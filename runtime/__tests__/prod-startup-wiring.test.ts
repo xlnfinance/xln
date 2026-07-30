@@ -963,13 +963,13 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-connectivity'");
     expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK');
-    expect(mmNode).toContain('let bootstrapCrossStarted = false;');
-    expect(mmNode).toContain('if (sameReady) {');
-    expect(mmNode).not.toContain('\n      bootstrapCrossStarted = false;');
-    expect(mmNode).toContain('const previousPhase = startupPhase;');
-    expect(mmNode).toContain('if (startupPhase === previousPhase) return;');
+    expect(mmNode).toContain('bootstrapCrossStarted: false,');
+    expect(mmNode).toContain('readModel.allSameDepthReady(readVisibleHubProfiles(env, true))');
+    expect(mmNode).not.toContain('\n      state.bootstrapCrossStarted = false;');
+    expect(mmNode).toContain('const previousPhase = state.phase;');
+    expect(mmNode).toContain('if (state.phase === previousPhase) return;');
     expect(mmNode).toContain('rebuildCachedHealthResponseJson();');
-    expect(mmNode).toContain("startupPhase = 'bootstrap-cross';");
+    expect(mmNode).toContain("state.phase = 'bootstrap-cross';");
     expect(mmNode).toContain("if (input.mode === 'steady') return true;");
     expect(mmNode).toContain('input.state.bootstrapCrossCursor = nextCursor;');
     expect(mmNode).toContain("if (mode === 'steady') state.steadyCrossCursor = selection.nextCursor;");
@@ -988,7 +988,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain("const jobCount = mode === 'bootstrap'");
     expect(mmNode).not.toContain('? crossQuoteJobs.length');
     expect(mmNode).toContain('MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK');
-    expect(mmNode).toContain('if (quoteReadModel.isBootstrapDepthComplete(health)) return;');
+    expect(mmNode).toContain('if (readModel.isBootstrapDepthComplete(currentHealth)) return;');
     expect(mmNode).toContain('if (deps.isDepthComplete(beforeDrive) && deps.canCheckCompletion()) return beforeDrive;');
     expect(mmNode).toContain('const hubsDepthReady = hubs.length > 0 && hubs.every((entry) => entry.depthReady);');
     expect(mmNode).toContain('const crossDepthReady = !cross.applicable || (');
@@ -1243,7 +1243,7 @@ describe('production startup wiring', () => {
   test('market-maker control lifecycle exists before the HTTP server accepts teardown', () => {
     const mmNode = readMarketMakerNodeSource();
     const serverStart = mmNode.indexOf('const server = Bun.serve({');
-    const lifecycleDeclarations = ['let shuttingDown = false;', 'let stopRuntimeLoops = (): void => {'];
+    const lifecycleDeclarations = ['shuttingDown: false,', 'stopRuntimeLoops: () => {'];
 
     expect(serverStart).toBeGreaterThan(0);
     for (const declaration of lifecycleDeclarations) {
@@ -1265,6 +1265,8 @@ describe('production startup wiring', () => {
     const mmSource = readMarketMakerNodeSource();
     const mmInitialization = mmSource.indexOf('const initializeMarketMakerContexts = async (');
     const mmLoopStart = mmSource.indexOf('startRuntimeLoop(env, {');
+    const mmServicesStart = mmSource.indexOf('const startMarketMakerServices = async (');
+    const mmServicesCall = mmSource.indexOf('await startMarketMakerServices(context)', mmLoopStart);
     const mmPrimaryContext = mmSource.indexOf(
       'const primaryContext = await createMarketMakerEntityContext(',
       mmInitialization,
@@ -1274,8 +1276,8 @@ describe('production startup wiring', () => {
       mmPrimaryContext,
     );
     const mmInitializationCall = mmSource.indexOf(
-      'mmTokenIdsByContext = await initializeMarketMakerContexts({',
-      mmLoopStart,
+      'state.tokenIdsByContext = await initializeMarketMakerContexts({',
+      mmServicesStart,
     );
     const mmP2PStart = mmSource.indexOf('const p2p = startP2P(env, {', mmInitializationCall);
     const mmP2PReady = mmSource.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", mmP2PStart);
@@ -1283,7 +1285,8 @@ describe('production startup wiring', () => {
     expect(mmPrimaryContext).toBeGreaterThan(mmInitialization);
     expect(mmSecondaryContexts).toBeGreaterThan(mmPrimaryContext);
     expect(mmLoopStart).toBeGreaterThan(0);
-    expect(mmInitializationCall).toBeGreaterThan(mmLoopStart);
+    expect(mmServicesCall).toBeGreaterThan(mmLoopStart);
+    expect(mmInitializationCall).toBeGreaterThan(mmServicesStart);
     expect(mmP2PStart).toBeGreaterThan(mmInitializationCall);
     expect(mmP2PReady).toBeGreaterThan(mmP2PStart);
 
@@ -1537,18 +1540,18 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const fingerprint = buildMarketMakerBootstrapFingerprint(');
     expect(mmNode).toContain('const runtimeStateHash = computeCanonicalStateHashFromEnv(deps.env);');
     expect(mmNode).toContain('const entityStateHash = buildMarketMakerBootstrapEntityStateHash(deps.env);');
-    expect(mmNode).toContain('bootstrapReadyHash = finalization.fingerprint.hash;');
-    expect(mmNode).toContain('bootstrapRuntimeStateHash = finalization.runtimeStateHash;');
-    expect(mmNode).toContain('bootstrapEntityStateHash = finalization.entityStateHash;');
+    expect(mmNode).toContain('state.bootstrapReadyHash = finalization.fingerprint.hash;');
+    expect(mmNode).toContain('state.bootstrapRuntimeStateHash = finalization.runtimeStateHash;');
+    expect(mmNode).toContain('state.bootstrapEntityStateHash = finalization.entityStateHash;');
     expect(mmNode).toContain('const restoredEntityStateHash = env.eReplicas.size > 0');
     expect(mmNode).toContain('restoredEntityStateHash,');
     expect(mmNode).toContain('runtimeStateHash,');
     expect(mmNode).toContain('entityStateHash,');
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD']");
     expect(mmNode).toContain('BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}');
-    expect(mmNode).toContain('let bootstrapCrossPlanJobCount: number | null = null;');
+    expect(mmNode).toContain('bootstrapCrossPlanJobCount: null,');
     expect(mmNode).not.toContain('let bootstrapCrossExpectedRoutes');
-    expect(mmNode).toContain("emitBootstrapDebugEvent('cross-plan'");
+    expect(mmNode).toContain("emit('cross-plan'");
     expect(mmNode).toContain('const plan = buildMarketMakerCrossPlanSummary(');
     expect(mmNode).toContain('const canCheckCompletion = (): boolean =>');
     expect(mmNode).toContain('if (plan.expectedRoutes > 0 && !bootstrapCross.producerAttempted) return false;');
@@ -1560,15 +1563,15 @@ describe('production startup wiring', () => {
       'if(deps.isDepthComplete(completionHealth)&&deps.canCheckCompletion())returncompletionHealth;',
     );
     expect(mmNode).toContain('const bootstrapHealth = await waitForBootstrapOffers({');
-    expect(mmNode).toContain('if (await markOffersReady()) {');
-    expect(mmNode).toContain('maintenanceLoops.startQuotes();');
+    expect(mmNode).toContain('if (await lifecycle.markOffersReady()) {');
+    expect(mmNode).toContain('lifecycle.loops.startQuotes();');
     expect(mmNode).not.toContain(
       'await markOffersReady();\n      publishMarketMakerHealthSnapshot({ includeCross: true });',
     );
-    expect(mmNode).toContain("startupPhase = 'bootstrap-same-chain';\n    healthController.publishBootstrap();");
-    expect(mmNode).toContain('if (bootstrapCrossStarted) {');
-    expect(mmNode).toContain('quoteReadModel.allSameDepthReady(visibleHubs) &&');
-    expect(mmNode).toContain('isMarketMakerSameDepthComplete(health)');
+    expect(mmNode).toContain("state.phase = 'bootstrap-same-chain';\n    health.publishBootstrap();");
+    expect(mmNode).toContain('if (state.bootstrapCrossStarted) {');
+    expect(mmNode).toContain('readModel.allSameDepthReady(readVisibleHubProfiles(env, true)) &&');
+    expect(mmNode).toContain('isMarketMakerSameDepthComplete(currentHealth)');
     expect(mmNode).not.toContain('bootstrapCrossStarted || isMarketMakerSameReady(health)');
     expect(mmNode).not.toContain("if (startupPhase !== 'offers-ready' && bootstrapCrossStarted) {");
     expect(mmNode).not.toContain(
@@ -1765,7 +1768,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain(
       "pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')",
     );
-    expect(mmNode).toContain('buildHealthSnapshot: () => healthController.buildSnapshot({ includeCross: true })');
+    expect(mmNode).toContain('buildHealthSnapshot: () => health.buildSnapshot({ includeCross: true })');
     expect(mmNode).toContain("pathname === '/api/account/status'");
     expect(mmNode).toContain('pendingFrameTxs: (account?.pendingFrame?.accountTxs ?? []).map');
     expect(smoke).toContain('const shouldFetchMarketMakerHealth = (health: HealthPayload): boolean =>');

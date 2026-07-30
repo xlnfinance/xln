@@ -1985,6 +1985,384 @@ const driveMarketMakerQuotes = async (
   }
 };
 
+type MarketMakerNodeState = {
+  phase: string;
+  externalIngressReady: boolean;
+  activeEntityId: string | null;
+  contexts: MarketMakerEntityContext[];
+  tokenIdsByContext: Map<string, number[]>;
+  bootstrapReadyHash: string | null;
+  bootstrapRuntimeStateHash: string | null;
+  bootstrapEntityStateHash: string | null;
+  bootstrapReadyAt: number | null;
+  bootstrapCrossStarted: boolean;
+  bootstrapCrossPlanJobCount: number | null;
+  bootstrapCrossProducerAttempted: boolean;
+  lastDirectInput: DirectEntityInputDebug | null;
+  lastDirectInputError: DirectEntityInputDebug | null;
+  shuttingDown: boolean;
+  stopRuntimeLoops: () => void;
+};
+
+type MarketMakerNodeContext = {
+  env: RuntimeState;
+  state: MarketMakerNodeState;
+  ingressReceipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
+  health: ReturnType<typeof createMarketMakerHealthController>;
+  emit: (event: string, fields?: Record<string, unknown>) => void;
+  checkpoint: () => Record<string, unknown>;
+};
+
+const createMarketMakerNodeContext = (
+  env: RuntimeState,
+  restoredEntityStateHash: string | null,
+): MarketMakerNodeContext => {
+  const state: MarketMakerNodeState = {
+    phase: 'boot',
+    externalIngressReady: false,
+    activeEntityId: null,
+    contexts: [],
+    tokenIdsByContext: new Map(),
+    bootstrapReadyHash: null,
+    bootstrapRuntimeStateHash: null,
+    bootstrapEntityStateHash: null,
+    bootstrapReadyAt: null,
+    bootstrapCrossStarted: false,
+    bootstrapCrossPlanJobCount: null,
+    bootstrapCrossProducerAttempted: false,
+    lastDirectInput: null,
+    lastDirectInputError: null,
+    shuttingDown: false,
+    stopRuntimeLoops: () => {
+      state.shuttingDown = true;
+    },
+  };
+  const ingressReceipts = createRuntimeIngressReceiptStore();
+  const emit = (event: string, fields: Record<string, unknown> = {}): void =>
+    emitNodeBootstrapDebugEvent(env, state.phase, state.activeEntityId, event, fields);
+  const checkpoint = (): Record<string, unknown> => buildNodeBootstrapCausalCheckpoint(env, state.contexts);
+  const health = createMarketMakerHealthController({
+    env,
+    contexts: () => state.contexts,
+    tokenIdsByContext: () => state.tokenIdsByContext,
+    activeEntityId: () => state.activeEntityId,
+    startupPhase: () => state.phase,
+    bootstrapCrossStarted: () => state.bootstrapCrossStarted,
+    bootstrap: () => ({
+      readyHash: state.bootstrapReadyHash,
+      runtimeStateHash: state.bootstrapRuntimeStateHash,
+      entityStateHash: state.bootstrapEntityStateHash,
+      restoredEntityStateHash,
+      readyAt: state.bootstrapReadyAt,
+    }),
+    directInput: () => ({
+      lastSeen: state.lastDirectInput,
+      lastError: state.lastDirectInputError,
+    }),
+  });
+  return { env, state, ingressReceipts, health, emit, checkpoint };
+};
+
+type StartedMarketMakerServices = {
+  server: Bun.Server;
+  httpDrain: ReturnType<typeof createHttpDrainTracker>;
+  primaryContext: MarketMakerEntityContext;
+};
+
+const startMarketMakerServices = async (context: MarketMakerNodeContext): Promise<StartedMarketMakerServices> => {
+  const { env, state, ingressReceipts, health } = context;
+  const runtimeInputStatusUrl = (id: string): string => `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
+  const directRuntimeWs = createDirectRuntimeWsRoute({
+    runtimeId: String(env.runtimeId || ''),
+    runtimeSeed: resolvedArgs.seed,
+    onRecoveryBundleRequest: async (_from, lookupKey) =>
+      resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
+    onEntityInputs: async (from, envelope, ingressTimestamp) => {
+      if (!state.externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
+      const debugEntry: DirectEntityInputDebug = {
+        at: Date.now(),
+        fromRuntimeId: String(from || ''),
+        entityIds: envelope.entityInputs.map(input => String(input.entityId || '')),
+        signerIds: envelope.entityInputs.map(input => String(input.signerId || '')),
+        txTypes: envelope.entityInputs.flatMap(input => (input.entityTxs || []).map(tx => String(tx?.type || ''))),
+      };
+      state.lastDirectInput = debugEntry;
+      try {
+        const inbound = handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp);
+        for (const receipt of inbound.receipts) {
+          requireDeliveryDelivered(
+            directRuntimeWs.sendReliableReceiptDelivery(from, receipt),
+            delivery => `DIRECT_RELIABLE_RECEIPT_NOT_DELIVERED:${delivery.code}`,
+          );
+        }
+      } catch (error) {
+        state.lastDirectInputError = {
+          ...debugEntry,
+          error: error instanceof Error ? error.message : String(error),
+        };
+        throw error;
+      }
+    },
+    onReliableReceipt: (from, receipt) => {
+      if (!state.externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
+      handleInboundReliableReceipt(env, from, receipt);
+    },
+  });
+  env.runtimeState = env.runtimeState ?? {};
+  // Direct dispatch is process infrastructure. It is deliberately installed
+  // outside every Runtime frame and excluded from canonical state roots.
+  env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
+    directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
+  env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
+    directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);
+  const handleRuntimeAdapterWsMessage = createMarketMakerRuntimeAdapterHandler({
+    env,
+    runtimeIngressReceipts: ingressReceipts,
+    runtimeInputStatusUrl,
+    isMutatingIngressReady: () => state.externalIngressReady,
+  });
+  const httpDrain = createHttpDrainTracker();
+  const server = Bun.serve({
+    hostname: resolvedArgs.apiHost,
+    port: resolvedArgs.apiPort,
+    idleTimeout: 120,
+    fetch: createMarketMakerHttpHandler({
+      env,
+      httpDrain,
+      directRuntimeWs,
+      runtimeIngressReceipts: ingressReceipts,
+      currentRuntimeHeight: target => Math.max(0, Math.floor(Number(target?.height ?? 0))),
+      getActiveEntityId: () => state.activeEntityId,
+      buildAccountStatusDebug: (entityId, counterpartyEntityId, tokenIds) =>
+        buildMarketMakerAccountStatusDebug(
+          env,
+          entityId,
+          counterpartyEntityId,
+          tokenIds,
+          state.lastDirectInput,
+          state.lastDirectInputError,
+        ),
+      buildInfoResponseJson: health.buildInfoResponse,
+      readCachedInfoResponseJson: health.readInfoResponseJson,
+      rebuildCachedInfoResponseJson: health.rebuildInfoResponse,
+      buildHealthSnapshot: () => health.buildSnapshot({ includeCross: true }),
+      readCachedHealthResponseJson: health.readHealthResponseJson,
+      rebuildCachedHealthResponseJson: health.rebuildHealthResponse,
+      stopRuntimeLoops: () => state.stopRuntimeLoops(),
+    }),
+    websocket: createMarketMakerWebSocketHandler(env, directRuntimeWs, handleRuntimeAdapterWsMessage),
+  });
+  state.tokenIdsByContext = await initializeMarketMakerContexts({
+    env,
+    jurisdiction: resolveJurisdictionConfig(resolvedArgs.rpcUrl),
+    contexts: state.contexts,
+    setStartupPhase: phase => {
+      state.phase = phase;
+    },
+    setActiveEntityId: entityId => {
+      state.activeEntityId = entityId;
+    },
+  });
+  const primaryContext = state.contexts[0];
+  if (!primaryContext) throw new Error('MARKET_MAKER_PRIMARY_CONTEXT_MISSING');
+  state.phase = 'j-catchup';
+  startJurisdictionWatchers(env);
+  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
+  state.externalIngressReady = true;
+  nodeLog.info('startup.j_catchup_ready', {
+    jurisdictions: watcherDrain.length,
+    cursors: watcherDrain.map(status => `${status.chainId}:${status.committedCursor}/${status.targetBlock}`),
+  });
+  state.phase = 'start-p2p';
+  const p2p = startP2P(env, {
+    relayUrls: [resolvedArgs.relayUrl],
+    wsUrl: directWsUrl,
+    allowDirectClients: false,
+    preferRelayForEntityInput: true,
+    advertiseEntityIds: state.contexts.map(item => item.entityId),
+    gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
+  });
+  if (!p2p) throw new Error('P2P_START_FAILED');
+  return { server, httpDrain, primaryContext };
+};
+
+type MarketMakerQuoteLifecycle = {
+  driveQuotes: (mode?: MarketMakerQuoteMode) => Promise<boolean>;
+  markOffersReady: () => Promise<boolean>;
+  refreshBootstrapPhase: (health: MarketMakerHealth | null) => void;
+  progress: ReturnType<typeof createBootstrapProgressMonitor>;
+  loops: ReturnType<typeof createMarketMakerMaintenanceLoops>;
+  readModel: ReturnType<typeof createMarketMakerQuoteReadModel>;
+};
+
+const createMarketMakerQuoteLifecycle = (
+  context: MarketMakerNodeContext,
+  primaryContext: MarketMakerEntityContext,
+): MarketMakerQuoteLifecycle => {
+  const { env, state, health, emit } = context;
+  let bootstrapSameCursor = 0;
+  const readModel = createMarketMakerQuoteReadModel({
+    env,
+    contexts: () => state.contexts,
+    tokenIdsByContext: () => state.tokenIdsByContext,
+    health,
+    bootstrapCross: () => ({
+      started: state.bootstrapCrossStarted,
+      producerAttempted: state.bootstrapCrossProducerAttempted,
+    }),
+    emit,
+  });
+  const driveBootstrapSameQuotes = createBootstrapSameQuoteDriver({
+    env,
+    buildJobs: readModel.buildSameJobs,
+    emitProgress: readModel.emitSameProgress,
+    getCursor: () => bootstrapSameCursor,
+    setCursor: cursor => {
+      bootstrapSameCursor = cursor;
+    },
+  });
+  const quoteEngineState: MarketMakerQuoteEngineState = {
+    inFlight: false,
+    bootstrapCrossCursor: 0,
+    steadyCrossCursor: 0,
+    attemptedBootstrapIntentOrderIds: new Set(),
+  };
+  const quoteEngineDeps: MarketMakerQuoteEngineDeps = {
+    env,
+    contexts: () => state.contexts,
+    tokenIdsByContext: () => state.tokenIdsByContext,
+    health,
+    readModel,
+    isShuttingDown: () => state.shuttingDown,
+    driveBootstrapSameQuotes,
+    bootstrapCross: {
+      isStarted: () => state.bootstrapCrossStarted,
+      markStarted: currentHealth => {
+        state.bootstrapCrossStarted = true;
+        state.phase = 'bootstrap-cross';
+        health.rebuildHealthResponse();
+        emit('phase', {
+          phase: state.phase,
+          health: summarizeMarketMakerHealthForDebug(currentHealth),
+        });
+      },
+      planJobCount: () => state.bootstrapCrossPlanJobCount,
+      recordPlan: (expectedJobs, expectedRoutes) => {
+        state.bootstrapCrossPlanJobCount = expectedJobs;
+        readModel.invalidateCompletionHealth();
+        emit('cross-plan', { expectedJobs, expectedRoutes });
+      },
+      markProducerAttempted: () => {
+        state.bootstrapCrossProducerAttempted = true;
+      },
+    },
+  };
+  const driveQuotes = (mode: MarketMakerQuoteMode = 'steady'): Promise<boolean> =>
+    driveMarketMakerQuotes(quoteEngineDeps, quoteEngineState, mode);
+  const publish = (finalization: MarketMakerBootstrapFinalization): void => {
+    state.bootstrapReadyHash = finalization.fingerprint.hash;
+    state.bootstrapRuntimeStateHash = finalization.runtimeStateHash;
+    state.bootstrapEntityStateHash = finalization.entityStateHash;
+    state.bootstrapReadyAt = Date.now();
+    state.phase = 'offers-ready';
+    health.setCurrentHealth(finalization.health);
+    health.rebuildHealthResponse();
+  };
+  const markOffersReady = createMarketMakerBootstrapFinalizer({
+    env,
+    contexts: () => state.contexts,
+    tokenIdsByContext: () => state.tokenIdsByContext,
+    health,
+    buildSameQuoteJobs: readModel.buildSameJobs,
+    allSameQuoteDepthReady: readModel.allSameDepthReady,
+    isReady: () => state.phase === 'offers-ready',
+    canCheckCompletion: readModel.canCheckCompletion,
+    publish,
+    emit,
+    logReadyHash: fields => nodeLog.info('bootstrap.ready_hash', fields),
+    logOffersReady: fields => nodeLog.info('offers.ready', fields),
+    primaryContext,
+    apiUrl,
+  }).markReady;
+  const refreshBootstrapPhase = (currentHealth: MarketMakerHealth | null): void => {
+    if (readModel.isBootstrapDepthComplete(currentHealth)) return;
+    const previousPhase = state.phase;
+    if (state.bootstrapCrossStarted) {
+      state.phase = 'bootstrap-cross';
+    } else if (
+      readModel.allSameDepthReady(readVisibleHubProfiles(env, true)) &&
+      isMarketMakerSameDepthComplete(currentHealth)
+    ) {
+      state.bootstrapCrossStarted = true;
+      state.phase = 'bootstrap-cross';
+    } else {
+      state.phase = 'bootstrap-same-chain';
+    }
+    if (state.phase === previousPhase) return;
+    emit('phase', { phase: state.phase, health: summarizeMarketMakerHealthForDebug(currentHealth) });
+    health.rebuildHealthResponse();
+  };
+  const progress = createBootstrapProgressMonitor({
+    env,
+    primaryContext,
+    phase: () => state.phase,
+    checkpoint: context.checkpoint,
+    directInput: () => ({ lastSeen: state.lastDirectInput, lastError: state.lastDirectInputError }),
+    emit,
+  });
+  const loops = createMarketMakerMaintenanceLoops({
+    env,
+    isShuttingDown: () => state.shuttingDown,
+    phase: () => state.phase,
+    health,
+    driveQuotes,
+    canCheckCompletion: readModel.canCheckCompletion,
+    buildCompletionHealth: readModel.buildCompletionHealth,
+    isBootstrapDepthComplete: readModel.isBootstrapDepthComplete,
+    markReady: markOffersReady,
+    emit,
+  });
+  state.stopRuntimeLoops = () => {
+    state.shuttingDown = true;
+    loops.stop();
+  };
+  return { driveQuotes, markOffersReady, refreshBootstrapPhase, progress, loops, readModel };
+};
+
+const startMarketMakerBootstrapWorker = (
+  context: MarketMakerNodeContext,
+  lifecycle: MarketMakerQuoteLifecycle,
+): void => {
+  const { env, state, health, emit } = context;
+  void (async () => {
+    await sleep(MARKET_MAKER_BOOTSTRAP_START_DELAY_MS);
+    if (state.shuttingDown) return;
+    state.phase = 'bootstrap-same-chain';
+    health.publishBootstrap();
+    emit('phase', { phase: state.phase });
+    while (!state.shuttingDown) {
+      const bootstrapHealth = await waitForBootstrapOffers({
+        env,
+        isShuttingDown: () => state.shuttingDown,
+        health,
+        progress: lifecycle.progress,
+        refreshPhase: lifecycle.refreshBootstrapPhase,
+        isDepthComplete: lifecycle.readModel.isBootstrapDepthComplete,
+        canCheckCompletion: lifecycle.readModel.canCheckCompletion,
+        buildCompletionHealth: lifecycle.readModel.buildCompletionHealth,
+        driveQuotes: lifecycle.driveQuotes,
+        emit,
+      });
+      if (!bootstrapHealth) break;
+      if (await lifecycle.markOffersReady()) {
+        lifecycle.loops.startQuotes();
+        return;
+      }
+    }
+    if (!state.shuttingDown) throw new Error('MARKET_MAKER_BOOTSTRAP_STOPPED_WITHOUT_READY');
+  })().catch(lifecycle.loops.fail);
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -2000,12 +2378,10 @@ export const runMarketMakerNode = async (): Promise<void> => {
   // is not a restore oracle: even an empty finalized J range advances the
   // certified anchor, Entity height, timestamp, and frame hash.
   const restoredEntityStateHash = env.eReplicas.size > 0 ? buildMarketMakerBootstrapEntityStateHash(env) : null;
-  const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
-  const currentRuntimeHeight = (targetEnv: RuntimeState | null): number =>
-    Math.max(0, Math.floor(Number(targetEnv?.height ?? 0)));
-  const runtimeInputStatusUrl = (id: string): string => `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
+  const context = createMarketMakerNodeContext(env, restoredEntityStateHash);
+  const { state, health: healthController, emit: emitBootstrapDebugEvent } = context;
   registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
-    runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
+    context.ingressReceipts.observeRuntimeInput(height, runtimeInput);
   });
   configureMarketMakerRuntimeLogging(env);
   // Bootstrap the local state machine before exposing this runtime to remote
@@ -2022,366 +2398,28 @@ export const runMarketMakerNode = async (): Promise<void> => {
       });
     },
   });
-  let startupPhase = 'boot';
-  let externalIngressReady = false;
-  let activeMmEntityId: string | null = null;
-  let mmContexts: MarketMakerEntityContext[] = [];
-  let mmTokenIdsByContext: Map<string, number[]> = new Map();
-  let bootstrapReadyHash: string | null = null;
-  let bootstrapRuntimeStateHash: string | null = null;
-  let bootstrapEntityStateHash: string | null = null;
-  let bootstrapReadyAt: number | null = null;
-  let bootstrapCrossStarted = false;
-  let bootstrapCrossPlanJobCount: number | null = null;
-  let bootstrapCrossProducerAttempted = false;
-  let lastDirectEntityInput: DirectEntityInputDebug | null = null;
-  let lastDirectEntityInputError: DirectEntityInputDebug | null = null;
-  const buildBootstrapCausalCheckpoint = (): Record<string, unknown> =>
-    buildNodeBootstrapCausalCheckpoint(env, mmContexts);
-  const emitBootstrapDebugEvent = (event: string, fields: Record<string, unknown> = {}): void =>
-    emitNodeBootstrapDebugEvent(env, startupPhase, activeMmEntityId, event, fields);
-  const healthController = createMarketMakerHealthController({
-    env,
-    contexts: () => mmContexts,
-    tokenIdsByContext: () => mmTokenIdsByContext,
-    activeEntityId: () => activeMmEntityId,
-    startupPhase: () => startupPhase,
-    bootstrapCrossStarted: () => bootstrapCrossStarted,
-    bootstrap: () => ({
-      readyHash: bootstrapReadyHash,
-      runtimeStateHash: bootstrapRuntimeStateHash,
-      entityStateHash: bootstrapEntityStateHash,
-      restoredEntityStateHash,
-      readyAt: bootstrapReadyAt,
-    }),
-    directInput: () => ({
-      lastSeen: lastDirectEntityInput,
-      lastError: lastDirectEntityInputError,
-    }),
-  });
+  nodeLog.info('startup phase', { phase: state.phase });
+  emitBootstrapDebugEvent('startup', { phase: state.phase });
+  const { server, httpDrain, primaryContext: primaryMmContext } = await startMarketMakerServices(context);
 
-  const buildAccountStatusDebug = (
-    entityId: string,
-    counterpartyEntityId: string,
-    tokenIds: number[],
-  ): Record<string, unknown> => {
-    return buildMarketMakerAccountStatusDebug(
-      env,
-      entityId,
-      counterpartyEntityId,
-      tokenIds,
-      lastDirectEntityInput,
-      lastDirectEntityInputError,
-    );
-  };
-
-  const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
-  nodeLog.info('startup phase', { phase: startupPhase });
-  emitBootstrapDebugEvent('startup', { phase: startupPhase });
-
-  const directRuntimeWs = createDirectRuntimeWsRoute({
-    runtimeId: String(env.runtimeId || ''),
-    runtimeSeed: resolvedArgs.seed,
-    onRecoveryBundleRequest: async (_from, lookupKey) =>
-      resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
-    onEntityInputs: async (from, envelope, ingressTimestamp) => {
-      if (!externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
-      const debugEntry: DirectEntityInputDebug = {
-        at: Date.now(),
-        fromRuntimeId: String(from || ''),
-        entityIds: envelope.entityInputs.map(input => String(input.entityId || '')),
-        signerIds: envelope.entityInputs.map(input => String(input.signerId || '')),
-        txTypes: envelope.entityInputs.flatMap(input => (input.entityTxs || []).map(tx => String(tx?.type || ''))),
-      };
-      lastDirectEntityInput = debugEntry;
-      try {
-        const inbound = handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp);
-        for (const receipt of inbound.receipts) {
-          requireDeliveryDelivered(
-            directRuntimeWs.sendReliableReceiptDelivery(from, receipt),
-            delivery => `DIRECT_RELIABLE_RECEIPT_NOT_DELIVERED:${delivery.code}`,
-          );
-        }
-      } catch (error) {
-        lastDirectEntityInputError = {
-          ...debugEntry,
-          error: error instanceof Error ? error.message : String(error),
-        };
-        throw error;
-      }
-    },
-    onReliableReceipt: (from, receipt) => {
-      if (!externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
-      handleInboundReliableReceipt(env, from, receipt);
-    },
-  });
-  env.runtimeState = env.runtimeState ?? {};
-  // Keep Entity inputs and reliable receipts on the same authenticated direct
-  // websocket when available. output-routing retains reliable inputs until a
-  // durable receipt and falls back to P2P if this direct send is unavailable.
-  env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
-    directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
-  env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
-    directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);
-  const handleRuntimeAdapterWsMessage = createMarketMakerRuntimeAdapterHandler({
-    env,
-    runtimeIngressReceipts,
-    runtimeInputStatusUrl,
-    isMutatingIngressReady: () => externalIngressReady,
-  });
-
-  // Bun exposes fetch handlers as soon as Bun.serve returns. Teardown may
-  // therefore arrive while jurisdiction/bootstrap initialization below is
-  // still awaiting. Keep every lifecycle handle used by control routes
-  // initialized before the server becomes reachable.
-  let shuttingDown = false;
-  let stopRuntimeLoops = (): void => {
-    shuttingDown = true;
-  };
-  const httpDrain = createHttpDrainTracker();
-  const server = Bun.serve({
-    hostname: resolvedArgs.apiHost,
-    port: resolvedArgs.apiPort,
-    idleTimeout: 120,
-    fetch: createMarketMakerHttpHandler({
-      env,
-      httpDrain,
-      directRuntimeWs,
-      runtimeIngressReceipts,
-      currentRuntimeHeight,
-      getActiveEntityId: () => activeMmEntityId,
-      buildAccountStatusDebug,
-      buildInfoResponseJson: healthController.buildInfoResponse,
-      readCachedInfoResponseJson: healthController.readInfoResponseJson,
-      rebuildCachedInfoResponseJson: healthController.rebuildInfoResponse,
-      buildHealthSnapshot: () => healthController.buildSnapshot({ includeCross: true }),
-      readCachedHealthResponseJson: healthController.readHealthResponseJson,
-      rebuildCachedHealthResponseJson: healthController.rebuildHealthResponse,
-      stopRuntimeLoops: () => stopRuntimeLoops(),
-    }),
-    websocket: createMarketMakerWebSocketHandler(env, directRuntimeWs, handleRuntimeAdapterWsMessage),
-  });
-
-  mmTokenIdsByContext = await initializeMarketMakerContexts({
-    env,
-    jurisdiction,
-    contexts: mmContexts,
-    setStartupPhase: phase => {
-      startupPhase = phase;
-    },
-    setActiveEntityId: entityId => {
-      activeMmEntityId = entityId;
-    },
-  });
-  const primaryMmContext = mmContexts[0];
-  if (!primaryMmContext) {
-    throw new Error('MARKET_MAKER_PRIMARY_CONTEXT_MISSING');
-  }
-
-  startupPhase = 'j-catchup';
-  startJurisdictionWatchers(env);
-  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
-  externalIngressReady = true;
-  nodeLog.info('startup.j_catchup_ready', {
-    jurisdictions: watcherDrain.length,
-    cursors: watcherDrain.map(status => `${status.chainId}:${status.committedCursor}/${status.targetBlock}`),
-  });
-
-  startupPhase = 'start-p2p';
-  const p2p = startP2P(env, {
-    relayUrls: [resolvedArgs.relayUrl],
-    wsUrl: directWsUrl,
-    allowDirectClients: false,
-    preferRelayForEntityInput: true,
-    advertiseEntityIds: mmContexts.map(context => context.entityId),
-    gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
-  });
-  if (!p2p) throw new Error('P2P_START_FAILED');
-
-  let bootstrapSameCursor = 0;
-  const quoteReadModel = createMarketMakerQuoteReadModel({
-    env,
-    contexts: () => mmContexts,
-    tokenIdsByContext: () => mmTokenIdsByContext,
-    health: healthController,
-    bootstrapCross: () => ({
-      started: bootstrapCrossStarted,
-      producerAttempted: bootstrapCrossProducerAttempted,
-    }),
-    emit: emitBootstrapDebugEvent,
-  });
-  const driveBootstrapSameQuotes = createBootstrapSameQuoteDriver({
-    env,
-    buildJobs: quoteReadModel.buildSameJobs,
-    emitProgress: quoteReadModel.emitSameProgress,
-    getCursor: () => bootstrapSameCursor,
-    setCursor: cursor => {
-      bootstrapSameCursor = cursor;
-    },
-  });
-  const quoteEngineState: MarketMakerQuoteEngineState = {
-    inFlight: false,
-    bootstrapCrossCursor: 0,
-    steadyCrossCursor: 0,
-    attemptedBootstrapIntentOrderIds: new Set(),
-  };
-  const quoteEngineDeps: MarketMakerQuoteEngineDeps = {
-    env,
-    contexts: () => mmContexts,
-    tokenIdsByContext: () => mmTokenIdsByContext,
-    health: healthController,
-    readModel: quoteReadModel,
-    isShuttingDown: () => shuttingDown,
-    driveBootstrapSameQuotes,
-    bootstrapCross: {
-      isStarted: () => bootstrapCrossStarted,
-      markStarted: health => {
-        bootstrapCrossStarted = true;
-        startupPhase = 'bootstrap-cross';
-        healthController.rebuildHealthResponse();
-        emitBootstrapDebugEvent('phase', {
-          phase: startupPhase,
-          health: summarizeMarketMakerHealthForDebug(health),
-        });
-      },
-      planJobCount: () => bootstrapCrossPlanJobCount,
-      recordPlan: (expectedJobs, expectedRoutes) => {
-        bootstrapCrossPlanJobCount = expectedJobs;
-        quoteReadModel.invalidateCompletionHealth();
-        emitBootstrapDebugEvent('cross-plan', { expectedJobs, expectedRoutes });
-      },
-      markProducerAttempted: () => {
-        bootstrapCrossProducerAttempted = true;
-      },
-    },
-  };
-  const driveQuotes = (mode: MarketMakerQuoteMode = 'steady'): Promise<boolean> =>
-    driveMarketMakerQuotes(quoteEngineDeps, quoteEngineState, mode);
-
-  const publishMarketMakerBootstrapFinalization = (finalization: MarketMakerBootstrapFinalization): void => {
-    bootstrapReadyHash = finalization.fingerprint.hash;
-    bootstrapRuntimeStateHash = finalization.runtimeStateHash;
-    bootstrapEntityStateHash = finalization.entityStateHash;
-    bootstrapReadyAt = Date.now();
-    startupPhase = 'offers-ready';
-    healthController.setCurrentHealth(finalization.health);
-    healthController.rebuildHealthResponse();
-  };
-  const bootstrapFinalizer = createMarketMakerBootstrapFinalizer({
-    env,
-    contexts: () => mmContexts,
-    tokenIdsByContext: () => mmTokenIdsByContext,
-    health: healthController,
-    buildSameQuoteJobs: quoteReadModel.buildSameJobs,
-    allSameQuoteDepthReady: quoteReadModel.allSameDepthReady,
-    isReady: () => startupPhase === 'offers-ready',
-    canCheckCompletion: quoteReadModel.canCheckCompletion,
-    publish: publishMarketMakerBootstrapFinalization,
-    emit: emitBootstrapDebugEvent,
-    logReadyHash: fields => nodeLog.info('bootstrap.ready_hash', fields),
-    logOffersReady: fields => nodeLog.info('offers.ready', fields),
-    primaryContext: primaryMmContext,
-    apiUrl,
-  });
-  const markOffersReady = bootstrapFinalizer.markReady;
-
-  const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
-    if (quoteReadModel.isBootstrapDepthComplete(health)) return;
-    const previousPhase = startupPhase;
-    if (bootstrapCrossStarted) {
-      startupPhase = 'bootstrap-cross';
-    } else {
-      const visibleHubs = readVisibleHubProfiles(env, true);
-      const sameReady = quoteReadModel.allSameDepthReady(visibleHubs) && isMarketMakerSameDepthComplete(health);
-      if (sameReady) {
-        bootstrapCrossStarted = true;
-        startupPhase = 'bootstrap-cross';
-      } else {
-        startupPhase = 'bootstrap-same-chain';
-      }
-    }
-    if (startupPhase === previousPhase) return;
-    emitBootstrapDebugEvent('phase', {
-      phase: startupPhase,
-      health: summarizeMarketMakerHealthForDebug(health),
-    });
-    healthController.rebuildHealthResponse();
-  };
-
-  const bootstrapProgress = createBootstrapProgressMonitor({
-    env,
-    primaryContext: primaryMmContext,
-    phase: () => startupPhase,
-    checkpoint: buildBootstrapCausalCheckpoint,
-    directInput: () => ({
-      lastSeen: lastDirectEntityInput,
-      lastError: lastDirectEntityInputError,
-    }),
-    emit: emitBootstrapDebugEvent,
-  });
-
-  const maintenanceLoops = createMarketMakerMaintenanceLoops({
-    env,
-    isShuttingDown: () => shuttingDown,
-    phase: () => startupPhase,
-    health: healthController,
-    driveQuotes,
-    canCheckCompletion: quoteReadModel.canCheckCompletion,
-    buildCompletionHealth: quoteReadModel.buildCompletionHealth,
-    isBootstrapDepthComplete: quoteReadModel.isBootstrapDepthComplete,
-    markReady: markOffersReady,
-    emit: emitBootstrapDebugEvent,
-  });
-  stopRuntimeLoops = () => {
-    shuttingDown = true;
-    maintenanceLoops.stop();
-  };
-  startupPhase = 'runtime-ready';
+  const quoteLifecycle = createMarketMakerQuoteLifecycle(context, primaryMmContext);
+  state.phase = 'runtime-ready';
   healthController.publish({ includeCross: false });
-  maintenanceLoops.startHealth();
-  emitBootstrapDebugEvent('phase', { phase: startupPhase });
+  quoteLifecycle.loops.startHealth();
+  emitBootstrapDebugEvent('phase', { phase: state.phase });
   nodeLog.info('runtime.ready', {
     entityId: primaryMmContext.entityId,
     runtimeId: String(env.runtimeId || ''),
     api: apiUrl,
     relay: resolvedArgs.relayUrl,
   });
-
-  void (async () => {
-    await sleep(MARKET_MAKER_BOOTSTRAP_START_DELAY_MS);
-    if (shuttingDown) return;
-    startupPhase = 'bootstrap-same-chain';
-    healthController.publishBootstrap();
-    emitBootstrapDebugEvent('phase', { phase: startupPhase });
-    while (!shuttingDown) {
-      const bootstrapHealth = await waitForBootstrapOffers({
-        env,
-        isShuttingDown: () => shuttingDown,
-        health: healthController,
-        progress: bootstrapProgress,
-        refreshPhase: refreshBootstrapPhase,
-        isDepthComplete: quoteReadModel.isBootstrapDepthComplete,
-        canCheckCompletion: quoteReadModel.canCheckCompletion,
-        buildCompletionHealth: quoteReadModel.buildCompletionHealth,
-        driveQuotes,
-        emit: emitBootstrapDebugEvent,
-      });
-      if (!bootstrapHealth) break;
-      if (await markOffersReady()) {
-        maintenanceLoops.startQuotes();
-        return;
-      }
-    }
-    if (!shuttingDown) {
-      throw new Error('MARKET_MAKER_BOOTSTRAP_STOPPED_WITHOUT_READY');
-    }
-  })().catch(maintenanceLoops.fail);
+  startMarketMakerBootstrapWorker(context, quoteLifecycle);
 
   const shutdown = createMarketMakerShutdown({
     env,
     server,
     httpDrain,
-    stopRuntimeLoops,
+    stopRuntimeLoops: state.stopRuntimeLoops,
   });
   installMarketMakerShutdownSignals(shutdown);
   await new Promise<void>(() => {});
