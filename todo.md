@@ -49,16 +49,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Preserve the enforced lower-layer ownership boundaries when moving code:
   pass the smallest deterministic value or capability required by a transition
   and never hide an upward dependency behind a neutral barrel or re-export.
-- [ ] Close only current, reproduced audit findings. The accepted remainder is
-  decomposed below: durable/idempotent off-chain faucet admission, the
-  Replica/State split, Activity/history migration, exact Account-frame
-  validation names, canonical financial construction and load/recovery proof.
-  Eliminate consensus non-null assertions by returning refined
-  decoded/preflight types. Treat certified human-readable event strings as
-  frozen protocol bytes until typed `ActivityEvent` projection separates
-  consensus facts from localized display copy. Recheck every external finding
-  on current `main`; never preserve stale paths, counts, closed claims or a
-  second audit backlog.
 - [ ] Make the audit surface mechanically legible after the function split.
   Keep production runtime at zero explicit `any` and zero TypeScript
   suppressions; drive the exact `as unknown as` debt to zero through typed
@@ -107,58 +97,21 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   bilateral `AccountState`. Replace implicit field-deletion projections with
   explicitly named byte-identical projections.
 - [ ] Give every nested machine one explicit deterministic input boundary.
-  `RuntimeInput` owns `RuntimeTx[]` plus routed Entity inputs; `EntityInput`
-  owns `EntityTx[]` plus Entity-consensus evidence. `AccountInput` is the one
-  Account boundary: its local `txs` branch carries `AccountTx[]` destined for
-  a future Account frame, while its peer
-  `frame/ack/frame_ack/dispute/reseal` branches carry bilateral
-  consensus evidence. The `accountInput` EntityTx commits the exact child
-  `AccountPeerInput`; Entity-owned financial transactions create the local
-  `AccountInput.txs` branch. Both paths enter one `applyAccountInput`
-  transition so Entity reducers never mutate an Account mempool directly.
-  Do not serialize that deterministically derived local child input as an
-  additional `EntityTx.accountInput`: the parent EntityTx already commits the
-  instruction that produces it, while duplicating the child would change
-  EntityFrame bytes and create two sources of truth. Add an explicit
-  WAL/schema fence rejecting `EntityTx.accountInput.data.kind === 'txs'`,
-  matching the existing TypeScript and P2P boundary.
-  Validate pair endpoints, domain and watch seed before dispatching every
-  AccountInput variant. Preflight a complete local `txs` batch and install it
-  atomically so a rejected later transaction cannot leave earlier admission
-  behind at the Account API boundary.
-  Each replica transition
-  returns deterministic outputs to its parent; only Runtime may interpret
-  committed outputs as post-WAL external effects. Keep transaction order and
-  multiplicity byte-identical, especially identical separately authorized
-  payments, while lifecycle transactions retain exact-payload idempotency.
-- [ ] Standardize transition result naming (owner-approved):
-  `outputs` are deterministic messages to another state machine; `effects` are
-  post-commit external I/O only; queued child-machine inputs must be named for
-  their destination instead of the implementation detail `mempoolOps`.
-  Entity reducers wrap local future-frame `AccountTx[]` in
-  `AccountInput { kind: 'txs' }`; peer AccountInput variants remain exact
-  bilateral protocol payloads.
-  Account proposals never time out: once a Hanko leaves the replica, the
-  signed proposal is final and non-negotiable. Lost delivery only resends the
-  exact signed `AccountPeerInput`. A pending proposal may be rolled back only
-  during deterministic same-height collision resolution: the valid LEFT frame
-  wins, the losing pending transactions return to the Account mempool in their
-  original order, and they are reapplied above the accepted frame. The winner
-  never depends on wall time, retries, HTLC deadlines, dispute evidence or a
-  settlement nonce: the protocol permits one proposal per side per height, and
-  `Depository.sol` uses the same unconditional LEFT tie-break.
-  Evaluate a small structural `Transition<State, Output, Effect>` result type,
-  but adopt it only where it removes duplicate result shapes without weakening
-  the Runtime/Entity/Account ownership boundary.
+  Keep the existing canonical `RuntimeInput`, `EntityInput`, and `AccountInput`
+  boundaries and the WAL fence rejecting local `AccountInput(kind='txs')`
+  inside an `EntityTx.accountInput`. Finish the remaining proof: validate pair
+  endpoints, domain and watch seed before every Account dispatch, preflight one
+  complete local `txs` batch, and install it atomically. Remove the direct
+  Account-mempool mutation in `entity/consensus/frame-application.ts`; both
+  local and peer paths must enter `applyAccountInput`. Preserve transaction
+  order, multiplicity, exact-payload idempotency, and the documented
+  deterministic LEFT-wins rollback.
 - [ ] Pin the financial and durability baselines before structural changes.
-  Add byte-identical roots for payment/HTLC/settlement/rebalance, durable
-  reliable-frontier assertions on both peers, rollback ordering, and measured
-  clone/apply/WAL/dispatch p50/p95. Record the public `runtime.ts` export
-  surface and always rebuild the browser bundle before browser evidence.
-  Preserve explicit regressions proving that a queued writer rechecks sticky
-  halt after waking, a post-WAL notification failure cannot downgrade a
-  durable commit, and abort closes candidate-only storage handles without
-  touching live handles.
+  Keep the existing cold/incremental Account and Entity root, reliable
+  frontier, sticky-halt, post-WAL and candidate-abort regressions. Add the
+  missing exact payment/HTLC/settlement/rebalance golden vectors, measured
+  clone/apply/WAL/dispatch p50/p95, and an executable public-facade/browser
+  bundle trace.
 - [ ] Finish the canonical Activity projection and local crypto ownership.
   Keep canonical ordered Entity/Account event receipts inline in their signed
   Frame and covered by its Hanko; do not add a second Merkle tree unless
@@ -223,9 +176,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   that the Entity transaction creates the canonical bilateral request while
   crontab exclusively materializes that same request into one J batch.
 - [ ] Finish canonical financial construction and naming. Empty Deltas now use
-  the Account-owned constructor, hold fields are mandatory, and strict versus
-  boolean Account-frame validation is named `decodeAccountFrame` versus
-  `isWithinAccountFrameBounds`. Centralize the remaining settlement-Hanko
+  the Account-owned constructor, hold fields are mandatory, and Account-frame
+  validation names are canonical. Centralize the remaining settlement-Hanko
   projection and RuntimeState symbols. Keep exactly three semantic verb
   families: `decode*` for unknown/wire → typed and throw, `assert*` for a typed
   invariant and throw, and `is<Decision>*` for one boolean decision.
@@ -281,10 +233,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   lines, zero R/E/A functions over 100 lines and zero files over 3000 lines.
 - [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,
   codecs and state helpers as leaf modules that never import reducers,
-  Runtime routing or chain adapters. Execute SHA-256, proposal construction
-  and one Account open from the actual browser bundle,
-  not only Bun source imports. Programming faults such as `TypeError` must
-  preserve their source stack and halt, never be relabelled as rejected input.
+  Runtime routing or chain adapters. The value graph is already acyclic
+  (`maxValueScc=1`, no reverse/root debt); keep that gate green. Execute
+  SHA-256, proposal construction and one Account open from the actual browser
+  bundle, not only Bun source imports. Programming faults such as `TypeError`
+  must preserve their source stack and halt, never be relabelled as rejected
+  input.
 - [ ] Remove only call-site-proven dead code in small module-owned batches.
   Reverify dynamic imports, scenario/CLI entrypoints and browser API first;
   `runNumberedRegistrationIntent` is currently live scenario infrastructure,
@@ -312,11 +266,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   through an explicit Runtime/J-adapter outbox using Entity-committed intent
   data, and add a source gate forbidding provider, wall-clock and randomness
   access under deterministic Entity/Account/protocol code.
-- [ ] Make the directory hierarchy match the three nested state machines only
-  after semantic diffs are green. Keep the stable root `runtime/runtime.ts`
-  browser facade; place Runtime frame transition/mempool/transaction/lifecycle
-  under `runtime/runtime/frame/` and reliable delivery/output/J submission
-  under `runtime/runtime/delivery/`. Preserve the exact export surface.
 - [ ] Profile a growing hub only after the structural work. Do not introduce
   Runtime→Entity→Account COW, optimistic batching or remove receiver
   validation without byte-identical differential roots, equivalent failures
