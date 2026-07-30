@@ -322,7 +322,7 @@
 
   $effect(() => {
     const xln = $xlnInstance;
-    if (!xln?.getEnv || !xln?.getActiveJAdapter) {
+    if (!xln?.getActiveJAdapter) {
       tokenRegistryRequestId += 1;
       browserVmTokens = [];
       tokenRegistryError = null;
@@ -489,7 +489,7 @@
     const tokenAddress = tokenMeta?.address;
     const jData = selectedJurisdictionData;
 
-    if (!tokenAddress || signers.length === 0 || !xln?.getEnv || !xln?.getActiveJAdapter) {
+    if (!tokenAddress || signers.length === 0 || !xln?.getActiveJAdapter) {
       externalBalances = [];
       externalBalancesLoading = false;
       externalBalancesError = null;
@@ -552,7 +552,7 @@
     const xln = $xlnInstance;
     const jData = selectedJurisdictionData;
 
-    if (signers.length === 0 || !xln?.getEnv || !xln?.getActiveJAdapter) {
+    if (signers.length === 0 || !xln?.getActiveJAdapter) {
       externalEthBalances = [];
       externalEthBalancesLoading = false;
       externalEthBalancesError = null;
@@ -617,7 +617,7 @@
     const names = entityNames;
     const tokenId = selectedTokenId;
 
-    if (!xln?.getEnv || !xln?.getActiveJAdapter) {
+    if (!xln?.getActiveJAdapter) {
       entityDebts = [];
       debtsLoading = false;
       return;

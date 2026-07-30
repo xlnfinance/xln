@@ -13,6 +13,7 @@ import type {
 import { RuntimeAdapterError } from './errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
 import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../runtime/lifecycle';
+import { ensureRuntimeState } from '../runtime/runtime-state';
 
 export type EmbeddedRuntimeAdapterDeps = {
   getEnv: () => RuntimeState | null;
@@ -36,6 +37,10 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   private changeCbs = new Set<(height: number) => void>();
   private currentStatus: RuntimeAdapterStatus = 'disconnected';
   private configuredRuntimeId = '';
+  private publishedRuntimeId = '';
+  private publishedHeight = 0;
+  private publishedCommandReady = false;
+  private publishedCommandReadyReason: string | null = 'adapter-disconnected';
 
   constructor(private readonly deps: EmbeddedRuntimeAdapterDeps) {}
 
@@ -44,7 +49,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   }
 
   get runtimeId(): string {
-    return String(this.resolveEnv()?.runtimeId || this.configuredRuntimeId || 'embedded').trim().toLowerCase();
+    return this.publishedRuntimeId || this.configuredRuntimeId || 'embedded';
   }
 
   get serverFingerprint(): null {
@@ -52,8 +57,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   }
 
   get currentHeight(): number {
-    const env = this.resolveEnv();
-    return Math.max(0, Math.floor(Number(env?.height ?? 0)));
+    return this.publishedHeight;
   }
 
   get nextCommandSequence(): null {
@@ -69,14 +73,12 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   }
 
   get commandReady(): boolean {
-    const env = this.resolveEnv();
-    return this.currentStatus === 'connected' && env !== null && getRuntimeCommandReadiness(env).ready;
+    return this.currentStatus === 'connected' && this.publishedCommandReady;
   }
 
   get commandReadyReason(): string | null {
-    const env = this.resolveEnv();
-    if (this.currentStatus !== 'connected' || !env) return `adapter-${this.currentStatus}`;
-    return getRuntimeCommandReadiness(env).reason;
+    if (this.currentStatus !== 'connected') return `adapter-${this.currentStatus}`;
+    return this.publishedCommandReadyReason;
   }
 
   async connect(config: RuntimeAdapterConfig): Promise<void> {
@@ -88,10 +90,15 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
       : this.deps.getEnv();
     if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
     this.env = env;
+    this.publishCommittedMetadata(env);
     this.unregister?.();
     this.unregister = this.deps.registerEnvChangeCallback(env, (nextEnv) => {
       this.env = nextEnv;
-      for (const cb of this.changeCbs) cb(Math.max(0, Math.floor(Number(nextEnv.height ?? 0))));
+      // Infrastructure notifications may race an in-place frame mutation.
+      // Such a callback must never publish H+1 before WAL has committed it.
+      if (ensureRuntimeState(nextEnv).stateMutationInFlight) return;
+      this.publishCommittedMetadata(nextEnv);
+      for (const cb of this.changeCbs) cb(this.publishedHeight);
     });
     this.setStatus('connected');
   }
@@ -100,6 +107,10 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     this.unregister?.();
     this.unregister = null;
     this.env = null;
+    this.publishedRuntimeId = '';
+    this.publishedHeight = 0;
+    this.publishedCommandReady = false;
+    this.publishedCommandReadyReason = 'adapter-disconnected';
     this.setStatus('disconnected');
   }
 
@@ -158,6 +169,30 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
 
   private resolveEnv(): RuntimeState | null {
     return this.deps.getEnv() ?? this.env;
+  }
+
+  /**
+   * Copy only committed scalar metadata out of the live Runtime object.
+   *
+   * Runtime frame construction mutates its owned State in place for
+   * performance. Holding the object here is necessary for ingress, but UI
+   * status must be a value snapshot so an uncommitted H+1 cannot leak.
+   */
+  private publishCommittedMetadata(env: RuntimeState): void {
+    if (ensureRuntimeState(env).stateMutationInFlight) {
+      throw new RuntimeAdapterError(
+        'E_INTERNAL',
+        'RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED',
+        true,
+      );
+    }
+    const readiness = getRuntimeCommandReadiness(env);
+    this.publishedRuntimeId = String(env.runtimeId || this.configuredRuntimeId || 'embedded')
+      .trim()
+      .toLowerCase();
+    this.publishedHeight = Math.max(0, Math.floor(Number(env.height ?? 0)));
+    this.publishedCommandReady = readiness.ready;
+    this.publishedCommandReadyReason = readiness.reason;
   }
 
   private requireCommandReady(env: RuntimeState): void {
