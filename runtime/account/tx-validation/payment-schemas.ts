@@ -1,0 +1,100 @@
+import type { AccountTxDataSchema } from './fields';
+
+export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
+  direct_payment: {
+    required: { tokenId: 'integer', amount: 'bigint' },
+    optional: {
+      route: 'stringArray', description: 'string', fromEntityId: 'string',
+      toEntityId: 'string', deliveryMode: 'string', trustedGatewayEntityId: 'string',
+    },
+    literals: { deliveryMode: ['trusted'] },
+  },
+  add_delta: { required: { tokenId: 'integer' } },
+  set_credit_limit: { required: { tokenId: 'integer', amount: 'bigint' } },
+  account_settle: {
+    required: {
+      tokenId: 'integer', ownReserve: 'string', counterpartyReserve: 'string',
+      collateral: 'string', ondelta: 'string', side: 'string',
+      blockNumber: 'integer', transactionHash: 'string',
+    },
+    literals: { side: ['left', 'right'] },
+  },
+  reserve_to_collateral: {
+    required: {
+      tokenId: 'integer', collateral: 'string', ondelta: 'string',
+      side: 'string', blockNumber: 'integer', transactionHash: 'string',
+    },
+    literals: { side: ['receiving', 'counterparty'] },
+  },
+  request_collateral: {
+    required: {
+      tokenId: 'integer', amount: 'bigint', feeAmount: 'bigint', policyVersion: 'integer',
+    },
+    optional: { feeTokenId: 'integer' },
+  },
+  rebalance_refund: {
+    required: {
+      requestId: 'string', requestTokenId: 'integer', amount: 'bigint', reason: 'string',
+    },
+    literals: { reason: ['policy_mismatch', 'timeout', 'fee_too_low', 'manual'] },
+  },
+  rebalance_policy: {
+    required: {
+      tokenId: 'integer', policyVersion: 'integer', baseFee: 'bigint',
+      liquidityFeeBps: 'bigint', gasFee: 'bigint',
+    },
+  },
+  pull_lock: {
+    required: {
+      pullId: 'string', tokenId: 'integer', amount: 'bigint',
+      revealedUntilTimestamp: 'integer', fullHash: 'string', partialRoot: 'string',
+    },
+    optional: { crossJurisdiction: 'record', crossJurisdictionRoute: 'record' },
+  },
+  pull_resolve: { required: { pullId: 'string', binary: 'string' } },
+  pull_cancel: {
+    required: { pullId: 'string' },
+    optional: { reason: 'string' },
+    literals: {
+      reason: [
+        'beneficiary_release', 'expired', 'cross_j_cancel_no_fill',
+        'cross_j_source_remainder_release',
+      ],
+    },
+  },
+  swap_offer: {
+    required: {
+      offerId: 'string', giveTokenId: 'integer', giveAmount: 'bigint',
+      wantTokenId: 'integer', wantAmount: 'bigint',
+    },
+    optional: { priceTicks: 'bigint', timeInForce: 'integer', crossJurisdiction: 'record' },
+    literals: { timeInForce: [0, 1, 2] },
+  },
+  swap_cancel_request: { required: { offerId: 'string' } },
+  swap_resolve: {
+    required: { offerId: 'string', fillRatio: 'integer', cancelRemainder: 'boolean' },
+    optional: {
+      fillNumerator: 'bigint', fillDenominator: 'bigint', comment: 'string',
+      feeTokenId: 'integer', feeAmount: 'bigint', executionGiveAmount: 'bigint',
+      executionWantAmount: 'bigint', restingGiveTokenId: 'integer',
+      restingWantTokenId: 'integer', restingPriceTicks: 'bigint',
+      restingGiveAmount: 'bigint', restingWantAmount: 'bigint',
+      restingQuantizedGive: 'bigint', restingQuantizedWant: 'bigint',
+    },
+  },
+  cross_swap_fill_ack: {
+    required: { offerId: 'string', cumulativeFillRatio: 'integer' },
+    optional: {
+      routeHash: 'string', previousFillSeq: 'integer', fillSeq: 'integer',
+      incrementalSourceAmount: 'bigint', incrementalTargetAmount: 'bigint',
+      cumulativeSourceAmount: 'bigint', cumulativeTargetAmount: 'bigint',
+      fillNumerator: 'bigint', fillDenominator: 'bigint', ackKind: 'string',
+      executionSourceAmount: 'bigint', executionTargetAmount: 'bigint',
+      priceImprovementMode: 'string', priceImprovementAmount: 'bigint',
+      priceImprovementTokenId: 'integer', cancelRemainder: 'boolean',
+      comment: 'string', priceTicks: 'bigint', pairId: 'string',
+    },
+    literals: { ackKind: ['fill', 'cancel'], priceImprovementMode: ['source_savings'] },
+  },
+  reopen_disputed: { required: { jNonce: 'integer' } },
+} as const satisfies Readonly<Record<string, AccountTxDataSchema>>;

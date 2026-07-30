@@ -2,12 +2,18 @@ import type { AccountFrame } from '../types/account';
 import {
   FinancialDataCorruptionError,
   validateArray,
-  validateNumber,
   validateObject,
   validateString,
 } from '../protocol/validation-primitives';
 import { assertAccountFrameDeltaIntegrity } from './frame';
 import { validateDelta } from './delta-validation';
+import { decodeAccountTxs } from './tx-validation';
+import {
+  requireBoundaryInteger,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-validation';
+
+const ACCOUNT_FRAME_NESTING_LIMIT = 16;
 
 /**
  * Decode unknown storage/wire data into the only valid AccountFrame shape.
@@ -16,9 +22,22 @@ import { validateDelta } from './delta-validation';
 export const decodeAccountFrame = (
   value: unknown,
   context = 'AccountFrame',
+  nestingDepth = 0,
 ): AccountFrame => {
+  if (nestingDepth > ACCOUNT_FRAME_NESTING_LIMIT) {
+    throw new FinancialDataCorruptionError(`${context}.nesting limit exceeded`);
+  }
   const frame = validateObject(value, context);
-  const height = validateNumber(frame['height'], `${context}.height`);
+  requireExactBoundaryKeys(
+    frame,
+    [
+      'height', 'timestamp', 'jHeight', 'accountTxs', 'prevFrameHash',
+      'accountStateRoot', 'stateHash', 'deltas',
+    ],
+    ['byLeft'],
+    `${context}.fields`,
+  );
+  const height = requireBoundaryInteger(frame['height'], `${context}.height`);
   const optionalAtGenesis = (field: 'prevFrameHash' | 'stateHash'): string => {
     const raw = frame[field];
     return typeof raw === 'string' && (raw.length > 0 || height === 0)
@@ -34,21 +53,30 @@ export const decodeAccountFrame = (
       `${context}.accountStateRoot must be bytes32 hex`,
     );
   }
+  const byLeft = frame['byLeft'];
+  if (byLeft !== undefined && typeof byLeft !== 'boolean') {
+    throw new FinancialDataCorruptionError(`${context}.byLeft must be boolean`);
+  }
 
   const decoded: AccountFrame = {
     height,
-    timestamp: validateNumber(frame['timestamp'], `${context}.timestamp`),
-    jHeight: validateNumber(frame['jHeight'], `${context}.jHeight`),
-    accountTxs: validateArray(frame['accountTxs'], `${context}.accountTxs`),
+    timestamp: requireBoundaryInteger(frame['timestamp'], `${context}.timestamp`),
+    jHeight: requireBoundaryInteger(frame['jHeight'], `${context}.jHeight`),
+    accountTxs: decodeAccountTxs(
+      frame['accountTxs'],
+      `${context}.accountTxs`,
+      (nestedFrame, nestedContext) =>
+        decodeAccountFrame(nestedFrame, nestedContext, nestingDepth + 1),
+    ),
     prevFrameHash: optionalAtGenesis('prevFrameHash'),
     accountStateRoot,
     stateHash: optionalAtGenesis('stateHash'),
-    deltas: validateArray(frame['deltas'] || [], `${context}.deltas`).map(
+    deltas: validateArray(frame['deltas'], `${context}.deltas`).map(
       (delta, index) => validateDelta(delta, `${context}.deltas[${index}]`),
     ),
-    ...(typeof frame['byLeft'] === 'boolean'
-      ? { byLeft: frame['byLeft'] }
-      : {}),
+    ...(byLeft === undefined
+      ? {}
+      : { byLeft }),
   };
   if (decoded.height > 0 && decoded.stateHash.length === 0) {
     throw new FinancialDataCorruptionError(
