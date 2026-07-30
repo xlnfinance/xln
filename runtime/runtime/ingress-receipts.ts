@@ -174,114 +174,144 @@ const createReceiptId = (): string => {
   return `ingress_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 };
 
-export const createRuntimeIngressReceiptStore = (options: RuntimeIngressReceiptStoreOptions = {}) => {
-  const ttlMs = Math.max(1_000, options.ttlMs ?? DEFAULT_RECEIPT_TTL_MS);
-  const now = options.now ?? (() => Date.now());
-  const receipts = new Map<string, RuntimeIngressReceipt>();
-  const fingerprintProgress = new Map<string, {
-    remaining: string[];
-    lastObservedFrameKey?: string;
-  }>();
+type ReceiptFingerprintProgress = {
+  remaining: string[];
+  lastObservedFrameKey?: string;
+};
 
-  const expireOldReceipts = (): void => {
-    const timestamp = now();
-    for (const [id, receipt] of receipts) {
-      if (receipt.status === 'pending' && timestamp >= receipt.expiresAt) {
-        receipts.set(id, { ...receipt, status: 'expired' });
-      } else if (timestamp >= receipt.expiresAt + ttlMs) {
-        receipts.delete(id);
-        fingerprintProgress.delete(id);
-      }
+type RuntimeIngressReceiptStoreState = {
+  ttlMs: number;
+  now(): number;
+  receipts: Map<string, RuntimeIngressReceipt>;
+  fingerprintProgress: Map<string, ReceiptFingerprintProgress>;
+};
+
+const expireOldReceipts = (state: RuntimeIngressReceiptStoreState): void => {
+  const timestamp = state.now();
+  for (const [id, receipt] of state.receipts) {
+    if (receipt.status === 'pending' && timestamp >= receipt.expiresAt) {
+      state.receipts.set(id, { ...receipt, status: 'expired' });
+    } else if (timestamp >= receipt.expiresAt + state.ttlMs) {
+      state.receipts.delete(id);
+      state.fingerprintProgress.delete(id);
     }
-  };
+  }
+};
 
-  const observeRuntimeInput = (height: number, runtimeInput: RuntimeInput): void => {
-    expireOldReceipts();
-    const observedHeight = normalizeHeight(height);
-    const observedInputHash = hashRuntimeIngressInput(runtimeInput);
-    const observedFingerprints = fingerprintRuntimeIngressInput(runtimeInput);
-    for (const [id, receipt] of receipts) {
-      if (receipt.status !== 'pending') continue;
-      if (observedHeight <= receipt.enqueuedHeight) continue;
-      const requiredFingerprints = receipt.inputFingerprints ?? [];
-      if (requiredFingerprints.length > 0) {
-        const progress = fingerprintProgress.get(id) ?? { remaining: [...requiredFingerprints] };
-        const observedFrameKey = `${observedHeight}:${observedInputHash}`;
-        if (progress.lastObservedFrameKey === observedFrameKey) continue;
-        const remaining = consumeObservedFingerprints(progress.remaining, observedFingerprints);
-        fingerprintProgress.set(id, { remaining, lastObservedFrameKey: observedFrameKey });
-        if (remaining.length > 0) {
-          if (remaining.length !== progress.remaining.length) {
-            receipts.set(id, {
-              ...receipt,
-              observedFingerprintCount: requiredFingerprints.length - remaining.length,
-              requiredFingerprintCount: requiredFingerprints.length,
-            });
-          }
-          continue;
+const observeRuntimeInput = (
+  state: RuntimeIngressReceiptStoreState,
+  height: number,
+  runtimeInput: RuntimeInput,
+): void => {
+  expireOldReceipts(state);
+  const observedHeight = normalizeHeight(height);
+  const observedInputHash = hashRuntimeIngressInput(runtimeInput);
+  const observedFingerprints = fingerprintRuntimeIngressInput(runtimeInput);
+  for (const [id, receipt] of state.receipts) {
+    if (receipt.status !== 'pending' || observedHeight <= receipt.enqueuedHeight) continue;
+    const required = receipt.inputFingerprints ?? [];
+    if (required.length > 0) {
+      const progress = state.fingerprintProgress.get(id) ?? { remaining: [...required] };
+      const frameKey = `${observedHeight}:${observedInputHash}`;
+      if (progress.lastObservedFrameKey === frameKey) continue;
+      const remaining = consumeObservedFingerprints(progress.remaining, observedFingerprints);
+      state.fingerprintProgress.set(id, { remaining, lastObservedFrameKey: frameKey });
+      if (remaining.length > 0) {
+        if (remaining.length !== progress.remaining.length) {
+          state.receipts.set(id, {
+            ...receipt,
+            observedFingerprintCount: required.length - remaining.length,
+            requiredFingerprintCount: required.length,
+          });
         }
-      } else if (!receipt.inputHash || receipt.inputHash !== observedInputHash) {
         continue;
       }
-      receipts.set(id, {
-        ...receipt,
-        status: 'observed',
-        ...(requiredFingerprints.length > 0
-          ? {
-              observedFingerprintCount: requiredFingerprints.length,
-              requiredFingerprintCount: requiredFingerprints.length,
-            }
-          : {}),
-        observedHeight,
-        note:
-          receipt.note ??
-          'Runtime frame committed the accepted input; inspect entity/account state for semantic commit details.',
-      });
+    } else if (!receipt.inputHash || receipt.inputHash !== observedInputHash) {
+      continue;
     }
+    state.receipts.set(id, {
+      ...receipt,
+      status: 'observed',
+      ...(required.length > 0
+        ? {
+            observedFingerprintCount: required.length,
+            requiredFingerprintCount: required.length,
+          }
+        : {}),
+      observedHeight,
+      note:
+        receipt.note ??
+        'Runtime frame committed the accepted input; inspect entity/account state for semantic commit details.',
+    });
+  }
+};
+
+const registerRuntimeIngressReceipt = (
+  state: RuntimeIngressReceiptStoreState,
+  input: RegisterReceiptOptions,
+): RuntimeIngressReceipt => {
+  expireOldReceipts(state);
+  const enqueuedAt = state.now();
+  const inputFingerprints = input.inputFingerprints ?? (
+    input.runtimeInput ? fingerprintRuntimeIngressInput(input.runtimeInput) : undefined
+  );
+  const inputHash = input.inputHash ?? (
+    input.runtimeInput ? hashRuntimeIngressInput(input.runtimeInput) : undefined
+  );
+  const receipt: RuntimeIngressReceipt = {
+    id: input.id || createReceiptId(),
+    kind: input.kind,
+    status: 'pending',
+    counts: input.counts,
+    enqueuedAt,
+    enqueuedHeight: normalizeHeight(input.enqueuedHeight),
+    ...(inputHash === undefined ? {} : { inputHash }),
+    ...(inputFingerprints === undefined
+      ? {}
+      : {
+          inputFingerprints,
+          observedFingerprintCount: 0,
+          requiredFingerprintCount: inputFingerprints.length,
+        }),
+    expiresAt: enqueuedAt + state.ttlMs,
+    ...(input.note ? { note: input.note } : {}),
+  };
+  state.receipts.set(receipt.id, receipt);
+  if ((receipt.inputFingerprints?.length ?? 0) > 0) {
+    state.fingerprintProgress.set(receipt.id, {
+      remaining: [...receipt.inputFingerprints!],
+    });
+  }
+  return receipt;
+};
+
+export const createRuntimeIngressReceiptStore = (
+  options: RuntimeIngressReceiptStoreOptions = {},
+) => {
+  const state: RuntimeIngressReceiptStoreState = {
+    ttlMs: Math.max(1_000, options.ttlMs ?? DEFAULT_RECEIPT_TTL_MS),
+    now: options.now ?? (() => Date.now()),
+    receipts: new Map<string, RuntimeIngressReceipt>(),
+    fingerprintProgress: new Map<string, ReceiptFingerprintProgress>(),
   };
 
   return {
     register(input: RegisterReceiptOptions): RuntimeIngressReceipt {
-      expireOldReceipts();
-      const enqueuedAt = now();
-      const inputFingerprints = input.inputFingerprints ?? (
-        input.runtimeInput ? fingerprintRuntimeIngressInput(input.runtimeInput) : undefined
-      );
-      const receipt: RuntimeIngressReceipt = {
-        id: input.id || createReceiptId(),
-        kind: input.kind,
-        status: 'pending',
-        counts: input.counts,
-        enqueuedAt,
-        enqueuedHeight: normalizeHeight(input.enqueuedHeight),
-        ...(input.inputHash || input.runtimeInput ? { inputHash: input.inputHash ?? hashRuntimeIngressInput(input.runtimeInput!) } : {}),
-        ...(inputFingerprints !== undefined
-          ? {
-              inputFingerprints,
-              observedFingerprintCount: 0,
-              requiredFingerprintCount: inputFingerprints.length,
-            }
-          : {}),
-        expiresAt: enqueuedAt + ttlMs,
-        ...(input.note ? { note: input.note } : {}),
-      };
-      receipts.set(receipt.id, receipt);
-      if ((receipt.inputFingerprints?.length ?? 0) > 0) {
-        fingerprintProgress.set(receipt.id, { remaining: [...receipt.inputFingerprints!] });
-      }
-      return receipt;
+      return registerRuntimeIngressReceipt(state, input);
     },
 
-    observeRuntimeInput,
+    observeRuntimeInput(height: number, runtimeInput: RuntimeInput): void {
+      observeRuntimeInput(state, height, runtimeInput);
+    },
 
     get(id: string): RuntimeIngressReceipt | null {
-      expireOldReceipts();
-      return receipts.get(id) ?? null;
+      expireOldReceipts(state);
+      return state.receipts.get(id) ?? null;
     },
 
     size(): number {
-      expireOldReceipts();
-      return receipts.size;
+      expireOldReceipts(state);
+      return state.receipts.size;
     },
   };
 };
