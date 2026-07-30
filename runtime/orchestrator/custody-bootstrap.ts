@@ -586,23 +586,6 @@ export const discoverHubIds = async (
   );
 };
 
-export const waitForDebugEntity = async (
-  apiBaseUrl: string,
-  entityId: string,
-  predicate: (entry: DebugEntitySummary) => boolean,
-  timeoutMs = 30_000,
-): Promise<DebugEntitySummary> => {
-  const normalized = entityId.toLowerCase();
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const entities = await fetchDebugEntities(apiBaseUrl);
-    const match = entities.find(entry => String(entry.entityId || '').toLowerCase() === normalized);
-    if (match && predicate(match)) return match;
-    await sleep(500);
-  }
-  throw new Error(`Timed out waiting for debug entity ${entityId}`);
-};
-
 export const startCustodySupport = async (
   options: StartCustodySupportOptions,
 ): Promise<StartedCustodySupport> => {

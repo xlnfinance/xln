@@ -117,21 +117,6 @@ export function encodeHashLadderPartialBinary(fillRatio: number, reveals: readon
   return `0x${ratioHex}${reveals.map(reveal => reveal.slice(2)).join('')}`;
 }
 
-export function encodeHashLadderBinaryFromParts(
-  fillRatio: number,
-  fullSecret?: string,
-  reveals?: readonly string[],
-): string {
-  const ratio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(fillRatio) || 0)));
-  if (ratio === 0) return '0x';
-  if (ratio === HASHLADDER_MAX_FILL_RATIO) {
-    if (!fullSecret || !HEX_32_RE.test(fullSecret)) throw new Error('HASHLADDER_FULL_SECRET_INVALID');
-    return fullSecret;
-  }
-  if (!reveals) throw new Error('HASHLADDER_PARTIAL_REVEALS_MISSING');
-  return encodeHashLadderPartialBinary(ratio, reveals);
-}
-
 export function decodeHashLadderBinary(binary?: string): DecodedHashLadderBinary {
   const value = String(binary || '0x').toLowerCase();
   if (value === '0x') return { fillRatio: 0 };

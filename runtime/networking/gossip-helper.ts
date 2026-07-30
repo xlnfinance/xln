@@ -12,7 +12,7 @@ import type {
   ProfileJurisdiction,
   ProfileMirror,
 } from '../entity/profile';
-import { compareStableText, safeStringify } from '../protocol/serialization';
+import { compareStableText } from '../protocol/serialization';
 import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKeyIfAvailable, getSignerPublicKey } from '../account/crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import { UINT16_MAX } from '../config/constants';
@@ -211,89 +211,3 @@ export const buildLocalEntityProfile = (
     runtimeEncPubKey: pubKeyToHex(deriveEncryptionKeyPair(runtimeSeed).publicKey),
   };
 };
-
-export const announceLocalEntityProfile = (
-  env: RuntimeState,
-  entityState: EntityState,
-  timestamp?: number,
-): Profile => {
-  const profile = buildLocalEntityProfile(
-    env,
-    entityState,
-    timestamp ?? getNextProfileTimestamp(env, entityState.entityId),
-  );
-  env.gossip.announce(profile);
-  return profile;
-};
-
-type FingerprintTokenCapacity = {
-  tokenId: string;
-  inCapacity: string;
-  outCapacity: string;
-};
-
-type FingerprintAccount = {
-  counterpartyId: string;
-  tokenCapacities: FingerprintTokenCapacity[];
-};
-
-const compareTokenIdStrings = (left: string, right: string): number => {
-  const leftNum = Number(left);
-  const rightNum = Number(right);
-  if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
-    return leftNum - rightNum;
-  }
-  return compareStableText(left, right);
-};
-
-/**
- * Deterministic fingerprint of the public routing state we advertise via gossip.
- * Excludes volatile fields like lastUpdated/signatures so we only re-announce
- * when the visible profile meaningfully changes.
- */
-export function buildEntityAdvertisedStateFingerprint(
-  entityState: EntityState,
-  signerResolver?: ProfileSignerResolver,
-): string {
-  const profile = buildEntityProfile(entityState, 0, signerResolver);
-  const accounts: FingerprintAccount[] = profile.accounts
-    .map((account) => {
-      const tokenEntries =
-        account.tokenCapacities instanceof Map
-          ? Array.from(account.tokenCapacities.entries())
-          : Object.entries(account.tokenCapacities);
-      const tokenCapacities = tokenEntries
-        .map(([tokenId, capacity]) => ({
-          tokenId: String(tokenId),
-          inCapacity: String(capacity.inCapacity),
-          outCapacity: String(capacity.outCapacity),
-        }))
-        .sort((left, right) => compareTokenIdStrings(left.tokenId, right.tokenId));
-      return {
-        counterpartyId: account.counterpartyId,
-        tokenCapacities,
-      };
-    })
-    .sort((left, right) => compareStableText(left.counterpartyId, right.counterpartyId));
-
-  const metadata = profile.metadata;
-  const fingerprintPayload = {
-    entityId: profile.entityId,
-    publicAccounts: [...profile.publicAccounts].sort(),
-    accounts,
-    metadata: {
-      isHub: metadata.isHub,
-      routingFeePPM: metadata.routingFeePPM,
-      baseFee: String(metadata.baseFee),
-      swapTakerFeeBps: Number(metadata.swapTakerFeeBps ?? 0),
-      policyVersion: Number(metadata.policyVersion ?? 0),
-      rebalanceBaseFee: String(metadata.rebalanceBaseFee ?? ''),
-      rebalanceLiquidityFeeBps: String(metadata.rebalanceLiquidityFeeBps ?? ''),
-      rebalanceGasFee: String(metadata.rebalanceGasFee ?? ''),
-      rebalanceTimeoutMs: Number(metadata.rebalanceTimeoutMs ?? 0),
-      board: metadata.board,
-    },
-  };
-
-  return safeStringify(fingerprintPayload);
-}

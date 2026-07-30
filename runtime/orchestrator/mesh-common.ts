@@ -303,17 +303,6 @@ export const getAccountState = (
   return null;
 };
 
-export const getAccountDelta = (
-  env: RuntimeState,
-  entityId: string,
-  counterpartyId: string,
-  tokenId: number,
-): Delta | null => {
-  const account = getAccountState(env, entityId, counterpartyId);
-  if (!account?.deltas) return null;
-  return account.deltas.get(tokenId) ?? null;
-};
-
 export const serializeAccountDelta = (delta: Delta | null | undefined): Record<string, string> | null =>
   delta
     ? {

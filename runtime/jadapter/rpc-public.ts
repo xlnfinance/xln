@@ -184,11 +184,6 @@ export const assertAuthenticatedWatcherLogHeaders = (
   return authenticatedHeaders;
 };
 
-export const prepareAuthenticatedWatcherHeaders = (
-  authenticatedRange: Pick<AuthenticatedReceiptRange, 'headers' | 'logs'>,
-): Array<{ jHeight: number; jBlockHash: string }> =>
-  applyJBlockHeadersIngressTransform(assertAuthenticatedWatcherLogHeaders(authenticatedRange));
-
 export const prepareAuthenticatedWatcherIngress = (
   authenticatedRange: AuthenticatedReceiptRange,
   expectedParent?: NonNullable<ReceiptReadProfile['expectedParent']>,

@@ -452,14 +452,6 @@ export const DEFAULT_DISPUTE_CONFIG: DisputeConfig = {
 };
 
 /**
- * Calculate actual block delay from config value
- * Value * 10 = blocks
- */
-export function getDisputeDelayBlocks(configValue: number): number {
-  return configValue * 10;
-}
-
-/**
  * Create settlement hash for bilateral signature with explicit nonce
  * Matches Account.sol CooperativeUpdate encoding
  * @param nonce The on-chain nonce for cooperative settlement
