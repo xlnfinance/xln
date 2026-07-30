@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { buildJAdapterConfigFromJurisdiction } from '../jadapter/jurisdiction';
+import { BrowserVMEthersProvider } from '../jadapter/browservm-ethers-provider';
 import { requireJurisdictionChainId } from '../jurisdiction/jurisdiction-stack';
 import type { JurisdictionConfig } from '../entity/types';
 
@@ -28,5 +29,14 @@ describe('jurisdiction chain identity', () => {
       'J_ADAPTER_JURISDICTION_CHAIN_ID_INVALID:undefined',
     );
     expect(buildJAdapterConfigFromJurisdiction(jurisdiction(31337)).chainId).toBe(31337);
+  });
+
+  test('never invents an Anvil identity for a malformed BrowserVM provider', () => {
+    expect(() => new BrowserVMEthersProvider({})).toThrow(
+      'BROWSERVM_ETHERS_CHAIN_ID_UNAVAILABLE',
+    );
+    expect(() => new BrowserVMEthersProvider({ getChainId: () => 1.5 })).toThrow(
+      'BROWSERVM_ETHERS_CHAIN_ID_INVALID:1.5',
+    );
   });
 });

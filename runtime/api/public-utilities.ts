@@ -18,7 +18,6 @@ export {
   debugFundReserves,
   getBrowserVMInstance,
   getEntityInfoFromChain,
-  getJurisdictionByAddress,
   submitProcessBatch,
 } from '../jadapter';
 export { getAvailableJurisdictions } from '../jurisdiction/config';

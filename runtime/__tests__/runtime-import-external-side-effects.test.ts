@@ -4,7 +4,6 @@ import { join } from 'path';
 import { computeAddress, hexlify } from 'ethers';
 
 import { getSignerPrivateKey } from '../account/crypto';
-import { getRegisteredBrowserVMJurisdiction } from '../jadapter';
 import { dbRootPath } from '../runtime/platform';
 import { bootScenario } from '../scenarios/boot';
 import { setScenarioStorageEnabled } from '../scenarios/helpers';
@@ -92,13 +91,12 @@ describe('runtime import external-side-effect atomicity', () => {
     }));
   });
 
-  test('failed BrowserVM importJ frame leaves the process-global jurisdiction registry unchanged', async () => {
+  test('failed BrowserVM importJ frame leaves runtime-owned adapter state unchanged', async () => {
     const env = createEmptyEnv('runtime-import-j-external-side-effects');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
     env.state.timestamp = 1_000;
     const browserVMBefore = env.browserVM;
-    const registryBefore = getRegisteredBrowserVMJurisdiction();
     const unknownSignerId = `0x${'cd'.repeat(20)}`;
     const unknownEntityId = generateLazyEntityId([unknownSignerId], 1n).toLowerCase();
 
@@ -123,7 +121,6 @@ describe('runtime import external-side-effect atomicity', () => {
 
     expect(env.state.jReplicas.size).toBe(0);
     expect(env.browserVM).toBe(browserVMBefore);
-    expect(getRegisteredBrowserVMJurisdiction()).toBe(registryBefore);
   }, 30_000);
 
   test('BrowserVM import publishes one live adapter only after durable result commit', async () => {
@@ -131,7 +128,6 @@ describe('runtime import external-side-effect atomicity', () => {
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
     env.state.timestamp = 1_000;
-    const registryBefore = getRegisteredBrowserVMJurisdiction();
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
@@ -151,7 +147,6 @@ describe('runtime import external-side-effect atomicity', () => {
     expect(env.state.jReplicas.size).toBe(0);
     expect(env.infrastructure?.pendingJurisdictionImports?.size).toBe(1);
     expect(env.runtimeMempool?.runtimeTxs.map(tx => tx.type)).toEqual(['completeImportJ']);
-    expect(getRegisteredBrowserVMJurisdiction()).toBe(registryBefore);
 
     await processRuntime(env);
     const replica = env.state.jReplicas.get('Durable BrowserVM');
@@ -163,7 +158,7 @@ describe('runtime import external-side-effect atomicity', () => {
       expect(env.runtimeMempool?.runtimeTxs).toHaveLength(0);
       expect(adapter.getBrowserVM()).toBe(env.browserVM);
       expect(adapter.isWatching()).toBe(true);
-      expect(getRegisteredBrowserVMJurisdiction()?.depositoryAddress.toLowerCase())
+      expect(env.browserVM?.getDepositoryAddress().toLowerCase())
         .toBe(adapter.addresses.depository.toLowerCase());
       expect(replica.contracts?.deltaTransformer?.toLowerCase())
         .toBe(adapter.addresses.deltaTransformer.toLowerCase());

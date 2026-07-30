@@ -221,7 +221,7 @@ export const rehydrateRestoredRuntimeInfra = async (
     loadGossipProfiles: (env: RuntimeReplica) => Promise<void>;
     assertPersistedContractConfigReady: (env: RuntimeReplica, label: string) => void;
     setBrowserVMJurisdiction: (
-      env: RuntimeReplica | null,
+      env: RuntimeReplica,
       depositoryAddress: string,
       chainId: number,
       browserVM?: BrowserVMProvider | null,

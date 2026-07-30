@@ -328,6 +328,6 @@ export type BrowserVmEthersProviderTarget = {
   getBlockHash?(): string;
   getBlockNumber?(): bigint | number;
   getBlockTimestamp?(): number;
-  getChainId?(): bigint | number;
+  getChainId(): bigint | number;
   mineEmptyBlock?(timestampMs?: number): Promise<number>;
 };

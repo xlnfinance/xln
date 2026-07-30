@@ -10,6 +10,18 @@ import { ethers } from 'ethers';
 import { createAddressFromString } from '@ethereumjs/util';
 import type { BrowserVmEthersProviderTarget } from './types';
 
+const requireBrowserVmChainId = (browserVM: BrowserVmEthersProviderTarget): number => {
+  if (typeof browserVM.getChainId !== 'function') {
+    throw new Error('BROWSERVM_ETHERS_CHAIN_ID_UNAVAILABLE');
+  }
+  const raw = browserVM.getChainId();
+  const chainId = typeof raw === 'bigint' ? Number(raw) : raw;
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new Error(`BROWSERVM_ETHERS_CHAIN_ID_INVALID:${String(raw)}`);
+  }
+  return chainId;
+};
+
 const buildBrowserVmReceipt = (
   browserVM: BrowserVmEthersProviderTarget,
   hash: string,
@@ -69,7 +81,7 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
   constructor(browserVM: unknown) {
     super();
     this.browserVM = browserVM as BrowserVmEthersProviderTarget;
-    const chainId = this.browserVM.getChainId?.() ?? 31337;
+    const chainId = requireBrowserVmChainId(this.browserVM);
     this._network = new ethers.Network('browservm', chainId);
   }
 
@@ -129,7 +141,7 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
     }
     switch (req.method) {
       case 'chainId':
-        return asResponse(this.browserVM.getChainId?.() ?? 31337);
+        return asResponse(requireBrowserVmChainId(this.browserVM));
 
       case 'getBlockNumber':
         return asResponse(Number(this.browserVM.getBlockNumber?.() ?? 0));

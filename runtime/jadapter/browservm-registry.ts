@@ -3,8 +3,6 @@ import type { JurisdictionConfig } from '../entity/types';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import type { BrowserVMProvider } from './types';
 
-let registeredBrowserVMJurisdiction: JurisdictionConfig | null = null;
-
 type BrowserVMCarrier = BrowserVMProvider | { browserVM?: BrowserVMProvider | null } | null | undefined;
 
 const unwrapBrowserVM = (value: BrowserVMCarrier): BrowserVMProvider | null => {
@@ -26,7 +24,7 @@ export const buildBrowserVMJurisdiction = (
 });
 
 export const setBrowserVMJurisdiction = (
-  env: RuntimeReplica | null,
+  env: RuntimeReplica,
   depositoryAddress: string,
   chainId: number,
   browserVMInstance?: BrowserVMCarrier,
@@ -41,24 +39,14 @@ export const setBrowserVMJurisdiction = (
       `BROWSERVM_JURISDICTION_CHAIN_ID_MISMATCH:expected=${chainId}:actual=${providerChainId.toString()}`,
     );
   }
-  if (browserVM && env) {
-    (env as RuntimeReplica & { browserVM?: BrowserVMProvider | null }).browserVM = browserVM;
-  }
+  if (browserVM) env.browserVM = browserVM;
 
-  const entityProviderAddress = requireUsableContractAddress(
+  requireUsableContractAddress(
     'entity_provider',
-    browserVM?.getEntityProviderAddress?.() || env?.browserVM?.getEntityProviderAddress?.(),
+    browserVM?.getEntityProviderAddress?.() || env.browserVM?.getEntityProviderAddress?.(),
   );
-
-  registeredBrowserVMJurisdiction = buildBrowserVMJurisdiction(
-    requireUsableContractAddress('depository', depositoryAddress),
-    entityProviderAddress,
-    chainId,
-  );
+  requireUsableContractAddress('depository', depositoryAddress);
 };
 
 export const getBrowserVMInstance = (env?: RuntimeReplica | null): BrowserVMProvider | null =>
   (env?.browserVM as BrowserVMProvider | null | undefined) ?? null;
-
-export const getRegisteredBrowserVMJurisdiction = (): JurisdictionConfig | null =>
-  registeredBrowserVMJurisdiction;

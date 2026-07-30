@@ -1,9 +1,7 @@
 import type { JurisdictionConfig } from '../entity/types';
-import { getAvailableJurisdictions } from '../jurisdiction/config';
 import { requireJurisdictionChainId } from '../jurisdiction/jurisdiction-stack';
 import { createJAdapter } from './factory';
 import type { JAdapter, JAdapterConfig, JAdapterReplicaConnection } from './types';
-import { getRegisteredBrowserVMJurisdiction } from './browservm-registry';
 
 const buildFromReplica = (jurisdiction: JurisdictionConfig): JAdapterReplicaConnection =>
   ({
@@ -48,16 +46,4 @@ export const connectJurisdictionContracts = async (jurisdiction: JurisdictionCon
     entityProvider: jadapter.entityProvider,
     depository: jadapter.depository,
   };
-};
-
-export const getJurisdictionByAddress = async (
-  address: string,
-): Promise<JurisdictionConfig | undefined> => {
-  const browserVMJurisdiction = getRegisteredBrowserVMJurisdiction();
-  if (browserVMJurisdiction && browserVMJurisdiction.address === address) {
-    return browserVMJurisdiction;
-  }
-
-  const jurisdictions = await getAvailableJurisdictions();
-  return jurisdictions.find((jurisdiction) => jurisdiction.address === address);
 };
