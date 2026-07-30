@@ -307,6 +307,7 @@
         env={activeIsLive ? (liveRuntimeEnv ?? actionRuntimeEnv) : null}
         isLive={activeIsLive}
         runtimeView={swapRuntimeView}
+        {runtimeHeight}
       />
     {:else}
       <LiveRequiredState message="Swap projection is not available yet." />

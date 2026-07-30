@@ -117,6 +117,31 @@ export const assertRuntimeViewIsLive = (view: Pick<RuntimeView, 'atHeight'>): vo
   throw new Error(`RUNTIME_COMMAND_REQUIRES_LIVE_VIEW: selected=h${view.atHeight}`);
 };
 
+/**
+ * Read one detached Entity projection without changing the workspace's active
+ * Entity. Cross-network tools use this for a secondary local signer: changing
+ * the shared selection would replace the page the user is currently auditing.
+ */
+export const readRuntimeEntityProjectionFrame = async (
+  entityId: string,
+): Promise<RuntimeAdapterViewFrame> => {
+  const normalizedEntityId = normalizeEntityIdForRuntimeView(entityId);
+  if (!normalizedEntityId) throw new Error('RUNTIME_ENTITY_PROJECTION_ID_MISSING');
+  const atHeight = get(runtimeView).atHeight;
+  const frame = await runtimeQueryClient.readViewFrame(runtimeViewQueryAtHeight({
+    entityId: normalizedEntityId,
+    accountsLimit: 10,
+    booksLimit: 10,
+  }, atHeight));
+  const projectedEntityId = normalizeEntityIdForRuntimeView(
+    frame.activeEntityId || frame.activeEntity?.summary?.entityId || frame.activeEntity?.core?.entityId,
+  );
+  if (projectedEntityId !== normalizedEntityId) {
+    throw new Error(`RUNTIME_ENTITY_PROJECTION_MISMATCH:${normalizedEntityId}:${projectedEntityId || 'missing'}`);
+  }
+  return frame;
+};
+
 export const emptyRuntimeViewHistoryScan = (endpoint = ''): RuntimeViewHistoryScanState => ({
   loading: false,
   error: null,

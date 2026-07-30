@@ -322,9 +322,12 @@ describe('swap panel helpers', () => {
     expect(panel).toContain('export let env: RuntimeReplica | null = null');
     expect(panel).not.toContain('export let env: RuntimeReplica | EnvSnapshot');
     expect(panel).toContain('swapRuntimeView = runtimeView ?? buildSwapPanelRuntimeView(activeFrame)');
+    expect(panel).toContain('readRuntimeEntityProjectionFrame(entityId)');
+    expect(panel).toContain("buildEntityPanelView(null, entityId, '', '', frame).replica");
     expect(workspace).toContain('export let swapRuntimeView: SwapPanelRuntimeView | null = null');
     expect(workspace).toContain('{#if activeEnv || swapRuntimeView}');
     expect(workspace).toContain('runtimeView={swapRuntimeView}');
+    expect(workspace).toContain('{runtimeHeight}');
     expect(tabs).toContain('swapRuntimeView = buildSwapPanelRuntimeView({');
     expect(tabs).toContain('profiles: panelProfiles');
     expect(tabs).toContain('networkProfiles: getGossipProfiles(actionRuntimeEnv)');

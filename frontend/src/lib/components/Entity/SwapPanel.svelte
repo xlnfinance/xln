@@ -13,6 +13,7 @@ import {
 import type { Profile } from '@xln/runtime/api/runtime-module';
 import type { SwapBookEntry } from '@xln/runtime/api/runtime-module';
 import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
+import { readRuntimeEntityProjectionFrame } from '../../stores/runtimeViewStore';
 import { toasts } from '../../stores/toastStore';
 import { errorLog } from '../../stores/errorLogStore';
 import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
@@ -20,6 +21,7 @@ import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
 import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from './token-metadata';
+import { buildEntityPanelView } from './entity-panel-model';
 import { formatEntityId } from '$lib/utils/format';
 import {
   buildSwapPanelRuntimeView,
@@ -105,6 +107,7 @@ export let tab: Tab;
 export let env: RuntimeReplica | null = null;
 export let isLive: boolean;
 export let runtimeView: SwapPanelRuntimeView | null = null;
+export let runtimeHeight = 0;
 // Props
 export let counterpartyId: string = '';
 let orderbookScopeMode: 'aggregated' | 'selected' = 'selected';
@@ -258,6 +261,14 @@ let crossSetupCreditIncreaseLabel = '';
 let crossSwapSetupSteps: CrossSwapSetupStep[] = [];
 let placingSwapOffer = false;
 let swapRuntimeView: SwapPanelRuntimeView = buildSwapPanelRuntimeView(null);
+let detailedSourceReplica: EntityReplica | null = null;
+let cachedSourceReplica: EntityReplica | null = null;
+const detailedReplicaByEntityId = new Map<
+  string,
+  { runtimeHeight: number; replica: EntityReplica }
+>();
+let sourceProjectionKey = '';
+let sourceProjectionRequestId = 0;
 $: activeXlnFunctions = $xlnFunctions;
 $: activeFrame = env;
 $: runtimeEnv = unwrapLiveRuntimeEnv(activeFrame);
@@ -271,13 +282,47 @@ $: if (!sourceEntityOptions.some((option) => option.value === selectedSourceEnti
   selectedSourceEntityValue = sourceEntityOptions.find((option) => option.value === tabEntityId)?.value || sourceEntityOptions[0]?.value || '';
 }
 $: selectedSourceEntity = sourceEntityOptions.find((option) => option.value === selectedSourceEntityValue) || null;
-$: currentReplica = selectedSourceEntity?.replica || replica;
+$: {
+  const nextKey = `${runtimeHeight}:${selectedSourceEntityValue}`;
+  if (nextKey !== sourceProjectionKey) {
+    sourceProjectionKey = nextKey;
+    detailedSourceReplica = null;
+    if (activeIsLive && selectedSourceEntityValue) {
+      void refreshDetailedSourceReplica(nextKey, selectedSourceEntityValue);
+    }
+  }
+}
+$: {
+  const cached = detailedReplicaByEntityId.get(selectedSourceEntityValue);
+  cachedSourceReplica = cached?.runtimeHeight === runtimeHeight ? cached.replica : null;
+}
+$: currentReplica =
+  detailedSourceReplica?.entityId === selectedSourceEntityValue
+    ? detailedSourceReplica
+    : cachedSourceReplica || selectedSourceEntity?.replica || replica;
 $: sourceEntityIdValue = String(currentReplica?.entityId || currentReplica?.state?.entityId || tab.entityId || '')
   .trim()
   .toLowerCase();
 $: sourceSignerIdValue = String(currentReplica?.signerId || tab.signerId || '')
   .trim()
   .toLowerCase();
+
+async function refreshDetailedSourceReplica(key: string, entityId: string): Promise<void> {
+  const requestId = ++sourceProjectionRequestId;
+  try {
+    const frame = await readRuntimeEntityProjectionFrame(entityId);
+    const projected = buildEntityPanelView(null, entityId, '', '', frame).replica;
+    if (!projected) throw new Error(`SWAP_SOURCE_PROJECTION_MISSING:${entityId}`);
+    if (requestId !== sourceProjectionRequestId || key !== sourceProjectionKey) return;
+    detailedReplicaByEntityId.set(entityId, { runtimeHeight, replica: projected });
+    detailedSourceReplica = projected;
+  } catch (error) {
+    if (requestId !== sourceProjectionRequestId || key !== sourceProjectionKey) return;
+    detailedSourceReplica = null;
+    submitError = `Source projection unavailable: ${toErrorMessage(error)}`;
+    errorLog.log(submitError, 'Swap Panel', { entityId, error });
+  }
+}
 // Get available accounts (counterparties)
 $: accounts = currentReplica?.state?.accounts ? Array.from(currentReplica.state.accounts.keys()) : [];
 $: baseAccountIds = accounts.map((id) => String(id)).sort();
@@ -1542,6 +1587,8 @@ function findReplicaByEntityId(entityId: string, view: SwapPanelRuntimeView = sw
     .trim()
     .toLowerCase();
   if (!normalized) return null;
+  const detailed = detailedReplicaByEntityId.get(normalized);
+  if (detailed?.runtimeHeight === runtimeHeight) return detailed.replica;
   return (
     view.localReplicas.find(
       (candidate) =>
