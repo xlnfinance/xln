@@ -10,12 +10,7 @@ const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 // production function and its current maximum. A function that grows, a new
 // large function, or a completed refactor whose allowance was not removed
 // fails the gate. The only healthy direction is toward an empty object.
-const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
-  'runtime/jadapter/rpc-adapter.ts::createRpcAdapter': 2009,
-  'runtime/jadapter/rpc-adapter.ts::doPoll': 389,
-  'runtime/jadapter/rpc-adapter.ts::pollInFlight callback': 300,
-  'runtime/jadapter/rpc-adapter.ts::startWatching': 659,
-};
+const COORDINATOR_DEBT: Readonly<Record<string, number>> = {};
 
 type FunctionSize = {
   key: string;

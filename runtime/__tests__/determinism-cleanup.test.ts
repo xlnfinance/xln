@@ -5,12 +5,19 @@ const repoRoot = new URL('../..', import.meta.url).pathname;
 const readSource = (path: string): string =>
   path === 'runtime/jadapter/rpc-adapter.ts'
     ? [
-    'rpc-public.ts',
-    'rpc-adapter.ts',
-    'rpc-lifecycle.ts',
-    'rpc-reads.ts',
-    'rpc-wallet-writes.ts',
-      ].map(file => readFileSync(`${repoRoot}/runtime/jadapter/${file}`, 'utf8')).join('\n')
+        'rpc-public.ts',
+        'rpc-adapter.ts',
+        'rpc-lifecycle.ts',
+        'rpc-reads.ts',
+        'rpc-wallet-writes.ts',
+        'rpc-watcher-canonical.ts',
+        'rpc-watcher-controller.ts',
+        'rpc-watcher-ingress.ts',
+        'rpc-watcher-poll.ts',
+        'rpc-watcher-types.ts',
+      ]
+        .map(file => readFileSync(`${repoRoot}/runtime/jadapter/${file}`, 'utf8'))
+        .join('\n')
     : readFileSync(`${repoRoot}/${path}`, 'utf8');
 
 describe('determinism cleanup lifecycle', () => {
@@ -38,28 +45,26 @@ describe('determinism cleanup lifecycle', () => {
   test('rpc adapter close waits for an in-flight watcher poll before returning', () => {
     const source = readSource('runtime/jadapter/rpc-adapter.ts');
 
-    expect(source).toContain('const inFlightWatcherPoll = pollInFlight;');
-    expect(source).toContain('adapter.stopWatching();');
-    expect(source).toContain('if (inFlightWatcherPoll) await inFlightWatcherPoll;');
-    expect(source).not.toContain('inFlightWatcherPoll.catch(() => undefined)');
+    expect(source).toContain('const inFlight = state.inFlight;');
+    expect(source).toContain('this.stopWatching();');
+    expect(source).toContain('if (inFlight) await inFlight;');
+    expect(source).not.toContain('inFlight.catch(() => undefined)');
   });
 
   test('rpc watcher cancellation keeps in-flight poll tracked and blocks late event ingress', () => {
     const source = readSource('runtime/jadapter/rpc-adapter.ts');
     const stopStart = source.indexOf('stopWatching(): void {');
-    const stopEnd = source.indexOf('getBrowserVM(): BrowserVMProvider | null', stopStart);
+    const stopEnd = source.indexOf('async stopWatchingAndWait(): Promise<void> {', stopStart);
     const stopSource = source.slice(stopStart, stopEnd);
 
-    expect(source).toContain('const watcherPollCancelled = (): boolean =>');
-    expect(source).toContain('if (watcherPollCancelled()) return;');
+    expect(source).toContain('const isCancelled = (): boolean =>');
+    expect(source).toContain('if (request.isCancelled()) return false;');
     expect(source).toContain("step: 'before-process-event-batch'");
-    expect(source).toContain("step: 'before-authenticated-history-range-ingress'");
-    expect(source).toContain("step: 'before-authenticated-empty-range-ingress'");
-    const historyIngress = source.indexOf('const rangeReplicaKeys = enqueueJHistoryRange(');
-    const emptyIngress = source.indexOf('const rangeReplicaKeys = enqueueJHistoryRange(', historyIngress + 1);
-    expect(source.lastIndexOf('if (isJEventIngressPaused(activeEnv)) {', historyIngress)).toBeGreaterThan(0);
-    expect(source.lastIndexOf('if (isJEventIngressPaused(activeEnv)) {', emptyIngress)).toBeGreaterThan(historyIngress);
-    expect(stopSource).not.toContain('pollInFlight = null;');
+    expect(source).toContain("'before-authenticated-history-range-ingress'");
+    expect(source).toContain("'before-authenticated-empty-range-ingress'");
+    const historyIngress = source.lastIndexOf('commitAuthenticatedRange(');
+    expect(source.lastIndexOf('if (request.isPaused()) {', historyIngress)).toBeGreaterThan(0);
+    expect(stopSource).not.toContain('state.inFlight = null;');
   });
 
   test('determinism check command exits explicitly after a successful gate', () => {
@@ -100,8 +105,8 @@ describe('determinism cleanup lifecycle', () => {
     const rpcSource = readSource('runtime/jadapter/rpc-adapter.ts');
     const bootSource = readSource('runtime/scenarios/boot.ts');
 
-    expect(rpcSource).toContain("const manualPolling = env.scenarioMode === true;");
-    expect(rpcSource).toContain("if (!manualPolling) {");
+    expect(rpcSource).toContain('manualPolling: env.scenarioMode === true,');
+    expect(rpcSource).toContain('if (!session.manualPolling) {');
     expect(bootSource).toContain("'--timestamp', '4102444800'");
   });
 });

@@ -12,9 +12,16 @@ const readMarketMakerNodeSource = (): string => [
 const readRpcAdapterSource = (): string => [
   'rpc-public.ts',
   'rpc-adapter.ts',
+  'rpc-chain-io.ts',
+  'rpc-contract-stack.ts',
   'rpc-lifecycle.ts',
+  'rpc-receipts.ts',
   'rpc-reads.ts',
+  'rpc-submission.ts',
   'rpc-wallet-writes.ts',
+  'rpc-watcher-controller.ts',
+  'rpc-watcher-poll.ts',
+  'rpc-write-methods.ts',
 ].map(file => readFileSync(join(process.cwd(), 'runtime/jadapter', file), 'utf8')).join('\n');
 
 test('rpc jadapter startup and watcher lifecycle logs stay structured', () => {

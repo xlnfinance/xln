@@ -52,8 +52,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Close only current, reproduced audit findings. The accepted remainder is
   decomposed below: durable/idempotent off-chain faucet admission, the
   Replica/State split, Activity/history migration, exact Account-frame
-  validation names, canonical financial
-  construction, oversized infrastructure functions and load/recovery proof.
+  validation names, canonical financial construction and load/recovery proof.
   Eliminate consensus non-null assertions by returning refined
   decoded/preflight types. Treat certified human-readable event strings as
   frozen protocol bytes until typed `ActivityEvent` projection separates
@@ -84,17 +83,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   and fail loud on unknown or malformed financial events. Prove that no
   transport DTO can enter consensus directly and that required block/hash/tx
   coordinates cannot become `0`/`0x` defaults after the witnessed boundary.
-- [ ] Split `jadapter/helpers.ts` and `createRpcAdapter` by real I/O and failure
-  boundaries, with no barrel or dependency-bag replacement. Canonical owners
-  are receipt decode, event relevance/fan-out, certified history range,
-  Runtime ingress, cursor/rewind, deployment, contract attachment, submission,
-  receipt confirmation, watcher reconciliation and wallet writes. Delete
-  duplicate gas/nonce/RPC-error policies and BrowserVM/RPC event logic as each
-  owner is extracted. Record before/after LOC, converter count and import
-  edges; require negative net LOC or a proven trust-boundary/type-safety gain.
-  The public facade/factory cycle is gone and the global value-import graph is
-  acyclic. Keep `rpc-adapter.ts` below 3000 throughout and drive its exact
-  oversized function allowances to zero.
 - [ ] Replace technical-history top-level folders with an owner-first tree,
   preserving the distinct guarantees as named subfolders rather than unrelated
   roots: `storage/{wal,state,views,queries,recovery}`,
@@ -287,22 +275,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   without a quarantine, forensic receipt or consensus-frame inclusion. In
   dev/test it fails loudly so the defect is fixed. Mixed-batch retention is
   already pinned and must remain unchanged.
-- [ ] Split remaining god-functions by protocol phase and failure boundary:
-  `applyEntityInput`, `applyAccountInput`, Runtime scheduler/transport/storage,
-  and RPC submit/watch/receipt. Target pure helpers below 50 lines,
-  coordinators below 100–150 lines, and every file below 3000 lines. After the
-  pipeline, collapse DI factories that add navigation
-  without providing a real swappable boundary. The R/E/A gate is already at
-  zero functions over 100 lines. The production ratchet now owns 5 exact
-  allowances over 150 lines and rejects every new/growing coordinator plus
-  every file over 3000 lines; delete each allowance with its verified split.
-  The exact remaining owners are `jadapter/rpc-adapter.ts::{createRpcAdapter,
-  startWatching,doPoll,pollInFlight callback}`,
-  and `orchestrator/mm-node-run.ts::runMarketMakerNode`. Split by lifecycle/ownership boundary, not
-  arbitrary line ranges, and delete each exact allowance after its verified
-  extraction.
-  Replace `prod-startup-wiring.test.ts` source-text assertions with executable
-  boundary/boot tests so refactors cannot pass or fail because of spelling.
+- [ ] Replace `prod-startup-wiring.test.ts` source-text assertions with
+  executable boundary/boot tests so refactors cannot pass or fail because of
+  spelling. Keep the enforced budgets at zero production functions over 150
+  lines, zero R/E/A functions over 100 lines and zero files over 3000 lines.
 - [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,
   codecs and state helpers as leaf modules that never import reducers,
   Runtime routing or chain adapters. Execute SHA-256, proposal construction
