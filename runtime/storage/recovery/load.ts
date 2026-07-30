@@ -81,7 +81,6 @@ const installRestoredRuntimeFrame = async (
   reads: PersistedStorageReadApi,
   env: RuntimeState,
   source: PersistedRestoreSource,
-  hydrateAccountFrameHistoryViews: (env: RuntimeState) => Promise<void>,
 ): Promise<void> => {
   const {
     latestHeight,
@@ -108,7 +107,6 @@ const installRestoredRuntimeFrame = async (
     frame.runtimeOutputs ?? [],
   );
   await reads.restoreOverlayFromFrameLog(env, targetHeight);
-  await hydrateAccountFrameHistoryViews(env);
   env.frameLogs = frame.activityLogs.map(entry => ({ ...entry }));
   if (frame.runtimeMachine) {
     restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
@@ -132,7 +130,6 @@ const installRestoredRuntimeFrame = async (
 export const loadPersistedRuntime = async (
   deps: RuntimeStorageApiDeps,
   reads: PersistedStorageReadApi,
-  hydrateAccountFrameHistoryViews: (env: RuntimeState) => Promise<void>,
   runtimeId?: string | null,
   runtimeSeed?: string | null,
   targetHeightOverride?: number,
@@ -166,7 +163,6 @@ export const loadPersistedRuntime = async (
       reads,
       env,
       source,
-      hydrateAccountFrameHistoryViews,
     );
     returningEnv = true;
     return {

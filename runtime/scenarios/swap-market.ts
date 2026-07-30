@@ -27,7 +27,6 @@ import {
 } from './boot';
 import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
-import { getAccountFrameHistoryView } from '../runtime/env-events';
 import { getBookOrders } from '../orderbook/core';
 
 type MarketHub = { name: string; id: string; signer: string; role: string; pairs: string[] };
@@ -683,16 +682,8 @@ export async function swapMarket(env: RuntimeState): Promise<void> {
   const aliceEthAccountAfter = aliceEthRepAfter.state.accounts.get(hubEth.id);
   assert(!aliceEthAccountAfter?.swapOffers?.has('alice-eth-ask'), 'Alice ETH ask cancelled');
   const aliceEthRepricedOffer = aliceEthAccountAfter?.swapOffers?.get('alice-eth-ask-repriced');
-  const aliceEthRepricedOfferInHistory = aliceEthAccountAfter
-    ? getAccountFrameHistoryView(aliceEthAccountAfter).some((frame) =>
-    Array.isArray(frame?.accountTxs) &&
-      frame.accountTxs.some(
-        (tx) => tx?.type === 'swap_offer' && String(tx?.data?.offerId || '') === 'alice-eth-ask-repriced',
-      ),
-    )
-    : false;
-  if (!aliceEthRepricedOffer && !aliceEthRepricedOfferInHistory) {
-    console.warn('[SWAP-MARKET] Alice ETH repriced ask was not observed as open/history (likely rejected or immediately resolved)');
+  if (!aliceEthRepricedOffer) {
+    console.warn('[SWAP-MARKET] Alice ETH repriced ask is no longer open (likely rejected or immediately resolved)');
   }
   if (aliceEthRepricedOffer) {
     assert(aliceEthRepricedOffer.giveAmount === eth(10), `Alice ETH repriced ask giveAmount = ${eth(10)} (got ${aliceEthRepricedOffer.giveAmount})`);

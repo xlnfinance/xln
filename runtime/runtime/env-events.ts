@@ -10,7 +10,7 @@ import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-v
  *   env.emit('FrameCommitted', { entityId, height, hash });
  */
 
-import type { AccountFrame, AccountState, RuntimeOverlayRecord } from '../types/account';
+import type { AccountFrame, RuntimeOverlayRecord } from '../types/account';
 import type { CertifiedEntityFrameLink, EntityState, EntityCandidateEffect } from '../entity/types';
 import type { RuntimeState, RuntimeHistoryRecord } from './types';
 import type { LogCategory, FrameLogEntry } from '../types/logging';
@@ -242,45 +242,6 @@ export const applyStorageChanges = (
 ): void => {
   applyEntityStorageChanges(state, changes);
   applyRuntimeStorageChanges(env, changes);
-};
-
-// AccountState already owns currentFrame and pendingFrame. Historical frames
-// are carried by the Runtime WAL and materialized into history views.
-export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 0;
-const ACCOUNT_FRAME_HISTORY_VIEW = Symbol.for('xln.accountFrameHistoryView');
-type AccountWithFrameHistoryView = AccountState & {
-  [ACCOUNT_FRAME_HISTORY_VIEW]?: AccountFrame[];
-};
-
-const cloneFrameForView = (frame: AccountFrame): AccountFrame => structuredClone(frame);
-
-export const setAccountFrameHistoryView = (
-  account: AccountState,
-  frames: AccountFrame[],
-  limit = ACCOUNT_FRAME_HISTORY_VIEW_LIMIT,
-): void => {
-  const boundedLimit = Math.max(0, Math.floor(Number(limit || 0)));
-  const view = boundedLimit > 0 ? frames.slice(-boundedLimit).map(frame => cloneFrameForView(frame)) : [];
-  Object.defineProperty(account, ACCOUNT_FRAME_HISTORY_VIEW, {
-    value: view,
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  });
-};
-
-export const getAccountFrameHistoryView = (account: AccountState): AccountFrame[] => {
-  const view = (account as AccountWithFrameHistoryView)[ACCOUNT_FRAME_HISTORY_VIEW];
-  return Array.isArray(view) ? view.map(frame => cloneFrameForView(frame)) : [];
-};
-
-export const appendAccountFrameHistoryView = (
-  account: AccountState,
-  frame: AccountFrame,
-  limit = ACCOUNT_FRAME_HISTORY_VIEW_LIMIT,
-): void => {
-  const existing = (account as AccountWithFrameHistoryView)[ACCOUNT_FRAME_HISTORY_VIEW] ?? [];
-  setAccountFrameHistoryView(account, [...existing, frame], limit);
 };
 
 export const recordAccountFrameHistory = (

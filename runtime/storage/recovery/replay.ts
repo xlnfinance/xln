@@ -32,11 +32,6 @@ type LoadPersistedRuntime = (
   options?: ReplayOptions,
 ) => Promise<LoadedRuntimeStorage | null>;
 
-type HydrateAccountHistory = (
-  env: RuntimeState,
-  limit?: number,
-) => Promise<void>;
-
 const resolveReplayTarget = async (
   deps: RuntimeStorageApiDeps,
   reads: PersistedStorageReadApi,
@@ -109,14 +104,12 @@ const assertReplayedFrameMatches = (
 
 const restoreActivityViews = async (
   reads: PersistedStorageReadApi,
-  hydrateAccountHistory: HydrateAccountHistory,
   env: RuntimeState,
   targetHeight: number,
 ): Promise<void> => {
   // Activity is a rebuildable read model. Deferred Runtime input remains owned
   // by the authoritative WAL frame and must never be erased by view hydration.
   await reads.restoreOverlayFromFrameLog(env, targetHeight);
-  await hydrateAccountHistory(env);
   const frame = await reads.readPersistedStorageFrameRecord(env, targetHeight);
   env.frameLogs = frame?.activityLogs.map(entry => ({ ...entry })) ?? [];
 };
@@ -145,7 +138,6 @@ const reconcileMaterializedHistory = async (
 
 const finalizeReplay = async (
   reads: PersistedStorageReadApi,
-  hydrateAccountHistory: HydrateAccountHistory,
   restored: LoadedRuntimeStorage,
   target: ReplayTarget,
   frame: StorageFrameRecord,
@@ -153,7 +145,6 @@ const finalizeReplay = async (
   assertReplayedFrameMatches(restored.env, frame);
   await restoreActivityViews(
     reads,
-    hydrateAccountHistory,
     restored.env,
     target.targetHeight,
   );
@@ -174,7 +165,6 @@ export const createRuntimeReplayLoader = (
   deps: RuntimeStorageApiDeps,
   reads: PersistedStorageReadApi,
   loadPersistedRuntime: LoadPersistedRuntime,
-  hydrateAccountHistory: HydrateAccountHistory,
 ) => async (
   runtimeId?: string | null,
   runtimeSeed?: string | null,
@@ -227,7 +217,6 @@ export const createRuntimeReplayLoader = (
     }
     await finalizeReplay(
       reads,
-      hydrateAccountHistory,
       restored,
       target,
       targetFrame,

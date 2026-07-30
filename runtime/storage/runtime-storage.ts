@@ -7,7 +7,6 @@ import { createPersistedStorageReadApi } from './persisted-read';
 import { loadPersistedRuntime } from './recovery/load';
 import { createRuntimeReplayLoader } from './recovery/replay';
 import { createRuntimeChainVerifier } from './recovery/verify';
-import { createAccountFrameHistoryHydrator } from './views/account-history';
 
 export type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
@@ -57,8 +56,6 @@ export const notifyRuntimeSyncAfterCommit = (
 
 export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   const commitApi = createRuntimeStorageCommitApi(deps);
-  const hydrateAccountFrameHistoryViews =
-    createAccountFrameHistoryHydrator(deps);
 
   const persistedReadApi = createPersistedStorageReadApi(deps);
   const {
@@ -77,7 +74,6 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     loadPersistedRuntime(
       deps,
       persistedReadApi,
-      hydrateAccountFrameHistoryViews,
       runtimeId,
       runtimeSeed,
       targetHeightOverride,
@@ -93,7 +89,6 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     deps,
     persistedReadApi,
     loadEnvFromStorage,
-    hydrateAccountFrameHistoryViews,
   );
 
   return {

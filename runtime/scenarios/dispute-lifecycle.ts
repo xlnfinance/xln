@@ -8,10 +8,8 @@
  * 4) explicit reopen moves both sides back to active and clears pending disputed state
  */
 
-import type { AccountState } from '../types/account';
 import type { RuntimeState } from '../runtime/types';
 import type { JAdapter } from '../jadapter/types';
-import { getAccountFrameHistoryView } from '../runtime/env-events';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { bootScenario, registerEntities, fundEntities } from './boot';
 import {
@@ -36,17 +34,6 @@ const requireRegistered = (entity: Registered | undefined, name: string): Regist
   }
   return entity;
 };
-
-function jEventClaimCount(account: AccountState | undefined): number {
-  const frames = account ? getAccountFrameHistoryView(account) : [];
-  let count = 0;
-  for (const frame of frames) {
-    for (const tx of frame.accountTxs) {
-      if (tx.type === 'j_event_claim') count += 1;
-    }
-  }
-  return count;
-}
 
 async function mineUntilHeight(jadapter: JAdapter, targetHeight: number): Promise<void> {
   const mineableProvider = jadapter.provider as unknown as Partial<MineableProvider>;
@@ -182,9 +169,6 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeState): Promise<
       env,
     );
 
-    const aliceClaimCountBefore = jEventClaimCount(aliceAccountPre);
-    const hubClaimCountBefore = jEventClaimCount(hubAccountPre);
-
     // Freeze locally before creating the jurisdiction batch.
     await process(env, [{
       entityId: alice.id,
@@ -248,20 +232,6 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeState): Promise<
     assert(
       frameAfterBlockedTraffic === frameBeforeBlockedTraffic,
       `Disputed account accepted business tx unexpectedly (${frameBeforeBlockedTraffic} -> ${frameAfterBlockedTraffic})`,
-      env,
-    );
-
-    // Dispute path is unilateral at entity-layer: no new bilateral j_event_claims should appear.
-    const aliceClaimCountAfterStart = jEventClaimCount(aliceAfterStart);
-    const hubClaimCountAfterStart = jEventClaimCount(hubAfterStart);
-    assert(
-      aliceClaimCountAfterStart === aliceClaimCountBefore,
-      `Unexpected j_event_claim growth on Alice during disputeStart (${aliceClaimCountBefore} -> ${aliceClaimCountAfterStart})`,
-      env,
-    );
-    assert(
-      hubClaimCountAfterStart === hubClaimCountBefore,
-      `Unexpected j_event_claim growth on Hub during disputeStart (${hubClaimCountBefore} -> ${hubClaimCountAfterStart})`,
       env,
     );
 
@@ -401,19 +371,6 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeState): Promise<
     assert(
       Number(hubAfterFinalize?.proofHeader?.nextProofNonce || 0) >= hubOnChainNonce + 1,
       'Hub proofHeader.nextProofNonce must be onChain+1 after finalize',
-      env,
-    );
-
-    const aliceClaimCountAfterFinalize = jEventClaimCount(aliceAfterFinalize);
-    const hubClaimCountAfterFinalize = jEventClaimCount(hubAfterFinalize);
-    assert(
-      aliceClaimCountAfterFinalize === aliceClaimCountBefore,
-      `Unexpected j_event_claim growth on Alice during disputeFinalize (${aliceClaimCountBefore} -> ${aliceClaimCountAfterFinalize})`,
-      env,
-    );
-    assert(
-      hubClaimCountAfterFinalize === hubClaimCountBefore,
-      `Unexpected j_event_claim growth on Hub during disputeFinalize (${hubClaimCountBefore} -> ${hubClaimCountAfterFinalize})`,
       env,
     );
 

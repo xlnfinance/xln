@@ -16,12 +16,6 @@ import {
   registerSignerKey,
 } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import {
-  ACCOUNT_FRAME_HISTORY_VIEW_LIMIT,
-  appendAccountFrameHistoryView,
-  getAccountFrameHistoryView,
-} from '../runtime/env-events';
-import type { AccountState } from '../types/account';
 import type { RuntimeState } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
@@ -37,22 +31,6 @@ afterEach(async () => {
       rmSync(join(root, `${namespace}${suffix}`), { recursive: true, force: true });
     }
   }
-});
-
-test('live Account memory retains no historical frame copies', () => {
-  expect(ACCOUNT_FRAME_HISTORY_VIEW_LIMIT).toBe(0);
-  const account = {} as AccountState;
-  appendAccountFrameHistoryView(account, {
-    height: 1,
-    timestamp: 1,
-    jHeight: 0,
-    accountTxs: [],
-    prevFrameHash: 'genesis',
-    accountStateRoot: `0x${'11'.repeat(32)}`,
-    stateHash: `0x${'22'.repeat(32)}`,
-    deltas: [],
-  });
-  expect(getAccountFrameHistoryView(account)).toEqual([]);
 });
 
 test('live Entity memory keeps certified lineage while LevelDB keeps frame history', async () => {
@@ -84,6 +62,12 @@ test('live Entity memory keeps certified lineage while LevelDB keeps frame histo
   env.activeJurisdiction = jurisdiction.name;
   env.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    position: { x: 0, y: 0, z: 0 },
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
