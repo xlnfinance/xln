@@ -1,5 +1,4 @@
 import type { FrameLogEntry, LogCategory, LogLevel } from '../types/logging';
-import type { RuntimeInput } from '../runtime/types';
 
 const isLogLevel = (value: unknown): value is LogLevel => {
   switch (value) {
@@ -64,57 +63,6 @@ export const requireBoundaryInteger = (
     throw new Error(`${code}:${String(value)}`);
   }
   return Number(value);
-};
-
-const validateRuntimeInputEntry = (value: unknown, code: string): void => {
-  const entry = requireBoundaryRecord(value, code);
-  if (typeof entry['type'] !== 'string' || entry['type'].trim().length === 0) throw new Error(code);
-};
-
-const validateEntityInputEntry = (value: unknown, code: string): void => {
-  const entry = requireBoundaryRecord(value, code);
-  if (typeof entry['entityId'] !== 'string' || entry['entityId'].trim().length === 0) throw new Error(code);
-};
-
-export const validateRuntimeInputEnvelope = (
-  value: unknown,
-  context: string,
-): RuntimeInput => {
-  const input = requireBoundaryRecord(value, `${context}_INVALID`);
-  requireExactBoundaryKeys(
-    input,
-    ['runtimeTxs', 'entityInputs'],
-    ['jInputs', 'reliableReceipts', 'timestamp', 'queuedAt'],
-    `${context}_FIELDS_INVALID`,
-  );
-  if (!Array.isArray(input['runtimeTxs']) || !Array.isArray(input['entityInputs'])) {
-    throw new Error(`${context}_INVALID`);
-  }
-  input['runtimeTxs'].forEach((entry, index) =>
-    validateRuntimeInputEntry(entry, `${context}_RUNTIME_TX_INVALID:index=${index}`));
-  input['entityInputs'].forEach((entry, index) =>
-    validateEntityInputEntry(entry, `${context}_ENTITY_INPUT_INVALID:index=${index}`));
-  if (input['jInputs'] !== undefined) {
-    if (!Array.isArray(input['jInputs'])) throw new Error(`${context}_J_INPUTS_INVALID`);
-    input['jInputs'].forEach((entry, index) => {
-      const jInput = requireBoundaryRecord(entry, `${context}_J_INPUT_INVALID:index=${index}`);
-      requireExactBoundaryKeys(
-        jInput,
-        ['jurisdictionName', 'jTxs'],
-        [],
-        `${context}_J_INPUT_FIELDS_INVALID:index=${index}`,
-      );
-      if (typeof jInput['jurisdictionName'] !== 'string' || !Array.isArray(jInput['jTxs'])) {
-        throw new Error(`${context}_J_INPUT_INVALID:index=${index}`);
-      }
-    });
-  }
-  if (input['reliableReceipts'] !== undefined && !Array.isArray(input['reliableReceipts'])) {
-    throw new Error(`${context}_RELIABLE_RECEIPTS_INVALID`);
-  }
-  if (input['timestamp'] !== undefined) requireBoundaryInteger(input['timestamp'], `${context}_TIMESTAMP_INVALID`);
-  if (input['queuedAt'] !== undefined) requireBoundaryInteger(input['queuedAt'], `${context}_QUEUED_AT_INVALID`);
-  return input as unknown as RuntimeInput;
 };
 
 export const validateFrameLogEntries = (value: unknown, invalidCode: string): FrameLogEntry[] => {

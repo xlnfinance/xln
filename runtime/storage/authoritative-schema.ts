@@ -1,7 +1,7 @@
 import {
   validateFrameLogEntries,
-  validateRuntimeInputEnvelope,
 } from '../protocol/boundary-validation';
+import { decodeRuntimeInput } from '../runtime/input-schema';
 import type { RoutedEntityInput } from '../runtime/types';
 import { decodeRoutedEntityInput } from '../runtime/routing-validation';
 import { assertStorageSchemaVersion, STORAGE_FRAME_FORMAT } from './keys';
@@ -123,7 +123,10 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
       `${code}_MACHINE`,
     );
   }
-  validateRuntimeInputEnvelope(frame['runtimeInput'], `${code}_RUNTIME_INPUT`);
+  frame['runtimeInput'] = decodeRuntimeInput(
+    frame['runtimeInput'],
+    `${code}_RUNTIME_INPUT`,
+  );
   frame['historyRecords'] = validateRuntimeHistoryRecords(
     frame['historyRecords'],
     Number(frame['height']),
@@ -131,7 +134,10 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
   );
   validateFrameLogEntries(frame['activityLogs'], `${code}_ACTIVITY_LOGS`);
   if (frame['pendingRuntimeInput'] !== undefined) {
-    validateRuntimeInputEnvelope(frame['pendingRuntimeInput'], `${code}_PENDING_RUNTIME_INPUT`);
+    frame['pendingRuntimeInput'] = decodeRuntimeInput(
+      frame['pendingRuntimeInput'],
+      `${code}_PENDING_RUNTIME_INPUT`,
+    );
   }
   requireStringArray(frame['touchedEntities'], `${code}_TOUCHED_ENTITIES`);
   validateTouchedAccounts(frame['touchedAccounts'], `${code}_TOUCHED_ACCOUNTS`);
