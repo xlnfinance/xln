@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { validateEntityTx } from '../storage/wal/runtime-machine-schema/entity-tx';
+import { validateEntityTx } from '../entity/tx-validation';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;

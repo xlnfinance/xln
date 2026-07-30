@@ -3,7 +3,7 @@ import { validateRuntimeInputEnvelope } from '../../../protocol/boundary-validat
 import { cloneIsolatedRuntimeSnapshot } from '../../../runtime/input-clone';
 import { decodeRoutedEntityInput } from '../../../runtime/routing-validation';
 import { validateBrowserVmState } from './browser';
-import { validateEntityTxs } from './entity-tx';
+import { validateEntityTxs } from '../../../entity/tx-validation';
 import { validateJInputs, validateJReplicas } from './j';
 import { validateRuntimeTx } from './runtime-tx';
 import { validateDurableRuntimeState, validateReliableReceipt } from './runtime-state';
@@ -18,7 +18,7 @@ import {
   requireString,
   requireStringArray,
   validateStorageSafeValue,
-} from './primitives';
+} from '../../../protocol/boundary-primitives';
 
 const validateStorageConfig = (value: unknown, code: string): void => {
   const storage = requireBoundaryRecord(value, code);

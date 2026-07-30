@@ -8,7 +8,7 @@ import {
   requireFiniteNumber,
   requireString,
   requireStringArray,
-} from './primitives';
+} from '../../../protocol/boundary-primitives';
 
 const validateJurisdictionConfig = (value: unknown, code: string): void => {
   const jurisdiction = requireBoundaryRecord(value, code);

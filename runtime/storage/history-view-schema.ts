@@ -1,7 +1,7 @@
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
 import { decodeAccountFrame } from '../account/frame-validation';
-import { validateEntityTxs } from './wal/runtime-machine-schema/entity-tx';
+import { validateEntityTxs } from '../entity/tx-validation';
 import { validateJInputs } from './wal/runtime-machine-schema/j';
 import {
   requireBoundaryInteger,

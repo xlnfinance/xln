@@ -6,7 +6,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
   requireString,
-} from './primitives';
+} from '../../../protocol/boundary-primitives';
 
 type FieldValidator = (value: unknown, code: string) => unknown;
 

@@ -1,4 +1,4 @@
-import type { EntityTxDataSchema } from './entity-tx-fields';
+import type { EntityTxDataSchema } from './fields';
 
 export const ENTITY_TX_PAYMENT_SCHEMAS = {
   directPayment: {

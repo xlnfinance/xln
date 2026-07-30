@@ -7,6 +7,7 @@ import {
   validateString,
 } from '../../protocol/validation-primitives';
 import type { EntityLeaderTimeoutVote, ProposedEntityFrame } from '../types';
+import { validateEntityTxs } from '../tx-validation';
 import { assertEntityFrameEventByteBudget } from './frame-events';
 import { validateJPrefixCertificate } from './j-prefix-validation';
 
@@ -186,7 +187,7 @@ function assertProposedEntityFrame(
       `${context}.timestamp must be a non-negative safe integer`,
     );
   }
-  validateArray(frame['txs'], `${context}.txs`);
+  validateEntityTxs(frame['txs'], `${context}.txs`);
   validateFrameEvents(frame['events'], `${context}.events`);
   validateString(frame['hash'], `${context}.hash`);
   const leader = validateObject(frame['leader'], `${context}.leader`);

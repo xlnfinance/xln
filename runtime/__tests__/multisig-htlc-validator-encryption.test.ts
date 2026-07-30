@@ -104,7 +104,7 @@ import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../ju
 import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
-import { validateEntityTx } from '../storage/wal/runtime-machine-schema/entity-tx';
+import { validateEntityTx } from '../entity/tx-validation';
 import {
   buildConsensusOutputOrigin,
   hashCertifiedEntityOutput,

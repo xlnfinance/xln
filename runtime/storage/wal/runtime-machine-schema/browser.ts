@@ -4,7 +4,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
   requireString,
-} from './primitives';
+} from '../../../protocol/boundary-primitives';
 
 const validateNumberStringTuple = (value: unknown, code: string): void => {
   for (const [index, entry] of requireArray(value, code).entries()) {

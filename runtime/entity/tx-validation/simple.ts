@@ -1,11 +1,11 @@
-import type { EntityTx } from '../../../types/entity-tx';
+import type { EntityTx } from '../../types/entity-tx';
 import {
   type EntityTxDataSchema,
   validateEntityTxDataFields,
-} from './entity-tx-fields';
-import { ENTITY_TX_CROSS_J_SCHEMAS } from './entity-tx-cross-j-schemas';
-import { ENTITY_TX_OPERATION_SCHEMAS } from './entity-tx-operation-schemas';
-import { ENTITY_TX_PAYMENT_SCHEMAS } from './entity-tx-payment-schemas';
+} from './fields';
+import { ENTITY_TX_CROSS_J_SCHEMAS } from './cross-j-schemas';
+import { ENTITY_TX_OPERATION_SCHEMAS } from './operation-schemas';
+import { ENTITY_TX_PAYMENT_SCHEMAS } from './payment-schemas';
 
 const ENTITY_TX_SIMPLE_SCHEMAS = {
   ...ENTITY_TX_PAYMENT_SCHEMAS,

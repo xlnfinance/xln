@@ -1,4 +1,4 @@
-import type { EntityTxDataSchema } from './entity-tx-fields';
+import type { EntityTxDataSchema } from './fields';
 
 const ROUTE = { required: { route: 'record' } } as const;
 

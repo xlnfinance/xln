@@ -24,7 +24,7 @@ import { computeStorageFrameHash } from '../storage/hashes';
 import type { StorageFrameRecord } from '../storage/types';
 import { createEmptyBatch } from '../jurisdiction/batch';
 import { validateDurableRuntimeMachineSnapshot } from '../storage/wal/runtime-machine-schema';
-import { validateEntityTx } from '../storage/wal/runtime-machine-schema/entity-tx';
+import { validateEntityTx } from '../entity/tx-validation';
 import { buildEntityTransactionProposalAction } from '../entity/authorization';
 import { hashEntityCommandTxs } from '../entity/command-codec';
 import {
@@ -182,7 +182,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       },
     ]];
     expect(() => validateDurableRuntimeMachineSnapshot(corruptJReplica, 'RUNTIME_MACHINE'))
-      .toThrow('RUNTIME_MACHINE_J_REPLICAS_0_CONTRACTS_FIELDS');
+      .toThrow('RUNTIME_MACHINE_J_REPLICAS_0_VALUE_CONTRACTS_FIELDS');
   });
 
   test('rejects malformed RuntimeTx and EntityTx payloads before restore', () => {

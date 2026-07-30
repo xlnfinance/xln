@@ -1,11 +1,11 @@
-import { assertEntityProposalAction } from '../../../entity/authorization';
-import { decodeAccountPeerInput } from '../../../account/input-validation';
-import { normalizeSignedEntityCommand } from '../../../entity/command-codec';
-import { normalizeConsensusOutputBoardAuthority } from '../../../entity/consensus/output-certification';
-import { requireKnownEntityTxType } from '../../../entity/tx/catalog';
-import type { EntityTx } from '../../../types/entity-tx';
-import type { ProposalAction } from '../../../entity/types';
-import { assertExactMultiRecipientCiphertextSchema } from '../../../protocol/htlc/multi-recipient-schema';
+import { decodeAccountPeerInput } from '../../account/input-validation';
+import { assertExactMultiRecipientCiphertextSchema } from '../../protocol/htlc/multi-recipient-schema';
+import type { EntityTx } from '../../types/entity-tx';
+import { assertEntityProposalAction } from '../authorization';
+import { normalizeSignedEntityCommand } from '../command-codec';
+import { normalizeConsensusOutputBoardAuthority } from '../consensus/output-certification';
+import type { ProposalAction } from '../types';
+import { requireKnownEntityTxType } from '../tx/catalog';
 import {
   requireArray,
   requireBigInt,
@@ -14,11 +14,11 @@ import {
   requireExactBoundaryKeys,
   requireString,
   validateStorageSafeValue,
-} from './primitives';
+} from '../../protocol/boundary-primitives';
 import {
   isSimpleEntityTxType,
   validateSimpleEntityTxData,
-} from './entity-tx-simple-schema';
+} from './simple';
 
 const ENTITY_TX_NESTING_LIMIT = 16;
 
