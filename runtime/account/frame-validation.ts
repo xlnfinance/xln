@@ -13,6 +13,35 @@ import {
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
 
+const isBytes32 = (value: string): boolean => /^0x[0-9a-fA-F]{64}$/.test(value);
+
+const decodeFrameHash = (
+  value: unknown,
+  field: 'prevFrameHash' | 'stateHash',
+  height: number,
+  context: string,
+): string => {
+  if (typeof value !== 'string') {
+    throw new FinancialDataCorruptionError(`${context}.${field} must be a string`);
+  }
+  const hash = value;
+  const valid = field === 'stateHash'
+    ? (height === 0 ? hash === '' : isBytes32(hash))
+    : (
+        height === 0
+          ? hash === ''
+          : height === 1
+            ? hash === 'genesis'
+            : isBytes32(hash)
+      );
+  if (!valid) {
+    throw new FinancialDataCorruptionError(
+      `${context}.${field} is invalid for height ${height}`,
+    );
+  }
+  return hash;
+};
+
 /**
  * Decode unknown storage/wire data into the only valid AccountFrame shape.
  * Callers inside Account consensus receive an already checked frame.
@@ -32,12 +61,6 @@ export const decodeAccountFrame = (
     `${context}.fields`,
   );
   const height = requireBoundaryInteger(frame['height'], `${context}.height`);
-  const optionalAtGenesis = (field: 'prevFrameHash' | 'stateHash'): string => {
-    const raw = frame[field];
-    return typeof raw === 'string' && (raw.length > 0 || height === 0)
-      ? raw
-      : validateString(raw, `${context}.${field}`);
-  };
   const accountStateRoot = validateString(
     frame['accountStateRoot'],
     `${context}.accountStateRoot`,
@@ -57,9 +80,19 @@ export const decodeAccountFrame = (
     timestamp: requireBoundaryInteger(frame['timestamp'], `${context}.timestamp`),
     jHeight: requireBoundaryInteger(frame['jHeight'], `${context}.jHeight`),
     accountTxs: decodeAccountTxs(frame['accountTxs'], `${context}.accountTxs`),
-    prevFrameHash: optionalAtGenesis('prevFrameHash'),
+    prevFrameHash: decodeFrameHash(
+      frame['prevFrameHash'],
+      'prevFrameHash',
+      height,
+      context,
+    ),
     accountStateRoot,
-    stateHash: optionalAtGenesis('stateHash'),
+    stateHash: decodeFrameHash(
+      frame['stateHash'],
+      'stateHash',
+      height,
+      context,
+    ),
     deltas: validateArray(frame['deltas'], `${context}.deltas`).map(
       (delta, index) => validateDelta(delta, `${context}.deltas[${index}]`),
     ),
@@ -67,11 +100,6 @@ export const decodeAccountFrame = (
       ? {}
       : { byLeft }),
   };
-  if (decoded.height > 0 && decoded.stateHash.length === 0) {
-    throw new FinancialDataCorruptionError(
-      'AccountFrame.stateHash cannot be empty',
-    );
-  }
   if (decoded.height > 0 && decoded.timestamp <= 0) {
     throw new FinancialDataCorruptionError(
       'AccountFrame.timestamp must be positive',

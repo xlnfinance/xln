@@ -53,7 +53,7 @@ describe('history-view compact values', () => {
         timestamp: 100 + accountHeight,
         jHeight: 7,
         accountTxs: [],
-        prevFrameHash: zeroHash,
+        prevFrameHash: accountHeight === 1 ? 'genesis' : zeroHash,
         accountStateRoot: zeroHash,
         stateHash: zeroHash,
         byLeft: true,

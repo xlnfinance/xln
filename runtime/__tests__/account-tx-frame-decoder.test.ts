@@ -119,4 +119,22 @@ describe('signed Account frame transaction decoder', () => {
     })).toThrow('AccountFrame.byLeft');
   });
 
+  test('requires canonical frame hashes at every committed height', () => {
+    expect(() => decodeAccountFrame({
+      ...genesisFrame([]),
+      height: 1,
+      timestamp: 1,
+      prevFrameHash: 'genesis',
+      stateHash: 'short',
+    })).toThrow('AccountFrame.stateHash is invalid for height 1');
+
+    expect(() => decodeAccountFrame({
+      ...genesisFrame([]),
+      height: 2,
+      timestamp: 1,
+      prevFrameHash: 'genesis',
+      stateHash: hash,
+    })).toThrow('AccountFrame.prevFrameHash is invalid for height 2');
+  });
+
 });

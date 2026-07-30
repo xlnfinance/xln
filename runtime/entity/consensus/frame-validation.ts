@@ -226,22 +226,7 @@ function assertProposedEntityFrame(
       `${context} cannot carry proposer-supplied execution state or outputs`,
     );
   }
-  const hashes = validateArray<unknown>(
-    frame['hashesToSign'],
-    `${context}.hashesToSign`,
-  );
-  if (hashes.length === 0) {
-    throw new FinancialDataCorruptionError(
-      `${context}.hashesToSign cannot be empty`,
-    );
-  }
-  hashes.forEach((value, index) => {
-    const item = `${context}.hashesToSign[${index}]`;
-    const entry = validateObject(value, item);
-    validateString(entry['hash'], `${item}.hash`);
-    validateString(entry['type'], `${item}.type`);
-    validateString(entry['context'], `${item}.context`);
-  });
+  validateHashManifest(frame['hashesToSign'], context);
   if (frame['collectedSigs'] !== undefined) {
     const signatures = validateMapInstance(
       frame['collectedSigs'],
@@ -260,6 +245,22 @@ function assertProposedEntityFrame(
     validateArray(frame['hankos'], `${context}.hankos`);
   }
 }
+
+const validateHashManifest = (value: unknown, context: string): void => {
+  const hashes = validateArray<unknown>(value, `${context}.hashesToSign`);
+  if (hashes.length === 0) {
+    throw new FinancialDataCorruptionError(
+      `${context}.hashesToSign cannot be empty`,
+    );
+  }
+  hashes.forEach((rawEntry, index) => {
+    const item = `${context}.hashesToSign[${index}]`;
+    const entry = validateObject(rawEntry, item);
+    validateString(entry['hash'], `${item}.hash`);
+    validateString(entry['type'], `${item}.type`);
+    validateString(entry['context'], `${item}.context`);
+  });
+};
 
 export const validateProposedEntityFrame = (
   value: unknown,
