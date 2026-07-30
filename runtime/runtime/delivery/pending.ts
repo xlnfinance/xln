@@ -1,7 +1,7 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import type {
   DeliverableEntityInput,
-  RuntimeState,
+  RuntimeReplica,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
@@ -49,12 +49,12 @@ const NETWORK_RETRY_MAX_MS = 30_000;
 const RELIABLE_NETWORK_RETRY_MAX_MS = 4_000;
 const RESTORED_RELIABLE_OUTPUTS_DUE = Symbol('restored-reliable-outputs-due');
 
-type RestoredReliableDueEnv = RuntimeState & { [RESTORED_RELIABLE_OUTPUTS_DUE]?: true };
+type RestoredReliableDueEnv = RuntimeReplica & { [RESTORED_RELIABLE_OUTPUTS_DUE]?: true };
 
-const hasRestoredReliableOutputsDue = (env: RuntimeState): boolean =>
+const hasRestoredReliableOutputsDue = (env: RuntimeReplica): boolean =>
   (env as RestoredReliableDueEnv)[RESTORED_RELIABLE_OUTPUTS_DUE] === true;
 
-const clearRestoredReliableOutputsDue = (env: RuntimeState): void => {
+const clearRestoredReliableOutputsDue = (env: RuntimeReplica): void => {
   delete (env as RestoredReliableDueEnv)[RESTORED_RELIABLE_OUTPUTS_DUE];
 };
 
@@ -364,27 +364,27 @@ export type RuntimeEntityInputRoutingResult = {
 };
 
 export type RuntimeOutputRoutingDeps = {
-  ensureRuntimeState(env: RuntimeState): NonNullable<RuntimeState['runtimeState']>;
-  getP2P(env: RuntimeState): RuntimeP2PDispatch | null;
+  ensureRuntimeState(env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeState']>;
+  getP2P(env: RuntimeReplica): RuntimeP2PDispatch | null;
   enqueueRuntimeInputs(
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityInputs: RoutedEntityInput[],
     runtimeTxs?: never,
     jInputs?: never,
     ingressTimestamp?: number,
   ): void;
   extractEntityId(replicaKey: string): string;
-  hasLocalSignerForEntity(env: RuntimeState, entityId: string): boolean;
-  hasLocalSignerForEntitySigner(env: RuntimeState, entityId: string, signerId: string): boolean;
-  resolveSoleLocalSignerForEntity(env: RuntimeState, entityId: string): string | null;
-  resolveRuntimeIdForEntity(env: RuntimeState, entityId: string): string | null;
-  resolveRuntimeIdForCrossJurisdictionEntity(env: RuntimeState, entityId: string): string | null;
+  hasLocalSignerForEntity(env: RuntimeReplica, entityId: string): boolean;
+  hasLocalSignerForEntitySigner(env: RuntimeReplica, entityId: string, signerId: string): boolean;
+  resolveSoleLocalSignerForEntity(env: RuntimeReplica, entityId: string): string | null;
+  resolveRuntimeIdForEntity(env: RuntimeReplica, entityId: string): string | null;
+  resolveRuntimeIdForCrossJurisdictionEntity(env: RuntimeReplica, entityId: string): string | null;
 };
 
 const getDeferredNetworkMeta = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeOutputRoutingDeps,
-): NonNullable<NonNullable<RuntimeState['runtimeState']>['deferredNetworkMeta']> => {
+): NonNullable<NonNullable<RuntimeReplica['runtimeState']>['deferredNetworkMeta']> => {
   const state = deps.ensureRuntimeState(env);
   if (!state.deferredNetworkMeta) {
     state.deferredNetworkMeta = new Map();
@@ -393,7 +393,7 @@ const getDeferredNetworkMeta = (
 };
 
 export const reportRetryableRouteDefer = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeOutputRoutingDeps,
   output: RoutedEntityInput,
   details: Record<string, unknown>,
@@ -415,12 +415,12 @@ export const reportRetryableRouteDefer = (
   env.info?.('network', 'ROUTE_SEND_DEFERRED', payload);
 };
 
-const getRuntimeNowMs = (env: RuntimeState): number => env.timestamp ?? 0;
+const getRuntimeNowMs = (env: RuntimeReplica): number => env.timestamp ?? 0;
 
 // Retry metadata must stay in one clock domain. Deterministic scenarios own
 // logical time explicitly; production transport retries are wall-clock I/O.
 // Mixing Unix time into a scenario retry makes the envelope unreachable forever.
-const getNetworkRetryNowMs = (env: RuntimeState): number =>
+const getNetworkRetryNowMs = (env: RuntimeReplica): number =>
   env.scenarioMode ? getRuntimeNowMs(env) : getWallClockMs();
 
 export const toDeliverableEntityInput = (
@@ -489,7 +489,7 @@ const readBoardValidatorSignerId = (validator: unknown): string => {
   return String(raw.signerId || raw.signer || '').trim();
 };
 
-export const resolveGossipBoardSignerIds = (env: RuntimeState, entityId: string): string[] => {
+export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: string): string[] => {
   const targetEntityId = String(entityId || '')
     .trim()
     .toLowerCase();
@@ -506,7 +506,7 @@ export const resolveGossipBoardSignerIds = (env: RuntimeState, entityId: string)
 };
 
 export const splitPendingOutputsByRetryWindow = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   pending: RoutedEntityInput[],
   deps: RuntimeOutputRoutingDeps,
 ): { ready: RoutedEntityInput[]; waiting: RoutedEntityInput[] } => {
@@ -583,7 +583,7 @@ export const splitPendingOutputsByRetryWindow = (
   return { ready, waiting };
 };
 
-export const getNextNetworkRetryTimestamp = (env: RuntimeState, deps: RuntimeOutputRoutingDeps): number | null => {
+export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeOutputRoutingDeps): number | null => {
   const pending = env.pendingNetworkOutputs ?? [];
   if (pending.length === 0) return null;
   const meta = getDeferredNetworkMeta(env, deps);
@@ -628,7 +628,7 @@ export const getNextNetworkRetryTimestamp = (env: RuntimeState, deps: RuntimeOut
 };
 
 export const hasReadyPendingNetworkOutputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeOutputRoutingDeps,
   now = getNetworkRetryNowMs(env),
 ): boolean => {
@@ -782,11 +782,11 @@ export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): Routed
  * counter for diagnostics; only reset the operational deadline. A subsequent
  * failed attempt records a fresh bounded backoff in the new process.
  */
-export const markRestoredReliableOutputsDue = (env: RuntimeState): void => {
+export const markRestoredReliableOutputsDue = (env: RuntimeReplica): void => {
   if (!(env.pendingNetworkOutputs ?? []).some(output => getReliableOutputIdentity(output) !== null)) return;
   Object.defineProperty(env, RESTORED_RELIABLE_OUTPUTS_DUE, {
     configurable: true,
-    // Runtime frames execute on a shallow-cloned RuntimeState. Keep this Symbol
+    // Runtime frames execute on a shallow-cloned RuntimeReplica. Keep this Symbol
     // enumerable so object spread carries the volatile wake marker into that
     // transaction; string-keyed storage/canonical codecs still exclude it.
     enumerable: true,
@@ -802,7 +802,7 @@ export const markRestoredReliableOutputsDue = (env: RuntimeState): void => {
  * is never collected by a higher/different receipt.
  */
 export const pruneReceiptedReliableOutputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   outputs: RoutedEntityInput[],
   appliedReceipts: readonly ReliableDeliveryReceipt[] = [],
 ): RoutedEntityInput[] => {
@@ -870,7 +870,7 @@ export const pruneReceiptedReliableOutputs = (
 };
 
 export const rescheduleDeferredOutputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   attemptedPending: RoutedEntityInput[],
   failed: RoutedEntityInput[],
   waiting: RoutedEntityInput[],
@@ -927,7 +927,7 @@ export const rescheduleDeferredOutputs = (
 };
 
 export const markPendingCrossJAdmissionOutputsReady = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeOutputRoutingDeps,
   targetRuntimeId?: string,
 ): number => {

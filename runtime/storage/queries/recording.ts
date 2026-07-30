@@ -12,7 +12,7 @@ import type {
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
 } from '../../recovery/types';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import type { PersistenceQueryDeps } from './deps';
 import type { createPersistenceEntityQueries } from './entity';
 import type { createPersistenceHistoryQueries } from './history';
@@ -24,7 +24,7 @@ export type DetachedRuntimeRecordingAdapter = {
   readonly runtimeId: string;
   readonly baseHeight: number;
   readonly targetHeight: number;
-  readAtHeight(height: number): Promise<RuntimeState>;
+  readAtHeight(height: number): Promise<RuntimeReplica>;
   close(): Promise<void>;
 };
 
@@ -36,7 +36,7 @@ export const createPersistenceRecordingQueries = (
   historyQueries: HistoryQueries,
 ) => {
   const readPersistedCheckpointSnapshot = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     height: number,
   ): Promise<Record<string, unknown> | null> => {
     const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
@@ -61,7 +61,7 @@ export const createPersistenceRecordingQueries = (
   };
 
   const buildPersistedRuntimeRecording = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     options: {
       signers: RuntimeRecoverySignerV1[];
       meta?: RuntimeRecoveryMetaV1;
@@ -141,12 +141,12 @@ export const createPersistenceRecordingQueries = (
   ): DetachedRuntimeRecordingAdapter => {
     const validated = validateRuntimeRecording(recording);
     let closed = false;
-    let activeProjection: RuntimeState | null = null;
+    let activeProjection: RuntimeReplica | null = null;
     return {
       runtimeId: validated.runtimeId,
       baseHeight: validated.baseHeight,
       targetHeight: validated.targetHeight,
-      async readAtHeight(height: number): Promise<RuntimeState> {
+      async readAtHeight(height: number): Promise<RuntimeReplica> {
         if (closed) throw new Error('RUNTIME_RECORDING_ADAPTER_CLOSED');
         if (!Number.isSafeInteger(height) || height < validated.baseHeight || height > validated.targetHeight) {
           throw new Error(

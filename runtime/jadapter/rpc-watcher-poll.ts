@@ -3,7 +3,7 @@ import {
   getEntityCertifiedJAnchor,
   getValidatorJExpectedBlockHash,
 } from '../jurisdiction/local-history';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   findWatcherJurisdictionReplica,
   getMinimumCommittedSignerJHeight,
@@ -39,7 +39,7 @@ type PollRequest = {
   emitDebug(payload: Record<string, unknown>): void;
 };
 
-const isIngressPaused = (env: RuntimeState): boolean =>
+const isIngressPaused = (env: RuntimeReplica): boolean =>
   !!env.runtimeState?.persistenceQuiescing && !env.scenarioMode;
 
 const pauseForQuiesce = (
@@ -180,7 +180,7 @@ const auditCanonicalStateWhenDue = async (
 };
 
 const resolveExpectedParent = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   watcherReplica: NonNullable<ReturnType<typeof findWatcherJurisdictionReplica>>,
   parentHeight: number,
 ): { hash?: string; finalized: boolean } => {

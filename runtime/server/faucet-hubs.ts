@@ -1,7 +1,7 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { Profile } from '../entity/profile';
 
-export const getFaucetHubProfiles = (env: RuntimeState, activeHubEntityIds: string[]): Profile[] => {
+export const getFaucetHubProfiles = (env: RuntimeReplica, activeHubEntityIds: string[]): Profile[] => {
   const activeSet = new Set(activeHubEntityIds.map(id => id.toLowerCase()));
   const selected: Profile[] = [];
   for (const profile of env.gossip?.getProfiles?.() || []) {

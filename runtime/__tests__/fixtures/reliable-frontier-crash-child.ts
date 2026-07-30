@@ -24,7 +24,7 @@ import {
 import { buildEntityHashesToSign } from '../../entity/consensus/hanko-witness';
 import type {
   DeliverableEntityInput,
-  RuntimeState,
+  RuntimeReplica,
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
 } from '../../runtime/types';
@@ -100,7 +100,7 @@ const identity = (
 });
 
 const receipt = (
-  signerEnv: RuntimeState,
+  signerEnv: RuntimeReplica,
   receiverRuntimeId: string,
   value: ReliableDeliveryIdentity,
   coverage: ReliableDeliveryReceipt['body']['coverage'],

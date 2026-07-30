@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { summarizeLendingState } from '../extensions/lending';
 import { safeStringify } from '../protocol/serialization';
 import { isEntityId32 } from './utils';
@@ -20,7 +20,7 @@ const bigintFieldsToStrings = <T>(value: T): unknown => {
 
 export const handleLendingStateRequest = async (input: {
   req: Request;
-  env: RuntimeState | null;
+  env: RuntimeReplica | null;
   headers: HeadersInit;
   activeHubEntityIds: string[];
 }): Promise<Response> => {

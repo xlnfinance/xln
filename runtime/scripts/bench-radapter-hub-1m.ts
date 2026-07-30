@@ -56,7 +56,7 @@ import type {
 } from '../storage/types';
 import type { AccountReplica } from '../types/account';
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 
 type Cli = {
   accounts: number;
@@ -322,7 +322,7 @@ const seedBooks = (state: EntityState, count: number): void => {
   });
 };
 
-const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeState => {
+const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeReplica => {
   const runtimeId = deriveRuntimeIdFromSeed(seed);
   if (!runtimeId) throw new Error('BENCH_RUNTIME_ID_DERIVATION_FAILED');
   const env = {
@@ -342,7 +342,7 @@ const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeSta
       } as EntityReplica],
     ]),
     runtimeState: {},
-  } as RuntimeState;
+  } as RuntimeReplica;
   // This benchmark owns its command consumer below; the synthetic Runtime is
   // fully booted once that consumer exists. Keep the production readiness
   // fence intact instead of teaching the adapter to accept commands in booting.
@@ -586,7 +586,7 @@ const seedHub = async (
 const touchAccounts = async (
   cli: Cli,
   db: RuntimeDbLike,
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityHashDocsRef: { current: Map<string, StorageEntityHashDoc> },
   entityId: string,
   startIndex: number,
@@ -620,7 +620,7 @@ const touchAccounts = async (
 const insertNewAccountsAfterRead = async (
   cli: Cli,
   db: RuntimeDbLike,
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityHashDocsRef: { current: Map<string, StorageEntityHashDoc> },
   entityId: string,
   startIndex: number,
@@ -673,7 +673,7 @@ const runSnapshotRotationProbe = async (
   trace: Trace,
   db: RuntimeDbLike,
   dbPath: string,
-  env: RuntimeState,
+  env: RuntimeReplica,
 ): Promise<RotationProbeResult | null> => {
   if (!cli.rotationProbe) return null;
   const historyPath = `${dbPath}-rotation-frames`;
@@ -848,7 +848,7 @@ async function main() {
 
     const readHead = async (): Promise<StorageHead | null> => readStorageHead(db);
     const loadEntityViewPage = async (
-      targetEnv: RuntimeState,
+      targetEnv: RuntimeReplica,
       targetEntityId: string,
       height: number,
       query?: RuntimeAdapterReadQuery,

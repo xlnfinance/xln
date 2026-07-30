@@ -1,4 +1,4 @@
-import type { RuntimeState, RoutedEntityInput } from './types';
+import type { RuntimeReplica, RoutedEntityInput } from './types';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { buildRouteOutputKey } from './output-routing';
 
@@ -60,7 +60,7 @@ export const validateDurableOutputRetryState = (
 };
 
 export const buildDurableOutputRetryState = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   outputs: readonly RoutedEntityInput[],
 ): DurableOutputRetryState[] => outputs.flatMap(output => {
   const liveRouteKey = buildRouteOutputKey(output);
@@ -74,7 +74,7 @@ export const buildDurableOutputRetryState = (
 }).sort((left, right) => left.outputHash.localeCompare(right.outputHash));
 
 export const restoreDurableOutputRetryState = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entries: readonly DurableOutputRetryState[],
   outputs: readonly RoutedEntityInput[],
 ): void => {

@@ -1,6 +1,6 @@
 import { readPersistedRuntimeActivityPage } from '../runtime';
 import { safeStringify } from '../protocol/serialization';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 const parseCsv = (value: string | null): string[] =>
   String(value || '')
@@ -15,7 +15,7 @@ const parseOptionalNumber = (value: string | null): number | undefined => {
 };
 
 export const handleRuntimeActivityRequest = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   url: URL,
   headers: HeadersInit,
 ): Promise<Response> => {

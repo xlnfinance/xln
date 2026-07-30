@@ -5,7 +5,7 @@ import { RuntimeWsClient } from '../networking/ws-client';
 import { deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
 import { stopRuntimeP2P, stopRuntimeP2PAndWait } from '../runtime/p2p-lifecycle';
 import { createEmptyEnv } from '../runtime';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 const RUNTIME_ID = `0x${'11'.repeat(20)}`;
 
@@ -438,7 +438,7 @@ test('runtime lifecycle clears attachment only through drained shutdown', async 
       },
       lastP2PConfig: { runtimeId: RUNTIME_ID },
     },
-  } as unknown as RuntimeState;
+  } as unknown as RuntimeReplica;
 
   await stopRuntimeP2PAndWait(env, {
     ensureRuntimeState: (target) => target.runtimeState!,
@@ -465,9 +465,9 @@ test('synchronous stop retains transport ownership for a later awaited drain', a
       p2p,
       lastP2PConfig: { runtimeId: RUNTIME_ID },
     },
-  } as unknown as RuntimeState;
+  } as unknown as RuntimeReplica;
   const deps = {
-    ensureRuntimeState: (target: RuntimeState) => target.runtimeState!,
+    ensureRuntimeState: (target: RuntimeReplica) => target.runtimeState!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' as const }),
     handleInboundReliableReceipt: () => {},
@@ -508,7 +508,7 @@ test('synchronous runtime stop preserves actual P2P clients until awaited drain'
     lastP2PConfig: { runtimeId: RUNTIME_ID },
   };
   const deps = {
-    ensureRuntimeState: (target: RuntimeState) => target.runtimeState!,
+    ensureRuntimeState: (target: RuntimeReplica) => target.runtimeState!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' as const }),
     handleInboundReliableReceipt: () => {},
@@ -539,7 +539,7 @@ test('runtime lifecycle retains the quiesced handle when drain fails', async () 
       p2p,
       lastP2PConfig: { runtimeId: RUNTIME_ID },
     },
-  } as unknown as RuntimeState;
+  } as unknown as RuntimeReplica;
 
   await expect(stopRuntimeP2PAndWait(env, {
     ensureRuntimeState: (target) => target.runtimeState!,

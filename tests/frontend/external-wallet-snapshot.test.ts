@@ -88,7 +88,7 @@ describe('external wallet snapshot helpers', () => {
     );
   });
 
-  test('remote projection sessions read external wallet snapshots through API without live RuntimeState', () => {
+  test('remote projection sessions read external wallet snapshots through API without live RuntimeReplica', () => {
     const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
     const fetchStart = source.indexOf('async function fetchExternalTokens');
     const fetchEnd = source.indexOf('const allowanceReads = moveAllowanceRouteEnabled', fetchStart);

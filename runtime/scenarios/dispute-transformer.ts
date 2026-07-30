@@ -8,7 +8,7 @@ import { ethers } from 'ethers';
 
 import type { AccountFrame, AccountInput, AccountReplica } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JAdapter } from '../jadapter/types';
 import { deriveDisputeTokenFinalization } from '../protocol/dispute/finalization';
 import { generateLockId, hashHtlcSecret } from '../protocol/htlc/utils';
@@ -61,7 +61,7 @@ const findAccountAck = (txs: readonly EntityTx[] | undefined): AccountAckInput |
   return undefined;
 };
 
-const captureQueuedAck = (env: RuntimeState, toEntityId: string): AccountAckInput | undefined => {
+const captureQueuedAck = (env: RuntimeReplica, toEntityId: string): AccountAckInput | undefined => {
   const queues = [
     env.pendingOutputs ?? [],
     env.networkInbox ?? [],
@@ -86,7 +86,7 @@ const requirePendingResolution = (account: AccountReplica | undefined, side: str
   return frame;
 };
 
-const dropPartitionedOutputs = (env: RuntimeState, entityIds: ReadonlySet<string>): void => {
+const dropPartitionedOutputs = (env: RuntimeReplica, entityIds: ReadonlySet<string>): void => {
   env.pendingOutputs = (env.pendingOutputs ?? []).filter((output) => !entityIds.has(output.entityId));
   env.networkInbox = (env.networkInbox ?? []).filter((output) => !entityIds.has(output.entityId));
   env.pendingNetworkOutputs = (env.pendingNetworkOutputs ?? []).filter(
@@ -98,7 +98,7 @@ const dropPartitionedOutputs = (env: RuntimeState, entityIds: ReadonlySet<string
   });
 };
 
-const countOrderbookRows = (env: RuntimeState, offerIds: ReadonlySet<string>): number => {
+const countOrderbookRows = (env: RuntimeReplica, offerIds: ReadonlySet<string>): number => {
   let rows = 0;
   for (const replica of env.eReplicas.values()) {
     for (const orderId of replica.state.orderbookExt?.orderPairs?.keys() ?? []) {
@@ -156,7 +156,7 @@ const combinedPendingOffdelta = (
 const readDebtOutstanding = async (jadapter: JAdapter, entityId: string, tokenId: number): Promise<bigint> =>
   BigInt(await jadapter.depository.debtOutstanding(entityId, tokenId));
 
-export async function runDisputeTransformer(_existingEnv?: RuntimeState): Promise<RuntimeState> {
+export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
   const process = await getProcess();
   const { env, jadapter, jurisdiction } = await bootScenario({
     name: 'dispute-transformer',

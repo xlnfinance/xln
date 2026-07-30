@@ -12,7 +12,7 @@ import type { createRuntimeRecoveryApi } from '../../recovery/restore';
 import type { createRuntimeStorageApi } from '../../storage/runtime-storage';
 import { notifyRuntimeSyncAfterCommit } from '../../storage/runtime-storage';
 import type { EntityInput } from '../../entity/types';
-import type { RuntimeInput, RuntimeState } from '../types';
+import type { RuntimeInput, RuntimeReplica } from '../types';
 import { getWallClockMs } from '../../infra/time';
 import { clearPendingAuditEvents, flushPendingAuditEvents } from '../env-events';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './writer-lock';
@@ -70,23 +70,23 @@ export type RuntimeProcessDeps = {
   loop: RuntimeLoopProcessDeps;
   recovery: RuntimeRecoveryProcessDeps;
   storage: RuntimeStorageProcessDeps;
-  attachEventEmitters(env: RuntimeState): void;
+  attachEventEmitters(env: RuntimeReplica): void;
   applyRuntimeInput: RuntimeInputReducer;
-  setApplyAllowed(env: RuntimeState, allowed: boolean): void;
+  setApplyAllowed(env: RuntimeReplica, allowed: boolean): void;
   getRuntimeOutputRoutingDeps(): ReturnType<
     ReturnType<typeof createRuntimeLoopApi>['getRuntimeOutputRoutingDeps']
   >;
-  notifyEnvChange(env: RuntimeState): void;
-  notifyRuntimeFrameCommitted(env: RuntimeState, input: RuntimeInput): void;
+  notifyEnvChange(env: RuntimeReplica): void;
+  notifyRuntimeFrameCommitted(env: RuntimeReplica, input: RuntimeInput): void;
 };
 
-type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
 type RuntimeIngressDecision =
   | { ready: true }
   | { ready: false; outcome: 'no-work' | 'not-ready' };
 
 const collectRuntimeIngress = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: EntityInput[] | undefined,
   state: RuntimeLifecycleState,
   runtimeDelay: number,
@@ -140,7 +140,7 @@ const collectRuntimeIngress = async (
 
 type RuntimeFrameCandidate = {
   transaction: ReturnType<typeof createRuntimeFrameTransaction>;
-  env: RuntimeState;
+  env: RuntimeReplica;
   state: RuntimeLifecycleState;
   mempool: RuntimeInput;
   runtimeInput: RuntimeInput;
@@ -150,7 +150,7 @@ type RuntimeFrameCandidate = {
 };
 
 const buildRuntimeFrameInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   mempool: RuntimeInput,
   deps: RuntimeProcessDeps,
 ): RuntimeInput => {
@@ -179,7 +179,7 @@ const buildRuntimeFrameInput = (
 };
 
 const resolveRuntimeFrameTimestamp = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   mempoolQueuedAt: number | undefined,
 ): number => {
   if (env.scenarioMode) {
@@ -204,7 +204,7 @@ const resolveRuntimeFrameTimestamp = (
 };
 
 const openRuntimeFrameCandidate = (
-  liveEnv: RuntimeState,
+  liveEnv: RuntimeReplica,
   liveState: RuntimeLifecycleState,
   frame: FrameExecutionState,
   profile: RuntimeProcessProfile,
@@ -263,13 +263,13 @@ const beginRuntimeFrameMutation = (
 };
 
 type RuntimeFrameCommitResult = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   state: RuntimeLifecycleState;
   staleWriterStopped: boolean;
 };
 
 const haltStaleRuntimeWriter = async (
-  liveEnv: RuntimeState,
+  liveEnv: RuntimeReplica,
   frame: FrameExecutionState,
   frameHeightBeforeTick: number,
   profile: RuntimeProcessProfile,
@@ -296,7 +296,7 @@ const haltStaleRuntimeWriter = async (
 };
 
 const publishCommittedRuntimeFrame = (
-  candidateEnv: RuntimeState,
+  candidateEnv: RuntimeReplica,
   frame: FrameExecutionState,
   appliedInput: RuntimeInput | undefined,
   quietLogs: boolean,
@@ -330,8 +330,8 @@ const publishCommittedRuntimeFrame = (
 };
 
 const commitRuntimeFrame = async (
-  candidateEnv: RuntimeState,
-  liveEnv: RuntimeState,
+  candidateEnv: RuntimeReplica,
+  liveEnv: RuntimeReplica,
   frame: FrameExecutionState,
   profile: RuntimeProcessProfile,
   options: {
@@ -390,7 +390,7 @@ const commitRuntimeFrame = async (
 };
 
 const applyRuntimeFrameCandidate = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: RuntimeLifecycleState,
   candidate: RuntimeFrameCandidate,
   frame: FrameExecutionState,
@@ -428,13 +428,13 @@ const applyRuntimeFrameCandidate = async (
 };
 
 const applyAndCommitRuntimeFrame = async (
-  liveEnv: RuntimeState,
+  liveEnv: RuntimeReplica,
   processState: RuntimeLifecycleState,
   frame: FrameExecutionState,
   profile: RuntimeProcessProfile,
   started: { frameHeightBeforeTick: number; frameTimestampBeforeTick: number },
   deps: RuntimeProcessDeps,
-): Promise<{ env: RuntimeState; staleWriterStopped: boolean }> => {
+): Promise<{ env: RuntimeReplica; staleWriterStopped: boolean }> => {
   const candidate = openRuntimeFrameCandidate(
     liveEnv,
     processState,
@@ -517,10 +517,10 @@ const applyAndCommitRuntimeFrame = async (
 };
 
 export const createRuntimeProcessor = (deps: RuntimeProcessDeps) => async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs?: EntityInput[],
   runtimeDelay = 0,
-): Promise<RuntimeState> => {
+): Promise<RuntimeReplica> => {
   const liveEnv = env;
   deps.loop.ensureRuntimeConfig(env);
   const processState = ensureRuntimeState(env);

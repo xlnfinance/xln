@@ -8,7 +8,7 @@ export type ScopedEventSink = {
  * Emit operational frame logs without retaining them in consensus State.
  *
  * This helper accepts only the logging port it needs. Entity code must not
- * import or mutate a RuntimeState merely to produce diagnostics.
+ * import or mutate a RuntimeReplica merely to produce diagnostics.
  */
 export const emitScopedEvents = (
   sink: ScopedEventSink,

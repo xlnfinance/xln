@@ -1,12 +1,12 @@
 import type { AccountReplica } from '../types/account';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import { resolveHankoDefaultProposerSignerId } from '../hanko/signing';
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();
 
 /** Resolve an established Account lane from the counterparty's certified frame Hanko. */
 export const resolveCertifiedAccountCounterpartyProposer = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   account: AccountReplica,
   counterpartyEntityId: string,
 ): Promise<string | null> => {

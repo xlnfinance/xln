@@ -1,7 +1,7 @@
 import { materializePendingJurisdictionImportResults } from '../jurisdiction-import';
 import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../j-submit';
 import { ensureRuntimeState } from '../runtime-state';
-import type { RuntimeState, RuntimeInput, RuntimeTx } from '../types';
+import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/input';
 import { getWallClockMs } from '../../infra/time';
 import {
@@ -17,8 +17,8 @@ import type { RuntimeOutputRoutingDeps } from '../output-routing';
 
 export type CommittedRuntimeEffectDeps = {
   enqueueRuntimeInputs: RuntimeJOutboxQueue;
-  reconcileRuntimeInfraEffects(env: RuntimeState, runtimeTxs: readonly RuntimeTx[]): Promise<void>;
-  notifyEnvChange(env: RuntimeState): void;
+  reconcileRuntimeInfraEffects(env: RuntimeReplica, runtimeTxs: readonly RuntimeTx[]): Promise<void>;
+  notifyEnvChange(env: RuntimeReplica): void;
 };
 
 export type CommittedRuntimeEffects = {
@@ -36,7 +36,7 @@ const countRuntimeInfraEffects = (input: RuntimeInput | undefined): number =>
   ).length;
 
 export const runCommittedRuntimeEffects = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   frame: FrameExecutionState,
   effects: CommittedRuntimeEffects,
   profile: RuntimeProcessProfile,

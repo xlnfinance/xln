@@ -44,7 +44,7 @@ import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
 import { requiresLocalNodeOperator } from '../server/node-http-access';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { ReliableDeliveryReceipt, RuntimeState } from '../runtime/types';
+import type { ReliableDeliveryReceipt, RuntimeReplica } from '../runtime/types';
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
@@ -166,7 +166,7 @@ type DirectEntityInputDebug = {
 type MarketMakerQuoteMode = 'bootstrap' | 'steady';
 
 type BootstrapStallCapsuleArgs = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   phase: string;
   idleMs: number;
   lastProgressReason: string;
@@ -289,7 +289,7 @@ const summarizeReceiptLedger = (ledger: Map<string, ReliableDeliveryReceipt> | u
     .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right)));
 
 const buildNodeBootstrapCausalCheckpoint = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   contexts: readonly MarketMakerEntityContext[],
 ): Record<string, unknown> => {
   const state = env.runtimeState;
@@ -350,7 +350,7 @@ const buildNodeBootstrapCausalCheckpoint = (
 };
 
 const emitNodeBootstrapDebugEvent = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   startupPhase: string,
   activeEntityId: string | null,
   event: string,
@@ -373,7 +373,7 @@ type MarketMakerHealthSnapshot = {
 };
 
 const computeMarketMakerHealthSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   contexts: readonly MarketMakerEntityContext[],
   activeEntityId: string | null,
   tokenIdsByContext: ReadonlyMap<string, number[]>,
@@ -422,7 +422,7 @@ const summarizeRuntimeInputs = (
   }));
 
 const buildMarketMakerAccountStatusDebug = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   counterpartyEntityId: string,
   tokenIds: number[],
@@ -476,7 +476,7 @@ const buildMarketMakerAccountStatusDebug = (
 };
 
 type MarketMakerInfoProjection = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   contexts: readonly MarketMakerEntityContext[];
   tokenIdsByContext: ReadonlyMap<string, number[]>;
   currentHealth: MarketMakerHealth | null;
@@ -534,7 +534,7 @@ const buildMarketMakerInfoResponseJson = (input: MarketMakerInfoProjection, incl
   });
 
 type MarketMakerHealthProjection = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   contexts: readonly MarketMakerEntityContext[];
   cachedHealth: MarketMakerHealth | null;
   visibleHubs: readonly HubProfile[];
@@ -635,7 +635,7 @@ const buildMarketMakerHealthResponseJson = (input: MarketMakerHealthProjection):
 };
 
 type MarketMakerHealthControllerDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   contexts: () => readonly MarketMakerEntityContext[];
   tokenIdsByContext: () => ReadonlyMap<string, number[]>;
   activeEntityId: () => string | null;
@@ -759,11 +759,11 @@ const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps
 };
 
 type MarketMakerHttpHandlerDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   httpDrain: ReturnType<typeof createHttpDrainTracker>;
   directRuntimeWs: ReturnType<typeof createDirectRuntimeWsRoute>;
   runtimeIngressReceipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
-  currentRuntimeHeight: (env: RuntimeState | null) => number;
+  currentRuntimeHeight: (env: RuntimeReplica | null) => number;
   getActiveEntityId: () => string | null;
   buildAccountStatusDebug: (
     entityId: string,
@@ -888,7 +888,7 @@ const createMarketMakerHttpHandler =
   };
 
 type MarketMakerRuntimeAdapterDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   runtimeIngressReceipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
   runtimeInputStatusUrl: (id: string) => string;
   isMutatingIngressReady: () => boolean;
@@ -933,7 +933,7 @@ const createMarketMakerRuntimeAdapterHandler =
   };
 
 const createMarketMakerWebSocketHandler = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   directRuntimeWs: ReturnType<typeof createDirectRuntimeWsRoute>,
   handleRuntimeAdapterMessage: (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer) => void,
 ) => ({
@@ -961,7 +961,7 @@ const createMarketMakerWebSocketHandler = (
 });
 
 type MarketMakerContextInitialization = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   jurisdiction: ReturnType<typeof resolveJurisdictionConfig>;
   contexts: MarketMakerEntityContext[];
   setStartupPhase: (phase: string) => void;
@@ -1067,7 +1067,7 @@ const buildMarketMakerSameQuoteJobs = (
     );
 
 const hasMarketMakerCrossAccountBacklog = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   contexts: readonly MarketMakerEntityContext[],
   visibleHubs: readonly HubProfile[],
 ): boolean => {
@@ -1085,7 +1085,7 @@ const hasMarketMakerCrossAccountBacklog = (
   return false;
 };
 
-const describeMarketMakerSameQuoteProgress = (env: RuntimeState, job: SameQuoteJob): Record<string, unknown> => {
+const describeMarketMakerSameQuoteProgress = (env: RuntimeReplica, job: SameQuoteJob): Record<string, unknown> => {
   const account = getAccountState(env, job.context.entityId, job.hub.entityId);
   return {
     mmEntityId: job.context.entityId,
@@ -1106,7 +1106,7 @@ const describeMarketMakerSameQuoteProgress = (env: RuntimeState, job: SameQuoteJ
 };
 
 type BootstrapSameQuoteDriverDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   buildJobs: (visibleHubs: HubProfile[]) => SameQuoteJob[];
   emitProgress: (reason: string, jobs: SameQuoteJob[], selectedJob?: SameQuoteJob) => void;
   getCursor: () => number;
@@ -1228,7 +1228,7 @@ const createBootstrapSameQuoteDriver =
   };
 
 const buildMarketMakerCrossQuoteJobs = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   contexts: readonly MarketMakerEntityContext[],
   tokenIdsByContext: ReadonlyMap<string, number[]>,
   mode: MarketMakerQuoteMode,
@@ -1289,7 +1289,7 @@ const selectMarketMakerCrossQuoteJobs = (
 };
 
 type MarketMakerShutdownDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   server: Bun.Server;
   httpDrain: ReturnType<typeof createHttpDrainTracker>;
   stopRuntimeLoops: () => void;
@@ -1341,7 +1341,7 @@ const installMarketMakerShutdownSignals = (shutdown: (code?: number) => Promise<
 };
 
 type BootstrapProgressMonitorDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   primaryContext: MarketMakerEntityContext;
   phase: () => string;
   checkpoint: () => Record<string, unknown>;
@@ -1437,7 +1437,7 @@ const createBootstrapProgressMonitor = (deps: BootstrapProgressMonitorDeps) => {
 };
 
 type WaitForBootstrapOffersDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   isShuttingDown: () => boolean;
   health: ReturnType<typeof createMarketMakerHealthController>;
   progress: ReturnType<typeof createBootstrapProgressMonitor>;
@@ -1522,7 +1522,7 @@ type MarketMakerBootstrapFinalization = {
 };
 
 type MarketMakerBootstrapFinalizerDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   contexts: () => readonly MarketMakerEntityContext[];
   tokenIdsByContext: () => ReadonlyMap<string, number[]>;
   health: ReturnType<typeof createMarketMakerHealthController>;
@@ -1584,7 +1584,7 @@ const createMarketMakerBootstrapFinalizer = (deps: MarketMakerBootstrapFinalizer
     // READY is published only if the completion fence remains true afterwards.
     await yieldMarketMakerApi();
     if (!deps.canCheckCompletion()) return false;
-    // RuntimeState advances only after the canonical commit point has persisted
+    // RuntimeReplica advances only after the canonical commit point has persisted
     // the frame and durable outbox. READY therefore describes committed state;
     // it must never invent a bootstrap-specific snapshot or second commit path.
     const finalizeStartedAt = Date.now();
@@ -1616,7 +1616,7 @@ const createMarketMakerBootstrapFinalizer = (deps: MarketMakerBootstrapFinalizer
 };
 
 type MarketMakerMaintenanceLoopDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   isShuttingDown: () => boolean;
   phase: () => string;
   health: ReturnType<typeof createMarketMakerHealthController>;
@@ -1693,7 +1693,7 @@ const createMarketMakerMaintenanceLoops = (deps: MarketMakerMaintenanceLoopDeps)
 };
 
 type MarketMakerQuoteReadModelDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   contexts: () => readonly MarketMakerEntityContext[];
   tokenIdsByContext: () => ReadonlyMap<string, number[]>;
   health: ReturnType<typeof createMarketMakerHealthController>;
@@ -1782,7 +1782,7 @@ type MarketMakerQuoteEngineState = {
 };
 
 type MarketMakerQuoteEngineDeps = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   contexts: () => readonly MarketMakerEntityContext[];
   tokenIdsByContext: () => ReadonlyMap<string, number[]>;
   health: ReturnType<typeof createMarketMakerHealthController>;
@@ -2005,7 +2005,7 @@ type MarketMakerNodeState = {
 };
 
 type MarketMakerNodeContext = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   state: MarketMakerNodeState;
   ingressReceipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
   health: ReturnType<typeof createMarketMakerHealthController>;
@@ -2014,7 +2014,7 @@ type MarketMakerNodeContext = {
 };
 
 const createMarketMakerNodeContext = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   restoredEntityStateHash: string | null,
 ): MarketMakerNodeContext => {
   const state: MarketMakerNodeState = {

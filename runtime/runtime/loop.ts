@@ -5,7 +5,7 @@ import {
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
 } from './input-validation';
 import { ensureRuntimeState } from './runtime-state';
-import type { RuntimeState, RuntimeInput } from './types';
+import type { RuntimeReplica, RuntimeInput } from './types';
 import { closeRuntimeWalDb, closeHistoryViewDb, closeInfraDb, closeStorageDb } from '../storage/runtime-dbs';
 import {
   ENV_APPLY_ALLOWED_KEY,
@@ -62,7 +62,7 @@ import { waitForPromiseBeforeTimeout } from './loop-drain';
 type RuntimeModule = typeof import('../runtime');
 
 export type RuntimeLoopApiDeps = {
-  notifyEnvChange(env: RuntimeState): void;
+  notifyEnvChange(env: RuntimeReplica): void;
   processRuntime: RuntimeModule['processRuntime'];
   waitForRuntimeProcessingIdle: RuntimeModule['waitForRuntimeProcessingIdle'];
   getRuntimeProcessGlobal(): { exit?: (code: number) => unknown } | null;
@@ -91,9 +91,9 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     runtimeInputHasQueuedWork: deps.runtimeInputHasQueuedWork,
     getOutputRoutingDeps: routing.getRuntimeOutputRoutingDeps,
   };
-  const getRuntimeWorkReason = (env: RuntimeState): string | null =>
+  const getRuntimeWorkReason = (env: RuntimeReplica): string | null =>
     resolveRuntimeWorkReason(env, workDeps);
-  const hasRuntimeWork = (env: RuntimeState): boolean => getRuntimeWorkReason(env) !== null;
+  const hasRuntimeWork = (env: RuntimeReplica): boolean => getRuntimeWorkReason(env) !== null;
   const lifecycle = createRuntimeLifecycleApi({
     processRuntime: deps.processRuntime,
     waitForRuntimeProcessingIdle: deps.waitForRuntimeProcessingIdle,
@@ -103,7 +103,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
       resolveNextWallClockWakeTimestamp(env, workDeps),
   });
 
-  const closeRuntimeDb = async (env: RuntimeState): Promise<void> => {
+  const closeRuntimeDb = async (env: RuntimeReplica): Promise<void> => {
     await lifecycle.stopJurisdictionWatchersAndWait(env);
     const shutdown = await Promise.allSettled([
       lifecycle.stopRuntimeLoopAndWait(env, 10_000).then(stopped => {
@@ -122,7 +122,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
   };
 
-  const closeManagedInfraDb = async (env: RuntimeState): Promise<void> => {
+  const closeManagedInfraDb = async (env: RuntimeReplica): Promise<void> => {
     ensureRuntimeState(env).infraDbClosing = true;
     await drainInfraDbWrites(env);
     await closeInfraDb(env);

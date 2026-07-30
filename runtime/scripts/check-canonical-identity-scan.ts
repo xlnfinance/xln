@@ -7,7 +7,7 @@ import {
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
 } from '../jurisdiction/jurisdiction-runtime';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const readText = (path: string): string => {
@@ -60,7 +60,7 @@ const env = {
       depositoryAddress: address('11'),
     } as JReplica],
   ]),
-} as RuntimeState;
+} as RuntimeReplica;
 
 requireCondition(getJReplicaByJurisdictionRef(env, canonicalRef)?.name === 'Canonical', 'stack ref lookup picked wrong replica');
 requireCondition(getJReplicaByJurisdictionRef(env, 'Canonical') === undefined, 'stack ref lookup accepted display name');

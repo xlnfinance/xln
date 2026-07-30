@@ -21,7 +21,7 @@ import {
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
-import type { BrowserVMState, RuntimeState } from '../runtime/types';
+import type { BrowserVMState, RuntimeReplica } from '../runtime/types';
 import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
@@ -60,7 +60,7 @@ const jurisdictionReplica = (): JReplica => ({
 });
 
 const createCommittedAccountFixture = async (): Promise<{
-  env: RuntimeState;
+  env: RuntimeReplica;
   replica: EntityReplica;
 }> => {
   const env = createEmptyEnv('state-replica-boundary');

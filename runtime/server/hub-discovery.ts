@@ -1,11 +1,11 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { Profile } from '../entity/profile';
 import { getAllGossipProfiles } from '../relay/store';
 import { normalizeRuntimeKey, type RelayStore } from '../relay/store';
 import { compareStableText } from '../protocol/serialization';
 
 export const buildHubDiscoveryPayload = (input: {
-  env: RuntimeState | null;
+  env: RuntimeReplica | null;
   relayStore: RelayStore;
   serverTime?: number;
 }): {

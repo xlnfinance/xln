@@ -1,5 +1,5 @@
 import type { EntityState } from '../../entity/types';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import type { StorageReplicaMeta } from '../types';
 
 const listReplicaValidators = (state: EntityState): string[] => {
@@ -54,7 +54,7 @@ export const resolvePersistedReplicaIdentity = (
  * consensus-relevant state. Recovery must obtain the exact JReplica from the
  * Runtime WAL instead.
  */
-export const assertPersistedJurisdictionsAvailable = (env: RuntimeState): void => {
+export const assertPersistedJurisdictionsAvailable = (env: RuntimeReplica): void => {
   if (env.jReplicas.size > 0) return;
   const configuredEntity = [...env.eReplicas.values()].find(
     replica => replica.state.config?.jurisdiction !== undefined,

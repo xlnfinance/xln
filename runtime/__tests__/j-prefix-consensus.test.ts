@@ -28,7 +28,7 @@ import {
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv, hasRuntimeWork } from '../runtime';
 import type { EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent, ValidatorJHistory } from '../types/jurisdiction-events';
 
@@ -136,14 +136,14 @@ const observedThrough = (height: number, includeDispute: boolean): ValidatorJHis
   });
 };
 
-const installOwnKey = (env: RuntimeState, label: string): string => {
+const installOwnKey = (env: RuntimeReplica, label: string): string => {
   const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
   registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
   return signerId;
 };
 
 const buildOrdinaryProposal = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   proposerSignerId: string,
   timestamp: number,

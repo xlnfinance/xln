@@ -1,6 +1,6 @@
 import type { AccountReplica, Delta } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { deriveDelta, getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { compareStableText } from '../protocol/serialization';
@@ -69,7 +69,7 @@ export const deriveMarketMakerEntityId = (
   jurisdiction: MarketMakerEntityJurisdictionConfig,
 ): string => hashBoard(encodeBoard(buildMarketMakerConsensusConfig(signerId, jurisdiction))).toLowerCase();
 
-export const hasPendingRuntimeWork = (env: RuntimeState): boolean => {
+export const hasPendingRuntimeWork = (env: RuntimeReplica): boolean => {
   if (env.runtimeState?.processingPromise) return true;
   if (env.pendingOutputs?.length) return true;
   if (env.pendingNetworkOutputs?.length) return true;
@@ -97,7 +97,7 @@ export type RuntimeQuiescenceHealth = {
 };
 
 /** Read-only bootstrap evidence; it never participates in consensus state. */
-export const summarizeRuntimeQuiescence = (env: RuntimeState): RuntimeQuiescenceHealth => {
+export const summarizeRuntimeQuiescence = (env: RuntimeReplica): RuntimeQuiescenceHealth => {
   let pendingAccountFrames = 0;
   let accountMempoolTxs = 0;
   for (const replica of env.eReplicas.values()) {
@@ -115,7 +115,7 @@ export const summarizeRuntimeQuiescence = (env: RuntimeState): RuntimeQuiescence
   };
 };
 
-export const settleRuntimeFor = async (env: RuntimeState, rounds = 30): Promise<void> => {
+export const settleRuntimeFor = async (env: RuntimeReplica, rounds = 30): Promise<void> => {
   for (let i = 0; i < rounds; i += 1) {
     if (!hasPendingRuntimeWork(env)) break;
     await sleep(RUNTIME_SETTLE_POLL_MS);
@@ -161,7 +161,7 @@ const accountMatchesCounterparty = (
   return false;
 };
 
-export const hasAccount = (env: RuntimeState, entityId: string, counterpartyId: string): boolean => {
+export const hasAccount = (env: RuntimeReplica, entityId: string, counterpartyId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return false;
   const needle = String(counterpartyId || '').toLowerCase();
@@ -198,7 +198,7 @@ const expandQueuedEntityTxs = (txs: readonly EntityTx[] | undefined): EntityTx[]
 };
 
 export const hasQueuedOpenAccount = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
 ): boolean => {
@@ -209,7 +209,7 @@ export const hasQueuedOpenAccount = (
   );
 };
 
-const queuedEntityTxsFor = (env: RuntimeState, targetEntityId: string): EntityTx[] => {
+const queuedEntityTxsFor = (env: RuntimeReplica, targetEntityId: string): EntityTx[] => {
   const normalizedEntityId = String(targetEntityId || '').toLowerCase();
   const txs: EntityTx[] = [];
   for (const input of env.runtimeMempool.entityInputs) {
@@ -219,7 +219,7 @@ const queuedEntityTxsFor = (env: RuntimeState, targetEntityId: string): EntityTx
   return txs;
 };
 
-const semanticQueuedEntityTxsFor = (env: RuntimeState, entityId: string): EntityTx[] => {
+const semanticQueuedEntityTxsFor = (env: RuntimeReplica, entityId: string): EntityTx[] => {
   const replica = getEntityReplicaById(env, entityId);
   return [
     queuedEntityTxsFor(env, entityId),
@@ -237,7 +237,7 @@ const parseQueuedAmount = (value: unknown): bigint | null => {
 };
 
 export const hasQueuedExtendCredit = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
   tokenId: number,
@@ -261,7 +261,7 @@ export const hasQueuedExtendCredit = (
 };
 
 export const collectQueuedSwapOfferIds = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
 ): Set<string> => {
@@ -281,14 +281,14 @@ export const collectQueuedSwapOfferIds = (
 };
 
 export const hasQueuedSwapOffer = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
   offerId: string,
 ): boolean => collectQueuedSwapOfferIds(env, entityId, counterpartyId).has(String(offerId || '').trim());
 
 export const getAccountState = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
 ): AccountReplica | null => {
@@ -362,7 +362,7 @@ export const isAccountWriteLaneIdle = (account: AccountReplica | null): boolean 
 export const isAccountConsensusReady = isAccountWriteLaneIdle;
 
 export const hasPairMutualCredit = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   leftEntityId: string,
   rightEntityId: string,
   tokenId: number,
@@ -378,7 +378,7 @@ export const hasPairMutualCredit = (
 };
 
 export const hasPairMutualCredits = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   leftEntityId: string,
   rightEntityId: string,
   tokenIds: readonly number[],

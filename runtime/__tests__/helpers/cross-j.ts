@@ -10,7 +10,7 @@ import {
 } from '../../jurisdiction/event-observation';
 import type { AccountState } from '../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../entity/types';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../types/jurisdiction-events';
 import { createDefaultDelta } from '../../account/delta';
@@ -32,7 +32,7 @@ export const makeJurisdiction = (name: string, chainId: number, depByte: string,
 
 export const jref = (jurisdiction: JurisdictionConfig): string => getJurisdictionStackId(jurisdiction);
 
-export const registerTestSigner = (env: RuntimeState, seed: string, slot = '1'): string => {
+export const registerTestSigner = (env: RuntimeReplica, seed: string, slot = '1'): string => {
   env.runtimeSeed = seed;
   const signerId = deriveSignerAddressSync(seed, slot);
   registerSignerKey(seed, signerId, deriveSignerKeySync(seed, slot));
@@ -40,7 +40,7 @@ export const registerTestSigner = (env: RuntimeState, seed: string, slot = '1'):
 };
 
 export const prepareJEventInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
   input: {
@@ -167,7 +167,7 @@ export const makeState = (
   };
 };
 
-export const addReplica = (env: RuntimeState, state: EntityState, signerId: string, isProposer = true): void => {
+export const addReplica = (env: RuntimeReplica, state: EntityState, signerId: string, isProposer = true): void => {
   const keys = hasLocalSignerKey(env, signerId)
     ? deriveLocalEntityCryptoKeys(env, state.entityId, signerId)
     : { publicKey: '', privateKey: '' };
@@ -182,7 +182,7 @@ export const addReplica = (env: RuntimeState, state: EntityState, signerId: stri
   } as EntityReplica);
 };
 
-export const installJurisdictions = (env: RuntimeState, ...jurisdictions: JurisdictionConfig[]): void => {
+export const installJurisdictions = (env: RuntimeReplica, ...jurisdictions: JurisdictionConfig[]): void => {
   for (const jurisdiction of jurisdictions) {
     env.jReplicas.set(jurisdiction.name, {
       name: jurisdiction.name,

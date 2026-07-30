@@ -1,5 +1,5 @@
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { compareStableText } from '../protocol/serialization';
 import {
   buildCertifiedEntityLineagePlan,
@@ -14,7 +14,7 @@ import type { StorageReplicaLookup } from './types';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 
 export const findReplicaForEntity = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   lookup?: StorageReplicaLookup,
 ): { replicaKey: string; replica: EntityReplica; state: EntityState } | null => {
@@ -22,7 +22,7 @@ export const findReplicaForEntity = (
   return (lookup ?? buildReplicaLookup(env)).get(normalized) ?? null;
 };
 
-export const buildReplicaLookup = (env: RuntimeState): StorageReplicaLookup => {
+export const buildReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup => {
   return buildCertifiedEntityLineagePlan(env).lookup;
 };
 
@@ -32,7 +32,7 @@ export const buildReplicaLookup = (env: RuntimeState): StorageReplicaLookup => {
  * full validation; ordinary WAL frames bind only already-certified heads and
  * are replayed from that checkpoint after a crash.
  */
-export const buildLiveReplicaLookup = (env: RuntimeState): StorageReplicaLookup => {
+export const buildLiveReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup => {
   const lookup: StorageReplicaLookup = new Map();
   for (const [replicaKey, replica] of [...env.eReplicas.entries()].sort(([left], [right]) => (
     compareStableText(String(left).toLowerCase(), String(right).toLowerCase())
@@ -48,7 +48,7 @@ export const buildLiveReplicaLookup = (env: RuntimeState): StorageReplicaLookup 
   return lookup;
 };
 
-export const buildLiveReplicaMetaPlan = (env: RuntimeState): CertifiedEntityLineagePlan => {
+export const buildLiveReplicaMetaPlan = (env: RuntimeReplica): CertifiedEntityLineagePlan => {
   const lineageByReplicaKey = new Map();
   const anchorByReplicaKey = new Map();
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
@@ -67,7 +67,7 @@ export const buildLiveReplicaMetaPlan = (env: RuntimeState): CertifiedEntityLine
 };
 
 export const buildStorageReplicaMetaCommitment = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   lineagePlan = buildCertifiedEntityLineagePlan(env),
 ): {
   entries: Array<{ key: Buffer; value: Buffer }>;
@@ -83,7 +83,7 @@ export const buildStorageReplicaMetaCommitment = (
  * same immutable plan for lookup, metadata, and post-commit publication.
  */
 export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   checkpointPlan: ReturnType<typeof rebaseCertifiedEntityLineageAtRuntimeCheckpoint>,
   options: { omitIntermediateSingleSignerState?: boolean } = {},
 ): {
@@ -112,7 +112,7 @@ export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
   return { entries, digest: computeStorageReplicaMetaDigest(entries) };
 };
 
-export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeState): {
+export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
   entries: Array<{ key: Buffer; value: Buffer }>;
   digest: string;
 } => {

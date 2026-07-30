@@ -9,7 +9,7 @@ import {
 import { buildCollectiveEntityProposalTx } from '../entity/authorization';
 import { hashEntityCommandTxs } from '../entity/command-codec';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 const entityId = '0x1111111111111111111111111111111111111111111111111111111111111111';
 const counterpartyId = '0x2222222222222222222222222222222222222222222222222222222222222222';
@@ -21,7 +21,7 @@ describe('mesh queued work detection', () => {
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
       eReplicas: new Map(),
       jReplicas: new Map(),
-    } as unknown as RuntimeState;
+    } as unknown as RuntimeReplica;
 
     expect(hasPendingRuntimeWork(env)).toBe(true);
   });
@@ -44,7 +44,7 @@ describe('mesh queued work detection', () => {
         }],
       },
       eReplicas: new Map(),
-    } as unknown as RuntimeState;
+    } as unknown as RuntimeReplica;
 
     expect(hasQueuedOpenAccount(env, entityId, counterpartyId)).toBe(true);
     expect(hasQueuedOpenAccount(env, entityId, `${counterpartyId.slice(0, -1)}3`)).toBe(false);
@@ -68,7 +68,7 @@ describe('mesh queued work detection', () => {
         }],
       },
       eReplicas: new Map(),
-    } as unknown as RuntimeState;
+    } as unknown as RuntimeReplica;
 
     expect(hasQueuedExtendCredit(env, entityId, counterpartyId, 2, 1000n)).toBe(true);
     expect(hasQueuedExtendCredit(env, entityId, counterpartyId, 2, 1001n)).toBe(false);
@@ -115,7 +115,7 @@ describe('mesh queued work detection', () => {
     const env = {
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
       eReplicas: new Map([[`${entityId}:${author}`, { entityId, mempool: [signedCommand] }]]),
-    } as unknown as RuntimeState;
+    } as unknown as RuntimeReplica;
 
     expect(hasQueuedOpenAccount(env, entityId, counterpartyId)).toBe(true);
     expect(hasQueuedExtendCredit(env, entityId, counterpartyId, 2, 1000n)).toBe(true);
@@ -143,7 +143,7 @@ describe('mesh queued work detection', () => {
         }],
       },
       eReplicas: new Map(),
-    } as unknown as RuntimeState;
+    } as unknown as RuntimeReplica;
 
     expect([...collectQueuedSwapOfferIds(env, entityId, counterpartyId)]).toEqual(['mm-queued-ask-1']);
     expect(hasQueuedSwapOffer(env, entityId, counterpartyId, 'mm-queued-ask-1')).toBe(true);

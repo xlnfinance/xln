@@ -4,7 +4,7 @@
  * Executes parsed scenarios by feeding events to the XLN runtime
  */
 
-import type { RuntimeState, RuntimeTx } from '../runtime/types.js';
+import type { RuntimeReplica, RuntimeTx } from '../runtime/types.js';
 import type { EntityInput, ConsensusConfig } from '../entity/types.js';
 import { ethers } from 'ethers';
 import type {
@@ -31,14 +31,14 @@ import { commitRuntimeInput, processJEvents, waitScenario } from './helpers';
 let payRandomCounter = 0;
 type ImportReplicaData = Extract<RuntimeTx, { type: 'importReplica' }>['data'];
 
-const scenarioBoardSigner = (env: RuntimeState, alias: string): string => {
+const scenarioBoardSigner = (env: RuntimeReplica, alias: string): string => {
   const signer = getSignerAddress(env, alias)?.toLowerCase();
   if (!signer) throw new Error(`SCENARIO_BOARD_SIGNER_UNAVAILABLE:${alias}`);
   return signer;
 };
 
 export const resolveScenarioNumberedRegistrationContext = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: NonNullable<ConsensusConfig['jurisdiction']>,
 ) => {
   const payerSignerId = String(env.runtimeId || '').trim().toLowerCase();
@@ -64,7 +64,7 @@ const scenarioRegistrationIntentId = (
 ): string => ethers.id(`xln.scenario.numbered-registration.v1:${context.scenario.seed}:${actionIndex}:${kind}`);
 
 const registerScenarioEntities = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   context: ScenarioExecutionContext,
   actionIndex: number,
   kind: 'import' | 'grid',
@@ -96,7 +96,7 @@ const registerScenarioEntities = async (
  * Execute a scenario and generate runtime frames
  */
 export async function executeScenario(
-  env: RuntimeState,
+  env: RuntimeReplica,
   scenario: Scenario,
   options: {
     maxTimestamp?: number;
@@ -178,7 +178,7 @@ export async function executeScenario(
  * Execute a single scenario event
  */
 async function executeEvent(
-  env: RuntimeState,
+  env: RuntimeReplica,
   event: ScenarioEvent,
   context: ScenarioExecutionContext
 ): Promise<void> {
@@ -213,7 +213,7 @@ async function executeEvent(
  * Execute a single action
  */
 async function executeAction(
-  env: RuntimeState,
+  env: RuntimeReplica,
   action: ScenarioAction,
   context: ScenarioExecutionContext,
   actionIndex: number,
@@ -264,14 +264,14 @@ async function executeAction(
  * Import entities (create numbered entities)
  *
  * This is the critical function that:
- * 1. Registers new entities through the RuntimeState's trusted jurisdiction adapter
+ * 1. Registers new entities through the RuntimeReplica's trusted jurisdiction adapter
  * 2. Imports them into existing runtime state (additive, not replacement)
  * 3. Creates snapshots with narrative metadata
  */
 async function handleImport(
   params: ActionParam[],
   context: ScenarioExecutionContext,
-  env: RuntimeState,
+  env: RuntimeReplica,
   actionIndex: number,
 ): Promise<void> {
   const jurisdiction = resolveRuntimeJurisdictionConfig(env);
@@ -339,7 +339,7 @@ async function handleImport(
 async function handleGrid(
   params: ActionParam[],
   context: ScenarioExecutionContext,
-  env: RuntimeState,
+  env: RuntimeReplica,
   _actionIndex: number,
 ): Promise<void> {
   const positional = getPositionalParams(params);
@@ -578,7 +578,7 @@ async function handleLazyGrid(
   Z: number,
   spacing: number,
   context: ScenarioExecutionContext,
-  env: RuntimeState
+  env: RuntimeReplica
 ): Promise<void> {
   const { cryptoHash } = await import('../infra/platform-crypto.js');
 
@@ -725,7 +725,7 @@ async function handleLazyGrid(
 async function handlePayRandom(
   params: ActionParam[],
   context: ScenarioExecutionContext,
-  env: RuntimeState
+  env: RuntimeReplica
 ): Promise<void> {
   const named = namedParamsToObject(params);
 
@@ -825,7 +825,7 @@ async function handlePayRandom(
 async function handleR2R(
   params: ActionParam[],
   context: ScenarioExecutionContext,
-  env: RuntimeState
+  env: RuntimeReplica
 ): Promise<void> {
   const fromIndex = String(params[0]);
   const toIndex = String(params[1]);
@@ -875,7 +875,7 @@ async function handleR2R(
 async function handleFund(
   params: ActionParam[],
   context: ScenarioExecutionContext,
-  env: RuntimeState
+  env: RuntimeReplica
 ): Promise<void> {
   const entityIndex = String(params[0]);
   const amount = BigInt(String(params[1] ?? '0'));
@@ -922,7 +922,7 @@ async function handleOpenAccount(
   entityId: string,
   params: ActionParam[],
   context: ScenarioExecutionContext,
-  env: RuntimeState
+  env: RuntimeReplica
 ): Promise<void> {
   const counterpartyScenarioId = String(params[0]);
 
@@ -958,7 +958,7 @@ async function handleOpenAccount(
  * Apply view state to the current frame
  */
 function applyViewState(
-  env: RuntimeState,
+  env: RuntimeReplica,
   viewState: ViewState,
   context: ScenarioExecutionContext
 ): void {

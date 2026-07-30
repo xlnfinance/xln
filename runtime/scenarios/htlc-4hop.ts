@@ -4,7 +4,7 @@
  * Verifies onion routing, fees cascade, secret propagation
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { createEconomy, connectEconomy, testHtlcRoute, type EconomyEntity } from './test-economy';
 import { usd, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, createJReplica, getScenarioJAdapter, isScenarioJAdapterMissingError } from './boot';
@@ -29,7 +29,7 @@ function requireEconomyEntity(entity: EconomyEntity | undefined, label: string):
   return entity;
 }
 
-export async function htlc4hop(env: RuntimeState): Promise<void> {
+export async function htlc4hop(env: RuntimeReplica): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'HTLC 4-Hop');
   const prevScenarioMode = env.scenarioMode;
   try {

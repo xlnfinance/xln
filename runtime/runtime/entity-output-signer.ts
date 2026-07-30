@@ -8,16 +8,16 @@ import { validateMultiRecipientCiphertext } from '../protocol/htlc/multi-recipie
 import { encryptedHtlcLayer } from '../protocol/htlc/onion-layer';
 import type { AccountPeerInput } from '../types/account';
 import type { EntityOutput, EntityReplica } from '../entity/types';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import type { EntityTx } from '../types/entity-tx';
 
 const REPLAY_OUTPUT_SIGNER_HINTS = Symbol.for('xln.runtime.replay.output-signer-hints');
 
-type RuntimeStateWithReplaySignerHints = RuntimeState & {
+type RuntimeStateWithReplaySignerHints = RuntimeReplica & {
   [REPLAY_OUTPUT_SIGNER_HINTS]?: ReadonlyMap<string, string>;
 };
 
-export const installReplayOutputSignerHints = (env: RuntimeState, hints: ReadonlyMap<string, string>): void => {
+export const installReplayOutputSignerHints = (env: RuntimeReplica, hints: ReadonlyMap<string, string>): void => {
   const canonical = new Map<string, string>();
   for (const [rawEntityId, rawSignerId] of hints) {
     const entityId = String(rawEntityId || '')
@@ -39,12 +39,12 @@ export const installReplayOutputSignerHints = (env: RuntimeState, hints: Readonl
   });
 };
 
-export const clearReplayOutputSignerHints = (env: RuntimeState): void => {
+export const clearReplayOutputSignerHints = (env: RuntimeReplica): void => {
   const transient: RuntimeStateWithReplaySignerHints = env;
   delete transient[REPLAY_OUTPUT_SIGNER_HINTS];
 };
 
-const replayOutputSignerHint = (env: RuntimeState, entityId: string): string | null => {
+const replayOutputSignerHint = (env: RuntimeReplica, entityId: string): string | null => {
   const transient: RuntimeStateWithReplaySignerHints = env;
   const hints = transient[REPLAY_OUTPUT_SIGNER_HINTS];
   return hints instanceof Map ? String(hints.get(entityId) || '') || null : null;
@@ -59,7 +59,7 @@ const replayOutputSignerHint = (env: RuntimeState, entityId: string): string | n
  * Runtime/Entity/Account consensus state and is cleared after each replayed
  * Runtime frame.
  */
-export const resolveEntityProposerId = (env: RuntimeState, entityId: string, context: string): string => {
+export const resolveEntityProposerId = (env: RuntimeReplica, entityId: string, context: string): string => {
   const targetEntityId = String(entityId || '').toLowerCase();
   let localKeyReplicaFallback: string | null = null;
   let configFallback: string | null = null;
@@ -180,7 +180,7 @@ const encryptedAccountSignerHint = (
  * frame's WAL commit succeeds.
  */
 export const resolveEntityOutputSignerId = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   sourceReplica: EntityReplica,
   output: EntityOutput,
 ): Promise<string> => {

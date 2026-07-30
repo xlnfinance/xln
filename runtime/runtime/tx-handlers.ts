@@ -24,7 +24,7 @@ import {
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from './types';
+import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import { applyRuntimeAdapterCommandMarker } from '../radapter/command-frontier';
 import { assertRuntimeAdapterCommandTxAuthorized } from '../radapter/command-frontier-auth';
@@ -68,13 +68,13 @@ export interface RuntimeTxHandlerDeps {
   isReplay?: boolean;
 }
 
-const commitRuntimeTxEntityChange = (env: RuntimeState, entityId: string | undefined): JInput[] => {
+const commitRuntimeTxEntityChange = (env: RuntimeReplica, entityId: string | undefined): JInput[] => {
   if (entityId) applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
   return [];
 };
 
 export const applyRuntimeTx = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTx: RuntimeTx,
   deps: RuntimeTxHandlerDeps = {},
 ): Promise<JInput[]> => {
@@ -155,7 +155,7 @@ export const applyRuntimeTx = async (
 };
 
 const rewindJHistoryRuntimeTx = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTx: Extract<RuntimeTx, { type: 'rewindJHistory' }>,
 ): string => {
   const entityId = String(runtimeTx.data.entityId || '').trim().toLowerCase();
@@ -192,7 +192,7 @@ const rewindJHistoryRuntimeTx = (
 };
 
 const observeJRangeRuntimeTx = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTx: Extract<RuntimeTx, { type: 'observeJRange' }>,
 ): string | undefined => {
   const entityId = String(runtimeTx.data.entityId || '').trim().toLowerCase();
@@ -216,7 +216,7 @@ const observeJRangeRuntimeTx = (
   };
   const certifiedAnchor = getEntityCertifiedJAnchor(match.replica.state);
   if (certifiedAnchor && observation.scannedThroughHeight < certifiedAnchor.height) {
-    // A watcher page can be queued against an older live RuntimeState while another
+    // A watcher page can be queued against an older live RuntimeReplica while another
     // Runtime frame advances this Entity's certified J head. Validate the
     // discarded page independently, then prove the retained local cache has
     // not corrupted the newer certified anchor. Never let staleness hide bad
@@ -240,7 +240,7 @@ const observeJRangeRuntimeTx = (
 };
 
 const resolveImportCheckpointState = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
   config: EntityState['config'],
@@ -302,7 +302,7 @@ const entityHasCertifiedCheckpoint = (
     Boolean(replica.certifiedFrameLineage?.length));
 
 const applyReplicaLocalMetadata = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   replica: EntityReplica,
   identity: ReplicaImportIdentity,
   isProposer: boolean,
@@ -319,7 +319,7 @@ const applyReplicaLocalMetadata = (
 };
 
 const reuseExistingReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTx: ImportReplicaRuntimeTx,
   identity: ReplicaImportIdentity,
   existingKey: string,
@@ -359,7 +359,7 @@ const reuseExistingReplica = (
 };
 
 const buildCheckpointReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTx: ImportReplicaRuntimeTx,
   identity: ReplicaImportIdentity,
   config: EntityState['config'],
@@ -392,7 +392,7 @@ const buildCheckpointReplica = (
 };
 
 const buildGenesisReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTx: ImportReplicaRuntimeTx,
   identity: ReplicaImportIdentity,
   config: EntityState['config'],
@@ -455,7 +455,7 @@ const buildGenesisReplica = (
 };
 
 const assertCreatedReplicaJHeight = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   replicaKey: string,
 ): void => {
   const actual = env.eReplicas.get(replicaKey)?.state.lastFinalizedJHeight;
@@ -467,7 +467,7 @@ const assertCreatedReplicaJHeight = (
   }
 };
 
-const importReplicaRuntimeTx = (env: RuntimeState, runtimeTx: ImportReplicaRuntimeTx): string => {
+const importReplicaRuntimeTx = (env: RuntimeReplica, runtimeTx: ImportReplicaRuntimeTx): string => {
   const identity = normalizeReplicaImportIdentity(runtimeTx);
   if (DEBUG) {
     runtimeTxLog.debug('replica.import_start', {
@@ -524,7 +524,7 @@ const importReplicaRuntimeTx = (env: RuntimeState, runtimeTx: ImportReplicaRunti
 };
 
 const findExistingReplicaCaseInsensitive = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
 ): { key: string; replica: EntityReplica } | null => {

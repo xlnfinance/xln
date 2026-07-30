@@ -1,4 +1,4 @@
-import type { RuntimeState, EnvSnapshot } from './types';
+import type { RuntimeReplica, EnvSnapshot } from './types';
 
 // Runtime memory is the live finalized state plus the private in-flight clone.
 // Historical views belong to LevelDB or to an explicit test-only collector.
@@ -22,9 +22,9 @@ type RuntimeHistoryTrace = {
   snapshots: EnvSnapshot[];
 };
 
-const testingTraceByEnv = new Map<RuntimeState, RuntimeHistoryTrace>();
+const testingTraceByEnv = new Map<RuntimeReplica, RuntimeHistoryTrace>();
 
-export const hasRuntimeHistoryTraceForTesting = (env: RuntimeState): boolean =>
+export const hasRuntimeHistoryTraceForTesting = (env: RuntimeReplica): boolean =>
   testingTraceByEnv.has(env);
 
 export type RuntimeHistoryTraceCollector = {
@@ -33,13 +33,13 @@ export type RuntimeHistoryTraceCollector = {
 };
 
 /**
- * Explicit test/scenario trace. Production RuntimeState history stays bounded; callers
+ * Explicit test/scenario trace. Production RuntimeReplica history stays bounded; callers
  * that need a complete determinism oracle own this separate lifetime instead.
  *
  * Also the recording primitive behind browser demos — see `startRuntimeFrameTrace`, which
  * is the same collector named for that second, non-test caller.
  */
-export const startRuntimeHistoryTraceForTesting = (env: RuntimeState): RuntimeHistoryTraceCollector => {
+export const startRuntimeHistoryTraceForTesting = (env: RuntimeReplica): RuntimeHistoryTraceCollector => {
   if (testingTraceByEnv.has(env)) throw new Error('RUNTIME_HISTORY_TRACE_ALREADY_ACTIVE');
   const trace: RuntimeHistoryTrace = { snapshots: [] };
   testingTraceByEnv.set(env, trace);
@@ -54,7 +54,7 @@ export const startRuntimeHistoryTraceForTesting = (env: RuntimeState): RuntimeHi
 };
 
 export const recordRuntimeHistoryTraceForTesting = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   snapshot: EnvSnapshot,
 ): void => {
   testingTraceByEnv.get(env)?.snapshots.push(snapshot);

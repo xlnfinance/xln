@@ -1,7 +1,7 @@
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import { inferRuntimeLifecyclePhase } from './lifecycle';
 
-export const ensureRuntimeState = (env: RuntimeState): NonNullable<RuntimeState['runtimeState']> => {
+export const ensureRuntimeState = (env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeState']> => {
   if (!env.runtimeState) {
     env.runtimeState = {
       lifecyclePhase: 'booting',

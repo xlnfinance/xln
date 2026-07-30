@@ -1,5 +1,5 @@
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeInput, RuntimeState } from '../runtime/types';
+import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -17,25 +17,25 @@ import { ensureRuntimeState } from '../runtime/runtime-state';
 import type { RuntimePublishedNotice } from '../runtime/loop-environment';
 
 export type EmbeddedRuntimeAdapterDeps = {
-  getEnv: () => RuntimeState | null;
-  main?: (seed?: string | null) => Promise<RuntimeState>;
-  enqueueRuntimeInput: (env: RuntimeState, input: RuntimeInput) => void;
-  validateRuntimeInputAdmission: (env: RuntimeState, input: RuntimeInput) => void;
+  getEnv: () => RuntimeReplica | null;
+  main?: (seed?: string | null) => Promise<RuntimeReplica>;
+  enqueueRuntimeInput: (env: RuntimeReplica, input: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: RuntimeReplica, input: RuntimeInput) => void;
   submitCrossJurisdictionIntent: (
-    env: RuntimeState,
+    env: RuntimeReplica,
     route: CrossJurisdictionSwapRoute,
   ) => Promise<RuntimeAdapterCrossJurisdictionIntentResult>;
-  controlRuntime?: (env: RuntimeState, action: RuntimeAdapterControlAction) => Promise<unknown>;
+  controlRuntime?: (env: RuntimeReplica, action: RuntimeAdapterControlAction) => Promise<unknown>;
   registerRuntimePublishedCallback: (
-    env: RuntimeState,
+    env: RuntimeReplica,
     cb: (notice: RuntimePublishedNotice) => void,
   ) => (() => void);
-  buildReadContext?: (env: RuntimeState) => Partial<Omit<RuntimeAdapterResolveContext, 'env'>>;
+  buildReadContext?: (env: RuntimeReplica) => Partial<Omit<RuntimeAdapterResolveContext, 'env'>>;
 };
 
 export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   readonly mode = 'embedded' as const;
-  private env: RuntimeState | null = null;
+  private env: RuntimeReplica | null = null;
   private unregister: (() => void) | null = null;
   private statusCbs = new Set<(status: RuntimeAdapterStatus) => void>();
   private changeCbs = new Set<(height: number) => void>();
@@ -167,7 +167,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     for (const cb of this.statusCbs) cb(status);
   }
 
-  private resolveEnv(): RuntimeState | null {
+  private resolveEnv(): RuntimeReplica | null {
     return this.deps.getEnv() ?? this.env;
   }
 
@@ -178,7 +178,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
    * performance. Holding the object here is necessary for ingress, but UI
    * status must be a value snapshot so an uncommitted H+1 cannot leak.
    */
-  private publishCommittedMetadata(env: RuntimeState): void {
+  private publishCommittedMetadata(env: RuntimeReplica): void {
     if (ensureRuntimeState(env).stateMutationInFlight) {
       throw new RuntimeAdapterError(
         'E_INTERNAL',
@@ -202,7 +202,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     this.publishedCommandReadyReason = notice.commandReadyReason;
   }
 
-  private requireCommandReady(env: RuntimeState): void {
+  private requireCommandReady(env: RuntimeReplica): void {
     try {
       assertRuntimeCommandReady(env);
     } catch (error) {

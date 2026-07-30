@@ -1,8 +1,8 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { runSwapOrderbookBenchmark } from '../scripts/bench-swap-orderbook-tps';
 import { runSwapRuntimeBenchmark } from '../scripts/bench-swap-runtime-tps';
 
-export async function swapTps(_env: RuntimeState): Promise<void> {
+export async function swapTps(_env: RuntimeReplica): Promise<void> {
   const orderbook = runSwapOrderbookBenchmark({
     swaps: 100_000,
     warmup: 10_000,
@@ -18,5 +18,5 @@ export async function swapTps(_env: RuntimeState): Promise<void> {
 }
 
 if (import.meta.main) {
-  await swapTps({} as RuntimeState);
+  await swapTps({} as RuntimeReplica);
 }

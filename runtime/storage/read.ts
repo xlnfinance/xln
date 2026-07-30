@@ -1,6 +1,6 @@
 import type { BookState } from '../orderbook';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { decodeBuffer, decodeValidatedBuffer } from './codec';
 import { docRefCellKey, docRefKey, docValueKey } from './doc-refs';
@@ -130,7 +130,7 @@ const assertEntityDocKeyBinding = (
 };
 
 export const hydrateCertifiedBoardRootNodesFromStorage = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   db: RuntimeDbLike,
   root: string | undefined,
 ): Promise<void> => {
@@ -157,7 +157,7 @@ export const hydrateCertifiedBoardRootNodesFromStorage = async (
 };
 
 export const hydrateConsumptionRootNodesFromStorage = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   db: RuntimeDbLike,
   state: NonNullable<EntityState['consumptionAccumulator']> | undefined,
 ): Promise<void> => {
@@ -184,7 +184,7 @@ export const hydrateConsumptionRootNodesFromStorage = async (
 };
 
 export const hydrateAccountJClaimRootNodesFromStorage = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   db: RuntimeDbLike,
   states: readonly AccountJClaimAccumulatorState[],
 ): Promise<void> => {
@@ -210,7 +210,7 @@ export const hydrateAccountJClaimRootNodesFromStorage = async (
 };
 
 const hydrateEntityWithCertifiedBoardNodes = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   db: RuntimeDbLike,
   core: StorageEntityCoreDoc,
   accounts: Map<string, StorageAccountDoc>,
@@ -736,7 +736,7 @@ const loadSnapshotDocsAtHeight = async (
 };
 
 const hydrateEntityStatesFromDocs = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   db: RuntimeDbLike,
   docs: Map<string, StorageDoc>,
 ): Promise<Map<string, EntityState>> => {
@@ -1111,9 +1111,9 @@ const loadBookDocPageAtHeight = async (
 };
 
 export const loadEntityViewPageFromStorage = async (options: {
-  env: RuntimeState;
-  tryOpenDb: (env: RuntimeState) => Promise<boolean>;
-  getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
+  env: RuntimeReplica;
+  tryOpenDb: (env: RuntimeReplica) => Promise<boolean>;
+  getRuntimeDb: (env: RuntimeReplica) => RuntimeDbLike;
   entityId: string;
   height?: number;
   accountQuery?: StoragePageQuery;
@@ -1158,9 +1158,9 @@ export const loadEntityViewPageFromStorage = async (options: {
 };
 
 export const loadEntityAccountDocFromStorage = async (options: {
-  env: RuntimeState;
-  tryOpenDb: (env: RuntimeState) => Promise<boolean>;
-  getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
+  env: RuntimeReplica;
+  tryOpenDb: (env: RuntimeReplica) => Promise<boolean>;
+  getRuntimeDb: (env: RuntimeReplica) => RuntimeDbLike;
   entityId: string;
   counterpartyId: string;
   height?: number;
@@ -1193,9 +1193,9 @@ export const loadEntityAccountDocFromStorage = async (options: {
 };
 
 export const loadEntityStateFromStorage = async (options: {
-  env: RuntimeState;
-  tryOpenDb: (env: RuntimeState) => Promise<boolean>;
-  getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
+  env: RuntimeReplica;
+  tryOpenDb: (env: RuntimeReplica) => Promise<boolean>;
+  getRuntimeDb: (env: RuntimeReplica) => RuntimeDbLike;
   entityId: string;
   height?: number;
   liveStateReadable?: boolean;
@@ -1309,9 +1309,9 @@ export const loadEntityStateFromStorage = async (options: {
 };
 
 export const loadEntityStatesAtHeightFromStorage = async (options: {
-  env: RuntimeState;
-  tryOpenDb: (env: RuntimeState) => Promise<boolean>;
-  getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
+  env: RuntimeReplica;
+  tryOpenDb: (env: RuntimeReplica) => Promise<boolean>;
+  getRuntimeDb: (env: RuntimeReplica) => RuntimeDbLike;
   height?: number;
 }): Promise<Map<string, EntityState>> => {
   await requireStorageDbOpen(

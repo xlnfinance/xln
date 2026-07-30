@@ -17,7 +17,7 @@ import {
 } from '../jurisdiction/jurisdiction-runtime';
 import { safeStringify } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from './types';
+import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import type { JTx } from '../types/jurisdiction-runtime';
 
@@ -128,7 +128,7 @@ export const requireCanonicalEntityProviderActionAttempt = (
 };
 
 export const findEntityProviderActionReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
 ): EntityReplica | null => {
@@ -158,12 +158,12 @@ export const actionAttemptMatchesIdentity = (
 );
 
 export const hasPendingCommittedEntityProviderAction = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   identity: Omit<EntityProviderActionAttemptIdentity, 'attemptNumber'>,
 ): boolean => (env.runtimeState?.pendingCommittedJOutbox ?? []).some((input) =>
   input.jTxs.some((jTx) => actionAttemptMatchesIdentity(input.jurisdictionName, jTx, identity)));
 
-const requireTrustedPending = (env: RuntimeState, replica: EntityReplica) => {
+const requireTrustedPending = (env: RuntimeReplica, replica: EntityReplica) => {
   const pending = replica.state.entityProviderActionState?.pending;
   if (!pending) throw new Error(`ENTITY_PROVIDER_ACTION_PENDING_MISSING:${replica.entityId}`);
   const configuredName = getJurisdictionConfigName(replica.state.config.jurisdiction);
@@ -215,7 +215,7 @@ export const getMatchingEntityProviderActionSubmitState = (replica: EntityReplic
 };
 
 export const applyRetryEntityProviderActionRuntimeTx = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   tx: RetryActionTx,
 ): JInput[] => {
   const replica = findEntityProviderActionReplica(env, tx.data.entityId, tx.data.signerId);
@@ -294,7 +294,7 @@ export const applyRetryEntityProviderActionRuntimeTx = (
   return [{ jurisdictionName, jTxs: [jTx] }];
 };
 
-export const canSubmitEntityProviderActionLocally = (env: RuntimeState, signerId: string): boolean => {
+export const canSubmitEntityProviderActionLocally = (env: RuntimeReplica, signerId: string): boolean => {
   const signer = normalizeEntityProviderActionId(signerId);
   return signer === normalizeEntityProviderActionId(env.runtimeId) || Boolean(getLocalSignerPrivateKey(env, signer));
 };

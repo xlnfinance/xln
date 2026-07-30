@@ -8,7 +8,7 @@ import {
   withStorageWriterLock,
   type StorageWriterLockBoundary,
 } from '../storage/runtime-dbs';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 const waitForReadyWorkers = async (directory: string, count: number): Promise<void> => {
   const deadline = Date.now() + 10_000;
@@ -28,7 +28,7 @@ for (const boundary of [
 ] satisfies StorageWriterLockBoundary[]) {
   test(`fresh process acquires immediately after SIGKILL ${boundary}`, async () => {
     const namespace = `storage-writer-kill-${boundary}-${process.pid}-${Date.now()}`;
-    const env = { dbNamespace: namespace, runtimeId: namespace, height: 2 } as RuntimeState;
+    const env = { dbNamespace: namespace, runtimeId: namespace, height: 2 } as RuntimeReplica;
     const lockPath = resolveStorageWriterLockPath(env);
     const child = Bun.spawn({
       cmd: [process.execPath, crashFixture, namespace, boundary],
@@ -65,7 +65,7 @@ for (const boundary of [
 
 test('candidate recovery preserves a candidate owned by a live process', async () => {
   const namespace = `storage-writer-live-candidate-${process.pid}-${Date.now()}`;
-  const env = { dbNamespace: namespace, runtimeId: namespace, height: 3 } as RuntimeState;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 3 } as RuntimeReplica;
   const lockPath = resolveStorageWriterLockPath(env);
   const candidatePath = `${lockPath}.candidate-${process.pid}-${Date.now()}-777`;
   mkdirSync(dirname(lockPath), { recursive: true });
@@ -90,7 +90,7 @@ test('candidate recovery preserves a candidate owned by a live process', async (
 
 test('candidate recovery fails loud on an unparseable candidate owner', async () => {
   const namespace = `storage-writer-invalid-candidate-${process.pid}-${Date.now()}`;
-  const env = { dbNamespace: namespace, runtimeId: namespace, height: 4 } as RuntimeState;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 4 } as RuntimeReplica;
   const lockPath = resolveStorageWriterLockPath(env);
   const candidatePath = `${lockPath}.candidate-invalid-owner`;
   mkdirSync(dirname(lockPath), { recursive: true });
@@ -114,7 +114,7 @@ test('concurrent processes cannot both reclaim the same expired writer lock', as
     dbNamespace: namespace,
     runtimeId: namespace,
     height: 1,
-  } as RuntimeState;
+  } as RuntimeReplica;
   const lockPath = resolveStorageWriterLockPath(env);
   const controlPath = `${lockPath}.test-control`;
   const readyPath = `${controlPath}/ready`;
@@ -194,7 +194,7 @@ test('concurrent processes cannot both reclaim the same expired writer lock', as
 
 test('a new writer reclaims expired writer and recovery locks after a crash', async () => {
   const namespace = `storage-writer-recovery-${process.pid}-${Date.now()}`;
-  const env = { dbNamespace: namespace, runtimeId: namespace, height: 7 } as RuntimeState;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 7 } as RuntimeReplica;
   const lockPath = resolveStorageWriterLockPath(env);
   const recoveryPath = `${lockPath}.recovery`;
   const expired = {
@@ -223,7 +223,7 @@ test('a new writer reclaims expired writer and recovery locks after a crash', as
 
 test('a new writer reclaims a non-expired lock immediately when the recorded pid is dead', async () => {
   const namespace = `storage-writer-dead-pid-${process.pid}-${Date.now()}`;
-  const env = { dbNamespace: namespace, runtimeId: namespace, height: 8 } as RuntimeState;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 8 } as RuntimeReplica;
   const lockPath = resolveStorageWriterLockPath(env);
   mkdirSync(dirname(lockPath), { recursive: true });
   writeFileSync(lockPath, `${JSON.stringify({
@@ -247,7 +247,7 @@ test('a new writer reclaims a non-expired lock immediately when the recorded pid
 
 test('a malformed canonical lock cannot permanently fence the namespace', async () => {
   const namespace = `storage-writer-malformed-${process.pid}-${Date.now()}`;
-  const env = { dbNamespace: namespace, runtimeId: namespace, height: 9 } as RuntimeState;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 9 } as RuntimeReplica;
   const lockPath = resolveStorageWriterLockPath(env);
   mkdirSync(dirname(lockPath), { recursive: true });
   writeFileSync(lockPath, '', 'utf8');

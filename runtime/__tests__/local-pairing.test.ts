@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 
 import { verifyRuntimeAdapterAuthCredential } from '../radapter/auth';
 import { createLocalPairingController, isTrustedLocalPairingOrigin } from '../server/local-pairing';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 const CONTROL_TOKEN = 'control-token-that-is-longer-than-thirty-two-bytes';
 const AUTH_SEED = 'runtime-auth-seed-that-is-longer-than-thirty-two-bytes';
@@ -18,7 +18,7 @@ afterAll(() => {
   else process.env['XLN_RADAPTER_AUTH_SEED'] = previousAuthSeed;
 });
 
-const env = { runtimeId: RUNTIME_ID } as RuntimeState;
+const env = { runtimeId: RUNTIME_ID } as RuntimeReplica;
 
 const issueRequest = (token = CONTROL_TOKEN): Request => new Request(
   'http://localhost:8080/api/local-pairing/issue',

@@ -1,5 +1,5 @@
 import type { JInput } from '../jurisdiction/input';
-import type { RoutedEntityInput, RuntimeState } from './types';
+import type { RoutedEntityInput, RuntimeReplica } from './types';
 import {
   createRuntimeEntityInputBatchContext,
   entityInputLog,
@@ -37,7 +37,7 @@ export {
  * candidates together; all other inputs consume one position.
  */
 export const applyMergedEntityInputs = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: RoutedEntityInput[],
   initialJOutbox: JInput[],
   options: RuntimeEntityInputApplyOptions,

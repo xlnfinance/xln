@@ -1,4 +1,4 @@
-import type { AccountReplica, EntityReplica, RuntimeState, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
+import type { AccountReplica, EntityReplica, RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
 import { getJurisdictionStackId } from '@xln/runtime/jurisdiction/jurisdiction-stack';
 import {
   buildOpenAccountTx,
@@ -136,7 +136,7 @@ export type HubDiscoveryProjection = {
 export const HUB_OPEN_ACCOUNT_REQUIRES_ADMIN =
   'Account opening requires admin runtime access.';
 
-type RuntimeProfileSourceEnv = RuntimeState & {
+type RuntimeProfileSourceEnv = RuntimeReplica & {
   gossip?: {
     getProfiles?: () => unknown[];
   };
@@ -486,7 +486,7 @@ export function getHubOpenAccountPermissionError(input: HubOpenAccountPermission
   return canSubmitHubOpenAccount(input) ? null : HUB_OPEN_ACCOUNT_REQUIRES_ADMIN;
 }
 
-function hasLiveRuntimeProfileSource(env: RuntimeState | null | undefined): boolean {
+function hasLiveRuntimeProfileSource(env: RuntimeReplica | null | undefined): boolean {
   const runtimeEnv = env as RuntimeProfileSourceEnv | null | undefined;
   return Boolean(
     runtimeEnv?.runtimeState?.p2p?.ensureProfiles
@@ -495,7 +495,7 @@ function hasLiveRuntimeProfileSource(env: RuntimeState | null | undefined): bool
 }
 
 export async function ensureHubOpenAccountProfileReady(input: {
-  env: RuntimeState | null | undefined;
+  env: RuntimeReplica | null | undefined;
   sourceEntityId: string;
   hub: HubOpenAccountProfile;
   seedProfiles?: (hubId: string) => Promise<HubProfileSeedResult>;

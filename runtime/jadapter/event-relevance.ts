@@ -2,7 +2,7 @@ import {
   CANONICAL_J_EVENTS,
   type CanonicalJEvent,
 } from '../jurisdiction/event-catalog';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JEventIngress } from './types';
 
 export type CanonicalJEventIngress = JEventIngress & {
@@ -84,7 +84,7 @@ export const isEventRelevantToEntity = (
 };
 
 export const collectRelevantJEventReplicaKeys = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   events: JEventIngress[],
 ): string[] => {
   const canonicalEvents = events.filter(isCanonicalEvent);

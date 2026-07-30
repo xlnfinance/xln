@@ -1,5 +1,5 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
-import type { RuntimeState, RuntimeTx } from '../runtime/types';
+import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 
 export const MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES = 1_024;
 
@@ -56,7 +56,7 @@ export const validateRuntimeAdapterCommandMarker = (
 };
 
 export const readRuntimeAdapterCommandFrontier = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   laneId: string,
 ): RuntimeAdapterCommandFrontier | undefined => {
   const frontier = env.runtimeState?.runtimeAdapterCommandFrontiers?.get(laneId.toLowerCase());
@@ -67,7 +67,7 @@ export const readRuntimeAdapterCommandFrontier = (
     : undefined;
 };
 
-export const countActiveRuntimeAdapterCommandLanes = (env: RuntimeState): number => {
+export const countActiveRuntimeAdapterCommandLanes = (env: RuntimeReplica): number => {
   const nowMs = Math.max(0, Number(env.timestamp || 0));
   let count = 0;
   for (const frontier of env.runtimeState?.runtimeAdapterCommandFrontiers?.values() ?? []) {
@@ -86,7 +86,7 @@ const pruneExpiredCommandFrontiers = (
 };
 
 export const applyRuntimeAdapterCommandMarker = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   raw: RuntimeAdapterCommandMarkerData,
 ): void => {
   const data = validateRuntimeAdapterCommandMarker(raw);

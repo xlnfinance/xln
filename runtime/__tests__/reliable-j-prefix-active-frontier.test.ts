@@ -8,14 +8,14 @@ import {
 } from '../runtime/reliable-delivery';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { createEmptyEnv } from '../runtime';
-import type { DeliverableEntityInput, RuntimeState } from '../runtime/types';
+import type { DeliverableEntityInput, RuntimeReplica } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const signerId = (byte: string): string => `0x${byte.repeat(20)}`;
 
-const runtime = (seed: string): RuntimeState => {
+const runtime = (seed: string): RuntimeReplica => {
   const env = createEmptyEnv(seed);
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, '1'));
@@ -59,7 +59,7 @@ const jPrefixOutput = (
 };
 
 const installTargetReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   output: DeliverableEntityInput,
   entityHeight: number,
   retainAppliedRound: boolean,

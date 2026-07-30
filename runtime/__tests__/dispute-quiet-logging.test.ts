@@ -4,7 +4,7 @@ import { readEntityFrameEventMessages } from '../entity/frame-events';
 import { handleDisputeFinalize } from '../entity/tx/handlers/dispute';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 
 const ALICE = `0x${'11'.repeat(32)}`;
@@ -87,7 +87,7 @@ describe('dispute quiet logging', () => {
             cooperative: true,
           },
         } as Extract<EntityTx, { type: 'disputeFinalize' }>,
-        { quietRuntimeLogs: true } as RuntimeState,
+        { quietRuntimeLogs: true } as RuntimeReplica,
       );
 
       expect(readEntityFrameEventMessages(result.newState)?.some((message) =>

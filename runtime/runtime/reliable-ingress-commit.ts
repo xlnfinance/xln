@@ -1,5 +1,5 @@
 import type {
-  RuntimeState,
+  RuntimeReplica,
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
@@ -44,12 +44,12 @@ export type ReliableIngressCommit = {
 };
 
 type ReliableIngressMutationContext = {
-  state: NonNullable<RuntimeState['runtimeState']>;
+  state: NonNullable<RuntimeReplica['runtimeState']>;
   sourceLaneKeys: Set<string>;
 };
 
 const snapshotIngressMutation = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   key: string | null,
   frontierKey: string,
   receipt: ReliableDeliveryReceipt | null,
@@ -86,7 +86,7 @@ const assertTerminalAdvance = (
 };
 
 const installTerminalFrontier = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   context: ReliableIngressMutationContext,
   key: string,
   identity: ReliableDeliveryIdentity,
@@ -115,7 +115,7 @@ const installTerminalFrontier = (
 };
 
 const refreshTerminalFrontiers = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   context: ReliableIngressMutationContext,
   shouldRefresh: (frontierKey: string, identity: ReliableDeliveryIdentity) => boolean = () => true,
 ): ReliableIngressCommit[] => {
@@ -146,7 +146,7 @@ const refreshTerminalFrontiers = (
 };
 
 const commitTerminalPendingIngress = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   context: ReliableIngressMutationContext,
 ): ReliableIngressCommit[] => {
   const { state } = context;
@@ -170,7 +170,7 @@ const commitTerminalPendingIngress = (
 };
 
 const installActiveFrontier = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   context: ReliableIngressMutationContext,
   key: string,
   identity: ReliableDeliveryIdentity,
@@ -194,7 +194,7 @@ const installActiveFrontier = (
 };
 
 const planAppliedIngressCommit = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   context: ReliableIngressMutationContext,
   input: RoutedEntityInput,
   identity: ReliableDeliveryIdentity,
@@ -222,7 +222,7 @@ const planAppliedIngressCommit = (
 
 /** Install active/terminal frontiers in the same working state as the enclosing WAL. */
 export const commitReliableIngress = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   appliedInputs: readonly RoutedEntityInput[],
 ): ReliableIngressCommit[] => {
   const state = ensureReliableIngressState(env);
@@ -276,7 +276,7 @@ export const commitReliableIngress = (
 
 /** Let a later transport retry enqueue messages consensus did not commit. */
 export const releaseUncommittedReliableIngress = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   attemptedInputs: readonly RoutedEntityInput[],
   appliedInputs: readonly RoutedEntityInput[],
 ): void => {
@@ -313,7 +313,7 @@ export const releaseUncommittedReliableIngress = (
 
 /** Restore both active and terminal maps if the enclosing WAL write fails. */
 export const rollbackReliableIngressCommit = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   commits: readonly ReliableIngressCommit[],
 ): void => {
   const state = ensureReliableIngressState(env);
@@ -334,7 +334,7 @@ export const rollbackReliableIngressCommit = (
 
 /** Emit only receipts caused by exact ingress; refresh-only mutations need no ACK-of-ACK. */
 export const finalizeReliableIngressCommit = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   commits: readonly ReliableIngressCommit[],
 ): Array<{ runtimeId: string; receipt: ReliableDeliveryReceipt }> => {
   const state = ensureReliableIngressState(env);

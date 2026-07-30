@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeInput } from '@xln/runtime/api/runtime-module';
+import type { RuntimeReplica, RuntimeInput } from '@xln/runtime/api/runtime-module';
 import {
   deriveJMachineCreatedAt,
   jmachineOperations,
@@ -19,7 +19,7 @@ export type JMachineCreateDetail = {
 };
 
 export type RuntimeJMachineImportResult = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   config: JMachineConfig;
 };
 
@@ -118,7 +118,7 @@ export const buildJMachineImportRuntimeInput = (detail: JMachineCreateDetail): R
 };
 
 const readImportedContracts = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   name: string,
   fallback?: JMachineConfig['contracts'],
 ): JMachineConfig['contracts'] | undefined => {
@@ -140,7 +140,7 @@ const readImportedContracts = (
 
 export const buildPersistedJMachineConfig = (
   detail: JMachineCreateDetail,
-  env?: RuntimeState | null,
+  env?: RuntimeReplica | null,
   existing?: JMachineConfig | null,
 ): JMachineConfig => {
   const config = normalizeJMachineCreateDetail(detail);
@@ -164,7 +164,7 @@ export const buildPersistedJMachineConfig = (
 };
 
 export const importJMachineViaRuntime = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   detail: JMachineCreateDetail,
 ): Promise<RuntimeJMachineImportResult> => {
   const normalized = normalizeJMachineCreateDetail(detail);

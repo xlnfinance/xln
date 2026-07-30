@@ -25,7 +25,7 @@ import {
   submitCrossJurisdictionIntent,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 export type HubServerSocket = DirectWebSocket &
   RuntimeAdapterSocket & { data?: { type?: string } };
@@ -48,7 +48,7 @@ export const runtimeInputStatusUrl = (id: string): string =>
   `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
 
 export const createHubDirectRuntimeRoute = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeSeed: string,
   isIngressReady: () => boolean,
   debug: DirectInputDebugState,
@@ -130,7 +130,7 @@ export const createHubDirectRuntimeRoute = (
 };
 
 export const createHubRadapterMessageHandler = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   receipts: ReturnType<typeof createRuntimeIngressReceiptStore>,
   isIngressReady: () => boolean,
 ): ((

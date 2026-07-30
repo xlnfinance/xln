@@ -4,7 +4,7 @@ import { setBrowserVMJurisdiction } from '../jadapter/browservm-registry';
 import { findWatcherJurisdictionReplica } from '../jadapter/watcher-replica';
 import { requireDurableJurisdictionStack } from '../jurisdiction/contract-address';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from './types';
+import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { createStructuredLogger } from '../infra/logger';
 import { ensureLiveJAdapterForReplica } from './infra';
@@ -12,7 +12,7 @@ import { ensureLiveJAdapterForReplica } from './infra';
 const runtimeLog = createStructuredLogger('runtime');
 
 export const assertPersistedContractConfigReady = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   label: string,
 ): void => {
   for (const [name, replica] of env.jReplicas.entries()) {
@@ -26,7 +26,7 @@ export const assertPersistedContractConfigReady = (
 };
 
 const findJurisdictionByName = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   name: string,
 ): [string, JReplica] | null => {
   const expected = String(name || '').trim().toLowerCase();
@@ -39,7 +39,7 @@ const findJurisdictionByName = (
 };
 
 const registerSingleSignerWallet = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   replica: EntityReplica,
 ): void => {
   const validators = replica.state.config.validators;
@@ -100,7 +100,7 @@ const registerSingleSignerWallet = (
 };
 
 export const registerCommittedSingleSignerWallets = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityIds?: ReadonlySet<string>,
 ): void => {
   for (const replica of env.eReplicas.values()) {
@@ -110,9 +110,9 @@ export const registerCommittedSingleSignerWallets = (
 };
 
 export const reconcileRecoveryInfraEffects = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTxs: readonly RuntimeTx[],
-  startJurisdictionWatchers: (env: RuntimeState) => void,
+  startJurisdictionWatchers: (env: RuntimeReplica) => void,
 ): Promise<void> => {
   const jurisdictionNames = new Set<string>();
   const importedEntityIds = new Set<string>();

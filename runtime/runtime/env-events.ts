@@ -2,7 +2,7 @@ import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-v
 /**
  * XLN Event Emission System (EVM-style)
  *
- * Attaches event emission methods to RuntimeState (like Ethereum blocks have logs).
+ * Attaches event emission methods to RuntimeReplica (like Ethereum blocks have logs).
  * Events are stored in env.frameLogs and travel with snapshots for time-travel debugging.
  *
  * Usage:
@@ -12,7 +12,7 @@ import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-v
 
 import type { AccountFrame, RuntimeOverlayRecord } from '../types/account';
 import type { CertifiedEntityFrameLink, EntityState, EntityCandidateEffect } from '../entity/types';
-import type { RuntimeState, RuntimeHistoryRecord } from './types';
+import type { RuntimeReplica, RuntimeHistoryRecord } from './types';
 import type { LogCategory, FrameLogEntry } from '../types/logging';
 
 import { storageOverlayRecordKey } from '../protocol/overlay';
@@ -20,7 +20,7 @@ import { invalidateEntityAccountCommitment } from '../entity/consensus/state-roo
 import { refreshAccountWorkIndex } from '../entity/consensus/account-work-index';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from './security-incidents';
 
-const getLogState = (env: RuntimeState) => {
+const getLogState = (env: RuntimeReplica) => {
   if (!env.runtimeState) env.runtimeState = {};
   if (!env.runtimeState.logState) {
     env.runtimeState.logState = { nextId: 0, mirrorToConsole: true };
@@ -30,13 +30,13 @@ const getLogState = (env: RuntimeState) => {
 
 const MAX_CLEAN_LOGS = 2000;
 
-const getCleanLogBuffer = (env: RuntimeState): string[] => {
+const getCleanLogBuffer = (env: RuntimeReplica): string[] => {
   if (!env.runtimeState) env.runtimeState = {};
   if (!env.runtimeState.cleanLogs) env.runtimeState.cleanLogs = [];
   return env.runtimeState.cleanLogs;
 };
 
-const addCleanLog = (env: RuntimeState, level: string, msg: string): void => {
+const addCleanLog = (env: RuntimeReplica, level: string, msg: string): void => {
   const ts = new Date().toLocaleTimeString('en-US', {
     hour12: false,
     hour: '2-digit',
@@ -49,7 +49,7 @@ const addCleanLog = (env: RuntimeState, level: string, msg: string): void => {
   if (buffer.length > MAX_CLEAN_LOGS) buffer.shift();
 };
 
-const forwardDebugEvent = (env: RuntimeState, payload: Record<string, unknown>): void => {
+const forwardDebugEvent = (env: RuntimeReplica, payload: Record<string, unknown>): void => {
   const p2p = env.runtimeState?.p2p as { sendDebugEvent?: (data: unknown) => boolean } | undefined;
   try {
     p2p?.sendDebugEvent?.(payload);
@@ -60,20 +60,20 @@ const forwardDebugEvent = (env: RuntimeState, payload: Record<string, unknown>):
   }
 };
 
-const getPendingAuditEvents = (env: RuntimeState): Map<string, Record<string, unknown>> => {
+const getPendingAuditEvents = (env: RuntimeReplica): Map<string, Record<string, unknown>> => {
   if (!env.runtimeState) env.runtimeState = {};
   if (!env.runtimeState.pendingAuditEvents) env.runtimeState.pendingAuditEvents = new Map();
   return env.runtimeState.pendingAuditEvents;
 };
 
-const queuePendingAuditEvent = (env: RuntimeState, payload: Record<string, unknown>): void => {
+const queuePendingAuditEvent = (env: RuntimeReplica, payload: Record<string, unknown>): void => {
   const pending = getPendingAuditEvents(env);
   const key = encodeCanonicalConsensusValue(payload);
   if (!pending.has(key)) pending.set(key, structuredClone(payload));
 };
 
 const appendFrameLog = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entry: Omit<FrameLogEntry, 'id' | 'timestamp'>,
   cleanLevel: string,
 ): void => {
@@ -87,7 +87,7 @@ const appendFrameLog = (
 };
 
 const queueStructuredAuditEvent = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   level: 'info' | 'warn' | 'error',
   category: LogCategory,
   message: string,
@@ -106,7 +106,7 @@ const queueStructuredAuditEvent = (
 };
 
 const attachStructuredLogger =
-  (env: RuntimeState, level: 'info' | 'warn' | 'error', cleanLevel: 'INFO' | 'WARN' | 'ERR') =>
+  (env: RuntimeReplica, level: 'info' | 'warn' | 'error', cleanLevel: 'INFO' | 'WARN' | 'ERR') =>
   (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string): void => {
     appendFrameLog(
       env,
@@ -127,7 +127,7 @@ const attachStructuredLogger =
     }
   };
 
-export const flushPendingAuditEvents = (env: RuntimeState): void => {
+export const flushPendingAuditEvents = (env: RuntimeReplica): void => {
   const pending = env.runtimeState?.pendingAuditEvents;
   if (!(pending instanceof Map) || pending.size === 0) return;
   for (const payload of pending.values()) {
@@ -136,24 +136,24 @@ export const flushPendingAuditEvents = (env: RuntimeState): void => {
   pending.clear();
 };
 
-export const clearPendingAuditEvents = (env: RuntimeState): void => {
+export const clearPendingAuditEvents = (env: RuntimeReplica): void => {
   const pending = env.runtimeState?.pendingAuditEvents;
   if (!(pending instanceof Map) || pending.size === 0) return;
   pending.clear();
 };
 
-const getPendingHistoryRecords = (env: RuntimeState): RuntimeHistoryRecord[] => {
+const getPendingHistoryRecords = (env: RuntimeReplica): RuntimeHistoryRecord[] => {
   if (!env.runtimeState) env.runtimeState = {};
   if (!env.runtimeState.pendingHistoryRecords) env.runtimeState.pendingHistoryRecords = [];
   return env.runtimeState.pendingHistoryRecords;
 };
 
-const getOverlay = (env: RuntimeState): RuntimeOverlayRecord[] => {
+const getOverlay = (env: RuntimeReplica): RuntimeOverlayRecord[] => {
   if (!env.overlay) env.overlay = [];
   return env.overlay;
 };
 
-const pushOverlayRecord = (env: RuntimeState, record: RuntimeOverlayRecord): void => {
+const pushOverlayRecord = (env: RuntimeReplica, record: RuntimeOverlayRecord): void => {
   const overlay = getOverlay(env);
   const key = storageOverlayRecordKey(record);
   const existingIndex = overlay.findIndex(candidate => storageOverlayRecordKey(candidate) === key);
@@ -173,14 +173,14 @@ const pushOverlayRecord = (env: RuntimeState, record: RuntimeOverlayRecord): voi
   currentMarks.push({ ...record });
 };
 
-const markStorageEntityDirty = (env: RuntimeState, entityId: string): void => {
+const markStorageEntityDirty = (env: RuntimeReplica, entityId: string): void => {
   const normalized = String(entityId || '').toLowerCase();
   if (!normalized) return;
   const record: RuntimeOverlayRecord = { family: 'entity', entityId: normalized };
   pushOverlayRecord(env, record);
 };
 
-const markStorageAccountDirty = (env: RuntimeState, entityId: string, counterpartyId: string): void => {
+const markStorageAccountDirty = (env: RuntimeReplica, entityId: string, counterpartyId: string): void => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedCounterpartyId = String(counterpartyId || '').toLowerCase();
   if (!normalizedEntityId || !normalizedCounterpartyId) return;
@@ -198,7 +198,7 @@ const markStorageAccountDirty = (env: RuntimeState, entityId: string, counterpar
   pushOverlayRecord(env, record);
 };
 
-const markStorageBookDirty = (env: RuntimeState, entityId: string, pairId: string, deleted = false): void => {
+const markStorageBookDirty = (env: RuntimeReplica, entityId: string, pairId: string, deleted = false): void => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedPairId = String(pairId || '').trim();
   if (!normalizedEntityId || !normalizedPairId) return;
@@ -211,7 +211,7 @@ const markStorageBookDirty = (env: RuntimeState, entityId: string, pairId: strin
   pushOverlayRecord(env, record);
 };
 
-export const applyRuntimeStorageChanges = (env: RuntimeState, changes: readonly RuntimeOverlayRecord[]): void => {
+export const applyRuntimeStorageChanges = (env: RuntimeReplica, changes: readonly RuntimeOverlayRecord[]): void => {
   for (const change of changes) {
     if (change.family === 'entity') {
       markStorageEntityDirty(env, change.entityId);
@@ -236,7 +236,7 @@ export const applyEntityStorageChanges = (
 };
 
 export const applyStorageChanges = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   changes: readonly RuntimeOverlayRecord[],
 ): void => {
@@ -245,7 +245,7 @@ export const applyStorageChanges = (
 };
 
 export const recordAccountFrameHistory = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   record: {
     entityId: string;
     counterpartyId: string;
@@ -286,7 +286,7 @@ export const recordAccountFrameHistory = (
   applyRuntimeStorageChanges(env, [{ family: 'account', entityId, counterpartyId }]);
 };
 
-export const publishEntityCandidateEffects = (env: RuntimeState, effects: readonly EntityCandidateEffect[]): void => {
+export const publishEntityCandidateEffects = (env: RuntimeReplica, effects: readonly EntityCandidateEffect[]): void => {
   for (const effect of effects) {
     if (effect.kind === 'entityFrameHistory') {
       recordEntityFrameHistory(env, effect);
@@ -305,7 +305,7 @@ export const publishEntityCandidateEffects = (env: RuntimeState, effects: readon
 };
 
 export const recordEntityFrameHistory = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   record: { entityId: string; link: CertifiedEntityFrameLink },
 ): void => {
   const entityId = String(record.entityId || '').toLowerCase();
@@ -340,7 +340,7 @@ export const recordEntityFrameHistory = (
 };
 
 export const peekPendingHistoryRecords = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeHeight?: number,
   timestamp?: number,
 ): RuntimeHistoryRecord[] => {
@@ -355,13 +355,13 @@ export const peekPendingHistoryRecords = (
   return pending.map(record => structuredClone(record));
 };
 
-export const dropPendingHistoryRecords = (env: RuntimeState, count: number): void => {
+export const dropPendingHistoryRecords = (env: RuntimeReplica, count: number): void => {
   const pending = env.runtimeState?.pendingHistoryRecords;
   if (!Array.isArray(pending) || pending.length === 0) return;
   pending.splice(0, Math.max(0, Math.floor(count)));
 };
 
-export const dropOverlay = (env: RuntimeState, count: number): void => {
+export const dropOverlay = (env: RuntimeReplica, count: number): void => {
   const pending = env.overlay;
   if (!Array.isArray(pending) || pending.length === 0) return;
   if (Math.max(0, Math.floor(count)) >= pending.length) {
@@ -375,7 +375,7 @@ export const dropOverlay = (env: RuntimeState, count: number): void => {
  * Create event emission methods for an environment.
  * Called once during env creation (createEmptyEnv).
  */
-export function attachEventEmitters(env: RuntimeState): void {
+export function attachEventEmitters(env: RuntimeReplica): void {
   env.log = (message: string) => {
     appendFrameLog(
       env,

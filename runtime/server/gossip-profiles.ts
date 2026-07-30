@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { Profile } from '../entity/profile';
 import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay/store';
 
@@ -6,7 +6,7 @@ const normalizeEntityId = (value: unknown): string => String(value || '').trim()
 
 export const buildKnownProfileBundle = (
   input: {
-    env: RuntimeState | null;
+    env: RuntimeReplica | null;
     relayStore: RelayStore;
     entityId: string;
   },

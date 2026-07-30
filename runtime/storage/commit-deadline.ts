@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { evaluateStorageProgressDeadline } from './progress-deadline';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
@@ -51,7 +51,7 @@ const resolveStorageWriteTimeoutMs = (): number => {
 
 export const waitForRuntimeProcessingIdle = async (
   deps: RuntimeStorageApiDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   timeoutMs = 5_000,
 ): Promise<boolean> => {
   const startedAt = Date.now();
@@ -69,7 +69,7 @@ export const waitForRuntimeProcessingIdle = async (
 };
 
 export const withStorageWriteDeadline = async <T>(
-  env: RuntimeState,
+  env: RuntimeReplica,
   operation: (markProgress: (step: string) => void) => Promise<T>,
 ): Promise<T> => {
   const timeoutMs = resolveStorageWriteTimeoutMs();

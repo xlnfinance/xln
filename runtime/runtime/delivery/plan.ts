@@ -1,4 +1,4 @@
-import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../../extensions/cross-j/boundary';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
@@ -37,7 +37,7 @@ const dedupeEntityOutputs = (outputs: RoutedEntityInput[]): RoutedEntityInput[] 
 };
 
 const resolveLocalEntityOutput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   output: RoutedEntityInput,
   deps: RuntimeOutputRoutingDeps,
 ): PlannedEntityOutput | null => {
@@ -84,7 +84,7 @@ const resolveLocalEntityOutput = (
 };
 
 const alignRemoteOutputSigner = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   output: RoutedEntityInput,
 ): RoutedEntityInput => {
   const gossipSignerIds = resolveGossipBoardSignerIds(env, output.entityId);
@@ -124,7 +124,7 @@ const alignRemoteOutputSigner = (
 };
 
 const bindVerifiedTargetRuntime = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   output: RoutedEntityInput,
   deps: RuntimeOutputRoutingDeps,
 ): { output: RoutedEntityInput; targetRuntimeId: string } => {
@@ -169,7 +169,7 @@ const bindVerifiedTargetRuntime = (
 };
 
 const planRemoteEntityOutput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   initialOutput: RoutedEntityInput,
   deps: RuntimeOutputRoutingDeps,
 ): PlannedEntityOutput => {
@@ -225,7 +225,7 @@ const planRemoteEntityOutput = (
 };
 
 export const planEntityOutputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   outputs: RoutedEntityInput[],
   deps: RuntimeOutputRoutingDeps,
 ): {

@@ -1,9 +1,9 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
-  import type { RuntimeState } from '@xln/runtime/runtime/types';
+  import type { RuntimeReplica } from '@xln/runtime/runtime/types';
 
   const MIB = 1024 ** 2;
-  export let runtimeFrameEnv: Writable<RuntimeState | null>;
+  export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
 
   let loadedRuntimeId = '';
   let cloneMiB = '';
@@ -16,7 +16,7 @@
   const display = (value: number | undefined, divisor = 1): string =>
     value === undefined ? '' : String(Number((value / divisor).toFixed(3)));
 
-  const loadRuntime = (env: RuntimeState | null): void => {
+  const loadRuntime = (env: RuntimeReplica | null): void => {
     const runtimeId = String(env?.runtimeId || env?.dbNamespace || '');
     if (!env || runtimeId === loadedRuntimeId) return;
     loadedRuntimeId = runtimeId;

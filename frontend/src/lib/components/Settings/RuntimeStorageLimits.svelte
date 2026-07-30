@@ -1,10 +1,10 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
-  import type { RuntimeState } from '@xln/runtime/runtime/types';
+  import type { RuntimeReplica } from '@xln/runtime/runtime/types';
 
   const GIB = 1024 ** 3;
 
-  export let runtimeFrameEnv: Writable<RuntimeState | null>;
+  export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
 
   let loadedRuntimeId = '';
   let commonGiB = '';
@@ -19,7 +19,7 @@
       ? ''
       : String(Number((bytes / GIB).toFixed(6)));
 
-  const loadRuntime = (env: RuntimeState | null): void => {
+  const loadRuntime = (env: RuntimeReplica | null): void => {
     const runtimeId = String(env?.runtimeId || env?.dbNamespace || '');
     if (!env || runtimeId === loadedRuntimeId) return;
     loadedRuntimeId = runtimeId;
@@ -76,7 +76,7 @@
         if (!env) throw new Error('No Runtime is selected');
         env.runtimeConfig ??= {};
         const storage = { ...(env.runtimeConfig.storage ?? {}) } as Record<string, unknown> &
-          NonNullable<NonNullable<RuntimeState['runtimeConfig']>['storage']>;
+          NonNullable<NonNullable<RuntimeReplica['runtimeConfig']>['storage']>;
         writeOptional(storage, 'epochMaxBytes', epochMaxBytes);
         writeOptional(storage, 'historyViewMaxBytes', historyViewMaxBytes);
         writeOptional(storage, 'historyViewRetainFrames', retainFrames);

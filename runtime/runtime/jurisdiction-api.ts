@@ -5,19 +5,19 @@ import { resolveEntityProposerId } from './entity-output-signer';
 import type { AccountState } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from './types';
+import type { RuntimeReplica, RuntimeInput } from './types';
 import { getWallClockMs } from '../infra/time';
 import { buildDebtEnforcementRuntimeInputFromProjection } from './debt-enforcement-input';
 import type { DebtEnforcementProjectionRuntimeInputParams } from './debt-enforcement-input';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs } from '../extensions/cross-j/market';
 
-export function getActiveJAdapter(env: RuntimeState): JAdapter | null {
+export function getActiveJAdapter(env: RuntimeReplica): JAdapter | null {
   if (!env.activeJurisdiction) return null;
   const jReplica = env.jReplicas?.get(env.activeJurisdiction);
   return jReplica?.jadapter || null;
 }
 
-export function getEntityJAdapter(env: RuntimeState, entityId: string, signerId?: string): JAdapter | null {
+export function getEntityJAdapter(env: RuntimeReplica, entityId: string, signerId?: string): JAdapter | null {
   const jurisdiction = requireEntityRuntimeJurisdictionConfig(env, entityId, signerId);
   const jReplica = env.jReplicas?.get(jurisdiction.name);
   return jReplica?.jadapter || null;
@@ -74,7 +74,7 @@ export const requireCrossJurisdictionOrderId = (value: string): string => {
   return orderId;
 };
 
-const findEntityStateForRuntime = (env: RuntimeState, entityId: string, signerId?: string): EntityState | null => {
+const findEntityStateForRuntime = (env: RuntimeReplica, entityId: string, signerId?: string): EntityState | null => {
   const target = normalizeRuntimeEntityId(entityId);
   const signer = signerId ? String(signerId).toLowerCase() : null;
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
@@ -100,7 +100,7 @@ const findRuntimeAccountWith = (state: EntityState | null, counterpartyId: strin
 };
 
 const resolveCrossJurisdictionSwapContext = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   params: CrossJurisdictionSwapSubmitParams,
 ) => {
   const now = env.scenarioMode ? env.timestamp : getWallClockMs();
@@ -204,7 +204,7 @@ const resolveCrossJurisdictionBook = (
 };
 
 export function buildCrossJurisdictionSwapSubmission(
-  env: RuntimeState,
+  env: RuntimeReplica,
   params: CrossJurisdictionSwapSubmitParams,
 ): CrossJurisdictionSwapSubmitResult {
   const context = resolveCrossJurisdictionSwapContext(env, params);
@@ -261,7 +261,7 @@ export function buildCrossJurisdictionSwapSubmission(
 }
 
 export function buildDebtEnforcementRuntimeInput(
-  env: RuntimeState,
+  env: RuntimeReplica,
   params: DebtEnforcementRuntimeInputParams,
 ): RuntimeInput {
   const entityId = String(params.entityId || '').trim().toLowerCase();

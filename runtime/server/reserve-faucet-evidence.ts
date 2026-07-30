@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   findReserveUpdatedEvidence,
   type ReserveUpdatedEvidence,
@@ -23,7 +23,7 @@ export const parseReserveFaucetAmount = (
 };
 
 export const waitForReserveUpdatedEvidence = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   tokenId: number,
   expectedMin: bigint,

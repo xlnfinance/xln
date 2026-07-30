@@ -9,7 +9,7 @@ import {
 } from '../routing/name-resolution';
 import type { createRuntimeLoopApi } from './loop';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeState, RuntimeEntityInputsEnvelope } from './types';
+import type { RuntimeReplica, RuntimeEntityInputsEnvelope } from './types';
 import {
   buildCrossJurisdictionSwapSubmission,
   type CrossJurisdictionSwapSubmitParams,
@@ -38,7 +38,7 @@ export const getEntityDisplayInfoFromProfile = (entityId: string) =>
  */
 export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies) => {
   const submitCrossJurisdictionIntent = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     route: CrossJurisdictionSwapRoute,
   ): Promise<CrossJurisdictionSwapSubmitResult> => {
     assertRuntimeCommandReady(env);
@@ -99,7 +99,7 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
   };
 
   const submitCrossJurisdictionSwap = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     params: CrossJurisdictionSwapSubmitParams,
   ): Promise<CrossJurisdictionSwapSubmitResult> => {
     const { route } = buildCrossJurisdictionSwapSubmission(env, params);

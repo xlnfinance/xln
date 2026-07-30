@@ -23,7 +23,7 @@ import {
 } from '../jurisdiction/registration-evidence';
 import { compareStableText } from '../protocol/serialization';
 import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, ConsensusConfig, EntityFrameAuthority, EntityReplica, ProposedEntityFrame } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
 import { normalizeEntityId } from './keys';
@@ -143,7 +143,7 @@ const assertAuthorityShape = (authority: EntityFrameAuthority, height: number, c
 };
 
 const assertLeaderTransition = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   link: CertifiedEntityFrameLink,
   preAuthority: EntityFrameAuthority,
@@ -204,7 +204,7 @@ const assertFrameBody = (entityId: string, link: CertifiedEntityFrameLink): Prop
 };
 
 const assertCertificateVariant = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   link: CertifiedEntityFrameLink,
   preAuthority: EntityFrameAuthority,
@@ -307,7 +307,7 @@ const computeRuntimeCheckpointReplicaSetRoot = (
   );
 
 const assertGenesisBoardAuthority = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   authority: EntityFrameAuthority,
 ): string | undefined => {
@@ -346,7 +346,7 @@ const assertGenesisBoardAuthority = (
   return computeRegistrationEvidenceHash(evidence);
 };
 
-const assertGenesisAnchor = (env: RuntimeState, entityId: string, anchor: CertifiedEntityLineageAnchor): void => {
+const assertGenesisAnchor = (env: RuntimeReplica, entityId: string, anchor: CertifiedEntityLineageAnchor): void => {
   if (
     normalizeEntityId(anchor.entityId) !== entityId ||
     anchor.height !== 0 ||
@@ -364,7 +364,7 @@ const assertGenesisAnchor = (env: RuntimeState, entityId: string, anchor: Certif
   }
 };
 
-const assertLineageAnchor = (env: RuntimeState, entityId: string, anchor: CertifiedEntityLineageAnchor): void => {
+const assertLineageAnchor = (env: RuntimeReplica, entityId: string, anchor: CertifiedEntityLineageAnchor): void => {
   if (
     normalizeEntityId(anchor.entityId) !== entityId ||
     !Number.isSafeInteger(anchor.height) ||
@@ -396,7 +396,7 @@ const assertLineageAnchor = (env: RuntimeState, entityId: string, anchor: Certif
 };
 
 const createGenesisAnchor = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   entry: ReplicaEntry,
 ): CertifiedEntityLineageAnchor => {
@@ -418,7 +418,7 @@ const createGenesisAnchor = (
 };
 
 const resolveGenesisAnchor = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   entries: ReplicaEntry[],
 ): CertifiedEntityLineageAnchor => {
@@ -500,7 +500,7 @@ const assertReplicaMatchesCertifiedHeight = (entry: ReplicaEntry, link: Certifie
  * its next R-WAL checkpoint can become the local anchor.
  */
 const buildUncheckpointedEntityBootstrapPlan = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   entries: ReplicaEntry[],
 ): {
@@ -615,7 +615,7 @@ type EntityLineagePlan = {
 };
 
 const buildCheckpointedReplicaLineage = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   entry: ReplicaEntry,
   anchor: CertifiedEntityLineageAnchor,
@@ -716,7 +716,7 @@ const assertCheckpointSet = (
 };
 
 const buildCheckpointedEntityPlan = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   entries: ReplicaEntry[],
 ): EntityLineagePlan => {
@@ -810,7 +810,7 @@ const buildCheckpointedEntityPlan = (
   return { selected, lineages, anchors };
 };
 
-const buildEntityPlan = (env: RuntimeState, entityId: string, entries: ReplicaEntry[]): EntityLineagePlan => {
+const buildEntityPlan = (env: RuntimeReplica, entityId: string, entries: ReplicaEntry[]): EntityLineagePlan => {
   const checkpointed = entries.some(entry => Boolean(entry.replica.certifiedFrameAnchor?.runtimeCheckpoint));
   if (checkpointed) return buildCheckpointedEntityPlan(env, entityId, entries);
   const bootstrap = buildUncheckpointedEntityBootstrapPlan(env, entityId, entries);
@@ -821,7 +821,7 @@ const buildEntityPlan = (env: RuntimeState, entityId: string, entries: ReplicaEn
   };
 };
 
-export const buildCertifiedEntityLineagePlan = (env: RuntimeState): CertifiedEntityLineagePlan => {
+export const buildCertifiedEntityLineagePlan = (env: RuntimeReplica): CertifiedEntityLineagePlan => {
   const byEntity = new Map<string, ReplicaEntry[]>();
   for (const [rawReplicaKey, replica] of env.eReplicas.entries()) {
     if (!replica?.state) continue;
@@ -861,7 +861,7 @@ export const buildCertifiedEntityLineagePlan = (env: RuntimeState): CertifiedEnt
  * Runtime trust boundary.
  */
 export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   validated = buildCertifiedEntityLineagePlan(env),
 ): CertifiedEntityLineagePlan => {
   const lineageByReplicaKey = new Map<string, CertifiedEntityFrameLink[]>();
@@ -953,7 +953,7 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
  * test gates. Repeating it synchronously every 100 R-frames turns a derived
  * LevelDB checkpoint into user-visible latency without adding new authority.
  */
-export const buildRuntimeCheckpointLineagePlan = (env: RuntimeState): CertifiedEntityLineagePlan => {
+export const buildRuntimeCheckpointLineagePlan = (env: RuntimeReplica): CertifiedEntityLineagePlan => {
   const entriesByEntity = new Map<string, ReplicaEntry[]>();
   for (const [rawReplicaKey, replica] of env.eReplicas) {
     if (!replica?.state) continue;
@@ -1084,7 +1084,7 @@ export const buildRuntimeCheckpointLineagePlan = (env: RuntimeState): CertifiedE
  * Untouched Entity anchors stay byte-identical; a later full storage
  * checkpoint still validates and republishes the complete replica set.
  */
-export const refreshRuntimeCheckpointLineageForEntity = (env: RuntimeState, rawEntityId: string): void => {
+export const refreshRuntimeCheckpointLineageForEntity = (env: RuntimeReplica, rawEntityId: string): void => {
   const entityId = normalizeEntityId(rawEntityId);
   const replicas = new Map(
     [...env.eReplicas.entries()].filter(
@@ -1116,7 +1116,7 @@ export type RuntimeCheckpointLineageRefreshGuard = Readonly<{
  * metadata so the WAL remains a pure function of its persisted Runtime input.
  */
 export const beginRuntimeCheckpointLineageRefresh = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   rawEntityId: string,
 ): RuntimeCheckpointLineageRefreshGuard => {
   const entityId = normalizeEntityId(rawEntityId);
@@ -1161,7 +1161,7 @@ export const beginRuntimeCheckpointLineageRefresh = (
   };
 };
 
-export const applyCertifiedEntityLineagePlan = (env: RuntimeState, plan: CertifiedEntityLineagePlan): void => {
+export const applyCertifiedEntityLineagePlan = (env: RuntimeReplica, plan: CertifiedEntityLineagePlan): void => {
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const lineage = plan.lineageByReplicaKey.get(String(replicaKey));
     if (lineage && lineage.length > 0) {

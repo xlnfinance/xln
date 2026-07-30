@@ -26,7 +26,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { createEmptyEnv } from '../runtime';
 import { cloneEntityState } from '../entity/state-clone';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import { signEntityHashes } from '../hanko/signing';
 import {
@@ -46,7 +46,7 @@ const counterpartyId = entity('02');
 const signerId = addr('31');
 const secondValidatorId = addr('32');
 
-const envAt = (scannedThroughHeight: number, disputeDelayBlocks: number): RuntimeState => {
+const envAt = (scannedThroughHeight: number, disputeDelayBlocks: number): RuntimeReplica => {
   const env = createEmptyEnv(`certified-j-height:${scannedThroughHeight}:${disputeDelayBlocks}`);
   env.timestamp = 1_000;
   env.quietRuntimeLogs = true;
@@ -240,7 +240,7 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
       type: 'disputeStart',
       data: { counterpartyEntityId: peerEntityId },
     } satisfies Extract<EntityTx, { type: 'disputeStart' }>;
-    const envFor = (height: number, delay: number): RuntimeState => {
+    const envFor = (height: number, delay: number): RuntimeReplica => {
       const env = envAt(height, delay);
       env.runtimeSeed = signingEnv.runtimeSeed;
       return env;

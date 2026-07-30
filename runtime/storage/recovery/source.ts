@@ -1,6 +1,6 @@
 import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/local-history';
 import type { EntityState } from '../../entity/types';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import {
   loadEntityStatesAtHeightFromStorage,
   verifyStorageSnapshotAtHeight,
@@ -24,7 +24,7 @@ export type PersistedRestoreSource = {
 export const resolvePersistedRestoreSource = async (
   deps: RuntimeStorageApiDeps,
   reads: PersistedStorageReadApi,
-  env: RuntimeState,
+  env: RuntimeReplica,
   targetHeightOverride?: number,
   options: { prunedTargetReturnsNull?: boolean } = {},
 ): Promise<PersistedRestoreSource | null> => {

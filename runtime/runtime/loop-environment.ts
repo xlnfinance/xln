@@ -7,7 +7,7 @@ import {
 } from '../infra/runtime-process';
 import { safeStringify } from '../protocol/serialization';
 import { ensureRuntimeState } from './runtime-state';
-import type { RuntimeState, RuntimeInput } from './types';
+import type { RuntimeReplica, RuntimeInput } from './types';
 import {
   getRuntimeCommandReadiness,
   inferRuntimeLifecyclePhase,
@@ -17,11 +17,11 @@ import {
 export const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 export const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 
-export const readRuntimeMetadata = (env: RuntimeState, key: PropertyKey): unknown =>
+export const readRuntimeMetadata = (env: RuntimeReplica, key: PropertyKey): unknown =>
   Reflect.get(env, key);
 
 export const writeRuntimeMetadata = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   key: PropertyKey,
   value: unknown,
 ): void => {
@@ -30,7 +30,7 @@ export const writeRuntimeMetadata = (
   }
 };
 
-export const deleteRuntimeMetadata = (env: RuntimeState, key: PropertyKey): void => {
+export const deleteRuntimeMetadata = (env: RuntimeReplica, key: PropertyKey): void => {
   if (!Reflect.deleteProperty(env, key)) {
     throw new Error(`RUNTIME_METADATA_DELETE_FAILED:${String(key)}`);
   }
@@ -48,8 +48,8 @@ export const failfastAssert: (
 };
 
 export const registerEnvChangeCallback = (
-  env: RuntimeState,
-  callback: (env: RuntimeState) => void,
+  env: RuntimeReplica,
+  callback: (env: RuntimeReplica) => void,
 ): (() => void) => {
   const state = ensureRuntimeState(env);
   state.envChangeCallbacks ??= new Set();
@@ -75,7 +75,7 @@ export type RuntimePublishedNotice = Readonly<{
  * fetch bounded, owned projections through RuntimeAdapter reads.
  */
 export const registerRuntimePublishedCallback = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   callback: (notice: RuntimePublishedNotice) => void,
 ): (() => void) =>
   registerEnvChangeCallback(env, (committedEnv) => {
@@ -95,7 +95,7 @@ export const registerRuntimePublishedCallback = (
   });
 
 export const registerRuntimeFrameCommitCallback = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   callback: (frame: { height: number; runtimeInput: RuntimeInput }) => void,
 ): (() => void) => {
   const state = ensureRuntimeState(env);
@@ -105,9 +105,9 @@ export const registerRuntimeFrameCommitCallback = (
 };
 
 export const registerRecoveryBackupBarrier = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   callback: (
-    env: RuntimeState,
+    env: RuntimeReplica,
     info: { height: number; remoteOutputCount: number; jInputCount: number },
   ) => Promise<void>,
 ): (() => void) => {
@@ -128,7 +128,7 @@ const readPositiveInteger = (name: string): number | undefined => {
   return value;
 };
 
-export const ensureRuntimeConfig = (env: RuntimeState): NonNullable<RuntimeState['runtimeConfig']> => {
+export const ensureRuntimeConfig = (env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeConfig']> => {
   env.runtimeConfig ??= {
     minFrameDelayMs: 0,
     loopIntervalMs: isProductionRuntime ? 25 : 0,

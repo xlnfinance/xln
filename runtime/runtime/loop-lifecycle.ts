@@ -1,4 +1,4 @@
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import { getWallClockMs } from '../infra/time';
 import { inferRuntimeLifecyclePhase, transitionRuntimeLifecycle } from './lifecycle';
 import { requestRuntimeLoopWake, requireRuntimeMempool } from './input-queue';
@@ -26,7 +26,7 @@ import {
 import { emitRuntimeLoopError, reportFatalLoopError } from './loop-failure';
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
 
 export type RuntimeLoopConfig = {
   tickDelayMs?: number;
@@ -41,11 +41,11 @@ export type RuntimeLoopConfig = {
 };
 
 export type RuntimeLoopLifecycleDeps = {
-  processRuntime(env: RuntimeState): Promise<unknown>;
-  waitForRuntimeProcessingIdle(env: RuntimeState, timeoutMs: number): Promise<boolean>;
+  processRuntime(env: RuntimeReplica): Promise<unknown>;
+  waitForRuntimeProcessingIdle(env: RuntimeReplica, timeoutMs: number): Promise<boolean>;
   getRuntimeProcessGlobal(): { exit?: (code: number) => unknown } | null;
-  hasRuntimeWork(env: RuntimeState): boolean;
-  getNextWallClockWakeTimestamp(env: RuntimeState): number | null;
+  hasRuntimeWork(env: RuntimeReplica): boolean;
+  getNextWallClockWakeTimestamp(env: RuntimeReplica): number | null;
 };
 
 type LoopControl = {
@@ -73,7 +73,7 @@ const configureFrameCaps = (state: RuntimeLifecycleState, config?: RuntimeLoopCo
 };
 
 const waitForNextRuntimeWork = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   tickDelayMs: number,
   deps: RuntimeLoopLifecycleDeps,
 ): Promise<void> => {
@@ -101,7 +101,7 @@ const waitForNextRuntimeWork = async (
 };
 
 const processAvailableRuntimeWork = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeLoopLifecycleDeps,
 ): Promise<void> => {
   startJurisdictionWatchers(env);
@@ -117,7 +117,7 @@ const processAvailableRuntimeWork = async (
 };
 
 const finishRuntimeLoop = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: RuntimeLifecycleState,
   control: LoopControl,
   haltedMessage: string | null,
@@ -133,7 +133,7 @@ const finishRuntimeLoop = (
 };
 
 const runRuntimeLoop = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: RuntimeLifecycleState,
   config: RuntimeLoopConfig | undefined,
   control: LoopControl,
@@ -157,7 +157,7 @@ const runRuntimeLoop = async (
 };
 
 const startRuntimeLoopWithDeps = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   config: RuntimeLoopConfig | undefined,
   deps: RuntimeLoopLifecycleDeps,
 ): (() => void) => {
@@ -183,7 +183,7 @@ const startRuntimeLoopWithDeps = (
 };
 
 const stopRuntimeLoopAndWaitWithDeps = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   timeoutMs: number,
   deps: RuntimeLoopLifecycleDeps,
 ): Promise<boolean> => {
@@ -204,7 +204,7 @@ const stopRuntimeLoopAndWaitWithDeps = async (
 };
 
 const resumeRuntimeLoopWithDeps = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   config: RuntimeLoopConfig | undefined,
   deps: RuntimeLoopLifecycleDeps,
 ): (() => void) => {
@@ -222,7 +222,7 @@ const resumeRuntimeLoopWithDeps = (
 };
 
 const resumeAfterPersistenceQuiesce = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   config: RuntimeLoopConfig | undefined,
   deps: RuntimeLoopLifecycleDeps,
 ): (() => void) => {
@@ -241,7 +241,7 @@ const resumeAfterPersistenceQuiesce = (
   return resumeRuntimeLoopWithDeps(env, config, deps);
 };
 
-const detachRuntimeEnv = (env: RuntimeState): void => {
+const detachRuntimeEnv = (env: RuntimeReplica): void => {
   const state = env.runtimeState;
   stopJurisdictionWatchers(env);
   state?.stopLoop?.();
@@ -266,16 +266,16 @@ const detachRuntimeEnv = (env: RuntimeState): void => {
 };
 
 export const createRuntimeLifecycleApi = (deps: RuntimeLoopLifecycleDeps) => ({
-  startRuntimeLoop: (env: RuntimeState, config?: RuntimeLoopConfig) =>
+  startRuntimeLoop: (env: RuntimeReplica, config?: RuntimeLoopConfig) =>
     startRuntimeLoopWithDeps(env, config, deps),
-  stopRuntimeLoopAndWait: (env: RuntimeState, timeoutMs = 10_000) =>
+  stopRuntimeLoopAndWait: (env: RuntimeReplica, timeoutMs = 10_000) =>
     stopRuntimeLoopAndWaitWithDeps(env, timeoutMs, deps),
-  resumeRuntimeLoop: (env: RuntimeState, config?: RuntimeLoopConfig) =>
+  resumeRuntimeLoop: (env: RuntimeReplica, config?: RuntimeLoopConfig) =>
     resumeRuntimeLoopWithDeps(env, config, deps),
-  resumeRuntimeAfterPersistenceQuiesce: (env: RuntimeState, config?: RuntimeLoopConfig) =>
+  resumeRuntimeAfterPersistenceQuiesce: (env: RuntimeReplica, config?: RuntimeLoopConfig) =>
     resumeAfterPersistenceQuiesce(env, config, deps),
   waitForRuntimeWorkDrained: (
-    env: RuntimeState,
+    env: RuntimeReplica,
     timeoutMs = 10_000,
     quietMs = 250,
     options: { allowPersistencePaused?: boolean } = {},

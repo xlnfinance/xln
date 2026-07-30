@@ -3,7 +3,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { createStructuredLogger } from '../infra/logger';
 import { nodeProcess } from '../infra/runtime-process';
 import { dbRootPath } from '../runtime/platform';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   readStorageHead,
   seedFreshStorageEpoch,
@@ -16,13 +16,13 @@ import {
   writeDurableStorageMarkerFile,
 } from './fs-durability';
 
-type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
 type RuntimeDbHandleRole = 'storage-current' | 'storage-previous' | 'runtime-wal' | 'history-views' | 'infra';
 
 const storageLog = createStructuredLogger('runtime.storage');
 const closingRuntimeDbHandles = new Set<string>();
 
-const runtimeDbHandleKey = (env: RuntimeState, role: RuntimeDbHandleRole): string => {
+const runtimeDbHandleKey = (env: RuntimeReplica, role: RuntimeDbHandleRole): string => {
   if (role === 'storage-current') return resolveStorageDbPath(env, 'current');
   if (role === 'storage-previous') return resolveStorageDbPath(env, 'previous');
   if (role === 'runtime-wal') return resolveRuntimeWalDbPath(env);
@@ -30,15 +30,15 @@ const runtimeDbHandleKey = (env: RuntimeState, role: RuntimeDbHandleRole): strin
   return resolveDbPath(env, 'infra');
 };
 
-const beginRuntimeDbClose = (env: RuntimeState, role: RuntimeDbHandleRole): void => {
+const beginRuntimeDbClose = (env: RuntimeReplica, role: RuntimeDbHandleRole): void => {
   closingRuntimeDbHandles.add(runtimeDbHandleKey(env, role));
 };
 
-const endRuntimeDbClose = (env: RuntimeState, role: RuntimeDbHandleRole): void => {
+const endRuntimeDbClose = (env: RuntimeReplica, role: RuntimeDbHandleRole): void => {
   closingRuntimeDbHandles.delete(runtimeDbHandleKey(env, role));
 };
 
-const assertRuntimeDbNotClosing = (env: RuntimeState, role: RuntimeDbHandleRole): void => {
+const assertRuntimeDbNotClosing = (env: RuntimeReplica, role: RuntimeDbHandleRole): void => {
   if (closingRuntimeDbHandles.has(runtimeDbHandleKey(env, role))) {
     throw new Error(`STORAGE_HANDLE_STATUS_CONFLICT:role=${role}:status=closing`);
   }
@@ -52,7 +52,7 @@ const createRebranchedLevel = (path: string): Level<Buffer, Buffer> => withRebra
 );
 
 export type RuntimeStorageDbDeps = {
-  ensureRuntimeState(env: RuntimeState): RuntimeLifecycleState;
+  ensureRuntimeState(env: RuntimeReplica): RuntimeLifecycleState;
 };
 
 const DEFAULT_DB_NAMESPACE = 'default';
@@ -71,7 +71,7 @@ export const deriveRuntimeIdFromSeed = (seed?: string | null): string | null => 
 };
 
 export const resolveDbNamespace = (
-  options: { env?: RuntimeState | null; runtimeId?: string | null; runtimeSeed?: string | null } = {},
+  options: { env?: RuntimeReplica | null; runtimeId?: string | null; runtimeSeed?: string | null } = {},
 ): string => {
   const explicit = options.env?.dbNamespace;
   if (explicit) return normalizeDbNamespace(explicit);
@@ -83,7 +83,7 @@ export const resolveDbNamespace = (
   return DEFAULT_DB_NAMESPACE;
 };
 
-export const resolveDbPath = (env: RuntimeState, kind: RuntimeDbKind = 'core'): string => {
+export const resolveDbPath = (env: RuntimeReplica, kind: RuntimeDbKind = 'core'): string => {
   const namespace = resolveDbNamespace({ env });
   const suffix = kind === 'core' ? '' : '-infra';
   if (nodeProcess) {
@@ -104,17 +104,17 @@ type StorageEpochRotationMarker = {
 
 const storageEpochRecoveryPromises = new Map<string, Promise<void>>();
 
-export const resolveStorageDbPath = (env: RuntimeState, role: StorageDbRole = 'current'): string => {
+export const resolveStorageDbPath = (env: RuntimeReplica, role: StorageDbRole = 'current'): string => {
   const base = resolveDbPath(env, 'core');
   return `${base}-storage-${role}`;
 };
 
-export const resolveRuntimeWalDbPath = (env: RuntimeState): string => {
+export const resolveRuntimeWalDbPath = (env: RuntimeReplica): string => {
   const base = resolveDbPath(env, 'core');
   return `${base}-wal`;
 };
 
-export const resolveHistoryViewDbPath = (env: RuntimeState): string => {
+export const resolveHistoryViewDbPath = (env: RuntimeReplica): string => {
   const base = resolveDbPath(env, 'core');
   return `${base}-history-views`;
 };
@@ -129,7 +129,7 @@ export type StorageWriterLockOptions = {
   onBoundary?: (boundary: StorageWriterLockBoundary) => void | Promise<void>;
 };
 
-export const resolveStorageWriterLockPath = (env: RuntimeState): string => {
+export const resolveStorageWriterLockPath = (env: RuntimeReplica): string => {
   const base = resolveDbPath(env, 'core');
   return `${base}-writer.lock`;
 };
@@ -324,7 +324,7 @@ const tryReclaimExpiredStorageLock = async (
 };
 
 const acquireStorageRecoveryLock = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   recoveryPath: string,
   fs: typeof import('fs/promises'),
   path: typeof import('path'),
@@ -361,7 +361,7 @@ const releaseStorageRecoveryLock = async (
 };
 
 const tryAcquireStorageWriterLock = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   lockPath: string,
   fs: typeof import('fs/promises'),
   path: typeof import('path'),
@@ -442,7 +442,7 @@ const getBrowserLockManager = (): BrowserLockManager | null => {
   return browserNavigator?.locks ?? null;
 };
 
-const withBrowserStorageWriterLock = async <T>(env: RuntimeState, fn: () => Promise<T>): Promise<T> => {
+const withBrowserStorageWriterLock = async <T>(env: RuntimeReplica, fn: () => Promise<T>): Promise<T> => {
   const locks = getBrowserLockManager();
   if (!locks) {
     throw new Error(`STORAGE_BROWSER_WRITER_LOCK_UNAVAILABLE: namespace=${resolveDbNamespace({ env })}`);
@@ -455,7 +455,7 @@ const withBrowserStorageWriterLock = async <T>(env: RuntimeState, fn: () => Prom
 };
 
 export const withStorageWriterLock = async <T>(
-  env: RuntimeState,
+  env: RuntimeReplica,
   fn: () => Promise<T>,
   options: StorageWriterLockOptions = {},
 ): Promise<T> => {
@@ -535,11 +535,11 @@ export const withStorageWriterLock = async <T>(
  * contender instead of observing a torn history window.
  */
 export const withStorageConsistentRead = async <T>(
-  env: RuntimeState,
+  env: RuntimeReplica,
   fn: () => Promise<T>,
 ): Promise<T> => withStorageWriterLock(env, fn);
 
-const resolveStorageRotationMarkerPath = (env: RuntimeState): string => {
+const resolveStorageRotationMarkerPath = (env: RuntimeReplica): string => {
   const base = resolveDbPath(env, 'core');
   return `${base}-storage-rotation.json`;
 };
@@ -556,7 +556,7 @@ const storageStateFields = (role: StorageDbRole) =>
       } as const);
 
 export const getStorageDb = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
   role: StorageDbRole = 'current',
 ): Level<Buffer, Buffer> => {
@@ -571,7 +571,7 @@ export const getStorageDb = (
 };
 
 export const closeStorageDb = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   role: StorageDbRole = 'current',
 ): Promise<void> => {
   const state = env.runtimeState;
@@ -612,7 +612,7 @@ const isFsNotFound = (error: unknown): boolean => {
   return String((error as { code?: unknown }).code ?? '') === 'ENOENT';
 };
 
-const readStorageRotationMarker = async (env: RuntimeState): Promise<StorageEpochRotationMarker | null> => {
+const readStorageRotationMarker = async (env: RuntimeReplica): Promise<StorageEpochRotationMarker | null> => {
   if (!nodeProcess) return null;
   const fs = await import('fs/promises');
   const markerPath = resolveStorageRotationMarkerPath(env);
@@ -648,13 +648,13 @@ const readStorageRotationMarker = async (env: RuntimeState): Promise<StorageEpoc
   };
 };
 
-const writeStorageRotationMarker = async (env: RuntimeState, marker: StorageEpochRotationMarker): Promise<void> => {
+const writeStorageRotationMarker = async (env: RuntimeReplica, marker: StorageEpochRotationMarker): Promise<void> => {
   if (!nodeProcess) return;
   const markerPath = resolveStorageRotationMarkerPath(env);
   await writeDurableStorageMarkerFile(markerPath, `${JSON.stringify(marker)}\n`);
 };
 
-const removeStorageRotationMarker = async (env: RuntimeState): Promise<void> => {
+const removeStorageRotationMarker = async (env: RuntimeReplica): Promise<void> => {
   if (!nodeProcess) return;
   const fs = await import('fs/promises');
   const markerPath = resolveStorageRotationMarkerPath(env);
@@ -663,7 +663,7 @@ const removeStorageRotationMarker = async (env: RuntimeState): Promise<void> => 
   await fsyncStorageParentDirectory(markerPath);
 };
 
-const recoverStorageEpochRotationOnce = async (env: RuntimeState): Promise<void> => {
+const recoverStorageEpochRotationOnce = async (env: RuntimeReplica): Promise<void> => {
   if (!nodeProcess) return;
   const fs = await import('fs/promises');
   const marker = await readStorageRotationMarker(env);
@@ -713,7 +713,7 @@ const recoverStorageEpochRotationOnce = async (env: RuntimeState): Promise<void>
   }
 };
 
-const recoverStorageEpochRotation = async (env: RuntimeState): Promise<void> => {
+const recoverStorageEpochRotation = async (env: RuntimeReplica): Promise<void> => {
   if (!nodeProcess) return;
   const key = resolveStorageRotationMarkerPath(env);
   const existing = storageEpochRecoveryPromises.get(key);
@@ -731,7 +731,7 @@ const recoverStorageEpochRotation = async (env: RuntimeState): Promise<void> => 
 };
 
 const waitForStorageEpochRotation = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
 ): Promise<void> => {
   const pending = deps.ensureRuntimeState(env).storageEpochRotatePromise;
@@ -739,7 +739,7 @@ const waitForStorageEpochRotation = async (
 };
 
 const verifyOpenedStorageDb = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
   role: StorageDbRole,
   db: Level<Buffer, Buffer>,
@@ -755,7 +755,7 @@ const verifyOpenedStorageDb = async (
 };
 
 export const tryOpenStorageDb = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
   role: StorageDbRole = 'current',
 ): Promise<boolean> => {
@@ -795,7 +795,7 @@ export const tryOpenStorageDb = async (
 };
 
 export const rotateStorageEpochDb = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
   snapshotHeight: number,
   timestamp = env.timestamp,
@@ -857,7 +857,7 @@ export const rotateStorageEpochDb = async (
 };
 
 export const getInfraDb = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
 ): Level<Buffer, Buffer> => {
   assertRuntimeDbNotClosing(env, 'infra');
@@ -870,7 +870,7 @@ export const getInfraDb = (
 };
 
 export const getRuntimeWalDb = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
 ): Level<Buffer, Buffer> => {
   assertRuntimeDbNotClosing(env, 'runtime-wal');
@@ -881,7 +881,7 @@ export const getRuntimeWalDb = (
   return state.runtimeWalDb as Level<Buffer, Buffer>;
 };
 
-export const closeRuntimeWalDb = async (env: RuntimeState): Promise<void> => {
+export const closeRuntimeWalDb = async (env: RuntimeReplica): Promise<void> => {
   const state = env.runtimeState;
   const db = state?.runtimeWalDb as Level<Buffer, Buffer> | undefined;
   if (!db) return;
@@ -900,7 +900,7 @@ export const closeRuntimeWalDb = async (env: RuntimeState): Promise<void> => {
 };
 
 export const getHistoryViewDb = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
 ): Level<Buffer, Buffer> => {
   assertRuntimeDbNotClosing(env, 'history-views');
@@ -911,7 +911,7 @@ export const getHistoryViewDb = (
   return state.historyViewDb;
 };
 
-export const closeHistoryViewDb = async (env: RuntimeState): Promise<void> => {
+export const closeHistoryViewDb = async (env: RuntimeReplica): Promise<void> => {
   const state = env.runtimeState;
   const db = state?.historyViewDb;
   if (!db) return;
@@ -928,7 +928,7 @@ export const closeHistoryViewDb = async (env: RuntimeState): Promise<void> => {
   }
 };
 
-export const closeInfraDb = async (env: RuntimeState): Promise<void> => {
+export const closeInfraDb = async (env: RuntimeReplica): Promise<void> => {
   const state = env.runtimeState;
   if (!state?.infraDb) return;
   const db = state.infraDb;
@@ -946,7 +946,7 @@ export const closeInfraDb = async (env: RuntimeState): Promise<void> => {
 };
 
 export async function tryOpenRuntimeWalDb(
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
 ): Promise<boolean> {
   const state = deps.ensureRuntimeState(env);
@@ -983,7 +983,7 @@ export async function tryOpenRuntimeWalDb(
 }
 
 export async function tryOpenHistoryViewDb(
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
 ): Promise<boolean> {
   const state = deps.ensureRuntimeState(env);

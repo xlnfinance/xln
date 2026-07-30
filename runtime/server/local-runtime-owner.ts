@@ -1,6 +1,6 @@
 import { generateLazyEntityId } from '../entity/factory';
 import type { ConsensusConfig } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const normalize = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -68,7 +68,7 @@ export const buildLocalRuntimeOwner = (input: {
   };
 };
 
-const hasLocalOwnerReplica = (env: RuntimeState, entityId: string, signerId: string): boolean => {
+const hasLocalOwnerReplica = (env: RuntimeReplica, entityId: string, signerId: string): boolean => {
   const targetEntityId = normalize(entityId);
   const targetSignerId = normalize(signerId);
   return Array.from(env.eReplicas.values()).some((replica) => (
@@ -78,11 +78,11 @@ const hasLocalOwnerReplica = (env: RuntimeState, entityId: string, signerId: str
 };
 
 export const ensureLocalRuntimeOwner = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   owner: ReturnType<typeof buildLocalRuntimeOwner>,
   deps: {
-    enqueue: (env: RuntimeState, input: RuntimeInput) => void;
-    onFrameCommit: (env: RuntimeState, callback: (height: number) => void) => () => void;
+    enqueue: (env: RuntimeReplica, input: RuntimeInput) => void;
+    onFrameCommit: (env: RuntimeReplica, callback: (height: number) => void) => () => void;
     timeoutMs?: number;
   },
 ): Promise<{ entityId: string; created: boolean; height: number }> => {

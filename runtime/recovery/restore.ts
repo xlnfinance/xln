@@ -11,7 +11,7 @@ import {
   registerCommittedSingleSignerWallets,
 } from '../runtime/recovery-infra';
 import { replayPersistedRuntimeJournals } from '../storage/recovery/journal';
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../runtime/types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../runtime/types';
 import type { PersistedFrameJournal } from './../storage/types';
 import type { RuntimeRecoveryBundleV1 } from './../recovery/types';
 import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
@@ -26,14 +26,14 @@ export type RuntimeRecoveryDeps = Pick<
   RuntimeModule,
   'closeRuntimeDb' | 'closeInfraDb' | 'startJurisdictionWatchers'
 > & {
-  ensureRuntimeConfig(env: RuntimeState): NonNullable<RuntimeState['runtimeConfig']>;
+  ensureRuntimeConfig(env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeConfig']>;
   createEmptyEnv: RuntimeModule['createEmptyEnv'];
-  getStorageDb(env: RuntimeState, role?: StorageDbRole): Level<Buffer, Buffer>;
-  getRuntimeWalDb(env: RuntimeState): Level<Buffer, Buffer>;
-  tryOpenStorageDb(env: RuntimeState, role?: StorageDbRole): Promise<boolean>;
-  tryOpenRuntimeWalDb(env: RuntimeState): Promise<boolean>;
+  getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
+  getRuntimeWalDb(env: RuntimeReplica): Level<Buffer, Buffer>;
+  tryOpenStorageDb(env: RuntimeReplica, role?: StorageDbRole): Promise<boolean>;
+  tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
   enqueueRuntimeContinuation(
-    env: RuntimeState,
+    env: RuntimeReplica,
     inputs?: import('../entity/types').EntityInput[],
     runtimeTxs?: RuntimeTx[],
     jInputs?: import('../jurisdiction/input').JInput[],
@@ -41,7 +41,7 @@ export type RuntimeRecoveryDeps = Pick<
     reliableReceipts?: ReliableDeliveryReceipt[],
   ): void;
   infraGossipDbAccess: Parameters<typeof loadGossipProfilesFromInfraDb>[1];
-  generateHookPings(env: RuntimeState, nowMs?: number, queuedAt?: number): void;
+  generateHookPings(env: RuntimeReplica, nowMs?: number, queuedAt?: number): void;
   getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps;
   applyRuntimeInput: RuntimeModule['applyRuntimeInput'];
 };
@@ -69,7 +69,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     options?: Parameters<typeof restoreCheckpointSnapshot>[2],
   ) => restoreCheckpointSnapshot({ createEmptyEnv, infraGossipDbAccess }, snapshot, options);
 
-  const replayRecoveryFrameJournals = (env: RuntimeState, frames: PersistedFrameJournal[]): Promise<void> =>
+  const replayRecoveryFrameJournals = (env: RuntimeReplica, frames: PersistedFrameJournal[]): Promise<void> =>
     replayPersistedRuntimeJournals(
       {
         ensureRuntimeConfig,
@@ -81,7 +81,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
       env,
       frames,
     );
-  const failRecoveryRestoreAfterCleanup = async (env: RuntimeState, error: unknown): Promise<never> => {
+  const failRecoveryRestoreAfterCleanup = async (env: RuntimeReplica, error: unknown): Promise<never> => {
     const originalError = error instanceof Error ? error : new Error(String(error));
     const cleanup = await Promise.allSettled([closeRuntimeDb(env), closeInfraDb(env)]);
     const cleanupErrors = cleanup
@@ -96,7 +96,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   const restoreEnvFromRecoveryBundles = async (
     bundles: RuntimeRecoveryBundleV1[],
     options: RuntimeBundleRestoreOptions = {},
-  ): Promise<RuntimeState> =>
+  ): Promise<RuntimeReplica> =>
     restoreRuntimeFromBundles(
       {
         restoreCheckpoint: restoreEnvFromCheckpointSnapshot,
@@ -108,16 +108,16 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     );
 
   const persistRestoredEnvToDB = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     options: PersistRestoredRuntimeOptions = {},
   ): Promise<void> =>
     persistRestoredRuntimeState({ getStorageDb, getRuntimeWalDb, tryOpenStorageDb, tryOpenRuntimeWalDb }, env, options);
 
-  const reconcileCommittedRuntimeInfraEffects = (env: RuntimeState, runtimeTxs: readonly RuntimeTx[]) =>
+  const reconcileCommittedRuntimeInfraEffects = (env: RuntimeReplica, runtimeTxs: readonly RuntimeTx[]) =>
     reconcileRecoveryInfraEffects(env, runtimeTxs, startJurisdictionWatchers);
 
   const applyDeterministicRuntimeOutputPlan = (
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityOutbox: readonly RoutedEntityInput[],
     outputRoutingDeps: RuntimeOutputRoutingDeps,
   ) => applyRecoveryRuntimeOutputPlan(env, entityOutbox, outputRoutingDeps, enqueueRuntimeContinuation);

@@ -27,7 +27,7 @@ import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchest
 import { createEmptyEnv } from '../runtime';
 import type { AccountState } from '../types/account';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { createDefaultDelta } from '../account/delta';
 import { LIMITS } from '../config/constants';
 import { encodeBuffer } from '../storage/codec';
@@ -71,7 +71,7 @@ test('market maker server health treats absent cross topology as neutral', () =>
   state.targetHubIds = ['hub'];
   state.tokenIds = [1, 2, 3];
 
-  const health = getServerMarketMakerHealth({} as RuntimeState, state, () => null);
+  const health = getServerMarketMakerHealth({} as RuntimeReplica, state, () => null);
 
   expect(health.cross.applicable).toBe(false);
   expect(health.cross.ok).toBe(true);
@@ -95,7 +95,7 @@ test('market maker server health is ready with one committed offer per pair befo
     mempool: [],
     pendingFrame: null,
   };
-  const health = getServerMarketMakerHealth({} as RuntimeState, state, () => account as any);
+  const health = getServerMarketMakerHealth({} as RuntimeReplica, state, () => account as any);
 
   expect(health.ok).toBe(true);
   expect(health.hubs[0]?.ready).toBe(true);
@@ -127,7 +127,7 @@ test('market maker server health reports depthReady at full configured depth', (
       }
     }
   }
-  const health = getServerMarketMakerHealth({} as RuntimeState, state, () => ({
+  const health = getServerMarketMakerHealth({} as RuntimeReplica, state, () => ({
     swapOffers: offers,
     currentHeight: 1,
     mempool: [],
@@ -159,7 +159,7 @@ test('market maker server health does not count pending offers as bootstrap-read
     }
   }
 
-  const health = getServerMarketMakerHealth({} as RuntimeState, state, () => ({
+  const health = getServerMarketMakerHealth({} as RuntimeReplica, state, () => ({
     swapOffers: new Map(),
     currentHeight: 1,
     mempool: [],
@@ -287,7 +287,7 @@ test('five-token market maker depth remains canonical through Account and hub ad
 });
 
 const addReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
   accounts: Map<string, AccountState> = new Map(),
@@ -317,7 +317,7 @@ const committedSameChainOffers = (hubEntityId: string, tokenIds: number[]): Map<
 };
 
 const buildBootstrapTopology = (): {
-  env: RuntimeState;
+  env: RuntimeReplica;
   contexts: MarketMakerEntityContext[];
   visibleHubs: HubProfile[];
   tokenIdsByContext: MarketMakerTokenIdsByContext;
@@ -382,7 +382,7 @@ const buildBootstrapTopology = (): {
         board: { validators: [{ signerId: hub.signerId }] },
       },
     })),
-  } as RuntimeState['gossip'];
+  } as RuntimeReplica['gossip'];
   const tokenIdsByContext = new Map(contexts.map(context => [context.entityId, [1, 2, 3]]));
   return { env, contexts, visibleHubs, tokenIdsByContext };
 };
@@ -560,7 +560,7 @@ test('market maker hub discovery uses stable hubName instead of mutable display 
         },
       },
     ],
-  } as RuntimeState['gossip'];
+  } as RuntimeReplica['gossip'];
 
   const visibleHubs = readVisibleHubProfiles(env);
   expect(visibleHubs.map(hub => hub.entityId)).toEqual([entity('90')]);

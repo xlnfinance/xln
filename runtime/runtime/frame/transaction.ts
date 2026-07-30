@@ -1,4 +1,4 @@
-import type { RuntimeInput, RuntimeState } from '../types';
+import type { RuntimeInput, RuntimeReplica } from '../types';
 import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeState } from '../runtime-state';
 import { rebuildScheduledWakeIndex } from '../scheduled-wake';
@@ -14,14 +14,14 @@ export { cloneRuntimeFrameMempool } from './clone';
  * second speculative Runtime State and therefore no O(total state) clone.
  */
 export type RuntimeFrameTransaction = {
-  liveEnv: RuntimeState;
+  liveEnv: RuntimeReplica;
   frameMempool: RuntimeInput;
   liveFrameLogBaseLength: number;
   published: boolean;
 };
 
 export const createRuntimeFrameTransaction = (
-  liveEnv: RuntimeState,
+  liveEnv: RuntimeReplica,
 ): RuntimeFrameTransaction => {
   const frameMempool = requireRuntimeMempool(liveEnv);
   const activeMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
@@ -96,7 +96,7 @@ export const previewPublishedRuntimeInput = (
  */
 export const publishRuntimeFrameTransaction = (
   transaction: RuntimeFrameTransaction,
-): RuntimeState => {
+): RuntimeReplica => {
   if (transaction.published) return transaction.liveEnv;
   const { liveEnv, frameMempool } = transaction;
   const activeMempool = requireRuntimeMempool(liveEnv);

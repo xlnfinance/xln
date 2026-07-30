@@ -1,5 +1,5 @@
 import { createStructuredLogger } from '../../infra/logger';
-import type { RoutedEntityInput, RuntimeInput, RuntimeState } from '../types';
+import type { RoutedEntityInput, RuntimeInput, RuntimeReplica } from '../types';
 import { RuntimeEntityInputApplyError } from '../entity-inputs';
 import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../loop-environment';
 import { cloneRuntimeFrameMempool } from './clone';
@@ -28,7 +28,7 @@ const sameRejectedOrigin = (
  * attacker grow durable Runtime state without ever producing a valid frame.
  */
 export const discardRejectedEntityInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RuntimeInput,
   error: unknown,
   quietLogs: boolean,

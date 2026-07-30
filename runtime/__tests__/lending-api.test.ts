@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 import { handleLendingStateRequest } from '../server/lending';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const HUB = entity('11');
@@ -22,7 +22,7 @@ describe('lending API boundary', () => {
           lending: { pools: new Map(), loans: new Map() },
         },
       }]]),
-    } as unknown as RuntimeState;
+    } as unknown as RuntimeReplica;
     const request = new Request(`http://xln.local/api/lending/state?hubEntityId=${HUB}&userEntityId=${USER}&tokenId=1`);
     const response = await handleLendingStateRequest({ req: request, env, headers: {}, activeHubEntityIds: [HUB] });
     expect(response.status).toBe(200);

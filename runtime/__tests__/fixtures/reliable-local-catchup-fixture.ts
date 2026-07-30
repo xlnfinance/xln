@@ -28,7 +28,7 @@ import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
 } from '../../storage/entity-lineage';
-import type { DeliverableEntityInput, RuntimeState } from '../../runtime/types';
+import type { DeliverableEntityInput, RuntimeReplica } from '../../runtime/types';
 import type { EntityReplica, EntityState, ProposedEntityFrame } from '../../entity/types';
 
 export const deriveCatchupFixtureSigners = (seed: string): {
@@ -42,7 +42,7 @@ export const deriveCatchupFixtureSigners = (seed: string): {
   return { leaderSignerId, targetSignerId };
 };
 
-export const registerCatchupFixtureSigners = (env: RuntimeState, seed: string): {
+export const registerCatchupFixtureSigners = (env: RuntimeReplica, seed: string): {
   leaderSignerId: string;
   targetSignerId: string;
 } => {
@@ -84,7 +84,7 @@ export const createCatchupFixtureState = (
   };
 };
 
-const installReplica = (env: RuntimeState, state: EntityState, signerId: string): EntityReplica => {
+const installReplica = (env: RuntimeReplica, state: EntityState, signerId: string): EntityReplica => {
   const replica: EntityReplica = {
     entityId: state.entityId,
     signerId,
@@ -98,14 +98,14 @@ const installReplica = (env: RuntimeState, state: EntityState, signerId: string)
   return replica;
 };
 
-const installFixtureEncryptionKeys = (env: RuntimeState, replica: EntityReplica): void => {
+const installFixtureEncryptionKeys = (env: RuntimeReplica, replica: EntityReplica): void => {
   const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, replica.signerId);
   replica.entityEncPubKey = keys.publicKey;
   replica.entityEncPrivKey = keys.privateKey;
 };
 
 export const prepareCatchupFixtureReplica = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   leaderSignerId: string,
   targetSignerId: string,
@@ -136,7 +136,7 @@ export const prepareCatchupFixtureReplica = async (
 };
 
 export const buildCatchupFixtureCertificate = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   timestamp: number,
 ): Promise<{ frame: ProposedEntityFrame; nextState: EntityState }> => {

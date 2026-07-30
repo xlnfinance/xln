@@ -1,4 +1,4 @@
-import type { RuntimeState, JAdapter } from '@xln/runtime/api/runtime-module';
+import type { RuntimeReplica, JAdapter } from '@xln/runtime/api/runtime-module';
 import type { ExternalWalletSnapshotSource } from './asset-ledger';
 
 export type { ExternalWalletSnapshotSource } from './asset-ledger';
@@ -49,7 +49,7 @@ export type ExternalWalletSnapshotIngressDecision =
 
 export function resolveExternalWalletSnapshotIngress(
   expectedRuntimeId: string,
-  currentEnv: RuntimeState | null,
+  currentEnv: RuntimeReplica | null,
 ): ExternalWalletSnapshotIngressDecision {
   const expected = expectedRuntimeId.trim().toLowerCase();
   if (!expected) throw new Error('EXTERNAL_WALLET_SNAPSHOT_RUNTIME_ID_MISSING');

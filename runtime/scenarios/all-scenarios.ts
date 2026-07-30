@@ -9,7 +9,7 @@
  * Run with: bun runtime/scenarios/all-scenarios.ts
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { getPerfMs } from '../infra/time';
 import { scenarioRegistry, type ScenarioEntry } from './index';
 import { assertRuntimeIdle } from './helpers';
@@ -23,8 +23,8 @@ type ScenarioResult = {
   error?: string;
 };
 
-let _createEmptyEnv: (() => RuntimeState) | null = null;
-async function getCreateEmptyEnv(): Promise<() => RuntimeState> {
+let _createEmptyEnv: (() => RuntimeReplica) | null = null;
+async function getCreateEmptyEnv(): Promise<() => RuntimeReplica> {
   if (!_createEmptyEnv) {
     const runtime = await import('../runtime');
     _createEmptyEnv = runtime.createEmptyEnv;

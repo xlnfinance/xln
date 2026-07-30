@@ -17,7 +17,7 @@
  */
 
 import type { AccountReplica } from '../types/account';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
@@ -34,8 +34,8 @@ import {
 } from '../qa/account-causal-trace';
 import { getPerfMs } from '../infra/time';
 
-let _process: ((env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>) | null = null;
-let _processWithStep: ((env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>) | null = null;
+let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
+let _processWithStep: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -43,7 +43,7 @@ const getProcess = async () => {
     _process = runtime.processRuntime;
   }
   if (!_processWithStep) {
-    _processWithStep = async (env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => {
+    _processWithStep = async (env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => {
       if (env.scenarioMode) {
         const step = typeof delay === 'number' && delay > 0 ? delay : 1;
         env.timestamp = (env.timestamp || 0) + step;
@@ -54,7 +54,7 @@ const getProcess = async () => {
   return _processWithStep;
 };
 
-async function processJEvents(env: RuntimeState): Promise<void> {
+async function processJEvents(env: RuntimeReplica): Promise<void> {
   // RPC watcher is polling-based; force immediate poll in scenarios to avoid
   // relying on wall-clock interval timing between submit and assertions.
   for (const [, jReplica] of env.jReplicas) {
@@ -136,7 +136,7 @@ const computeFilledAmounts = (giveAmount: bigint, wantAmount: bigint, fillRatio:
 };
 
 const pendingAccountSwapFillRatio = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   accountId: string,
   offerId: string,
@@ -150,7 +150,7 @@ const pendingAccountSwapFillRatio = (
   return tx?.type === 'swap_resolve' ? tx.data.fillRatio : 0;
 };
 
-function assert(condition: boolean, message: string, env?: RuntimeState): void {
+function assert(condition: boolean, message: string, env?: RuntimeReplica): void {
   if (!condition) {
     if (env) {
       console.log('\n' + '='.repeat(80));
@@ -216,7 +216,7 @@ function requireAccount(account: AccountReplica | undefined, label: string): Acc
   return account;
 }
 
-export async function swap(env: RuntimeState): Promise<void> {
+export async function swap(env: RuntimeReplica): Promise<void> {
   const restoreFailFast = enableStrictScenario(env, 'SWAP');
   const prevScenarioMode = env.scenarioMode;
   try {
@@ -643,7 +643,7 @@ function assertQuantizedRemaining(
 // PHASE 2: OrderbookExtension - Hub-based matching
 // ============================================================================
 
-export async function swapWithOrderbook(env: RuntimeState): Promise<RuntimeState> {
+export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeReplica> {
   const restoreFailFast = enableStrictScenario(env, 'SWAP');
   const prevScenarioMode = env.scenarioMode;
   const accountCausalFrames: ScenarioAccountCausalFrame[] = [];
@@ -666,7 +666,7 @@ export async function swapWithOrderbook(env: RuntimeState): Promise<RuntimeState
     }
   });
   const jadapter = getScenarioJAdapter(env);
-  const runDisputePhase = Boolean((env as RuntimeState & { scenarioSwapRunDisputePhase?: boolean }).scenarioSwapRunDisputePhase);
+  const runDisputePhase = Boolean((env as RuntimeReplica & { scenarioSwapRunDisputePhase?: boolean }).scenarioSwapRunDisputePhase);
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('             PHASE 2: ORDERBOOK MATCHING (RJEA FLOW)            ');
   console.log('═══════════════════════════════════════════════════════════════\n');
@@ -1222,7 +1222,7 @@ export async function swapWithOrderbook(env: RuntimeState): Promise<RuntimeState
 // PHASE 3: Multi-Party Trading - Carol & Dave eating larger orders
 // ============================================================================
 
-export async function multiPartyTrading(env: RuntimeState): Promise<RuntimeState> {
+export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeReplica> {
   const restoreFailFast = enableStrictScenario(env, 'SWAP');
   const prevScenarioMode = env.scenarioMode;
   try {

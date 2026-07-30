@@ -14,7 +14,7 @@ import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import { createEmptyEnv } from '../runtime';
 import type { AccountInput, AccountReplica, AccountTx, Delta } from '../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { getPerfMs } from '../infra/time';
 import { createDefaultDelta } from '../account/delta';
@@ -32,8 +32,8 @@ type Cli = {
 
 type BenchAccountCase = {
   kind: 'same' | 'cross';
-  proposerEnv: RuntimeState;
-  receiverEnv: RuntimeState;
+  proposerEnv: RuntimeReplica;
+  receiverEnv: RuntimeReplica;
   proposer: AccountReplica;
   receiver: AccountReplica;
   txs: AccountTx[];
@@ -178,7 +178,7 @@ const makeEntityState = (
 });
 
 const addReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
   jurisdiction: JurisdictionConfig,
@@ -195,7 +195,7 @@ const addReplica = (
 };
 
 const registerBenchEntity = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
   seed: string,
   slot: string,
@@ -216,7 +216,7 @@ const registerBenchIdentity = (
   return { entityId, signerId };
 };
 
-const installJurisdiction = (env: RuntimeState, jurisdiction: JurisdictionConfig): void => {
+const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): void => {
   env.activeJurisdiction = jurisdiction.name;
   const deltaTransformer = addr('dd');
   env.jReplicas.set(jurisdiction.name, {
@@ -299,7 +299,7 @@ const mirrorAccount = (
 };
 
 const makeSameCase = (
-  hubEnv: RuntimeState,
+  hubEnv: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
   hubId: string,
   startIndex: number,
@@ -360,7 +360,7 @@ const makeSameCase = (
 };
 
 const makeCrossCase = (
-  hubEnv: RuntimeState,
+  hubEnv: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
   hubId: string,
   startIndex: number,
@@ -524,7 +524,7 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
   }
 };
 
-const makeParticipantEnv = (seed: string, jurisdiction: JurisdictionConfig): RuntimeState => {
+const makeParticipantEnv = (seed: string, jurisdiction: JurisdictionConfig): RuntimeReplica => {
   const env = createEmptyEnv(seed);
   env.runtimeSeed = seed;
   env.timestamp = 1_000;
@@ -533,7 +533,7 @@ const makeParticipantEnv = (seed: string, jurisdiction: JurisdictionConfig): Run
   return env;
 };
 
-const makeEnv = (seed: string): { env: RuntimeState; jurisdiction: JurisdictionConfig; hubId: string } => {
+const makeEnv = (seed: string): { env: RuntimeReplica; jurisdiction: JurisdictionConfig; hubId: string } => {
   const env = createEmptyEnv(seed);
   env.runtimeSeed = seed;
   env.timestamp = 1_000;
@@ -545,7 +545,7 @@ const makeEnv = (seed: string): { env: RuntimeState; jurisdiction: JurisdictionC
 };
 
 const buildCases = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
   hubId: string,
   swaps: number,

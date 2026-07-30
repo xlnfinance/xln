@@ -1,5 +1,5 @@
 import type { AccountFrame, AccountReplica } from '../../types/account';
-import type { RuntimeState } from '../types';
+import type { RuntimeReplica } from '../types';
 import { validateEntityState } from '../../entity/state-validation';
 import { computeFrameHash } from '../../account/consensus/index';
 import { assertAccountFrameDeltaIntegrity } from '../../account/frame';
@@ -57,7 +57,7 @@ const assertAccountFrames = async (
   }
 };
 
-export async function assertRuntimeStateStrict(env: RuntimeState): Promise<void> {
+export async function assertRuntimeStateStrict(env: RuntimeReplica): Promise<void> {
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     validateEntityState(replica.state, `strictScenario.${replicaKey}`);
     for (const [counterpartyId, account] of replica.state.accounts.entries()) {

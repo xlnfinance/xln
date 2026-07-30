@@ -13,7 +13,7 @@
  * outCollateral is already secured value and must not inflate trigger metric.
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { AccountState } from '../types/account';
 import {
   getProcess,
@@ -34,7 +34,7 @@ const HUB_INITIAL_RESERVE = usd(200_000); // $200K
 const USER_RESERVE = usd(25_000); // $25K each
 const INITIAL_COLLATERAL = usd(500); // Exact default C→R keep threshold; payments create the later imbalance.
 
-function assert(condition: unknown, message: string, env?: RuntimeState): asserts condition {
+function assert(condition: unknown, message: string, env?: RuntimeReplica): asserts condition {
   if (!condition) {
     if (env) {
       console.log('\n' + '='.repeat(80));
@@ -55,7 +55,7 @@ const requireEntity = (entity: Entity | undefined, name: string): Entity => {
   return entity;
 };
 
-const convergeScenario = (env: RuntimeState, maxCycles = 15) => converge(env, maxCycles);
+const convergeScenario = (env: RuntimeReplica, maxCycles = 15) => converge(env, maxCycles);
 
 type AccountJProgress = {
   lastFinalizedJHeight: number;

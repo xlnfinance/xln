@@ -5,7 +5,7 @@
 
 import { ethers } from 'ethers';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type {
   BoardMetadata,
   Profile,
@@ -41,7 +41,7 @@ const buildProfileJurisdiction = (state: EntityState): ProfileJurisdiction | und
   };
 };
 
-const buildProfileMirrors = (env: RuntimeState, entityState: EntityState): ProfileMirror[] => {
+const buildProfileMirrors = (env: RuntimeReplica, entityState: EntityState): ProfileMirror[] => {
   const mirrors = new Map<string, ProfileMirror>();
   for (const replica of env.eReplicas?.values?.() || []) {
     const entityId = String(replica?.state?.entityId || replica?.entityId || '').trim();
@@ -156,7 +156,7 @@ export function buildEntityProfile(
   return profile;
 }
 
-export const createProfileSignerResolver = (env: RuntimeState): ProfileSignerResolver => {
+export const createProfileSignerResolver = (env: RuntimeReplica): ProfileSignerResolver => {
   return {
     getSignerAddress: (signerId) => getSignerAddress(env, signerId),
     getSignerPublicKeyHex: (signerId) => {
@@ -167,14 +167,14 @@ export const createProfileSignerResolver = (env: RuntimeState): ProfileSignerRes
   };
 };
 
-export const getNextProfileTimestamp = (env: RuntimeState, entityId: string, fallbackTimestamp?: number): number => {
+export const getNextProfileTimestamp = (env: RuntimeReplica, entityId: string, fallbackTimestamp?: number): number => {
   const existingProfile = env.gossip.getProfiles().find((profile) => profile.entityId === entityId);
   const lastTimestamp = existingProfile?.lastUpdated ?? 0;
   const candidate = typeof fallbackTimestamp === 'number' ? fallbackTimestamp : env.timestamp;
   return Math.max(1, lastTimestamp + 1, candidate);
 };
 
-const resolveProfileRuntimeId = (env: RuntimeState, entityId: string): string => {
+const resolveProfileRuntimeId = (env: RuntimeReplica, entityId: string): string => {
   if (typeof env.runtimeId === 'string' && env.runtimeId.trim().length > 0) {
     return env.runtimeId.trim().toLowerCase();
   }
@@ -186,7 +186,7 @@ const resolveProfileRuntimeId = (env: RuntimeState, entityId: string): string =>
 };
 
 export const buildLocalEntityProfile = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityState: EntityState,
   timestamp: number = getNextProfileTimestamp(env, entityState.entityId),
 ): Profile => {

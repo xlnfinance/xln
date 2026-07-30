@@ -3,7 +3,7 @@ import type {
   Depository,
   EntityProvider,
 } from '../../jurisdictions/typechain-types/index.ts';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { DisputeFinalizationEvidence } from '../types/jurisdiction-events';
 import type {
   EventBatchCounter,
@@ -49,7 +49,7 @@ export type RpcWatcherServices = {
 };
 
 export type RpcWatcherSession = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   generation: number;
   interval: ReturnType<typeof setInterval> | null;
   manualPolling: boolean;
@@ -79,7 +79,7 @@ export type RpcWatcherControllerState = {
 };
 
 export type RpcWatcherMethods = {
-  startWatching(env: RuntimeState): void;
+  startWatching(env: RuntimeReplica): void;
   pollNow(): Promise<void>;
   isWatching(): boolean;
   stopWatching(): void;

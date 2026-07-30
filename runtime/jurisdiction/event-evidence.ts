@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 export type ReserveUpdatedEvidence = {
   name: 'ReserveUpdated';
@@ -28,7 +28,7 @@ const readDecimalBigInt = (value: unknown): bigint | null => {
 };
 
 const toReserveUpdatedEvidence = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   event: {
     name?: string;
     args?: Record<string, unknown>;
@@ -66,7 +66,7 @@ const reserveIndexKeyFromArgs = (args: Record<string, unknown>): string | null =
   return `${entity}:${tokenId}`;
 };
 
-const ensureReserveUpdatedIndex = (env: RuntimeState): Map<string, ReserveUpdatedEvidence> => {
+const ensureReserveUpdatedIndex = (env: RuntimeReplica): Map<string, ReserveUpdatedEvidence> => {
   if (!env.runtimeState) env.runtimeState = {};
   const current = env.runtimeState.recentReserveUpdatedEvents;
   if (current instanceof Map) return current;
@@ -86,7 +86,7 @@ const copyReserveUpdatedEvidence = (event: ReserveUpdatedEvidence): ReserveUpdat
 });
 
 export const indexReserveUpdatedEvents = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   events: Array<{
     name?: string;
     args?: Record<string, unknown>;
@@ -112,7 +112,7 @@ export const indexReserveUpdatedEvents = (
 };
 
 export const findReserveUpdatedEvidence = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   tokenId: number,
   expectedMin: bigint,

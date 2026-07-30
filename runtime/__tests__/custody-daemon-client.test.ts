@@ -3,7 +3,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { decodeRuntimeAdapterRequest, encodeRuntimeAdapterMessageForBrowser } from '../radapter/codec';
 import { signRuntimeAdapterServerIdentity } from '../radapter/server-identity-signer';
 import type { RuntimeAdapterRequest } from '../radapter/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { DaemonRpcClient } from '../../custody/daemon-client';
 
 const originalWebSocket = globalThis.WebSocket;
@@ -18,7 +18,7 @@ describe('custody daemon rAdapter transport', () => {
     const identityEnv = {
       runtimeSeed,
       runtimeId: deriveSignerAddressSync(runtimeSeed, '1').toLowerCase(),
-    } as RuntimeState;
+    } as RuntimeReplica;
     const seenOps: RuntimeAdapterRequest['op'][] = [];
 
     class CanonicalRuntimeSocket {
@@ -111,7 +111,7 @@ describe('custody daemon rAdapter transport', () => {
     const targetEntityId = `0x${'22'.repeat(32)}`;
     const signerId = `0x${'33'.repeat(20)}`;
     const hashlock = `0x${'44'.repeat(32)}`;
-    const identityEnv = { runtimeSeed, runtimeId } as RuntimeState;
+    const identityEnv = { runtimeSeed, runtimeId } as RuntimeReplica;
     const seenOps: RuntimeAdapterRequest['op'][] = [];
     let sentInput: RuntimeAdapterRequest | null = null;
     let sendCount = 0;

@@ -1,4 +1,4 @@
-import type { RuntimeInput, RuntimeState } from '../runtime/types';
+import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
 import type { JAdapter } from '../jadapter';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger } from '../infra/logger';
@@ -22,13 +22,13 @@ const faucetLog = createStructuredLogger('server.faucet');
 
 export type ReserveFaucetInput = {
   req: Request;
-  env: RuntimeState | null;
+  env: RuntimeReplica | null;
   headers: HeadersInit;
   relayStore: { activeHubEntityIds: string[] };
   getJAdapter: () => JAdapter | null;
   ensureTokenCatalog: () => Promise<TokenCatalogEntry[]>;
-  validateRuntimeInputAdmission: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
-  enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
+  enqueueRuntimeInput: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
 };
 
 const unavailable = (

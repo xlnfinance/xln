@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JAdapter } from '../jadapter';
 import { DEV_CHAIN_IDS } from '../jadapter';
 import { createStructuredLogger } from '../infra/logger';
@@ -40,7 +40,7 @@ const reservePollMs = (adapter: JAdapter): number => {
   return DEV_CHAIN_IDS.has(adapter.chainId) ? 50 : 300;
 };
 
-const hasPendingRuntimeWork = (env: RuntimeState): boolean => {
+const hasPendingRuntimeWork = (env: RuntimeReplica): boolean => {
   if (env.pendingOutputs?.length || env.networkInbox?.length) return true;
   if (env.runtimeMempool.runtimeTxs.length || env.runtimeMempool.entityInputs.length) return true;
   return Array.from(env.jReplicas?.values() ?? []).some(replica => (replica.mempool?.length ?? 0) > 0);
@@ -60,7 +60,7 @@ const pollUntil = async (
 };
 
 export const waitForRuntimeIdle = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   adapter: JAdapter,
   timeoutMs = 5000,
 ): Promise<boolean> => pollUntil(
@@ -70,7 +70,7 @@ export const waitForRuntimeIdle = (
 );
 
 export const waitForJBatchClear = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   adapter: JAdapter,
   timeoutMs = 10000,
 ): Promise<boolean> => pollUntil(
@@ -85,7 +85,7 @@ export const waitForJBatchClear = (
 );
 
 export const waitForEntityBroadcastWindow = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   adapter: JAdapter,
   entityId: string,
   timeoutMs = 10000,

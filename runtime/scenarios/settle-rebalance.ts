@@ -17,7 +17,7 @@
  * - Never trigger from (outCollateral + outPeerCredit), otherwise post-topup spam appears.
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { SettlementDiff, SettlementOp } from '../types/account';
 import {
   getProcess, advanceScenarioTime, enableStrictScenario, converge, syncChain,
@@ -33,7 +33,7 @@ import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention
 import { ethers } from 'ethers';
 
 const USDC = 1;
-const convergeScenario = (env: RuntimeState, maxCycles = 15): Promise<void> => converge(env, maxCycles);
+const convergeScenario = (env: RuntimeReplica, maxCycles = 15): Promise<void> => converge(env, maxCycles);
 
 const requireRegisteredEntity = (
   entity: RegisteredEntity | undefined,
@@ -45,7 +45,7 @@ const requireRegisteredEntity = (
   return entity;
 };
 
-export async function runSettleRebalance(_existingEnv?: RuntimeState): Promise<RuntimeState> {
+export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
   console.log('=' .repeat(80));
   console.log('  MERGED SETTLEMENT + REBALANCE SCENARIO');
   console.log('  Hub + Alice + Bob + Charlie + Dave');

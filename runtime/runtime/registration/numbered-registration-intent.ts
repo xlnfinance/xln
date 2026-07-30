@@ -7,7 +7,7 @@ import {
 } from '../../jurisdiction/registration-evidence';
 import type {
   CompletedNumberedRegistration,
-  RuntimeState,
+  RuntimeReplica,
   NumberedRegistrationRecord,
   NumberedRegistrationRequest,
   PendingNumberedRegistration,
@@ -36,14 +36,14 @@ export type RegistrationSubmission =
   | { kind: 'nonce-conflict'; reason: string };
 
 export const getNumberedRegistrationRecord = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   intentId: string,
 ): NumberedRegistrationRecord | undefined => env.runtimeState?.numberedRegistrationIntents?.get(
   numberedRegistrationBytes32(intentId, 'INTENT_ID'),
 );
 
 export const prepareNumberedRegistrationIntent = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   adapter: JAdapter,
   request: NumberedRegistrationRequest,
 ): Promise<NumberedRegistrationRecord> => {
@@ -79,7 +79,7 @@ export const prepareNumberedRegistrationIntent = async (
   return pending;
 };
 
-export const applyNumberedRegistrationIntent = (env: RuntimeState, pending: PendingNumberedRegistration): void => {
+export const applyNumberedRegistrationIntent = (env: RuntimeReplica, pending: PendingNumberedRegistration): void => {
   assertNumberedRegistrationRequest(env, pending.request);
   if (computeNumberedRegistrationRequestHash(pending.request) !== pending.requestHash) throw new Error('NUMBERED_REGISTRATION_REQUEST_HASH_MISMATCH');
   const adapter = getTrustedRegistrationAdapter(env, pending.request.entities[0]!.config.jurisdiction!);
@@ -128,7 +128,7 @@ export const submitNumberedRegistrationIntent = async (
 };
 
 const completedResolution = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   pending: PendingNumberedRegistration,
   submission: Extract<RegistrationSubmission, { kind: 'receipt' }>,
 ): Extract<ResolveNumberedRegistrationData, { kind: 'completed' }> => {
@@ -163,7 +163,7 @@ const completedResolution = (
 };
 
 export const buildNumberedRegistrationCompletionRuntimeTxs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   pending: PendingNumberedRegistration,
   submission: Extract<RegistrationSubmission, { kind: 'receipt' }>,
 ): RuntimeTx[] => {
@@ -196,7 +196,7 @@ export const buildNumberedRegistrationCompletionRuntimeTxs = (
 };
 
 export const applyNumberedRegistrationResolution = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   resolution: ResolveNumberedRegistrationData,
 ): void => {
   const records = env.runtimeState?.numberedRegistrationIntents;
@@ -240,7 +240,7 @@ export type NumberedRegistrationResult = {
 };
 
 const completedResults = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   request: NumberedRegistrationRequest,
   completed: CompletedNumberedRegistration,
 ): NumberedRegistrationResult[] => completed.results.map((result, index) => {
@@ -252,7 +252,7 @@ const completedResults = (
 });
 
 export const runNumberedRegistrationIntent = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   adapter: JAdapter,
   request: NumberedRegistrationRequest,
   commit: (runtimeTxs: RuntimeTx[]) => Promise<void>,

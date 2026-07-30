@@ -13,7 +13,7 @@ const forbiddenSuffixes = new Set([
   'Transaction',
 ]);
 const required = new Set([
-  'RuntimeState',
+  'RuntimeReplica',
   'RuntimeInput',
   'RuntimeTx',
   'EntityState',

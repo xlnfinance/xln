@@ -60,7 +60,7 @@ test('runtime command bus records pending accepted observed committed error rece
   expect(source).not.toContain('Math.random');
 });
 
-test('browser E2E mutations use the live runtime command bus instead of a detached view RuntimeState', () => {
+test('browser E2E mutations use the live runtime command bus instead of a detached view RuntimeReplica', () => {
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const helperSource = readFileSync('tests/utils/e2e-runtime-input.ts', 'utf8');
   const enqueueStart = helperSource.indexOf('export async function enqueueRuntimeInput');
@@ -660,7 +660,7 @@ test('runtime controller forwards caller-owned commandId to the remote adapter',
   expect(sendSource).toContain('adapter.send(input, options)');
 });
 
-test('public mutation exports no longer accept caller-owned RuntimeState', () => {
+test('public mutation exports no longer accept caller-owned RuntimeReplica', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   expect(source).not.toContain('assertSubmittedEnvMatchesActiveRuntime');
 
@@ -675,14 +675,14 @@ test('public mutation exports no longer accept caller-owned RuntimeState', () =>
   expect(submitRuntimeSource).toContain('export async function submitRuntimeInput(');
   expect(submitRuntimeSource).toContain('commandOptions: RuntimeCommandExecutionOptions = {}');
   expect(submitRuntimeSource).toContain('return submitActiveRuntimeInput(input, commandOptions);');
-  expect(submitRuntimeSource).not.toContain('env: RuntimeState');
+  expect(submitRuntimeSource).not.toContain('env: RuntimeReplica');
   expect(submitRuntimeSource).not.toContain('assertSubmittedEnvMatchesActiveRuntime');
   expect(submitRuntimeSource).not.toContain('routeRuntimeInput(');
 
   const submitEntitySource = source.slice(submitEntityIndex, utilityFunctionsIndex);
   expect(submitEntitySource).toContain('export async function submitEntityInputs(inputs: RoutedEntityInput[] = [])');
   expect(submitEntitySource).toContain('return submitActiveEntityInputs(inputs);');
-  expect(submitEntitySource).not.toContain('env: RuntimeState');
+  expect(submitEntitySource).not.toContain('env: RuntimeReplica');
   expect(submitEntitySource).not.toContain('submitRuntimeInput(env');
   expect(submitEntitySource).not.toContain('assertSubmittedEnvMatchesActiveRuntime');
   expect(submitEntitySource).not.toContain('routeRuntimeInput(');
@@ -805,7 +805,7 @@ test('entity panel never promotes UI reads or transaction responses into J-prefi
   expect(source).not.toContain('applyJEventsToEnv');
 });
 
-test('entity panel pure RuntimeInput mutations do not require embedded RuntimeState on remote', () => {
+test('entity panel pure RuntimeInput mutations do not require embedded RuntimeReplica on remote', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
 
   expect(source).not.toContain('requireRuntimeEnv(activeEnv');

@@ -3,11 +3,11 @@ import type { Profile } from '../entity/profile';
 import { canonicalizeProfile, parseProfile } from '../entity/profile';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import { createStructuredLogger, shortId } from '../infra/logger';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 
 type InfraDbAccess = {
-  tryOpenInfraDb: (env: RuntimeState) => Promise<boolean>;
-  getInfraDb: (env: RuntimeState) => Level<Buffer, Buffer>;
+  tryOpenInfraDb: (env: RuntimeReplica) => Promise<boolean>;
+  getInfraDb: (env: RuntimeReplica) => Level<Buffer, Buffer>;
 };
 
 const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
@@ -41,7 +41,7 @@ const pruneInfraGossipProfile = async (db: Level<Buffer, Buffer>, entityId: stri
 };
 
 export const persistGossipProfileToInfraDb = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   dbAccess: InfraDbAccess,
   profile: Profile,
 ): Promise<void> => {
@@ -62,7 +62,7 @@ export const persistGossipProfileToInfraDb = async (
 };
 
 export const loadGossipProfilesFromInfraDb = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   dbAccess: InfraDbAccess,
 ): Promise<void> => {
   const dbReady = await dbAccess.tryOpenInfraDb(env);
@@ -89,7 +89,7 @@ export const loadGossipProfilesFromInfraDb = async (
 };
 
 export const clearInfraGossipProfiles = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   dbAccess: InfraDbAccess,
   options: { runtimeId?: string } = {},
 ): Promise<void> => {

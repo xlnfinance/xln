@@ -16,10 +16,10 @@ import {
   registerSignerKey,
 } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
-const created: RuntimeState[] = [];
+const created: RuntimeReplica[] = [];
 
 afterEach(async () => {
   for (const env of created.splice(0)) {

@@ -1,10 +1,10 @@
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput, RuntimeInput } from './types';
+import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from './types';
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
 const findExactReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
 ): EntityReplica | undefined => [...env.eReplicas.values()].find(replica =>
@@ -48,7 +48,7 @@ const possibleCommittedHeight = (
  * stay in the runtime mempool and are applied only after H is durably saved.
  */
 export const applyEntityHeightDurabilityBarrier = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   mempool: RuntimeInput,
   queuedAt: number,

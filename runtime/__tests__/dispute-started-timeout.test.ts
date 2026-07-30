@@ -6,7 +6,7 @@ import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/st
 import { rawEventToJEvents } from '../jadapter/j-event-payloads';
 import { normalizeJurisdictionEvent } from '../jurisdiction/event-normalization';
 import { createEmptyEnv } from '../runtime';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   entity,
   installJurisdictions,
@@ -20,7 +20,7 @@ const jurisdiction = makeJurisdiction('Ethereum', 1, '11', '12');
 const entityId = entity('01');
 const counterpartyId = entity('02');
 
-const envAt = (scannedThroughHeight: number, disputeDelayBlocks: number): RuntimeState => {
+const envAt = (scannedThroughHeight: number, disputeDelayBlocks: number): RuntimeReplica => {
   const env = createEmptyEnv(`dispute-started-timeout:${scannedThroughHeight}:${disputeDelayBlocks}`);
   env.timestamp = 1_000;
   env.quietRuntimeLogs = true;

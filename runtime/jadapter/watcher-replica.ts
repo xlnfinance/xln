@@ -1,5 +1,5 @@
 import type { JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { getValidatorJContiguousThroughHeight } from '../jurisdiction/local-history';
 
@@ -20,7 +20,7 @@ export const watcherChainIdOf = (
 };
 
 export const findWatcherJurisdictionReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   depositoryAddress?: string,
   chainId?: number,
 ): JReplica | null => {
@@ -55,7 +55,7 @@ export const findWatcherJurisdictionReplica = (
 };
 
 export const requireWatcherJurisdictionReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   depositoryAddress: string | undefined,
   chainId: number | undefined,
   context: string,
@@ -79,7 +79,7 @@ export const requireWatcherJurisdictionReplica = (
 };
 
 export const isEntityReplicaRelevantToWatcher = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   replica: { state?: { config?: { jurisdiction?: JurisdictionConfig } } },
   watcher: JReplica,
 ): boolean => {
@@ -113,7 +113,7 @@ export const isEntityReplicaRelevantToWatcher = (
 };
 
 export const getMinimumCommittedSignerJHeight = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   watcher?: JReplica,
 ): number | null => {
   let minimum: number | null = null;
@@ -127,7 +127,7 @@ export const getMinimumCommittedSignerJHeight = (
 };
 
 export const getMinimumScannedSignerJHeight = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   watcher?: JReplica,
 ): number | null => {
   let minimum: number | null = null;

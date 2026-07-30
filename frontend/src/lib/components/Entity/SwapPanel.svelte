@@ -2,7 +2,7 @@
 import { tick } from 'svelte';
 import type { AccountReplica, EntityReplica, Tab } from '$lib/types/ui';
 import { writable } from 'svelte/store';
-import type { BookState, RuntimeState, SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/runtime-module';
+import type { BookState, RuntimeReplica, SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/runtime-module';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
@@ -102,7 +102,7 @@ import {
 } from './swap-panel-core';
 export let replica: EntityReplica | null;
 export let tab: Tab;
-export let env: RuntimeState | null = null;
+export let env: RuntimeReplica | null = null;
 export let isLive: boolean;
 export let runtimeView: SwapPanelRuntimeView | null = null;
 // Props

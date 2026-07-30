@@ -2,7 +2,7 @@ import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../extensions/cro
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 import { safeStringify } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
-import type { RoutedEntityInput, RuntimeState, RuntimeTx } from './types';
+import type { RoutedEntityInput, RuntimeReplica, RuntimeTx } from './types';
 import { RuntimeEntityInputApplyError } from './entity-input-contract';
 
 export const assertRuntimeEntityIngress: (
@@ -96,7 +96,7 @@ const importedReplicaKeys = (
   );
 
 const replicaKeysForEntity = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   imports: ReadonlySet<string>,
 ): string[] => {
@@ -113,7 +113,7 @@ const replicaKeysForEntity = (
  * set. The reducer resolves the concrete replica again after imports apply.
  */
 export const validateExternalEntityInputTargets = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: readonly RoutedEntityInput[],
   runtimeTxs: readonly RuntimeTx[],
 ): void => {
@@ -148,7 +148,7 @@ export const validateExternalEntityInputTargets = (
 };
 
 export const findEntityReplicaKey = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId?: string | null,
 ): string | null => {
@@ -167,7 +167,7 @@ export const findEntityReplicaKey = (
 };
 
 const findEntityReplicaKeys = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
 ): string[] => {
   const entityNorm = String(entityId || '').toLowerCase();
@@ -178,7 +178,7 @@ const findEntityReplicaKeys = (
 };
 
 export const resolveEntityInputReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityInput: RoutedEntityInput,
 ): { signerId: string; replicaKey: string; replica: EntityReplica } => {
   const entityId = entityInput.entityId.trim().toLowerCase();

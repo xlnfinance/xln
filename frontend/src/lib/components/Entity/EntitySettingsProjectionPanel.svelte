@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Network, PlusCircle, Save, ShieldCheck, SlidersHorizontal } from 'lucide-svelte';
-  import type { RuntimeState, HubRebalanceConfig } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica, HubRebalanceConfig } from '@xln/runtime/api/runtime-module';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
@@ -66,7 +66,7 @@
   export let proposalCount = 0;
   export let isHub = false;
   export let activeIsLive = true;
-  export let runtimeEnv: RuntimeState | null = null;
+  export let runtimeEnv: RuntimeReplica | null = null;
   export let consensusView: EntityConsensusSettingsView;
   export let settingsSubview: SettingsSubview = 'wallet';
   export let onSaveProfile: (profile: ProfileDraft) => Promise<void> = async () => {};

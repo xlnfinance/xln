@@ -8,7 +8,7 @@ import { handleRuntimeInputControl } from '../server/runtime-input-control';
 import { decodeP2PControlBody } from '../server/p2p-control';
 import { decodeSignerRegistration } from '../server/signer-control';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 
 test('control body parser rejects oversized request bodies before deserializing', async () => {
   const request = new Request('http://localhost/api/control/runtime-input', {
@@ -28,7 +28,7 @@ test('runtime input control rejects oversized payloads without enqueueing runtim
       body: 'x'.repeat(DEFAULT_CONTROL_BODY_MAX_BYTES + 1),
     }),
     { 'Content-Type': 'application/json' },
-    {} as RuntimeState,
+    {} as RuntimeReplica,
     {
       enqueueRuntimeInput: () => {
         enqueueCalled = true;
@@ -64,7 +64,7 @@ test('runtime input control still accepts normal tagged payloads', async () => {
       body: serializeTaggedJson({ runtimeTxs: [], entityInputs: [], jInputs: [{ jurisdictionName: 'test', jTxs: [] }] }),
     }),
     { 'Content-Type': 'application/json' },
-    {} as RuntimeState,
+    {} as RuntimeReplica,
     {
       enqueueRuntimeInput: (_env, runtimeInput) => {
         accepted.push(runtimeInput);
@@ -96,7 +96,7 @@ test('runtime input control rejects malformed Runtime transactions before enqueu
       }),
     }),
     { 'Content-Type': 'application/json' },
-    {} as RuntimeState,
+    {} as RuntimeReplica,
     {
       enqueueRuntimeInput: () => {
         enqueueCalled = true;

@@ -1,7 +1,7 @@
 // Health check endpoint
 // Returns status of all J-machines, hubs, and system health
 
-import type { RuntimeState } from '../runtime/types.js';
+import type { RuntimeReplica } from '../runtime/types.js';
 import type { EntityReplica } from '../entity/types.js';
 import { getP2PState } from '../runtime.js';
 import { compareStableText } from '../protocol/serialization';
@@ -60,7 +60,7 @@ export interface SystemHealth {
 
 const startTime = Date.now();
 
-const buildEntityReplicaIndex = (env: RuntimeState): Map<string, EntityReplica> => {
+const buildEntityReplicaIndex = (env: RuntimeReplica): Map<string, EntityReplica> => {
   const replicas = new Map<string, EntityReplica>();
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const fallbackEntityId = String(replicaKey).split(':')[0] || '';
@@ -85,7 +85,7 @@ const serializeReserves = (reserves: ReadonlyMap<string | number, bigint>): Reco
   return Object.fromEntries(entries);
 };
 
-const buildHealthStatus = (env: RuntimeState | null): HealthStatus => {
+const buildHealthStatus = (env: RuntimeReplica | null): HealthStatus => {
   const jMachines: JMachineHealth[] = [];
   const hubs: HubHealth[] = [];
   const replicasByEntityId = env ? buildEntityReplicaIndex(env) : new Map<string, EntityReplica>();
@@ -168,7 +168,7 @@ const buildHealthStatus = (env: RuntimeState | null): HealthStatus => {
  * Health is externally visible. It must not leak balances from H+1 while the
  * writer is still awaiting the WAL commit that makes H+1 real.
  */
-export const getHealthStatus = (env: RuntimeState | null): Promise<HealthStatus> =>
+export const getHealthStatus = (env: RuntimeReplica | null): Promise<HealthStatus> =>
   env
     ? withRuntimeCommittedRead(env, () => buildHealthStatus(env))
     : Promise.resolve(buildHealthStatus(null));

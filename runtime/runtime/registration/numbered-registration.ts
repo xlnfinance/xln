@@ -12,13 +12,13 @@ import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { canonicalJStackAddress } from '../../jadapter/stack-binding';
 import type { JAdapter } from '../../jadapter/types';
 import type { ConsensusConfig, JurisdictionConfig } from '../../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeReplica } from '../types';
 import { DEBUG } from '../../infra/debug-flags';
 
 const registrationLog = createStructuredLogger('runtime.numbered-registration');
 
 export const getTrustedRegistrationAdapter = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
 ): JAdapter => {
   const expectedChainId = Number(jurisdiction.chainId);
@@ -59,7 +59,7 @@ export const getTrustedRegistrationAdapter = (
 };
 
 export const getNumberedRegistrationWallet = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jadapter: JAdapter,
   registrationSignerId: string,
 ): ethers.Wallet => {
@@ -138,7 +138,7 @@ export const createNumberedEntity = async (
   validators: readonly BoardMemberInput[],
   threshold: bigint,
   jurisdiction: JurisdictionConfig,
-  env: RuntimeState,
+  env: RuntimeReplica,
   registrationSignerId: string,
 ): Promise<{ config: ConsensusConfig; entityNumber: number; entityId: string }> => {
   const requestedConfig = createLazyEntity(
@@ -202,7 +202,7 @@ export const createNumberedEntitiesBatch = async (
     threshold: bigint;
   }>[],
   jurisdiction: JurisdictionConfig,
-  env: RuntimeState,
+  env: RuntimeReplica,
   registrationSignerId: string,
 ): Promise<Array<{ config: ConsensusConfig; entityNumber: number; entityId: string }>> => {
   if (entities.length === 0) throw new Error('NUMBERED_REGISTRATION_BATCH_EMPTY');

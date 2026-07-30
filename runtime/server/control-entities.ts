@@ -1,6 +1,6 @@
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import { compareStableText } from '../protocol/serialization';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 export type ControlEntitySummary = {
   entityId: string;
@@ -14,7 +14,7 @@ export type ControlEntitySummary = {
 };
 
 const getProfileNameForEntity = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   getRelayProfileName: (entityId: string) => string | undefined,
 ): string => {
@@ -27,7 +27,7 @@ const getProfileNameForEntity = (
 };
 
 export const listLocalControlEntities = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   getRelayProfileName: (entityId: string) => string | undefined,
 ): ControlEntitySummary[] => {
   const seen = new Set<string>();

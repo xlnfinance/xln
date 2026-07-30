@@ -16,7 +16,7 @@ import { encodeBoard, hashBoard } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
 import { applyRuntimeInput, createEmptyEnv, processRuntime } from '../runtime';
 import type { ConsensusConfig, EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
+import type { RuntimeReplica, RoutedEntityInput } from '../runtime/types';
 
 const RUN_ID = `${process.pid}-${Date.now()}`;
 
@@ -28,7 +28,7 @@ const jurisdiction = {
   entityProviderAddress: `0x${'a3'.repeat(20)}`,
 };
 
-const boardFor = (env: RuntimeState): ConsensusConfig => {
+const boardFor = (env: RuntimeReplica): ConsensusConfig => {
   const proposerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
   return {
     mode: 'proposer-based',
@@ -39,7 +39,7 @@ const boardFor = (env: RuntimeState): ConsensusConfig => {
   };
 };
 
-const baseState = (env: RuntimeState): EntityState => {
+const baseState = (env: RuntimeReplica): EntityState => {
   const board = boardFor(env);
   return {
     entityId: hashBoard(encodeBoard(board, env)).toLowerCase(),
@@ -75,7 +75,7 @@ const replica = (state: EntityState, signerId: string): EntityReplica => ({
 });
 
 type RaceFixture = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   state: EntityState;
   proposer: EntityReplica;
   proposalInput: RoutedEntityInput;
@@ -128,7 +128,7 @@ const buildFixture = async (label: string): Promise<RaceFixture> => {
 };
 
 const signedTimeoutInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   targetSignerId: string,
   voterId: string,

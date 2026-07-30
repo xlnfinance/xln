@@ -1,6 +1,6 @@
 import { SigningKey, computeAddress, hexlify, keccak256 } from 'ethers';
 import { deriveSignerKeySync } from '../account/crypto';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   buildRuntimeAdapterServerIdentityDigest,
   type RuntimeAdapterServerIdentityProof,
@@ -13,7 +13,7 @@ import {
  * captured response useless on the next socket.
  */
 export const signRuntimeAdapterServerIdentity = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   challenge: string,
 ): RuntimeAdapterServerIdentityProof => {
   const seed = String(env.runtimeSeed || '').trim();

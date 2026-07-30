@@ -28,7 +28,7 @@ import {
 } from '../../runtime/entity-output-signer';
 import type {
   RuntimeInput,
-  RuntimeState,
+  RuntimeReplica,
   RoutedEntityInput,
 } from '../../runtime/types';
 import type { RuntimeInputApplyResult } from '../../runtime/frame/apply';
@@ -46,19 +46,19 @@ const runtimeLog = createStructuredLogger('runtime');
 
 export type RecoveryJournalDeps = {
   ensureRuntimeConfig(
-    env: RuntimeState,
-  ): NonNullable<RuntimeState['runtimeConfig']>;
+    env: RuntimeReplica,
+  ): NonNullable<RuntimeReplica['runtimeConfig']>;
   applyRuntimeInput(
-    env: RuntimeState,
+    env: RuntimeReplica,
     input: RuntimeInput,
   ): Promise<RuntimeInputApplyResult>;
   applyRuntimeOutputPlan(
-    env: RuntimeState,
+    env: RuntimeReplica,
     outputs: readonly RoutedEntityInput[],
     routing: RuntimeOutputRoutingDeps,
   ): unknown;
   getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps;
-  generateHookPings(env: RuntimeState): void;
+  generateHookPings(env: RuntimeReplica): void;
 };
 
 const validateReplayFrameHeader = (
@@ -119,7 +119,7 @@ const collectOutputSignerHints = (
 
 const replayOneFrame = async (
   deps: RecoveryJournalDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   frame: PersistedFrameJournal,
   height: number,
 ): Promise<void> => {
@@ -182,7 +182,7 @@ const replayOneFrame = async (
 
 export const replayPersistedRuntimeJournals = async (
   deps: RecoveryJournalDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   frames: PersistedFrameJournal[],
 ): Promise<void> => {
   deps.ensureRuntimeConfig(env);

@@ -31,7 +31,7 @@ import type { JAdapter } from '../jadapter/types';
 import { canonicalizeProfile, parseProfile } from '../entity/profile';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 import type { ConsensusConfig, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { installCanonicalRegistrationEvidence } from './helpers/registration-evidence';
 import { createTestJReplica } from './helpers/j-replica';
 import { resolveDbPath } from '../storage/runtime-dbs';
@@ -40,9 +40,9 @@ import { SigningKey, computeAddress } from 'ethers';
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 let envSequence = 0;
-const createdEnvs: RuntimeState[] = [];
+const createdEnvs: RuntimeReplica[] = [];
 
-const cleanupEnvStorage = (env: RuntimeState): void => {
+const cleanupEnvStorage = (env: RuntimeReplica): void => {
   const base = resolveDbPath(env, 'core');
   for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${base}${suffix}`, { recursive: true, force: true });
@@ -66,7 +66,7 @@ const makeJurisdiction = (name: string, chainId: number, depByte: string, epByte
   entityProviderAddress: addr(epByte),
 });
 
-const installJurisdiction = (env: RuntimeState, jurisdiction: JurisdictionConfig, jadapter?: Partial<JAdapter>): void => {
+const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConfig, jadapter?: Partial<JAdapter>): void => {
   const adapter = jadapter
     ? {
         setBlockTimestamp: () => {},
@@ -103,7 +103,7 @@ const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): Consens
   jurisdiction,
 });
 
-const makeEnv = (label: string): RuntimeState => {
+const makeEnv = (label: string): RuntimeReplica => {
   const unique = `${label}-${process.pid}-${++envSequence}`;
   const env = createEmptyEnv(unique);
   env.dbNamespace = unique;
@@ -113,7 +113,7 @@ const makeEnv = (label: string): RuntimeState => {
   return env;
 };
 
-const canonicalLocalSigner = (env: RuntimeState, signerId: string): string => {
+const canonicalLocalSigner = (env: RuntimeReplica, signerId: string): string => {
   const privateKey = getLocalSignerPrivateKey(env, signerId);
   if (!privateKey) throw new Error(`TEST_SIGNER_KEY_MISSING:${signerId}`);
   const address = getSignerAddress(env, signerId);
@@ -192,7 +192,7 @@ describe('multi-jurisdiction entity binding', () => {
   });
 
   const importEntity = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityId: string,
     signerId: string,
     jurisdiction: JurisdictionConfig,
@@ -221,7 +221,7 @@ describe('multi-jurisdiction entity binding', () => {
     return canonicalSignerId;
   };
 
-  const findState = (env: RuntimeState, entityId: string) =>
+  const findState = (env: RuntimeReplica, entityId: string) =>
     Array.from(env.eReplicas.values()).find((replica) => replica.state.entityId === entityId)?.state;
 
   test('rejects importing the same entity into a second jurisdiction', async () => {

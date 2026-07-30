@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeTx } from '../runtime/types';
+import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import {
   getEntityCertifiedJAnchor,
@@ -24,7 +24,7 @@ export type PendingWatcherJHistoryRange = {
 };
 
 export const getWatcherStartBlock = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   depositoryAddress?: string,
   chainId?: number,
 ): number => {
@@ -42,7 +42,7 @@ export const getWatcherStartBlock = (
 };
 
 export const updateWatcherJurisdictionCursor = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   blockNumber: number,
   depositoryAddress?: string,
   chainId?: number,
@@ -85,7 +85,7 @@ export const updateWatcherJurisdictionCursor = (
 
 /** Apply the durable cursor transaction while constructing an R-frame. */
 export const applyWatcherJurisdictionCursor = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   data: Extract<RuntimeTx, { type: 'advanceJWatcherCursor' }>['data'],
 ): void => {
   if (!Number.isSafeInteger(data.blockNumber) || data.blockNumber < 0) {
@@ -122,7 +122,7 @@ export const rememberPendingWatcherJBlock = (
 };
 
 export const areJEventReplicaKeysFinalizedThrough = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   replicaKeys: Iterable<string>,
   blockNumber: number,
 ): boolean => {
@@ -138,7 +138,7 @@ export const areJEventReplicaKeysFinalizedThrough = (
 };
 
 export const isWatcherJHistoryRangeDurable = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   range: PendingWatcherJHistoryRange,
 ): boolean => {
   if (
@@ -182,7 +182,7 @@ export const isWatcherJHistoryRangeDurable = (
 };
 
 export const resolveCommittedWatcherCursor = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   pending: PendingWatcherJBlockMap,
   candidateCursor: number,
   currentCursor: number,

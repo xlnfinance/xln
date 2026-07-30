@@ -1,4 +1,4 @@
-import type { RuntimeInput, RuntimeState, RuntimeTx } from '../runtime/types';
+import type { RuntimeInput, RuntimeReplica, RuntimeTx } from '../runtime/types';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { indexReserveUpdatedEvents } from '../jurisdiction/event-evidence';
 import { isCanonicalEvent } from './event-relevance';
@@ -82,7 +82,7 @@ const assertChainCoordinates = (
 
 export const processEventBatch = (
   rawEvents: JEventIngress[],
-  env: RuntimeState,
+  env: RuntimeReplica,
   blockNumber: number,
   blockHash: string,
   counter: EventBatchCounter,

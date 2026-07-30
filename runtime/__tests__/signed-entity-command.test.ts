@@ -61,7 +61,7 @@ import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
 import type { ConsensusConfig, EntityReplica, EntityState, Proposal } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
+import type { RuntimeReplica, RoutedEntityInput } from '../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
@@ -194,7 +194,7 @@ const setupNoJurisdictionMultisig = () => {
 };
 
 const installCertifiedBoardEvents = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   events: JurisdictionEvent[],
 ): void => {
@@ -320,7 +320,7 @@ describe('signed Entity command admission', () => {
       warn: () => {},
       info: () => {},
       error: () => {},
-    } as unknown as RuntimeState;
+    } as unknown as RuntimeReplica;
 
     expect(() => routeInboundP2PEntityInput(env, address('44'), {
       entityId: targetEntityId,

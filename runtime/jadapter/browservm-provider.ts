@@ -1159,7 +1159,7 @@ export class BrowserVMProvider {
 
     throw new Error(
       `BrowserVM missing wallet for entity ${entityId.slice(0, 20)}... ` +
-      `(registerEntityWallet must bind an RuntimeState-derived key explicitly)`
+      `(registerEntityWallet must bind an RuntimeReplica-derived key explicitly)`
     );
   }
 
@@ -2489,7 +2489,7 @@ export class BrowserVMProvider {
   /**
    * Register numbered entities with explicit validator keys.
    * Creates boards with signer addresses as sole validators.
-   * The provider has no RuntimeState and therefore must never resolve numeric aliases
+   * The provider has no RuntimeReplica and therefore must never resolve numeric aliases
    * through process-global key state.
    * @returns Array of assigned entity numbers
    */

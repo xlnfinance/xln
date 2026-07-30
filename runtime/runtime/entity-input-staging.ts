@@ -8,7 +8,7 @@ import {
   accountInputProposal,
 } from '../account/consensus/flush';
 import type { EntityReplica } from '../entity/types';
-import type { RoutedEntityInput, RuntimeState } from './types';
+import type { RoutedEntityInput, RuntimeReplica } from './types';
 import { commitEntityFrameCandidateState } from '../entity/state-clone';
 import { getPerfMs } from '../infra/time';
 import { shortId } from '../infra/logger';
@@ -94,7 +94,7 @@ export type StagedEntityInput = {
 };
 
 export const stageExternalEntityInput = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   inputIndex: number,
   options: RuntimeEntityInputApplyOptions,
@@ -144,7 +144,7 @@ export const stageExternalEntityInput = async (
 };
 
 const registerCommittedInputRoutes = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   staged: StagedEntityInput,
   options: RuntimeEntityInputApplyOptions,
 ): void => {
@@ -171,7 +171,7 @@ const registerCommittedInputRoutes = (
 };
 
 export const collectStagedEntityInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   staged: StagedEntityInput,
   options: RuntimeEntityInputApplyOptions,
   context: RuntimeEntityInputBatchContext,
@@ -196,7 +196,7 @@ export const collectStagedEntityInput = (
 };
 
 export const applyExternalEntityInput = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   inputIndex: number,
   options: RuntimeEntityInputApplyOptions,
@@ -218,7 +218,7 @@ export const applyExternalEntityInput = async (
 };
 
 export const discardMalformedRemoteEntityInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   error: unknown,
   inputIndex: number,
   context: RuntimeEntityInputBatchContext,

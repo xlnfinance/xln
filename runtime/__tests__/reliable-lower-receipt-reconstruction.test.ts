@@ -17,7 +17,7 @@ import {
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
 import { createEmptyEnv, processRuntime } from '../runtime';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   buildCatchupFixtureCertificate,
   catchupFixtureDeliverable,
@@ -26,7 +26,7 @@ import {
   registerCatchupFixtureSigners,
 } from './fixtures/reliable-local-catchup-fixture';
 
-const runtime = (seed: string): RuntimeState => {
+const runtime = (seed: string): RuntimeReplica => {
   const env = createEmptyEnv(seed);
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, '1'));

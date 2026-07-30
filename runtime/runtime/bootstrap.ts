@@ -7,7 +7,7 @@ import { createStructuredLogger } from '../infra/logger';
 import { attachEventEmitters } from './env-events';
 import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import type { TrustedJurisdictionRpcBinding } from './infra';
 
 const runtimeLog = createStructuredLogger('runtime');
@@ -23,14 +23,14 @@ export type RuntimeCreationOptions = Readonly<{
 }>;
 
 export type RuntimeBootstrapDeps = {
-  createRuntime(seed: string | null): RuntimeState;
+  createRuntime(seed: string | null): RuntimeReplica;
   loadRuntime(
     runtimeId?: string | null,
     runtimeSeed?: string | null,
     options?: Pick<RuntimeCreationOptions, 'trustedJurisdictionRpcBindings'>,
-  ): Promise<RuntimeState | null>;
-  loadGossipProfiles(env: RuntimeState): Promise<void>;
-  startRuntimeLoop(env: RuntimeState): unknown;
+  ): Promise<RuntimeReplica | null>;
+  loadGossipProfiles(env: RuntimeReplica): Promise<void>;
+  startRuntimeLoop(env: RuntimeReplica): unknown;
 };
 
 const registerLocalRuntimeSigners = (
@@ -51,10 +51,10 @@ const registerLocalRuntimeSigners = (
 };
 
 const restoreRuntimeAtBootstrap = async (
-  baseEnv: RuntimeState,
+  baseEnv: RuntimeReplica,
   options: RuntimeCreationOptions | undefined,
   deps: RuntimeBootstrapDeps,
-): Promise<{ env: RuntimeState; restored: boolean }> => {
+): Promise<{ env: RuntimeReplica; restored: boolean }> => {
   const restoreDisabled =
     !runtimeIsBrowser &&
     !!nodeProcess &&
@@ -74,7 +74,7 @@ const restoreRuntimeAtBootstrap = async (
   return { env, restored: true };
 };
 
-const ensureBootstrapRuntimeId = (env: RuntimeState): void => {
+const ensureBootstrapRuntimeId = (env: RuntimeReplica): void => {
   if (env.runtimeId || !env.runtimeSeed) return;
   try {
     env.runtimeId = deriveSignerAddressSync(env.runtimeSeed, '1');
@@ -90,7 +90,7 @@ export const bootstrapRuntime = async (
   deps: RuntimeBootstrapDeps,
   runtimeSeedOverride?: string | null,
   options?: RuntimeCreationOptions,
-): Promise<RuntimeState> => {
+): Promise<RuntimeReplica> => {
   const runtimeSeed = runtimeSeedOverride ?? null;
   registerLocalRuntimeSigners(runtimeSeed, options?.localSigners ?? []);
   const restored = await restoreRuntimeAtBootstrap(
@@ -119,12 +119,12 @@ export const bootstrapRuntime = async (
 
 export const queueEntityTransaction = (
   enqueue: (
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityId: string,
     signerId: string,
     tx: EntityTx,
   ) => void,
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
   txData: { type: EntityTx['type'] } & Record<string, unknown>,
@@ -132,12 +132,12 @@ export const queueEntityTransaction = (
   enqueue(env, entityId, signerId, { type: txData.type, data: txData } as EntityTx);
 };
 
-export const getHistory = (env: RuntimeState) => env.history || [];
+export const getHistory = (env: RuntimeReplica) => env.history || [];
 
-export const getSnapshot = (env: RuntimeState, index: number) => {
+export const getSnapshot = (env: RuntimeReplica, index: number) => {
   const history = getHistory(env);
   return index >= 0 && index < history.length ? history[index] : null;
 };
 
-export const getCurrentHistoryIndex = (env: RuntimeState): number =>
+export const getCurrentHistoryIndex = (env: RuntimeReplica): number =>
   getHistory(env).length - 1;

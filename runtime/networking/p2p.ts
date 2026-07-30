@@ -5,7 +5,7 @@
  * Durable retry ownership belongs to the runtime outbox, never this adapter.
  */
 
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from '../entity/profile';
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
@@ -47,7 +47,7 @@ const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
 const ENTITY_INPUT_TARGET_OFFLINE = 'ENTITY_INPUT_TARGET_NOT_CONNECTED';
 const RELIABLE_RECEIPT_TARGET_OFFLINE = 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
-export const reportRelayClientError = (env: RuntimeState, relay: string, error: Error): void => {
+export const reportRelayClientError = (env: RuntimeReplica, relay: string, error: Error): void => {
   if (error.message === ENTITY_INPUT_TARGET_OFFLINE) {
     env.info('network', 'ENTITY_INPUT_TARGET_OFFLINE', { relay, error: error.message });
     return;
@@ -64,7 +64,7 @@ export const reportRelayClientError = (env: RuntimeState, relay: string, error: 
 };
 
 export const reportDirectClientError = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   endpoint: string,
   targetRuntimeId: string,
   error: Error,
@@ -99,7 +99,7 @@ export type P2PConfig = {
 };
 
 type RuntimeP2POptions = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   runtimeId: string;
   signerId?: string;
   relayUrls?: string[];
@@ -256,7 +256,7 @@ const isInactiveTabStandby = (): boolean => {
 };
 
 export class RuntimeP2P {
-  private env: RuntimeState;
+  private env: RuntimeReplica;
   private runtimeId: string;
   private signerId: string;
   private relayUrls: string[];
@@ -1255,7 +1255,7 @@ export class RuntimeP2P {
         continue;
       }
       profile.metadata.profileHanko = certification.hanko;
-      const signedProfile = await signProfileRuntimeRoute(this.env as RuntimeState, profile, replicaSignerId);
+      const signedProfile = await signProfileRuntimeRoute(this.env as RuntimeReplica, profile, replicaSignerId);
       profiles.push(signedProfile);
     }
     return profiles;

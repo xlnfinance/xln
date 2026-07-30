@@ -92,7 +92,7 @@ import type {
   StorageSnapshotManifest,
 } from '../storage/types';
 
-import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, RuntimeState, RuntimeInput } from '../runtime/types';
+import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, RuntimeReplica, RuntimeInput } from '../runtime/types';
 
 import type { BookState } from '../orderbook';
 
@@ -135,7 +135,7 @@ const makeHubProfile = (id: string, name: string, lastUpdated = 7): Profile =>
     },
   });
 
-const makeEnv = (): RuntimeState =>
+const makeEnv = (): RuntimeReplica =>
   ({
     height: 7,
     timestamp: 700,
@@ -232,7 +232,7 @@ const makeEnv = (): RuntimeState =>
         } as EntityReplica,
       ],
     ]),
-  }) as RuntimeState;
+  }) as RuntimeReplica;
 
 const makeBook = (_price: bigint): BookState => ({
   params: { bucketWidthTicks: 1n, maxOrders: 100, stpPolicy: 0 },
@@ -323,7 +323,7 @@ const readTestPageLimit = (raw: unknown, fallback = 10): number => {
 };
 
 const makeTestViewPageLoader =
-  (env: RuntimeState) =>
+  (env: RuntimeReplica) =>
   async (
     requestedEntityId: string,
     height: number,
@@ -1693,7 +1693,7 @@ test('runtime adapter recovery bundle read is gated by seed-derived lookup key',
     'recovery bundle not found',
   );
 
-  const noSeedEnv = { ...env, runtimeSeed: undefined } as RuntimeState;
+  const noSeedEnv = { ...env, runtimeSeed: undefined } as RuntimeReplica;
   await expect(
     resolveRuntimeAdapterRead({ env: noSeedEnv }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
   ).rejects.toThrow('recovery bundle reads require runtimeSeed');

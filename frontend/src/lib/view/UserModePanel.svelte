@@ -26,7 +26,7 @@
   import { runtimes, activeRuntimeId, runtimeOperations } from '$lib/stores/runtimeStore';
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import type { Tab } from '$lib/types/ui';
-  import type { RuntimeState } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica } from '@xln/runtime/api/runtime-module';
   import type { EntityReplica } from '@xln/runtime/entity/types';
   import type { EnvSnapshot } from '@xln/runtime/runtime/types';
   import {
@@ -61,16 +61,16 @@
   } from '$lib/components/Entity/formation-runtime-projection';
   import { hubDiscoveryJurisdictionKey } from '$lib/components/Entity/hub-discovery-profile';
 
-  type RuntimeFrame = RuntimeState | EnvSnapshot;
+  type RuntimeFrame = RuntimeReplica | EnvSnapshot;
   type JurisdictionLike = { name: string };
   type JurisdictionEntry = { name?: string; rpcs?: string[] };
   interface Props {
-    runtimeFrameEnv: Writable<RuntimeState | null>;
+    runtimeFrameEnv: Writable<RuntimeReplica | null>;
     runtimeFrameRevision?: Writable<number>;
     runtimeFrameHistory?: Writable<EnvSnapshot[]>;
     runtimeFrameTimeIndex?: Writable<number>;
     runtimeFrameIsLive?: Writable<boolean>;
-    liveEnvResolver?: () => RuntimeState | null;
+    liveEnvResolver?: () => RuntimeReplica | null;
     dockMode?: boolean;
   }
 
@@ -84,7 +84,7 @@
     dockMode = false,
   }: Props = $props();
 
-  function publishRuntimeFrameEnv(env: RuntimeState | null) {
+  function publishRuntimeFrameEnv(env: RuntimeReplica | null) {
     const runtimeEnv = env ? (unwrapLiveRuntimeEnv(env) ?? env) : null;
     runtimeFrameEnv.set(runtimeEnv ? createRuntimeViewEnv(runtimeEnv) : null);
     if (runtimeEnv) runtimeOperations.updateLocalEnv(runtimeEnv);
@@ -97,11 +97,11 @@
     errorLog.log(message, 'User Mode', details);
   }
 
-  function isLiveRuntimeFrame(frame: RuntimeFrame): frame is RuntimeState {
+  function isLiveRuntimeFrame(frame: RuntimeFrame): frame is RuntimeReplica {
     return unwrapLiveRuntimeEnv(frame) !== null;
   }
 
-  function cloneLiveEnv(frame: RuntimeState): RuntimeState {
+  function cloneLiveEnv(frame: RuntimeReplica): RuntimeReplica {
     return createRuntimeViewEnv(unwrapLiveRuntimeEnv(frame) ?? frame);
   }
 
@@ -684,11 +684,11 @@
   const workspaceEnv = $derived.by<RuntimeFrame | null>(() =>
     isRemoteRuntime ? null : currentFrame,
   );
-  const workspaceLiveEnv = $derived.by<RuntimeState | null>(() =>
+  const workspaceLiveEnv = $derived.by<RuntimeReplica | null>(() =>
     isRemoteRuntime ? null : (currentLiveRuntimeEnv ?? $runtimeFrameEnv),
   );
 
-  function resolveWorkspaceLiveEnv(): RuntimeState | null {
+  function resolveWorkspaceLiveEnv(): RuntimeReplica | null {
     return isRemoteRuntime ? null : (currentLiveRuntimeEnv ?? $runtimeFrameEnv);
   }
 

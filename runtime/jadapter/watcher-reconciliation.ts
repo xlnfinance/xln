@@ -3,7 +3,7 @@ import {
   getValidatorJExpectedBlockHash,
 } from '../jurisdiction/local-history';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { isEntityReplicaRelevantToWatcher } from './watcher';
 
@@ -29,7 +29,7 @@ export type WatcherTargetedRewind = {
 };
 
 export const collectWatcherCanonicalAudit = (
-  state: RuntimeState,
+  state: RuntimeReplica,
   watcherReplica: JReplica,
   lastSyncedBlock: number,
 ): WatcherCanonicalAudit => {

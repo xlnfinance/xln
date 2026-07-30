@@ -91,7 +91,7 @@ import {
 } from '../runtime.ts';
 import { registerEnvChangeCallback } from '../runtime/loop-environment';
 import type { EntityInput } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import {
   BOOTSTRAP_POLL_MS,
@@ -241,7 +241,7 @@ type HubBootstrapIdentity = {
 };
 
 type HubNodeLiveContext = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   bootstrap: HubBootstrapIdentity | null;
   hubBootstraps: HubBootstrapEntry[];
   activeJAdapter: JAdapter | null;
@@ -324,7 +324,7 @@ const normalizeJurisdictionName = (value: unknown): string =>
   normalizeJurisdictionDisplayName(value).trim().toLowerCase();
 
 const resolveJReplicaForJurisdictionName = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdictionName: string,
 ): { name: string; replica: JReplica } | null => {
   return resolveJReplicaForJurisdictionIdentity(env, { name: jurisdictionName });
@@ -337,7 +337,7 @@ const sameJurisdictionRef = (left: unknown, right: unknown): boolean => {
 };
 
 const resolveJReplicaForJurisdictionIdentity = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: unknown,
 ): { name: string; replica: JReplica } | null => {
   const explicitRef = isJurisdictionStackRef(jurisdiction) ? String(jurisdiction).trim().toLowerCase() : '';
@@ -360,7 +360,7 @@ const resolveJReplicaForJurisdictionIdentity = (
   return null;
 };
 
-const hasLiveJAdapterForJurisdiction = (env: RuntimeState, jurisdictionName: string): boolean =>
+const hasLiveJAdapterForJurisdiction = (env: RuntimeReplica, jurisdictionName: string): boolean =>
   Boolean(resolveJReplicaForJurisdictionName(env, jurisdictionName)?.replica?.jadapter);
 
 type JurisdictionImportDiagnostics = {
@@ -575,7 +575,7 @@ const buildLocalHubSignerLabels = (): string[] => {
   return labels;
 };
 
-const configureHubRuntimeLogging = (env: RuntimeState): void => {
+const configureHubRuntimeLogging = (env: RuntimeReplica): void => {
   if (readBooleanEnv('XLN_HUB_VERBOSE_RUNTIME_LOGS', false)) return;
   env.quietRuntimeLogs = true;
 };
@@ -592,7 +592,7 @@ const resolveOperatorAppUrl = (): string => {
   return 'http://localhost:8080/app';
 };
 
-const buildRuntimeAdminUrl = (env: RuntimeState): string | null => {
+const buildRuntimeAdminUrl = (env: RuntimeReplica): string | null => {
   const seed = resolveRuntimeAdapterAuthSeed(env);
   if (!seed) return null;
   const runtimeAdapterUrl = new URL(directWsUrl);
@@ -769,7 +769,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
   resetMeshJurisdictionsCache();
 };
 
-const syncEnvJurisdictionReplica = (env: RuntimeState, jadapter: JAdapter, rpcUrl: string): void => {
+const syncEnvJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapter, rpcUrl: string): void => {
   const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
   if (!activeName) return;
   const replica = env.jReplicas?.get(activeName);
@@ -788,7 +788,7 @@ const syncEnvJurisdictionReplica = (env: RuntimeState, jadapter: JAdapter, rpcUr
   replica.jadapter = jadapter;
 };
 
-const buildRuntimeJurisdictionsPayload = (env: RuntimeState): string | null => {
+const buildRuntimeJurisdictionsPayload = (env: RuntimeReplica): string | null => {
   const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
   if (!activeName) return null;
   const replica = env.jReplicas?.get(activeName) as
@@ -855,7 +855,7 @@ const buildRuntimeJurisdictionsPayload = (env: RuntimeState): string | null => {
   });
 };
 
-const ensureRpcStackReady = async (env: RuntimeState, jadapter: JAdapter): Promise<void> => {
+const ensureRpcStackReady = async (env: RuntimeReplica, jadapter: JAdapter): Promise<void> => {
   if (jadapter.mode === 'browservm') return;
   const hasAddresses = Boolean(
     jadapter.addresses?.account &&
@@ -918,7 +918,7 @@ const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTo
   throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${HUB_REQUIRED_TOKEN_COUNT}`);
 };
 
-const ensureOrderbook = async (env: RuntimeState, entityId: string, signerId: string): Promise<void> => {
+const ensureOrderbook = async (env: RuntimeReplica, entityId: string, signerId: string): Promise<void> => {
   const replica = getEntityReplicaById(env, entityId);
   if (replica?.state?.orderbookExt) return;
 
@@ -955,7 +955,7 @@ type ImportedJurisdictionContracts = {
 };
 
 const getImportedJurisdictionContracts = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdictionName: string,
   fallback?: JurisdictionConfig['contracts'],
 ): ImportedJurisdictionContracts => {
@@ -985,7 +985,7 @@ const getImportedJurisdictionContracts = (
 };
 
 const importJurisdiction = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
 ): Promise<void> => {
   enqueueRuntimeInput(env, {
@@ -1015,7 +1015,7 @@ type HubBootstrapPosition = NonNullable<
 >;
 
 const bootstrapHubEntity = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: {
     signerId: string;
     rpcUrl: string;
@@ -1050,7 +1050,7 @@ const bootstrapHubEntity = async (
 };
 
 const bootstrapHubJurisdictions = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   primary: JurisdictionConfig,
 ): Promise<{
   primaryBootstrap: NonNullable<Awaited<ReturnType<typeof bootstrapHub>>>;
@@ -1155,7 +1155,7 @@ const tokenCatalogsByEntityId = new Map<string, JTokenInfo[]>();
 
 const normalizeEntityId = (entityId: string): string => String(entityId || '').trim().toLowerCase();
 
-const requireJAdapterForEntity = (env: RuntimeState, entityId: string, purpose: string): JAdapter => {
+const requireJAdapterForEntity = (env: RuntimeReplica, entityId: string, purpose: string): JAdapter => {
   const adapter = getEntityJAdapter(env, entityId);
   if (!adapter) {
     throw new Error(`${purpose}_JADAPTER_MISSING: entity=${entityId}`);
@@ -1164,7 +1164,7 @@ const requireJAdapterForEntity = (env: RuntimeState, entityId: string, purpose: 
 };
 
 const requireJAdapterForDebugReserve = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   jurisdictionRef: string,
 ): JAdapter => {
@@ -1195,7 +1195,7 @@ const requireJAdapterForDebugReserve = (
   return activeAdapter;
 };
 
-const getReserveHealth = (env: RuntimeState, entityId: string, tokenCatalog: JTokenInfo[]): LocalHealthResponse['bootstrapReserves'] => {
+const getReserveHealth = (env: RuntimeReplica, entityId: string, tokenCatalog: JTokenInfo[]): LocalHealthResponse['bootstrapReserves'] => {
   const replica = getEntityReplicaById(env, entityId);
   const tokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
     jurisdictionName: getEntityJurisdictionName(env, entityId),
@@ -1223,7 +1223,7 @@ const getReserveHealth = (env: RuntimeState, entityId: string, tokenCatalog: JTo
 };
 
 const refreshReserveStateFromWatcher = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   tokenCatalog: JTokenInfo[],
 ): Promise<LocalHealthResponse['bootstrapReserves']> => {
@@ -1240,7 +1240,7 @@ const refreshReserveStateFromWatcher = async (
 };
 
 const ensureBootstrapReserves = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   tokenCatalog: JTokenInfo[],
   reportProgress: (step: string) => void,
@@ -1307,7 +1307,7 @@ const ensureBootstrapReserves = async (
 };
 
 const ensurePeerBootstrapReserves = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   peerProfiles: VisibleHubProfile[],
   tokenCatalog: JTokenInfo[],
   reportProgress: (step: string) => void,
@@ -1374,20 +1374,20 @@ const ensurePeerBootstrapReserves = async (
   }
 };
 
-const getEntityJurisdictionName = (env: RuntimeState, entityId: string | null): string => {
+const getEntityJurisdictionName = (env: RuntimeReplica, entityId: string | null): string => {
   if (!entityId) return '';
   const replica = getEntityReplicaById(env, entityId);
   return normalizeJurisdictionDisplayName(replica?.state?.config?.jurisdiction?.name || '');
 };
 
-const getEntityJurisdiction = (env: RuntimeState, entityId: string | null): unknown | null => {
+const getEntityJurisdiction = (env: RuntimeReplica, entityId: string | null): unknown | null => {
   if (!entityId) return null;
   const replica = getEntityReplicaById(env, entityId);
   return replica?.state?.config?.jurisdiction ?? null;
 };
 
 const resolveEntityTokenCatalog = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
 ): Promise<JTokenInfo[]> => {
   const normalizedEntityId = normalizeEntityId(entityId);
@@ -1420,7 +1420,7 @@ const buildAggregateReserveHealth = (
 });
 
 const buildHubBootstrapReserveHealth = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   primaryEntityId: string | null,
   fallbackCatalog: JTokenInfo[],
   hubEntities: HubBootstrapEntry[] = [],
@@ -1456,7 +1456,7 @@ const buildHubBootstrapReserveHealth = (
 };
 
 const ensureHubBootstrapReserves = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   hubEntities: HubBootstrapEntry[],
   reportProgress: (step: string) => void,
 ): Promise<BootstrapReserveHealth> => {
@@ -1488,7 +1488,7 @@ const ensureHubBootstrapReserves = async (
   return buildAggregateReserveHealth(primaryHealth, entities);
 };
 
-const readVisibleHubProfiles = (env: RuntimeState, jurisdiction: unknown): VisibleHubProfile[] => {
+const readVisibleHubProfiles = (env: RuntimeReplica, jurisdiction: unknown): VisibleHubProfile[] => {
   const profiles = env.gossip?.getProfiles?.() || [];
   return profiles
     .filter(profile => profile.metadata?.isHub === true)
@@ -1521,24 +1521,24 @@ const readVisibleHubProfiles = (env: RuntimeState, jurisdiction: unknown): Visib
     );
 };
 
-const openDirectRuntimeIds = (env: RuntimeState): Set<string> => new Set(
+const openDirectRuntimeIds = (env: RuntimeReplica): Set<string> => new Set(
   (getP2PState(env).directPeers || [])
     .filter(peer => peer.open === true)
     .map(peer => normalizeRuntimeId(peer.runtimeId || ''))
     .filter(runtimeId => runtimeId.length > 0),
 );
 
-const directRuntimePeersReady = (env: RuntimeState, peers: Array<{ runtimeId: string }>): boolean => {
+const directRuntimePeersReady = (env: RuntimeReplica, peers: Array<{ runtimeId: string }>): boolean => {
   if (peers.length === 0) return true;
   const openRuntimeIds = openDirectRuntimeIds(env);
   return peers.every(peer => openRuntimeIds.has(peer.runtimeId));
 };
 
-const directHubPeersReady = (env: RuntimeState, peers: VisibleHubProfile[]): boolean => directRuntimePeersReady(env, peers);
+const directHubPeersReady = (env: RuntimeReplica, peers: VisibleHubProfile[]): boolean => directRuntimePeersReady(env, peers);
 
 const visibleDirectSupportPeers = (
   identities: SupportPeerIdentity[],
-  profiles: ReturnType<NonNullable<RuntimeState['gossip']>['getProfiles']>,
+  profiles: ReturnType<NonNullable<RuntimeReplica['gossip']>['getProfiles']>,
   selfEntityId: string,
   jurisdiction: unknown,
 ): VisibleSupportPeer[] => {
@@ -1566,14 +1566,14 @@ type HubMeshInputPlan = {
 };
 
 const planSupportPeerInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   owner: Pick<
     HubBootstrapEntry,
     'entityId' | 'signerId' | 'jurisdictionName' | 'chainId' | 'depositoryAddress'
   >,
   supportPeerIdentities: SupportPeerIdentity[],
   visibleProfiles: ReturnType<
-    NonNullable<RuntimeState['gossip']>['getProfiles']
+    NonNullable<RuntimeReplica['gossip']>['getProfiles']
   >,
 ): HubMeshInputPlan => {
   const openInputs: EntityInput[] = [];
@@ -1644,7 +1644,7 @@ const planSupportPeerInputs = (
 };
 
 const planHubPeerInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   bootstrap: Pick<HubBootstrapEntry, 'entityId' | 'signerId'>,
   peers: VisibleHubProfile[],
 ): HubMeshInputPlan => {
@@ -1707,7 +1707,7 @@ const planHubPeerInputs = (
 };
 
 const planMeshBootstrapInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   bootstrap: Pick<HubBootstrapEntry, 'entityId' | 'signerId'>,
   hubBootstraps: HubBootstrapEntry[],
   peers: VisibleHubProfile[],
@@ -1731,7 +1731,7 @@ const planMeshBootstrapInputs = (
   };
 };
 
-const buildPairHealth = (env: RuntimeState, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
+const buildPairHealth = (env: RuntimeReplica, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
   return peers.map(peer => {
     const account = getAccountState(env, selfEntityId, peer.entityId);
     const grantedByMe = account ? getCreditGrantedByEntity(account, selfEntityId, HUB_MESH_TOKEN_ID) : 0n;
@@ -1751,7 +1751,7 @@ const buildPairHealth = (env: RuntimeState, selfEntityId: string, peers: Array<{
 };
 
 const buildLocalHealth = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string | null,
   tokenCatalog: JTokenInfo[],
   jadapter: JAdapter | null,
@@ -1824,7 +1824,7 @@ const summarizeRecentRuntimeInputs = (
   }));
 
 const handleAccountStatusRequest = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   request: Request,
   url: URL,
   defaultHubEntityId: string | null,
@@ -1920,7 +1920,7 @@ const handleAccountStatusRequest = (
 };
 
 const handleMarketSnapshotsRequest = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   request: Request,
   url: URL,
   defaultHubEntityId: string,
@@ -1994,7 +1994,7 @@ const handleMarketSnapshotsRequest = (
 };
 
 const handleDebugReserveRequest = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   request: Request,
   url: URL,
 ): Promise<Response | null> => {
@@ -2046,7 +2046,7 @@ const handleDebugReserveRequest = async (
 };
 
 const createHubControlRequestHandler = (dependencies: {
-  state: RuntimeState;
+  state: RuntimeReplica;
   nodeName: string;
   pauseBootstrap: () => Promise<void>;
   markShuttingDown: () => void;
@@ -2083,7 +2083,7 @@ const createHubControlRequestHandler = (dependencies: {
   };
 
 const handleHubJurisdictionsRequest = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   url: URL,
 ): Response | null => {
   if (url.pathname !== '/api/jurisdictions') return null;
@@ -2101,11 +2101,11 @@ const handleHubJurisdictionsRequest = (
       );
 };
 
-const currentRuntimeHeight = (env: RuntimeState | null): number =>
+const currentRuntimeHeight = (env: RuntimeReplica | null): number =>
   Math.max(0, Math.floor(Number(env?.height ?? 0)));
 
 type HubHttpContext = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   hubBootstraps: HubBootstrapEntry[];
   externalWalletApi: ReturnType<typeof createExternalWalletApi>;
   faucetRelayStore: ReturnType<typeof createRelayStore>;
@@ -2259,7 +2259,7 @@ type MeshBootstrapMilestones = {
 };
 
 type HubMeshBootstrapInput = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   bootstrap: { entityId: string; signerId: string };
   hubBootstraps: HubBootstrapEntry[];
   jurisdiction: JurisdictionConfig;

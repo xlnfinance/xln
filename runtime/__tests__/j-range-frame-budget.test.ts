@@ -25,7 +25,7 @@ import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEventBlock, JurisdictionEventData, ValidatorJEventBlock, ValidatorJHistory } from '../types/jurisdiction-events';
 
@@ -82,7 +82,7 @@ const scheduledWakeTx: EntityTx = {
   data: { version: 1, proposerSignerId: `0x${'33'.repeat(20)}`, dueAt: 1, jobs: [] },
 };
 
-const installSigner = (env: RuntimeState, label: string): string => {
+const installSigner = (env: RuntimeReplica, label: string): string => {
   const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
   registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
   return signerId;

@@ -6,7 +6,7 @@ import {
   beginRuntimeCheckpointLineageRefresh,
   refreshRuntimeCheckpointLineageForEntity,
 } from '../../storage/entity-lineage';
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/input';
 import { DEBUG } from '../../infra/debug-flags';
 import { getPerfMs } from '../../infra/time';
@@ -49,8 +49,8 @@ const APPLY_SLOW_MS = Math.max(
 export type RuntimeInputReducerDeps =
   RuntimeInputAdmissionDeps &
   RuntimeReliableCommitDeps & {
-    assertApplyAllowed(env: RuntimeState): void;
-    isReplay(env: RuntimeState): boolean;
+    assertApplyAllowed(env: RuntimeReplica): void;
+    isReplay(env: RuntimeReplica): boolean;
     getRoutingDeps(): RuntimeEntityRoutingDeps;
   };
 
@@ -67,13 +67,13 @@ export type AppliedRuntimeInput = {
 };
 
 export type RuntimeInputReducer = {
-  (env: RuntimeState, runtimeInput: RuntimeInput): Promise<AppliedRuntimeInput>;
-  validate(env: RuntimeState, runtimeInput: RuntimeInput): void;
+  (env: RuntimeReplica, runtimeInput: RuntimeInput): Promise<AppliedRuntimeInput>;
+  validate(env: RuntimeReplica, runtimeInput: RuntimeInput): void;
 };
 
 type ApplyProfiler = {
   mark(label: string): void;
-  finish(env: RuntimeState, result: AppliedRuntimeInput, runtimeTxs: RuntimeTx[]): void;
+  finish(env: RuntimeReplica, result: AppliedRuntimeInput, runtimeTxs: RuntimeTx[]): void;
 };
 
 const createApplyProfiler = (): ApplyProfiler => {
@@ -110,7 +110,7 @@ type LineageRefresh = {
   finalize(): void;
 };
 
-const createLineageRefresh = (env: RuntimeState): LineageRefresh => {
+const createLineageRefresh = (env: RuntimeReplica): LineageRefresh => {
   const guards = new Map<
     string,
     ReturnType<typeof beginRuntimeCheckpointLineageRefresh>
@@ -133,7 +133,7 @@ const createLineageRefresh = (env: RuntimeState): LineageRefresh => {
 };
 
 const applyRuntimeTransactions = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTxs: RuntimeTx[],
   isReplay: boolean,
   lineage: LineageRefresh,
@@ -176,7 +176,7 @@ type AppliedEntityBatch = Awaited<ReturnType<typeof applyMergedEntityInputs>>;
 type PreparedAtomicCrossJ = Awaited<ReturnType<typeof admitAtomicCrossJAccountInputs>>;
 
 const applyRuntimeEntityBatch = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   ingress: PreparedRuntimeIngress,
   mergedInputs: RoutedEntityInput[],
   isReplay: boolean,
@@ -235,7 +235,7 @@ const applyRuntimeEntityBatch = async (
 };
 
 const finalizeRuntimeInputApply = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   ingress: PreparedRuntimeIngress,
   prepared: PreparedAtomicCrossJ,
@@ -290,7 +290,7 @@ const finalizeRuntimeInputApply = (
 };
 
 const applyRuntimeInputPhases = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   deps: RuntimeInputReducerDeps,
   profile: ApplyProfiler,

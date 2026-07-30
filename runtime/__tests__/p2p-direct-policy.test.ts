@@ -3,7 +3,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { RuntimeP2P } from '../networking/p2p';
 import { hexToPubKey } from '../protocol/p2p-crypto';
 import type { Profile } from '../entity/profile';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 const key = (byte: string): string => `0x${byte.repeat(32)}`;
 
@@ -50,7 +50,7 @@ const makeP2P = (profiles: Profile[]): RuntimeP2P => new RuntimeP2P({
     runtimeSeed: 'p2p-direct-policy-local',
     gossip: { getProfiles: () => profiles },
     warn: () => {},
-  } as unknown as RuntimeState,
+  } as unknown as RuntimeReplica,
   runtimeId: runtimeIdFor('local'),
   onEntityInputs: () => {},
   onGossipProfiles: () => {},

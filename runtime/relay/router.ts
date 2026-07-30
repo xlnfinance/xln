@@ -1,5 +1,5 @@
 /**
- * Relay Router — pure message routing. No RuntimeState, no decryption.
+ * Relay Router — pure message routing. No RuntimeReplica, no decryption.
  *
  * Receives parsed relay messages, looks up targets in the store,
  * and delegates to callbacks for local delivery and sending.

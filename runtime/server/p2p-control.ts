@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -64,7 +64,7 @@ export const decodeP2PControlBody = (value: unknown): P2PControlBody => {
 export const handleP2PControl = async (
   req: Request,
   headers: HeadersInit,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   deps: P2PControlDeps,
 ): Promise<Response> => {
   if (!env) {

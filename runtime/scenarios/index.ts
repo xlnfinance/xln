@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 // ============================================================================
 // SCENARIO REGISTRY - Used by runtime.ts exports and all-scenarios.ts
@@ -9,7 +9,7 @@ export interface ScenarioMetadata {
   name: string;
   description: string;
   tags: string[];
-  run: (env: RuntimeState) => Promise<RuntimeState | void>;
+  run: (env: RuntimeReplica) => Promise<RuntimeReplica | void>;
 }
 
 // Lazy-load scenarios - run is async callable that imports on first call
@@ -19,84 +19,84 @@ export const SCENARIOS: ScenarioMetadata[] = [
     name: 'Settlement Workspace',
     description: 'Settlement workspace negotiation: propose, update, approve, execute, reject',
     tags: ['settlement', 'core', 'bilateral'],
-    run: async (env: RuntimeState) => { await (await import('./settle')).runSettleScenario(env); },
+    run: async (env: RuntimeReplica) => { await (await import('./settle')).runSettleScenario(env); },
   },
   {
     id: 'ahb',
     name: 'Alice-Hub-Bob Triangle',
     description: 'Full bilateral consensus test with 6 phases, simultaneous payments, rollback verification',
     tags: ['consensus', 'core', 'bilateral'],
-    run: async (env: RuntimeState) => { await (await import('./ahb')).ahb(env); },
+    run: async (env: RuntimeReplica) => { await (await import('./ahb')).ahb(env); },
   },
   {
     id: 'lock-ahb',
     name: 'HTLC Multi-Hop (A→H→B)',
     description: '3-hop onion routed HTLC with encrypted envelopes, automatic secret propagation, fee collection',
     tags: ['htlc', 'routing', 'onion'],
-    run: async (env: RuntimeState) => { await (await import('./lock-ahb')).lockAhb(env); },
+    run: async (env: RuntimeReplica) => { await (await import('./lock-ahb')).lockAhb(env); },
   },
   {
     id: 'htlc-4hop',
     name: 'HTLC 4-Hop Chain',
     description: '4-hop onion routed payment through 3 hubs, fee cascade verification',
     tags: ['htlc', 'routing'],
-    run: async (env: RuntimeState) => (await import('./htlc-4hop')).htlc4hop(env),
+    run: async (env: RuntimeReplica) => (await import('./htlc-4hop')).htlc4hop(env),
   },
   {
     id: 'swap',
     name: 'Swap Orderbook',
     description: 'Bilateral swap orderbook with limit orders, partial fills, cancel',
     tags: ['swap', 'orderbook'],
-    run: async (env: RuntimeState) => (await import('./swap')).swap(env),
+    run: async (env: RuntimeReplica) => (await import('./swap')).swap(env),
   },
   {
     id: 'swap-market',
     name: 'Multi-Party Swap Market',
     description: '8 traders, 3 orderbooks, realistic market simulation',
     tags: ['swap', 'orderbook', 'stress'],
-    run: async (env: RuntimeState) => (await import('./swap-market')).swapMarket(env),
+    run: async (env: RuntimeReplica) => (await import('./swap-market')).swapMarket(env),
   },
   {
     id: 'swap-tps',
     name: 'Swap TPS Benchmark',
     description: 'Pure orderbook matcher throughput gate: 100k swaps, minimum 10k TPS',
     tags: ['swap', 'orderbook', 'benchmark'],
-    run: async (env: RuntimeState) => (await import('./swap-tps')).swapTps(env),
+    run: async (env: RuntimeReplica) => (await import('./swap-tps')).swapTps(env),
   },
   {
     id: 'multi-sig',
     name: 'Multi-Signer BFT',
     description: '2-of-3 threshold consensus, byzantine tolerance, offline validator simulation',
     tags: ['consensus', 'bft', 'multi-sig'],
-    run: async (env: RuntimeState) => (await import('./multi-sig')).multiSig(env),
+    run: async (env: RuntimeReplica) => (await import('./multi-sig')).multiSig(env),
   },
   {
     id: 'rapid-fire',
     name: 'Rapid-Fire Stress Test',
     description: '200 payments in 10s, bidirectional high-load, rollback handling',
     tags: ['stress', 'bilateral'],
-    run: async (env: RuntimeState) => (await import('./rapid-fire')).rapidFire(env),
+    run: async (env: RuntimeReplica) => (await import('./rapid-fire')).rapidFire(env),
   },
   {
     id: 'processbatch',
     name: 'ProcessBatch Smoke',
     description: 'Isolated hub R→C batch build + j_broadcast + on-chain event finalization',
     tags: ['j-batch', 'rebalance', 'rpc'],
-    run: async (env: RuntimeState) => { await (await import('./processbatch')).runProcessBatchScenario(env); },
+    run: async (env: RuntimeReplica) => { await (await import('./processbatch')).runProcessBatchScenario(env); },
   },
   {
     id: 'dispute-lifecycle',
     name: 'Dispute Lifecycle',
     description: 'Unilateral dispute lifecycle: start -> finalize -> resume, without bilateral j_event_claim flow',
     tags: ['dispute', 'safety', 'rpc'],
-    run: async (env: RuntimeState) => (await import('./dispute-lifecycle')).runDisputeLifecycle(env),
+    run: async (env: RuntimeReplica) => (await import('./dispute-lifecycle')).runDisputeLifecycle(env),
   },
   {
     id: 'dispute-transformer',
     name: 'Programmable Dispute Transformer',
     description: 'Real Depository dispute with payment, bilateral HTLC evidence, both swap directions, freeze, and late ACK',
     tags: ['dispute', 'safety', 'htlc', 'swap', 'rpc'],
-    run: async (env: RuntimeState) => (await import('./dispute-transformer')).runDisputeTransformer(env),
+    run: async (env: RuntimeReplica) => (await import('./dispute-transformer')).runDisputeTransformer(env),
   },
 ];
 
@@ -115,22 +115,22 @@ export function getScenariosByTag(tag: string): ScenarioMetadata[] {
 export type ScenarioEntry = {
   key: string;
   name: string;
-  load: () => Promise<(env: RuntimeState) => Promise<void | RuntimeState>>;
+  load: () => Promise<(env: RuntimeReplica) => Promise<void | RuntimeReplica>>;
   requiresStress?: boolean;
 };
 
 export const scenarioRegistry: ScenarioEntry[] = [
   { key: 'settle', name: 'Settlement', load: async () => {
     const { runSettleScenario } = await import('./settle');
-    return async (env: RuntimeState): Promise<void> => { await runSettleScenario(env); };
+    return async (env: RuntimeReplica): Promise<void> => { await runSettleScenario(env); };
   }},
   { key: 'ahb', name: 'AHB', load: async () => {
     const { ahb } = await import('./ahb');
-    return async (env: RuntimeState): Promise<void> => { await ahb(env); };
+    return async (env: RuntimeReplica): Promise<void> => { await ahb(env); };
   }},
   { key: 'lock-ahb', name: 'HTLC AHB', load: async () => {
     const { lockAhb } = await import('./lock-ahb');
-    return async (env: RuntimeState): Promise<void> => { await lockAhb(env); };
+    return async (env: RuntimeReplica): Promise<void> => { await lockAhb(env); };
   }},
   { key: 'htlc-4hop', name: 'HTLC 4-Hop', load: async () => (await import('./htlc-4hop')).htlc4hop },
   { key: 'swap', name: 'Swap Trading', load: async () => (await import('./swap')).swap },
@@ -149,7 +149,7 @@ export const scenarioRegistry: ScenarioEntry[] = [
     name: 'ProcessBatch Smoke',
     load: async () => {
       const { runProcessBatchScenario } = await import('./processbatch');
-      return async (env: RuntimeState): Promise<RuntimeState> => runProcessBatchScenario(env);
+      return async (env: RuntimeReplica): Promise<RuntimeReplica> => runProcessBatchScenario(env);
     },
   },
   {
@@ -157,7 +157,7 @@ export const scenarioRegistry: ScenarioEntry[] = [
     name: 'Dispute Lifecycle',
     load: async () => {
       const { runDisputeLifecycle } = await import('./dispute-lifecycle');
-      return async (env: RuntimeState): Promise<RuntimeState> => runDisputeLifecycle(env);
+      return async (env: RuntimeReplica): Promise<RuntimeReplica> => runDisputeLifecycle(env);
     },
   },
   {
@@ -165,7 +165,7 @@ export const scenarioRegistry: ScenarioEntry[] = [
     name: 'Programmable Dispute Transformer',
     load: async () => {
       const { runDisputeTransformer } = await import('./dispute-transformer');
-      return async (env: RuntimeState): Promise<RuntimeState> => runDisputeTransformer(env);
+      return async (env: RuntimeReplica): Promise<RuntimeReplica> => runDisputeTransformer(env);
     },
   },
 ];

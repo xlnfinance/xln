@@ -1,7 +1,7 @@
 import type { RuntimeActivityFilters } from '../storage/views/activity-types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 import {
   assertRuntimeAdapterMessageSize,
   encodeRuntimeAdapterMessageForBrowser,
@@ -73,7 +73,7 @@ type AdapterClientState = {
 };
 
 type RuntimeAdapterResponseDiagnostic = {
-  env?: RuntimeState | null;
+  env?: RuntimeReplica | null;
   op?: string;
   path?: string;
   query?: RuntimeAdapterReadQuery;
@@ -81,42 +81,42 @@ type RuntimeAdapterResponseDiagnostic = {
 };
 
 export type RuntimeAdapterServerDeps = {
-  readHead?: (env: RuntimeState) => Promise<StorageHead | null>;
-  readFrame?: (env: RuntimeState, height: number) => Promise<StorageFrameRecord | null>;
-  listCheckpoints?: (env: RuntimeState) => Promise<number[]>;
-  loadEntityState?: (env: RuntimeState, entityId: string, height: number) => Promise<EntityState | null>;
-  loadEntityAccountDoc?: (env: RuntimeState, entityId: string, counterpartyId: string, height: number) => Promise<StorageAccountDoc | null>;
-  loadEntityViewPage?: (env: RuntimeState, entityId: string, height: number, query?: RuntimeAdapterReadQuery) => Promise<StorageEntityViewPage | null>;
-  listEntityIdsAtHeight?: (env: RuntimeState, height: number) => Promise<string[]>;
+  readHead?: (env: RuntimeReplica) => Promise<StorageHead | null>;
+  readFrame?: (env: RuntimeReplica, height: number) => Promise<StorageFrameRecord | null>;
+  listCheckpoints?: (env: RuntimeReplica) => Promise<number[]>;
+  loadEntityState?: (env: RuntimeReplica, entityId: string, height: number) => Promise<EntityState | null>;
+  loadEntityAccountDoc?: (env: RuntimeReplica, entityId: string, counterpartyId: string, height: number) => Promise<StorageAccountDoc | null>;
+  loadEntityViewPage?: (env: RuntimeReplica, entityId: string, height: number, query?: RuntimeAdapterReadQuery) => Promise<StorageEntityViewPage | null>;
+  listEntityIdsAtHeight?: (env: RuntimeReplica, height: number) => Promise<string[]>;
 	  readActivityPage?: (
-    env: RuntimeState,
+    env: RuntimeReplica,
     opts: RuntimeActivityFilters & {
       beforeHeight?: number | undefined;
       limit?: number | undefined;
       scanLimit?: number | undefined;
     },
 	  ) => Promise<RuntimeAdapterActivityPage>;
-	  enqueueRuntimeInput: (env: RuntimeState, input: RuntimeInput) => void;
-	  submitCrossJurisdictionIntent?: (env: RuntimeState, route: CrossJurisdictionSwapRoute) => Promise<unknown>;
-	  controlRuntime?: (env: RuntimeState, action: RuntimeAdapterControlAction) => Promise<unknown>;
-	  validateRuntimeInputAdmission?: (env: RuntimeState, input: RuntimeInput) => void;
+	  enqueueRuntimeInput: (env: RuntimeReplica, input: RuntimeInput) => void;
+	  submitCrossJurisdictionIntent?: (env: RuntimeReplica, route: CrossJurisdictionSwapRoute) => Promise<unknown>;
+	  controlRuntime?: (env: RuntimeReplica, action: RuntimeAdapterControlAction) => Promise<unknown>;
+	  validateRuntimeInputAdmission?: (env: RuntimeReplica, input: RuntimeInput) => void;
 	  registerReceipt?: (input: RegisterReceiptOptions) => RuntimeIngressReceipt;
 	  readReceipt?: (id: string) => RuntimeIngressReceipt | null;
-	  readFrameReceipts?: (env: RuntimeState, query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterFrameReceiptResponse>;
-	  findPaymentRoutes?: (env: RuntimeState, query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
+	  readFrameReceipts?: (env: RuntimeReplica, query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterFrameReceiptResponse>;
+	  findPaymentRoutes?: (env: RuntimeReplica, query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
 	  buildRuntimeInputStatusUrl?: (id: string) => string;
 	  isMutatingIngressReady?: () => boolean;
 	};
 
 const clients = new Map<RuntimeAdapterSocket, AdapterClientState>();
-let attachedEnv: RuntimeState | null = null;
+let attachedEnv: RuntimeReplica | null = null;
 let detachEnvChange: (() => void) | null = null;
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
 const RUNTIME_ADAPTER_PENDING_READ_LOG_MS = 1_000;
 const runtimeAdapterLog = createStructuredLogger('runtime.radapter');
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
-const requireRuntimeCommandReady = (env: RuntimeState): void => {
+const requireRuntimeCommandReady = (env: RuntimeReplica): void => {
   try {
     assertRuntimeCommandReady(env);
   } catch (error) {
@@ -138,9 +138,9 @@ type PendingRuntimeAdapterCommand = {
   };
 };
 
-const pendingRuntimeAdapterCommands = new Map<RuntimeState, Map<string, PendingRuntimeAdapterCommand>>();
+const pendingRuntimeAdapterCommands = new Map<RuntimeReplica, Map<string, PendingRuntimeAdapterCommand>>();
 
-const pendingCommandsFor = (env: RuntimeState): Map<string, PendingRuntimeAdapterCommand> => {
+const pendingCommandsFor = (env: RuntimeReplica): Map<string, PendingRuntimeAdapterCommand> => {
   const existing = pendingRuntimeAdapterCommands.get(env);
   if (existing) return existing;
   const created = new Map<string, PendingRuntimeAdapterCommand>();
@@ -166,7 +166,7 @@ const commandSequenceOrThrow = (value: unknown): number => {
   }
 };
 
-const reconcilePendingCommand = (env: RuntimeState, laneId: string): PendingRuntimeAdapterCommand | undefined => {
+const reconcilePendingCommand = (env: RuntimeReplica, laneId: string): PendingRuntimeAdapterCommand | undefined => {
   const commands = pendingRuntimeAdapterCommands.get(env);
   if (!commands) return undefined;
   const pending = commands.get(laneId);
@@ -182,14 +182,14 @@ const reconcilePendingCommand = (env: RuntimeState, laneId: string): PendingRunt
   return pending;
 };
 
-const prunePendingCommands = (env: RuntimeState): void => {
+const prunePendingCommands = (env: RuntimeReplica): void => {
   const commands = pendingRuntimeAdapterCommands.get(env);
   if (!commands) return;
   for (const laneId of commands.keys()) reconcilePendingCommand(env, laneId);
   if (commands.size === 0) pendingRuntimeAdapterCommands.delete(env);
 };
 
-const countUncommittedPendingLanes = (env: RuntimeState): number => {
+const countUncommittedPendingLanes = (env: RuntimeReplica): number => {
   let count = 0;
   for (const laneId of pendingRuntimeAdapterCommands.get(env)?.keys() ?? []) {
     if (!readRuntimeAdapterCommandFrontier(env, laneId)) count += 1;
@@ -424,7 +424,7 @@ export const closeInvalidRuntimeAdapterMessage = (ws: RuntimeAdapterSocket, erro
   ws.close?.(message.includes('RADAPTER_MESSAGE_TOO_LARGE') ? 1009 : 1003, 'Invalid runtime adapter message');
 };
 
-export const broadcastRuntimeAdapterTick = (env: RuntimeState): void => {
+export const broadcastRuntimeAdapterTick = (env: RuntimeReplica): void => {
   prunePendingCommands(env);
   if (clients.size === 0) return;
   const height = Math.max(0, Math.floor(Number(env.height ?? 0)));
@@ -456,8 +456,8 @@ export const broadcastRuntimeAdapterTick = (env: RuntimeState): void => {
 };
 
 export const attachRuntimeAdapterTicker = (
-  env: RuntimeState,
-  registerEnvChangeCallback: (env: RuntimeState, cb: (env: RuntimeState) => void) => (() => void),
+  env: RuntimeReplica,
+  registerEnvChangeCallback: (env: RuntimeReplica, cb: (env: RuntimeReplica) => void) => (() => void),
 ): void => {
   if (attachedEnv === env) return;
   detachEnvChange?.();
@@ -474,7 +474,7 @@ type RuntimeAdapterDiagnostic = () => RuntimeAdapterResponseDiagnostic;
 const handleRuntimeAdapterAuth = (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'auth'>,
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: AdapterClientState,
   diagnostic: RuntimeAdapterDiagnostic,
 ): void => {
@@ -558,7 +558,7 @@ const handleRuntimeAdapterAuth = (
 };
 
 const buildRuntimeAdapterReadContext = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeAdapterServerDeps,
 ) => ({
   env,
@@ -666,7 +666,7 @@ const buildRuntimeAdapterReadContext = (
 const handleRuntimeAdapterRead = async (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'read'>,
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: AdapterClientState,
   deps: RuntimeAdapterServerDeps,
   diagnostic: RuntimeAdapterDiagnostic,
@@ -709,7 +709,7 @@ const handleRuntimeAdapterRead = async (
 };
 
 const requireMutatingRuntimeAdapterReady = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeAdapterServerDeps,
 ): void => {
   requireRuntimeCommandReady(env);
@@ -726,7 +726,7 @@ const requireMutatingRuntimeAdapterReady = (
 const handleRuntimeAdapterCrossJIntent = async (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'cross-j-intent'>,
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: AdapterClientState,
   deps: RuntimeAdapterServerDeps,
   diagnostic: RuntimeAdapterDiagnostic,
@@ -747,7 +747,7 @@ const handleRuntimeAdapterCrossJIntent = async (
 const handleRuntimeAdapterControl = async (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'control'>,
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: AdapterClientState,
   deps: RuntimeAdapterServerDeps,
   diagnostic: RuntimeAdapterDiagnostic,
@@ -771,7 +771,7 @@ const handleRuntimeAdapterControl = async (
 const sendCommittedRuntimeAdapterCommand = (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'send'>,
-  env: RuntimeState,
+  env: RuntimeReplica,
   laneId: string,
   commandId: string,
   commandSequence: number,
@@ -841,7 +841,7 @@ const sendPendingRuntimeAdapterCommand = (
 };
 
 const assertRuntimeAdapterCommandCapacity = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   laneId: string,
 ): void => {
   if (readRuntimeAdapterCommandFrontier(env, laneId)) return;
@@ -864,7 +864,7 @@ const assertRuntimeAdapterCommandCapacity = (
 const enqueueRuntimeAdapterCommand = (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'send'>,
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeAdapterServerDeps,
   laneId: string,
   commandId: string,
@@ -936,7 +936,7 @@ const enqueueRuntimeAdapterCommand = (
 const handleRuntimeAdapterSend = (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'send'>,
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: AdapterClientState,
   deps: RuntimeAdapterServerDeps,
   diagnostic: RuntimeAdapterDiagnostic,
@@ -1015,7 +1015,7 @@ const handleRuntimeAdapterSend = (
 export const handleRuntimeAdapterMessage = async (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequest,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   deps: RuntimeAdapterServerDeps,
 ): Promise<boolean> => {
   const state = getClientState(ws);

@@ -95,7 +95,7 @@ import type {
 import type { AccountTx, Delta } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 
 import type { BookState } from '../orderbook';
 
@@ -138,7 +138,7 @@ const makeHubProfile = (id: string, name: string, lastUpdated = 7): Profile =>
     },
   });
 
-const makeEnv = (): RuntimeState =>
+const makeEnv = (): RuntimeReplica =>
   ({
     height: 7,
     timestamp: 700,
@@ -234,7 +234,7 @@ const makeEnv = (): RuntimeState =>
         } as EntityReplica,
       ],
     ]),
-  }) as RuntimeState;
+  }) as RuntimeReplica;
 
 const makeBook = (_price: bigint): BookState => ({
   params: { bucketWidthTicks: 1n, maxOrders: 100, stpPolicy: 0 },
@@ -325,7 +325,7 @@ const readTestPageLimit = (raw: unknown, fallback = 10): number => {
 };
 
 const makeTestViewPageLoader =
-  (env: RuntimeState) =>
+  (env: RuntimeReplica) =>
   async (
     requestedEntityId: string,
     height: number,

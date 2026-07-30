@@ -10,7 +10,7 @@
  * Also tests auto-approve logic and conservation law validation.
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { SettlementDiff, SettlementOp } from '../types/account';
 import { compileOps } from '../protocol/settlement/operations';
 import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from './helpers';
@@ -29,7 +29,7 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 const JURISDICTION = 'Settle Test';
 const ENTITY_NAME_MAP = new Map<string, string>();
 
-function assert(condition: unknown, message: string, env?: RuntimeState): asserts condition {
+function assert(condition: unknown, message: string, env?: RuntimeReplica): asserts condition {
   if (!condition) {
     if (env) {
       console.log('\n' + '='.repeat(80));
@@ -42,7 +42,7 @@ function assert(condition: unknown, message: string, env?: RuntimeState): assert
   }
 }
 
-export async function runSettleScenario(existingEnv?: RuntimeState): Promise<RuntimeState> {
+export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
   console.log('═══════════════════════════════════════════════════════════════════════════════');
   console.log('                    SETTLEMENT WORKSPACE TEST SCENARIO                          ');
   console.log('═══════════════════════════════════════════════════════════════════════════════');
@@ -56,7 +56,7 @@ export async function runSettleScenario(existingEnv?: RuntimeState): Promise<Run
 
   // DETERMINISTIC: Use fixed timestamp for scenario init (scenarioMode advances it manually)
   const SCENARIO_START_TIMESTAMP = 1700000000000; // Fixed epoch for reproducibility
-  let env: RuntimeState;
+  let env: RuntimeReplica;
   if (existingEnv) {
     env = existingEnv;
   } else {

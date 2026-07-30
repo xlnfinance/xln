@@ -1,8 +1,8 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeReplica } from '../types';
 import { inferRuntimeLifecyclePhase } from '../lifecycle';
 import { ensureRuntimeState } from '../runtime-state';
 
-type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
 
 export const assertRuntimeWriterAcceptingIngress = (state: RuntimeLifecycleState): void => {
   if (inferRuntimeLifecyclePhase(state) === 'halted') {
@@ -28,7 +28,7 @@ const waitForCommittedReaders = async (
  * check before installing processingPromise.
  */
 export const acquireRuntimeCommittedRead = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
 ): Promise<() => void> => {
   // The barrier belongs to the live Runtime replica. A detached fallback
   // object would let a writer miss an already-active reader on a fresh Runtime.
@@ -68,7 +68,7 @@ export const acquireRuntimeCommittedRead = async (
  * never escape through the returned value.
  */
 export const withRuntimeCommittedRead = async <T>(
-  env: RuntimeState,
+  env: RuntimeReplica,
   read: () => T | Promise<T>,
 ): Promise<T> => {
   const release = await acquireRuntimeCommittedRead(env);

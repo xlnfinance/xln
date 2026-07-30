@@ -16,12 +16,12 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const attach = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   adapter: Awaited<ReturnType<typeof createJAdapter>>,
   jurisdiction: JurisdictionConfig,
 ): void => {

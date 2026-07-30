@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 import {
   applyJBlockHeadersIngressTransform,
   enqueueJHistoryRange,
@@ -20,7 +20,7 @@ import type { JEvent } from './types';
 type WatcherReplica = NonNullable<ReturnType<typeof findWatcherJurisdictionReplica>>;
 
 export type AuthenticatedWatcherRangeRequest = {
-  activeEnv: RuntimeState;
+  activeEnv: RuntimeReplica;
   watcherReplica: WatcherReplica;
   currentBlock: number;
   fromBlock: number;

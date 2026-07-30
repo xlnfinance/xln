@@ -6,7 +6,7 @@ import { EntityProvider__factory } from '../../jurisdictions/typechain-types';
 import { verifyCanonicalReceiptProof, type AuthenticatedRpcLog } from './receipt-codec';
 
 import type { CertifiedRegistrationEvidence, JReplica } from '../types/jurisdiction-runtime';
-import type { RuntimeState, RuntimeTx } from '../runtime/types';
+import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import { getCertifiedBoardStackKey } from './board-registry';
 
 const FOUNDATION_ENTITY_ID = ethers.toBeHex(1n, 32).toLowerCase();
@@ -152,7 +152,7 @@ const jReplicaStackKey = (replica: JReplica): string | null => {
 };
 
 export const buildCertifiedRegistrationEvidence = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   replica: JReplica,
   source: CertifiedRegistrationEvidence['source'],
   log: AuthenticatedRpcLog,
@@ -214,7 +214,7 @@ export const buildCertifiedRegistrationEvidence = (
   return unsigned;
 };
 
-const assertExactLocalStack = (env: RuntimeState, evidence: CertifiedRegistrationEvidence): JReplica => {
+const assertExactLocalStack = (env: RuntimeReplica, evidence: CertifiedRegistrationEvidence): JReplica => {
   const matches = Array.from(env.jReplicas.values()).filter(replica => jReplicaStackKey(replica) === evidence.stackKey);
   if (matches.length !== 1) {
     throw new Error(`J_AUTHORITY_STACK_LOCAL_MATCH_INVALID:${evidence.stackKey}:${matches.length}`);
@@ -253,7 +253,7 @@ const assertDecodedRegistrationLog = (evidence: CertifiedRegistrationEvidence): 
 };
 
 export const assertRegistrationEvidenceEnvelope = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   evidence: CertifiedRegistrationEvidence,
 ): void => {
   if (evidence.version !== 1) throw new Error(`J_AUTHORITY_VERSION_INVALID:${String(evidence.version)}`);
@@ -376,7 +376,7 @@ const assertReceiptContainsRawLog = async (evidence: CertifiedRegistrationEviden
 };
 
 export const assertCertifiedRegistrationEvidence = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   evidence: CertifiedRegistrationEvidence,
 ): Promise<void> => {
   assertRegistrationEvidenceEnvelope(env, evidence);
@@ -397,7 +397,7 @@ export const freezeCertifiedRegistrationEvidence = (
   return Object.freeze(evidence);
 };
 
-export const assertCertifiedRegistrationEvidenceStore = async (env: RuntimeState): Promise<void> => {
+export const assertCertifiedRegistrationEvidenceStore = async (env: RuntimeReplica): Promise<void> => {
   const store = env.runtimeState?.certifiedRegistrationEvidence;
   if (store !== undefined && !(store instanceof Map)) {
     throw new Error('J_AUTHORITY_STORE_TYPE_INVALID');

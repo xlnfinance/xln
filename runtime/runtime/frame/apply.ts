@@ -4,7 +4,7 @@ import {
   summarizeRuntimeAccountCausality,
 } from '../../qa/account-causal-trace';
 import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/input';
 import { getPerfMs } from '../../infra/time';
 import {
@@ -36,8 +36,8 @@ export type RuntimeInputApplyResult = {
 };
 
 export type RuntimeFrameApplyDeps = {
-  applyRuntimeInput(env: RuntimeState, input: RuntimeInput): Promise<RuntimeInputApplyResult>;
-  setApplyAllowed(env: RuntimeState, allowed: boolean): void;
+  applyRuntimeInput(env: RuntimeReplica, input: RuntimeInput): Promise<RuntimeInputApplyResult>;
+  setApplyAllowed(env: RuntimeReplica, allowed: boolean): void;
 };
 
 export type RuntimeFrameApplyOutput = {
@@ -58,7 +58,7 @@ const collectChangedEntityIds = (
 ]);
 
 const queueProfileCertification = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   changedEntityIds: ReadonlySet<string>,
 ): void => {
   const state = env.runtimeState!;
@@ -88,7 +88,7 @@ const recordApplyEgress = (
 };
 
 export const applyPreparedRuntimeFrame = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RuntimeInput,
   hasInput: boolean,
   jEventPrioritized: boolean,

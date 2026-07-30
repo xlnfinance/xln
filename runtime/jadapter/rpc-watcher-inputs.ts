@@ -2,7 +2,7 @@ import type { Provider } from 'ethers';
 import { ethers } from 'ethers';
 import type { Depository } from '../../jurisdictions/typechain-types';
 import { compareStableText } from '../protocol/serialization';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   decodeDisputeFinalizationEvidenceCalldata,
   type ExternalWalletTrackedOwnerCursor,
@@ -23,7 +23,7 @@ export const normalizeEvmAddress = (value: unknown): string => {
 };
 
 export const buildTrackedExternalOwners = (
-  env: RuntimeState,
+  env: RuntimeReplica,
 ): Map<string, ExternalWalletTrackedOwnerCursor[]> => {
   const owners = new Map<string, Map<string, ExternalWalletTrackedOwnerCursor>>();
   const readBlock = (value: unknown): number => {

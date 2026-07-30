@@ -7,7 +7,7 @@
    */
   import { createEventDispatcher } from 'svelte';
   import type { Writable } from 'svelte/store';
-  import type { RuntimeState, EnvSnapshot } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot } from '@xln/runtime/api/runtime-module';
   import { formatTokenAmount } from './entity/shared/formatters';
   import { getTokenInfo } from '@xln/runtime/account/utils';
 
@@ -20,12 +20,12 @@
       accounts?: MapRecord<AccountLike>;
     };
   };
-  type FrameLike = RuntimeState | EnvSnapshot | null;
+  type FrameLike = RuntimeReplica | EnvSnapshot | null;
 
   export let entityId: string;
   export let entityName: string = '';
   export let position: { x: number; y: number } = { x: 0, y: 0 };
-  export let runtimeFrameEnv: Writable<RuntimeState | null>;
+  export let runtimeFrameEnv: Writable<RuntimeReplica | null>;
   export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
   export let runtimeFrameTimeIndex: Writable<number>;
 

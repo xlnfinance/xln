@@ -6,7 +6,7 @@ import {
   accountInputAck,
   accountInputProposal,
 } from '../account/consensus/flush';
-import type { RoutedEntityInput, RuntimeState } from './types';
+import type { RoutedEntityInput, RuntimeReplica } from './types';
 import { commitEntityFrameCandidateState } from '../entity/state-clone';
 import {
   isCommittedEntityInput,
@@ -131,7 +131,7 @@ const recordAtomicPairRejection = (
 };
 
 const applyRetainedNonAtomicInputs = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   pair: readonly [RoutedEntityInput, RoutedEntityInput],
   indexes: readonly [number, number],
   options: RuntimeEntityInputApplyOptions,
@@ -155,7 +155,7 @@ const applyRetainedNonAtomicInputs = async (
 };
 
 export const applyAtomicEntityInputPair = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   pair: readonly [RoutedEntityInput, RoutedEntityInput],
   firstInputIndex: number,
   options: RuntimeEntityInputApplyOptions,

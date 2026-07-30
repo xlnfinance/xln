@@ -1,6 +1,6 @@
 import { signEntityHashes } from '../../hanko/signing';
 import type { AccountInput } from '../../types/account';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 
 type AccountDraft = {
   accountInput?: AccountInput;
@@ -17,7 +17,7 @@ type AccountDraft = {
  * boundary instead of feeding an impossible unsigned peer input.
  */
 export const sealAccountDraftAsEntity = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
   draft: AccountDraft,

@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * Runtime I/O Panel - Shows frame-by-frame input/output data
-   * via compact projections only. It must not render full RuntimeState documents.
+   * via compact projections only. It must not render full RuntimeReplica documents.
    *
    * @license AGPL-3.0
    * Copyright (C) 2025 XLN Finance

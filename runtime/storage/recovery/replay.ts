@@ -1,7 +1,7 @@
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
 import { safeStringify } from '../../protocol/serialization';
 import { writeRuntimeMetadata } from '../../runtime/loop-environment';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import {
   listStorageSnapshotHeights,
   readStorageFrameRecord,
@@ -74,7 +74,7 @@ const resolveReplayTarget = async (
 };
 
 const assertReplayedFrameMatches = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   frame: StorageFrameRecord,
 ): void => {
   const verification = verifyPersistedFrameState(env, frame);
@@ -104,7 +104,7 @@ const assertReplayedFrameMatches = (
 
 const restoreActivityViews = async (
   reads: PersistedStorageReadApi,
-  env: RuntimeState,
+  env: RuntimeReplica,
   targetHeight: number,
 ): Promise<void> => {
   // Activity is a rebuildable read model. Deferred Runtime input remains owned
@@ -116,7 +116,7 @@ const restoreActivityViews = async (
 
 const reconcileMaterializedHistory = async (
   deps: RuntimeStorageApiDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   latestHeight: number,
 ): Promise<void> => {
   if (!(await deps.tryOpenRuntimeWalDb(env))) {

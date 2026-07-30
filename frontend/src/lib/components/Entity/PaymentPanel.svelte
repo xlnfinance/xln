@@ -6,7 +6,7 @@
   import type {
     AccountState,
     RoutedEntityInput as EntityInputPayload,
-    RuntimeState,
+    RuntimeReplica,
     PaymentRoute,
     PaymentDeliveryMode,
     Profile as GossipProfile,
@@ -44,7 +44,7 @@
 
   export let entityId: string;
   export let paymentView: PaymentPanelView = emptyPaymentPanelView();
-  export let actionRuntimeEnv: RuntimeState | null = null;
+  export let actionRuntimeEnv: RuntimeReplica | null = null;
   export let isLive: boolean;
   export let signerId: string | null = null;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
@@ -396,7 +396,7 @@
     return '';
   }
 
-  function resolvePaymentSignerId(env: RuntimeState | null): string {
+  function resolvePaymentSignerId(env: RuntimeReplica | null): string {
     if (env) {
       const runtimeSignerId = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'payment-panel');
       const normalizedRuntimeSignerId = normalizeEntityId(runtimeSignerId);

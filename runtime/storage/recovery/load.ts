@@ -5,7 +5,7 @@ import {
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { writeRuntimeMetadata } from '../../runtime/loop-environment';
 import { restoreDurableOutputRetryState } from '../../runtime/durable-output-retry';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import {
   authorizeRestoredRuntimeInput,
   restoreDurableRuntimeSnapshot,
@@ -26,14 +26,14 @@ import {
 } from './source';
 
 export type LoadedRuntimeStorage = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   latestHeight: number;
   checkpointHeight: number;
   selectedSnapshotHeight: number;
 };
 
 const assertRestoredCanonicalState = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   source: PersistedRestoreSource,
 ): void => {
   const { frame, targetHeight } = source;
@@ -79,7 +79,7 @@ const assertRestoredCanonicalState = (
 
 const installRestoredRuntimeFrame = async (
   reads: PersistedStorageReadApi,
-  env: RuntimeState,
+  env: RuntimeReplica,
   source: PersistedRestoreSource,
 ): Promise<void> => {
   const {

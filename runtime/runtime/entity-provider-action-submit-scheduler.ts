@@ -1,7 +1,7 @@
 import { ENTITY_J_SUBMIT_FALLBACK_MS, isEntityActiveLeader } from '../entity/consensus/leader';
 import { getJurisdictionConfigName } from '../jurisdiction/jurisdiction-runtime';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from './types';
+import type { RuntimeReplica, RuntimeTx } from './types';
 import {
   canSubmitEntityProviderActionLocally,
   getMatchingEntityProviderActionSubmitState,
@@ -13,7 +13,7 @@ import { markLocalEntityProviderActionRuntimeTx } from './entity-provider-action
 type RetryActionTx = Extract<RuntimeTx, { type: 'retryEntityProviderAction' }>;
 
 const hasQueuedRetry = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   identity: RetryActionTx['data'],
 ): boolean => (env.runtimeMempool?.runtimeTxs ?? []).some((tx) =>
   tx.type === 'retryEntityProviderAction' &&
@@ -46,7 +46,7 @@ const nextRetryAt = (replica: EntityReplica): number | null => {
   return local.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS;
 };
 
-export const getNextEntityProviderActionRetryTimestamp = (env: RuntimeState): number | null => {
+export const getNextEntityProviderActionRetryTimestamp = (env: RuntimeReplica): number | null => {
   let next = Infinity;
   for (const replica of env.eReplicas.values()) {
     if (!isEntityActiveLeader(replica) || !canSubmitEntityProviderActionLocally(env, replica.signerId)) continue;
@@ -59,7 +59,7 @@ export const getNextEntityProviderActionRetryTimestamp = (env: RuntimeState): nu
 };
 
 export const collectDueEntityProviderActionRuntimeTxs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   now: number,
 ): RetryActionTx[] => {
   const retries: RetryActionTx[] = [];

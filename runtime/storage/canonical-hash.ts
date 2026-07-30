@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-event-collector';
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeInput, RuntimeState } from '../runtime/types';
+import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
 import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
 import { buildCertifiedEntityLineagePlan } from './entity-lineage';
 
@@ -132,7 +132,7 @@ export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFra
   };
 };
 
-export const computeCanonicalEntityHashesFromEnv = (env: RuntimeState): CanonicalFrameEntityHash[] => {
+export const computeCanonicalEntityHashesFromEnv = (env: RuntimeReplica): CanonicalFrameEntityHash[] => {
   const lineagePlan = buildCertifiedEntityLineagePlan(env);
   return Array.from(lineagePlan.lookup.values(), ({ replica }) => computeCanonicalEntityHash(replica))
     .sort((left, right) => compareStableText(left.entityId, right.entityId));
@@ -159,7 +159,7 @@ export const computeCanonicalRuntimeStateHash = (
   });
 
 export const computeCanonicalStateHashFromEnv = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput?: RuntimeInput,
 ): string =>
   computeCanonicalRuntimeStateHash(

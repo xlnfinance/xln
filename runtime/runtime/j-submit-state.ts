@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from './types';
+import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import type { JTx } from '../types/jurisdiction-runtime';
 import { keccak256, toUtf8Bytes } from 'ethers';
@@ -85,7 +85,7 @@ export const buildJSubmitAttemptId = (identity: JSubmitAttemptIdentity): string 
   }))).toLowerCase();
 };
 
-export const findJSubmitReplica = (env: RuntimeState, entityId: string, signerId: string): EntityReplica | null => {
+export const findJSubmitReplica = (env: RuntimeReplica, entityId: string, signerId: string): EntityReplica | null => {
   const entity = normalizeJSubmitId(entityId);
   const signer = normalizeJSubmitId(signerId);
   for (const replica of env.eReplicas.values()) {
@@ -148,7 +148,7 @@ const requireCanonicalPendingAttempt = (
 const pendingAttemptFingerprint = (jurisdictionName: string, jTx: JTx): string =>
   safeStringify({ jurisdictionName, jTx });
 
-const pendingAttemptFingerprints = (env: RuntimeState): Map<string, string> => {
+const pendingAttemptFingerprints = (env: RuntimeReplica): Map<string, string> => {
   const fingerprints = new Map<string, string>();
   for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
@@ -181,7 +181,7 @@ const matchesJSubmitBatchIdentity = (
   Number(jTx.data.batchGeneration) === Number(identity.batchGeneration)
 );
 
-export const hasPendingCommittedJBatch = (env: RuntimeState, identity: JSubmitBatchIdentity): boolean =>
+export const hasPendingCommittedJBatch = (env: RuntimeReplica, identity: JSubmitBatchIdentity): boolean =>
   (env.runtimeState?.pendingCommittedJOutbox ?? []).some((input) => input.jTxs.some((jTx) =>
     matchesJSubmitBatchIdentity(input.jurisdictionName, jTx, identity)));
 
@@ -229,7 +229,7 @@ export const assertJSubmitRuntimeTxAuthorized = (runtimeTx: RuntimeTx, replay: b
   throw new Error('J_SUBMIT_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
 };
 
-export const registerPendingCommittedJOutbox = (env: RuntimeState, additions: JInput[]): void => {
+export const registerPendingCommittedJOutbox = (env: RuntimeReplica, additions: JInput[]): void => {
   if (additions.length === 0) return;
   if (!env.runtimeState) env.runtimeState = {};
   const existing = env.runtimeState.pendingCommittedJOutbox ?? [];
@@ -254,7 +254,7 @@ export const registerPendingCommittedJOutbox = (env: RuntimeState, additions: JI
   env.runtimeState.pendingCommittedJOutbox = [...existing, ...accepted];
 };
 
-export const applyRetryJSubmitRuntimeTx = (env: RuntimeState, tx: RetryJSubmitTx): JInput[] => {
+export const applyRetryJSubmitRuntimeTx = (env: RuntimeReplica, tx: RetryJSubmitTx): JInput[] => {
   const replica = findJSubmitReplica(env, tx.data.entityId, tx.data.signerId);
   if (!replica) throw new Error(`J_SUBMIT_LOCAL_REPLICA_MISSING:${tx.data.entityId}:${tx.data.signerId}`);
   if (!isEntityActiveLeader(replica)) throw new Error(`J_SUBMIT_NOT_ACTIVE_LEADER:${tx.data.signerId}`);

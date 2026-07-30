@@ -14,10 +14,10 @@ import {
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { createTestJReplica } from './helpers/j-replica';
 
-function hasPendingBilateralState(env: RuntimeState): boolean {
+function hasPendingBilateralState(env: RuntimeReplica): boolean {
   for (const replica of env.eReplicas.values()) {
     for (const account of replica.state?.accounts?.values() || []) {
       if (account.pendingFrame || account.pendingAccountInput) {

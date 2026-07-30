@@ -1,6 +1,6 @@
 import type {
   DeliverableEntityInput,
-  RuntimeState,
+  RuntimeReplica,
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
 } from '../types';
@@ -94,7 +94,7 @@ const outputEnvelopeGroupKey = (output: DeliverableEntityInput): string => {
 };
 
 const buildRuntimeEntityInputsEnvelope = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   outputs: readonly DeliverableEntityInput[],
 ): RuntimeEntityInputsEnvelope => {
   if (outputs.length === 0) throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_EMPTY');
@@ -145,7 +145,7 @@ const buildRuntimeEntityInputsEnvelope = (
 };
 
 const awaitsDurableEntityCertificate = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   targetRuntimeId: string,
   identity: ReliableOutputIdentity,
 ): boolean => {
@@ -232,7 +232,7 @@ const assertCompleteOutputGroup = (
 };
 
 const selectSendableOutputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   group: OutputEnvelopeGroup,
   blockedReliableLanes: Set<string>,
   deferredOutputs: RoutedEntityInput[],
@@ -277,7 +277,7 @@ const retainDeliveredReliableOutputs = (
 };
 
 const deferOutputsAfterDeliveryFailure = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeOutputRoutingDeps,
   sendable: DeliverableEntityInput[],
   targetRuntimeId: string,
@@ -295,7 +295,7 @@ const deferOutputsAfterDeliveryFailure = (
 };
 
 const tryDirectOutputEnvelope = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   group: OutputEnvelopeGroup,
   sendable: DeliverableEntityInput[],
   envelope: RuntimeEntityInputsEnvelope,
@@ -327,7 +327,7 @@ const tryDirectOutputEnvelope = (
 };
 
 const dispatchP2POutputEnvelope = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   group: OutputEnvelopeGroup,
   sendable: DeliverableEntityInput[],
   envelope: RuntimeEntityInputsEnvelope,
@@ -417,7 +417,7 @@ const dispatchP2POutputEnvelope = (
 };
 
 const dispatchOutputEnvelope = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   group: OutputEnvelopeGroup,
   sendable: DeliverableEntityInput[],
   envelope: RuntimeEntityInputsEnvelope,
@@ -447,7 +447,7 @@ const dispatchOutputEnvelope = (
 };
 
 export const dispatchEntityOutputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   outputs: PlannedRemoteOutput[],
   deps: RuntimeOutputRoutingDeps,
 ): RoutedEntityInput[] => {
@@ -478,7 +478,7 @@ export const dispatchEntityOutputs = (
 };
 
 export const sendEntityInputWithRouting = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   deps: RuntimeOutputRoutingDeps,
 ): RuntimeEntityInputRoutingResult => {

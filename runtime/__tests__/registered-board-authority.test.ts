@@ -54,7 +54,7 @@ import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { cloneEntityState } from '../entity/state-clone';
 import type { ConsensusOutputOrigin, EntityTx } from '../types/entity-tx';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
+import type { RuntimeReplica, RoutedEntityInput } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { addr, entity, makeAccount, makeState } from './helpers/cross-j';
 import { buildJEventRangeData } from './helpers/j-history';
@@ -134,7 +134,7 @@ const event = (
 };
 
 const installEvents = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   events: JurisdictionEvent[],
 ): void => {
@@ -231,7 +231,7 @@ const signDigest = (privateKey: Uint8Array, digest: string): string => {
 
 const buildRegisteredProfile = async (): Promise<{
   profile: Profile;
-  localEnv: RuntimeState;
+  localEnv: RuntimeReplica;
   boardHash: string;
   privateKey: Uint8Array;
 }> => {
@@ -313,7 +313,7 @@ const buildRegisteredProfile = async (): Promise<{
   return { profile: await signProfileRuntimeRoute(localEnv, profile, signer), localEnv, boardHash, privateKey };
 };
 
-const remoteObserverEnv = (boardHash: string): RuntimeState => {
+const remoteObserverEnv = (boardHash: string): RuntimeReplica => {
   const env = createEmptyEnv('registered-board-authority:remote');
   const signerId = addr('91');
   const state = makeState(entity('99'), signerId, jurisdiction);

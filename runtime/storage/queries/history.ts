@@ -21,7 +21,7 @@ import type {
 } from '../views/activity-types';
 import type { AccountFrame } from '../../types/account';
 import type { CertifiedEntityFrameLink, EntityInput } from '../../entity/types';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import type { FrameLogEntry } from '../../types/logging';
 import type { PersistedFrameJournal } from '../types';
 import type { PersistenceQueryDeps } from './deps';
@@ -71,7 +71,7 @@ export type PersistedRuntimeActivityPage = {
 
 const readRuntimeActivityJournal = async (
   deps: PersistenceQueryDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   height: number,
 ): Promise<(PersistedActivityJournal & { logs: FrameLogEntry[] }) | null> => {
   const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
@@ -114,7 +114,7 @@ type HistoryViewReadDeps = Pick<
 
 export const readAccountFrameHistory = async (
   deps: HistoryViewReadDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
   limit = 50,
@@ -145,7 +145,7 @@ export const readAccountFrameHistory = async (
 
 export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   const readPersistedFrameJournal = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     height: number,
   ): Promise<PersistedFrameJournal | null> => {
     const frame = await deps.readPersistedStorageFrameRecord(env, height);
@@ -154,12 +154,12 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const readPersistedRuntimeActivityJournal = (
-    env: RuntimeState,
+    env: RuntimeReplica,
     height: number,
   ) => readRuntimeActivityJournal(deps, env, height);
 
   const readPersistedAccountFrameHistory = (
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityId: string,
     counterpartyId: string,
     limit = 50,
@@ -167,7 +167,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   ) => readAccountFrameHistory(deps, env, entityId, counterpartyId, limit, opts);
 
   const readPersistedEntityFrameHistory = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityId: string,
     limit = 50,
     opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
@@ -191,7 +191,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const readPersistedFrameJournals = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     opts?: { fromHeight?: number; toHeight?: number; limit?: number },
   ): Promise<PersistedFrameJournal[]> => {
     const latestHeight = await deps.resolvePersistedLatestHeight(env);
@@ -214,7 +214,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const readPersistedRuntimeActivityPage = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     opts: RuntimeActivityFilters & {
       beforeHeight?: number | undefined;
       limit?: number | undefined;

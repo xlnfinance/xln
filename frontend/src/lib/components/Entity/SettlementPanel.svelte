@@ -2,7 +2,7 @@
   import { getXLN, submitEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import type { EntityReplica, EntityTx, AccountReplica, EntityState } from '$lib/types/ui';
-  import type { RuntimeState, EnvSnapshot, Profile as GossipProfile } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot, Profile as GossipProfile } from '@xln/runtime/api/runtime-module';
   import { errorLog } from '../../stores/errorLogStore';
   import { toasts } from '../../stores/toastStore';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
@@ -14,7 +14,7 @@
   export let entityId: string;
   export let replica: EntityReplica | null = null;
   export let historyOnly = false;
-  export let env: RuntimeState | EnvSnapshot | null = null;
+  export let env: RuntimeReplica | EnvSnapshot | null = null;
   export let isLive: boolean;
   export let profiles: GossipProfile[] = [];
   type Action = 'r2c' | 'c2r' | 'transfer' | 'history';
@@ -26,7 +26,7 @@
     entities: string[];
     details: BatchDetailField[];
   };
-  type RuntimeEnv = RuntimeState;
+  type RuntimeEnv = RuntimeReplica;
   type JBatchState = NonNullable<EntityState['jBatchState']>;
   type BatchShape = JBatchState['batch'];
   type ActiveDispute = NonNullable<AccountReplica['activeDispute']>;

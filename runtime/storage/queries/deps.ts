@@ -3,27 +3,27 @@ import type { Level } from 'level';
 import type { RuntimeRecoveryBundleV1 } from '../../recovery/types';
 import type { StorageFrameRecord } from '..';
 import type { StorageDbRole } from '../runtime-dbs';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 
 type RuntimeDb = Level<Buffer, Buffer>;
 
 export type PersistenceQueryDeps = {
-  tryOpenStorageDb(env: RuntimeState, role: StorageDbRole): Promise<boolean>;
-  getStorageDb(env: RuntimeState, role: StorageDbRole): RuntimeDb;
-  tryOpenRuntimeWalDb(env: RuntimeState): Promise<boolean>;
-  getRuntimeWalDb(env: RuntimeState): RuntimeDb;
-  tryOpenHistoryViewDb(env: RuntimeState): Promise<boolean>;
-  getHistoryViewDb(env: RuntimeState): RuntimeDb;
-  resolvePersistedLatestHeight(env: RuntimeState): Promise<number>;
-  resolvePersistedCheckpointHeights(env: RuntimeState): Promise<number[]>;
-  readPersistedStorageFrameRecord(env: RuntimeState, height: number): Promise<StorageFrameRecord | null>;
+  tryOpenStorageDb(env: RuntimeReplica, role: StorageDbRole): Promise<boolean>;
+  getStorageDb(env: RuntimeReplica, role: StorageDbRole): RuntimeDb;
+  tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
+  getRuntimeWalDb(env: RuntimeReplica): RuntimeDb;
+  tryOpenHistoryViewDb(env: RuntimeReplica): Promise<boolean>;
+  getHistoryViewDb(env: RuntimeReplica): RuntimeDb;
+  resolvePersistedLatestHeight(env: RuntimeReplica): Promise<number>;
+  resolvePersistedCheckpointHeights(env: RuntimeReplica): Promise<number[]>;
+  readPersistedStorageFrameRecord(env: RuntimeReplica, height: number): Promise<StorageFrameRecord | null>;
   loadEnvFromStorageByReplay(
     runtimeId?: string | null,
     runtimeSeed?: string | null,
     targetHeightOverride?: number,
     options?: { prunedTargetReturnsNull?: boolean },
-  ): Promise<{ env: RuntimeState } | null>;
-  closeRuntimeDb(env: RuntimeState): Promise<void>;
+  ): Promise<{ env: RuntimeReplica } | null>;
+  closeRuntimeDb(env: RuntimeReplica): Promise<void>;
   restoreEnvFromRecoveryBundles(
     bundles: RuntimeRecoveryBundleV1[],
     options: {
@@ -32,6 +32,6 @@ export type PersistenceQueryDeps = {
       targetHeight: number;
       readOnly: true;
     },
-  ): Promise<RuntimeState>;
-  withStorageConsistentRead<T>(env: RuntimeState, operation: () => Promise<T>): Promise<T>;
+  ): Promise<RuntimeReplica>;
+  withStorageConsistentRead<T>(env: RuntimeReplica, operation: () => Promise<T>): Promise<T>;
 };

@@ -43,7 +43,7 @@ import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv } from '../runtime';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
 import type { EntityReplica, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const makeJReplica = (
@@ -73,7 +73,7 @@ const makeJurisdiction = (name: string, chainId: number, depositoryAddress: stri
   entityProviderAddress: `0x${(chainId % 256).toString(16).padStart(2, '0').repeat(20)}`,
 });
 
-const makeCursorEnv = (seed: string, replicas: JReplica[], activeJurisdiction?: string): RuntimeState => {
+const makeCursorEnv = (seed: string, replicas: JReplica[], activeJurisdiction?: string): RuntimeReplica => {
   const env = createEmptyEnv(seed);
   env.activeJurisdiction = activeJurisdiction;
   env.jReplicas = new Map(replicas.map((replica) => [replica.name, replica]));
@@ -242,7 +242,7 @@ describe('JAdapter watcher ingress', () => {
       `0x${'42'.repeat(20)}`,
     );
     env.jReplicas.set(source.name, source);
-    env.runtimeState = { persistenceQuiescing: true } as RuntimeState['runtimeState'];
+    env.runtimeState = { persistenceQuiescing: true } as RuntimeReplica['runtimeState'];
     const entityId = `0x${'44'.repeat(32)}`;
     const owner = `0x${'55'.repeat(20)}`;
     const txCounter = { value: 0 } as { value: number; _seenLogs?: unknown };

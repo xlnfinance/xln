@@ -1,6 +1,6 @@
 import type {
   EncryptedRuntimeRecoveryBundleV1,
-  RuntimeState,
+  RuntimeReplica,
   TowerAppointmentV1,
   TowerCounterDisputeRemedy,
   TowerLastResortPayloadV1,
@@ -32,7 +32,7 @@ export type LastResortTowerAppointmentUpload = {
 
 export async function buildDelayedLastResortAppointmentsForTower(
   runtime: Runtime,
-  env: RuntimeState,
+  env: RuntimeReplica,
   xln: XLNModule,
   tower: RecoveryTowerConfig,
   towerSignerAddress: string,

@@ -10,7 +10,7 @@ import {
   computeStoragePostStateHash,
   type StorageFrameRecord,
 } from '..';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import type { PersistedStorageReadApi } from '../persisted-read';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import type { LoadedRuntimeStorage } from './load';
@@ -31,7 +31,7 @@ export type RuntimeChainVerification = PersistedFrameVerification & {
 };
 
 export const verifyPersistedFrameState = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   frame: StorageFrameRecord,
 ): PersistedFrameVerification => {
   const expectedStateHash = frame.postStateHash;

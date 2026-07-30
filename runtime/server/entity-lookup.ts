@@ -1,6 +1,6 @@
 import { deriveDelta } from '../account/utils';
 import type { AccountReplica, AccountState } from '../types/account';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { getEntityReplicaById } from '../entity/replica-lookup';
 export { getEntityReplicaById } from '../entity/replica-lookup';
 
@@ -24,7 +24,7 @@ const accountMatchesCounterparty = (
   return false;
 };
 
-export const hasAccount = (env: RuntimeState, entityId: string, counterpartyId: string): boolean => {
+export const hasAccount = (env: RuntimeReplica, entityId: string, counterpartyId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return false;
   const needle = counterpartyId.toLowerCase();
@@ -38,7 +38,7 @@ export const hasAccount = (env: RuntimeState, entityId: string, counterpartyId: 
 };
 
 export const getAccountState = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
 ): AccountReplica | null => {
@@ -86,13 +86,13 @@ const serializeReserveMap = (reserves: ReadonlyMap<string | number, bigint>): Re
   return Object.fromEntries(entries);
 };
 
-export const getReplicaReserveSnapshot = (env: RuntimeState, entityId: string): Record<string, string> | undefined => {
+export const getReplicaReserveSnapshot = (env: RuntimeReplica, entityId: string): Record<string, string> | undefined => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.reserves || replica.state.reserves.size === 0) return undefined;
   return serializeReserveMap(replica.state.reserves);
 };
 
-export const getReplicaAccountCount = (env: RuntimeState, entityId: string): number | undefined => {
+export const getReplicaAccountCount = (env: RuntimeReplica, entityId: string): number | undefined => {
   const replica = getEntityReplicaById(env, entityId);
   return replica?.state?.accounts?.size;
 };

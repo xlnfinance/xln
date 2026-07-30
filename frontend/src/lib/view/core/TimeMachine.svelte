@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { type Writable, type Readable } from 'svelte/store';
-  import type { RuntimeState, EnvSnapshot, JReplica, RuntimeAdapterViewFrame, XLNModule } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot, JReplica, RuntimeAdapterViewFrame, XLNModule } from '@xln/runtime/api/runtime-module';
   import type { JAdapter } from '@xln/runtime/jadapter';
   import { DISPLAY, TIME_MACHINE } from '@xln/runtime/config/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
@@ -36,7 +36,7 @@
   export let history: Writable<EnvSnapshot[]> | Readable<EnvSnapshot[]>;
   export let timeIndex: Writable<number> | Readable<number>;
   export let isLive: Writable<boolean> | Readable<boolean>;
-  export let env: Writable<RuntimeState | null> | Readable<RuntimeState | null>; // For state export
+  export let env: Writable<RuntimeReplica | null> | Readable<RuntimeReplica | null>; // For state export
 
   // Type guard to check if store is writable
   function isWritable<T>(store: Writable<T> | Readable<T>): store is Writable<T> {
@@ -74,7 +74,7 @@
 
   type BrowserVMHandle = NonNullable<ReturnType<JAdapter['getBrowserVM']>>;
 
-  async function getBrowserVMFromEnv(envValue: RuntimeState | null): Promise<BrowserVMHandle | null> {
+  async function getBrowserVMFromEnv(envValue: RuntimeReplica | null): Promise<BrowserVMHandle | null> {
     if (!envValue) return null;
     const xln = cachedXLN ?? await getXLN();
     cachedXLN = xln;

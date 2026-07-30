@@ -1,10 +1,10 @@
 import { createStructuredLogger } from '../../infra/logger';
-import type { RuntimeInput, RuntimeState } from '../types';
+import type { RuntimeInput, RuntimeReplica } from '../types';
 import { ensureRuntimeState } from '../runtime-state';
 
 const runtimeLog = createStructuredLogger('runtime');
 
-export const notifyRuntimeStateChanged = (env: RuntimeState): void => {
+export const notifyRuntimeStateChanged = (env: RuntimeReplica): void => {
   const callbacks = ensureRuntimeState(env).envChangeCallbacks;
   if (!callbacks || callbacks.size === 0) return;
   for (const callback of callbacks) {
@@ -19,7 +19,7 @@ export const notifyRuntimeStateChanged = (env: RuntimeState): void => {
 };
 
 export const notifyRuntimeFrameCommitted = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
 ): void => {
   const callbacks = ensureRuntimeState(env).runtimeFrameCommitCallbacks;

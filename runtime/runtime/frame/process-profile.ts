@@ -2,7 +2,7 @@ import type { EntityInputCausalTrace } from '../../qa/account-causal-trace';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
 import { createStructuredLogger } from '../../infra/logger';
-import type { RuntimeState } from '../types';
+import type { RuntimeReplica } from '../types';
 import { getPerfMs } from '../../infra/time';
 import { nodeProcess } from '../../infra/runtime-process';
 
@@ -51,10 +51,10 @@ export type RuntimeProcessProfile = {
   metrics: RuntimeProcessProfileMetrics;
   outcome: string;
   mark(label: string): void;
-  finish(env: RuntimeState): void;
+  finish(env: RuntimeReplica): void;
 };
 
-const profileEnabled = (env: RuntimeState): boolean =>
+const profileEnabled = (env: RuntimeReplica): boolean =>
   PROCESS_PROFILE ||
   Object.keys(env.runtimeConfig?.performance ?? {}).length > 0 ||
   isRuntimePerfProfileEnabled('XLN_RUNTIME_APPLY_PROFILE', 'XLN_ACCOUNT_CAUSAL_TRACE');
@@ -73,7 +73,7 @@ const profileHasWork = (metrics: RuntimeProcessProfileMetrics): boolean =>
   metrics.frameAdvanced;
 
 export const createRuntimeProcessProfile = (
-  liveEnv: RuntimeState,
+  liveEnv: RuntimeReplica,
   triggerReason: string | null | undefined,
 ): RuntimeProcessProfile => {
   const enabled = profileEnabled(liveEnv);

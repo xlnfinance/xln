@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityInput, EntityReplica } from '../entity/types';
 import type { Delta } from '../types/account';
 import type { FrameLogEntry } from '../types/logging';
@@ -10,7 +10,7 @@ import { advanceScenarioTime } from './helpers';
 import { submitSignedScenarioBatch } from './j-batch-submit';
 import { DEFAULT_TOKENS } from '../jurisdiction/default-tokens';
 
-type ProcessFn = (env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>;
+type ProcessFn = (env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>;
 
 // Lazy-loaded runtime function avoids the scenario -> runtime -> scenario import cycle.
 let cachedProcess: ProcessFn | null = null;
@@ -66,7 +66,7 @@ export const AHB_DEBUG = getEnv('AHB_DEBUG', '0') === '1';
 export const usd = (amount: number | bigint): bigint => BigInt(amount) * ONE_TOKEN;
 
 export async function submitReserveToReserveBatch(
-  env: RuntimeState,
+  env: RuntimeReplica,
   jadapter: JAdapter,
   signerId: string,
   fromEntityId: string,
@@ -86,7 +86,7 @@ export async function submitReserveToReserveBatch(
 
 type ReplicaEntry = [string, EntityReplica];
 
-export function findReplica(env: RuntimeState, entityId: string): ReplicaEntry {
+export function findReplica(env: RuntimeReplica, entityId: string): ReplicaEntry {
   const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
   if (!entry) {
     throw new Error(`AHB: Replica for entity ${entityId} not found`);
@@ -94,7 +94,7 @@ export function findReplica(env: RuntimeState, entityId: string): ReplicaEntry {
   return entry as ReplicaEntry;
 }
 
-export function assert(condition: unknown, message: string, env?: RuntimeState): asserts condition {
+export function assert(condition: unknown, message: string, env?: RuntimeReplica): asserts condition {
   if (!condition) {
     if (env) {
       console.log('\n' + '='.repeat(80));
@@ -116,7 +116,7 @@ export function hasExpectedDirection(actual: bigint, expected: bigint): boolean 
   return (actual > 0n) === (expected > 0n);
 }
 
-export function getDerivedOutCapacity(env: RuntimeState, entityId: string, counterpartyId: string, tokenId: number): bigint {
+export function getDerivedOutCapacity(env: RuntimeReplica, entityId: string, counterpartyId: string, tokenId: number): bigint {
   const [, replica] = findReplica(env, entityId);
   const account = replica.state.accounts.get(counterpartyId);
   const delta = account?.deltas.get(tokenId);
@@ -131,7 +131,7 @@ export function getDerivedOutCapacity(env: RuntimeState, entityId: string, count
  * BrowserVM emits events, the watcher queues entity inputs, and this helper lets
  * the runtime process those inputs like any other jurisdiction observation.
  */
-export async function processJEvents(env: RuntimeState): Promise<void> {
+export async function processJEvents(env: RuntimeReplica): Promise<void> {
   const processRuntime = await getProcess();
   const { getScenarioJAdapter, isScenarioJAdapterMissingError } = await import('./boot');
   let jadapter;
@@ -163,7 +163,7 @@ export async function processJEvents(env: RuntimeState): Promise<void> {
 }
 
 export async function maybeApproveSettlement(
-  env: RuntimeState,
+  env: RuntimeReplica,
   approver: { id: string; signer: string; name: string },
   counterpartyId: string,
 ): Promise<boolean> {
@@ -204,7 +204,7 @@ export async function maybeApproveSettlement(
 }
 
 export async function processUntil(
-  env: RuntimeState,
+  env: RuntimeReplica,
   predicate: () => boolean,
   maxRounds: number = 10,
   label: string = 'condition'
@@ -221,7 +221,7 @@ export async function processUntil(
 }
 
 // Account deltas are stored canonically from the lower entity id's perspective.
-export function getOffdelta(env: RuntimeState, entityA: string, entityB: string, tokenId: number): bigint {
+export function getOffdelta(env: RuntimeReplica, entityA: string, entityB: string, tokenId: number): bigint {
   const leftEntity = isLeft(entityA, entityB) ? entityA : entityB;
   const rightEntity = isLeft(entityA, entityB) ? entityB : entityA;
 
@@ -233,7 +233,7 @@ export function getOffdelta(env: RuntimeState, entityA: string, entityB: string,
   return delta?.offdelta ?? 0n;
 }
 
-export function assertBilateralSync(env: RuntimeState, entityA: string, entityB: string, tokenId: number, label: string): void {
+export function assertBilateralSync(env: RuntimeReplica, entityA: string, entityB: string, tokenId: number, label: string): void {
   const [, replicaA] = findReplica(env, entityA);
   const [, replicaB] = findReplica(env, entityB);
 

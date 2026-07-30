@@ -45,7 +45,7 @@ import { enqueueRuntimeInput } from '../runtime.ts';
 import type { AccountReplica, SwapOffer } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
 import {
   BOOTSTRAP_POLL_MS,
@@ -537,7 +537,7 @@ export const buildLocalMarketMakerSignerLabels = (): string[] => {
   return labels;
 };
 
-export const configureMarketMakerRuntimeLogging = (env: RuntimeState): void => {
+export const configureMarketMakerRuntimeLogging = (env: RuntimeReplica): void => {
   if (readBooleanEnv('XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS', false)) return;
   env.quietRuntimeLogs = true;
 };
@@ -563,14 +563,14 @@ const sameImportedJurisdiction = (target: JurisdictionConfig, replica: unknown):
   return Boolean(targetRef && replicaRef && targetRef === replicaRef);
 };
 
-const hasJurisdictionReplica = (env: RuntimeState, jurisdiction: JurisdictionConfig): boolean => {
+const hasJurisdictionReplica = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): boolean => {
   for (const replica of env.jReplicas?.values?.() || []) {
     if (sameImportedJurisdiction(jurisdiction, replica)) return true;
   }
   return false;
 };
 
-const hasLiveJurisdictionAdapter = (env: RuntimeState, jurisdiction: JurisdictionConfig): boolean => {
+const hasLiveJurisdictionAdapter = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): boolean => {
   for (const replica of env.jReplicas?.values?.() || []) {
     if (sameImportedJurisdiction(jurisdiction, replica)) {
       return Boolean(replica?.jadapter);
@@ -580,7 +580,7 @@ const hasLiveJurisdictionAdapter = (env: RuntimeState, jurisdiction: Jurisdictio
 };
 
 export const importJurisdictionIfNeeded = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
   rounds = 35,
 ): Promise<void> => {
@@ -608,7 +608,7 @@ export const importJurisdictionIfNeeded = async (
 };
 
 export const createMarketMakerEntityContext = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
   signerLabel: string,
   profileName: string,
@@ -672,13 +672,13 @@ export const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Prom
   throw new Error('TOKEN_CATALOG_EMPTY');
 };
 
-const findJurisdictionAdapters = (env: RuntimeState, jurisdiction: JurisdictionConfig): JAdapter[] =>
+const findJurisdictionAdapters = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): JAdapter[] =>
   [...(env.jReplicas?.values?.() ?? [])]
     .filter(replica => sameImportedJurisdiction(jurisdiction, replica) && Boolean(replica.jadapter))
     .map(replica => replica.jadapter!);
 
 export const waitForJurisdictionAdapter = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
   rounds = 1200,
 ): Promise<JAdapter> => {
@@ -702,14 +702,14 @@ export const waitForJurisdictionAdapter = async (
   );
 };
 
-const waitForReplicaReady = async (env: RuntimeState, entityId: string, rounds = 200): Promise<void> => {
+const waitForReplicaReady = async (env: RuntimeReplica, entityId: string, rounds = 200): Promise<void> => {
   const ready = await waitUntil(() => Boolean(getEntityReplicaById(env, entityId)), rounds, BOOTSTRAP_POLL_MS);
   if (!ready) {
     throw new Error(`MM_REPLICA_NOT_READY entityId=${entityId}`);
   }
 };
 
-export const ensureJurisdictionReplica = (env: RuntimeState, jadapter: JAdapter, rpcUrl: string): void => {
+export const ensureJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapter, rpcUrl: string): void => {
   const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
   if (!activeName) return;
   const replica = env.jReplicas?.get(activeName);
@@ -751,7 +751,7 @@ const readHubSignerId = (profile: {
     .toLowerCase();
 };
 
-export const readVisibleHubProfiles = (env: RuntimeState, includeSiblings = false): HubProfile[] => {
+export const readVisibleHubProfiles = (env: RuntimeReplica, includeSiblings = false): HubProfile[] => {
   const required = new Set(resolvedArgs.meshHubNames.map(name => name.toLowerCase()));
   return (env.gossip?.getProfiles?.() || [])
     .filter(
@@ -1220,7 +1220,7 @@ const pushMarketMakerEntityTx = (
 };
 
 const resolveEntityRuntimeIdForCrossJ = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
 ): string | null => {
   const target = normalizeEntityRef(entityId);
@@ -1236,7 +1236,7 @@ const resolveEntityRuntimeIdForCrossJ = (
   return null;
 };
 
-const isCrossJurisdictionRouteTwoRuntime = (env: RuntimeState, route: CrossJurisdictionSwapRoute): boolean => {
+const isCrossJurisdictionRouteTwoRuntime = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {
   const canonical = withCanonicalCrossJurisdictionRouteHash(route);
   return Boolean(
     resolveCrossJurisdictionRuntimeTopology(canonical, entityId =>
@@ -1246,14 +1246,14 @@ const isCrossJurisdictionRouteTwoRuntime = (env: RuntimeState, route: CrossJuris
 };
 
 const canonicalizeLocalCrossJurisdictionRoute = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   route: CrossJurisdictionSwapRoute,
 ): CrossJurisdictionSwapRoute | null => {
   const canonical = withCanonicalCrossJurisdictionRouteHash(route);
   return isCrossJurisdictionRouteTwoRuntime(env, canonical) ? canonical : null;
 };
 
-const requireMarketMakerQuoteTimestamp = (env: RuntimeState): number => {
+const requireMarketMakerQuoteTimestamp = (env: RuntimeReplica): number => {
   const timestamp = Math.floor(Number(env.timestamp));
   if (!Number.isFinite(timestamp) || timestamp <= 0) {
     throw new Error(`MARKET_MAKER_CROSS_TIMESTAMP_INVALID:${String(env.timestamp)}`);
@@ -1262,7 +1262,7 @@ const requireMarketMakerQuoteTimestamp = (env: RuntimeState): number => {
 };
 
 export const buildMarketMakerCrossOfferSpecs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   sourceContext: MarketMakerEntityContext,
   targetContext: MarketMakerEntityContext,
   sourceHubs: HubProfile[],
@@ -1411,7 +1411,7 @@ export const buildMarketMakerCrossOfferSpecs = (
 };
 
 export const countCommittedMarketMakerOffersForHubPair = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   mmEntityId: string,
   hubEntityId: string,
   pair: { baseTokenId: number; quoteTokenId: number },
@@ -1426,7 +1426,7 @@ export const countCommittedMarketMakerOffersForHubPair = (
   return count;
 };
 
-const countMarketMakerOffersForHub = (env: RuntimeState, mmEntityId: string, hubEntityId: string): number => {
+const countMarketMakerOffersForHub = (env: RuntimeReplica, mmEntityId: string, hubEntityId: string): number => {
   const account = getAccountState(env, mmEntityId, hubEntityId);
   if (!account) return 0;
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
@@ -1438,7 +1438,7 @@ const countMarketMakerOffersForHub = (env: RuntimeState, mmEntityId: string, hub
 };
 
 export const countCommittedMarketMakerOffersForHub = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   mmEntityId: string,
   hubEntityId: string,
 ): number => {
@@ -1452,7 +1452,7 @@ export const countCommittedMarketMakerOffersForHub = (
   return count;
 };
 
-export const isSameQuoteJobDepthReady = (env: RuntimeState, job: SameQuoteJob): boolean => {
+export const isSameQuoteJobDepthReady = (env: RuntimeReplica, job: SameQuoteJob): boolean => {
   const account = getAccountState(env, job.context.entityId, job.hub.entityId);
   if (!hasCommittedAccountState(account)) return false;
   const specs = buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds);
@@ -1473,7 +1473,7 @@ export const isSameQuoteJobDepthReady = (env: RuntimeState, job: SameQuoteJob): 
 type PendingCrossRequestReader = (entityId: string) => Set<string>;
 
 export const hasCrossSpecBootstrapProgress = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   spec: MarketMakerOfferSpec,
   getPendingCrossRequestOrderIds: PendingCrossRequestReader,
 ): boolean => {
@@ -1486,7 +1486,7 @@ export const hasCrossSpecBootstrapProgress = (
 };
 
 export const countCrossSpecBootstrapProgress = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   specs: MarketMakerOfferSpec[],
   getPendingCrossRequestOrderIds: PendingCrossRequestReader,
 ): number => {
@@ -1498,7 +1498,7 @@ export const countCrossSpecBootstrapProgress = (
 };
 
 export const countCrossSpecBootstrapProgressByPair = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   specs: MarketMakerOfferSpec[],
   getPendingCrossRequestOrderIds: PendingCrossRequestReader,
 ): Map<string, number> => {
@@ -1511,7 +1511,7 @@ export const countCrossSpecBootstrapProgressByPair = (
 };
 
 export const countCrossSpecVisibleOffersByPair = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   specs: MarketMakerOfferSpec[],
 ): Map<string, number> => {
   const counts = new Map<string, number>();
@@ -1522,7 +1522,7 @@ export const countCrossSpecVisibleOffersByPair = (
   return counts;
 };
 
-const countFinalizedCrossOffersByPair = (env: RuntimeState, specs: MarketMakerOfferSpec[]): Map<string, number> => {
+const countFinalizedCrossOffersByPair = (env: RuntimeReplica, specs: MarketMakerOfferSpec[]): Map<string, number> => {
   const counts = new Map<string, number>();
   for (const spec of specs) {
     if (!spec.crossJurisdiction || !hasFinalizedMarketMakerCrossOffer(env, spec)) continue;
@@ -1534,13 +1534,13 @@ const countFinalizedCrossOffersByPair = (env: RuntimeState, specs: MarketMakerOf
 const crossSpecPairIds = (specs: MarketMakerOfferSpec[]): string[] =>
   Array.from(new Set(specs.map(spec => spec.pairId).filter(Boolean))).sort(compareStableText);
 
-export const countCrossPairCoverageGaps = (env: RuntimeState, specs: MarketMakerOfferSpec[]): number => {
+export const countCrossPairCoverageGaps = (env: RuntimeReplica, specs: MarketMakerOfferSpec[]): number => {
   const finalizedByPair = countFinalizedCrossOffersByPair(env, specs);
   return crossSpecPairIds(specs).filter(pairId => (finalizedByPair.get(pairId) || 0) === 0).length;
 };
 
 export const ensureMarketMakerHubConnectivity = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   mmEntityId: string,
   mmSignerId: string,
   hubEntityIds: string[],
@@ -1643,7 +1643,7 @@ export const ensureMarketMakerHubConnectivity = async (
 };
 
 const isMarketMakerConnectivityReady = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   mmEntityId: string,
   hubEntityIds: string[],
   tokenIds: number[],
@@ -1657,7 +1657,7 @@ const isMarketMakerConnectivityReady = (
   });
 
 export const maintainMarketMakerQuotes = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   mmEntityId: string,
   mmSignerId: string,
   hubEntityIds: string[],
@@ -1753,7 +1753,7 @@ export const maintainMarketMakerQuotes = async (
   return false;
 };
 
-export const hasCrossRouteRegistered = (env: RuntimeState, entityId: string, orderId: string): boolean => {
+export const hasCrossRouteRegistered = (env: RuntimeReplica, entityId: string, orderId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
   return Boolean(replica?.state?.crossJurisdictionSwaps?.has(orderId));
 };
@@ -1787,7 +1787,7 @@ const isMatchingCrossOfferRoute = (
   );
 };
 
-const hasSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionSwapRoute): boolean => {
+const hasSourceAccountCrossOffer = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {
   const account = getAccountState(env, route.source.entityId, route.source.counterpartyEntityId);
   if (!account) return false;
   const committed = account.swapOffers?.get(route.orderId);
@@ -1802,7 +1802,7 @@ const hasSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionS
 };
 
 export const getCommittedSourceAccountCrossOffer = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   route: CrossJurisdictionSwapRoute,
 ): SwapOffer | null => {
   const account = getAccountState(env, route.source.entityId, route.source.counterpartyEntityId);
@@ -1810,7 +1810,7 @@ export const getCommittedSourceAccountCrossOffer = (
   return isMatchingCrossOfferRoute(committed?.crossJurisdiction, route) ? committed! : null;
 };
 
-export const collectPendingCrossRequestOrderIds = (env: RuntimeState, entityId: string): Set<string> => {
+export const collectPendingCrossRequestOrderIds = (env: RuntimeReplica, entityId: string): Set<string> => {
   const normalizedEntityId = normalizeEntityRef(entityId);
   const ids = new Set<string>();
   const replica = getEntityReplicaById(env, normalizedEntityId);
@@ -1820,7 +1820,7 @@ export const collectPendingCrossRequestOrderIds = (env: RuntimeState, entityId: 
   return ids;
 };
 
-export const hasMarketMakerCrossOffer = (env: RuntimeState, spec: MarketMakerOfferSpec): boolean => {
+export const hasMarketMakerCrossOffer = (env: RuntimeReplica, spec: MarketMakerOfferSpec): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
   if (hasSourceAccountCrossOffer(env, route)) return true;
@@ -1830,18 +1830,18 @@ export const hasMarketMakerCrossOffer = (env: RuntimeState, spec: MarketMakerOff
   return Boolean(bookOwner && hasCrossJurisdictionBookOrder(bookOwner, route));
 };
 
-export const hasFinalizedMarketMakerCrossOffer = (env: RuntimeState, spec: MarketMakerOfferSpec): boolean => {
+export const hasFinalizedMarketMakerCrossOffer = (env: RuntimeReplica, spec: MarketMakerOfferSpec): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
   return Boolean(getCommittedSourceAccountCrossOffer(env, route));
 };
 
-export const hasMarketMakerAccountBacklog = (env: RuntimeState, entityId: string, hubEntityId: string): boolean => {
+export const hasMarketMakerAccountBacklog = (env: RuntimeReplica, entityId: string, hubEntityId: string): boolean => {
   const account = getAccountState(env, entityId, hubEntityId);
   return Boolean(account?.pendingFrame) || Number(account?.mempool?.length || 0) > 0;
 };
 
-export const hasMarketMakerRuntimeBacklog = (env: RuntimeState): boolean => {
+export const hasMarketMakerRuntimeBacklog = (env: RuntimeReplica): boolean => {
   const runtimeMempool = env.runtimeMempool;
   return runtimeBacklogBlocksMarketMakerQuotes({
     processing: Boolean(env.runtimeState?.processingPromise),
@@ -1853,7 +1853,7 @@ export const hasMarketMakerRuntimeBacklog = (env: RuntimeState): boolean => {
 };
 
 export const getMarketMakerRuntimeBacklogSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   options: { includeQueuedEntityInputs?: boolean } = {},
 ): Record<string, unknown> => {
   const snapshot: Record<string, unknown> = {

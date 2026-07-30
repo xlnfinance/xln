@@ -52,7 +52,7 @@ import type { AccountState, AccountInput, AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { ConsensusOutputOrigin, EntityTx } from '../types/entity-tx';
 import type { EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const seed = 'multisig-secondary-hanko alpha beta gamma';
@@ -117,7 +117,7 @@ const buildUnverifiedBoardResealTx = (
   },
 });
 
-const registerOnly = (env: RuntimeState, signerId: string) => {
+const registerOnly = (env: RuntimeReplica, signerId: string) => {
   clearSignerKeys(env);
   const label = signerLabels[validators.indexOf(signerId)] ?? '4';
   registerSignerKey(env, signerId, deriveSignerKeySync(seed, label));

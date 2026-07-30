@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { getHealthStatus, type HealthStatus, type HubHealth } from './health';
 import type { JTokenInfo } from '../jadapter/types';
 import { getStorageHealthSnapshotSync } from '../infra/storage-monitor';
@@ -26,7 +26,7 @@ export type RuntimeHealthCacheEntry = {
 };
 
 export type RuntimeHealthDeps = {
-  env: RuntimeState | null;
+  env: RuntimeReplica | null;
   relayStore: RelayStore;
   healthCacheTtlMs: number;
   cachedHealthResponse: RuntimeHealthCacheEntry | null;
@@ -78,7 +78,7 @@ const collectRelayHealth = (deps: RuntimeHealthDeps) => {
 
 const mergeHubHealth = (
   health: HealthStatus,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   deps: RuntimeHealthDeps,
   activeClientRuntimeIds: string[],
   profiles: Profile[],

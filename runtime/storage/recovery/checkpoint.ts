@@ -16,7 +16,7 @@ import { rehydrateRestoredRuntimeInfra } from '../../runtime/infra';
 import { loadGossipProfilesFromInfraDb } from '../../runtime/infra-gossip-store';
 import { assertPersistedContractConfigReady, registerCommittedSingleSignerWallets } from '../../runtime/recovery-infra';
 import { runtimeIsBrowser } from '../../infra/runtime-process';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import { normalizeDbNamespace } from '../runtime-dbs';
 import { restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 import { validateJReplicas } from '../wal/runtime-machine-schema/j';
@@ -56,7 +56,7 @@ const requireCheckpointEntries = (
   return decoded;
 };
 
-const restoreCheckpointState = (env: RuntimeState, snapshot: Record<string, unknown>): Profile[] => {
+const restoreCheckpointState = (env: RuntimeReplica, snapshot: Record<string, unknown>): Profile[] => {
   env.height = requireBoundaryInteger(snapshot['height'], 'RECOVERY_CHECKPOINT_HEIGHT_INVALID');
   env.timestamp = requireBoundaryInteger(snapshot['timestamp'], 'RECOVERY_CHECKPOINT_TIMESTAMP_INVALID');
   const entityEntries = requireCheckpointEntries(
@@ -88,7 +88,7 @@ const restoreCheckpointState = (env: RuntimeState, snapshot: Record<string, unkn
   return gossip.profiles.map(parseProfile);
 };
 
-const assertCheckpointCommitments = async (env: RuntimeState): Promise<void> => {
+const assertCheckpointCommitments = async (env: RuntimeReplica): Promise<void> => {
   for (const replica of env.eReplicas.values()) {
     assertCertifiedJHistoryIntegrity(replica.state);
     assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
@@ -106,7 +106,7 @@ export const restoreCheckpointSnapshot = async (
   deps: CheckpointRestoreDeps,
   snapshot: Record<string, unknown>,
   options: CheckpointRestoreOptions = {},
-): Promise<RuntimeState> => {
+): Promise<RuntimeReplica> => {
   if (!snapshot || typeof snapshot !== 'object') throw new Error('RECOVERY_CHECKPOINT_INVALID');
 
   const normalizedSnapshot = cloneIsolatedRuntimeSnapshot(snapshot);

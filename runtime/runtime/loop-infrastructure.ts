@@ -23,7 +23,7 @@ import {
   type StorageDbRole,
 } from '../storage/runtime-dbs';
 import type { EntityInput } from '../entity/types';
-import type { RuntimeState, ReliableDeliveryReceipt, RuntimeTx } from './types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 
 const infrastructureLog = createStructuredLogger('runtime.infrastructure');
@@ -32,38 +32,38 @@ const cleanLogDeps = { ensureRuntimeState };
 const inputQueueDeps = { ensureRuntimeState, requestRuntimeLoopWake };
 
 export const getRuntimeStorageDb = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   role: StorageDbRole = 'current',
 ): Level<Buffer, Buffer> => getStorageDb(env, storageDeps, role);
 
-export const getRuntimeInfraDb = (env: RuntimeState): Level<Buffer, Buffer> =>
+export const getRuntimeInfraDb = (env: RuntimeReplica): Level<Buffer, Buffer> =>
   getInfraDb(env, storageDeps);
 
-export const getRuntimeHistoryView = (env: RuntimeState): Level<Buffer, Buffer> =>
+export const getRuntimeHistoryView = (env: RuntimeReplica): Level<Buffer, Buffer> =>
   getRuntimeWalDb(env, storageDeps);
 
-export const getRuntimeHistoryViewDb = (env: RuntimeState): Level<Buffer, Buffer> =>
+export const getRuntimeHistoryViewDb = (env: RuntimeReplica): Level<Buffer, Buffer> =>
   getHistoryViewDb(env, storageDeps);
 
 export const tryOpenRuntimeStorageDb = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   role: StorageDbRole = 'current',
 ): Promise<boolean> => tryOpenStorageDb(env, storageDeps, role);
 
 export const rotateRuntimeStorageEpochDb = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   snapshotHeight: number,
   timestamp = env.timestamp,
 ): Promise<boolean> =>
   rotateStorageEpochDb(env, storageDeps, snapshotHeight, timestamp);
 
-export const tryOpenRuntimeHistoryView = (env: RuntimeState): Promise<boolean> =>
+export const tryOpenRuntimeHistoryView = (env: RuntimeReplica): Promise<boolean> =>
   tryOpenRuntimeWalDb(env, storageDeps);
 
-export const tryOpenRuntimeHistoryViewDb = (env: RuntimeState): Promise<boolean> =>
+export const tryOpenRuntimeHistoryViewDb = (env: RuntimeReplica): Promise<boolean> =>
   tryOpenHistoryViewDb(env, storageDeps);
 
-export const waitForRuntimeLoopWake = async (env: RuntimeState): Promise<void> => {
+export const waitForRuntimeLoopWake = async (env: RuntimeReplica): Promise<void> => {
   const state = ensureRuntimeState(env);
   if (state.wakeRequested) {
     state.wakeRequested = false;
@@ -86,7 +86,7 @@ export const waitForRuntimeLoopWake = async (env: RuntimeState): Promise<void> =
 };
 
 export const waitForRuntimeLoopWakeOrTimeout = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   timeoutMs: number,
 ): Promise<'wake' | 'timeout'> => {
   const state = ensureRuntimeState(env);
@@ -119,17 +119,17 @@ export const waitForRuntimeLoopWakeOrTimeout = async (
   });
 };
 
-export const getCleanLogs = (env: RuntimeState): string =>
+export const getCleanLogs = (env: RuntimeReplica): string =>
   getRuntimeCleanLogs(env, cleanLogDeps);
 
-export const clearCleanLogs = (env: RuntimeState): void =>
+export const clearCleanLogs = (env: RuntimeReplica): void =>
   clearRuntimeCleanLogs(env, cleanLogDeps);
 
-export const copyCleanLogs = (env: RuntimeState): Promise<string> =>
+export const copyCleanLogs = (env: RuntimeReplica): Promise<string> =>
   copyRuntimeCleanLogs(env, cleanLogDeps);
 
 export const enqueueRuntimeInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
@@ -150,7 +150,7 @@ export const enqueueRuntimeInputs = (
 };
 
 export const enqueueRuntimeContinuation = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
@@ -166,7 +166,7 @@ export const enqueueRuntimeContinuation = (
   { acceptedBeforeQuiesce: true },
 );
 
-export const tryOpenRuntimeInfraDb = async (env: RuntimeState): Promise<boolean> => {
+export const tryOpenRuntimeInfraDb = async (env: RuntimeReplica): Promise<boolean> => {
   const state = ensureRuntimeState(env);
   if (state.infraDbClosing) return false;
   state.infraDbOpenPromise ??= getRuntimeInfraDb(env).open().then(
@@ -200,14 +200,14 @@ export const infraGossipDbAccess = {
   getInfraDb: getRuntimeInfraDb,
 };
 
-export const trackInfraDbWrite = (env: RuntimeState, promise: Promise<void>): void => {
+export const trackInfraDbWrite = (env: RuntimeReplica, promise: Promise<void>): void => {
   const state = ensureRuntimeState(env);
   state.infraDbPendingWrites ??= new Set();
   const tracked = promise.finally(() => state.infraDbPendingWrites?.delete(tracked));
   state.infraDbPendingWrites.add(tracked);
 };
 
-export const drainInfraDbWrites = async (env: RuntimeState): Promise<void> => {
+export const drainInfraDbWrites = async (env: RuntimeReplica): Promise<void> => {
   const state = ensureRuntimeState(env);
   while (state.infraDbPendingWrites && state.infraDbPendingWrites.size > 0) {
     await Promise.allSettled([...state.infraDbPendingWrites]);

@@ -11,7 +11,7 @@ import {
 import { serializeTaggedJson } from '../protocol/serialization';
 import { clearGossip, closeInfraDb, createEmptyEnv } from '../runtime';
 import { resolveDbPath } from '../storage/runtime-dbs';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   buildCryptographicProfileFixture,
   deriveSingleSignerFixtureEntityId,
@@ -85,7 +85,7 @@ test('loadGossipProfilesFromInfraDb prunes malformed persisted profile', async (
         announced.push(profile);
       },
     },
-  } as RuntimeState;
+  } as RuntimeReplica;
 
   try {
     await loadGossipProfilesFromInfraDb(env, {
@@ -147,7 +147,7 @@ test('relocation clear drains pending profile writes before deleting durable gos
   env.dbNamespace = `${String(env.runtimeId)}-relocation-clear`;
   const infraPath = resolveDbPath(env, 'infra');
   const restoredProfiles: unknown[] = [];
-  let probe: RuntimeState | null = null;
+  let probe: RuntimeReplica | null = null;
 
   try {
     expect(await tryOpenRuntimeInfraDb(env)).toBe(true);
@@ -188,7 +188,7 @@ test('relocation clear removes only profiles owned by the moved runtime', async 
   const env = createEmptyEnv(localSeed);
   env.dbNamespace = `${String(env.runtimeId)}-scoped-relocation-clear`;
   const infraPath = resolveDbPath(env, 'infra');
-  let probe: RuntimeState | null = null;
+  let probe: RuntimeReplica | null = null;
 
   try {
     expect(await tryOpenRuntimeInfraDb(env)).toBe(true);

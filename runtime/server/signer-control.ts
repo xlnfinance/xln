@@ -7,11 +7,11 @@ import {
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody } from './auth';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 type SignerControlDeps = {
   parseTaggedControlBody: typeof parseTaggedControlBody;
-  env: RuntimeState;
+  env: RuntimeReplica;
 };
 
 export const decodeSignerRegistration = (

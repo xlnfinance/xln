@@ -1,6 +1,6 @@
 import type { AccountInput, AccountFrame, AccountTx } from '../types/account';
 import type { EntityInput, EntityReplica } from '../entity/types';
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeTx } from './types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import type { EntityTx } from '../types/entity-tx';
 import type { Profile } from '../entity/profile';
@@ -18,7 +18,7 @@ import {
 } from '../extensions/cross-j';
 import { recordRuntimeSecurityIncident } from './security-incidents';
 
-type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
 
 export type RuntimeInboundEntityInputOptions = {
   /** The transport accepted this exact input before persistence quiescing began. */
@@ -26,9 +26,9 @@ export type RuntimeInboundEntityInputOptions = {
 };
 
 export type RuntimeEntityRoutingDeps = {
-  ensureRuntimeState(env: RuntimeState): RuntimeLifecycleState;
+  ensureRuntimeState(env: RuntimeReplica): RuntimeLifecycleState;
   enqueueRuntimeInputs(
-    env: RuntimeState,
+    env: RuntimeReplica,
     inputs?: EntityInput[],
     runtimeTxs?: RuntimeTx[],
     jInputs?: JInput[],
@@ -36,9 +36,9 @@ export type RuntimeEntityRoutingDeps = {
     options?: RuntimeInboundEntityInputOptions,
   ): void;
   extractEntityId(replicaKey: string): string;
-  hasLocalSignerForEntity(env: RuntimeState, entityId: string): boolean;
-  hasLocalSignerForEntitySigner(env: RuntimeState, entityId: string, signerId: string): boolean;
-  resolveSoleLocalSignerForEntity(env: RuntimeState, entityId: string): string | null;
+  hasLocalSignerForEntity(env: RuntimeReplica, entityId: string): boolean;
+  hasLocalSignerForEntitySigner(env: RuntimeReplica, entityId: string, signerId: string): boolean;
+  resolveSoleLocalSignerForEntity(env: RuntimeReplica, entityId: string): string | null;
   getP2P: RuntimeOutputRoutingDeps['getP2P'];
 };
 
@@ -172,7 +172,7 @@ const sourceAdmissionCandidate = (
 };
 
 const findInputReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
 ): EntityReplica | null =>
   env.eReplicas.get(
@@ -180,7 +180,7 @@ const findInputReplica = (
   ) ?? null;
 
 const findReplicaAccount = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   counterpartyId: string,
 ) => {
@@ -190,7 +190,7 @@ const findReplicaAccount = (
 };
 
 const proposalAlreadyCommitted = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   accountInput: AccountInput,
 ): boolean => {
@@ -387,7 +387,7 @@ const buildCrossJProposalFrameCandidate = (
 };
 
 const buildCrossJAckFrameCandidate = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   inputIndex: number,
   accountInput: AccountInput,
@@ -501,7 +501,7 @@ export const selectPotentialCrossJAccountInputPairs = (
 };
 
 const collectCrossJAdmissionCandidates = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: readonly RoutedEntityInput[],
 ): CrossJAdmissionFrameCandidate[] => inputs.flatMap((input, inputIndex) => {
   const replica = findInputReplica(env, input);
@@ -712,7 +712,7 @@ const removeRejectedCrossJAccountInputs = (
 };
 
 export const removeRejectedCrossJAccountInputsByIndex = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: readonly RoutedEntityInput[],
   rejectedInputIndexes: ReadonlySet<number>,
 ): RoutedEntityInput[] => {
@@ -738,7 +738,7 @@ export const removeRejectedCrossJAccountInputsByIndex = (
  * unrelated Entity transactions in the same Runtime input remain eligible.
  */
 export const selectMatchedCrossJAccountInputPairs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: readonly RoutedEntityInput[],
 ): CrossJAccountInputPairSelection => {
   const candidates = collectCrossJAdmissionCandidates(env, inputs);
@@ -792,7 +792,7 @@ export const selectMatchedCrossJAccountInputPairs = (
   };
 };
 
-const runtimeRoutingTimestamp = (env: RuntimeState): number => {
+const runtimeRoutingTimestamp = (env: RuntimeReplica): number => {
   const timestamp = Math.floor(Number(env.timestamp ?? 0));
   return Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : 0;
 };
@@ -803,7 +803,7 @@ const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | nul
 };
 
 export const resolveRuntimeIdForEntity = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState'>,
 ): string | null => {
@@ -845,7 +845,7 @@ export const resolveRuntimeIdForEntity = (
 };
 
 export const resolveRuntimeIdForCrossJurisdictionEntity = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState' | 'extractEntityId' | 'hasLocalSignerForEntity'>,
 ): string | null => {
@@ -855,7 +855,7 @@ export const resolveRuntimeIdForCrossJurisdictionEntity = (
 };
 
 export const registerEntityRuntimeHintWithDeps = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   runtimeId: string,
   deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState'>,
@@ -872,7 +872,7 @@ export const registerEntityRuntimeHintWithDeps = (
 };
 
 export const collectCrossJurisdictionRemoteEntityHints = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   fromRuntimeId: string,
   deps: Pick<RuntimeEntityRoutingDeps, 'extractEntityId' | 'hasLocalSignerForEntity'>,
@@ -915,7 +915,7 @@ const inboundEntityContext = (input: RoutedEntityInput): InboundEntityContext =>
 });
 
 const rejectUnavailableInboundTarget = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   code: string,
   payload: Record<string, unknown>,
@@ -933,7 +933,7 @@ const rejectUnavailableInboundTarget = (
 };
 
 const findInboundTargetReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
 ): EntityReplica | undefined => {
   const entityId = normalizeEntityKey(input.entityId);
@@ -944,7 +944,7 @@ const findInboundTargetReplica = (
 };
 
 const validateInboundEntityCommands = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   from: string,
   input: RoutedEntityInput,
 ): void => {
@@ -968,7 +968,7 @@ const validateInboundEntityCommands = (
 };
 
 export const validateInboundP2PEntityInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   from: string,
   input: RoutedEntityInput,
   deps: RuntimeEntityRoutingDeps,
@@ -1025,7 +1025,7 @@ export const validateInboundP2PEntityInput = (
 };
 
 export const routeInboundP2PEntityInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   from: string,
   input: RoutedEntityInput,
   deps: RuntimeEntityRoutingDeps,
@@ -1054,7 +1054,7 @@ type AtomicCrossJPair = NonNullable<RuntimeEntityInputsEnvelope['atomicCrossJuri
 type CrossJIntent = NonNullable<RuntimeEntityInputsEnvelope['crossJurisdictionIntent']>;
 
 const validateEntityInputsEnvelopeHeader = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
 ): {
@@ -1100,7 +1100,7 @@ const validateEntityInputsEnvelopeHeader = (
 };
 
 const validateEnvelopeEntityInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeEntityRoutingDeps,
@@ -1130,7 +1130,7 @@ const validateEnvelopeEntityInputs = (
 });
 
 const appendCrossJurisdictionIntentInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   rawIntent: CrossJIntent,
   deps: RuntimeEntityRoutingDeps,
   transportSource: string,
@@ -1225,7 +1225,7 @@ const assertAtomicCrossJEnvelope = (
 };
 
 export const validateInboundP2PEntityInputsEnvelope = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeEntityRoutingDeps,
@@ -1264,7 +1264,7 @@ export const validateInboundP2PEntityInputsEnvelope = (
 };
 
 export const routeInboundP2PEntityInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeEntityRoutingDeps,

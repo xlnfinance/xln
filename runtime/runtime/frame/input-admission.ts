@@ -2,7 +2,7 @@ import { createStructuredLogger, logError, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { decodeRoutedEntityInput } from '../routing-validation';
 import { validateJInputs } from '../../storage/wal/runtime-machine-schema/j';
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/input';
 import {
   getInputReliableIdentity,
@@ -21,7 +21,7 @@ const runtimeLog = createStructuredLogger('runtime');
 
 export type RuntimeInputAdmissionDeps = {
   normalizeEntityInput(
-    env: RuntimeState,
+    env: RuntimeReplica,
     input: RoutedEntityInput,
     context: string,
   ): RoutedEntityInput;
@@ -43,7 +43,7 @@ const rejectRuntimeInput = (message: string): never => {
 };
 
 const collectJOutbox = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
 ): JInput[] => {
   if (!runtimeInput.jInputs?.length) return [];
@@ -63,7 +63,7 @@ const collectJOutbox = (
 };
 
 const validateEntityInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   isReplay: boolean,
   deps: RuntimeInputAdmissionDeps,
@@ -107,7 +107,7 @@ const validateEntityInputs = (
   });
 
 const registerReliableEntityInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: RoutedEntityInput[],
   isReplay: boolean,
 ): Pick<PreparedRuntimeIngress, 'entityInputs' | 'immediateReliableReceipts'> => {
@@ -157,7 +157,7 @@ const registerReliableEntityInputs = (
 };
 
 export const validateRuntimeInputIngress = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   isReplay: boolean,
   deps: RuntimeInputAdmissionDeps,
@@ -174,7 +174,7 @@ export const validateRuntimeInputIngress = (
 };
 
 export const prepareRuntimeInputIngress = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   isReplay: boolean,
   deps: RuntimeInputAdmissionDeps,

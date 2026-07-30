@@ -1,6 +1,6 @@
 import { getTokenInfo } from '../account/utils';
 import { scaleWholeTokenAmount } from '../types/rebalance';
-import { type RuntimeState } from '../runtime/types';
+import { type RuntimeReplica } from '../runtime/types';
 import type { JTokenInfo } from '../jadapter/types';
 import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
 import {
@@ -24,7 +24,7 @@ export const getRequestCreditCap = (tokenId: number): bigint => {
   return scaleWholeTokenAmount(REQUEST_CREDIT_CAP_WHOLE, getTokenInfo(tokenId).decimals);
 };
 
-export const getHubMeshHealth = (env: RuntimeState | null, activeHubEntityIds: readonly string[]) => {
+export const getHubMeshHealth = (env: RuntimeReplica | null, activeHubEntityIds: readonly string[]) => {
   if (!env) {
     return {
       requiredHubCount: HUB_MESH_REQUIRED_HUBS,
@@ -124,7 +124,7 @@ export type BootstrapReserveHealth = {
 };
 
 export const getBootstrapReserveHealth = async (
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   options: {
     activeHubEntityIds: readonly string[];
     marketMakerEntityId?: string | null;

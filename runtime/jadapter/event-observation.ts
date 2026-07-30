@@ -1,6 +1,6 @@
 import type { DisputeFinalizationEvidence, ValidatorJEventBlock } from '../types/jurisdiction-events';
 import type { EntityInput } from '../entity/types';
-import type { RuntimeInput, RuntimeState, RuntimeTx } from '../runtime/types';
+import type { RuntimeInput, RuntimeReplica, RuntimeTx } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import {
@@ -46,7 +46,7 @@ export type JEventsRuntimeInputOptions = {
 };
 
 export const assertJEventIngressOpen = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   label: string,
 ): void => {
   if (!env.runtimeState?.persistenceQuiescing || env.scenarioMode) return;
@@ -80,7 +80,7 @@ const enrichDisputeBatchNonces = (
 };
 
 const resolveWatcher = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   options: JEventsRuntimeInputOptions,
 ): JReplica | undefined => {
   if (
@@ -114,7 +114,7 @@ type Delivery = {
 };
 
 const collectDeliveries = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   events: JEventIngress[],
   blockNumber: number,
   watcher: JReplica | undefined,
@@ -154,7 +154,7 @@ const evidenceEntries = (
   ]);
 
 const buildDelivery = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   delivery: Delivery,
   options: JEventsRuntimeInputOptions,
 ): { runtimeTx: RuntimeTx; evidence: Array<[string, JEventIngress]> } | null => {
@@ -219,7 +219,7 @@ const buildDelivery = (
 };
 
 export const buildJEventObservationInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   rawEvents: JEventIngress[],
   options: JEventsRuntimeInputOptions,
 ): JEventsRuntimeInputBuildResult | null => {

@@ -1,5 +1,5 @@
 import type { AccountState } from '../types/account';
-import type { RuntimeInput, RuntimeState } from '../runtime/types';
+import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
 import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import { getAccountState, getEntityOutCapacity, hasAccount } from './entity-lookup';
@@ -11,13 +11,13 @@ import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 type CreditRequestInput = {
   req: Request;
-  env: RuntimeState | null;
+  env: RuntimeReplica | null;
   headers: HeadersInit;
   activeHubEntityIds: string[];
-  enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
-  validateRuntimeInputAdmission: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
+  enqueueRuntimeInput: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
   registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
-  getCurrentRuntimeHeight: (env: RuntimeState | null) => number;
+  getCurrentRuntimeHeight: (env: RuntimeReplica | null) => number;
   buildRuntimeInputStatusUrl: (id: string) => string;
 };
 
@@ -61,7 +61,7 @@ const parseCreditRequest = async (
 };
 
 const admitCreditRequest = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   request: ParsedCreditRequest,
   activeHubEntityIds: string[],
   headers: HeadersInit,
@@ -93,7 +93,7 @@ const admitCreditRequest = (
 
 const alreadySatisfied = (
   input: CreditRequestInput,
-  env: RuntimeState,
+  env: RuntimeReplica,
   request: AdmittedCreditRequest,
 ): Response | null => {
   const capacity = getEntityOutCapacity(request.account, request.hubEntityId, request.tokenId);
@@ -130,7 +130,7 @@ const buildCreditRuntimeInput = (
 });
 
 const resolveHubSigner = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   hubEntityId: string,
   headers: HeadersInit,
 ): string | Response => {
@@ -145,7 +145,7 @@ const resolveHubSigner = (
 
 const queueCreditRequest = (
   input: CreditRequestInput,
-  env: RuntimeState,
+  env: RuntimeReplica,
   request: AdmittedCreditRequest,
   runtimeInput: RuntimeInput,
 ): Response => {

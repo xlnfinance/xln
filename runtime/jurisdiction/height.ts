@@ -1,5 +1,5 @@
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   getJReplicaByJurisdictionRef,
   getJReplicaByName,
@@ -28,7 +28,7 @@ export function getEntityCertifiedJurisdictionHeight(
   return height;
 }
 
-const getJReplicaByJurisdictionNameOrRef = (env: RuntimeState, jurisdictionName?: string): ReturnType<typeof getJReplicaByName> => {
+const getJReplicaByJurisdictionNameOrRef = (env: RuntimeReplica, jurisdictionName?: string): ReturnType<typeof getJReplicaByName> => {
   const raw = String(jurisdictionName || '').trim();
   if (!raw) return undefined;
   return isJurisdictionStackRef(raw)
@@ -36,7 +36,7 @@ const getJReplicaByJurisdictionNameOrRef = (env: RuntimeState, jurisdictionName?
     : getJReplicaByName(env, raw);
 };
 
-export function getRuntimeJurisdictionHeight(env: RuntimeState, fallbackHeight = 0, jurisdictionName?: string): number {
+export function getRuntimeJurisdictionHeight(env: RuntimeReplica, fallbackHeight = 0, jurisdictionName?: string): number {
   const fallback = Number.isFinite(fallbackHeight) ? Math.max(0, Math.floor(fallbackHeight)) : 0;
   if (jurisdictionName) {
     const requested = getJReplicaByJurisdictionNameOrRef(env, jurisdictionName);

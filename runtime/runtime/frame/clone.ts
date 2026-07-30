@@ -1,5 +1,5 @@
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from '../../entity/consensus/leader';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeReplica, RuntimeInput } from '../types';
 import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/registration-evidence';
 import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
 import { copyDeterministicHtlcTestSecretCapability } from '../../protocol/htlc/test-secret-capability';
@@ -49,5 +49,5 @@ export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
  * It is intentionally opt-in because encoding the canonical snapshot adds
  * measurement cost. Shared process handles are excluded by the snapshot.
  */
-export const measureRuntimeFrameCloneBytes = (source: RuntimeState): number =>
+export const measureRuntimeFrameCloneBytes = (source: RuntimeReplica): number =>
   encodeBuffer(buildCanonicalRuntimeStateSnapshot(source)).byteLength;

@@ -1,25 +1,25 @@
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import { runtimeIsBrowser } from '../infra/runtime-process';
 
 export type RuntimeCleanLogDeps = {
-  ensureRuntimeState: (env: RuntimeState) => NonNullable<RuntimeState['runtimeState']>;
+  ensureRuntimeState: (env: RuntimeReplica) => NonNullable<RuntimeReplica['runtimeState']>;
 };
 
-const getCleanLogBuffer = (env: RuntimeState, deps: RuntimeCleanLogDeps): string[] => {
+const getCleanLogBuffer = (env: RuntimeReplica, deps: RuntimeCleanLogDeps): string[] => {
   const state = deps.ensureRuntimeState(env);
   if (!state.cleanLogs) state.cleanLogs = [];
   return state.cleanLogs;
 };
 
-export const getRuntimeCleanLogs = (env: RuntimeState, deps: RuntimeCleanLogDeps): string =>
+export const getRuntimeCleanLogs = (env: RuntimeReplica, deps: RuntimeCleanLogDeps): string =>
   getCleanLogBuffer(env, deps).join('\n');
 
-export const clearRuntimeCleanLogs = (env: RuntimeState, deps: RuntimeCleanLogDeps): void => {
+export const clearRuntimeCleanLogs = (env: RuntimeReplica, deps: RuntimeCleanLogDeps): void => {
   const buffer = getCleanLogBuffer(env, deps);
   buffer.length = 0;
 };
 
-export const copyRuntimeCleanLogs = async (env: RuntimeState, deps: RuntimeCleanLogDeps): Promise<string> => {
+export const copyRuntimeCleanLogs = async (env: RuntimeReplica, deps: RuntimeCleanLogDeps): Promise<string> => {
   const text = getRuntimeCleanLogs(env, deps);
   if (runtimeIsBrowser && navigator.clipboard) {
     try {

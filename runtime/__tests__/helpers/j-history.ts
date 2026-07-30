@@ -9,7 +9,7 @@ import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../..
 import { finalizedJHistoryRoot } from '../../jurisdiction/local-history';
 import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
 import type { EntityState } from '../../entity/types';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import type { JEventApplyResult } from '../../entity/tx/j-events-types';
 
 export type LegacyJEventInput = {
@@ -29,7 +29,7 @@ export type LegacyJEventInput = {
 
 const signRange = (
   state: EntityState,
-  env: RuntimeState,
+  env: RuntimeReplica,
   signerId: string,
   unsigned: Omit<JurisdictionEventData, 'from' | 'signature' | 'observedAt'>,
 ): JurisdictionEventData => ({
@@ -46,7 +46,7 @@ const signRange = (
 export const buildJEventRangeData = (
   state: EntityState,
   data: LegacyJEventInput,
-  env: RuntimeState,
+  env: RuntimeReplica,
 ): JurisdictionEventData => {
   const events = (data.events ?? [data.event]).map((event, index) => ({
     ...event,
@@ -94,5 +94,5 @@ export const buildJEventRangeData = (
 export const applyJEventRange = async (
   state: EntityState,
   data: LegacyJEventInput,
-  env: RuntimeState,
+  env: RuntimeReplica,
 ): Promise<JEventApplyResult> => applyJEvent(state, buildJEventRangeData(state, data, env), env);

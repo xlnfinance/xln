@@ -1,9 +1,9 @@
 import { createStructuredLogger } from '../infra/logger';
 import { normalizeRuntimeFailureCode } from '../protocol/failure-taxonomy';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import { transitionRuntimeLifecycle } from './lifecycle';
 
-type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
 
 type FatalLoopDeps = {
   getRuntimeProcessGlobal(): { exit?: (code: number) => unknown } | null;
@@ -21,7 +21,7 @@ type FatalLoopConfig = {
 const failureLog = createStructuredLogger('runtime.loop');
 
 export const emitRuntimeLoopError = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   code: 'RUNTIME_LOOP_ERROR' | 'RUNTIME_LOOP_HALTED',
   payload: Record<string, unknown>,
 ): void => {
@@ -36,7 +36,7 @@ export const emitRuntimeLoopError = (
 };
 
 export const reportFatalLoopError = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: RuntimeLifecycleState,
   config: FatalLoopConfig | undefined,
   deps: FatalLoopDeps,

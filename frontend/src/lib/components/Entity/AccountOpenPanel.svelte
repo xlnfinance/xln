@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RuntimeState, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import type { DisputedAccountView } from './account-dispute-view';
   import EntityInput from '../shared/EntityInput.svelte';
@@ -12,7 +12,7 @@
   export let replica: EntityReplica | null = null;
   export let tab: Tab;
   export let activeIsLive = false;
-  export let actionRuntimeEnv: RuntimeState | null = null;
+  export let actionRuntimeEnv: RuntimeReplica | null = null;
   export let hubDiscoveryProjection: HubDiscoveryProjection = emptyHubDiscoveryProjection();
   export let canOpenAccounts = true;
   export let openAccountEntityId = '';

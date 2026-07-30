@@ -16,7 +16,7 @@ import {
   EntityProvider__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type {
   JAdapter,
   JAdapterConfig,
@@ -111,7 +111,7 @@ export async function createBrowserVMAdapter(
 
     submitTx,
 
-    startWatching(env: RuntimeState): void {
+    startWatching(env: RuntimeReplica): void {
       if (!stackBindingVerified) {
         throw new Error(`J_STACK_BINDING_UNVERIFIED:browservm:chainId=${config.chainId}`);
       }

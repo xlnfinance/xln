@@ -34,7 +34,7 @@ import {
 } from '../storage/wal/snapshot';
 import type { AccountInput } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../runtime/types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../runtime/types';
 import { enableStrictScenario } from '../scenarios/helpers';
 import {
   buildEntityHashesToSign,
@@ -104,7 +104,7 @@ const makeAliasedBoardRuntimeInput = (): {
   };
 };
 
-const installJurisdiction = (env: RuntimeState): void => {
+const installJurisdiction = (env: RuntimeReplica): void => {
   env.activeJurisdiction = jurisdiction.name;
   env.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
@@ -159,7 +159,7 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
 });
 
 const installValidatorReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   leader: string,
   validator: string,
 ): EntityReplica => {
@@ -194,7 +194,7 @@ const importReplicaTx = (slot: string) => {
   };
 };
 
-const localImportReplicaTx = (env: RuntimeState, slot: string) => {
+const localImportReplicaTx = (env: RuntimeReplica, slot: string) => {
   const signerId = env.runtimeId!;
   const coValidatorId = address(`${slot}f`);
   const config: ConsensusConfig = {
@@ -216,7 +216,7 @@ const localImportReplicaTx = (env: RuntimeState, slot: string) => {
   };
 };
 
-const exactQueuedInput = (env: RuntimeState): RuntimeInput => ({
+const exactQueuedInput = (env: RuntimeReplica): RuntimeInput => ({
   runtimeTxs: env.runtimeMempool?.runtimeTxs ?? [],
   entityInputs: env.runtimeMempool?.entityInputs ?? [],
   ...(env.runtimeMempool?.jInputs?.length ? { jInputs: env.runtimeMempool.jInputs } : {}),
@@ -226,7 +226,7 @@ const exactQueuedInput = (env: RuntimeState): RuntimeInput => ({
 });
 
 const createTestReliableReceipt = (
-  targetEnv: RuntimeState,
+  targetEnv: RuntimeReplica,
   entityId: string,
   signerId: string,
 ): { from: string; receipt: ReliableDeliveryReceipt } => {
@@ -246,7 +246,7 @@ const createTestReliableReceipt = (
   };
 };
 
-const corruptCurrentHeadAhead = async (env: RuntimeState): Promise<void> => {
+const corruptCurrentHeadAhead = async (env: RuntimeReplica): Promise<void> => {
   const currentDb = getRuntimeStorageDb(env);
   const head = await readStorageHead(currentDb);
   if (!head) throw new Error('TEST_STORAGE_CURRENT_HEAD_MISSING');
@@ -255,7 +255,7 @@ const corruptCurrentHeadAhead = async (env: RuntimeState): Promise<void> => {
   await batch.write({ sync: true });
 };
 
-const closeTestEnv = async (env: RuntimeState): Promise<void> => {
+const closeTestEnv = async (env: RuntimeReplica): Promise<void> => {
   await closeRuntimeDb(env);
   await closeInfraDb(env);
 };

@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   KEY_DIFF,
   KEY_FRAME,
@@ -26,9 +26,9 @@ import type { RuntimeDbLike, StorageDebugStats } from './types';
 import { requireStorageDbOpen } from './availability';
 
 export const inspectStorage = async (options: {
-  env: RuntimeState;
-  tryOpenDb: (env: RuntimeState) => Promise<boolean>;
-  getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
+  env: RuntimeReplica;
+  tryOpenDb: (env: RuntimeReplica) => Promise<boolean>;
+  getRuntimeDb: (env: RuntimeReplica) => RuntimeDbLike;
 }): Promise<StorageDebugStats | null> => {
   await requireStorageDbOpen(
     () => options.tryOpenDb(options.env),

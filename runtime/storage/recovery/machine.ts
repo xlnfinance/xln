@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { safeStringify } from '../../protocol/serialization';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import { canonicalizeStorageAuditValue } from '../canonical-hash';
 import {
   buildReplayVerifiableRuntimeMachineSnapshot,
@@ -94,7 +94,7 @@ const readMachineField = (
 };
 
 export const assertRecoveryRuntimeMachineMatches = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   expectedMachine: Record<string, unknown>,
   height: number,
   options?: { includeIngressWorkingState?: boolean },

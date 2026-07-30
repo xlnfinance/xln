@@ -1,6 +1,6 @@
 import { runtimeIsBrowser } from '../infra/runtime-process';
 import { ensureRuntimeState } from '../runtime/runtime-state';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 import { createRuntimeStorageCommitApi } from './commit';
 import { createPersistedStorageReadApi } from './persisted-read';
@@ -10,7 +10,7 @@ import { createRuntimeChainVerifier } from './recovery/verify';
 
 export type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
-type RuntimeSyncChannel = NonNullable<NonNullable<RuntimeState['runtimeState']>['runtimeSyncChannel']>;
+type RuntimeSyncChannel = NonNullable<NonNullable<RuntimeReplica['runtimeState']>['runtimeSyncChannel']>;
 
 export type RuntimeSyncNotificationOptions = {
   enabled?: boolean;
@@ -23,7 +23,7 @@ export type RuntimeSyncNotificationOptions = {
  * durable financial frame into an apparent rollback.
  */
 export const notifyRuntimeSyncAfterCommit = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   options: RuntimeSyncNotificationOptions = {},
 ): Error | null => {
   const enabled = options.enabled ?? runtimeIsBrowser;

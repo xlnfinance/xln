@@ -16,7 +16,7 @@ import { cloneEntityState } from '../entity/state-clone';
 import type { StorageFrameRecord } from '../storage/types';
 import type { AccountState } from '../types/account';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   buildReplayVerifiableRuntimeMachineSnapshot,
   projectReplayVerifiableRuntimeMachine,
@@ -91,7 +91,7 @@ const makeAccount = (frameStateHash: string): AccountState =>
     jNonce: 0,
   }) as AccountState;
 
-const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): RuntimeState =>
+const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): RuntimeReplica =>
   ({
     height: 7,
     timestamp: 1234,
@@ -125,7 +125,7 @@ const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): Runt
         },
       } as EntityReplica],
     ]),
-  }) as RuntimeState;
+  }) as RuntimeReplica;
 
 const sharedOrderId = 'account:offer-1';
 
@@ -143,7 +143,7 @@ const createBookWithSharedOrder = () => {
   }).state;
 };
 
-const makeEnvWithOrderbookPairs = (pairIds: string[]): RuntimeState => {
+const makeEnvWithOrderbookPairs = (pairIds: string[]): RuntimeReplica => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const replica = Array.from(env.eReplicas.values())[0]!;
   const orderbookExt = {
@@ -257,7 +257,7 @@ test('replay oracle canonicalizes empty optional Runtime input queues', () => {
     eReplicas: new Map(),
     jReplicas: new Map(),
     runtimeMempool: { runtimeTxs: [], entityInputs: [] },
-  } as unknown as RuntimeState;
+  } as unknown as RuntimeReplica;
   const withEmptyOptionals = {
     ...base,
     runtimeMempool: {
@@ -266,7 +266,7 @@ test('replay oracle canonicalizes empty optional Runtime input queues', () => {
       jInputs: [],
       reliableReceipts: [],
     },
-  } as RuntimeState;
+  } as RuntimeReplica;
 
   expect(buildReplayVerifiableRuntimeMachineSnapshot(withEmptyOptionals))
     .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));
@@ -277,9 +277,9 @@ test('replay oracle excludes process-local Runtime lifecycle failures', () => {
     eReplicas: new Map(),
     jReplicas: new Map(),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-  } as unknown as RuntimeState;
-  const running = { ...base, runtimeState: { halted: false } } as RuntimeState;
-  const halted = { ...base, runtimeState: { halted: true } } as RuntimeState;
+  } as unknown as RuntimeReplica;
+  const running = { ...base, runtimeState: { halted: false } } as RuntimeReplica;
+  const halted = { ...base, runtimeState: { halted: true } } as RuntimeReplica;
 
   expect(buildReplayVerifiableRuntimeMachineSnapshot(running))
     .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));

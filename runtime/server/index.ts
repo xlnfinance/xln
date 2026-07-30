@@ -29,7 +29,7 @@ import {
 import { registerEnvChangeCallback } from '../runtime/loop-environment';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeState, RuntimeEntityInputsEnvelope } from '../runtime/types';
+import type { RuntimeReplica, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { maybeHandleQaRequest } from '../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
@@ -108,7 +108,7 @@ import type { Server } from 'bun';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
-let serverEnv: RuntimeState | null = null;
+let serverEnv: RuntimeReplica | null = null;
 let serverStartupBarrier: Promise<void> = Promise.resolve();
 let resolveServerStartupBarrier: (() => void) | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
@@ -175,7 +175,7 @@ const logOneShot = (key: string, message: string, fields: Record<string, unknown
   serverLog.warn(message, fields);
 };
 
-const currentRuntimeHeight = (env: RuntimeState | null): number => Math.max(0, Math.floor(Number(env?.height ?? 0)));
+const currentRuntimeHeight = (env: RuntimeReplica | null): number => Math.max(0, Math.floor(Number(env?.height ?? 0)));
 
 const runtimeInputStatusUrl = (id: string): string => `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
 
@@ -293,7 +293,7 @@ let serverBootStartedAt = 0;
 let serverBootCompletedAt: number | null = null;
 
 const sendDirectEntityInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   targetRuntimeId: string,
   envelope: RuntimeEntityInputsEnvelope,
   ingressTimestamp?: number,
@@ -338,7 +338,7 @@ const installProcessSafetyGuards = (): void => {
 };
 
 const buildMarketSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   hubEntityId: string,
   pairId: string,
   depth: number,
@@ -390,7 +390,7 @@ const handleRpcMessage = createServerRpcMessageHandler({
 const maybeHandleControlApi = async (
   req: Request,
   pathname: string,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
 ): Promise<Response | null> => {
   if (pathname === '/api/control/entities' && req.method === 'GET') {
@@ -453,7 +453,7 @@ const maybeHandleControlApi = async (
 const maybeHandleRuntimeInfoApi = async (
   req: Request,
   pathname: string,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
   operatorAuthorized: boolean,
 ): Promise<Response | null> => {
@@ -523,7 +523,7 @@ const maybeHandleRuntimeInfoApi = async (
 
 const handleGossipProfileApi = async (
   req: Request,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
 ): Promise<Response> => {
   const url = new URL(req.url);
@@ -562,7 +562,7 @@ const handleGossipProfileApi = async (
   );
 };
 
-const handleJurisdictionsApi = async (env: RuntimeState | null, headers: typeof JSON_HEADERS): Promise<Response> => {
+const handleJurisdictionsApi = async (env: RuntimeReplica | null, headers: typeof JSON_HEADERS): Promise<Response> => {
   try {
     const payload = (await buildRuntimeJurisdictionsJson(env)) ?? (await readCanonicalJurisdictionsJson());
     return new Response(payload, {
@@ -583,7 +583,7 @@ const handleJurisdictionsApi = async (env: RuntimeState | null, headers: typeof 
 const maybeHandleDiscoveryApi = (
   req: Request,
   pathname: string,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
 ): Promise<Response> | null => {
   if (pathname === '/api/gossip/profile') {
@@ -598,7 +598,7 @@ const maybeHandleDiscoveryApi = (
 const maybeHandleDebugApi = async (
   req: Request,
   pathname: string,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
   operatorAuthorized: boolean,
 ): Promise<Response | null> => {
@@ -668,7 +668,7 @@ const maybeHandleDebugApi = async (
 const maybeHandleFinancialApi = (
   req: Request,
   pathname: string,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
 ): Promise<Response> | Response | null => {
   if (pathname === '/api/tokens') {
@@ -735,7 +735,7 @@ const maybeHandleFinancialApi = (
 const handleApiAgainstCommittedState = async (
   req: Request,
   pathname: string,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   clientId: string,
   operatorAuthorized: boolean,
 ): Promise<Response> => {
@@ -763,7 +763,7 @@ const handleApiAgainstCommittedState = async (
 const handleApi = (
   req: Request,
   pathname: string,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   clientId: string,
   operatorAuthorized: boolean,
 ): Promise<Response> => {
@@ -782,7 +782,7 @@ const handleApi = (
 };
 
 type ServerSession = {
-  env: RuntimeState | null;
+  env: RuntimeReplica | null;
   routerConfig: RelayRouterConfig | null;
   relayHelloChallenges: ReturnType<typeof createHelloChallengeRegistry>;
 };
@@ -1003,7 +1003,7 @@ type ServerJurisdictionRegistration = {
 };
 
 const registerServerJurisdiction = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   registration: ServerJurisdictionRegistration,
 ): Promise<void> => {
   if (!env.jReplicas) env.jReplicas = new Map();
@@ -1038,7 +1038,7 @@ const registerServerJurisdiction = async (
   serverLog.info('jreplica.registered', { name: registration.name });
 };
 
-const initializeBrowserVmJurisdiction = async (env: RuntimeState): Promise<JAdapter> => {
+const initializeBrowserVmJurisdiction = async (env: RuntimeReplica): Promise<JAdapter> => {
   serverLog.info('browservm.start');
   const adapter = await withStartupStepTimeout(
     'createJAdapter(browservm)',
@@ -1142,7 +1142,7 @@ const assertPredeployedStackCode = async (
   }
 };
 
-const initializeJurisdictionAdapter = async (env: RuntimeState): Promise<void> => {
+const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void> => {
   // Initialize J-adapter (anvil for testnet, browserVM for local)
   const useAnvil = process.env['USE_ANVIL'] === 'true';
   const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
@@ -1295,7 +1295,7 @@ const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
 
 const closeFailedServerStartup = async (
   startupError: unknown,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   bound: BoundServerSession,
 ): Promise<never> => {
   stopMarketMakerLoop();
@@ -1322,7 +1322,7 @@ const closeFailedServerStartup = async (
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
   const options = { ...DEFAULT_OPTIONS, ...opts };
   const bound = bindServerSession(options);
-  let env: RuntimeState | null = null;
+  let env: RuntimeReplica | null = null;
 
   try {
     serverBootPhase = 'runtime';

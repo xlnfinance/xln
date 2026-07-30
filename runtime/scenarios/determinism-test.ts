@@ -5,7 +5,7 @@
  * compares the complete runtime history hash sequence plus final state hash.
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { createHash } from 'node:crypto';
 import { safeStringify } from '../protocol/serialization';
 import { clearSignerKeys } from '../account/crypto';
@@ -250,7 +250,7 @@ const restoreConsole = (original: ConsoleFns): void => {
   console.error = original.error;
 };
 
-const projectJReplicas = (jReplicas: RuntimeState['jReplicas'] | undefined): Map<string, unknown> => {
+const projectJReplicas = (jReplicas: RuntimeReplica['jReplicas'] | undefined): Map<string, unknown> => {
   const projected = new Map<string, unknown>();
   for (const [key, replica] of jReplicas ?? new Map()) {
     projected.set(key, buildCanonicalJReplicaSnapshot(replica));
@@ -258,7 +258,7 @@ const projectJReplicas = (jReplicas: RuntimeState['jReplicas'] | undefined): Map
   return projected;
 };
 
-const snapshotEnvProjection = (env: RuntimeState): Record<string, unknown> => ({
+const snapshotEnvProjection = (env: RuntimeReplica): Record<string, unknown> => ({
   height: env.height,
   timestamp: env.timestamp,
   runtimeId: env.runtimeId,
@@ -270,7 +270,7 @@ const snapshotEnvProjection = (env: RuntimeState): Record<string, unknown> => ({
   networkInbox: env.networkInbox ?? [],
 });
 
-const snapshotProjection = (snapshot: RuntimeState['history'][number]): Record<string, unknown> => ({
+const snapshotProjection = (snapshot: RuntimeReplica['history'][number]): Record<string, unknown> => ({
   height: snapshot.height,
   timestamp: snapshot.timestamp,
   runtimeId: snapshot.runtimeId,
@@ -291,8 +291,8 @@ const buildFrameHashTrace = (records: EntityFrameHashDebugRecord[]): unknown[] =
   }));
 
 const buildOracle = (
-  env: RuntimeState,
-  history: readonly RuntimeState['history'][number][],
+  env: RuntimeReplica,
+  history: readonly RuntimeReplica['history'][number][],
   frameHashRecords: EntityFrameHashDebugRecord[],
   accountStateRootRecords: AccountStateRootDebugRecord[],
 ): ScenarioOracle => {
@@ -429,7 +429,7 @@ const assertMatchingOracles = (scenario: ScenarioEntry, runs: ScenarioOracle[]):
   }
 };
 
-const cleanupScenarioEnv = async (env: RuntimeState): Promise<void> => {
+const cleanupScenarioEnv = async (env: RuntimeReplica): Promise<void> => {
   const { closeRuntimeDb, closeInfraDb, stopRuntimeLoopAndWait } = await import('../runtime');
   await stopRuntimeLoopAndWait(env, 5_000);
 
@@ -465,10 +465,10 @@ const runScenarioOnce = async (
   const previousJAdapterMode = process.env['JADAPTER_MODE'];
   const previousAnvilRpc = process.env['ANVIL_RPC'];
   const previousForceFreshAnvil = process.env['XLN_FORCE_FRESH_ANVIL'];
-  let env: RuntimeState | null = null;
-  let activeEnv: RuntimeState | null = null;
+  let env: RuntimeReplica | null = null;
+  let activeEnv: RuntimeReplica | null = null;
   let stopHistoryTrace: (() => void) | null = null;
-  let fullHistory: readonly RuntimeState['history'][number][] = [];
+  let fullHistory: readonly RuntimeReplica['history'][number][] = [];
   const frameHashRecords: EntityFrameHashDebugRecord[] = [];
   const accountStateRootRecords: AccountStateRootDebugRecord[] = [];
   const restoreFrameHashRecorder = setEntityFrameHashDebugRecorder((record) => {
@@ -514,7 +514,7 @@ const runScenarioOnce = async (
     };
     if (env.runtimeState) env.runtimeState.persistencePaused = true;
 
-    const run = await scenario.load() as (targetEnv: RuntimeState) => Promise<RuntimeState | void>;
+    const run = await scenario.load() as (targetEnv: RuntimeReplica) => Promise<RuntimeReplica | void>;
     const returnedEnv = await run(env);
     if (returnedEnv) activeEnv = returnedEnv;
     assertRuntimeIdle(activeEnv, scenario.name);
@@ -556,7 +556,7 @@ const runScenarioOnce = async (
     else process.env['ANVIL_RPC'] = previousAnvilRpc;
     if (previousForceFreshAnvil === undefined) delete process.env['XLN_FORCE_FRESH_ANVIL'];
     else process.env['XLN_FORCE_FRESH_ANVIL'] = previousForceFreshAnvil;
-    const cleanupTargets = new Set<RuntimeState>();
+    const cleanupTargets = new Set<RuntimeReplica>();
     if (env) cleanupTargets.add(env);
     if (activeEnv) cleanupTargets.add(activeEnv);
     for (const targetEnv of cleanupTargets) {

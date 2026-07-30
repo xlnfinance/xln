@@ -16,7 +16,7 @@ import { encodeBoard, hashBoard } from '../runtime/entity/factory';
 import { createStructuredLogger } from '../runtime/infra/logger';
 import { requireJurisdictionBlockTimeMs } from '../runtime/orchestrator/mesh-jurisdictions';
 import type { ConsensusConfig } from '../runtime/entity/types';
-import type { RuntimeState } from '../runtime/runtime/types';
+import type { RuntimeReplica } from '../runtime/runtime/types';
 
 const args = process.argv.slice(2);
 
@@ -78,13 +78,13 @@ const deriveHubSigner = (seed: string, signerLabel: string): { signerAddress: st
   return { signerAddress, signerLabel };
 };
 
-const ensureRuntimeInput = (env: RuntimeState) => {
+const ensureRuntimeInput = (env: RuntimeReplica) => {
   if (!env.runtimeMempool) {
     env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   }
 };
 
-const resolveJurisdiction = (env: RuntimeState, requestedName?: string) => {
+const resolveJurisdiction = (env: RuntimeReplica, requestedName?: string) => {
   const normalizedRequested = String(requestedName || '').trim().toLowerCase();
   const name = (normalizedRequested && env.jReplicas
       ? Array.from(env.jReplicas.keys()).find((key) => key.toLowerCase() === normalizedRequested)
@@ -105,7 +105,7 @@ const resolveJurisdiction = (env: RuntimeState, requestedName?: string) => {
   };
 };
 
-export async function bootstrapHub(env?: RuntimeState, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {
+export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {
   const hubConfig: HubConfig = { ...DEFAULT_CONFIG, ...(config || {}) };
   const { signerAddress } = deriveHubSigner(hubConfig.seed, hubConfig.signerId);
   bootstrapLog.info('hub.start', {
@@ -224,7 +224,7 @@ export async function bootstrapHub(env?: RuntimeState, config?: Partial<HubConfi
   return { entityId, signerId: signerAddress };
 }
 
-export async function bootstrapHubs(env: RuntimeState, configs: HubConfig[]): Promise<Array<{ entityId: string; signerId: string; signerLabel: string }>> {
+export async function bootstrapHubs(env: RuntimeReplica, configs: HubConfig[]): Promise<Array<{ entityId: string; signerId: string; signerLabel: string }>> {
   const entities: Array<{ entityId: string; signerId: string; signerLabel: string }> = [];
   for (const config of configs) {
     const result = await bootstrapHub(env, config);

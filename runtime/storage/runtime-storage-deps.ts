@@ -1,6 +1,6 @@
 import type { Level } from 'level';
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { PersistedFrameJournal } from './types';
 import type { StorageDbRole } from './runtime-dbs';
 
@@ -14,23 +14,23 @@ type RuntimeModule = typeof import('../runtime');
  */
 export type RuntimeStorageApiDeps =
   Pick<RuntimeModule, 'closeRuntimeDb' | 'closeInfraDb' | 'createEmptyEnv'> & {
-    getStorageDb(env: RuntimeState, role?: StorageDbRole): Level<Buffer, Buffer>;
-    getRuntimeWalDb(env: RuntimeState): Level<Buffer, Buffer>;
-    getHistoryViewDb(env: RuntimeState): Level<Buffer, Buffer>;
-    tryOpenStorageDb(env: RuntimeState, role?: StorageDbRole): Promise<boolean>;
+    getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
+    getRuntimeWalDb(env: RuntimeReplica): Level<Buffer, Buffer>;
+    getHistoryViewDb(env: RuntimeReplica): Level<Buffer, Buffer>;
+    tryOpenStorageDb(env: RuntimeReplica, role?: StorageDbRole): Promise<boolean>;
     rotateStorageEpochDb(
-      env: RuntimeState,
+      env: RuntimeReplica,
       snapshotHeight: number,
       timestamp?: number,
     ): Promise<boolean>;
-    tryOpenRuntimeWalDb(env: RuntimeState): Promise<boolean>;
-    tryOpenHistoryViewDb(env: RuntimeState): Promise<boolean>;
+    tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
+    tryOpenHistoryViewDb(env: RuntimeReplica): Promise<boolean>;
     waitForPromiseBeforeTimeout<T>(
       promise: Promise<T>,
       timeoutMs: number,
     ): Promise<boolean>;
     replayRecoveryFrameJournals(
-      env: RuntimeState,
+      env: RuntimeReplica,
       frames: PersistedFrameJournal[],
     ): Promise<void>;
   };

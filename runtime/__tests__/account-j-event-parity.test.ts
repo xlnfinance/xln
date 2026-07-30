@@ -13,7 +13,7 @@ import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
 import type { JEventAccountTx } from '../entity/tx/j-events-types';
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, AccountTx } from '../types/account';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { createDefaultDelta } from '../account/delta';
 
@@ -64,7 +64,7 @@ const machine = (): AccountState => ({
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
 } as AccountState);
 
-const env = (): RuntimeState => {
+const env = (): RuntimeReplica => {
   const value = createEmptyEnv('account-j-parity');
   value.jReplicas.set('account-j-parity', {
     name: 'account-j-parity',

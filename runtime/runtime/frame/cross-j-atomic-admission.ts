@@ -1,6 +1,6 @@
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
-import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import type { RuntimeEntityInputApplyResult } from '../entity-inputs';
 import {
   selectMatchedCrossJAccountInputPairs,
@@ -58,7 +58,7 @@ export const atomicCrossJPairIndexesThatDidNotCommit = (
 };
 
 const groupAtomicPairsFirst = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   selection: CrossJSelection,
 ): CrossJSelection => {
   if (selection.pairs.length === 0) return selection;
@@ -101,7 +101,7 @@ const groupAtomicPairsFirst = (
 };
 
 export const admitAtomicCrossJAccountInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: readonly RoutedEntityInput[],
   isReplay: boolean,
 ): { inputs: RoutedEntityInput[]; pairs: CrossJSelection['pairs'] } => {

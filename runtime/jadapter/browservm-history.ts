@@ -1,5 +1,5 @@
 import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types/index.ts';
-import type { RuntimeState, RuntimeTx } from '../runtime/types';
+import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import {
   enqueueJHistoryRange,
   findWatcherJurisdictionReplica,
@@ -84,7 +84,7 @@ const buildHistoryHeaders = (
 
 const collectHistoricalEvents = (
   options: BrowserVmHistoryOptions,
-  env: RuntimeState,
+  env: RuntimeReplica,
   logs: AuthenticatedRpcLog[],
   fromBlock: number,
   targetBlock: number,
@@ -133,7 +133,7 @@ const collectHistoricalEvents = (
 
 const buildObservedInputs = (
   options: BrowserVmHistoryOptions,
-  env: RuntimeState,
+  env: RuntimeReplica,
   byBlock: Map<number, JEventIngress[]>,
   authorityTxsByBlock: Map<number, RuntimeTx[]>,
   txCounter: EventBatchCounter,
@@ -165,7 +165,7 @@ const buildObservedInputs = (
 
 export const createBrowserVmHistoryWatcher = (options: BrowserVmHistoryOptions) => {
   let watcherUnsubscribe: (() => void) | null = null;
-  let watcherEnv: RuntimeState | null = null;
+  let watcherEnv: RuntimeReplica | null = null;
   let pollInFlight: Promise<void> | null = null;
   let progress: BrowserVmWatcherProgress = {
     scannedThroughHeight: 0,
@@ -258,7 +258,7 @@ export const createBrowserVmHistoryWatcher = (options: BrowserVmHistoryOptions) 
   };
 
   return {
-    startWatching(env: RuntimeState): void {
+    startWatching(env: RuntimeReplica): void {
       if (watcherUnsubscribe) return;
       watcherEnv = env;
       watcherUnsubscribe = options.browserVM.onAny(async () => {

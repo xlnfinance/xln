@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import { isLeftEntity } from '../../entity/id';
 import type { AccountFrame, AccountInput, AccountTx, SwapOffer, SwapOrderHistoryEntry } from '../../types/account';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionCloseProof, CrossJurisdictionRouteDomain, CrossJurisdictionSettlementPolicy, CrossJurisdictionPendingFill, CrossJurisdictionPullBinding, CrossJurisdictionPullLeg, CrossJurisdictionSwapLeg, CrossJurisdictionSwapRoute, CrossJurisdictionSwapStatus, CrossJurisdictionTimePolicy } from '../../types/cross-jurisdiction';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import {
   buildHashLadderProof,
   revealHashLadder,
@@ -788,7 +788,7 @@ export function buildCrossJurisdictionCloseProof(
 }
 
 export function getCrossJurisdictionPrivateSeed(
-  env: Pick<RuntimeState, 'runtimeSeed'>,
+  env: Pick<RuntimeReplica, 'runtimeSeed'>,
   route: CrossJurisdictionSwapRoute,
 ): string {
   return deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route);

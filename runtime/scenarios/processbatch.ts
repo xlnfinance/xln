@@ -9,7 +9,7 @@
  * - AccountSettled reaches both sides and collateral updates bilaterally
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 import {
   getProcess,
@@ -66,7 +66,7 @@ function requireRegistered(entities: RegisteredEntity[], index: number, label: s
   return entity;
 }
 
-export async function runProcessBatchScenario(_existingEnv?: RuntimeState): Promise<RuntimeState> {
+export async function runProcessBatchScenario(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
   console.log('\n' + '═'.repeat(80));
   console.log('  PROCESSBATCH MIXED REBALANCE');
   console.log('  Hub batch with C→R (proofed) + R→C (unilateral)');

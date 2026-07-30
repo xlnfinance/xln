@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JTx } from '../types/jurisdiction-runtime';
 import type { JAdapter } from '../jadapter/types';
 import type { JBatch } from '../jurisdiction/batch';
@@ -7,7 +7,7 @@ import { getSignerPrivateKey } from '../account/crypto';
 import { prepareSignedBatch } from '../hanko/batch';
 
 export async function submitSignedScenarioBatch(
-  env: RuntimeState,
+  env: RuntimeReplica,
   jadapter: JAdapter,
   entityId: string,
   signerId: string,

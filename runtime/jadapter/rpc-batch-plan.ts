@@ -3,7 +3,7 @@ import { isBatchEmpty, preflightBatchForE2, type JBatch } from '../jurisdiction/
 import { assertSealedJBatchBinding, type SealedBatchJTx } from '../jurisdiction/sealed-batch';
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import type { JTx } from '../types/jurisdiction-runtime';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { FeeOverrides } from './rpc-boundary';
 
 type BatchJTx = Extract<JTx, { type: 'batch' }>;
@@ -44,7 +44,7 @@ export const applyBatchFeeOverrides = (base: FeeOverrides, requested: RequestedF
 
 export const planRpcBatchSubmission = (
   jTx: BatchJTx,
-  env: RuntimeState,
+  env: RuntimeReplica,
   signerId: string | undefined,
   chainId: number,
   depositoryAddress: string,

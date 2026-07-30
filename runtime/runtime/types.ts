@@ -29,7 +29,7 @@ import type {
  * Runtime machine State, Input, Tx, routing envelopes, and local infrastructure.
  *
  * Entity, Account, Jurisdiction, and protocol types stay in their owner
- * modules. This file may import child-layer types to compose RuntimeState, but
+ * modules. This file may import child-layer types to compose RuntimeReplica, but
  * it must never re-export them as a neutral convenience barrel.
  */
 
@@ -422,7 +422,7 @@ export type RuntimeHistoryRecord = AccountHistoryRecord | {
 
 export type BrowserVMState = import('../jadapter/browservm-state').BrowserVmSerializedState;
 
-export interface RuntimeState {
+export interface RuntimeReplica {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
@@ -515,7 +515,7 @@ export interface RuntimeState {
     p2p?: RuntimeP2P | null | undefined;
     pendingP2PConfig?: RuntimeP2PConfig | null;
     lastP2PConfig?: RuntimeP2PConfig | null;
-    envChangeCallbacks?: Set<(state: RuntimeState) => void>;
+    envChangeCallbacks?: Set<(state: RuntimeReplica) => void>;
     runtimeFrameCommitCallbacks?: Set<(frame: { height: number; runtimeInput: RuntimeInput }) => void>;
     storageDb?: Level<Buffer, Buffer> | null | undefined;
     storageDbOpenPromise?: Promise<boolean> | null | undefined;
@@ -636,7 +636,7 @@ export interface RuntimeState {
      * the just-committed state.
      */
     recoveryBackupBarrier?: ((
-      state: RuntimeState,
+      state: RuntimeReplica,
       info: {
         height: number;
         remoteOutputCount: number;

@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeReplica, RuntimeInput } from '../types';
 import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeState } from '../runtime-state';
 import type { FrameExecutionState } from './execution-state';
@@ -9,8 +9,8 @@ import {
 
 export type UndurableRuntimeInputContext = {
   frame: FrameExecutionState;
-  liveEnv: RuntimeState;
-  attemptedEnv: RuntimeState;
+  liveEnv: RuntimeReplica;
+  attemptedEnv: RuntimeReplica;
   runtimeInput: RuntimeInput;
   mempoolQueuedAt: number | undefined;
   frameTimestampBeforeTick: number;
@@ -24,8 +24,8 @@ export type UndurableRuntimeInputContext = {
 };
 
 export type UndurableRuntimeInputResult = {
-  env: RuntimeState;
-  state: NonNullable<RuntimeState['runtimeState']>;
+  env: RuntimeReplica;
+  state: NonNullable<RuntimeReplica['runtimeState']>;
   error: Error;
 };
 

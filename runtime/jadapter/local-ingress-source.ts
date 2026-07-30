@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JAdapter } from './types';
 
@@ -37,12 +37,12 @@ const replicaEntityProvider = (replica: JReplica): unknown =>
   replica.entityProviderAddress ?? replica.contracts?.entityProvider;
 
 /**
- * Binds manual event ingress to an object reference already owned by this RuntimeState.
+ * Binds manual event ingress to an object reference already owned by this RuntimeReplica.
  * Serialized HTTP/peer data can copy fields but cannot satisfy this identity
  * check, so it cannot select or relabel a jurisdiction stack.
  */
 export const bindLocalJEventIngressSource = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   source: LocalJEventIngressSource | null | undefined,
   context: string,
 ): BoundLocalJEventIngressSource => {

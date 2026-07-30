@@ -6,7 +6,7 @@ import {
 } from '../radapter/auth';
 import type { RuntimeAdapterAuthLevel } from '../radapter/types';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 export const DEFAULT_CONTROL_BODY_MAX_BYTES = 256 * 1024;
@@ -18,7 +18,7 @@ const extractBearerAuth = (header: string | null): string => {
 };
 
 export const verifyDaemonCapability = (
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   key: unknown,
   requiredLevel: RuntimeAdapterAuthLevel,
 ): boolean => {
@@ -32,7 +32,7 @@ export const verifyDaemonCapability = (
 
 export const hasDaemonControlAuth = (
   req: Request,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   requiredLevel: RuntimeAdapterAuthLevel = 'admin',
 ): boolean => env !== null && verifyDaemonCapability(
   env,
@@ -42,7 +42,7 @@ export const hasDaemonControlAuth = (
 
 export const requireDaemonControlAuth = (
   req: Request,
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   requiredLevel: RuntimeAdapterAuthLevel = 'admin',
 ): Response | null => {
   if (!env) {

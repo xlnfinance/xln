@@ -74,7 +74,7 @@ import { getXLN, xlnInstance } from './xlnRuntimeLoader';
 import { parseProfile } from '@xln/runtime/entity/profile';
 import type {
   XLNModule,
-  RuntimeState,
+  RuntimeReplica,
   EnvSnapshot,
   EntityId,
   ReplicaKey,
@@ -102,7 +102,7 @@ let unregisterRuntimeControllerChange: (() => void) | null = null;
 let unregisterRuntimeControllerStatus: (() => void) | null = null;
 type RemoteProjectionRefreshInFlight = {
   key: string;
-  promise: Promise<RuntimeState | null>;
+  promise: Promise<RuntimeReplica | null>;
 };
 
 let remoteProjectionRefreshInFlight: RemoteProjectionRefreshInFlight | null = null;
@@ -398,7 +398,7 @@ const isStaleRemoteEntitySelectionError = (error: unknown, requestedEntityId: st
     );
 };
 
-const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeState): void => {
+const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeReplica): void => {
   const selectedRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();
   const envRuntimeId = String(env.runtimeId || '').toLowerCase();
   if (selectedRuntimeId && selectedRuntimeId !== envRuntimeId) {
@@ -429,7 +429,7 @@ const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeState): void =
   });
 };
 
-const registerLocalEnvironmentCallback = (xln: XLNModule, env: RuntimeState): void => {
+const registerLocalEnvironmentCallback = (xln: XLNModule, env: RuntimeReplica): void => {
   unregisterEnvChange?.();
   unregisterEnvChange = xln.registerRuntimePublishedCallback?.(env, (notice) => {
     currentHeight.set(notice.height);
@@ -602,7 +602,7 @@ const resolveAppRuntimeAdapterConfig = async (): Promise<RuntimeAdapterConfig> =
 };
 
 const upsertRuntimeSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   config: RuntimeAdapterConfig,
   status: RuntimeAdapterStatus,
   authLevel: RuntimeAdapterAuthLevel | null = null,
@@ -838,7 +838,7 @@ const refreshRemoteRuntimeProjection = async (
 const createEmbeddedRuntimeAdapter = async (
   xln: XLNModule,
   runtimeSeed?: string | null,
-  targetEnv?: RuntimeState | null,
+  targetEnv?: RuntimeReplica | null,
 ): Promise<RuntimeAdapter> => {
   let boundEnv = targetEnv ? (unwrapLiveRuntimeEnv(targetEnv) ?? targetEnv) : null;
   if (!boundEnv) {
@@ -890,7 +890,7 @@ const createEmbeddedRuntimeAdapter = async (
   });
 };
 
-export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Promise<RuntimeState | null> => {
+export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Promise<RuntimeReplica | null> => {
   const normalizedConfig: RuntimeAdapterConfig = config.mode === 'remote'
     ? {
         mode: 'remote',
@@ -1017,7 +1017,7 @@ registerRuntimeAdapterSwitcher(async (config) => {
   await switchAppRuntimeAdapter(config);
 });
 
-export const refreshCurrentRuntimeProjection = async (): Promise<RuntimeState | null> => {
+export const refreshCurrentRuntimeProjection = async (): Promise<RuntimeReplica | null> => {
   const config = getRuntimeControllerConfig();
   if (config?.mode !== 'remote') return get(xlnEnvironment);
   const refreshKey = remoteProjectionRefreshKey(config);
@@ -1046,7 +1046,7 @@ export const refreshCurrentRuntimeProjection = async (): Promise<RuntimeState | 
 };
 
 // Helper functions for common patterns (not wrappers)
-export async function initializeXLN(): Promise<RuntimeState | null> {
+export async function initializeXLN(): Promise<RuntimeReplica | null> {
   showPendingResetNotice();
   // CRITICAL: Don't re-initialize if we already have data
   if (isInitialized) {
@@ -1081,7 +1081,7 @@ export async function initializeXLN(): Promise<RuntimeState | null> {
     }
 
     // Load from IndexedDB - main() handles DB timeout internally
-    let env: RuntimeState;
+    let env: RuntimeReplica;
     try {
       const knownRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();
       if (knownRuntimeId) {
@@ -1175,7 +1175,7 @@ export async function initializeXLN(): Promise<RuntimeState | null> {
 export { getXLN, xlnInstance };
 
 // Helper to get current environment
-export function getEnv(): RuntimeState | null {
+export function getEnv(): RuntimeReplica | null {
   return get(xlnEnvironment);
 }
 
@@ -1232,7 +1232,7 @@ async function fetchPaymentGossipProfiles(entityIds: string[]): Promise<GossipPr
   return profiles;
 }
 
-const announcePaymentGossipProfiles = (env: RuntimeState, profiles: GossipProfile[]): number => {
+const announcePaymentGossipProfiles = (env: RuntimeReplica, profiles: GossipProfile[]): number => {
   if (typeof env.gossip?.announce !== 'function') return 0;
   let announced = 0;
   for (const profile of profiles) {
@@ -1326,7 +1326,7 @@ export async function refreshPaymentRuntimeGossip(options: {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-const publishLocalRuntimeEnvIfActive = (env: RuntimeState): void => {
+const publishLocalRuntimeEnvIfActive = (env: RuntimeReplica): void => {
   const runtimeId = normalizeRuntimeIdentifier(env.runtimeId);
   if (runtimeId) runtimeOperations.updateRuntimeEnv(runtimeId, env);
   if (!runtimeId || normalizeRuntimeIdentifier(get(activeRuntimeId)) === runtimeId) {
@@ -1336,7 +1336,7 @@ const publishLocalRuntimeEnvIfActive = (env: RuntimeState): void => {
 
 const drainLocalRuntimeInput = async (
   xln: XLNModule,
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RuntimeInput,
   afterHeight: number,
 ): Promise<number> => {
@@ -1351,7 +1351,7 @@ const drainLocalRuntimeInput = async (
       Math.max(afterHeight, Math.floor(Number(env.height || 0))),
     );
     if (persistedHeight !== null) return persistedHeight;
-    // The runtime loop created with this RuntimeState is the only owner allowed to call
+    // The runtime loop created with this RuntimeReplica is the only owner allowed to call
     // process(). Command submission only enqueues and observes its durable
     // commit; a UI waiter must never become a second transition driver.
     await sleep(25);
@@ -1364,13 +1364,13 @@ const drainLocalRuntimeInput = async (
 
 const normalizeRuntimeIdentifier = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-const assertLocalRuntimeInputIngressOpen = (env: RuntimeState): void => {
+const assertLocalRuntimeInputIngressOpen = (env: RuntimeReplica): void => {
   if (env.runtimeState?.persistenceQuiescing && !env.scenarioMode) {
     throw new Error(`LOCAL_RUNTIME_INPUT_INGRESS_QUIESCING:${env.runtimeId || '<unknown>'}`);
   }
 };
 
-const embeddedAdapterTargetsRuntimeEnv = (targetEnv: RuntimeState): boolean => {
+const embeddedAdapterTargetsRuntimeEnv = (targetEnv: RuntimeReplica): boolean => {
   const current = getEnv();
   const currentEnv = current ? (unwrapLiveRuntimeEnv(current) ?? current) : null;
   if (!currentEnv) return false;
@@ -1514,10 +1514,10 @@ export const resumeRemoteRuntimeCommandIntents = async (runtimeId: string): Prom
 
 const routeRuntimeInput = async (
   xln: XLNModule,
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RuntimeInput,
   commandOptions: RuntimeCommandExecutionOptions = {},
-): Promise<RuntimeState | null> => {
+): Promise<RuntimeReplica | null> => {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const adapter = getRuntimeControllerAdapter();
   const handle = get(runtimeControllerHandle);
@@ -1612,7 +1612,7 @@ const logInterestingEntityInputs = (inputs: RoutedEntityInput[]): void => {
   }
 };
 
-const resolveActiveRuntimeCommandEnv = async (xln: XLNModule): Promise<RuntimeState> => {
+const resolveActiveRuntimeCommandEnv = async (xln: XLNModule): Promise<RuntimeReplica> => {
   const selectedEnv = get(activeEnv) ?? get(xlnEnvironment);
   const runtimeEnv = selectedEnv ? (unwrapLiveRuntimeEnv(selectedEnv) ?? selectedEnv) : null;
   if (runtimeEnv) return runtimeEnv;
@@ -1627,9 +1627,9 @@ const resolveActiveRuntimeCommandEnv = async (xln: XLNModule): Promise<RuntimeSt
 };
 
 /**
- * Keeps the live RuntimeState and registration adapter behind the runtime-controller
+ * Keeps the live RuntimeReplica and registration adapter behind the runtime-controller
  * boundary. Formation UI supplies intent plus the unlocked vault identity; it
- * must never reach into an embedded RuntimeState to choose registration authority.
+ * must never reach into an embedded RuntimeReplica to choose registration authority.
  */
 export const createActiveNumberedEntity = async (
   name: Parameters<XLNModule['createNumberedEntity']>[0],
@@ -1659,7 +1659,7 @@ export const createActiveNumberedEntity = async (
 export async function submitActiveRuntimeInput(
   input: RuntimeInput,
   commandOptions: RuntimeCommandExecutionOptions = {},
-): Promise<RuntimeState | null> {
+): Promise<RuntimeReplica | null> {
   assertRuntimeViewIsLive(get(runtimeView));
   assertNetworkMachineIsLive(get(networkMachineRuntime));
   const adapter = getRuntimeControllerAdapter();
@@ -1672,7 +1672,7 @@ export async function submitActiveRuntimeInput(
   return routeRuntimeInput(xln, env, input, commandOptions);
 }
 
-export async function dispatchRuntimeInputToRuntimeEnv(env: RuntimeState, input: RuntimeInput): Promise<RuntimeState | null> {
+export async function dispatchRuntimeInputToRuntimeEnv(env: RuntimeReplica, input: RuntimeInput): Promise<RuntimeReplica | null> {
   assertRuntimeViewIsLive(get(runtimeView));
   assertNetworkMachineIsLive(get(networkMachineRuntime));
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
@@ -1693,7 +1693,7 @@ export async function dispatchRuntimeInputToRuntimeEnv(env: RuntimeState, input:
   return runtimeEnv;
 }
 
-export async function submitActiveEntityInputs(inputs: RoutedEntityInput[] = []): Promise<RuntimeState | null> {
+export async function submitActiveEntityInputs(inputs: RoutedEntityInput[] = []): Promise<RuntimeReplica | null> {
   logInterestingEntityInputs(inputs);
   return submitActiveRuntimeInput({
     runtimeTxs: [],
@@ -1704,7 +1704,7 @@ export async function submitActiveEntityInputs(inputs: RoutedEntityInput[] = [])
 export async function submitRuntimeInput(
   input: RuntimeInput,
   commandOptions: RuntimeCommandExecutionOptions = {},
-): Promise<RuntimeState | null> {
+): Promise<RuntimeReplica | null> {
   return submitActiveRuntimeInput(input, commandOptions);
 }
 
@@ -1720,7 +1720,7 @@ export async function submitActiveCrossJurisdictionIntent(
   await adapter.submitCrossJurisdictionIntent(route);
 }
 
-export async function submitEntityInputs(inputs: RoutedEntityInput[] = []): Promise<RuntimeState | null> {
+export async function submitEntityInputs(inputs: RoutedEntityInput[] = []): Promise<RuntimeReplica | null> {
   logInterestingEntityInputs(inputs);
   return submitActiveEntityInputs(inputs);
 }

@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JAdapter } from '../jadapter';
 import { normalizeJurisdictionKey, selectWritableJurisdictionKey, type WritableJurisdictionEntry } from '../jurisdiction/jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
@@ -142,7 +142,7 @@ const readCanonicalNetworkVersion = async (): Promise<string> => {
   return computeJurisdictionsNetworkVersion(parsed, await readCanonicalJurisdictionsVersion());
 };
 
-export const buildRuntimeJurisdictionsJson = async (env?: RuntimeState | null): Promise<string | null> => {
+export const buildRuntimeJurisdictionsJson = async (env?: RuntimeReplica | null): Promise<string | null> => {
   if (!env?.jReplicas || env.jReplicas.size === 0) return null;
   const jurisdictionName = env.activeJurisdiction ?? env.jReplicas.keys().next().value;
   if (typeof jurisdictionName !== 'string' || !jurisdictionName) return null;

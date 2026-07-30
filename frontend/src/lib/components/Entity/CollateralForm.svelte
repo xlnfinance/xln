@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store';
-  import type { AccountState, RuntimeState, RuntimeInput } from '@xln/runtime/api/runtime-module';
+  import type { AccountState, RuntimeReplica, RuntimeInput } from '@xln/runtime/api/runtime-module';
   import { xlnFunctions, error } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
@@ -15,7 +15,7 @@
   import { requireTokenDecimals } from './token-metadata';
 
   export let entityId: string;
-  export let actionRuntimeEnv: RuntimeState | null = null;
+  export let actionRuntimeEnv: RuntimeReplica | null = null;
   export let isLive: boolean;
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
@@ -122,7 +122,7 @@
   };
 
   function resolveCounterpartyPolicy(
-    env: RuntimeState,
+    env: RuntimeReplica,
     ownerEntityId: string,
     cpEntityId: string,
     tokenId: number,
@@ -176,7 +176,7 @@
       const env = activeEnv;
       const handle = get(runtimeControllerHandle);
       const remoteWritable = handle.mode === 'remote' && handle.authLevel === 'admin';
-      if (!env && !remoteWritable) throw new Error('Collateral command requires live embedded RuntimeState or admin remote runtime');
+      if (!env && !remoteWritable) throw new Error('Collateral command requires live embedded RuntimeReplica or admin remote runtime');
       if (!activeIsLive) throw new Error('Collateral request is only available in LIVE mode');
       const resolvedSigner = (env && activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'collateral-form'))
         || signerId

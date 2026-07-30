@@ -41,7 +41,7 @@ import { commitReliableIngress } from '../runtime/reliable-delivery';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
 import type { ConsensusConfig, EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent, ValidatorJHistory } from '../types/jurisdiction-events';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
@@ -349,7 +349,7 @@ describe('entity leader policy', () => {
       env.quietRuntimeLogs = true;
       env.timestamp = 20_000;
     }
-    const installKey = (env: RuntimeState, label: string): string => {
+    const installKey = (env: RuntimeReplica, label: string): string => {
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
       registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
       return signerId;
@@ -425,7 +425,7 @@ describe('entity leader policy', () => {
       isProposer: signerId === proposerId,
       jHistory: history(),
     });
-    const signerEnvs = new Map<string, RuntimeState>([
+    const signerEnvs = new Map<string, RuntimeReplica>([
       [proposerId, proposerEnv],
       [failoverId, failoverEnv],
       [validatorId, validatorEnv],

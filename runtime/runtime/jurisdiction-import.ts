@@ -5,7 +5,7 @@ import { createJAdapterWithRetry } from '../jadapter/retry';
 import { createStructuredLogger } from '../infra/logger';
 import type { JAdapter, JAdapterConfig } from '../jadapter/types';
 import { safeStringify } from '../protocol/serialization';
-import type { RuntimeState, JurisdictionImportRequest, JurisdictionImportResult, PendingJurisdictionImport, RuntimeTx } from './types';
+import type { RuntimeReplica, JurisdictionImportRequest, JurisdictionImportResult, PendingJurisdictionImport, RuntimeTx } from './types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { requireRuntimeMempool } from './input-queue';
 
@@ -159,7 +159,7 @@ export const buildJurisdictionImportRequestHash = (
 const jurisdictionNameKey = (name: string): string => name.trim().toLowerCase();
 
 const findJurisdictionReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   name: string,
 ): [string, JReplica] | null => {
   const wanted = jurisdictionNameKey(name);
@@ -200,7 +200,7 @@ const assertReplicaMatchesRequest = (
 };
 
 export const applyImportJurisdictionIntent = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTx: ImportJRuntimeTx,
 ): void => {
   const request = normalizeJurisdictionImportRequest(runtimeTx.data);
@@ -332,7 +332,7 @@ const assertReplicaMatchesResult = (
 };
 
 const assertWatcherIdentityAvailable = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   result: JurisdictionImportResult,
 ): void => {
   for (const [name, replica] of env.jReplicas.entries()) {
@@ -349,7 +349,7 @@ const assertWatcherIdentityAvailable = (
 };
 
 export const applyCompleteImportJurisdiction = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeTx: CompleteImportJRuntimeTx,
 ): void => {
   const existing = findJurisdictionReplica(env, runtimeTx.data.name);
@@ -569,7 +569,7 @@ export const prepareJurisdictionImportResult = async (
 };
 
 export const materializePendingJurisdictionImportResults = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   enqueue: (runtimeTx: CompleteImportJRuntimeTx) => void,
 ): Promise<void> => {
   const pending = env.runtimeState?.pendingJurisdictionImports;

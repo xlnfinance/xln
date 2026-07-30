@@ -1,5 +1,5 @@
 import type { EntityInput } from '../entity/types';
-import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeState, RuntimeTx } from './types';
+import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import {
@@ -20,7 +20,7 @@ import {
 } from './reliable-delivery';
 
 export type RuntimeContinuationEnqueuer = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
@@ -29,7 +29,7 @@ export type RuntimeContinuationEnqueuer = (
 ) => void;
 
 export const hasPendingLocalReliableOutput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
 ): boolean => {
   const runtimeId = normalizeRuntimeId(env.runtimeId);
   if (!runtimeId) return false;
@@ -41,7 +41,7 @@ export const hasPendingLocalReliableOutput = (
 };
 
 const queueLocalReliableOutputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   localOutputs: readonly RoutedEntityInput[],
   enqueueRuntimeContinuation: RuntimeContinuationEnqueuer,
 ): RoutedEntityInput[] => {
@@ -86,7 +86,7 @@ const queueLocalReliableOutputs = (
 };
 
 export const applyRecoveryRuntimeOutputPlan = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityOutbox: readonly RoutedEntityInput[],
   routing: RuntimeOutputRoutingDeps,
   enqueueRuntimeContinuation: RuntimeContinuationEnqueuer,
@@ -134,7 +134,7 @@ export const applyRecoveryRuntimeOutputPlan = (
 };
 
 export const applyCommittedLocalReliableReceipts = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   commits: ReliableIngressCommit[],
   options: {
     isReplay?: boolean;

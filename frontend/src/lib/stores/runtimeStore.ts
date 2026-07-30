@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import type { RuntimeState, RuntimeAdapterConfig } from '@xln/runtime/api/runtime-module';
+import type { RuntimeReplica, RuntimeAdapterConfig } from '@xln/runtime/api/runtime-module';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {
@@ -28,7 +28,7 @@ export interface Runtime {
   id: string;                    // Runtime identifier (EOA for local runtimes)
   type: 'local' | 'remote';
   label: string;                 // Display name: "Local" or "CEX Production"
-  env: RuntimeState | null;               // Active view snapshot for this runtime
+  env: RuntimeReplica | null;               // Active view snapshot for this runtime
   wsUrl?: string;                // Remote runtime adapter endpoint
   seed?: string;                 // BrainVault seed backing this runtime (if any)
   vaultId?: string;              // Vault name bound to this runtime (if any)
@@ -99,13 +99,13 @@ type RuntimeAdapterStorageSnapshot = {
   sessionKey: string | null;
 };
 
-const getEnvRuntimeId = (env: RuntimeState | null | undefined): string => {
+const getEnvRuntimeId = (env: RuntimeReplica | null | undefined): string => {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const runtimeId = typeof runtimeEnv?.runtimeId === 'string' ? runtimeEnv.runtimeId.trim() : '';
   return runtimeId.toLowerCase();
 };
 
-const publishRuntimeEnvView = (env: RuntimeState): RuntimeState => {
+const publishRuntimeEnvView = (env: RuntimeReplica): RuntimeReplica => {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   return createRuntimeViewEnv(runtimeEnv);
 };
@@ -436,12 +436,12 @@ export const runtimeOperations = {
   },
 
   // Update active runtime env.
-  createRuntimeEnvView(env: RuntimeState) {
+  createRuntimeEnvView(env: RuntimeReplica) {
     return publishRuntimeEnvView(env);
   },
 
   // Update active runtime env.
-  updateLocalEnv(env: RuntimeState) {
+  updateLocalEnv(env: RuntimeReplica) {
     const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
     const viewEnv = publishRuntimeEnvView(runtimeEnv);
     runtimes.update(r => {
@@ -490,7 +490,7 @@ export const runtimeOperations = {
   },
 
   // Update specific runtime's env
-  updateRuntimeEnv(runtimeId: string, env: RuntimeState) {
+  updateRuntimeEnv(runtimeId: string, env: RuntimeReplica) {
     const viewEnv = publishRuntimeEnvView(env);
     runtimes.update(r => {
       const runtime = r.get(runtimeId);

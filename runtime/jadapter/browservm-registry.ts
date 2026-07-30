@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import type { BrowserVMProvider } from './types';
@@ -26,7 +26,7 @@ export const buildBrowserVMJurisdiction = (
 });
 
 export const setBrowserVMJurisdiction = (
-  env: RuntimeState | null,
+  env: RuntimeReplica | null,
   depositoryAddress: string,
   chainId: number,
   browserVMInstance?: BrowserVMCarrier,
@@ -42,7 +42,7 @@ export const setBrowserVMJurisdiction = (
     );
   }
   if (browserVM && env) {
-    (env as RuntimeState & { browserVM?: BrowserVMProvider | null }).browserVM = browserVM;
+    (env as RuntimeReplica & { browserVM?: BrowserVMProvider | null }).browserVM = browserVM;
   }
 
   const entityProviderAddress = requireUsableContractAddress(
@@ -57,7 +57,7 @@ export const setBrowserVMJurisdiction = (
   );
 };
 
-export const getBrowserVMInstance = (env?: RuntimeState | null): BrowserVMProvider | null =>
+export const getBrowserVMInstance = (env?: RuntimeReplica | null): BrowserVMProvider | null =>
   (env?.browserVM as BrowserVMProvider | null | undefined) ?? null;
 
 export const getRegisteredBrowserVMJurisdiction = (): JurisdictionConfig | null =>

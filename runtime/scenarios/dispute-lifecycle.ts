@@ -8,7 +8,7 @@
  * 4) explicit reopen moves both sides back to active and clears pending disputed state
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JAdapter } from '../jadapter/types';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { bootScenario, registerEntities, fundEntities } from './boot';
@@ -59,7 +59,7 @@ async function mineUntilHeight(jadapter: JAdapter, targetHeight: number): Promis
 }
 
 async function reopenFromAlice(
-  env: RuntimeState,
+  env: RuntimeReplica,
   process: Awaited<ReturnType<typeof getProcess>>,
   aliceId: string,
   aliceSigner: string,
@@ -79,7 +79,7 @@ async function reopenFromAlice(
   await converge(env, 10);
 }
 
-export async function runDisputeLifecycle(_existingEnv?: RuntimeState): Promise<RuntimeState> {
+export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
   console.log('\n' + '='.repeat(80));
   console.log('  DISPUTE LIFECYCLE SCENARIO (UNILATERAL)');
   console.log('='.repeat(80));

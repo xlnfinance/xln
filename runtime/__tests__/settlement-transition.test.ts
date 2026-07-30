@@ -52,7 +52,7 @@ import { createAccountConsensusContext } from '../entity/account-consensus-conte
 import { cloneAccountState } from '../account/state-clone';
 import type { AccountTx, SettlementOp } from '../types/account';
 import type { EntityState, HashToSign, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { createDefaultDelta } from '../account/delta';
 import {
@@ -123,7 +123,7 @@ const accountSettledEvent = (nonce: number) => ({
 });
 
 const installRegisteredBoard = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   jurisdiction: JurisdictionConfig,
   boardHash: string,
@@ -164,7 +164,7 @@ const installRegisteredBoard = (
   }
 };
 
-const installProofStack = (env: RuntimeState, state: EntityState): void => {
+const installProofStack = (env: RuntimeReplica, state: EntityState): void => {
   const jurisdiction = state.config.jurisdiction;
   if (!jurisdiction) throw new Error('TEST_PROOF_JURISDICTION_MISSING');
   if (![...env.eReplicas.values()].some((replica) => replica.entityId === state.entityId)) {
@@ -193,7 +193,7 @@ const installProofStack = (env: RuntimeState, state: EntityState): void => {
 };
 
 const attachSettlementSealWitness = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   counterpartyId: string,
   tx: Extract<AccountTx, { type: 'settle_transition' }>,

@@ -47,7 +47,7 @@ test('gossip directory view projects sorted non-blocked profile rows', () => {
   });
 });
 
-test('gossip directory view projects radapter entity summaries without full RuntimeState access', () => {
+test('gossip directory view projects radapter entity summaries without full RuntimeReplica access', () => {
   const view = buildGossipDirectoryViewFromRuntimeEntities({
     runtimeId: 'radapter:ws://127.0.0.1:8092/rpc',
     entities: [

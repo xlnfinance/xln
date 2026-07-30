@@ -1,5 +1,5 @@
 import { markRestoredReliableOutputsDue } from '../runtime/output-routing';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { CheckpointRestoreOptions } from '../storage/recovery/checkpoint';
 import type { PersistedFrameJournal } from '../storage/types';
 import { assertRuntimeRecoveryBundleAuthenticity } from './bundle';
@@ -10,9 +10,9 @@ export interface RuntimeBundleRestoreOptions extends CheckpointRestoreOptions {
 }
 
 export interface RuntimeBundleRestoreDeps {
-  restoreCheckpoint(snapshot: Record<string, unknown>, options: CheckpointRestoreOptions): Promise<RuntimeState>;
-  replayJournals(env: RuntimeState, frames: PersistedFrameJournal[]): Promise<void>;
-  failAfterCleanup(env: RuntimeState, error: unknown): Promise<never>;
+  restoreCheckpoint(snapshot: Record<string, unknown>, options: CheckpointRestoreOptions): Promise<RuntimeReplica>;
+  replayJournals(env: RuntimeReplica, frames: PersistedFrameJournal[]): Promise<void>;
+  failAfterCleanup(env: RuntimeReplica, error: unknown): Promise<never>;
 }
 
 interface RecoveryCandidate {
@@ -65,7 +65,7 @@ const selectRecoveryCandidate = (bundles: RuntimeRecoveryBundleV1[], targetHeigh
 
 const replayCandidateTail = async (
   deps: RuntimeBundleRestoreDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   candidate: RecoveryCandidate,
   readOnly: boolean,
 ): Promise<void> => {
@@ -88,7 +88,7 @@ export const restoreRuntimeFromBundles = async (
   deps: RuntimeBundleRestoreDeps,
   bundles: RuntimeRecoveryBundleV1[],
   options: RuntimeBundleRestoreOptions = {},
-): Promise<RuntimeState> => {
+): Promise<RuntimeReplica> => {
   if (!options.runtimeSeed) throw new Error('RECOVERY_BUNDLE_TRUSTED_SEED_REQUIRED');
   const validated = bundles.map(bundle =>
     assertRuntimeRecoveryBundleAuthenticity(bundle, options.runtimeSeed!, options.runtimeId),

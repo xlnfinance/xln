@@ -27,7 +27,7 @@ import {
 import { dbRootPath } from '../runtime/platform';
 import type { AccountReplica } from '../types/account';
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
+import type { RuntimeReplica, RoutedEntityInput } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { getPerfMs } from '../infra/time';
@@ -194,7 +194,7 @@ const runQuiet = async <T>(enabled: boolean, fn: () => Promise<T>): Promise<T> =
   }
 };
 
-const findReplica = (env: RuntimeState, participant: Participant): EntityReplica => {
+const findReplica = (env: RuntimeReplica, participant: Participant): EntityReplica => {
   const replica = env.eReplicas.get(`${participant.entityId}:${participant.signerId}`);
   if (!replica) {
     throw new Error(`REPLICA_NOT_FOUND: ${participant.name}`);
@@ -399,7 +399,7 @@ const describeRouteLockRefs = (
   return `refs=${refs.join(',') || 'none'}`;
 };
 
-const summarizeOpenHtlcLocks = (env: RuntimeState): OpenHtlcLockStats => {
+const summarizeOpenHtlcLocks = (env: RuntimeReplica): OpenHtlcLockStats => {
   const stats: OpenHtlcLockStats = { total: 0, entityLockBook: 0, accountLocks: 0, htlcRoutes: 0, samples: [] };
   for (const replica of env.eReplicas.values()) {
     const entityId = String(replica.state.entityId || '').slice(0, 10);
@@ -430,7 +430,7 @@ const summarizeOpenHtlcLocks = (env: RuntimeState): OpenHtlcLockStats => {
 };
 
 const drainHtlcSettlements = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   maxRounds: number,
   maxConverge: number,
   verbose: boolean,
@@ -451,7 +451,7 @@ const drainHtlcSettlements = async (
 };
 
 const importParticipants = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   participants: Participant[],
   importBatch: number,
   jurisdiction: { name: string; depositoryAddress: string; entityProviderAddress: string; chainId: number },
@@ -476,7 +476,7 @@ const importParticipants = async (
         },
       })),
       entityInputs: [],
-    } as unknown as RuntimeState['runtimeMempool'];
+    } as unknown as RuntimeReplica['runtimeMempool'];
     await applyRuntimeInput(env, runtimeInput);
     if (env.runtimeConfig?.storage?.enabled === true || env.runtimeState?.persistencePaused !== true) {
       await saveEnvToDB(env, runtimeInput);
@@ -495,7 +495,7 @@ const isStorageAbsentAtHeightError = (error: unknown): boolean =>
   error instanceof Error && error.message.startsWith('STORAGE_DIFF_MISSING:');
 
 const loadOptionalEntityStateFromStorageDb = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   height: number,
 ): Promise<EntityState | null> => {
@@ -591,7 +591,7 @@ async function main() {
       : {}),
   };
   if (!env.runtimeState) {
-    env.runtimeState = {} as NonNullable<RuntimeState['runtimeState']>;
+    env.runtimeState = {} as NonNullable<RuntimeReplica['runtimeState']>;
   }
   env.runtimeState.persistencePaused = !persist && !storageEnabled;
   const jurisdiction = {

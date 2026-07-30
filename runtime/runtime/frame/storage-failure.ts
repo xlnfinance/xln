@@ -1,7 +1,7 @@
 import { clearPendingAuditEvents } from '../env-events';
 import { transitionRuntimeLifecycle } from '../lifecycle';
 import { ensureRuntimeState } from '../runtime-state';
-import type { RuntimeState } from '../types';
+import type { RuntimeReplica } from '../types';
 import type { FrameExecutionState } from './execution-state';
 import {
   publishRuntimeFrameTransaction,
@@ -12,7 +12,7 @@ import type { RuntimeFrameCommitStatus } from '../../storage/commit-status';
 export type { RuntimeFrameCommitStatus } from '../../storage/commit-status';
 
 const haltRuntimeForRecovery = (
-  runtime: RuntimeState,
+  runtime: RuntimeReplica,
   message: string,
 ): void => {
   const state = ensureRuntimeState(runtime);
@@ -35,8 +35,8 @@ const haltRuntimeForRecovery = (
 export const handleRuntimeFrameStorageFailure = async (
   status: RuntimeFrameCommitStatus,
   error: Error,
-  liveRuntime: RuntimeState,
-  candidateRuntime: RuntimeState,
+  liveRuntime: RuntimeReplica,
+  candidateRuntime: RuntimeReplica,
   frame: FrameExecutionState,
 ): Promise<void> => {
   clearPendingAuditEvents(candidateRuntime);

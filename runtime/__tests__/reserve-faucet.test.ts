@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { JAdapter } from '../jadapter';
 import { handleReserveFaucet, parseReserveFaucetAmount } from '../server/reserve-faucet';
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -20,7 +20,7 @@ const makeAdapter = (): JAdapter => ({
 const makeEnv = (options: {
   activeHubProfile?: boolean;
   hubReserve?: bigint;
-} = {}): RuntimeState => ({
+} = {}): RuntimeReplica => ({
   eReplicas: new Map([
     [`${HUB}:${HUB_SIGNER}`, {
       entityId: HUB,
@@ -53,17 +53,17 @@ const makeEnv = (options: {
         },
       }],
   },
-} as unknown as RuntimeState);
+} as unknown as RuntimeReplica);
 
 const callReserveFaucet = async (options: {
   adapter?: JAdapter | null;
   activeHubEntityIds?: string[];
   amount?: string;
-  env?: RuntimeState | null;
+  env?: RuntimeReplica | null;
   tokenCatalog?: Array<{ tokenId: number; symbol: string; decimals: number }>;
   tokenId?: number | string;
   userEntityId?: string;
-  validateRuntimeInputAdmission?: (env: RuntimeState, input: RuntimeInput) => void;
+  validateRuntimeInputAdmission?: (env: RuntimeReplica, input: RuntimeInput) => void;
 } = {}): Promise<{ response: Response; body: Record<string, unknown>; enqueued: RuntimeInput[] }> => {
   const enqueued: RuntimeInput[] = [];
   const response = await handleReserveFaucet({

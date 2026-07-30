@@ -1,5 +1,5 @@
 import { BLOCKCHAIN } from '../config/constants';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { isDebugEventEmitter } from './rpc-utils';
 import {
   haltProcessForFatalWatcherError,
@@ -32,7 +32,7 @@ const emitWatcherDebug = (
 };
 
 const createWatcherSession = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   generation: number,
   services: RpcWatcherServices,
 ): RpcWatcherSession => {

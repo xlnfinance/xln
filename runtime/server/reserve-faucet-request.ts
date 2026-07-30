@@ -1,5 +1,5 @@
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeInput, RuntimeState } from '../runtime/types';
+import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
 import type { JAdapter } from '../jadapter';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger, shortId } from '../infra/logger';
@@ -24,13 +24,13 @@ const faucetLog = createStructuredLogger('server.faucet');
 
 export type ReserveFaucetDependencies = {
   req: Request;
-  env: RuntimeState;
+  env: RuntimeReplica;
   adapter: JAdapter;
   headers: HeadersInit;
   activeHubEntityIds: string[];
   ensureTokenCatalog: () => Promise<TokenCatalogEntry[]>;
-  validateRuntimeInputAdmission: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
-  enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
+  enqueueRuntimeInput: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
 };
 
 type ReserveRequest = {

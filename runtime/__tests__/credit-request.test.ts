@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { createDefaultDelta } from '../account/delta';
 import { handleCreditRequest } from '../server/credit-request';
 import type { AccountState } from '../types/account';
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -35,7 +35,7 @@ const makeAccount = (): AccountState => {
   } as unknown as AccountState;
 };
 
-const makeEnv = (): RuntimeState => ({
+const makeEnv = (): RuntimeReplica => ({
   height: 9,
   runtimeId: RUNTIME_ID,
   eReplicas: new Map([
@@ -65,7 +65,7 @@ const makeEnv = (): RuntimeState => ({
       metadata: { isHub: true },
     }],
   },
-} as unknown as RuntimeState);
+} as unknown as RuntimeReplica);
 
 describe('credit request ingress', () => {
   test('queues hub credit extension through runtime admission and returns receipt status metadata', async () => {

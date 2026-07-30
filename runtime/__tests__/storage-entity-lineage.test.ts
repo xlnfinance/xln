@@ -39,7 +39,7 @@ import {
 import { buildStorageReplicaMetaCommitment } from '../storage/replicas';
 import type { StorageReplicaMeta } from '../storage/types';
 import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
@@ -52,7 +52,7 @@ const lineageJurisdiction: JurisdictionConfig = {
   entityProviderAddress: address('22'),
 };
 
-const makeGenesis = (env: RuntimeState, signerId: string): EntityState => {
+const makeGenesis = (env: RuntimeReplica, signerId: string): EntityState => {
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   return {
     entityId,
@@ -84,7 +84,7 @@ const makeGenesis = (env: RuntimeState, signerId: string): EntityState => {
   };
 };
 
-const makeRuntime = (seed: string): { env: RuntimeState; signerId: string; genesis: EntityState } => {
+const makeRuntime = (seed: string): { env: RuntimeReplica; signerId: string; genesis: EntityState } => {
   const env = createEmptyEnv(seed);
   env.runtimeSeed = seed;
   env.scenarioMode = true;
@@ -104,7 +104,7 @@ const genesisAnchor = (state: EntityState): CertifiedEntityLineageAnchor => ({
 });
 
 const certifyNextFrame = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   signerId: string,
   preState: EntityState,
   txs: EntityTx[],
@@ -158,7 +158,7 @@ const certifyNextFrame = async (
 };
 
 const installReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   signerId: string,
   state: EntityState,
   options: {
@@ -182,7 +182,7 @@ const installReplica = (
 
 const installCertifiedImportFixture = async (
   seed: string,
-): Promise<{ env: RuntimeState; signerId: string; state: EntityState }> => {
+): Promise<{ env: RuntimeReplica; signerId: string; state: EntityState }> => {
   const { env, signerId, genesis } = makeRuntime(seed);
   const jurisdiction: JurisdictionConfig = {
     name: 'LineageTestnet',

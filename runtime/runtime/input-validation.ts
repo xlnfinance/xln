@@ -1,5 +1,5 @@
 import { safeStringify } from '../protocol/serialization';
-import type { RuntimeState, RuntimeInput } from './types';
+import type { RuntimeReplica, RuntimeInput } from './types';
 
 export const MAX_RUNTIME_J_INPUTS = 256;
 export const MAX_RUNTIME_J_TXS = 1_024;
@@ -12,7 +12,7 @@ export const MAX_RUNTIME_RELIABLE_RECEIPTS = 10_000;
 type RejectRuntimeInput = (message: string) => never;
 
 const validateRuntimeJIngressLimits = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   reject: RejectRuntimeInput,
 ): void => {
@@ -58,7 +58,7 @@ const validateRuntimeJIngressLimits = (
  * expose different failure taxonomies while enforcing identical limits.
  */
 export const validateRuntimeInputShapeAndLimits = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   reject: RejectRuntimeInput,
 ): void => {

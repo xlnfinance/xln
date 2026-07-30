@@ -29,7 +29,7 @@ describe('BrowserVM J-watcher historical catch-up', () => {
       .toThrow('scenario witness: runtimeId does not match runtimeSeed');
   });
 
-  test('isolates the same signer slot as a canonical EOA in each RuntimeState key store', async () => {
+  test('isolates the same signer slot as a canonical EOA in each RuntimeReplica key store', async () => {
     const firstEnv = createEmptyEnv('numeric signer isolation seed A');
     ensureSignerKeysFromSeed(firstEnv, ['1'], 'numeric signer isolation A');
     const firstAddress = canonicalSigner(firstEnv, '1');

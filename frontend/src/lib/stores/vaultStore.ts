@@ -4,7 +4,7 @@ import { Wallet } from 'ethers';
 
 import type {
   EncryptedRuntimeRecoveryBundleV1,
-  RuntimeState,
+  RuntimeReplica,
   JurisdictionConfig,
   PersistedFrameJournal,
   RuntimeInput,
@@ -190,7 +190,7 @@ export async function restoreRuntimeEnvFromRecoveryCandidate(
   runtime: Runtime,
   xln: XLNModule,
   candidate: RuntimeRecoveryCandidate,
-): Promise<{ env: RuntimeState; bundle: RuntimeRecoveryBundleV1 }> {
+): Promise<{ env: RuntimeReplica; bundle: RuntimeRecoveryBundleV1 }> {
   const runtimeId = normalizeRuntimeId(runtime.id);
   if (!runtimeId) throw new Error('RECOVERY_RESTORE_RUNTIME_ID_INVALID');
   if (normalizeRuntimeId(candidate.runtimeId) !== runtimeId) {
@@ -424,7 +424,7 @@ const updateRuntimeRecoveryMetadata = (
 export async function tryRestoreRuntimeEnvFromTower(
   runtime: Runtime,
   xln: XLNModule,
-): Promise<{ env: RuntimeState; bundle: RuntimeRecoveryBundleV1 } | null> {
+): Promise<{ env: RuntimeReplica; bundle: RuntimeRecoveryBundleV1 } | null> {
   if (
     typeof xln.restoreEnvFromRecoveryBundles !== 'function' ||
     typeof xln.decryptRuntimeRecoveryBundle !== 'function' ||
@@ -469,7 +469,7 @@ export async function tryRestoreRuntimeEnvFromTower(
   return restoreRuntimeEnvFromRecoveryCandidate(runtime, xln, best);
 }
 
-async function uploadRuntimeRecoverySnapshot(runtimeId: string, env: RuntimeState, xln: XLNModule): Promise<void> {
+async function uploadRuntimeRecoverySnapshot(runtimeId: string, env: RuntimeReplica, xln: XLNModule): Promise<void> {
   if (
     typeof xln.buildRuntimeRecoveryBundle !== 'function' ||
     typeof xln.encryptRuntimeRecoveryBundle !== 'function' ||
@@ -723,7 +723,7 @@ async function drainRuntimeRecoveryUploads(runtimeId: string): Promise<void> {
   }
 }
 
-function scheduleRuntimeRecoveryUpload(runtimeId: string, env: RuntimeState, xln: XLNModule): void {
+function scheduleRuntimeRecoveryUpload(runtimeId: string, env: RuntimeReplica, xln: XLNModule): void {
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   if (!normalizedRuntimeId) return;
   const existingTimer = runtimeRecoveryUploadTimers.get(normalizedRuntimeId);
@@ -745,13 +745,13 @@ function scheduleRuntimeRecoveryUpload(runtimeId: string, env: RuntimeState, xln
   );
 }
 
-const getLiveRuntimeEnvForId = (runtimeId: string, fallback?: RuntimeState | null): RuntimeState | null => {
+const getLiveRuntimeEnvForId = (runtimeId: string, fallback?: RuntimeReplica | null): RuntimeReplica | null => {
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   const latest = normalizedRuntimeId ? get(runtimes).get(normalizedRuntimeId)?.env : null;
   return unwrapLiveRuntimeEnv(latest) ?? unwrapLiveRuntimeEnv(fallback) ?? fallback ?? null;
 };
 
-const getRuntimeFatalDiagnostics = (env: RuntimeState, replicaName?: string): string => {
+const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: string): string => {
   const frameLogs = env.frameLogs;
   const cleanLogs = Array.isArray(env.runtimeState?.cleanLogs) ? env.runtimeState.cleanLogs : [];
   const recentErrors = frameLogs
@@ -799,7 +799,7 @@ const getRuntimeFatalDiagnostics = (env: RuntimeState, replicaName?: string): st
 
 async function enqueueAndAwait(
   _xln: XLNModule,
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   ready: () => boolean,
   label: string,
@@ -902,7 +902,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
   }
 }
 
-async function stopRuntimeEnv(env: RuntimeState): Promise<void> {
+async function stopRuntimeEnv(env: RuntimeReplica): Promise<void> {
   await suspendRuntimeEnvActivity(env);
   const xln = await getXLN();
 
@@ -914,7 +914,7 @@ async function stopRuntimeEnv(env: RuntimeState): Promise<void> {
   }
 }
 
-async function suspendRuntimeEnvActivity(env: RuntimeState, loadedXln?: XLNModule): Promise<void> {
+async function suspendRuntimeEnvActivity(env: RuntimeReplica, loadedXln?: XLNModule): Promise<void> {
   const xln = loadedXln ?? (await getXLN());
   const failures: string[] = [];
 
@@ -998,7 +998,7 @@ function unregisterRuntimeEnvChange(runtimeId: string): void {
   }
 }
 
-function registerRuntimeEnvChange(runtimeId: string, env: RuntimeState, xln: XLNModule): void {
+function registerRuntimeEnvChange(runtimeId: string, env: RuntimeReplica, xln: XLNModule): void {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId || runtimeEnv.runtimeId);
   if (!normalizedRuntimeId) {
@@ -1031,7 +1031,7 @@ function registerRuntimeEnvChange(runtimeId: string, env: RuntimeState, xln: XLN
   onPublished();
 }
 
-function runtimeToEntry(runtime: Runtime, env: RuntimeState) {
+function runtimeToEntry(runtime: Runtime, env: RuntimeReplica) {
   const runtimeId = normalizeRuntimeId(runtime.id);
   if (!runtimeId) {
     throw new Error(`[VaultStore] Invalid runtime.id: ${String(runtime.id)}`);
@@ -1062,7 +1062,7 @@ async function registerRuntimeSignerKeys(runtime: Runtime, xln: XLNModule): Prom
   }
 }
 
-function applyRuntimeLogPreference(env: RuntimeState): void {
+function applyRuntimeLogPreference(env: RuntimeReplica): void {
   if (!env) return;
   const verbose = !!get(settings).verboseLogging;
   env.quietRuntimeLogs = !verbose;
@@ -1099,20 +1099,20 @@ async function resetRuntimePersistence(runtime: Runtime, xln: XLNModule): Promis
   toasts.warning('This runtime storage was reset', 8000);
 }
 
-function ensureRuntimeLoopRunning(env: RuntimeState, xln: XLNModule, reason: string): void {
+function ensureRuntimeLoopRunning(env: RuntimeReplica, xln: XLNModule, reason: string): void {
   const state = env.runtimeState;
   if (state?.loopActive && !state.persistencePaused && !state.persistenceQuiescing) return;
   xln.resumeRuntimeAfterPersistenceQuiesce(env);
 }
 
-async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strictRestore = false): Promise<RuntimeState> {
+async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strictRestore = false): Promise<RuntimeReplica> {
   const runtimeIdLower = normalizeRuntimeId(runtime.id);
   if (!runtimeIdLower) {
     throw new Error(`[VaultStore] Invalid runtime.id for env restore: ${String(runtime.id)}`);
   }
   await registerRuntimeSignerKeys(runtime, xln);
   const runtimeSeed = runtime.seed;
-  let env: RuntimeState | null = null;
+  let env: RuntimeReplica | null = null;
   let signerMetadataChanged = false;
   let restoredFromTower = false;
 
@@ -1218,7 +1218,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     }
   }
 
-  const hasLiveJAdapter = (targetEnv: RuntimeState | null): boolean => {
+  const hasLiveJAdapter = (targetEnv: RuntimeReplica | null): boolean => {
     if (!targetEnv?.jReplicas || targetEnv.jReplicas.size === 0) return false;
     for (const [, jReplica] of targetEnv.jReplicas.entries()) {
       if (hasConnectedJurisdictionAdapter(jReplica)) return true;
@@ -1498,7 +1498,7 @@ export const vaultOperations = {
     const localEnvs = Array.from(get(runtimes).values())
       .filter(entry => entry.type === 'local' && entry.env)
       .map(entry => unwrapLiveRuntimeEnv(entry.env) ?? entry.env)
-      .filter((env): env is RuntimeState => Boolean(env));
+      .filter((env): env is RuntimeReplica => Boolean(env));
     if (localEnvs.length === 0) return;
 
     const xln = get(xlnInstance);
@@ -1557,7 +1557,7 @@ export const vaultOperations = {
 
       const runtime = currentState.runtimes[runtimeId];
       const runtimeEntry = get(runtimes).get(runtimeId);
-      const entryEnv = runtimeEntry?.env as RuntimeState | undefined;
+      const entryEnv = runtimeEntry?.env as RuntimeReplica | undefined;
       const env = unwrapLiveRuntimeEnv(entryEnv) ?? entryEnv;
       if (!runtime || !env) return false;
 
@@ -1601,7 +1601,7 @@ export const vaultOperations = {
     const xln = await getXLN();
     await registerRuntimeSignerKeys(runtime, xln);
 
-    let env = get(runtimes).get(runtimeId)?.env as RuntimeState | undefined;
+    let env = get(runtimes).get(runtimeId)?.env as RuntimeReplica | undefined;
     if (!env) {
       env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
       runtimes.update(currentRuntimes => {
@@ -1612,7 +1612,7 @@ export const vaultOperations = {
       registerRuntimeEnvChange(runtimeId, env, xln);
     }
     const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
-    const getLatestEnv = (): RuntimeState => {
+    const getLatestEnv = (): RuntimeReplica => {
       const latest = getLiveRuntimeEnvForId(runtimeId, runtimeEnv);
       if (!latest) throw new Error(`Runtime env not found: ${runtimeId}`);
       return latest;
@@ -1727,12 +1727,12 @@ export const vaultOperations = {
     };
   },
 
-  async getPersistedLatestHeight(env: RuntimeState): Promise<number> {
+  async getPersistedLatestHeight(env: RuntimeReplica): Promise<number> {
     const xln = await getXLN();
     return xln.getPersistedLatestHeight(unwrapLiveRuntimeEnv(env) ?? env);
   },
 
-  async listPersistedCheckpointHeights(env: RuntimeState): Promise<number[]> {
+  async listPersistedCheckpointHeights(env: RuntimeReplica): Promise<number[]> {
     const xln = await getXLN();
     return xln.listPersistedCheckpointHeights(unwrapLiveRuntimeEnv(env) ?? env);
   },
@@ -1758,7 +1758,7 @@ export const vaultOperations = {
     return wallet.signMessage(message);
   },
 
-  async readPersistedFrameJournal(env: RuntimeState, height: number): Promise<PersistedFrameJournal | null> {
+  async readPersistedFrameJournal(env: RuntimeReplica, height: number): Promise<PersistedFrameJournal | null> {
     const xln = await getXLN();
     return xln.readPersistedFrameJournal(unwrapLiveRuntimeEnv(env) ?? env, height);
   },
@@ -2032,7 +2032,7 @@ export const vaultOperations = {
 
     // Import XLN and create env BEFORE returning
     let xln: XLNModule | null = null;
-    let newEnv: RuntimeState | null = null;
+    let newEnv: RuntimeReplica | null = null;
 
     try {
       xln = await getXLN();

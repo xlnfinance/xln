@@ -59,7 +59,7 @@ import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
 } from '../storage/entity-lineage';
-import type { DeliverableEntityInput, RuntimeState } from '../runtime/types';
+import type { DeliverableEntityInput, RuntimeReplica } from '../runtime/types';
 import type { EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import {
@@ -76,7 +76,7 @@ import {
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const createRuntime = (seed: string): RuntimeState => {
+const createRuntime = (seed: string): RuntimeReplica => {
   const env = createEmptyEnv(seed);
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, '1'));
@@ -133,7 +133,7 @@ const createEntityState = (
 };
 
 const buildCommitCertificate = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   signerIds: string | string[],
   timestamp: number,
@@ -216,7 +216,7 @@ const deliverable = (
   proposedFrame: structuredClone(frame),
 });
 
-const installReplica = (env: RuntimeState, state: EntityState, signerId: string): void => {
+const installReplica = (env: RuntimeReplica, state: EntityState, signerId: string): void => {
   const keys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
   const replica: EntityReplica = {
     entityId: state.entityId,
@@ -230,7 +230,7 @@ const installReplica = (env: RuntimeState, state: EntityState, signerId: string)
   env.eReplicas.set(`${state.entityId}:${signerId}`, replica);
 };
 
-const reliableRecoveryProjection = (env: RuntimeState): Record<string, unknown> => ({
+const reliableRecoveryProjection = (env: RuntimeReplica): Record<string, unknown> => ({
   pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
   reliableIngressReceiptLedger: env.runtimeState?.reliableIngressReceiptLedger ?? new Map(),
   reliableIngressTerminalWatermarks: env.runtimeState?.reliableIngressTerminalWatermarks ?? new Map(),

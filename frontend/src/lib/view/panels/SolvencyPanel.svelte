@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { readable, type Readable } from 'svelte/store';
-  import type { RuntimeState } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica } from '@xln/runtime/api/runtime-module';
   import { createRuntimeQueryStore } from '$lib/stores/runtimeQueryClient';
   import { buildSolvencyProjection } from './solvency-panel-view';
 
-  const emptyEnv = readable<RuntimeState | null>(null);
+  const emptyEnv = readable<RuntimeReplica | null>(null);
 
-  let { runtimeFrameEnv = emptyEnv }: { runtimeFrameEnv?: Readable<RuntimeState | null> } = $props();
+  let { runtimeFrameEnv = emptyEnv }: { runtimeFrameEnv?: Readable<RuntimeReplica | null> } = $props();
 
   const solvencyStore = createRuntimeQueryStore((client) => client.readSolvencySummary());
   onDestroy(() => solvencyStore.destroy());

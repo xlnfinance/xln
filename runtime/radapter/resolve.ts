@@ -1,7 +1,7 @@
 import type { BookState, BookOrderState, PriceBucketState, PriceLevelState } from '../orderbook';
 import type { AccountTx } from '../types/account';
 import type { EntityReplica, EntityState, ExternalWalletState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JBatch, JBatchState, SentJBatch } from '../jurisdiction/batch';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
@@ -63,7 +63,7 @@ import { calculateSolvency } from '../runtime/solvency';
 import { acquireRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 export type RuntimeAdapterResolveContext = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   readHead?: () => Promise<StorageHead | null>;
   readFrame?: (height: number) => Promise<StorageFrameRecord | null>;
   listCheckpoints?: () => Promise<number[]>;
@@ -308,7 +308,7 @@ const readHeightBatch = (query?: RuntimeAdapterReadQuery): number[] => {
 const normalizeRuntimeIdForRecovery = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
 
-const inferRecoverySignersForAdapter = (env: RuntimeState): RuntimeRecoverySignerV1[] => {
+const inferRecoverySignersForAdapter = (env: RuntimeReplica): RuntimeRecoverySignerV1[] => {
   const runtimeId = normalizeRuntimeIdForRecovery(env.runtimeId);
   if (!runtimeId) return [];
   let entityId = '';
@@ -419,7 +419,7 @@ const readActivityQuery = (
   };
 };
 
-const envHeight = (env: RuntimeState): number => Math.max(0, Math.floor(Number(env.height ?? 0)));
+const envHeight = (env: RuntimeReplica): number => Math.max(0, Math.floor(Number(env.height ?? 0)));
 
 const latestHeadHeight = (head: StorageHead): number =>
   Math.max(0, Math.floor(Number(head.latestHeight ?? 0)));
@@ -444,7 +444,7 @@ const assertRequestedHeightAvailable = (
   }
 };
 
-const findReplica = (env: RuntimeState, entityId: string): EntityReplica | null => {
+const findReplica = (env: RuntimeReplica, entityId: string): EntityReplica | null => {
   const normalized = normalizeEntityId(entityId);
   for (const replica of env.eReplicas?.values?.() ?? []) {
     if (normalizeEntityId(replica.entityId) === normalized) return replica;
@@ -547,7 +547,7 @@ const listLiveGossipProfileSummaries = (ctx: RuntimeAdapterResolveContext): Runt
   return summaries;
 };
 
-const headFromEnv = (env: RuntimeState): StorageHead => {
+const headFromEnv = (env: RuntimeReplica): StorageHead => {
   const storage = env.runtimeConfig?.storage;
   const height = envHeight(env);
   return {
@@ -1612,7 +1612,7 @@ const projectGraphFrame = async (
   // A live graph read is a projection of the in-memory R-frame, not a
   // historical storage query. Capture every graph DTO before the first await:
   // snapshot publication may legitimately prune the old diff chain while this
-  // request is in flight, and the live RuntimeState is replaced at each committed frame.
+  // request is in flight, and the live RuntimeReplica is replaced at each committed frame.
   const capturedLive = isLiveQuery
     ? captureLiveGraph(ctx, query, entityLimit, accountsLimit)
     : null;

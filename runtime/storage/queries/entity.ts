@@ -13,7 +13,7 @@ import {
 import { verifyStorageTailIntegrity } from '../verify';
 import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/local-history';
 import type { EntityState } from '../../entity/types';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import type { PersistenceQueryDeps } from './deps';
 import { requireStorageDbOpen } from '../availability';
 
@@ -36,7 +36,7 @@ export type StorageEntityViewQuery = {
 
 const inspectRuntimeStorage = async (
   deps: PersistenceQueryDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
 ) => {
   const current = await inspectStorage({
     env,
@@ -106,11 +106,11 @@ const inspectRuntimeStorage = async (
 };
 
 export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
-  const getPersistedLatestHeight = (env: RuntimeState): Promise<number> =>
+  const getPersistedLatestHeight = (env: RuntimeReplica): Promise<number> =>
     deps.resolvePersistedLatestHeight(env);
 
   const loadEntityStateFromStorageDb = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityId: string,
     height?: number,
   ): Promise<EntityState | null> => {
@@ -127,7 +127,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const loadEntityAccountDocFromStorageDb = (
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityId: string,
     counterpartyId: string,
     height?: number,
@@ -142,7 +142,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
   });
 
   const loadEntityViewPageFromStorageDb = (
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityId: string,
     height: number,
     query?: StorageEntityViewQuery,
@@ -174,10 +174,10 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     });
   };
 
-  const listPersistedCheckpointHeights = (env: RuntimeState): Promise<number[]> =>
+  const listPersistedCheckpointHeights = (env: RuntimeReplica): Promise<number[]> =>
     deps.resolvePersistedCheckpointHeights(env);
 
-  const readPersistedStorageHead = async (env: RuntimeState): Promise<StorageHead | null> => {
+  const readPersistedStorageHead = async (env: RuntimeReplica): Promise<StorageHead | null> => {
     await requireStorageDbOpen(
       () => deps.tryOpenRuntimeWalDb(env),
       'runtime-wal:head',
@@ -185,7 +185,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     return readStorageHead(deps.getRuntimeWalDb(env));
   };
 
-  const verifyLiveRuntimeStorage = async (env: RuntimeState): Promise<{
+  const verifyLiveRuntimeStorage = async (env: RuntimeReplica): Promise<{
     ok: true;
     runtimeId: string;
     latestHeight: number;
@@ -203,7 +203,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     loadEntityStateFromStorageDb,
     loadEntityAccountDocFromStorageDb,
     loadEntityViewPageFromStorageDb,
-    inspectStorageDb: (env: RuntimeState) => inspectRuntimeStorage(deps, env),
+    inspectStorageDb: (env: RuntimeReplica) => inspectRuntimeStorage(deps, env),
     listPersistedCheckpointHeights,
     readPersistedStorageHead,
     verifyLiveRuntimeStorage,

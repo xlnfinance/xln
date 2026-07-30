@@ -254,7 +254,7 @@ import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 
 import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from '../runtime/types';
+import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import type { JInput } from '../jurisdiction/input';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../types/jurisdiction-events';
@@ -290,7 +290,7 @@ const makeSingleSignerConfigFor = (signerId: string): EntityState['config'] => (
   },
 });
 
-const installSingleSignerBoard = (env: RuntimeState, state: EntityState, slot = '1'): string => {
+const installSingleSignerBoard = (env: RuntimeReplica, state: EntityState, slot = '1'): string => {
   const seed = env.runtimeSeed;
   if (!seed) throw new Error('TEST_RUNTIME_SEED_REQUIRED');
   const signerId = deriveSignerAddressSync(seed, slot).toLowerCase();
@@ -482,7 +482,7 @@ const registerLazySigner = (seed: string, signerSlot: string): { signerId: strin
   };
 };
 
-const ensureCanonicalCommandBoardAuthority = async (env: RuntimeState, state: EntityState): Promise<void> => {
+const ensureCanonicalCommandBoardAuthority = async (env: RuntimeReplica, state: EntityState): Promise<void> => {
   const boardHash = hashBoard(encodeBoard(state.config, env)).toLowerCase();
   if (state.entityId.toLowerCase() === boardHash) return;
   const jurisdiction = state.config.jurisdiction;
@@ -511,7 +511,7 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeState, state: En
 };
 
 const buildQuorumAuthorizedFrameTxs = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   state: EntityState,
   collectiveTxs: EntityTx[],
   frameTimestamp: number = env.timestamp,
@@ -680,7 +680,7 @@ const applyDisputeFinalizedFixture = async (fixture: ReturnType<typeof makeDispu
     fixture.env,
   );
 
-const sealAuditJSubmitAttempts = (env: RuntimeState, inputs: JInput[]): void => {
+const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void => {
   for (const input of inputs) {
     for (const jTx of input.jTxs) {
       if (jTx.type !== 'batch' || !jTx.data.runtimeSubmitAttempt) continue;
@@ -750,7 +750,7 @@ const sealAuditJSubmitAttempts = (env: RuntimeState, inputs: JInput[]): void => 
 };
 
 const submitAuditRuntimeJOutbox = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: JInput[],
   deps: Parameters<typeof submitRuntimeJOutbox>[2],
 ): Promise<void> => {
@@ -1567,7 +1567,7 @@ describe('audit fail-fast regressions', () => {
     ]);
   });
 
-  test('submitRuntimeJOutbox submits RuntimeState-local multi-signer batches even when runtimeId differs', async () => {
+  test('submitRuntimeJOutbox submits RuntimeReplica-local multi-signer batches even when runtimeId differs', async () => {
     const entityId = `0x${'af'.repeat(32)}`;
     const runtimeId = `0x${'33'.repeat(20)}`;
     const localScenarioSignerId = '97';

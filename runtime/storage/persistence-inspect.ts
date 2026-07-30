@@ -13,7 +13,7 @@ import {
   verifyRuntimeChain,
 } from '../runtime';
 import { deserializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoveryBundleV1,
@@ -185,7 +185,7 @@ export const buildPersistenceIssues = (input: {
   return issues;
 };
 
-const buildWalTail = async (env: RuntimeState, latestHeight: number, tail: number): Promise<PersistenceWalTailSummary> => {
+const buildWalTail = async (env: RuntimeReplica, latestHeight: number, tail: number): Promise<PersistenceWalTailSummary> => {
   const toHeight = Math.max(0, latestHeight);
   const fromHeight = toHeight > 0 ? Math.max(1, toHeight - Math.max(1, tail) + 1) : 0;
   if (fromHeight <= 0 || toHeight <= 0) {

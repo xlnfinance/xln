@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import type { JAdapter } from '../../jadapter/types';
 import { getCertifiedBoardStackKey } from '../../jurisdiction/board-registry';
 
-import type { RuntimeState, NumberedRegistrationRequest, PendingNumberedRegistration } from '../types';
+import type { RuntimeReplica, NumberedRegistrationRequest, PendingNumberedRegistration } from '../types';
 import { createLazyEntity, encodeBoard, hashBoard, type BoardMemberInput } from '../../entity/factory';
 
 export type NumberedRegistrationDefinition = Readonly<{
@@ -46,7 +46,7 @@ export const encodeNumberedRegistrationCalldata = (adapter: JAdapter, request: N
     .encodeFunctionData('registerNumberedEntitiesBatch', [request.entities.map(entity => entity.boardHash)])
     .toLowerCase();
 
-export const assertNumberedRegistrationRequest = (env: RuntimeState, request: NumberedRegistrationRequest): void => {
+export const assertNumberedRegistrationRequest = (env: RuntimeReplica, request: NumberedRegistrationRequest): void => {
   if (request.version !== 1) throw new Error('NUMBERED_REGISTRATION_INTENT_VERSION_INVALID');
   numberedRegistrationBytes32(request.intentId, 'INTENT_ID');
   numberedRegistrationBytes32(request.stackKey, 'STACK_KEY');
@@ -100,7 +100,7 @@ export const parseNumberedRegistrationIntentTransaction = (adapter: JAdapter, pe
 };
 
 export const buildNumberedRegistrationRequest = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: {
     intentId: string;
     jurisdiction: NonNullable<NumberedRegistrationRequest['entities'][number]['config']['jurisdiction']>;

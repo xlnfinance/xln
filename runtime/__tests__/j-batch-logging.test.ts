@@ -12,7 +12,7 @@ import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
 import type { DebtEntry } from '../types/debt';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 
 const entityId = `0x${'aa'.repeat(32)}`;
@@ -70,7 +70,7 @@ test('entity j-batch operation handler state transitions are unchanged', async (
   }]);
 
   const mintTx = { type: 'mintReserves', data: { tokenId: 1, amount: 5n } } satisfies EntityTx;
-  const mintResult = await handleMintReserves(makeEntityState(), mintTx, {} as RuntimeState);
+  const mintResult = await handleMintReserves(makeEntityState(), mintTx, {} as RuntimeReplica);
   expect(mintResult.jOutputs).toEqual([]);
   expect(readEntityFrameEventMessages(mintResult.newState).at(-1)).toContain('Jurisdiction unavailable for mint');
 });

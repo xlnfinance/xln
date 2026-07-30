@@ -5,7 +5,7 @@ import {
   getEntityCertifiedJAnchor,
   getValidatorJExpectedBlockHash,
 } from '../jurisdiction/local-history';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   enqueueJHistoryRewindForReplicaKeys,
   findWatcherJurisdictionReplica,
@@ -24,7 +24,7 @@ type EmitWatcherDebug = (payload: Record<string, unknown>) => void;
 
 const clearPendingRewindIfApplied = (
   session: RpcWatcherSession,
-  activeEnv: RuntimeState,
+  activeEnv: RuntimeReplica,
 ): boolean => {
   if (session.pendingRewindReplicaKeys.length === 0) return false;
   const stillPending = session.pendingRewindReplicaKeys.some(replicaKey => {
@@ -40,7 +40,7 @@ const clearPendingRewindIfApplied = (
 
 const enqueueTargetedRewinds = (
   session: RpcWatcherSession,
-  activeEnv: RuntimeState,
+  activeEnv: RuntimeReplica,
   services: RpcWatcherServices,
   targetedRewinds: ReturnType<typeof collectTargetedWatcherRewinds>,
   emitWatcherDebug: EmitWatcherDebug,
@@ -79,7 +79,7 @@ const enqueueTargetedRewinds = (
 
 const enqueueTipRewind = (
   session: RpcWatcherSession,
-  activeEnv: RuntimeState,
+  activeEnv: RuntimeReplica,
   services: RpcWatcherServices,
   canonicalTipHash: string,
   expectedTipHash: string,
@@ -117,7 +117,7 @@ const enqueueTipRewind = (
  */
 export const reconcileWatcherCanonicalTip = async (
   session: RpcWatcherSession,
-  activeEnv: RuntimeState,
+  activeEnv: RuntimeReplica,
   services: RpcWatcherServices,
   emitWatcherDebug: EmitWatcherDebug,
 ): Promise<boolean> => {
@@ -187,7 +187,7 @@ export const reconcileWatcherCanonicalTip = async (
 
 export const assertAuthorityEvidenceCanonical = async (
   session: RpcWatcherSession,
-  activeEnv: RuntimeState,
+  activeEnv: RuntimeReplica,
   currentHead: number,
   services: RpcWatcherServices,
 ): Promise<void> => {

@@ -20,10 +20,10 @@ import { generateLazyEntityId } from '../entity/factory';
 import { readStorageFrameRecord } from '../storage';
 import { resolveDbPath } from '../storage/runtime-dbs';
 import type { EntityReplica, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
-type RecoveryEnv = { env: RuntimeState; entityId: string; signerId: string; replica: EntityReplica };
+type RecoveryEnv = { env: RuntimeReplica; entityId: string; signerId: string; replica: EntityReplica };
 const cleanupPaths: string[] = [];
 
 const cleanup = (base: string): void => {
@@ -119,7 +119,7 @@ const createRecoveryEnv = async (
   return { env, entityId, signerId, replica };
 };
 
-const closeRecoveryEnv = async (env: RuntimeState): Promise<void> => {
+const closeRecoveryEnv = async (env: RuntimeReplica): Promise<void> => {
   await closeRuntimeDb(env);
   await closeInfraDb(env);
 };

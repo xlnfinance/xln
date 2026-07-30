@@ -1,6 +1,6 @@
 import type { JPrefixAttestation } from '../types/jurisdiction-events';
 import type { EntityInput } from '../entity/types';
-import type { RuntimeState, RuntimeInput, RuntimeTx } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../runtime/types';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
@@ -112,7 +112,7 @@ const combineRuntimeInputs = (inputs: RuntimeInput[]): RuntimeInput | null => {
 };
 
 export function buildJHistoryRangeRuntimeInput(
-  env: RuntimeState,
+  env: RuntimeReplica,
   newlyObservedInputs: RuntimeInput[],
   scannedThroughHeight: number,
   tipBlockHash: string,
@@ -239,7 +239,7 @@ export function buildJHistoryRangeRuntimeInput(
 }
 
 export function enqueueJHistoryRange(
-  env: RuntimeState,
+  env: RuntimeReplica,
   newlyObservedInputs: RuntimeInput[],
   scannedThroughHeight: number,
   tipBlockHash: string,

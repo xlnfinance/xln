@@ -1,4 +1,4 @@
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import { clearInfraGossipProfiles } from './infra-gossip-store';
 import {
   drainInfraDbWrites,
@@ -10,8 +10,8 @@ import {
  * the in-memory change so observers never see a state that persistence rejected.
  */
 export const clearRuntimeGossip = async (
-  env: RuntimeState,
-  notifyEnvChange: (env: RuntimeState) => void,
+  env: RuntimeReplica,
+  notifyEnvChange: (env: RuntimeReplica) => void,
   options: { runtimeId?: string } = {},
 ): Promise<void> => {
   await drainInfraDbWrites(env);

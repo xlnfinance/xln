@@ -32,7 +32,7 @@ import {
   restoreEnvFromRecoveryBundles,
 } from '../runtime';
 import type { EntityLeaderTimeoutVote, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { createTestJReplica } from './helpers/j-replica';
 
 const cleanupRuntimeStorage = (runtimeId: string): void => {
@@ -42,7 +42,7 @@ const cleanupRuntimeStorage = (runtimeId: string): void => {
   }
 };
 
-const installVoteTarget = (env: RuntimeState): {
+const installVoteTarget = (env: RuntimeReplica): {
   replica: EntityReplica;
   vote: EntityLeaderTimeoutVote;
 } => {
@@ -106,7 +106,7 @@ const voteRuntimeInput = (
   }],
 });
 
-const installJurisdiction = (env: RuntimeState): JurisdictionConfig => {
+const installJurisdiction = (env: RuntimeReplica): JurisdictionConfig => {
   const jurisdiction: JurisdictionConfig = {
     name: 'LeaderVoteDurability',
     address: 'browservm://leader-vote-durability',
@@ -242,7 +242,7 @@ describe('leader timeout vote durability', () => {
     await closeInfraDb(env);
 
     let forgedRestoreError: unknown = null;
-    let forgedRestoredEnv: RuntimeState | null = null;
+    let forgedRestoredEnv: RuntimeReplica | null = null;
     try {
       forgedRestoredEnv = await restoreEnvFromRecoveryBundles(
         [snapshotBundle, forgedTail],

@@ -1,6 +1,6 @@
 import type {
   EntityReplica,
-  RuntimeState,
+  RuntimeReplica,
   EnvSnapshot,
   RuntimeAdapterEntitySummary,
   RuntimeAdapterGraphEntityCore,
@@ -100,7 +100,7 @@ type ProjectionOptions = {
   adapterKind: RuntimeGraphAdapterKind;
 };
 
-type RuntimeGraphEnvFrame = RuntimeState | EnvSnapshot;
+type RuntimeGraphEnvFrame = RuntimeReplica | EnvSnapshot;
 
 const text = (value: unknown): string => String(value || '').trim();
 const id = (value: unknown): string => text(value).toLowerCase();
@@ -163,7 +163,7 @@ const positionOf = (value: unknown): RuntimeGraphPosition | null => {
 };
 
 const profileMap = (env: RuntimeGraphEnvFrame): Map<string, { entityId?: string; name?: string; metadata?: Record<string, unknown> }> => {
-  const gossip = env.gossip as RuntimeState['gossip'] | EnvSnapshot['gossip'] | undefined;
+  const gossip = env.gossip as RuntimeReplica['gossip'] | EnvSnapshot['gossip'] | undefined;
   const rawProfiles = gossip && 'getProfiles' in gossip && typeof gossip.getProfiles === 'function'
     ? gossip.getProfiles()
     : gossip?.profiles;

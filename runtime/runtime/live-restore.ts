@@ -1,7 +1,7 @@
 import { createStructuredLogger } from '../infra/logger';
 import { markRestoredReliableOutputsDue } from './output-routing';
 import type { TrustedJurisdictionRpcBinding } from './infra';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -15,12 +15,12 @@ export type RuntimeLiveRestoreDeps = {
     runtimeId?: string | null,
     runtimeSeed?: string | null,
     fromSnapshotHeight?: number,
-  ): Promise<{ env: RuntimeState } | null>;
+  ): Promise<{ env: RuntimeReplica } | null>;
   rehydrate(
-    env: RuntimeState,
+    env: RuntimeReplica,
     trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[],
   ): Promise<void>;
-  registerCommittedSingleSignerWallets(env: RuntimeState): void;
+  registerCommittedSingleSignerWallets(env: RuntimeReplica): void;
 };
 
 export const loadLiveRuntimeFromDB = async (
@@ -28,7 +28,7 @@ export const loadLiveRuntimeFromDB = async (
   runtimeId?: string | null,
   runtimeSeed?: string | null,
   options?: RuntimeLoadOptions,
-): Promise<RuntimeState | null> => {
+): Promise<RuntimeReplica | null> => {
   try {
     const snapshotHeight = Number.isFinite(options?.fromSnapshotHeight)
       ? Math.floor(Number(options?.fromSnapshotHeight))

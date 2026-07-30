@@ -6,7 +6,7 @@ import {
   validateDurableOutputRetryState,
 } from '../runtime/durable-output-retry';
 import { buildRouteOutputKey } from '../runtime/output-routing';
-import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
+import type { RuntimeReplica, RoutedEntityInput } from '../runtime/types';
 
 describe('durable output retry', () => {
   test('bounds a large live route key and restores retry metadata by exact output', () => {
@@ -26,13 +26,13 @@ describe('durable output retry', () => {
           { attempts: 7, nextRetryAt: 9_000_000_000_000 },
         ]]),
       },
-    } as RuntimeState;
+    } as RuntimeReplica;
     const retryState = buildDurableOutputRetryState(env, [output]);
     expect(retryState).toHaveLength(1);
     expect(retryState[0]!.outputHash.length).toBeLessThan(128);
     expect(validateDurableOutputRetryState(retryState, [output], 'TEST_OUTPUT_RETRY')).toEqual(retryState);
 
-    const restored = {} as RuntimeState;
+    const restored = {} as RuntimeReplica;
     restoreDurableOutputRetryState(restored, retryState, [output]);
     expect(restored.runtimeState?.deferredNetworkMeta?.get(liveRouteKey)).toEqual({
       attempts: 7,
@@ -71,10 +71,10 @@ describe('durable output retry', () => {
           { attempts: 1, nextRetryAt: 42, manual: true },
         ]]),
       },
-    } as RuntimeState;
+    } as RuntimeReplica;
 
     const persisted = buildDurableOutputRetryState(env, [output]);
-    const restored = {} as RuntimeState;
+    const restored = {} as RuntimeReplica;
     restoreDurableOutputRetryState(restored, persisted, [output]);
 
     expect(persisted[0]?.manual).toBe(true);

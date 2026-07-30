@@ -6,7 +6,7 @@ import {
 } from '../../frontend/src/lib/components/Entity/pending-batch-actions';
 
 describe('pending batch action helpers', () => {
-  test('pending batch actions do not require embedded RuntimeState', () => {
+  test('pending batch actions do not require embedded RuntimeReplica', () => {
     const source = readFileSync('frontend/src/lib/components/Entity/pending-batch-actions.ts', 'utf8');
     expect(source).not.toContain('EnvSnapshot');
     expect(source).not.toContain('requireRuntimeEnv');

@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../../entity/types';
-import type { RuntimeState, EnvSnapshot, RoutedEntityInput, RuntimeInput } from '../../runtime/types';
+import type { RuntimeReplica, EnvSnapshot, RoutedEntityInput, RuntimeInput } from '../../runtime/types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { Profile } from '../../entity/profile';
 import { cloneEntityReplica } from '../../entity/replica-clone';
@@ -233,7 +233,7 @@ const DURABLE_RUNTIME_STATE_KEYS = [
 ] as const;
 
 const buildDurableRuntimeStateSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   options?: {
     includeCertifiedBoardNodes?: boolean;
     includeIngressWorkingState?: boolean;
@@ -304,7 +304,7 @@ const buildDurableRuntimeStateSnapshot = (
 };
 
 export const buildDurableRuntimeMachineSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
     runtimeInput?: RuntimeInput;
@@ -356,7 +356,7 @@ export const projectReplayVerifiableRuntimeMachine = (
 };
 
 export const buildReplayVerifiableRuntimeMachineSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
     runtimeInput?: RuntimeInput;
@@ -372,12 +372,12 @@ const cloneProfiles = (profiles: Profile[] | undefined): Profile[] | undefined =
   return profiles.map(profile => structuredClone(profile));
 };
 
-const cloneLogs = (logs: RuntimeState['frameLogs'] | undefined): RuntimeState['frameLogs'] | undefined => {
+const cloneLogs = (logs: RuntimeReplica['frameLogs'] | undefined): RuntimeReplica['frameLogs'] | undefined => {
   if (!Array.isArray(logs) || logs.length === 0) return undefined;
   return logs.map(entry => ({ ...entry }));
 };
 
-const requireRuntimeJReplicas = (env: RuntimeState): RuntimeState['jReplicas'] => {
+const requireRuntimeJReplicas = (env: RuntimeReplica): RuntimeReplica['jReplicas'] => {
   if (!(env.jReplicas instanceof Map)) {
     throw new Error('RUNTIME_SNAPSHOT_J_REPLICAS_MISSING');
   }
@@ -385,9 +385,9 @@ const requireRuntimeJReplicas = (env: RuntimeState): RuntimeState['jReplicas'] =
 };
 
 export const buildCanonicalRuntimeStateSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   options?: {
-    browserVMState?: RuntimeState['browserVMState'];
+    browserVMState?: RuntimeReplica['browserVMState'];
     compactTransient?: boolean;
     includeCertifiedBoardNodes?: boolean;
   },
@@ -424,11 +424,11 @@ export const buildCanonicalRuntimeStateSnapshot = (
   };
 };
 
-export const buildRuntimeCheckpointSnapshot = (env: RuntimeState): Record<string, unknown> => {
+export const buildRuntimeCheckpointSnapshot = (env: RuntimeReplica): Record<string, unknown> => {
   return buildCanonicalRuntimeStateSnapshot(env, { includeCertifiedBoardNodes: true });
 };
 
-export const buildRuntimeRecoveryCheckpointSnapshot = (env: RuntimeState): Record<string, unknown> => {
+export const buildRuntimeRecoveryCheckpointSnapshot = (env: RuntimeReplica): Record<string, unknown> => {
   const snapshot = buildCanonicalRuntimeStateSnapshot(env, { includeCertifiedBoardNodes: true });
   const gossipProfiles = cloneProfiles(env.gossip?.getProfiles?.());
   return {
@@ -438,7 +438,7 @@ export const buildRuntimeRecoveryCheckpointSnapshot = (env: RuntimeState): Recor
 };
 
 export const restoreDurableRuntimeSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   snapshot: Record<string, unknown>,
 ): void => {
   if (env.runtimeState?.processingPromise) {
@@ -447,7 +447,7 @@ export const restoreDurableRuntimeSnapshot = (
   if (typeof snapshot['runtimeId'] === 'string') env.runtimeId = snapshot['runtimeId'];
   if (typeof snapshot['activeJurisdiction'] === 'string') env.activeJurisdiction = snapshot['activeJurisdiction'];
   if (snapshot['browserVMState']) {
-    env.browserVMState = structuredClone(snapshot['browserVMState']) as NonNullable<RuntimeState['browserVMState']>;
+    env.browserVMState = structuredClone(snapshot['browserVMState']) as NonNullable<RuntimeReplica['browserVMState']>;
   }
   const runtimeInput = snapshot['runtimeInput'];
   if (runtimeInput && typeof runtimeInput === 'object') {
@@ -457,12 +457,12 @@ export const restoreDurableRuntimeSnapshot = (
     env.runtimeMempool = restoredInput;
   }
   if (snapshot['runtimeConfig'] && typeof snapshot['runtimeConfig'] === 'object') {
-    env.runtimeConfig = structuredClone(snapshot['runtimeConfig']) as RuntimeState['runtimeConfig'];
+    env.runtimeConfig = structuredClone(snapshot['runtimeConfig']) as RuntimeReplica['runtimeConfig'];
   }
   const retainedRuntimeState = { ...(env.runtimeState ?? {}) };
   for (const key of DURABLE_RUNTIME_STATE_KEYS) delete retainedRuntimeState[key];
   const restoredRuntimeState = snapshot['runtimeState'] && typeof snapshot['runtimeState'] === 'object'
-    ? structuredClone(snapshot['runtimeState']) as NonNullable<RuntimeState['runtimeState']>
+    ? structuredClone(snapshot['runtimeState']) as NonNullable<RuntimeReplica['runtimeState']>
     : {};
   env.runtimeState = { ...retainedRuntimeState, ...restoredRuntimeState };
   env.pendingOutputs = Array.isArray(snapshot['pendingOutputs'])
@@ -485,22 +485,22 @@ export const restoreDurableRuntimeSnapshot = (
 };
 
 export const buildCanonicalEnvSnapshot = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   options: {
     runtimeInput: RuntimeInput;
     runtimeOutputs: RoutedEntityInput[];
     description: string;
     meta?: EnvSnapshot['meta'];
-    browserVMState?: RuntimeState['browserVMState'];
+    browserVMState?: RuntimeReplica['browserVMState'];
     gossipProfiles?: Profile[];
-    logs?: RuntimeState['frameLogs'];
+    logs?: RuntimeReplica['frameLogs'];
   },
 ): EnvSnapshot => {
   const core = buildCanonicalRuntimeStateSnapshot(env, { browserVMState: options.browserVMState }) as {
     height: number;
     timestamp: number;
     runtimeId?: string;
-    browserVMState?: RuntimeState['browserVMState'];
+    browserVMState?: RuntimeReplica['browserVMState'];
     eReplicas: Array<[string, EntityReplica]>;
     jReplicas: Array<[string, JReplica]>;
   };

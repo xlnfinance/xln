@@ -1,5 +1,5 @@
 import type { EntityInput } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from './types';
+import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import type { JAdapterFailure, JReplica, JTx } from '../types/jurisdiction-runtime';
 import type { JAdapter, JSubmitResult } from '../jadapter/types';
@@ -28,7 +28,7 @@ import { requireRuntimeMempool } from './input-queue';
 const jSubmitLog = createStructuredLogger('runtime.jsubmit');
 
 export type RuntimeJOutboxQueue = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
@@ -50,12 +50,12 @@ const hasSemanticJHistoryTx = (input: EntityInput): boolean =>
     (attestation) => attestation.blocks.length > 0,
   );
 
-const captureQueuedEntityInputs = (env: RuntimeState): EntityInput[] => {
+const captureQueuedEntityInputs = (env: RuntimeReplica): EntityInput[] => {
   const mempool = requireRuntimeMempool(env);
   return Array.isArray(mempool?.entityInputs) ? [...mempool.entityInputs] : [];
 };
 
-const prioritizeJEventsQueuedAfterSubmit = (env: RuntimeState, beforePoll: EntityInput[]): number => {
+const prioritizeJEventsQueuedAfterSubmit = (env: RuntimeReplica, beforePoll: EntityInput[]): number => {
   const mempool = requireRuntimeMempool(env);
   if (!Array.isArray(mempool.entityInputs)) return 0;
   const current = mempool.entityInputs;
@@ -75,7 +75,7 @@ const prioritizeJEventsQueuedAfterSubmit = (env: RuntimeState, beforePoll: Entit
   return newlyQueuedJEvents.length;
 };
 
-const pollSubmittedJEventsBeforeFollowups = async (env: RuntimeState, jAdapter: { pollNow?: () => Promise<void> }): Promise<void> => {
+const pollSubmittedJEventsBeforeFollowups = async (env: RuntimeReplica, jAdapter: { pollNow?: () => Promise<void> }): Promise<void> => {
   if (typeof jAdapter.pollNow !== 'function') return;
   const beforePoll = captureQueuedEntityInputs(env);
   await jAdapter.pollNow();
@@ -86,7 +86,7 @@ const pollSubmittedJEventsBeforeFollowups = async (env: RuntimeState, jAdapter: 
 };
 
 const awaitAuthenticatedJEventsBeforeSubmit = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jAdapter: { pollNow?: () => Promise<void> },
 ): Promise<number> => {
   const alreadyQueued = captureQueuedEntityInputs(env).filter(hasSemanticJHistoryTx).length;
@@ -128,7 +128,7 @@ export const isTransientJSubmitFailure = (error: unknown): boolean => {
 };
 
 const queueBatchResult = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: Extract<JTx, { type: 'batch' }>,
@@ -146,7 +146,7 @@ const queueBatchResult = (
 };
 
 const queueEntityProviderActionResult = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: ActionJTx,
@@ -163,7 +163,7 @@ const queueEntityProviderActionResult = (
   });
 };
 
-const shouldSubmitFromThisRuntime = (env: RuntimeState, jTx: JTx): boolean => {
+const shouldSubmitFromThisRuntime = (env: RuntimeReplica, jTx: JTx): boolean => {
   if (jTx.type !== 'batch' && !isEntityProviderActionJTx(jTx)) return true;
   const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId.toLowerCase() : '';
   const runtimeId = typeof env.runtimeId === 'string' ? env.runtimeId.toLowerCase() : '';
@@ -179,7 +179,7 @@ const shouldSubmitFromThisRuntime = (env: RuntimeState, jTx: JTx): boolean => {
 };
 
 const reconcileDurablyStaleEntityProviderAction = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -204,7 +204,7 @@ const reconcileDurablyStaleEntityProviderAction = (
 };
 
 const reconcileDurablyAbortedBatch = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -246,7 +246,7 @@ const reconcileDurablyAbortedBatch = (
  * and deterministic RJEA execution.
  */
 const queueKnownFailure = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -266,7 +266,7 @@ const queueKnownFailure = (
 };
 
 const collectActiveJTxs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jInput: JInput,
 ): JTx[] =>
@@ -275,7 +275,7 @@ const collectActiveJTxs = (
     !reconcileDurablyStaleEntityProviderAction(env, deps, jInput.jurisdictionName, jTx));
 
 const queueUnavailableAdapterResults = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTxs: JTx[],
@@ -289,7 +289,7 @@ const queueUnavailableAdapterResults = (
 };
 
 const resolveJSubmitAdapter = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   activeJTxs: JTx[],
@@ -328,7 +328,7 @@ const resolveJSubmitAdapter = async (
 };
 
 const deferSealedAttemptsForAuthenticatedEvents = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   activeJTxs: JTx[],
@@ -354,7 +354,7 @@ const deferSealedAttemptsForAuthenticatedEvents = (
 };
 
 const validateSubmitAttempt = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -389,7 +389,7 @@ const validateSubmitAttempt = (
 };
 
 const submitJTxToAdapter = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   adapter: JAdapter,
   jTx: JTx,
 ): Promise<JSubmitResult> => {
@@ -405,7 +405,7 @@ const submitJTxToAdapter = async (
 };
 
 const recordSuccessfulSubmit = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   adapter: JAdapter,
@@ -430,7 +430,7 @@ const recordSuccessfulSubmit = async (
 };
 
 const recordFailedSubmit = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -450,7 +450,7 @@ const recordFailedSubmit = (
 };
 
 const submitOneJTx = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   adapter: JAdapter,
@@ -489,7 +489,7 @@ const submitOneJTx = async (
 };
 
 const submitJInput = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jInput: JInput,
 ): Promise<void> => {
@@ -528,7 +528,7 @@ const submitJInput = async (
  * as recordJSubmitResult so restart/replay cannot lose failure classification.
  */
 export async function submitRuntimeJOutbox(
-  env: RuntimeState,
+  env: RuntimeReplica,
   jOutbox: JInput[],
   deps: RuntimeJSubmitDeps,
 ): Promise<void> {

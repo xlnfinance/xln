@@ -2,7 +2,7 @@ import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/st
 import { isLeftEntity } from '../protocol/entity-id';
 import { createStructuredLogger } from '../infra/logger';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 
 const solvencyLog = createStructuredLogger('runtime.solvency');
 
@@ -54,7 +54,7 @@ const canonicalAmount = (value: unknown, context: string): bigint => {
   throw new Error(`${context} must be a bigint-compatible amount`);
 };
 
-const selectCanonicalStates = (env: RuntimeState): EntityState[] => {
+const selectCanonicalStates = (env: RuntimeReplica): EntityState[] => {
   const selected = new Map<string, { signerId: string; state: EntityState }>();
   for (const replica of env.eReplicas.values()) {
     const entityId = String(replica.state?.entityId || '')
@@ -103,7 +103,7 @@ const ensureAsset = (byAsset: Map<string, AssetSolvency>, state: EntityState, ra
   return created;
 };
 
-export const calculateSolvency = (env: RuntimeState, snapshot?: RuntimeState): Solvency => {
+export const calculateSolvency = (env: RuntimeReplica, snapshot?: RuntimeReplica): Solvency => {
   const states = selectCanonicalStates(snapshot || env);
   const byAsset = new Map<string, AssetSolvency>();
   let accountViews = 0;
@@ -140,7 +140,7 @@ export const calculateSolvency = (env: RuntimeState, snapshot?: RuntimeState): S
   };
 };
 
-export const verifySolvency = (env: RuntimeState, label?: string): boolean => {
+export const verifySolvency = (env: RuntimeReplica, label?: string): boolean => {
   const solvency = calculateSolvency(env);
   const invalid = Array.from(solvency.byAsset.values()).filter(asset => !asset.isValid);
   if (!solvency.isValid) {

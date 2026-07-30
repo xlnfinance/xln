@@ -10,9 +10,9 @@ import type { EntityReplica } from './types';
 /**
  * Runtime-owned capabilities visible during one Entity transition.
  *
- * This is deliberately structural: Entity never imports RuntimeState and
+ * This is deliberately structural: Entity never imports RuntimeReplica and
  * cannot inspect Runtime mempools, WAL handles, transport state, or lifecycle
- * machinery. RuntimeState satisfies this contract at the call boundary.
+ * machinery. RuntimeReplica satisfies this contract at the call boundary.
  *
  * The remaining fields are the measured legacy transition surface. Shrink
  * this interface when a dependency becomes an explicit input; never widen it

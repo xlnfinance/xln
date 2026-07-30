@@ -1,6 +1,6 @@
 import type { Signer } from 'ethers';
 import { ethers } from 'ethers';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JTx } from '../types/jurisdiction-runtime';
 import { makeJAdapterFailureResult } from './failure';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
@@ -26,7 +26,7 @@ import type { RpcWriteMethods } from './rpc-write-methods';
 import type { RpcReceiptReaders } from './rpc-receipts';
 
 type SubmitOptions = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   signerId?: string;
   signerPrivateKey?: Uint8Array;
   timestamp?: number;

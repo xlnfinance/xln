@@ -1,8 +1,8 @@
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 
 export type RuntimeLifecyclePhase = 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
 
-type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
 
 const ALLOWED_TRANSITIONS: Record<RuntimeLifecyclePhase, ReadonlySet<RuntimeLifecyclePhase>> = {
   booting: new Set(['running', 'quiescing', 'stopped', 'halted']),
@@ -39,7 +39,7 @@ export type RuntimeCommandReadiness =
   | { ready: true; reason: null }
   | { ready: false; reason: string };
 
-export const getRuntimeCommandReadiness = (env: RuntimeState): RuntimeCommandReadiness => {
+export const getRuntimeCommandReadiness = (env: RuntimeReplica): RuntimeCommandReadiness => {
   const state = env.runtimeState ?? {};
   const phase = inferRuntimeLifecyclePhase(state);
   if (phase !== 'running') return { ready: false, reason: `phase=${phase}` };
@@ -49,7 +49,7 @@ export const getRuntimeCommandReadiness = (env: RuntimeState): RuntimeCommandRea
   return { ready: true, reason: null };
 };
 
-export const assertRuntimeCommandReady = (env: RuntimeState): void => {
+export const assertRuntimeCommandReady = (env: RuntimeReplica): void => {
   const readiness = getRuntimeCommandReadiness(env);
   if (!readiness.ready) throw new Error(`RUNTIME_COMMAND_NOT_READY:${readiness.reason}`);
 };

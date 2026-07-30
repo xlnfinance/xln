@@ -16,7 +16,7 @@
   import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
   import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/embedded-runtime-context';
   import type { Tab } from '$lib/types/ui';
-  import type { RuntimeState, EnvSnapshot } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot } from '@xln/runtime/api/runtime-module';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import type { EntityOpenAction } from '$lib/view/utils/panelBridge';
 
@@ -34,7 +34,7 @@
     entityId?: string;
     entityName?: string;
     signerId?: string;
-    runtimeFrameEnv?: Writable<RuntimeState | null>;
+    runtimeFrameEnv?: Writable<RuntimeReplica | null>;
     runtimeFrameHistory?: Writable<EnvSnapshot[]>;
     runtimeFrameTimeIndex?: Writable<number>;
     runtimeFrameIsLive?: Writable<boolean>;
@@ -51,7 +51,7 @@
   });
 
   const isRemoteRuntime = $derived.by<boolean>(() => $runtimeControllerHandle.mode === 'remote');
-  const activeEnv = $derived.by<RuntimeState | null>(() => {
+  const activeEnv = $derived.by<RuntimeReplica | null>(() => {
     if (isRemoteRuntime) return null;
     return runtimeFrameEnv ? ($runtimeFrameEnv ?? null) : null;
   });
@@ -84,7 +84,7 @@
     runtimeFrameIsLive?.set(true);
   }
 
-  function resolveLiveEnv(): RuntimeState | null {
+  function resolveLiveEnv(): RuntimeReplica | null {
     return isRemoteRuntime ? null : activeEnv;
   }
 

@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from './types';
+import type { RuntimeReplica, RuntimeTx } from './types';
 import { getLocalSignerPrivateKey } from '../account/crypto';
 import { ENTITY_J_SUBMIT_FALLBACK_MS, isEntityActiveLeader } from '../entity/consensus/leader';
 import { isBatchEmpty } from '../jurisdiction/batch';
@@ -13,12 +13,12 @@ import {
 
 type RetryJSubmitTx = Extract<RuntimeTx, { type: 'retryJSubmit' }>;
 
-const hasQueuedAbort = (env: RuntimeState, entityId: string): boolean =>
+const hasQueuedAbort = (env: RuntimeReplica, entityId: string): boolean =>
   (env.runtimeMempool?.entityInputs ?? []).some((input) =>
     normalizeJSubmitId(input.entityId) === normalizeJSubmitId(entityId) &&
     (input.entityTxs ?? []).some((tx) => tx.type === 'j_abort_sent_batch'));
 
-const hasQueuedRetry = (env: RuntimeState, identity: JSubmitBatchIdentity): boolean =>
+const hasQueuedRetry = (env: RuntimeReplica, identity: JSubmitBatchIdentity): boolean =>
   (env.runtimeMempool?.runtimeTxs ?? []).some((tx) =>
     tx.type === 'retryJSubmit' &&
     normalizeJSubmitId(tx.data.jurisdictionName) === normalizeJSubmitId(identity.jurisdictionName) &&
@@ -41,7 +41,7 @@ const jSubmitBatchIdentity = (replica: EntityReplica): JSubmitBatchIdentity | nu
   };
 };
 
-const canSubmitLocally = (env: RuntimeState, signerId: string): boolean => {
+const canSubmitLocally = (env: RuntimeReplica, signerId: string): boolean => {
   const signer = normalizeJSubmitId(signerId);
   return signer === normalizeJSubmitId(env.runtimeId) || Boolean(getLocalSignerPrivateKey(env, signer));
 };
@@ -59,7 +59,7 @@ const nextRetryAt = (replica: EntityReplica): number | null => {
   return local.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS;
 };
 
-export const getNextJSubmitRetryTimestamp = (env: RuntimeState): number | null => {
+export const getNextJSubmitRetryTimestamp = (env: RuntimeReplica): number | null => {
   let next = Infinity;
   for (const replica of env.eReplicas.values()) {
     if (!isEntityActiveLeader(replica) || !canSubmitLocally(env, replica.signerId)) continue;
@@ -74,7 +74,7 @@ export const getNextJSubmitRetryTimestamp = (env: RuntimeState): number | null =
   return Number.isFinite(next) ? next : null;
 };
 
-export const collectDueJSubmitRuntimeTxs = (env: RuntimeState, now: number): RetryJSubmitTx[] => {
+export const collectDueJSubmitRuntimeTxs = (env: RuntimeReplica, now: number): RetryJSubmitTx[] => {
   const retries: RetryJSubmitTx[] = [];
   for (const replica of env.eReplicas.values()) {
     if (!isEntityActiveLeader(replica) || !canSubmitLocally(env, replica.signerId)) continue;

@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeReplica } from '../types';
 import {
   rollbackReliableDeliveryReceipts,
   rollbackReliableIngressCommit,
@@ -12,7 +12,7 @@ import {
 import type { FrameExecutionState } from './execution-state';
 import type { RuntimeProcessProfile } from './process-profile';
 
-type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
 
 export type RuntimeFrameFailureDeps = {
   isStorageError(error: unknown): boolean;
@@ -20,13 +20,13 @@ export type RuntimeFrameFailureDeps = {
 };
 
 export type RuntimeFrameFailure = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   error: unknown;
   inputDropped: boolean;
 };
 
 const haltMutatedRuntime = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   error: unknown,
 ): void => {
   const state = ensureRuntimeState(env);
@@ -42,7 +42,7 @@ const haltMutatedRuntime = (
 
 export const handleRuntimeFrameFailure = async (
   error: unknown,
-  liveEnv: RuntimeState,
+  liveEnv: RuntimeReplica,
   frame: FrameExecutionState,
   deps: RuntimeFrameFailureDeps,
 ): Promise<RuntimeFrameFailure> => {
@@ -94,8 +94,8 @@ export const handleRuntimeFrameFailure = async (
 };
 
 export const finishRuntimeFrame = (
-  env: RuntimeState,
-  liveEnv: RuntimeState,
+  env: RuntimeReplica,
+  liveEnv: RuntimeReplica,
   state: RuntimeLifecycleState,
   frame: FrameExecutionState,
   profile: RuntimeProcessProfile,

@@ -2,7 +2,7 @@ import { createStructuredLogger } from '../infra/logger';
 import type { createRuntimeLoopApi } from './loop';
 import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
 import { dbRootPath } from './platform';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -21,7 +21,7 @@ type RuntimeStorageAdminDeps = Pick<
 >;
 
 const clearNodeRuntimeDatabases = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageAdminDeps,
 ): Promise<void> => {
   await deps.closeRuntimeDb(env);
@@ -33,7 +33,7 @@ const clearNodeRuntimeDatabases = async (
 };
 
 const clearBrowserRuntimeDatabases = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageAdminDeps,
 ): Promise<void> => {
   const infraReady = await deps.tryOpenInfraDb(env);
@@ -50,7 +50,7 @@ const clearBrowserRuntimeDatabases = async (
 };
 
 export const clearRuntimeDatabases = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeStorageAdminDeps,
 ): Promise<void> => {
   try {

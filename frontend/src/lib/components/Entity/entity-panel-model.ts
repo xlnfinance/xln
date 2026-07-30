@@ -1,6 +1,6 @@
 import type {
   AccountReplica,
-  RuntimeState,
+  RuntimeReplica,
   EnvSnapshot,
   Profile as GossipProfile,
   RuntimeAdapterEntitySummary,
@@ -36,7 +36,7 @@ export function materializeReplicaMap(
 }
 
 export function getEnvReplicaMap(
-  sourceEnv: RuntimeState | EnvSnapshot | null | undefined,
+  sourceEnv: RuntimeReplica | EnvSnapshot | null | undefined,
   _revision = '',
 ): Map<string, EntityReplica> | null {
   if (!sourceEnv) return null;
@@ -220,7 +220,7 @@ function buildEntityPanelViewFromRuntimeProjection(
   frame: RuntimeAdapterViewFrame | null | undefined,
   entityId: string,
   signerId: string,
-  sourceEnv: RuntimeState | EnvSnapshot | null | undefined,
+  sourceEnv: RuntimeReplica | EnvSnapshot | null | undefined,
 ): EntityPanelView | null {
   if (!frame?.activeEntity) return null;
   const requestedEntityId = normalizeEntityId(entityId || frame.activeEntityId || frame.activeEntity.summary.entityId);
@@ -267,7 +267,7 @@ function buildEntityPanelViewFromRuntimeProjection(
 }
 
 export function buildEntityPanelView(
-  sourceEnv: RuntimeState | EnvSnapshot | null | undefined,
+  sourceEnv: RuntimeReplica | EnvSnapshot | null | undefined,
   entityId: string,
   signerId: string,
   revision = '',
@@ -308,7 +308,7 @@ export function buildEntityPanelView(
   };
 }
 
-export function hasDevnetJurisdiction(sourceEnv: RuntimeState | EnvSnapshot | null | undefined): boolean {
+export function hasDevnetJurisdiction(sourceEnv: RuntimeReplica | EnvSnapshot | null | undefined): boolean {
   if (!sourceEnv?.jReplicas) return false;
   for (const [, replica] of sourceEnv.jReplicas.entries()) {
     if (Number(replica?.chainId ?? 0) === 31337) return true;
@@ -316,22 +316,22 @@ export function hasDevnetJurisdiction(sourceEnv: RuntimeState | EnvSnapshot | nu
   return false;
 }
 
-export function getRuntimeEnv(env: RuntimeState | EnvSnapshot | null | undefined): RuntimeState | null {
+export function getRuntimeEnv(env: RuntimeReplica | EnvSnapshot | null | undefined): RuntimeReplica | null {
   return unwrapLiveRuntimeEnv(env);
 }
 
-export function requireRuntimeEnv(env: RuntimeState | EnvSnapshot | null | undefined, context: string): RuntimeState {
+export function requireRuntimeEnv(env: RuntimeReplica | EnvSnapshot | null | undefined, context: string): RuntimeReplica {
   const runtimeEnv = getRuntimeEnv(env);
   if (!runtimeEnv) throw new Error(`${context} requires live runtime environment`);
   return runtimeEnv;
 }
 
-export function getRuntimeId(env: RuntimeState | EnvSnapshot | null | undefined): string | null {
+export function getRuntimeId(env: RuntimeReplica | EnvSnapshot | null | undefined): string | null {
   const runtimeId = env?.runtimeId;
   return typeof runtimeId === 'string' && runtimeId.length > 0 ? runtimeId : null;
 }
 
-export function getActiveJurisdictionName(env: RuntimeState | EnvSnapshot | null | undefined): string | null {
+export function getActiveJurisdictionName(env: RuntimeReplica | EnvSnapshot | null | undefined): string | null {
   if (!env || !('activeJurisdiction' in env)) return null;
   return typeof env.activeJurisdiction === 'string' && env.activeJurisdiction.length > 0
     ? env.activeJurisdiction
@@ -357,7 +357,7 @@ export function jurisdictionKey(value: unknown): string {
 }
 
 export function getCurrentEntityJurisdictionName(
-  env: RuntimeState | EnvSnapshot | null | undefined,
+  env: RuntimeReplica | EnvSnapshot | null | undefined,
   replica: EntityReplica | null | undefined,
 ): string | null {
   const configured = String(replica?.state?.config?.jurisdiction?.name || '').trim();
@@ -365,7 +365,7 @@ export function getCurrentEntityJurisdictionName(
 }
 
 export function getCurrentEntityJurisdictionKey(
-  env: RuntimeState | EnvSnapshot | null | undefined,
+  env: RuntimeReplica | EnvSnapshot | null | undefined,
   replica: EntityReplica | null | undefined,
 ): string {
   return jurisdictionKey(replica?.state?.config?.jurisdiction)
@@ -374,7 +374,7 @@ export function getCurrentEntityJurisdictionKey(
 }
 
 export function getEntityJurisdictionKey(
-  env: RuntimeState | EnvSnapshot | null | undefined,
+  env: RuntimeReplica | EnvSnapshot | null | undefined,
   entityId: string,
 ): string {
   const normalized = String(entityId || '').trim().toLowerCase();
@@ -409,7 +409,7 @@ export function getEntityJurisdictionKeyFromReplicas(
 }
 
 export function isSameJurisdictionEntity(
-  env: RuntimeState | EnvSnapshot | null | undefined,
+  env: RuntimeReplica | EnvSnapshot | null | undefined,
   replica: EntityReplica | null | undefined,
   fallbackEntityId: string,
   leftEntityId: string,
@@ -448,7 +448,7 @@ export function isSameJurisdictionEntityInReplicas(
   return leftJurisdiction === rightJurisdiction;
 }
 
-export function getGossipProfiles(env: RuntimeState | EnvSnapshot | null | undefined): GossipProfile[] {
+export function getGossipProfiles(env: RuntimeReplica | EnvSnapshot | null | undefined): GossipProfile[] {
   if (!env?.gossip) return [];
   if ('getProfiles' in env.gossip && typeof env.gossip.getProfiles === 'function') {
     return env.gossip.getProfiles();

@@ -1,6 +1,6 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import type { EntityTx } from '../../types/entity-tx';
-import type { RuntimeState, ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, RoutedEntityInput } from '../types';
+import type { RuntimeReplica, ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, RoutedEntityInput } from '../types';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { hasEntityCommitCertificate } from '../../entity/signatures';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
@@ -629,7 +629,7 @@ export const accountProposalEvidenceRank = (output: RoutedEntityInput): number =
     return rank + Number(Boolean(proposal.frameHanko)) + Number(Boolean(proposal.disputeSeal));
   }, 0);
 
-export const accountProposalCommittedBySender = (env: RuntimeState, output: RoutedEntityInput): boolean => {
+export const accountProposalCommittedBySender = (env: RuntimeReplica, output: RoutedEntityInput): boolean => {
   const proposals = getEffectiveEntityInputTxs(output).flatMap(tx => {
     if (tx.type !== 'accountInput') return [];
     const proposal = accountInputProposal(tx.data);

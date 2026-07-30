@@ -8,7 +8,7 @@ import {
 } from '../server/offchain-faucet-admission';
 import { createRelayStore } from '../relay/store';
 import type { AccountFrame, AccountState } from '../types/account';
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -56,7 +56,7 @@ const makeEnv = (
   account: AccountState,
   hubEntityId: string = HUB,
   hubSignerId: string = HUB_SIGNER,
-): RuntimeState => ({
+): RuntimeReplica => ({
   eReplicas: new Map([
     [`${hubEntityId}:${hubSignerId}`, {
       entityId: hubEntityId,
@@ -79,7 +79,7 @@ const makeEnv = (
   ]),
   gossip: { getProfiles: () => [] },
   runtimeId: USER_RUNTIME_ID,
-} as unknown as RuntimeState);
+} as unknown as RuntimeReplica);
 
 const callFaucet = async (
   account: AccountState,

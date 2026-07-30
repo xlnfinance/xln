@@ -1,5 +1,5 @@
 import type { EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica } from '../entity/types';
-import type { RuntimeState, ReliableDeliveryIdentity, RoutedEntityInput } from './types';
+import type { RuntimeReplica, ReliableDeliveryIdentity, RoutedEntityInput } from './types';
 import type { EntityTx } from '../types/entity-tx';
 import { getEntityLeaderState } from '../entity/consensus/leader';
 import { reconcileJEventRangeWithFinalizedState } from '../jurisdiction/local-history';
@@ -18,7 +18,7 @@ import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope'
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
 const findTargetReplica = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   identity: ReliableDeliveryIdentity,
 ): EntityReplica | undefined => [...env.eReplicas.values()].find(replica =>
   normalize(replica.entityId || replica.state.entityId) === identity.entityId &&
@@ -237,7 +237,7 @@ const jPrefixLineageCoversIdentity = (
  * not carry their signed body and must never become terminal by height alone.
  */
 export const isAuthenticatedAppliedStaleJPrefixInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   identity: ReliableDeliveryIdentity,
 ): boolean => {
@@ -307,7 +307,7 @@ const accountStateCovers = (
  * normal scheduler deferral.
  */
 export const isReliableAccountAckAwaitingCommit = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   identity: ReliableDeliveryIdentity,
 ): boolean => {
   if (identity.kind !== 'account-ack') return false;
@@ -459,7 +459,7 @@ const accountForLane = (
  * lineage, H+2 says nothing about the exact proposal hash at H+1.
  */
 export const canReissueTerminalAccountFrameAck = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   terminal: ReliableDeliveryIdentity,
   candidate: ReliableDeliveryIdentity,
   input: RoutedEntityInput,
@@ -549,7 +549,7 @@ const terminalJFinality = (
 };
 
 export const assertReliableIdentityDurableInPostState = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   input: RoutedEntityInput,
   identity: ReliableDeliveryIdentity,
 ): void => {
@@ -571,7 +571,7 @@ export const assertReliableIdentityDurableInPostState = (
 
 /** Classify identities whose retained receipt may advance the compact terminal frontier. */
 export const isReliableIdentityTerminalInPostState = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   identity: ReliableDeliveryIdentity,
 ): boolean => {
   const replica = findTargetReplica(env, identity);
@@ -591,7 +591,7 @@ export const isReliableIdentityTerminalInPostState = (
  * verified certified prefix. No terminal receipt itself covers a lower hash.
  */
 export const assertTerminalReceiptCoversInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   terminal: ReliableDeliveryIdentity,
   candidate: ReliableDeliveryIdentity,
   input: RoutedEntityInput,

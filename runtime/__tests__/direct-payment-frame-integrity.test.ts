@@ -5,7 +5,7 @@ import { computeFrameHash } from '../account/consensus/frame';
 import { applyPendingForwardFollowup } from '../entity/tx/handlers/account/committed-htlc-followups';
 import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;
@@ -128,7 +128,7 @@ describe('direct payment frame integrity', () => {
       const state = { entityId: LEFT } as EntityState;
       const newState = { entityId: LEFT, accounts: new Map([[NEXT, {} as AccountState]]) } as EntityState;
       applyPendingForwardFollowup({
-        env: {} as RuntimeState,
+        env: {} as RuntimeReplica,
         state,
         newState,
         input: {} as AccountInput,
@@ -149,7 +149,7 @@ describe('direct payment frame integrity', () => {
     account.pendingForwards = [{ tokenId: 1, amount: 1n, route: [LEFT, NEXT, FINAL] }];
 
     expect(() => applyPendingForwardFollowup({
-      env: {} as RuntimeState,
+      env: {} as RuntimeReplica,
       state: { entityId: LEFT } as EntityState,
       newState: { entityId: LEFT, accounts: new Map() } as EntityState,
       input: {} as AccountInput,

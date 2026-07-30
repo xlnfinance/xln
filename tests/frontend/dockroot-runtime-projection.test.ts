@@ -68,7 +68,7 @@ test('DockRoot defaults to Graph left plus pinned wallet and tools on the right'
   expect(source).toContain('showDockTimeMachine = !embedMode || $settings.showTimeMachine');
 });
 
-test('DockRoot blocks RuntimeState-only panels on remote runtimes instead of mounting blank fake RuntimeState views', () => {
+test('DockRoot blocks RuntimeReplica-only panels on remote runtimes instead of mounting blank fake RuntimeReplica views', () => {
   const source = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
 
   expect(source).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");

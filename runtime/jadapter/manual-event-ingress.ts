@@ -1,5 +1,5 @@
 import { isHexString } from 'ethers';
-import type { RuntimeInput, RuntimeState, RuntimeTx } from '../runtime/types';
+import type { RuntimeInput, RuntimeReplica, RuntimeTx } from '../runtime/types';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { indexReserveUpdatedEvents } from '../jurisdiction/event-evidence';
 import {
@@ -57,7 +57,7 @@ const normalizeManualJEvents = (
 };
 
 const buildFromIngress = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   events: JEventIngress[],
   label: string,
   source: LocalJEventIngressSource,
@@ -106,7 +106,7 @@ const buildFromIngress = (
 };
 
 export const buildJEventsRuntimeInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   events: JEvent[],
   label: string,
   source: LocalJEventIngressSource,
@@ -116,7 +116,7 @@ export const buildJEventsRuntimeInput = (
     : buildFromIngress(env, normalizeManualJEvents(events, label), label, source);
 
 export const applyJEventsToEnv = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   events: JEvent[],
   label: string,
   source: LocalJEventIngressSource,

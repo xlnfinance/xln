@@ -17,7 +17,7 @@ import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountReplica, Delta } from '../types/account';
 import type { EntityInput, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../entity/profile';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
@@ -53,7 +53,7 @@ const R2R_AMOUNT = usd(250);
 const HTLC_AMOUNT = usd(1_000);
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-type P2PScenarioEnv = RuntimeState;
+type P2PScenarioEnv = RuntimeReplica;
 
 const resolveJurisdiction = (): {
   jurisdiction: JurisdictionConfig;

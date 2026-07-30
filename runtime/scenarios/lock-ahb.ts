@@ -15,7 +15,7 @@
  * - Griefing protection (timelock cascade)
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import type { JAdapter } from '../jadapter/types';
 import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry } from './helpers';
@@ -41,7 +41,7 @@ const SIGNER_PREFUND = usd(1_000_000);
 // - env, title, opts (required)
 // - Optional 4th param: either EntityInput[] OR {expectedSolvency: bigint} to merge into opts
 async function pushSnapshot(
-  env: RuntimeState,
+  env: RuntimeReplica,
   title: string,
   opts: {
     title?: string;
@@ -73,7 +73,7 @@ async function pushSnapshot(
 
 
 // Alias for runtime.ts compatibility
-export async function lockAhb(env: RuntimeState): Promise<void> {
+export async function lockAhb(env: RuntimeReplica): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'HTLC AHB');
   // Register signer keys for real signatures
   // 2-6 for entities (1 reserved for foundation)
@@ -1934,10 +1934,10 @@ if (import.meta.main) {
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
 
-  // Dump full RuntimeState to JSON
+  // Dump full RuntimeReplica to JSON
   const fs = await import('fs');
 
-  console.log('💾 Dumping full runtime (RuntimeState) to JSON...');
+  console.log('💾 Dumping full runtime (RuntimeReplica) to JSON...');
 
   // Handle circular refs
   const seen = new Set<object>();
@@ -1958,7 +1958,7 @@ if (import.meta.main) {
 
   fs.writeFileSync('/tmp/lock-ahb-runtime.json', envJson);
   const sizeMB = (envJson.length / 1024 / 1024).toFixed(1);
-  console.log(`  ✅ /tmp/lock-ahb-runtime.json (${sizeMB}MB full RuntimeState dump)\n`);
+  console.log(`  ✅ /tmp/lock-ahb-runtime.json (${sizeMB}MB full RuntimeReplica dump)\n`);
 
   process.exit(0);
 }

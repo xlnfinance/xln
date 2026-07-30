@@ -8,7 +8,7 @@ import {
   summarizeRuntimeAccountCausality,
 } from '../../qa/account-causal-trace';
 import { prepareHtlcPaymentEntityInputs } from '../../entity/htlc/payment-admission';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeReplica, RuntimeInput } from '../types';
 import { applyEntityHeightDurabilityBarrier } from '../entity-height-barrier';
 import { cloneRuntimeFrameMempool } from './clone';
 import type { FrameExecutionState } from './execution-state';
@@ -27,8 +27,8 @@ const countEntityTxs = (input: RuntimeInput): number =>
   input.entityInputs.reduce((sum, entityInput) => sum + (entityInput.entityTxs?.length ?? 0), 0);
 
 export const prepareRuntimeFrameInput = async (
-  env: RuntimeState,
-  state: NonNullable<RuntimeState['runtimeState']>,
+  env: RuntimeReplica,
+  state: NonNullable<RuntimeReplica['runtimeState']>,
   input: RuntimeInput,
   mempool: RuntimeInput,
   queuedAt: number | undefined,

@@ -98,7 +98,7 @@ describe('swap panel helpers', () => {
     expect(view.getPairBook(userId, '1/2')).toBeNull();
   });
 
-  test('builds swap projection from runtime-view fields without RuntimeState shape', () => {
+  test('builds swap projection from runtime-view fields without RuntimeReplica shape', () => {
     const hubId = '0xHubProjection';
     const userId = '0xUserProjection';
     const book = { bids: [], asks: [] };
@@ -276,7 +276,7 @@ describe('swap panel helpers', () => {
     });
   });
 
-  test('SwapPanel reads through injected runtime projection instead of owning RuntimeState reads', async () => {
+  test('SwapPanel reads through injected runtime projection instead of owning RuntimeReplica reads', async () => {
     const [panel, workspace, tabs] = await Promise.all([
       Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte').text(),
       Bun.file('frontend/src/lib/components/Entity/AccountWorkspaceView.svelte').text(),
@@ -284,8 +284,8 @@ describe('swap panel helpers', () => {
     ]);
 
     expect(panel).toContain('export let runtimeView: SwapPanelRuntimeView | null = null');
-    expect(panel).toContain('export let env: RuntimeState | null = null');
-    expect(panel).not.toContain('export let env: RuntimeState | EnvSnapshot');
+    expect(panel).toContain('export let env: RuntimeReplica | null = null');
+    expect(panel).not.toContain('export let env: RuntimeReplica | EnvSnapshot');
     expect(panel).toContain('swapRuntimeView = runtimeView ?? buildSwapPanelRuntimeView(activeFrame)');
     expect(workspace).toContain('export let swapRuntimeView: SwapPanelRuntimeView | null = null');
     expect(workspace).toContain('{#if activeEnv || swapRuntimeView}');

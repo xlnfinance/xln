@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import { EntityProvider__factory } from '../../../jurisdictions/typechain-types';
 import type { CertifiedRegistrationEvidence } from '../../types/jurisdiction-runtime';
 import type { EntityState, JurisdictionConfig } from '../../entity/types';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import {
   computeCanonicalReceiptsRoot,
@@ -32,7 +32,7 @@ const heightHash = (value: number): string => {
 };
 
 export const installCanonicalRegistrationEvidence = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
   entityId: string,
   boardHash: string,
@@ -112,7 +112,7 @@ export const installCanonicalRegistrationEvidence = async (
 };
 
 export const installCanonicalRegisteredBoardAuthority = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   jurisdiction: JurisdictionConfig,
   state: EntityState,
   boardHash: string,

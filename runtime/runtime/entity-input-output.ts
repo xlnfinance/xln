@@ -1,5 +1,5 @@
 import type { EntityTx } from '../types/entity-tx';
-import type { RoutedEntityInput, RuntimeState } from './types';
+import type { RoutedEntityInput, RuntimeReplica } from './types';
 import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from './entity-output-signer';
 import { getPerfMs } from '../infra/time';
@@ -73,7 +73,7 @@ const normalizeRuntimeRef = (value: unknown): string =>
     .toLowerCase();
 
 const decodeCrossJCommand = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   output: RoutedEntityInput,
 ): CrossJCommand => {
   if (!isCrossJCommandEnvelope(output)) {
@@ -151,7 +151,7 @@ const commandToEntityInput = (
 });
 
 export const routeCommittedEntityOutputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   outputs: RoutedEntityInput[],
   context: RuntimeEntityInputBatchContext,
 ): void => {
@@ -181,7 +181,7 @@ export const routeCommittedEntityOutputs = (
 };
 
 export const collectCommittedEntityResult = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   replicaKey: string,
   result: Awaited<ReturnType<typeof applyEntityInputToReplica>>,
   context: RuntimeEntityInputBatchContext,
@@ -199,7 +199,7 @@ export const collectCommittedEntityResult = (
 };
 
 export const drainImmediateCrossJurisdictionOutputs = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   options: RuntimeEntityInputApplyOptions,
   context: RuntimeEntityInputBatchContext,
 ): Promise<void> => {

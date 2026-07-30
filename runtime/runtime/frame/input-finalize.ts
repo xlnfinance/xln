@@ -2,7 +2,7 @@ import { isLocalEntityLeaderTimeoutVote } from '../../entity/consensus/leader';
 import { createStructuredLogger } from '../../infra/logger';
 import { createGossipLayer } from '../../networking/gossip';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
-import type { RuntimeState, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/input';
 import {
   commitReliableIngress,
@@ -18,7 +18,7 @@ const runtimeLog = createStructuredLogger('runtime');
 
 export type RuntimeReliableCommitDeps = {
   applyCommittedLocalReceipts(
-    env: RuntimeState,
+    env: RuntimeReplica,
     commits: ReliableIngressCommit[],
     options: {
       isReplay: boolean;
@@ -28,7 +28,7 @@ export type RuntimeReliableCommitDeps = {
 };
 
 export const commitRuntimeReliableIngress = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   receivedInputs: RoutedEntityInput[],
   appliedInputs: RoutedEntityInput[],
   isReplay: boolean,
@@ -58,7 +58,7 @@ const countMeaningfulEntityInputs = (
     return count + Number(meaningful);
   }, 0);
 
-const emitQueuedJBatches = (env: RuntimeState, jOutbox: readonly JInput[]): void => {
+const emitQueuedJBatches = (env: RuntimeReplica, jOutbox: readonly JInput[]): void => {
   for (const jInput of jOutbox) {
     for (const jTx of jInput.jTxs) {
       env.emit('JBatchQueued', {
@@ -71,7 +71,7 @@ const emitQueuedJBatches = (env: RuntimeState, jOutbox: readonly JInput[]): void
 };
 
 export const advanceAppliedRuntimeFrame = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   runtimeInput: RuntimeInput,
   runtimeTxs: readonly RuntimeTx[],
   appliedEntityInputs: readonly RoutedEntityInput[],
@@ -116,7 +116,7 @@ export const advanceAppliedRuntimeFrame = (
 };
 
 const durableIngressSources = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   commits: readonly ReliableIngressCommit[],
 ): Map<string, Set<string>> => {
   const sourcesByIdentity = new Map<string, Set<string>>();
@@ -165,7 +165,7 @@ const durableReceiptInputs = (
   );
 
 export const buildAppliedRuntimeInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   sourceInput: RuntimeInput,
   runtimeTxs: RuntimeTx[],
   receivedInputs: RoutedEntityInput[],

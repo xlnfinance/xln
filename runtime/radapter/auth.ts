@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { RuntimeAdapterAuthLevel, RuntimeAdapterAuthRole } from './types';
 
 const AUTH_DOMAIN = 'xln-radapter-v1';
@@ -98,7 +98,7 @@ const decodeTokenField = (value: string, label: string): string | null => {
   }
 };
 
-export const resolveRuntimeAdapterAuthAudience = (env: RuntimeState | null): string => {
+export const resolveRuntimeAdapterAuthAudience = (env: RuntimeReplica | null): string => {
   const explicit = typeof process !== 'undefined' ? String(process.env['XLN_RADAPTER_AUDIENCE'] || '').trim() : '';
   if (explicit) return normalizeTokenField(explicit.toLowerCase(), 'AUDIENCE');
   const runtimeId = String(env?.runtimeId || '').trim().toLowerCase();
@@ -155,7 +155,7 @@ const constantTimeEquals = (left: string, right: string): boolean => {
   return timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-export const resolveRuntimeAdapterAuthSeed = (env: RuntimeState | null): string | null => {
+export const resolveRuntimeAdapterAuthSeed = (env: RuntimeReplica | null): string | null => {
   const fromEnv = typeof process !== 'undefined' ? String(process.env['XLN_RADAPTER_AUTH_SEED'] || '').trim() : '';
   if (registeredRuntimeAdapterAuthSeed) {
     if (fromEnv && normalizedSeed(fromEnv) !== registeredRuntimeAdapterAuthSeed) {

@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState, RuntimeInput } from '../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 import { safeStringify } from '../protocol/serialization';
 import type { Profile } from '../entity/profile';
 import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../relay/store';
@@ -24,13 +24,13 @@ const faucetLog = createStructuredLogger('server.faucet');
 
 type OffchainFaucetHandlerInput = {
   req: Request;
-  env: RuntimeState | null;
+  env: RuntimeReplica | null;
   headers: HeadersInit;
   relayStore: RelayStore;
-  enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
-  validateRuntimeInputAdmission: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
+  enqueueRuntimeInput: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: RuntimeReplica, runtimeInput: RuntimeInput) => void;
   registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
-  getCurrentRuntimeHeight: (env: RuntimeState | null) => number;
+  getCurrentRuntimeHeight: (env: RuntimeReplica | null) => number;
   buildRuntimeInputStatusUrl: (id: string) => string;
 };
 
@@ -67,7 +67,7 @@ const fail = (
 });
 
 const resolveUserRuntimeId = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   userEntityId: string,
   runtimeId: unknown,
 ): string => {
@@ -80,7 +80,7 @@ const resolveUserRuntimeId = (
 };
 
 const parseFaucetRequest = async (
-  input: OffchainFaucetHandlerInput & { env: RuntimeState },
+  input: OffchainFaucetHandlerInput & { env: RuntimeReplica },
 ): Promise<FaucetPhase<FaucetRequest>> => {
   const body = await input.req.json() as Record<string, unknown>;
   const userEntityId = body['userEntityId'];
@@ -163,7 +163,7 @@ const recordRuntimeVisibility = (
 };
 
 const resolveFaucetHub = (
-  input: OffchainFaucetHandlerInput & { env: RuntimeState },
+  input: OffchainFaucetHandlerInput & { env: RuntimeReplica },
   request: FaucetRequest,
 ): FaucetPhase<FaucetHub> => {
   const activeHubs = input.relayStore.activeHubEntityIds.filter(Boolean).map(entityId => ({ entityId }));
@@ -236,7 +236,7 @@ const resolveFaucetHub = (
 };
 
 const admitFaucetAccount = (
-  input: OffchainFaucetHandlerInput & { env: RuntimeState },
+  input: OffchainFaucetHandlerInput & { env: RuntimeReplica },
   request: FaucetRequest,
   hub: FaucetHub,
 ): FaucetPhase<FaucetAccountAdmission> => {
@@ -315,7 +315,7 @@ const admitFaucetAccount = (
 };
 
 const buildFaucetRuntimeInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   request: FaucetRequest,
   hub: FaucetHub,
   amountWei: bigint,
@@ -347,7 +347,7 @@ const buildFaucetRuntimeInput = (
 };
 
 const enqueueFaucetPayment = (
-  input: OffchainFaucetHandlerInput & { env: RuntimeState },
+  input: OffchainFaucetHandlerInput & { env: RuntimeReplica },
   request: FaucetRequest,
   runtimeInput: RuntimeInput,
 ): FaucetPhase<RuntimeIngressReceipt> => {

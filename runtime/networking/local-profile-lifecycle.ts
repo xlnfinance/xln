@@ -1,7 +1,7 @@
 import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { isEntityActiveLeader } from '../entity/consensus/leader';
 import type { EntityInput, EntityReplica } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
@@ -18,11 +18,11 @@ import {
 
 const normalize = (value: string): string => value.trim().toLowerCase();
 
-const hasLocalSigner = (env: RuntimeState, signerId: string): boolean => {
+const hasLocalSigner = (env: RuntimeReplica, signerId: string): boolean => {
   return getSignerPrivateKeyIfAvailable(env, signerId) !== null;
 };
 
-const entityReplicas = (env: RuntimeState, entityId: string): EntityReplica[] => {
+const entityReplicas = (env: RuntimeReplica, entityId: string): EntityReplica[] => {
   const normalizedEntityId = normalize(entityId);
   return [...env.eReplicas.values()].filter(
     (replica) => normalize(replica.entityId) === normalizedEntityId,
@@ -32,7 +32,7 @@ const entityReplicas = (env: RuntimeState, entityId: string): EntityReplica[] =>
 const hasCertificationTx = (txs: readonly { type: string }[] | undefined): boolean =>
   txs?.some((tx) => tx.type === 'certifyProfile') === true;
 
-const hasPendingCertification = (env: RuntimeState, entityId: string): boolean => {
+const hasPendingCertification = (env: RuntimeReplica, entityId: string): boolean => {
   const normalizedEntityId = normalize(entityId);
   for (const replica of entityReplicas(env, normalizedEntityId)) {
     if (
@@ -48,7 +48,7 @@ const hasPendingCertification = (env: RuntimeState, entityId: string): boolean =
 };
 
 const currentProfileIsCertified = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   replica: EntityReplica,
   manifest: ValidatorEncryptionManifest,
 ): boolean => {
@@ -64,7 +64,7 @@ const currentProfileIsCertified = (
  * rebuild the exact descriptor/hash in handleCertifyProfileEntityTx.
  */
 export const buildLocalProfileCertificationInput = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   encryptionAttestations?: readonly ValidatorEncryptionAttestation[],
 ): EntityInput | null => {
@@ -93,7 +93,7 @@ export const buildLocalProfileCertificationInput = (
 
 /** Collect due profile certifications even when no P2P transport is running. */
 export const collectDueLocalProfileCertificationInputs = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   candidateEntityIds?: ReadonlySet<string>,
 ): EntityInput[] => {
   const candidates = candidateEntityIds
@@ -130,7 +130,7 @@ export const collectDueLocalProfileCertificationInputs = (
  * committed Entity Hanko witness. Missing witnesses remain non-routable.
  */
 export const announceCertifiedLocalProfiles = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityIds: readonly string[],
 ): Promise<number> => {
   let announced = 0;

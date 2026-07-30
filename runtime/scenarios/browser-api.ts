@@ -1,4 +1,4 @@
-import type { EnvSnapshot, RuntimeState } from '../runtime/types';
+import type { EnvSnapshot, RuntimeReplica } from '../runtime/types';
 import { startRuntimeFrameTrace } from '../runtime/history-retention';
 
 /**
@@ -9,48 +9,48 @@ import { startRuntimeFrameTrace } from '../runtime/history-retention';
  * implementations back into its own dependency graph.
  */
 export const scenarios = {
-  ahb: async (env: RuntimeState): Promise<RuntimeState> => {
+  ahb: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
     const { ahb } = await import('./ahb');
     await ahb(env);
     return env;
   },
-  lockAhb: async (env: RuntimeState): Promise<RuntimeState> => {
+  lockAhb: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
     const { lockAhb } = await import('./lock-ahb');
     await lockAhb(env);
     return env;
   },
-  swap: async (env: RuntimeState): Promise<RuntimeState> => {
+  swap: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
     const { swap, swapWithOrderbook, multiPartyTrading } = await import('./swap');
     await swap(env);
     await swapWithOrderbook(env);
     await multiPartyTrading(env);
     return env;
   },
-  swapMarket: async (env: RuntimeState): Promise<RuntimeState> => {
+  swapMarket: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
     const { swapMarket } = await import('./swap-market');
     await swapMarket(env);
     return env;
   },
-  rapidFire: async (env: RuntimeState): Promise<RuntimeState> => {
+  rapidFire: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
     const { rapidFire } = await import('./rapid-fire');
     await rapidFire(env);
     return env;
   },
-  grid: async (env: RuntimeState): Promise<RuntimeState> => {
+  grid: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
     const { grid } = await import('./grid');
     await grid(env);
     return env;
   },
-  settle: async (env: RuntimeState): Promise<RuntimeState> => {
+  settle: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
     const { runSettleScenario } = await import('./settle');
     await runSettleScenario(env);
     return env;
   },
-  disputeLifecycle: async (env: RuntimeState): Promise<RuntimeState> => {
+  disputeLifecycle: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
     const { runDisputeLifecycle } = await import('./dispute-lifecycle');
     return await runDisputeLifecycle(env);
   },
-  fullMechanics: async (env: RuntimeState): Promise<RuntimeState> => {
+  fullMechanics: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
     const { getScenario } = await import('./index');
     const scenario = getScenario('ahb');
     if (!scenario) throw new Error('FULL_MECHANICS_SCENARIO_MISSING');
@@ -65,7 +65,7 @@ export type ScenarioRecording = {
   key: ScenarioKey;
   /** Every committed frame of the run, in order. */
   frames: EnvSnapshot[];
-  env: RuntimeState;
+  env: RuntimeReplica;
 };
 
 export const scenarioKeys = Object.keys(scenarios) as ScenarioKey[];
@@ -79,7 +79,7 @@ export const scenarioKeys = Object.keys(scenarios) as ScenarioKey[];
  */
 export const recordScenario = async (
   key: ScenarioKey,
-  env: RuntimeState,
+  env: RuntimeReplica,
 ): Promise<ScenarioRecording> => {
   const run = scenarios[key];
   if (!run) throw new Error(`SCENARIO_UNKNOWN:${String(key)}`);

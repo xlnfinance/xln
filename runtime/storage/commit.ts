@@ -12,7 +12,7 @@ import { safeStringify } from '../protocol/serialization';
 import type {
   RoutedEntityInput,
   RuntimeInput,
-  RuntimeState,
+  RuntimeReplica,
 } from '../runtime/types';
 import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
 import { computeCanonicalStateHashFromEnv } from './canonical-hash';
@@ -76,7 +76,7 @@ export const classifyRuntimeFrameCommitProof = (
 
 const resolveAuthoritativeFrameCommitStatus = async (
   deps: RuntimeStorageApiDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   expectedInput: RuntimeInput | undefined,
   pendingRuntimeInput: RuntimeInput | undefined,
 ): Promise<RuntimeFrameCommitStatus> => {
@@ -111,7 +111,7 @@ const resolveAuthoritativeFrameCommitStatus = async (
 
 export const saveRuntimeEnvironment = async (
   deps: RuntimeStorageApiDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   currentFrameInput?: RuntimeInput,
   currentFrameOutputs?: RoutedEntityInput[],
   pendingRuntimeInput?: RuntimeInput,
@@ -228,14 +228,14 @@ export const createRuntimeStorageCommitApi = (
   deps: RuntimeStorageApiDeps,
 ) => ({
   waitForRuntimeProcessingIdle: (
-    env: RuntimeState,
+    env: RuntimeReplica,
     timeoutMs = 5_000,
   ): Promise<boolean> => waitForRuntimeProcessingIdle(deps, env, timeoutMs),
   getRuntimeProcessGlobal,
   RuntimeStorageWriteTimeoutError,
   RuntimeFrameStorageError,
   saveEnvToDB: (
-    env: RuntimeState,
+    env: RuntimeReplica,
     currentFrameInput?: RuntimeInput,
     currentFrameOutputs?: RoutedEntityInput[],
     pendingRuntimeInput?: RuntimeInput,

@@ -82,7 +82,7 @@ import { createStructuredLogger } from '../infra/logger';
 import { cumulativeMarksToDurations } from '../infra/perf-profile';
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
+import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
 import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
 import {
   collectReachableCertifiedBoardNodes,
@@ -409,7 +409,7 @@ const certifiedBoardRoot = (
   state.certifiedBoardState?.boardRegistryRoot;
 
 const collectCertifiedBoardHistoryRoots = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   walDb: RuntimeDbLike,
 ): Promise<Set<string>> => {
   const roots = new Set<string>();
@@ -462,7 +462,7 @@ const deleteCertifiedBoardNodes = async (
 };
 
 const pruneUnreachableCertifiedBoardHistoryNodes = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
 ): Promise<number> => {
@@ -478,7 +478,7 @@ const pruneUnreachableCertifiedBoardHistoryNodes = async (
 };
 
 const pruneUnreachableConsumptionHistoryNodes = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   walDb: RuntimeDbLike,
 ): Promise<number> => {
   const byRoot = new Map<string, ConsumptionAccumulatorState>();
@@ -577,7 +577,7 @@ const synchronizeAccountJClaimNodes = async (
 };
 
 const pruneUnreachableAccountJClaimHistoryNodes = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   walDb: RuntimeDbLike,
 ): Promise<number> => {
   const states = new Map<string, AccountJClaimAccumulatorState>();
@@ -765,19 +765,19 @@ export type StoragePersistencePerf = {
 };
 
 export type StorageFrameSaveOptions = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
   currentFrameOutputs?: RoutedEntityInput[];
   pendingRuntimeInput?: RuntimeInput;
   historyRecords?: RuntimeHistoryRecord[];
-  tryOpenDb: (env: RuntimeState) => Promise<boolean>;
-  getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
-  tryOpenRuntimeWalDb: (env: RuntimeState) => Promise<boolean>;
-  getRuntimeWalDb: (env: RuntimeState) => RuntimeDbLike;
-  tryOpenHistoryViewDb: (env: RuntimeState) => Promise<boolean>;
-  getHistoryViewDb: (env: RuntimeState) => RuntimeDbLike;
-  rotateEpochDb?: (env: RuntimeState, snapshotHeight: number, timestamp: number) => Promise<boolean | void>;
+  tryOpenDb: (env: RuntimeReplica) => Promise<boolean>;
+  getRuntimeDb: (env: RuntimeReplica) => RuntimeDbLike;
+  tryOpenRuntimeWalDb: (env: RuntimeReplica) => Promise<boolean>;
+  getRuntimeWalDb: (env: RuntimeReplica) => RuntimeDbLike;
+  tryOpenHistoryViewDb: (env: RuntimeReplica) => Promise<boolean>;
+  getHistoryViewDb: (env: RuntimeReplica) => RuntimeDbLike;
+  rotateEpochDb?: (env: RuntimeReplica, snapshotHeight: number, timestamp: number) => Promise<boolean | void>;
   stopStaleWriterOnHeadAhead?: boolean;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
   onPersistenceProgress?: StoragePersistenceProgressHook;
@@ -1077,7 +1077,7 @@ const resolveStorageAppendPosition = async (
   };
 };
 
-const collectPendingStorageNodes = (env: RuntimeState) => {
+const collectPendingStorageNodes = (env: RuntimeReplica) => {
   const state = env.runtimeState ?? {};
   const boardNodes =
     state.pendingCertifiedBoardNodes instanceof Map
@@ -1128,7 +1128,7 @@ const collectPendingStorageNodes = (env: RuntimeState) => {
 };
 
 const logReplicaMetaDebug = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   checkpointed: boolean,
   commitment: ReturnType<typeof buildStorageLiveReplicaMetaCommitment>,
 ): void => {

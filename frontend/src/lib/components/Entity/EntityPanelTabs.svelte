@@ -4,7 +4,7 @@ import { createEventDispatcher } from "svelte";
 import { onDestroy, onMount } from "svelte";
 import type { ComponentType } from "svelte";
 import { MaxUint256, Wallet, hexlify, isAddress, parseEther, ZeroAddress } from "ethers";
-import type { AccountReplica, EntityTx, RuntimeState, EnvSnapshot, JAdapter, JBatch, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/api/runtime-module";
+import type { AccountReplica, EntityTx, RuntimeReplica, EnvSnapshot, JAdapter, JBatch, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/api/runtime-module";
 import { buildDebtEnforcementRuntimeInputFromProjection } from "@xln/runtime/runtime/debt-enforcement-input";
 import { getDraftBatchReserveDelta } from "@xln/runtime/jurisdiction/batch";
 import type { Tab, EntityReplica } from "$lib/types/ui";
@@ -109,9 +109,9 @@ export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntity
 export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;
 export let runtimeProjectionFrame: RuntimeAdapterViewFrame | null = null;
 const dispatch = createEventDispatcher();
-let env: RuntimeState | EnvSnapshot | null = null;
-let liveEnv: RuntimeState | null = null;
-let liveEnvResolver: (() => RuntimeState | null) | null = null;
+let env: RuntimeReplica | EnvSnapshot | null = null;
+let liveEnv: RuntimeReplica | null = null;
+let liveEnvResolver: (() => RuntimeReplica | null) | null = null;
 let envRevision = "";
 let history: EnvSnapshot[] = [];
 let timeIndex = -1;
@@ -238,7 +238,7 @@ type IconBadgeTabConfig<T extends string> = IconTabConfig<T> & {
 type IndexedDbWithDatabases = IDBFactory & {
   databases?: () => Promise<IDBDatabaseInfo[]>;
 };
-function getCurrentEntityJAdapter(xln: XLNModule, env: RuntimeState, context: string): JAdapter {
+function getCurrentEntityJAdapter(xln: XLNModule, env: RuntimeReplica, context: string): JAdapter {
   const entityId = String(replica?.state?.entityId || tab.entityId || "").trim();
   const signerId = String(currentSignerId || tab.signerId || "").trim();
   const jadapter = entityId && xln.getEntityJAdapter ? xln.getEntityJAdapter(env, entityId, signerId || undefined) : xln.getActiveJAdapter?.(env);
@@ -730,7 +730,7 @@ $: openAccountPermissionError = getHubOpenAccountPermissionError({
   adapterMode: $runtimeControllerHandle.mode,
   authLevel: $runtimeControllerHandle.authLevel,
 });
-async function submitPanelRuntimeInput(input: RuntimeInput): Promise<RuntimeState | null> {
+async function submitPanelRuntimeInput(input: RuntimeInput): Promise<RuntimeReplica | null> {
   if (!getRuntimeEnv(actionRuntimeEnv) && $runtimeControllerHandle.mode !== "remote") {
     requireRuntimeEnv(actionRuntimeEnv, "runtime-input-submit");
   }
@@ -1032,7 +1032,7 @@ function getMoveAllowanceToken(): ExternalToken {
   return token;
 }
 async function getMoveAllowanceContext(context: string): Promise<{
-  env: RuntimeState;
+  env: RuntimeReplica;
   jadapter: JAdapter;
   token: ExternalToken;
   owner: string;

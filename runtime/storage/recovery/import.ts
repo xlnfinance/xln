@@ -12,7 +12,7 @@ import {
   assertValidatorJHistoryMatchesCertifiedAnchor,
 } from '../../jurisdiction/local-history';
 import { ensureRuntimeState } from '../../runtime/runtime-state';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import { clearDatabase } from '../clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';
 import { buildCertifiedEntityLineagePlan } from '../entity-lineage';
@@ -31,10 +31,10 @@ import type { StorageDoc, StoragePersistenceBoundaryHook } from '../types';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
 
 export interface PersistRestoredRuntimeDeps {
-  getStorageDb(env: RuntimeState, role?: StorageDbRole): Level<Buffer, Buffer>;
-  getRuntimeWalDb(env: RuntimeState): Level<Buffer, Buffer>;
-  tryOpenStorageDb(env: RuntimeState, role?: StorageDbRole): Promise<boolean>;
-  tryOpenRuntimeWalDb(env: RuntimeState): Promise<boolean>;
+  getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
+  getRuntimeWalDb(env: RuntimeReplica): Level<Buffer, Buffer>;
+  tryOpenStorageDb(env: RuntimeReplica, role?: StorageDbRole): Promise<boolean>;
+  tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
 }
 
 export interface PersistRestoredRuntimeOptions {
@@ -82,7 +82,7 @@ const collectCertifiedStorageDocs = (
   return { docs, canonicalEntityHashes };
 };
 
-const readRestoredFrameCoordinates = (env: RuntimeState): { height: number; timestamp: number } => {
+const readRestoredFrameCoordinates = (env: RuntimeReplica): { height: number; timestamp: number } => {
   const height = Number(env.height);
   const timestamp = Number(env.timestamp);
   if (!Number.isSafeInteger(height) || height <= 0) throw new Error('RECOVERY_PERSIST_HEIGHT_REQUIRED');
@@ -94,7 +94,7 @@ const readRestoredFrameCoordinates = (env: RuntimeState): { height: number; time
 
 const persistRestoredRuntimeStateUnlocked = async (
   deps: PersistRestoredRuntimeDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   coordinates: { height: number; timestamp: number },
   options: PersistRestoredRuntimeOptions,
 ): Promise<void> => {
@@ -167,7 +167,7 @@ const persistRestoredRuntimeStateUnlocked = async (
 // previous WAL: the recovered checkpoint becomes the first authoritative local frame.
 export const persistRestoredRuntimeState = async (
   deps: PersistRestoredRuntimeDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
   options: PersistRestoredRuntimeOptions = {},
 ): Promise<void> => {
   const coordinates = readRestoredFrameCoordinates(env);

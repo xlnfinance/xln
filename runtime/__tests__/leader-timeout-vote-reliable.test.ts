@@ -38,10 +38,10 @@ import {
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
-import type { DeliverableEntityInput, RuntimeState, RuntimeEntityInputsEnvelope } from '../runtime/types';
+import type { DeliverableEntityInput, RuntimeReplica, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import type { EntityLeaderTimeoutVote, EntityReplica, EntityState } from '../entity/types';
 
-const runtime = (seed: string): RuntimeState => {
+const runtime = (seed: string): RuntimeReplica => {
   const env = createEmptyEnv(seed);
   const runtimeId = deriveSignerAddressSync(seed, 'runtime').toLowerCase();
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, 'runtime'));
@@ -54,7 +54,7 @@ const runtime = (seed: string): RuntimeState => {
 };
 
 const installVoteTarget = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   seed: string,
   options: { localSignerIsFallback?: boolean } = {},
 ): {
@@ -115,7 +115,7 @@ const installVoteTarget = (
 };
 
 const voteOutput = (
-  receiver: RuntimeState,
+  receiver: RuntimeReplica,
   replica: EntityReplica,
   vote: EntityLeaderTimeoutVote,
 ): DeliverableEntityInput => ({
@@ -149,7 +149,7 @@ const routingDeps = (
 });
 
 const applyVote = async (
-  receiver: RuntimeState,
+  receiver: RuntimeReplica,
   output: DeliverableEntityInput,
 ): Promise<void> => {
   const key = `${output.entityId}:${output.signerId}`;

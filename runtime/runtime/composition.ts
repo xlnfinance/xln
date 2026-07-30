@@ -10,7 +10,7 @@ export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 import { setBrowserVMJurisdiction } from '../jadapter/browservm-registry';
 import { attachEventEmitters } from './env-events';
 import type { EntityInput } from '../entity/types';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import { createPersistenceQueries } from '../storage/queries';
 import { createRuntimeStorageApi } from '../storage/runtime-storage';
 import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './infra';
@@ -55,15 +55,15 @@ export { admitAtomicCrossJAccountInputs };
 let processRuntimeImpl: ReturnType<typeof createRuntimeProcessor> | undefined;
 
 export const processRuntime = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs?: EntityInput[],
   runtimeDelay = 0,
-): Promise<RuntimeState> => {
+): Promise<RuntimeReplica> => {
   if (!processRuntimeImpl) throw new Error('RUNTIME_PROCESSOR_NOT_INITIALIZED');
   return processRuntimeImpl(env, inputs, runtimeDelay);
 };
 
-// Runtime execution state lives on RuntimeState. This module owns the canonical
+// Runtime execution state lives on RuntimeReplica. This module owns the canonical
 // frame transition; runtime.ts is intentionally only the public entrypoint.
 
 const runtimeLoopApi = createRuntimeLoopApi({
@@ -194,7 +194,7 @@ export {
   ensureGossipProfiles,
   clearGossip,
 };
-export const initEnv = (seed?: string | null): RuntimeState => {
+export const initEnv = (seed?: string | null): RuntimeReplica => {
   return createEmptyEnv(seed ?? null);
 };
 
@@ -219,7 +219,7 @@ export type { RuntimeCreationOptions, RuntimeLocalSigner };
 const main = (
   runtimeSeedOverride?: string | null,
   options?: RuntimeCreationOptions,
-): Promise<RuntimeState> => bootstrapRuntime({
+): Promise<RuntimeReplica> => bootstrapRuntime({
   createRuntime: createEmptyEnv,
   loadRuntime: loadEnvFromDB,
   loadGossipProfiles: env => loadGossipProfilesFromInfraDb(env, infraGossipDbAccess),
@@ -232,7 +232,7 @@ const main = (
  * Wraps applyRuntimeInput with a single entity tx
  */
 export const queueEntityInput = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   entityId: string,
   signerId: string,
   txData: Parameters<typeof queueEntityTransaction>[4],
@@ -381,7 +381,7 @@ export const loadEnvFromDB = async (
     fromSnapshotHeight?: number;
     trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
   },
-): Promise<RuntimeState | null> => loadLiveRuntimeFromDB({
+): Promise<RuntimeReplica | null> => loadLiveRuntimeFromDB({
   loadByReplay: loadEnvFromStorageByReplay,
   rehydrate: (env, trustedJurisdictionRpcBindings) =>
     rehydrateRestoredRuntimeInfra(env, {
@@ -395,7 +395,7 @@ export const loadEnvFromDB = async (
   registerCommittedSingleSignerWallets,
 }, runtimeId, runtimeSeed, options);
 
-export const clearDB = async (env?: RuntimeState): Promise<void> => {
+export const clearDB = async (env?: RuntimeReplica): Promise<void> => {
   const targetEnv = env ?? createEmptyEnv(null);
   await clearRuntimeDatabases(targetEnv, runtimeLoopApi);
 };

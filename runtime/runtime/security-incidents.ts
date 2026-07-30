@@ -1,4 +1,4 @@
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 import type { RuntimeSecurityIncident, RuntimeSecurityIncidentIdentity } from '../protocol/security-incident';
 
 export const MAX_RUNTIME_SECURITY_INCIDENTS = 256;
@@ -18,12 +18,12 @@ export const buildRuntimeSecurityIncidentId = (
   canonicalPart(incident.routeHash),
 ].join(':');
 
-const getIncidentMap = (env: RuntimeState): Map<string, RuntimeSecurityIncident> => {
+const getIncidentMap = (env: RuntimeReplica): Map<string, RuntimeSecurityIncident> => {
   const runtimeState = env.runtimeState ?? (env.runtimeState = {});
   return runtimeState.securityIncidents ?? (runtimeState.securityIncidents = new Map());
 };
 
-const incidentTimestamp = (env: RuntimeState): number => {
+const incidentTimestamp = (env: RuntimeReplica): number => {
   const timestamp = Number(env.timestamp);
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
     throw new Error(`RUNTIME_SECURITY_INCIDENT_TIMESTAMP_INVALID:${String(env.timestamp)}`);
@@ -31,7 +31,7 @@ const incidentTimestamp = (env: RuntimeState): number => {
   return timestamp;
 };
 
-const recordCapacityIncident = (env: RuntimeState, incidents: Map<string, RuntimeSecurityIncident>): RuntimeSecurityIncident => {
+const recordCapacityIncident = (env: RuntimeReplica, incidents: Map<string, RuntimeSecurityIncident>): RuntimeSecurityIncident => {
   const now = incidentTimestamp(env);
   const existing = incidents.get(OVERFLOW_INCIDENT_ID);
   const next: RuntimeSecurityIncident = existing
@@ -54,7 +54,7 @@ const recordCapacityIncident = (env: RuntimeState, incidents: Map<string, Runtim
 };
 
 export const recordRuntimeSecurityIncident = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   identity: RuntimeSecurityIncidentIdentity,
 ): RuntimeSecurityIncident => {
   const incidents = getIncidentMap(env);
@@ -94,7 +94,7 @@ export const recordRuntimeSecurityIncident = (
 };
 
 export const resolveRuntimeSecurityIncident = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   identity: RuntimeSecurityIncidentIdentity,
 ): RuntimeSecurityIncident | null => {
   const incidents = getIncidentMap(env);

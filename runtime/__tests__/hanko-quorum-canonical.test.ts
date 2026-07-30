@@ -15,11 +15,11 @@ import { decodeHankoEnvelope, encodeHankoEnvelope } from '../hanko/codec';
 import { createEmptyEnv } from '../runtime';
 import { createJReplica } from '../scenarios/boot';
 import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import { installCanonicalRegisteredBoardAuthority } from './helpers/registration-evidence';
 
 type Fixture = {
-  env: RuntimeState;
+  env: RuntimeReplica;
   entityId: string;
   config: ConsensusConfig;
   digest: string;

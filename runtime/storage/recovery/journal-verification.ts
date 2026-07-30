@@ -1,7 +1,7 @@
 import { getCachedSignerPrivateKey } from '../../account/crypto';
 import { safeStringify } from '../../protocol/serialization';
 import type { RuntimeInputApplyResult } from '../../runtime/frame/apply';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import { computeStoragePostStateHash } from '..';
 import { computeCanonicalStateHashFromEnv } from '../canonical-hash';
 import {
@@ -27,7 +27,7 @@ import {
 } from './machine';
 
 export const verifyRecoveryJournalFrame = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   frame: PersistedFrameJournal,
   height: number,
   result: RuntimeInputApplyResult,

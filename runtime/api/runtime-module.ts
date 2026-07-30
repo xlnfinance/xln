@@ -6,7 +6,7 @@
  * is loaded dynamically at runtime.
  *
  * Usage in frontend:
- *   import type { XLNModule, RuntimeState } from '@xln/runtime/api/runtime-module';
+ *   import type { XLNModule, RuntimeReplica } from '@xln/runtime/api/runtime-module';
  */
 
 // Re-export identity types from ids.ts
@@ -23,7 +23,7 @@ export type {
 export type { JurisdictionInfo } from '../protocol/jurisdiction-identity';
 
 // Re-export core types from types.ts
-export type { RuntimeState, EnvSnapshot, RuntimeInput, RoutedEntityInput } from '../runtime/types';
+export type { RuntimeReplica, EnvSnapshot, RuntimeInput, RoutedEntityInput } from '../runtime/types';
 export type { EntityReplica, EntityState, SwapBookEntry, JurisdictionConfig, ConsensusConfig, EntityInput } from '../entity/types';
 export type { JReplica } from '../types/jurisdiction-runtime';
 export type { EntityTx } from '../types/entity-tx';

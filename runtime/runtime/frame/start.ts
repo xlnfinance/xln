@@ -1,13 +1,13 @@
 import type { EntityInput } from '../../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeReplica } from '../types';
 import type { RuntimeProcessProfile } from './process-profile';
 
-type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
 
 export type RuntimeFrameStartDeps = {
-  attachEventEmitters(env: RuntimeState): void;
+  attachEventEmitters(env: RuntimeReplica): void;
   collectIngress(
-    env: RuntimeState,
+    env: RuntimeReplica,
     inputs: EntityInput[] | undefined,
     state: RuntimeLifecycleState,
     runtimeDelay: number,
@@ -21,7 +21,7 @@ export type RuntimeFrameStart = {
   frameTimestampBeforeTick: number;
 };
 
-const stopAtDebugFrame = async (env: RuntimeState): Promise<void> => {
+const stopAtDebugFrame = async (env: RuntimeReplica): Promise<void> => {
   if (env.stopAtFrame === undefined || env.height < env.stopAtFrame) return;
   console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);
   console.log('═'.repeat(80));
@@ -33,7 +33,7 @@ const stopAtDebugFrame = async (env: RuntimeState): Promise<void> => {
 };
 
 export const startRuntimeFrame = async (
-  env: RuntimeState,
+  env: RuntimeReplica,
   inputs: EntityInput[] | undefined,
   state: RuntimeLifecycleState,
   runtimeDelay: number,

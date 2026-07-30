@@ -1,6 +1,6 @@
 import { TIMING } from '../config/constants';
 import type { EntityInput } from '../entity/types';
-import type { RuntimeState, ReliableDeliveryReceipt, RuntimeInput, RuntimeTx } from './types';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeInput, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import { getWallClockMs } from '../infra/time';
 import { createStructuredLogger } from '../infra/logger';
@@ -9,8 +9,8 @@ import { ensureRuntimeState } from './runtime-state';
 const runtimeInputQueueLog = createStructuredLogger('runtime.input_queue');
 
 export type RuntimeInputQueueDeps = {
-  ensureRuntimeState: (env: RuntimeState) => NonNullable<RuntimeState['runtimeState']>;
-  requestRuntimeLoopWake: (env: RuntimeState) => void;
+  ensureRuntimeState: (env: RuntimeReplica) => NonNullable<RuntimeReplica['runtimeState']>;
+  requestRuntimeLoopWake: (env: RuntimeReplica) => void;
 };
 
 export type RuntimeInputQueueOptions = {
@@ -18,7 +18,7 @@ export type RuntimeInputQueueOptions = {
   acceptedBeforeQuiesce?: boolean;
 };
 
-export const requestRuntimeLoopWake = (env: RuntimeState): void => {
+export const requestRuntimeLoopWake = (env: RuntimeReplica): void => {
   const state = ensureRuntimeState(env);
   if (state.halted) return;
   const wakeLoop = state.wakeLoop;
@@ -35,12 +35,12 @@ const shouldLogRuntimeInputDebug = (): boolean => {
   return env?.['XLN_RUNTIME_INPUT_DEBUG'] === '1';
 };
 
-export const requireRuntimeMempool = (env: RuntimeState): RuntimeInput => {
+export const requireRuntimeMempool = (env: RuntimeReplica): RuntimeInput => {
   if (!env.runtimeMempool) throw new Error('RUNTIME_MEMPOOL_MISSING');
   return env.runtimeMempool;
 };
 
-const normalizeIngressTimestamp = (env: RuntimeState, explicitTimestamp?: number): number => {
+const normalizeIngressTimestamp = (env: RuntimeReplica, explicitTimestamp?: number): number => {
   if (typeof explicitTimestamp === 'number' && Number.isFinite(explicitTimestamp) && explicitTimestamp > 0) {
     const sanitizedTimestamp = Math.floor(explicitTimestamp);
     if (env.scenarioMode) return sanitizedTimestamp;
@@ -56,7 +56,7 @@ const normalizeIngressTimestamp = (env: RuntimeState, explicitTimestamp?: number
  * pre-consensus: queued inputs are observable work, not committed state.
  */
 export const enqueueRuntimeInputsWithDeps = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   deps: RuntimeInputQueueDeps,
   inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
@@ -128,7 +128,7 @@ export const enqueueRuntimeInputsWithDeps = (
   }
 };
 
-export const enqueueRuntimeInput = (env: RuntimeState, runtimeInput: RuntimeInput): void => {
+export const enqueueRuntimeInput = (env: RuntimeReplica, runtimeInput: RuntimeInput): void => {
   const ingressTimestamp = env.scenarioMode
     ? (runtimeInput.timestamp ?? env.timestamp ?? 0)
     : (runtimeInput.timestamp ?? getWallClockMs());

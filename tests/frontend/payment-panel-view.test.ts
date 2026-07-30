@@ -135,11 +135,11 @@ test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', 
   const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
 
   expect(panel).toContain('export let paymentView: PaymentPanelView');
-  expect(panel).toContain('export let actionRuntimeEnv: RuntimeState | null');
+  expect(panel).toContain('export let actionRuntimeEnv: RuntimeReplica | null');
   expect(panel).toContain('export let submitRuntimeInput');
   expect(panel).toContain('await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] })');
   expect(panel).toContain('function resolveProjectedSignerId');
-  expect(panel).toContain('function resolvePaymentSignerId(env: RuntimeState | null)');
+  expect(panel).toContain('function resolvePaymentSignerId(env: RuntimeReplica | null)');
   expect(panel).toContain('const resolvedSignerId = resolvePaymentSignerId(currentEnv)');
   expect(panel).toContain('paymentProjectionReady &&');
   expect(panel).not.toContain("throw new Error('Environment not ready')");
@@ -167,7 +167,7 @@ test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', 
   expect(tabs).toContain('{paymentView}');
 
   const viewSource = readFileSync('frontend/src/lib/components/Entity/payment-panel-view.ts', 'utf8');
-  expect(viewSource).not.toContain('RuntimeState,');
+  expect(viewSource).not.toContain('RuntimeReplica,');
   expect(viewSource).not.toContain('actionRuntimeEnv');
   expect(viewSource).not.toContain('gossip?.getNetworkGraph');
   expect(viewSource).toContain('networkGraph?: PaymentRuntimeGraph | null');

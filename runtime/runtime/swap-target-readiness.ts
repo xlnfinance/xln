@@ -1,12 +1,12 @@
 import { assertCrossJurisdictionSwapTargetReady } from './swap-command-plan';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeState } from './types';
+import type { RuntimeReplica } from './types';
 
 const normalizeId = (value: string): string => value.trim().toLowerCase();
 
 /** Resolve the target Account from the owning Runtime before invoking the pure Account check. */
 export const assertCrossJurisdictionSwapTargetReadyInEnv = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   route: CrossJurisdictionSwapRoute,
 ): void => {
   const targetEntityId = normalizeId(route.target.counterpartyEntityId);

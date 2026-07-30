@@ -10,7 +10,7 @@ import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/reg
 import { restoreJPrefixRound } from '../../jurisdiction/j-prefix-consensus';
 import { cloneEntityState } from '../../entity/state-clone';
 import type { EntityReplica, EntityState } from '../../entity/types';
-import type { RuntimeState } from '../../runtime/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
@@ -27,7 +27,7 @@ import { assertPersistedJurisdictionsAvailable, resolvePersistedReplicaIdentity 
 
 const installPersistedEntityReplicas = async (
   reads: PersistedStorageReadApi,
-  env: RuntimeState,
+  env: RuntimeReplica,
   restoredStates: Map<string, EntityState>,
   targetHeight: number,
   latestHeight: number,
@@ -139,7 +139,7 @@ const installPersistedEntityReplicas = async (
 
 const hydrateRestoredEntityDags = async (
   deps: RuntimeStorageApiDeps,
-  env: RuntimeState,
+  env: RuntimeReplica,
 ): Promise<void> => {
   const walDb = deps.getRuntimeWalDb(env);
   const boardRoots = new Set(
@@ -162,7 +162,7 @@ const hydrateRestoredEntityDags = async (
 };
 
 const verifyRestoredEntityLineage = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   restoredStates: Map<string, EntityState>,
 ): void => {
   const lineagePlan = buildCertifiedEntityLineagePlan(env);
@@ -189,7 +189,7 @@ const verifyRestoredEntityLineage = (
 export const restorePersistedEntityGraph = async (
   deps: RuntimeStorageApiDeps,
   reads: PersistedStorageReadApi,
-  env: RuntimeState,
+  env: RuntimeReplica,
   restoredStates: Map<string, EntityState>,
   targetHeight: number,
   latestHeight: number,

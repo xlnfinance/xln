@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeTx } from '../runtime/types';
+import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { getEntityCertifiedJAnchor } from '../jurisdiction/local-history';
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
@@ -10,7 +10,7 @@ import {
 } from './watcher-replica';
 
 const enqueueScopedRewind = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   conflictingHeight: number,
   conflictingBlockHash: string,
   requestedKeys: ReadonlySet<string> | null,
@@ -83,7 +83,7 @@ const enqueueScopedRewind = (
 };
 
 export const enqueueJHistoryRewindForReplicaKeys = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   conflictingHeight: number,
   conflictingBlockHash: string,
   replicaKeys: readonly string[],
@@ -106,7 +106,7 @@ export const enqueueJHistoryRewindForReplicaKeys = (
 };
 
 export const enqueueJHistoryRewind = (
-  env: RuntimeState,
+  env: RuntimeReplica,
   conflictingHeight: number,
   conflictingBlockHash: string,
   depositoryAddress?: string,

@@ -8,7 +8,7 @@
  *   console.log(formatAccount(account, myEntityId));
  */
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { EntityState } from '../entity/types';
 import type { AccountReplica } from '../types/account';
 import { getWallClockMs } from '../infra/time';
@@ -162,9 +162,9 @@ function drawProgressBar(current: bigint, max: bigint, width: number = 10): stri
 }
 
 /**
- * Format full runtime state (RuntimeState)
+ * Format full runtime state (RuntimeReplica)
  */
-export function formatRuntime(env: RuntimeState, options?: FormatOptions): string {
+export function formatRuntime(env: RuntimeReplica, options?: FormatOptions): string {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const output: string[] = [];
 
@@ -595,7 +595,7 @@ export function formatOrderbook(bookState: unknown, pairId: string, depth: numbe
 /**
  * Format a summary line for quick status
  */
-export function formatSummary(env: RuntimeState): string {
+export function formatSummary(env: RuntimeReplica): string {
   const entityCount = env.eReplicas.size;
   const jCount = env.jReplicas?.size || 0;
 

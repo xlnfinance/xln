@@ -1,10 +1,10 @@
-import type { AccountReplica, EntityReplica, RuntimeState } from '@xln/runtime/api/runtime-module';
+import type { AccountReplica, EntityReplica, RuntimeReplica } from '@xln/runtime/api/runtime-module';
 
 // These helpers operate on validated runtime state only.
 // The only nullable boundary is the outer env reference before a runtime is attached.
 // Do not widen these helpers to ad hoc partial frontend shapes: missing accounts/deltas
 // inside a live replica is a bug and must fail at the real decode/validation layer.
-type EnvLike = RuntimeState | null | undefined;
+type EnvLike = RuntimeReplica | null | undefined;
 
 function toReplicaEntries(envLike: EnvLike): Array<[string, EntityReplica]> {
   if (!envLike) return [];

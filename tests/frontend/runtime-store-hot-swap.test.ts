@@ -99,7 +99,7 @@ test('embedded RuntimeInput ingress rechecks the quiesce fence after every async
 test('embedded adapter binds to selected runtime env before bootstrap commands', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
 
-  expect(source).toContain('targetEnv?: RuntimeState | null');
+  expect(source).toContain('targetEnv?: RuntimeReplica | null');
   expect(source).toContain("const boundRuntimeId = normalizeRuntimeConfigId(boundEnv?.runtimeId || '')");
   expect(source).toContain('const runtimeEnv = get(runtimes).get(boundRuntimeId)?.env');
   expect(source).toContain('runtimeOperations.setActiveRuntimeId(envRuntimeId)');
@@ -129,13 +129,13 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
   expect(storeSource).not.toContain('const bootstrapEnvironment = writable');
   expect(storeSource).not.toContain('export const xlnEnvironment = derived');
   expect(storeSource).not.toContain('export function setXlnEnvironment');
-  expect(embeddedSource).toContain('const bootstrapEnvironment = writable<RuntimeState | null>(null);');
+  expect(embeddedSource).toContain('const bootstrapEnvironment = writable<RuntimeReplica | null>(null);');
   expect(derivedSource).toContain('return runtimeEntry?.env ?? null;');
   expect(derivedSource).not.toContain('if (runtimeEntry) return runtimeEntry.env ?? null;');
   expect(embeddedSource).toContain("import { errorLog } from './errorLogStore';");
   expect(setEnvSource).toContain('const canPublishActiveEnv = !selectedRuntimeId || (envRuntimeId !== \'\' && envRuntimeId === selectedRuntimeId);');
   expect(setEnvSource).toContain('RUNTIME_STORE_ENV_OVERWRITE_REFUSED');
-  expect(setEnvSource).toContain("errorLog.log(message, 'Runtime RuntimeState'");
+  expect(setEnvSource).toContain("errorLog.log(message, 'Runtime RuntimeReplica'");
   expect(setEnvSource).toContain('throw new Error(message)');
   expect(embeddedSource).not.toContain('console.error');
   expect(embeddedSource).not.toContain('console.warn');
@@ -151,7 +151,7 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
 
 test('runtime store fails fast on cross-runtime env overwrite', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
-  const updateStart = source.indexOf('updateLocalEnv(env: RuntimeState)');
+  const updateStart = source.indexOf('updateLocalEnv(env: RuntimeReplica)');
   const metadataStart = source.indexOf('// Update active runtime metadata.', updateStart);
   expect(updateStart).toBeGreaterThan(0);
   expect(metadataStart).toBeGreaterThan(updateStart);
@@ -207,7 +207,7 @@ test('direct remote runtime URL reuses saved capability before showing paste pro
     .toBeLessThan(readSource.indexOf('const requiresAuthPaste = !authKey'));
 });
 
-test('remote projection never materializes fake RuntimeState snapshots', () => {
+test('remote projection never materializes fake RuntimeReplica snapshots', () => {
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   expect(existsSync('frontend/src/lib/utils/runtimeViewEnv.ts')).toBe(false);
   expect(storeSource).not.toContain("$lib/utils/runtimeViewEnv");
@@ -334,7 +334,7 @@ test('frontend remote runtime operations use short fail-fast budgets', () => {
   expect(importValidationSource).toContain('requestTimeoutMs: 5_000');
 });
 
-test('remote RuntimeView refresh stays projection-native without fake RuntimeState timestamps', () => {
+test('remote RuntimeView refresh stays projection-native without fake RuntimeReplica timestamps', () => {
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const refreshStart = storeSource.indexOf('const refreshRemoteRuntimeProjection = async');
   const refreshEnd = storeSource.indexOf('const createEmbeddedRuntimeAdapter', refreshStart);
@@ -424,7 +424,7 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
 
 test('view runtime frame stores do not expose legacy isolated names', () => {
   const viewFiles = collectFrontendSources('frontend/src/lib/view');
-  const legacyPattern = /\bisolated(RuntimeState|History|TimeIndex|IsLive|Revision)\b/;
+  const legacyPattern = /\bisolated(RuntimeReplica|History|TimeIndex|IsLive|Revision)\b/;
   for (const file of viewFiles) {
     const source = readFileSync(file, 'utf8');
     expect(source.match(legacyPattern)?.[0] ?? '', file).toBe('');

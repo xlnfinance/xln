@@ -2,7 +2,7 @@ import type { Level } from 'level';
 
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeReplica } from '../runtime/types';
 import type { RuntimeOverlayRecord } from '../types/account';
 import {
   findStorageLatestSnapshotAtOrBelow,
@@ -36,7 +36,7 @@ const createPersistedStorageNavigationApi = (
   const createPersistedStorageEnv = (
     runtimeId?: string | null,
     runtimeSeed?: string | null,
-  ): RuntimeState => {
+  ): RuntimeReplica => {
     const env = deps.createEmptyEnv(runtimeSeed ?? null);
     const normalizedRuntimeId = normalizeRuntimeId(
       runtimeId ?? env.runtimeId ?? null,
@@ -49,7 +49,7 @@ const createPersistedStorageNavigationApi = (
   };
 
   const listPersistedStorageHandles = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
   ): Promise<PersistedStorageHandle[]> => {
     await requireStorageDbOpen(
       () => deps.tryOpenRuntimeWalDb(env),
@@ -78,7 +78,7 @@ const createPersistedStorageNavigationApi = (
   };
 
   const restoreOverlayFromFrameLog = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     targetHeight: number,
   ): Promise<void> => {
     for (const handle of await listPersistedStorageHandles(env)) {
@@ -115,7 +115,7 @@ const createPersistedStorageNavigationApi = (
   };
 
   const resolvePersistedLatestHeight = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
   ): Promise<number> => {
     const handles = await listPersistedStorageHandles(env);
     return handles.reduce(
@@ -125,7 +125,7 @@ const createPersistedStorageNavigationApi = (
   };
 
   const resolvePersistedCheckpointHeights = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
   ): Promise<number[]> => {
     const handles = await listPersistedStorageHandles(env);
     return Array.from(
@@ -134,7 +134,7 @@ const createPersistedStorageNavigationApi = (
   };
 
   const readPersistedStorageFrameRecord = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     height: number,
   ): Promise<
     ReturnType<typeof readStorageFrameRecord> extends Promise<infer T>
@@ -172,7 +172,7 @@ const createPersistedStorageEntityReadApi = (
   const { listPersistedStorageHandles } = navigation;
 
   const readPersistedStorageReplicaMetas = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     entityId: string,
     sharedState?: EntityState,
   ): Promise<Awaited<ReturnType<typeof listStorageReplicaMetas>>> => {
@@ -190,7 +190,7 @@ const createPersistedStorageEntityReadApi = (
   };
 
   const readPersistedStorageSnapshotReplicaMetas = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     snapshotHeight: number,
     entityId: string,
   ): Promise<Awaited<ReturnType<typeof listStorageSnapshotReplicaMetas>>> => {
@@ -208,7 +208,7 @@ const createPersistedStorageEntityReadApi = (
   };
 
   const resolvePersistedSnapshotHeight = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     targetHeight: number,
   ): Promise<number> => {
     let best = 0;
@@ -224,7 +224,7 @@ const createPersistedStorageEntityReadApi = (
   };
 
   const listPersistedEntityIdsAtHeight = async (
-    env: RuntimeState,
+    env: RuntimeReplica,
     targetHeight: number,
   ): Promise<string[]> => {
     const entityIds = new Set<string>();
