@@ -875,7 +875,11 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
     currentFrame: compactAccountFrameForView(doc.currentFrame),
     deltas: compactMapHead(doc.deltas, 100) ?? new Map(),
     locks: compactMapTail(doc.locks, 20) ?? new Map(),
-    swapOffers: new Map(),
+    // Open offers are current Account state, not historical decoration. The
+    // storage projection has already removed private route material; retain a
+    // bounded tail so a committed Runtime view can render and cancel recent
+    // orders without reaching into the live mutable replica.
+    swapOffers: compactMapTail(doc.swapOffers, 100) ?? new Map(),
     globalCreditLimits: doc.globalCreditLimits,
     currentHeight: doc.currentHeight,
     pendingSignatures: [],

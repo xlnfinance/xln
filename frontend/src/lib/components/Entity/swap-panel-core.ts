@@ -301,6 +301,12 @@ export const createSwapPanelCore = (deps: SwapPanelCoreDeps) => {
       return null;
     }
     const account = candidate?.state?.accounts?.get?.(counterparty) ?? null;
+    // Partial Runtime projections expose Entity identity before their Account
+    // page arrives. A read-only preview must report "unknown" instead of
+    // interpreting that transient omission as an absent bilateral Account.
+    // The submit path fetches a fresh detailed projection before it may plan
+    // an openAccount command.
+    if (!account && !allowOpenAccount) return null;
     return runtime.planSwapInboundCapacity({
       account,
       ownerEntityId: owner,

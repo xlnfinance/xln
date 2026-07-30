@@ -698,6 +698,12 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   account.settlementWorkspace = { notes: 'w'.repeat(100_000) };
   account.swapOrderHistory = new Map([['history', { note: 'h'.repeat(100_000), resolves: [] }]]);
   account.swapClosedOrders = new Map([['closed', { note: 'c'.repeat(100_000), resolves: [] }]]);
+  account.swapOffers = new Map(
+    Array.from({ length: 101 }, (_, index) => [
+      `offer-${index}`,
+      { offerId: `offer-${index}` },
+    ]),
+  );
   replica.state.nonces = new Map(
     Array.from({ length: 500 }, (_, index) => [`0x${index.toString(16).padStart(64, '0')}`, index]),
   );
@@ -745,6 +751,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     disputeProofBodiesByHash?: unknown;
     disputeArgumentSnapshotsByHash?: unknown;
     settlementWorkspace?: unknown;
+    swapOffers: Map<string, { offerId: string }>;
     swapOrderHistory?: unknown;
     swapClosedOrders?: unknown;
   }>({ env }, `entity/${entityId}/account/${counterpartyId}`);
@@ -797,6 +804,9 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     expect(doc.disputeProofBodiesByHash).toBeUndefined();
     expect(doc.disputeArgumentSnapshotsByHash).toBeUndefined();
     expect(doc.settlementWorkspace).toBeUndefined();
+    expect(doc.swapOffers.size).toBe(100);
+    expect(doc.swapOffers.has('offer-0')).toBe(false);
+    expect(doc.swapOffers.get('offer-100')?.offerId).toBe('offer-100');
     expect(doc.swapOrderHistory).toBeUndefined();
     expect(doc.swapClosedOrders).toBeUndefined();
   }

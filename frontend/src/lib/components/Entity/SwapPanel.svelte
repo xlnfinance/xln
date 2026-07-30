@@ -262,6 +262,7 @@ let crossSwapSetupSteps: CrossSwapSetupStep[] = [];
 let placingSwapOffer = false;
 let swapRuntimeView: SwapPanelRuntimeView = buildSwapPanelRuntimeView(null);
 let detailedSourceReplica: EntityReplica | null = null;
+let detailedTargetReplica: EntityReplica | null = null;
 let cachedSourceReplica: EntityReplica | null = null;
 const detailedReplicaByEntityId = new Map<
   string,
@@ -269,6 +270,8 @@ const detailedReplicaByEntityId = new Map<
 >();
 let sourceProjectionKey = '';
 let sourceProjectionRequestId = 0;
+let targetProjectionKey = '';
+let targetProjectionRequestId = 0;
 $: activeXlnFunctions = $xlnFunctions;
 $: activeFrame = env;
 $: runtimeEnv = unwrapLiveRuntimeEnv(activeFrame);
@@ -310,16 +313,38 @@ $: sourceSignerIdValue = String(currentReplica?.signerId || tab.signerId || '')
 async function refreshDetailedSourceReplica(key: string, entityId: string): Promise<void> {
   const requestId = ++sourceProjectionRequestId;
   try {
-    const frame = await readRuntimeEntityProjectionFrame(entityId);
-    const projected = buildEntityPanelView(null, entityId, '', '', frame).replica;
-    if (!projected) throw new Error(`SWAP_SOURCE_PROJECTION_MISSING:${entityId}`);
+    const projected = await readCommittedEntityReplica(entityId);
     if (requestId !== sourceProjectionRequestId || key !== sourceProjectionKey) return;
-    detailedReplicaByEntityId.set(entityId, { runtimeHeight, replica: projected });
     detailedSourceReplica = projected;
   } catch (error) {
     if (requestId !== sourceProjectionRequestId || key !== sourceProjectionKey) return;
     detailedSourceReplica = null;
     submitError = `Source projection unavailable: ${toErrorMessage(error)}`;
+    errorLog.log(submitError, 'Swap Panel', { entityId, error });
+  }
+}
+
+async function readCommittedEntityReplica(entityId: string): Promise<EntityReplica> {
+  const frame = await readRuntimeEntityProjectionFrame(entityId);
+  const projected = buildEntityPanelView(null, entityId, '', '', frame).replica;
+  if (!projected) throw new Error(`SWAP_SOURCE_PROJECTION_MISSING:${entityId}`);
+  detailedReplicaByEntityId.set(entityId, {
+    runtimeHeight: frame.height,
+    replica: projected,
+  });
+  return projected;
+}
+
+async function refreshDetailedTargetReplica(key: string, entityId: string): Promise<void> {
+  const requestId = ++targetProjectionRequestId;
+  try {
+    const projected = await readCommittedEntityReplica(entityId);
+    if (requestId !== targetProjectionRequestId || key !== targetProjectionKey) return;
+    detailedTargetReplica = projected;
+  } catch (error) {
+    if (requestId !== targetProjectionRequestId || key !== targetProjectionKey) return;
+    detailedTargetReplica = null;
+    submitError = `Target projection unavailable: ${toErrorMessage(error)}`;
     errorLog.log(submitError, 'Swap Panel', { entityId, error });
   }
 }
@@ -486,6 +511,19 @@ $: selectedCrossTarget =
   crossTargetOptions.find((option) => option.value === selectedCrossTargetValue) ||
   (selectedCrossTargetOverride?.value === selectedCrossTargetValue ? selectedCrossTargetOverride : null) ||
   null;
+$: {
+  const targetEntityId = String(selectedCrossTarget?.targetEntityId || '')
+    .trim()
+    .toLowerCase();
+  const nextKey = `${runtimeHeight}:${targetEntityId}`;
+  if (nextKey !== targetProjectionKey) {
+    targetProjectionKey = nextKey;
+    detailedTargetReplica = null;
+    if (activeIsLive && targetEntityId) {
+      void refreshDetailedTargetReplica(nextKey, targetEntityId);
+    }
+  }
+}
 $: routedRouteRecommendations = buildPanelRoutedRouteCandidates(
   swapRouteMode,
   selectedCrossTarget,
@@ -539,7 +577,11 @@ $: routeSummaryAssetsLabel =
     ? `${tokenNetworkLabel(giveToken, sourceJurisdictionLabel, tokenSymbol)} -> ${tokenNetworkLabel(wantToken, targetJurisdictionLabel, tokenSymbol)}`
     : `${giveTokenSymbol} -> ${wantTokenSymbol}`;
 $: swapTokenPairLabel = `${giveTokenSymbol} -> ${wantTokenSymbol}`;
-$: selectedCrossTargetReplica = selectedCrossTarget ? findReplicaByEntityId(selectedCrossTarget.targetEntityId) : null;
+$: selectedCrossTargetReplica =
+  selectedCrossTarget &&
+  detailedTargetReplica?.entityId === selectedCrossTarget.targetEntityId
+    ? detailedTargetReplica
+    : null;
 $: crossTargetHasAccount = Boolean(
   swapRouteMode === 'cross' &&
   selectedCrossTarget &&
@@ -2467,7 +2509,13 @@ async function placeSwapOffer() {
     }
     const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(currentReplica);
     const targetRoute = selectedCrossTarget;
-    const targetReplica = targetRoute ? findReplicaByEntityId(targetRoute.targetEntityId) : null;
+    // Setup is derived from the latest committed target Account, not the
+    // asynchronously rendered workspace projection. Otherwise a second order
+    // can enqueue openAccount after the first order already committed it,
+    // turning harmless UI staleness into a fatal duplicate Entity command.
+    const targetReplica = targetRoute
+      ? await readCommittedEntityReplica(targetRoute.targetEntityId)
+      : null;
     const targetAccountExists = Boolean(targetRoute && hasReplicaAccount(targetReplica, targetRoute.targetHubEntityId));
     const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
     if (!sourceJurisdictionRef) throw new Error('Source jurisdiction stack is not available.');
