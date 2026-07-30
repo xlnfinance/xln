@@ -1,4 +1,5 @@
-import { Contract, Interface, JsonRpcProvider, Wallet, ethers } from 'ethers';
+import { Interface, JsonRpcProvider, Wallet, ethers } from 'ethers';
+import { Depository__factory } from '../../jurisdictions/typechain-types/index.ts';
 import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
@@ -68,7 +69,9 @@ const requireHex = (value: unknown, label: string): string => {
   return value;
 };
 
-const normalizeFinalProofbody = (value: unknown): Record<string, unknown> => {
+const normalizeFinalProofbody = (
+  value: unknown,
+): TowerFinalDisputeProof['finalProofbody'] => {
   const proof = requireBoundaryRecord(value, 'WATCHTOWER_REMEDY_FINAL_PROOFBODY_INVALID');
   requireExactBoundaryKeys(
     proof,
@@ -110,15 +113,19 @@ const normalizeFinalProofbody = (value: unknown): Record<string, unknown> => {
         [],
         `${allowanceCode}_FIELDS_INVALID`,
       );
-      const decoded: Record<string, bigint> = {};
-      for (const field of ['deltaIndex', 'rightAllowance', 'leftAllowance'] as const) {
-        const amount = allowance[field];
-        if (typeof amount !== 'bigint' || amount < 0n) {
-          throw new Error(`${allowanceCode}_${field.toUpperCase()}_INVALID`);
-        }
-        decoded[field] = amount;
+      const deltaIndex = allowance['deltaIndex'];
+      const rightAllowance = allowance['rightAllowance'];
+      const leftAllowance = allowance['leftAllowance'];
+      if (typeof deltaIndex !== 'bigint' || deltaIndex < 0n) {
+        throw new Error(`${allowanceCode}_DELTA_INDEX_INVALID`);
       }
-      return decoded;
+      if (typeof rightAllowance !== 'bigint' || rightAllowance < 0n) {
+        throw new Error(`${allowanceCode}_RIGHT_ALLOWANCE_INVALID`);
+      }
+      if (typeof leftAllowance !== 'bigint' || leftAllowance < 0n) {
+        throw new Error(`${allowanceCode}_LEFT_ALLOWANCE_INVALID`);
+      }
+      return { deltaIndex, rightAllowance, leftAllowance };
     });
     return {
       transformerAddress: normalizeAddress(transformer['transformerAddress'], 'TRANSFORMER'),
@@ -154,7 +161,9 @@ const normalizeFinalDisputeProof = (value: unknown): TowerFinalDisputeProof => {
   };
 };
 
-const computeProofBodyHash = (proofBody: Record<string, unknown>): string =>
+const computeProofBodyHash = (
+  proofBody: TowerFinalDisputeProof['finalProofbody'],
+): string =>
   ethers.keccak256(ABI_CODER.encode([PROOF_BODY_PARAM], [proofBody])).toLowerCase();
 
 export const encodeTowerCounterDisputeRemedy = (remedy: TowerCounterDisputeRemedy): string =>
@@ -273,7 +282,7 @@ type WatchtowerSweepOptions = {
         initialNonce: number;
         finalNonce: number;
         initialProofbodyHash: string;
-        finalProofbody: Record<string, unknown>;
+        finalProofbody: TowerFinalDisputeProof['finalProofbody'];
         starterArguments: string;
         otherArguments: string;
         sig: string;
@@ -721,14 +730,10 @@ export const runWatchtowerSweep = async (
     if (!(provider instanceof JsonRpcProvider)) {
       throw new Error('WATCHTOWER_JSON_RPC_PROVIDER_REQUIRED');
     }
-    // Ethers types dynamic ABI methods as a generic Contract. This single
-    // adapter owns the checked ABI/interface boundary; sweep logic and custom
-    // test contracts remain structurally typed after construction.
-    return new Contract(
+    return Depository__factory.connect(
       target.depositoryAddress,
-      DEPOSITORY_MINIMAL_ABI,
       wallet.connect(provider),
-    ) as unknown as ReturnType<SweepContractFactory>;
+    );
   };
   const contractFactory = options?.contractFactory ?? defaultContractFactory;
   const context: WatchtowerSweepContext = {

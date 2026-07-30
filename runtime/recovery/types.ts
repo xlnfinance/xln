@@ -76,10 +76,25 @@ export const normalizeTowerModeV1 = (mode: unknown): TowerModeV1 => {
 
 export type TowerActionKindV1 = 'counter_dispute_only';
 
+export type TowerProofBody = {
+  watchSeed: string;
+  offdeltas: bigint[];
+  tokenIds: bigint[];
+  transformers: Array<{
+    transformerAddress: string;
+    encodedBatch: string;
+    allowances: Array<{
+      deltaIndex: bigint;
+      rightAllowance: bigint;
+      leftAllowance: bigint;
+    }>;
+  }>;
+};
+
 export type TowerFinalDisputeProof = {
   counterentity: string;
   finalNonce: number;
-  finalProofbody: Record<string, unknown>;
+  finalProofbody: TowerProofBody;
   leftArguments: string;
   rightArguments: string;
   sig: string;
