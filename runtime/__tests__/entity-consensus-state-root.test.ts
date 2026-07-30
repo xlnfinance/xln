@@ -6,7 +6,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,
   computeEntityFrameAuthorityRoot,
-  ENTITY_CONSENSUS_STATE_FIELDS,
+  ENTITY_STATE_ROOT_FIELDS,
   ENTITY_STATE_ROOT_EXCLUDED_FIELDS,
   invalidateEntityAccountCommitment,
 } from '../entity/consensus/state-root';
@@ -200,7 +200,10 @@ const mutators = {
 const stateRootExcludedFields = new Set<keyof EntityState>(ENTITY_STATE_ROOT_EXCLUDED_FIELDS);
 
 test('Entity consensus root covers every shared EntityState field', () => {
-  expect(Object.keys(mutators).sort()).toEqual([...ENTITY_CONSENSUS_STATE_FIELDS].sort());
+  expect(Object.keys(mutators).sort()).toEqual([
+    ...ENTITY_STATE_ROOT_FIELDS,
+    ...ENTITY_STATE_ROOT_EXCLUDED_FIELDS,
+  ].sort());
   const baseline = computeCanonicalEntityConsensusStateHash(baseState());
   for (const [field, mutate] of Object.entries(mutators) as Array<[keyof EntityState, StateMutator]>) {
     const changed = baseState();

@@ -10,7 +10,6 @@ import { createStructuredLogger } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
 import { getPerfMs } from '../../infra/time';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
-import { ENTITY_FRAME_EVENT_COLLECTOR } from '../frame-event-collector';
 import {
   buildEntityAccountCommitment,
   deleteEntityAccountCommitment,
@@ -23,7 +22,14 @@ import {
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
-export const ENTITY_CONSENSUS_STATE_FIELDS = [
+/**
+ * Exact EntityState fields authenticated by the Entity state root.
+ *
+ * Keep this list explicit. A spread followed by deletion makes a newly added
+ * field consensus-critical by accident; this allowlist instead makes the type
+ * checker reject every unclassified field until its ownership is reviewed.
+ */
+export const ENTITY_STATE_ROOT_FIELDS = [
   'entityId',
   'height',
   'timestamp',
@@ -31,14 +37,12 @@ export const ENTITY_CONSENSUS_STATE_FIELDS = [
   'entityCommandNonces',
   'proposals',
   'config',
-  'prevFrameHash',
   'leaderState',
   'reserves',
   'accounts',
   'externalWallet',
   'deferredAccountProposals',
   'lastFinalizedJHeight',
-  'jBlockChain',
   'jHistoryFinality',
   'certifiedBoardState',
   'crontabState',
@@ -48,7 +52,6 @@ export const ENTITY_CONSENSUS_STATE_FIELDS = [
   'profile',
   'htlcRoutes',
   'htlcFeesEarned',
-  'htlcNotes',
   'consumptionAccumulator',
   'certifiedOutputSequences',
   'outDebtsByToken',
@@ -63,16 +66,20 @@ export const ENTITY_CONSENSUS_STATE_FIELDS = [
   'lending',
 ] as const satisfies readonly (keyof EntityState)[];
 
-type AssertNoMissingEntityStateField<T extends never> = T;
-export type EntityConsensusStateFieldCoverage = AssertNoMissingEntityStateField<
-  Exclude<keyof EntityState, (typeof ENTITY_CONSENSUS_STATE_FIELDS)[number]>
->;
-
 export const ENTITY_STATE_ROOT_EXCLUDED_FIELDS = [
   'prevFrameHash',
   'jBlockChain',
   'htlcNotes',
 ] as const satisfies readonly (keyof EntityState)[];
+
+type AssertNoMissingEntityStateField<T extends never> = T;
+export type EntityConsensusStateFieldCoverage = AssertNoMissingEntityStateField<
+  Exclude<
+    keyof EntityState,
+    | (typeof ENTITY_STATE_ROOT_FIELDS)[number]
+    | (typeof ENTITY_STATE_ROOT_EXCLUDED_FIELDS)[number]
+  >
+>;
 
 const projectPendingWithdrawals = (withdrawals: AccountReplica['pendingWithdrawals']): Map<string, unknown> =>
   new Map(
@@ -314,19 +321,15 @@ export const projectConsensusConfigCommitment = (config: ConsensusConfig): Recor
 };
 
 export const projectEntityConsensusState = (state: EntityState, expandAccounts = true): Record<string, unknown> => {
-  const projected = { ...state } as Partial<EntityState>;
-  // Frame events are committed by the outer signed frame. The enumerable
-  // reducer-local collector exists only so immutable spreads cannot lose them.
-  delete (projected as Record<string, unknown>)[ENTITY_FRAME_EVENT_COLLECTOR];
-  // The previous-frame link is committed by the outer Entity frame payload.
-  // The committed state then stores this frame's hash here, so including it in
-  // its own state root would be circular.
-  delete projected.prevFrameHash;
-  // Finalized J effects and the exact current anchor/root are authoritative.
-  // These bounded event bodies are only a local display/audit cache and may be
-  // absent after restore without changing the Entity consensus state.
-  delete projected.jBlockChain;
-  delete projected.htlcNotes;
+  // Preserve property presence exactly: optional fields that are absent from
+  // the live State must remain absent from the signed projection. Symbols such
+  // as the frame-local event collector cannot enter through this string-key
+  // allowlist.
+  const projected = Object.fromEntries(
+    ENTITY_STATE_ROOT_FIELDS
+      .filter((field) => Object.hasOwn(state, field))
+      .map((field) => [field, state[field]]),
+  );
   const orderbookExt = projectOrderbookConsensusState(state.orderbookExt);
   return {
     ...projected,
