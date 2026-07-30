@@ -1,5 +1,6 @@
 import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 import { safeStringify } from '../protocol/serialization';
+import { readPositiveIntegerEnv } from '../config/environment';
 import type { HubChild } from './orchestrator-types';
 
 type ProxyHubEndpoint =
@@ -97,19 +98,14 @@ const rewriteProxiedHubJsonBody = (text: string, hubEntityId: string): string =>
   }
 };
 
-const readPositiveIntEnv = (name: string, fallback: number): number => {
-  const value = Number(process.env[name] || '');
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
-};
-
 const readHubApiProxyTimeoutMs = (endpointWithQuery = ''): number => {
-  const defaultTimeoutMs = readPositiveIntEnv(
+  const defaultTimeoutMs = readPositiveIntegerEnv(
     'XLN_HUB_API_PROXY_TIMEOUT_MS',
-    readPositiveIntEnv('XLN_RPC_PROXY_TIMEOUT_MS', DEFAULT_HUB_API_PROXY_TIMEOUT_MS),
+    readPositiveIntegerEnv('XLN_RPC_PROXY_TIMEOUT_MS', DEFAULT_HUB_API_PROXY_TIMEOUT_MS),
   );
   const pathname = endpointWithQuery.split('?', 1)[0] || '';
   if (!LONG_RUNNING_HUB_ENDPOINTS.has(pathname)) return defaultTimeoutMs;
-  return readPositiveIntEnv(
+  return readPositiveIntegerEnv(
     'XLN_HUB_FAUCET_PROXY_TIMEOUT_MS',
     Math.max(defaultTimeoutMs, DEFAULT_HUB_FAUCET_PROXY_TIMEOUT_MS),
   );
@@ -194,7 +190,7 @@ const proxyRpc = async (
           );
         }
       }
-      const timeoutMs = readPositiveIntEnv('XLN_RPC_PROXY_TIMEOUT_MS', DEFAULT_RPC_PROXY_TIMEOUT_MS);
+      const timeoutMs = readPositiveIntegerEnv('XLN_RPC_PROXY_TIMEOUT_MS', DEFAULT_RPC_PROXY_TIMEOUT_MS);
       const { response, text } = await fetchTextWithTimeout(upstreamRpcUrl, {
         method: 'POST',
         headers: {

@@ -3,6 +3,7 @@ import { ERC20Mock__factory } from '../../../jurisdictions/typechain-types/index
 import { deriveSignerKeySync } from '../../account/crypto';
 import type { JAdapter, JTokenInfo } from '../../jadapter/types';
 import { safeStringify } from '../../protocol/serialization';
+import { readPositiveIntegerEnv } from '../../config/environment';
 import type { ExternalWalletApiContext } from './context';
 import { externalWalletLog } from './http';
 
@@ -26,13 +27,8 @@ export interface WaitableTransaction {
   wait(confirms?: number, timeout?: number): Promise<unknown | null>;
 }
 
-const readPositiveIntEnv = (name: string, fallback: number): number => {
-  const value = Number(process.env[name] || '');
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
-};
-
-const FAUCET_TX_WAIT_TIMEOUT_MS = readPositiveIntEnv('XLN_FAUCET_TX_WAIT_TIMEOUT_MS', 20_000);
-const FAUCET_REFILL_THRESHOLD_BPS = Math.min(10_000, readPositiveIntEnv('XLN_FAUCET_REFILL_THRESHOLD_BPS', 5_000));
+const FAUCET_TX_WAIT_TIMEOUT_MS = readPositiveIntegerEnv('XLN_FAUCET_TX_WAIT_TIMEOUT_MS', 20_000);
+const FAUCET_REFILL_THRESHOLD_BPS = Math.min(10_000, readPositiveIntegerEnv('XLN_FAUCET_REFILL_THRESHOLD_BPS', 5_000));
 
 const createFaucetLock = (): FaucetLock => ({
   locked: false,

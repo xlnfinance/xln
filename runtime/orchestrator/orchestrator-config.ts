@@ -1,45 +1,41 @@
 import { join, resolve } from 'node:path';
 import { normalizeLoopbackUrl } from '../networking/loopback-url';
+import { readPositiveIntegerEnv } from '../config/environment';
 import type { Args } from './orchestrator-types';
 
 const argsRaw = process.argv.slice(2);
 
-const readPositiveIntEnv = (name: string, fallback: number): number => {
-  const value = Number(process.env[name] || '');
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
-};
-
-export const STARTUP_TIMEOUT_MS = readPositiveIntEnv('XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS', 180_000);
+export const STARTUP_TIMEOUT_MS = readPositiveIntegerEnv('XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS', 180_000);
 export const CHILD_HEALTH_TIMEOUT_MS = Math.max(
   1_500,
-  readPositiveIntEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000),
+  readPositiveIntegerEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000),
 );
 export const HEALTH_RESPONSE_REFRESH_TIMEOUT_MS = Math.max(
   250,
-  Math.min(CHILD_HEALTH_TIMEOUT_MS, readPositiveIntEnv('XLN_HEALTH_RESPONSE_REFRESH_TIMEOUT_MS', 1_500)),
+  Math.min(CHILD_HEALTH_TIMEOUT_MS, readPositiveIntegerEnv('XLN_HEALTH_RESPONSE_REFRESH_TIMEOUT_MS', 1_500)),
 );
-export const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_PROFILES_READY_TIMEOUT_MS', 5_000);
-export const HUB_BASELINE_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_BASELINE_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
+export const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntegerEnv('XLN_HUB_PROFILES_READY_TIMEOUT_MS', 5_000);
+export const HUB_BASELINE_TIMEOUT_MS = readPositiveIntegerEnv('XLN_HUB_BASELINE_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
 export const HUB_BASELINE_STALL_TIMEOUT_MS = Math.max(
   10_000,
-  readPositiveIntEnv('XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000),
+  readPositiveIntegerEnv('XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000),
 );
-export const HUB_DIRECT_LINK_BASELINE_GRACE_MS = readPositiveIntEnv('XLN_HUB_DIRECT_LINK_BASELINE_GRACE_MS', 5_000);
+export const HUB_DIRECT_LINK_BASELINE_GRACE_MS = readPositiveIntegerEnv('XLN_HUB_DIRECT_LINK_BASELINE_GRACE_MS', 5_000);
 export const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
-  readPositiveIntEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000),
+  readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000),
 );
 export const MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS = Math.max(
   10_000,
-  readPositiveIntEnv('MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000),
+  readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000),
 );
-export const MARKET_MAKER_READY_TIMEOUT_MS = readPositiveIntEnv(
+export const MARKET_MAKER_READY_TIMEOUT_MS = readPositiveIntegerEnv(
   'XLN_MARKET_MAKER_READY_TIMEOUT_MS',
   Math.max(MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS, STARTUP_TIMEOUT_MS),
 );
-export const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
-export const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
-export const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
+export const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntegerEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
+export const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntegerEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
+export const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntegerEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
 export const CHILD_LOG_RING_MAX = 200;
 export const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;

@@ -16,7 +16,16 @@ const readMarketMakerNodeSource = (): string =>
   ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts'].map(readMarketMakerNodeModule).join('\n');
 
 const readRpcAdapterSource = (): string =>
-  ['rpc-public.ts', 'rpc-adapter.ts', 'rpc-lifecycle.ts', 'rpc-reads.ts', 'rpc-wallet-writes.ts']
+  [
+    'rpc-public.ts',
+    'rpc-adapter.ts',
+    'rpc-chain-io.ts',
+    'rpc-lifecycle.ts',
+    'rpc-reads.ts',
+    'rpc-wallet-writes.ts',
+    'rpc-watcher-ingress.ts',
+    'rpc-watcher-poll.ts',
+  ]
     .map(file => readFileSync(join(repoRoot, 'runtime/jadapter', file), 'utf8'))
     .join('\n');
 
@@ -457,7 +466,7 @@ describe('production startup wiring', () => {
       "relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')",
     );
     expect(orchestratorConfig).toContain('const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;');
-    expect(orchestratorConfig).toContain("readPositiveIntEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000)");
+    expect(orchestratorConfig).toContain("readPositiveIntegerEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000)");
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
     expect(orchestrator).not.toContain('XLN_MARKET_MAKER_INFO_TIMEOUT_MS');
     expect(orchestrator).toContain("process.env['XLN_CHILD_SHUTDOWN_QUIESCE_MS'] || '5000'");
@@ -801,10 +810,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('export const waitForJurisdictionAdapter = async (');
     expect(mmNode).toContain('JURISDICTION_ADAPTER_AMBIGUOUS');
     expect(mmNode).toContain('JURISDICTION_ADAPTER_NOT_READY name=${jurisdiction.name}');
-    expect(orchestratorConfig).toContain("readPositiveIntEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000)");
+    expect(orchestratorConfig).toContain("readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000)");
     expect(orchestratorConfig).toContain('Math.max(MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS, STARTUP_TIMEOUT_MS)');
     expect(mmNode).toContain("import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from './orchestrator-config';");
-    expect(orchestratorConfig).toContain("readPositiveIntEnv('MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000)");
+    expect(orchestratorConfig).toContain("readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000)");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
@@ -842,13 +851,11 @@ describe('production startup wiring', () => {
     expect(jurisdictionImport).toContain('blockNumber: (await resolveInitialBlockNumber(adapter, request)).toString()');
     expect(jadapterTypes).toContain('getCurrentBlockNumber?(): Promise<number>;');
     expect(jadapterTypes).toContain('getFinalityDepth?(): number;');
-    expect(rpcAdapter).toContain('const readCurrentRpcBlockNumber = async (): Promise<number> => {');
+    expect(rpcAdapter).toContain('const readCurrentBlockNumber = async (): Promise<number> =>');
     expect(rpcAdapter).toContain("send('eth_blockNumber', [])");
     expect(rpcAdapter).toContain('J_WATCHER_BLOCK_NUMBER_INVALID');
-    expect(rpcAdapter).toContain('async getCurrentBlockNumber(): Promise<number> {');
-    expect(rpcAdapter).toContain('return await readSafeWatcherBlockNumber();');
-    expect(rpcAdapter).toContain('getFinalityDepth(): number {');
-    expect(rpcAdapter).toContain('return resolveFinalityDepth(false);');
+    expect(rpcAdapter).toContain('getCurrentBlockNumber: chainIo.readSafeBlockNumber');
+    expect(rpcAdapter).toContain('getFinalityDepth: () => chainIo.resolveFinalityDepth(false)');
     expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
     expect(mmNode).toContain('return unique;');
     expect(mmNode).not.toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
@@ -2672,16 +2679,17 @@ describe('production startup wiring', () => {
   });
 
   test('RPC watcher pauses during persistence quiesce instead of entering j-event ingress', () => {
-    const rpc = readRpcAdapterSource();
-    const pauseHelper = rpc.indexOf('const isJEventIngressPaused = (activeEnv: RuntimeState): boolean =>');
-    const earlyPause = rpc.indexOf("pauseJEventWatcherForQuiesce({ step: 'before-block-number' });");
-    const batchPause = rpc.indexOf("step: 'before-process-event-batch'");
-    const processBatch = rpc.indexOf('const builtInput = processEventBatch(');
+    const poll = readFileSync(join(repoRoot, 'runtime/jadapter/rpc-watcher-poll.ts'), 'utf8');
+    const ingress = readFileSync(join(repoRoot, 'runtime/jadapter/rpc-watcher-ingress.ts'), 'utf8');
+    const pauseHelper = poll.indexOf('const isIngressPaused = (env: RuntimeState): boolean =>');
+    const earlyPause = poll.indexOf("pauseForQuiesce(request, { step: 'before-block-number' });");
+    const batchPause = ingress.indexOf("step: 'before-process-event-batch'");
+    const processBatch = ingress.indexOf('const observedInputs = decoded.events.length > 0');
 
     expect(pauseHelper).toBeGreaterThan(0);
-    expect(rpc).toContain("event: 'j_watch_paused_persistence_quiescing'");
+    expect(poll).toContain("event: 'j_watch_paused_persistence_quiescing'");
     expect(earlyPause).toBeGreaterThan(pauseHelper);
-    expect(batchPause).toBeGreaterThan(pauseHelper);
+    expect(batchPause).toBeGreaterThan(0);
     expect(batchPause).toBeLessThan(processBatch);
   });
 

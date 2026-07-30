@@ -13,6 +13,7 @@
  *   bun runtime/server/index.ts --port 9000        # Custom port
  */
 
+import { readPositiveIntegerEnv } from '../config/environment';
 import {
   main,
   enqueueRuntimeInput,
@@ -219,13 +220,9 @@ const resolveTrustedServerRestoreRpcBindings = (): Array<{
   if (!jurisdictionRef) throw new Error('PREDEPLOYED_JURISDICTION_IDENTITY_MISSING');
   return [{ jurisdictionRef, rpcUrl }];
 };
-const readPositiveIntEnv = (name: string, fallback: number): number => {
-  const value = Number(process.env[name] || '');
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
-};
-const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
-const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
-const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
+const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntegerEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
+const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntegerEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
+const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntegerEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
 const marketMakerState = createMarketMakerServerState();
 
 const externalWalletApi = createExternalWalletApi({
