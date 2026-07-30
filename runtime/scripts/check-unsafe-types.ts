@@ -11,7 +11,6 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/entity/tx/j-events-htlc.ts': 2,
   'runtime/hanko/codec.ts': 1,
   'runtime/jadapter/browservm-provider.ts': 4,
-  'runtime/jadapter/rpc-public.ts': 1,
   'runtime/jadapter/tron-signer.ts': 1,
   'runtime/jurisdiction/batch.ts': 1,
   'runtime/jurisdiction/config.ts': 1,

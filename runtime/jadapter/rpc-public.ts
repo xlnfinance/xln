@@ -77,20 +77,23 @@ export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinal
       });
     }
     if (parsed.name === 'watchtowerCounterDispute') {
-      const proof = parsed.args[1] as unknown as Record<string, unknown>;
-      const starterArguments = toFinalizationHex(proof['starterArguments']);
-      const otherArguments = toFinalizationHex(proof['otherArguments']);
-      const startedByLeft = Boolean(proof['startedByLeft']);
+      const proof = parsed.args[1];
+      if (typeof proof !== 'object' || proof === null) {
+        throw new Error('J_DISPUTE_FINALIZATION_PROOF_INVALID');
+      }
+      const starterArguments = toFinalizationHex(Reflect.get(proof, 'starterArguments'));
+      const otherArguments = toFinalizationHex(Reflect.get(proof, 'otherArguments'));
+      const startedByLeft = Boolean(Reflect.get(proof, 'startedByLeft'));
       return [
         {
-          counterentity: toFinalizationHex(proof['counterentity']),
-          initialNonce: toFinalizationDecimal(proof['initialNonce']),
-          finalNonce: toFinalizationDecimal(proof['finalNonce']),
-          initialProofbodyHash: toFinalizationHex(proof['initialProofbodyHash']),
+          counterentity: toFinalizationHex(Reflect.get(proof, 'counterentity')),
+          initialNonce: toFinalizationDecimal(Reflect.get(proof, 'initialNonce')),
+          finalNonce: toFinalizationDecimal(Reflect.get(proof, 'finalNonce')),
+          initialProofbodyHash: toFinalizationHex(Reflect.get(proof, 'initialProofbodyHash')),
           leftArguments: startedByLeft ? starterArguments : otherArguments,
           rightArguments: startedByLeft ? otherArguments : starterArguments,
           startedByLeft,
-          sig: toFinalizationHex(proof['sig']),
+          sig: toFinalizationHex(Reflect.get(proof, 'sig')),
         },
       ];
     }
