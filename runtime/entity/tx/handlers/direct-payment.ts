@@ -3,7 +3,6 @@ import type { AccountTx } from '../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
-import { formatEntityId } from '../../../presentation/identity-display';
 import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
@@ -120,7 +119,7 @@ const buildNextHopPayment = (
         tokenId,
         amount,
         route: route.slice(1),
-        description: description || `Payment to ${formatEntityId(targetEntityId)}`,
+        description: description || `Payment to ${targetEntityId}`,
         fromEntityId: state.entityId,
         toEntityId: nextHop,
         ...(deliveryMode ? { deliveryMode } : {}),
@@ -174,7 +173,7 @@ export const handleDirectPaymentEntityTx = async (
 
   addMessage(
     newState,
-    `💸 Sending ${entityTx.data.amount} (token ${entityTx.data.tokenId}) to ${formatEntityId(entityTx.data.targetEntityId)} via ${route.length - 1} hops`,
+    `💸 Sending ${entityTx.data.amount} (token ${entityTx.data.tokenId}) to ${entityTx.data.targetEntityId} via ${route.length - 1} hops`,
   );
   emitPaymentInitiated(candidateEffects, entityState.entityId, entityTx, route);
 

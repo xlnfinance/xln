@@ -3,7 +3,6 @@ import type { Delta } from '../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
 import type { EntityTx } from '../../../types/entity-tx';
-import { formatEntityId } from '../../../presentation/identity-display';
 import { upsertSortedStringMapEntry } from '../../../infra/sorted-map-index';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
@@ -176,15 +175,15 @@ export const handleOpenAccountEntityTx = async (
   if (entityTx.data.accountDomain === undefined) throw new Error('OPEN_ACCOUNT_DOMAIN_REQUIRED');
   const accountDomain = normalizeAccountStateDomain(entityTx.data.accountDomain, 'OPEN_ACCOUNT_DOMAIN');
   const jurisdiction = entityState.config?.jurisdiction;
-  if (!jurisdiction) throw new Error(`ACCOUNT_STATE_DOMAIN_MISSING: entity=${formatEntityId(entityState.entityId)}`);
+  if (!jurisdiction) throw new Error(`ACCOUNT_STATE_DOMAIN_MISSING: entity=${entityState.entityId}`);
   if (!sameAccountStateDomain(accountDomain, accountStateDomainFromJurisdiction(jurisdiction))) {
     throw new Error('OPEN_ACCOUNT_DOMAIN_MISMATCH');
   }
 
   if (findAccountKey(entityState, counterpartyId)) {
     const error =
-      `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${formatEntityId(entityState.entityId)} ` +
-      `counterparty=${formatEntityId(counterpartyId)}`;
+      `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${entityState.entityId} ` +
+      `counterparty=${counterpartyId}`;
     openAccountLog.error('already_exists', {
       entity: shortId(entityState.entityId),
       counterparty: shortId(counterpartyId),
@@ -200,12 +199,12 @@ export const handleOpenAccountEntityTx = async (
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
 
-  addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
+  addMessage(newState, `💳 Opening account with Entity ${entityTx.data.targetEntityId}...`);
 
   if (findAccountKey(newState, counterpartyId)) {
     throw new Error(
-      `OPEN_ACCOUNT_ALREADY_EXISTS_AFTER_CLONE: entity=${formatEntityId(entityState.entityId)} ` +
-      `counterparty=${formatEntityId(counterpartyId)}`,
+      `OPEN_ACCOUNT_ALREADY_EXISTS_AFTER_CLONE: entity=${entityState.entityId} ` +
+      `counterparty=${counterpartyId}`,
     );
   }
   insertLocalAccount(
@@ -219,7 +218,7 @@ export const handleOpenAccountEntityTx = async (
   );
   await seedOpenAccountPolicies(accountConsensusContext, newState, entityTx, counterpartyId);
 
-  addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
+  addMessage(newState, `✅ Account opening request sent to Entity ${counterpartyId}`);
 
   return { newState, outputs, accountChanges: [counterpartyId] };
 };

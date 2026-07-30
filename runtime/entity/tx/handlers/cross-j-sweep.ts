@@ -19,7 +19,6 @@ import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../types/account';
-import { formatEntityId } from '../../../presentation/identity-display';
 import { findAccountKey } from '../account-key';
 import {
   accountHasCrossSwapAckQueued,
@@ -90,8 +89,8 @@ const queueExpiredOfferClosure = (
   addMessage(
     state,
     accountId
-      ? `🌉 Cross-j sweep ${orderId}: no live source offer in ${formatEntityId(accountId)}`
-      : `🌉 Cross-j sweep ${orderId}: no source account for ${formatEntityId(sourceEntityId)}`,
+      ? `🌉 Cross-j sweep ${orderId}: no live source offer in ${accountId}`
+      : `🌉 Cross-j sweep ${orderId}: no source account for ${sourceEntityId}`,
   );
   return 0;
 };

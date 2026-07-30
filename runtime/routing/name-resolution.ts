@@ -9,7 +9,7 @@ import type { EntityTx } from '../types/entity-tx';
 import type { RuntimeState } from '../runtime/types';
 import type { NameSearchResult, ProfileUpdateTx } from '../types/profile';
 import { compareStableText } from '../protocol/serialization';
-import { formatEntityDisplay, generateEntityAvatar } from '../presentation/identity-display';
+import { generateEntityAvatar } from '../presentation/identity-display';
 
 type DisplayProfile = {
   entityId: string;
@@ -22,7 +22,7 @@ const normalizeId = (value: string): string => String(value || '').trim().toLowe
 
 const normalizeName = (value: string, entityId: string): string => {
   const trimmed = String(value || '').trim();
-  return trimmed.length > 0 ? trimmed : formatEntityDisplay(entityId);
+  return trimmed.length > 0 ? trimmed : entityId;
 };
 
 const collectProfiles = (env: RuntimeState | null | undefined): Map<string, DisplayProfile> => {
@@ -102,7 +102,7 @@ export const resolveRuntimeEntityName = async (
 ): Promise<string | null> => {
   const normalizedEntityId = normalizeId(entityId);
   if (!normalizedEntityId) return null;
-  return collectProfiles(env).get(normalizedEntityId)?.name ?? formatEntityDisplay(normalizedEntityId);
+  return collectProfiles(env).get(normalizedEntityId)?.name ?? normalizedEntityId;
 };
 
 export const getRuntimeEntityDisplayInfo = async (
@@ -119,7 +119,7 @@ export const getRuntimeEntityDisplayInfo = async (
 
   const profile = collectProfiles(env).get(normalizedEntityId);
   return {
-    name: profile?.name ?? formatEntityDisplay(normalizedEntityId),
+    name: profile?.name ?? normalizedEntityId,
     avatar: profile?.avatar || generateEntityAvatar(normalizedEntityId),
   };
 };

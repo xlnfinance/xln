@@ -16,7 +16,6 @@ import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../types/account';
-import { formatEntityId } from '../../../presentation/identity-display';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import {
   accountHasCrossSwapAckQueued,
@@ -121,7 +120,7 @@ const closeLiveSourceOffer = (
   const ratio = getCrossJurisdictionCommittedFillAmounts(route).fillRatio;
   if (!liveOffer?.crossJurisdiction || (!cancelRemainder && ratio <= 0)) return undefined;
   if (!accountId || !account) {
-    addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${formatEntityId(route.source.entityId)}`);
+    addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${route.source.entityId}`);
     return { newState, outputs, accountTxs };
   }
   if (accountHasCrossSwapAckQueued(account, orderId)) {
@@ -207,7 +206,7 @@ const requestFilledRouteReveal = (
   const { env, entityState, newState, outputs, accountTxs, orderId, cancelRemainder } = context;
   const account = accountId ? newState.accounts.get(accountId) : undefined;
   if (!accountId || !account) {
-    addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${formatEntityId(route.source.entityId)}`);
+    addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${route.source.entityId}`);
     return { newState, outputs, accountTxs };
   }
   if (!account.pulls?.has(route.sourcePull!.pullId)) {

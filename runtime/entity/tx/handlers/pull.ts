@@ -12,7 +12,6 @@ import { addMessage } from '../../frame-events';
 import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
-import { formatEntityId } from '../../../presentation/identity-display';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { findCrossJurisdictionPullRoute, isCrossJurisdictionPullCancelWithinClear } from '../cross-jurisdiction-helpers';
 import type { ApplyEntityTxOptions } from '../apply';
@@ -41,7 +40,7 @@ const requestFrame = (state: EntityState, outputs: EntityInput[]): void => {
 
 const resolveCounterparty = (result: PullResult, counterpartyEntityId: string, action: 'lock' | 'resolve' | 'cancel'): string | null => {
   const accountId = findAccountKey(result.newState, counterpartyEntityId);
-  if (!accountId) fail(result, `❌ Pull ${action} failed: no account with ${formatEntityId(counterpartyEntityId)}`);
+  if (!accountId) fail(result, `❌ Pull ${action} failed: no account with ${counterpartyEntityId}`);
   return accountId;
 };
 

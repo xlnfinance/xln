@@ -3,7 +3,6 @@ import { generateLockId, hashHtlcSecret } from '../../../protocol/htlc/utils';
 import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
-import { formatEntityId } from '../../../presentation/identity-display';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey } from '../account-key';
@@ -37,7 +36,7 @@ export const handleHashlockPaymentEntityTx = (
   const { targetEntityId, tokenId, amount, hashlock, description } = entityTx.data;
   const normalizedTarget = findAccountKey(newState, targetEntityId);
   if (!normalizedTarget) {
-    addMessage(newState, `❌ Hashlock payment failed: no account with ${formatEntityId(targetEntityId)}`);
+    addMessage(newState, `❌ Hashlock payment failed: no account with ${targetEntityId}`);
     return { newState, outputs, accountTxs };
   }
   const amountBig = typeof amount === 'bigint' ? amount : BigInt(String(amount));
@@ -121,7 +120,7 @@ export const handleHashlockPaymentEntityTx = (
   if (description && typeof description === 'string') {
     setHtlcRouteNote(newState, hashlock, lockId, description);
   }
-  addMessage(newState, `🔒 Hashlock payment locked ${amountBig} token ${tokenId} to ${formatEntityId(normalizedTarget)}`);
+  addMessage(newState, `🔒 Hashlock payment locked ${amountBig} token ${tokenId} to ${normalizedTarget}`);
   wakeLocalProposer(entityState, outputs);
   return { newState, outputs, accountTxs };
 };
@@ -137,7 +136,7 @@ export const handleResolveHtlcLockEntityTx = (
   const { counterpartyEntityId, lockId, secret } = entityTx.data;
   const normalizedCounterparty = findAccountKey(newState, counterpartyEntityId);
   if (!normalizedCounterparty) {
-    addMessage(newState, `❌ HTLC resolve failed: no account with ${formatEntityId(counterpartyEntityId)}`);
+    addMessage(newState, `❌ HTLC resolve failed: no account with ${counterpartyEntityId}`);
     return { newState, outputs, accountTxs };
   }
   if (!HEX_32_RE.test(lockId)) {
@@ -169,7 +168,7 @@ export const handleResolveHtlcLockEntityTx = (
       },
     },
   });
-  addMessage(newState, `🔓 HTLC resolve queued for ${formatEntityId(normalizedCounterparty)}`);
+  addMessage(newState, `🔓 HTLC resolve queued for ${normalizedCounterparty}`);
   wakeLocalProposer(entityState, outputs);
   return { newState, outputs, accountTxs };
 };

@@ -57,9 +57,6 @@ export const generateEntityAvatar = (entityId: string): string =>
 export const generateSignerAvatar = (signerId: string): string =>
   hashToAvatar(getSignerAddress(signerId).trim().toLowerCase(), 32);
 
-export const formatEntityDisplay = (entityId: string): string =>
-  entityId ? extractNumberFromEntityId(entityId).toString() : 'undefined';
-
 export const getEntityDisplayInfo = (
   entityId: string,
 ): { name: string; avatar: string; type: 'numbered' | 'lazy' } => {
@@ -69,11 +66,6 @@ export const getEntityDisplayInfo = (
     avatar: generateEntityAvatar(entityId),
     type: 'numbered',
   };
-};
-
-export const formatSignerDisplay = (signerId: string): string => {
-  const signer = DEMO_SIGNERS[signerId as keyof typeof DEMO_SIGNERS];
-  return signer ? `👤 ${signer.name}` : signerId;
 };
 
 export const getSignerDisplayInfo = (

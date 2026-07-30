@@ -39,7 +39,6 @@ import {
 import { assertEntityProviderActionRuntimeTxAuthorized } from './entity-provider-action-submit-auth';
 import { applyRecordEntityProviderActionResultRuntimeTx } from './entity-provider-action-submit-result';
 import { DEBUG } from '../infra/debug-flags';
-import { formatEntityDisplay, formatSignerDisplay } from '../presentation/identity-display';
 import { createStructuredLogger } from '../infra/logger';
 import { cloneEntityState } from '../entity/state-clone';
 import { buildRuntimeCheckpointLineagePlan } from '../storage/entity-lineage';
@@ -225,8 +224,8 @@ const observeJRangeRuntimeTx = (
     recordValidatorJHistory(undefined, observation);
     assertValidatorJHistoryMatchesCertifiedAnchor(match.replica.state, match.replica.jHistory);
     runtimeTxLog.info('jurisdiction.observation_superseded', {
-      entity: formatEntityDisplay(entityId),
-      signer: formatSignerDisplay(signerId),
+      entity: entityId,
+      signer: signerId,
       observedThrough: observation.scannedThroughHeight,
       certifiedThrough: certifiedAnchor.height,
     });
@@ -349,8 +348,8 @@ const reuseExistingReplica = (
     normalizeEntitySwapTradingPairs(replica.state);
     if (DEBUG) {
       runtimeTxLog.debug('replica.restored_reused', {
-        entity: formatEntityDisplay(identity.entityId),
-        signer: formatSignerDisplay(identity.signerId),
+        entity: identity.entityId,
+        signer: identity.signerId,
       });
     }
   }
@@ -472,8 +471,8 @@ const importReplicaRuntimeTx = (env: RuntimeState, runtimeTx: ImportReplicaRunti
   const identity = normalizeReplicaImportIdentity(runtimeTx);
   if (DEBUG) {
     runtimeTxLog.debug('replica.import_start', {
-      entity: formatEntityDisplay(identity.entityId),
-      signer: formatSignerDisplay(identity.signerId),
+      entity: identity.entityId,
+      signer: identity.signerId,
       isProposer: runtimeTx.data.isProposer,
     });
   }
@@ -507,8 +506,8 @@ const importReplicaRuntimeTx = (env: RuntimeState, runtimeTx: ImportReplicaRunti
     const replica = buildCheckpointReplica(env, runtimeTx, identity, config, replicaKeys);
     env.eReplicas.set(identity.replicaKey, replica);
     runtimeTxLog.info('replica.imported_from_certified_checkpoint', {
-      entity: formatEntityDisplay(identity.entityId),
-      signer: formatSignerDisplay(identity.signerId),
+      entity: identity.entityId,
+      signer: identity.signerId,
       height: replica.state.height,
       head: replica.state.prevFrameHash ?? 'genesis',
     });

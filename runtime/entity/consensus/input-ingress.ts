@@ -3,7 +3,6 @@ import { cloneIsolatedEntityInput } from '../input-clone';
 import { forkEntityReplicaForInput } from '../replica-clone';
 import type { EntityInput, EntityReplica } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
-import { formatEntityDisplay } from '../../presentation/identity-display';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { log } from '../../infra/diagnostics';
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from './leader';
@@ -120,7 +119,7 @@ export const prepareEntityInputIngress = (
     );
   }
   normalizeProposedFrameCollectedSigs(input.proposedFrame);
-  const entityDisplay = formatEntityDisplay(input.entityId);
+  const entityDisplay = input.entityId;
   const frameHash = input.proposedFrame?.hash?.slice(0, 10) || 'none';
   logEntityInput(env, input, workingReplica, entityDisplay, frameHash);
 

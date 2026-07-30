@@ -2,7 +2,6 @@ import { createOrderbookExtState, validateSpreadDistribution } from '../../../or
 import type { EntityInput, EntityState, Proposal } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
-import { formatEntityId } from '../../../presentation/identity-display';
 import { log } from '../../../infra/diagnostics';
 import { normalizeEntityName } from '../../profile-name';
 import { prepareEntityTxState } from '../../state-clone';
@@ -299,7 +298,7 @@ export const handleInitOrderbookExtEntityTx = (
   }
 
   if (!validateSpreadDistribution(entityTx.data.spreadDistribution)) {
-    log.error(`❌ Invalid spread distribution for initOrderbookExt on ${formatEntityId(entityState.entityId)}`);
+    log.error(`❌ Invalid spread distribution for initOrderbookExt on ${entityState.entityId}`);
     return { newState: entityState, outputs: [] };
   }
 
