@@ -23,7 +23,7 @@ import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
   type GossipProfileBatchRequest,
-} from './profile-batch';
+} from '../networking/profile-batch';
 import { redactTelemetryValue } from '../infra/telemetry-redaction';
 
 // ---------------------------------------------------------------------------

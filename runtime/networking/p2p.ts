@@ -17,7 +17,7 @@ import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } fr
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
 import { compareStableText } from '../protocol/serialization';
-import { DEFAULT_GOSSIP_BATCH_LIMIT, selectProfileBatch, type GossipProfileBatchRequest } from '../relay/profile-batch';
+import { DEFAULT_GOSSIP_BATCH_LIMIT, selectProfileBatch, type GossipProfileBatchRequest } from './profile-batch';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../infra/perf-runtime-flags';
 import {
