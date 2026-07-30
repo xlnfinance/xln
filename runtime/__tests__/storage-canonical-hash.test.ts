@@ -481,6 +481,7 @@ test('replica metadata projection preserves in-flight consensus and layout state
   expect(meta.jHistory).toEqual(replica.jHistory);
   expect(meta.state).toEqual(cloneEntityState(replica.state, true));
   expect(meta.state.accounts.get(counterpartyId)?.pulls).toBeUndefined();
+  expect('entityEncPrivKey' in meta).toBeFalse();
 });
 
 test('immediate replica metadata encoding matches the isolated recovery projection', () => {

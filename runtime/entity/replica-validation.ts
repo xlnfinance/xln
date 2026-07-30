@@ -212,22 +212,18 @@ const validateJPrefixRound = (value: unknown, context: string): void => {
   }
 };
 
-function assertEntityReplica(
+type EntityReplicaMetadata = Omit<EntityReplica, 'entityEncPrivKey'>;
+
+function assertEntityReplicaMetadata(
   replica: Record<string, unknown>,
   context: string,
-): asserts replica is Record<string, unknown> & EntityReplica {
+): asserts replica is Record<string, unknown> & EntityReplicaMetadata {
   const entityId = validateString(replica['entityId'], `${context}.entityId`);
   validateString(replica['signerId'], `${context}.signerId`);
   const publicKey = replica['entityEncPubKey'];
-  const privateKey = replica['entityEncPrivKey'];
-  if (typeof publicKey !== 'string' || typeof privateKey !== 'string') {
+  if (typeof publicKey !== 'string') {
     throw new FinancialDataCorruptionError(
-      `${context} encryption keypair must be strings`,
-    );
-  }
-  if (Boolean(publicKey) !== Boolean(privateKey)) {
-    throw new FinancialDataCorruptionError(
-      `${context} encryption keypair must be both present or both absent`,
+      `${context}.entityEncPubKey must be a string`,
     );
   }
   const state = validateEntityState(replica['state'], `${context}.state`);
@@ -265,11 +261,50 @@ function assertEntityReplica(
   }
 }
 
+function assertEntityReplica(
+  replica: Record<string, unknown>,
+  context: string,
+): asserts replica is Record<string, unknown> & EntityReplica {
+  assertEntityReplicaMetadata(replica, context);
+  const privateKey = replica['entityEncPrivKey'];
+  if (typeof privateKey !== 'string') {
+    throw new FinancialDataCorruptionError(
+      `${context}.entityEncPrivKey must be a string`,
+    );
+  }
+  if (Boolean(replica.entityEncPubKey) !== Boolean(privateKey)) {
+    throw new FinancialDataCorruptionError(
+      `${context} encryption keypair must be both present or both absent`,
+    );
+  }
+}
+
 export const validateEntityReplica = (
   value: unknown,
   context = 'EntityReplica',
 ): EntityReplica => {
   const replica = validateObject(value, context);
   assertEntityReplica(replica, context);
+  return replica;
+};
+
+/**
+ * Decode durable replica coordination metadata without accepting secrets.
+ *
+ * Runtime signer material rederives the private encryption key after storage
+ * verification. Persisting it here would turn every WAL/checkpoint copy into
+ * a plaintext key backup and would make remote history export unsafe.
+ */
+export const validateEntityReplicaMetadata = (
+  value: unknown,
+  context = 'EntityReplicaMetadata',
+): EntityReplicaMetadata => {
+  const replica = validateObject(value, context);
+  if (Object.hasOwn(replica, 'entityEncPrivKey')) {
+    throw new FinancialDataCorruptionError(
+      `${context}.entityEncPrivKey must not be persisted`,
+    );
+  }
+  assertEntityReplicaMetadata(replica, context);
   return replica;
 };

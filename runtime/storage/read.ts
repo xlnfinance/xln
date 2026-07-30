@@ -76,7 +76,10 @@ import {
   type AccountJClaimAccumulatorState,
 } from '../account/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
-import { validateEntityReplica } from '../entity/replica-validation';
+import {
+  validateEntityReplica,
+  validateEntityReplicaMetadata,
+} from '../entity/replica-validation';
 import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,
@@ -297,7 +300,7 @@ const listReplicaMetas = async (
         state: { ...sharedState, ...(localState as Record<string, unknown>) },
       };
     }
-    const meta = validateEntityReplica(
+    const meta = validateEntityReplicaMetadata(
       candidate,
       `StorageReplicaMeta[0x${key.toString('hex')}]`,
     ) as StorageReplicaMeta;

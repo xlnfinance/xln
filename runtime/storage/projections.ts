@@ -105,7 +105,6 @@ export type EntityReplicaCoreViewDoc = StorageEntityCoreDoc & {
   signerId: string;
   isProposer: boolean;
   entityEncPubKey: string;
-  entityEncPrivKey: '';
   htlcNotes?: EntityState['htlcNotes'];
 };
 
@@ -122,7 +121,6 @@ export const projectEntityReplicaCoreView = (
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
   entityEncPubKey: replica.entityEncPubKey,
-  entityEncPrivKey: '',
   ...withProp('htlcNotes', state.htlcNotes),
 });
 
@@ -157,7 +155,6 @@ const buildReplicaMetaProjection = (
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
   entityEncPubKey: replica.entityEncPubKey,
-  entityEncPrivKey: replica.entityEncPrivKey,
   ...(!options?.omitState ? { state } : {}),
   ...(options?.omitState ? {
     localEntityState: {

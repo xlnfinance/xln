@@ -317,7 +317,6 @@ export type StorageReplicaMeta = {
   signerId: string;
   isProposer: boolean;
   entityEncPubKey: string;
-  entityEncPrivKey: string;
   /**
    * Exact validator-local state for multi-validator or checkpoint records.
    * Intermediate single-signer metadata references the authoritative shared
@@ -348,7 +347,8 @@ type EntityPersistenceSplitKeys =
   | 'accounts'
   | 'orderbookExt'
   | 'htlcNotes';
-type ReplicaPersistenceSplitKeys = never;
+/** Process-local secrets are rederived from Runtime signer material on restore. */
+type ReplicaPersistenceSplitKeys = 'entityEncPrivKey';
 
 export type AccountPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
   Exclude<keyof AccountReplica, keyof StorageAccountDoc>

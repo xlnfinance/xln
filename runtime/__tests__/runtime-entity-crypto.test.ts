@@ -103,7 +103,7 @@ describe('runtime entity crypto', () => {
     expect(() => assertLocalEntityCryptoKeys(env)).toThrow('ENTITY_CRYPTO_KEY_MISMATCH');
   });
 
-  test('rejects persisted local private-key corruption instead of repairing it', () => {
+  test('validates the persisted public identity without storing its private key', () => {
     const seed = 'runtime-entity-crypto-reject-persisted-private-corruption';
     const env = createEmptyEnv(seed);
     clearSignerKeys(env);
@@ -113,9 +113,11 @@ describe('runtime entity crypto', () => {
     const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
 
     expect(() => assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, {
-      entityEncPubKey: keys.publicKey,
-      entityEncPrivKey: `0x${'00'.repeat(32)}`,
+      entityEncPubKey: `0x${'00'.repeat(32)}`,
     })).toThrow('ENTITY_CRYPTO_KEY_MISMATCH');
+    expect(() => assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, {
+      entityEncPubKey: keys.publicKey,
+    })).not.toThrow();
   });
 
   test('direct importReplica canonicalizes stale local private key when public key matches', async () => {

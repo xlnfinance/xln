@@ -51,7 +51,6 @@ type RuntimeAdapterEntityCoreDoc = StorageEntityCoreDoc & {
   signerId?: string;
   isProposer?: boolean;
   entityEncPubKey?: string;
-  entityEncPrivKey?: '';
   htlcNotes?: EntityState['htlcNotes'];
 };
 import type { Profile } from '../entity/profile';
@@ -1060,7 +1059,6 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
     entityId: core.entityId,
     ...withDefinedProp('signerId', core.signerId),
     ...withDefinedProp('isProposer', core.isProposer),
-    entityEncPrivKey: '',
     height: core.height,
     timestamp: core.timestamp,
     ...(core.entityEncPubKey ? { entityEncPubKey: core.entityEncPubKey } : {}),

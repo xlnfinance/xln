@@ -782,7 +782,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   });
 
   for (const core of [liveEntity, historicalEntity]) {
-    expect(core.entityEncPrivKey).toBe('');
+    expect('entityEncPrivKey' in core).toBe(false);
     expect(core.nonces.size).toBeLessThanOrEqual(100);
     expect(core.crontabState).toBeUndefined();
     expect(core.jBatchState?.batch?.disputeStarts?.length ?? 0).toBeLessThanOrEqual(50);
@@ -901,7 +901,7 @@ test('current stored view frame overlays local identity without mixing a later l
   expect(frame.activeEntity?.core.signerId).toBe(replica.signerId);
   expect(frame.activeEntity?.core.isProposer).toBe(true);
   expect(frame.activeEntity?.core.entityEncPubKey).toBe('pub');
-  expect(frame.activeEntity?.core.entityEncPrivKey).toBe('');
+  expect('entityEncPrivKey' in (frame.activeEntity?.core ?? {})).toBe(false);
   expect(frame.activeEntity?.core.htlcNotes).toEqual(new Map([['hashlock:local-h7', 'local note h7']]));
 });
 
@@ -2654,7 +2654,7 @@ test('runtime adapter view-frame caps route-heavy core maps under wire budget', 
   const core = frame.activeEntity?.core;
 
   expect(encoded.byteLength).toBeLessThan(1_048_576);
-  expect(core?.entityEncPrivKey).toBe('');
+  expect('entityEncPrivKey' in (core ?? {})).toBe(false);
   expect(core?.htlcRoutes.size).toBeLessThanOrEqual(20);
   expect(core?.htlcNotes?.size ?? 0).toBeLessThanOrEqual(20);
   expect(core?.crossJurisdictionSwaps?.size ?? 0).toBeLessThanOrEqual(20);

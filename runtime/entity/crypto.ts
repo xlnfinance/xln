@@ -65,18 +65,14 @@ export const assertPersistedLocalEntityCryptoKeys = (
   env: EntityRuntimeContext,
   entityId: string,
   signerId: string,
-  replica: { entityEncPubKey?: string; entityEncPrivKey?: string },
+  replica: { entityEncPubKey?: string },
 ): void => {
   if (!hasLocalSignerKey(env, signerId)) return;
   const expected = deriveLocalEntityCryptoKeys(env, entityId, signerId);
-  if (
-    replica.entityEncPubKey !== expected.publicKey ||
-    replica.entityEncPrivKey !== expected.privateKey
-  ) {
+  if (replica.entityEncPubKey !== expected.publicKey) {
     throw new Error(
       `ENTITY_CRYPTO_KEY_MISMATCH: entity=${entityId} signer=${signerId} ` +
-      `expectedPub=${expected.publicKey} actualPub=${String(replica.entityEncPubKey || '')} ` +
-      `privateKeyMatch=${replica.entityEncPrivKey === expected.privateKey}`,
+      `expectedPub=${expected.publicKey} actualPub=${String(replica.entityEncPubKey || '')}`,
     );
   }
 };
