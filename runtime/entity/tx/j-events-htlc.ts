@@ -15,13 +15,21 @@ type DisputeTransformerArgs = {
   pulls?: Array<string>;
 };
 
+const decodeStringArray = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) return undefined;
+  return [...value];
+};
+
 function decodeDisputeTransformerArgs(starterInitialArgumentsRaw: unknown): DisputeTransformerArgs[] {
   const starterInitialArguments = String(starterInitialArgumentsRaw || '0x');
   if (starterInitialArguments === '0x') return [];
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   let argArray: string[];
   try {
-    [argArray] = abiCoder.decode(['bytes[]'], starterInitialArguments) as unknown as [string[]];
+    const value = abiCoder.decode(['bytes[]'], starterInitialArguments)[0];
+    const decoded = decodeStringArray(value);
+    if (!decoded) return [];
+    argArray = decoded;
   } catch {
     return [];
   }
@@ -30,11 +38,17 @@ function decodeDisputeTransformerArgs(starterInitialArgumentsRaw: unknown): Disp
   for (const arg of argArray) {
     if (!arg || arg === '0x') continue;
     try {
-      const [decoded] = abiCoder.decode(
+      const decoded = abiCoder.decode(
         ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
         arg,
-      ) as unknown as [DisputeTransformerArgs];
-      decodedArgs.push(decoded);
+      )[0];
+      if (typeof decoded !== 'object' || decoded === null) continue;
+      const secrets = decodeStringArray(Reflect.get(decoded, 'secrets'));
+      const pulls = decodeStringArray(Reflect.get(decoded, 'pulls'));
+      decodedArgs.push({
+        ...(secrets === undefined ? {} : { secrets }),
+        ...(pulls === undefined ? {} : { pulls }),
+      });
     } catch {
       // Ignore non-transformer argument formats.
     }
