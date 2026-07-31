@@ -4,11 +4,11 @@ import {
   createRelayStore,
   deliverPendingMessages,
   enqueueMessage,
-  isRelaySendResultFailure,
   pushDebugEvent,
   setDebugIncidentState,
   storeVerifiedGossipProfile,
 } from '../network/relay/store';
+import { classifyWebSocketSendResult } from '../network/websocket-send-result';
 import type { Profile } from '../entity/profile';
 import {
   buildCryptographicProfileFixture,
@@ -30,13 +30,22 @@ const drainPendingMessages = (
   return delivered;
 };
 
-test('relay send result predicate matches websocket failure contract', () => {
-  expect(isRelaySendResultFailure(false)).toBe(true);
-  expect(isRelaySendResultFailure(-1)).toBe(true);
-  expect(isRelaySendResultFailure(true)).toBe(false);
-  expect(isRelaySendResultFailure(0)).toBe(false);
-  expect(isRelaySendResultFailure(1)).toBe(false);
-  expect(isRelaySendResultFailure()).toBe(false);
+test('websocket send result classifier covers the complete server/client matrix', () => {
+  const matrix = [
+    { result: false, expected: 'dropped' },
+    { result: 0, expected: 'dropped' },
+    { result: -1, expected: 'backpressured' },
+    { result: true, expected: 'accepted' },
+    { result: 1, expected: 'accepted' },
+    { result: 4096, expected: 'accepted' },
+    { result: undefined, expected: 'accepted' },
+  ] as const;
+
+  for (const { result, expected } of matrix) {
+    expect(classifyWebSocketSendResult(result)).toBe(expected);
+  }
+  expect(() => classifyWebSocketSendResult(-2)).toThrow('WEBSOCKET_SEND_RESULT_INVALID');
+  expect(() => classifyWebSocketSendResult(Number.NaN)).toThrow('WEBSOCKET_SEND_RESULT_INVALID');
 });
 
 test('relay incidents group repeated root errors and reopen after a new occurrence', () => {
@@ -139,7 +148,7 @@ test('relay pending queue rejects payloads that cannot be measured canonically',
   expect(store.pendingMessageBytes).toBe(0);
 });
 
-test('relay pending delivery retains current and later messages when send fails', () => {
+test('relay pending delivery retains current and later messages when send reports zero bytes', () => {
   const store = createRelayStore('relay-test');
   const delivered: unknown[] = [];
 
@@ -149,7 +158,7 @@ test('relay pending delivery retains current and later messages when send fails'
 
   const failed = deliverPendingMessages(store, 'runtime-a', (msg) => {
     const record = msg as { n?: number };
-    if (record.n === 2) return false;
+    if (record.n === 2) return 0;
     delivered.push(msg);
     return true;
   });
@@ -164,6 +173,19 @@ test('relay pending delivery retains current and later messages when send fails'
   });
   expect(asRecords(delivered).map(msg => msg['n'])).toEqual([1]);
   expect(asRecords(drainPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2, 3]);
+  expect(store.pendingMessageBytes).toBe(0);
+});
+
+test('relay pending delivery removes an item accepted into Bun backpressure', () => {
+  const store = createRelayStore('relay-test');
+  enqueueMessage(store, 'runtime-a', { n: 1 });
+
+  expect(deliverPendingMessages(store, 'runtime-a', () => -1)).toEqual({
+    delivered: 1,
+    expired: 0,
+    retained: 0,
+  });
+  expect(store.pendingMessages.has('runtime-a')).toBe(false);
   expect(store.pendingMessageBytes).toBe(0);
 });
 

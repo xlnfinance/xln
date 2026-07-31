@@ -25,6 +25,10 @@ import {
   type GossipProfileBatchRequest,
 } from '../p2p/profile-batch';
 import { redactTelemetryValue } from '../../infra/telemetry-redaction';
+import {
+  classifyWebSocketSendResult,
+  type WebSocketSendResult,
+} from '../websocket-send-result';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,13 +42,13 @@ export type RelayClient = {
 };
 
 export type RelaySocketLike = {
-  send(data: string | Uint8Array): boolean | number | void;
+  send(data: string | Uint8Array): WebSocketSendResult;
   close?(code?: number, reason?: string): unknown;
   terminate?(): unknown;
   readyState?: unknown;
 };
 
-export type RelaySendResult = boolean | number | void;
+export type RelaySendResult = WebSocketSendResult;
 
 export type RelayDebugEvent = {
   id: number;
@@ -219,9 +223,6 @@ export const isRelaySocketOpen = (ws: unknown): boolean => {
   const readyState = Number((ws as { readyState?: unknown }).readyState);
   return !Number.isFinite(readyState) || readyState === 1;
 };
-
-export const isRelaySendResultFailure = (result: RelaySendResult): boolean =>
-  result === false || (typeof result === 'number' && result < 0);
 
 const deliveryCodeFor = (status: string, reason: string): string => {
   if (reason) return normalizeRuntimeFailureCode(reason);
@@ -651,7 +652,7 @@ export const deliverPendingMessages = (
     }
     try {
       const sendResult = deliver(item.msg);
-      if (isRelaySendResultFailure(sendResult)) {
+      if (classifyWebSocketSendResult(sendResult) === 'dropped') {
         failure = { reason: 'RELAY_PENDING_SEND_FAILED' };
         retained.push(item);
         continue;

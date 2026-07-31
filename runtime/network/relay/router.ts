@@ -12,7 +12,6 @@ import {
   type RelaySendResult,
   type RelayStore,
   isCanonicalRuntimeId,
-  isRelaySendResultFailure,
   normalizeRuntimeKey,
   nextWsTimestamp,
   pushDebugEvent,
@@ -28,6 +27,7 @@ import {
   isRelaySocketOpen,
   classifyRelayDeliveryEvent,
 } from './store';
+import { classifyWebSocketSendResult } from '../websocket-send-result';
 import type { Profile } from '../../entity/profile';
 import { verifyProfileSignature, type ProfileVerifyResult } from '../../entity/profile-signing';
 import { verifyHelloAuth } from '../p2p/hello-auth';
@@ -180,8 +180,8 @@ const sendRelayDelivery = (
   }
   try {
     const result = config.send(ws, serializeWsMessage(msg as RuntimeWsMessage));
-    if (isRelaySendResultFailure(result)) {
-      return requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_FALSE');
+    if (classifyWebSocketSendResult(result) === 'dropped') {
+      return requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_DROPPED');
     }
     return requireRelayDeliveryMetadata('delivered');
   } catch (error) {

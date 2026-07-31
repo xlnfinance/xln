@@ -59,7 +59,7 @@ describe('relay direct entity delivery', () => {
     const targetKeys = deriveEncryptionKeyPair(targetSeed);
     const targetPubKey = pubKeyToHex(targetKeys.publicKey);
     const store = createRelayStore(sourceRuntimeId);
-    const targetSocket = makeSocket();
+    const targetSocket = makeSocket({ sendResult: -1 });
     const logs: string[] = [];
 
     cacheEncryptionKey(store, sourceRuntimeId, sourcePubKey);
@@ -200,7 +200,7 @@ describe('relay direct entity delivery', () => {
     });
   });
 
-  test('falls back when direct relay socket send returns false', () => {
+  test('falls back when direct relay socket send reports zero bytes', () => {
     const sourceSeed = 'relay-direct-send-false-source';
     const targetSeed = 'relay-direct-send-false-target';
     const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
@@ -208,7 +208,7 @@ describe('relay direct entity delivery', () => {
     const sourcePubKey = pubKeyToHex(deriveEncryptionKeyPair(sourceSeed).publicKey);
     const targetPubKey = pubKeyToHex(deriveEncryptionKeyPair(targetSeed).publicKey);
     const store = createRelayStore(sourceRuntimeId);
-    const targetSocket = makeSocket({ sendResult: false });
+    const targetSocket = makeSocket({ sendResult: 0 });
 
     cacheEncryptionKey(store, sourceRuntimeId, sourcePubKey);
     cacheEncryptionKey(store, targetRuntimeId, targetPubKey);
@@ -250,10 +250,10 @@ describe('relay direct entity delivery', () => {
       from: sourceRuntimeId,
       to: targetRuntimeId,
       status: 'send-failed',
-      reason: 'ROUTE_DIRECT_SEND_FALSE',
+      reason: 'ROUTE_DIRECT_SEND_DROPPED',
       delivery: {
         outcome: 'failed',
-        code: 'ROUTE_DIRECT_SEND_FALSE',
+        code: 'ROUTE_DIRECT_SEND_DROPPED',
         retryable: true,
         fatal: false,
         terminal: false,

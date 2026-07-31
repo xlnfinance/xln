@@ -450,7 +450,7 @@ describe('relay-router gossip fanout', () => {
     )).toBe(true);
   });
 
-  test('reports typed send failure when forwarding to active target socket returns false', async () => {
+  test('accepts Bun backpressure and rejects a zero-byte forward to an active target', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
@@ -462,8 +462,11 @@ describe('relay-router gossip fanout', () => {
         const bucket = sentBySocket.get(ws) ?? [];
         bucket.push(message);
         sentBySocket.set(ws, bucket);
-        if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-send-false') {
-          return false;
+        if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-backpressured') {
+          return -1;
+        }
+        if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-dropped') {
+          return 0;
         }
       },
     };
@@ -474,7 +477,27 @@ describe('relay-router gossip fanout', () => {
     await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
     await relayRoute(config, wsA, {
       type: 'entity_inputs',
-      id: 'deliver-send-false',
+      id: 'deliver-backpressured',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: 'encrypted-account-input',
+      encrypted: true,
+      entityId: ENTITY_B,
+      txs: 1,
+    });
+
+    expect(store.clients.get(RUNTIME_B)?.ws).toBe(wsB);
+    expect(store.debugEvents.find(event =>
+      event.event === 'delivery' &&
+      event.status === 'delivered' &&
+      event.details &&
+      (event.details as { traceId?: string }).traceId === 'deliver-backpressured'
+    )).toBeDefined();
+
+    await relayRoute(config, wsA, {
+      type: 'entity_inputs',
+      id: 'deliver-dropped',
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: RUNTIME_B,
@@ -488,7 +511,7 @@ describe('relay-router gossip fanout', () => {
     expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
       type: 'error',
       error: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
-      inReplyTo: 'deliver-send-false',
+      inReplyTo: 'deliver-dropped',
       to: RUNTIME_B,
     });
     expect(store.debugEvents.find(event =>
@@ -496,20 +519,20 @@ describe('relay-router gossip fanout', () => {
       event.status === 'send-failed' &&
       event.to === RUNTIME_B
     )).toMatchObject({
-      reason: 'RELAY_SEND_FALSE',
+      reason: 'RELAY_SEND_DROPPED',
       delivery: {
         outcome: 'failed',
-        code: 'RELAY_SEND_FALSE',
+        code: 'RELAY_SEND_DROPPED',
         retryable: true,
         fatal: false,
         terminal: false,
         failure: {
           category: 'TransientRace',
-          code: 'RELAY_SEND_FALSE',
+          code: 'RELAY_SEND_DROPPED',
         },
       },
       details: {
-        traceId: 'deliver-send-false',
+        traceId: 'deliver-dropped',
         entityId: ENTITY_B,
         txs: 1,
       },

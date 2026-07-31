@@ -3,13 +3,13 @@ import type { RuntimeReplica, RuntimeEntityInputsEnvelope } from '../../runtime/
 import { encryptJSON, hexToPubKey } from '../../protocol/p2p-crypto';
 import {
   isRelaySocketOpen,
-  isRelaySendResultFailure,
   normalizeRuntimeKey,
   nextWsTimestamp,
   pushDebugEvent,
   resolveEncryptionPublicKeyHex,
   type RelayStore,
 } from '../../network/relay/store';
+import { classifyWebSocketSendResult } from '../../network/websocket-send-result';
 import { serializeWsMessage } from '../../network/p2p/ws-protocol';
 import {
   deliveryAccepted,
@@ -155,13 +155,13 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     };
     if (target && isRelaySocketOpen(target.ws)) {
       const result = target.ws.send(serializeWsMessage(msg));
-      if (isRelaySendResultFailure(result)) {
+      if (classifyWebSocketSendResult(result) === 'dropped') {
         pushDirectRelayDeliveryEvent(relayStore, {
           fromRuntimeId,
           targetRuntimeId,
           envelope,
           status: 'send-failed',
-          reason: 'ROUTE_DIRECT_SEND_FALSE',
+          reason: 'ROUTE_DIRECT_SEND_DROPPED',
         });
         return deferredDirectRelayDelivery('ROUTE_DIRECT_SEND_FAILED');
       }

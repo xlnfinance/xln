@@ -14,8 +14,8 @@ import {
 } from '../protocol/payments/delivery-result';
 import {
   classifyRelayDeliveryEvent,
-  isRelaySendResultFailure,
 } from '../network/relay/store';
+import { classifyWebSocketSendResult } from '../network/websocket-send-result';
 
 const repoRoot = process.cwd();
 
@@ -102,11 +102,12 @@ requireCondition(classifyUndeliveredDelivery(terminalFailure, {
   terminal: 'DELIVERY_DROP',
 }).retry === false, 'terminal disposition must drop');
 
-requireCondition(isRelaySendResultFailure(false), 'relay send false must fail');
-requireCondition(isRelaySendResultFailure(-1), 'relay negative send must fail');
-requireCondition(!isRelaySendResultFailure(true), 'relay send true must pass');
-requireCondition(!isRelaySendResultFailure(0), 'relay send 0 must pass');
-requireCondition(!isRelaySendResultFailure(undefined), 'relay send void must pass');
+requireCondition(classifyWebSocketSendResult(false) === 'dropped', 'relay send false must drop');
+requireCondition(classifyWebSocketSendResult(0) === 'dropped', 'relay send zero must drop');
+requireCondition(classifyWebSocketSendResult(-1) === 'backpressured', 'relay send -1 must be accepted with backpressure');
+requireCondition(classifyWebSocketSendResult(true) === 'accepted', 'relay send true must pass');
+requireCondition(classifyWebSocketSendResult(1) === 'accepted', 'relay positive send must pass');
+requireCondition(classifyWebSocketSendResult(undefined) === 'accepted', 'relay send void must pass');
 
 assertDelivery(classifyRelayDeliveryEvent({ status: 'queued' }), {
   outcome: 'queued',
@@ -222,15 +223,20 @@ for (const [path, markers] of [
     'ROUTE_DIRECT_MISS_FALLBACK',
     'ROUTE_DIRECT_SEND_FAILED',
   ]],
+  ['runtime/network/websocket-send-result.ts', [
+    'export const classifyWebSocketSendResult',
+    "return 'backpressured'",
+    "return 'dropped'",
+  ]],
   ['runtime/network/relay/store.ts', [
-    'export const isRelaySendResultFailure',
+    "classifyWebSocketSendResult(sendResult) === 'dropped'",
     'export const classifyRelayDeliveryEvent',
     'deliveryFailure({',
     'deliverPendingMessages',
   ]],
   ['runtime/network/relay/router.ts', [
     'const sendRelayDelivery = (',
-    'isRelaySendResultFailure(result)',
+    "classifyWebSocketSendResult(result) === 'dropped'",
     'delivery: relayDelivery',
     'local-delivery-failed',
   ]],

@@ -12,6 +12,10 @@ import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { verifyHelloAuth } from './hello-auth';
 import { createHelloChallengeRegistry } from './hello-challenge';
 import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
+import {
+  classifyWebSocketSendResult,
+  type WebSocketSendResult,
+} from '../websocket-send-result';
 
 type DirectRuntimeWsOptions = {
   runtimeId: string;
@@ -26,7 +30,7 @@ type DirectRuntimeWsOptions = {
 
 export type DirectWebSocket = {
   readyState?: number;
-  send(data: string | Uint8Array): boolean | number | void;
+  send(data: string | Uint8Array): WebSocketSendResult;
   close(code?: number, reason?: string): unknown;
 };
 
@@ -90,7 +94,7 @@ const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt 
   if (!isSocketOpen(ws)) return { sent: false };
   try {
     const result = ws.send(serializeWsMessage(msg));
-    return result === false || (typeof result === 'number' && result < 0) ? { sent: false } : { sent: true };
+    return classifyWebSocketSendResult(result) === 'dropped' ? { sent: false } : { sent: true };
   } catch (error) {
     return { sent: false, error: error instanceof Error ? error.message : String(error) };
   }

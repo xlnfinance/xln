@@ -577,6 +577,57 @@ describe('direct runtime websocket route', () => {
     });
   });
 
+  test('accepts Bun backpressure but forgets a direct socket that reports zero bytes', async () => {
+    const serverSeed = 'direct-route-server-send-contract';
+    const clientSeed = 'direct-route-client-send-contract';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onEntityInputs: () => undefined,
+    });
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId: serverRuntimeId,
+      sourceRuntimeHeight: 1,
+      sourceRuntimeTimestamp: 1,
+      entityInputs: [{
+        entityId: `0x${'46'.repeat(32)}`,
+        runtimeId: clientRuntimeId,
+        signerId: clientRuntimeId,
+        entityTxs: [],
+      }],
+    };
+
+    ws.send = (raw) => {
+      sent.push(deserializeWsMessage(raw));
+      return -1;
+    };
+    expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
+      outcome: 'delivered',
+      code: 'ROUTE_DIRECT_DELIVERED',
+    });
+    expect(route.getSessionState()).toEqual([
+      expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+    ]);
+
+    ws.send = (raw) => {
+      sent.push(deserializeWsMessage(raw));
+      return 0;
+    };
+    expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_SEND_FAILED',
+      retryable: true,
+      terminal: false,
+    });
+    expect(route.getSessionState()).toEqual([]);
+  });
+
   test('preserves direct socket root errors in a retryable structured delivery result', async () => {
     const serverSeed = 'direct-route-server-send-error';
     const clientSeed = 'direct-route-client-send-error';
