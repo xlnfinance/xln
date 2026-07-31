@@ -22,6 +22,7 @@
   import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/remoteRuntimeValidation';
   import {
     BRAINVAULT_V1,
+    BRAINVAULT_V1_SPEC_ID,
     bytesToHex,
     combineShards,
     deriveEthereumAddress,
@@ -66,6 +67,12 @@
 
   function logRuntimeCreationDiagnostic(message: string, details?: unknown): void {
     errorLog.log(message, 'Runtime Creation', details);
+  }
+
+  const BRAINVAULT_WORKER_URL = `/brainvault-worker.js?spec=${encodeURIComponent(BRAINVAULT_V1_SPEC_ID)}`;
+
+  function createBrainVaultWorker(): Worker {
+    return new Worker(BRAINVAULT_WORKER_URL);
   }
 
   function isScenarioPreview(): boolean {
@@ -897,6 +904,12 @@
       const { type, data } = e.data;
 
       if (type === 'ready') {
+        if (data?.specId !== BRAINVAULT_V1_SPEC_ID) {
+          const error = new Error(`BRAINVAULT_WORKER_SPEC_MISMATCH:${String(data?.specId)}:${BRAINVAULT_V1_SPEC_ID}`);
+          opts.onError?.(error);
+          if (opts.handleErrors !== false) handleWorkerFailure(worker, error);
+          return;
+        }
         opts.onReady?.();
       } else if (type === 'probe_result') {
         const probeTime = normalizeBrainVaultShardTimeSample(data?.estimatedShardTimeMs);
@@ -997,7 +1010,7 @@
         const workerPromises: Promise<void>[] = [];
 
         for (let i = 0; i < initialWorkers; i++) {
-          const worker = new Worker('/brainvault-worker.js');
+          const worker = createBrainVaultWorker();
           workers.push(worker);
 
           const initPromise = new Promise<void>((resolve, reject) => {
@@ -1230,7 +1243,7 @@
       const currentTotal = workers.length;
 
       for (let i = 0; i < workersToAdd && hasPendingShardWork(); i++) {
-        const worker = new Worker('/brainvault-worker.js');
+        const worker = createBrainVaultWorker();
         workers.push(worker);
 
         attachWorkerHandlers(worker, {

@@ -10,7 +10,7 @@
 import { argon2id } from 'hash-wasm';
 import { bytesToHex } from './encoding.ts';
 import { deriveShardWithParams } from './kdf.ts';
-import { BRAINVAULT_V1, createShardSalt } from './spec.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './spec.ts';
 
 // Message handler
 self.onmessage = async function(e: MessageEvent) {
@@ -19,7 +19,7 @@ self.onmessage = async function(e: MessageEvent) {
   try {
     switch (type) {
       case 'init':
-        self.postMessage({ type: 'ready', id });
+        self.postMessage({ type: 'ready', id, data: { specId: BRAINVAULT_V1_SPEC_ID } });
         break;
 
       case 'probe': {

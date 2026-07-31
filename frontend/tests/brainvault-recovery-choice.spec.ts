@@ -73,4 +73,22 @@ test.describe('Recovery choice guidance', () => {
     await page.keyboard.press('Home');
     await expect(brainVaultTab).toBeFocused();
   });
+
+  test('rejects a stale cached worker before deriving', { tag: '@functional' }, async ({ page }) => {
+    await page.route(/\/brainvault-worker\.js\?spec=/, async (route) => {
+      await route.fulfill({
+        contentType: 'application/javascript',
+        body: `self.onmessage = ({ data }) => {
+          if (data.type === 'init') self.postMessage({ type: 'ready', id: data.id, data: { specId: 'stale-v0' } });
+        };`,
+      });
+    });
+    await page.goto(TEST_URL);
+    await page.getByLabel('Vault name public derivation input').fill('cache-check');
+    await page.getByLabel('Secret passphrase').fill('secret123456');
+    await page.getByRole('button', { name: /Security work factor/ }).click();
+    await page.getByRole('button', { name: '1 Test', exact: true }).click();
+    await page.getByRole('button', { name: 'Derive wallet', exact: true }).click();
+    await expect(page.getByText(/BRAINVAULT_WORKER_SPEC_MISMATCH:stale-v0/)).toBeVisible();
+  });
 });

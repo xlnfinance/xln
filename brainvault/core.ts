@@ -27,7 +27,7 @@ import { BRAINVAULT_V1 } from './spec.ts';
 export { bytesToHex, hexToBytes } from './encoding.ts';
 export { deriveShard, deriveShardWithParams } from './kdf.ts';
 export type { BrainvaultKdfParams } from './kdf.ts';
-export { BRAINVAULT_V1, createShardSalt } from './spec.ts';
+export { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './spec.ts';
 
 /**
  * Calculate number of shards for a given factor
