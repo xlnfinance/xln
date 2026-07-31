@@ -61,8 +61,8 @@ export type {
 export type { GossipLayer } from '../network/p2p/gossip';
 export type { Profile } from '../entity/profile';
 export type { PaymentRoute } from '../routing/pathfinding';
-export type { CompletedBatch, JBatch, JBatchState } from '../jurisdiction/batch';
-export type { JAdapter, JEvent } from '../jadapter/types';
+export type { CompletedBatch, JBatch, JBatchState } from '../jurisdiction/machine/batch';
+export type { JAdapter, JEvent } from '../jurisdiction/adapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from '../orderbook';
 export type {
   SwapAccountCapacityView,
@@ -117,7 +117,7 @@ export {
 export {
   getJurisdictionStackId,
   isJurisdictionStackRef,
-} from '../jurisdiction/jurisdiction-stack';
+} from '../jurisdiction/machine/jurisdiction-stack';
 
 // Re-export identity functions types
 export {

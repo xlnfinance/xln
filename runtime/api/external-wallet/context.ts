@@ -1,4 +1,4 @@
-import type { JAdapter, JTokenInfo } from '../../jadapter/types';
+import type { JAdapter, JTokenInfo } from '../../jurisdiction/adapter/types';
 
 export interface ExternalWalletApiContext {
   getJAdapter(): JAdapter | null;

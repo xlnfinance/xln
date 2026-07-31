@@ -13,7 +13,7 @@ import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
-} from '../../../../jurisdiction/board-registry';
+} from '../../../../jurisdiction/machine/board-registry';
 import { verifyHankoForHash } from '../../../../hanko/signing';
 import type { AccountJClaimNodeChanges } from '../../../../types/account-j-claims';
 import type { ApplyEntityTxOptions } from '../../apply';

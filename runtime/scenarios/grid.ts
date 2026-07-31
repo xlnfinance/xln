@@ -17,8 +17,8 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
-import type { JAdapter } from '../jadapter/types';
-import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/batch';
+import type { JAdapter } from '../jurisdiction/adapter/types';
+import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/machine/batch';
 import {
   ensureJAdapter,
   getScenarioJAdapter,

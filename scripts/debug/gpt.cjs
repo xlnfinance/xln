@@ -1160,7 +1160,7 @@ xln/
     entity/consensus/index.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - Entity candidate and Hanko certification
     account/consensus/index.ts         ${fileSizes['runtime/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective
     account/view-state.ts   ${fileSizes['runtime/account/view-state.ts'] || '?'} lines - Bilateral state machine
-    jurisdiction/batch.ts                   ${fileSizes['runtime/jurisdiction/batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
+    jurisdiction/batch.ts                   ${fileSizes['runtime/jurisdiction/machine/batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
     account/utils.ts             ${fileSizes['runtime/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
     protocol/serialization.ts       ${fileSizes['runtime/protocol/serialization.ts'] || '?'} lines - BigInt serialization
     account/crypto.ts            ${fileSizes['runtime/account/crypto.ts'] || '?'} lines - Signature verification

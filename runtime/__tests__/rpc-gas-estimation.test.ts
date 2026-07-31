@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { JsonRpcProvider, Wallet } from 'ethers';
 
-import { createRpcChainIo } from '../jadapter/rpc-chain-io';
+import { createRpcChainIo } from '../jurisdiction/adapter/rpc-chain-io';
 
 test('RPC writes fail closed when gas estimation fails', async () => {
   const provider = new JsonRpcProvider('http://127.0.0.1:1', 31_337, {

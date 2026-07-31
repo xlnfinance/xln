@@ -4,7 +4,7 @@ import {
   createEmptyBatch,
   getDraftBatchReserveDelta,
   simulateDraftBatchReserveAvailability,
-} from '../jurisdiction/batch';
+} from '../jurisdiction/machine/batch';
 
 describe('j-batch draft reserve availability', () => {
   test('counts same-batch collateral-to-reserve as spendable by later reserve ops', () => {

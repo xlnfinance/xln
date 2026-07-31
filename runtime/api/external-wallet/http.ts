@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { JAdapter, JWalletAllowanceRead } from '../../jadapter/types';
+import type { JAdapter, JWalletAllowanceRead } from '../../jurisdiction/adapter/types';
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
 

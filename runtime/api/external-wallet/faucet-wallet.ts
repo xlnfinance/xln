@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../../../jurisdictions/typechain-types/index.ts';
 import { deriveSignerKeySync } from '../../account/crypto';
-import type { JAdapter, JTokenInfo } from '../../jadapter/types';
+import type { JAdapter, JTokenInfo } from '../../jurisdiction/adapter/types';
 import { safeStringify } from '../../protocol/serialization';
 import { readPositiveIntegerEnv } from '../../config/environment';
 import type { ExternalWalletApiContext } from './context';

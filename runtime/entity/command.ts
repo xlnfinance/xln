@@ -10,7 +10,7 @@ import {
   getCertifiedBoardNodeStore,
   getCertifiedBoardStackKey,
   resolveObserverCertifiedBoardRecord,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import { validatePersistedValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
 import { requireCommittedDirectPaymentRoute } from '../protocol/payments/route';
 import type { EntityCommandNonceState, EntityTx, SignedEntityCommandV1 } from '../types/entity-tx';

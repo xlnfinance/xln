@@ -1,6 +1,6 @@
 import type { AccountConsensusContext } from '../account/consensus/context';
 import { getEntityConfigBoardHash, verifyHankoForHash } from '../hanko/signing';
-import { resolveSigningCertifiedBoardHash } from '../jurisdiction/board-registry';
+import { resolveSigningCertifiedBoardHash } from '../jurisdiction/machine/board-registry';
 import type { EntityRuntimeContext } from './runtime-context';
 import { getAccountJClaimNodeStore } from './account-j-claim-node-store';
 import type { AccountJClaimNodeStore } from '../types/account-j-claims';

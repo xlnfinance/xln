@@ -12,7 +12,7 @@ import {
   getCertifiedBoardStackKey,
   lookupCertifiedBoardRecord,
   putCertifiedBoardRecord,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import { generateLazyEntityId } from '../entity/factory';
 import {
   buildEntityFrameAuthority,

@@ -15,7 +15,7 @@ import type { SettlementDiff, SettlementOp } from '../types/account';
 import { compileOps } from '../protocol/settlement/operations';
 import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig, registerEntities } from './boot';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { createGossipLayer } from '../network/p2p/gossip';
 import { userAutoApprove } from '../entity/tx/handlers/settle';

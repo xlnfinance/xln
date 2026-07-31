@@ -13,7 +13,7 @@ import { compareStableText } from '../protocol/serialization';
 import {
   resolveUniqueCertifiedRegisteredBoardRecord,
   resolveSigningCertifiedBoardHash,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import {
   decodeHankoEnvelope,
   encodeHankoEnvelope,

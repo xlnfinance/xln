@@ -13,8 +13,8 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
-import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
+import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/history-consensus';
 import {
   assertFrameJPrefix,
   buildJPrefixCertificate,
@@ -24,8 +24,8 @@ import {
   restoreJPrefixRound,
   selectHighestWeightedCommonJPrefix,
   verifyJPrefixCertificate,
-} from '../jurisdiction/j-prefix-consensus';
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
+} from '../jurisdiction/machine/j-prefix-consensus';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { createEmptyEnv, hasRuntimeWork } from '../runtime';
 import type { EntityReplica, EntityState, EntityFrame } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';

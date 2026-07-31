@@ -1,6 +1,6 @@
 import type { EntityInput, EntityOutput, EntityCandidateEffect, EntityReplica, EntityState } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
-import type { JInput } from '../../jurisdiction/input';
+import type { JInput } from '../../jurisdiction/machine/input';
 import type { RuntimeOverlayRecord } from '../../types/account';
 
 /**

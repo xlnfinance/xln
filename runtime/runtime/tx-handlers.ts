@@ -13,19 +13,19 @@ import {
 import {
   backfillEntityJurisdictionBinding,
   requireBoundEntityConfig,
-} from '../jurisdiction/jurisdiction-runtime';
-import { getJHistoryRegistrationBaseHeight } from '../jurisdiction/history-consensus';
+} from '../jurisdiction/machine/jurisdiction-runtime';
+import { getJHistoryRegistrationBaseHeight } from '../jurisdiction/machine/history-consensus';
 import {
   assertValidatorJHistoryMatchesCertifiedAnchor,
   getEntityCertifiedJAnchor,
   recordValidatorJHistory,
   rewindValidatorJHistory,
-} from '../jurisdiction/local-history';
-import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
+} from '../jurisdiction/machine/local-history';
+import { getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import type { EntityReplica, EntityState } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import { applyRuntimeAdapterCommandMarker } from './command-frontier';
 import { assertRuntimeAdapterCommandTxAuthorized } from './command-frontier-auth';
 import {
@@ -48,13 +48,13 @@ import {
   computeRegistrationEvidenceClaimHash,
   freezeCertifiedRegistrationEvidence,
   registrationEvidenceKey,
-} from '../jurisdiction/registration-evidence';
+} from '../jurisdiction/machine/registration-evidence';
 import {
   applyCompleteImportJurisdiction,
   applyImportJurisdictionIntent,
   assertJImportResultRuntimeTxAuthorized,
 } from './jurisdiction-import';
-import { applyWatcherJurisdictionCursor } from '../jadapter/watcher-cursor';
+import { applyWatcherJurisdictionCursor } from '../jurisdiction/adapter/watcher-cursor';
 import {
   applyNumberedRegistrationIntent,
   applyNumberedRegistrationResolution,

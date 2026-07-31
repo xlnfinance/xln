@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   J_WATCHER_IDLE_CANONICAL_AUDIT_MS,
   shouldAuditCanonicalWatcherState,
-} from '../jadapter/watcher-poll-policy';
+} from '../jurisdiction/adapter/watcher-poll-policy';
 
 const idle = {
   currentHead: 42,

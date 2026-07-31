@@ -1,6 +1,6 @@
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from '../../entity/consensus/leader';
 import type { RuntimeReplica, RuntimeInput } from '../types';
-import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/registration-evidence';
+import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/machine/registration-evidence';
 import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
 import { copyDeterministicHtlcTestSecretCapability } from '../../protocol/htlc/test-secret-capability';
 import { copyLocalRuntimeAdapterCommandAuthorization } from '../command-frontier-auth';

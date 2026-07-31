@@ -5,7 +5,7 @@ import {
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import { createXlnJsonRpcProvider } from '../jadapter';
+import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import type {
   TowerCounterDisputeRemedy,
   TowerFinalDisputeProof,

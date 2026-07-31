@@ -15,12 +15,12 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
 import { encodeBoard, hashBoard } from '../entity/factory';
-import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
+import { getCertifiedBoardStackKey } from '../jurisdiction/machine/board-registry';
 import {
   assertRegistrationEvidenceEnvelope,
   computeRegistrationEvidenceHash,
   registrationEvidenceKey,
-} from '../jurisdiction/registration-evidence';
+} from '../jurisdiction/machine/registration-evidence';
 import { compareStableText } from '../protocol/serialization';
 import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, ConsensusConfig, EntityFrameAuthority, EntityReplica, EntityFrame } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';

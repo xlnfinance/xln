@@ -5,10 +5,10 @@ import { applyHankoBatchProcessedEvent } from '../entity/tx/j-events-batch';
 import { applyBatchOperationSkippedEvent } from '../entity/tx/j-events-batch-skip';
 import { generateLazyEntityId } from '../entity/factory';
 import { prepareSignedBatch } from '../hanko/batch';
-import { createJAdapter } from '../jadapter';
-import { rawEventToJEvents } from '../jadapter/j-event-payloads';
-import { createEmptyBatch } from '../jurisdiction/batch';
-import { normalizeJurisdictionEvent } from '../jurisdiction/event-normalization';
+import { createJAdapter } from '../jurisdiction/adapter';
+import { rawEventToJEvents } from '../jurisdiction/adapter/j-event-payloads';
+import { createEmptyBatch } from '../jurisdiction/machine/batch';
+import { normalizeJurisdictionEvent } from '../jurisdiction/machine/event-normalization';
 import type { EntityState } from '../entity/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 

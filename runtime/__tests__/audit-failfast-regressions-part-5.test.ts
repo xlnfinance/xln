@@ -144,21 +144,21 @@ import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
-} from '../jurisdiction/event-observation';
+} from '../jurisdiction/machine/event-observation';
 
-import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
+import { getRuntimeJurisdictionHeight } from '../jurisdiction/machine/height';
 
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 
-import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
+import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
 
-import { createEmptyBatch, encodeJBatch } from '../jurisdiction/batch';
+import { createEmptyBatch, encodeJBatch } from '../jurisdiction/machine/batch';
 
 import {
   getCertifiedBoardNodeStore,
   resolveCertifiedRegisteredBoardHash,
   resolveObserverCertifiedBoardRecord,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 
 import {
   applyCommand,
@@ -258,7 +258,7 @@ import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../types/jurisdiction-events';
 import type { EntityTx } from '../types/entity-tx';

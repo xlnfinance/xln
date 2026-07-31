@@ -1,0 +1,333 @@
+/**
+ * JAdapter Types
+ * @license AGPL-3.0
+ */
+
+import type { Provider, Signer } from 'ethers';
+import type { Address } from '@ethereumjs/util';
+import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../../jurisdictions/typechain-types/index.ts';
+import type { BrowserVMState, RuntimeReplica } from '../../runtime/types';
+import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
+import type { JAdapterFailure, JReplica, JTx } from '../../types/jurisdiction-runtime';
+
+export type JAdapterMode = 'browservm' | 'anvil' | 'rpc' | 'tron';
+
+export type JAdapterReplicaConnection = Partial<JReplica>;
+
+export interface JAdapterConfig {
+  mode: JAdapterMode;
+  chainId: number;
+  rpcUrl?: string;                    // Required for anvil/rpc
+  tronFullHost?: string;              // Required for TRON writes; defaults from rpcUrl
+  tronApiKey?: string;                // Server-side TronGrid API key
+  stateFile?: string;                 // Anvil: --load-state, BrowserVM: import path
+  privateKey?: string;                // Signer key (required for non-dev RPC chains)
+  watchOnly?: boolean;                // Explicit read/import adapter without a default signer
+  watchPollMs?: number;               // Optional watcher polling interval override
+  confirmationDepth?: number;         // Optional event finality depth override
+  defaultDisputeDelayBlocks?: number; // Required when deploying a non-dev stack
+  txWaitTimeoutMs?: number;           // Optional tx wait timeout override
+  txWaitConfirms?: number;            // Optional tx.wait confirmations override
+  fromReplica?: JAdapterReplicaConnection; // Connect to an already deployed stack
+  browserVMState?: BrowserVMState;    // Import BrowserVM state directly
+}
+
+export interface JAdapterAddresses {
+  account: string;
+  depository: string;
+  entityProvider: string;
+  deltaTransformer: string;
+}
+
+/**
+ * One decoded jurisdiction log at the external-I/O boundary.
+ *
+ * BrowserVM, EVM RPC, and TRON all produce this envelope. Coordinates remain
+ * optional until the adapter has attached the canonical block and transaction
+ * evidence required by `JEvent`.
+ */
+export interface JEventIngress {
+  name: string;
+  args: Record<string, unknown>;
+  blockNumber?: number;
+  blockHash?: string;
+  transactionHash?: string;
+  logIndex?: number;
+  disputeFinalizationEvidence?: DisputeFinalizationEvidence;
+}
+
+/** A decoded jurisdiction log with the coordinates required for ingestion. */
+export type JEvent = JEventIngress & {
+  blockNumber: number;
+  blockHash: string;
+  transactionHash: string;
+};
+
+export interface JTokenInfo {
+  symbol: string;
+  name?: string;
+  address: string;
+  decimals: number;
+  tokenId?: number;
+}
+
+export interface JWalletAllowanceRead {
+  tokenAddress: string;
+  spender: string;
+}
+
+export interface JWalletSnapshotRequest {
+  owner: string;
+  tokenAddresses: string[];
+  allowances?: JWalletAllowanceRead[];
+  includeNativeBalance?: boolean;
+  blockTag?: number | string;
+}
+
+export interface JWalletSnapshot {
+  nativeBalance: bigint | null;
+  tokenBalances: bigint[];
+  allowances: bigint[];
+  tokenErrors?: Array<{ tokenAddress: string; error: string }>;
+  allowanceErrors?: Array<{ tokenAddress: string; spender: string; error: string }>;
+}
+
+export interface JReserveMint {
+  entityId: string;
+  tokenId: number;
+  amount: bigint;
+}
+
+export type SnapshotId = string;
+
+export interface JAdapter {
+  readonly mode: JAdapterMode;
+  readonly chainId: number;
+  readonly provider: Provider;
+  readonly signer: Signer;
+
+  // Typechain contracts
+  readonly account: Account;
+  readonly depository: Depository;
+  readonly entityProvider: EntityProvider;
+  readonly deltaTransformer: DeltaTransformer;
+  readonly addresses: JAdapterAddresses;
+  /** Trusted chain-derived first block containing EntityProvider bytecode. */
+  readonly entityProviderDeploymentBlock: number;
+
+  // Lifecycle
+  deployStack(): Promise<void>;
+  snapshot(): Promise<SnapshotId>;
+  revert(snapshotId: SnapshotId): Promise<void>;
+  dumpState(): Promise<BrowserVMState | string>;
+  loadState(state: BrowserVMState | string): Promise<void>;
+
+  // Events
+  processBlock(): Promise<JEvent[]>;
+
+  // Reads
+  getReserves(entityId: string, tokenId: number): Promise<bigint>;
+  getCollateral(entity1: string, entity2: string, tokenId: number): Promise<bigint>;
+  getAccountInfo(entityId: string, counterpartyId: string): Promise<{
+    nonce: bigint;
+    disputeHash: string;
+    disputeTimeout: bigint;
+  }>;
+  getEntityNonce(entityId: string): Promise<bigint>;
+  /** Exact receipt proof for a previously submitted sealed Depository batch. */
+  hasProcessedBatch?(
+    entityId: string,
+    batchHash: string,
+    entityNonce: bigint,
+  ): Promise<boolean>;
+  /** Trusted chain state for EntityProvider quorum-action reconciliation. */
+  getEntityProviderActionNonce?(entityId: string): Promise<bigint>;
+  /** Exact canonical receipt for one consumed EntityProvider action nonce. */
+  getEntityProviderActionReceipt?(entityId: string, actionNonce: bigint): Promise<JEvent | null>;
+  isEntityRegistered(entityId: string): Promise<boolean>;
+  getTokenRegistry(): Promise<JTokenInfo[]>;
+  readWalletSnapshot(request: JWalletSnapshotRequest): Promise<JWalletSnapshot>;
+  getErc20Balance(tokenAddress: string, owner: string): Promise<bigint>;
+  getErc20Balances(tokenAddresses: string[], owner: string): Promise<bigint[]>;
+  getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint>;
+  getEthBalance?(owner: string): Promise<bigint>;
+  getDebts?(entityId: string, tokenId: number): Promise<Array<{ amount: bigint; creditor: string }>>;
+  // Writes - Core Operations
+  processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt>;
+  enforceDebts(entityId: string, tokenId: number, maxIterations?: number | bigint): Promise<void>;
+
+  // Writes - Testing/Debug (may be no-op on mainnet)
+  debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]>;
+  debugFundReservesBatch(mints: JReserveMint[]): Promise<JEvent[]>;
+
+  // Writes - Deposits (user deposits ERC20 to their entity reserves)
+  externalTokenToReserve(
+    signerPrivateKey: Uint8Array,
+    entityId: string,
+    tokenAddress: string,
+    amount: bigint,
+    options?: {
+      tokenType?: number;
+      externalTokenId?: bigint;
+      internalTokenId?: number;
+    }
+  ): Promise<JEvent[]>;
+  approveErc20(
+    signerPrivateKey: Uint8Array,
+    tokenAddress: string,
+    spender: string,
+    amount: bigint,
+    options?: {
+      entityId?: string;
+      tokenId?: number;
+    },
+  ): Promise<JEvent[]>;
+  transferErc20(
+    signerPrivateKey: Uint8Array,
+    tokenAddress: string,
+    to: string,
+    amount: bigint,
+  ): Promise<string>;
+  transferNative(
+    signerPrivateKey: Uint8Array,
+    to: string,
+    amount: bigint,
+  ): Promise<string>;
+  fundSignerWallet?(address: string, amount?: bigint, tokenSymbol?: string): Promise<void>;
+
+  // === High-level J-tx submission (unified interface for all modes) ===
+  // Handles encoding, signing, and execution. Events arrive via j-watcher → next frame.
+  submitTx(jTx: JTx, options: {
+    env: RuntimeReplica;           // Runtime env (for hanko signing)
+    signerId?: string;  // Which signer to use for hanko
+    signerPrivateKey?: Uint8Array;
+    timestamp?: number; // Block timestamp (scenarioMode)
+  }): Promise<JSubmitResult>;
+
+  // === J-Watcher integration ===
+  // Starts feeding J-events back to runtime mempool. Same object handles submit + watch.
+  startWatching(env: RuntimeReplica): void;
+  isWatching(): boolean;
+  stopWatching(): void;
+  /** Invalidates ingress synchronously, then waits for the current external poll to unwind. */
+  stopWatchingAndWait(): Promise<void>;
+  // Immediate poll for scenarios (no-op if watcher not started)
+  pollNow?(): Promise<void>;
+  /** Authenticated watcher progress that may be newer than the durable WAL cursor. */
+  getWatcherScanProgress?(): {
+    scannedThroughHeight: number;
+    replicaScannedThrough: Record<string, number>;
+  };
+
+  // BrowserVM-specific (returns null for RPC mode)
+  getBrowserVM(): BrowserVMProvider | null;
+  /** Deterministic clock control is available only on in-process simulation adapters. */
+  setBlockTimestamp?(timestamp: number): void;
+  setQuietLogs?(quiet: boolean): void;
+  registerEntityWallet?(entityId: string, privateKey: string): void;
+  captureStateRoot?(): Promise<Uint8Array | null>;
+  getCurrentBlockNumber?(): Promise<number>;
+  getFinalityDepth?(): number;
+  syncRuntimeState?(
+    accountPairs: Array<{ entityId: string; counterpartyId: string }>,
+    tokenIds: number[],
+  ): Promise<{
+    collaterals: Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>;
+    blockNumber: bigint;
+  } | null>;
+
+  // Cleanup
+  close(): Promise<void>;
+}
+
+// Result from submitTx
+export interface JSubmitResult {
+  success: boolean;
+  txHash?: string;
+  blockNumber?: number;
+  events?: JEvent[];
+  error?: string;
+  failure?: JAdapterFailure;
+}
+
+// Settlement diff structure matching Depository contract
+export interface SettlementDiff {
+  tokenId: number;
+  leftDiff: bigint;
+  rightDiff: bigint;
+  collateralDiff: bigint;
+  ondeltaDiff?: bigint;
+}
+
+
+// Receipt for processBatch
+export interface JBatchReceipt {
+  txHash: string;
+  blockNumber: number;
+  events: JEvent[];
+}
+
+// Forward declare BrowserVMProvider (avoid circular import)
+export interface BrowserVMProvider {
+  processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<unknown[]>;
+  enforceDebts(entityId: string, tokenId: number, maxIterations?: number | bigint): Promise<void>;
+  setBlockTimestamp(timestamp: number): void;
+  getChainId(): bigint;
+  getDepositoryAddress(): string;
+  getEntityProviderAddress(): string;
+  getAccountAddress(): string;
+  debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<unknown[]>;
+  serializeState(): Promise<BrowserVMState>;
+  restoreState(state: BrowserVMState): Promise<void>;
+  onAny(callback: (events: unknown[]) => void): () => void;
+  getCollateral(entityId: string, counterpartyId: string, tokenId: number): Promise<{ collateral: bigint; ondelta: bigint }>;
+  getReserves(entityId: string, tokenId: number): Promise<bigint>;
+  getEthBalance?(owner: string): Promise<bigint>;
+  getDebts?(entityId: string, tokenId: number): Promise<Array<{ amount: bigint; creditor: string }>>;
+  timeTravel?(stateRoot: Uint8Array): Promise<void>;
+  getAccountInfo?(
+    entityId: string,
+    counterpartyId: string,
+  ): Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
+  getEntityNonce(entityId: string): Promise<bigint>;
+  signSettlement(
+    initiatorEntityId: string,
+    counterpartyEntityId: string,
+    diffs: SettlementDiff[],
+    forgiveDebtsInTokenIds?: number[]
+  ): Promise<string>;
+}
+
+export type BrowserVmEthersProviderTarget = {
+  runExclusiveVmOperation<T>(operation: () => Promise<T>): Promise<T>;
+  vm: {
+    stateManager: {
+      getAccount(address: Address): Promise<{ nonce?: bigint; balance?: bigint } | null | undefined>;
+      getCode(address: Address): Promise<Uint8Array>;
+      checkpoint(): Promise<void>;
+      revert(): Promise<void>;
+    };
+    evm: {
+      runCall(request: {
+        to: Address;
+      caller: Address;
+      data: Uint8Array;
+      gasLimit: bigint;
+      value?: bigint;
+      }): Promise<{ execResult: { exceptionError?: unknown; returnValue: Uint8Array; executionGasUsed: bigint } }>;
+    };
+  };
+  deployerAddress: Address;
+  executeSignedTx(signedTransaction: string): Promise<string>;
+  getTransactionReceipt?(hash: string): {
+    to: string | null; from: string; contractAddress: string | null; transactionHash: string;
+    blockHash: string; blockNumber: number; status: number;
+    logs: Array<{ blockNumber: number; transactionHash: string; address: string; topics: string[]; data: string }>;
+  } | null;
+  getLogs?(filter: unknown): unknown[];
+  getBlockHash?(): string;
+  getBlockNumber?(): bigint | number;
+  getBlockTimestamp?(): number;
+  getChainId(): bigint | number;
+  mineEmptyBlock?(timestampMs?: number): Promise<number>;
+};

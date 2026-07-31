@@ -1,8 +1,8 @@
-import type { JAdapter } from '../jadapter';
-import { DEV_CHAIN_IDS } from '../jadapter';
-import type { JTokenInfo } from '../jadapter/types';
-import { defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
-import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment';
+import type { JAdapter } from '../jurisdiction/adapter';
+import { DEV_CHAIN_IDS } from '../jurisdiction/adapter';
+import type { JTokenInfo } from '../jurisdiction/adapter/types';
+import { defaultTokensForJurisdiction } from '../jurisdiction/machine/default-tokens';
+import { deployMissingDefaultTokens } from '../jurisdiction/adapter/dev-token-deployment';
 import { createStructuredLogger } from '../infra/logger';
 import { HUB_REQUIRED_TOKEN_COUNT } from './hub-health';
 

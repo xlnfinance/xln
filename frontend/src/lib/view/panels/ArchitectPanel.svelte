@@ -18,7 +18,7 @@
   import { shortAddress } from '$lib/utils/format';
   import { getXLN, submitRuntimeInput } from '$lib/stores/xlnStore';
   import type { RuntimeInput, XLNModule } from '@xln/runtime/api/runtime-module';
-  import type { JAdapter } from '@xln/runtime/jadapter';
+  import type { JAdapter } from '@xln/runtime/jurisdiction/adapter';
   import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
   import { activeRuntime as activeVaultRuntime } from '$lib/stores/vaultStore';
   import SolvencyPanel from './SolvencyPanel.svelte';

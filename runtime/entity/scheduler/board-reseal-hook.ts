@@ -6,7 +6,7 @@ import type {
   EntityTransitionContext,
   ScheduledHook,
 } from '../scheduler-types';
-import { getCertifiedBoardNodeStore } from '../../jurisdiction/board-registry';
+import { getCertifiedBoardNodeStore } from '../../jurisdiction/machine/board-registry';
 import {
   applyBoardRotationResealMigrations,
   BOARD_RESEAL_HOOK_ID,

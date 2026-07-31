@@ -16,7 +16,7 @@ import {
   batchAddReserveToCollateral,
   cloneJBatch,
   initJBatch,
-} from '../../jurisdiction/batch';
+} from '../../jurisdiction/machine/batch';
 import { hasPendingSettlementTransition } from '../../account/tx/handlers/settle-transition';
 import type {
   CrontabExecutionContext,

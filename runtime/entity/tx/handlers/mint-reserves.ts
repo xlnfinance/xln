@@ -12,7 +12,7 @@
 
 import type { EntityState, EntityInput } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
-import type { JInput } from '../../../jurisdiction/input';
+import type { JInput } from '../../../jurisdiction/machine/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JTx } from '../../../types/jurisdiction-runtime';
 import { prepareEntityTxState } from '../../state-clone';
@@ -20,7 +20,7 @@ import { addMessage } from '../../frame-events';
 import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
-} from '../../../jurisdiction/jurisdiction-runtime';
+} from '../../../jurisdiction/machine/jurisdiction-runtime';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');

@@ -5,7 +5,7 @@ import type {
   EntityTransitionContext,
   ScheduledHook,
 } from '../scheduler-types';
-import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/height';
+import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/machine/height';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { terminateHtlcRoute } from '../tx/htlc-route-lifecycle';
 import { createDueHookPlan, type DueHookPlan } from './due-hook-types';

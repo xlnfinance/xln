@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
-import { createJAdapter, createXlnJsonRpcProvider } from '../jadapter';
-import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
+import { createJAdapter, createXlnJsonRpcProvider } from '../jurisdiction/adapter';
+import { ensureLocalDisputeDelayConfigured } from '../jurisdiction/adapter/local-config';
 
 type Args = {
   name: string;

@@ -16,7 +16,7 @@ const readRpcAdapterSource = (repoRoot: string): string => [
   'rpc-lifecycle.ts',
   'rpc-reads.ts',
   'rpc-wallet-writes.ts',
-].map(file => readFileSync(join(repoRoot, 'runtime/jadapter', file), 'utf8')).join('\n');
+].map(file => readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter', file), 'utf8')).join('\n');
 
 const sentinels = {
   seed: 'seed-sentinel-never-log',
@@ -120,7 +120,7 @@ test('consensus logging has no raw payload escape hatch', () => {
 
 test('J adapters route failures through structured telemetry and never synthesize zero reads', () => {
   const repoRoot = join(import.meta.dir, '..', '..');
-  const browserVm = readFileSync(join(repoRoot, 'runtime/jadapter/browservm-provider.ts'), 'utf8');
+  const browserVm = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/browservm-provider.ts'), 'utf8');
   const rpc = readRpcAdapterSource(repoRoot);
 
   expect(browserVm).not.toContain('console.error');

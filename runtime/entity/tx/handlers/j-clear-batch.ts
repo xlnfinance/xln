@@ -11,11 +11,11 @@
 
 import type { EntityState, EntityInput } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
-import type { JInput } from '../../../jurisdiction/input';
+import type { JInput } from '../../../jurisdiction/machine/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import { createEmptyBatch, batchOpCount } from '../../../jurisdiction/batch';
+import { createEmptyBatch, batchOpCount } from '../../../jurisdiction/machine/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');

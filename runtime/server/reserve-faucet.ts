@@ -1,5 +1,5 @@
 import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
-import type { JAdapter } from '../jadapter';
+import type { JAdapter } from '../jurisdiction/adapter';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger } from '../infra/logger';
 import { getErrorMessage } from './utils';

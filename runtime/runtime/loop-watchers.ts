@@ -1,5 +1,5 @@
 import type { Provider } from 'ethers';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { createStructuredLogger } from '../infra/logger';
 import type { RuntimeReplica } from './types';
 import type { JReplica } from '../types/jurisdiction-runtime';

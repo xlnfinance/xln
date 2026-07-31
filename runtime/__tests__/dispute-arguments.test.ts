@@ -11,7 +11,7 @@ import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import {
   sanitizeOptionalDisputeArgument,
   sanitizeOptionalDisputeStarterArgumentPair,
-} from '../jurisdiction/batch';
+} from '../jurisdiction/machine/batch';
 import type { AccountState, AccountTx, SwapOffer } from '../types/account';
 import type { EntityState } from '../entity/types';
 

@@ -4,8 +4,8 @@ import { Depository__factory } from '../../jurisdictions/typechain-types';
 import {
   decodeDisputeFinalizationEvidenceCalldata,
   resolveDisputeFinalizationEvidence,
-} from '../jadapter/rpc-public';
-import { createEmptyBatch, encodeJBatch } from '../jurisdiction/batch';
+} from '../jurisdiction/adapter/rpc-public';
+import { createEmptyBatch, encodeJBatch } from '../jurisdiction/machine/batch';
 
 const bytes32 = (byte: string): string => `0x${byte.repeat(32)}`;
 

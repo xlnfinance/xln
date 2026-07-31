@@ -1,4 +1,4 @@
-import type { JBatch } from '../../jurisdiction/batch';
+import type { JBatch } from '../../jurisdiction/machine/batch';
 
 const normalizeCounterpartyId = (value: unknown): string => String(value || '').trim().toLowerCase();
 

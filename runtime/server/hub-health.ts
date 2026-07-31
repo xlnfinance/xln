@@ -1,8 +1,8 @@
 import { getTokenInfo } from '../account/utils';
 import { scaleWholeTokenAmount } from '../types/rebalance';
 import { type RuntimeReplica } from '../runtime/types';
-import type { JTokenInfo } from '../jadapter/types';
-import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
+import type { JTokenInfo } from '../jurisdiction/adapter/types';
+import { getBootstrapTokenAmount } from '../jurisdiction/machine/bootstrap-economy';
 import {
   getAccountState,
   getEntityOutCapacity,

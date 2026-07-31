@@ -40,7 +40,7 @@ import {
   buildEntityHashesToSign,
   cloneAccountInputWithoutPostCommitHankos,
 } from '../entity/consensus/hanko-witness';
-import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
+import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/machine/registration-evidence';
 import { readStorageFrameRecord } from '../storage/read';
 import { createTestJReplica } from './helpers/j-replica';
 

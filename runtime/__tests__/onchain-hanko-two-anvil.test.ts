@@ -16,8 +16,8 @@ import {
   hashEntityTransferHankoPayload,
 } from '../hanko/onchain-domain';
 import { buildQuorumHanko } from '../hanko/signing';
-import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
-import { computeBatchHankoHash, createEmptyBatch, encodeJBatch } from '../jurisdiction/batch';
+import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jurisdiction/adapter';
+import { computeBatchHankoHash, createEmptyBatch, encodeJBatch } from '../jurisdiction/machine/batch';
 import { createSettlementHashWithNonce } from '../protocol/dispute/proof-builder';
 import { createEmptyEnv } from '../runtime';
 

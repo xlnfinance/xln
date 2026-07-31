@@ -22,7 +22,7 @@ const readRpcAdapterSource = (): string => [
   'rpc-watcher-controller.ts',
   'rpc-watcher-poll.ts',
   'rpc-write-methods.ts',
-].map(file => readFileSync(join(process.cwd(), 'runtime/jadapter', file), 'utf8')).join('\n');
+].map(file => readFileSync(join(process.cwd(), 'runtime/jurisdiction/adapter', file), 'utf8')).join('\n');
 
 test('rpc jadapter startup and watcher lifecycle logs stay structured', () => {
   const source = readRpcAdapterSource();
@@ -58,7 +58,7 @@ test('runtime dev startup status logs stay structured', () => {
   const orchestrator = readFileSync(join(process.cwd(), 'runtime/orchestrator/orchestrator.ts'), 'utf8');
   const wsClient = readFileSync(join(process.cwd(), 'runtime/network/p2p/ws-client.ts'), 'utf8');
   const bootstrapHub = readFileSync(join(process.cwd(), 'scripts/bootstrap-hub.ts'), 'utf8');
-  const localConfig = readFileSync(join(process.cwd(), 'runtime/jadapter/local-config.ts'), 'utf8');
+  const localConfig = readFileSync(join(process.cwd(), 'runtime/jurisdiction/adapter/local-config.ts'), 'utf8');
   const logger = readFileSync(join(process.cwd(), 'runtime/infra/logger.ts'), 'utf8');
   const devRunner = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
   const runtimeConsoleLines = runtimeFrameStart

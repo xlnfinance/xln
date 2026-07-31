@@ -1,7 +1,7 @@
 import type { AccountInput, AccountFrame, AccountTx } from '../types/account';
 import type { EntityInput, EntityReplica } from '../entity/types';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import type { EntityTx } from '../types/entity-tx';
 import type { Profile } from '../entity/profile';
 import type { RuntimeOutputRoutingDeps } from './output-routing';

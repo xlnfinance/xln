@@ -44,8 +44,8 @@ that drives them. Read the cascade before the services around it.
 
 ### 4. External settlement
 
-21. `runtime/jurisdiction/history-consensus.ts` — certified J-prefix facts.
-22. `runtime/jadapter/ingress-transform.ts` — external evidence boundary.
+21. `runtime/jurisdiction/machine/history-consensus.ts` — certified J-prefix facts.
+22. `runtime/jurisdiction/adapter/ingress-transform.ts` — external evidence boundary.
 23. `runtime/entity/tx/j-events.ts` — certified J effects enter Entity.
 24. `runtime/account/j-finality.ts` — Account-owned settlement finality.
 25. `runtime/runtime/j-submit.ts` — durable post-frame submission lifecycle.
@@ -57,8 +57,8 @@ that drives them. Read the cascade before the services around it.
 | `runtime/runtime/` | Runtime input, frame, WAL ordering, routing | Entity/Account financial rules |
 | `runtime/entity/` | Entity transactions, candidates, Hanko consensus | physical storage or transport |
 | `runtime/account/` | bilateral consensus and every money mutation | Entity/Runtime orchestration |
-| `runtime/jurisdiction/` | deterministic J protocol facts | RPC/provider behavior |
-| `runtime/jadapter/` | chain reads, authenticated receipts, submissions | consensus authority |
+| `runtime/jurisdiction/machine/` | deterministic J protocol facts | RPC/provider behavior |
+| `runtime/jurisdiction/adapter/` | chain reads, authenticated receipts, submissions | consensus authority |
 | `runtime/storage/` | current state, WAL, history views, replay | protocol decisions |
 | `runtime/network/p2p/` | Runtime-to-Runtime delivery | financial state |
 | `runtime/network/relay/` | discovery and market relay services | Runtime consensus |

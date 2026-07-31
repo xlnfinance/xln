@@ -1,6 +1,6 @@
 import type { RuntimeReplica } from '../runtime/types';
-import type { JAdapter } from '../jadapter';
-import { DEV_CHAIN_IDS } from '../jadapter';
+import type { JAdapter } from '../jurisdiction/adapter';
+import { DEV_CHAIN_IDS } from '../jurisdiction/adapter';
 import { createStructuredLogger } from '../infra/logger';
 import { getEntityReplicaById } from './entity-lookup';
 import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';

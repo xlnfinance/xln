@@ -19,12 +19,12 @@ import {
   rollbackReliableDeliveryReceipts,
   rollbackReliableIngressCommit,
 } from '../runtime/reliable-delivery';
-import { canonicalJEventRangeHash, EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
+import { canonicalJEventRangeHash, EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/history-consensus';
 import {
   buildLocalJPrefixAttestation,
   hashJPrefixAttestation,
   mergeJPrefixAttestations,
-} from '../jurisdiction/j-prefix-consensus';
+} from '../jurisdiction/machine/j-prefix-consensus';
 import {
   hashCertifiedEntityOutput,
   hashCertifiedEntityOutputSemantic,
@@ -32,7 +32,7 @@ import {
 import { generateLazyEntityId } from '../entity/factory';
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 import { orderReliableEntityInputsWithinSourceLanes } from '../runtime/frame/input-admission';
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import {
   buildCatchupFixtureCertificate,

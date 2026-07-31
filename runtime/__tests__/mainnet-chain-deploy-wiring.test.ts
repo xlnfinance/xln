@@ -12,7 +12,7 @@ const readRpcAdapterSource = (): string => [
   'rpc-finality.ts',
   'rpc-reads.ts',
   'rpc-wallet-writes.ts',
-].map(file => readFileSync(join(repoRoot, 'runtime/jadapter', file), 'utf8')).join('\n');
+].map(file => readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter', file), 'utf8')).join('\n');
 
 describe('mainnet chain deployment wiring', () => {
   test('root scripts expose one-click testnet and mainnet chain deploy commands', () => {

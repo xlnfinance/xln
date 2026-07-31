@@ -2,12 +2,12 @@ import { deriveAccountWatchSeed } from '../../protocol/account-watch-seed';
 import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
 import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../../entity/crypto';
-import { getJurisdictionStackId } from '../../jurisdiction/jurisdiction-runtime';
+import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-runtime';
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
-} from '../../jurisdiction/event-observation';
+} from '../../jurisdiction/machine/event-observation';
 import type { AccountState } from '../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';

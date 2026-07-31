@@ -16,8 +16,8 @@ import {
   readAuthenticatedLogsForRange,
   verifyCanonicalReceiptProof,
   type CanonicalRpcReceipt,
-} from '../jadapter/receipt-root';
-import { isTransientRpcUnavailableError } from '../jadapter/rpc-public';
+} from '../jurisdiction/adapter/receipt-root';
+import { isTransientRpcUnavailableError } from '../jurisdiction/adapter/rpc-public';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types';
 
 const zeroBloom = `0x${'00'.repeat(256)}`;

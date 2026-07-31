@@ -6,7 +6,7 @@ import { addMessage } from '../../../frame-events';
 import {
   assertDisputeArgumentsWithinContractLimits,
   assertDisputeProofBodyWithinContractLimits,
-} from '../../../../jurisdiction/batch';
+} from '../../../../jurisdiction/machine/batch';
 import {
   createDisputeProofHashWithNonce,
   hashProofBodyStruct,

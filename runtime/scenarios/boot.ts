@@ -6,15 +6,15 @@
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JReplica, JTx } from '../types/jurisdiction-runtime';
-import type { JAdapter, JAdapterMode } from '../jadapter/types';
+import type { JAdapter, JAdapterMode } from '../jurisdiction/adapter/types';
 import { ethers } from 'ethers';
-import { createXlnJsonRpcProvider } from '../jadapter';
+import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import { getSignerPrivateKey, registerSignerKey } from '../account/crypto';
-import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
+import { ensureLocalDisputeDelayConfigured } from '../jurisdiction/adapter/local-config';
 import { isLoopbackUrl } from '../network/p2p/loopback-url';
 import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge, setScenarioStorageEnabled } from './helpers';
-import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
-import { registrationEvidenceKey } from '../jurisdiction/registration-evidence';
+import { getCertifiedBoardStackKey } from '../jurisdiction/machine/board-registry';
+import { registrationEvidenceKey } from '../jurisdiction/machine/registration-evidence';
 import {
   attachLiveJAdapter,
   getLiveJAdapter,
@@ -272,8 +272,8 @@ export async function ensureJAdapter(
   mode?: JAdapterMode,
   options?: { deployStack?: boolean },
 ): Promise<JAdapter> {
-  const { createJAdapter } = await import('../jadapter');
-  const { assertBrowserVMJurisdiction } = await import('../jadapter');
+  const { createJAdapter } = await import('../jurisdiction/adapter');
+  const { assertBrowserVMJurisdiction } = await import('../jurisdiction/adapter');
 
   const actualMode = mode ?? env?.scenarioJAdapterMode ?? getJAdapterMode();
   const rpcUrl = process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl();

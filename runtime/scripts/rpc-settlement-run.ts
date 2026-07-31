@@ -9,14 +9,14 @@
 
 import { ethers } from 'ethers';
 
-import { DEV_CHAIN_IDS, createXlnJsonRpcProvider } from '../jadapter';
-import type { JAdapter } from '../jadapter/types';
-import { createEmptyBatch } from '../jurisdiction/batch';
+import { DEV_CHAIN_IDS, createXlnJsonRpcProvider } from '../jurisdiction/adapter';
+import type { JAdapter } from '../jurisdiction/adapter/types';
+import { createEmptyBatch } from '../jurisdiction/machine/batch';
 import { prepareSignedBatch } from '../hanko/batch';
 import { generateLazyEntityId } from '../entity/factory';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
-import { rawEventToJEvents } from '../jadapter/j-event-payloads';
-import { parseReceiptLogsToJEvents } from '../jadapter/j-event-log-decoder';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
+import { rawEventToJEvents } from '../jurisdiction/adapter/j-event-payloads';
+import { parseReceiptLogsToJEvents } from '../jurisdiction/adapter/j-event-log-decoder';
 
 export type ParityRunOptions = {
   mode: string;

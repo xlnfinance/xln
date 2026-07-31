@@ -18,8 +18,8 @@ export {
   debugFundReserves,
   getEntityInfoFromChain,
   submitProcessBatch,
-} from '../jadapter';
-export { getAvailableJurisdictions } from '../jurisdiction/config';
+} from '../jurisdiction/adapter';
+export { getAvailableJurisdictions } from '../jurisdiction/adapter/config';
 export { createProfileUpdateTx } from '../routing/name-resolution';
 export {
   createDemoDelta,

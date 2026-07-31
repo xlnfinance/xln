@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 
-import { createJAdapter } from '../jadapter';
+import { createJAdapter } from '../jurisdiction/adapter';
 import {
   computeBatchHankoHash,
   createEmptyBatch,
   encodeJBatch,
   batchOpCount,
-} from '../jurisdiction/batch';
+} from '../jurisdiction/machine/batch';
 import { createEmptyEnv } from '../runtime';
 import type { JTx } from '../types/jurisdiction-runtime';
 

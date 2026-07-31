@@ -10,7 +10,7 @@ import type { EntityInput, EntityState } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import { batchAddReserveToExternal, initJBatch } from '../../../jurisdiction/batch';
+import { batchAddReserveToExternal, initJBatch } from '../../../jurisdiction/machine/batch';
 import { getReserveCandidateIssue } from './j-batch-reserve-admission';
 
 export async function handleR2E(

@@ -6,9 +6,9 @@ import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-tra
 import { applyEntityInput } from '../entity/consensus';
 import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv, hasRuntimeWork } from '../runtime';
-import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
-import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
+import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
+import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
 import type { AccountState, AccountTx } from '../types/account';
 import type { EntityReplica } from '../entity/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';

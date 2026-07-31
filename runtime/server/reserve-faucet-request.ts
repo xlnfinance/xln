@@ -1,6 +1,6 @@
 import type { EntityTx } from '../types/entity-tx';
 import type { RuntimeInput, RuntimeReplica } from '../runtime/types';
-import type { JAdapter } from '../jadapter';
+import type { JAdapter } from '../jurisdiction/adapter';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';

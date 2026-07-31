@@ -2,7 +2,7 @@ import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
 import { getLocalSignerPrivateKey } from '../account/crypto';
 import { ENTITY_J_SUBMIT_FALLBACK_MS, isEntityActiveLeader } from '../entity/consensus/leader';
-import { isBatchEmpty } from '../jurisdiction/batch';
+import { isBatchEmpty } from '../jurisdiction/machine/batch';
 import {
   getMatchingJSubmitState,
   hasPendingCommittedJBatch,

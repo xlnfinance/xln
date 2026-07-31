@@ -4,7 +4,7 @@ import type { EntityState } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityTx } from '../../types/entity-tx';
 
-import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/board-registry';
+import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/machine/board-registry';
 import { verifyHankoForHash } from '../../hanko/signing';
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import {

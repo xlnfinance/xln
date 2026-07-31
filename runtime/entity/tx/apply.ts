@@ -1,7 +1,7 @@
 import type { AccountPeerInput, RuntimeOverlayRecord } from '../../types/account';
 import type { EntityState, EntityOutput, HashType, EntityCandidateEffect } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
-import type { JInput } from '../../jurisdiction/input';
+import type { JInput } from '../../jurisdiction/machine/input';
 import type { EntityTx } from '../../types/entity-tx';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import type { AccountConsensusContext } from '../../account/consensus/context';

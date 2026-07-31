@@ -6,11 +6,11 @@ import {
   getConsumptionNodeStore,
   getLiveConsumptionAccumulatorStates,
 } from '../../entity/consumption-store';
-import { collectReachableCertifiedBoardNodes, getCertifiedBoardNodeStore } from '../../jurisdiction/board-registry';
+import { collectReachableCertifiedBoardNodes, getCertifiedBoardNodeStore } from '../../jurisdiction/machine/board-registry';
 import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryMatchesCertifiedAnchor,
-} from '../../jurisdiction/local-history';
+} from '../../jurisdiction/machine/local-history';
 import { ensureRuntimeInfrastructure } from '../../runtime/runtime-infrastructure';
 import type { RuntimeReplica } from '../../runtime/types';
 import { clearDatabase } from '../clear-database';

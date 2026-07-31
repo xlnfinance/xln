@@ -4,7 +4,7 @@ import {
   hasDueLocalJPrefixAdvance,
   mergeJPrefixAttestations,
   verifyOutOfRoundJPrefixAttestation,
-} from '../../jurisdiction/j-prefix-consensus';
+} from '../../jurisdiction/machine/j-prefix-consensus';
 
 import {
   commitEntityConsensusInput,

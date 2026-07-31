@@ -9,7 +9,7 @@ import {
   prepareNumberedRegistrationIntent,
   submitNumberedRegistrationIntent,
 } from '../runtime/registration/numbered-registration-intent';
-import { createJAdapter } from '../jadapter';
+import { createJAdapter } from '../jurisdiction/adapter';
 import { createEmptyEnv } from '../runtime';
 import { commitRuntimeInput, processJEvents, setScenarioStorageEnabled } from '../scenarios/helpers';
 import {

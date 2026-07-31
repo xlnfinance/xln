@@ -4,7 +4,7 @@ Snapshot after commit `e25567a0`.
 
 Metrics:
 - `runtime`: `67,912` code lines
-- `runtime/jadapter`: `4,295` code lines
+- `runtime/jurisdiction/adapter`: `4,295` code lines
 - `runtime + frontend/src + jurisdictions + tests + custody`: `525,030` code lines
 - Priority rule: reduce business logic and duplicate paths, not comments or formatting
 
@@ -45,24 +45,24 @@ Top 100 simplification targets:
 33. `runtime/storage/wal/snapshot.ts` — separate env snapshot building from BrowserVM state inclusion.
 34. `runtime/storage/index.ts` — separate pure restore from infra rehydration glue.
 35. `runtime/storage/wal/hash.ts` — centralize hash-input normalization with zero ad hoc field deletions outside this file.
-38. `runtime/jurisdiction/batch.ts` — split encoding/hash/signing helpers from batch-mutation helpers.
-39. `runtime/jurisdiction/batch.ts` — move submit-to-contract glue out, keep only batch structure logic.
-40. `runtime/jurisdiction/batch.ts` — centralize batch op dedupe rules per op type instead of scattered checks.
-41. `runtime/jadapter/rpc.ts` — extract shared batch submit flow into helper shared with BrowserVM adapter.
-42. `runtime/jadapter/rpc.ts` — extract watcher poll loop into `rpc-watcher.ts`.
-43. `runtime/jadapter/rpc.ts` — extract token allowance/deposit helpers into `rpc-erc20.ts`.
-44. `runtime/jadapter/rpc.ts` — extract debug/mint/testnet-only helpers into `rpc-dev.ts`.
-45. `runtime/jadapter/browservm.ts` — extract batch submit flow shared with rpc adapter.
-46. `runtime/jadapter/browservm.ts` — extract token transfer/approve helpers into `browservm-erc20.ts`.
-47. `runtime/jadapter/browservm.ts` — extract watcher glue into `browservm-watcher.ts`.
-48. `runtime/jadapter/browservm-provider.ts` — split deployment, ERC20 ops, and batch processing into separate files.
-49. `runtime/jadapter/browservm-provider.ts` — move test/demo-only token bootstrap into a separate module.
-51. `runtime/jadapter/runtime-api.ts` — dedupe manual batch signing with `runtime/hanko/batch.ts`.
-52. `runtime/jadapter/runtime-api.ts` — reduce thin wrappers that only re-export `jadapter` calls.
-53. `runtime/jadapter/index.ts` — keep factory only; move BrowserVM registry state elsewhere if still needed.
-54. `runtime/jadapter/types.ts` — remove legacy/dead adapter methods and tighten surface to required production calls only.
-55. `runtime/jadapter/jurisdiction.ts` — merge or delete if it only proxies `jurisdiction-config` and adapter connect.
-56. `runtime/jadapter/browservm-registry.ts` — delete once runtime/browser no longer store BrowserVM instance directly.
+38. `runtime/jurisdiction/machine/batch.ts` — split encoding/hash/signing helpers from batch-mutation helpers.
+39. `runtime/jurisdiction/machine/batch.ts` — move submit-to-contract glue out, keep only batch structure logic.
+40. `runtime/jurisdiction/machine/batch.ts` — centralize batch op dedupe rules per op type instead of scattered checks.
+41. `runtime/jurisdiction/adapter/rpc.ts` — extract shared batch submit flow into helper shared with BrowserVM adapter.
+42. `runtime/jurisdiction/adapter/rpc.ts` — extract watcher poll loop into `rpc-watcher.ts`.
+43. `runtime/jurisdiction/adapter/rpc.ts` — extract token allowance/deposit helpers into `rpc-erc20.ts`.
+44. `runtime/jurisdiction/adapter/rpc.ts` — extract debug/mint/testnet-only helpers into `rpc-dev.ts`.
+45. `runtime/jurisdiction/adapter/browservm.ts` — extract batch submit flow shared with rpc adapter.
+46. `runtime/jurisdiction/adapter/browservm.ts` — extract token transfer/approve helpers into `browservm-erc20.ts`.
+47. `runtime/jurisdiction/adapter/browservm.ts` — extract watcher glue into `browservm-watcher.ts`.
+48. `runtime/jurisdiction/adapter/browservm-provider.ts` — split deployment, ERC20 ops, and batch processing into separate files.
+49. `runtime/jurisdiction/adapter/browservm-provider.ts` — move test/demo-only token bootstrap into a separate module.
+51. `runtime/jurisdiction/adapter/runtime-api.ts` — dedupe manual batch signing with `runtime/hanko/batch.ts`.
+52. `runtime/jurisdiction/adapter/runtime-api.ts` — reduce thin wrappers that only re-export `jadapter` calls.
+53. `runtime/jurisdiction/adapter/index.ts` — keep factory only; move BrowserVM registry state elsewhere if still needed.
+54. `runtime/jurisdiction/adapter/types.ts` — remove legacy/dead adapter methods and tighten surface to required production calls only.
+55. `runtime/jurisdiction/adapter/jurisdiction.ts` — merge or delete if it only proxies `jurisdiction-config` and adapter connect.
+56. `runtime/jurisdiction/adapter/browservm-registry.ts` — delete once runtime/browser no longer store BrowserVM instance directly.
 57. `runtime/runtime/infra.ts` — centralize all infra-only objects here and forbid them in state handlers.
 58. `runtime/account/crypto.ts` — split signer derivation, cache, and browser storage concerns.
 59. `runtime/network/p2p/p2p.ts` — split transport, profile propagation, and debug event paths.
@@ -70,7 +70,7 @@ Top 100 simplification targets:
 61. `runtime/network/relay/router.ts` — split websocket transport from pending-message persistence.
 62. `runtime/network/relay/store.ts` — merge tiny helpers or make it the only relay persistence layer.
 63. `runtime/entity/factory.ts` — split entity-id encoding from on-chain registration helpers.
-64. `runtime/jurisdiction/jurisdiction-loader.ts` — merge with `jurisdiction-config` or split cleanly by responsibility.
+64. `runtime/jurisdiction/adapter/jurisdiction-loader.ts` — merge with `jurisdiction-config` or split cleanly by responsibility.
 65. `runtime/jurisdiction-factory.ts` — remove direct BrowserVM knowledge once `jadapter` fully owns backend construction.
 66. `runtime/types.ts` — split runtime, entity, account, batch, event, and adapter types into separate files.
 67. `runtime/types.ts` — move BrowserVM-only comments and deprecated fields out of core type file.

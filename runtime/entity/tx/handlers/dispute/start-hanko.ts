@@ -8,7 +8,7 @@ import { verifyHankoForHash } from '../../../../hanko/signing';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
-} from '../../../../jurisdiction/board-registry';
+} from '../../../../jurisdiction/machine/board-registry';
 import { disputeLog, resolveDepositoryHankoDomain } from './shared';
 import type { StartEvidence } from './start-evidence';
 

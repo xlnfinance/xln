@@ -5,7 +5,7 @@ import { signatureMapSize } from '../signatures';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { hashEntityLeaderVoteBody } from './leader';
-import { hashJPrefixAttestation } from '../../jurisdiction/j-prefix-consensus';
+import { hashJPrefixAttestation } from '../../jurisdiction/machine/j-prefix-consensus';
 import { getEffectiveEntityInputTxs } from './output-envelope';
 import { accountInputProposal } from '../../account/consensus/flush';
 

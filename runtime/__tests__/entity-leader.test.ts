@@ -28,15 +28,15 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
 import { encodeBoard, hashBoard } from '../entity/factory';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
-import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
+import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/history-consensus';
 import {
   buildCertifiedJPrefixTx,
   buildJPrefixCertificate,
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
-} from '../jurisdiction/j-prefix-consensus';
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
+} from '../jurisdiction/machine/j-prefix-consensus';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { commitReliableIngress } from '../runtime/reliable-delivery';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';

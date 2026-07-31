@@ -3,7 +3,7 @@ import { createStructuredLogger } from '../../infra/logger';
 import { createGossipLayer } from '../../network/p2p/gossip';
 import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
-import type { JInput } from '../../jurisdiction/input';
+import type { JInput } from '../../jurisdiction/machine/input';
 import {
   commitReliableIngress,
   getInputReliableIdentity,

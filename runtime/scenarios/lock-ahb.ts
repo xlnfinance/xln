@@ -17,7 +17,7 @@
 
 import type { RuntimeReplica } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from './boot';
 import { formatRuntime } from '../qa/runtime-ascii';
@@ -26,7 +26,7 @@ import { ethers } from 'ethers';
 import { createRngFromEnv } from './seeded-rng';
 import { generateLazyEntityId } from '../entity/factory';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
-import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
+import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
 import { mineRpcToBlockExact } from './rpc-block-mining';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { htlcRouteConvergenceCycleBudget } from './test-economy';

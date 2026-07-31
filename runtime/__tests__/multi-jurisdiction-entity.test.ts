@@ -15,7 +15,7 @@ import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
-} from '../jurisdiction/jurisdiction-runtime';
+} from '../jurisdiction/machine/jurisdiction-runtime';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -27,7 +27,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { getEntityConfigBoardHash } from '../hanko/signing';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
 import { accountStateDomainFromJurisdiction } from '../account/state-root';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { canonicalizeProfile, parseProfile } from '../entity/profile';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 import type { ConsensusConfig, JurisdictionConfig } from '../entity/types';

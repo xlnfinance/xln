@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync } from '../account/crypto';
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { createEmptyEnv } from '../runtime';
 import { attachLiveJAdapter } from '../runtime/live-jadapters';
 import { registerCommittedSingleSignerWallets } from '../runtime/recovery-infra';

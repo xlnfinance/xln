@@ -9,11 +9,11 @@ import {
   encodeJBatch,
   batchOpCount,
   J_BATCH_CONTRACT_LIMITS,
-} from '../../../../jurisdiction/batch';
-import { getEntityCertifiedJurisdictionHeight } from '../../../../jurisdiction/height';
+} from '../../../../jurisdiction/machine/batch';
+import { getEntityCertifiedJurisdictionHeight } from '../../../../jurisdiction/machine/height';
 import { requireAccountDeltaTransformerAddress } from '../../../../account/consensus/helpers';
 import { collectKnownDisputeSecretsForSnapshot } from '../../../dispute-arguments';
-import { isUsableContractAddress } from '../../../../jurisdiction/contract-address';
+import { isUsableContractAddress } from '../../../../jurisdiction/machine/contract-address';
 import { shortId } from '../../../../infra/logger';
 import { disputeLog, warnDisputeUnlessQuiet } from './shared';
 import { admitDisputeFinalize } from './finalize-admission';

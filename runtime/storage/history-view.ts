@@ -1,6 +1,6 @@
 import type { EntityTx } from '../types/entity-tx';
 import type { FrameLogEntry } from '../types/logging';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import type { RuntimeHistoryRecord, RuntimeInput } from '../runtime/types';
 import { cloneIsolatedEntityTxs } from '../entity/input-clone';
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec';

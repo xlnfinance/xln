@@ -1,4 +1,4 @@
-import type { JBatch } from '../jurisdiction/batch';
+import type { JBatch } from '../jurisdiction/machine/batch';
 import type { EntityProviderActionJTxData } from './entity-provider-actions';
 
 export type CertifiedRegistrationEvidence = {

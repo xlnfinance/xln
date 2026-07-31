@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import type { JAdapterAddresses, JAdapterReplicaConnection } from '../jadapter/types';
+import type { JAdapterAddresses, JAdapterReplicaConnection } from '../jurisdiction/adapter/types';
 
 export type ParityDeployment = {
   schemaVersion: 1;

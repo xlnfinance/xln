@@ -9,12 +9,12 @@ import { ethers } from 'ethers';
 import { createEmptyEnv } from '../runtime';
 import { deriveSignerAddressSync, getSignerPrivateKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
+import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jurisdiction/adapter';
 import { createJReplica, createJurisdictionConfig } from '../scenarios/boot';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import {
   commitRuntimeInput,
   ensureSignerKeysFromSeed,

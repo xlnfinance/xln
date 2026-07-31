@@ -1,6 +1,6 @@
 import { getEntityConfigBoardHash } from '../../hanko/signing';
-import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardRecord } from '../../jurisdiction/board-registry';
-import { selectEntityTxsWithinJRangeBudget } from '../../jurisdiction/range-budget';
+import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardRecord } from '../../jurisdiction/machine/board-registry';
+import { selectEntityTxsWithinJRangeBudget } from '../../jurisdiction/machine/range-budget';
 import type { EntityTx } from '../../types/entity-tx';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityState, EntityFrame } from '../types';

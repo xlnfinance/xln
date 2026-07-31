@@ -2,7 +2,7 @@ import { applyEntityInput } from '../entity/consensus/index';
 import type { EntityInputOutcome } from '../entity/consensus/index';
 import type { EntityOutput, EntityInput, EntityReplica } from '../entity/types';
 import type { RoutedEntityInput, RuntimeReplica } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import { resolveEntityOutputSignerId } from './entity-output-signer';
 import { decodeEntityOutput } from './routing-validation';
 import { DEBUG } from '../infra/debug-flags';

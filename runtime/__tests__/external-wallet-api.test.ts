@@ -3,8 +3,8 @@ import { ethers } from 'ethers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createExternalWalletApi, type ExternalWalletApiContext } from '../api/external-wallet-api';
-import { createXlnJsonRpcProvider } from '../jadapter';
-import type { JAdapter } from '../jadapter/types';
+import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 
 const USER_ADDRESS = new ethers.Wallet(`0x${'22'.repeat(32)}`).address;
 const USDC_ADDRESS = '0x1111111111111111111111111111111111111111';

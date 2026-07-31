@@ -14,7 +14,7 @@ describe('JAdapter dispute diagnostics', () => {
       'rpc-lifecycle.ts',
       'rpc-reads.ts',
       'rpc-wallet-writes.ts',
-    ].map(file => Bun.file(new URL(`../jadapter/${file}`, import.meta.url)).text())).then(parts => parts.join('\n'));
+    ].map(file => Bun.file(new URL(`../jurisdiction/adapter/${file}`, import.meta.url)).text())).then(parts => parts.join('\n'));
     expect(source).toContain('disputeStart=${safeStringify(input.disputeStartDebug)}');
     expect(source).not.toContain('JSON.stringify(input.disputeStartDebug)');
   });

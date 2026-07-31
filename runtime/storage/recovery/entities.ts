@@ -8,9 +8,9 @@ import { createReplicaKey, formatReplicaKey } from '../../protocol/identity';
 import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryIntegrity,
-} from '../../jurisdiction/local-history';
-import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
-import { restoreJPrefixRound } from '../../jurisdiction/j-prefix-consensus';
+} from '../../jurisdiction/machine/local-history';
+import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
+import { restoreJPrefixRound } from '../../jurisdiction/machine/j-prefix-consensus';
 import { cloneEntityState } from '../../entity/state-clone';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';

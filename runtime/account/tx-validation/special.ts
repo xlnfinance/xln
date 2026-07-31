@@ -1,4 +1,4 @@
-import { normalizeJurisdictionEvent } from '../../jurisdiction/event-normalization';
+import { normalizeJurisdictionEvent } from '../../jurisdiction/machine/event-normalization';
 import { assertExactMultiRecipientCiphertextSchema } from '../../protocol/htlc/multi-recipient-schema';
 import {
   requireBoundaryInteger,

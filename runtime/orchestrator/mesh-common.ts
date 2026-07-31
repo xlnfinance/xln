@@ -4,7 +4,7 @@ import type { RuntimeReplica } from '../runtime/types';
 import { deriveDelta, getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { compareStableText } from '../protocol/serialization';
-import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
+import { getBootstrapTokenAmount } from '../jurisdiction/machine/bootstrap-economy';
 import { getEntityReplicaById } from '../entity/replica-lookup';
 import { assertEntityProposalAction } from '../entity/authorization';
 import { normalizeSignedEntityCommand } from '../entity/command-codec';
@@ -15,7 +15,7 @@ export {
   BOOTSTRAP_USD_NOTIONAL,
   BOOTSTRAP_WETH_USD_RATE,
   getBootstrapTokenAmount,
-} from '../jurisdiction/bootstrap-economy';
+} from '../jurisdiction/machine/bootstrap-economy';
 
 export const HUB_MESH_TOKEN_ID = 1;
 export const getBootstrapCreditAmount = (

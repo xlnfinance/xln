@@ -1,8 +1,8 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
-import type { JAdapter } from '../../jadapter/types';
-import { getCertifiedBoardStackKey } from '../../jurisdiction/board-registry';
+import type { JAdapter } from '../../jurisdiction/adapter/types';
+import { getCertifiedBoardStackKey } from '../../jurisdiction/machine/board-registry';
 
 import type { RuntimeReplica, NumberedRegistrationRequest, PendingNumberedRegistration } from '../types';
 import { createLazyEntity, encodeBoard, hashBoard, type BoardMemberInput } from '../../entity/factory';

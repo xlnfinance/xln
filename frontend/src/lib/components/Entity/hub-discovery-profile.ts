@@ -1,5 +1,5 @@
 import type { AccountReplica, EntityReplica, RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
-import { getJurisdictionStackId } from '@xln/runtime/jurisdiction/jurisdiction-stack';
+import { getJurisdictionStackId } from '@xln/runtime/jurisdiction/machine/jurisdiction-stack';
 import {
   buildOpenAccountTx,
   type OpenAccountRebalancePolicy,

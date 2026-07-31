@@ -2,7 +2,7 @@ import type { BookState, BookOrderState, PriceBucketState, PriceLevelState } fro
 import type { AccountTx } from '../types/account';
 import type { EntityReplica, EntityState, ExternalWalletState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
-import type { JBatch, JBatchState, SentJBatch } from '../jurisdiction/batch';
+import type { JBatch, JBatchState, SentJBatch } from '../jurisdiction/machine/batch';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,

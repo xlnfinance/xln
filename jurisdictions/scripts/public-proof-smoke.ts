@@ -11,7 +11,7 @@ import {
   hashCooperativeUpdateHankoPayload,
   hashDisputeProofHankoPayload,
 } from '../../runtime/hanko/onchain-domain';
-import { createEmptyBatch, type JBatch } from '../../runtime/jurisdiction/batch';
+import { createEmptyBatch, type JBatch } from '../../runtime/jurisdiction/machine/batch';
 import { PROOF_BODY_ABI } from '../../runtime/protocol/dispute/proof-body';
 import { Depository__factory } from '../typechain-types/factories/contracts/Depository.sol/Depository__factory';
 

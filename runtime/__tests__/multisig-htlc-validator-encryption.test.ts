@@ -99,9 +99,9 @@ import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
 } from '../storage/entity-lineage';
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
-import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
-import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
+import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
+import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { validateEntityTx } from '../entity/tx-validation';

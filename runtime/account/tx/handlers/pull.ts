@@ -10,7 +10,7 @@ import {
   hashCrossJurisdictionCloseBinary,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
-import { getJurisdictionStackId } from '../../../jurisdiction/jurisdiction-stack';
+import { getJurisdictionStackId } from '../../../jurisdiction/machine/jurisdiction-stack';
 import { safeStringify } from '../../../protocol/serialization';
 import {
   HASHLADDER_MAX_FILL_RATIO,

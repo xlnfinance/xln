@@ -3,8 +3,8 @@ import { ethers } from 'ethers';
 import type { AccountFrame, AccountTx } from '../../types/account';
 import { assertAccountFrameDeltaIntegrity } from '../frame';
 import { computeCanonicalMerkleRoot } from '../state-root';
-import { canonicalJurisdictionEventsHash } from '../../jurisdiction/event-observation';
-import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/event-normalization';
+import { canonicalJurisdictionEventsHash } from '../../jurisdiction/machine/event-observation';
+import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
 import { LIMITS } from '../../config/constants';
 

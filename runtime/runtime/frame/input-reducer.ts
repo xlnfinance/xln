@@ -7,7 +7,7 @@ import {
   refreshRuntimeCheckpointLineageForEntity,
 } from '../../storage/entity-lineage';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
-import type { JInput } from '../../jurisdiction/input';
+import type { JInput } from '../../jurisdiction/machine/input';
 import { DEBUG } from '../../infra/debug-flags';
 import { getPerfMs } from '../../infra/time';
 import { attachEventEmitters } from '../env-events';

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv, enqueueRuntimeInput, generateLazyEntityId, processRuntime } from '../runtime';
-import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
-import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
+import { getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
+import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/history-consensus';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import type { JurisdictionConfig } from '../entity/types';
 import { createTestJReplica } from './helpers/j-replica';

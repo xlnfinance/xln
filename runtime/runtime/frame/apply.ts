@@ -5,7 +5,7 @@ import {
 } from '../../qa/account-causal-trace';
 import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
-import type { JInput } from '../../jurisdiction/input';
+import type { JInput } from '../../jurisdiction/machine/input';
 import { getPerfMs } from '../../infra/time';
 import {
   captureReliableReceiptSenderCheckpoint,

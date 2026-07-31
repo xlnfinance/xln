@@ -13,7 +13,7 @@ import {
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { createJAdapter } from '../jadapter';
+import { createJAdapter } from '../jurisdiction/adapter';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../entity/types';
 

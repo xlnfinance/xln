@@ -168,14 +168,14 @@ import {
   hasDueLocalJPrefixAdvance,
   hasPendingLocalJEvent,
   mergeJPrefixAttestations,
-} from '../../jurisdiction/j-prefix-consensus';
+} from '../../jurisdiction/machine/j-prefix-consensus';
 import {
   getJEventRangeValidationError,
   getValidatorJContiguousThroughHeight,
   isCertifiedJHistoryCorruption,
   pruneFinalizedValidatorJHistory,
-} from '../../jurisdiction/local-history';
-import { getEntityFrameJRangeBudgetError } from '../../jurisdiction/range-budget';
+} from '../../jurisdiction/machine/local-history';
+import { getEntityFrameJRangeBudgetError } from '../../jurisdiction/machine/range-budget';
 import type { EntityTx } from '../../types/entity-tx';
 import { emitDefaultProposerHtlcOnionAdvances } from '../htlc-onion-post-commit';
 import type { EntityRuntimeContext } from '../runtime-context';

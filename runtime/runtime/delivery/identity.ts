@@ -7,7 +7,7 @@ import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
 import { txFingerprint } from '../../protocol/tx-multiset';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { buildPreparedFrameEvidence, hashEntityLeaderVoteBody } from '../../entity/consensus/leader';
-import { hashJPrefixAttestation } from '../../jurisdiction/j-prefix-consensus';
+import { hashJPrefixAttestation } from '../../jurisdiction/machine/j-prefix-consensus';
 
 import { assertCertifiedOutputSemanticIdentity } from '../../entity/consensus/output-certification';
 import { getCertifiedOutputNestedTxs, getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';

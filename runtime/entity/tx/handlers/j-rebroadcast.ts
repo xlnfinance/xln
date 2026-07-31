@@ -1,16 +1,16 @@
 import type { EntityInput, EntityReplica, EntityState, HashType } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
-import type { JInput } from '../../../jurisdiction/input';
+import type { JInput } from '../../../jurisdiction/machine/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JTx } from '../../../types/jurisdiction-runtime';
-import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
+import { requireUsableContractAddress } from '../../../jurisdiction/machine/contract-address';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import { batchOpCount, cloneJBatch, computeBatchHankoHash, encodeJBatch, isBatchEmpty } from '../../../jurisdiction/batch';
+import { batchOpCount, cloneJBatch, computeBatchHankoHash, encodeJBatch, isBatchEmpty } from '../../../jurisdiction/machine/batch';
 import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
-} from '../../../jurisdiction/jurisdiction-runtime';
+} from '../../../jurisdiction/machine/jurisdiction-runtime';
 import type { EntityTxReducerResult } from '../apply';
 import { getEntityLeaderState } from '../../consensus/leader';
 

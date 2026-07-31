@@ -4,13 +4,13 @@ import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { Profile } from '../../entity/profile';
 import { cloneEntityReplica } from '../../entity/replica-clone';
 import { markRestoredJSubmitRuntimeTxs } from '../../runtime/j-submit-state';
-import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/registration-evidence';
+import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/machine/registration-evidence';
 import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction-import';
 import { markRestoredEntityProviderActionRuntimeTxs } from '../../runtime/entity-provider-action-submit-auth';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
-} from '../../jurisdiction/board-registry';
+} from '../../jurisdiction/machine/board-registry';
 import {
   collectReachableConsumptionNodes,
   getConsumptionNodeStore,

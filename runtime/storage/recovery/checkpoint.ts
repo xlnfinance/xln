@@ -5,12 +5,12 @@ import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../runtime/input-clone';
 import { assertAccountJClaimRootsAvailable } from '../../entity/account-j-claim-node-store';
 import { assertConsumptionRootsAvailable } from '../../entity/consumption-store';
-import { assertCertifiedBoardRootsAvailable } from '../../jurisdiction/board-registry';
-import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
+import { assertCertifiedBoardRootsAvailable } from '../../jurisdiction/machine/board-registry';
+import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
 import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryMatchesCertifiedAnchor,
-} from '../../jurisdiction/local-history';
+} from '../../jurisdiction/machine/local-history';
 import type { RuntimeReplica } from '../../runtime/types';
 import { normalizeDbNamespace } from '../runtime-dbs';
 import { restoreDurableRuntimeSnapshot } from '../wal/snapshot';

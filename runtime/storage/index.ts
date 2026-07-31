@@ -88,7 +88,7 @@ import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
   hashCertifiedBoardNode,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import {
   hashConsumptionNode,
   type ConsumptionAccumulatorState,

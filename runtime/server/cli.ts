@@ -8,11 +8,11 @@
  */
 
 import * as readline from 'readline';
-import { createXlnJsonRpcProvider } from '../jadapter';
+import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import { ethers } from 'ethers';
 import { createProviderScopedEntityId, normalizeEntityId } from '../entity/id';
-import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from '../jurisdiction/batch';
-import { loadCliJurisdiction, type CliJurisdiction } from '../jurisdiction/cli-jurisdiction';
+import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from '../jurisdiction/machine/batch';
+import { loadCliJurisdiction, type CliJurisdiction } from '../jurisdiction/adapter/cli-jurisdiction';
 import { getTokenInfo } from '../account/utils';
 
 const REMOTE_RPC = process.env['XLN_CLI_REMOTE_RPC'] || 'https://xln.finance/rpc';

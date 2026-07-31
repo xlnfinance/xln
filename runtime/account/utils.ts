@@ -7,7 +7,7 @@ import type { Delta, DerivedDelta } from '../types/account';
 import { PERFORMANCE } from '../config/constants';
 import { validateDelta } from './delta-validation';
 import { isLeftEntity } from '../protocol/entity-id';
-import { DEFAULT_TOKENS, TRON_ONLY_DEFAULT_TOKENS, defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
+import { DEFAULT_TOKENS, TRON_ONLY_DEFAULT_TOKENS, defaultTokensForJurisdiction } from '../jurisdiction/machine/default-tokens';
 import { logDebug } from '../infra/logger';
 
 /**

@@ -380,7 +380,7 @@ export const checkOnchainHankoAst = (): void => {
   const deploymentReferences = [
     'jurisdictions/ignition',
     'jurisdictions/scripts',
-    'runtime/jadapter',
+    'runtime/jurisdiction/adapter',
     'runtime/orchestrator',
     'scripts',
     'frontend/src',

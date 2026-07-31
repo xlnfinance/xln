@@ -1,12 +1,12 @@
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import type { JAdapterFailure, JReplica, JTx } from '../types/jurisdiction-runtime';
-import type { JAdapter, JSubmitResult } from '../jadapter/types';
+import type { JAdapter, JSubmitResult } from '../jurisdiction/adapter/types';
 import { getLocalSignerPrivateKey } from '../account/crypto';
-import { isBatchEmpty } from '../jurisdiction/batch';
-import { indexReserveUpdatedEvents } from '../jurisdiction/event-evidence';
-import { classifyJAdapterFailure } from '../jadapter/failure';
+import { isBatchEmpty } from '../jurisdiction/machine/batch';
+import { indexReserveUpdatedEvents } from '../jurisdiction/machine/event-evidence';
+import { classifyJAdapterFailure } from '../jurisdiction/adapter/failure';
 import { ensureLiveJAdapterForReplica } from './infra';
 import { getLiveJAdapter } from './live-jadapters';
 import { createStructuredLogger, shortId } from '../infra/logger';

@@ -1,7 +1,7 @@
 import type { EntityCandidateEffect } from '../types';
 import { addMessage } from '../frame-events';
 import { getTokenInfo } from '../../account/utils';
-import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/event-normalization';
+import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/event-normalization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import type { FinalizedJEventContext } from './j-events';
 

@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import { computeBatchHankoHash, encodeJBatch, type JBatch } from '../jurisdiction/batch';
+import { computeBatchHankoHash, encodeJBatch, type JBatch } from '../jurisdiction/machine/batch';
 import { normalizeEntityId } from '../entity/id';
 import { encodeSignedHanko } from './codec';
 import { resolveHankoBoardDelays } from './claims';

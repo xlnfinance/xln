@@ -2,13 +2,13 @@ import type { RuntimeReplica } from '../runtime/types';
 import type { EntityInput, EntityReplica } from '../entity/types';
 import type { Delta } from '../types/account';
 import type { FrameLogEntry } from '../types/logging';
-import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import { deriveDelta, isLeft } from '../account/utils';
-import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/batch';
+import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/machine/batch';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { advanceScenarioTime } from './helpers';
 import { submitSignedScenarioBatch } from './j-batch-submit';
-import { DEFAULT_TOKENS } from '../jurisdiction/default-tokens';
+import { DEFAULT_TOKENS } from '../jurisdiction/machine/default-tokens';
 
 type ProcessFn = (env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>;
 

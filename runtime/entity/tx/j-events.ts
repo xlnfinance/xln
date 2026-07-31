@@ -11,7 +11,7 @@ import { cancelHook, scheduleHook } from '../scheduler';
 import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';
 import {
   getJEventJurisdictionRef,
-} from '../../jurisdiction/event-observation';
+} from '../../jurisdiction/machine/event-observation';
 import { verifyAccountSignature } from '../../account/crypto';
 import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
 import { buildAccountProofBodyFromJurisdictions } from '../../account/consensus/helpers';
@@ -20,7 +20,7 @@ import {
   cloneJBatch,
   isBatchEmpty,
   mergeBatchOps,
-} from '../../jurisdiction/batch';
+} from '../../jurisdiction/machine/batch';
 import { canonicalizeProofBodyStruct } from './handlers/dispute';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
@@ -40,19 +40,19 @@ import {
 } from './j-events-entity-provider-action';
 import {
   foldJHistoryRoot,
-} from '../../jurisdiction/history-consensus';
+} from '../../jurisdiction/machine/history-consensus';
 import {
   finalizedJHistoryRoot,
   pruneCertifiedJHistory,
   reconcileJEventRangeWithFinalizedState,
   type ReconciledJEventRange,
-} from '../../jurisdiction/local-history';
-import { assertEntityFrameJRangeBudget } from '../../jurisdiction/range-budget';
+} from '../../jurisdiction/machine/local-history';
+import { assertEntityFrameJRangeBudget } from '../../jurisdiction/machine/range-budget';
 import { getEntityLeaderState } from '../consensus/leader';
 import {
   advanceCertifiedBoardFinality,
-} from '../../jurisdiction/board-registry';
-import { validateJEventRangeEnvelope } from '../../jurisdiction/j-event-range-validation';
+} from '../../jurisdiction/machine/board-registry';
+import { validateJEventRangeEnvelope } from '../../jurisdiction/machine/j-event-range-validation';
 import { applyAccountInput } from '../../account/consensus';
 import {
   createAccountDisputeFinalityInput,

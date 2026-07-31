@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 
 import type { EntityInput, EntityState } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
-import { initJBatch, batchAddExternalTokenToReserve } from '../../../jurisdiction/batch';
+import { initJBatch, batchAddExternalTokenToReserve } from '../../../jurisdiction/machine/batch';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 

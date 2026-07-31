@@ -24,7 +24,7 @@ import {
   createJReplica,
   resolveScenarioBoardSigner,
 } from './boot';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta, isLeft } from '../account/utils';

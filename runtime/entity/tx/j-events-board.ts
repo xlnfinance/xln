@@ -4,7 +4,7 @@ import {
   cacheCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardRecord,
-} from '../../jurisdiction/board-registry';
+} from '../../jurisdiction/machine/board-registry';
 import { cancelHook, scheduleHook } from '../scheduler';
 import {
   BOARD_RESEAL_HOOK_ID,

@@ -11,7 +11,7 @@ import { deriveSignerAddressSync, getSignerPrivateKey } from '../account/crypto'
 import { getTokenInfo } from '../account/utils';
 import { createGossipLayer } from '../network/p2p/gossip';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
-import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
+import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
 import { buildRouteOutputKey } from '../runtime/output-routing';
 import { releaseUncommittedReliableIngress } from '../runtime/reliable-delivery';
 import { accountHasProposableMempool } from '../entity/consensus/account-mempool-eligibility';

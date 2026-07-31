@@ -121,7 +121,7 @@ export type PendingReliableIngress = {
   targetRuntimeIds: Set<string>;
 };
 
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 
 export type JurisdictionImportRequest = {
   name: string;
@@ -420,7 +420,7 @@ export type RuntimeHistoryRecord = AccountHistoryRecord | {
   timestamp?: number;
 };
 
-export type BrowserVMState = import('../jadapter/browservm-state').BrowserVmSerializedState;
+export type BrowserVMState = import('../jurisdiction/adapter/browservm-state').BrowserVmSerializedState;
 
 /**
  * Deterministic data fixed by one committed Runtime frame.
@@ -447,7 +447,7 @@ export interface RuntimeInfrastructure {
    * Keeping them beside JReplica would make the object non-deterministic and
    * force every hash/snapshot path to remember an exclusion list.
    */
-  liveJAdapters?: Map<string, import('../jadapter/types').JAdapter>;
+  liveJAdapters?: Map<string, import('../jurisdiction/adapter/types').JAdapter>;
   lifecyclePhase?: 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
   loopActive?: boolean;
   halted?: boolean;
@@ -594,7 +594,7 @@ export interface RuntimeInfrastructure {
     seenAt: number;
   }>;
   externalWalletWatchOwners?: Map<string, Map<string, number>>;
-  watcherDedupCounter?: import('../jadapter/watcher').EventBatchCounter;
+  watcherDedupCounter?: import('../jurisdiction/adapter/watcher').EventBatchCounter;
   directEntityInputsDispatch?: ((
     targetRuntimeId: string,
     envelope: RuntimeEntityInputsEnvelope,
@@ -695,7 +695,7 @@ export interface RuntimeReplica {
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
   // Explicit dependency injection for scenario execution. Visual previews use the
   // real in-process EVM so they never depend on or flood an external RPC endpoint.
-  scenarioJAdapterMode?: import('../jadapter/types').JAdapterMode;
+  scenarioJAdapterMode?: import('../jurisdiction/adapter/types').JAdapterMode;
   quietRuntimeLogs?: boolean; // When true, suppress noisy runtime console logs
   debugJWatcherBatches?: boolean; // Enables verbose J watcher batch routing diagnostics
   scenarioLogLevel?: 'debug' | 'info' | 'warn' | 'error'; // Scenario log verbosity

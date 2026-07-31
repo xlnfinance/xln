@@ -6,19 +6,19 @@ import {
   assertEntityProviderActionIntent,
   recomputeEntityProviderActionHash,
 } from '../entity/entity-provider-action';
-import { requireUsableContractAddress } from '../jurisdiction/contract-address';
+import { requireUsableContractAddress } from '../jurisdiction/machine/contract-address';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardRecord,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
-} from '../jurisdiction/jurisdiction-runtime';
+} from '../jurisdiction/machine/jurisdiction-runtime';
 import { safeStringify } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import type { JTx } from '../types/jurisdiction-runtime';
 
 type RetryActionTx = Extract<RuntimeTx, { type: 'retryEntityProviderAction' }>;

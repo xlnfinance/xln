@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { JAdapter } from '../jadapter';
+import type { JAdapter } from '../jurisdiction/adapter';
 import { handleReserveFaucet, parseReserveFaucetAmount } from '../server/reserve-faucet';
 import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 

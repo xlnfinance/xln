@@ -1,0 +1,69 @@
+import { ethers } from 'ethers';
+import type { JurisdictionEvent } from '../../types/jurisdiction-events';
+import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
+import { getJurisdictionIdentityRef } from './jurisdiction-runtime';
+import {
+  canonicalJurisdictionEventKey,
+  compareCanonicalJurisdictionEvents,
+  requireCanonicalJurisdictionEvents,
+} from './event-normalization';
+
+export const UNCONFIGURED_J_EVENT_JURISDICTION = 'unconfigured';
+
+export const getJEventJurisdictionRef = (jurisdiction: unknown): string =>
+  getJurisdictionIdentityRef(jurisdiction) || UNCONFIGURED_J_EVENT_JURISDICTION;
+
+export const canonicalJurisdictionEventsHash = (events: JurisdictionEvent[]): string => {
+  const keys = requireCanonicalJurisdictionEvents(events)
+    .sort(compareCanonicalJurisdictionEvents)
+    .map((event) => canonicalJurisdictionEventKey(event));
+  return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(keys)));
+};
+
+const normHex = (value: unknown): string => {
+  const text = String(value || '').trim();
+  return text.startsWith('0x') ? text.toLowerCase() : text;
+};
+
+const normDecimal = (value: unknown): string => {
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number') return Number.isFinite(value) ? Math.floor(value).toString() : '';
+  return String(value || '').trim();
+};
+
+export const canonicalDisputeFinalizationEvidenceKey = (evidence: DisputeFinalizationEvidence): string => {
+  return JSON.stringify([
+    normHex(evidence.sender),
+    normHex(evidence.counterentity),
+    normDecimal(evidence.initialNonce),
+    normDecimal(evidence.finalNonce),
+    normHex(evidence.initialProofbodyHash),
+    normHex(evidence.finalProofbodyHash),
+    normHex(evidence.leftArguments),
+    normHex(evidence.rightArguments),
+    evidence.startedByLeft,
+    normHex(evidence.sig),
+  ]);
+};
+
+export const normalizeDisputeFinalizationEvidence = (
+  evidence: readonly DisputeFinalizationEvidence[] = [],
+): DisputeFinalizationEvidence[] => {
+  const ordered = evidence
+    .map((entry) => ({ key: canonicalDisputeFinalizationEvidenceKey(entry), entry: structuredClone(entry) }))
+    .sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+  for (let index = 1; index < ordered.length; index += 1) {
+    if (ordered[index - 1]!.key === ordered[index]!.key) {
+      throw new Error('J_DISPUTE_FINALIZATION_EVIDENCE_DUPLICATE');
+    }
+  }
+  return ordered.map(({ entry }) => entry);
+};
+
+export const canonicalDisputeFinalizationEvidenceHash = (
+  evidence: readonly DisputeFinalizationEvidence[] = [],
+): string => {
+  const keys = normalizeDisputeFinalizationEvidence(evidence)
+    .map(canonicalDisputeFinalizationEvidenceKey);
+  return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(keys)));
+};

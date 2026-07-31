@@ -1,6 +1,6 @@
 import type { RuntimeReplica } from '../runtime/types';
 import { getHealthStatus, type HealthStatus, type HubHealth } from './health';
-import type { JTokenInfo } from '../jadapter/types';
+import type { JTokenInfo } from '../jurisdiction/adapter/types';
 import { getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../network/relay/store';
 import type { Profile } from '../entity/profile';

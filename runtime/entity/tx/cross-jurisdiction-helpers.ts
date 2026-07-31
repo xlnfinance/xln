@@ -6,7 +6,7 @@ import {
 import {
   getJurisdictionStackId,
   isJurisdictionStackRef,
-} from '../../jurisdiction/jurisdiction-runtime';
+} from '../../jurisdiction/machine/jurisdiction-runtime';
 import type { AccountTx } from '../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../types';

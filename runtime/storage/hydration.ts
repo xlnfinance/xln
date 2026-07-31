@@ -16,7 +16,7 @@ import { assertAccountJClaimAccumulatorState } from '../account/j-claim-accumula
 import { assertEntityAccountCountWithinLimit } from '../entity/account-capacity';
 import { assertConsumptionAccumulatorState } from '../entity/consumption-accumulator';
 import { LIMITS } from '../config/constants';
-import { assertJBatchWithinContractLimits } from '../jurisdiction/batch';
+import { assertJBatchWithinContractLimits } from '../jurisdiction/machine/batch';
 
 const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
   value === undefined ? {} : ({ [key]: value } as Record<K, V>);

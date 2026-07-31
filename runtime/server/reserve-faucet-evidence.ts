@@ -3,7 +3,7 @@ import type { RuntimeReplica } from '../runtime/types';
 import {
   findReserveUpdatedEvidence,
   type ReserveUpdatedEvidence,
-} from '../jurisdiction/event-evidence';
+} from '../jurisdiction/machine/event-evidence';
 
 export type TokenCatalogEntry = {
   tokenId?: number | string | null;

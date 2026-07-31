@@ -3,7 +3,7 @@ import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import {
   initJBatch,
   isBatchEmpty,
-} from '../../jurisdiction/batch';
+} from '../../jurisdiction/machine/batch';
 import { addMessage } from '../frame-events';
 import { createStructuredLogger } from '../../infra/logger';
 

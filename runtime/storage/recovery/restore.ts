@@ -12,7 +12,7 @@ import {
 } from '../../runtime/recovery-infra';
 import { rehydrateRestoredRuntimeInfra } from '../../runtime/infra';
 import { runtimeIsBrowser } from '../../infra/runtime-process';
-import { assertBrowserVMJurisdiction } from '../../jadapter/browservm-registry';
+import { assertBrowserVMJurisdiction } from '../../jurisdiction/adapter/browservm-registry';
 import { replayPersistedRuntimeJournals } from './journal';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../../runtime/types';
 import type { PersistedFrameJournal } from '../types';
@@ -42,7 +42,7 @@ export type RuntimeRecoveryDeps = Pick<
     env: RuntimeReplica,
     inputs?: import('../../entity/types').EntityInput[],
     runtimeTxs?: RuntimeTx[],
-    jInputs?: import('../../jurisdiction/input').JInput[],
+    jInputs?: import('../../jurisdiction/machine/input').JInput[],
     explicitTimestamp?: number,
     reliableReceipts?: ReliableDeliveryReceipt[],
   ): void;

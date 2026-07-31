@@ -1,10 +1,10 @@
 import type { RuntimeReplica, RuntimeState } from './types';
 import type { JReplica } from '../types/jurisdiction-runtime';
-import type { JAdapter } from '../jadapter/types';
-import type { BrowserVMProvider, JAdapterConfig } from '../jadapter/types';
-import { createJAdapterWithRetry } from '../jadapter/retry';
+import type { JAdapter } from '../jurisdiction/adapter/types';
+import type { BrowserVMProvider, JAdapterConfig } from '../jurisdiction/adapter/types';
+import { createJAdapterWithRetry } from '../jurisdiction/adapter/retry';
 import { createStructuredLogger } from '../infra/logger';
-import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
+import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';
 import {
   attachLiveJAdapter,

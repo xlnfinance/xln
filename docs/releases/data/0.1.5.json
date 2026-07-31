@@ -166,16 +166,16 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/account-utils.ts"
       ],
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -186,8 +186,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -200,8 +200,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -213,8 +213,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -226,8 +226,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -240,8 +240,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -253,8 +253,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -266,8 +266,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -279,8 +279,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -294,8 +294,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -309,8 +309,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -322,8 +322,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -333,8 +333,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -343,8 +343,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -356,8 +356,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -368,8 +368,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -380,8 +380,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/ahb.ts",
@@ -390,8 +390,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/ahb.ts",
@@ -401,8 +401,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -412,8 +412,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-tx-handlers.ts",
         "runtime/account-utils.ts"
@@ -421,8 +421,8 @@
       [
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-tx-handlers.ts",
         "runtime/runtime-swap-pairs.ts",
@@ -442,15 +442,15 @@
       ],
       [
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/hanko/signing.ts",
         "runtime/entity-factory.ts"
       ],
       [
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/runtime-api.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts",
         "runtime/entity-factory.ts"
       ],
       [
@@ -467,8 +467,8 @@
         "runtime/financial-utils.ts",
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -480,13 +480,13 @@
         "runtime/financial-utils.ts",
         "runtime/account-utils.ts",
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/financial-utils.ts"
       ],
       [
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -494,12 +494,12 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/browservm-provider.ts",
-        "runtime/jadapter/helpers.ts"
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/browservm-provider.ts",
+        "runtime/jurisdiction/adapter/helpers.ts"
       ],
       [
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -507,11 +507,11 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/helpers.ts"
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/helpers.ts"
       ],
       [
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -519,32 +519,32 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/helpers.ts"
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/helpers.ts"
       ],
       [
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
         "runtime/entity-tx/apply.ts",
         "runtime/entity-tx/j-events.ts",
-        "runtime/jadapter/helpers.ts"
+        "runtime/jurisdiction/adapter/helpers.ts"
       ],
       [
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/jurisdiction.ts",
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       [
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       [
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -552,9 +552,9 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/watcher.ts"
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/watcher.ts"
       ],
       [
         "runtime/networking/gossip.ts",
@@ -643,8 +643,8 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/state-helpers.ts"
       ],
       [
@@ -654,36 +654,36 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/j-event-observation.ts",
         "runtime/j-event-normalization.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/j-event-observation.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/account-consensus-state.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/cross-jurisdiction.ts",
         "runtime/cross-jurisdiction-market.ts",
@@ -691,16 +691,16 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/cross-jurisdiction.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -710,8 +710,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -720,8 +720,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -731,8 +731,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -744,8 +744,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -756,8 +756,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -770,8 +770,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -783,8 +783,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -794,8 +794,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -803,14 +803,14 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/browservm-registry.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/browservm-registry.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -818,15 +818,15 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
         "runtime/jurisdiction-config.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -834,14 +834,14 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -849,16 +849,16 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/hanko/signing.ts",
         "runtime/hanko/core.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -866,15 +866,15 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/hanko/signing.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -882,14 +882,14 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -897,14 +897,14 @@
         "runtime/state-helpers.ts",
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/runtime-api.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -916,8 +916,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -928,8 +928,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -938,8 +938,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -949,8 +949,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -961,8 +961,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -974,8 +974,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -986,8 +986,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -998,8 +998,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1010,8 +1010,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1022,8 +1022,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1036,8 +1036,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1049,8 +1049,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1061,8 +1061,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1073,8 +1073,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1085,8 +1085,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1097,8 +1097,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1109,8 +1109,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1121,8 +1121,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1134,8 +1134,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1146,8 +1146,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1158,8 +1158,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1173,8 +1173,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1189,8 +1189,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1204,8 +1204,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1218,8 +1218,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1233,8 +1233,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1248,8 +1248,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1262,8 +1262,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1276,8 +1276,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1291,8 +1291,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1305,8 +1305,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1320,8 +1320,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1335,8 +1335,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1349,8 +1349,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1363,8 +1363,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1377,8 +1377,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1390,8 +1390,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1402,8 +1402,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1414,8 +1414,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1425,8 +1425,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1435,8 +1435,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/account-consensus.ts",
@@ -1444,8 +1444,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-consensus-frame.ts",
@@ -1453,8 +1453,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-consensus/cross-j-orderbook.ts",
@@ -1462,8 +1462,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-consensus/hanko-witness.ts",
@@ -1471,8 +1471,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-input-merge.ts",
@@ -1480,8 +1480,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1491,8 +1491,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1503,8 +1503,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1514,8 +1514,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1526,8 +1526,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1537,8 +1537,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1548,8 +1548,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1559,8 +1559,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1571,8 +1571,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1583,8 +1583,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1594,8 +1594,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1605,8 +1605,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1616,8 +1616,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1627,8 +1627,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1638,8 +1638,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1649,8 +1649,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1660,8 +1660,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1671,8 +1671,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1682,8 +1682,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1693,8 +1693,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1704,8 +1704,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1715,8 +1715,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1726,8 +1726,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1737,8 +1737,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1748,8 +1748,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1759,8 +1759,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1770,8 +1770,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1781,8 +1781,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1792,8 +1792,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1803,8 +1803,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1814,8 +1814,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1825,8 +1825,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1837,8 +1837,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1850,8 +1850,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1863,8 +1863,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1875,8 +1875,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1887,8 +1887,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1899,8 +1899,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1910,8 +1910,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/index.ts",
@@ -1920,32 +1920,32 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/entity-consensus.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/name-resolution.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/open-swap-offers.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/radapter/index.ts",
         "runtime/radapter/embedded.ts",
@@ -1955,8 +1955,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/radapter/index.ts",
         "runtime/radapter/embedded.ts",
@@ -1967,8 +1967,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/radapter/index.ts",
         "runtime/radapter/embedded.ts",
@@ -1978,8 +1978,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/radapter/index.ts",
         "runtime/radapter/embedded.ts",
@@ -1988,8 +1988,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/radapter/index.ts",
         "runtime/radapter/embedded.ts",
@@ -1997,8 +1997,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/radapter/index.ts",
         "runtime/radapter/remote.ts",
@@ -2006,16 +2006,16 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/recovery/bundle.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/recovery/bundle.ts",
         "runtime/wal/index.ts",
@@ -2024,8 +2024,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/recovery/bundle.ts",
         "runtime/wal/index.ts",
@@ -2034,24 +2034,24 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-ascii.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-clean-logs.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-entity-inputs.ts",
         "runtime/cross-jurisdiction-boundary.ts",
@@ -2059,8 +2059,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-entity-inputs.ts",
         "runtime/runtime-entity-routing.ts",
@@ -2069,8 +2069,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-entity-inputs.ts",
         "runtime/runtime-entity-routing.ts",
@@ -2078,56 +2078,56 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-entity-inputs.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-infra-gossip-store.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-infra.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-input-queue.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-j-submit.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-jurisdiction-api.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-p2p-lifecycle.ts",
         "runtime/networking/p2p.ts",
@@ -2136,8 +2136,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-p2p-lifecycle.ts",
         "runtime/networking/p2p.ts",
@@ -2146,8 +2146,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-p2p-lifecycle.ts",
         "runtime/networking/p2p.ts",
@@ -2155,8 +2155,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-p2p-lifecycle.ts",
         "runtime/runtime-entity-crypto.ts",
@@ -2164,16 +2164,16 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-p2p-lifecycle.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/ahb.ts",
@@ -2185,8 +2185,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/ahb.ts",
@@ -2197,8 +2197,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/ahb.ts",
@@ -2208,8 +2208,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/ahb.ts",
@@ -2218,8 +2218,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/ahb.ts",
@@ -2227,8 +2227,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/grid.ts",
@@ -2236,8 +2236,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2246,8 +2246,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2257,8 +2257,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2267,8 +2267,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2277,8 +2277,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2287,8 +2287,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2297,8 +2297,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2307,8 +2307,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2317,8 +2317,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2327,8 +2327,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2337,8 +2337,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/scenarios/index.ts",
@@ -2346,16 +2346,16 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-scenarios.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-storage-dbs.ts",
         "runtime/storage/index.ts",
@@ -2364,8 +2364,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-storage-dbs.ts",
         "runtime/storage/index.ts",
@@ -2375,8 +2375,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-storage-dbs.ts",
         "runtime/storage/index.ts",
@@ -2386,8 +2386,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-storage-dbs.ts",
         "runtime/storage/index.ts",
@@ -2396,8 +2396,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-storage-dbs.ts",
         "runtime/storage/index.ts",
@@ -2406,8 +2406,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-storage-dbs.ts",
         "runtime/storage/index.ts",
@@ -2416,8 +2416,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-storage-dbs.ts",
         "runtime/storage/index.ts",
@@ -2426,8 +2426,8 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-storage-dbs.ts",
         "runtime/storage/index.ts",
@@ -2435,55 +2435,55 @@
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-storage-dbs.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-tx-handlers.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/runtime-wake.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/solvency.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/strict-assertions.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/types.ts"
       ],
       [
         "runtime/types.ts",
-        "runtime/jadapter/watcher.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/types.ts"
       ],
       [
@@ -2499,8 +2499,8 @@
       [
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
         "runtime/jurisdiction-config.ts",
         "runtime/jurisdiction-loader.ts",
         "runtime/utils.ts"
@@ -2508,16 +2508,16 @@
       [
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
         "runtime/jurisdiction-config.ts",
         "runtime/utils.ts"
       ],
       [
         "runtime/utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/hanko/signing.ts",
         "runtime/hanko/core.ts",
         "runtime/utils.ts"
@@ -2537,8 +2537,8 @@
       "runtime/orchestrator/custody-bootstrap.ts",
       "runtime/radapter/auth.ts",
       "runtime/types.ts",
-      "runtime/jadapter/watcher.ts",
-      "runtime/jadapter/helpers.ts",
+      "runtime/jurisdiction/adapter/watcher.ts",
+      "runtime/jurisdiction/adapter/helpers.ts",
       "runtime/runtime.ts",
       "runtime/runtime-entity-inputs.ts",
       "runtime/entity-consensus.ts",
@@ -2553,9 +2553,9 @@
       "runtime/jurisdiction-runtime.ts",
       "runtime/utils.ts",
       "runtime/entity-factory.ts",
-      "runtime/jadapter/index.ts",
-      "runtime/jadapter/browservm.ts",
-      "runtime/jadapter/browservm-provider.ts",
+      "runtime/jurisdiction/adapter/index.ts",
+      "runtime/jurisdiction/adapter/browservm.ts",
+      "runtime/jurisdiction/adapter/browservm-provider.ts",
       "runtime/hanko/batch.ts",
       "runtime/j-batch.ts",
       "runtime/entity-id-utils.ts"
@@ -8438,7 +8438,7 @@
           {
             "kind": "directory",
             "name": "jadapter",
-            "path": "runtime/jadapter",
+            "path": "runtime/jurisdiction/machine/adapter",
             "metrics": {
               "bytes": 216277,
               "lines": 5618,
@@ -8474,7 +8474,7 @@
               {
                 "kind": "file",
                 "name": "batch-helpers.ts",
-                "path": "runtime/jadapter/batch-helpers.ts",
+                "path": "runtime/jurisdiction/adapter/batch-helpers.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 1603,
@@ -8511,7 +8511,7 @@
               {
                 "kind": "file",
                 "name": "browservm-ethers-provider.ts",
-                "path": "runtime/jadapter/browservm-ethers-provider.ts",
+                "path": "runtime/jurisdiction/adapter/browservm-ethers-provider.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 5366,
@@ -8548,7 +8548,7 @@
               {
                 "kind": "file",
                 "name": "browservm-events.ts",
-                "path": "runtime/jadapter/browservm-events.ts",
+                "path": "runtime/jurisdiction/adapter/browservm-events.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 2341,
@@ -8585,7 +8585,7 @@
               {
                 "kind": "file",
                 "name": "browservm-provider.ts",
-                "path": "runtime/jadapter/browservm-provider.ts",
+                "path": "runtime/jurisdiction/adapter/browservm-provider.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 76741,
@@ -8622,7 +8622,7 @@
               {
                 "kind": "file",
                 "name": "browservm-registry.ts",
-                "path": "runtime/jadapter/browservm-registry.ts",
+                "path": "runtime/jurisdiction/adapter/browservm-registry.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 1768,
@@ -8659,7 +8659,7 @@
               {
                 "kind": "file",
                 "name": "browservm-state.ts",
-                "path": "runtime/jadapter/browservm-state.ts",
+                "path": "runtime/jurisdiction/adapter/browservm-state.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 4504,
@@ -8696,7 +8696,7 @@
               {
                 "kind": "file",
                 "name": "browservm.ts",
-                "path": "runtime/jadapter/browservm.ts",
+                "path": "runtime/jurisdiction/adapter/browservm.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 768,
@@ -8733,7 +8733,7 @@
               {
                 "kind": "file",
                 "name": "default-tokens.ts",
-                "path": "runtime/jadapter/default-tokens.ts",
+                "path": "runtime/jurisdiction/adapter/default-tokens.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 572,
@@ -8770,7 +8770,7 @@
               {
                 "kind": "file",
                 "name": "helpers.ts",
-                "path": "runtime/jadapter/helpers.ts",
+                "path": "runtime/jurisdiction/adapter/helpers.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 21762,
@@ -8807,7 +8807,7 @@
               {
                 "kind": "file",
                 "name": "index.ts",
-                "path": "runtime/jadapter/index.ts",
+                "path": "runtime/jurisdiction/adapter/index.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 4696,
@@ -8844,7 +8844,7 @@
               {
                 "kind": "file",
                 "name": "jurisdiction.ts",
-                "path": "runtime/jadapter/jurisdiction.ts",
+                "path": "runtime/jurisdiction/adapter/jurisdiction.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 2211,
@@ -8881,7 +8881,7 @@
               {
                 "kind": "file",
                 "name": "local-config.ts",
-                "path": "runtime/jadapter/local-config.ts",
+                "path": "runtime/jurisdiction/adapter/local-config.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 899,
@@ -8918,7 +8918,7 @@
               {
                 "kind": "file",
                 "name": "README.md",
-                "path": "runtime/jadapter/README.md",
+                "path": "runtime/jurisdiction/adapter/README.md",
                 "category": "docs",
                 "metrics": {
                   "bytes": 761,
@@ -8955,7 +8955,7 @@
               {
                 "kind": "file",
                 "name": "rpc-utils.ts",
-                "path": "runtime/jadapter/rpc-utils.ts",
+                "path": "runtime/jurisdiction/adapter/rpc-utils.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 4202,
@@ -8992,7 +8992,7 @@
               {
                 "kind": "file",
                 "name": "rpc.ts",
-                "path": "runtime/jadapter/rpc.ts",
+                "path": "runtime/jurisdiction/adapter/rpc.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 74270,
@@ -9029,7 +9029,7 @@
               {
                 "kind": "file",
                 "name": "runtime-api.ts",
-                "path": "runtime/jadapter/runtime-api.ts",
+                "path": "runtime/jurisdiction/adapter/runtime-api.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 4070,
@@ -9066,7 +9066,7 @@
               {
                 "kind": "file",
                 "name": "types.ts",
-                "path": "runtime/jadapter/types.ts",
+                "path": "runtime/jurisdiction/adapter/types.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 9273,
@@ -9103,7 +9103,7 @@
               {
                 "kind": "file",
                 "name": "watcher.ts",
-                "path": "runtime/jadapter/watcher.ts",
+                "path": "runtime/jurisdiction/adapter/watcher.ts",
                 "category": "source",
                 "metrics": {
                   "bytes": 470,
@@ -63137,7 +63137,7 @@
         "custody/daemon-client.ts",
         "custody/store.ts",
         "runtime/financial-utils.ts",
-        "runtime/jadapter/default-tokens.ts",
+        "runtime/jurisdiction/adapter/default-tokens.ts",
         "runtime/radapter/auth.ts",
         "runtime/serialization-utils.ts"
       ],
@@ -83099,13 +83099,13 @@
       },
       "complexityPerKloc": 24,
       "dependencies": [
-        "runtime/jadapter/watcher.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
         "runtime/runtime.ts",
         "runtime/types.ts"
       ],
       "dependents": [],
       "testsFor": [
-        "runtime/jadapter/watcher.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
         "runtime/runtime.ts",
         "runtime/types.ts"
       ],
@@ -83222,7 +83222,7 @@
         "runtime/account-crypto.ts",
         "runtime/entity-factory.ts",
         "runtime/entity-tx/apply.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdiction-runtime.ts",
         "runtime/networking/gossip.ts",
         "runtime/runtime.ts",
@@ -83233,7 +83233,7 @@
         "runtime/account-crypto.ts",
         "runtime/entity-factory.ts",
         "runtime/entity-tx/apply.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdiction-runtime.ts",
         "runtime/networking/gossip.ts",
         "runtime/runtime.ts",
@@ -83947,7 +83947,7 @@
         "runtime/constants.ts",
         "runtime/entity-crontab.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/watcher.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
         "runtime/runtime.ts",
         "runtime/types.ts"
       ],
@@ -83957,7 +83957,7 @@
         "runtime/constants.ts",
         "runtime/entity-crontab.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/watcher.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
         "runtime/runtime.ts",
         "runtime/types.ts"
       ],
@@ -84558,7 +84558,7 @@
         "runtime/entity-factory.ts",
         "runtime/hanko/batch.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/rpc-utils.ts",
+        "runtime/jurisdiction/adapter/rpc-utils.ts",
         "runtime/recovery/crypto.ts",
         "runtime/recovery/types.ts",
         "runtime/watchtower/action.ts",
@@ -84570,7 +84570,7 @@
         "runtime/entity-factory.ts",
         "runtime/hanko/batch.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/rpc-utils.ts",
+        "runtime/jurisdiction/adapter/rpc-utils.ts",
         "runtime/recovery/crypto.ts",
         "runtime/recovery/types.ts",
         "runtime/watchtower/action.ts",
@@ -84983,7 +84983,7 @@
         "runtime/entity-factory.ts",
         "runtime/entity-tx/j-events.ts",
         "runtime/hanko/signing.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/networking/gossip-helper.ts",
         "runtime/networking/p2p.ts",
         "runtime/networking/profile-signing.ts",
@@ -86171,7 +86171,7 @@
       "complexityPerKloc": 114.71,
       "dependencies": [
         "runtime/account-crypto.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/serialization-utils.ts"
       ],
       "dependents": [
@@ -86213,7 +86213,7 @@
       "dependencies": [
         "runtime/entity-id-utils.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "dependents": [],
       "testsFor": [],
@@ -86304,7 +86304,7 @@
         "runtime/entity-tx/handlers/direct-payment.ts",
         "runtime/entity-tx/handlers/htlc-payment.ts",
         "runtime/htlc-utils.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/logger.ts",
         "runtime/orchestrator/mm-node.ts",
         "runtime/runtime-input-queue.ts"
@@ -86350,10 +86350,10 @@
         "runtime/entity-tx/handlers/j-broadcast.ts",
         "runtime/entity-tx/handlers/j-rebroadcast.ts",
         "runtime/entity-tx/handlers/settle-diffs.ts",
-        "runtime/jadapter/browservm-registry.ts",
-        "runtime/jadapter/rpc-utils.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/runtime-api.ts",
+        "runtime/jurisdiction/adapter/browservm-registry.ts",
+        "runtime/jurisdiction/adapter/rpc-utils.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts",
         "runtime/jurisdiction-config.ts",
         "runtime/jurisdiction-runtime.ts"
       ],
@@ -86989,8 +86989,8 @@
       "complexityPerKloc": 242.9,
       "dependencies": [
         "runtime/account-crypto.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
         "runtime/serialization-utils.ts",
         "runtime/types.ts",
         "runtime/utils.ts"
@@ -87006,7 +87006,7 @@
         "runtime/__tests__/storage-frame-journal-retention.test.ts",
         "runtime/__tests__/watchtower-rpc-last-resort.test.ts",
         "runtime/hanko/signing.ts",
-        "runtime/jadapter/runtime-api.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts",
         "runtime/orchestrator/daemon-control.ts",
         "runtime/orchestrator/mm-node.ts",
         "runtime/orchestrator/orchestrator.ts",
@@ -87082,10 +87082,10 @@
         "runtime/entity-tx/handlers/settle.ts",
         "runtime/hanko/batch.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/batch-helpers.ts",
-        "runtime/jadapter/browservm-provider.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/runtime-api.ts",
+        "runtime/jurisdiction/adapter/batch-helpers.ts",
+        "runtime/jurisdiction/adapter/browservm-provider.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts",
         "runtime/runtime.ts",
         "runtime/scenarios/rebalance.ts",
         "runtime/scenarios/settle-rebalance.ts",
@@ -89480,7 +89480,7 @@
         "runtime/j-event-normalization.ts",
         "runtime/j-event-observation.ts",
         "runtime/j-height.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/logger.ts",
         "runtime/proof-builder.ts",
         "runtime/state-helpers.ts",
@@ -89711,8 +89711,8 @@
       ],
       "dependents": [
         "runtime/__tests__/watchtower-rpc-last-resort.test.ts",
-        "runtime/jadapter/browservm-provider.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/browservm-provider.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/runtime.ts",
         "runtime/scripts/rpc-settlement-parity.ts"
       ],
@@ -89803,8 +89803,8 @@
         "runtime/entity-consensus.ts",
         "runtime/entity-tx/handlers/dispute.ts",
         "runtime/entity-tx/handlers/settle.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/runtime-api.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts",
         "runtime/networking/p2p.ts",
         "runtime/networking/profile-signing.ts"
       ],
@@ -90172,11 +90172,11 @@
         "runtime/entity-tx/j-events-batch.ts",
         "runtime/entity-tx/j-events-history.ts",
         "runtime/hanko/batch.ts",
-        "runtime/jadapter/batch-helpers.ts",
-        "runtime/jadapter/browservm-provider.ts",
-        "runtime/jadapter/helpers.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/runtime-api.ts",
+        "runtime/jurisdiction/adapter/batch-helpers.ts",
+        "runtime/jurisdiction/adapter/browservm-provider.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts",
         "runtime/scenarios/ahb-helpers.ts",
         "runtime/scenarios/grid.ts",
         "runtime/scenarios/lock-ahb.ts",
@@ -90273,7 +90273,7 @@
         "runtime/__tests__/audit-failfast-regressions.test.ts",
         "runtime/__tests__/cross-jurisdiction-swap.test.ts",
         "runtime/entity-tx/j-events.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/runtime.ts",
         "runtime/scripts/rpc-settlement-parity.ts"
       ],
@@ -90329,7 +90329,7 @@
       "delta": null
     },
     {
-      "path": "runtime/jadapter/README.md",
+      "path": "runtime/jurisdiction/adapter/README.md",
       "name": "README.md",
       "entryType": "file",
       "extension": ".md",
@@ -90363,7 +90363,7 @@
       "delta": null
     },
     {
-      "path": "runtime/jadapter/batch-helpers.ts",
+      "path": "runtime/jurisdiction/adapter/batch-helpers.ts",
       "name": "batch-helpers.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90400,7 +90400,7 @@
       "delta": null
     },
     {
-      "path": "runtime/jadapter/browservm-ethers-provider.ts",
+      "path": "runtime/jurisdiction/adapter/browservm-ethers-provider.ts",
       "name": "browservm-ethers-provider.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90428,17 +90428,17 @@
       },
       "complexityPerKloc": 226.56,
       "dependencies": [
-        "runtime/jadapter/types.ts"
+        "runtime/jurisdiction/adapter/types.ts"
       ],
       "dependents": [
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "testsFor": [],
       "testedBy": [],
       "delta": null
     },
     {
-      "path": "runtime/jadapter/browservm-events.ts",
+      "path": "runtime/jurisdiction/adapter/browservm-events.ts",
       "name": "browservm-events.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90467,14 +90467,14 @@
       "complexityPerKloc": 186.67,
       "dependencies": [],
       "dependents": [
-        "runtime/jadapter/browservm-provider.ts"
+        "runtime/jurisdiction/adapter/browservm-provider.ts"
       ],
       "testsFor": [],
       "testedBy": [],
       "delta": null
     },
     {
-      "path": "runtime/jadapter/browservm-provider.ts",
+      "path": "runtime/jurisdiction/adapter/browservm-provider.ts",
       "name": "browservm-provider.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90505,21 +90505,21 @@
         "runtime/entity-id-utils.ts",
         "runtime/hanko/batch.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/browservm-events.ts",
-        "runtime/jadapter/browservm-state.ts",
-        "runtime/jadapter/default-tokens.ts",
-        "runtime/jadapter/helpers.ts"
+        "runtime/jurisdiction/adapter/browservm-events.ts",
+        "runtime/jurisdiction/adapter/browservm-state.ts",
+        "runtime/jurisdiction/adapter/default-tokens.ts",
+        "runtime/jurisdiction/adapter/helpers.ts"
       ],
       "dependents": [
-        "runtime/jadapter/browservm.ts",
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/browservm.ts",
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "testsFor": [],
       "testedBy": [],
       "delta": null
     },
     {
-      "path": "runtime/jadapter/browservm-registry.ts",
+      "path": "runtime/jurisdiction/adapter/browservm-registry.ts",
       "name": "browservm-registry.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90548,19 +90548,19 @@
       "complexityPerKloc": 214.29,
       "dependencies": [
         "runtime/contract-address.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/types.ts"
       ],
       "dependents": [
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/jurisdiction.ts"
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts"
       ],
       "testsFor": [],
       "testedBy": [],
       "delta": null
     },
     {
-      "path": "runtime/jadapter/browservm-state.ts",
+      "path": "runtime/jurisdiction/adapter/browservm-state.ts",
       "name": "browservm-state.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90589,14 +90589,14 @@
       "complexityPerKloc": 330.43,
       "dependencies": [],
       "dependents": [
-        "runtime/jadapter/browservm-provider.ts"
+        "runtime/jurisdiction/adapter/browservm-provider.ts"
       ],
       "testsFor": [],
       "testedBy": [],
       "delta": null
     },
     {
-      "path": "runtime/jadapter/browservm.ts",
+      "path": "runtime/jurisdiction/adapter/browservm.ts",
       "name": "browservm.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90624,18 +90624,18 @@
       },
       "complexityPerKloc": 0,
       "dependencies": [
-        "runtime/jadapter/browservm-provider.ts",
-        "runtime/jadapter/types.ts"
+        "runtime/jurisdiction/adapter/browservm-provider.ts",
+        "runtime/jurisdiction/adapter/types.ts"
       ],
       "dependents": [
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "testsFor": [],
       "testedBy": [],
       "delta": null
     },
     {
-      "path": "runtime/jadapter/default-tokens.ts",
+      "path": "runtime/jurisdiction/adapter/default-tokens.ts",
       "name": "default-tokens.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90665,7 +90665,7 @@
       "dependencies": [],
       "dependents": [
         "custody/server.ts",
-        "runtime/jadapter/browservm-provider.ts",
+        "runtime/jurisdiction/adapter/browservm-provider.ts",
         "runtime/orchestrator/hub-node.ts",
         "runtime/scenarios/p2p-node.ts",
         "runtime/scenarios/p2p-relay.ts",
@@ -90676,7 +90676,7 @@
       "delta": null
     },
     {
-      "path": "runtime/jadapter/helpers.ts",
+      "path": "runtime/jurisdiction/adapter/helpers.ts",
       "name": "helpers.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90707,16 +90707,16 @@
         "runtime/account-crypto.ts",
         "runtime/j-batch.ts",
         "runtime/j-event-observation.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/runtime.ts",
         "runtime/types.ts"
       ],
       "dependents": [
         "runtime/entity-tx/j-events.ts",
-        "runtime/jadapter/browservm-provider.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/watcher.ts",
+        "runtime/jurisdiction/adapter/browservm-provider.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
         "runtime/scripts/rpc-settlement-parity.ts"
       ],
       "testsFor": [],
@@ -90724,7 +90724,7 @@
       "delta": null
     },
     {
-      "path": "runtime/jadapter/index.ts",
+      "path": "runtime/jurisdiction/adapter/index.ts",
       "name": "index.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90752,22 +90752,22 @@
       },
       "complexityPerKloc": 223.53,
       "dependencies": [
-        "runtime/jadapter/browservm-ethers-provider.ts",
-        "runtime/jadapter/browservm-provider.ts",
-        "runtime/jadapter/browservm-registry.ts",
-        "runtime/jadapter/browservm.ts",
-        "runtime/jadapter/helpers.ts",
-        "runtime/jadapter/jurisdiction.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/runtime-api.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/browservm-ethers-provider.ts",
+        "runtime/jurisdiction/adapter/browservm-provider.ts",
+        "runtime/jurisdiction/adapter/browservm-registry.ts",
+        "runtime/jurisdiction/adapter/browservm.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/loopback-url.ts"
       ],
       "dependents": [
         "runtime/cli.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/jurisdiction.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/orchestrator/jurisdictions.ts",
         "runtime/runtime-infra.ts",
         "runtime/runtime-jurisdiction-api.ts",
@@ -90791,7 +90791,7 @@
       "delta": null
     },
     {
-      "path": "runtime/jadapter/jurisdiction.ts",
+      "path": "runtime/jurisdiction/adapter/jurisdiction.ts",
       "name": "jurisdiction.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90819,23 +90819,23 @@
       },
       "complexityPerKloc": 142.86,
       "dependencies": [
-        "runtime/jadapter/browservm-registry.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/browservm-registry.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdiction-config.ts",
         "runtime/types.ts"
       ],
       "dependents": [
         "runtime/entity-factory.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/runtime-api.ts"
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts"
       ],
       "testsFor": [],
       "testedBy": [],
       "delta": null
     },
     {
-      "path": "runtime/jadapter/local-config.ts",
+      "path": "runtime/jurisdiction/adapter/local-config.ts",
       "name": "local-config.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90863,7 +90863,7 @@
       },
       "complexityPerKloc": 115.38,
       "dependencies": [
-        "runtime/jadapter/types.ts"
+        "runtime/jurisdiction/adapter/types.ts"
       ],
       "dependents": [
         "runtime/runtime-tx-handlers.ts",
@@ -90875,7 +90875,7 @@
       "delta": null
     },
     {
-      "path": "runtime/jadapter/rpc-utils.ts",
+      "path": "runtime/jurisdiction/adapter/rpc-utils.ts",
       "name": "rpc-utils.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90907,7 +90907,7 @@
       ],
       "dependents": [
         "runtime/__tests__/watchtower-rpc-last-resort.test.ts",
-        "runtime/jadapter/rpc.ts"
+        "runtime/jurisdiction/adapter/rpc.ts"
       ],
       "testsFor": [],
       "testedBy": [
@@ -90916,7 +90916,7 @@
       "delta": null
     },
     {
-      "path": "runtime/jadapter/rpc.ts",
+      "path": "runtime/jurisdiction/adapter/rpc.ts",
       "name": "rpc.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -90950,24 +90950,24 @@
         "runtime/hanko/batch.ts",
         "runtime/hanko/signing.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/helpers.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/rpc-utils.ts",
-        "runtime/jadapter/types.ts",
-        "runtime/jadapter/watcher.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/rpc-utils.ts",
+        "runtime/jurisdiction/adapter/types.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
         "runtime/proof-builder.ts",
         "runtime/state-helpers.ts",
         "runtime/types.ts"
       ],
       "dependents": [
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "testsFor": [],
       "testedBy": [],
       "delta": null
     },
     {
-      "path": "runtime/jadapter/runtime-api.ts",
+      "path": "runtime/jurisdiction/adapter/runtime-api.ts",
       "name": "runtime-api.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -91000,18 +91000,18 @@
         "runtime/entity-id-utils.ts",
         "runtime/hanko/signing.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
         "runtime/types.ts"
       ],
       "dependents": [
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "testsFor": [],
       "testedBy": [],
       "delta": null
     },
     {
-      "path": "runtime/jadapter/types.ts",
+      "path": "runtime/jurisdiction/adapter/types.ts",
       "name": "types.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -91044,14 +91044,14 @@
       "dependents": [
         "runtime/__tests__/multi-jurisdiction-entity.test.ts",
         "runtime/api/external-wallet-api.ts",
-        "runtime/jadapter/browservm-ethers-provider.ts",
-        "runtime/jadapter/browservm-registry.ts",
-        "runtime/jadapter/browservm.ts",
-        "runtime/jadapter/helpers.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/jurisdiction.ts",
-        "runtime/jadapter/local-config.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/browservm-ethers-provider.ts",
+        "runtime/jurisdiction/adapter/browservm-registry.ts",
+        "runtime/jurisdiction/adapter/browservm.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/local-config.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/orchestrator/hub-node.ts",
         "runtime/orchestrator/mm-node.ts",
         "runtime/runtime-infra.ts",
@@ -91084,7 +91084,7 @@
       "delta": null
     },
     {
-      "path": "runtime/jadapter/watcher.ts",
+      "path": "runtime/jurisdiction/adapter/watcher.ts",
       "name": "watcher.ts",
       "entryType": "file",
       "extension": ".ts",
@@ -91112,12 +91112,12 @@
       },
       "complexityPerKloc": 0,
       "dependencies": [
-        "runtime/jadapter/helpers.ts"
+        "runtime/jurisdiction/adapter/helpers.ts"
       ],
       "dependents": [
         "runtime/__tests__/jadapter-helpers.test.ts",
         "runtime/__tests__/runtime-ingress-timestamp.test.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/orchestrator/hub-node.ts",
         "runtime/types.ts"
       ],
@@ -91164,7 +91164,7 @@
         "runtime/utils.ts"
       ],
       "dependents": [
-        "runtime/jadapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
         "runtime/runtime.ts"
       ],
       "testsFor": [],
@@ -91532,7 +91532,7 @@
       "complexityPerKloc": 258.06,
       "dependencies": [],
       "dependents": [
-        "runtime/jadapter/index.ts",
+        "runtime/jurisdiction/adapter/index.ts",
         "runtime/orchestrator/hub-node.ts",
         "runtime/orchestrator/jurisdictions.ts",
         "runtime/orchestrator/orchestrator-config.ts",
@@ -92563,9 +92563,9 @@
       "dependencies": [
         "runtime/api/external-wallet-api.ts",
         "runtime/health-redaction.ts",
-        "runtime/jadapter/default-tokens.ts",
-        "runtime/jadapter/types.ts",
-        "runtime/jadapter/watcher.ts",
+        "runtime/jurisdiction/adapter/default-tokens.ts",
+        "runtime/jurisdiction/adapter/types.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
         "runtime/jurisdictions-path.ts",
         "runtime/logger.ts",
         "runtime/loopback-url.ts",
@@ -92617,7 +92617,7 @@
       },
       "complexityPerKloc": 284.09,
       "dependencies": [
-        "runtime/jadapter/index.ts",
+        "runtime/jurisdiction/adapter/index.ts",
         "runtime/jurisdictions-path.ts",
         "runtime/jurisdictions-version.ts",
         "runtime/loopback-url.ts"
@@ -92783,7 +92783,7 @@
         "runtime/cross-jurisdiction-boundary.ts",
         "runtime/cross-jurisdiction.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdiction-stack.ts",
         "runtime/logger.ts",
         "runtime/networking/direct-runtime-bun.ts",
@@ -93484,7 +93484,7 @@
         "runtime/entity-tx/handlers/dispute.ts",
         "runtime/entity-tx/handlers/settle.ts",
         "runtime/entity-tx/j-events.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/runtime.ts",
         "runtime/scenarios/swap.ts"
       ],
@@ -95064,8 +95064,8 @@
       },
       "complexityPerKloc": 333.33,
       "dependencies": [
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/types.ts"
       ],
       "dependents": [
@@ -95184,7 +95184,7 @@
       "complexityPerKloc": 290.7,
       "dependencies": [
         "runtime/cross-jurisdiction.ts",
-        "runtime/jadapter/index.ts",
+        "runtime/jurisdiction/adapter/index.ts",
         "runtime/jurisdiction-runtime.ts",
         "runtime/state-helpers.ts",
         "runtime/types.ts",
@@ -95485,9 +95485,9 @@
         "runtime/account-crypto.ts",
         "runtime/account-utils.ts",
         "runtime/env-events.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/local-config.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/local-config.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdiction-runtime.ts",
         "runtime/logger.ts",
         "runtime/networking/gossip-helper.ts",
@@ -95585,7 +95585,7 @@
         "runtime/hanko/batch.ts",
         "runtime/ids.ts",
         "runtime/j-event-observation.ts",
-        "runtime/jadapter/index.ts",
+        "runtime/jurisdiction/adapter/index.ts",
         "runtime/jurisdiction-config.ts",
         "runtime/logger.ts",
         "runtime/name-resolution.ts",
@@ -95657,7 +95657,7 @@
         "runtime/__tests__/storage-frame-journal-retention.test.ts",
         "runtime/__tests__/watchtower-restart-resilience.test.ts",
         "runtime/__tests__/watchtower-standalone.test.ts",
-        "runtime/jadapter/helpers.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
         "runtime/jurisdiction-factory.ts",
         "runtime/orchestrator/hub-node.ts",
         "runtime/orchestrator/mm-node.ts",
@@ -95748,7 +95748,7 @@
       "dependencies": [
         "runtime/account-utils.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/runtime-ascii.ts",
         "runtime/runtime.ts",
         "runtime/scenarios/boot.ts",
@@ -95794,7 +95794,7 @@
         "runtime/account-crypto.ts",
         "runtime/account-utils.ts",
         "runtime/entity-factory.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/networking/gossip.ts",
         "runtime/runtime-ascii.ts",
         "runtime/runtime.ts",
@@ -95882,9 +95882,9 @@
       "complexityPerKloc": 177.5,
       "dependencies": [
         "runtime/account-crypto.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/local-config.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/local-config.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/loopback-url.ts",
         "runtime/runtime.ts",
         "runtime/scenarios/helpers.ts",
@@ -95982,7 +95982,7 @@
       "dependencies": [
         "runtime/entity-crontab.ts",
         "runtime/env-events.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/scenarios/boot.ts",
         "runtime/scenarios/helpers.ts",
         "runtime/types.ts"
@@ -96023,7 +96023,7 @@
       },
       "complexityPerKloc": 213.3,
       "dependencies": [
-        "runtime/jadapter/index.ts",
+        "runtime/jurisdiction/adapter/index.ts",
         "runtime/scenarios/helpers.ts"
       ],
       "dependents": [],
@@ -96061,7 +96061,7 @@
       "complexityPerKloc": 90.91,
       "dependencies": [
         "runtime/j-batch.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/runtime.ts",
         "runtime/scenarios/boot.ts",
         "runtime/scenarios/helpers.ts",
@@ -96105,7 +96105,7 @@
       "complexityPerKloc": 309.38,
       "dependencies": [
         "runtime/account-crypto.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/logger.ts",
         "runtime/runtime-ascii.ts",
         "runtime/runtime.ts",
@@ -96204,7 +96204,7 @@
       },
       "complexityPerKloc": 103.9,
       "dependencies": [
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/runtime.ts",
         "runtime/scenarios/boot.ts",
         "runtime/scenarios/helpers.ts",
@@ -96299,7 +96299,7 @@
       },
       "complexityPerKloc": 129.03,
       "dependencies": [
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "dependents": [],
       "testsFor": [],
@@ -96335,7 +96335,7 @@
       },
       "complexityPerKloc": 180.33,
       "dependencies": [
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "dependents": [],
       "testsFor": [],
@@ -96409,7 +96409,7 @@
         "runtime/account-utils.ts",
         "runtime/htlc-utils.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/runtime-ascii.ts",
         "runtime/runtime.ts",
         "runtime/scenarios/boot.ts",
@@ -96500,8 +96500,8 @@
         "runtime/account-crypto.ts",
         "runtime/account-utils.ts",
         "runtime/htlc-utils.ts",
-        "runtime/jadapter/default-tokens.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/default-tokens.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdiction-loader.ts",
         "runtime/networking/gossip.ts",
         "runtime/relay/standalone-server.ts",
@@ -96544,9 +96544,9 @@
       "complexityPerKloc": 126.58,
       "dependencies": [
         "runtime/account-crypto.ts",
-        "runtime/jadapter/default-tokens.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/default-tokens.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdiction-loader.ts",
         "runtime/types.ts"
       ],
@@ -96862,7 +96862,7 @@
       "complexityPerKloc": 107.62,
       "dependencies": [
         "runtime/entity-tx/handlers/settle.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/networking/gossip.ts",
         "runtime/runtime-ascii.ts",
         "runtime/scenarios/boot.ts",
@@ -96992,7 +96992,7 @@
       },
       "complexityPerKloc": 131.69,
       "dependencies": [
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/networking/gossip.ts",
         "runtime/open-swap-offers.ts",
         "runtime/orderbook/index.ts",
@@ -97562,8 +97562,8 @@
       },
       "complexityPerKloc": 201.39,
       "dependencies": [
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/local-config.ts"
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/local-config.ts"
       ],
       "dependents": [],
       "testsFor": [],
@@ -97865,8 +97865,8 @@
         "runtime/hanko/batch.ts",
         "runtime/j-batch.ts",
         "runtime/j-event-observation.ts",
-        "runtime/jadapter/helpers.ts",
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/helpers.ts",
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "dependents": [],
       "testsFor": [],
@@ -98219,7 +98219,7 @@
       "complexityPerKloc": 125.4,
       "dependencies": [
         "runtime/entity-id-utils.ts",
-        "runtime/jadapter/types.ts"
+        "runtime/jurisdiction/adapter/types.ts"
       ],
       "dependents": [],
       "testsFor": [],
@@ -98500,8 +98500,8 @@
       "complexityPerKloc": 251.86,
       "dependencies": [
         "runtime/api/external-wallet-api.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdictions-path.ts",
         "runtime/logger.ts",
         "runtime/market-snapshot.ts",
@@ -98905,7 +98905,7 @@
       "dependencies": [
         "runtime/health-redaction.ts",
         "runtime/health.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/networking/gossip.ts",
         "runtime/orchestrator/storage-monitor.ts",
         "runtime/relay-store.ts",
@@ -98993,7 +98993,7 @@
       "complexityPerKloc": 78.65,
       "dependencies": [
         "runtime/account-utils.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/server/entity-lookup.ts",
         "runtime/types.ts"
       ],
@@ -99076,7 +99076,7 @@
       },
       "complexityPerKloc": 282.05,
       "dependencies": [
-        "runtime/jadapter/index.ts",
+        "runtime/jurisdiction/adapter/index.ts",
         "runtime/jurisdictions-path.ts",
         "runtime/jurisdictions-version.ts",
         "runtime/logger.ts",
@@ -99291,7 +99291,7 @@
       },
       "complexityPerKloc": 198.74,
       "dependencies": [
-        "runtime/jadapter/index.ts",
+        "runtime/jurisdiction/adapter/index.ts",
         "runtime/logger.ts",
         "runtime/relay-store.ts",
         "runtime/serialization-utils.ts",
@@ -99512,7 +99512,7 @@
       },
       "complexityPerKloc": 130,
       "dependencies": [
-        "runtime/jadapter/index.ts"
+        "runtime/jurisdiction/adapter/index.ts"
       ],
       "dependents": [
         "runtime/server.ts"
@@ -99586,9 +99586,9 @@
       },
       "complexityPerKloc": 211.76,
       "dependencies": [
-        "runtime/jadapter/default-tokens.ts",
-        "runtime/jadapter/index.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/default-tokens.ts",
+        "runtime/jurisdiction/adapter/index.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/logger.ts",
         "runtime/server/hub-health.ts"
       ],
@@ -99884,7 +99884,7 @@
         "runtime/entity-tx/j-events-debt.ts",
         "runtime/entity-tx/j-events-htlc.ts",
         "runtime/entity-tx/j-events.ts",
-        "runtime/jadapter/rpc.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
         "runtime/runtime-entity-inputs.ts",
         "runtime/runtime-jurisdiction-api.ts",
         "runtime/runtime-output-routing.ts",
@@ -101382,8 +101382,8 @@
         "runtime/crontab-types.ts",
         "runtime/ids.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/types.ts",
-        "runtime/jadapter/watcher.ts",
+        "runtime/jurisdiction/adapter/types.ts",
+        "runtime/jurisdiction/adapter/watcher.ts",
         "runtime/networking/gossip.ts",
         "runtime/networking/p2p.ts",
         "runtime/orderbook/index.ts",
@@ -101525,12 +101525,12 @@
         "runtime/j-event-normalization.ts",
         "runtime/j-event-observation.ts",
         "runtime/j-height.ts",
-        "runtime/jadapter/browservm-registry.ts",
-        "runtime/jadapter/helpers.ts",
-        "runtime/jadapter/jurisdiction.ts",
-        "runtime/jadapter/rpc.ts",
-        "runtime/jadapter/runtime-api.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/browservm-registry.ts",
+        "runtime/jurisdiction/adapter/helpers.ts",
+        "runtime/jurisdiction/adapter/jurisdiction.ts",
+        "runtime/jurisdiction/adapter/rpc.ts",
+        "runtime/jurisdiction/adapter/runtime-api.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdiction-config.ts",
         "runtime/jurisdiction-runtime.ts",
         "runtime/market-snapshot.ts",
@@ -101939,7 +101939,7 @@
       "complexityPerKloc": 0,
       "dependencies": [
         "runtime/j-batch.ts",
-        "runtime/jadapter/types.ts"
+        "runtime/jurisdiction/adapter/types.ts"
       ],
       "dependents": [
         "runtime/types.ts"
@@ -102665,7 +102665,7 @@
         "runtime/cross-jurisdiction-market.ts",
         "runtime/ids.ts",
         "runtime/j-batch.ts",
-        "runtime/jadapter/types.ts",
+        "runtime/jurisdiction/adapter/types.ts",
         "runtime/jurisdiction-stack.ts",
         "runtime/networking/gossip.ts",
         "runtime/orderbook/index.ts",

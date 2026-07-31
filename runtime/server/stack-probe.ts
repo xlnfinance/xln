@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { JAdapter } from '../jadapter';
+import type { JAdapter } from '../jurisdiction/adapter';
 
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
 

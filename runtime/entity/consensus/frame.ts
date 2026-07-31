@@ -7,7 +7,7 @@ import type { JPrefixCertificate } from '../../types/jurisdiction-events';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
-import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/event-normalization';
+import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/event-normalization';
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame';
 import {
   computeCanonicalEntityConsensusStateHash,

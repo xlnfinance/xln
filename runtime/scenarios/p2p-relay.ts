@@ -9,10 +9,10 @@ import net from 'net';
 import path from 'path';
 import { ethers } from 'ethers';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { createJAdapter } from '../jadapter';
-import type { JAdapter, JTokenInfo } from '../jadapter/types';
-import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
-import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment';
+import { createJAdapter } from '../jurisdiction/adapter';
+import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
+import { loadJurisdictions } from '../jurisdiction/adapter/jurisdiction-loader';
+import { deployMissingDefaultTokens } from '../jurisdiction/adapter/dev-token-deployment';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { hasCliFlag, readCliOption } from '../config/cli';
 

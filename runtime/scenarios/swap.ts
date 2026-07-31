@@ -24,7 +24,7 @@ import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
 import { getOpenSwapOfferEntries } from '../orderbook/open-swap-offers';
 import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig } from './boot';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
 import { createGossipLayer } from '../network/p2p/gossip';

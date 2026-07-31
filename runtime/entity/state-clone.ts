@@ -6,7 +6,7 @@ import {
   cloneCrossJurisdictionRoute,
 } from '../extensions/cross-j';
 import { createStructuredLogger } from '../infra/logger';
-import { cloneJBatch, type JBatchState } from '../jurisdiction/batch';
+import { cloneJBatch, type JBatchState } from '../jurisdiction/machine/batch';
 import { structuredCloneOrThrow } from '../protocol/structured-clone';
 import { cloneCrossJurisdictionAccountTxRoute } from '../extensions/cross-j';
 import { applyAccountClonePolicy } from '../account/state-clone';

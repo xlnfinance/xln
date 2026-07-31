@@ -6,7 +6,7 @@ import { getEntityConfigBoardHash } from '../hanko/signing';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import { bootScenario, fundEntities, registerEntities } from '../scenarios/boot';
 import { ensureSignerKeysFromSeed } from '../scenarios/helpers';
 import { createEmptyEnv } from '../runtime';

@@ -28,19 +28,27 @@ const FORBIDDEN_DEPENDENCIES = new Set([
   'account->storage',
   'entity->runtime',
   'entity->jadapter',
-  'entity->network',
+  'entity->network/p2p',
+  'entity->network/relay',
   'entity->storage',
   'protocol->account',
   'protocol->entity',
   'server->orchestrator',
+  'jurisdiction/machine->jurisdiction/adapter',
 ]);
 
 // Owner moves are one-way migrations. Rejecting the retired roots prevents a
 // future feature from recreating the old split ownership beside network/.
-for (const retiredRoot of ['runtime/networking', 'runtime/relay']) {
+for (const retiredRoot of ['runtime/networking', 'runtime/relay', 'runtime/jadapter']) {
   if (fs.existsSync(retiredRoot)) {
     throw new Error(`RUNTIME_RETIRED_OWNER_ROOT:${retiredRoot}`);
   }
+}
+
+const jurisdictionRootFiles = fs.readdirSync('runtime/jurisdiction', { withFileTypes: true })
+  .filter(entry => entry.isFile() && entry.name.endsWith('.ts'));
+if (jurisdictionRootFiles.length > 0) {
+  throw new Error(`RUNTIME_RETIRED_JURISDICTION_ROOT_FILES:${jurisdictionRootFiles.map(entry => entry.name).join(',')}`);
 }
 
 const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {};
@@ -58,6 +66,9 @@ const collectFiles = (directory: string): string[] =>
 const packageOwner = (file: string): string => {
   const relative = path.relative(RUNTIME_ROOT, file);
   const parts = relative.split(path.sep);
+  if ((parts[0] === 'jurisdiction' || parts[0] === 'network') && parts[1]) {
+    return `${parts[0]}/${parts[1]}`;
+  }
   return parts.length === 1 ? '(root)' : (parts[0] ?? '(root)');
 };
 

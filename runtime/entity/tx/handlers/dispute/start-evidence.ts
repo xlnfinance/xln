@@ -7,7 +7,7 @@ import {
   assertDisputeArgumentsWithinContractLimits,
   assertDisputeProofBodyWithinContractLimits,
   sanitizeOptionalDisputeStarterArgumentPair,
-} from '../../../../jurisdiction/batch';
+} from '../../../../jurisdiction/machine/batch';
 import { hashProofBodyStruct } from '../../../../protocol/dispute/proof-builder';
 import {
   requireDisputeArgumentSnapshot,

@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import {
   readAuthenticatedReceiptRange,
   type RpcBatchCall,
-} from '../jadapter/receipt-root';
+} from '../jurisdiction/adapter/receipt-root';
 
 const zeroBloom = `0x${'00'.repeat(256)}`;
 const hashFor = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;

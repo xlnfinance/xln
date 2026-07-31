@@ -710,7 +710,7 @@ Current repo status:
 
 Files/modules:
 
-- extend `runtime/jadapter/watcher.ts` event fanout for account/dispute events;
+- extend `runtime/jurisdiction/adapter/watcher.ts` event fanout for account/dispute events;
 - add `runtime/storage/recovery/tower-action.ts`;
 - add tower fee budget and action receipts;
 - add a guarded contract path, for example `watchtowerCounterDispute`, that rejects early tower action before the last-resort window;

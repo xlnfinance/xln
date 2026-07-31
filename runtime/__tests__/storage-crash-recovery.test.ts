@@ -38,7 +38,7 @@ import {
   EMPTY_CERTIFIED_BOARD_ROOT,
   getCertifiedBoardStackKey,
   putCertifiedBoardRecord,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import {
   applyConsumptionOutput,
   createConsumptionProof,

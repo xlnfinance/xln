@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
-import { createJAdapter, DEFAULT_PRIVATE_KEY } from '../jadapter';
+import { createJAdapter, DEFAULT_PRIVATE_KEY } from '../jurisdiction/adapter';
 import {
   applyCompleteImportJurisdiction,
   buildJurisdictionImportRequestHash,

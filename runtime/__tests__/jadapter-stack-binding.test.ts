@@ -12,7 +12,7 @@ import {
   ERC721Mock__factory,
   SupplyLivenessHarness__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
-import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
+import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jurisdiction/adapter';
 import { createEmptyEnv } from '../runtime';
 import { createTokenCatalogController } from '../server/token-catalog';
 import type { JReplica } from '../types/jurisdiction-runtime';

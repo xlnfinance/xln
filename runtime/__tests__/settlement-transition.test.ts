@@ -41,13 +41,13 @@ import {
 } from '../entity/scheduler';
 import { hubRebalanceHandler } from '../entity/scheduler/rebalance';
 import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
-import { createEmptyBatch, initJBatch } from '../jurisdiction/batch';
+import { createEmptyBatch, initJBatch } from '../jurisdiction/machine/batch';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import {
   applyCertifiedBoardRegistryEvent,
   cacheCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { cloneAccountState } from '../account/state-clone';

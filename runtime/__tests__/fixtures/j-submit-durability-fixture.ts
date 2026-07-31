@@ -4,7 +4,7 @@ import {
   registerPendingCommittedJOutbox,
 } from '../../runtime/j-submit-state';
 import { collectDueJSubmitRuntimeTxs } from '../../runtime/j-submit-scheduler';
-import { createEmptyBatch } from '../../jurisdiction/batch';
+import { createEmptyBatch } from '../../jurisdiction/machine/batch';
 import type { EntityReplica, EntityState } from '../../entity/types';
 
 export const entityId = `0x${'31'.repeat(32)}`;

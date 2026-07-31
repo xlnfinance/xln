@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { createJAdapter } from '../jadapter';
+import { createJAdapter } from '../jurisdiction/adapter';
 import {
   attachLiveJAdapter,
   getLiveJAdapter,
@@ -11,10 +11,10 @@ import {
 import {
   applyJEventsToEnv,
   buildJEventsRuntimeInput,
-} from '../jadapter/manual-event-ingress';
-import { parseReceiptLogsToJEvents } from '../jadapter/j-event-log-decoder';
-import { bindLocalJEventIngressSource } from '../jadapter/local-ingress-source';
-import { resolveApprovalReceiptLogIndex } from '../jadapter/rpc-public';
+} from '../jurisdiction/adapter/manual-event-ingress';
+import { parseReceiptLogsToJEvents } from '../jurisdiction/adapter/j-event-log-decoder';
+import { bindLocalJEventIngressSource } from '../jurisdiction/adapter/local-ingress-source';
+import { resolveApprovalReceiptLogIndex } from '../jurisdiction/adapter/rpc-public';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';

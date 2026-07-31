@@ -20,14 +20,14 @@ import {
 } from '../entity/crypto';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-event-collector';
 import { getEntityLeaderState } from '../entity/consensus/leader';
-import { buildJPrefixCertificate } from '../jurisdiction/j-prefix-consensus';
+import { buildJPrefixCertificate } from '../jurisdiction/machine/j-prefix-consensus';
 import { generateNumberedEntityId } from '../entity/factory';
 import { verifyHankoForHash } from '../hanko/signing';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
 import { dbRootPath } from '../runtime/platform';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';

@@ -1,4 +1,4 @@
-import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
+import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
 import { safeStringify } from '../../protocol/serialization';
 import { writeRuntimeMetadata } from '../../runtime/loop-environment';
 import type { RuntimeReplica } from '../../runtime/types';

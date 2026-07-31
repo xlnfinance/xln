@@ -2,7 +2,7 @@ import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
   requireCanonicalJurisdictionEvents,
-} from '../../jurisdiction/event-normalization';
+} from '../../jurisdiction/machine/event-normalization';
 import type { JEventClaimTx, JEventAccountTx } from './j-events-types';
 
 const isJEventClaimOp = (

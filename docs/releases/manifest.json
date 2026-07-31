@@ -19191,8 +19191,8 @@
               "runtime/hanko/batch.ts",
               "runtime/ids.ts",
               "runtime/j-event-observation.ts",
-              "runtime/jadapter/index.ts",
-              "runtime/jadapter/watcher.ts",
+              "runtime/jurisdiction/adapter/index.ts",
+              "runtime/jurisdiction/adapter/watcher.ts",
               "runtime/jurisdiction-config.ts",
               "runtime/logger.ts",
               "runtime/name-resolution.ts",
@@ -19336,11 +19336,11 @@
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/jadapter/index.ts"
+            "dependency": "runtime/jurisdiction/adapter/index.ts"
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/jadapter/watcher.ts"
+            "dependency": "runtime/jurisdiction/adapter/watcher.ts"
           },
           {
             "source": "runtime/runtime.ts",
@@ -20384,8 +20384,8 @@
               "runtime/hanko/batch.ts",
               "runtime/ids.ts",
               "runtime/j-event-observation.ts",
-              "runtime/jadapter/index.ts",
-              "runtime/jadapter/watcher.ts",
+              "runtime/jurisdiction/adapter/index.ts",
+              "runtime/jurisdiction/adapter/watcher.ts",
               "runtime/jurisdiction-config.ts",
               "runtime/logger.ts",
               "runtime/name-resolution.ts",
@@ -20529,11 +20529,11 @@
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/jadapter/index.ts"
+            "dependency": "runtime/jurisdiction/adapter/index.ts"
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/jadapter/watcher.ts"
+            "dependency": "runtime/jurisdiction/adapter/watcher.ts"
           },
           {
             "source": "runtime/runtime.ts",

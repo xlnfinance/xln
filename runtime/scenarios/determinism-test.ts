@@ -29,7 +29,7 @@ import {
   type JEventIngressBatch,
   type JHistoryRangeIngress,
   type JEventIngress,
-} from '../jadapter/watcher';
+} from '../jurisdiction/adapter/watcher';
 
 const RUNS = 2;
 const SEED = 'determinism-test-seed-42';

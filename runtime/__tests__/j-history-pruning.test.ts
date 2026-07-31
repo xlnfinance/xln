@@ -2,20 +2,20 @@ import { describe, expect, test } from 'bun:test';
 
 import { signAccountFrame, deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { applyJEvent } from '../entity/tx/j-events';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import {
   buildJEventRangeDigest,
   canonicalJEventRangeHash,
   EMPTY_J_HISTORY_ROOT,
   foldJHistoryRoot,
-} from '../jurisdiction/history-consensus';
+} from '../jurisdiction/machine/history-consensus';
 import {
   assertCertifiedJHistoryIntegrity,
   finalizedJHistoryRoot,
   MAX_CERTIFIED_J_EVENT_BLOCKS,
   reconcileJEventRangeWithFinalizedState,
-} from '../jurisdiction/local-history';
-import { advanceCertifiedBoardFinality } from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/local-history';
+import { advanceCertifiedBoardFinality } from '../jurisdiction/machine/board-registry';
 import { createEmptyEnv } from '../runtime';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import type { EntityState } from '../entity/types';

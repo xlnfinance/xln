@@ -8,7 +8,7 @@ import type { RuntimeReplica } from '../runtime/types';
 import { createEconomy, connectEconomy, testHtlcRoute, type EconomyEntity } from './test-economy';
 import { usd, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, createJReplica, getScenarioJAdapter, isScenarioJAdapterMissingError } from './boot';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { createRngFromEnv } from './seeded-rng';
 
 const USDC_TOKEN_ID = 1;

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { accountInputAck } from '../account/consensus/flush';
-import { initJBatch } from '../jurisdiction/batch';
+import { initJBatch } from '../jurisdiction/machine/batch';
 import {
   collectReachableDisputeEvidenceHashes,
   pruneUnreachableDisputeEvidence,

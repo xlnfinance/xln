@@ -10,10 +10,10 @@ import {
   ensureLiveJAdapterForReplica,
   normalizeRestoredJReplicas,
 } from '../runtime/infra';
-import { buildBrowserVMJurisdiction, createJAdapter } from '../jadapter';
+import { buildBrowserVMJurisdiction, createJAdapter } from '../jurisdiction/adapter';
 import { applyImportJurisdictionIntent } from '../runtime/jurisdiction-import';
 import { createEmptyEnv } from '../runtime';
-import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
+import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import {
   attachLiveJAdapter,
   getLiveJAdapter,

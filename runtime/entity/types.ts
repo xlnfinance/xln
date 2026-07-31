@@ -18,8 +18,8 @@ import type { CertifiedBoardRegistryState } from '../types/entity-board-registry
 import type { ConsumptionAccumulatorState, ConsumptionNodeEntry } from './consumption-accumulator-types';
 import type { AccountJClaimNodeChanges } from '../types/account-j-claims';
 import type { EntityProviderActionState, EntityProviderActionSubmitState } from '../types/entity-provider-actions';
-import type { JBatchState } from '../jurisdiction/batch';
-import type { JInput } from '../jurisdiction/input';
+import type { JBatchState } from '../jurisdiction/machine/batch';
+import type { JInput } from '../jurisdiction/machine/input';
 import type { RuntimeSecurityIncidentIdentity } from '../protocol/security-incident';
 import type { JurisdictionConfig } from '../protocol/jurisdiction-config';
 import type { CrontabState } from './scheduler-types';

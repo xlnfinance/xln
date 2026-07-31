@@ -57,7 +57,7 @@ export {
   verifyAccountSignature,
   getSignerPublicKey,
 } from '../account/crypto.js';
-export { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
+export { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 export type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecording,
@@ -115,9 +115,9 @@ export type {
   MppJsonValue,
   MppReceipt,
 } from '../protocol/payments/mpp';
-export { createJAdapter } from '../jadapter';
-export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from '../jadapter';
-export { applyJEventsToEnv, buildJEventsRuntimeInput } from '../jadapter/watcher';
+export { createJAdapter } from '../jurisdiction/adapter';
+export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from '../jurisdiction/adapter';
+export { applyJEventsToEnv, buildJEventsRuntimeInput } from '../jurisdiction/adapter/watcher';
 export {
   getActiveJAdapter,
   getEntityJAdapter,

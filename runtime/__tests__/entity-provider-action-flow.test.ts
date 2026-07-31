@@ -45,13 +45,13 @@ import {
   splitJOutboxForDurableSubmit,
 } from '../runtime/j-submit-state';
 import { createEmptyEnv } from '../runtime';
-import { createJAdapter } from '../jadapter';
+import { createJAdapter } from '../jurisdiction/adapter';
 import {
   applyCertifiedBoardRegistryEvent,
   cacheCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardRecord,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import {
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,

@@ -1,5 +1,5 @@
 import { encodeBuffer, writeBatch } from './codec';
-import { hashCertifiedBoardNode } from '../jurisdiction/board-registry';
+import { hashCertifiedBoardNode } from '../jurisdiction/machine/board-registry';
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
 import { hashConsumptionNode, type ConsumptionNode } from '../entity/consumption-accumulator';
 import {

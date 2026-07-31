@@ -32,8 +32,8 @@ import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
 import type { RuntimeReplica, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { maybeHandleQaRequest } from '../qa/api';
-import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
-import type { JAdapterConfig } from '../jadapter/types';
+import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jurisdiction/adapter';
+import type { JAdapterConfig } from '../jurisdiction/adapter/types';
 import { createMarketMakerServerState, resetMarketMakerServerState } from './market-maker-health';
 import { serveRuntimeBundle, serveStatic } from './static-assets';
 import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth } from './auth';
@@ -48,7 +48,7 @@ import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
 import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
-import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
+import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
 import { createStructuredLogger, registerStructuredLogSink, shortId } from '../infra/logger';
 import { startParentLivenessWatch } from '../infra/parent-watch';
 import { buildMarketSnapshotForReplica, type MarketSnapshotPayload } from '../network/relay/market-snapshot';
@@ -99,7 +99,7 @@ import {
   resolveAssistantRateClientId,
 } from './assistant-proxy';
 import { selectPredeployedJurisdiction } from './predeployed-jurisdiction';
-import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
+import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import { readInheritedChildSecrets } from '../infra/child-secrets';
 import { createLocalPairingController } from './local-pairing';
 import { deriveSignerAddressSync } from '../account/crypto';

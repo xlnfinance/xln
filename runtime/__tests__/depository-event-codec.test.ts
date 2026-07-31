@@ -3,8 +3,8 @@ import { Depository__factory } from '../../jurisdictions/typechain-types/index.t
 import {
   extractCanonicalDepositoryEventArgs,
   parseKnownDepositoryLog,
-} from '../jadapter/depository-event-codec';
-import { parseReceiptLogsToJEvents } from '../jadapter/j-event-log-decoder';
+} from '../jurisdiction/adapter/depository-event-codec';
+import { parseReceiptLogsToJEvents } from '../jurisdiction/adapter/j-event-log-decoder';
 
 const iface = Depository__factory.createInterface();
 const word = (suffix: string): string => `0x${suffix.padStart(64, '0')}`;

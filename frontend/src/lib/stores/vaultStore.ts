@@ -61,7 +61,7 @@ import {
 
 import { lockRuntimeCommandJournal } from './runtimeCommandJournalKeyring';
 
-import { deriveJurisdictionSignerIndex } from '../../../../runtime/jurisdiction/signer-derivation';
+import { deriveJurisdictionSignerIndex } from '../../../../runtime/jurisdiction/machine/signer-derivation';
 
 import {
   findRuntimeByIdCaseInsensitive,

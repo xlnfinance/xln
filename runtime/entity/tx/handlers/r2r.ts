@@ -15,7 +15,7 @@ import type { EntityState, EntityInput } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import { initJBatch, batchAddReserveToReserve } from '../../../jurisdiction/batch';
+import { initJBatch, batchAddReserveToReserve } from '../../../jurisdiction/machine/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { getReserveCandidateIssue } from './j-batch-reserve-admission';
 

@@ -1,6 +1,6 @@
 import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
 import type { EntityOutput, EntityState, HashToSign, HashType, EntityFrame } from '../types';
-import type { JInput } from '../../jurisdiction/input';
+import type { JInput } from '../../jurisdiction/machine/input';
 import type { HankoString } from '../../types/hanko';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
 import { normalizeSignatureMap } from '../signatures';

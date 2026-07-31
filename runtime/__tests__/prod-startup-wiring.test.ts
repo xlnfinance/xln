@@ -26,7 +26,7 @@ const readRpcAdapterSource = (): string =>
     'rpc-watcher-ingress.ts',
     'rpc-watcher-poll.ts',
   ]
-    .map(file => readFileSync(join(repoRoot, 'runtime/jadapter', file), 'utf8'))
+    .map(file => readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter', file), 'utf8'))
     .join('\n');
 
 const extractSourceBlock = (source: string, marker: string, nextMarker: string): string => {
@@ -656,7 +656,7 @@ describe('production startup wiring', () => {
     const mmNode = readMarketMakerNodeSource();
     const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime/tx-handlers.ts'), 'utf8');
     const jurisdictionImport = readFileSync(join(repoRoot, 'runtime/runtime/jurisdiction-import.ts'), 'utf8');
-    const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jadapter/types.ts'), 'utf8');
+    const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/types.ts'), 'utf8');
     const rpcAdapter = readRpcAdapterSource();
     expect(hubNode).toContain("nodeLog.error('jurisdiction_contracts.code_missing'");
     expect(bootstrapHub).toContain(
@@ -2680,8 +2680,8 @@ describe('production startup wiring', () => {
   });
 
   test('RPC watcher pauses during persistence quiesce instead of entering j-event ingress', () => {
-    const poll = readFileSync(join(repoRoot, 'runtime/jadapter/rpc-watcher-poll.ts'), 'utf8');
-    const ingress = readFileSync(join(repoRoot, 'runtime/jadapter/rpc-watcher-ingress.ts'), 'utf8');
+    const poll = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/rpc-watcher-poll.ts'), 'utf8');
+    const ingress = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/rpc-watcher-ingress.ts'), 'utf8');
     const pauseHelper = poll.indexOf('const isIngressPaused = (env: RuntimeReplica): boolean =>');
     const earlyPause = poll.indexOf("pauseForQuiesce(request, { step: 'before-block-number' });");
     const batchPause = ingress.indexOf("step: 'before-process-event-batch'");

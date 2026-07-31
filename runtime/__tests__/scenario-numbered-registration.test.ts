@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createJAdapter } from '../jadapter';
+import { createJAdapter } from '../jurisdiction/adapter';
 import { createEmptyEnv } from '../runtime';
 import {
   executeScenario,

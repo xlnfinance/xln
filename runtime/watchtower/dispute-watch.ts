@@ -10,7 +10,7 @@
  */
 
 import { Interface } from 'ethers';
-import { createXlnJsonRpcProvider } from '../jadapter';
+import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import { assertWatchtowerRpcUrlAllowed } from './action';
 import { buildDisputeWakeNotification, disputeWakeCollapseKey, selectWakeTargets } from './push/dispute-wake';
 import { createStructuredLogger } from '../infra/logger';

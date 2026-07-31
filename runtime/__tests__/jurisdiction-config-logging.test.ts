@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { getAvailableJurisdictions } from '../jurisdiction/config';
-import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
+import { getAvailableJurisdictions } from '../jurisdiction/adapter/config';
+import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
 
 test('canonical jurisdiction path follows the repository contract config', () => {
   const normalized = resolveJurisdictionsJsonPath().replaceAll('\\', '/');
@@ -12,7 +12,7 @@ test('canonical jurisdiction path follows the repository contract config', () =>
 });
 
 test('jurisdiction config loader uses structured logging without direct console output', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction/config.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction/adapter/config.ts'), 'utf8');
 
   expect(source).toContain("const jurisdictionConfigLog = createStructuredLogger('runtime.jurisdiction_config');");
   expect(source).toContain('JURISDICTIONS_BROWSER_FETCH_FAILED');

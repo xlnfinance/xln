@@ -7,12 +7,12 @@ import type {
   AccountJClaimRecord,
   AccountJClaimSide,
 } from '../types/account-j-claims';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
   requireCanonicalJurisdictionEvents,
-} from '../jurisdiction/event-normalization';
+} from '../jurisdiction/machine/event-normalization';
 import {
   applyAccountJClaimDelete,
   applyAccountJClaimInsert,

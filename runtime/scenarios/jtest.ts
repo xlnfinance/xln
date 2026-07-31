@@ -9,7 +9,7 @@
  * @license AGPL-3.0
  */
 
-import { createJAdapter } from '../jadapter';
+import { createJAdapter } from '../jurisdiction/adapter';
 import type { ContractTransactionResponse } from 'ethers';
 import { ethers } from 'ethers';
 

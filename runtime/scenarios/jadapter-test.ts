@@ -8,7 +8,7 @@
  * @license AGPL-3.0
  */
 
-import { createJAdapter } from '../jadapter';
+import { createJAdapter } from '../jurisdiction/adapter';
 import { ethers } from 'ethers';
 
 const mode = process.argv[2] === 'anvil' ? 'anvil' : 'browservm';

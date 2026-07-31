@@ -12,7 +12,7 @@ import {
   encodeJBatch,
   getJBatchContractLimitIssue,
   initJBatch,
-} from '../jurisdiction/batch';
+} from '../jurisdiction/machine/batch';
 
 const transformer = `0x${'11'.repeat(20)}`;
 const secret = (index: number): string => `0x${index.toString(16).padStart(64, '0')}`;

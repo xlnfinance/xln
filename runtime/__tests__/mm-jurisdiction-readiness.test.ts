@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { waitForJurisdictionAdapter } from '../orchestrator/mm-node';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';

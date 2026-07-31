@@ -5,8 +5,8 @@ import {
   createEmptyBatch,
   encodeJBatch,
   batchOpCount,
-} from '../jurisdiction/batch';
-import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
+} from '../jurisdiction/machine/batch';
+import { assertSealedJBatchBinding } from '../jurisdiction/machine/sealed-batch';
 import type { JTx } from '../types/jurisdiction-runtime';
 
 const entityId = `0x${'11'.repeat(32)}`;

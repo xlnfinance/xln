@@ -3,7 +3,7 @@ import {
   assertJBatchWithinContractLimits,
   type JBatch,
   type JBatchState,
-} from '../../jurisdiction/batch';
+} from '../../jurisdiction/machine/batch';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
 import {
   accountInputAck,

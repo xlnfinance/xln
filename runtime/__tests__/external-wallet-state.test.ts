@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
+import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyJEventRange, type LegacyJEventInput } from './helpers/j-history';
-import { buildJEventsRuntimeInput } from '../jadapter/watcher';
+import { buildJEventsRuntimeInput } from '../jurisdiction/adapter/watcher';
 import {
   applyRuntimeInput,
   createEmptyEnv,

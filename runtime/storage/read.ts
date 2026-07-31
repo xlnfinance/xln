@@ -59,7 +59,7 @@ import {
   EMPTY_CERTIFIED_BOARD_ROOT,
   getCertifiedBoardNodeStore,
   hashCertifiedBoardNode,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import {
   EMPTY_CONSUMPTION_ROOT,
   hashConsumptionNode,

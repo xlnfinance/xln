@@ -37,16 +37,16 @@ import {
   resolveObserverCertifiedBoardRecord,
   resolveUniqueCertifiedRegisteredBoardRecord,
   verifyCertifiedBoardProof,
-} from '../jurisdiction/board-registry';
+} from '../jurisdiction/machine/board-registry';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../entity/profile-signing';
 import type { Profile } from '../entity/profile';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
-import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
-import { foldJHistoryRoot, EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
-import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
+import { getJEventJurisdictionRef } from '../jurisdiction/machine/event-observation';
+import { foldJHistoryRoot, EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/history-consensus';
+import { buildLocalJPrefixAttestation } from '../jurisdiction/machine/j-prefix-consensus';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../runtime';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';

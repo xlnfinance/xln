@@ -5,9 +5,9 @@ import { resolve } from 'node:path';
 import { ethers } from 'ethers';
 
 import { prepareSignedBatch } from '../hanko/batch';
-import { createJAdapter } from '../jadapter';
-import { readAuthenticatedReceiptRange } from '../jadapter/receipt-reader';
-import { createEmptyBatch } from '../jurisdiction/batch';
+import { createJAdapter } from '../jurisdiction/adapter';
+import { readAuthenticatedReceiptRange } from '../jurisdiction/adapter/receipt-reader';
+import { createEmptyBatch } from '../jurisdiction/machine/batch';
 
 type JurisdictionConfig = {
   chainId?: number;

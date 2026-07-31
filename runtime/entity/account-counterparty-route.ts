@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import type { AccountReplica } from '../types/account';
 import type { CertifiedBoardNodeStore } from '../types/entity-board-registry';
 import { verifyCanonicalHanko } from '../hanko/claims';
-import { resolveObserverCertifiedBoardRecord } from '../jurisdiction/board-registry';
+import { resolveObserverCertifiedBoardRecord } from '../jurisdiction/machine/board-registry';
 import type { EntityState } from './types';
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();

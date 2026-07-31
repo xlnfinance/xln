@@ -24,7 +24,7 @@ import {
 } from '../storage/runtime-dbs';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 
 const infrastructureLog = createStructuredLogger('runtime.infrastructure');
 const storageDeps = { ensureRuntimeInfrastructure };

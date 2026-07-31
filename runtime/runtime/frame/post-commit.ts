@@ -2,7 +2,7 @@ import { materializePendingJurisdictionImportResults } from '../jurisdiction-imp
 import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../j-submit';
 import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../types';
-import type { JInput } from '../../jurisdiction/input';
+import type { JInput } from '../../jurisdiction/machine/input';
 import { getWallClockMs } from '../../infra/time';
 import {
   dispatchCommittedEntityOutputs,

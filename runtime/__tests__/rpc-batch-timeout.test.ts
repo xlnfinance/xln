@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { sendRpcBatch } from '../jadapter/rpc-utils';
+import { sendRpcBatch } from '../jurisdiction/adapter/rpc-utils';
 
 describe('RPC batch transport timeouts', () => {
   test('fails fast when upstream accepts the request but never responds', async () => {

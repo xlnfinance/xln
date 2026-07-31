@@ -7,7 +7,7 @@ import {
   ONCHAIN_HANKO_GOLDEN_PAYLOADS,
 } from '../../tests/fixtures/onchain-hanko-golden';
 
-import { computeBatchHankoHash } from '../jurisdiction/batch';
+import { computeBatchHankoHash } from '../jurisdiction/machine/batch';
 import {
   createCooperativeDisputeProofHash,
   createDisputeProofHash,

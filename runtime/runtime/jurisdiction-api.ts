@@ -1,6 +1,6 @@
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j/index';
-import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/jurisdiction-runtime';
+import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/machine/jurisdiction-runtime';
 import { resolveEntityProposerId } from './entity-output-signer';
 import type { AccountState } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';

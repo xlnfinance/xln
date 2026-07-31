@@ -10,17 +10,17 @@ import {
   createCanonicalReceiptProofs,
   type AuthenticatedRpcLog,
   type CanonicalRpcReceipt,
-} from '../../jadapter/receipt-root';
+} from '../../jurisdiction/adapter/receipt-root';
 import {
   buildCertifiedRegistrationEvidence,
   markLocalJAuthorityRuntimeTx,
-} from '../../jurisdiction/registration-evidence';
+} from '../../jurisdiction/machine/registration-evidence';
 import {
   applyCertifiedBoardRegistryEvent,
   cacheCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
   getCertifiedBoardStackKey,
-} from '../../jurisdiction/board-registry';
+} from '../../jurisdiction/machine/board-registry';
 import { applyRuntimeTx } from '../../runtime/tx-handlers';
 
 const zeroBloom = `0x${'00'.repeat(256)}`;

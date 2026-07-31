@@ -17,7 +17,7 @@ import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { getAccountPerspective } from '../../../account/perspective';
 import { addMessage } from '../../frame-events';
-import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
+import { initJBatch, batchAddSettlement } from '../../../jurisdiction/machine/batch';
 import { isLeftEntity } from '../../id';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { HashToSign } from '../../types';
@@ -33,7 +33,7 @@ import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
-} from '../../../jurisdiction/board-registry';
+} from '../../../jurisdiction/machine/board-registry';
 import {
   assertCanonicalSettlementWorkspace,
   createSettlementWorkspaceHash,

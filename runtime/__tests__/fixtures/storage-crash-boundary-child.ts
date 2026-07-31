@@ -45,17 +45,17 @@ import { buildQuorumHanko, getEntityConfigBoardHash } from '../../hanko/signing'
 import {
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
-} from '../../jurisdiction/event-observation';
+} from '../../jurisdiction/machine/event-observation';
 import {
   buildJEventRangeDigest,
   canonicalJEventRangeHash,
   EMPTY_J_HISTORY_ROOT,
   foldJHistoryRoot,
-} from '../../jurisdiction/history-consensus';
+} from '../../jurisdiction/machine/history-consensus';
 import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
-} from '../../jurisdiction/j-prefix-consensus';
+} from '../../jurisdiction/machine/j-prefix-consensus';
 import { applyRuntimeStorageChanges } from '../../runtime/env-events';
 import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
 import { collectDueJSubmitRuntimeTxs } from '../../runtime/j-submit-scheduler';

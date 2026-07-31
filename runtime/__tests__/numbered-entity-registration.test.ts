@@ -11,7 +11,7 @@ import {
   createNumberedEntity,
   parseNumberedEntityRegistrationReceipt,
 } from '../runtime/registration/numbered-registration';
-import { createJAdapter } from '../jadapter';
+import { createJAdapter } from '../jurisdiction/adapter';
 import { createEmptyEnv } from '../runtime';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../entity/types';

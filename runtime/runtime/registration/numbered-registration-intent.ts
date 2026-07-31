@@ -1,10 +1,10 @@
 import { ethers, type TransactionReceipt } from 'ethers';
 
-import type { JAdapter } from '../../jadapter/types';
+import type { JAdapter } from '../../jurisdiction/adapter/types';
 import {
   computeRegistrationEvidenceHash,
   registrationEvidenceKey,
-} from '../../jurisdiction/registration-evidence';
+} from '../../jurisdiction/machine/registration-evidence';
 import type {
   CompletedNumberedRegistration,
   RuntimeReplica,

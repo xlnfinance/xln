@@ -2,10 +2,10 @@ import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { isUsableContractAddress } from '../../../../jurisdiction/contract-address';
+import { isUsableContractAddress } from '../../../../jurisdiction/machine/contract-address';
 import {
   type OptionalDisputeArgumentWarning,
-} from '../../../../jurisdiction/batch';
+} from '../../../../jurisdiction/machine/batch';
 import {
   type DepositoryHankoDomain,
 } from '../../../../protocol/dispute/proof-builder';

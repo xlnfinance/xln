@@ -6,7 +6,7 @@ import {
   hasCurrentRoundJPrefixAttestation,
   hasPendingLocalJEvent,
   isFrozenBaseJPrefixRollAuthorized,
-} from '../jurisdiction/j-prefix-consensus';
+} from '../jurisdiction/machine/j-prefix-consensus';
 import { getWallClockMs } from '../infra/time';
 import {
   getNextNetworkRetryTimestamp,

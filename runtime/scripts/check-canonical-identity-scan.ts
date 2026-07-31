@@ -6,7 +6,7 @@ import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
-} from '../jurisdiction/jurisdiction-runtime';
+} from '../jurisdiction/machine/jurisdiction-runtime';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
@@ -71,7 +71,7 @@ requireCondition(getJReplicaByJurisdictionRef(env, canonicalRef)?.name === 'Cano
 requireCondition(getJReplicaByJurisdictionRef(env, 'Canonical') === undefined, 'stack ref lookup accepted display name');
 
 for (const [path, markers] of [
-  ['runtime/jurisdiction/jurisdiction-runtime.ts', [
+  ['runtime/jurisdiction/machine/jurisdiction-runtime.ts', [
     'export const sameJurisdictionIdentity = (left: unknown, right: unknown): boolean => {',
     'return Boolean(leftRef && rightRef && leftRef === rightRef);',
     'if (!isJurisdictionStackRef(raw)) return undefined;',
@@ -79,7 +79,7 @@ for (const [path, markers] of [
     '? getJReplicaByJurisdictionRef(env, configuredName)',
     ': getJReplicaByName(env, configuredName);',
   ]],
-  ['runtime/jurisdiction/height.ts', [
+  ['runtime/jurisdiction/machine/height.ts', [
     'const getJReplicaByJurisdictionNameOrRef =',
     'return isJurisdictionStackRef(raw)',
     '? getJReplicaByJurisdictionRef(env, raw)',
@@ -112,7 +112,7 @@ for (const [path, markers] of [
 }
 
 for (const [path, forbidden] of [
-  ['runtime/jurisdiction/jurisdiction-runtime.ts', [
+  ['runtime/jurisdiction/machine/jurisdiction-runtime.ts', [
     'if (!isJurisdictionStackRef(raw)) return getJReplicaByName(env, raw);',
     'sameJurisdictionIdentityOrNameOnlyFallback',
   ]],

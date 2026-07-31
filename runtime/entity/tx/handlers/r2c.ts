@@ -17,13 +17,13 @@
  */
 
 import type { EntityState, EntityInput } from '../../types';
-import type { JInput } from '../../../jurisdiction/input';
+import type { JInput } from '../../../jurisdiction/machine/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { AccountTx } from '../../../types/account';
 import { QUOTE_EXPIRY_MS } from '../../../types/rebalance';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import { batchAddReserveToCollateral, initJBatch } from '../../../jurisdiction/batch';
+import { batchAddReserveToCollateral, initJBatch } from '../../../jurisdiction/machine/batch';
 import { createStructuredLogger, formatAmount, shortId } from '../../../infra/logger';
 import { getReserveCandidateIssue } from './j-batch-reserve-admission';
 

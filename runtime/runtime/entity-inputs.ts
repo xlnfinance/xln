@@ -1,4 +1,4 @@
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import type { RoutedEntityInput, RuntimeReplica } from './types';
 import {
   createRuntimeEntityInputBatchContext,

@@ -5,10 +5,10 @@ import { TIMING } from '../config/constants';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../entity/crypto';
-import { processEventBatch } from '../jadapter/watcher';
+import { processEventBatch } from '../jurisdiction/adapter/watcher';
 import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
 import { buildJEventRangeData } from './helpers/j-history';
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
@@ -25,7 +25,7 @@ import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { getWallClockMs } from '../infra/time';
 import { attachLiveJAdapter } from '../runtime/live-jadapters';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,

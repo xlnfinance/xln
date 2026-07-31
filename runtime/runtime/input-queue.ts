@@ -1,7 +1,7 @@
 import { LIMITS, TIMING } from '../config/constants';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeInput, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import { getWallClockMs } from '../infra/time';
 import { createStructuredLogger } from '../infra/logger';
 import { ensureRuntimeInfrastructure } from './runtime-infrastructure';

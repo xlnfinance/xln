@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../../../jurisdictions/typechain-types/index.ts';
-import type { JAdapter, JTokenInfo } from '../../jadapter/types';
+import type { JAdapter, JTokenInfo } from '../../jurisdiction/adapter/types';
 import type { ExternalWalletApiContext } from './context';
 import {
   requireFaucetWalletBalances,

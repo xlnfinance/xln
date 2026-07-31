@@ -12,7 +12,7 @@ import {
   resolveWatcherPollToBlock,
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
-} from '../jadapter/rpc-public';
+} from '../jurisdiction/adapter/rpc-public';
 import {
   applyJEventsToEnv,
   buildJEventsRuntimeInput,
@@ -32,14 +32,14 @@ import {
   setJEventIngressTransform,
   setJHistoryRangeIngressTransform,
   updateWatcherJurisdictionCursor,
-} from '../jadapter/watcher';
-import { findReserveUpdatedEvidence } from '../jurisdiction/event-evidence';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
+} from '../jurisdiction/adapter/watcher';
+import { findReserveUpdatedEvidence } from '../jurisdiction/machine/event-evidence';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
-} from '../jurisdiction/j-prefix-consensus';
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
+} from '../jurisdiction/machine/j-prefix-consensus';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { createEmptyEnv } from '../runtime';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
 import type { EntityReplica, JurisdictionConfig } from '../entity/types';
@@ -121,7 +121,7 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
 describe('JAdapter watcher ingress', () => {
   test('J-event observation diagnostics use structured logging only', () => {
     const source = readFileSync(
-      join(process.cwd(), 'runtime/jadapter/event-observation.ts'),
+      join(process.cwd(), 'runtime/jurisdiction/adapter/event-observation.ts'),
       'utf8',
     );
 
@@ -140,10 +140,10 @@ describe('JAdapter watcher ingress', () => {
       'watcher-event-batch.ts',
     ];
     const source = files
-      .map(file => readFileSync(join(process.cwd(), 'runtime/jadapter', file), 'utf8'))
+      .map(file => readFileSync(join(process.cwd(), 'runtime/jurisdiction/adapter', file), 'utf8'))
       .join('\n');
 
-    expect(source).toContain("from '../runtime/input-queue'");
+    expect(source).toContain("from '../../runtime/input-queue'");
     expect(source).not.toMatch(/from ['"]\.\.\/runtime(?:\.ts)?['"]/);
   });
 

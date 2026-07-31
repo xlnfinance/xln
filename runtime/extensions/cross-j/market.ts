@@ -1,6 +1,6 @@
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import { isLiquidSwapToken } from '../../account/utils';
-import { parseJurisdictionStackIdentity } from '../../jurisdiction/jurisdiction-stack';
+import { parseJurisdictionStackIdentity } from '../../jurisdiction/machine/jurisdiction-stack';
 
 const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 const normalizeJurisdiction = (value: string): string => String(value || '').trim().toLowerCase();

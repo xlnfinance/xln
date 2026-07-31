@@ -17,8 +17,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { DEFAULT_PRIVATE_KEY, DEV_CHAIN_IDS, createJAdapter } from '../jadapter';
-import type { JAdapter } from '../jadapter/types';
+import { DEFAULT_PRIVATE_KEY, DEV_CHAIN_IDS, createJAdapter } from '../jurisdiction/adapter';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { startAnvil, stopAnvil, waitForRpcReady, type ManagedAnvil } from './rpc-settlement-anvil';
 import { runParity } from './rpc-settlement-run';
 import {

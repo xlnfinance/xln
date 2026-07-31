@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import { getLiveJAdapter } from '../runtime/live-jadapters';
 import { normalizeJurisdictionImportRequest } from '../runtime/jurisdiction-import';
 import { findMissingRpcContractCode } from '../orchestrator/contract-readiness';

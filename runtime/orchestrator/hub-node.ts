@@ -8,16 +8,16 @@ import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
-import { defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
-import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment';
-import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import { defaultTokensForJurisdiction } from '../jurisdiction/machine/default-tokens';
+import { deployMissingDefaultTokens } from '../jurisdiction/adapter/dev-token-deployment';
+import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import { attachLiveJAdapter, getLiveJAdapter } from '../runtime/live-jadapters';
 import {
   normalizeJurisdictionKey,
   selectWritableJurisdictionKey,
   type WritableJurisdictionEntry,
-} from '../jurisdiction/jurisdiction-key';
-import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
+} from '../jurisdiction/machine/jurisdiction-key';
+import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import {
   buildMarketSnapshotForReplica,
@@ -30,8 +30,8 @@ import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../infra/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { quiesceNodeRuntime } from './node-runtime-quiesce';
-import { applyJEventsToEnv } from '../jadapter/watcher';
-import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
+import { applyJEventsToEnv } from '../jurisdiction/adapter/watcher';
+import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
 import { createRelayStore } from '../network/relay/store';
 import { safeStringify } from '../protocol/serialization';
 import { writeDurableFile } from '../storage/fs-durability';
@@ -62,8 +62,8 @@ import {
 import {
   getJurisdictionIdentityRef,
   isJurisdictionStackRef,
-} from '../jurisdiction/jurisdiction-runtime';
-import { requireJurisdictionChainId } from '../jurisdiction/jurisdiction-stack';
+} from '../jurisdiction/machine/jurisdiction-runtime';
+import { requireJurisdictionChainId } from '../jurisdiction/machine/jurisdiction-stack';
 import {
   attachRuntimeAdapterTicker,
   forgetRuntimeAdapterClient,

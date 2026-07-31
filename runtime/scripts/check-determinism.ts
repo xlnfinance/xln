@@ -13,7 +13,7 @@ const ROOT = process.cwd();
 const SCAN_ROOTS = [
   'runtime/account',
   'runtime/entity',
-  'runtime/jurisdiction',
+  'runtime/jurisdiction/machine',
   'runtime/runtime/frame',
 ];
 const SCAN_FILES = ['runtime/extensions/lending.ts'];
@@ -39,8 +39,6 @@ const BANNED_PATTERNS: Array<{ pattern: RegExp; rule: string }> = [
 // Keep every exception exact so adding another nondeterministic call fails CI.
 const ALLOWED_INFRA_CALLS = new Set([
   'runtime/entity/htlc/payment-admission.ts:getRandomValues',
-  'runtime/jurisdiction/config.ts:Date.now',
-  'runtime/jurisdiction/config.ts:setTimeout',
   'runtime/runtime/frame/process-profile.ts:Date.now',
   'runtime/runtime/frame/start.ts:Date.now',
 ]);

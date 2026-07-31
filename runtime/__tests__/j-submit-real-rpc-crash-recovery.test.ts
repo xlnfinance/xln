@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { createXlnJsonRpcProvider } from '../jadapter';
+import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 
 const CHAIN_ID = 31_337;
 const fixture = join(import.meta.dir, 'fixtures/j-submit-real-rpc-crash-child.ts');

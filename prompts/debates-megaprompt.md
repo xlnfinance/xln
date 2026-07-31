@@ -24,7 +24,7 @@ Read these first:
 6. `custody/store.ts`
 7. `custody/daemon-client.ts`
 8. `runtime/radapter/auth.ts`
-9. `runtime/jadapter/default-tokens.ts`
+9. `runtime/jurisdiction/adapter/default-tokens.ts`
 10. `ai/server.ts`
 
 Useful existing pieces:
@@ -33,7 +33,7 @@ Useful existing pieces:
 - `custody/store.ts`: SQLite ledger pattern for balances and activity.
 - `custody/daemon-client.ts`: `getFrameReceipts`, `findRoutes`, `queuePayment`.
 - `runtime/radapter/auth.ts`: capability-token auth between service and runtime daemon.
-- `runtime/jadapter/default-tokens.ts`: dev/test token catalog: USDC, WETH, USDT.
+- `runtime/jurisdiction/adapter/default-tokens.ts`: dev/test token catalog: USDC, WETH, USDT.
 - `ai/server.ts`: existing council orchestration that can inspire judge-board execution.
 
 Do not mutate custody directly. Create a new service directory:

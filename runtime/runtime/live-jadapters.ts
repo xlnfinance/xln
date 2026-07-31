@@ -1,4 +1,4 @@
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 import type { RuntimeReplica } from './types';
 import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 

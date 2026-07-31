@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { createJAdapter } from '../jadapter';
-import type { JAdapter } from '../jadapter/types';
-import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
-import { computeJurisdictionsNetworkVersion } from '../jurisdiction/jurisdictions-version';
+import { createJAdapter } from '../jurisdiction/adapter';
+import type { JAdapter } from '../jurisdiction/adapter/types';
+import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
+import { computeJurisdictionsNetworkVersion } from '../jurisdiction/adapter/jurisdictions-version';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../network/p2p/loopback-url';
 import {
   assertCanonicalRpcContractStack,

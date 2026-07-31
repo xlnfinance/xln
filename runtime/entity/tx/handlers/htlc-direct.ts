@@ -1,4 +1,4 @@
-import { getEntityCertifiedJurisdictionHeight } from '../../../jurisdiction/height';
+import { getEntityCertifiedJurisdictionHeight } from '../../../jurisdiction/machine/height';
 import { generateLockId, hashHtlcSecret } from '../../../protocol/htlc/utils';
 import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';

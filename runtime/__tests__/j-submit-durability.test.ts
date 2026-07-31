@@ -10,7 +10,7 @@ import { J_SUBMIT_RESULT_FINGERPRINT_LIMIT } from '../runtime/j-submit-result';
 import { collectDueJSubmitRuntimeTxs } from '../runtime/j-submit-scheduler';
 import { submitRuntimeJOutbox } from '../runtime/j-submit';
 import { ENTITY_J_SUBMIT_FALLBACK_MS } from '../entity/consensus/leader';
-import { createEmptyBatch } from '../jurisdiction/batch';
+import { createEmptyBatch } from '../jurisdiction/machine/batch';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import {
@@ -23,7 +23,7 @@ import {
 } from './fixtures/j-submit-durability-fixture';
 import { attachLiveJAdapter } from '../runtime/live-jadapters';
 import type { RuntimeReplica } from '../runtime/types';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 
 const makeFixture = makeJSubmitDurabilityFixture;
 const commitAttempt = commitJSubmitAttempt;

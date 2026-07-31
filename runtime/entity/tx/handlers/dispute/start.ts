@@ -8,7 +8,7 @@ import {
   encodeJBatch,
   batchOpCount,
   J_BATCH_CONTRACT_LIMITS,
-} from '../../../../jurisdiction/batch';
+} from '../../../../jurisdiction/machine/batch';
 import { shortHash, shortId } from '../../../../infra/logger';
 import {
   freezeAccountForDispute,

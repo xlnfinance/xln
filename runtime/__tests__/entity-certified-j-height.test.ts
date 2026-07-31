@@ -13,7 +13,7 @@ import { applyEntityTx } from '../entity/tx/apply';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
-import { getEntityCertifiedJurisdictionHeight } from '../jurisdiction/height';
+import { getEntityCertifiedJurisdictionHeight } from '../jurisdiction/machine/height';
 import {
   buildAccountProofBody,
   createDisputeProofHashWithNonce,

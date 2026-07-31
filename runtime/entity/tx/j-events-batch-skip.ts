@@ -1,6 +1,6 @@
 import type { EntityState } from '../types';
 import type { JurisdictionEvent } from '../../types/jurisdiction-events';
-import type { BatchOperationSkip, BatchOperationType } from '../../jurisdiction/batch';
+import type { BatchOperationSkip, BatchOperationType } from '../../jurisdiction/machine/batch';
 import { addMessage } from '../frame-events';
 
 const OPERATION_TYPES: readonly BatchOperationType[] = [

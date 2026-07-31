@@ -1,5 +1,5 @@
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import { getWallClockMs } from '../infra/time';
 import {
   createDueScheduledWakeInputs,

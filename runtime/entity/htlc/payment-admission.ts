@@ -27,7 +27,7 @@ import { isMultiRecipientCiphertext, validateMultiRecipientCiphertext } from '..
 import type { CertifiedValidatorEncryptionManifest } from '../../protocol/htlc/validator-encryption';
 import { verifyHankoForHash } from '../../hanko/signing';
 
-import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/board-registry';
+import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/machine/board-registry';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
 import { getDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
 

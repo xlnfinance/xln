@@ -12,7 +12,7 @@ import {
   assertCertifiedRegistrationEvidenceStore,
   buildRegistrationEvidenceDigest,
   computeRegistrationEvidenceHash,
-} from '../jurisdiction/registration-evidence';
+} from '../jurisdiction/machine/registration-evidence';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
 import { createEmptyEnv } from '../runtime';
 import { buildCertifiedEntityLineagePlan } from '../storage/entity-lineage';

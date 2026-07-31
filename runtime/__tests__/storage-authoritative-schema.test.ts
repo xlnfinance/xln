@@ -22,7 +22,7 @@ import { createEmptyEnv } from '../runtime';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { computeStorageFrameHash } from '../storage/hashes';
 import type { RuntimeFrame } from '../storage/types';
-import { createEmptyBatch } from '../jurisdiction/batch';
+import { createEmptyBatch } from '../jurisdiction/machine/batch';
 import { validateDurableRuntimeMachineSnapshot } from '../storage/wal/runtime-machine-schema';
 import { validateEntityTx } from '../entity/tx-validation';
 import { buildEntityTransactionProposalAction } from '../entity/authorization';

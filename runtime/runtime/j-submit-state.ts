@@ -1,9 +1,9 @@
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import type { JTx } from '../types/jurisdiction-runtime';
 import { keccak256, toUtf8Bytes } from 'ethers';
-import { batchOpCount, cloneJBatch } from '../jurisdiction/batch';
+import { batchOpCount, cloneJBatch } from '../jurisdiction/machine/batch';
 import { safeStringify } from '../protocol/serialization';
 import {
   ENTITY_J_SUBMIT_FALLBACK_MS,

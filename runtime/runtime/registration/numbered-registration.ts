@@ -9,8 +9,8 @@ import {
   type BoardMemberInput,
 } from '../../entity/factory';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import { canonicalJStackAddress } from '../../jadapter/stack-binding';
-import type { JAdapter } from '../../jadapter/types';
+import { canonicalJStackAddress } from '../../jurisdiction/adapter/stack-binding';
+import type { JAdapter } from '../../jurisdiction/adapter/types';
 import type { ConsensusConfig, JurisdictionConfig } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
 import { DEBUG } from '../../infra/debug-flags';

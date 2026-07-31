@@ -7,7 +7,7 @@ import { decodeHashLadderBinary } from '../htlc/hash-ladder';
 import {
   sanitizeOptionalDisputeArgument,
   type OptionalDisputeArgumentWarning,
-} from '../../jurisdiction/batch';
+} from '../../jurisdiction/machine/batch';
 import {
   cloneDisputeArgumentSnapshot,
   type DisputeArgumentSide,

@@ -5,7 +5,7 @@ import {
 import {
   DEPOSITORY_J_EVENTS,
   ENTITY_PROVIDER_J_EVENTS,
-} from '../jurisdiction/event-catalog';
+} from '../jurisdiction/machine/event-catalog';
 
 type EventPolicy = {
   consensus: readonly string[];

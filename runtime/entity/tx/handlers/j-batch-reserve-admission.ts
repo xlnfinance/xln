@@ -6,7 +6,7 @@ import {
   simulateDraftBatchReserveAvailability,
   type DraftBatchReserveIssue,
   type JBatch,
-} from '../../../jurisdiction/batch';
+} from '../../../jurisdiction/machine/batch';
 
 type ReserveCandidate =
   | {

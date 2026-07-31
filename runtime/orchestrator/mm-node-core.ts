@@ -23,14 +23,14 @@ import {
 } from '../extensions/cross-j/index';
 import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { createStructuredLogger } from '../infra/logger';
-import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import {
   attachLiveJAdapter,
   getLiveJAdapter,
   getLiveJAdapterEntries,
 } from '../runtime/live-jadapters';
-import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
-import { getJurisdictionStackId, requireJurisdictionChainId } from '../jurisdiction/jurisdiction-stack';
+import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
+import { getJurisdictionStackId, requireJurisdictionChainId } from '../jurisdiction/machine/jurisdiction-stack';
 import { type DirectWebSocket } from '../network/p2p/direct-runtime-bun';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import {

@@ -1,6 +1,6 @@
 import type { EntityInput } from '../entity/types';
 import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeReplica, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/machine/input';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import {
   buildPendingNetworkOutputs,

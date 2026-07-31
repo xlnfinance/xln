@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { applyEntityTx } from '../entity/tx/apply';
 import { handleMintReserves } from '../entity/tx/handlers/mint-reserves';
 import { handleR2R } from '../entity/tx/handlers/r2r';
-import { cloneJBatch, initJBatch } from '../jurisdiction/batch';
+import { cloneJBatch, initJBatch } from '../jurisdiction/machine/batch';
 import { createEmptyEnv } from '../runtime';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
@@ -49,7 +49,7 @@ const makeEntityState = (): EntityState => ({
 });
 
 test('j-batch success-path logs stay behind structured debug logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction/batch.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction/machine/batch.ts'), 'utf8');
 
   expect(source).toContain("const jBatchLog = createStructuredLogger('j.batch');");
   expect(source).not.toContain('console.log');

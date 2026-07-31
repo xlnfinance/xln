@@ -3,7 +3,7 @@ import { canonicalizeProfile, type Profile } from './profile';
 import type { EntityRuntimeContext } from './runtime-context';
 import type { HankoString } from '../types/hanko';
 import { verifyHankoForHash } from '../hanko/signing';
-import { resolveCertifiedRegisteredBoardHash } from '../jurisdiction/board-registry';
+import { resolveCertifiedRegisteredBoardHash } from '../jurisdiction/machine/board-registry';
 import { getSignerAddress, getSignerPublicKey, signAccountFrame } from '../account/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
 import {

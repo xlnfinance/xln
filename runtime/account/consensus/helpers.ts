@@ -12,7 +12,7 @@ import { assertAccountMempoolWithinLimit } from '../mempool';
 import {
   firstUsableContractAddress,
   requireDurableJurisdictionStack,
-} from '../../jurisdiction/contract-address';
+} from '../../jurisdiction/machine/contract-address';
 import { buildAccountProofBody } from '../../protocol/dispute/proof-builder';
 
 const accountConsensusHelperLog = createStructuredLogger('account.consensus');

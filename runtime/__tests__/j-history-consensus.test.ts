@@ -6,12 +6,12 @@ import {
   EMPTY_J_HISTORY_ROOT,
   foldJHistoryRoot,
   getJHistoryRegistrationBaseHeight,
-} from '../jurisdiction/history-consensus';
+} from '../jurisdiction/machine/history-consensus';
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
-} from '../jurisdiction/event-observation';
-import { compareCanonicalJurisdictionEvents } from '../jurisdiction/event-normalization';
+} from '../jurisdiction/machine/event-observation';
+import { compareCanonicalJurisdictionEvents } from '../jurisdiction/machine/event-normalization';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyEntityInput } from '../entity/consensus/index';
 import { applyJEvent } from '../entity/tx/j-events';
@@ -24,7 +24,7 @@ import {
   verifyAccountSignature,
 } from '../account/crypto';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
-import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
+import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/machine/registration-evidence';
 import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryIntegrity,
@@ -36,7 +36,7 @@ import {
   reconcileJEventRangeWithFinalizedState,
   recordValidatorJHistory,
   rewindValidatorJHistory,
-} from '../jurisdiction/local-history';
+} from '../jurisdiction/machine/local-history';
 import type { EntityReplica, EntityState } from '../entity/types';
 import type { JurisdictionEvent, ValidatorJEventBlock } from '../types/jurisdiction-events';
 

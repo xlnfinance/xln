@@ -3,7 +3,7 @@ import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
 import { decodeRoutedEntityInput } from '../routing-validation';
 import { validateJInputs } from '../../storage/wal/runtime-machine-schema/j';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
-import type { JInput } from '../../jurisdiction/input';
+import type { JInput } from '../../jurisdiction/machine/input';
 import {
   getInputReliableIdentity,
   registerReliableIngress,

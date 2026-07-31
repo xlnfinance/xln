@@ -2,12 +2,12 @@ import type { EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica } 
 import type { RuntimeReplica, ReliableDeliveryIdentity, RoutedEntityInput } from './types';
 import type { EntityTx } from '../types/entity-tx';
 import { getEntityLeaderState } from '../entity/consensus/leader';
-import { reconcileJEventRangeWithFinalizedState } from '../jurisdiction/local-history';
-import { decodeUnsignedJEventRange } from '../jurisdiction/j-event-range-validation';
+import { reconcileJEventRangeWithFinalizedState } from '../jurisdiction/machine/local-history';
+import { decodeUnsignedJEventRange } from '../jurisdiction/machine/j-event-range-validation';
 import {
   getJPrefixAttestationTemporalDisposition,
   verifyOutOfRoundJPrefixAttestation,
-} from '../jurisdiction/j-prefix-consensus';
+} from '../jurisdiction/machine/j-prefix-consensus';
 import {
   assertReliableLaneCompatible,
   reliableIdentityExactKey,

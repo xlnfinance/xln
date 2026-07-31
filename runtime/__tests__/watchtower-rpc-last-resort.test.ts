@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 import { Contract, ContractFactory, HDNodeWallet, JsonRpcProvider, Wallet, ethers } from 'ethers';
 
 import { buildSingleSignerHanko } from '../hanko/batch';
-import { computeBatchHankoHash, createEmptyBatch, encodeJBatch, type JBatch } from '../jurisdiction/batch';
-import { linkArtifactBytecode } from '../jadapter/rpc-utils';
+import { computeBatchHankoHash, createEmptyBatch, encodeJBatch, type JBatch } from '../jurisdiction/machine/batch';
+import { linkArtifactBytecode } from '../jurisdiction/adapter/rpc-utils';
 import {
   buildTowerAppointmentOwnerMessage,
   deriveRuntimeRecoveryActionLookupKey,

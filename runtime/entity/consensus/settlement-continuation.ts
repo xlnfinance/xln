@@ -1,5 +1,5 @@
 import { hasPendingSettlementTransition } from '../../account/tx/handlers/settle-transition';
-import { isBatchEmpty } from '../../jurisdiction/batch';
+import { isBatchEmpty } from '../../jurisdiction/machine/batch';
 import type { EntityTx, PendingSettlementContinuation } from '../../types/entity-tx';
 import type { EntityState } from '../types';
 import { getAccountPerspective } from '../../account/perspective';

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
-import { createJAdapter } from '../jadapter';
-import { verifyCanonicalReceiptProof } from '../jurisdiction/receipt-codec';
+import { createJAdapter } from '../jurisdiction/adapter';
+import { verifyCanonicalReceiptProof } from '../jurisdiction/machine/receipt-codec';
 import { createEmptyEnv } from '../runtime';
 import { bindScenarioJReplica, createJReplica, createJurisdictionConfig } from '../scenarios/boot';
 import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';

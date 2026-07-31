@@ -22,7 +22,7 @@ import {
   getCertifiedBoardStackKey,
   resolveObserverCertifiedBoardHash,
   resolveObserverCertifiedBoardRecord,
-} from '../../jurisdiction/board-registry';
+} from '../../jurisdiction/machine/board-registry';
 import { LIMITS } from '../../config/constants';
 import { assertReliableCertifiedPayloadIsAtomic } from './output-envelope';
 import { assertCertifiedEntityOutputAuthorization } from '../authorization';

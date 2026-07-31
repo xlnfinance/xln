@@ -12,17 +12,17 @@ import {
   canonicalEntityFrameJRangePayloadByteLength,
   canonicalJRangeBodiesByteLength,
   selectEntityTxsWithinJRangeBudget,
-} from '../jurisdiction/range-budget';
+} from '../jurisdiction/machine/range-budget';
 import {
   buildCertifiedJPrefixTx,
   buildJPrefixCertificate,
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
   restoreJPrefixRound,
-} from '../jurisdiction/j-prefix-consensus';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
-import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
-import { recordValidatorJHistory } from '../jurisdiction/local-history';
+} from '../jurisdiction/machine/j-prefix-consensus';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
+import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/history-consensus';
+import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';

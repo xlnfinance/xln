@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 
 import type { EntityInput, EntityState, HashType } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
-import type { JInput } from '../../../jurisdiction/input';
+import type { JInput } from '../../../jurisdiction/machine/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JTx } from '../../../types/jurisdiction-runtime';
 import type {
@@ -15,18 +15,18 @@ import {
   entityProviderActionKindCode,
   recomputeEntityProviderActionHash,
 } from '../../entity-provider-action';
-import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
+import { requireUsableContractAddress } from '../../../jurisdiction/machine/contract-address';
 import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
-} from '../../../jurisdiction/jurisdiction-runtime';
+} from '../../../jurisdiction/machine/jurisdiction-runtime';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { getEntityLeaderState } from '../../consensus/leader';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardRecord,
-} from '../../../jurisdiction/board-registry';
+} from '../../../jurisdiction/machine/board-registry';
 import type { EntityTxReducerResult } from '../apply';
 
 type TransferTx = Extract<EntityTx, { type: 'entityProviderTransfer' }>;

@@ -1,4 +1,4 @@
-import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/local-history';
+import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/machine/local-history';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import {

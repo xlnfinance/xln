@@ -4,9 +4,9 @@ import {
   buildJEventRangeDigest,
   canonicalJEventRangeHash,
   foldJHistoryRoot,
-} from '../../jurisdiction/history-consensus';
-import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../../jurisdiction/event-observation';
-import { finalizedJHistoryRoot } from '../../jurisdiction/local-history';
+} from '../../jurisdiction/machine/history-consensus';
+import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../../jurisdiction/machine/event-observation';
+import { finalizedJHistoryRoot } from '../../jurisdiction/machine/local-history';
 import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';

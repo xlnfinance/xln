@@ -1,9 +1,9 @@
 import { ethers } from 'ethers';
 
-import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
-import { createJAdapterWithRetry } from '../jadapter/retry';
+import { ensureLocalDisputeDelayConfigured } from '../jurisdiction/adapter/local-config';
+import { createJAdapterWithRetry } from '../jurisdiction/adapter/retry';
 import { createStructuredLogger } from '../infra/logger';
-import type { JAdapter, JAdapterConfig } from '../jadapter/types';
+import type { JAdapter, JAdapterConfig } from '../jurisdiction/adapter/types';
 import { safeStringify } from '../protocol/serialization';
 import type { RuntimeReplica, JurisdictionImportRequest, JurisdictionImportResult, PendingJurisdictionImport, RuntimeTx } from './types';
 import type { JReplica } from '../types/jurisdiction-runtime';
