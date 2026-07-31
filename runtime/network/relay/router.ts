@@ -504,6 +504,33 @@ const isRoutableRelayType = (type: string): boolean =>
   type === 'gossip_response' ||
   LIVE_RECOVERY_MESSAGE_TYPES.has(type);
 
+/**
+ * Recipient-key encryption proves confidentiality, not sender identity. If a
+ * socket could route before signed hello, it could claim a victim runtime in
+ * both `from` and the encrypted envelope; Runtime admission intentionally
+ * trusts authenticated transport provenance for unsigned cross-j intents.
+ */
+const rejectUnauthenticatedRoutableMessage = (context: RelayRouteContext): boolean => {
+  const { config, ws, type, from, to, id, fromKey, rememberedRuntimeId, traceId } = context;
+  if (fromKey && rememberedRuntimeId === fromKey) return false;
+  pushDebugEvent(config.store, {
+    event: 'error',
+    from,
+    to,
+    msgType: type,
+    status: 'rejected',
+    reason: 'ROUTABLE_MESSAGE_UNREGISTERED_RUNTIME',
+    details: { traceId, rememberedRuntimeId },
+  });
+  config.send(ws, serializeWsMessage({
+    type: 'error',
+    error: 'Routable message requires registered relay hello',
+    ...(id ? { inReplyTo: id } : {}),
+    ...(to ? { to } : {}),
+  }));
+  return true;
+};
+
 const routeDeliveryDetails = (context: RelayRouteContext): Record<string, unknown> => ({
   traceId: context.traceId,
   ...(context.deliveryEntityId ? { entityId: context.deliveryEntityId } : {}),
@@ -633,6 +660,7 @@ const rejectUnavailableReliableMessage = (context: RelayRouteContext): boolean =
 const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolean> => {
   const { config, ws, msg, type, from, to, payload, toKey, traceId } = context;
   if (!isRoutableRelayType(type)) return false;
+  if (rejectUnauthenticatedRoutableMessage(context)) return true;
   if (!toKey) {
     pushDebugEvent(config.store, {
       event: 'error',

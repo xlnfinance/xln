@@ -718,6 +718,57 @@ describe('relay-router gossip fanout', () => {
     });
   });
 
+  test('rejects every routable message before authenticated hello', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: Uint8Array) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(deserializeWsMessage(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const attacker: FakeWs = { label: 'unauthenticated', readyState: 1 };
+    const target: FakeWs = { label: 'target', readyState: 1 };
+    await relayRoute(config, target, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+
+    const routableTypes = [
+      'entity_inputs',
+      'entity_input_receipt',
+      'gossip_response',
+      'recovery_bundle_request',
+      'recovery_bundle_response',
+    ] as const;
+    for (const [index, type] of routableTypes.entries()) {
+      await relayRoute(config, attacker, {
+        type,
+        id: `unauthenticated-${index}`,
+        from: RUNTIME_A,
+        fromEncryptionPubKey: KEY_A,
+        to: RUNTIME_B,
+        payload: type === 'entity_inputs' ? 'attacker-ciphertext' : { forged: true },
+        ...(type === 'entity_inputs' ? { encrypted: true } : {}),
+      });
+    }
+
+    expect(sentBySocket.get(target)).toEqual([{ type: 'hello_ack', to: RUNTIME_B.toLowerCase() }]);
+    expect(sentBySocket.get(attacker)).toHaveLength(routableTypes.length);
+    for (const [index, response] of (sentBySocket.get(attacker) ?? []).entries()) {
+      expect(response).toMatchObject({
+        type: 'error',
+        error: 'Routable message requires registered relay hello',
+        inReplyTo: `unauthenticated-${index}`,
+        to: RUNTIME_B,
+      });
+    }
+    expect(store.debugEvents.filter(event => event.reason === 'ROUTABLE_MESSAGE_UNREGISTERED_RUNTIME')).toHaveLength(
+      routableTypes.length,
+    );
+  });
+
   test('rejects unencrypted entity_inputs at relay ingress', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
