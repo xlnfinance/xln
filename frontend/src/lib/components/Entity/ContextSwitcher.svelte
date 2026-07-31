@@ -4,14 +4,16 @@
   import { allRuntimes, activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
   import {
     activeRuntimeId as activeStoreRuntimeId,
+    coordinateRuntimeSelection,
     runtimeOperations,
     runtimes as runtimeEntries,
     type Runtime as StoreRuntime,
+    type RuntimeSelectionLease,
   } from '$lib/stores/runtimeStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { refreshRuntimeView, runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore';
+  import { runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore';
   import { resetEverything } from '$lib/utils/resetEverything';
-  import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
+  import { refreshCurrentRuntimeProjection, xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
   import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/public/runtime-module';
   import type { Tab } from '$lib/types/ui';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
@@ -28,6 +30,7 @@
 
   let open = false;
   let focusedRuntimeId = '';
+  let runtimeSelectionRequestId = 0;
 
   onMount(() => {
     runtimeOperations.hydrateRemoteRuntimeImports();
@@ -422,19 +425,35 @@
     focusedRuntimeId = runtimeId;
   }
 
-  async function selectRemoteRuntime(runtimeId: string, entityId = ''): Promise<void> {
-    await runtimeOperations.selectRuntime(runtimeId);
-    const normalizedEntityId = normalizeId(entityId);
-    if (normalizedEntityId) setRuntimeViewActiveEntityId(normalizedEntityId);
-    await refreshRuntimeView(normalizedEntityId ? { entityId: normalizedEntityId } : {});
+  async function runLatestRuntimeSelection<T>(
+    requestId: number,
+    operation: (lease: RuntimeSelectionLease) => Promise<T>,
+  ): Promise<T | null> {
+    return coordinateRuntimeSelection<T | null>(async (lease) => {
+      if (requestId !== runtimeSelectionRequestId) return null;
+      return operation(lease);
+    });
+  }
+
+  async function selectRemoteRuntime(runtimeId: string, entityId: string, requestId: number): Promise<boolean> {
+    const selected = await runLatestRuntimeSelection(requestId, async (lease) => {
+      if (!await runtimeOperations.selectRuntime(runtimeId, lease)) return false;
+      if (requestId !== runtimeSelectionRequestId) return false;
+      const normalizedEntityId = normalizeId(entityId);
+      setRuntimeViewActiveEntityId(normalizedEntityId);
+      await refreshCurrentRuntimeProjection();
+      return requestId === runtimeSelectionRequestId;
+    });
+    return selected === true;
   }
 
   async function selectRuntimeEntity(runtimeId: string, signerId: string, entity: EntitySummary) {
+    const requestId = ++runtimeSelectionRequestId;
     const group = runtimeGroups.find((candidate) => candidate.runtimeId === runtimeId);
     open = false;
     if (group?.source === 'remote') {
       const selectedEntityId = entity.isPlaceholder ? '' : entity.entityId;
-      await selectRemoteRuntime(runtimeId, selectedEntityId);
+      if (!await selectRemoteRuntime(runtimeId, selectedEntityId, requestId)) return;
       dispatch('entitySelect', {
         jurisdiction: entity.jurisdiction || 'browservm',
         signerId: entity.signerId || signerId,
@@ -442,7 +461,11 @@
       });
       return;
     }
-    await vaultOperations.selectRuntime(runtimeId);
+    const selected = await runLatestRuntimeSelection(requestId, async (lease) => {
+      if (!await vaultOperations.selectRuntime(runtimeId, lease)) return false;
+      return requestId === runtimeSelectionRequestId;
+    });
+    if (selected !== true) return;
     dispatch('entitySelect', {
       jurisdiction: entity.jurisdiction || 'browservm',
       signerId: entity.signerId || signerId,

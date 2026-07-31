@@ -24,7 +24,7 @@
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
   import { activeRuntimeId } from '$lib/stores/runtimeStore';
-  import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
+  import { refreshSelectedRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
   import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { isLocalDebugSurfaceAllowed, registerDebugSurface } from '$lib/utils/debugSurface';
 
@@ -294,7 +294,7 @@
       return Promise.resolve(null);
     }
     lastRuntimeViewRefreshAt = now;
-    runtimeViewRefreshPromise = refreshRuntimeView()
+    runtimeViewRefreshPromise = refreshSelectedRuntimeView()
       .catch((error) => {
         surfaceRuntimeViewError(error);
       })

@@ -36,6 +36,7 @@ import {
 } from './embeddedRuntimeCommandCompletion';
 import {
   REMOTE_HISTORY_SCAN_CACHE_LIMIT,
+  ensureRuntimeHistoryContext,
   resetRuntimeHistoryFrames,
   runtimeHistoryFrameFromViewFrame,
   upsertRuntimeHistoryFrame,
@@ -47,10 +48,10 @@ import {
   resetRuntimeView,
   resetRuntimeViewSelection,
   refreshRuntimeView,
-  runtimeViewAccountsPage,
-  runtimeViewActiveEntityId,
-  runtimeViewBooksPage,
-  runtimeViewPageInfo,
+  readRuntimeViewSelection,
+  runtimeViewPublicationMatches,
+  setRuntimeViewActiveEntityId,
+  type RuntimeViewSelection,
 } from './runtimeViewStore';
 import { assertNetworkMachineIsLive, networkMachineRuntime } from './networkMachineRuntimeStore';
 import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
@@ -106,6 +107,7 @@ type RemoteProjectionRefreshInFlight = {
 };
 
 let remoteProjectionRefreshInFlight: RemoteProjectionRefreshInFlight | null = null;
+let remoteProjectionRefreshGeneration = 0;
 let remoteProjectionRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let remoteProjectionRefreshQueued = false;
 let lastRemoteProjectionRefreshWarningAt = 0;
@@ -362,8 +364,6 @@ export const resolveConfiguredApiBase = (baseOrigin: string): string => {
   return baseOrigin;
 };
 
-const normalizeEntityIdForView = (value: string): string => String(value || '').trim().toLowerCase();
-
 const remoteRuntimeIdFromConfig = runtimeIdFromRuntimeAdapterConfig;
 
 const shouldResetRuntimeAdapterViewSelection = (
@@ -383,19 +383,6 @@ const resetRuntimeAdapterViewSelection = (): void => {
   resetRuntimeView();
   resetRuntimeViewSelection();
   resetRuntimeHistoryFrames();
-};
-
-const isStaleRemoteEntitySelectionError = (error: unknown, requestedEntityId: string): boolean => {
-  if (!requestedEntityId) return false;
-  const candidate = error as { code?: unknown; message?: unknown } | null;
-  const code = String(candidate?.code || '').trim();
-  const message = String(candidate?.message || error || '').toLowerCase();
-  return (!code || code === 'E_NOT_FOUND') &&
-    message.includes(requestedEntityId.toLowerCase()) &&
-    (
-      message.includes('entity summary not found') ||
-      message.includes('entity not found')
-    );
 };
 
 const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeReplica): void => {
@@ -442,6 +429,7 @@ const clearRuntimeAdapterSubscriptions = (): void => {
   unregisterRuntimeControllerChange = null;
   unregisterRuntimeControllerStatus?.();
   unregisterRuntimeControllerStatus = null;
+  remoteProjectionRefreshGeneration += 1;
   remoteProjectionRefreshInFlight = null;
   if (remoteProjectionRefreshTimer) {
     clearTimeout(remoteProjectionRefreshTimer);
@@ -508,12 +496,16 @@ const defaultRemoteAdapterWsUrl = (): string => {
   return `${protocol}//${window.location.host}${DEFAULT_REMOTE_ADAPTER_PATH}`;
 };
 
-const remoteProjectionRefreshKey = (config: RuntimeAdapterConfig): string => {
+const remoteProjectionRefreshKey = (
+  config: RuntimeAdapterConfig,
+  selection: RuntimeViewSelection,
+): string => {
   if (config.mode !== 'remote') return 'embedded';
   const runtimeId = normalizeRuntimeConfigId(config.runtimeId || remoteRuntimeIdFromConfig(config));
   const wsUrl = normalizeWsConnectUrl(config.wsUrl || defaultRemoteAdapterWsUrl());
   const access = readRemoteRuntimeTokenAccess(config.authKey || '') || 'noauth';
-  return `remote:${runtimeId}:${wsUrl}:${access}`;
+  const selectedHeight = selection.atHeight ?? 'live';
+  return `remote:${runtimeId}:${wsUrl}:${access}:${selection.revision}:${selection.entityId}:${selection.accountsPage}:${selection.booksPage}:${selectedHeight}`;
 };
 
 const EMBEDDED_RUNTIME_SEED_STORAGE_KEY = 'xln-embedded-runtime-seed-v1';
@@ -765,63 +757,84 @@ type RemoteRuntimeProjectionRefresh = {
 const refreshRemoteRuntimeProjection = async (
   adapter: RuntimeAdapter,
   config: RuntimeAdapterConfig,
-): Promise<RemoteRuntimeProjectionRefresh> => {
+  selection: RuntimeViewSelection,
+  generation: number,
+): Promise<RemoteRuntimeProjectionRefresh | null> => {
   if (adapter.mode !== 'remote' || config.mode !== 'remote') {
     throw new Error('Remote projection refresh requires remote runtime adapter');
   }
   const adapterHeight = Math.max(0, Math.floor(Number(adapter.currentHeight || 0)));
-  const requestedEntityId = normalizeEntityIdForView(get(runtimeViewActiveEntityId));
-  const accountsPage = Math.max(0, Math.floor(Number(get(runtimeViewAccountsPage) ?? 0)));
-  const booksPage = Math.max(0, Math.floor(Number(get(runtimeViewBooksPage) ?? 0)));
+  const requestedEntityId = selection.entityId;
+  const runtimeId = normalizeRuntimeConfigId(adapter.runtimeId || config.runtimeId || remoteRuntimeIdFromConfig(config));
+  const requestedHistoryContext = ensureRuntimeHistoryContext({
+    runtimeId,
+    mode: 'remote',
+    entityId: selection.entityId,
+    accountsPage: selection.accountsPage,
+    booksPage: selection.booksPage,
+  }, config.wsUrl || '');
   const viewQuery: RuntimeAdapterReadQuery = {
     limit: REMOTE_VIEW_PAGE_SIZE,
     accountsLimit: REMOTE_VIEW_PAGE_SIZE,
     booksLimit: REMOTE_VIEW_PAGE_SIZE,
-    accountsPage,
-    booksPage,
+    accountsPage: selection.accountsPage,
+    booksPage: selection.booksPage,
   };
-  const refreshView = async (entityId: string): Promise<RuntimeAdapterViewFrame> => {
+  const refreshView = async (entityId: string): Promise<RuntimeAdapterViewFrame | null> => {
     const view = await refreshRuntimeView(entityId ? { ...viewQuery, entityId } : viewQuery);
+    // refreshRuntimeView returns the caller-owned result even when a newer read
+    // won the shared store. Secondary publishers may only derive from the result
+    // that is still mounted as the canonical RuntimeView.
+    if (get(runtimeView) !== view) {
+      // A queued height catch-up may replace the just-published object before
+      // this caller resumes. Coalesce one fresh projection pass instead of
+      // stranding initial remote setup on an identity-only race.
+      if (
+        isCurrentRuntimeAdapterConfig(config) &&
+        runtimeViewPublicationMatches(generation, remoteProjectionRefreshGeneration, selection)
+      ) {
+        scheduleRuntimeProjectionRefresh();
+      }
+      return null;
+    }
     if (!view.frame) {
       if (entityId) {
-        const staleEntityError = new Error(`Remote entity summary not found: ${entityId}`);
-        (staleEntityError as Error & { code?: string }).code = 'E_NOT_FOUND';
-        throw staleEntityError;
+        throw new Error(`Remote entity summary not found: ${entityId}`);
       }
       throw new Error('REMOTE_RUNTIME_VIEW_FRAME_MISSING');
     }
     return view.frame;
   };
 
-  let frame: RuntimeAdapterViewFrame;
-  try {
-    frame = await refreshView(requestedEntityId);
-  } catch (error) {
-    if (!isStaleRemoteEntitySelectionError(error, requestedEntityId)) throw error;
-    errorLog.log(
-      `Remote active entity ${requestedEntityId} is not available in this runtime view; resetting to default entity.`,
-      'Runtime Projection Refresh',
-      error,
+  const publicationStillCurrent = (): boolean =>
+    isCurrentRuntimeAdapterConfig(config) &&
+    runtimeViewPublicationMatches(
+      generation,
+      remoteProjectionRefreshGeneration,
+      selection,
     );
-    runtimeViewActiveEntityId.set('');
-    runtimeViewAccountsPage.set(0);
-    runtimeViewBooksPage.set(0);
-    frame = await refreshView('');
-  }
+  const frame = await refreshView(requestedEntityId);
+  if (!frame) return null;
+  if (!publicationStillCurrent()) return null;
 
-  const runtimeId = normalizeRuntimeConfigId(adapter.runtimeId || config.runtimeId || remoteRuntimeIdFromConfig(config));
   const historyFrame = runtimeHistoryFrameFromViewFrame({
     runtimeId,
     mode: 'remote',
     frame,
   });
+  const historyContext = historyFrame.activeEntityId && !requestedHistoryContext.entityId
+    ? ensureRuntimeHistoryContext({
+        ...requestedHistoryContext,
+        entityId: historyFrame.activeEntityId,
+      }, config.wsUrl || '')
+    : requestedHistoryContext;
   upsertRuntimeHistoryFrame({
     runtimeId,
     mode: 'remote',
     frame,
+    context: historyContext,
   }, REMOTE_HISTORY_SCAN_CACHE_LIMIT);
-  if (historyFrame.activeEntityId) runtimeViewActiveEntityId.set(historyFrame.activeEntityId);
-  runtimeViewPageInfo.set(historyFrame.pageInfo);
+  if (historyFrame.activeEntityId) setRuntimeViewActiveEntityId(historyFrame.activeEntityId);
   const height = Math.max(
     historyFrame.height,
     Math.max(0, Math.floor(Number(frame.head?.latestHeight || 0))),
@@ -848,7 +861,7 @@ const createEmbeddedRuntimeAdapter = async (
   if (!boundEnv) {
     // No ad-hoc env construction here: the only way to obtain a correctly
     // restored env (real signer keys, not just the generic index sweep) is
-    // the canonical vaultOperations.selectRuntime path in switchAppRuntimeAdapter,
+    // the canonical vault restore path in switchAppRuntimeAdapter,
     // which always builds/passes targetEnv before this function is called.
     throw new Error('EMBEDDED_RUNTIME_ADAPTER_ENV_MISSING: caller must restore env via the canonical runtime-selection path before requesting an adapter');
   }
@@ -982,7 +995,7 @@ export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Pro
     // Canonical restore only: registers the runtime's real signer keys
     // (not just the generic HD-index sweep) before any replay can run.
     // Never construct an env for a known local runtime any other way.
-    await vaultOperations.selectRuntime(selectedRuntimeId);
+    await vaultOperations.prepareRuntimeForAdapterSwitch(selectedRuntimeId);
     const restored = get(runtimes).get(selectedRuntimeId);
     env = restored?.type === 'local' ? (unwrapLiveRuntimeEnv(restored.env) ?? restored.env) : null;
     if (!env) {
@@ -1020,15 +1033,21 @@ registerRuntimeAdapterSwitcher(async (config) => {
 export const refreshCurrentRuntimeProjection = async (): Promise<RuntimeReplica | null> => {
   const config = getRuntimeControllerConfig();
   if (config?.mode !== 'remote') return get(xlnEnvironment);
-  const refreshKey = remoteProjectionRefreshKey(config);
+  const selection = readRuntimeViewSelection();
+  const refreshKey = remoteProjectionRefreshKey(config, selection);
   if (remoteProjectionRefreshInFlight?.key === refreshKey) {
     return remoteProjectionRefreshInFlight.promise;
   }
+  const generation = ++remoteProjectionRefreshGeneration;
   const promise = (async () => {
     const adapter = getRuntimeControllerAdapter();
     if (!adapter || adapter.mode !== 'remote') return null;
-    const projection = await refreshRemoteRuntimeProjection(adapter, config);
-    if (!isCurrentRuntimeAdapterConfig(config)) return null;
+    const projection = await refreshRemoteRuntimeProjection(adapter, config, selection, generation);
+    if (
+      !projection ||
+      generation !== remoteProjectionRefreshGeneration ||
+      !isCurrentRuntimeAdapterConfig(config)
+    ) return null;
     currentHeight.set(projection.height);
     return null;
   })();

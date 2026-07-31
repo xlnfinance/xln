@@ -58,14 +58,20 @@ test('ContextSwitcher remote rows switch runtime and selected projected entity t
   const addStart = source.indexOf('function handleAddRuntime', entityStart);
   const entitySource = source.slice(entityStart, addStart);
 
-  expect(source).toContain("async function selectRemoteRuntime(runtimeId: string, entityId = ''): Promise<void>");
+  expect(source).toContain('async function selectRemoteRuntime(runtimeId: string, entityId: string, requestId: number): Promise<boolean>');
+  expect(source).toContain('coordinateRuntimeSelection<T | null>');
+  expect(source).toContain('async function runLatestRuntimeSelection<T>');
+  expect(source).toContain('operation: (lease: RuntimeSelectionLease) => Promise<T>');
+  expect(source).toContain('if (requestId !== runtimeSelectionRequestId) return null;');
+  expect(source).toContain('runtimeOperations.selectRuntime(runtimeId, lease)');
+  expect(source).toContain('vaultOperations.selectRuntime(runtimeId, lease)');
   expect(source).toContain('setRuntimeViewActiveEntityId(normalizedEntityId)');
-  expect(source).toContain('await refreshRuntimeView(normalizedEntityId ? { entityId: normalizedEntityId } : {})');
+  expect(source).toContain('await refreshCurrentRuntimeProjection()');
   expect(entitySource).toContain("if (group?.source === 'remote') {");
   expect(entitySource).toContain("const selectedEntityId = entity.isPlaceholder ? '' : entity.entityId");
-  expect(entitySource).toContain('await selectRemoteRuntime(runtimeId, selectedEntityId);');
+  expect(entitySource).toContain('if (!await selectRemoteRuntime(runtimeId, selectedEntityId, requestId)) return;');
   expect(entitySource).toContain("dispatch('entitySelect'");
-  expect(entitySource.indexOf("dispatch('entitySelect'")).toBeLessThan(entitySource.indexOf('return;'));
+  expect(entitySource).toContain("entityId: selectedEntityId\n      });\n      return;");
   expect(source).not.toContain('async function selectRuntimeSelf');
 });
 

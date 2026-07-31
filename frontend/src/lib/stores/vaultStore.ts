@@ -16,7 +16,13 @@ import type {
   XLNModule,
 } from '@xln/runtime/api/public/runtime-module';
 
-import { activeRuntimeId, runtimeOperations, runtimes } from './runtimeStore';
+import {
+  activeRuntimeId,
+  coordinateRuntimeSelection,
+  runtimeOperations,
+  runtimes,
+  type RuntimeSelectionLease,
+} from './runtimeStore';
 
 import {
   dispatchRuntimeInputToRuntimeEnv,
@@ -118,7 +124,6 @@ import {
   summarizeRuntimeRecoveryTowerReceipt,
   type CreateRuntimeOptions,
   type FaucetResult,
-  type FrameLogEntry,
   type HealthMachine,
   type HealthPayload,
   type ImportedJMachineConfig,
@@ -141,7 +146,11 @@ import {
   fundSignerWalletViaFaucet,
   fundRuntimeSignersInBrowserVM,
 } from './vault-bootstrap';
-import { runtimeInputWorkSummary, runtimeQuiesceWorkSummary } from './vault-lifecycle-helpers';
+import {
+  getRuntimeFatalDiagnostics,
+  runtimeInputWorkSummary,
+  runtimeQuiesceWorkSummary,
+} from './vault-lifecycle-helpers';
 export { buildDelayedLastResortAppointmentsForTower } from './vault-watchtower';
 
 export type {
@@ -748,52 +757,6 @@ const getLiveRuntimeEnvForId = (runtimeId: string, fallback?: RuntimeReplica | n
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   const latest = normalizedRuntimeId ? get(runtimes).get(normalizedRuntimeId)?.env : null;
   return unwrapLiveRuntimeEnv(latest) ?? unwrapLiveRuntimeEnv(fallback) ?? fallback ?? null;
-};
-
-const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: string): string => {
-  const frameLogs = env.frameLogs;
-  const cleanLogs = Array.isArray(env.infrastructure?.cleanLogs) ? env.infrastructure.cleanLogs : [];
-  const recentErrors = frameLogs
-    .filter(
-      (entry: FrameLogEntry) =>
-        entry.level === 'error' || entry.message === 'RUNTIME_LOOP_ERROR' || entry.message === 'RUNTIME_LOOP_HALTED',
-    )
-    .slice(-3)
-    .map((entry: FrameLogEntry) => ({
-      level: entry.level ?? null,
-      category: entry.category ?? null,
-      message: entry.message ?? null,
-      data: entry.data ?? null,
-      entityId: entry.entityId ?? null,
-      timestamp: entry.timestamp ?? null,
-    }));
-  const recentLogs = cleanLogs.slice(-8);
-  const replica = replicaName ? env.state.jReplicas.get(replicaName) : env.state.jReplicas.values().next().value;
-  const jState = replica
-    ? {
-        name: replica.name ?? null,
-        chainId: replica.chainId ?? null,
-        depositoryAddress: replica.depositoryAddress ?? null,
-        entityProviderAddress: replica.entityProviderAddress ?? null,
-        contracts: replica.contracts ?? null,
-        rpcs: replica.rpcs ?? null,
-        hasAdapter: hasConnectedJurisdictionAdapter(env, replica.name),
-        hasAddresses: hasRuntimeJurisdictionAddresses(replica),
-      }
-    : null;
-  return JSON.stringify(
-    {
-      runtimeId: env.runtimeId ?? null,
-      height: env.state.height ?? null,
-      latestHeight: env.state.height ?? null,
-      loopActive: env.infrastructure?.loopActive ?? null,
-      jState,
-      recentErrors,
-      recentLogs,
-    },
-    null,
-    2,
-  );
 };
 
 async function enqueueAndAwait(
@@ -2493,12 +2456,11 @@ export const vaultOperations = {
     if (lockError) throw lockError;
   },
 
-  // Select runtime
-  async selectRuntime(runtimeId: string) {
-    // If restore is still in progress after reload, wait for it to settle first.
-    // This prevents initialize() from clobbering a just-selected runtime/env.
+  // Restore the vault-owned env and signer keys. The Runtime selection owner
+  // calls this inside its global lease before switching the adapter.
+  async prepareRuntimeForAdapterSwitch(runtimeId: string): Promise<string> {
     if (initializePromise && !initialized) {
-      await initializePromise;
+      throw new Error('RUNTIME_SELECTION_DURING_VAULT_INITIALIZATION');
     }
 
     const requestedRuntimeId = normalizeRuntimeId(runtimeId);
@@ -2559,7 +2521,28 @@ export const vaultOperations = {
     }
 
     this.syncRuntime(runtime || null);
-    await runtimeOperations.selectRuntime(resolvedRuntimeId);
+    return resolvedRuntimeId;
+  },
+
+  // Select runtime
+  async selectRuntime(runtimeId: string, lease?: RuntimeSelectionLease): Promise<boolean> {
+    // Initialization performs its own Runtime selection before resolving.
+    // Await it before acquiring the global lease; waiting from inside the
+    // lease would deadlock against initialize()'s queued selection.
+    if (!lease && initializePromise && !initialized) {
+      await initializePromise;
+    }
+    if (lease && initializePromise && !initialized) {
+      throw new Error('RUNTIME_SELECTION_DURING_VAULT_INITIALIZATION');
+    }
+    if (!lease) {
+      const selected = await coordinateRuntimeSelection((currentLease) =>
+        this.selectRuntime(runtimeId, currentLease)
+      );
+      return selected === true;
+    }
+    const resolvedRuntimeId = await this.prepareRuntimeForAdapterSwitch(runtimeId);
+    return runtimeOperations.selectRuntime(resolvedRuntimeId, lease);
   },
 
   // Add signer to active runtime. Awaits key registration and entity

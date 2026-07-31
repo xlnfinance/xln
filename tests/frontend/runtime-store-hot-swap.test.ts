@@ -142,7 +142,7 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
   expect(embeddedSource).not.toContain('console.info');
   expect(switchSource).toContain('const currentRuntimeId = normalizeRuntimeConfigId(currentEnv?.runtimeId || \'\');');
   expect(switchSource).toContain('if (!selectedRuntimeId || currentRuntimeId === selectedRuntimeId)');
-  expect(switchSource).toContain('await vaultOperations.selectRuntime(selectedRuntimeId);');
+  expect(switchSource).toContain('await vaultOperations.prepareRuntimeForAdapterSwitch(selectedRuntimeId);');
   expect(switchSource).toContain('EMBEDDED_RUNTIME_ENV_RESTORE_FAILED');
   expect(switchSource).toContain('env = await xln.main(normalizedConfig.seed ?? null);');
   expect(switchSource).toContain('EMBEDDED_RUNTIME_ENV_MISMATCH');
@@ -250,9 +250,13 @@ test('remote runtime switch resets runtime-scoped view selection without droppin
   expect(source).toContain('resetRuntimeViewSelection();');
   expect(source).toContain('type RemoteProjectionRefreshInFlight =');
   expect(source).toContain('let remoteProjectionRefreshInFlight: RemoteProjectionRefreshInFlight | null = null');
+  expect(source).toContain('let remoteProjectionRefreshGeneration = 0;');
   expect(source).toContain('const remoteProjectionRefreshKey =');
+  expect(source).toContain('const selection = readRuntimeViewSelection();');
+  expect(source).toContain('remoteProjectionRefreshKey(config, selection)');
   expect(source).toContain('remoteProjectionRefreshInFlight = null;');
   expect(source).toContain('if (remoteProjectionRefreshInFlight?.key === refreshKey)');
+  expect(source).toContain('const generation = ++remoteProjectionRefreshGeneration;');
   expect(source).not.toContain('remoteHistoryCache');
   expect(runtimeViewSource).toContain('export const runtimeViewActiveEntityId');
   expect(runtimeViewSource).toContain('export const runtimeViewPageInfo');
@@ -265,13 +269,17 @@ test('remote runtime switch resets runtime-scoped view selection without droppin
   expect(source).not.toContain("localStorage.removeItem('xln-runtime-adapter-ws')");
 });
 
-test('stale remote entity selection resets only on current view refresh', () => {
+test('stale remote entity selection fails loudly without resetting to another entity', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  expect(source).toContain('const isStaleRemoteEntitySelectionError =');
-  expect(source).toContain('if (!isStaleRemoteEntitySelectionError(error, requestedEntityId)) throw error;');
-  expect(source).toContain('Remote active entity ${requestedEntityId} is not available in this runtime view; resetting to default entity.');
-  expect(source).toContain('runtimeViewActiveEntityId.set');
-  expect(source).toContain('frame = await refreshView(\'\');');
+  expect(source).toContain('if (!publicationStillCurrent()) return null;');
+  expect(source).toContain('runtimeViewPublicationMatches(');
+  expect(source).toContain('remoteProjectionRefreshGeneration,');
+  expect(source).toContain('const projection = await refreshRemoteRuntimeProjection(adapter, config, selection, generation);');
+  expect(source).toContain('Remote entity summary not found: ${entityId}');
+  expect(source).toContain('setRuntimeViewActiveEntityId(historyFrame.activeEntityId)');
+  expect(source).toContain('const frame = await refreshView(requestedEntityId);');
+  expect(source).not.toContain('isStaleRemoteEntitySelectionError');
+  expect(source).not.toContain("refreshView('')");
 });
 
 test('remote RuntimeInput command waits for observed receipt before projection refresh', () => {
@@ -336,6 +344,7 @@ test('frontend remote runtime operations use short fail-fast budgets', () => {
 
 test('remote RuntimeView refresh stays projection-native without fake RuntimeReplica timestamps', () => {
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  const runtimeViewSource = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
   const refreshStart = storeSource.indexOf('const refreshRemoteRuntimeProjection = async');
   const refreshEnd = storeSource.indexOf('const createEmbeddedRuntimeAdapter', refreshStart);
   expect(refreshStart).toBeGreaterThan(0);
@@ -348,7 +357,8 @@ test('remote RuntimeView refresh stays projection-native without fake RuntimeRep
   expect(storeSource).not.toContain("throw new Error('REMOTE_RUNTIME_INITIAL_VIEW_MISSING')");
   expect(storeSource).toContain('const refreshRemoteRuntimeProjection = async');
   expect(refreshSource).toContain('const view = await refreshRuntimeView');
-  expect(refreshSource).toContain('runtimeViewPageInfo.set(historyFrame.pageInfo)');
+  expect(refreshSource).not.toContain('runtimeViewPageInfo.set');
+  expect(runtimeViewSource).toContain('runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));');
   expect(refreshSource).not.toContain('Date.now()');
   expect(refreshSource).not.toContain('createEmptyEnv');
 });
@@ -416,7 +426,7 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   expect(viewSource).toContain("registerDebugSurface('publishLiveRuntimeSnapshot', () => publishLocalEnv");
   expect(viewSource).not.toContain("Object.defineProperty(window, 'runtimeFrameEnv'");
   expect(viewSource).not.toContain("Object.defineProperty(window, 'isolatedEnv'");
-  expect(viewSource).toContain("import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore'");
+  expect(viewSource).toContain("import { refreshSelectedRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore'");
   expect(viewSource).toContain("from '$lib/utils/debugSurface'");
   expect(viewSource).toContain("registerDebugSurface('view', () => get(runtimeView)");
   expect(viewSource).not.toContain("legacyName: '__xlnRuntimeView'");
@@ -439,7 +449,7 @@ test('view runtime frame stores do not expose legacy isolated names', () => {
 test('local runtime selection persists embedded mode without deleting saved remote registry', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
   const persistStart = source.indexOf('const persistActiveEmbeddedRuntime =');
-  const switchStart = source.indexOf('// Switch active runtime');
+  const switchStart = source.indexOf('const performRuntimeSelection =');
   expect(persistStart).toBeGreaterThan(0);
   expect(switchStart).toBeGreaterThan(persistStart);
   const persistSource = source.slice(persistStart, switchStart);
@@ -455,11 +465,11 @@ test('local runtime selection persists embedded mode without deleting saved remo
 test('selecting the already connected runtime does not reconnect the adapter', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
   const helperStart = source.indexOf('const runtimeControllerAlreadyTargets =');
-  const selectStart = source.indexOf('// Switch active runtime');
+  const selectStart = source.indexOf('const performRuntimeSelection =');
   expect(helperStart).toBeGreaterThan(0);
   expect(selectStart).toBeGreaterThan(helperStart);
   const helperSource = source.slice(helperStart, selectStart);
-  const selectSource = source.slice(selectStart);
+  const selectSource = source.slice(selectStart, source.indexOf('// Operations', selectStart));
 
   expect(helperSource).toContain("handle.status !== 'connected'");
   expect(helperSource).toContain('handle.authLevel === expectedAuth');
@@ -476,15 +486,15 @@ test('selecting the already connected runtime does not reconnect the adapter', (
 test('runtime selection persists websocket before switch with rollback and reaffirms active endpoint after success', () => {
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const selectStart = runtimeStoreSource.indexOf('// Switch active runtime');
-  const activateStart = runtimeStoreSource.indexOf('async activateRemoteRuntime', selectStart);
+  const selectStart = runtimeStoreSource.indexOf('const performRuntimeSelection =');
+  const activateStart = runtimeStoreSource.indexOf('// Operations', selectStart);
   expect(selectStart).toBeGreaterThan(0);
   expect(activateStart).toBeGreaterThan(selectStart);
   const selectSource = runtimeStoreSource.slice(selectStart, activateStart);
 
   expect(runtimeStoreSource).toContain('const readRuntimeAdapterStorageSnapshot =');
   expect(runtimeStoreSource).toContain('const restoreRuntimeAdapterStorageSnapshot =');
-  const remoteSwitchIndex = selectSource.indexOf('await switchToRuntimeAdapter({\n            mode: \'remote\'');
+  const remoteSwitchIndex = selectSource.indexOf("await switchToRuntimeAdapter({\n          mode: 'remote'");
   const remotePersistIndex = selectSource.indexOf('const persisted = persistActiveRemoteRuntime(runtime)');
   const remoteRollbackIndex = selectSource.indexOf('restoreRuntimeAdapterStorageSnapshot(previousStorage)');
   const remotePendingIndex = selectSource.indexOf('setRuntimeControllerPendingRuntimeId(id)', remotePersistIndex);
@@ -765,7 +775,8 @@ test('xlnStore boot diagnostics use persistent error log instead of raw console'
   expect(initializeSource).toContain("errorLog.log(errorMessage, 'XLN Initialization', err)");
   expect(initializeSource).toContain("'Financial restore failure; refusing automatic local data reset'");
   expect(initializeSource).toContain("'Embedded runtime adapter failed to connect; local env remains usable'");
-  expect(refreshSource).toContain('Remote active entity ${requestedEntityId} is not available in this runtime view; resetting to default entity.');
+  expect(refreshSource).toContain('Remote entity summary not found: ${entityId}');
+  expect(refreshSource).not.toContain('resetting to default entity');
   expect(`${initializeSource}\n${refreshSource}`).not.toContain('console.warn');
   expect(`${initializeSource}\n${refreshSource}`).not.toContain('console.error');
 });
@@ -820,12 +831,18 @@ test('local runtime creation marks the target before bootstrap and switches cont
 
 test('vault runtime selection delegates adapter lifecycle to RuntimeController path', () => {
   const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
-  const selectStart = source.indexOf('async selectRuntime(runtimeId: string)');
+  const selectStart = source.indexOf('async selectRuntime(runtimeId: string, lease?: RuntimeSelectionLease)');
   const addSignerStart = source.indexOf('// Add signer to active runtime', selectStart);
   expect(selectStart).toBeGreaterThan(0);
   expect(addSignerStart).toBeGreaterThan(selectStart);
   const selectSource = source.slice(selectStart, addSignerStart);
-  expect(selectSource).toContain('runtimeOperations.selectRuntime(resolvedRuntimeId)');
+  expect(selectSource).toContain('coordinateRuntimeSelection');
+  expect(selectSource).toContain('runtimeOperations.selectRuntime(resolvedRuntimeId, lease)');
+  expect(selectSource).toContain('if (!lease && initializePromise && !initialized)');
+  expect(selectSource).toContain('if (lease && initializePromise && !initialized)');
+  expect(selectSource).toContain('RUNTIME_SELECTION_DURING_VAULT_INITIALIZATION');
+  expect(selectSource.indexOf('await initializePromise;'))
+    .toBeLessThan(selectSource.indexOf('coordinateRuntimeSelection'));
   expect(selectSource).not.toContain('switchAppRuntimeAdapter');
   expect(selectSource).not.toContain('activeRuntimeId.set(resolvedRuntimeId)');
 });

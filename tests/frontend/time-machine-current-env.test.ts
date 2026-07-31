@@ -6,10 +6,16 @@ import { runtimeQueryClient } from '../../frontend/src/lib/stores/runtimeQueryCl
 import {
   assertRuntimeViewIsLive,
   normalizeRuntimeViewAtHeight,
+  readRuntimeViewSelection,
+  refreshSelectedRuntimeView,
   resetRuntimeView,
   runtimeView,
+  runtimeViewAccountsPage,
   runtimeViewFrameMatchesAtHeight,
+  runtimeViewPageInfo,
+  runtimeViewPublicationMatches,
   runtimeViewQueryAtHeight,
+  setRuntimeViewPage,
   setRuntimeViewAtHeight,
 } from '../../frontend/src/lib/stores/runtimeViewStore';
 
@@ -122,6 +128,146 @@ describe('frontend time-machine current env contract', () => {
     expect(readStore(runtimeView)).toMatchObject({ atHeight: null, height: 12, frame: { height: 12 }, error: null });
   });
 
+  test('LIVE and historical height changes reject superseded remote publications', async () => {
+    runtimeControllerHandle.set({
+      id: 'remote-a',
+      runtimeId: 'remote-a',
+      pendingRuntimeId: '',
+      mode: 'remote',
+      endpoint: 'ws://remote-a',
+      permissions: 'read',
+      status: 'connected',
+      height: 12,
+      authLevel: 'read',
+    });
+    runtimeQueryClient.readHead = async () => ({ latestHeight: 12 }) as never;
+    runtimeQueryClient.readViewFrame = async (query = {}) => ({ height: query.atHeight ?? 12 }) as never;
+    resetRuntimeView();
+
+    const published: string[] = [];
+    const publishIfCurrent = async (
+      selection: ReturnType<typeof readRuntimeViewSelection>,
+      result: Promise<string>,
+    ): Promise<void> => {
+      const resolved = await result;
+      if (runtimeViewPublicationMatches(1, 1, selection)) published.push(resolved);
+    };
+
+    const liveSelection = readRuntimeViewSelection();
+    let resolveLive!: (value: string) => void;
+    const staleLive = publishIfCurrent(
+      liveSelection,
+      new Promise<string>((resolve) => { resolveLive = resolve; }),
+    );
+    await setRuntimeViewAtHeight(7);
+    resolveLive('LIVE');
+    await staleLive;
+
+    const heightSevenSelection = readRuntimeViewSelection();
+    let resolveHeightSeven!: (value: string) => void;
+    const staleHeightSeven = publishIfCurrent(
+      heightSevenSelection,
+      new Promise<string>((resolve) => { resolveHeightSeven = resolve; }),
+    );
+    await setRuntimeViewAtHeight(8);
+    resolveHeightSeven('h7');
+    await staleHeightSeven;
+
+    expect(published).toEqual([]);
+    expect(readRuntimeViewSelection().atHeight).toBe(8);
+  });
+
+  test('historical frame and pager publish from the same current height read', async () => {
+    runtimeControllerHandle.set({
+      id: 'remote-a',
+      runtimeId: 'remote-a',
+      pendingRuntimeId: '',
+      mode: 'remote',
+      endpoint: 'ws://remote-a',
+      permissions: 'read',
+      status: 'connected',
+      height: 12,
+      authLevel: 'read',
+    });
+    const frameAt = (height: number, accountsPageCount: number) => ({
+      height,
+      entities: [],
+      activeEntityId: '0xentity-a',
+      activeEntity: {
+        summary: { entityId: '0xentity-a' },
+        core: { entityId: '0xentity-a', timestamp: height },
+        accounts: {
+          items: [],
+          totalItems: accountsPageCount,
+          pageIndex: 0,
+          pageCount: accountsPageCount,
+          prevCursor: null,
+          nextCursor: accountsPageCount > 1 ? `accounts-${height}` : null,
+        },
+        books: {
+          items: [],
+          totalItems: 0,
+          pageIndex: 0,
+          pageCount: 1,
+          prevCursor: null,
+          nextCursor: null,
+        },
+      },
+    }) as never;
+    runtimeQueryClient.readHead = async () => ({ latestHeight: 12 }) as never;
+    runtimeQueryClient.readViewFrame = async () => frameAt(12, 10);
+    resetRuntimeView();
+    await refreshSelectedRuntimeView();
+    expect(readStore(runtimeViewPageInfo)?.accountsPageCount).toBe(10);
+
+    const deferred = new Map<number, (frame: never) => void>();
+    runtimeQueryClient.readViewFrame = async (query = {}) => new Promise<never>((resolve) => {
+      deferred.set(Number(query.atHeight), resolve);
+    });
+    const heightSeven = setRuntimeViewAtHeight(7);
+    expect(readStore(runtimeViewPageInfo)).toBeNull();
+    const heightEight = setRuntimeViewAtHeight(8);
+
+    deferred.get(7)?.(frameAt(7, 7));
+    await heightSeven;
+    expect(readStore(runtimeViewPageInfo)).toBeNull();
+
+    deferred.get(8)?.(frameAt(8, 2));
+    await heightEight;
+    expect(readStore(runtimeView)).toMatchObject({ atHeight: 8, frame: { height: 8 } });
+    expect(readStore(runtimeViewPageInfo)).toMatchObject({
+      entityId: '0xentity-a',
+      accountsPageCount: 2,
+      accountsNextCursor: 'accounts-8',
+    });
+  });
+
+  test('changing a wallet page invalidates an in-flight projection before the queued refresh starts', async () => {
+    let resolveFrame!: (frame: never) => void;
+    runtimeControllerHandle.set({
+      id: 'remote-a',
+      runtimeId: 'remote-a',
+      pendingRuntimeId: '',
+      mode: 'remote',
+      endpoint: 'ws://remote-a',
+      permissions: 'read',
+      status: 'connected',
+      height: 12,
+      authLevel: 'read',
+    });
+    runtimeQueryClient.readHead = async () => ({ latestHeight: 12 }) as never;
+    runtimeQueryClient.readViewFrame = async () => new Promise<never>((resolve) => { resolveFrame = resolve; });
+    resetRuntimeView();
+
+    const stalePage = refreshSelectedRuntimeView();
+    setRuntimeViewPage('accounts', 1);
+    resolveFrame({ height: 12, activeEntityId: '0xentity-a' } as never);
+    await stalePage;
+
+    expect(readStore(runtimeViewAccountsPage)).toBe(1);
+    expect(readStore(runtimeView).frame).toBeNull();
+  });
+
   test('TimeMachine publishes its selected frame through RuntimeView for browser and remote runtimes', () => {
     const timeMachine = read('frontend/src/lib/view/core/TimeMachine.svelte');
     const workspace = read('frontend/src/lib/components/Entity/EntityWorkspace.svelte');
@@ -219,7 +365,7 @@ describe('frontend time-machine current env contract', () => {
     expect(source).not.toContain('unsubActiveRuntimeView = runtimeView.subscribe');
     expect(source).not.toContain('runtimeViewFrameToEnv(');
     expect(source).toContain('onRuntimeControllerStatus');
-    expect(source).toContain('refreshRuntimeView()');
+    expect(source).toContain('refreshSelectedRuntimeView()');
     expect(source).not.toContain('onRuntimeControllerChange');
     expect(source).toContain('publishedRuntimeKey !== runtimeKey');
     expect(source).toContain('if (get(localIsLive))');

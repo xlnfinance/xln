@@ -11,6 +11,7 @@ import {
   runtimeAdapterHeight,
   runtimeControllerHandle,
 } from './runtimeControllerStore';
+import { errorLog } from './errorLogStore';
 import { runtimeQueryClient } from './runtimeQueryClient';
 
 export type RuntimeView = {
@@ -61,6 +62,37 @@ export type RuntimeViewPageInfo = {
   booksHasMore: boolean;
 };
 
+export const runtimeViewPageInfoFromFrame = (
+  frame: RuntimeAdapterViewFrame,
+): RuntimeViewPageInfo | null => {
+  const active = frame.activeEntity;
+  const entityId = normalizeEntityIdForRuntimeView(
+    frame.activeEntityId || active?.summary?.entityId || active?.core?.entityId,
+  );
+  if (!active || !entityId) return null;
+  const accountsPageIndex = active.accounts.pageIndex ?? 0;
+  const accountsPageCount = active.accounts.pageCount ?? 1;
+  const booksPageIndex = active.books.pageIndex ?? 0;
+  const booksPageCount = active.books.pageCount ?? 1;
+  return {
+    entityId,
+    accountsShown: active.accounts.items.length,
+    accountsTotal: active.accounts.totalItems ?? active.accounts.items.length,
+    accountsPageIndex,
+    accountsPageCount,
+    accountsPrevCursor: active.accounts.prevCursor ?? null,
+    accountsNextCursor: active.accounts.nextCursor ?? null,
+    accountsHasMore: accountsPageIndex + 1 < accountsPageCount && !!active.accounts.nextCursor,
+    booksShown: active.books.items.length,
+    booksTotal: active.books.totalItems ?? active.books.items.length,
+    booksPageIndex,
+    booksPageCount,
+    booksPrevCursor: active.books.prevCursor ?? null,
+    booksNextCursor: active.books.nextCursor ?? null,
+    booksHasMore: booksPageIndex + 1 < booksPageCount && !!active.books.nextCursor,
+  };
+};
+
 export const runtimeViewPageNeedsNavigation = (
   pageInfo: RuntimeViewPageInfo,
   kind?: 'accounts' | 'books',
@@ -107,8 +139,17 @@ export const runtimeViewNeedsHeightRefresh = (
   status: RuntimeAdapterStatus,
   nextHeight: number,
 ): boolean => {
-  if (view.atHeight !== null || status !== 'connected' || !view.frame) return false;
-  const frameHeight = Math.max(0, Math.floor(Number(view.frame.height || 0)));
+  if (!view.frame) return false;
+  return runtimeViewTracksHeightAdvance(view, status, nextHeight);
+};
+
+export const runtimeViewTracksHeightAdvance = (
+  view: Pick<RuntimeView, 'atHeight' | 'frame'>,
+  status: RuntimeAdapterStatus,
+  nextHeight: number,
+): boolean => {
+  if (view.atHeight !== null || status !== 'connected' || nextHeight <= 0) return false;
+  const frameHeight = Math.max(0, Math.floor(Number(view.frame?.height || 0)));
   return nextHeight > frameHeight;
 };
 
@@ -188,20 +229,63 @@ export const runtimeViewPageInfo = writable<RuntimeViewPageInfo | null>(null);
 export const runtimeViewHistoryScan = writable<RuntimeViewHistoryScanState>(
   emptyRuntimeViewHistoryScan(),
 );
+let runtimeViewRefreshId = 0;
+let runtimeViewSelectionRevision = 0;
+
+export type RuntimeViewSelection = {
+  revision: number;
+  entityId: string;
+  accountsPage: number;
+  booksPage: number;
+  atHeight: number | null;
+};
+
+export const readRuntimeViewSelection = (): RuntimeViewSelection => ({
+  revision: runtimeViewSelectionRevision,
+  entityId: normalizeEntityIdForRuntimeView(get(runtimeViewActiveEntityId)),
+  accountsPage: Math.max(0, Math.floor(Number(get(runtimeViewAccountsPage) ?? 0))),
+  booksPage: Math.max(0, Math.floor(Number(get(runtimeViewBooksPage) ?? 0))),
+  atHeight: selectedRuntimeViewHeight,
+});
+
+export const runtimeViewSelectionMatches = (expected: RuntimeViewSelection): boolean => {
+  const current = readRuntimeViewSelection();
+  return current.revision === expected.revision &&
+    current.entityId === expected.entityId &&
+    current.accountsPage === expected.accountsPage &&
+    current.booksPage === expected.booksPage &&
+    current.atHeight === expected.atHeight;
+};
+
+export const runtimeViewPublicationMatches = (
+  expectedGeneration: number,
+  currentGeneration: number,
+  expectedSelection: RuntimeViewSelection,
+): boolean => expectedGeneration === currentGeneration &&
+  runtimeViewSelectionMatches(expectedSelection);
 
 export const setRuntimeViewActiveEntityId = (entityId: string): void => {
-  runtimeViewActiveEntityId.set(normalizeEntityIdForRuntimeView(entityId));
+  const normalizedEntityId = normalizeEntityIdForRuntimeView(entityId);
+  if (get(runtimeViewActiveEntityId) === normalizedEntityId) return;
+  runtimeViewSelectionRevision += 1;
+  runtimeViewRefreshId += 1;
+  runtimeViewActiveEntityId.set(normalizedEntityId);
   runtimeViewAccountsPage.set(0);
   runtimeViewBooksPage.set(0);
 };
 
 export const setRuntimeViewPage = (kind: 'accounts' | 'books', pageIndex: number): void => {
   const safePage = Math.max(0, Math.floor(Number(pageIndex) || 0));
-  if (kind === 'accounts') runtimeViewAccountsPage.set(safePage);
-  else runtimeViewBooksPage.set(safePage);
+  const target = kind === 'accounts' ? runtimeViewAccountsPage : runtimeViewBooksPage;
+  if (get(target) === safePage) return;
+  runtimeViewSelectionRevision += 1;
+  runtimeViewRefreshId += 1;
+  target.set(safePage);
 };
 
 export const resetRuntimeViewSelection = (): void => {
+  runtimeViewSelectionRevision += 1;
+  runtimeViewRefreshId += 1;
   runtimeViewActiveEntityId.set('');
   runtimeViewAccountsPage.set(0);
   runtimeViewBooksPage.set(0);
@@ -232,7 +316,6 @@ const emptyRuntimeView = (atHeight = selectedRuntimeViewHeight): RuntimeView => 
 const errorMessage = (value: unknown): string =>
   value instanceof Error ? value.message : String(value || 'RuntimeView refresh failed');
 
-let runtimeViewRefreshId = 0;
 let heightRefreshInFlight = false;
 let pendingHeightRefresh = 0;
 let heightRefreshRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -256,7 +339,9 @@ export const resetRuntimeView = (): void => {
   runtimeViewRefreshId += 1;
   pendingHeightRefresh = 0;
   clearHeightRefreshRetry();
+  if (selectedRuntimeViewHeight !== null) runtimeViewSelectionRevision += 1;
   selectedRuntimeViewHeight = null;
+  runtimeViewPageInfo.set(null);
   runtimeView.set(emptyRuntimeView());
 };
 
@@ -292,7 +377,10 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
       loading: false,
       error: 'Runtime adapter is not connected',
     };
-    if (requestStillCurrent()) runtimeView.set(next);
+    if (requestStillCurrent()) {
+      runtimeViewPageInfo.set(null);
+      runtimeView.set(next);
+    }
     return next;
   }
 
@@ -320,7 +408,11 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
     };
     // A superseded read still owns its result. Latest-wins applies only to the
     // shared store; callers must never receive another request's transient state.
-    if (requestStillCurrent()) runtimeView.set(next);
+    if (requestStillCurrent()) {
+      runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));
+      runtimeView.set(next);
+      continueRuntimeViewCatchup();
+    }
     return next;
   } catch (error) {
     if (!requestStillCurrent()) throw error;
@@ -336,6 +428,7 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
       loading: false,
       error: errorMessage(error),
     };
+    runtimeViewPageInfo.set(null);
     runtimeView.set(next);
     throw error;
   }
@@ -352,6 +445,9 @@ const currentRuntimeViewQuery = (): RuntimeAdapterReadQuery => {
   return runtimeViewQueryAtHeight(query, selectedRuntimeViewHeight);
 };
 
+export const refreshSelectedRuntimeView = (): Promise<RuntimeView> =>
+  refreshRuntimeView(currentRuntimeViewQuery());
+
 export const setRuntimeViewAtHeight = async (value: number | null): Promise<RuntimeView> => {
   const atHeight = normalizeRuntimeViewAtHeight(value);
   const current = get(runtimeView);
@@ -364,9 +460,11 @@ export const setRuntimeViewAtHeight = async (value: number | null): Promise<Runt
     return current;
   }
 
+  if (selectedRuntimeViewHeight !== atHeight) runtimeViewSelectionRevision += 1;
   selectedRuntimeViewHeight = atHeight;
   runtimeViewRefreshId += 1;
   pendingHeightRefresh = 0;
+  runtimeViewPageInfo.set(null);
   runtimeView.update((view) => ({
     ...view,
     atHeight,
@@ -406,18 +504,24 @@ const scheduleRuntimeViewHeightRetry = (): void => {
   }, delayMs);
 };
 
-const refreshRuntimeViewAfterHeightAdvance = async (): Promise<void> => {
+function continueRuntimeViewCatchup(): void {
+  if (heightRefreshInFlight || selectedRuntimeViewHeight !== null) return;
+  const view = get(runtimeView);
+  const handle = get(runtimeControllerHandle);
+  if (!runtimeViewTracksHeightAdvance(view, handle.status, pendingHeightRefresh)) return;
+  void refreshRuntimeViewAfterHeightAdvance();
+}
+
+async function refreshRuntimeViewAfterHeightAdvance(): Promise<void> {
   if (selectedRuntimeViewHeight !== null) return;
   if (heightRefreshInFlight) return;
   heightRefreshInFlight = true;
   try {
     await refreshRuntimeView(currentRuntimeViewQuery());
   } catch (error) {
-    runtimeView.update((view) => ({
-      ...view,
-      loading: false,
-      error: errorMessage(error),
-    }));
+    // refreshRuntimeView already surfaces a current failure in RuntimeView.
+    // Superseded failures remain auditable but must not overwrite a newer read.
+    errorLog.log(errorMessage(error), 'Runtime View Catch-up', error);
   } finally {
     heightRefreshInFlight = false;
     const frameHeight = Math.max(0, Math.floor(Number(get(runtimeView).frame?.height || 0)));
@@ -431,7 +535,7 @@ const refreshRuntimeViewAfterHeightAdvance = async (): Promise<void> => {
       clearHeightRefreshRetry();
     }
   }
-};
+}
 
 runtimeAdapter.subscribe(() => {
   resetRuntimeView();
@@ -445,13 +549,13 @@ runtimeAdapterHeight.subscribe((height) => {
   }));
   const handle = get(runtimeControllerHandle);
   const view = get(runtimeView);
-  // The adapter switcher owns the initial projection. Starting an automatic
-  // height refresh before that frame exists races the initial read and can
-  // make its caller observe a transient frame=null as a successful result.
-  if (!runtimeViewNeedsHeightRefresh(view, handle.status, nextHeight)) return;
+  if (!runtimeViewTracksHeightAdvance(view, handle.status, nextHeight)) return;
   if (nextHeight > pendingHeightRefresh) {
     clearHeightRefreshRetry();
   }
   pendingHeightRefresh = Math.max(pendingHeightRefresh, nextHeight);
+  // The adapter switcher owns the initial projection. Remember newer committed
+  // heights while it loads, then catch up from the frame publication above.
+  if (!view.frame) return;
   void refreshRuntimeViewAfterHeightAdvance();
 });

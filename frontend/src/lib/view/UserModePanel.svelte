@@ -36,6 +36,7 @@
   } from '$lib/utils/onboardingState';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { panelBridge } from './utils/panelBridge';
+  import { resolveActiveLocalReplica } from './local-runtime-selection';
 
   import EntityWorkspace from '$lib/components/Entity/EntityWorkspace.svelte';
   import { runtimeProjectionMatchesRuntime } from '$lib/components/Entity/entity-workspace';
@@ -322,15 +323,6 @@
     return null;
   });
 
-  function firstReplicaInFrame(frame: RuntimeFrame | null | undefined): EntityReplica | null {
-    const replicas = frame?.state.eReplicas;
-    if (!replicas) return null;
-    for (const replica of replicas.values()) {
-      if (replica?.entityId && replica?.signerId) return replica;
-    }
-    return null;
-  }
-
   function findReplicaByEntityInFrame(frame: RuntimeFrame | null | undefined, entityId: string): EntityReplica | null {
     const normalized = String(entityId || '').trim().toLowerCase();
     const replicas = frame?.state.eReplicas;
@@ -363,7 +355,7 @@
     const frame = $runtimeView.frame;
     const active = frame?.activeEntity ?? null;
     const entityId = normalizeId($runtimeView.activeEntityId || frame?.activeEntityId || active?.summary?.entityId || active?.core?.entityId);
-    const signerId = normalizeId(active?.core?.signerId || selectedSignerId);
+    const signerId = normalizeId(active?.core?.signerId);
     if (!entityId) return;
     if (selectedEntityId === entityId && (!signerId || selectedSignerId === signerId)) return;
     viewMode = 'entity';
@@ -383,19 +375,16 @@
       vault?.signers?.[activeSignerIndex]
       || vault?.signers?.[0]
       || null;
-    const activeSignerId = String(activeSigner?.address || '').trim().toLowerCase();
-    const preferredReplica = activeSignerId
-      ? findReplicaBySigner(currentFrame, activeSignerId, null)
-      : null;
-    const replica = preferredReplica || firstReplicaInFrame(currentFrame);
+    const replica = resolveActiveLocalReplica(currentFrame.state.eReplicas, activeSigner);
     if (!replica?.entityId || !replica?.signerId) return;
 
-    // After full device wipe the runtime can be restored from a tower before the
-    // old tab selection exists. Defaulting to the active local signer replica
-    // keeps wallet boot deterministic instead of landing on an empty "Select Entity" shell.
+    // Recovery can publish restored replicas before vault metadata reaches this
+    // panel. Wait for the exact Entity + signer pair: Map insertion order is not
+    // identity, and one signer may control more than one Entity.
     viewMode = 'entity';
     selectedEntityId = String(replica.entityId).toLowerCase();
     selectedSignerId = String(replica.signerId).toLowerCase();
+    setRuntimeViewActiveEntityId(selectedEntityId);
     if (selectedJurisdictionName && selectedReplicaJurisdiction && selectedJurisdictionName !== selectedReplicaJurisdiction) {
       selectedJurisdictionName = selectedReplicaJurisdiction;
     }
@@ -421,6 +410,7 @@
     viewMode = 'entity';
     selectedEntityId = fallbackEntityId;
     selectedSignerId = fallbackSignerId;
+    setRuntimeViewActiveEntityId(fallbackEntityId);
   });
 
   // Clear entity/account if jurisdiction filter no longer matches
@@ -779,8 +769,8 @@
     selectedSignerId = signerId;
     selectedAccountId = null;
     selectedJurisdictionName = null; // Clear filter to allow any entity
+    setRuntimeViewActiveEntityId(entityId);
     if (isRemoteRuntime) {
-      setRuntimeViewActiveEntityId(entityId);
       void refreshCurrentRuntimeProjection();
     }
   }

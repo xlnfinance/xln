@@ -2,10 +2,13 @@
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeCommandLatestReceipt } from '$lib/stores/runtimeCommandBus';
   import {
-    refreshRuntimeView,
     runtimeView,
+    runtimeViewAccountsPage,
+    runtimeViewBooksPage,
     runtimeViewFrameMatchesAtHeight,
+    runtimeViewQueryAtHeight,
   } from '$lib/stores/runtimeViewStore';
+  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import type { RuntimeAdapterViewFrame } from '@xln/runtime/api/public/runtime-module';
   import { REMOTE_RUNTIME } from '@xln/runtime/config/constants';
   import type { Tab } from '$lib/types/ui';
@@ -58,19 +61,49 @@
     return !!frameEntityId && (!entityId || frameEntityId === entityId);
   };
 
+  const projectionFrameMatchesPages = (
+    frame: RuntimeAdapterViewFrame | null | undefined,
+    accountsPage: number,
+    booksPage: number,
+  ): boolean => !!frame?.activeEntity &&
+    (frame.activeEntity.accounts.pageIndex ?? 0) === accountsPage &&
+    (frame.activeEntity.books.pageIndex ?? 0) === booksPage;
+
   const isActionableRuntimeReceipt = (status: string | null | undefined): boolean =>
     status === 'pending' || status === 'error';
 
-  async function refreshWorkspaceProjection(key: string, entityId: string): Promise<void> {
+  async function refreshWorkspaceProjection(
+    key: string,
+    entityId: string,
+    atHeight: number | null,
+    minimumLiveHeight: number,
+    accountsPage: number,
+    booksPage: number,
+  ): Promise<void> {
     const requestId = ++workspaceProjectionRequestId;
     try {
-      const view = await refreshRuntimeView({
+      const frame = await runtimeQueryClient.readViewFrame(runtimeViewQueryAtHeight({
         ...(entityId ? { entityId } : {}),
         accountsLimit: WORKSPACE_VIEW_PAGE_SIZE,
         booksLimit: WORKSPACE_VIEW_PAGE_SIZE,
-      });
+        accountsPage,
+        booksPage,
+      }, atHeight));
       if (requestId !== workspaceProjectionRequestId || key !== workspaceProjectionKey) return;
-      workspaceProjectionFrame = view.frame;
+      if (!projectionFrameMatchesEntity(frame, entityId)) {
+        throw new Error(`Entity workspace projection mismatch: expected ${entityId || 'default'}`);
+      }
+      if (!runtimeViewFrameMatchesAtHeight(frame, atHeight)) {
+        throw new Error(`Entity workspace height mismatch: expected ${atHeight ?? 'LIVE'}, received ${frame.height}`);
+      }
+      const frameHeight = Math.max(0, Math.floor(Number(frame.height || 0)));
+      if (atHeight === null && frameHeight < minimumLiveHeight) {
+        throw new Error(`Entity workspace stale live projection: expected >= h${minimumLiveHeight}, received h${frameHeight}`);
+      }
+      if (!projectionFrameMatchesPages(frame, accountsPage, booksPage)) {
+        throw new Error(`Entity workspace page mismatch: expected accounts=${accountsPage}, books=${booksPage}`);
+      }
+      workspaceProjectionFrame = frame;
       workspaceProjectionError = null;
     } catch (error) {
       if (requestId !== workspaceProjectionRequestId || key !== workspaceProjectionKey) return;
@@ -88,15 +121,30 @@
       ? (tabEntityId || runtimeActiveEntityId)
       : tabEntityId;
     const selectedAtHeight = $runtimeView.atHeight;
+    const minimumLiveHeight = selectedAtHeight === null
+      ? Math.max(0, Math.floor(Number(handle.height || 0)))
+      : selectedAtHeight;
+    const accountsPage = $runtimeViewAccountsPage;
+    const booksPage = $runtimeViewBooksPage;
     // Connection state is not projection identity. Keep the last certified
     // frame mounted while the adapter reconnects so the command gate can
     // disable mutations without erasing the user's workspace.
-    const nextKey = `${selectedRuntimeId}|${entityId}|${selectedAtHeight ?? 'live'}`;
+    const nextKey = `${selectedRuntimeId}|${entityId}|h:${minimumLiveHeight}|a:${accountsPage}|b:${booksPage}`;
     if (
       runtimeProjectionMatchesRuntime($runtimeView.runtimeId, selectedRuntimeId)
       && projectionFrameMatchesEntity($runtimeView.frame, entityId)
       && runtimeViewFrameMatchesAtHeight($runtimeView.frame, selectedAtHeight)
+      && (
+        selectedAtHeight !== null ||
+        Math.max(0, Math.floor(Number($runtimeView.frame?.height || 0))) >= minimumLiveHeight
+      )
+      && projectionFrameMatchesPages($runtimeView.frame, accountsPage, booksPage)
     ) {
+      if (workspaceProjectionKey !== nextKey || workspaceProjectionFrame !== $runtimeView.frame) {
+        // Adopting the canonical frame supersedes any detached read that is
+        // still resolving for this workspace context.
+        workspaceProjectionRequestId += 1;
+      }
       workspaceProjectionKey = nextKey;
       workspaceProjectionFrame = $runtimeView.frame;
       workspaceProjectionError = null;
@@ -105,7 +153,7 @@
       workspaceProjectionFrame = null;
       workspaceProjectionError = null;
       if (handle.status === 'connected' && entityId) {
-        void refreshWorkspaceProjection(nextKey, entityId);
+        void refreshWorkspaceProjection(nextKey, entityId, selectedAtHeight, minimumLiveHeight, accountsPage, booksPage);
       }
     }
   }

@@ -202,6 +202,7 @@
   let remoteScanHeightDraft = '';
   let remoteScanError = '';
   let remoteEntityChanging = false;
+  let remoteEntitySelectionRequestId = 0;
   let pendingDeepLink: { height: number; entityId: string; runtimeId: string } | null = null;
   let deepLinkApplied = false;
   let lastRuntimeViewSelectionKey = '';
@@ -516,6 +517,7 @@
     remoteScanError = '';
     try {
       const result = await scanRuntimeAdapterHistoryAtHeight(requestedHeight);
+      if (!result) return;
       remoteScanHeightDraft = String(result.snapshot.height || requestedHeight);
       safeSet(timeIndex, result.frameIndex);
       safeSet(isLive, false);
@@ -528,23 +530,27 @@
   async function selectRemoteEntity(entityId: string): Promise<void> {
     const normalized = String(entityId || '').trim().toLowerCase();
     if (!normalized || normalized === $runtimeViewActiveEntityId) return;
+    const requestId = ++remoteEntitySelectionRequestId;
     remoteEntityChanging = true;
     remoteScanError = '';
     try {
       setRuntimeViewActiveEntityId(normalized);
       await refreshCurrentRuntimeProjection();
+      if (requestId !== remoteEntitySelectionRequestId) return;
       if (!$isLive && selectedRuntimeHistoryHeight) {
         const height = Number(selectedRuntimeHistoryHeight || 0);
         remoteScanHeightDraft = String(height);
         const result = await scanRuntimeAdapterHistoryAtHeight(height);
+        if (!result || requestId !== remoteEntitySelectionRequestId) return;
         safeSet(timeIndex, result.frameIndex);
         safeSet(isLive, false);
       }
       writeTimeMachineDeepLink(Number(selectedRuntimeHistoryHeight || $runtimeControllerHandle.height || 1), normalized);
     } catch (error) {
+      if (requestId !== remoteEntitySelectionRequestId) return;
       remoteScanError = error instanceof Error ? error.message : String(error || 'target switch failed');
     } finally {
-      remoteEntityChanging = false;
+      if (requestId === remoteEntitySelectionRequestId) remoteEntityChanging = false;
     }
   }
 

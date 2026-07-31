@@ -7,10 +7,12 @@ import {
 } from './runtimeControllerStore';
 import { runtimeQueryClient } from './runtimeQueryClient';
 import {
-  runtimeViewAccountsPage,
-  runtimeViewActiveEntityId,
-  runtimeViewBooksPage,
+  readRuntimeViewSelection,
+  emptyRuntimeViewHistoryScan,
   runtimeViewHistoryScan,
+  runtimeViewPageInfoFromFrame,
+  runtimeViewSelectionMatches,
+  setRuntimeViewActiveEntityId,
   type RuntimeViewPageInfo,
 } from './runtimeViewStore';
 
@@ -25,6 +27,14 @@ export type RuntimeHistoryFrame = {
   activeEntityId: string | null;
   pageInfo: RuntimeViewPageInfo | null;
   frame: RuntimeAdapterViewFrame;
+};
+
+export type RuntimeHistoryContext = {
+  runtimeId: string;
+  mode: 'embedded' | 'remote';
+  entityId: string;
+  accountsPage: number;
+  booksPage: number;
 };
 
 const normalizeHeight = (value: unknown): number => {
@@ -42,36 +52,47 @@ const normalizeTimestamp = (value: unknown): number | null => {
   return Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : null;
 };
 
-const pageInfoFromFrame = (
-  entityId: string | null,
-  frame: RuntimeAdapterViewFrame,
-): RuntimeViewPageInfo | null => {
-  const active = frame.activeEntity;
-  if (!active || !entityId) return null;
-  const accountsPageIndex = active.accounts.pageIndex ?? 0;
-  const accountsPageCount = active.accounts.pageCount ?? 1;
-  const booksPageIndex = active.books.pageIndex ?? 0;
-  const booksPageCount = active.books.pageCount ?? 1;
-  return {
-    entityId,
-    accountsShown: active.accounts.items.length,
-    accountsTotal: active.accounts.totalItems ?? active.accounts.items.length,
-    accountsPageIndex,
-    accountsPageCount,
-    accountsPrevCursor: active.accounts.prevCursor ?? null,
-    accountsNextCursor: active.accounts.nextCursor ?? null,
-    accountsHasMore: accountsPageIndex + 1 < accountsPageCount && !!active.accounts.nextCursor,
-    booksShown: active.books.items.length,
-    booksTotal: active.books.totalItems ?? active.books.items.length,
-    booksPageIndex,
-    booksPageCount,
-    booksPrevCursor: active.books.prevCursor ?? null,
-    booksNextCursor: active.books.nextCursor ?? null,
-    booksHasMore: booksPageIndex + 1 < booksPageCount && !!active.books.nextCursor,
-  };
+export const runtimeHistoryFrames = writable<RuntimeHistoryFrame[]>([]);
+let runtimeHistoryContextKey = '';
+let runtimeHistoryScanGeneration = 0;
+
+const normalizePage = (value: unknown): number =>
+  Math.max(0, Math.floor(Number(value) || 0));
+
+export const createRuntimeHistoryContext = (
+  input: RuntimeHistoryContext,
+): RuntimeHistoryContext => ({
+  runtimeId: String(input.runtimeId || '').trim().toLowerCase(),
+  mode: input.mode,
+  entityId: normalizeEntityId(input.entityId) || '',
+  accountsPage: normalizePage(input.accountsPage),
+  booksPage: normalizePage(input.booksPage),
+});
+
+const runtimeHistoryContextKeyFromContext = (input: RuntimeHistoryContext): string => {
+  const context = createRuntimeHistoryContext(input);
+  return [
+    context.runtimeId,
+    context.mode,
+    context.entityId,
+    context.accountsPage,
+    context.booksPage,
+  ].join('|');
 };
 
-export const runtimeHistoryFrames = writable<RuntimeHistoryFrame[]>([]);
+export const ensureRuntimeHistoryContext = (
+  input: RuntimeHistoryContext,
+  endpoint = '',
+): RuntimeHistoryContext => {
+  const context = createRuntimeHistoryContext(input);
+  const nextKey = runtimeHistoryContextKeyFromContext(context);
+  if (runtimeHistoryContextKey === nextKey) return context;
+  runtimeHistoryScanGeneration += 1;
+  runtimeHistoryContextKey = nextKey;
+  runtimeHistoryFrames.set([]);
+  runtimeViewHistoryScan.set(emptyRuntimeViewHistoryScan(endpoint));
+  return context;
+};
 
 export const runtimeHistoryFrameFromViewFrame = (
   input: {
@@ -91,7 +112,7 @@ export const runtimeHistoryFrameFromViewFrame = (
     height,
     timestamp: normalizeTimestamp(frame.activeEntity?.core?.timestamp ?? height),
     activeEntityId,
-    pageInfo: pageInfoFromFrame(activeEntityId, frame),
+    pageInfo: runtimeViewPageInfoFromFrame(frame),
     frame,
   };
 };
@@ -117,22 +138,48 @@ export const upsertRuntimeHistoryFrame = (
     runtimeId: string;
     mode: 'embedded' | 'remote';
     frame: RuntimeAdapterViewFrame;
+    context: RuntimeHistoryContext;
   },
   limit: number,
 ): RuntimeHistoryFrame[] => {
+  const context = createRuntimeHistoryContext(input.context);
+  const expectedContextKey = runtimeHistoryContextKeyFromContext(context);
+  if (runtimeHistoryContextKey !== expectedContextKey) {
+    throw new Error('RUNTIME_HISTORY_CONTEXT_SUPERSEDED');
+  }
   const nextFrame = runtimeHistoryFrameFromViewFrame(input);
+  if (nextFrame.runtimeId !== context.runtimeId || nextFrame.mode !== context.mode) {
+    throw new Error(`RUNTIME_HISTORY_RUNTIME_MISMATCH:${context.runtimeId}:${nextFrame.runtimeId}`);
+  }
+  if (context.entityId && nextFrame.activeEntityId !== context.entityId) {
+    throw new Error(`RUNTIME_HISTORY_ENTITY_MISMATCH:${context.entityId}:${nextFrame.activeEntityId || 'missing'}`);
+  }
+  if (nextFrame.pageInfo) {
+    if (
+      nextFrame.pageInfo.accountsPageIndex !== context.accountsPage ||
+      nextFrame.pageInfo.booksPageIndex !== context.booksPage
+    ) {
+      throw new Error(
+        `RUNTIME_HISTORY_PAGE_MISMATCH:${context.accountsPage}:${context.booksPage}:${nextFrame.pageInfo.accountsPageIndex}:${nextFrame.pageInfo.booksPageIndex}`,
+      );
+    }
+  } else if (context.entityId || context.accountsPage !== 0 || context.booksPage !== 0) {
+    throw new Error('RUNTIME_HISTORY_PAGE_INFO_MISSING');
+  }
   const nextFrames = mergeRuntimeHistoryFrame(get(runtimeHistoryFrames), nextFrame, limit);
   runtimeHistoryFrames.set(nextFrames);
   return nextFrames;
 };
 
 export const resetRuntimeHistoryFrames = (): void => {
+  runtimeHistoryScanGeneration += 1;
+  runtimeHistoryContextKey = '';
   runtimeHistoryFrames.set([]);
 };
 
 export const scanRuntimeAdapterHistoryAtHeight = async (
   height: number,
-): Promise<{ frameIndex: number; snapshot: { height: number }; frame: RuntimeAdapterViewFrame; framesCached: number }> => {
+): Promise<{ frameIndex: number; snapshot: { height: number }; frame: RuntimeAdapterViewFrame; framesCached: number } | null> => {
   const config = getRuntimeControllerConfig();
   if (!config || config.mode !== 'remote') {
     throw new Error('Remote Time Machine scan requires a remote runtime adapter');
@@ -141,6 +188,23 @@ export const scanRuntimeAdapterHistoryAtHeight = async (
   if (!Number.isFinite(requestedHeight) || requestedHeight < 1) {
     throw new Error('Remote Time Machine height must be a positive integer');
   }
+  const adapter = getRuntimeControllerAdapter();
+  if (!adapter || adapter.mode !== 'remote') {
+    throw new Error('Runtime adapter is not connected');
+  }
+  let selection = readRuntimeViewSelection();
+  let historyContext = ensureRuntimeHistoryContext({
+    runtimeId: adapter.runtimeId,
+    mode: 'remote',
+    entityId: selection.entityId,
+    accountsPage: selection.accountsPage,
+    booksPage: selection.booksPage,
+  }, config.wsUrl || '');
+  let scanGeneration = ++runtimeHistoryScanGeneration;
+  const requestStillCurrent = (): boolean =>
+    scanGeneration === runtimeHistoryScanGeneration &&
+    getRuntimeControllerAdapter() === adapter &&
+    runtimeViewSelectionMatches(selection);
 
   const startedAt = Date.now();
   runtimeViewHistoryScan.set({
@@ -159,38 +223,62 @@ export const scanRuntimeAdapterHistoryAtHeight = async (
   });
 
   try {
-    const adapter = getRuntimeControllerAdapter();
-    if (!adapter || adapter.mode !== 'remote') {
-      throw new Error('Runtime adapter is not connected');
-    }
-    const activeEntityId = get(runtimeViewActiveEntityId);
-    const accountsPage = get(runtimeViewAccountsPage);
-    const booksPage = get(runtimeViewBooksPage);
     const batch = await runtimeQueryClient.readHistoryFrameBatch({
-      entityId: activeEntityId,
+      entityId: selection.entityId,
       accountsLimit: REMOTE_HISTORY_VIEW_PAGE_SIZE,
       booksLimit: REMOTE_HISTORY_VIEW_PAGE_SIZE,
-      accountsPage,
-      booksPage,
+      accountsPage: selection.accountsPage,
+      booksPage: selection.booksPage,
       heights: [requestedHeight],
     });
-    const frame = batch.frames.find((item) => Math.max(0, Number(item.height || 0)) === requestedHeight)
-      ?? batch.frames[0];
+    if (!requestStillCurrent()) return null;
+    const frame = batch.frames.find((item) => Math.max(0, Number(item.height || 0)) === requestedHeight);
     if (!frame) {
       const unavailable = (batch.unavailable || []).find((item) => Number(item.height || 0) === requestedHeight);
       const detail = unavailable ? `${unavailable.code}: ${unavailable.message}` : 'height unavailable';
       throw new Error(`Remote Time Machine scan failed for height ${requestedHeight}: ${detail}`);
     }
+    const projected = runtimeHistoryFrameFromViewFrame({
+      runtimeId: adapter.runtimeId,
+      mode: 'remote',
+      frame,
+    });
+    if (selection.entityId && projected.activeEntityId !== selection.entityId) {
+      throw new Error(`Remote Time Machine entity mismatch: expected ${selection.entityId}, received ${projected.activeEntityId || '<missing>'}`);
+    }
+    if (
+      !projected.pageInfo ||
+      projected.pageInfo.accountsPageIndex !== selection.accountsPage ||
+      projected.pageInfo.booksPageIndex !== selection.booksPage
+    ) {
+      throw new Error(
+        `Remote Time Machine page mismatch: expected accounts=${selection.accountsPage}, books=${selection.booksPage}`,
+      );
+    }
+    if (!selection.entityId && projected.activeEntityId) {
+      setRuntimeViewActiveEntityId(projected.activeEntityId);
+      selection = readRuntimeViewSelection();
+      historyContext = ensureRuntimeHistoryContext({
+        runtimeId: adapter.runtimeId,
+        mode: 'remote',
+        entityId: selection.entityId,
+        accountsPage: selection.accountsPage,
+        booksPage: selection.booksPage,
+      }, config.wsUrl || '');
+      scanGeneration = runtimeHistoryScanGeneration;
+    }
     const projectionHistory = upsertRuntimeHistoryFrame({
       runtimeId: adapter.runtimeId,
       mode: 'remote',
       frame,
+      context: historyContext,
     }, REMOTE_HISTORY_SCAN_CACHE_LIMIT);
 
     const activeEntity = frame.activeEntity ?? null;
     const scannedHeight = Math.max(0, Math.floor(Number(frame.height || requestedHeight)));
     const frameIndex = projectionHistory.findIndex((item) => Math.max(0, Number(item.height || 0)) === scannedHeight);
     if (frameIndex < 0) throw new Error(`Remote Time Machine scan did not cache height ${scannedHeight}`);
+    if (!requestStillCurrent()) return null;
     runtimeViewHistoryScan.set({
       loading: false,
       error: null,
@@ -207,6 +295,7 @@ export const scanRuntimeAdapterHistoryAtHeight = async (
     });
     return { frameIndex, snapshot: { height: scannedHeight }, frame, framesCached: projectionHistory.length };
   } catch (error) {
+    if (!requestStillCurrent()) return null;
     const message = error instanceof Error ? error.message : String(error || 'Remote Time Machine scan failed');
     runtimeViewHistoryScan.set({
       loading: false,

@@ -1,5 +1,7 @@
 import type { RuntimeReplica, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 
+import { hasConnectedJurisdictionAdapter, hasRuntimeJurisdictionAddresses } from './vault-helpers';
+
 export const runtimeInputWorkSummary = (input: RuntimeInput | undefined) => ({
   runtimeTxs: (input?.runtimeTxs ?? []).map(tx =>
     tx.type === 'importReplica'
@@ -61,3 +63,47 @@ export const runtimeQuiesceWorkSummary = (env: RuntimeReplica) => ({
     ];
   }),
 });
+
+export const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: string): string => {
+  const cleanLogs = Array.isArray(env.infrastructure?.cleanLogs) ? env.infrastructure.cleanLogs : [];
+  const recentErrors = env.frameLogs
+    .filter(
+      entry =>
+        entry.level === 'error' || entry.message === 'RUNTIME_LOOP_ERROR' || entry.message === 'RUNTIME_LOOP_HALTED',
+    )
+    .slice(-3)
+    .map(entry => ({
+      level: entry.level ?? null,
+      category: entry.category ?? null,
+      message: entry.message ?? null,
+      data: entry.data ?? null,
+      entityId: entry.entityId ?? null,
+      timestamp: entry.timestamp ?? null,
+    }));
+  const replica = replicaName ? env.state.jReplicas.get(replicaName) : env.state.jReplicas.values().next().value;
+  const jState = replica
+    ? {
+        name: replica.name ?? null,
+        chainId: replica.chainId ?? null,
+        depositoryAddress: replica.depositoryAddress ?? null,
+        entityProviderAddress: replica.entityProviderAddress ?? null,
+        contracts: replica.contracts ?? null,
+        rpcs: replica.rpcs ?? null,
+        hasAdapter: hasConnectedJurisdictionAdapter(env, replica.name),
+        hasAddresses: hasRuntimeJurisdictionAddresses(replica),
+      }
+    : null;
+  return JSON.stringify(
+    {
+      runtimeId: env.runtimeId ?? null,
+      height: env.state.height ?? null,
+      latestHeight: env.state.height ?? null,
+      loopActive: env.infrastructure?.loopActive ?? null,
+      jState,
+      recentErrors,
+      recentLogs: cleanLogs.slice(-8),
+    },
+    null,
+    2,
+  );
+};

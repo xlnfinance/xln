@@ -8,7 +8,30 @@ import {
 import {
   runtimeViewHeightRetryDelayMs,
   runtimeViewNeedsHeightRefresh,
+  runtimeViewTracksHeightAdvance,
+  readRuntimeViewSelection,
+  runtimeViewAccountsPage,
+  runtimeViewActiveEntityId,
+  runtimeViewBooksPage,
+  runtimeViewHistoryScan,
+  resetRuntimeViewSelection,
+  runtimeViewPublicationMatches,
+  runtimeViewSelectionMatches,
+  setRuntimeViewActiveEntityId,
 } from '../../frontend/src/lib/stores/runtimeViewStore';
+import {
+  ensureRuntimeHistoryContext,
+  resetRuntimeHistoryFrames,
+  runtimeHistoryFrames,
+  upsertRuntimeHistoryFrame,
+} from '../../frontend/src/lib/stores/runtimeHistoryStore';
+
+const readStore = <T>(store: { subscribe: (run: (value: T) => void) => () => void }): T => {
+  let current!: T;
+  const unsubscribe = store.subscribe((value) => { current = value; });
+  unsubscribe();
+  return current;
+};
 
 test('runtime query client exposes typed projection reads and bounded cache', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
@@ -33,12 +56,62 @@ test('runtime query client exposes typed projection reads and bounded cache', ()
   expect(source).toContain('this.cacheRuntimeId || handle.id');
 });
 
+test('remote history cache clears synchronously and rejects a superseded selection', () => {
+  resetRuntimeHistoryFrames();
+  const contextA = ensureRuntimeHistoryContext({
+    runtimeId: 'runtime-a',
+    mode: 'remote',
+    entityId: '0xaaa',
+    accountsPage: 0,
+    booksPage: 0,
+  }, 'ws://runtime-a');
+  const frame = {
+    height: 7,
+    entities: [],
+    activeEntityId: '0xaaa',
+    activeEntity: {
+      summary: { entityId: '0xaaa' },
+      core: { entityId: '0xaaa', timestamp: 7 },
+      accounts: { items: [], totalItems: 0, pageIndex: 0, pageCount: 1 },
+      books: { items: [], totalItems: 0, pageIndex: 0, pageCount: 1 },
+    },
+  } as never;
+  upsertRuntimeHistoryFrame({
+    runtimeId: 'runtime-a',
+    mode: 'remote',
+    frame,
+    context: contextA,
+  }, 24);
+  expect(readStore(runtimeHistoryFrames)).toHaveLength(1);
+  runtimeViewHistoryScan.update((state) => ({ ...state, loading: true, requestedHeight: 7 }));
+
+  ensureRuntimeHistoryContext({
+    runtimeId: 'runtime-a',
+    mode: 'remote',
+    entityId: '0xbbb',
+    accountsPage: 0,
+    booksPage: 0,
+  }, 'ws://runtime-a');
+  expect(readStore(runtimeHistoryFrames)).toEqual([]);
+  expect(readStore(runtimeViewHistoryScan).loading).toBe(false);
+  expect(() => upsertRuntimeHistoryFrame({
+    runtimeId: 'runtime-a',
+    mode: 'remote',
+    frame,
+    context: contextA,
+  }, 24)).toThrow('RUNTIME_HISTORY_CONTEXT_SUPERSEDED');
+  resetRuntimeHistoryFrames();
+});
+
 test('runtime view store owns the active projected RuntimeView without RuntimeReplica access', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
 
   expect(source).toContain('export type RuntimeView');
   expect(source).toContain('export const runtimeView');
   expect(source).toContain('export const refreshRuntimeView');
+  expect(source).toContain('export const refreshSelectedRuntimeView');
+  expect(source).toContain('refreshRuntimeView(currentRuntimeViewQuery())');
+  expect(source).toContain('if (get(runtimeViewActiveEntityId) === normalizedEntityId) return;');
   expect(source).toContain('runtimeQueryClient.readHead()');
   expect(source).toContain('runtimeQueryClient.readViewFrame(query)');
   expect(source).toContain('runtimeControllerHandle');
@@ -49,7 +122,7 @@ test('runtime view store owns the active projected RuntimeView without RuntimeRe
   expect(source).toContain('const requestStillCurrent = (): boolean =>');
   expect(source).toContain('current.id === expectedRuntimeId');
   expect(source).toContain('current.mode === expectedRuntimeMode');
-  expect(source).toContain('if (requestStillCurrent()) runtimeView.set(next);');
+  expect(source).toContain('runtimeViewPageInfo.set(runtimeViewPageInfoFromFrame(frame));');
   expect(source).toContain('if (!requestStillCurrent()) throw error;');
   expect(source).toContain('runtimeAdapter.subscribe');
   expect(source).toContain('resetRuntimeView();');
@@ -60,6 +133,66 @@ test('runtime view store owns the active projected RuntimeView without RuntimeRe
   expect(source).not.toContain('getEnv');
   expect(source).not.toContain('setXlnEnvironment');
   expect(source).not.toContain('runtimeAdapterStore');
+});
+
+test('re-pinning the same wallet Entity preserves account pagination', () => {
+  resetRuntimeViewSelection();
+  try {
+    setRuntimeViewActiveEntityId('0xentity-a');
+    runtimeViewAccountsPage.set(3);
+    runtimeViewBooksPage.set(4);
+
+    setRuntimeViewActiveEntityId(' 0xENTITY-A ');
+
+    expect(readStore(runtimeViewActiveEntityId)).toBe('0xentity-a');
+    expect(readStore(runtimeViewAccountsPage)).toBe(3);
+    expect(readStore(runtimeViewBooksPage)).toBe(4);
+  } finally {
+    resetRuntimeViewSelection();
+  }
+});
+
+test('an ABA remote Entity refresh cannot publish after the newer selection revision', async () => {
+  resetRuntimeViewSelection();
+  try {
+    setRuntimeViewActiveEntityId('0xentity-a');
+    const selectionA = readRuntimeViewSelection();
+    let resolveA!: (value: string) => void;
+    const delayedA = new Promise<string>((resolve) => { resolveA = resolve; });
+    const published: string[] = [];
+    let currentGeneration = 0;
+    const publishIfCurrent = async (
+      generation: number,
+      selection: typeof selectionA,
+      value: Promise<string>,
+    ): Promise<void> => {
+      const resolved = await value;
+      if (runtimeViewPublicationMatches(generation, currentGeneration, selection)) published.push(resolved);
+    };
+    const refreshA = publishIfCurrent(++currentGeneration, selectionA, delayedA);
+
+    setRuntimeViewActiveEntityId('0xentity-b');
+    const selectionB = readRuntimeViewSelection();
+    await publishIfCurrent(++currentGeneration, selectionB, Promise.resolve('B'));
+
+    setRuntimeViewActiveEntityId('0xentity-a');
+    const selectionA2 = readRuntimeViewSelection();
+    await publishIfCurrent(++currentGeneration, selectionA2, Promise.resolve('A2'));
+    expect(runtimeViewSelectionMatches(selectionA)).toBe(false);
+    resolveA('A');
+    await refreshA;
+
+    expect(published).toEqual(['B', 'A2']);
+  } finally {
+    resetRuntimeViewSelection();
+  }
+});
+
+test('automatic root refresh preserves the pinned RuntimeView Entity', () => {
+  const source = readFileSync('frontend/src/lib/view/View.svelte', 'utf8');
+
+  expect(source).toContain('refreshSelectedRuntimeView()');
+  expect(source).not.toContain('refreshRuntimeView()');
 });
 
 test('runtime view height pushes cannot race the initial remote projection', () => {
@@ -73,6 +206,20 @@ test('runtime view height pushes cannot race the initial remote projection', () 
   expect(runtimeViewNeedsHeightRefresh({ ...liveView, atHeight: 10 }, 'connected', 11)).toBe(false);
   expect(runtimeViewNeedsHeightRefresh(liveView, 'connected', 10)).toBe(false);
   expect(runtimeViewNeedsHeightRefresh(liveView, 'connected', 11)).toBe(true);
+});
+
+test('runtime view queues committed heights that arrive during the initial projection', () => {
+  const loadingLiveView = { atHeight: null, frame: null };
+
+  expect(runtimeViewTracksHeightAdvance(loadingLiveView, 'connected', 11)).toBe(true);
+  expect(runtimeViewTracksHeightAdvance(loadingLiveView, 'connecting', 11)).toBe(false);
+  expect(runtimeViewTracksHeightAdvance({ ...loadingLiveView, atHeight: 10 }, 'connected', 11)).toBe(false);
+  expect(runtimeViewTracksHeightAdvance(loadingLiveView, 'connected', 0)).toBe(false);
+
+  const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
+  expect(source).toContain('pendingHeightRefresh = Math.max(pendingHeightRefresh, nextHeight);');
+  expect(source).toContain('if (!view.frame) return;');
+  expect(source).toContain('continueRuntimeViewCatchup();');
 });
 
 test('runtime view catch-up retries back off instead of spinning', () => {
@@ -442,6 +589,8 @@ test('remote Time Machine scan reads historical frames through history-frame-bat
   expect(scanSource).toContain('runtimeQueryClient.readHistoryFrameBatch');
   expect(scanSource).toContain('heights: [requestedHeight]');
   expect(scanSource).toContain('upsertRuntimeHistoryFrame');
+  expect(scanSource).toContain('ensureRuntimeHistoryContext');
+  expect(scanSource).toContain('setRuntimeViewActiveEntityId(projected.activeEntityId)');
   expect(scanSource).toContain('snapshot: { height: scannedHeight }');
   expect(scanSource).not.toContain('remoteViewFrameToEnv');
   expect(scanSource).not.toContain('setXlnEnvironment');
