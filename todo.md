@@ -291,6 +291,20 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 3. Transport and secret persistence — P0/P1, owner-approved
 
+- [ ] Enforce one canonical transport-hop matrix and reject every accidental
+  loopback/proxy/relay detour. A normal user Runtime opens one authenticated
+  direct WebSocket to the Hub's public server; the Hub keeps that live socket
+  in its bounded in-memory connection registry and sends replies and Account
+  traffic back over the same bidirectional socket. Hub Runtimes connect
+  directly server-to-server with deterministic duplicate-socket ownership.
+  Relay transport is reserved for user-to-user delivery when neither user is
+  the connected Hub endpoint; user-to-Hub, Hub-to-user and Hub-to-Hub traffic
+  must never bounce through a local relay or a second loopback WebSocket.
+  Preserve the durable Runtime outbox and signed delivery receipts above the
+  transport choice. Add an executable topology matrix that records exact
+  source, target, socket identity, selected transport and hop count; assert one
+  hop for both direct classes, same-socket reverse delivery, bounded registry
+  cleanup/reconnect, no duplicate live authority, and relay-only user pairs.
 - [ ] Make off-chain faucet admission durable without adding production-style
   friction to the intentionally open testnet faucet. The server assigns a
   request id, waits until the Runtime command has a durable WAL receipt before
