@@ -91,7 +91,7 @@ async function readFaucetAccountSnapshot(
         if (signerId && String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
         const account = replica.state?.accounts?.get(hubId);
         if (!account) return null;
-        const delta = account.deltas?.get?.(tokenId) ?? account.deltas?.get?.(String(tokenId));
+        const delta = account.state.deltas?.get?.(tokenId) ?? account.state.deltas?.get?.(String(tokenId));
         if (!delta || typeof delta !== 'object') return null;
         const data = delta as Record<string, unknown>;
         const readBig = (value: unknown): string => {
@@ -217,7 +217,7 @@ async function measureAccountStateToDomLatency(
           if (signerId && String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
           const account = replica.state?.accounts?.get?.(hubId);
           if (!account) return null;
-          const delta = account.deltas?.get?.(tokenId) ?? account.deltas?.get?.(String(tokenId));
+          const delta = account.state.deltas?.get?.(tokenId) ?? account.state.deltas?.get?.(String(tokenId));
           return {
             currentHeight: Number(account.currentHeight || 0),
             deltaJson: JSON.stringify(delta, (_, value) => typeof value === 'bigint' ? value.toString() : value),

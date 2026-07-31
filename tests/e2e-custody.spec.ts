@@ -590,15 +590,15 @@ async function getOffchainOutboundCapacity(
           const accountDebug: OffchainCapacitySnapshot['replicas'][number]['accountMatches'][number] = {
             accountKey: String(accountEntityId || ''),
             matchesCounterparty,
-            leftEntity: String(account?.leftEntity || ''),
-            rightEntity: String(account?.rightEntity || ''),
-            deltaKeys: account?.deltas instanceof Map ? Array.from(account.deltas.keys()).map((value: unknown) => String(value)) : [],
+            leftEntity: String(account?.state?.leftEntity || ''),
+            rightEntity: String(account?.state?.rightEntity || ''),
+            deltaKeys: account?.state?.deltas instanceof Map ? Array.from(account.state.deltas.keys()).map((value: unknown) => String(value)) : [],
           };
           replicaDebug.accountMatches.push(accountDebug);
           if (!matchesCounterparty) {
             continue;
           }
-          const delta = account?.deltas?.get?.(tokenId);
+          const delta = account?.state?.deltas?.get?.(tokenId);
           if (!delta) {
             return {
               runtimeId: String(env.runtimeId || ''),
@@ -612,7 +612,7 @@ async function getOffchainOutboundCapacity(
             runtimeId: String(env.runtimeId || ''),
             reason: 'ok',
             delta: serializeDelta(delta),
-            iAmLeft: String(account.leftEntity || '').trim().toLowerCase() === ownerNorm,
+            iAmLeft: String(account.state.leftEntity || '').trim().toLowerCase() === ownerNorm,
             replicas: debugReplicas,
           } satisfies OffchainCapacitySnapshot;
         }
@@ -701,9 +701,9 @@ async function waitForOffchainOutboundCapacity(
                   matchesCounterparty:
                     String(accountEntityId || '').trim().toLowerCase() === counterpartyNorm
                     || accountMatchesCounterparty(account, ownerNorm, counterpartyNorm),
-                  leftEntity: String(account?.leftEntity || ''),
-                  rightEntity: String(account?.rightEntity || ''),
-                  deltaKeys: account?.deltas instanceof Map ? Array.from(account.deltas.keys()).map((item: unknown) => String(item)) : [],
+                  leftEntity: String(account?.state?.leftEntity || ''),
+                  rightEntity: String(account?.state?.rightEntity || ''),
+                  deltaKeys: account?.state?.deltas instanceof Map ? Array.from(account.state.deltas.keys()).map((item: unknown) => String(item)) : [],
                 });
               }
             }

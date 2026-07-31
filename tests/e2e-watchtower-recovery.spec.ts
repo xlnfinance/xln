@@ -209,8 +209,8 @@ async function readLocalHubAccountState(page: Page, hubId: string): Promise<{
       if (String(signerId || '').toLowerCase() !== runtimeId) continue;
       const account = replica?.state?.accounts?.get?.(targetHubId);
       if (!account) continue;
-      const tokenIds = account.deltas instanceof Map
-        ? Array.from(account.deltas.keys()).map((tokenId) => Number(tokenId)).sort((a, b) => a - b)
+      const tokenIds = account.state.deltas instanceof Map
+        ? Array.from(account.state.deltas.keys()).map((tokenId) => Number(tokenId)).sort((a, b) => a - b)
         : [];
       return {
         runtimeHeight: Number(env.state.height || 0),
@@ -282,8 +282,8 @@ async function readPrimaryLocalAccountState(page: Page): Promise<{
           hubId,
           currentHeight: Number(account?.currentHeight || 0),
           hasPendingFrame: Boolean(account?.pendingFrame),
-          tokenIds: account?.deltas instanceof Map
-            ? Array.from(account.deltas.keys()).map((tokenId) => Number(tokenId)).sort((a, b) => a - b)
+          tokenIds: account?.state?.deltas instanceof Map
+            ? Array.from(account.state.deltas.keys()).map((tokenId) => Number(tokenId)).sort((a, b) => a - b)
             : [],
         };
         if (!best || candidate.currentHeight > best.currentHeight) {

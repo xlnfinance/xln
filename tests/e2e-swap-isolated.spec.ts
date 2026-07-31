@@ -166,7 +166,7 @@ async function outCap(page: Page, entityId: string, counterpartyId: string, toke
     for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica.state?.accounts?.get(counterpartyId);
-      const delta = account?.deltas?.get(tokenId);
+      const delta = account?.state?.deltas?.get(tokenId);
       if (!delta || typeof delta !== 'object') return null;
       const raw = delta as Record<string, unknown>;
       const readBig = (value: unknown): string => {
@@ -215,7 +215,7 @@ async function holdTotal(page: Page, entityId: string, counterpartyId: string, t
     for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica.state?.accounts?.get(counterpartyId);
-      const delta = account?.deltas?.get(tokenId);
+      const delta = account?.state?.deltas?.get(tokenId);
       if (!delta || typeof delta !== 'object') return null;
       const raw = delta as Record<string, unknown>;
       const readBig = (value: unknown): string => {
@@ -289,7 +289,7 @@ async function waitForTokenDeltaActive(
         for (const [replicaKey, replica] of view.isolatedEnv.state.eReplicas.entries()) {
           if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
           const account = replica.state?.accounts?.get(counterpartyId);
-          const hasDelta = !!account?.deltas?.has(tokenId);
+          const hasDelta = !!account?.state?.deltas?.has(tokenId);
           return hasDelta && Number(account?.currentHeight || 0) > 0;
         }
         return false;
@@ -726,8 +726,8 @@ async function readSwapResolveSnapshotsFrom(
 
     const accountMatches = (accountKey: string, rawAccount: unknown): boolean => {
       const account = recordOf(rawAccount);
-      const left = typeof account.leftEntity === 'string' ? account.leftEntity.toLowerCase() : '';
-      const right = typeof account.rightEntity === 'string' ? account.rightEntity.toLowerCase() : '';
+      const left = typeof account.state.leftEntity === 'string' ? account.state.leftEntity.toLowerCase() : '';
+      const right = typeof account.state.rightEntity === 'string' ? account.state.rightEntity.toLowerCase() : '';
       const canonicalCp = typeof account.counterpartyEntityId === 'string' ? account.counterpartyEntityId.toLowerCase() : '';
       return accountKey.toLowerCase() === cp ||
         canonicalCp === cp ||
@@ -869,8 +869,8 @@ async function readSwapOfferSnapshot(
     const owner = String(entityId || '').toLowerCase();
     const cp = String(counterpartyId || '').toLowerCase();
     for (const [accountKey, account] of replica.state.accounts.entries()) {
-      const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-      const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+      const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+      const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
       const canonicalCp = typeof account?.counterpartyEntityId === 'string'
         ? String(account.counterpartyEntityId).toLowerCase()
         : '';
@@ -963,8 +963,8 @@ async function readSwapOfferCount(
       const canonicalCp = typeof account?.counterpartyEntityId === 'string'
         ? String(account.counterpartyEntityId).toLowerCase()
         : '';
-      const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-      const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+      const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+      const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
       if (canonicalCp === cp || (left && right && ((left === owner && right === cp) || (right === owner && left === cp)))) {
         return Number(account?.swapOffers?.size || 0);
       }
@@ -993,8 +993,8 @@ async function readSwapHistoryCount(
     const owner = String(entityId || '').toLowerCase();
     const cp = String(counterpartyId || '').toLowerCase();
     for (const [accountKey, account] of replica.state.accounts.entries()) {
-      const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-      const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+      const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+      const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
       const canonicalCp = typeof account?.counterpartyEntityId === 'string'
         ? String(account.counterpartyEntityId).toLowerCase()
         : '';

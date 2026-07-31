@@ -292,16 +292,16 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
           ? String(account.counterpartyEntityId).toLowerCase()
           : '';
         if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
         if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
       }
       return null;
     };
 
     const getDelta = (account: any, tokenId: number): any => {
-      if (!(account?.deltas instanceof Map)) return null;
-      return account.deltas.get(tokenId) ?? null;
+      if (!(account?.state?.deltas instanceof Map)) return null;
+      return account.state.deltas.get(tokenId) ?? null;
     };
 
     const getTokenDecimals = (tokenId: number): number => {
@@ -337,8 +337,8 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
 
     const listTokenIds = (account: any): number[] => {
       const tokenIds = new Set<number>(CANDIDATE_TOKEN_IDS);
-      if (account?.deltas instanceof Map) {
-        for (const [id] of account.deltas.entries()) {
+      if (account?.state?.deltas instanceof Map) {
+        for (const [id] of account.state.deltas.entries()) {
           const parsed = Number.parseInt(String(id), 10);
           if (Number.isFinite(parsed) && parsed > 0) tokenIds.add(parsed);
         }
@@ -704,8 +704,8 @@ async function readAccountTokenOutCapacity(
         break;
       }
     }
-    if (!account?.deltas || !(account.deltas instanceof Map)) return 0;
-    const delta = account.deltas.get(tokenId);
+    if (!account?.state?.deltas || !(account.state.deltas instanceof Map)) return 0;
+    const delta = account.state.deltas.get(tokenId);
     if (!delta) return 0;
 
     const totalDelta = BigInt(delta.ondelta || 0n) + BigInt(delta.offdelta || 0n);
@@ -720,7 +720,7 @@ async function readAccountTokenOutCapacity(
     const outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
     const outAllowance = BigInt(delta.leftAllowance || 0n);
     const leftHold = BigInt(delta.leftHold || 0n);
-    const leftEntity = normalize(String(account.leftEntity || ''));
+    const leftEntity = normalize(String(account.state.leftEntity || ''));
     const isLeft = leftEntity === normalize(entityId);
     let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
     outCapacity = nonNegative(outCapacity - leftHold);
@@ -914,8 +914,8 @@ async function readSwapState(
           ? String(account.counterpartyEntityId).toLowerCase()
           : '';
         if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
         if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
       }
       return null;
@@ -1000,7 +1000,7 @@ async function readSwapState(
       accountLockedFrameSize: Number(account?.lockedFrame?.accountTxs?.length ?? account?.lockedFrame?.txs?.length ?? 0),
       accountPendingFrameSize: Number(account?.pendingFrame?.accountTxs?.length ?? account?.pendingFrame?.txs?.length ?? 0),
       deltas: Object.fromEntries(
-        Array.from(account?.deltas?.entries?.() || []).map(([tokenId, delta]: [unknown, any]) => [
+        Array.from(account?.state?.deltas?.entries?.() || []).map(([tokenId, delta]: [unknown, any]) => [
           String(tokenId),
           {
             collateral: String(delta?.collateral ?? 0n),
@@ -1108,8 +1108,8 @@ async function readSwapResolveCount(
           ? String(account.counterpartyEntityId).toLowerCase()
           : '';
         if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
         if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
       }
       return null;
@@ -1153,8 +1153,8 @@ async function readPositiveSwapResolveCount(
           ? String(account.counterpartyEntityId).toLowerCase()
           : '';
         if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
         if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
       }
       return null;

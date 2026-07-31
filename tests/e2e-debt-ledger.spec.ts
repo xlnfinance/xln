@@ -856,7 +856,7 @@ async function readAccountDeltaSnapshot(
     });
     const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
-    const delta = account?.deltas?.get?.(tokenId);
+    const delta = account?.state?.deltas?.get?.(tokenId);
     if (!delta) return null;
     return {
       ondelta: String(delta.ondelta || 0n),

@@ -942,9 +942,9 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
                     String(candidate?.state?.entityId || candidate?.entityId || '').toLowerCase() === owner,
                 );
                 const account = replica?.state?.accounts?.get?.(counterparty);
-                const delta = account?.deltas?.get?.(tokenId);
+                const delta = account?.state?.deltas?.get?.(tokenId);
                 if (!account || !delta) return null;
-                const ownerIsLeft = owner === String(account.leftEntity || '').toLowerCase();
+                const ownerIsLeft = owner === String(account.state.leftEntity || '').toLowerCase();
                 return {
                   peerCreditLimit: String(ownerIsLeft ? delta.rightCreditLimit : delta.leftCreditLimit),
                   inboundHold: String(ownerIsLeft ? delta.rightHold : delta.leftHold),

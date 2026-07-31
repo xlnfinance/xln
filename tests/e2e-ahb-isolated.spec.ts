@@ -391,7 +391,7 @@ async function outCapRaw(page: Page, entityId: string, cpId: string): Promise<bi
     for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica?.state?.accounts?.get?.(cpId);
-      const rawDelta = account?.deltas?.get?.(1);
+      const rawDelta = account?.state?.deltas?.get?.(1);
       if (!rawDelta || typeof rawDelta !== 'object') return null;
 
       const raw = rawDelta as Record<string, unknown>;

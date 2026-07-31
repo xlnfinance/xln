@@ -409,7 +409,7 @@ async function readAccountCollateralState(
     });
     const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
-    const delta = account?.deltas?.get?.(tokenId);
+    const delta = account?.state?.deltas?.get?.(tokenId);
     return String(delta?.collateral || '0');
   }, { entityId, signerId, counterpartyId, tokenId });
   return BigInt(String(raw || '0'));
@@ -450,12 +450,12 @@ async function readAccountWithdrawableCollateralState(
     });
     const replica = key ? env.state.eReplicas.get(key) : null;
     const account = replica?.state?.accounts?.get?.(counterpartyId);
-    const delta = account?.deltas?.get?.(tokenId);
+    const delta = account?.state?.deltas?.get?.(tokenId);
     const deriveDelta = runtimeWindow.XLN?.deriveDelta;
     if (!delta || typeof deriveDelta !== 'function') return '0';
     const owner = String(entityId || '').toLowerCase();
-    const left = String(account?.leftEntity || '').toLowerCase();
-    const right = String(account?.rightEntity || '').toLowerCase();
+    const left = String(account?.state?.leftEntity || '').toLowerCase();
+    const right = String(account?.state?.rightEntity || '').toLowerCase();
     if (owner !== left && owner !== right) return '0';
     const derived = deriveDelta(delta, owner === left);
     const outCollateral = typeof derived?.outCollateral === 'bigint' ? derived.outCollateral : 0n;
@@ -490,8 +490,8 @@ async function readAccountProgress(
           ? String(account.counterpartyEntityId).toLowerCase()
           : '';
         if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
         if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
       }
       return null;

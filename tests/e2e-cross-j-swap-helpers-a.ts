@@ -763,9 +763,11 @@ export async function waitForAccountReady(
                 {
                   currentHeight?: number;
                   pendingFrame?: unknown;
-                  deltas?: Map<number, unknown>;
-                  leftEntity?: string;
-                  rightEntity?: string;
+                  state: {
+                    deltas: Map<number, unknown>;
+                    leftEntity: string;
+                    rightEntity: string;
+                  };
                 }
               >,
               ownerEntityId: string,
@@ -777,8 +779,8 @@ export async function waitForAccountReady(
               if (direct) return direct;
               for (const [accountKey, account] of accounts.entries()) {
                 if (normalizeEntityId(accountKey) === target) return account;
-                const left = normalizeEntityId(account.leftEntity);
-                const right = normalizeEntityId(account.rightEntity);
+                const left = normalizeEntityId(account.state.leftEntity);
+                const right = normalizeEntityId(account.state.rightEntity);
                 if ((left === owner && right === target) || (right === owner && left === target)) return account;
               }
               return null;
@@ -787,7 +789,7 @@ export async function waitForAccountReady(
             const account =
               accounts instanceof Map ? resolveCounterpartyAccount(accounts, identity.entityId, hubId) : null;
             if (!account || Number(account.currentHeight || 0) <= 0 || account.pendingFrame) return false;
-            return tokenIds.every((tokenId: number) => account.deltas instanceof Map && account.deltas.has(tokenId));
+            return tokenIds.every((tokenId: number) => account.state.deltas.has(tokenId));
           },
           { identity, hubId, tokenIds: Array.from(tokenIds) },
         ),
@@ -917,9 +919,11 @@ export async function ensureDirectHubAccount(
             {
               currentHeight?: number;
               pendingFrame?: unknown;
-              deltas?: Map<number, unknown>;
-              leftEntity?: string;
-              rightEntity?: string;
+              state: {
+                deltas: Map<number, unknown>;
+                leftEntity: string;
+                rightEntity: string;
+              };
             }
           >,
           ownerEntityId: string,
@@ -931,8 +935,8 @@ export async function ensureDirectHubAccount(
           if (direct) return direct;
           for (const [accountKey, account] of accounts.entries()) {
             if (normalizeEntityId(accountKey) === target) return account;
-            const left = normalizeEntityId(account.leftEntity);
-            const right = normalizeEntityId(account.rightEntity);
+            const left = normalizeEntityId(account.state.leftEntity);
+            const right = normalizeEntityId(account.state.rightEntity);
             if ((left === owner && right === target) || (right === owner && left === target)) return account;
           }
           return null;
@@ -940,12 +944,11 @@ export async function ensureDirectHubAccount(
         const accounts = replica?.state?.accounts;
         const account = accounts instanceof Map ? resolveCounterpartyAccount(accounts, identity.entityId, hubId) : null;
         if (!account || Number(account.currentHeight || 0) <= 0 || account.pendingFrame) return false;
-        if (!(account.deltas instanceof Map)) return false;
-        const rawDelta = account.deltas.get(tokenId);
+        const rawDelta = account.state.deltas.get(tokenId);
         if (!rawDelta || typeof rawDelta !== 'object') return false;
         const delta = rawDelta as Record<string, unknown>;
         const owner = normalizeEntityId(identity.entityId);
-        const left = normalizeEntityId(account.leftEntity);
+        const left = normalizeEntityId(account.state.leftEntity);
         const ownerIsLeft = left ? owner === left : owner < normalizeEntityId(hubId);
         const creditGrantedToHub = ownerIsLeft ? readBig(delta.rightCreditLimit) : readBig(delta.leftCreditLimit);
         return creditGrantedToHub >= BigInt(amount);
@@ -1229,7 +1232,7 @@ export async function accountCapacity(
         )
           continue;
         const account = replica.state?.accounts?.get(counterpartyId);
-        const raw = account?.deltas?.get(tokenId);
+        const raw = account?.state?.deltas?.get(tokenId);
         if (!account || !raw || typeof raw !== 'object') return null;
         const record = raw as Record<string, unknown>;
         return {
@@ -1333,7 +1336,7 @@ export async function waitForOutCapAtLeast(
                     pendingFrame: Array.from(account.pendingFrame?.accountTxs || []).map((tx: any) =>
                       String(tx?.type || ''),
                     ),
-                    pulls: Array.from(account.pulls?.entries?.() || []).map(([pullId, pull]: [string, any]) => ({
+                    pulls: Array.from(account.state?.pulls?.entries?.() || []).map(([pullId, pull]: [string, any]) => ({
                       pullId: String(pullId || ''),
                       tokenId: Number(pull?.tokenId || 0),
                       amount: stringifyBig(pull?.amount),
@@ -1349,7 +1352,7 @@ export async function waitForOutCapAtLeast(
                           }
                         : null,
                     })),
-                    deltas: Array.from(account.deltas?.entries?.() || [])
+                    deltas: Array.from(account.state?.deltas?.entries?.() || [])
                       .filter(([id]: [number, any]) => Number(id) === Number(tokenId))
                       .map(([id, delta]: [number, any]) => ({
                         tokenId: Number(id),
@@ -1454,12 +1457,14 @@ export async function readRebalanceSnapshot(
           string,
           {
             currentHeight?: number;
-            lastFinalizedJHeight?: number;
-            requestedRebalance?: Map<number, unknown>;
             shadow?: { rebalance?: { policy?: Map<number, unknown> } };
-            deltas?: Map<number, unknown>;
-            leftEntity?: string;
-            rightEntity?: string;
+            state: {
+              lastFinalizedJHeight?: number;
+              requestedRebalance?: Map<number, unknown>;
+              deltas: Map<number, unknown>;
+              leftEntity: string;
+              rightEntity: string;
+            };
           }
         >,
         ownerEntityId: string,
@@ -1471,8 +1476,8 @@ export async function readRebalanceSnapshot(
         if (direct) return direct;
         for (const [accountKey, account] of accounts.entries()) {
           if (normalizeEntityId(accountKey) === target) return account;
-          const left = normalizeEntityId(account.leftEntity);
-          const right = normalizeEntityId(account.rightEntity);
+          const left = normalizeEntityId(account.state.leftEntity);
+          const right = normalizeEntityId(account.state.rightEntity);
           if ((left === owner && right === target) || (right === owner && left === target)) return account;
         }
         return null;
@@ -1482,13 +1487,13 @@ export async function readRebalanceSnapshot(
       if (!(accounts instanceof Map)) return null;
       const account = resolveCounterpartyAccount(accounts, identity.entityId, hubId);
       if (!account) return null;
-      const delta = account.deltas?.get?.(tokenId);
+      const delta = account.state.deltas.get(tokenId);
       if (!delta || typeof delta !== 'object') return null;
       const policy = account.shadow?.rebalance?.policy?.get?.(tokenId);
       const policyRecord = policy && typeof policy === 'object' ? (policy as Record<string, unknown>) : null;
       const deltaRecord = delta as Record<string, unknown>;
       const owner = normalizeEntityId(identity.entityId);
-      const left = normalizeEntityId(account.leftEntity);
+      const left = normalizeEntityId(account.state.leftEntity);
       const ownerIsLeft = left ? owner === left : owner < normalizeEntityId(hubId);
       return {
         entityId: String(identity.entityId || ''),
@@ -1497,8 +1502,8 @@ export async function readRebalanceSnapshot(
         jurisdiction: String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || ''),
         ownerIsLeft,
         currentHeight: Number(account.currentHeight || 0),
-        lastFinalizedJHeight: Number(account.lastFinalizedJHeight || 0),
-        requested: readBig(account.requestedRebalance?.get?.(tokenId)),
+        lastFinalizedJHeight: Number(account.state.lastFinalizedJHeight || 0),
+        requested: readBig(account.state.requestedRebalance?.get?.(tokenId)),
         delta: {
           ondelta: readBig(deltaRecord.ondelta),
           offdelta: readBig(deltaRecord.offdelta),

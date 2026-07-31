@@ -348,8 +348,8 @@ async function readSwapState(page: Page, entityId: string, signerId: string, cou
           ? String(account.counterpartyEntityId).toLowerCase()
           : '';
         if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
         if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
       }
       return null;
@@ -544,7 +544,7 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
       const [replicaEntityId] = String(key).split(':');
       if (String(replicaEntityId || '').toLowerCase() !== entity) continue;
       const account = replica?.state?.accounts?.get?.(cpId);
-      const delta = account?.deltas?.get?.(1);
+      const delta = account?.state?.deltas?.get?.(1);
       if (!delta) return '0';
       const isLeft = entity < counterparty;
       const derived = deriveDelta(delta, isLeft);

@@ -769,7 +769,7 @@ async function readAccountOutCapacityRaw(
     for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica.state?.accounts?.get(counterpartyId);
-      const delta = account?.deltas?.get(tokenId);
+      const delta = account?.state?.deltas?.get(tokenId);
       if (!delta || typeof delta !== 'object') return null;
       const raw = delta as Record<string, unknown>;
       const readBig = (value: unknown): string => {

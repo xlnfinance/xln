@@ -288,8 +288,8 @@ async function getAccountLockCount(page: Page, entityId: string, counterpartyId:
           ? String(account.counterpartyEntityId).toLowerCase()
           : '';
         if (canonicalCp === cp) return account;
-        const left = typeof account?.leftEntity === 'string' ? String(account.leftEntity).toLowerCase() : '';
-        const right = typeof account?.rightEntity === 'string' ? String(account.rightEntity).toLowerCase() : '';
+        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
+        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
         if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
       }
       return null;

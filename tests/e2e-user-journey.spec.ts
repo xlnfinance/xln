@@ -198,7 +198,7 @@ async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress |
       if (!accounts || accounts.size === 0) continue;
 
       for (const [counterpartyId, account] of accounts.entries()) {
-        const delta = account?.deltas?.get?.(1) ?? account?.deltas?.get?.('1');
+        const delta = account?.state?.deltas?.get?.(1) ?? account?.state?.deltas?.get?.('1');
         if (!delta) continue;
         return {
           entityId,
@@ -394,7 +394,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
       if (rep?.state?.accounts instanceof Map) {
         for (const [counterpartyId, account] of rep.state.accounts.entries()) {
           if (!hubId) hubId = String(counterpartyId || '');
-          const hasDelta = !!(account?.deltas?.get?.(1) || account?.deltas?.get?.('1'));
+          const hasDelta = !!(account?.state?.deltas?.get?.(1) || account?.state?.deltas?.get?.('1'));
           if (hasDelta && !account?.pendingFrame && Number(account?.currentHeight || 0) > 0) {
             ready = true;
             hubId = String(counterpartyId || '');

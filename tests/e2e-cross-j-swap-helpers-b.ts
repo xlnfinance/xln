@@ -712,7 +712,7 @@ export async function readCrossState(
       return {
         offers,
         routes: Number(state?.crossJurisdictionSwaps?.size || 0),
-        pulls: Number(account?.pulls?.size || 0),
+        pulls: Number(account?.state?.pulls?.size || 0),
         currentHeight: Number(account?.currentHeight || 0),
         hasPendingFrame: Boolean(account?.pendingFrame),
         pendingTxs: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
@@ -730,7 +730,7 @@ export async function readCrossState(
           amount: String(offer?.amount ?? '0'),
           cross: Boolean(offer?.crossJurisdiction),
         })),
-        pullIds: Array.from(account?.pulls?.keys?.() || []).map((pullId: unknown) => String(pullId)),
+        pullIds: Array.from(account?.state?.pulls?.keys?.() || []).map((pullId: unknown) => String(pullId)),
         pendingOutputs: Array.from(env?.pendingOutputs || []).map((input: any) => ({
           entityId: String(input?.entityId || ''),
           signerId: String(input?.signerId || ''),
@@ -762,7 +762,7 @@ export async function readCrossState(
           directPeers: env?.infrastructure?.p2p?.getDirectPeerState?.() || null,
         },
         recoveryBarrier: Boolean(env?.infrastructure?.recoveryBackupBarrier),
-        ownerIsLeft: entityNeedle === String(account?.leftEntity || '').toLowerCase(),
+        ownerIsLeft: entityNeedle === String(account?.state?.leftEntity || '').toLowerCase(),
         currentFrameFees: Array.from(account?.currentFrame?.accountTxs || []).reduce(
           (fees: Record<string, string>, tx: any) => {
             const tokenId = Number(tx?.data?.feeTokenId ?? -1);
@@ -775,7 +775,7 @@ export async function readCrossState(
           {},
         ),
         deltas: Object.fromEntries(
-          Array.from(account?.deltas?.entries?.() || []).map(([tokenId, delta]: [unknown, any]) => [
+          Array.from(account?.state?.deltas?.entries?.() || []).map(([tokenId, delta]: [unknown, any]) => [
             String(tokenId),
             {
               tokenId: Number(tokenId),
@@ -974,7 +974,7 @@ export async function waitForCrossPullFlow(
               cross: Boolean(offer?.crossJurisdiction),
               status: String(offer?.crossJurisdiction?.status || ''),
             })),
-            pulls: Array.from(account?.pulls?.keys?.() || []).map(String),
+            pulls: Array.from(account?.state?.pulls?.keys?.() || []).map(String),
           })),
           routes: Array.from(state?.crossJurisdictionSwaps?.entries?.() || []).map(
             ([orderId, route]: [string, any]) => ({
@@ -1041,8 +1041,8 @@ export async function readCrossResolveSnapshots(
 
       const accountMatches = (accountKey: string, rawAccount: unknown): boolean => {
         const account = recordOf(rawAccount);
-        const left = typeof account.leftEntity === 'string' ? account.leftEntity.toLowerCase() : '';
-        const right = typeof account.rightEntity === 'string' ? account.rightEntity.toLowerCase() : '';
+        const left = typeof account.state?.leftEntity === 'string' ? account.state.leftEntity.toLowerCase() : '';
+        const right = typeof account.state?.rightEntity === 'string' ? account.state.rightEntity.toLowerCase() : '';
         const canonicalCp =
           typeof account.counterpartyEntityId === 'string' ? account.counterpartyEntityId.toLowerCase() : '';
         return (
@@ -1161,8 +1161,8 @@ export async function waitForLatestCrossResolveSnapshot(
                 String(accountKey || '').toLowerCase() === cp ||
                 String(account?.counterpartyEntityId || '').toLowerCase() === cp ||
                 [
-                  String(account?.leftEntity || '').toLowerCase(),
-                  String(account?.rightEntity || '').toLowerCase(),
+                  String(account?.state?.leftEntity || '').toLowerCase(),
+                  String(account?.state?.rightEntity || '').toLowerCase(),
                 ].includes(cp),
               currentHeight: Number(account?.currentHeight || 0),
               pendingTxs: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
@@ -1294,7 +1294,7 @@ export async function waitForCrossOffersCleared(
                 cross: Boolean(offer?.crossJurisdiction),
                 status: String(offer?.crossJurisdiction?.status || ''),
               })),
-              pulls: Array.from(account?.pulls?.keys?.() || []),
+              pulls: Array.from(account?.state?.pulls?.keys?.() || []),
             })),
           });
         }
