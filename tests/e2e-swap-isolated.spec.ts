@@ -881,8 +881,8 @@ async function readSwapOfferSnapshot(
       ) {
         continue;
       }
-      if (!(account?.swapOffers instanceof Map)) return [];
-      return Array.from(account.swapOffers.values()).map((offer: Record<string, unknown>) => ({
+      if (!(account?.state?.swapOffers instanceof Map)) return [];
+      return Array.from(account.state.swapOffers.values()).map((offer: Record<string, unknown>) => ({
         offerId: String(offer.offerId || ''),
         giveAmount: String(offer.giveAmount || '0'),
         wantAmount: String(offer.wantAmount || '0'),
@@ -958,7 +958,7 @@ async function readSwapOfferCount(
     const cp = String(counterpartyId || '').toLowerCase();
     for (const [accountKey, account] of replica.state.accounts.entries()) {
       if (String(accountKey || '').toLowerCase() === cp) {
-        return Number(account?.swapOffers?.size || 0);
+        return Number(account?.state?.swapOffers?.size || 0);
       }
       const canonicalCp = typeof account?.counterpartyEntityId === 'string'
         ? String(account.counterpartyEntityId).toLowerCase()
@@ -966,7 +966,7 @@ async function readSwapOfferCount(
       const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
       const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
       if (canonicalCp === cp || (left && right && ((left === owner && right === cp) || (right === owner && left === cp)))) {
-        return Number(account?.swapOffers?.size || 0);
+        return Number(account?.state?.swapOffers?.size || 0);
       }
     }
     return 0;

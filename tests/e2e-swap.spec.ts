@@ -963,11 +963,11 @@ async function readSwapState(
     return {
       openOfferCount: Number(
         Array.from(rep?.state?.accounts?.values?.() || []).reduce(
-          (count: number, account: any) => count + Number(account?.swapOffers?.size || 0),
+          (count: number, account: any) => count + Number(account?.state?.swapOffers?.size || 0),
           0,
         ),
       ),
-      accountSwapOffersSize: Number(account?.swapOffers?.size || 0),
+      accountSwapOffersSize: Number(account?.state?.swapOffers?.size || 0),
       accountSwapOrderHistorySize: Number(account?.swapOrderHistory?.size || 0),
       accountSwapClosedOrdersSize: Number(account?.swapClosedOrders?.size || 0),
       totalSwapOrderHistorySize,
@@ -1478,7 +1478,7 @@ async function executeOrderbookClickFill(
     });
     const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
-    const offer = account?.swapOffers instanceof Map ? Array.from(account.swapOffers.values())[0] : null;
+    const offer = account?.state?.swapOffers instanceof Map ? Array.from(account.state.swapOffers.values())[0] : null;
     let swapResolveCount = 0;
     let positiveSwapResolveCount = 0;
     for (const frame of account?.frameHistory || []) {
@@ -1692,7 +1692,7 @@ async function executeOrderbookClickFill(
           accountHeight: Number(account?.currentHeight ?? 0),
           mempool: Number(account?.mempool?.length ?? 0),
           pending: Number(account?.pendingFrame?.accountTxs?.length ?? 0),
-          openOffers: Number(account?.swapOffers?.size ?? 0),
+          openOffers: Number(account?.state?.swapOffers?.size ?? 0),
           closedOrders: Number(account?.swapClosedOrders?.size ?? 0),
           resolves: history.reduce((count, entry) => count + Number(Array.isArray(entry?.resolves) ? entry.resolves.length : 0), 0),
         };
@@ -2303,7 +2303,7 @@ test.describe('E2E Swap Flow', () => {
           );
           const account = replica?.state?.accounts?.get?.(targetAccountId);
           if (!account) return false;
-          const offerCount = account.swapOffers instanceof Map ? account.swapOffers.size : 0;
+          const offerCount = account.state.swapOffers instanceof Map ? account.state.swapOffers.size : 0;
           const pendingCount = Array.isArray(account.mempool) ? account.mempool.length : 0;
           return offerCount > 0 && !account.pendingFrame && pendingCount === 0;
         },

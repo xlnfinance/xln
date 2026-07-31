@@ -180,7 +180,7 @@ async function runtimeSnapshot(page: Page) {
           accountCount: Number(rep?.state?.accounts?.size || 0),
           openOfferCount: Number(
             Array.from(rep?.state?.accounts?.values?.() || []).reduce(
-              (count: number, account: any) => count + Number(account?.swapOffers?.size || 0),
+              (count: number, account: any) => count + Number(account?.state?.swapOffers?.size || 0),
               0,
             ),
           ),
@@ -376,11 +376,11 @@ async function readSwapState(page: Page, entityId: string, signerId: string, cou
     return {
       openOfferCount: Number(
         Array.from(rep?.state?.accounts?.values?.() || []).reduce(
-          (count: number, account: any) => count + Number(account?.swapOffers?.size || 0),
+          (count: number, account: any) => count + Number(account?.state?.swapOffers?.size || 0),
           0,
         ),
       ),
-      accountSwapOffersSize: Number(account?.swapOffers?.size || 0),
+      accountSwapOffersSize: Number(account?.state?.swapOffers?.size || 0),
       accountHasSwapOfferInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_offer'),
       accountHasSwapOfferInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_offer'),
       accountHasSwapCancelRequestInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_cancel_request'),

@@ -639,7 +639,7 @@ $: crossTargetHasAccount = Boolean(
 $: targetAccountReady = swapRouteMode !== 'cross' || crossTargetHasAccount;
 $: needsCrossTargetAccountSetup = Boolean(swapRouteMode === 'cross' && selectedCrossTarget && !crossTargetHasAccount);
 $: canAutoOpenCrossTargetAccount = Boolean(
-  needsCrossTargetAccountSetup && selectedCrossTarget && selectedCrossTargetReplica && selectedCrossTarget.targetHubEntityId && activeIsLive,
+  needsCrossTargetAccountSetup && selectedCrossTarget?.targetHubEntityId && activeIsLive,
 );
 $: orderbookSourceLabels = Object.fromEntries(orderbookHubIds.map((id) => [id, accountLabel(id)]));
 $: orderbookSourceAvatars = Object.fromEntries(
@@ -2525,6 +2525,11 @@ async function placeSwapOffer() {
     if (!resolvedCounterparty) {
       throw new Error('Select counterparty from your account list');
     }
+    // Submission is a financial boundary. Re-read the committed source
+    // replica instead of trusting the asynchronously rendered workspace
+    // projection: a route/identity switch can briefly leave that projection
+    // one Runtime frame behind while the source Account is already final.
+    const committedSourceReplica = await readCommittedEntityReplica(sourceEntityId);
     const giveToken = Number.parseInt(giveTokenId, 10);
     const wantToken = Number.parseInt(wantTokenId, 10);
     if (giveAmount <= 0n || wantAmount <= 0n) {
@@ -2551,7 +2556,10 @@ async function placeSwapOffer() {
     if (giveToken === wantToken && swapRouteMode === 'same') {
       throw new Error('Give token and want token must be different');
     }
-    const liveValidation = buildSwapValidationInput(resolvedCounterparty, giveToken, wantToken, effectiveGiveAmount, effectiveWantAmount, canonicalPriceTicks);
+    const liveValidation = {
+      ...buildSwapValidationInput(resolvedCounterparty, giveToken, wantToken, effectiveGiveAmount, effectiveWantAmount, canonicalPriceTicks),
+      accountIds: Array.from(committedSourceReplica?.state.accounts.keys() ?? []),
+    };
     const liveValidationReason =
       swapRouteMode === 'cross'
         ? validateCrossSwapForm(liveValidation, selectedCrossTarget, canAutoPrepareCrossInboundCapacity, canAutoOpenCrossTargetAccount)
@@ -2562,7 +2570,7 @@ async function placeSwapOffer() {
     if (!activeXlnFunctions?.planSwapCommand) {
       throw new Error('SWAP_COMMAND_PLANNER_UNAVAILABLE');
     }
-    const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(currentReplica);
+    const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(committedSourceReplica);
     const targetRoute = selectedCrossTarget;
     // Setup is derived from the latest committed target Account, not the
     // asynchronously rendered workspace projection. Otherwise a second order
@@ -2572,7 +2580,7 @@ async function placeSwapOffer() {
       ? await readCommittedEntityReplica(targetRoute.targetEntityId)
       : null;
     const targetAccountExists = Boolean(targetRoute && hasReplicaAccount(targetReplica, targetRoute.targetHubEntityId));
-    const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
+    const sourceJurisdictionRef = getReplicaJurisdictionRef(committedSourceReplica);
     if (!sourceJurisdictionRef) throw new Error('Source jurisdiction stack is not available.');
     if (swapRouteMode === 'cross' && !targetRoute) {
       throw new Error('Select target jurisdiction account.');
@@ -2593,7 +2601,7 @@ async function placeSwapOffer() {
         hubEntityId: resolvedCounterparty,
         hubSignerId: sourceHubSignerId,
         jurisdiction: sourceJurisdictionRef,
-        account: currentReplica?.state?.accounts?.get?.(resolvedCounterparty)?.state ?? null,
+        account: committedSourceReplica?.state.accounts.get(resolvedCounterparty)?.state ?? null,
       },
       ...(targetRoute
         ? {

@@ -675,7 +675,7 @@ export async function readCrossState(
         }
       }
       let offers = 0;
-      for (const offer of account?.swapOffers?.values?.() || []) {
+      for (const offer of account?.state?.swapOffers?.values?.() || []) {
         if (offer?.crossJurisdiction) offers += 1;
       }
       let settledRoutes = 0;
@@ -724,7 +724,7 @@ export async function readCrossState(
         accountKeys: Array.from(state?.accounts?.keys?.() || []).map((key: unknown) => String(key)),
         messages: Array.from(state?.messages || []).map((message: unknown) => String(message)),
         routeSummaries,
-        offerSummaries: Array.from(account?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
+        offerSummaries: Array.from(account?.state?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
           offerId: String(offerId),
           status: String(offer?.crossJurisdiction?.status || ''),
           amount: String(offer?.amount ?? '0'),
@@ -969,7 +969,7 @@ export async function waitForCrossPullFlow(
             currentHeight: Number(account?.currentHeight || 0),
             mempool: Array.from(account?.mempool || []).map((tx: any) => String(tx?.type || '')),
             pendingFrame: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
-            offers: Array.from(account?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
+            offers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
               offerId: String(offerId || ''),
               cross: Boolean(offer?.crossJurisdiction),
               status: String(offer?.crossJurisdiction?.status || ''),
@@ -1169,7 +1169,7 @@ export async function waitForLatestCrossResolveSnapshot(
               mempoolTxs: Array.from(account?.mempool || []).map(
                 (tx: any) => `${String(tx?.type || '')}:${String(tx?.data?.offerId || '').slice(-8)}`,
               ),
-              openOffers: Array.from(account?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
+              openOffers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
                 offerId,
                 cross: Boolean(offer?.crossJurisdiction),
                 status: String(offer?.crossJurisdiction?.status || ''),
@@ -1289,7 +1289,7 @@ export async function waitForCrossOffersCleared(
               pendingFrame: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) =>
                 String(tx?.type || ''),
               ),
-              offers: Array.from(account?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
+              offers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
                 offerId,
                 cross: Boolean(offer?.crossJurisdiction),
                 status: String(offer?.crossJurisdiction?.status || ''),
@@ -1524,7 +1524,7 @@ export async function triggerSourceDisputeArguments(
   expect(routeId, `${source.entityId.slice(0, 10)} active cross-j route id required for dispute args`).toBeTruthy();
   const abi = AbiCoder.defaultAbiCoder();
   const sourceDispute = await page.evaluate(
-    async ({ source, routeId, sourceHubRuntimeSeed }) => {
+    async ({ source, hubId, routeId, sourceHubRuntimeSeed }) => {
       const view = window as CrossRuntimeWindow;
       const env = view.isolatedEnv;
       if (!env) throw new Error('isolatedEnv missing');
@@ -1541,6 +1541,12 @@ export async function triggerSourceDisputeArguments(
       }
       const route = sourceState?.crossJurisdictionSwaps?.get(routeId);
       if (!route) throw new Error(`cross-j source dispute route missing: ${routeId}`);
+      const hubNeedle = String(hubId || '').toLowerCase();
+      const sourceAccount = Array.from(sourceState?.accounts?.entries?.() || []).find(
+        ([accountId]) => String(accountId || '').toLowerCase() === hubNeedle,
+      )?.[1];
+      const sourceAccountState = sourceAccount?.state;
+      if (!sourceAccountState) throw new Error(`cross-j source Account missing: ${hubId}`);
       const fillRatio = Number(route.cumulativeFillRatio || route.claimedRatio || 0);
       if (!Number.isFinite(fillRatio) || fillRatio <= 0) {
         throw new Error(`cross-j source dispute route has no committed fill: ${routeId}`);
@@ -1560,13 +1566,15 @@ export async function triggerSourceDisputeArguments(
       );
       return {
         partialBinary: String(reveal.binary),
+        watchSeed: String(sourceAccountState.watchSeed || ''),
+        nonce: String(sourceAccountState.jNonce ?? 0),
         // The synthetic watcher event must model a real fresh dispute. A fixed
         // absolute timeout eventually becomes overdue during this long E2E and
         // makes the scheduler finalize a dispute that was never put on-chain.
         disputeTimeout: currentJHeight + 5_760,
       };
     },
-    { source, routeId, sourceHubRuntimeSeed },
+    { source, hubId, routeId, sourceHubRuntimeSeed },
   );
   const crossPullArgs = abi.encode(
     ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
@@ -1582,8 +1590,9 @@ export async function triggerSourceDisputeArguments(
     data: {
       sender: hubId,
       counterentity: source.entityId,
-      nonce: '1',
+      nonce: sourceDispute.nonce,
       proofbodyHash: `0x${suffix}`,
+      watchSeed: sourceDispute.watchSeed,
       starterInitialArguments,
       starterIncrementedArguments: '0x',
       disputeTimeout: sourceDispute.disputeTimeout,
