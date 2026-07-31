@@ -618,6 +618,20 @@ export const enqueueMessage = (store: RelayStore, toKey: string, msg: unknown): 
   return queue.length;
 };
 
+const commitPendingQueueState = (
+  store: RelayStore,
+  toKey: string,
+  retained: PendingRelayMessage[],
+  removedBytes: number,
+): void => {
+  if (retained.length > 0) {
+    store.pendingMessages.set(toKey, retained);
+  } else {
+    store.pendingMessages.delete(toKey);
+  }
+  store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - removedBytes);
+};
+
 export const deliverPendingMessages = (
   store: RelayStore,
   toKey: string,
@@ -634,7 +648,8 @@ export const deliverPendingMessages = (
   let removedBytes = 0;
   let failure: RelayPendingDeliveryResult['failure'];
 
-  for (const item of pending) {
+  for (let index = 0; index < pending.length; index += 1) {
+    const item = pending[index]!;
     if (failure) {
       retained.push(item);
       continue;
@@ -659,7 +674,17 @@ export const deliverPendingMessages = (
       retained.push(item);
       continue;
     }
-    if (classifyWebSocketSendResult(sendResult) === 'dropped') {
+    let disposition: ReturnType<typeof classifyWebSocketSendResult>;
+    try {
+      disposition = classifyWebSocketSendResult(sendResult);
+    } catch (error) {
+      // Accepted/expired prefix items are no longer retryable. Persist their
+      // removal before surfacing adapter drift, while retaining the ambiguous
+      // current send and every untouched suffix item.
+      commitPendingQueueState(store, toKey, pending.slice(index), removedBytes);
+      throw error;
+    }
+    if (disposition === 'dropped') {
       failure = { reason: 'RELAY_PENDING_SEND_FAILED' };
       retained.push(item);
       continue;
@@ -668,12 +693,7 @@ export const deliverPendingMessages = (
     removedBytes += item.bytes;
   }
 
-  if (retained.length > 0) {
-    store.pendingMessages.set(toKey, retained);
-  } else {
-    store.pendingMessages.delete(toKey);
-  }
-  store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - removedBytes);
+  commitPendingQueueState(store, toKey, retained, removedBytes);
   return {
     delivered,
     expired,

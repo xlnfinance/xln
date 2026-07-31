@@ -190,7 +190,7 @@ test('relay pending delivery removes an item accepted into Bun backpressure', ()
   expect(store.pendingMessageBytes).toBe(0);
 });
 
-test('relay pending delivery fails loud on an invalid numeric send result', () => {
+test('relay pending delivery fails loud and retains an invalid first send', () => {
   const store = createRelayStore('relay-test');
   enqueueMessage(store, 'runtime-a', { n: 1 });
   const pendingBytes = store.pendingMessageBytes;
@@ -200,6 +200,22 @@ test('relay pending delivery fails loud on an invalid numeric send result', () =
   );
   expect(store.pendingMessages.get('runtime-a')).toHaveLength(1);
   expect(store.pendingMessageBytes).toBe(pendingBytes);
+});
+
+test('relay pending delivery commits an accepted prefix before invalid send failure', () => {
+  const store = createRelayStore('relay-test');
+  enqueueMessage(store, 'runtime-a', { n: 1 });
+  const acceptedBytes = store.pendingMessageBytes;
+  enqueueMessage(store, 'runtime-a', { n: 2 });
+  const initialBytes = store.pendingMessageBytes;
+
+  expect(() => deliverPendingMessages(store, 'runtime-a', (msg) => {
+    return (msg as { n: number }).n === 1 ? true : Number.POSITIVE_INFINITY;
+  })).toThrow('WEBSOCKET_SEND_RESULT_INVALID');
+  expect(store.pendingMessages.get('runtime-a')).toHaveLength(1);
+  expect(store.pendingMessageBytes).toBe(initialBytes - acceptedBytes);
+  expect(asRecords(drainPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2]);
+  expect(store.pendingMessageBytes).toBe(0);
 });
 
 test('relay delivery events expose typed retry and fatal semantics', () => {
