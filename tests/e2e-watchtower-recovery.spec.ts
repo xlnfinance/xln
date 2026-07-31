@@ -864,15 +864,15 @@ test.describe('watchtower runtime recovery', () => {
       const senderBeforeFaucet = await getRenderedOutboundForAccount(page, hubId);
       const senderCommittedBeforeFaucet = await readLocalHubAccountState(page, hubId);
       await faucetOffchain(page, restored.entityId, hubId);
-      const senderAfterFaucet = await waitForRenderedOutboundForAccountDelta(page, hubId, senderBeforeFaucet, 100, {
-        timeoutMs: CHANNEL_OP_TIMEOUT_MS,
-      });
       await waitForCommittedLocalHubAccountAdvance(
         page,
         hubId,
         senderCommittedBeforeFaucet.currentHeight,
         'post-restore faucet',
       );
+      const senderAfterFaucet = await waitForRenderedOutboundForAccountDelta(page, hubId, senderBeforeFaucet, 100, {
+        timeoutMs: CHANNEL_OP_TIMEOUT_MS,
+      });
 
       const recipientBeforePayment = await getRenderedOutboundForAccount(recipientPage, hubId);
       const senderCursor = await getPersistedReceiptCursor(page);
