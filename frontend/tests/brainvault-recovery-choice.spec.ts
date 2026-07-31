@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const TEST_URL = '/app?locktest=1&scenarioPreview=1';
+const TEST_MNEMONIC = 'test test test test test test test test test test test junk';
 const VIEWPORTS = [
   { label: 'iphone', width: 390, height: 844 },
   { label: 'laptop', width: 1440, height: 900 },
@@ -132,5 +133,27 @@ test.describe('Recovery choice guidance', () => {
     await expect(page.getByText(/Worker init timeout/)).toHaveCount(0);
     expect(workerRequests).toBe(2);
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  });
+
+  test('wallet persistence becomes an explicit point of no return', { tag: '@functional' }, async ({ page }) => {
+    let releaseJurisdictions!: () => void;
+    const jurisdictionGate = new Promise<void>((resolve) => {
+      releaseJurisdictions = resolve;
+    });
+    await page.route(/\/api\/jurisdictions/, async (route) => {
+      await jurisdictionGate;
+      await route.fulfill({ status: 503, body: 'test release' });
+    });
+
+    await page.goto(TEST_URL);
+    await page.getByRole('tab', { name: 'Mnemonic', exact: true }).click();
+    await page.getByLabel('Seed phrase').fill(TEST_MNEMONIC);
+    await page.getByRole('button', { name: 'Continue with seed', exact: true }).click();
+
+    await expect(page.getByText('Opening wallet', { exact: true })).toBeVisible({ timeout: 30_000 });
+    const finalizingButton = page.getByRole('button', { name: 'Finalizing wallet', exact: true });
+    await expect(finalizingButton).toBeVisible();
+    await expect(finalizingButton).toBeDisabled();
+    releaseJurisdictions();
   });
 });

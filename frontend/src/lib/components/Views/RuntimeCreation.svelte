@@ -1384,6 +1384,11 @@
 
 
   function reset() {
+    // Runtime creation/restore mutates durable vault and Runtime state before
+    // its final await returns. Treat that interval as a point of no return:
+    // resetting only the UI would lie about cancellation and allow a second
+    // seed to race the still-committing first wallet.
+    if (creatingRuntime) return;
     nodeDerivationAbort?.abort();
     nodeDerivationAbort = null;
     phase = 'input';
@@ -2096,7 +2101,12 @@
               </div>
 
               <div class="anim-controls">
-                <button class="control-btn cancel" on:click={reset} title="Cancel derivation">Cancel</button>
+                <button
+                  class="control-btn cancel"
+                  disabled={creatingRuntime}
+                  on:click={reset}
+                  title={creatingRuntime ? 'Wallet persistence cannot be cancelled safely' : 'Cancel derivation'}
+                >{creatingRuntime ? 'Finalizing wallet' : 'Cancel'}</button>
               </div>
             </div>
           </div>
@@ -2167,8 +2177,13 @@
             <h2>Restore wallet</h2>
             <p>Seed resolved for {shortRuntimeId(recoveryRuntimeId)}. Checking encrypted backups before any new runtime is created.</p>
           </div>
-          <button type="button" class="back-to-create compact" on:click={reset}>
-            Back
+          <button
+            type="button"
+            class="back-to-create compact"
+            disabled={creatingRuntime}
+            on:click={reset}
+          >
+            {creatingRuntime ? 'Restoring…' : 'Back'}
           </button>
         </div>
 
@@ -2204,6 +2219,7 @@
                   type="button"
                   class="recovery-candidate"
                   class:selected={selectedRecoveryCandidateId === candidate.id || (!selectedRecoveryCandidateId && index === 0)}
+                  disabled={creatingRuntime}
                   on:click={() => selectedRecoveryCandidateId = candidate.id}
                 >
                   <span class="candidate-main">
@@ -2228,7 +2244,12 @@
               >
                 {creatingRuntime ? 'Restoring...' : 'Restore selected backup'}
               </button>
-              <button type="button" class="backup-upload-btn" on:click={triggerBackupFilePicker}>
+              <button
+                type="button"
+                class="backup-upload-btn"
+                disabled={creatingRuntime}
+                on:click={triggerBackupFilePicker}
+              >
                 I have a runtime backup file
               </button>
             </div>
