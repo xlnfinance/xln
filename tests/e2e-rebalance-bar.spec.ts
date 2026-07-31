@@ -713,14 +713,15 @@ async function readPairState(page: Page, counterpartyId: string, ownerEntityId?:
     if (!env?.state?.eReplicas) return null;
     const ownerTarget = String(ownerEntityId || '').toLowerCase();
     for (const [key, rep] of env.state.eReplicas.entries()) {
-      const replicaEntityId = String(rep?.entityId || String(key).split(':')[0] || '').toLowerCase();
+      const replicaEntityId = String(rep?.state?.entityId || String(key).split(':')[0] || '').toLowerCase();
       if (ownerTarget && replicaEntityId !== ownerTarget) continue;
       const acc = rep.state?.accounts?.get(counterpartyId);
       if (!acc) continue;
-      const delta = acc.deltas?.get?.(1);
+      const accountState = acc.state;
+      const delta = accountState.deltas?.get?.(1);
       if (!delta) continue;
-      const isLeft = String(rep.entityId || '').toLowerCase() < String(counterpartyId).toLowerCase();
-      const requested = acc.requestedRebalance?.get?.(1) || 0n;
+      const isLeft = replicaEntityId < String(counterpartyId).toLowerCase();
+      const requested = accountState.requestedRebalance?.get?.(1) || 0n;
       const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
       const pendingTxs = Array.isArray(acc?.pendingFrame?.accountTxs) ? acc.pendingFrame.accountTxs : [];
       const htlcFrames = [...history.slice(-80), ...(pendingTxs.length > 0 ? [{ accountTxs: pendingTxs }] : [])];
@@ -759,7 +760,7 @@ async function readPairState(page: Page, counterpartyId: string, ownerEntityId?:
         pendingHeight: acc.pendingFrame ? Number(acc.pendingFrame.height || 0) : 0,
         mempoolLen: Number(acc.mempool?.length || 0),
         requested: requested.toString(),
-        lastFinalizedJHeight: Number(acc.lastFinalizedJHeight || 0),
+        lastFinalizedJHeight: Number(accountState.lastFinalizedJHeight || 0),
         recentDirectPaymentDescriptions,
         recentHtlcHashlocks,
         recentHtlcResolveCount,
@@ -1045,7 +1046,7 @@ async function readAccountJEventClaims(page: Page, hubId: string) {
         }
       }
       return {
-        accountEntityId: String(rep.entityId || '').toLowerCase(),
+        accountEntityId: String(rep.state?.entityId || '').toLowerCase(),
         counterpartyId: target,
         claims,
       };
@@ -1061,14 +1062,16 @@ async function readRebalanceState(page: Page, hubId: string) {
     for (const [key, rep] of env.state.eReplicas.entries()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
-      const delta = acc.deltas?.get?.(1);
+      const accountState = acc.state;
+      const delta = accountState.deltas?.get?.(1);
       if (!delta) continue;
-      const localIsLeft = String(rep.entityId || '').toLowerCase() < String(hubId).toLowerCase();
-      const hubIsLeft = String(hubId || '').toLowerCase() < String(rep.entityId || '').toLowerCase();
-      const requested = acc.requestedRebalance?.get?.(1) || 0n;
-      const policy = acc.shadow?.rebalance?.policy?.get?.(1) || null;
+      const entityId = String(rep.state?.entityId || '');
+      const localIsLeft = entityId.toLowerCase() < String(hubId).toLowerCase();
+      const hubIsLeft = String(hubId || '').toLowerCase() < entityId.toLowerCase();
+      const requested = accountState.requestedRebalance?.get?.(1) || 0n;
+      const policy = accountState.rebalanceFeePolicies?.get?.(1) || null;
       return {
-        entityId: String(rep.entityId || ''),
+        entityId,
         delta: {
           ondelta: String(delta.ondelta || 0n),
           offdelta: String(delta.offdelta || 0n),
@@ -1083,7 +1086,7 @@ async function readRebalanceState(page: Page, hubId: string) {
         localIsLeft,
         hubIsLeft,
         requested: requested.toString(),
-        lastFinalizedJHeight: Number(acc.lastFinalizedJHeight || 0),
+        lastFinalizedJHeight: Number(accountState.lastFinalizedJHeight || 0),
         currentHeight: Number(acc.currentHeight || 0),
         hasPolicy: !!policy,
       };
@@ -1269,8 +1272,8 @@ async function readRebalanceDiagnostics(page: Page, hubId: string) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       return {
-        accountEntityId: String(rep.entityId || ''),
-        rebalanceFeePolicies: acc.rebalanceFeePolicies || null,
+        accountEntityId: String(rep.state?.entityId || ''),
+        rebalanceFeePolicies: acc.state.rebalanceFeePolicies || null,
         profileFound: !!profile,
         profileIsHub: profile?.metadata?.isHub === true,
         profileFeeFields: {
