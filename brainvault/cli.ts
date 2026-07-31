@@ -23,7 +23,7 @@ import {
   getShardCount, combineShardsWithParams, deriveKey, entropyToMnemonic,
   deriveEthereumAddressMatrix, deriveEthereumPrivateKeyAtPath,
   factorForShardCount, formatDuration, hexToBytes, bytesToHex,
-  BRAINVAULT_V1, deriveSitePassword,
+  BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, deriveSitePassword,
 } from './core.ts';
 
 const args = process.argv.slice(2);
@@ -194,8 +194,14 @@ async function derive(name: string, passphrase: string, shardInput: number, work
         }
       });
 
-      w.on('message', ({ shardIndex, result }) => {
+      w.on('message', ({ specId, shardIndex, result }) => {
         if (failed) return;
+        if (specId !== BRAINVAULT_V1_SPEC_ID) {
+          fail(new Error(
+            `BRAINVAULT_WORKER_SPEC_MISMATCH:${String(specId)}:${BRAINVAULT_V1_SPEC_ID}`,
+          ));
+          return;
+        }
         if (!Number.isSafeInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {
           fail(new Error(`BRAINVAULT_WORKER_SHARD_INDEX_INVALID:${shardIndex}`));
           return;
@@ -235,6 +241,7 @@ async function derive(name: string, passphrase: string, shardInput: number, work
           void terminatePool().then(resolve, reject);
         } else if (nextShard < shardCount) {
           w.postMessage({
+            specId: BRAINVAULT_V1_SPEC_ID,
             name,
             passphrase,
             shardIndex: nextShard++,
@@ -247,6 +254,7 @@ async function derive(name: string, passphrase: string, shardInput: number, work
 
       if (nextShard < shardCount) {
         w.postMessage({
+          specId: BRAINVAULT_V1_SPEC_ID,
           name,
           passphrase,
           shardIndex: nextShard++,

@@ -155,6 +155,7 @@ export const deriveBrainVaultNative = async (
         if (shardIndex >= shardCount) return;
         assignedAt.set(worker, performance.now());
         worker.postMessage({
+          specId: BRAINVAULT_V1_SPEC_ID,
           name: input.name,
           passphrase: input.passphrase,
           shardIndex,
@@ -174,6 +175,13 @@ export const deriveBrainVaultNative = async (
           worker.on('message', (message: unknown) => {
             if (settled) return;
             const record = message && typeof message === 'object' ? message as Record<string, unknown> : null;
+            const workerSpecId = record?.['specId'];
+            if (workerSpecId !== BRAINVAULT_V1_SPEC_ID) {
+              fail(new Error(
+                `BRAINVAULT_WORKER_SPEC_MISMATCH:${String(workerSpecId)}:${BRAINVAULT_V1_SPEC_ID}`,
+              ));
+              return;
+            }
             const shardIndex = record?.['shardIndex'];
             const result = record?.['result'];
             if (!Number.isSafeInteger(shardIndex) || Number(shardIndex) < 0 || Number(shardIndex) >= shardCount) {

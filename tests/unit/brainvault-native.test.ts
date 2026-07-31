@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -39,6 +39,30 @@ test('isolated native workers reproduce the frozen multi-shard wallet', async ()
   expect(result.shardCount).toBe(10);
   expect(result.workers).toBe(8);
   expect(result.ethereumAddress).toBe('0xD42C021b40B4ab21Bffdb58837D76734dd9CC66D');
+});
+
+test('native derivation rejects a worker built for another BrainVault spec', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-brainvault-stale-worker-'));
+  const workerPath = join(directory, 'stale-worker.mjs');
+  writeFileSync(workerPath, [
+    "import { parentPort } from 'node:worker_threads';",
+    "parentPort.on('message', ({ shardIndex }) => parentPort.postMessage({",
+    "  specId: 'brainvault/stale-v0',",
+    '  shardIndex,',
+    "  result: '00'.repeat(32),",
+    '}));',
+  ].join('\n'), 'utf8');
+
+  try {
+    await expect(deriveBrainVaultNative({
+      name: 'alice',
+      passphrase: 'secret123456',
+      shardInput: 1,
+      workers: 1,
+    }, { workerPath })).rejects.toThrow('BRAINVAULT_WORKER_SPEC_MISMATCH:brainvault/stale-v0');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('native node backend honors cancellation before allocating Argon memory', async () => {
