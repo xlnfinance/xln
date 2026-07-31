@@ -46,6 +46,7 @@ test('websocket send result classifier covers the complete server/client matrix'
   }
   expect(() => classifyWebSocketSendResult(-2)).toThrow('WEBSOCKET_SEND_RESULT_INVALID');
   expect(() => classifyWebSocketSendResult(Number.NaN)).toThrow('WEBSOCKET_SEND_RESULT_INVALID');
+  expect(() => classifyWebSocketSendResult(Number.POSITIVE_INFINITY)).toThrow('WEBSOCKET_SEND_RESULT_INVALID');
 });
 
 test('relay incidents group repeated root errors and reopen after a new occurrence', () => {
@@ -187,6 +188,18 @@ test('relay pending delivery removes an item accepted into Bun backpressure', ()
   });
   expect(store.pendingMessages.has('runtime-a')).toBe(false);
   expect(store.pendingMessageBytes).toBe(0);
+});
+
+test('relay pending delivery fails loud on an invalid numeric send result', () => {
+  const store = createRelayStore('relay-test');
+  enqueueMessage(store, 'runtime-a', { n: 1 });
+  const pendingBytes = store.pendingMessageBytes;
+
+  expect(() => deliverPendingMessages(store, 'runtime-a', () => Number.POSITIVE_INFINITY)).toThrow(
+    'WEBSOCKET_SEND_RESULT_INVALID',
+  );
+  expect(store.pendingMessages.get('runtime-a')).toHaveLength(1);
+  expect(store.pendingMessageBytes).toBe(pendingBytes);
 });
 
 test('relay delivery events expose typed retry and fatal semantics', () => {

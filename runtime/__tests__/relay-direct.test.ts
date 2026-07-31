@@ -261,6 +261,48 @@ describe('relay direct entity delivery', () => {
     });
   });
 
+  test('fails loud when direct relay socket returns an invalid numeric result', () => {
+    const sourceSeed = 'relay-direct-invalid-source';
+    const targetSeed = 'relay-direct-invalid-target';
+    const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
+    const targetRuntimeId = deriveSignerAddressSync(targetSeed, '1').toLowerCase();
+    const store = createRelayStore(sourceRuntimeId);
+    const targetSocket = makeSocket({ sendResult: Number.POSITIVE_INFINITY });
+
+    cacheEncryptionKey(
+      store,
+      sourceRuntimeId,
+      pubKeyToHex(deriveEncryptionKeyPair(sourceSeed).publicKey),
+    );
+    cacheEncryptionKey(
+      store,
+      targetRuntimeId,
+      pubKeyToHex(deriveEncryptionKeyPair(targetSeed).publicKey),
+    );
+    expect(registerClient(store, targetRuntimeId, targetSocket.ws)).toBe(true);
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId,
+      sourceRuntimeHeight: 10,
+      sourceRuntimeTimestamp: 45678,
+      entityInputs: [{
+        runtimeId: targetRuntimeId,
+        entityId: `0x${'bd'.repeat(32)}`,
+        signerId: targetRuntimeId,
+        entityTxs: [],
+      }],
+    };
+
+    expect(() => sendEntityInputDirectViaRelaySocketDelivery(
+      store,
+      { runtimeId: sourceRuntimeId } as RuntimeReplica,
+      targetRuntimeId,
+      envelope,
+      () => undefined,
+      45678,
+    )).toThrow('WEBSOCKET_SEND_RESULT_INVALID');
+    expect(store.debugEvents.some(event => event.status === 'send-failed')).toBe(false);
+  });
+
   test('falls back with typed delivery event when direct relay socket send throws', () => {
     const sourceSeed = 'relay-direct-send-throw-source';
     const targetSeed = 'relay-direct-send-throw-target';

@@ -631,6 +631,7 @@ export const deliverPendingMessages = (
   const retained: PendingRelayMessage[] = [];
   let delivered = 0;
   let expired = 0;
+  let removedBytes = 0;
   let failure: RelayPendingDeliveryResult['failure'];
 
   for (const item of pending) {
@@ -640,7 +641,7 @@ export const deliverPendingMessages = (
     }
     if (now - item.enqueuedAt > store.pendingLimits.maxAgeMs) {
       expired++;
-      store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - item.bytes);
+      removedBytes += item.bytes;
       pushDebugEvent(store, {
         event: 'pending_drop',
         to: toKey,
@@ -650,19 +651,21 @@ export const deliverPendingMessages = (
       });
       continue;
     }
+    let sendResult: RelaySendResult;
     try {
-      const sendResult = deliver(item.msg);
-      if (classifyWebSocketSendResult(sendResult) === 'dropped') {
-        failure = { reason: 'RELAY_PENDING_SEND_FAILED' };
-        retained.push(item);
-        continue;
-      }
-      delivered++;
-      store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - item.bytes);
+      sendResult = deliver(item.msg);
     } catch (error) {
       failure = { reason: error instanceof Error ? error.message : String(error) };
       retained.push(item);
+      continue;
     }
+    if (classifyWebSocketSendResult(sendResult) === 'dropped') {
+      failure = { reason: 'RELAY_PENDING_SEND_FAILED' };
+      retained.push(item);
+      continue;
+    }
+    delivered++;
+    removedBytes += item.bytes;
   }
 
   if (retained.length > 0) {
@@ -670,6 +673,7 @@ export const deliverPendingMessages = (
   } else {
     store.pendingMessages.delete(toKey);
   }
+  store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - removedBytes);
   return {
     delivered,
     expired,

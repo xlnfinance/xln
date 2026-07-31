@@ -19,11 +19,26 @@ import { classifyWebSocketSendResult } from '../network/websocket-send-result';
 
 const repoRoot = process.cwd();
 
+const readRuntimeOutputRoutingBoundary = (): string => {
+  const deliveryDir = join(repoRoot, 'runtime/runtime/delivery');
+  const paths = [
+    join(repoRoot, 'runtime/runtime/output-routing.ts'),
+    ...readdirSync(deliveryDir)
+      .filter(file => file.endsWith('.ts'))
+      .sort()
+      .map(file => join(deliveryDir, file)),
+  ];
+  return paths.map(path => readFileSync(path, 'utf8')).join('\n');
+};
+
 const readText = (path: string): string => {
-  if (path !== 'runtime/orchestrator/mm-node.ts') return readFileSync(path, 'utf8');
-  return ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts']
-    .map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8'))
-    .join('\n');
+  if (path === 'runtime/runtime/output-routing.ts') return readRuntimeOutputRoutingBoundary();
+  if (path === 'runtime/orchestrator/mm-node.ts') {
+    return ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts']
+      .map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8'))
+      .join('\n');
+  }
+  return readFileSync(path, 'utf8');
 };
 
 const assertIncludes = (text: string, needle: string, path: string): void => {
@@ -197,7 +212,7 @@ for (const [path, markers] of [
     'export const deliveryFailure',
   ]],
   ['runtime/runtime/output-routing.ts', [
-    'enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): DeliveryResult;',
+    'enqueueEntityInputsDelivery(\n    targetRuntimeId: string,\n    envelope: RuntimeEntityInputsEnvelope,\n    ingressTimestamp?: number,\n  ): DeliveryResult;',
     'export type RuntimeEntityInputRoutingResult = {',
     'delivery: DeliveryResult;',
     'export const buildPendingNetworkOutputs',
@@ -205,11 +220,13 @@ for (const [path, markers] of [
     'NETWORK_OUTBOX_CAPACITY_EXCEEDED',
     'requireDeliveryResult(',
     'requireDeliveryDelivered(',
-    'isDeliveryDelivered(directDelivery)',
-    'shouldRetryDelivery(p2pDelivery)',
+    'const tryDirectOutputEnvelope = (',
+    'if (!isDeliveryDelivered(delivery)) return false;',
+    'const dispatchP2POutputEnvelope = (',
+    'if (shouldRetryDelivery(delivery)) {',
   ]],
   ['runtime/network/p2p/p2p.ts', [
-    'enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): EntityInputDeliveryResult',
+    'enqueueEntityInputsDelivery(\n    targetRuntimeId: string,\n    envelope: RuntimeEntityInputsEnvelope,\n    ingressTimestamp?: number,\n  ): EntityInputDeliveryResult',
     'sendEntityInputsRaw',
     "delivery.code === 'P2P_NO_PUBKEY'",
     'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
@@ -219,7 +236,7 @@ for (const [path, markers] of [
     'sendEntityInputsRaw(to: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): boolean',
   ]],
   ['runtime/network/p2p/direct-runtime-bun.ts', [
-    'sendEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): DeliveryResult',
+    'sendEntityInputsDelivery: (\n      targetRuntimeId: string,\n      envelope: RuntimeEntityInputsEnvelope,\n      ingressTimestamp?: number,\n    ): DeliveryResult',
     'ROUTE_DIRECT_MISS_FALLBACK',
     'ROUTE_DIRECT_SEND_FAILED',
   ]],
@@ -240,8 +257,9 @@ for (const [path, markers] of [
     'delivery: relayDelivery',
     'local-delivery-failed',
   ]],
-  ['runtime/orchestrator/hub-node.ts', [
-    'directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)',
+  ['runtime/orchestrator/hub-runtime-transport.ts', [
+    'route.sendEntityInputsDelivery(',
+    'targetRuntimeId,\n    envelope,\n    ingressTimestamp,',
   ]],
   ['runtime/orchestrator/mm-node.ts', [
     'directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)',
@@ -290,9 +308,10 @@ for (const [path, markers] of [
     'enqueueEntityInputsDelivery returns typed success with transport',
   ]],
   ['runtime/__tests__/relay-store.test.ts', [
-    'relay send result predicate matches websocket failure contract',
+    'websocket send result classifier covers the complete server/client matrix',
     'relay delivery events expose typed retry and fatal semantics',
-    'relay pending delivery retains current and later messages when send fails',
+    'relay pending delivery retains current and later messages when send reports zero bytes',
+    'relay pending delivery fails loud on an invalid numeric send result',
   ]],
   ['runtime/__tests__/relay-direct.test.ts', [
     'direct relay diagnostics stay machine-readable',
@@ -303,9 +322,11 @@ for (const [path, markers] of [
   ['runtime/__tests__/relay-router.test.ts', [
     'delivery:',
     'send-failed',
+    'deliver-invalid',
   ]],
   ['runtime/__tests__/direct-runtime-bun.test.ts', [
     'sendEntityInputsDelivery',
+    'WEBSOCKET_SEND_RESULT_INVALID',
     'ROUTE_DIRECT_DELIVERED',
   ]],
 ] as const) {

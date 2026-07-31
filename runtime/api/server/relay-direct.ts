@@ -74,6 +74,31 @@ const pushDirectRelayDeliveryEvent = (
   });
 };
 
+const recordDirectRelaySendError = (
+  relayStore: RelayStore,
+  fromRuntimeId: string,
+  targetRuntimeId: string,
+  envelope: RuntimeEntityInputsEnvelope,
+  logOneShot: RelayDirectOneShotLog,
+  error: unknown,
+): DeliveryResult => {
+  const reason = error instanceof Error ? error.message : String(error);
+  logOneShot(
+    `direct-dispatch-send-failed:${targetRuntimeId}`,
+    'relay.direct.send_failed',
+    { targetRuntimeId, reason },
+  );
+  pushDirectRelayDeliveryEvent(relayStore, {
+    fromRuntimeId,
+    targetRuntimeId,
+    envelope,
+    status: 'send-failed',
+    reason: 'ROUTE_DIRECT_SEND_THROW',
+    details: { error: reason },
+  });
+  return deferredDirectRelayDelivery('ROUTE_DIRECT_SEND_FAILED');
+};
+
 export const sendEntityInputDirectViaRelaySocketDelivery = (
   relayStore: RelayStore,
   env: RuntimeReplica,
@@ -132,73 +157,79 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     return delivery;
   }
 
+  let payload: string;
   try {
-    const payload = encryptJSON(envelope, hexToPubKey(targetPubKeyHex));
-    const target = relayStore.clients.get(targetKey);
-    const messageSeq = nextWsTimestamp(relayStore);
-    const msg = {
-      type: 'entity_inputs' as const,
-      id: `srv_${messageSeq}`,
-      from: fromRuntimeId,
-      fromEncryptionPubKey: fromPubKeyHex,
-      to: target?.runtimeId || targetRuntimeId,
-      timestamp:
-        typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp)
-          ? ingressTimestamp
-          : messageSeq,
-      payload,
-      encrypted: true,
-      ...(envelope.entityInputs.length === 1 && envelope.entityInputs[0]
-        ? { entityId: envelope.entityInputs[0].entityId }
-        : {}),
-      txs: envelope.entityInputs.reduce((count, entityInput) => count + (entityInput.entityTxs?.length ?? 0), 0),
-    };
-    if (target && isRelaySocketOpen(target.ws)) {
-      const result = target.ws.send(serializeWsMessage(msg));
-      if (classifyWebSocketSendResult(result) === 'dropped') {
-        pushDirectRelayDeliveryEvent(relayStore, {
-          fromRuntimeId,
-          targetRuntimeId,
-          envelope,
-          status: 'send-failed',
-          reason: 'ROUTE_DIRECT_SEND_DROPPED',
-        });
-        return deferredDirectRelayDelivery('ROUTE_DIRECT_SEND_FAILED');
-      }
+    payload = encryptJSON(envelope, hexToPubKey(targetPubKeyHex));
+  } catch (error) {
+    return recordDirectRelaySendError(
+      relayStore,
+      fromRuntimeId,
+      targetRuntimeId,
+      envelope,
+      logOneShot,
+      error,
+    );
+  }
+  const target = relayStore.clients.get(targetKey);
+  const messageSeq = nextWsTimestamp(relayStore);
+  const msg = {
+    type: 'entity_inputs' as const,
+    id: `srv_${messageSeq}`,
+    from: fromRuntimeId,
+    fromEncryptionPubKey: fromPubKeyHex,
+    to: target?.runtimeId || targetRuntimeId,
+    timestamp:
+      typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp)
+        ? ingressTimestamp
+        : messageSeq,
+    payload,
+    encrypted: true,
+    ...(envelope.entityInputs.length === 1 && envelope.entityInputs[0]
+      ? { entityId: envelope.entityInputs[0].entityId }
+      : {}),
+    txs: envelope.entityInputs.reduce((count, entityInput) => count + (entityInput.entityTxs?.length ?? 0), 0),
+  };
+  if (target && isRelaySocketOpen(target.ws)) {
+    let result: ReturnType<typeof target.ws.send>;
+    try {
+      result = target.ws.send(serializeWsMessage(msg));
+    } catch (error) {
+      return recordDirectRelaySendError(
+        relayStore,
+        fromRuntimeId,
+        targetRuntimeId,
+        envelope,
+        logOneShot,
+        error,
+      );
+    }
+    if (classifyWebSocketSendResult(result) === 'dropped') {
       pushDirectRelayDeliveryEvent(relayStore, {
         fromRuntimeId,
         targetRuntimeId,
         envelope,
-        status: 'delivered-direct-local',
+        status: 'send-failed',
+        reason: 'ROUTE_DIRECT_SEND_DROPPED',
       });
-      return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
+      return deferredDirectRelayDelivery('ROUTE_DIRECT_SEND_FAILED');
     }
-
-    // No open local WS client for target runtime in this process.
-    // Return false so the runtime can use its normal P2P route; process-local
-    // relay queues can blackhole outputs when the relay is external.
     pushDirectRelayDeliveryEvent(relayStore, {
       fromRuntimeId,
       targetRuntimeId,
       envelope,
-      status: 'direct-miss-fallback',
+      status: 'delivered-direct-local',
     });
-    return deferredDirectRelayDelivery('ROUTE_DIRECT_MISS_FALLBACK');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    logOneShot(
-      `direct-dispatch-send-failed:${targetRuntimeId}`,
-      'relay.direct.send_failed',
-      { targetRuntimeId, reason },
-    );
-    pushDirectRelayDeliveryEvent(relayStore, {
-      fromRuntimeId,
-      targetRuntimeId,
-      envelope,
-      status: 'send-failed',
-      reason: 'ROUTE_DIRECT_SEND_THROW',
-      details: { error: reason },
-    });
-    return deferredDirectRelayDelivery('ROUTE_DIRECT_SEND_FAILED');
+    return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
   }
+
+  // No open local WS client for target runtime in this process.
+  // Return false so the runtime can use its normal P2P route; process-local
+  // relay queues can blackhole outputs when the relay is external.
+  pushDirectRelayDeliveryEvent(relayStore, {
+    fromRuntimeId,
+    targetRuntimeId,
+    envelope,
+    status: 'direct-miss-fallback',
+  });
+  return deferredDirectRelayDelivery('ROUTE_DIRECT_MISS_FALLBACK');
 };

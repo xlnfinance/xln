@@ -178,15 +178,16 @@ const sendRelayDelivery = (
   if (!isRelaySocketOpen(ws)) {
     return requireRelayDeliveryMetadata('stale-target', 'TARGET_SOCKET_NOT_OPEN');
   }
+  let result: RelaySendResult;
   try {
-    const result = config.send(ws, serializeWsMessage(msg as RuntimeWsMessage));
-    if (classifyWebSocketSendResult(result) === 'dropped') {
-      return requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_DROPPED');
-    }
-    return requireRelayDeliveryMetadata('delivered');
+    result = config.send(ws, serializeWsMessage(msg as RuntimeWsMessage));
   } catch (error) {
     return requireRelayDeliveryMetadata('send-failed', error instanceof Error ? error.message : String(error));
   }
+  if (classifyWebSocketSendResult(result) === 'dropped') {
+    return requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_DROPPED');
+  }
+  return requireRelayDeliveryMetadata('delivered');
 };
 
 const createRelayRouteContext = (

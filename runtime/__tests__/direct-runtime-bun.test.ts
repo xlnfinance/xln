@@ -617,6 +617,17 @@ describe('direct runtime websocket route', () => {
 
     ws.send = (raw) => {
       sent.push(deserializeWsMessage(raw));
+      return -2;
+    };
+    expect(() => route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toThrow(
+      'WEBSOCKET_SEND_RESULT_INVALID',
+    );
+    expect(route.getSessionState()).toEqual([
+      expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+    ]);
+
+    ws.send = (raw) => {
+      sent.push(deserializeWsMessage(raw));
       return 0;
     };
     expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({

@@ -92,12 +92,13 @@ type DirectSendAttempt =
 
 const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt => {
   if (!isSocketOpen(ws)) return { sent: false };
+  let result: WebSocketSendResult;
   try {
-    const result = ws.send(serializeWsMessage(msg));
-    return classifyWebSocketSendResult(result) === 'dropped' ? { sent: false } : { sent: true };
+    result = ws.send(serializeWsMessage(msg));
   } catch (error) {
     return { sent: false, error: error instanceof Error ? error.message : String(error) };
   }
+  return classifyWebSocketSendResult(result) === 'dropped' ? { sent: false } : { sent: true };
 };
 
 const readRecoveryLookupKey = (payload: unknown): string => {
@@ -212,8 +213,9 @@ const sendEntityInputsDelivery = (
   if (!('session' in target)) return target;
   const peerKey = normalizeEncryptionPubKey(target.session.peerEncryptionPubKey);
   if (!peerKey) return deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_TARGET_KEY_MISSING' });
+  let msg: RuntimeWsMessage;
   try {
-    const msg: RuntimeWsMessage = {
+    msg = {
       type: 'entity_inputs',
       id: makeMessageId(),
       from: context.serverRuntimeId,
@@ -229,9 +231,6 @@ const sendEntityInputsDelivery = (
         : {}),
       txs: envelope.entityInputs.reduce((count, input) => count + (input.entityTxs?.length ?? 0), 0),
     };
-    const attempt = trySend(target.session.ws, msg);
-    if (!attempt.sent) forgetSession(context, target.session.ws);
-    return resultFromSendAttempt(attempt, 'ROUTE_DIRECT_DELIVERED', 'ROUTE_DIRECT_SEND_FAILED');
   } catch (error) {
     return deliveryFailure({
       category: 'TransientRace',
@@ -240,6 +239,9 @@ const sendEntityInputsDelivery = (
       terminal: false,
     });
   }
+  const attempt = trySend(target.session.ws, msg);
+  if (!attempt.sent) forgetSession(context, target.session.ws);
+  return resultFromSendAttempt(attempt, 'ROUTE_DIRECT_DELIVERED', 'ROUTE_DIRECT_SEND_FAILED');
 };
 
 const sendReliableReceiptDelivery = (

@@ -465,6 +465,9 @@ describe('relay-router gossip fanout', () => {
         if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-backpressured') {
           return -1;
         }
+        if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-invalid') {
+          return Number.NaN;
+        }
         if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-dropped') {
           return 0;
         }
@@ -494,6 +497,19 @@ describe('relay-router gossip fanout', () => {
       event.details &&
       (event.details as { traceId?: string }).traceId === 'deliver-backpressured'
     )).toBeDefined();
+
+    await expect(relayRoute(config, wsA, {
+      type: 'entity_inputs',
+      id: 'deliver-invalid',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: 'encrypted-account-input',
+      encrypted: true,
+      entityId: ENTITY_B,
+      txs: 1,
+    })).rejects.toThrow('WEBSOCKET_SEND_RESULT_INVALID');
+    expect(store.clients.get(RUNTIME_B)?.ws).toBe(wsB);
 
     await relayRoute(config, wsA, {
       type: 'entity_inputs',
