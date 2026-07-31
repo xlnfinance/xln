@@ -12,7 +12,7 @@ import {
   deriveSitePassword, factorForShardCount, getShardCount, hexToBytes, validateInputs,
 } from './core.ts';
 import { BIP39_ENGLISH } from './bip39-english.ts';
-import { BRAINVAULT_V1 } from './spec.ts';
+import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID } from './spec.ts';
 
 // Test vectors for v1.0 (simplified: no hashName, direct salt from name)
 // FROZEN - these define wallet compatibility forever
@@ -31,6 +31,13 @@ const VECTORS = [
     mnemonic24: 'lion shoot refuse toss scissors brass voice blame climb identify surface attack sing topic burden deer captain stone unit hood clarify scatter captain during',
     ethAddr: '0x4A699A1F4061ceEbC83b9dC14d6A0c33eC3E2327',
   }},
+  { name: ' alice ', passphrase: ' secret123456 ', shards: 1, expect: {
+    salt0: '77e473889c32e1e8f5defd5441eba3c9807a3c3ec1be9cec82e3028b76f072fc',
+    shard0: 'b38a177e90e56a5d9e7848a3aef3d76a560c8040d0ce2b257792b84a63236318',
+    masterKey: '6156efee5df98ec0f761e31ea389ca91e9fafbfa02da01e84f5b7bb0a8f16616',
+    mnemonic24: 'report hub ranch sword pony motion balance fitness make select fold garden parrot say invite slice clip lumber shoe advice vapor bread fashion input',
+    ethAddr: '0x04F873D11CceAafbe2Aa5B04C8537A7484966507',
+  }},
   { name: 'test', passphrase: 'secret123', shards: 10, expect: {
     salt0: '7e95de96d472cbce318d8dcc4976997c388d555027ee086ebdaaab004684efca',
     shard0: '1c2b3e5bc7647e48477cfaf2b64693e9c5b86bd33835c9d3400f8ef47eddc2fe',
@@ -47,6 +54,7 @@ test('embedded BIP39 English wordlist is canonical', () => {
   expect(Object.isFrozen(BIP39_ENGLISH)).toBe(true);
   expect(Object.isFrozen(BRAINVAULT_V1)).toBe(true);
   expect(BRAINVAULT_V1.ARGON_VERSION).toBe(0x13);
+  expect(BRAINVAULT_V1_SPEC_ID).toBe('brainvault/argon2id-sharded/v1.0|argon2id-v19-m262144-t1-p1|out32|nfkd-utf8');
   expect(() => ((BIP39_ENGLISH as string[])[0] = 'mutated')).toThrow();
   expect(() => ((BRAINVAULT_V1 as { ARGON_TIME_COST: number }).ARGON_TIME_COST = 2)).toThrow();
   expect(hash).toBe('2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda');

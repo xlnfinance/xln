@@ -36,3 +36,5 @@ bun test brainvault/core.test.ts
 ## Frozen Spec
 
 All parameters locked for 20+ year compatibility. DO NOT CHANGE.
+
+Name and passphrase are exact inputs: leading/trailing whitespace is significant, then V1 applies NFKD normalization. Older interactive CLI releases trimmed edge whitespace; recover wallets created there by entering the trimmed values.
