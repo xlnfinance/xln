@@ -53,6 +53,7 @@
     generateBase58Secret,
     hasSupportedMnemonicWordCount,
     normalizeMnemonicPhrase,
+    normalizeBrainVaultShardTimeSample,
     parseLiveRuntimeChoices,
     shouldRetryLiveRuntimeDiscovery,
     type LiveRuntimeChoice,
@@ -286,6 +287,7 @@
   let rehearsalEnabled = false;
   let rehearsalMode: RecoveryRehearsalMode | null = null;
   let rehearsalExpectedAddress = '';
+  let rehearsalFactorConfirmed = true;
   let derivationRun: BrainVaultDerivationRun | null = null;
 
   // Compute actual shard count and factor from input (must match cli.ts derive() logic)
@@ -320,14 +322,12 @@
 
   function readPersistedShardTime(): number | null {
     if (typeof localStorage === 'undefined') return null;
-    const value = Number(localStorage.getItem(BRAINVAULT_SHARD_TIME_STORAGE_KEY));
-    return Number.isFinite(value) && value >= 100 && value <= 600_000 ? value : null;
+    return normalizeBrainVaultShardTimeSample(
+      Number(localStorage.getItem(BRAINVAULT_SHARD_TIME_STORAGE_KEY)),
+    );
   }
 
   function recordMeasuredShardTime(elapsedMs: number): void {
-    if (!Number.isFinite(elapsedMs) || elapsedMs < 100 || elapsedMs > 600_000) {
-      throw new Error(`BRAINVAULT_SHARD_TIME_INVALID:${elapsedMs}`);
-    }
     estimatedShardTimeMs = shardTimeMeasured
       ? estimatedShardTimeMs * 0.7 + elapsedMs * 0.3
       : elapsedMs;
@@ -646,6 +646,7 @@
   $: canDerive = inputMode === 'brainvault'
     ? (
         isValidShardInput
+        && (rehearsalMode !== 'brainvault' || rehearsalFactorConfirmed)
         && name.length >= BRAINVAULT_V1.MIN_NAME_LENGTH
         && passphrase.length >= BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH
       )
@@ -683,8 +684,14 @@
     if (index >= 0) {
       workers.splice(index, 1);
     }
+    detachWorkerHandlers(worker);
     worker.terminate();
     syncWorkerCounts();
+  }
+
+  function detachWorkerHandlers(worker: Worker): void {
+    worker.onmessage = null;
+    worker.onerror = null;
   }
 
   function workerErrorMessage(err: unknown): string {
@@ -745,10 +752,12 @@
     rehearsalExpectedAddress = address.toLowerCase();
     derivationRun = null;
     clearDerivedWalletMaterial();
+    showAdvanced = false;
     if (mode === 'brainvault') {
       name = '';
       passphrase = '';
       shardInput = 3;
+      rehearsalFactorConfirmed = false;
     } else {
       mnemonicInput = '';
     }
@@ -773,6 +782,8 @@
     rehearsalMode = null;
     rehearsalExpectedAddress = '';
     rehearsalEnabled = false;
+    rehearsalFactorConfirmed = true;
+    showAdvanced = false;
     return true;
   }
 
@@ -780,7 +791,20 @@
     rehearsalEnabled = false;
     rehearsalMode = null;
     rehearsalExpectedAddress = '';
+    rehearsalFactorConfirmed = true;
+    showAdvanced = false;
     derivationError = '';
+  }
+
+  function selectPresetFactor(nextFactor: number): void {
+    shardInput = nextFactor;
+    rehearsalFactorConfirmed = true;
+    showAdvanced = false;
+  }
+
+  function selectCustomFactor(): void {
+    if (isPreset) shardInput = 6;
+    rehearsalFactorConfirmed = true;
   }
 
   function handleWorkerFailure(worker: Worker, err: unknown): void {
@@ -818,9 +842,11 @@
       if (type === 'ready') {
         opts.onReady?.();
       } else if (type === 'probe_result') {
-        const probeTime = Number(data?.estimatedShardTimeMs);
-        if (Number.isFinite(probeTime) && probeTime >= 100 && probeTime <= 600_000) {
+        const probeTime = normalizeBrainVaultShardTimeSample(data?.estimatedShardTimeMs);
+        if (probeTime !== null) {
           estimatedShardTimeMs = probeTime;
+        } else {
+          logRuntimeCreationDiagnostic('BrainVault worker returned invalid probe timing', data?.estimatedShardTimeMs);
         }
       } else if (type === 'shard_complete') {
         void handleShardComplete(worker, data?.shardIndex, data?.resultHex, data?.elapsedMs)
@@ -1028,10 +1054,7 @@
     if (typeof resultHex !== 'string' || resultHex.length !== BRAINVAULT_V1.SHARD_OUTPUT_BYTES * 2) {
       throw new Error(`BRAINVAULT_WORKER_RESULT_INVALID:${typeof resultHex === 'string' ? resultHex.length : typeof resultHex}`);
     }
-    const numericElapsedMs = Number(elapsedMs);
-    if (!Number.isFinite(numericElapsedMs) || numericElapsedMs <= 0) {
-      throw new Error(`BRAINVAULT_WORKER_TIME_INVALID:${String(elapsedMs)}`);
-    }
+    const measuredShardTimeMs = normalizeBrainVaultShardTimeSample(elapsedMs);
     const validatedShardIndex = Number(shardIndex);
     workerActiveShard.delete(worker);
     if (shardResults.has(validatedShardIndex)) {
@@ -1041,8 +1064,19 @@
     shardResults.set(validatedShardIndex, hexToBytes(resultHex));
     shardsCompleted = shardResults.size;
 
-    // Update time estimate (exponential moving average)
-    recordMeasuredShardTime(numericElapsedMs);
+    // Timing is telemetry: invalid or extreme samples must never discard valid Argon2 output.
+    if (measuredShardTimeMs === null) {
+      logRuntimeCreationDiagnostic('BrainVault worker returned invalid shard timing', { shardIndex, elapsedMs });
+    } else {
+      if (measuredShardTimeMs !== elapsedMs) {
+        logRuntimeCreationDiagnostic('BrainVault worker shard timing was clamped', {
+          shardIndex,
+          elapsedMs,
+          measuredShardTimeMs,
+        });
+      }
+      recordMeasuredShardTime(measuredShardTimeMs);
+    }
 
     if (isWorkerDraining(worker)) {
       shutdownWorker(worker);
@@ -1099,6 +1133,7 @@
 
   function terminateWorkers() {
     for (const worker of workers) {
+      detachWorkerHandlers(worker);
       worker?.terminate();
     }
     workers = [];
@@ -1155,6 +1190,8 @@
     rehearsalEnabled = false;
     rehearsalMode = null;
     rehearsalExpectedAddress = '';
+    rehearsalFactorConfirmed = true;
+    showAdvanced = false;
     // Keep name and passphrase for convenience
     mnemonic24 = '';
     mnemonic12 = '';
@@ -1428,7 +1465,9 @@
           <span class="advanced-toggle-main">
             <span class="advanced-toggle-label">Security work factor</span>
             <span class="advanced-toggle-summary">
-              {factorInfo.tier} · {factorInfo.shards.toLocaleString()} shards · {formatRuntimeDurationRounded(workEstimate.recoveryMs)}
+              {rehearsalMode === 'brainvault' && !rehearsalFactorConfirmed
+                ? 'Choose the same factor again'
+                : `${factorInfo.tier} · ${factorInfo.shards.toLocaleString()} shards · ${formatRuntimeDurationRounded(workEstimate.recoveryMs)}`}
             </span>
           </span>
           <svg class="advanced-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1443,8 +1482,8 @@
                 <button
                   type="button"
                   class="factor-btn"
-                  class:selected={shardInput === info.factor}
-                  on:click={() => shardInput = info.factor}
+                  class:selected={shardInput === info.factor && (rehearsalMode !== 'brainvault' || rehearsalFactorConfirmed)}
+                  on:click={() => selectPresetFactor(info.factor)}
                 >
                   <span class="factor-num">{info.factor}</span>
                   <span class="factor-tier">{info.tier}</span>
@@ -1453,8 +1492,8 @@
               <button
                 type="button"
                 class="factor-btn custom-btn"
-                class:selected={!isPreset}
-                on:click={() => { if (isPreset) shardInput = 6; }}
+                class:selected={!isPreset && (rehearsalMode !== 'brainvault' || rehearsalFactorConfirmed)}
+                on:click={selectCustomFactor}
               >
                 <span class="factor-num">⚙</span>
                 <span class="factor-tier">Custom</span>
@@ -1469,31 +1508,35 @@
                   min="6"
                   max="100000"
                   bind:value={shardInput}
+                  on:input={() => rehearsalFactorConfirmed = true}
                   placeholder="6"
                 />
                 <span class="custom-label">shards</span>
               </div>
             {/if}
 
-            <div class="work-estimate" data-testid="brainvault-work-estimate">
-              <div>
-                <span>{shardTimeMeasured ? 'Measured on this device' : 'Initial device estimate'}</span>
-                <strong>{formatRuntimeDurationRounded(workEstimate.recoveryMs)}</strong>
-                <small>{Math.max(1, Math.min(effectiveTargetWorkerCount, actualShardCount || 1))} worker target</small>
+            {#if rehearsalMode === 'brainvault' && !rehearsalFactorConfirmed}
+              <p class="warning-text">Choose the exact same work factor used in the first run.</p>
+            {:else}
+              <div class="work-estimate" data-testid="brainvault-work-estimate">
+                <div>
+                  <span>{shardTimeMeasured ? 'Measured on this device' : 'Initial device estimate'}</span>
+                  <strong>{formatRuntimeDurationRounded(workEstimate.recoveryMs)}</strong>
+                  <small>{Math.max(1, Math.min(effectiveTargetWorkerCount, actualShardCount || 1))} worker target</small>
+                </div>
+                <div>
+                  <span>Every password guess</span>
+                  <strong>{actualShardCount.toLocaleString()} × {SHARD_MEMORY_MB} MB</strong>
+                  <small>{formatMemoryLabel(workEstimate.totalMemoryWorkMb)} total memory-work</small>
+                </div>
               </div>
-              <div>
-                <span>Every password guess</span>
-                <strong>{actualShardCount.toLocaleString()} × {SHARD_MEMORY_MB} MB</strong>
-                <small>{formatMemoryLabel(workEstimate.totalMemoryWorkMb)} total memory-work</small>
-              </div>
-            </div>
-            <p class="measurement-note">
-              {shardTimeMeasured
-                ? 'Timing uses completed Argon2 work from this browser.'
-                : 'Timing updates and is saved after the first completed shard.'}
-            </p>
-
-            <p class="warning-text">Recovery requires the exact same vault name, passphrase, and work factor.</p>
+              <p class="measurement-note">
+                {shardTimeMeasured
+                  ? 'Timing uses completed Argon2 work from this browser.'
+                  : 'Timing updates and is saved after the first completed shard.'}
+              </p>
+              <p class="warning-text">Recovery requires the exact same vault name, passphrase, and work factor.</p>
+            {/if}
           </div>
         {/if}
         </div>

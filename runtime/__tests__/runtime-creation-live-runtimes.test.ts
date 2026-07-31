@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  BRAINVAULT_SHARD_TIME_MAX_MS,
   countMnemonicWords,
   estimateBrainVaultWork,
   formatLiveRuntimeImportStatus,
   hasSupportedMnemonicWordCount,
+  normalizeBrainVaultShardTimeSample,
   normalizeMnemonicPhrase,
   parseLiveRuntimeChoices,
 } from '../../frontend/src/lib/components/Views/runtime-creation-model';
@@ -46,6 +48,15 @@ describe('runtime creation live runtime discovery', () => {
     });
     expect(() => estimateBrainVaultWork(1.5, 256, 3_000, 1))
       .toThrow('BRAINVAULT_SHARD_COUNT_INVALID');
+  });
+
+  test('keeps shard timing telemetry bounded without failing valid derivation work', () => {
+    expect(normalizeBrainVaultShardTimeSample(Number.NaN)).toBeNull();
+    expect(normalizeBrainVaultShardTimeSample('3000')).toBeNull();
+    expect(normalizeBrainVaultShardTimeSample(1)).toBe(100);
+    expect(normalizeBrainVaultShardTimeSample(750_000)).toBe(750_000);
+    expect(normalizeBrainVaultShardTimeSample(BRAINVAULT_SHARD_TIME_MAX_MS * 2))
+      .toBe(BRAINVAULT_SHARD_TIME_MAX_MS);
   });
 
   test('parses suggested H/MM/Custody runtime choices through the shared import parser', () => {
@@ -102,6 +113,9 @@ describe('runtime creation live runtime discovery', () => {
     expect(source).toContain('Auto-discovery suppresses transport failures only');
     expect(source).not.toContain('swallows errors');
     expect(source).not.toContain('next.length === 0 && payload.ready === false');
+    expect(source).toContain('detachWorkerHandlers(worker);');
+    expect(source).toContain('worker.onmessage = null;');
+    expect(source).toContain('Timing is telemetry: invalid or extreme samples must never discard valid Argon2 output.');
   });
 
   test('keeps demo, remote-runtime, and reset controls behind the Testnet tab', () => {
