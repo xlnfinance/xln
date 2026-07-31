@@ -22,7 +22,10 @@ test.describe('Recovery choice guidance', () => {
       await page.getByRole('tab', { name: 'Mnemonic', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Create or restore from seed', exact: true })).toBeVisible();
       await expect(page.getByTestId('mnemonic-tradeoffs')).toBeVisible();
-      await expect(page.getByText('Fresh seeds use strong cryptographic randomness', { exact: true })).toBeVisible();
+      await expect(page.getByText('Correct implementations generate high-entropy seeds locally', { exact: true })).toBeVisible();
+      const rngIncident = page.getByRole('link', { name: 'Coldcard RNG incident', exact: true });
+      await expect(rngIncident).toBeVisible();
+      await expect(rngIncident).toHaveAttribute('href', 'https://www.cryptotimes.io/2026/07/31/bitcoins-invisible-risk-coldcard-mk3-firmware-bug-leaves-btc-wallet-seeds-exposed-38m-drained/');
       await page.waitForTimeout(250);
       await page.screenshot({ path: testInfo.outputPath(`${viewport.label}-mnemonic.png`), fullPage: true });
     });
@@ -57,5 +60,17 @@ test.describe('Recovery choice guidance', () => {
     await expect(page.getByRole('button', { name: 'Verify recovery', exact: true })).toBeEnabled();
     await page.waitForTimeout(250);
     await page.screenshot({ path: testInfo.outputPath('rehearsal-ready.png'), fullPage: true });
+  });
+
+  test('wallet tabs follow the keyboard tab pattern', { tag: '@functional' }, async ({ page }) => {
+    await page.goto(TEST_URL);
+    const brainVaultTab = page.getByRole('tab', { name: 'Brain Vault', exact: true });
+    const mnemonicTab = page.getByRole('tab', { name: 'Mnemonic', exact: true });
+    await brainVaultTab.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(mnemonicTab).toBeFocused();
+    await expect(mnemonicTab).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Home');
+    await expect(brainVaultTab).toBeFocused();
   });
 });

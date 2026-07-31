@@ -17,6 +17,7 @@ bun.lockb
 
 # Frontend generated files
 frontend/static/runtime.js
+frontend/static/brainvault-worker.js
 frontend/static/llms.txt
 frontend/static/llms*.txt
 frontend/static/c.txt

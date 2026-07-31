@@ -82,6 +82,10 @@
     showPassphrase = true; // Auto-show since it's random/public anyway
   }
 
+  function disableTextareaAutocorrect(node: HTMLTextAreaElement): void {
+    node.setAttribute('autocorrect', 'off');
+  }
+
   async function generateRandomMnemonic(): Promise<void> {
     // Generate 256 bits of entropy for 24-word mnemonic
     const entropy = new Uint8Array(32);
@@ -125,6 +129,30 @@
       return;
     }
     void discoverLiveRuntimes(true);
+  }
+
+  function focusWalletModeTab(next: InputMode): void {
+    selectInputMode(next);
+    document.getElementById(`wallet-mode-${next}`)?.focus();
+  }
+
+  function handleWalletModeKeydown(event: KeyboardEvent): void {
+    const enabledModes = (['brainvault', 'mnemonic', 'testnet'] as const).filter((mode) => (
+      rehearsalMode === null || mode === rehearsalMode
+    ));
+    const currentIndex = enabledModes.indexOf(inputMode);
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? enabledModes.length - 1
+        : event.key === 'ArrowRight'
+          ? (currentIndex + 1) % enabledModes.length
+          : event.key === 'ArrowLeft'
+            ? (currentIndex - 1 + enabledModes.length) % enabledModes.length
+            : -1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    focusWalletModeTab(enabledModes[nextIndex]!);
   }
 
   // Visual scheme for the standalone auth screen: 'dark' (default "vault") or 'light' (minimalist fintech skin)
@@ -360,6 +388,7 @@
   let workers: Worker[] = [];
   const drainingWorkers = new Set<Worker>();
   const workerActiveShard = new Map<Worker, number>();
+  const workerShardWatchdogs = new Map<Worker, ReturnType<typeof setTimeout>>();
   let retryShardQueue: number[] = [];
   const shardRetryCounts = new Map<number, number>();
   let workerCount = 1;
@@ -415,6 +444,7 @@
   let selectedRecoveryCandidateId = '';
   let localRuntimeAvailable = false;
   let backupFileInput: HTMLInputElement | null = null;
+  let recoveryRunToken = 0;
 
   // ============================================================================
   // LIFECYCLE - Load vault on mount
@@ -453,6 +483,7 @@
   };
 
   function resetRecoveryDecision(): void {
+    recoveryRunToken += 1;
     recoveryChecking = false;
     recoveryRuntimeId = '';
     recoveryLabel = '';
@@ -468,6 +499,8 @@
 
   async function prepareRecoveryDecisionFromCurrentSeed(labelOverride?: string): Promise<boolean> {
     if (!mnemonic24 || !ethereumAddress) return false;
+
+    const runToken = ++recoveryRunToken;
 
     derivationError = '';
     recoveryChecking = true;
@@ -486,6 +519,7 @@
       const discovery = await discoverRuntimeRecoveryCandidates(mnemonic24, {
         peers: buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId }),
       });
+      if (runToken !== recoveryRunToken) return false;
       recoveryCandidates = discovery.candidates;
       recoveryErrors = discovery.errors;
       recoveryFailures = discovery.failures;
@@ -498,11 +532,12 @@
       }
       return true;
     } catch (err) {
+      if (runToken !== recoveryRunToken) return false;
       recoveryErrors = [err instanceof Error ? err.message : String(err)];
       recoveryFailures = [];
-      return false;
+      return true;
     } finally {
-      recoveryChecking = false;
+      if (runToken === recoveryRunToken) recoveryChecking = false;
     }
   }
 
@@ -678,6 +713,7 @@
   }
 
   function shutdownWorker(worker: Worker): void {
+    clearWorkerShardWatchdog(worker);
     workerActiveShard.delete(worker);
     drainingWorkers.delete(worker);
     const index = workers.indexOf(worker);
@@ -692,6 +728,21 @@
   function detachWorkerHandlers(worker: Worker): void {
     worker.onmessage = null;
     worker.onerror = null;
+  }
+
+  function clearWorkerShardWatchdog(worker: Worker): void {
+    const watchdog = workerShardWatchdogs.get(worker);
+    if (watchdog !== undefined) clearTimeout(watchdog);
+    workerShardWatchdogs.delete(worker);
+  }
+
+  function armWorkerShardWatchdog(worker: Worker, shardIndex: number): void {
+    clearWorkerShardWatchdog(worker);
+    const timeoutMs = Math.min(600_000, Math.max(300_000, Math.ceil(estimatedShardTimeMs * 10)));
+    workerShardWatchdogs.set(worker, setTimeout(() => {
+      if (workerActiveShard.get(worker) !== shardIndex) return;
+      handleWorkerFailure(worker, new Error(`Shard ${shardIndex + 1} timed out after ${Math.ceil(timeoutMs / 1000)}s`));
+    }, timeoutMs));
   }
 
   function workerErrorMessage(err: unknown): string {
@@ -837,6 +888,12 @@
     opts: { onReady?: () => void; onError?: (err: unknown) => void; handleErrors?: boolean } = {}
   ): void {
     worker.onmessage = (e) => {
+      if (!e.data || typeof e.data !== 'object' || typeof e.data.type !== 'string') {
+        const error = new Error('BRAINVAULT_WORKER_MESSAGE_INVALID');
+        opts.onError?.(error);
+        if (opts.handleErrors !== false) handleWorkerFailure(worker, error);
+        return;
+      }
       const { type, data } = e.data;
 
       if (type === 'ready') {
@@ -857,6 +914,10 @@
         if (opts.handleErrors !== false) {
           handleWorkerFailure(worker, error);
         }
+      } else {
+        const error = new Error(`BRAINVAULT_WORKER_MESSAGE_UNKNOWN:${type}`);
+        opts.onError?.(error);
+        if (opts.handleErrors !== false) handleWorkerFailure(worker, error);
       }
     };
 
@@ -886,8 +947,9 @@
         ethereumAddress = await deriveEthereumAddress(mnemonic24);
         if (!acceptRecoveryRehearsal('mnemonic', ethereumAddress)) return;
         createLoginType = 'manual';
-        await prepareRecoveryDecisionFromCurrentSeed(`Mnemonic ${ethereumAddress.slice(0, 6)}`);
-        await continueAfterRecoveryDiscovery();
+        if (await prepareRecoveryDecisionFromCurrentSeed(`Mnemonic ${ethereumAddress.slice(0, 6)}`)) {
+          await continueAfterRecoveryDiscovery();
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to import mnemonic';
         logRuntimeCreationDiagnostic('Mnemonic import failed', err);
@@ -1030,6 +1092,7 @@
 
     const shardIndex = retryShardQueue.length > 0 ? retryShardQueue.shift()! : nextShardToDispatch++;
     workerActiveShard.set(worker, shardIndex);
+    armWorkerShardWatchdog(worker, shardIndex);
 
     worker.postMessage({
       type: 'derive_shard',
@@ -1056,6 +1119,7 @@
     }
     const measuredShardTimeMs = normalizeBrainVaultShardTimeSample(elapsedMs);
     const validatedShardIndex = Number(shardIndex);
+    clearWorkerShardWatchdog(worker);
     workerActiveShard.delete(worker);
     if (shardResults.has(validatedShardIndex)) {
       throw new Error(`BRAINVAULT_WORKER_DUPLICATE_SHARD:${validatedShardIndex}`);
@@ -1127,18 +1191,21 @@
     entityId = generateLazyEntityIdPreview([ethereumAddress], 1n);
 
     if (!acceptRecoveryRehearsal('brainvault', ethereumAddress)) return;
-    await prepareRecoveryDecisionFromCurrentSeed(run.name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);
-    await continueAfterRecoveryDiscovery();
+    if (await prepareRecoveryDecisionFromCurrentSeed(run.name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`)) {
+      await continueAfterRecoveryDiscovery();
+    }
   }
 
   function terminateWorkers() {
     for (const worker of workers) {
+      clearWorkerShardWatchdog(worker);
       detachWorkerHandlers(worker);
       worker?.terminate();
     }
     workers = [];
     drainingWorkers.clear();
     workerActiveShard.clear();
+    workerShardWatchdogs.clear();
     syncWorkerCounts();
   }
 
@@ -1204,6 +1271,7 @@
   }
 
   onDestroy(() => {
+    recoveryRunToken += 1;
     clearLiveRuntimeDiscoveryRetry();
     terminateWorkers();
   });
@@ -1318,6 +1386,7 @@
             class:selected={inputMode === 'brainvault'}
             disabled={phase !== 'input' || (rehearsalMode !== null && rehearsalMode !== 'brainvault')}
             on:click={() => selectInputMode('brainvault')}
+            on:keydown={handleWalletModeKeydown}
           >
             Brain Vault
           </button>
@@ -1331,6 +1400,7 @@
             class:selected={inputMode === 'mnemonic'}
             disabled={phase !== 'input' || (rehearsalMode !== null && rehearsalMode !== 'mnemonic')}
             on:click={() => selectInputMode('mnemonic')}
+            on:keydown={handleWalletModeKeydown}
           >
             Mnemonic
           </button>
@@ -1344,6 +1414,7 @@
             class:selected={inputMode === 'testnet'}
             disabled={phase !== 'input' || rehearsalMode !== null}
             on:click={() => selectInputMode('testnet')}
+            on:keydown={handleWalletModeKeydown}
           >
             Testnet
           </button>
@@ -1381,14 +1452,14 @@
             <p>{WALLET_MODE_TRADEOFFS.brainvault.summary}</p>
           </div>
           <div class="tradeoff-grid">
-            <div class="tradeoff-list benefit-list">
+            <div class="tradeoff-list benefit-list" role="list" aria-label="Benefits">
               {#each WALLET_MODE_TRADEOFFS.brainvault.benefits as item}
-                <div><span aria-hidden="true">+</span><p>{item}</p></div>
+                <div role="listitem"><span aria-hidden="true">+</span><p>{item}</p></div>
               {/each}
             </div>
-            <div class="tradeoff-list cost-list">
+            <div class="tradeoff-list cost-list" role="list" aria-label="Costs">
               {#each WALLET_MODE_TRADEOFFS.brainvault.costs as item}
-                <div><span aria-hidden="true">−</span><p>{item}</p></div>
+                <div role="listitem"><span aria-hidden="true">−</span><p>{item}</p></div>
               {/each}
             </div>
           </div>
@@ -1406,6 +1477,8 @@
               bind:value={name}
               placeholder={t('vault.name.placeholder')}
               autocomplete="off"
+              autocapitalize="none"
+              autocorrect="off"
               spellcheck="false"
             />
           </div>
@@ -1422,6 +1495,8 @@
               bind:value={passphrase}
               placeholder={t('vault.password.placeholder')}
               autocomplete="off"
+              autocapitalize="none"
+              autocorrect="off"
               spellcheck="false"
             />
             <button
@@ -1467,7 +1542,7 @@
             <span class="advanced-toggle-summary">
               {rehearsalMode === 'brainvault' && !rehearsalFactorConfirmed
                 ? 'Choose the same factor again'
-                : `${factorInfo.tier} · ${factorInfo.shards.toLocaleString()} shards · ${formatRuntimeDurationRounded(workEstimate.recoveryMs)}`}
+                : `${factorInfo.tier} · ${factorInfo.shards.toLocaleString()} ${factorInfo.shards === 1 ? 'shard' : 'shards'} · ${formatRuntimeDurationRounded(workEstimate.recoveryMs)}`}
             </span>
           </span>
           <svg class="advanced-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1553,15 +1628,28 @@
               <p>{WALLET_MODE_TRADEOFFS.mnemonic.summary}</p>
             </div>
             <div class="tradeoff-grid">
-              <div class="tradeoff-list benefit-list">
+              <div class="tradeoff-list benefit-list" role="list" aria-label="Benefits">
                 {#each WALLET_MODE_TRADEOFFS.mnemonic.benefits as item}
-                  <div><span aria-hidden="true">+</span><p>{item}</p></div>
+                  <div role="listitem"><span aria-hidden="true">+</span><p>{item}</p></div>
                 {/each}
               </div>
-              <div class="tradeoff-list cost-list">
+              <div class="tradeoff-list cost-list" role="list" aria-label="Costs">
                 {#each WALLET_MODE_TRADEOFFS.mnemonic.costs as item}
-                  <div><span aria-hidden="true">−</span><p>{item}</p></div>
+                  <div role="listitem"><span aria-hidden="true">−</span><p>{item}</p></div>
                 {/each}
+                {#if WALLET_MODE_TRADEOFFS.mnemonic.linkedCost}
+                  <div role="listitem">
+                    <span aria-hidden="true">−</span>
+                    <p>
+                      {WALLET_MODE_TRADEOFFS.mnemonic.linkedCost.text}
+                      <a
+                        href={WALLET_MODE_TRADEOFFS.mnemonic.linkedCost.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >{WALLET_MODE_TRADEOFFS.mnemonic.linkedCost.linkText}</a>
+                    </p>
+                  </div>
+                {/if}
               </div>
             </div>
             <p class="shared-risk">Malware during recovery can steal either a passphrase or a mnemonic.</p>
@@ -1596,9 +1684,11 @@
               <textarea
                 id="mnemonic"
                 bind:value={mnemonicInput}
+                use:disableTextareaAutocorrect
                 placeholder="Enter your seed words…"
                 rows="4"
                 autocomplete="off"
+                autocapitalize="none"
                 spellcheck="false"
               ></textarea>
             </div>
