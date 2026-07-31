@@ -24,6 +24,7 @@ more L2", but a consequence of the scaling and enforcement constraints.
 - [radapter.md](radapter.md) — canonical frontend/runtime adapter spec
 - [merkle.md](merkle.md) — storage and proof layout
 - [consensus-invariants.md](consensus-invariants.md) — bilateral consensus footguns
+- [audit-protocol.md](audit-protocol.md) — canonical evidence-driven modular audit workflow
 - [debug.md](debug.md) — the required runtime/network debug surface
 
 ## Core Protocol
