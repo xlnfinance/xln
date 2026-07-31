@@ -1,5 +1,5 @@
 import { isAddress, ZeroAddress } from 'ethers';
-import type { JAdapter } from '@xln/runtime/api/runtime-module';
+import type { JAdapter } from '@xln/runtime/api/public/runtime-module';
 import type { EntityReplica } from '$lib/types/ui';
 import { readJsonResponse } from './account-faucet';
 import type { ExternalToken } from './entity-asset-catalog';

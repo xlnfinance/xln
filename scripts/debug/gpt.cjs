@@ -1087,7 +1087,7 @@ Read these together:
 - \`runtime/extensions/lending.ts\`
 - \`runtime/types/lending.ts\`
 - \`runtime/entity/tx/handlers/lending.ts\`
-- \`runtime/server/lending.ts\`
+- \`runtime/api/server/lending.ts\`
 - \`frontend/src/lib/components/Entity/LendingPanel.svelte\`
 - \`runtime/__tests__/lending.test.ts\`
 - \`tests/e2e-lending.spec.ts\`
@@ -1098,7 +1098,7 @@ The test market maker must prepublish same-chain books and ETH/TRON cross-chain
 books before user swaps run. Empty books are a setup failure, not a user-flow
 failure. Health/self-test lives in:
 - \`runtime/orchestrator/mm-node.ts\`
-- \`runtime/server/market-maker-health.ts\`
+- \`runtime/api/server/market-maker-health.ts\`
 - \`runtime/network/relay/market-subscriptions.ts\`
 - \`tests/e2e-cross-j-swap.spec.ts\` ("market maker prepublishes...")
 
@@ -1179,11 +1179,11 @@ xln/
       account/tx/handlers/cross-swap-fill-ack.ts ${fileSizes['runtime/account/tx/handlers/cross-swap-fill-ack.ts'] || '?'} lines - Fill ACK processing
       relay/market-subscriptions.ts ${fileSizes['runtime/network/relay/market-subscriptions.ts'] || '?'} lines - Book streaming
       orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
-      server/market-maker-health.ts ${fileSizes['runtime/server/market-maker-health.ts'] || '?'} lines - MM readiness health
+      server/market-maker-health.ts ${fileSizes['runtime/api/server/market-maker-health.ts'] || '?'} lines - MM readiness health
       lending.ts                  ${fileSizes['runtime/extensions/lending.ts'] || '?'} lines - Lending math and ids
       types/lending.ts            ${fileSizes['runtime/types/lending.ts'] || '?'} lines - Lending state types
       entity/tx/handlers/lending.ts ${fileSizes['runtime/entity/tx/handlers/lending.ts'] || '?'} lines - Lending tx handlers
-      server/lending.ts           ${fileSizes['runtime/server/lending.ts'] || '?'} lines - Lending API handlers
+      server/lending.ts           ${fileSizes['runtime/api/server/lending.ts'] || '?'} lines - Lending API handlers
 
     entity/tx/
       apply.ts                   ${fileSizes['runtime/entity/tx/apply.ts'] || '?'} lines - Entity tx dispatcher

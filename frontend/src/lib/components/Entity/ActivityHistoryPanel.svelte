@@ -4,7 +4,7 @@
   import type {
     RuntimeAdapterReadQuery,
     RuntimeActivityEvent,
-  } from '@xln/runtime/api/runtime-module';
+  } from '@xln/runtime/api/public/runtime-module';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeControllerHandle, runtimeAdapterHeight } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';

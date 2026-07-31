@@ -4,7 +4,7 @@ import {
   publicAggregatedHealth,
   publicLocalHubHealth,
   publicRuntimeHealth,
-} from '../server/health-redaction';
+} from '../api/server/health-redaction';
 
 test('health redaction keeps local operator requests on loopback only', () => {
   expect(isLocalOperatorRequest(

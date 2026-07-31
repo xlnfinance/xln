@@ -52,7 +52,7 @@ describe('orchestrator child secret channel', () => {
     const childAuthSeed = 'derived-h1-radapter-auth-seed-32-bytes';
     const code = [
       "import { readInheritedChildSecrets, resolveChildSecret } from './runtime/infra/child-secrets.ts';",
-      "import { registerRuntimeAdapterAuthSeed, resolveRuntimeAdapterAuthSeed } from './runtime/radapter/auth.ts';",
+      "import { registerRuntimeAdapterAuthSeed, resolveRuntimeAdapterAuthSeed } from './runtime/api/runtime-adapter/auth.ts';",
       'const secrets = readInheritedChildSecrets();',
       "const seed = resolveChildSecret(secrets, 'runtimeSeed', process.env['XLN_RUNTIME_SEED'] || '');",
       "const radapterAuthSeed = resolveChildSecret(secrets, 'radapterAuthSeed', process.env['XLN_RADAPTER_AUTH_SEED'] || '');",

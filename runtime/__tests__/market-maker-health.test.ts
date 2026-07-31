@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   createMarketMakerServerState,
   getMarketMakerHealth as getServerMarketMakerHealth,
-} from '../server/market-maker-health';
+} from '../api/server/market-maker-health';
 import { buildDefaultEntitySwapPairs } from '../account/utils';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { deriveSameOrderbookMaterialization } from '../entity/tx/handlers/account/orderbook-matching-helpers';

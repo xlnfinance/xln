@@ -1,4 +1,4 @@
-import type { Profile as GossipProfile, RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-module';
+import type { Profile as GossipProfile, RuntimeAdapterEntitySummary } from '@xln/runtime/api/public/runtime-module';
 
 import { compareStableText } from '$lib/utils/stableSort';
 

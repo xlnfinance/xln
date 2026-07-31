@@ -1,7 +1,7 @@
 import type { EntityReplica } from '$lib/types/ui';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import { amountToUsd } from '$lib/utils/assetPricing';
-import type { SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/runtime-module';
+import type { SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/public/runtime-module';
 import { compareStableText } from './swap-formatting';
 import { type PreparedSwapOrderLike } from './swap-order-math';
 import './SwapPanel.css';

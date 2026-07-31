@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import CollateralForm from './CollateralForm.svelte';

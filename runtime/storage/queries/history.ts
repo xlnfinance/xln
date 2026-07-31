@@ -13,7 +13,7 @@ import { cloneIsolatedEntityInput } from '../../entity/input-clone';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
-} from '../../api/activity-history';
+} from '../../api/public/activity-history';
 import type {
   PersistedActivityJournal,
   RuntimeActivityEvent,

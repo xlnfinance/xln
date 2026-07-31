@@ -15,7 +15,7 @@
     isRelayTimelineWarning,
     type RelayTimelineDelivery,
   } from '$lib/health/relayEventSeverity';
-  import type { RuntimeActivityEvent, RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeActivityEvent, RuntimeAdapterEntitySummary } from '@xln/runtime/api/public/runtime-module';
   import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
   import { DISPLAY } from '@xln/runtime/config/constants';
 

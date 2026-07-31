@@ -3,7 +3,7 @@
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { createExternalWalletApi } from '../api/external-wallet-api';
+import { createExternalWalletApi } from '../api/public/external-wallet-api';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
@@ -51,14 +51,14 @@ import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-se
 import { findMissingRpcContractCode } from './contract-readiness';
 import { readJurisdictionsFile } from './jurisdictions-file';
 import { getTokenIdsForJurisdiction } from '../account/utils';
-import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../server/health-redaction';
-import { requiresLocalNodeOperator } from '../server/node-http-access';
+import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../api/server/health-redaction';
+import { requiresLocalNodeOperator } from '../api/server/node-http-access';
 import {
   deriveRuntimeAdapterCapabilityToken,
   registerRuntimeAdapterAuthSeed,
   resolveRuntimeAdapterAuthAudience,
   resolveRuntimeAdapterAuthSeed,
-} from '../radapter/auth';
+} from '../api/runtime-adapter/auth';
 import {
   getJurisdictionIdentityRef,
   isJurisdictionStackRef,
@@ -67,14 +67,14 @@ import { requireJurisdictionChainId } from '../jurisdiction/machine/jurisdiction
 import {
   attachRuntimeAdapterTicker,
   forgetRuntimeAdapterClient,
-} from '../radapter/server';
+} from '../api/runtime-adapter/server';
 import { redactTokenBearingUrlForLog } from './runtime-import-log';
-import { handleLendingStateRequest } from '../server/lending';
-import { handleRuntimeActivityRequest } from '../server/activity-api';
-import { handleReserveFaucet } from '../server/reserve-faucet';
-import { handleOffchainFaucet } from '../server/offchain-faucet';
+import { handleLendingStateRequest } from '../api/server/lending';
+import { handleRuntimeActivityRequest } from '../api/server/activity-api';
+import { handleReserveFaucet } from '../api/server/reserve-faucet';
+import { handleOffchainFaucet } from '../api/server/offchain-faucet';
 import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
-import { handleRuntimeInputStatus } from '../server/runtime-input-control';
+import { handleRuntimeInputStatus } from '../api/server/runtime-input-control';
 import {
   getActiveJAdapter,
   getP2PState,

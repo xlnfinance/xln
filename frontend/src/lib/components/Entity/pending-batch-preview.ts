@@ -1,4 +1,4 @@
-import type { EntityTx, JBatch } from '@xln/runtime/api/runtime-module';
+import type { EntityTx, JBatch } from '@xln/runtime/api/public/runtime-module';
 import {
   simulateDraftBatchReserveAvailability,
   type DraftBatchReserveIssue,

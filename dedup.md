@@ -13,8 +13,8 @@ Top 100 simplification targets:
 1. `runtime/runtime.ts` — split runtime loop orchestration from bootstrapping and exports.
 2. `runtime/runtime.ts` — isolate `process/apply/persist/dispatch` pipeline into one narrow module.
 3. `runtime/runtime.ts` — remove remaining BrowserVM registry plumbing from core runtime flow.
-4. `runtime/server/index.ts` — split API routes, runtime admin actions, and debug endpoints into separate modules.
-5. `runtime/server/index.ts` — move custody-specific handlers out of runtime server.
+4. `runtime/api/server/index.ts` — split API routes, runtime admin actions, and debug endpoints into separate modules.
+5. `runtime/api/server/index.ts` — move custody-specific handlers out of runtime server.
 6. `runtime/entity/consensus/index.ts` — extract single-signer path into its own helper file.
 7. `runtime/entity/consensus/index.ts` — extract multi-signer proposer flow into its own helper file.
 8. `runtime/entity/consensus/index.ts` — extract commit-time hanko attachment into one helper.
@@ -75,7 +75,7 @@ Top 100 simplification targets:
 66. `runtime/types.ts` — split runtime, entity, account, batch, event, and adapter types into separate files.
 67. `runtime/types.ts` — move BrowserVM-only comments and deprecated fields out of core type file.
 68. `runtime/types.ts` — remove deprecated `env.browserVM` once registry migration is complete.
-69. `runtime/api/runtime-module.ts` — keep the public browser contract narrow;
+69. `runtime/api/public/runtime-module.ts` — keep the public browser contract narrow;
     do not mirror internal helpers or legacy names.
 70. `frontend/src/lib/components/Entity/EntityPanelTabs.svelte` — split Move, account tab content, and shared pickers.
 71. `frontend/src/lib/components/Entity/EntityPanelTabs.svelte` — delete legacy asset tabs after Move fully replaces them.

@@ -1,4 +1,4 @@
-import type { Profile as GossipProfile } from '@xln/runtime/api/runtime-module';
+import type { Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
 import type { EntityReplica } from '$lib/types/ui';
 
 export function isFullEntityId(value: string): boolean {

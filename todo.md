@@ -51,12 +51,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   invariant, WAL boundary, adversarial-input boundary and intentionally
   non-obvious ordering rule. Comments must explain why the tempting alternative
   is unsafe rather than restating the code.
-- [ ] Finish the remaining owner-first folder moves:
-  `api/{public,server,runtime}`. Perform
-  path-only batches with exact export
-  surface checks and no compatibility re-exports, then tighten the dependency
-  and root-surface ratchets after every move. Defer the Activity projection
-  path until the independently edited Time Machine/3D consumer lands.
 - [ ] Separate committed frame state from each replica envelope before
   optimizing further. Introduce the missing `RuntimeReplica` boundary around
   committed `RuntimeState`, ingress, WAL/outbox, lifecycle and process-local

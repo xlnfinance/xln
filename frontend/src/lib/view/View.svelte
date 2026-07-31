@@ -3,7 +3,7 @@
   import { writable, get } from 'svelte/store';
   import { formatUnits } from 'ethers';
   import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
-  import type { RuntimeReplica } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
   import type { EnvSnapshot } from '@xln/runtime/runtime/types';
   import { toasts } from '$lib/stores/toastStore';
   import { paymentSpotlight } from '$lib/stores/paymentSpotlightStore';

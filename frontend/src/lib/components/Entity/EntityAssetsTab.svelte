@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Profile as GossipProfile } from '@xln/runtime/api/runtime-module';
+  import type { Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import AssetFaucetCard from './AssetFaucetCard.svelte';
   import AssetLedgerTable from './AssetLedgerTable.svelte';

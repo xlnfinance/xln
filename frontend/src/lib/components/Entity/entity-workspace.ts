@@ -1,4 +1,4 @@
-import type { RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/runtime/api/runtime-module';
+import type { RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/runtime/api/public/runtime-module';
 
 export type RuntimeWorkspaceMode = 'embedded' | 'remote';
 export type RuntimeWorkspaceAuthLevel = 'inspect' | 'admin' | null;

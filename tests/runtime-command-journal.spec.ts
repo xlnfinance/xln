@@ -1,6 +1,6 @@
 import { expect, test, type Page } from './global-setup.mts';
-import { signRuntimeAdapterServerIdentity } from '../runtime/radapter/server-identity-signer';
-import { verifyRuntimeAdapterServerIdentity } from '../runtime/radapter/server-identity';
+import { signRuntimeAdapterServerIdentity } from '../runtime/api/runtime-adapter/server-identity-signer';
+import { verifyRuntimeAdapterServerIdentity } from '../runtime/api/runtime-adapter/server-identity';
 
 const DB_NAME = 'xln-runtime-command-journal-v1';
 const INTENT_STORE = 'intents';

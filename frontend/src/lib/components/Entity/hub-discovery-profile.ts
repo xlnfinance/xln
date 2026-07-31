@@ -1,4 +1,4 @@
-import type { AccountReplica, EntityReplica, RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
+import type { AccountReplica, EntityReplica, RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/runtime/jurisdiction/machine/jurisdiction-stack';
 import {
   buildOpenAccountTx,

@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import type { RuntimeActivityEvent, RuntimeAdapterGraphFrame } from '@xln/runtime/api/runtime-module';
+import type { RuntimeActivityEvent, RuntimeAdapterGraphFrame } from '@xln/runtime/api/public/runtime-module';
 import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '$lib/network3d/networkMachine';
 import {
   disconnectNetworkTimelineReaders,

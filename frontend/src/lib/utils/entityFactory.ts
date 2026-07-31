@@ -3,7 +3,7 @@
  */
 
 import { keccak256, toUtf8Bytes } from 'ethers';
-import type { RuntimeReplica, EntityReplica } from '@xln/runtime/api/runtime-module';
+import type { RuntimeReplica, EntityReplica } from '@xln/runtime/api/public/runtime-module';
 import { unwrapLiveRuntimeEnv } from './liveRuntimeEnv';
 import { dispatchRuntimeInputToRuntimeEnv, getXLN } from '$lib/stores/xlnStore';
 

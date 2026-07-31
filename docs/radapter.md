@@ -25,7 +25,7 @@ component reactivity already provide. We deleted them.
 ## interface
 
 ```ts
-// runtime/radapter/types.ts (new file, ~40 LOC)
+// runtime/api/runtime-adapter/types.ts (new file, ~40 LOC)
 
 export interface RuntimeAdapter {
   readonly mode: 'embedded' | 'remote'
@@ -125,7 +125,7 @@ Errors are structured: `{ code, message, retryable }`. Codes are a closed enum:
 ## embedded implementation
 
 ```
-runtime/radapter/embedded.ts (~150 LOC)
+runtime/api/runtime-adapter/embedded.ts (~150 LOC)
 
 class EmbeddedAdapter implements RuntimeAdapter {
   private env: Env
@@ -161,7 +161,7 @@ function used on the server side — embedded and remote produce bit-identical
 output by construction.
 
 ```
-runtime/radapter/resolve.ts (~200 LOC)
+runtime/api/runtime-adapter/resolve.ts (~200 LOC)
 
 resolveRead(env, path, query):
   match path:
@@ -187,7 +187,7 @@ existing projection code reused: ~600 LOC.
 ## remote implementation
 
 ```
-runtime/radapter/remote.ts (~250 LOC)
+runtime/api/runtime-adapter/remote.ts (~250 LOC)
 
 class RemoteAdapter implements RuntimeAdapter {
   private ws: WebSocket
@@ -229,7 +229,7 @@ tracking is per-component, not in the adapter.
 
 ## server-side wiring
 
-Modify `runtime/server/index.ts` `/rpc` handler. ~250 LOC added.
+Modify `runtime/api/server/index.ts` `/rpc` handler. ~250 LOC added.
 
 ```
 on connection:
@@ -296,7 +296,7 @@ Token bucket per WS connection. Default: 50 reads/sec, 5 sends/sec, burst
 + `retryAfterMs`. Frontend honors backoff; missing this opens trivial DoS.
 
 ```
-runtime/radapter/rate-limit.ts (~80 LOC)
+runtime/api/runtime-adapter/rate-limit.ts (~80 LOC)
 
 class TokenBucket {
   constructor(capacity, refillPerSec) { ... }
@@ -433,7 +433,7 @@ They are additive and do not break the wire protocol.
 ## migration from current frontend
 
 Phase A: introduce adapter without removing anything.
-- create `runtime/radapter/{types, resolve, embedded}.ts`
+- create `runtime/api/runtime-adapter/{types, resolve, embedded}.ts`
 - `xlnStore.ts` initializes embedded adapter alongside existing env logic
 - export `readStore` helper
 - existing components unchanged, keep using `$xlnEnvironment`

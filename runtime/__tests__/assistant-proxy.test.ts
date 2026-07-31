@@ -5,7 +5,7 @@ import {
   resolveAssistantDirectClientIp,
   resolveAssistantRateClientId,
   type AssistantProxyConfig,
-} from '../server/assistant-proxy';
+} from '../api/server/assistant-proxy';
 
 const config = (overrides: Partial<AssistantProxyConfig> = {}): AssistantProxyConfig => ({
   upstreamUrl: 'http://127.0.0.1:3031',
@@ -37,7 +37,7 @@ const silentLogger = {
 
 describe('assistant production proxy', () => {
   test('is wired into both production servers before generic API proxying', () => {
-    const standalone = readFileSync('runtime/server/index.ts', 'utf8');
+    const standalone = readFileSync('runtime/api/server/index.ts', 'utf8');
     const orchestrator = readFileSync('runtime/orchestrator/orchestrator.ts', 'utf8');
     expect(standalone).toContain('const assistantResponse = await assistantProxy.handle(req, pathname, clientId);');
     expect(orchestrator).toContain(

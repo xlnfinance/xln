@@ -116,7 +116,7 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/extensions/lending.ts`
 - `runtime/types/lending.ts`
 - `runtime/entity/tx/handlers/lending.ts`
-- `runtime/server/lending.ts`
+- `runtime/api/server/lending.ts`
 - `runtime/network/relay/router.ts`
 - `runtime/network/p2p/p2p.ts`
 - `runtime/network/p2p/direct-runtime-bun.ts`

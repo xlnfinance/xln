@@ -9,7 +9,7 @@ import type {
   TowerModeV1,
   TowerReceiptV1,
   XLNModule,
-} from '@xln/runtime/api/runtime-module';
+} from '@xln/runtime/api/public/runtime-module';
 import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath } from 'ethers';
 import { get } from 'svelte/store';
 import {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createAssistantProxy, type AssistantProxyConfig } from '../server/assistant-proxy';
+import { createAssistantProxy, type AssistantProxyConfig } from '../api/server/assistant-proxy';
 
 const encoder = new TextEncoder();
 const config = (overrides: Partial<AssistantProxyConfig> = {}): AssistantProxyConfig => ({

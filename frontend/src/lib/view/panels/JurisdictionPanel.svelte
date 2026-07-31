@@ -8,7 +8,7 @@
   import type { Writable } from 'svelte/store';
   import { get } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
-  import type { BrowserVMTokenInfo, RuntimeReplica, EnvSnapshot, JReplica } from '@xln/runtime/api/runtime-module';
+  import type { BrowserVMTokenInfo, RuntimeReplica, EnvSnapshot, JReplica } from '@xln/runtime/api/public/runtime-module';
   import { activeRuntime, allRuntimes } from '$lib/stores/vaultStore';
   import { settings } from '$lib/stores/settingsStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';

@@ -101,7 +101,7 @@ for (const [path, markers] of [
     'const exactMatch = entries.find((entry) => sameMeshRpc(entry.rpc, requestedRpc));',
     'entries.find(isPrimaryJurisdiction)',
   ]],
-  ['runtime/server/jurisdictions.ts', [
+  ['runtime/api/server/jurisdictions.ts', [
     'const displayName = normalizeJurisdictionDisplayName(previous[\'name\']) || targetKey;',
     'name: displayName',
     'selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpc])',
@@ -129,7 +129,7 @@ for (const [path, forbidden] of [
   ['runtime/orchestrator/mesh-jurisdictions.ts', [
     "map['arrakis']",
   ]],
-  ['runtime/server/jurisdictions.ts', [
+  ['runtime/api/server/jurisdictions.ts', [
     "jurisdictions['arrakis']",
     'arrakisDisplayName',
     'existingArrakis',

@@ -1,4 +1,4 @@
-import type { Delta, DerivedDelta, Profile as GossipProfile } from '@xln/runtime/api/runtime-module';
+import type { Delta, DerivedDelta, Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
 import { getTokenCapacity } from '@xln/runtime/routing/capacity';
 
 export type CapacitySnapshot = {

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
-import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
-import { decodeRuntimeAdapterBrowserMessage } from '../radapter/codec';
-import { handleRuntimeAdapterMessage } from '../radapter/server';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
+import { decodeRuntimeAdapterBrowserMessage } from '../api/runtime-adapter/codec';
+import { handleRuntimeAdapterMessage } from '../api/runtime-adapter/server';
 import {
   acquireRuntimeCommittedRead,
   acquireRuntimeFrameWriter,

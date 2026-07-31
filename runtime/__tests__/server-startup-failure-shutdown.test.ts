@@ -27,7 +27,7 @@ test('startup failure closes the already-bound HTTP listener and exits nonzero',
   const port = await reservePort();
   const child = Bun.spawn([
     'bun',
-    'runtime/server/index.ts',
+    'runtime/api/server/index.ts',
     '--port',
     String(port),
     '--host',

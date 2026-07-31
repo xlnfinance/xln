@@ -13,7 +13,7 @@ import {
   encryptRuntimeRecoveryBundle,
   encryptTowerPayloadForWatchSeed,
 } from '../storage/recovery/crypto';
-import type { JReplica, JurisdictionConfig, TowerLastResortPayloadV1, TowerAppointmentV1 } from '../api/runtime-module';
+import type { JReplica, JurisdictionConfig, TowerLastResortPayloadV1, TowerAppointmentV1 } from '../api/public/runtime-module';
 import {
   encodeTowerCounterDisputeRemedy,
   runWatchtowerSweep,

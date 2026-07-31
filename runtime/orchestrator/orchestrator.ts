@@ -10,8 +10,8 @@ import { REMOTE_RUNTIME } from '../config/constants';
 import { readBooleanEnv } from '../config/environment';
 import { createStructuredLogger, registerStructuredLogSink } from '../infra/logger';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
-import { sanitizeChildProcessEnv } from '../server/child-process-env';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
+import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../infra/child-secrets';
 import {
   startCustodySupport,
@@ -40,16 +40,16 @@ import {
 } from '../network/relay/market-wire';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
-import { serveRuntimeBundle, serveStatic } from '../server/static-assets';
-import { handleWatchtowerProxy } from '../server/watchtower-proxy';
+import { serveRuntimeBundle, serveStatic } from '../api/server/static-assets';
+import { handleWatchtowerProxy } from '../api/server/watchtower-proxy';
 import {
   createAssistantProxyFromEnv,
   resolveAssistantDirectClientIp,
   resolveAssistantRateClientId,
-} from '../server/assistant-proxy';
+} from '../api/server/assistant-proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
-import { publicAggregatedHealth, resolveSocketPeerAddress } from '../server/health-redaction';
-import { resolveRequestClientIp } from '../server/relay-direct';
+import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health-redaction';
+import { resolveRequestClientIp } from '../api/server/relay-direct';
 import { isOperatorRequest, loadOrCreateOperatorToken } from './operator-access';
 import {
   resolveOrchestratorSocketType,

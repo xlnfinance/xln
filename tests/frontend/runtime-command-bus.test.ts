@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeInput } from '@xln/runtime/api/runtime-module';
+import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 import {
   clearRuntimeCommandReceipts,
   recordRuntimeIngressReceipt,
@@ -12,7 +12,7 @@ import {
   submitRuntimeCommand,
   type CommandReceipt,
 } from '../../frontend/src/lib/stores/runtimeCommandBus';
-import { RuntimeAdapterError } from '../../runtime/radapter/errors';
+import { RuntimeAdapterError } from '../../runtime/api/runtime-adapter/errors';
 import { listUnresolvedRemoteRuntimeCommandIntents } from '../../frontend/src/lib/stores/runtimeCommandIntent';
 import {
   findCommittedEmbeddedRuntimeInputHeight,
@@ -703,7 +703,7 @@ test('credit and collateral configure forms submit RuntimeInput through shared c
   const collateralSource = readFileSync('frontend/src/lib/components/Entity/CollateralForm.svelte', 'utf8');
   const configureSource = readFileSync('frontend/src/lib/components/Entity/AccountConfigurePanel.svelte', 'utf8');
   const accountWorkspaceSource = readFileSync('frontend/src/lib/components/Entity/AccountWorkspaceView.svelte', 'utf8');
-  const resolverSource = readFileSync('runtime/radapter/resolve.ts', 'utf8');
+  const resolverSource = readFileSync('runtime/api/runtime-adapter/resolve.ts', 'utf8');
 
   for (const source of [creditSource, collateralSource]) {
     expect(source).toContain('export let submitRuntimeInput');

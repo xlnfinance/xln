@@ -1,4 +1,4 @@
-import type { AccountReplica } from '@xln/runtime/api/runtime-module';
+import type { AccountReplica } from '@xln/runtime/api/public/runtime-module';
 import type { EntityReplica } from '$lib/types/ui';
 
 const COLLAPSED_ACCOUNT_LIMIT = 5;

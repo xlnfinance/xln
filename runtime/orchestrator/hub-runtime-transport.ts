@@ -2,13 +2,13 @@ import type { DirectWebSocket } from '../network/p2p/direct-runtime-bun';
 import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { safeStringify } from '../protocol/serialization';
-import { decodeRuntimeAdapterRequest } from '../radapter/codec';
-import { resolveRuntimeAdapterRead } from '../radapter/resolve';
+import { decodeRuntimeAdapterRequest } from '../api/runtime-adapter/codec';
+import { resolveRuntimeAdapterRead } from '../api/runtime-adapter/resolve';
 import {
   closeInvalidRuntimeAdapterMessage,
   handleRuntimeAdapterMessage,
   type RuntimeAdapterSocket,
-} from '../radapter/server';
+} from '../api/runtime-adapter/server';
 import type { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
 import {
   enqueueRuntimeInput,
@@ -138,7 +138,7 @@ export const createHubRadapterMessageHandler = (
   raw: string | Buffer | ArrayBuffer,
 ) => void) =>
   (ws, raw) => {
-    let message: import('../radapter/types').RuntimeAdapterRequest;
+    let message: import('../api/runtime-adapter/types').RuntimeAdapterRequest;
     try {
       message = decodeRuntimeAdapterRequest(raw);
     } catch (error) {

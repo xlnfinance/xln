@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { RemoteRuntimeAdapter } from '../../runtime/radapter/remote';
+import { RemoteRuntimeAdapter } from '../../runtime/api/runtime-adapter/remote';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const PACKAGE_DIR = join(ROOT, 'packages/npm/xlnfinance');
@@ -73,7 +73,7 @@ const buildPackage = (): void => {
   mkdirSync(DIST_DIR, { recursive: true });
   run('bun', [
     'build',
-    'runtime/server/index.ts',
+    'runtime/api/server/index.ts',
     '--target=bun',
     '--external=classic-level',
     '--external=msgpackr-extract',

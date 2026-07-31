@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createExternalWalletApi, type ExternalWalletApiContext } from '../api/external-wallet-api';
+import { createExternalWalletApi, type ExternalWalletApiContext } from '../api/public/external-wallet-api';
 import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 
@@ -125,12 +125,12 @@ describe('external wallet API faucet transaction gate', () => {
 
   test('external wallet API uses structured logging instead of raw console output', () => {
     const source = [
-      'runtime/api/external-wallet-api.ts',
-      'runtime/api/external-wallet/http.ts',
-      'runtime/api/external-wallet/faucet-wallet.ts',
-      'runtime/api/external-wallet/faucet-handlers.ts',
-      'runtime/api/external-wallet/snapshot-handler.ts',
-      'runtime/api/external-wallet/tokens-handler.ts',
+      'runtime/api/public/external-wallet-api.ts',
+      'runtime/api/public/external-wallet/http.ts',
+      'runtime/api/public/external-wallet/faucet-wallet.ts',
+      'runtime/api/public/external-wallet/faucet-handlers.ts',
+      'runtime/api/public/external-wallet/snapshot-handler.ts',
+      'runtime/api/public/external-wallet/tokens-handler.ts',
     ]
       .map(file => readFileSync(join(process.cwd(), file), 'utf8'))
       .join('\n');

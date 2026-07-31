@@ -671,7 +671,7 @@ Files/modules:
 - add `runtime/storage/recovery/bundle.ts`;
 - add `runtime/storage/recovery/verify.ts`;
 - add `runtime/storage/recovery/peer-sync.ts`;
-- extend hub/direct relay surfaces in `runtime/server/index.ts`, `runtime/orchestrator/hub-node.ts`, and relay server modules;
+- extend hub/direct relay surfaces in `runtime/api/server/index.ts`, `runtime/orchestrator/hub-node.ts`, and relay server modules;
 - extend `entity-crontab.ts` to schedule PSR pings.
 
 Exit tests:

@@ -1,4 +1,4 @@
-import type { RuntimeInput } from '@xln/runtime/api/runtime-module';
+import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 import {
   MAX_RECEIPT_ID_BYTES,
   MAX_STATUS_URL_BYTES,

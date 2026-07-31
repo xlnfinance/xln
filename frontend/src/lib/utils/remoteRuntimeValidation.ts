@@ -1,4 +1,4 @@
-import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
+import { RemoteRuntimeAdapter } from '../../../../runtime/api/runtime-adapter/remote';
 import { RuntimeWsClient, type RuntimeWsClientOptions } from '../../../../runtime/network/p2p/ws-client';
 import { deriveEncryptionKeyPair } from '../../../../runtime/protocol/p2p-crypto';
 import { RuntimeQueryClient } from '$lib/stores/runtimeQueryClient';
@@ -13,7 +13,7 @@ import {
   type StoredRemoteRuntimeImportEntry,
 } from '$lib/utils/remoteRuntimeImport';
 import type { RuntimeRecoveryPeerSource } from '$lib/stores/vaultStore';
-import type { RuntimeAdapter } from '../../../../runtime/radapter/types';
+import type { RuntimeAdapter } from '../../../../runtime/api/runtime-adapter/types';
 
 export type RemoteRuntimeValidationProgress = {
   index: number;

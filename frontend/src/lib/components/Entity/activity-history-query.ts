@@ -2,7 +2,7 @@ import type {
   RuntimeAdapterActivityPage,
   RuntimeAdapterReadQuery,
   RuntimeActivityFilters,
-} from '@xln/runtime/api/runtime-module';
+} from '@xln/runtime/api/public/runtime-module';
 import { formatTokenAmount } from './entity-asset-values';
 import { requireTokenDecimals } from './token-metadata';
 

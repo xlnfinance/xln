@@ -20,8 +20,8 @@ import type {
   RuntimeAdapterGraphFrame,
   RuntimeAdapterTimelineIndexPage,
   RuntimeActivityEvent,
-} from '@xln/runtime/api/runtime-module';
-import { buildRuntimeActivityEvents } from '../../../../runtime/api/activity-history';
+} from '@xln/runtime/api/public/runtime-module';
+import { buildRuntimeActivityEvents } from '../../../../runtime/api/public/activity-history';
 import { deserializeTaggedJson, serializeTaggedJson } from '@xln/runtime/protocol/serialization';
 import { normalizeRuntimeTimelineIndex, type RuntimeTimelineIndex } from './runtimeGraphTimeline';
 
@@ -235,12 +235,12 @@ export const graphFrameFromSnapshot = (
   runtimeId: string,
   snapshot: EnvSnapshot,
 ): RuntimeAdapterGraphFrame => {
-  const height = integer(snapshot.height);
-  const timestamp = integer(snapshot.timestamp);
+  const height = integer(snapshot.state.height);
+  const timestamp = integer(snapshot.state.timestamp);
   const profiles = new Map(
     (snapshot.gossip?.profiles ?? []).map((profile) => [normalizeId(profile.entityId), profile]),
   );
-  const entities = Array.from(snapshot.eReplicas?.values?.() ?? []).map((replica) => {
+  const entities = Array.from(snapshot.state.eReplicas.values()).map((replica) => {
     const entityId = normalizeId(replica.entityId);
     const state = replica.state as unknown as {
       reserves?: Map<number, bigint>;
@@ -302,7 +302,7 @@ export const scenarioNetworkTimelineSource = (
   if (!expected) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
   const byHeight = new Map<number, EnvSnapshot>();
   for (const snapshot of snapshots) {
-    const height = Math.floor(Number(snapshot.height || 0));
+    const height = Math.floor(Number(snapshot.state.height));
     if (height >= 1) byHeight.set(height, snapshot);
   }
 
@@ -319,8 +319,8 @@ export const scenarioNetworkTimelineSource = (
       runtimeId: expected,
       frames: Array.from(byHeight.values()).map((snapshot) => ({
         runtimeId: expected,
-        height: Math.floor(Number(snapshot.height || 0)),
-        timestamp: Math.floor(Number(snapshot.timestamp || 0)),
+        height: Math.floor(Number(snapshot.state.height)),
+        timestamp: Math.floor(Number(snapshot.state.timestamp)),
         stateHash: String((snapshot as EnvSnapshot & { stateHash?: string }).stateHash || ''),
         materialized: true,
         graphChanged: snapshotChangedGraph(snapshot),
@@ -341,7 +341,7 @@ export const scenarioNetworkTimelineSource = (
         if (height < from || height > to) continue;
         events.push(...buildRuntimeActivityEvents({
           height,
-          timestamp: Math.floor(Number(snapshot.timestamp || 0)),
+          timestamp: Math.floor(Number(snapshot.state.timestamp)),
           ...(snapshot.runtimeInput ? { runtimeInput: snapshot.runtimeInput } : {}),
         }).map((event) => ({ ...event, runtimeId: expected })));
       }

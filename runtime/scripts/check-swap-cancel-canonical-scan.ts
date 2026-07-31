@@ -73,7 +73,7 @@ assertIncludes(
 const commandRoutePath = 'runtime/account/swap-command-route.ts';
 assertIncludes(readText(commandRoutePath), 'withCanonicalCrossJurisdictionRouteHash({', commandRoutePath);
 
-const activityPath = 'runtime/api/activity-history.ts';
+const activityPath = 'runtime/api/public/activity-history.ts';
 const activity = readText(activityPath);
 assertIncludes(activity, "case 'cancelSwap':", activityPath);
 assertIncludes(activity, "case 'cancelSwapOffer':", activityPath);

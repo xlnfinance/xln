@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { sanitizeChildProcessEnv } from '../server/child-process-env';
+import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 
 const FINGERPRINT_DOMAIN = 'xln.repository-code-fingerprint.v1';
 const STATUS_PREVIEW_ENTRY_LIMIT = 16;

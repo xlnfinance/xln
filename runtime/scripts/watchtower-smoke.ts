@@ -19,7 +19,7 @@ import {
   buildTowerAppointmentOwnerMessage,
   encryptRuntimeRecoveryBundle,
 } from '../storage/recovery/crypto';
-import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../api/runtime-module';
+import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../api/public/runtime-module';
 import { startStandaloneWatchtowerServer } from '../watchtower/standalone-server';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;

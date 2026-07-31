@@ -7,7 +7,7 @@ import { cacheEncryptionKey, createRelayStore, registerClient } from '../network
 import {
   hasConnectedEncryptedRelayClient,
   sendEntityInputDirectViaRelaySocketDelivery,
-} from '../server/relay-direct';
+} from '../api/server/relay-direct';
 import type { DeliverableEntityInput, RuntimeReplica, RuntimeEntityInputsEnvelope } from '../runtime/types';
 
 type SentMessage = {
@@ -41,7 +41,7 @@ const makeSocket = (options: { readyState?: number; sendResult?: boolean | numbe
 
 describe('relay direct entity delivery', () => {
   test('direct relay diagnostics stay machine-readable', () => {
-    const source = readFileSync(new URL('../server/relay-direct.ts', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('../api/server/relay-direct.ts', import.meta.url), 'utf8');
 
     expect(source).not.toContain('[RELAY] Direct dispatch');
     expect(source).not.toContain('console.');

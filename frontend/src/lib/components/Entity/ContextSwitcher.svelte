@@ -12,7 +12,7 @@
   import { refreshRuntimeView, runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
-  import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/public/runtime-module';
   import type { Tab } from '$lib/types/ui';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
   import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';

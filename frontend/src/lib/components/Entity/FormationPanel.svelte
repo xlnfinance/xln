@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { ConsensusConfig } from '@xln/runtime/api/runtime-module';
+  import type { ConsensusConfig } from '@xln/runtime/api/public/runtime-module';
   import { createActiveNumberedEntity, getXLN, submitRuntimeInput } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { activeRuntime, vaultOperations } from '../../stores/vaultStore';

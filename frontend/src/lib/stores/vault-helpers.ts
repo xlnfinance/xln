@@ -4,7 +4,7 @@ import {
   type JurisdictionsPayload,
   type Runtime,
 } from './vault-recovery';
-import type { RuntimeReplica } from '@xln/runtime/api/runtime-module';
+import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
 
 export const findRuntimeByIdCaseInsensitive = (
   runtimeMap: Record<string, Runtime>,

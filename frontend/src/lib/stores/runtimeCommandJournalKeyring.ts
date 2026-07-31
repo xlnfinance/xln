@@ -1,6 +1,6 @@
 import { HDNodeWallet, Mnemonic, getIndexedAccountPath } from 'ethers';
 import type { SigningKey } from 'ethers';
-import { buildRuntimeAdapterOwnerBindingDigest } from '@xln/runtime/radapter/owner-binding';
+import { buildRuntimeAdapterOwnerBindingDigest } from '@xln/runtime/api/runtime-adapter/owner-binding';
 import { normalizeRuntimeId } from './runtimeCommandIntentCodec';
 
 type RuntimeCommandJournalKeys = {

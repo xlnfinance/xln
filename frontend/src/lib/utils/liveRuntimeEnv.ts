@@ -1,4 +1,4 @@
-import type { RuntimeReplica, EnvSnapshot } from '@xln/runtime/api/runtime-module';
+import type { RuntimeReplica, EnvSnapshot } from '@xln/runtime/api/public/runtime-module';
 
 const LIVE_RUNTIME_ENV_KEY = '__xlnLiveEnv';
 

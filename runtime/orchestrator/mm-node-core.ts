@@ -44,8 +44,8 @@ import {
 } from '../orderbook';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { registerRuntimeAdapterAuthSeed } from '../radapter/auth';
-import { type RuntimeAdapterSocket } from '../radapter/server';
+import { registerRuntimeAdapterAuthSeed } from '../api/runtime-adapter/auth';
+import { type RuntimeAdapterSocket } from '../api/runtime-adapter/server';
 import { enqueueRuntimeInput } from '../runtime.ts';
 import type { AccountReplica, SwapOffer } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';

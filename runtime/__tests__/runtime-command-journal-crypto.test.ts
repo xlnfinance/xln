@@ -19,8 +19,8 @@ import {
   settleRemoteRuntimeCommandIntent,
 } from '../../frontend/src/lib/stores/runtimeCommandIntent';
 import { submitRuntimeCommand } from '../../frontend/src/lib/stores/runtimeCommandBus';
-import { RuntimeAdapterError } from '../radapter/errors';
-import { verifyRuntimeAdapterOwnerBinding } from '../radapter/owner-binding';
+import { RuntimeAdapterError } from '../api/runtime-adapter/errors';
+import { verifyRuntimeAdapterOwnerBinding } from '../api/runtime-adapter/owner-binding';
 
 const seed = 'test test test test test test test test test test test junk';
 const otherSeed = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';

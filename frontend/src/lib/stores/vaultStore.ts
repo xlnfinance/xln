@@ -14,7 +14,7 @@ import type {
   TowerLastResortPayloadV1,
   TowerReceiptV1,
   XLNModule,
-} from '@xln/runtime/api/runtime-module';
+} from '@xln/runtime/api/public/runtime-module';
 
 import { activeRuntimeId, runtimeOperations, runtimes } from './runtimeStore';
 

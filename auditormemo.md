@@ -25,7 +25,7 @@ tests as authoritative.
 6. Hanko/proof/contract boundary.
 7. J-layer event bridge.
 8. Persistence/recovery/watchtower.
-9. Remote runtime/server/frontend projection.
+9. Remote runtime/api/server/frontend projection.
 10. Extensions: orderbook, cross-j, routing, lending/agent payments.
 
 ## Module map
@@ -46,7 +46,7 @@ Scores are `importance / complexity` out of 100.
 | J-layer bridge | 90 / 75 | `runtime/jurisdiction/adapter/*`, `runtime/jurisdiction/machine/batch.ts`, `runtime/jurisdiction/machine/height.ts` | Chain adapters, batch construction, J-event ingestion, and J-height safety. |
 | Storage, WAL, recovery | 95 / 85 | `runtime/storage/*`, `runtime/storage/wal/*`, `runtime/storage/recovery/*`, `runtime/watchtower/*` | Persistence, restore, recovery bundles, tower receipts, and last-resort account safety. |
 | Networking and delivery | 85 / 80 | `runtime/network/p2p/*`, `runtime/network/relay/*`, `runtime/network/relay/router.ts`, `runtime/protocol/payments/delivery-result.ts` | Relay/direct/P2P delivery semantics, retries, TTLs, and freshness/liveness boundaries. |
-| RAdapter and server | 85 / 80 | `runtime/radapter/*`, `runtime/server/*`, `runtime/server/index.ts` | Remote runtime query/control surface used by browser app and external operators. |
+| RAdapter and server | 85 / 80 | `runtime/api/runtime-adapter/*`, `runtime/api/server/*`, `runtime/api/server/index.ts` | Remote runtime query/control surface used by browser app and external operators. |
 | Orchestrator | 75 / 85 | `runtime/orchestrator/*` | Dev/prod process supervision, hub/MM/custody/watchtower wiring. Large operational surface, not the core consensus root. |
 | Orderbook and swaps | 82 / 85 | `runtime/orderbook/*`, `runtime/extensions/cross-j/index.ts`, `runtime/extensions/cross-j/orderbook.ts`, `runtime/account/tx/handlers/swap-*` | Same-j and cross-j swap lifecycle, fills, cancels, exact amount accounting, hash-ladder proof ratio boundaries. |
 | Routing | 85 / 75 | `runtime/routing/*`, payment/HTLC handlers | Payment path selection, route metadata, hub compatibility, and route-capacity assumptions. |
@@ -75,7 +75,7 @@ Scores are `importance / complexity` out of 100.
 - `jurisdictions/contracts/Depository.sol`
 - `jurisdictions/contracts/Account.sol`
 - `runtime/storage/index.ts`
-- `runtime/radapter/resolve.ts`
+- `runtime/api/runtime-adapter/resolve.ts`
 
 ## Focus questions for audit
 

@@ -69,7 +69,7 @@ test('parent watch still fails closed on missing parent pid', async () => {
 
 test('managed custody children terminate when their spawning process is replaced', () => {
   const bootstrap = readFileSync(join(process.cwd(), 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
-  const daemon = readFileSync(join(process.cwd(), 'runtime/server/index.ts'), 'utf8');
+  const daemon = readFileSync(join(process.cwd(), 'runtime/api/server/index.ts'), 'utf8');
   const custody = readFileSync(join(process.cwd(), 'custody/server.ts'), 'utf8');
 
   expect(bootstrap).toContain("XLN_MANAGED_PARENT_PID: String(process.pid)");

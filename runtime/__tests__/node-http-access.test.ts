@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { requiresLocalNodeOperator } from '../server/node-http-access';
+import { requiresLocalNodeOperator } from '../api/server/node-http-access';
 
 describe('node HTTP access boundary', () => {
   test('keeps control and diagnostic state local while leaving public data routes explicit', () => {

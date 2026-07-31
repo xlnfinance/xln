@@ -1,4 +1,4 @@
-import type { RuntimeReplica, JAdapter } from '@xln/runtime/api/runtime-module';
+import type { RuntimeReplica, JAdapter } from '@xln/runtime/api/public/runtime-module';
 import type { ExternalWalletSnapshotSource } from './asset-ledger';
 
 export type { ExternalWalletSnapshotSource } from './asset-ledger';

@@ -1,16 +1,16 @@
 import { SigningKey, hexlify } from 'ethers';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../runtime/account/crypto';
 import { createStructuredLogger } from '../runtime/infra/logger';
-import { RuntimeAdapterError } from '../runtime/radapter/errors';
-import { buildRuntimeAdapterOwnerBindingDigest } from '../runtime/radapter/owner-binding';
-import { RemoteRuntimeAdapter } from '../runtime/radapter/remote';
+import { RuntimeAdapterError } from '../runtime/api/runtime-adapter/errors';
+import { buildRuntimeAdapterOwnerBindingDigest } from '../runtime/api/runtime-adapter/owner-binding';
+import { RemoteRuntimeAdapter } from '../runtime/api/runtime-adapter/remote';
 import type {
   RuntimeAdapterFrameLog,
   RuntimeAdapterFrameReceiptResponse,
   RuntimeAdapterPaymentRoute,
   RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterSendResult,
-} from '../runtime/radapter/types';
+} from '../runtime/api/runtime-adapter/types';
 import type { RuntimeInput } from '../runtime/runtime/types';
 import type { EntityTx } from '../runtime/types/entity-tx';
 

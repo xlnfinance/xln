@@ -1,4 +1,4 @@
-import type { RuntimeReplica, RuntimeInput } from '@xln/runtime/api/runtime-module';
+import type { RuntimeReplica, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 
 export const runtimeInputWorkSummary = (input: RuntimeInput | undefined) => ({
   runtimeTxs: (input?.runtimeTxs ?? []).map(tx =>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { readable, type Readable } from 'svelte/store';
-  import type { RuntimeReplica } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
   import { createRuntimeQueryStore } from '$lib/stores/runtimeQueryClient';
   import { buildSolvencyProjection } from './solvency-panel-view';
 

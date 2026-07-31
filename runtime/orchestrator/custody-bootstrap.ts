@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
-import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
 import { deserializeTaggedJson } from '../protocol/serialization';
 import { fetchLoopback } from './loopback-fetch';
 import {
@@ -611,7 +611,7 @@ export const startCustodySupport = async (
     const daemonAuthKey = deriveDaemonAdminKey();
     daemonChild = spawnBunChild(
       'custody-daemon',
-      ['runtime/server/index.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
+      ['runtime/api/server/index.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
       {
         USE_ANVIL: 'true',
         XLN_USE_PREDEPLOYED_ADDRESSES: 'true',

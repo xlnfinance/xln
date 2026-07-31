@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import type { RuntimeAdapterViewFrame } from '@xln/runtime/api/runtime-module';
+import type { RuntimeAdapterViewFrame } from '@xln/runtime/api/public/runtime-module';
 import { REMOTE_RUNTIME } from '@xln/runtime/config/constants';
 import {
   getRuntimeControllerAdapter,

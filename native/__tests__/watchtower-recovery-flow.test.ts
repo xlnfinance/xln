@@ -15,7 +15,7 @@ import type {
   JReplica,
   JurisdictionConfig,
   TowerAppointmentV1,
-} from '../../runtime/api/runtime-module';
+} from '../../runtime/api/public/runtime-module';
 import {
   buildDelayedLastResortAppointmentsForTower,
   resolveDefaultRecoveryTowerUrls,

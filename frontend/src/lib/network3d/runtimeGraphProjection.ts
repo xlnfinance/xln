@@ -6,7 +6,7 @@ import type {
   RuntimeAdapterGraphEntityCore,
   RuntimeAdapterGraphFrame,
   RuntimeAdapterViewFrame,
-} from '@xln/runtime/api/runtime-module';
+} from '@xln/runtime/api/public/runtime-module';
 
 export type RuntimeGraphAdapterKind = 'browser' | 'remote';
 export type RuntimeGraphCanonicity = 'timestamp' | 'height' | 'left' | 'right' | 'hub';

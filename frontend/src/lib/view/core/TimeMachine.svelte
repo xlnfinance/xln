@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { type Writable, type Readable } from 'svelte/store';
-  import type { RuntimeReplica, EnvSnapshot, JReplica, RuntimeAdapterViewFrame, XLNModule } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot, JReplica, RuntimeAdapterViewFrame, XLNModule } from '@xln/runtime/api/public/runtime-module';
   import type { JAdapter } from '@xln/runtime/jurisdiction/adapter';
   import { DISPLAY, TIME_MACHINE } from '@xln/runtime/config/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';

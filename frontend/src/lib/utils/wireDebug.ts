@@ -7,8 +7,8 @@ import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,
   encodeRuntimeAdapterMessage,
-} from '@xln/runtime/radapter/codec';
-import type { RuntimeAdapterWireMessage } from '@xln/runtime/radapter/wire-schema';
+} from '@xln/runtime/api/runtime-adapter/codec';
+import type { RuntimeAdapterWireMessage } from '@xln/runtime/api/runtime-adapter/wire-schema';
 import { XLN_PROTOCOL_VERSION } from '@xln/runtime/protocol/version';
 import { deserializeTaggedJson, serializeTaggedJson } from '@xln/runtime/protocol/serialization';
 import { decodeBinaryPayload } from '@xln/runtime/storage/binary-codec';

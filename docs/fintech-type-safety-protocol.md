@@ -34,7 +34,7 @@ Fix these first when reducing type risk:
 4. `runtime/protocol/dispute/proof-builder.ts`
 5. `runtime/account/tx/*`
 6. `runtime/entity/tx/*`
-7. `runtime/server/index.ts`
+7. `runtime/api/server/index.ts`
 
 ## Review Bar
 

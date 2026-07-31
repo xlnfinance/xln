@@ -226,7 +226,7 @@ describe('production startup wiring', () => {
   });
 
   test('standalone runtime fsyncs fatal incidents before exiting', () => {
-    const server = readFileSync(join(repoRoot, 'runtime/server/index.ts'), 'utf8');
+    const server = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
     expect(server).toContain(
       "process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`",
     );
@@ -459,10 +459,10 @@ describe('production startup wiring', () => {
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
     const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime/entity-routing.ts'), 'utf8');
     const runtimeLoopSource = readFileSync(join(repoRoot, 'runtime/runtime/loop.ts'), 'utf8');
-    const standaloneServer = readFileSync(join(repoRoot, 'runtime/server/index.ts'), 'utf8');
+    const standaloneServer = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
     const custodyBootstrap = readFileSync(join(repoRoot, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
     const startCustodyDev = readFileSync(join(repoRoot, 'runtime/scripts/start-custody-dev.ts'), 'utf8');
-    const cli = readFileSync(join(repoRoot, 'runtime/server/cli.ts'), 'utf8');
+    const cli = readFileSync(join(repoRoot, 'runtime/api/server/cli.ts'), 'utf8');
     expect(orchestratorConfig).toContain(
       "relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')",
     );
@@ -652,7 +652,7 @@ describe('production startup wiring', () => {
 
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const bootstrapHub = readFileSync(join(repoRoot, 'scripts/bootstrap-hub.ts'), 'utf8');
-    const serverJurisdictions = readFileSync(join(repoRoot, 'runtime/server/jurisdictions.ts'), 'utf8');
+    const serverJurisdictions = readFileSync(join(repoRoot, 'runtime/api/server/jurisdictions.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
     const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime/tx-handlers.ts'), 'utf8');
     const jurisdictionImport = readFileSync(join(repoRoot, 'runtime/runtime/jurisdiction-import.ts'), 'utf8');
@@ -2001,7 +2001,7 @@ describe('production startup wiring', () => {
     expect(releaseGate).toContain("process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1'");
     expect(releaseGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');
     expect(mainnetGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');
-    expect(cleanupHelper).toContain("import { sanitizeChildProcessEnv } from '../server/child-process-env';");
+    expect(cleanupHelper).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
     expect(cleanupHelper).toContain('const next = sanitizeChildProcessEnv(env);');
     expect(unitTestsRunner).toContain('cleanupTestArtifactsBeforeRun({');
     expect(unitTestsRunner).toContain("reason: 'unit-tests'");
@@ -2018,9 +2018,9 @@ describe('production startup wiring', () => {
     expect(e2eFastRunner).toContain("scope: 'e2e'");
     expect(e2eFastRunner).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV');
     expect(e2eFastRunner).toContain('env: sanitizeChildProcessEnv({');
-    expect(e2eCoreRunner).toContain("import { sanitizeChildProcessEnv } from '../server/child-process-env';");
+    expect(e2eCoreRunner).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
     expect(e2eCoreRunner).toContain('env: sanitizeChildProcessEnv(process.env)');
-    expect(runner).toContain("import { sanitizeChildProcessEnv } from '../server/child-process-env';");
+    expect(runner).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
     expect(isolatedRuntime).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(runner).toContain(
       "XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1'",
@@ -2031,12 +2031,12 @@ describe('production startup wiring', () => {
     expect(systemRunner).toContain('cleanupTestArtifactsBeforeRun,');
     expect(systemRunner).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV,');
     expect(systemRunner).toContain("from './test-artifact-cleanup';");
-    expect(systemRunner).toContain("import { sanitizeChildProcessEnv } from '../server/child-process-env';");
+    expect(systemRunner).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
     expect(systemRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'system-tests' })");
     expect(systemRunner).toContain("process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1'");
     expect(systemRunner).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(systemRunner).toContain('env: sanitizeChildProcessEnv({');
-    expect(soakRunner).toContain("import { sanitizeChildProcessEnv } from '../server/child-process-env';");
+    expect(soakRunner).toContain("import { sanitizeChildProcessEnv } from '../api/server/child-process-env';");
     expect(soakRunner).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(cleanupHelper).toContain('export const DEFAULT_TEST_WORKSPACE_MAX_BYTES = 50 * 1024 * 1024 * 1024;');
     expect(cleanupHelper).toContain('const estimatedWorkspaceBytes = estimateWorkspaceBytes(cwd);');
@@ -2140,7 +2140,7 @@ describe('production startup wiring', () => {
       .map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8'))
       .join('\n');
     const types = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-types.ts'), 'utf8');
-    const healthRedaction = readFileSync(join(repoRoot, 'runtime/server/health-redaction.ts'), 'utf8');
+    const healthRedaction = readFileSync(join(repoRoot, 'runtime/api/server/health-redaction.ts'), 'utf8');
 
     expect(types).toContain('failure: RuntimeFailureSignal | null;');
     expect(bootstrapTimeline).toContain('classifyRuntimeBootstrapStageFailure');
@@ -2487,7 +2487,7 @@ describe('production startup wiring', () => {
     expect(paymentPanel).toContain('refreshPaymentRuntimeGossip');
     expect(xlnStore).toContain('/api/gossip/profile?entityId=');
     expect(xlnStore).toContain('export async function refreshPaymentRuntimeGossip');
-    expect(debugApi).toContain("import { buildKnownProfileBundle } from '../server/gossip-profiles';");
+    expect(debugApi).toContain("import { buildKnownProfileBundle } from '../api/server/gossip-profiles';");
     expect(debugApi).toContain("if (deps.pathname === '/api/gossip/profile')");
     expect(debugApi).toContain('const bundle = buildKnownProfileBundle({');
     expect(debugApi).toContain('relayStore: deps.relayStore');

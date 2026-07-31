@@ -22,8 +22,10 @@ xln/
 │   ├── network/
 │   │   ├── p2p/        Runtime-to-Runtime transport
 │   │   └── relay/      Discovery and market relay services
-│   ├── api/            Public Runtime API
-│   ├── server/         HTTP/WebSocket delivery
+│   ├── api/
+│   │   ├── public/     Stable typed Runtime surface
+│   │   ├── server/     HTTP/WebSocket delivery
+│   │   └── runtime-adapter/  Frontend queries and commands
 │   └── orchestrator/   Process startup and service composition
 ├── jurisdictions/      Solidity settlement and dispute contracts
 ├── frontend/           xln.finance client; display and input only

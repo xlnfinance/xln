@@ -1,5 +1,5 @@
 import { zeroPadValue } from 'ethers';
-import type { EntityTx } from '@xln/runtime/api/runtime-module';
+import type { EntityTx } from '@xln/runtime/api/public/runtime-module';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 

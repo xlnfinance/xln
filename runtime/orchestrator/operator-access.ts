@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { isLocalOperatorRequest } from '../server/health-redaction';
+import { isLocalOperatorRequest } from '../api/server/health-redaction';
 
 const readBearer = (request: Request): string => {
   const match = String(request.headers.get('authorization') || '').trim().match(/^Bearer\s+(.+)$/i);

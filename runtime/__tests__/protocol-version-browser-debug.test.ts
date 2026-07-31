@@ -8,7 +8,7 @@ import {
 import {
   decodeRuntimeAdapterBrowserMessage,
   encodeRuntimeAdapterMessageForBrowser,
-} from '../radapter/codec';
+} from '../api/runtime-adapter/codec';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
 
 describe('global network protocol version', () => {

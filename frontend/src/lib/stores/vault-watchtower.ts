@@ -5,7 +5,7 @@ import type {
   TowerCounterDisputeRemedy,
   TowerLastResortPayloadV1,
   XLNModule,
-} from '@xln/runtime/api/runtime-module';
+} from '@xln/runtime/api/public/runtime-module';
 import { Wallet } from 'ethers';
 import { resolveRpcUrl } from './vault-helpers';
 import {

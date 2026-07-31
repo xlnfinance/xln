@@ -1,5 +1,5 @@
 /**
- * Standalone relay process backed by the same relay router as runtime/server/index.ts.
+ * Standalone relay process backed by the same relay router as runtime/api/server/index.ts.
  */
 
 import { createRelayStore, removeClient, type RelayStore } from './store';

@@ -23,7 +23,7 @@ Read these first:
 5. `custody/server.ts`
 6. `custody/store.ts`
 7. `custody/daemon-client.ts`
-8. `runtime/radapter/auth.ts`
+8. `runtime/api/runtime-adapter/auth.ts`
 9. `runtime/jurisdiction/adapter/default-tokens.ts`
 10. `ai/server.ts`
 
@@ -32,7 +32,7 @@ Useful existing pieces:
 - `custody/server.ts`: template for an external Bun service with sessions, deposits, withdrawals, token formatting, daemon access, and static UI.
 - `custody/store.ts`: SQLite ledger pattern for balances and activity.
 - `custody/daemon-client.ts`: `getFrameReceipts`, `findRoutes`, `queuePayment`.
-- `runtime/radapter/auth.ts`: capability-token auth between service and runtime daemon.
+- `runtime/api/runtime-adapter/auth.ts`: capability-token auth between service and runtime daemon.
 - `runtime/jurisdiction/adapter/default-tokens.ts`: dev/test token catalog: USDC, WETH, USDT.
 - `ai/server.ts`: existing council orchestration that can inspire judge-board execution.
 

@@ -5,14 +5,14 @@ import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
 import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { decodeRuntimeAdapterRequest } from '../radapter/codec';
-import { resolveRuntimeAdapterRead } from '../radapter/resolve';
+import { decodeRuntimeAdapterRequest } from '../api/runtime-adapter/codec';
+import { resolveRuntimeAdapterRead } from '../api/runtime-adapter/resolve';
 import {
   attachRuntimeAdapterTicker,
   closeInvalidRuntimeAdapterMessage,
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
-} from '../radapter/server';
+} from '../api/runtime-adapter/server';
 import {
   closeInfraDb,
   closeRuntimeDb,
@@ -39,10 +39,10 @@ import {
 } from '../runtime.ts';
 import { registerEnvChangeCallback } from '../runtime/loop-environment';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
-import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../server/health-redaction';
+import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../api/server/health-redaction';
 import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
-import { requiresLocalNodeOperator } from '../server/node-http-access';
-import { handleRuntimeInputStatus } from '../server/runtime-input-control';
+import { requiresLocalNodeOperator } from '../api/server/node-http-access';
+import { handleRuntimeInputStatus } from '../api/server/runtime-input-control';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { ReliableDeliveryReceipt, RuntimeReplica } from '../runtime/types';
 import {
@@ -897,7 +897,7 @@ type MarketMakerRuntimeAdapterDeps = {
 const createMarketMakerRuntimeAdapterHandler =
   (deps: MarketMakerRuntimeAdapterDeps): ((ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer) => void) =>
   (ws, raw) => {
-    let request: import('../radapter/types').RuntimeAdapterRequest;
+    let request: import('../api/runtime-adapter/types').RuntimeAdapterRequest;
     try {
       request = decodeRuntimeAdapterRequest(raw);
     } catch (error) {

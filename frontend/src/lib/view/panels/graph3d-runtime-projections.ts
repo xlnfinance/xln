@@ -1,4 +1,4 @@
-import type { RuntimeAdapterGraphFrame } from '@xln/runtime/api/runtime-module';
+import type { RuntimeAdapterGraphFrame } from '@xln/runtime/api/public/runtime-module';
 import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import type { Runtime } from '$lib/stores/runtimeStore';
 import type { NetworkMachineRuntimeState } from '$lib/stores/networkMachineRuntimeStore';

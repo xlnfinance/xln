@@ -6,7 +6,7 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { deriveManagedEntityIdentity, DaemonControlClient, setupCustody } from '../orchestrator/daemon-control';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
-import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
 import {
   spawnBunChild,
   stopManagedChild,
@@ -115,7 +115,7 @@ const findProcessIdsByPattern = async (pattern: string): Promise<number[]> => {
 };
 
 const killStaleCustodyDaemon = async (): Promise<void> => {
-  const pattern = `runtime/server/index.ts --port ${DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${DAEMON_PORT}`;
+  const pattern = `runtime/api/server/index.ts --port ${DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${DAEMON_PORT}`;
   const pids = await findProcessIdsByPattern(pattern);
   if (pids.length === 0) return;
 
@@ -257,7 +257,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
 
   const daemonChild = spawnBunChild(
     'custody-daemon',
-    ['runtime/server/index.ts', '--port', String(DAEMON_PORT), '--host', '127.0.0.1', '--server-id', `custody-daemon-${DAEMON_PORT}`],
+    ['runtime/api/server/index.ts', '--port', String(DAEMON_PORT), '--host', '127.0.0.1', '--server-id', `custody-daemon-${DAEMON_PORT}`],
     {
       USE_ANVIL: 'true',
       BOOTSTRAP_LOCAL_HUBS: '0',

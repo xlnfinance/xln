@@ -14,7 +14,7 @@ import {
 } from '../../jurisdictions/typechain-types/index.ts';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jurisdiction/adapter';
 import { createEmptyEnv } from '../runtime';
-import { createTokenCatalogController } from '../server/token-catalog';
+import { createTokenCatalogController } from '../api/server/token-catalog';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const CHAIN_ID = 31_337;

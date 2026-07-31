@@ -3,10 +3,10 @@ import {
   DEFAULT_CONTROL_BODY_MAX_BYTES,
   getControlBodyErrorStatus,
   parseTaggedControlBody,
-} from '../server/auth';
-import { handleRuntimeInputControl } from '../server/runtime-input-control';
-import { decodeP2PControlBody } from '../server/p2p-control';
-import { decodeSignerRegistration } from '../server/signer-control';
+} from '../api/server/auth';
+import { handleRuntimeInputControl } from '../api/server/runtime-input-control';
+import { decodeP2PControlBody } from '../api/server/p2p-control';
+import { decodeSignerRegistration } from '../api/server/signer-control';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 

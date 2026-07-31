@@ -7,7 +7,7 @@ import {
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   transferTestArtifactRunLease,
 } from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../server/child-process-env';
+import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 import { signalProcessGroup, stopProcessGroup } from './process-group';
 
 type CleanupScope = 'all' | 'e2e';

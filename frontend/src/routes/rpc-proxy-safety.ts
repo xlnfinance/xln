@@ -1,4 +1,4 @@
 export {
   findForbiddenRpcProxyMethod,
   isLocalProxyRequest,
-} from '@xln/runtime/server/rpc-proxy-safety';
+} from '@xln/runtime/api/server/rpc-proxy-safety';

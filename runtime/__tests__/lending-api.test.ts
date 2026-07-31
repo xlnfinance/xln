@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { handleLendingStateRequest } from '../server/lending';
+import { handleLendingStateRequest } from '../api/server/lending';
 import type { RuntimeReplica } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -31,7 +31,7 @@ describe('lending API boundary', () => {
   });
 
   test('unauthenticated POST mutation routes are absent', () => {
-    for (const path of ['runtime/server/index.ts', 'runtime/orchestrator/hub-node.ts', 'runtime/orchestrator/orchestrator.ts']) {
+    for (const path of ['runtime/api/server/index.ts', 'runtime/orchestrator/hub-node.ts', 'runtime/orchestrator/orchestrator.ts']) {
       const source = readFileSync(path, 'utf8');
       expect(source).not.toContain("pathname === '/api/lending/offer'");
       expect(source).not.toContain("pathname === '/api/lending/borrow'");

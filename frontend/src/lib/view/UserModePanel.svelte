@@ -26,7 +26,7 @@
   import { runtimes, activeRuntimeId, runtimeOperations } from '$lib/stores/runtimeStore';
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import type { Tab } from '$lib/types/ui';
-  import type { RuntimeReplica } from '@xln/runtime/api/runtime-module';
+  import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
   import type { EntityReplica } from '@xln/runtime/entity/types';
   import type { EnvSnapshot } from '@xln/runtime/runtime/types';
   import {

@@ -40,13 +40,13 @@ Core files:
 - `runtime/network/p2p/ws-client.ts`
 - `runtime/network/p2p/p2p.ts`
 - `runtime/network/p2p/ws-protocol.ts`
-- `runtime/server/index.ts`
+- `runtime/api/server/index.ts`
 - `runtime/network/relay/debug-http.ts`
 - `frontend/src/lib/debug/browser-telemetry.ts`
 
 ## Event Model
 
-Relay event shape (from `runtime/server/index.ts`):
+Relay event shape (from `runtime/api/server/index.ts`):
 
 - `id`, `ts`, `event`
 - optional: `runtimeId`, `from`, `to`, `msgType`, `status`, `reason`, `encrypted`, `size`, `queueSize`, `details`

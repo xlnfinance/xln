@@ -15,7 +15,7 @@ import {
   withoutTestArtifactCleanupDoneEnv,
 } from '../scripts/test-artifact-cleanup';
 import { parseRunWithTestCleanupArgs } from '../scripts/run-with-test-cleanup';
-import { sanitizeChildProcessEnv } from '../server/child-process-env';
+import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 
 const makeTempWorkspace = (): string => mkdtempSync(join(tmpdir(), 'xln-test-artifacts-'));
 

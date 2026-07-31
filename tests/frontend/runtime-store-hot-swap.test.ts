@@ -292,7 +292,7 @@ test('remote RuntimeInput command waits for observed receipt before projection r
 });
 
 test('remote runtime refresh ignores unchanged ticks and debounces projection reads', () => {
-  const remoteSource = readFileSync('runtime/radapter/remote.ts', 'utf8');
+  const remoteSource = readFileSync('runtime/api/runtime-adapter/remote.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const noteHeightStart = remoteSource.indexOf('private noteHeight(');
   const noteHeightEnd = remoteSource.indexOf('private async openSocket', noteHeightStart);
@@ -542,7 +542,7 @@ test('runtime controller handle carries selected runtime identity', () => {
 
 test('authenticated remote admin authority survives transport reconnect while command readiness fail-closes', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const remoteSource = readFileSync('runtime/radapter/remote.ts', 'utf8');
+  const remoteSource = readFileSync('runtime/api/runtime-adapter/remote.ts', 'utf8');
   const switchStart = source.indexOf('export const switchAppRuntimeAdapter =');
   const callbackStart = source.indexOf('unregisterRuntimeControllerStatus = onRuntimeControllerStatus', switchStart);
   const callbackEnd = source.indexOf("if (status === 'connected')", callbackStart);

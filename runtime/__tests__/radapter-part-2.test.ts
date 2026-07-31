@@ -12,37 +12,37 @@ import {
   resolveRuntimeAdapterAuthSeed,
   verifyRuntimeAdapterAuthCredential,
   verifyRuntimeAdapterAuthKey,
-} from '../radapter/auth';
+} from '../api/runtime-adapter/auth';
 
 import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,
   encodeRuntimeAdapterMessage,
   runtimeAdapterMaxMessageBytes,
-} from '../radapter/codec';
+} from '../api/runtime-adapter/codec';
 
-import { EmbeddedRuntimeAdapter } from '../radapter/embedded';
+import { EmbeddedRuntimeAdapter } from '../api/runtime-adapter/embedded';
 import { registerRuntimePublishedCallback } from '../runtime/loop-environment';
 import { notifyRuntimeStateChanged } from '../runtime/frame/notifications';
 import { acquireRuntimeFrameWriter } from '../runtime/frame/writer-lock';
 
-import { RemoteRuntimeAdapter } from '../radapter/remote';
+import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
 
-import { verifyRuntimeAdapterServerIdentity } from '../radapter/server-identity';
+import { verifyRuntimeAdapterServerIdentity } from '../api/runtime-adapter/server-identity';
 
-import { buildRuntimeAdapterOwnerBindingDigest } from '../radapter/owner-binding';
+import { buildRuntimeAdapterOwnerBindingDigest } from '../api/runtime-adapter/owner-binding';
 
-import { signRuntimeAdapterServerIdentity } from '../radapter/server-identity-signer';
+import { signRuntimeAdapterServerIdentity } from '../api/runtime-adapter/server-identity-signer';
 
 import {
   assertRuntimeAdapterGraphFrameWireBudget,
   resolveRuntimeAdapterRead,
   type RuntimeAdapterGraphFrame,
-} from '../radapter/resolve';
+} from '../api/runtime-adapter/resolve';
 
 import { decryptRuntimeRecoveryBundle, deriveRuntimeRecoveryLookupKey } from '../storage/recovery/crypto';
 
-import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
+import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../api/runtime-adapter/server';
 
 import {
   applyRuntimeAdapterCommandMarker,

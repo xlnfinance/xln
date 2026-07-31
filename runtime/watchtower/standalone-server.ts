@@ -1,6 +1,6 @@
 /**
  * Standalone watchtower service for blind backup recovery and future
- * last-resort dispute appointments. This stays outside runtime/server/index.ts so
+ * last-resort dispute appointments. This stays outside runtime/api/server/index.ts so
  * runtime logs and operator surface remain separated from tower storage.
  */
 

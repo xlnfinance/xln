@@ -2,16 +2,16 @@
 import { tick } from 'svelte';
 import type { AccountReplica, EntityReplica, Tab } from '$lib/types/ui';
 import { writable } from 'svelte/store';
-import type { BookState, RuntimeReplica, SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/runtime-module';
+import type { BookState, RuntimeReplica, SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/public/runtime-module';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
   getJurisdictionStackId,
   getBestAsk,
   getBestBid,
-} from '@xln/runtime/api/runtime-module';
-import type { Profile } from '@xln/runtime/api/runtime-module';
-import type { SwapBookEntry } from '@xln/runtime/api/runtime-module';
+} from '@xln/runtime/api/public/runtime-module';
+import type { Profile } from '@xln/runtime/api/public/runtime-module';
+import type { SwapBookEntry } from '@xln/runtime/api/public/runtime-module';
 import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
 import {
   readRuntimeAccountProjection,

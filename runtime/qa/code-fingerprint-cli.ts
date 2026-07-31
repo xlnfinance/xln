@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 
 import { safeStringify } from '../protocol/serialization';
-import { sanitizeChildProcessEnv } from '../server/child-process-env';
+import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 import {
   assertRepositoryCodeFingerprintStable,
   computeRepositoryCodeFingerprint,

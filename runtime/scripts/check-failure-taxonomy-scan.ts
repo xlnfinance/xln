@@ -12,7 +12,7 @@ import {
   isRuntimeFailureSignal,
   type RuntimeFailureSignal,
 } from '../protocol/failure-taxonomy';
-import { publicAggregatedHealth } from '../server/health-redaction';
+import { publicAggregatedHealth } from '../api/server/health-redaction';
 import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
 
 const readText = (path: string): string => {
@@ -20,7 +20,7 @@ const readText = (path: string): string => {
     'runtime/runtime.ts': [
       'runtime/runtime.ts',
       'runtime/runtime/composition.ts',
-      'runtime/api/runtime-public.ts',
+      'runtime/api/public/runtime-public.ts',
       'runtime/runtime/frame/apply.ts',
       'runtime/runtime/frame/clone.ts',
       'runtime/runtime/frame/dispatch.ts',
@@ -88,13 +88,13 @@ const readText = (path: string): string => {
       'runtime/orchestrator/mm-node-health.ts',
       'runtime/orchestrator/mm-node-run.ts',
     ],
-    'runtime/api/external-wallet-api.ts': [
-      'runtime/api/external-wallet-api.ts',
-      'runtime/api/external-wallet/http.ts',
-      'runtime/api/external-wallet/faucet-wallet.ts',
-      'runtime/api/external-wallet/faucet-handlers.ts',
-      'runtime/api/external-wallet/snapshot-handler.ts',
-      'runtime/api/external-wallet/tokens-handler.ts',
+    'runtime/api/public/external-wallet-api.ts': [
+      'runtime/api/public/external-wallet-api.ts',
+      'runtime/api/public/external-wallet/http.ts',
+      'runtime/api/public/external-wallet/faucet-wallet.ts',
+      'runtime/api/public/external-wallet/faucet-handlers.ts',
+      'runtime/api/public/external-wallet/snapshot-handler.ts',
+      'runtime/api/public/external-wallet/tokens-handler.ts',
     ],
     'runtime/orchestrator/bootstrap-timeline.ts': [
       'runtime/orchestrator/bootstrap-timeline.ts',
@@ -188,7 +188,7 @@ const fatalIncidentRoutes = [
     name: 'standalone-runtime',
     steps: [
       [
-        'runtime/server/index.ts',
+        'runtime/api/server/index.ts',
         [
           "process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`",
           'incidentSink: incident => incidentJournal.record(incident)',
@@ -482,7 +482,7 @@ assertNotIncludes(marketMakerNode, 'Runtime storage disabled for rebuildable mar
 assertNotIncludes(marketMakerNode, '[MESH-MM] RUNTIME_READY', marketMakerNodePath);
 assertNotIncludes(marketMakerNode, '[MESH-MM] OFFERS_READY', marketMakerNodePath);
 
-const healthRedactionPath = 'runtime/server/health-redaction.ts';
+const healthRedactionPath = 'runtime/api/server/health-redaction.ts';
 const healthRedaction = readText(healthRedactionPath);
 for (const marker of [
   'const publicFailureSignal = (value: unknown): Record<string, unknown> | null => {',
@@ -514,11 +514,11 @@ for (const marker of [
 }
 
 for (const [path, markers] of [
-  ['runtime/server/faucet-failure.ts', ['classifyRuntimeFaucetFailure', 'failure,']],
-  ['runtime/server/offchain-faucet.ts', ['faucetFailureBody']],
-  ['runtime/server/reserve-faucet.ts', ['faucetFailureBody']],
+  ['runtime/api/server/faucet-failure.ts', ['classifyRuntimeFaucetFailure', 'failure,']],
+  ['runtime/api/server/offchain-faucet.ts', ['faucetFailureBody']],
+  ['runtime/api/server/reserve-faucet.ts', ['faucetFailureBody']],
   [
-    'runtime/api/external-wallet-api.ts',
+    'runtime/api/public/external-wallet-api.ts',
     ["createStructuredLogger('server.external_wallet')", 'faucet.erc20.failed', 'snapshot.failed', 'faucet.gas.failed'],
   ],
   ['runtime/entity/tx/invariant-errors.ts', ["'DIRECT_PAYMENT_',", "'SWAP_REQUEST_',"]],
@@ -630,7 +630,7 @@ for (const [path, markers] of [
     'runtime/jurisdiction/adapter/jurisdiction-loader.ts',
     ["createStructuredLogger('runtime.jurisdiction_loader')", 'JURISDICTIONS_CONFIG_MISSING', 'decodeJurisdictionsData'],
   ],
-  ['runtime/radapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
+  ['runtime/api/runtime-adapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   [
     'runtime/runtime/j-submit.ts',
@@ -819,13 +819,13 @@ const settlementOps = readText(settlementOpsPath);
 assertIncludes(settlementOps, 'SETTLEMENT_UNKNOWN_OP_TYPE', settlementOpsPath);
 assertNotIncludes(settlementOps, 'console.', settlementOpsPath);
 
-const externalWalletApiPath = 'runtime/api/external-wallet-api.ts';
+const externalWalletApiPath = 'runtime/api/public/external-wallet-api.ts';
 const externalWalletApi = readText(externalWalletApiPath);
 assertNotIncludes(externalWalletApi, 'console.', externalWalletApiPath);
 assertNotIncludes(externalWalletApi, '[EXT-FAUCET/', externalWalletApiPath);
 assertNotIncludes(externalWalletApi, '[EXT-WALLET/', externalWalletApiPath);
 
-const runtimeAdapterServerPath = 'runtime/radapter/server.ts';
+const runtimeAdapterServerPath = 'runtime/api/runtime-adapter/server.ts';
 const runtimeAdapterServer = readText(runtimeAdapterServerPath);
 assertNotIncludes(runtimeAdapterServer, 'console.', runtimeAdapterServerPath);
 assertNotIncludes(runtimeAdapterServer, '[RADAPTER] RESPONSE_TOO_LARGE', runtimeAdapterServerPath);

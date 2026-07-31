@@ -5,7 +5,7 @@ import type {
   Profile as GossipProfile,
   RuntimeAdapterEntitySummary,
   RuntimeAdapterViewFrame,
-} from '@xln/runtime/api/runtime-module';
+} from '@xln/runtime/api/public/runtime-module';
 
 import type { LocalAccountLike, LocalReplicaLike } from './payment-routing';
 import { normalizeEntityId } from './payment-routing';

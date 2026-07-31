@@ -9,7 +9,7 @@ import { Level } from 'level';
 import { readStorageHead } from '../storage';
 import { withRebranchedValues } from '../storage/rebranched-db';
 import type { StorageHead } from '../storage/types';
-import { RemoteRuntimeAdapter } from '../radapter/remote';
+import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
 import {
   E2E_FATAL_LOG_TAIL_LINES,
   findFirstRuntimeFatalLogHit,

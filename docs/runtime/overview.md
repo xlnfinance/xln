@@ -62,10 +62,10 @@ that drives them. Read the cascade before the services around it.
 | `runtime/storage/` | current state, WAL, history views, replay | protocol decisions |
 | `runtime/network/p2p/` | Runtime-to-Runtime delivery | financial state |
 | `runtime/network/relay/` | discovery and market relay services | Runtime consensus |
-| `runtime/api/` | public typed Runtime surface | service lifecycle |
-| `runtime/server/` | HTTP/WebSocket delivery | process orchestration |
+| `runtime/api/public/` | public typed Runtime surface | service lifecycle |
+| `runtime/api/server/` | HTTP/WebSocket delivery | process orchestration |
 | `runtime/orchestrator/` | process startup and service composition | reducer logic |
-| `runtime/radapter/` | frontend projections and commands | direct state mutation |
+| `runtime/api/runtime-adapter/` | frontend projections and commands | direct state mutation |
 | `runtime/watchtower/` | encrypted appointments and chain action | spend-capable user keys |
 | `runtime/qa/` | diagnostics and human-readable state dumps | protocol behavior |
 

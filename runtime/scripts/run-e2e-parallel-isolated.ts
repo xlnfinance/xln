@@ -51,7 +51,7 @@ import type {
 } from '../qa/types';
 import { assertMinDiskFree } from '../infra/storage-monitor';
 import { compareStableText } from '../protocol/serialization';
-import { sanitizeChildProcessEnv } from '../server/child-process-env';
+import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 import {
   createIncrementalRuntimeFatalLogScanner,
   findRuntimeFatalLogLines,
@@ -2019,7 +2019,7 @@ const runShard = async (
     // Layout:
     // - rpc: anvil
     // - rpc2: secondary anvil for cross-j local simulation
-    // - api: production runtime/server/index.ts on an isolated shard port
+    // - api: production runtime/api/server/index.ts on an isolated shard port
     // - web: vite preview
     // - extra reserved ports kept for any local child APIs the server may spawn
     const preflightStart = Date.now();

@@ -1,4 +1,4 @@
-import type { AccountState } from '@xln/runtime/api/runtime-module';
+import type { AccountState } from '@xln/runtime/api/public/runtime-module';
 import { ZeroAddress } from 'ethers';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';

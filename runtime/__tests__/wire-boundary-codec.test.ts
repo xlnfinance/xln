@@ -10,7 +10,7 @@ import {
 import {
   decodeRuntimeAdapterMessage,
   encodeRuntimeAdapterMessage,
-} from '../radapter/codec';
+} from '../api/runtime-adapter/codec';
 import {
   assertRuntimeAdapterCommandTxAuthorized,
   markLocalRuntimeAdapterCommandTx,
@@ -18,7 +18,7 @@ import {
 import { projectRuntimeIngressReceiptForWire } from '../runtime/ingress-receipts';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import type { RuntimeTx } from '../runtime/types';
-import type { RuntimeAdapterWireMessage } from '../radapter/wire-schema';
+import type { RuntimeAdapterWireMessage } from '../api/runtime-adapter/wire-schema';
 
 const previousWsMax = process.env['XLN_WS_MAX_MESSAGE_BYTES'];
 const previousRadapterMax = process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];

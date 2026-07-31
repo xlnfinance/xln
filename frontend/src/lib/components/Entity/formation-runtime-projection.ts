@@ -1,4 +1,4 @@
-import type { JurisdictionConfig } from '@xln/runtime/api/runtime-module';
+import type { JurisdictionConfig } from '@xln/runtime/api/public/runtime-module';
 
 export type FormationJurisdiction = JurisdictionConfig & {
   chainId?: number;
