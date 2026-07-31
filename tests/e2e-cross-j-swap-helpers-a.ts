@@ -1,6 +1,6 @@
 import { HDNodeWallet, Mnemonic, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
-import type { MarketSnapshotPayload } from '../runtime/relay/market-snapshot';
+import type { MarketSnapshotPayload } from '../runtime/network/relay/market-snapshot';
 import { expect, type Page } from './global-setup.mts';
 import { type E2EHealthResponse } from './utils/e2e-baseline';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';

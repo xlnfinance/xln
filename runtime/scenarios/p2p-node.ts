@@ -5,9 +5,9 @@
 
 import { ethers } from 'ethers';
 
-import { startStandaloneRelayServer } from '../relay/standalone-server';
+import { startStandaloneRelayServer } from '../network/relay/standalone-server';
 import { main, startP2P, processRuntime, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
-import { createLocalDeliveryHandler } from '../relay/local-delivery';
+import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
 import { getEntityReplicaById } from '../server/entity-lookup';
 import { processUntil } from './helpers';
 import { isLeft, deriveDelta } from '../account/utils';

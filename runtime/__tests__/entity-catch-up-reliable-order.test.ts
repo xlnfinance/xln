@@ -21,7 +21,7 @@ import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { initCrontab } from '../entity/scheduler';
 import { buildQuorumHanko } from '../hanko/signing';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
-import { buildLocalEntityProfile } from '../networking/gossip-helper';
+import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,

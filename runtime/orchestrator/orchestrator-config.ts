@@ -1,5 +1,5 @@
 import { join, resolve } from 'node:path';
-import { normalizeLoopbackUrl } from '../networking/loopback-url';
+import { normalizeLoopbackUrl } from '../network/p2p/loopback-url';
 import { readPositiveIntegerEnv } from '../config/environment';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import type { Args } from './orchestrator-types';

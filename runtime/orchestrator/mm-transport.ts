@@ -1,4 +1,4 @@
-import { normalizeRuntimeId } from '../networking/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 
 export type MarketMakerTransportState = {
   connected?: boolean;

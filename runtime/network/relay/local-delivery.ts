@@ -8,18 +8,18 @@
 import {
   handleInboundP2PEntityInputs,
   handleInboundReliableReceipt,
-} from '../runtime.ts';
-import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../protocol/p2p-crypto';
-import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../runtime/types';
-import type { EntityReplica } from '../entity/types';
+} from '../../runtime.ts';
+import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../../protocol/p2p-crypto';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../../runtime/types';
+import type { EntityReplica } from '../../entity/types';
 import {
   type RelayStore,
   normalizeRuntimeKey,
   pushDebugEvent,
 } from './store';
-import { createStructuredLogger } from '../infra/logger';
-import { isDeliveryDelivered } from '../protocol/payments/delivery-result';
-import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
+import { createStructuredLogger } from '../../infra/logger';
+import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
+import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
 
 const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'

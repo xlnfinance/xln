@@ -10,14 +10,14 @@ import {
 } from '../account/crypto';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
-import { RuntimeP2P } from '../networking/p2p';
+import { RuntimeP2P } from '../network/p2p/p2p';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   requireProfileEncryptionManifest,
 } from '../entity/profile-encryption';
-import { buildEntityProfile } from '../networking/gossip-helper';
-import { announceCertifiedLocalProfiles } from '../networking/local-profile-lifecycle';
+import { buildEntityProfile } from '../network/p2p/gossip-helper';
+import { announceCertifiedLocalProfiles } from '../network/p2p/local-profile-lifecycle';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildQuorumHanko, getEntityConfigBoardHash, verifyHankoForHash } from '../hanko/signing';

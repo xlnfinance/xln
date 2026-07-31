@@ -2,12 +2,12 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'bun:test';
-import { openRelayIncidentJournal } from '../relay/incident-journal';
+import { openRelayIncidentJournal } from '../network/relay/incident-journal';
 import {
   createRelayStore,
   pushDebugEvent,
   setDebugIncidentState,
-} from '../relay/store';
+} from '../network/relay/store';
 
 const roots: string[] = [];
 

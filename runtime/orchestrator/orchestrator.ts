@@ -25,19 +25,19 @@ import {
   pushDebugEvent,
   removeClient,
   type RelayStore,
-} from '../relay/store';
-import { openRelayIncidentJournal } from '../relay/incident-journal';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
-import { closeRelayClientsForReset } from '../relay/reset';
-import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
-import { createHelloChallengeRegistry } from '../networking/hello-challenge';
-import { type MarketSnapshotPayload } from '../relay/market-snapshot';
-import { createMarketSubscriptionStack } from '../relay/market-subscriptions';
+} from '../network/relay/store';
+import { openRelayIncidentJournal } from '../network/relay/incident-journal';
+import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../network/relay/router';
+import { closeRelayClientsForReset } from '../network/relay/reset';
+import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
+import { type MarketSnapshotPayload } from '../network/relay/market-snapshot';
+import { createMarketSubscriptionStack } from '../network/relay/market-subscriptions';
 import {
   decodeMarketWireRequest,
   encodeMarketWireMessage,
   type MarketWireRequest,
-} from '../relay/market-wire';
+} from '../network/relay/market-wire';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveRuntimeBundle, serveStatic } from '../server/static-assets';

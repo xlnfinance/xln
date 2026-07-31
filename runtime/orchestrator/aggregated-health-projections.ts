@@ -1,4 +1,4 @@
-import { normalizeRuntimeKey } from '../relay/store';
+import { normalizeRuntimeKey } from '../network/relay/store';
 import { compareStableText } from '../protocol/serialization';
 import { deriveHubRuntimeHealth } from './health-model';
 import type {

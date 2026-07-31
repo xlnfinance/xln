@@ -4,7 +4,7 @@ import {
   deserializeWsMessage,
   hashHelloMessage,
   serializeWsMessage,
-} from '../networking/ws-protocol';
+} from '../network/p2p/ws-protocol';
 import {
   decodeRuntimeAdapterBrowserMessage,
   encodeRuntimeAdapterMessageForBrowser,

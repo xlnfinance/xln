@@ -1,5 +1,5 @@
-import type { Profile } from '../entity/profile';
-import { compareStableText } from '../protocol/serialization';
+import type { Profile } from '../../entity/profile';
+import { compareStableText } from '../../protocol/serialization';
 
 export type GossipProfileBatchRequest = {
   ids?: string[];

@@ -26,7 +26,7 @@ import {
   registerEntities,
 } from './boot';
 import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
-import { createGossipLayer } from '../networking/gossip';
+import { createGossipLayer } from '../network/p2p/gossip';
 import { getBookOrders } from '../orderbook/core';
 
 type MarketHub = { name: string; id: string; signer: string; role: string; pairs: string[] };

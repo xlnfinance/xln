@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { decodeRuntimeEntityInputsEnvelope } from '../networking/entity-input-envelope';
+import { decodeRuntimeEntityInputsEnvelope } from '../network/p2p/entity-input-envelope';
 
 const runtimeId = `0x${'11'.repeat(20)}`;
 

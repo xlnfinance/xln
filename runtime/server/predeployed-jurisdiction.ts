@@ -1,4 +1,4 @@
-import { normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
+import { normalizeLoopbackUrl, toPublicRpcUrl } from '../network/p2p/loopback-url';
 
 export type PredeployedJurisdictionEntry = {
   rpc?: unknown;

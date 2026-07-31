@@ -9,8 +9,8 @@ import {
   pushDebugEvent,
   resolveEncryptionPublicKeyHex,
   type RelayStore,
-} from '../relay/store';
-import { serializeWsMessage } from '../networking/ws-protocol';
+} from '../network/relay/store';
+import { serializeWsMessage } from '../network/p2p/ws-protocol';
 import {
   deliveryAccepted,
   deliveryDeferred,

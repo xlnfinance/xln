@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { RuntimeP2P } from '../networking/p2p';
+import { RuntimeP2P } from '../network/p2p/p2p';
 
 type FakeRelayClient = {
   isOpen: () => boolean;

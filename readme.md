@@ -18,8 +18,9 @@ xln/
 │   ├── jurisdiction/   Deterministic jurisdiction protocol and event facts
 │   ├── jadapter/       External chain observation and submission
 │   ├── storage/        WAL, current state, history views, and recovery
-│   ├── networking/     Runtime-to-Runtime transport
-│   ├── relay/          Discovery and market relay services
+│   ├── network/
+│   │   ├── p2p/        Runtime-to-Runtime transport
+│   │   └── relay/      Discovery and market relay services
 │   ├── api/            Public Runtime API
 │   ├── server/         HTTP/WebSocket delivery
 │   └── orchestrator/   Process startup and service composition

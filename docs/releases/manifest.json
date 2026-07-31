@@ -19196,9 +19196,9 @@
               "runtime/jurisdiction-config.ts",
               "runtime/logger.ts",
               "runtime/name-resolution.ts",
-              "runtime/networking/gossip-helper.ts",
-              "runtime/networking/gossip.ts",
-              "runtime/networking/runtime-id.ts",
+              "runtime/network/p2p/gossip-helper.ts",
+              "runtime/network/p2p/gossip.ts",
+              "runtime/network/p2p/runtime-id.ts",
               "runtime/open-swap-offers.ts",
               "runtime/orderbook/index.ts",
               "runtime/proof-builder.ts",
@@ -19356,15 +19356,15 @@
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/networking/gossip-helper.ts"
+            "dependency": "runtime/network/p2p/gossip-helper.ts"
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/networking/gossip.ts"
+            "dependency": "runtime/network/p2p/gossip.ts"
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/networking/runtime-id.ts"
+            "dependency": "runtime/network/p2p/runtime-id.ts"
           },
           {
             "source": "runtime/runtime.ts",
@@ -20389,9 +20389,9 @@
               "runtime/jurisdiction-config.ts",
               "runtime/logger.ts",
               "runtime/name-resolution.ts",
-              "runtime/networking/gossip-helper.ts",
-              "runtime/networking/gossip.ts",
-              "runtime/networking/runtime-id.ts",
+              "runtime/network/p2p/gossip-helper.ts",
+              "runtime/network/p2p/gossip.ts",
+              "runtime/network/p2p/runtime-id.ts",
               "runtime/open-swap-offers.ts",
               "runtime/orderbook/index.ts",
               "runtime/proof-builder.ts",
@@ -20549,15 +20549,15 @@
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/networking/gossip-helper.ts"
+            "dependency": "runtime/network/p2p/gossip-helper.ts"
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/networking/gossip.ts"
+            "dependency": "runtime/network/p2p/gossip.ts"
           },
           {
             "source": "runtime/runtime.ts",
-            "dependency": "runtime/networking/runtime-id.ts"
+            "dependency": "runtime/network/p2p/runtime-id.ts"
           },
           {
             "source": "runtime/runtime.ts",

@@ -1,20 +1,20 @@
-import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
-import { isEntityActiveLeader } from '../entity/consensus/leader';
-import type { EntityInput, EntityReplica } from '../entity/types';
-import type { RuntimeReplica } from '../runtime/types';
+import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
+import { isEntityActiveLeader } from '../../entity/consensus/leader';
+import type { EntityInput, EntityReplica } from '../../entity/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   buildValidatorEncryptionBoard,
-} from '../entity/profile-encryption';
+} from '../../entity/profile-encryption';
 import { buildLocalEntityProfile } from './gossip-helper';
-import { computeProfileHash, signProfileRuntimeRoute } from '../entity/profile-signing';
-import { compareStableText } from '../protocol/serialization';
+import { computeProfileHash, signProfileRuntimeRoute } from '../../entity/profile-signing';
+import { compareStableText } from '../../protocol/serialization';
 import {
   requireCompleteValidatorEncryptionManifest,
   type ValidatorEncryptionAttestation,
   type ValidatorEncryptionManifest,
-} from '../protocol/htlc/validator-encryption';
+} from '../../protocol/htlc/validator-encryption';
 
 const normalize = (value: string): string => value.trim().toLowerCase();
 

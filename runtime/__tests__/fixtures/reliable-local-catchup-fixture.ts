@@ -18,7 +18,7 @@ import { deriveLocalEntityCryptoKeys } from '../../entity/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
 import { initCrontab } from '../../entity/scheduler';
 import { buildQuorumHanko } from '../../hanko/signing';
-import { buildLocalEntityProfile } from '../../networking/gossip-helper';
+import { buildLocalEntityProfile } from '../../network/p2p/gossip-helper';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,

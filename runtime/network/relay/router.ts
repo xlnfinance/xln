@@ -5,8 +5,8 @@
  * and delegates to callbacks for local delivery and sending.
  */
 
-import { asFailFastPayload, failfastAssert } from '../networking/failfast';
-import { serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
+import { asFailFastPayload, failfastAssert } from '../p2p/failfast';
+import { serializeWsMessage, type RuntimeWsMessage } from '../p2p/ws-protocol';
 import {
   type RelaySocketLike,
   type RelaySendResult,
@@ -28,12 +28,12 @@ import {
   isRelaySocketOpen,
   classifyRelayDeliveryEvent,
 } from './store';
-import type { Profile } from '../entity/profile';
-import { verifyProfileSignature, type ProfileVerifyResult } from '../entity/profile-signing';
-import { verifyHelloAuth } from '../networking/hello-auth';
-import { isDeliveryDelivered, type DeliveryResult } from '../protocol/payments/delivery-result';
-import { createStructuredLogger } from '../infra/logger';
-import { safeStringify } from '../protocol/serialization';
+import type { Profile } from '../../entity/profile';
+import { verifyProfileSignature, type ProfileVerifyResult } from '../../entity/profile-signing';
+import { verifyHelloAuth } from '../p2p/hello-auth';
+import { isDeliveryDelivered, type DeliveryResult } from '../../protocol/payments/delivery-result';
+import { createStructuredLogger } from '../../infra/logger';
+import { safeStringify } from '../../protocol/serialization';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');

@@ -4,7 +4,7 @@ import { createJAdapter } from '../jadapter';
 import type { JAdapter } from '../jadapter/types';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../jurisdiction/jurisdictions-version';
-import { normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
+import { normalizeLoopbackUrl, toPublicRpcUrl } from '../network/p2p/loopback-url';
 import {
   assertCanonicalRpcContractStack,
   findRpcContractDeploymentBlock,

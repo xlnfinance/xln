@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
-import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
+import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { decodeRuntimeAdapterRequest } from '../radapter/codec';

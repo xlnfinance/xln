@@ -5,26 +5,26 @@
  * and debug events. No WebSocket API, no crypto, no RuntimeReplica.
  */
 
-import { isRuntimeId, normalizeRuntimeId } from '../networking/runtime-id';
-import { canonicalizeProfile, type Profile } from '../entity/profile';
-import { safeStringify } from '../protocol/serialization';
+import { isRuntimeId, normalizeRuntimeId } from '../p2p/runtime-id';
+import { canonicalizeProfile, type Profile } from '../../entity/profile';
+import { safeStringify } from '../../protocol/serialization';
 import {
   normalizeRuntimeFailureCode,
   type RuntimeFailureCategory,
-} from '../protocol/failure-taxonomy';
+} from '../../protocol/failure-taxonomy';
 import {
   deliveryAccepted,
   deliveryDeferred,
   deliveryFailure,
   type DeliveryOutcome,
   type DeliveryResult,
-} from '../protocol/payments/delivery-result';
+} from '../../protocol/payments/delivery-result';
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
   type GossipProfileBatchRequest,
-} from '../networking/profile-batch';
-import { redactTelemetryValue } from '../infra/telemetry-redaction';
+} from '../p2p/profile-batch';
+import { redactTelemetryValue } from '../../infra/telemetry-redaction';
 
 // ---------------------------------------------------------------------------
 // Types

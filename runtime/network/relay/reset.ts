@@ -1,4 +1,4 @@
-import { createStructuredLogger } from '../infra/logger';
+import { createStructuredLogger } from '../../infra/logger';
 import type { RelayStore } from './store';
 
 type RelayResetLogger = {

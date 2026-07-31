@@ -10,8 +10,8 @@ import {
   readManagedProcessTable,
   type ManagedProcessOps,
 } from '../orchestrator/managed-runtime-leases';
-import { closeRelayClientsForReset } from '../relay/reset';
-import { createRelayStore } from '../relay/store';
+import { closeRelayClientsForReset } from '../network/relay/reset';
+import { createRelayStore } from '../network/relay/store';
 
 const fakePsChild = () => {
   const child = new EventEmitter() as EventEmitter & {

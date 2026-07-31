@@ -1,7 +1,7 @@
 import type { RuntimeReplica } from '../runtime/types';
-import { isLoopbackUrl } from '../networking/loopback-url';
+import { isLoopbackUrl } from '../network/p2p/loopback-url';
 import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
-import { pushDebugEvent, type RelayStore } from '../relay/store';
+import { pushDebugEvent, type RelayStore } from '../network/relay/store';
 import { safeStringify } from '../protocol/serialization';
 import { getErrorMessage } from './utils';
 

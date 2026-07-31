@@ -1,6 +1,6 @@
 import { assertCrossJurisdictionSwapTargetReadyInEnv } from './swap-target-readiness';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
-import { normalizeRuntimeId } from '../networking/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import { isDeliveryDelivered, requireDeliveryResult } from '../protocol/payments/delivery-result';
 import {
   getRuntimeEntityDisplayInfo,

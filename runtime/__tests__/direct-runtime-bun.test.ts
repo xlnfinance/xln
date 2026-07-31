@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync, signDigest } from '../account/crypto';
-import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
+import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
-import { hashHelloMessage, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../networking/ws-protocol';
+import { hashHelloMessage, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 

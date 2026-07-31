@@ -1,6 +1,6 @@
 import { extractEntityId } from '../protocol/identity';
 import { createStructuredLogger } from '../infra/logger';
-import { normalizeRuntimeId } from '../networking/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import { safeStringify } from '../protocol/serialization';
 import { runtimeInputRequiresOutboxCapacity } from './admission';
 import {

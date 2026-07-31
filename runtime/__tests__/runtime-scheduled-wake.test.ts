@@ -46,7 +46,7 @@ import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
 } from '../entity/profile-encryption';
-import { buildLocalEntityProfile } from '../networking/gossip-helper';
+import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
 import { computeProfileHash } from '../entity/profile-signing';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;

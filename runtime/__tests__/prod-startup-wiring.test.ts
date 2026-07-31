@@ -2067,7 +2067,7 @@ describe('production startup wiring', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scenarios/run.ts'), 'utf8');
     const p2pNode = readFileSync(join(repoRoot, 'runtime/scenarios/p2p-node.ts'), 'utf8');
 
-    expect(runner).not.toContain('runtime/relay/standalone-server.ts');
+    expect(runner).not.toContain('runtime/network/relay/standalone-server.ts');
     expect(runner).not.toContain('RELAY_URL:');
     expect(runner).not.toContain('INTERNAL_RELAY_URL:');
     expect(runner).not.toContain('PUBLIC_RELAY_URL:');
@@ -2253,7 +2253,7 @@ describe('production startup wiring', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const hubTransport = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-runtime-transport.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
-    const p2p = readFileSync(join(repoRoot, 'runtime/networking/p2p.ts'), 'utf8');
+    const p2p = readFileSync(join(repoRoot, 'runtime/network/p2p/p2p.ts'), 'utf8');
 
     expect(p2p).toContain('preferRelayForEntityInput?: boolean;');
     expect(p2p).toContain('if (this.preferRelayForEntityInput) {');

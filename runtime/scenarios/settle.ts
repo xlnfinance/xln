@@ -17,7 +17,7 @@ import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSe
 import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig, registerEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
-import { createGossipLayer } from '../networking/gossip';
+import { createGossipLayer } from '../network/p2p/gossip';
 import { userAutoApprove } from '../entity/tx/handlers/settle';
 
 const USDC_TOKEN_ID = 1;

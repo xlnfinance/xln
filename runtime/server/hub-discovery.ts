@@ -1,7 +1,7 @@
 import type { RuntimeReplica } from '../runtime/types';
 import type { Profile } from '../entity/profile';
-import { getAllGossipProfiles } from '../relay/store';
-import { normalizeRuntimeKey, type RelayStore } from '../relay/store';
+import { getAllGossipProfiles } from '../network/relay/store';
+import { normalizeRuntimeKey, type RelayStore } from '../network/relay/store';
 import { compareStableText } from '../protocol/serialization';
 
 export const buildHubDiscoveryPayload = (input: {

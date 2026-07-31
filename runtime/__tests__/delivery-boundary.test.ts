@@ -23,8 +23,8 @@ const collectRuntimeSourceFiles = (dir: string): string[] =>
   });
 
 const rawEntityInputSendAllowedFiles = new Set([
-  'runtime/networking/p2p.ts',
-  'runtime/networking/ws-client.ts',
+  'runtime/network/p2p/p2p.ts',
+  'runtime/network/p2p/ws-client.ts',
 ]);
 
 const deliveryOutcomeComparisonAllowedFiles = new Set([

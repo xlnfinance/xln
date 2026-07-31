@@ -5,9 +5,9 @@ import { attachEventEmitters } from './env-events';
 import { requireRuntimeMempool } from './input-queue';
 import { persistGossipProfileToInfraDb } from './infra-gossip-store';
 import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
-import { createGossipLayer } from '../networking/gossip';
+import { createGossipLayer } from '../network/p2p/gossip';
 import type { Profile } from '../entity/profile';
-import { buildLocalEntityProfile } from '../networking/gossip-helper';
+import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
 import { deriveRuntimeIdFromSeed, normalizeDbNamespace } from '../storage/runtime-dbs';
 import type { RuntimeReplica } from './types';
 

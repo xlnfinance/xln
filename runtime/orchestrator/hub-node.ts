@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';
-import { normalizeRuntimeId } from '../networking/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
 import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment';
@@ -25,14 +25,14 @@ import {
   normalizeMarketPairId,
   RPC_MARKET_DEFAULT_DEPTH,
   RPC_MARKET_MAX_DEPTH,
-} from '../relay/market-snapshot';
-import { toPublicRpcUrl } from '../networking/loopback-url';
+} from '../network/relay/market-snapshot';
+import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../infra/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { quiesceNodeRuntime } from './node-runtime-quiesce';
 import { applyJEventsToEnv } from '../jadapter/watcher';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
-import { createRelayStore } from '../relay/store';
+import { createRelayStore } from '../network/relay/store';
 import { safeStringify } from '../protocol/serialization';
 import { writeDurableFile } from '../storage/fs-durability';
 import { createStructuredLogger } from '../infra/logger';

@@ -1,6 +1,6 @@
 import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
-import { isLoopbackUrl, normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
+import { isLoopbackUrl, normalizeLoopbackUrl, toPublicRpcUrl } from '../network/p2p/loopback-url';
 
 export type MeshJurisdictionConfig = {
   name: string;

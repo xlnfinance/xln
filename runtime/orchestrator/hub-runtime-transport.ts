@@ -1,5 +1,5 @@
-import type { DirectWebSocket } from '../networking/direct-runtime-bun';
-import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
+import type { DirectWebSocket } from '../network/p2p/direct-runtime-bun';
+import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { safeStringify } from '../protocol/serialization';
 import { decodeRuntimeAdapterRequest } from '../radapter/codec';

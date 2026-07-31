@@ -1,12 +1,12 @@
-import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../runtime/types';
+import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import {
   deliveryAccepted,
   deliveryDeferred,
   deliveryFailure,
   type DeliveryResult,
-} from '../protocol/payments/delivery-result';
-import { compareCanonicalText } from '../orderbook/swap-keys';
-import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from '../protocol/p2p-crypto';
+} from '../../protocol/payments/delivery-result';
+import { compareCanonicalText } from '../../orderbook/swap-keys';
+import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from '../../protocol/p2p-crypto';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { verifyHelloAuth } from './hello-auth';

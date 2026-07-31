@@ -5,7 +5,7 @@ import type {
   RoutedEntityInput,
 } from './types';
 import { isLocalEntityLeaderTimeoutVote } from '../entity/consensus/leader';
-import { normalizeRuntimeId } from '../networking/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import {
   assertReliableIdentityDurableInPostState,
   isReliableAccountAckAwaitingCommit,

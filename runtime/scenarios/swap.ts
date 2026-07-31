@@ -27,7 +27,7 @@ import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJA
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
-import { createGossipLayer } from '../networking/gossip';
+import { createGossipLayer } from '../network/p2p/gossip';
 import { getTokenInfo } from '../account/utils';
 import {
   summarizeRuntimeAccountCausality,

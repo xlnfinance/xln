@@ -101,7 +101,7 @@ import type { BookState } from '../orderbook';
 
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
 
-import { createGossipLayer } from '../networking/gossip';
+import { createGossipLayer } from '../network/p2p/gossip';
 import type { Profile } from '../entity/profile';
 
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../account/crypto';

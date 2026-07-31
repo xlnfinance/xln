@@ -28,7 +28,7 @@ import type { JAdapter } from '../jadapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta, isLeft } from '../account/utils';
-import { createGossipLayer } from '../networking/gossip';
+import { createGossipLayer } from '../network/p2p/gossip';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
 import { ethers } from 'ethers';

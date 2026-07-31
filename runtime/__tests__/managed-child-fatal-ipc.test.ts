@@ -7,8 +7,8 @@ import {
   attachManagedChildFatalIpc,
   parseManagedChildFatalReport,
 } from '../orchestrator/managed-child-fatal-ipc';
-import { openRelayIncidentJournal } from '../relay/incident-journal';
-import { createRelayStore, pushDebugEvent } from '../relay/store';
+import { openRelayIncidentJournal } from '../network/relay/incident-journal';
+import { createRelayStore, pushDebugEvent } from '../network/relay/store';
 
 const fixture = join(import.meta.dir, 'fixtures/managed-child-fatal-ipc-child.ts');
 const tempPaths: string[] = [];

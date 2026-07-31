@@ -1,6 +1,6 @@
 import { isUsableContractAddress } from './contract-address';
 import { loadJurisdictions } from './jurisdiction-loader';
-import { normalizeLoopbackUrl } from '../networking/loopback-url';
+import { normalizeLoopbackUrl } from '../network/p2p/loopback-url';
 
 type RawJurisdictionEntry = Record<string, unknown> & {
   name?: unknown;

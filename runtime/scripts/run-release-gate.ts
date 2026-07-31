@@ -76,8 +76,8 @@ const SOUNDCHECK_TARGETS = [
   'runtime/account/consensus/index.ts',
   'runtime/entity/tx/apply.ts',
   'runtime/storage',
-  'runtime/relay/router.ts',
-  'runtime/networking/p2p.ts',
+  'runtime/network/relay/router.ts',
+  'runtime/network/p2p/p2p.ts',
 ].join(' ');
 
 const quickSteps: GateStep[] = [

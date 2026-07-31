@@ -11,8 +11,8 @@ import {
   writeSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
-import { safeStringify } from '../protocol/serialization';
-import { redactTelemetryValue } from '../infra/telemetry-redaction';
+import { safeStringify } from '../../protocol/serialization';
+import { redactTelemetryValue } from '../../infra/telemetry-redaction';
 import type {
   RelayDebugEvent,
   RelayDebugIncident,

@@ -58,7 +58,7 @@ export type {
   TowerRestoreResponseV1,
 } from '../storage/recovery/types';
 
-export type { GossipLayer } from '../networking/gossip';
+export type { GossipLayer } from '../network/p2p/gossip';
 export type { Profile } from '../entity/profile';
 export type { PaymentRoute } from '../routing/pathfinding';
 export type { CompletedBatch, JBatch, JBatchState } from '../jurisdiction/batch';
@@ -214,7 +214,7 @@ export type {
 	  RuntimeAdapterTimelineFrame,
 	};
 
-export type { P2PConfig } from '../networking/p2p';
+export type { P2PConfig } from '../network/p2p/p2p';
 export type {
   CrossJurisdictionSwapSubmitParams,
   CrossJurisdictionSwapSubmitResult,

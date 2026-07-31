@@ -8,7 +8,7 @@ import {
   pushDebugEvent,
   setDebugIncidentState,
   storeVerifiedGossipProfile,
-} from '../relay/store';
+} from '../network/relay/store';
 import type { Profile } from '../entity/profile';
 import {
   buildCryptographicProfileFixture,

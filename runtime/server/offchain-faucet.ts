@@ -3,7 +3,7 @@ import type { EntityTx } from '../types/entity-tx';
 import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 import { safeStringify } from '../protocol/serialization';
 import type { Profile } from '../entity/profile';
-import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../relay/store';
+import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../network/relay/store';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { encodeRebalancePolicyMemo } from '../extensions/rebalance/policy';
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';

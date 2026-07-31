@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import { normalizeLoopbackUrl } from '../networking/loopback-url';
+import { normalizeLoopbackUrl } from '../network/p2p/loopback-url';
 import { createBrowserVMAdapter } from './browservm';
 import { DEV_CHAIN_IDS, TRON_CHAIN_IDS } from './chain-ids';
 import { createRpcAdapter } from './rpc-adapter';

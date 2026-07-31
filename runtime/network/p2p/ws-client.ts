@@ -1,4 +1,4 @@
-import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../runtime/types';
+import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import {
   deserializeWsMessage,
   hashHelloMessage,
@@ -6,11 +6,11 @@ import {
   serializeWsMessage,
   type RuntimeWsMessage,
 } from './ws-protocol';
-import { signDigest } from '../account/crypto';
-import { encryptJSON, decryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
+import { signDigest } from '../../account/crypto';
+import { encryptJSON, decryptJSON, pubKeyToHex } from '../../protocol/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
-import { createStructuredLogger } from '../infra/logger';
+import { createStructuredLogger } from '../../infra/logger';
 import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
 

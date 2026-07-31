@@ -4,7 +4,7 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import {
   decodeMarketWireMessage,
   encodeMarketWireMessage,
-} from '../relay/market-wire';
+} from '../network/relay/market-wire';
 
 describe('frontend market JSON protocol', () => {
   const snapshotEnvelope = (overrides: Record<string, unknown> = {}): string => JSON.stringify({

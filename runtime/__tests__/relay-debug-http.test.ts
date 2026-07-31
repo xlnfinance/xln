@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { maybeHandleRelayDebugRequest } from '../relay/debug-http';
-import { clearDebugTimeline, createRelayStore, pushDebugEvent } from '../relay/store';
+import { maybeHandleRelayDebugRequest } from '../network/relay/debug-http';
+import { clearDebugTimeline, createRelayStore, pushDebugEvent } from '../network/relay/store';
 
 const call = async (
   store: ReturnType<typeof createRelayStore>,

@@ -1,7 +1,7 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 import { signAccountFrame, verifyAccountSignature } from '../account/crypto';
-import { normalizeRuntimeId } from '../networking/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import { serializeTaggedJson } from '../protocol/serialization';
 import type {
   RuntimeReplica,

@@ -1099,7 +1099,7 @@ books before user swaps run. Empty books are a setup failure, not a user-flow
 failure. Health/self-test lives in:
 - \`runtime/orchestrator/mm-node.ts\`
 - \`runtime/server/market-maker-health.ts\`
-- \`runtime/relay/market-subscriptions.ts\`
+- \`runtime/network/relay/market-subscriptions.ts\`
 - \`tests/e2e-cross-j-swap.spec.ts\` ("market maker prepublishes...")
 
 ### Smart-contract backstop
@@ -1177,7 +1177,7 @@ xln/
       entity/tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
       account/tx/handlers/swap-*.ts - Account-level offer/resolve/cancel
       account/tx/handlers/cross-swap-fill-ack.ts ${fileSizes['runtime/account/tx/handlers/cross-swap-fill-ack.ts'] || '?'} lines - Fill ACK processing
-      relay/market-subscriptions.ts ${fileSizes['runtime/relay/market-subscriptions.ts'] || '?'} lines - Book streaming
+      relay/market-subscriptions.ts ${fileSizes['runtime/network/relay/market-subscriptions.ts'] || '?'} lines - Book streaming
       orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
       server/market-maker-health.ts ${fileSizes['runtime/server/market-maker-health.ts'] || '?'} lines - MM readiness health
       lending.ts                  ${fileSizes['runtime/extensions/lending.ts'] || '?'} lines - Lending math and ids

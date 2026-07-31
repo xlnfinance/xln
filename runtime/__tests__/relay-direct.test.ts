@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveEncryptionKeyPair, decryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
-import { deserializeWsMessage } from '../networking/ws-protocol';
-import { cacheEncryptionKey, createRelayStore, registerClient } from '../relay/store';
+import { deserializeWsMessage } from '../network/p2p/ws-protocol';
+import { cacheEncryptionKey, createRelayStore, registerClient } from '../network/relay/store';
 import {
   hasConnectedEncryptedRelayClient,
   sendEntityInputDirectViaRelaySocketDelivery,

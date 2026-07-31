@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
-import { RuntimeWsClient } from '../networking/ws-client';
-import { deserializeWsMessage, serializeWsMessage } from '../networking/ws-protocol';
-import { startStandaloneRelayServer, type StandaloneRelayServer } from '../relay/standalone-server';
+import { RuntimeWsClient } from '../network/p2p/ws-client';
+import { deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
+import { startStandaloneRelayServer, type StandaloneRelayServer } from '../network/relay/standalone-server';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const SEED_A = 'runtime-ws-recovery-client-a';
@@ -72,7 +72,7 @@ afterEach(() => {
 
 describe('runtime websocket recovery requests', () => {
   test('standalone relay uses structured startup logging', () => {
-    const source = readFileSync(join(process.cwd(), 'runtime/relay/standalone-server.ts'), 'utf8');
+    const source = readFileSync(join(process.cwd(), 'runtime/network/relay/standalone-server.ts'), 'utf8');
 
     expect(source).toContain("createStructuredLogger('relay.standalone')");
     expect(source).toContain("relayStandaloneLog.info('service.listen'");

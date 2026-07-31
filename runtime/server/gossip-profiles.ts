@@ -1,6 +1,6 @@
 import type { RuntimeReplica } from '../runtime/types';
 import type { Profile } from '../entity/profile';
-import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay/store';
+import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../network/relay/store';
 
 const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
 

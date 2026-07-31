@@ -2,9 +2,9 @@ import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from '../protocol/boundary-validation';
-import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../protocol/version';
+} from '../../protocol/boundary-validation';
+import { deserializeTaggedJson, serializeTaggedJson } from '../../protocol/serialization';
+import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../../protocol/version';
 import {
   normalizeMarketEntityId,
   normalizeMarketPairId,

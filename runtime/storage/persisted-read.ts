@@ -1,6 +1,6 @@
 import type { Level } from 'level';
 
-import { normalizeRuntimeId } from '../networking/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { RuntimeOverlayRecord } from '../types/account';

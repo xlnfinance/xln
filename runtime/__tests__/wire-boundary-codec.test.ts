@@ -6,7 +6,7 @@ import {
   serializeWsMessage,
   serializeWsMessageForDebug,
   type RuntimeWsMessage,
-} from '../networking/ws-protocol';
+} from '../network/p2p/ws-protocol';
 import {
   decodeRuntimeAdapterMessage,
   encodeRuntimeAdapterMessage,

@@ -1,6 +1,6 @@
 import { readdir, readFile, writeFile } from 'fs/promises';
 import { deserializeTaggedJson, safeStringify } from '../protocol/serialization';
-import { pushDebugEvent, type RelayStore } from '../relay/store';
+import { pushDebugEvent, type RelayStore } from '../network/relay/store';
 import {
   DEBUG_DUMPS_DIR,
   buildDebugDumpFileName,

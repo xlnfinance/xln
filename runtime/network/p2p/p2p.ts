@@ -5,21 +5,21 @@
  * Durable retry ownership belongs to the runtime outbox, never this adapter.
  */
 
-import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
-import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from '../entity/profile';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../runtime/types';
+import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from '../../entity/profile';
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
-import { extractEntityId } from '../protocol/identity';
-import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../account/crypto';
-import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../entity/profile-signing';
-import { inspectHankoForHash } from '../hanko/signing';
-import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../protocol/p2p-crypto';
+import { extractEntityId } from '../../protocol/identity';
+import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../../account/crypto';
+import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../entity/profile-signing';
+import { inspectHankoForHash } from '../../hanko/signing';
+import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
-import { compareStableText } from '../protocol/serialization';
+import { compareStableText } from '../../protocol/serialization';
 import { DEFAULT_GOSSIP_BATCH_LIMIT, selectProfileBatch, type GossipProfileBatchRequest } from './profile-batch';
-import { createStructuredLogger, shortId } from '../infra/logger';
-import { isRuntimePerfProfileEnabled } from '../infra/perf-runtime-flags';
+import { createStructuredLogger, shortId } from '../../infra/logger';
+import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
 import {
   isBrowserDirectWsEndpointAllowed,
   isSameWsUrlList,
@@ -32,13 +32,13 @@ import {
   deliveryFailure,
   isDeliveryDelivered,
   type DeliveryResult,
-} from '../protocol/payments/delivery-result';
+} from '../../protocol/payments/delivery-result';
 import {
   acceptProfileEncryptionAnnouncement,
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   type ValidatorEncryptionAnnouncement,
-} from '../entity/profile-encryption';
+} from '../../entity/profile-encryption';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';

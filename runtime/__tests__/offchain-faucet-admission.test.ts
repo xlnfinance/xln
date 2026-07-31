@@ -6,7 +6,7 @@ import {
   describeOffchainFaucetAccountState,
   shouldRejectOffchainFaucetForSettledCapacity,
 } from '../server/offchain-faucet-admission';
-import { createRelayStore } from '../relay/store';
+import { createRelayStore } from '../network/relay/store';
 import type { AccountFrame, AccountState } from '../types/account';
 import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 

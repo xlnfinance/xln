@@ -1,7 +1,7 @@
 import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger';
-import { announceCertifiedLocalProfiles } from '../../networking/local-profile-lifecycle';
+import { announceCertifiedLocalProfiles } from '../../network/p2p/local-profile-lifecycle';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import {

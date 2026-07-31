@@ -1,4 +1,4 @@
-import { normalizeRuntimeId } from '../networking/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import type { RoutedEntityInput } from './types';
 import { reliableIdentityExactKey } from './reliable-frontier';
 import { getInputReliableIdentity } from './reliable-receipt';

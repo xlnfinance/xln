@@ -1,16 +1,16 @@
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from './types';
 import { createStructuredLogger, shortId } from '../infra/logger';
-import { RuntimeP2P, type P2PConfig } from '../networking/p2p';
-import { isRuntimeId } from '../networking/runtime-id';
+import { RuntimeP2P, type P2PConfig } from '../network/p2p/p2p';
+import { isRuntimeId } from '../network/p2p/runtime-id';
 import { assertLocalEntityCryptoKeys } from '../entity/crypto';
 import type { RuntimeInboundEntityInputsResult } from './entity-routing';
 import { isDeliveryDelivered } from '../protocol/payments/delivery-result';
 import {
   buildLocalProfileCertificationInput,
   collectDueLocalProfileCertificationInputs,
-} from '../networking/local-profile-lifecycle';
+} from '../network/p2p/local-profile-lifecycle';
 
-export type { P2PConfig } from '../networking/p2p';
+export type { P2PConfig } from '../network/p2p/p2p';
 
 export type RuntimeP2PLifecycleDeps = {
   ensureRuntimeInfrastructure: (env: RuntimeReplica) => NonNullable<RuntimeReplica['infrastructure']>;

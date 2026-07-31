@@ -7,7 +7,7 @@ import {
 import { buildDefaultEntitySwapPairs } from '../account/utils';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { deriveSameOrderbookMaterialization } from '../entity/tx/handlers/account/orderbook-matching-helpers';
-import { buildMarketSnapshotForReplica } from '../relay/market-snapshot';
+import { buildMarketSnapshotForReplica } from '../network/relay/market-snapshot';
 import { applyCommand, createBook } from '../orderbook';
 import { markWorkingOrderbookOffer } from '../orderbook/swap-execution';
 import {

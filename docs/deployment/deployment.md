@@ -138,7 +138,7 @@ relay deploy path alive just because an older doc mentioned it.
 If relay remains separate:
 
 ```bash
-pm2 start runtime/relay/standalone-server.ts \
+pm2 start runtime/network/relay/standalone-server.ts \
   --name xln-relay \
   --interpreter bun \
   -- --port 9000 --host 127.0.0.1

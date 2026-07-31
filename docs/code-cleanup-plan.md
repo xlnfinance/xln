@@ -27,8 +27,9 @@ They should still be done in small patches with targeted tests.
 
 1. Keep the current top-level split and document boundaries in
    [runtime overview](runtime/overview.md).
-2. Keep `relay`, `routing`, `orderbook`, `networking`, `orchestrator`,
-   `scripts`, `account-tx`, and `entity-tx` as the canonical buckets.
+2. Keep P2P transport and relay services under their shared `network/` owner;
+   keep `routing`, `orderbook`, `orchestrator`, `account/tx`, and `entity/tx`
+   as distinct responsibility boundaries.
 3. Deduplicate recovery/watchtower normalizers only when tests cover the exact
    before/after behavior:
    - lookup key normalization;

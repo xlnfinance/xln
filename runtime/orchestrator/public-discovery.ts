@@ -1,4 +1,4 @@
-import { normalizeRuntimeKey, type RelayStore } from '../relay/store';
+import { normalizeRuntimeKey, type RelayStore } from '../network/relay/store';
 import { compareStableText } from '../protocol/serialization';
 import type { HubChild } from './orchestrator-types';
 

@@ -31,8 +31,8 @@ import {
 } from '../runtime/live-jadapters';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
 import { getJurisdictionStackId, requireJurisdictionChainId } from '../jurisdiction/jurisdiction-stack';
-import { type DirectWebSocket } from '../networking/direct-runtime-bun';
-import { normalizeRuntimeId } from '../networking/runtime-id';
+import { type DirectWebSocket } from '../network/p2p/direct-runtime-bun';
+import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import {
   baseAmountAtPrice,
   baseAmountAtPriceCeil,

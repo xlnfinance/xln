@@ -7,7 +7,7 @@ import {
   registerStructuredLogSink,
   type StructuredLogEvent,
 } from '../infra/logger';
-import { createRelayStore, pushDebugEvent } from '../relay/store';
+import { createRelayStore, pushDebugEvent } from '../network/relay/store';
 import { safeStringify } from '../protocol/serialization';
 
 const readRpcAdapterSource = (repoRoot: string): string => [

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import type { RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
-import { RuntimeP2P } from '../networking/p2p';
+import { RuntimeP2P } from '../network/p2p/p2p';
 
 const TARGET_RUNTIME_ID = '0x1111111111111111111111111111111111111111';
 const SOURCE_RUNTIME_ID = '0x3333333333333333333333333333333333333333';

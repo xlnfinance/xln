@@ -11,7 +11,7 @@ import { ethers } from 'ethers';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import { getSignerPrivateKey, registerSignerKey } from '../account/crypto';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
-import { isLoopbackUrl } from '../networking/loopback-url';
+import { isLoopbackUrl } from '../network/p2p/loopback-url';
 import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge, setScenarioStorageEnabled } from './helpers';
 import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
 import { registrationEvidenceKey } from '../jurisdiction/registration-evidence';

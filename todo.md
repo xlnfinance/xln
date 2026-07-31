@@ -52,8 +52,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   non-obvious ordering rule. Comments must explain why the tempting alternative
   is unsafe rather than restating the code.
 - [ ] Finish the remaining owner-first folder moves:
-  `jurisdiction/{machine,adapter}`, `network/{p2p,relay}`, and
-  `api/{public,server,runtime}`. Perform path-only batches with exact export
+  `jurisdiction/{machine,adapter}` and `api/{public,server,runtime}`. Perform
+  path-only batches with exact export
   surface checks and no compatibility re-exports, then tighten the dependency
   and root-surface ratchets after every move. Defer the Activity projection
   path until the independently edited Time Machine/3D consumer lands.

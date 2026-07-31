@@ -117,10 +117,10 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/types/lending.ts`
 - `runtime/entity/tx/handlers/lending.ts`
 - `runtime/server/lending.ts`
-- `runtime/relay/router.ts`
-- `runtime/networking/p2p.ts`
-- `runtime/networking/direct-runtime-bun.ts`
-- `runtime/networking/ws-client.ts`
+- `runtime/network/relay/router.ts`
+- `runtime/network/p2p/p2p.ts`
+- `runtime/network/p2p/direct-runtime-bun.ts`
+- `runtime/network/p2p/ws-client.ts`
 - `jurisdictions/contracts/Depository.sol`
 - `jurisdictions/contracts/EntityProvider.sol`
 - `jurisdictions/contracts/Account.sol`

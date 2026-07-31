@@ -37,11 +37,11 @@ Single-source pipeline:
 Core files:
 
 - `runtime/runtime/env-events.ts`
-- `runtime/networking/ws-client.ts`
-- `runtime/networking/p2p.ts`
-- `runtime/networking/ws-protocol.ts`
+- `runtime/network/p2p/ws-client.ts`
+- `runtime/network/p2p/p2p.ts`
+- `runtime/network/p2p/ws-protocol.ts`
 - `runtime/server/index.ts`
-- `runtime/relay/debug-http.ts`
+- `runtime/network/relay/debug-http.ts`
 - `frontend/src/lib/debug/browser-telemetry.ts`
 
 ## Event Model

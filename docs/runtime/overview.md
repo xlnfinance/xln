@@ -60,8 +60,8 @@ that drives them. Read the cascade before the services around it.
 | `runtime/jurisdiction/` | deterministic J protocol facts | RPC/provider behavior |
 | `runtime/jadapter/` | chain reads, authenticated receipts, submissions | consensus authority |
 | `runtime/storage/` | current state, WAL, history views, replay | protocol decisions |
-| `runtime/networking/` | Runtime-to-Runtime delivery | financial state |
-| `runtime/relay/` | discovery and market relay services | Runtime consensus |
+| `runtime/network/p2p/` | Runtime-to-Runtime delivery | financial state |
+| `runtime/network/relay/` | discovery and market relay services | Runtime consensus |
 | `runtime/api/` | public typed Runtime surface | service lifecycle |
 | `runtime/server/` | HTTP/WebSocket delivery | process orchestration |
 | `runtime/orchestrator/` | process startup and service composition | reducer logic |

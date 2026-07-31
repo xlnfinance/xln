@@ -1,8 +1,8 @@
-import type { RuntimeWsMessage } from '@xln/runtime/networking/ws-protocol';
+import type { RuntimeWsMessage } from '@xln/runtime/network/p2p/ws-protocol';
 import {
   deserializeWsMessage,
   serializeWsMessage,
-} from '@xln/runtime/networking/ws-protocol';
+} from '@xln/runtime/network/p2p/ws-protocol';
 import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,

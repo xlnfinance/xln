@@ -15,7 +15,7 @@ import {
 import {
   classifyRelayDeliveryEvent,
   isRelaySendResultFailure,
-} from '../relay/store';
+} from '../network/relay/store';
 
 const repoRoot = process.cwd();
 
@@ -155,8 +155,8 @@ const collectRuntimeSourceFiles = (dir: string): string[] =>
 const runtimeSources = collectRuntimeSourceFiles(join(repoRoot, 'runtime'));
 
 const rawEntityInputSendAllowedFiles = new Set([
-  'runtime/networking/p2p.ts',
-  'runtime/networking/ws-client.ts',
+  'runtime/network/p2p/p2p.ts',
+  'runtime/network/p2p/ws-client.ts',
 ]);
 const deliveryDecisionAllowedFiles = new Set([
   'runtime/protocol/payments/delivery-result.ts',
@@ -207,28 +207,28 @@ for (const [path, markers] of [
     'isDeliveryDelivered(directDelivery)',
     'shouldRetryDelivery(p2pDelivery)',
   ]],
-  ['runtime/networking/p2p.ts', [
+  ['runtime/network/p2p/p2p.ts', [
     'enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): EntityInputDeliveryResult',
     'sendEntityInputsRaw',
     "delivery.code === 'P2P_NO_PUBKEY'",
     'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     'Durable retry ownership belongs to the runtime outbox',
   ]],
-  ['runtime/networking/ws-client.ts', [
+  ['runtime/network/p2p/ws-client.ts', [
     'sendEntityInputsRaw(to: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): boolean',
   ]],
-  ['runtime/networking/direct-runtime-bun.ts', [
+  ['runtime/network/p2p/direct-runtime-bun.ts', [
     'sendEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): DeliveryResult',
     'ROUTE_DIRECT_MISS_FALLBACK',
     'ROUTE_DIRECT_SEND_FAILED',
   ]],
-  ['runtime/relay/store.ts', [
+  ['runtime/network/relay/store.ts', [
     'export const isRelaySendResultFailure',
     'export const classifyRelayDeliveryEvent',
     'deliveryFailure({',
     'deliverPendingMessages',
   ]],
-  ['runtime/relay/router.ts', [
+  ['runtime/network/relay/router.ts', [
     'const sendRelayDelivery = (',
     'isRelaySendResultFailure(result)',
     'delivery: relayDelivery',
@@ -245,9 +245,9 @@ for (const [path, markers] of [
   for (const marker of markers) assertIncludes(text, marker, path);
 }
 
-const p2pSource = readText('runtime/networking/p2p.ts');
-assertNotIncludes(p2pSource, 'pendingByRuntime', 'runtime/networking/p2p.ts');
-assertNotIncludes(p2pSource, 'flushPending', 'runtime/networking/p2p.ts');
+const p2pSource = readText('runtime/network/p2p/p2p.ts');
+assertNotIncludes(p2pSource, 'pendingByRuntime', 'runtime/network/p2p/p2p.ts');
+assertNotIncludes(p2pSource, 'flushPending', 'runtime/network/p2p/p2p.ts');
 
 const runtimeRoutingPath = 'runtime/runtime/loop-routing.ts';
 const runtimeRouting = readText(runtimeRoutingPath);

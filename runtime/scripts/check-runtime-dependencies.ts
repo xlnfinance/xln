@@ -28,12 +28,20 @@ const FORBIDDEN_DEPENDENCIES = new Set([
   'account->storage',
   'entity->runtime',
   'entity->jadapter',
-  'entity->networking',
+  'entity->network',
   'entity->storage',
   'protocol->account',
   'protocol->entity',
   'server->orchestrator',
 ]);
+
+// Owner moves are one-way migrations. Rejecting the retired roots prevents a
+// future feature from recreating the old split ownership beside network/.
+for (const retiredRoot of ['runtime/networking', 'runtime/relay']) {
+  if (fs.existsSync(retiredRoot)) {
+    throw new Error(`RUNTIME_RETIRED_OWNER_ROOT:${retiredRoot}`);
+  }
+}
 
 const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {};
 

@@ -1,6 +1,6 @@
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { maybeHandleRelayDebugRequest } from '../relay/debug-http';
-import type { RelayStore } from '../relay/store';
+import { maybeHandleRelayDebugRequest } from '../network/relay/debug-http';
+import type { RelayStore } from '../network/relay/store';
 import { buildKnownProfileBundle } from '../server/gossip-profiles';
 import { getDebugEntityEntries } from './public-discovery';
 import type { HubChild, MarketMakerChild } from './orchestrator-types';

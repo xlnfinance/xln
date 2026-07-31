@@ -15,16 +15,16 @@
  * Message IDs and nonces are for correlation/debugging, not cryptographic security.
  */
 
-import { serializeTaggedJson } from '../protocol/serialization';
+import { serializeTaggedJson } from '../../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
-import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
-import type { Codec } from '../protocol/codec';
-import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../protocol/version';
+import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../storage/binary-codec';
+import type { Codec } from '../../protocol/codec';
+import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../../protocol/version';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from '../protocol/boundary-validation';
+} from '../../protocol/boundary-validation';
 
 const DEFAULT_MAX_WS_MESSAGE_BYTES = 16 * 1024 * 1024;
 

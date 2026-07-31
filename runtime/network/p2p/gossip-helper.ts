@@ -4,21 +4,21 @@
  */
 
 import { ethers } from 'ethers';
-import type { EntityState } from '../entity/types';
-import type { RuntimeReplica } from '../runtime/types';
+import type { EntityState } from '../../entity/types';
+import type { RuntimeReplica } from '../../runtime/types';
 import type {
   BoardMetadata,
   Profile,
   ProfileJurisdiction,
   ProfileMirror,
-} from '../entity/profile';
-import { compareStableText } from '../protocol/serialization';
-import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKeyIfAvailable, getSignerPublicKey } from '../account/crypto';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
-import { UINT16_MAX } from '../config/constants';
-import { requireCompleteValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
-import { getProfileEncryptionAttestations } from '../entity/profile-encryption';
-import { buildEntityProfileDescriptor } from '../entity/profile-descriptor';
+} from '../../entity/profile';
+import { compareStableText } from '../../protocol/serialization';
+import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKeyIfAvailable, getSignerPublicKey } from '../../account/crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../protocol/p2p-crypto';
+import { UINT16_MAX } from '../../config/constants';
+import { requireCompleteValidatorEncryptionManifest } from '../../protocol/htlc/validator-encryption';
+import { getProfileEncryptionAttestations } from '../../entity/profile-encryption';
+import { buildEntityProfileDescriptor } from '../../entity/profile-descriptor';
 
 type BuiltProfile = Omit<Profile, 'runtimeId' | 'runtimeEncPubKey'>;
 
@@ -60,7 +60,7 @@ export type ProfileSignerResolver = {
   getSignerAddress: (signerId: string) => string | null;
   getSignerPublicKeyHex: (signerId: string) => string | null;
   getValidatorEncryptionAttestations: (entityId: string) =>
-    import('../protocol/htlc/validator-encryption').ValidatorEncryptionAttestation[];
+    import('../../protocol/htlc/validator-encryption').ValidatorEncryptionAttestation[];
 };
 
 const normalizeSignerAddress = (raw: string): string => {

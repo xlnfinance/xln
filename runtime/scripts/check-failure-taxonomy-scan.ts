@@ -160,7 +160,7 @@ const fatalIncidentRoutes = [
           "fetch('/api/debug/events/ingest'",
         ],
       ],
-      ['runtime/relay/debug-http.ts', ["event: 'browser_error'", "source: 'browser'"]],
+      ['runtime/network/relay/debug-http.ts', ["event: 'browser_error'", "source: 'browser'"]],
       ['runtime/orchestrator/orchestrator.ts', ['incidentSink: incident => debugIncidentJournal.record(incident)']],
     ],
   },
@@ -545,7 +545,7 @@ for (const [path, markers] of [
   ],
   ['runtime/runtime/input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
   ['runtime/runtime/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
-  ['runtime/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
+  ['runtime/network/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
   ['runtime/entity/consensus/input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict']],
   ['runtime/entity/tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity/tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
@@ -733,16 +733,16 @@ const runtimeP2PLifecycle = readText(runtimeP2PLifecyclePath);
 assertNotIncludes(runtimeP2PLifecycle, 'console.', runtimeP2PLifecyclePath);
 
 for (const relayLoggingPath of [
-  'runtime/relay/router.ts',
-  'runtime/relay/local-delivery.ts',
-  'runtime/relay/standalone-server.ts',
+  'runtime/network/relay/router.ts',
+  'runtime/network/relay/local-delivery.ts',
+  'runtime/network/relay/standalone-server.ts',
 ]) {
   assertNotIncludes(readText(relayLoggingPath), 'console.', relayLoggingPath);
 }
 assertNotIncludes(
-  readText('runtime/relay/standalone-server.ts'),
+  readText('runtime/network/relay/standalone-server.ts'),
   '[WS] Runtime relay',
-  'runtime/relay/standalone-server.ts',
+  'runtime/network/relay/standalone-server.ts',
 );
 
 const solvencyPath = 'runtime/runtime/solvency.ts';

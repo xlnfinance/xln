@@ -1,4 +1,4 @@
-import { safeStringify } from '../protocol/serialization';
+import { safeStringify } from '../../protocol/serialization';
 import {
   pushDebugEvent,
   setDebugIncidentState,

@@ -3,7 +3,7 @@ import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import { rebuildScheduledWakeIndex } from '../scheduled-wake';
 import { getLiveJAdapterEntries } from '../live-jadapters';
-import { normalizeRuntimeId } from '../../networking/runtime-id';
+import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
 import { getInputReliableIdentity } from '../reliable-delivery';
 import { reliableIdentityExactKey } from '../reliable-frontier';
 

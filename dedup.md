@@ -65,10 +65,10 @@ Top 100 simplification targets:
 56. `runtime/jadapter/browservm-registry.ts` — delete once runtime/browser no longer store BrowserVM instance directly.
 57. `runtime/runtime/infra.ts` — centralize all infra-only objects here and forbid them in state handlers.
 58. `runtime/account/crypto.ts` — split signer derivation, cache, and browser storage concerns.
-59. `runtime/networking/p2p.ts` — split transport, profile propagation, and debug event paths.
-60. `runtime/networking/profile-signing.ts` — centralize profile hash building and hanko verification with other signing modules.
-61. `runtime/relay/router.ts` — split websocket transport from pending-message persistence.
-62. `runtime/relay/store.ts` — merge tiny helpers or make it the only relay persistence layer.
+59. `runtime/network/p2p/p2p.ts` — split transport, profile propagation, and debug event paths.
+60. `runtime/network/p2p/profile-signing.ts` — centralize profile hash building and hanko verification with other signing modules.
+61. `runtime/network/relay/router.ts` — split websocket transport from pending-message persistence.
+62. `runtime/network/relay/store.ts` — merge tiny helpers or make it the only relay persistence layer.
 63. `runtime/entity/factory.ts` — split entity-id encoding from on-chain registration helpers.
 64. `runtime/jurisdiction/jurisdiction-loader.ts` — merge with `jurisdiction-config` or split cleanly by responsibility.
 65. `runtime/jurisdiction-factory.ts` — remove direct BrowserVM knowledge once `jadapter` fully owns backend construction.

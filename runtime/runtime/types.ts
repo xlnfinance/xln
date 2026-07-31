@@ -1,5 +1,5 @@
 import type { Level } from 'level';
-import type { RuntimeP2P } from '../networking/p2p';
+import type { RuntimeP2P } from '../network/p2p/p2p';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type {
   AccountHistoryRecord,
@@ -33,7 +33,7 @@ import type {
  * it must never re-export them as a neutral convenience barrel.
  */
 
-import type { GossipLayer } from '../networking/gossip';
+import type { GossipLayer } from '../network/p2p/gossip';
 import type { Profile } from '../entity/profile';
 import type { RuntimeP2PConfig } from './p2p-types';
 

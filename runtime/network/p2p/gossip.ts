@@ -6,15 +6,15 @@
  * graph. This direction keeps deterministic Entity admission independent from
  * process-local networking.
  */
-import { logDebug } from '../infra/logger';
-import { buildNetworkGraph } from '../routing/graph';
-import { PathFinder, type PaymentRoute } from '../routing/pathfinding';
+import { logDebug } from '../../infra/logger';
+import { buildNetworkGraph } from '../../routing/graph';
+import { PathFinder, type PaymentRoute } from '../../routing/pathfinding';
 import {
   canonicalizeProfile,
   getBoardPrimaryPublicKey,
   isHubProfile,
   type Profile,
-} from '../entity/profile';
+} from '../../entity/profile';
 
 export interface GossipLayer {
   profiles: Map<string, Profile>;

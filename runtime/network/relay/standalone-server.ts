@@ -4,10 +4,10 @@
 
 import { createRelayStore, removeClient, type RelayStore } from './store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './router';
-import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
-import { normalizeRuntimeId } from '../networking/runtime-id';
-import { createStructuredLogger } from '../infra/logger';
-import { createHelloChallengeRegistry } from '../networking/hello-challenge';
+import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../p2p/ws-protocol';
+import { normalizeRuntimeId } from '../p2p/runtime-id';
+import { createStructuredLogger } from '../../infra/logger';
+import { createHelloChallengeRegistry } from '../p2p/hello-challenge';
 
 type StandaloneRelayOptions = {
   host?: string;
