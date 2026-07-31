@@ -1,7 +1,11 @@
 #!/usr/bin/env bun
 /**
  * BrainVault deterministic test vectors
- * Ensures same inputs = same outputs across versions/platforms
+ * Ensures same inputs = same outputs across versions/platforms.
+ *
+ * These vectors define wallet compatibility, but not the whole security bar:
+ * auditors must also look for leakage, resource exhaustion, cancellation and
+ * boundary failures that can remain invisible while output bytes stay equal.
  */
 
 import { test, expect } from 'bun:test';

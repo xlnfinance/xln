@@ -24,6 +24,9 @@ const VERSION = String(packageJson.version);
 
 const requireDistributionAssets = () => {
   if (!existsSync(PATHS.server)) throw new Error(`XLN_SERVER_BUNDLE_MISSING:${PATHS.server}`);
+  if (!existsSync(PATHS.brainvaultWorker)) {
+    throw new Error(`XLN_BRAINVAULT_WORKER_BUNDLE_MISSING:${PATHS.brainvaultWorker}`);
+  }
   if (!existsSync(`${PATHS.app}/app.html`)) throw new Error(`XLN_APP_BUNDLE_MISSING:${PATHS.app}/app.html`);
 };
 

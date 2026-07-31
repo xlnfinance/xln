@@ -84,6 +84,12 @@ const requireNonEmptyString = (value: unknown, code: string): string => {
   return value;
 };
 
+const requireBoundedSecretString = (value: unknown, maximumBytes: number, code: string): string => {
+  const text = requireNonEmptyString(value, code);
+  if (new TextEncoder().encode(text).byteLength > maximumBytes) throw new Error(code);
+  return text;
+};
+
 const validateStringList = (value: unknown, code: string): void => {
   if (typeof value === 'string') return;
   if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string')) throw new Error(code);
@@ -174,6 +180,51 @@ function assertRequest(
       requireExactBoundaryKeys(message, ['v', 'id', 'op', 'action'], [], 'RADAPTER_REQUEST_CONTROL_FIELDS_INVALID');
       if (message['action'] !== 'verify-chain') throw new Error('RADAPTER_REQUEST_CONTROL_ACTION_INVALID');
       break;
+    case 'brainvault-derive': {
+      requireExactBoundaryKeys(
+        message,
+        ['v', 'id', 'op', 'jobId', 'input'],
+        [],
+        'RADAPTER_REQUEST_BRAINVAULT_DERIVE_FIELDS_INVALID',
+      );
+      requireNonEmptyString(message['jobId'], 'RADAPTER_REQUEST_BRAINVAULT_JOB_ID_INVALID');
+      const input = requireBoundaryRecord(message['input'], 'RADAPTER_REQUEST_BRAINVAULT_INPUT_INVALID');
+      requireExactBoundaryKeys(
+        input,
+        ['specId', 'name', 'passphrase', 'shardInput', 'workers'],
+        [],
+        'RADAPTER_REQUEST_BRAINVAULT_INPUT_FIELDS_INVALID',
+      );
+      requireBoundedSecretString(input['specId'], 512, 'RADAPTER_REQUEST_BRAINVAULT_SPEC_ID_INVALID');
+      requireBoundedSecretString(input['name'], 1_024, 'RADAPTER_REQUEST_BRAINVAULT_NAME_INVALID');
+      requireBoundedSecretString(input['passphrase'], 4_096, 'RADAPTER_REQUEST_BRAINVAULT_PASSPHRASE_INVALID');
+      const shardInput = requireBoundaryInteger(
+        input['shardInput'],
+        'RADAPTER_REQUEST_BRAINVAULT_SHARD_INPUT_INVALID',
+        1,
+      );
+      const workers = requireBoundaryInteger(input['workers'], 'RADAPTER_REQUEST_BRAINVAULT_WORKERS_INVALID', 1);
+      if (shardInput > 100_000) throw new Error('RADAPTER_REQUEST_BRAINVAULT_SHARD_INPUT_INVALID');
+      if (workers > 256) throw new Error('RADAPTER_REQUEST_BRAINVAULT_WORKERS_INVALID');
+      break;
+    }
+    case 'brainvault-cancel':
+      requireExactBoundaryKeys(
+        message,
+        ['v', 'id', 'op', 'jobId'],
+        [],
+        'RADAPTER_REQUEST_BRAINVAULT_CANCEL_FIELDS_INVALID',
+      );
+      requireNonEmptyString(message['jobId'], 'RADAPTER_REQUEST_BRAINVAULT_JOB_ID_INVALID');
+      break;
+    case 'brainvault-reveal':
+      requireExactBoundaryKeys(
+        message,
+        ['v', 'id', 'op'],
+        [],
+        'RADAPTER_REQUEST_BRAINVAULT_REVEAL_FIELDS_INVALID',
+      );
+      break;
     case 'cross-j-intent':
       requireExactBoundaryKeys(
         message,
@@ -255,26 +306,48 @@ const validateResponse = (message: Record<string, unknown>): RuntimeAdapterRespo
 function assertPush(
   message: Record<string, unknown>,
 ): asserts message is Record<string, unknown> & RuntimeAdapterPush {
-  requireExactBoundaryKeys(
-    message,
-    ['v', 'op', 'height', 'commandReady', 'commandReadyReason'],
-    [],
-    'RADAPTER_PUSH_FIELDS_INVALID',
-  );
-  if (message['v'] !== XLN_PROTOCOL_VERSION || message['op'] !== 'tick') {
-    throw new Error('RADAPTER_PUSH_TYPE_INVALID');
+  if (message['v'] !== XLN_PROTOCOL_VERSION) throw new Error('RADAPTER_PUSH_VERSION_INVALID');
+  if (message['op'] === 'tick') {
+    requireExactBoundaryKeys(
+      message,
+      ['v', 'op', 'height', 'commandReady', 'commandReadyReason'],
+      [],
+      'RADAPTER_PUSH_FIELDS_INVALID',
+    );
+    requireBoundaryInteger(message['height'], 'RADAPTER_PUSH_HEIGHT_INVALID');
+    if (typeof message['commandReady'] !== 'boolean') throw new Error('RADAPTER_PUSH_COMMAND_READY_INVALID');
+    if (message['commandReadyReason'] !== null && typeof message['commandReadyReason'] !== 'string') {
+      throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
+    }
+    if (message['commandReady'] === true && message['commandReadyReason'] !== null) {
+      throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
+    }
+    if (message['commandReady'] === false && !String(message['commandReadyReason'] || '').trim()) {
+      throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
+    }
+    return;
   }
-  requireBoundaryInteger(message['height'], 'RADAPTER_PUSH_HEIGHT_INVALID');
-  if (typeof message['commandReady'] !== 'boolean') throw new Error('RADAPTER_PUSH_COMMAND_READY_INVALID');
-  if (message['commandReadyReason'] !== null && typeof message['commandReadyReason'] !== 'string') {
-    throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
+  if (message['op'] === 'brainvault-progress') {
+    requireExactBoundaryKeys(message, ['v', 'op', 'jobId', 'progress'], [], 'RADAPTER_PUSH_FIELDS_INVALID');
+    requireNonEmptyString(message['jobId'], 'RADAPTER_PUSH_BRAINVAULT_JOB_ID_INVALID');
+    const progress = requireBoundaryRecord(message['progress'], 'RADAPTER_PUSH_BRAINVAULT_PROGRESS_INVALID');
+    requireExactBoundaryKeys(
+      progress,
+      ['completed', 'total', 'elapsedMs', 'lastShardMs', 'workers'],
+      [],
+      'RADAPTER_PUSH_BRAINVAULT_PROGRESS_FIELDS_INVALID',
+    );
+    requireBoundaryInteger(progress['completed'], 'RADAPTER_PUSH_BRAINVAULT_COMPLETED_INVALID', 0);
+    requireBoundaryInteger(progress['total'], 'RADAPTER_PUSH_BRAINVAULT_TOTAL_INVALID', 1);
+    requireBoundaryInteger(progress['elapsedMs'], 'RADAPTER_PUSH_BRAINVAULT_ELAPSED_INVALID', 0);
+    requireBoundaryInteger(progress['lastShardMs'], 'RADAPTER_PUSH_BRAINVAULT_SHARD_MS_INVALID', 0);
+    requireBoundaryInteger(progress['workers'], 'RADAPTER_PUSH_BRAINVAULT_WORKERS_INVALID', 1);
+    if (Number(progress['completed']) > Number(progress['total'])) {
+      throw new Error('RADAPTER_PUSH_BRAINVAULT_PROGRESS_RANGE_INVALID');
+    }
+    return;
   }
-  if (message['commandReady'] === true && message['commandReadyReason'] !== null) {
-    throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
-  }
-  if (message['commandReady'] === false && !String(message['commandReadyReason'] || '').trim()) {
-    throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
-  }
+  throw new Error('RADAPTER_PUSH_TYPE_INVALID');
 }
 
 const validatePush = (message: Record<string, unknown>): RuntimeAdapterPush => {
@@ -285,7 +358,9 @@ const validatePush = (message: Record<string, unknown>): RuntimeAdapterPush => {
 export const validateRuntimeAdapterWireMessage = (value: unknown): RuntimeAdapterWireMessage => {
   const message = requireBoundaryRecord(value, 'RADAPTER_WIRE_OBJECT_INVALID');
   if (Object.hasOwn(message, 'inReplyTo')) return validateResponse(message);
-  if (message['op'] === 'tick' && !Object.hasOwn(message, 'id')) return validatePush(message);
+  if ((message['op'] === 'tick' || message['op'] === 'brainvault-progress') && !Object.hasOwn(message, 'id')) {
+    return validatePush(message);
+  }
   if (Object.hasOwn(message, 'id')) return validateRequest(message);
   throw new Error('RADAPTER_WIRE_VARIANT_INVALID');
 };

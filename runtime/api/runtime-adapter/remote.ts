@@ -8,6 +8,11 @@ import {
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
+  RuntimeAdapterBrainVaultInput,
+  RuntimeAdapterBrainVaultOptions,
+  RuntimeAdapterBrainVaultProgress,
+  RuntimeAdapterBrainVaultRecovery,
+  RuntimeAdapterBrainVaultResult,
   RuntimeAdapterCommandLaneKind,
   RuntimeAdapterConfig,
   RuntimeAdapterControlAction,
@@ -40,7 +45,12 @@ type RuntimeAdapterRequestBody =
   | { op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
   | { op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput }
   | { op: 'control'; action: RuntimeAdapterControlAction }
+  | { op: 'brainvault-derive'; jobId: string; input: RuntimeAdapterBrainVaultInput }
+  | { op: 'brainvault-cancel'; jobId: string }
+  | { op: 'brainvault-reveal' }
   | { op: 'cross-j-intent'; route: CrossJurisdictionSwapRoute };
+
+const BRAINVAULT_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
 
 const nextBackoff = (attempt: number, maxMs: number): number =>
   Math.min(maxMs, Math.max(1_000, 2 ** Math.min(attempt, 5) * 250));
@@ -56,6 +66,47 @@ const toWebSocketBuffer = (bytes: Uint8Array): ArrayBuffer => {
 
 const recordOrNull = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+const assertBrainVaultTransportIsConfidential = (wsUrl: string | undefined): void => {
+  const url = new URL(String(wsUrl || ''));
+  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+  if (url.protocol !== 'wss:' && !(url.protocol === 'ws:' && loopback)) {
+    throw new RuntimeAdapterError(
+      'E_UNAUTHORIZED',
+      'BrainVault secrets require wss:// or a localhost ws:// node',
+    );
+  }
+};
+
+const parseBrainVaultResult = (value: unknown): RuntimeAdapterBrainVaultResult => {
+  const result = recordOrNull(value);
+  if (!result) throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault node returned an invalid result');
+  for (const key of ['specId', 'ethereumAddress', 'entityId'] as const) {
+    if (typeof result[key] !== 'string' || !result[key]) {
+      throw new RuntimeAdapterError('E_INTERNAL', `BrainVault node omitted ${key}`);
+    }
+  }
+  if (result['backend'] !== 'native-node') {
+    throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault node returned the wrong backend');
+  }
+  for (const key of ['shardCount', 'factor', 'workers', 'derivationTimeMs', 'height'] as const) {
+    if (!Number.isSafeInteger(result[key]) || Number(result[key]) < 0) {
+      throw new RuntimeAdapterError('E_INTERNAL', `BrainVault node returned invalid ${key}`);
+    }
+  }
+  if (typeof result['created'] !== 'boolean') {
+    throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault node returned invalid owner state');
+  }
+  return result as RuntimeAdapterBrainVaultResult;
+};
+
+const parseBrainVaultRecovery = (value: unknown): RuntimeAdapterBrainVaultRecovery => {
+  const result = recordOrNull(value);
+  if (!result || typeof result['mnemonic24'] !== 'string' || !result['mnemonic24'].trim()) {
+    throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault node returned an invalid mnemonic');
+  }
+  return { mnemonic24: result['mnemonic24'] };
+};
 
 const heightFromPayload = (payload: unknown): number => {
   const record = recordOrNull(payload);
@@ -94,6 +145,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   private pending = new Map<string, PendingRequest>();
   private changeCbs = new Set<(height: number) => void>();
   private statusCbs = new Set<(status: RuntimeAdapterStatus) => void>();
+  private brainVaultProgressCbs = new Map<string, (progress: RuntimeAdapterBrainVaultProgress) => void>();
   private requestId = 0;
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -222,6 +274,38 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       op: 'cross-j-intent',
       route,
     });
+  }
+
+  async deriveBrainVault(
+    input: RuntimeAdapterBrainVaultInput,
+    options: RuntimeAdapterBrainVaultOptions = {},
+  ): Promise<RuntimeAdapterBrainVaultResult> {
+    if (this.level !== 'admin') throw new RuntimeAdapterError('E_UNAUTHORIZED', 'BrainVault requires admin auth');
+    assertBrainVaultTransportIsConfidential(this.config?.wsUrl);
+    if (options.signal?.aborted) throw new Error('BRAINVAULT_DERIVATION_ABORTED');
+    const jobId = `brainvault-${++this.requestId}`;
+    if (options.onProgress) this.brainVaultProgressCbs.set(jobId, options.onProgress);
+    const cancel = (): void => {
+      void this.request({ op: 'brainvault-cancel', jobId }).catch(() => undefined);
+    };
+    options.signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      const result = await this.request<unknown>(
+        { op: 'brainvault-derive', jobId, input },
+        BRAINVAULT_REQUEST_TIMEOUT_MS,
+      );
+      if (options.signal?.aborted) throw new Error('BRAINVAULT_DERIVATION_ABORTED');
+      return parseBrainVaultResult(result);
+    } finally {
+      options.signal?.removeEventListener('abort', cancel);
+      this.brainVaultProgressCbs.delete(jobId);
+    }
+  }
+
+  async revealBrainVaultMnemonic(): Promise<RuntimeAdapterBrainVaultRecovery> {
+    if (this.level !== 'admin') throw new RuntimeAdapterError('E_UNAUTHORIZED', 'BrainVault export requires admin auth');
+    assertBrainVaultTransportIsConfidential(this.config?.wsUrl);
+    return parseBrainVaultRecovery(await this.request<unknown>({ op: 'brainvault-reveal' }));
   }
 
   control<T = unknown>(action: RuntimeAdapterControlAction): Promise<T> {
@@ -398,10 +482,16 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       return;
     }
 
-    if ('op' in message && message.op === 'tick') {
-      this.setServerCommandReadiness(message.commandReady, message.commandReadyReason);
-      this.noteHeight(message.height, { allowDecrease: true });
-      return;
+    if ('op' in message) {
+      if (message.op === 'tick') {
+        this.setServerCommandReadiness(message.commandReady, message.commandReadyReason);
+        this.noteHeight(message.height, { allowDecrease: true });
+        return;
+      }
+      if (message.op === 'brainvault-progress') {
+        this.brainVaultProgressCbs.get(message.jobId)?.(message.progress);
+        return;
+      }
     }
 
     if (!('inReplyTo' in message)) return;
@@ -418,14 +508,14 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  private request<T>(body: RuntimeAdapterRequestBody): Promise<T> {
+  private request<T>(body: RuntimeAdapterRequestBody, timeoutOverrideMs?: number): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter is not connected', true));
     }
     const id = `r-${++this.requestId}`;
     const payload = { v: XLN_PROTOCOL_VERSION, id, ...body } as RuntimeAdapterRequest;
     return new Promise<T>((resolve, reject) => {
-      const timeoutMs = Math.max(1_000, Number(this.config?.requestTimeoutMs ?? 15_000));
+      const timeoutMs = Math.max(1_000, Number(timeoutOverrideMs ?? this.config?.requestTimeoutMs ?? 15_000));
       const timer = setTimeout(() => {
         this.pending.delete(id);
         const requestLabel = body.op === 'read' ? `${body.op}:${body.path}` : body.op;

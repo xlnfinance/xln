@@ -14,7 +14,7 @@ import {
   submitCrossJurisdictionIntent,
   verifyLiveRuntimeStorage,
 } from '../../runtime.ts';
-import { handleRuntimeAdapterMessage } from '../runtime-adapter/server';
+import { handleRuntimeAdapterMessage, type RuntimeAdapterServerDeps } from '../runtime-adapter/server';
 import { RuntimeAdapterError } from '../runtime-adapter/errors';
 import type {
   RuntimeAdapterFrameReceiptResponse,
@@ -31,6 +31,8 @@ type ServerRpcHandlerDeps = {
   registerRuntimeInputReceipt?: (input: RegisterReceiptOptions) => RuntimeIngressReceipt;
   readRuntimeInputReceipt?: (id: string) => RuntimeIngressReceipt | null;
   buildRuntimeInputStatusUrl?: (id: string) => string;
+  deriveBrainVault?: RuntimeAdapterServerDeps['deriveBrainVault'];
+  revealBrainVaultMnemonic?: RuntimeAdapterServerDeps['revealBrainVaultMnemonic'];
 };
 
 const stringList = (value: string[] | string | undefined): string[] =>
@@ -135,6 +137,8 @@ export const createServerRpcMessageHandler = ({
   registerRuntimeInputReceipt,
   readRuntimeInputReceipt,
   buildRuntimeInputStatusUrl,
+  deriveBrainVault,
+  revealBrainVaultMnemonic,
 }: ServerRpcHandlerDeps) =>
   async (ws: RelaySocket, request: RuntimeAdapterRequest, env: RuntimeReplica | null): Promise<void> => {
     await handleRuntimeAdapterMessage(ws, request, env, {
@@ -150,6 +154,8 @@ export const createServerRpcMessageHandler = ({
       ...(registerRuntimeInputReceipt ? { registerReceipt: registerRuntimeInputReceipt } : {}),
       ...(readRuntimeInputReceipt ? { readReceipt: readRuntimeInputReceipt } : {}),
       ...(buildRuntimeInputStatusUrl ? { buildRuntimeInputStatusUrl } : {}),
+      ...(deriveBrainVault ? { deriveBrainVault } : {}),
+      ...(revealBrainVaultMnemonic ? { revealBrainVaultMnemonic } : {}),
       readHead: targetEnv => readPersistedStorageHead(targetEnv),
       readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
       listCheckpoints: targetEnv => listPersistedCheckpointHeights(targetEnv),

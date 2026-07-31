@@ -167,6 +167,45 @@ export type RuntimeAdapterCrossJurisdictionIntentResult = {
 
 export type RuntimeAdapterControlAction = 'verify-chain';
 
+/** Exact secret input sent only to the selected trusted node's admin channel. */
+export type RuntimeAdapterBrainVaultInput = Readonly<{
+  specId: string;
+  name: string;
+  passphrase: string;
+  shardInput: number;
+  workers: number;
+}>;
+
+export type RuntimeAdapterBrainVaultProgress = Readonly<{
+  completed: number;
+  total: number;
+  elapsedMs: number;
+  lastShardMs: number;
+  workers: number;
+}>;
+
+/** Public receipt returned after the node durably installs its local signer. */
+export type RuntimeAdapterBrainVaultResult = Readonly<{
+  specId: string;
+  backend: 'native-node';
+  shardCount: number;
+  factor: number;
+  workers: number;
+  derivationTimeMs: number;
+  ethereumAddress: string;
+  entityId: string;
+  created: boolean;
+  height: number;
+}>;
+
+/** Secret recovery export, available only through a separate explicit action. */
+export type RuntimeAdapterBrainVaultRecovery = Readonly<{ mnemonic24: string }>;
+
+export type RuntimeAdapterBrainVaultOptions = Readonly<{
+  signal?: AbortSignal;
+  onProgress?: (progress: RuntimeAdapterBrainVaultProgress) => void;
+}>;
+
 export interface RuntimeAdapter {
   readonly mode: RuntimeAdapterMode;
   readonly runtimeId: string;
@@ -188,6 +227,11 @@ export interface RuntimeAdapter {
   submitCrossJurisdictionIntent(
     route: CrossJurisdictionSwapRoute,
   ): Promise<RuntimeAdapterCrossJurisdictionIntentResult>;
+  deriveBrainVault(
+    input: RuntimeAdapterBrainVaultInput,
+    options?: RuntimeAdapterBrainVaultOptions,
+  ): Promise<RuntimeAdapterBrainVaultResult>;
+  revealBrainVaultMnemonic(): Promise<RuntimeAdapterBrainVaultRecovery>;
   control<T = unknown>(action: RuntimeAdapterControlAction): Promise<T>;
   onChange(cb: (height: number) => void): () => void;
   onStatus(cb: (status: RuntimeAdapterStatus) => void): () => void;
@@ -214,19 +258,29 @@ export type RuntimeAdapterRequest =
   | { v: XlnProtocolVersion; id: string; op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
   | { v: XlnProtocolVersion; id: string; op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput }
   | { v: XlnProtocolVersion; id: string; op: 'control'; action: RuntimeAdapterControlAction }
+  | { v: XlnProtocolVersion; id: string; op: 'brainvault-derive'; jobId: string; input: RuntimeAdapterBrainVaultInput }
+  | { v: XlnProtocolVersion; id: string; op: 'brainvault-cancel'; jobId: string }
+  | { v: XlnProtocolVersion; id: string; op: 'brainvault-reveal' }
   | { v: XlnProtocolVersion; id: string; op: 'cross-j-intent'; route: CrossJurisdictionSwapRoute };
 
 export type RuntimeAdapterResponse =
   | { v: XlnProtocolVersion; inReplyTo: string; ok: true; payload: unknown }
   | { v: XlnProtocolVersion; inReplyTo: string; ok: false; error: RuntimeAdapterErrorPayload };
 
-export type RuntimeAdapterPush = {
-  v: XlnProtocolVersion;
-  op: 'tick';
-  height: number;
-  commandReady: boolean;
-  commandReadyReason: string | null;
-};
+export type RuntimeAdapterPush =
+  | {
+      v: XlnProtocolVersion;
+      op: 'tick';
+      height: number;
+      commandReady: boolean;
+      commandReadyReason: string | null;
+    }
+  | {
+      v: XlnProtocolVersion;
+      op: 'brainvault-progress';
+      jobId: string;
+      progress: RuntimeAdapterBrainVaultProgress;
+    };
 
 export type RuntimeAdapterEntitySummary = {
   entityId: string;

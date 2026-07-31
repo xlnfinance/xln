@@ -4,6 +4,10 @@ import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
 	  RuntimeAdapterConfig,
+	  RuntimeAdapterBrainVaultInput,
+	  RuntimeAdapterBrainVaultOptions,
+	  RuntimeAdapterBrainVaultRecovery,
+	  RuntimeAdapterBrainVaultResult,
 	  RuntimeAdapterControlAction,
 	  RuntimeAdapterCrossJurisdictionIntentResult,
 	  RuntimeAdapterReadQuery,
@@ -144,6 +148,23 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
     this.requireCommandReady(env);
     return await this.deps.submitCrossJurisdictionIntent(env, route);
+  }
+
+  deriveBrainVault(
+    _input: RuntimeAdapterBrainVaultInput,
+    _options: RuntimeAdapterBrainVaultOptions = {},
+  ): Promise<RuntimeAdapterBrainVaultResult> {
+    return Promise.reject(new RuntimeAdapterError(
+      'E_BAD_QUERY',
+      'embedded BrainVault derivation belongs to the browser worker backend',
+    ));
+  }
+
+  revealBrainVaultMnemonic(): Promise<RuntimeAdapterBrainVaultRecovery> {
+    return Promise.reject(new RuntimeAdapterError(
+      'E_BAD_QUERY',
+      'embedded mnemonic export belongs to the browser vault',
+    ));
   }
 
   control<T = unknown>(action: RuntimeAdapterControlAction): Promise<T> {

@@ -26,12 +26,17 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import type {
   RuntimeAdapterAuthLevel,
   RuntimeAdapterActivityPage,
+  RuntimeAdapterBrainVaultInput,
+  RuntimeAdapterBrainVaultProgress,
+  RuntimeAdapterBrainVaultRecovery,
+  RuntimeAdapterBrainVaultResult,
   RuntimeAdapterControlAction,
   RuntimeAdapterFrameReceiptResponse,
   RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterReadQuery,
   RuntimeAdapterRequest,
   RuntimeAdapterResponse,
+  RuntimeAdapterPush,
 } from './types';
 import {
   resolveRuntimeAdapterAuthAudience,
@@ -73,6 +78,8 @@ type AdapterClientState = {
   sendBucket: TokenBucket;
 };
 
+type ActiveBrainVaultJob = Readonly<{ jobId: string; abort: AbortController }>;
+
 type RuntimeAdapterResponseDiagnostic = {
   env?: RuntimeReplica | null;
   op?: string;
@@ -107,9 +114,19 @@ export type RuntimeAdapterServerDeps = {
 	  findPaymentRoutes?: (env: RuntimeReplica, query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
 	  buildRuntimeInputStatusUrl?: (id: string) => string;
 	  isMutatingIngressReady?: () => boolean;
+	  deriveBrainVault?: (
+	    env: RuntimeReplica,
+	    input: RuntimeAdapterBrainVaultInput,
+	    options: Readonly<{
+	      signal: AbortSignal;
+	      onProgress: (progress: RuntimeAdapterBrainVaultProgress) => void;
+	    }>,
+	  ) => Promise<RuntimeAdapterBrainVaultResult>;
+	  revealBrainVaultMnemonic?: () => Promise<RuntimeAdapterBrainVaultRecovery>;
 	};
 
 const clients = new Map<RuntimeAdapterSocket, AdapterClientState>();
+const brainVaultJobs = new Map<RuntimeAdapterSocket, ActiveBrainVaultJob>();
 let attachedEnv: RuntimeReplica | null = null;
 let detachEnvChange: (() => void) | null = null;
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
@@ -381,6 +398,12 @@ const sendOk = (
   sendResponse(ws, { v: XLN_PROTOCOL_VERSION, inReplyTo, ok: true, payload }, diagnostic);
 };
 
+const sendPush = (ws: RuntimeAdapterSocket, message: RuntimeAdapterPush): void => {
+  const encoded = encodeRuntimeAdapterMessageForBrowser(message);
+  assertRuntimeAdapterMessageSize(encoded);
+  ws.send(encoded);
+};
+
 const sendErr = (
   ws: RuntimeAdapterSocket,
   inReplyTo: string,
@@ -417,6 +440,8 @@ const requireBucket = (bucket: TokenBucket, label: string): void => {
 };
 
 export const forgetRuntimeAdapterClient = (ws: RuntimeAdapterSocket): void => {
+  brainVaultJobs.get(ws)?.abort.abort();
+  brainVaultJobs.delete(ws);
   clients.delete(ws);
 };
 
@@ -769,6 +794,67 @@ const handleRuntimeAdapterControl = async (
   );
 };
 
+const handleRuntimeAdapterBrainVaultDerive = async (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'brainvault-derive'>,
+  env: RuntimeReplica,
+  state: AdapterClientState,
+  deps: RuntimeAdapterServerDeps,
+  diagnostic: RuntimeAdapterDiagnostic,
+): Promise<void> => {
+  requireAuth(state, 'admin');
+  requireBucket(state.sendBucket, 'brainvault');
+  if (!deps.deriveBrainVault) throw new RuntimeAdapterError('E_INTERNAL', 'native BrainVault is unavailable');
+  if (brainVaultJobs.has(ws)) {
+    throw new RuntimeAdapterError('E_COMMAND_PENDING', 'a BrainVault derivation is already running', true, 1_000);
+  }
+  const abort = new AbortController();
+  const job: ActiveBrainVaultJob = { jobId: msg.jobId, abort };
+  brainVaultJobs.set(ws, job);
+  try {
+    const result = await deps.deriveBrainVault(env, msg.input, {
+      signal: abort.signal,
+      onProgress: progress => sendPush(ws, {
+        v: XLN_PROTOCOL_VERSION,
+        op: 'brainvault-progress',
+        jobId: msg.jobId,
+        progress,
+      }),
+    });
+    sendOk(ws, msg.id, result, diagnostic());
+  } finally {
+    if (brainVaultJobs.get(ws) === job) brainVaultJobs.delete(ws);
+  }
+};
+
+const handleRuntimeAdapterBrainVaultCancel = (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'brainvault-cancel'>,
+  state: AdapterClientState,
+  diagnostic: RuntimeAdapterDiagnostic,
+): void => {
+  requireAuth(state, 'admin');
+  const job = brainVaultJobs.get(ws);
+  const cancelled = job?.jobId === msg.jobId;
+  if (cancelled) job.abort.abort();
+  sendOk(ws, msg.id, { cancelled }, diagnostic());
+};
+
+const handleRuntimeAdapterBrainVaultReveal = async (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'brainvault-reveal'>,
+  state: AdapterClientState,
+  deps: RuntimeAdapterServerDeps,
+  diagnostic: RuntimeAdapterDiagnostic,
+): Promise<void> => {
+  requireAuth(state, 'admin');
+  requireBucket(state.sendBucket, 'brainvault');
+  if (!deps.revealBrainVaultMnemonic) {
+    throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault mnemonic export is unavailable');
+  }
+  sendOk(ws, msg.id, await deps.revealBrainVaultMnemonic(), diagnostic());
+};
+
 const sendCommittedRuntimeAdapterCommand = (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'send'>,
@@ -1088,6 +1174,21 @@ export const handleRuntimeAdapterMessage = async (
         deps,
         diagnostic,
       );
+      return true;
+    }
+
+    if (msg.op === 'brainvault-derive') {
+      await handleRuntimeAdapterBrainVaultDerive(ws, msg, env, state, deps, diagnostic);
+      return true;
+    }
+
+    if (msg.op === 'brainvault-cancel') {
+      handleRuntimeAdapterBrainVaultCancel(ws, msg, state, diagnostic);
+      return true;
+    }
+
+    if (msg.op === 'brainvault-reveal') {
+      await handleRuntimeAdapterBrainVaultReveal(ws, msg, state, deps, diagnostic);
       return true;
     }
 

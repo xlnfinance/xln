@@ -29,6 +29,7 @@ export const STATE_DIR = String(process.env['XLNFINANCE_STATE_DIR'] || '').trim(
 export const PATHS = Object.freeze({
   app: join(PACKAGE_ROOT, 'app'),
   server: join(PACKAGE_ROOT, 'dist', 'server.js'),
+  brainvaultWorker: join(PACKAGE_ROOT, 'dist', 'brainvault-worker-native.js'),
   database: join(STATE_DIR, 'db'),
   jurisdictions: join(STATE_DIR, 'jurisdictions.json'),
   log: join(STATE_DIR, 'xln.log'),
@@ -36,6 +37,7 @@ export const PATHS = Object.freeze({
   runtimeSeed: join(STATE_DIR, 'runtime-seed'),
   authSeed: join(STATE_DIR, 'runtime-auth-seed'),
   controlToken: join(STATE_DIR, 'control-token'),
+  brainvaultOwner: join(STATE_DIR, 'brainvault-owner.json'),
 });
 
 export const ensureStateDirectory = () => {

@@ -1,4 +1,17 @@
-/** Argon2id shard derivation shared by library and Wasm workers. */
+/**
+ * Canonical Wasm Argon2 shard implementation.
+ *
+ * Browser and compatibility workers import this function instead of copying
+ * options. Password bytes are exact input after NFKD: trimming, case folding,
+ * replacement characters, library defaults, or an Argon version upgrade would
+ * all create a different wallet. resolveKdfParams exists for the legacy CLI's
+ * explicitly domain-separated custom mode; V1 callers use the frozen defaults.
+ *
+ * AUDITOR NOTE: t=1 and p=1 describe one shard, not the whole recovery. The
+ * outer protocol repeats that 256 MiB unit for every shard. Keeping each shard
+ * independent lets a low-memory device run them sequentially while a node runs
+ * them concurrently without changing a byte of output or total Argon work.
+ */
 
 import { argon2id } from 'hash-wasm';
 import { BRAINVAULT_V1 } from './spec.ts';
@@ -34,7 +47,9 @@ export async function deriveShardWithParams(
   params: BrainvaultKdfParams = {},
 ): Promise<Uint8Array> {
   const kdf = resolveKdfParams(params);
-  // Canonical bytes also make malformed UTF-16 deterministic across JS and native engines.
+  // TextEncoder defines malformed UTF-16 replacement identically for browser,
+  // Bun Wasm and the native bridge; passing a JS string directly would delegate
+  // that boundary behavior to whichever Argon wrapper happened to be installed.
   const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
   const result = await argon2id({
     password,

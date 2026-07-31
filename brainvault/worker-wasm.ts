@@ -1,3 +1,8 @@
+/**
+ * Bun worker transport for the Wasm compatibility backend.
+ * All cryptographic choices remain in spec.ts/kdf.ts; this file only moves one
+ * indexed shard across a worker-thread boundary and returns strict hex.
+ */
 import { parentPort } from 'worker_threads';
 import { bytesToHex } from './encoding.ts';
 import { deriveShardWithParams } from './kdf.ts';

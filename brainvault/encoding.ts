@@ -1,4 +1,10 @@
-/** Strict hexadecimal encoding at BrainVault module boundaries. */
+/**
+ * Strict hexadecimal encoding at BrainVault module boundaries.
+ *
+ * Worker messages cannot transfer implementation-specific Buffer objects as a
+ * protocol assumption. Lowercase hex is the small, deterministic wire format;
+ * odd length or non-hex input must fail instead of being partially parsed.
+ */
 
 export function hexToBytes(hex: string): Uint8Array {
   if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 !== 0) {

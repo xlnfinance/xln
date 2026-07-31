@@ -274,7 +274,7 @@
 
   .tradeoff-heading p,
   .tradeoff-list p,
-  .shared-risk,
+  .shared-risk p,
   .rehearsal-active p {
     margin: 0;
   }
@@ -344,11 +344,75 @@
   }
 
   .shared-risk {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
     padding-top: 10px;
     border-top: 1px solid rgba(255, 255, 255, 0.07);
-    color: rgba(255, 255, 255, 0.42);
+    color: rgba(255, 255, 255, 0.58);
     font-size: 11px;
     line-height: 1.45;
+  }
+
+  .shared-risk strong {
+    color: #fca5a5;
+    font-size: 12px;
+  }
+
+  .execution-target,
+  .node-secret-export {
+    display: grid;
+    gap: 7px;
+    padding: 14px 16px;
+    border: 1px solid rgba(85, 214, 190, 0.28);
+    border-radius: 12px;
+    background: rgba(85, 214, 190, 0.07);
+  }
+
+  .execution-target p,
+  .node-secret-export p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .node-ready-card {
+    display: grid;
+    gap: 16px;
+  }
+
+  .node-result-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .node-result-grid > div {
+    display: grid;
+    gap: 4px;
+    padding: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+  }
+
+  .node-result-grid span,
+  .node-secret-export label {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .node-secret-export textarea {
+    width: 100%;
+    resize: vertical;
+    font: inherit;
+    line-height: 1.55;
+  }
+
+  @media (max-width: 640px) {
+    .node-result-grid { grid-template-columns: 1fr; }
   }
 
   .mnemonic-panel {
@@ -1909,6 +1973,16 @@
   .scheme-light .work-estimate small,
   .scheme-light .measurement-note { color: var(--l-text-3); }
   .scheme-light .shared-risk { border-top-color: var(--l-border); }
+  .scheme-light .execution-target,
+  .scheme-light .node-secret-export {
+    border-color: var(--l-border);
+    background: var(--l-accent-soft);
+  }
+  .scheme-light .execution-target p,
+  .scheme-light .node-secret-export p,
+  .scheme-light .node-result-grid span,
+  .scheme-light .node-secret-export label { color: var(--l-text-2); }
+  .scheme-light .node-result-grid > div { border-color: var(--l-border); }
   .scheme-light .work-estimate strong { color: var(--l-accent); }
   .scheme-light .rehearsal-option strong,
   .scheme-light .rehearsal-active strong { color: var(--l-text); }

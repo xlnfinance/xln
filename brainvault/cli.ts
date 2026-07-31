@@ -3,17 +3,17 @@
  * BrainVault CLI - Production wallet derivation
  *
  * Usage:
- *   bun brainvault.ts                           # Interactive
- *   bun brainvault.ts test secret123 100 --w=64 # Non-interactive (JSON output)
+ *   bun run bv                                  # Interactive
+ *   bun run bv test secret123 100 --w=64        # Non-interactive (JSON output)
  *   bun test brainvault/core.test.ts            # Run deterministic tests
- *   bun brainvault.ts --bench                   # Benchmark performance
- *   bun brainvault.ts --lib=wasm                # Force hash-wasm (slower, compat check)
- *   bun brainvault.ts --lib=native              # Force @node-rs/argon2 (default, faster)
- *   bun brainvault.ts --repeat                  # Interactive: require double entry for name/pass
- *   bun brainvault.ts --shard-multiplier=4      # Custom KDF mode: 256MB * multiplier per shard
- *   bun brainvault.ts --address-count=5         # Number of standard + ledger-live addresses
- *   bun brainvault.ts --show-private-key        # Print raw key for Address 1 (high risk)
- *   bun brainvault.ts --help                    # Show usage/help
+ *   bun run bv --bench                          # Benchmark performance
+ *   bun run bv --lib=wasm                       # Force hash-wasm (slower, compat check)
+ *   bun run bv --lib=native                     # Force @node-rs/argon2 (default, faster)
+ *   bun run bv --repeat                         # Interactive: require double entry for name/pass
+ *   bun run bv --shard-multiplier=4             # Custom KDF mode: 256MB * multiplier per shard
+ *   bun run bv --address-count=5                # Number of standard + ledger-live addresses
+ *   bun run bv --show-private-key               # Print raw key for Address 1 (high risk)
+ *   bun run bv --help                           # Show usage/help
  */
 
 import { stdin } from 'process';
@@ -38,10 +38,10 @@ What is BrainVault?
 - Same inputs => same master key, mnemonics, and addresses.
 
 Usage:
-- bun bv
-- bun bv <name> <passphrase> <shards> [--w=N]
-- bun bv --bench
-- bun bv --password
+- bun run bv
+- bun run bv -- <name> <passphrase> <shards> [--w=N]
+- bun run bv --bench
+- bun run bv --password
 
 Flags:
 - --help, -h
@@ -67,11 +67,11 @@ Flags:
   Also print raw private key for Address 1 (high risk; use only if you understand key handling risks).
 
 Examples:
-- bun bv
-- bun bv alice "correct horse battery staple" 100 --w=16
-- bun bv alice "secret123456" 1 --address-count=10
-- bun bv alice "secret123456" 100 --w=24 --shard-multiplier=50
-- bun bv alice "secret123456" 1 --show-private-key
+- bun run bv
+- bun run bv -- alice "correct horse battery staple" 100 --w=16
+- bun run bv -- alice "secret123456" 1 --address-count=10
+- bun run bv -- alice "secret123456" 100 --w=24 --shard-multiplier=50
+- bun run bv -- alice "secret123456" 1 --show-private-key
 
 Recovery rule:
 - You must use the exact same Name + Passphrase + Shard count + shard-multiplier

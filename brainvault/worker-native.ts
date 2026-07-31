@@ -1,22 +1,44 @@
+/**
+ * Thin worker-thread transport for the CLI.
+ *
+ * Argon parameters live in native.ts; duplicating them here would let the CLI
+ * and node server silently derive different wallets after a future edit.
+ */
 import { parentPort } from 'worker_threads';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
 import { bytesToHex } from './encoding.ts';
+import { deriveBrainVaultNativeShard } from './native.ts';
 import { BRAINVAULT_V1, createShardSalt } from './spec.ts';
 
 parentPort?.on('message', async ({ name, passphrase, shardIndex, shardCount, shardMemoryKb, algId }) => {
   const memoryKb = shardMemoryKb ?? BRAINVAULT_V1.SHARD_MEMORY_KB;
-  const salt = await createShardSalt(name, shardIndex, shardCount, algId ?? BRAINVAULT_V1.ALG_ID);
-  const normalized = new TextEncoder().encode(passphrase.normalize('NFKD'));
+  const effectiveAlgId = algId ?? BRAINVAULT_V1.ALG_ID;
+  const standard = memoryKb === BRAINVAULT_V1.SHARD_MEMORY_KB && effectiveAlgId === BRAINVAULT_V1.ALG_ID;
+  let result: Uint8Array;
+  if (standard) {
+    result = await deriveBrainVaultNativeShard(
+      { name, passphrase, shardInput: shardCount, workers: 1 },
+      shardIndex,
+      shardCount,
+    );
+  } else {
+    const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
+    try {
+      result = new Uint8Array(await argon2Native(password, {
+        salt: Buffer.from(await createShardSalt(name, shardIndex, shardCount, effectiveAlgId)),
+        memoryCost: memoryKb,
+        timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
+        parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
+        outputLen: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
+        algorithm: 2,
+        version: 1,
+      }));
+    } finally {
+      password.fill(0);
+    }
+  }
 
-  const result = await argon2Native(normalized, {
-    salt: Buffer.from(salt),
-    memoryCost: memoryKb,
-    timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
-    parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
-    outputLen: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
-    algorithm: 2, // argon2id
-    version: 1, // @node-rs/argon2 Version.V0x13; matches BRAINVAULT_V1.ARGON_VERSION.
-  });
-
-  parentPort?.postMessage({ shardIndex, result: bytesToHex(Buffer.from(result)) });
+  const encoded = bytesToHex(result);
+  result.fill(0);
+  parentPort?.postMessage({ shardIndex, result: encoded });
 });

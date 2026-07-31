@@ -146,7 +146,10 @@ export async function combineShardsWithParams(
     offset += shard.length;
   }
 
-  // Domain-separated final hash (binds factor and KDF params)
+  // AUDITOR NOTE: the domain tag binds every KDF parameter and shard count.
+  // `factor` is redundant with shard count but is frozen into V1; removing it
+  // would be wallet-breaking, not cleanup. Custom settings therefore cannot
+  // alias the V1 namespace even when name/passphrase are identical.
   const shardCount = shardResults.length;
   const domainTag = `${kdf.algId}|mem=${kdf.shardMemoryKb}|t=${kdf.argonTimeCost}|p=${kdf.argonParallelism}|out=${kdf.shardOutputBytes}|shards=${shardCount}|factor=${factor}`;
   const domainBytes = new TextEncoder().encode(domainTag);
