@@ -179,42 +179,46 @@ describe('entity panel model helpers', () => {
         accounts: {
           items: [
             {
-              leftEntity: entityId,
-              rightEntity: hubOne,
+              state: {
+                leftEntity: entityId,
+                rightEntity: hubOne,
+                deltas: new Map([[1, { offdelta: 10n }]]),
+                locks: new Map(),
+                swapOffers: new Map(),
+                globalCreditLimits: new Map(),
+                lastFinalizedJHeight: 3,
+                requestedRebalance: new Map(),
+                requestedRebalanceFeeState: new Map(),
+                rebalancePolicy: new Map(),
+              },
               status: 'open',
-              deltas: new Map([[1, { offdelta: 10n }]]),
               currentHeight: 5,
               currentFrame: { height: 5, timestamp: 1000, outcome: [], accountTxs: [] },
               mempool: [],
-              locks: new Map(),
-              swapOffers: new Map(),
-              globalCreditLimits: new Map(),
               pendingSignatures: [],
               rollbackCount: 0,
-              lastFinalizedJHeight: 3,
               pendingWithdrawals: new Map(),
-              requestedRebalance: new Map(),
-              requestedRebalanceFeeState: new Map(),
-              rebalancePolicy: new Map(),
             },
             {
-              leftEntity: hubTwo,
-              rightEntity: entityId,
+              state: {
+                leftEntity: hubTwo,
+                rightEntity: entityId,
+                deltas: new Map([[1, { offdelta: -2n }]]),
+                locks: new Map(),
+                swapOffers: new Map(),
+                globalCreditLimits: new Map(),
+                lastFinalizedJHeight: 2,
+                requestedRebalance: new Map(),
+                requestedRebalanceFeeState: new Map(),
+                rebalancePolicy: new Map(),
+              },
               status: 'open',
-              deltas: new Map([[1, { offdelta: -2n }]]),
               currentHeight: 4,
               currentFrame: { height: 4, timestamp: 900, outcome: [], accountTxs: [] },
               mempool: [],
-              locks: new Map(),
-              swapOffers: new Map(),
-              globalCreditLimits: new Map(),
               pendingSignatures: [],
               rollbackCount: 0,
-              lastFinalizedJHeight: 2,
               pendingWithdrawals: new Map(),
-              requestedRebalance: new Map(),
-              requestedRebalanceFeeState: new Map(),
-              rebalancePolicy: new Map(),
             },
           ],
           nextCursor: null,
@@ -239,8 +243,8 @@ describe('entity panel model helpers', () => {
     expect(view.height).toBe(77);
     expect(view.timestamp).toBe(5678);
     expect(view.replica?.state?.accounts?.size).toBe(2);
-    expect(view.replica?.state?.accounts?.get(hubOne)?.deltas.get(1)?.offdelta).toBe(10n);
-    expect(view.replica?.state?.accounts?.get(hubTwo)?.deltas.get(1)?.offdelta).toBe(-2n);
+    expect(view.replica?.state?.accounts?.get(hubOne)?.state.deltas.get(1)?.offdelta).toBe(10n);
+    expect(view.replica?.state?.accounts?.get(hubTwo)?.state.deltas.get(1)?.offdelta).toBe(-2n);
     expect(view.entityNames.get(hubOne)).toBe('H1');
     expect(view.jurisdictions).toEqual([{ name: 'Testnet', chainId: 31337 }]);
     expect(view.isDevnet).toBe(true);

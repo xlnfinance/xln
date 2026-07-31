@@ -528,7 +528,7 @@ const assertRunnerPreflight = async (): Promise<void> => {
   if (!existsSync(typechainIndex)) {
     throw new Error(`RUNNER_PREFLIGHT_FAILED missing ${typechainIndex}`);
   }
-  await import(resolve(process.cwd(), 'runtime', 'jadapter', 'browservm.ts'));
+  await import(resolve(process.cwd(), 'runtime', 'jurisdiction', 'adapter', 'browservm.ts'));
 };
 
 type PlaywrightTarget = {

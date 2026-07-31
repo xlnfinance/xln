@@ -149,8 +149,8 @@ function summaryReplica(summary: RuntimeAdapterEntitySummary): EntityReplica {
 
 function runtimeProjectionAccountKey(entityId: string, account: RuntimeProjectionAccountDoc): string {
   const owner = normalizeEntityId(entityId);
-  const left = normalizeEntityId((account as { leftEntity?: unknown }).leftEntity);
-  const right = normalizeEntityId((account as { rightEntity?: unknown }).rightEntity);
+  const left = normalizeEntityId(account.state.leftEntity);
+  const right = normalizeEntityId(account.state.rightEntity);
   if (owner && left === owner && right) return right;
   if (owner && right === owner && left) return left;
   return right || left;
