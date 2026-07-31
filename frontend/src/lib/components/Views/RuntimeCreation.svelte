@@ -2137,7 +2137,6 @@
               value={revealedNodeMnemonic}
               autocomplete="off"
               autocapitalize="none"
-              autocorrect="off"
               spellcheck="false"
             ></textarea>
             <p class="warning-text">Mnemonic is now present in this tab. Hide it before screen sharing or remote access.</p>
