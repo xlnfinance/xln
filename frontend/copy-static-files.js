@@ -104,6 +104,22 @@ function ensureDir(pathname) {
   mkdirSync(pathname, { recursive: true });
 }
 
+function buildBrainvaultWorker() {
+  const source = resolve(REPO_ROOT, 'brainvault/worker-browser.ts');
+  const output = fromStatic('brainvault-worker.js');
+  if (!existsSync(source)) throw new Error(`BRAINVAULT_WORKER_SOURCE_MISSING:${source}`);
+
+  ensureDir(dirname(output));
+  execFileSync('bun', ['build', source, '--outfile', output, '--target=browser', '--minify'], {
+    cwd: REPO_ROOT,
+    stdio: 'pipe',
+  });
+  if (!existsSync(output) || statSync(output).size === 0) {
+    throw new Error(`BRAINVAULT_WORKER_BUILD_FAILED:${output}`);
+  }
+  console.log(`[static] built brainvault worker (${statSync(output).size} bytes)`);
+}
+
 function cleanDir(pathname) {
   rmSync(pathname, { recursive: true, force: true });
   ensureDir(pathname);
@@ -428,6 +444,7 @@ const requireAllContractSources = process.argv.includes('--require-all-contract-
 
 copyContracts(requireAllContractSources);
 if (!contractsOnly) {
+  buildBrainvaultWorker();
   copyScenarios();
   copyDocsAndManifest();
   generateLlmsStaticFiles();

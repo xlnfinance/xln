@@ -1,5 +1,7 @@
 import { parentPort } from 'worker_threads';
-import { createShardSalt, deriveShardWithParams, bytesToHex, BRAINVAULT_V1 } from './core.ts';
+import { bytesToHex } from './encoding.ts';
+import { deriveShardWithParams } from './kdf.ts';
+import { BRAINVAULT_V1, createShardSalt } from './spec.ts';
 
 parentPort?.on('message', async ({ name, passphrase, shardIndex, shardCount, shardMemoryKb, algId }) => {
   const memoryKb = shardMemoryKb ?? BRAINVAULT_V1.SHARD_MEMORY_KB;

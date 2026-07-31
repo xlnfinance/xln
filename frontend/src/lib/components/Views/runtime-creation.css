@@ -325,6 +325,14 @@
     line-height: 1.45;
   }
 
+  .tradeoff-list a {
+    color: #7dd3fc;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .tradeoff-list a:hover { color: #bae6fd; }
+
   .benefit-list > div > span {
     color: #86efac;
     background: rgba(34, 197, 94, 0.12);
@@ -1895,6 +1903,7 @@
   .scheme-light .tradeoff-list p,
   .scheme-light .rehearsal-option small,
   .scheme-light .rehearsal-active p { color: var(--l-text-2); }
+  .scheme-light .tradeoff-list a { color: var(--l-accent); }
   .scheme-light .shared-risk,
   .scheme-light .work-estimate span,
   .scheme-light .work-estimate small,

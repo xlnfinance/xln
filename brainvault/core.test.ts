@@ -5,11 +5,14 @@
  */
 
 import { test, expect } from 'bun:test';
+import { hashRaw as argon2Native } from '@node-rs/argon2';
 import {
-  createShardSalt, deriveShard, combineShards, deriveKey,
+  createShardSalt, deriveShard, deriveShardWithParams, combineShards, deriveKey,
   entropyToMnemonic, deriveEthereumAddress, bytesToHex,
-  factorForShardCount, getShardCount, hexToBytes, validateInputs,
+  deriveSitePassword, factorForShardCount, getShardCount, hexToBytes, validateInputs,
 } from './core.ts';
+import { BIP39_ENGLISH } from './bip39-english.ts';
+import { BRAINVAULT_V1 } from './spec.ts';
 
 // Test vectors for v1.0 (simplified: no hashName, direct salt from name)
 // FROZEN - these define wallet compatibility forever
@@ -37,11 +40,29 @@ const VECTORS = [
   }},
 ];
 
+test('embedded BIP39 English wordlist is canonical', () => {
+  const canonicalFile = `${BIP39_ENGLISH.join('\n')}\n`;
+  const hash = new Bun.CryptoHasher('sha256').update(canonicalFile).digest('hex');
+  expect(BIP39_ENGLISH).toHaveLength(2048);
+  expect(Object.isFrozen(BIP39_ENGLISH)).toBe(true);
+  expect(Object.isFrozen(BRAINVAULT_V1)).toBe(true);
+  expect(BRAINVAULT_V1.ARGON_VERSION).toBe(0x13);
+  expect(() => ((BIP39_ENGLISH as string[])[0] = 'mutated')).toThrow();
+  expect(() => ((BRAINVAULT_V1 as { ARGON_TIME_COST: number }).ARGON_TIME_COST = 2)).toThrow();
+  expect(hash).toBe('2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda');
+});
+
 test('salt is deterministic', async () => {
   for (const v of VECTORS) {
     const salt = await createShardSalt(v.name, 0, v.shards);
     expect(bytesToHex(salt)).toBe(v.expect.salt0);
   }
+});
+
+test('salt rejects values that cannot be encoded exactly', async () => {
+  await expect(createShardSalt('alice', -1, 1)).rejects.toThrow('BRAINVAULT_SHARD_INDEX_INVALID:-1');
+  await expect(createShardSalt('alice', 1, 1)).rejects.toThrow('BRAINVAULT_SHARD_INDEX_INVALID:1');
+  await expect(createShardSalt('alice', 0, 0x1_0000_0000)).rejects.toThrow('BRAINVAULT_SHARD_COUNT_INVALID:4294967296');
 });
 
 test('factor mapping is integer-only and preserves the V1 formula', () => {
@@ -61,6 +82,11 @@ test('wallet boundaries fail loudly on malformed bytes', async () => {
   expect(() => hexToBytes('0xff')).toThrow('BRAINVAULT_HEX_INVALID');
   expect(() => entropyToMnemonic(new Uint8Array(15))).toThrow('BRAINVAULT_ENTROPY_LENGTH_INVALID:15');
   expect(() => entropyToMnemonic(new Uint8Array(33))).toThrow('BRAINVAULT_ENTROPY_LENGTH_INVALID:33');
+  await expect(deriveSitePassword('00'.repeat(32), 'example.com', 3)).rejects.toThrow('BRAINVAULT_SITE_PASSWORD_LENGTH_INVALID:3');
+  expect(await deriveSitePassword('00'.repeat(32), 'example.com', 20)).toBe('Hu?C%-1gRM37898J+%mS');
+  await expect(combineShards([], 1)).rejects.toThrow('BRAINVAULT_SHARDS_EMPTY');
+  await expect(combineShards([new Uint8Array(1)], 1)).rejects.toThrow('BRAINVAULT_SHARD_LENGTH_INVALID:0:1');
+  await expect(combineShards([new Uint8Array(32)], Number.NaN)).rejects.toThrow('BRAINVAULT_FACTOR_INVALID:NaN');
 });
 
 test('single shard derivation is deterministic', async () => {
@@ -69,6 +95,28 @@ test('single shard derivation is deterministic', async () => {
   const shard = await deriveShard(v.passphrase, salt);
 
   expect(bytesToHex(shard)).toBe(v.expect.shard0);
+});
+
+test('Wasm and native engines share canonical malformed UTF-16 encoding', async () => {
+  const passphrase = '\ud800';
+  const salt = await createShardSalt('unicode-parity', 0, 1);
+  const params = {
+    shardMemoryKb: 8,
+    argonTimeCost: 1,
+    argonParallelism: 1,
+    shardOutputBytes: 32,
+  };
+  const wasm = await deriveShardWithParams(passphrase, salt, params);
+  const native = await argon2Native(new TextEncoder().encode(passphrase.normalize('NFKD')), {
+    salt,
+    memoryCost: params.shardMemoryKb,
+    timeCost: params.argonTimeCost,
+    parallelism: params.argonParallelism,
+    outputLen: params.shardOutputBytes,
+    algorithm: 2,
+    version: 1,
+  });
+  expect(bytesToHex(wasm)).toBe(bytesToHex(native));
 });
 
 test('full derivation produces correct wallet (1 shard)', async () => {

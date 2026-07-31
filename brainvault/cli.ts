@@ -5,7 +5,7 @@
  * Usage:
  *   bun brainvault.ts                           # Interactive
  *   bun brainvault.ts test secret123 100 --w=64 # Non-interactive (JSON output)
- *   bun brainvault.ts --test                    # Run deterministic tests
+ *   bun test brainvault/core.test.ts            # Run deterministic tests
  *   bun brainvault.ts --bench                   # Benchmark performance
  *   bun brainvault.ts --lib=wasm                # Force hash-wasm (slower, compat check)
  *   bun brainvault.ts --lib=native              # Force @node-rs/argon2 (default, faster)
@@ -40,15 +40,12 @@ What is BrainVault?
 Usage:
 - bun bv
 - bun bv <name> <passphrase> <shards> [--w=N]
-- bun bv --test
 - bun bv --bench
 - bun bv --password
 
 Flags:
 - --help, -h
   Show this help message.
-- --test
-  Run deterministic test vectors.
 - --bench
   Benchmark derivation speed.
 - --password
@@ -101,8 +98,8 @@ function getPositiveIntFlag(name: string, defaultValue: number): number {
   const flag = args.find(a => a.startsWith(`--${name}=`));
   if (!flag) return defaultValue;
   const raw = flag.split('=')[1] ?? '';
-  const value = Number.parseInt(raw, 10);
-  if (!Number.isInteger(value) || value < 1) {
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) {
     console.error(`Error: invalid --${name} value: ${raw}. Expected a positive integer.`);
     process.exit(1);
   }
@@ -142,6 +139,13 @@ async function derive(name: string, passphrase: string, shardInput: number, work
     shardMultiplier = 1,
   } = options;
 
+  if (!Number.isSafeInteger(shardInput) || shardInput < 1) {
+    throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${shardInput}`);
+  }
+  if (!Number.isSafeInteger(workers) || workers < 1) {
+    throw new Error(`BRAINVAULT_WORKER_COUNT_INVALID:${workers}`);
+  }
+
   const isPreset = shardInput >= 1 && shardInput <= 5;
   const shardCount = isPreset ? getShardCount(shardInput) : shardInput;
   const factor = isPreset ? shardInput : factorForShardCount(shardCount);
@@ -166,32 +170,50 @@ async function derive(name: string, passphrase: string, shardInput: number, work
     console.log('Using hash-wasm (WASM) - slower but browser-compatible');
   }
 
-  function safeTerminate(w: Worker) {
-    try {
-      w.terminate();
-    } catch (e) {
-      // Ignore
-    }
-  }
-
   await new Promise<void>((resolve, reject) => {
     let lastUpdate = 0;
+    const terminatePool = () => Promise.all(pool.map(worker => worker.terminate())).then(() => undefined);
+    const fail = (error: unknown) => {
+      if (failed) return;
+      failed = true;
+      const cause = error instanceof Error ? error : new Error(String(error));
+      void terminatePool().then(
+        () => reject(cause),
+        terminationError => reject(new AggregateError([cause, terminationError], 'BrainVault worker failure')),
+      );
+    };
 
     for (let i = 0; i < actualWorkers; i++) {
       const w = new Worker(workerPath);
       pool.push(w);
 
-      w.on('error', (err) => {
-        if (failed) return;
-        failed = true;
-        console.error('\nWorker error:', err);
-        pool.forEach(safeTerminate);
-        reject(err);
+      w.on('error', fail);
+      w.on('exit', code => {
+        if (!failed && completed < shardCount) {
+          fail(new Error(`BRAINVAULT_WORKER_EXITED:${code}`));
+        }
       });
 
       w.on('message', ({ shardIndex, result }) => {
         if (failed) return;
-        shardResults[shardIndex] = hexToBytes(result);
+        if (!Number.isSafeInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {
+          fail(new Error(`BRAINVAULT_WORKER_SHARD_INDEX_INVALID:${shardIndex}`));
+          return;
+        }
+        if (shardResults[shardIndex] !== undefined) {
+          fail(new Error(`BRAINVAULT_WORKER_SHARD_DUPLICATE:${shardIndex}`));
+          return;
+        }
+        if (typeof result !== 'string' || result.length !== BRAINVAULT_V1.SHARD_OUTPUT_BYTES * 2) {
+          fail(new Error(`BRAINVAULT_WORKER_RESULT_INVALID:${shardIndex}`));
+          return;
+        }
+        try {
+          shardResults[shardIndex] = hexToBytes(result);
+        } catch (error) {
+          fail(error);
+          return;
+        }
         completed++;
 
         const now = Date.now();
@@ -210,8 +232,7 @@ async function derive(name: string, passphrase: string, shardInput: number, work
 
         if (completed >= shardCount) {
           console.log('');
-          pool.forEach(safeTerminate);
-          resolve();
+          void terminatePool().then(resolve, reject);
         } else if (nextShard < shardCount) {
           w.postMessage({
             name,
@@ -276,47 +297,6 @@ async function derive(name: string, passphrase: string, shardInput: number, work
   };
 }
 
-// ============================================================================
-// TESTS (deterministic vectors)
-// ============================================================================
-
-async function runTests() {
-  console.log('Running deterministic tests...\n');
-
-  const vectors = [
-    {
-      name: 'alice', pass: 'secret123456', shards: 1,
-      expect: {
-        mnemonic24: 'milk click novel require across cousin good chair street mouse crash movie same daughter air quote total pride crop mention focus sick slice hole',
-        ethAddr24: '0x93bAb14eD871462D414a7c0357BF1a76DE741397',
-      }
-    },
-    {
-      name: 'bob', pass: 'password123', shards: 1,
-      expect: {
-        mnemonic24: 'lion shoot refuse toss scissors brass voice blame climb identify surface attack sing topic burden deer captain stone unit hood clarify scatter captain during',
-        ethAddr24: '0x4A699A1F4061ceEbC83b9dC14d6A0c33eC3E2327',
-      }
-    },
-  ];
-
-  for (const v of vectors) {
-    const result = await derive(v.name, v.pass, v.shards, 1);
-    const match24 = result.mnemonic24 === v.expect.mnemonic24;
-    const matchAddr = result.ethAddr24 === v.expect.ethAddr24;
-
-    console.log(`Test: ${v.name}/${v.pass}/${v.shards} shards`);
-    console.log(`  Mnemonic: ${match24 ? '✅' : '❌'}`);
-    console.log(`  Address:  ${matchAddr ? '✅' : '❌'}`);
-    if (!match24) console.log(`    Got: ${result.mnemonic24.split(' ').slice(0, 6).join(' ')}...`);
-    if (!matchAddr) console.log(`    Got: ${result.ethAddr24}`);
-    console.log('');
-
-    if (!match24 || !matchAddr) process.exit(1);
-  }
-
-  console.log('✅ All tests passed');
-}
 
 // ============================================================================
 // BENCHMARK
@@ -352,16 +332,16 @@ async function interactive() {
 
   console.log('BrainVault v1.0 - Memory-Hard Brain Wallet\n');
   console.log('WHY: Mnemonic backups are brittle (lose/steal). BrainVault: remember inputs, derive anywhere.');
-  console.log('HISTORY: brainwallet.io (MD5) → crackable; WarpWallet (scrypt) → never cracked; BrainVault (argon2id sharding)');
-  console.log('SECURITY: 256MB per shard forces attackers to use RAM. Parallelizable on powerful hardware.\n');
+  console.log('DESIGN: unlike classic brainwallets, every guess pays Argon2id memory cost.');
+  console.log('SECURITY: each shard uses 256MB. Shards can run in parallel when RAM allows.\n');
   if (shardMultiplier > 1) {
     const memoryPerShardGb = (BRAINVAULT_V1.SHARD_MEMORY_KB * shardMultiplier) / (1024 * 1024);
     console.log(`CUSTOM MODE: shard-multiplier=${shardMultiplier} (${memoryPerShardGb.toFixed(2)}GB per shard)\n`);
   }
 
-  const name = (await rl.question('Name: ')).trim();
+  const name = await rl.question('Name: ');
   if (requireRepeat) {
-    const nameRepeat = (await rl.question('Repeat Name: ')).trim();
+    const nameRepeat = await rl.question('Repeat Name: ');
     if (name !== nameRepeat) {
       console.log('Error: Name entries do not match');
       rl.close();
@@ -369,9 +349,9 @@ async function interactive() {
     }
   }
 
-  const pass = (await rl.question('Pass: ')).trim();
+  const pass = await rl.question('Pass: ');
   if (requireRepeat) {
-    const passRepeat = (await rl.question('Repeat Pass: ')).trim();
+    const passRepeat = await rl.question('Repeat Pass: ');
     if (pass !== passRepeat) {
       console.log('Error: Passphrase entries do not match');
       rl.close();
@@ -386,14 +366,19 @@ async function interactive() {
   }
 
   console.log('\nShards (quick presets or any number):');
-  console.log('  1 →      1 shard   (256MB)    ~0.2s');
-  console.log('  2 →     10 shards  (2.5GB)    ~0.2s');
-  console.log('  3 →    100 shards  (25GB)     ~1s');
-  console.log('  4 →  1,000 shards  (256GB)    ~11s');
-  console.log('  5 → 10,000 shards  (2.5TB)    ~2min');
+  console.log('  1 →      1 shard');
+  console.log('  2 →     10 shards');
+  console.log('  3 →    100 shards');
+  console.log('  4 →  1,000 shards');
+  console.log('  5 → 10,000 shards');
   console.log('  6+ → any number (e.g., 64, 256, 528)\n');
 
-  const shardInput = parseInt((await rl.question('Shards (100): ')).trim() || '100');
+  const shardInput = Number((await rl.question('Shards (100): ')).trim() || '100');
+  if (!Number.isSafeInteger(shardInput) || shardInput < 1) {
+    console.log('Error: Shards must be a positive integer');
+    rl.close();
+    return;
+  }
   const shardCount = shardInput >= 1 && shardInput <= 5 ? getShardCount(shardInput) : shardInput;
 
   // Calculate recommended workers (CPU cores, capped by RAM)
@@ -412,7 +397,12 @@ async function interactive() {
   console.log(`Hardware capacity: ${maxFromHW} parallel workers`);
   console.log(`Recommended workers: ${recommended} (limited by ${bottleneck})\n`);
 
-  const workersInput = parseInt((await rl.question(`Number of parallel workers (${recommended}): `)).trim() || `${recommended}`);
+  const workersInput = Number((await rl.question(`Number of parallel workers (${recommended}): `)).trim() || `${recommended}`);
+  if (!Number.isSafeInteger(workersInput) || workersInput < 1) {
+    console.log('Error: Workers must be a positive integer');
+    rl.close();
+    return;
+  }
 
   rl.close();
 
@@ -469,7 +459,13 @@ async function derivePassword() {
   console.log('BrainVault Password Manager\n');
   const name = await rl.question('Name: ');
   const pass = await rl.question('Pass: ');
-  const shardInput = parseInt((await rl.question('Shards (3): ')).trim() || '3');
+  const shardInput = Number((await rl.question('Shards (3): ')).trim() || '3');
+
+  if (!Number.isSafeInteger(shardInput) || shardInput < 1) {
+    console.error('Error: Shards must be a positive integer');
+    rl.close();
+    return;
+  }
 
   rl.close();
 
@@ -502,24 +498,22 @@ async function derivePassword() {
 // MAIN
 // ============================================================================
 
-if (args.includes('--test')) {
-  await runTests();
-} else if (args.includes('--bench')) {
+if (args.includes('--bench')) {
   await runBenchmark();
 } else if (args.includes('--password')) {
   await derivePassword();
 } else if (args.length >= 3 && !args[0]?.startsWith('--')) {
   // Non-interactive: name pass shards [--w=N] [--lib=wasm|native] [--address-count=N] [--shard-multiplier=N]
   const [name, pass, shardStr] = args;
-  const shards = parseInt(shardStr!, 10);
-  if (!Number.isInteger(shards) || shards < 1) {
+  const shards = Number(shardStr);
+  if (!Number.isSafeInteger(shards) || shards < 1) {
     console.error(`Error: invalid shard count: ${shardStr}`);
     process.exit(1);
   }
 
   const wFlag = args.find(a => a.startsWith('--w='));
-  const workers = wFlag ? parseInt(wFlag.split('=')[1]!, 10) : 64;
-  if (!Number.isInteger(workers) || workers < 1) {
+  const workers = wFlag ? Number(wFlag.split('=')[1]) : 64;
+  if (!Number.isSafeInteger(workers) || workers < 1) {
     console.error(`Error: invalid worker count: ${wFlag?.split('=')[1] ?? ''}`);
     process.exit(1);
   }

@@ -4,7 +4,8 @@ delete process.env['NO_COLOR'];
 
 const host = process.env.PLAYWRIGHT_FRONTEND_HOST || '127.0.0.1';
 const port = Number(process.env.PLAYWRIGHT_FRONTEND_PORT || 4173);
-const baseURL = `https://${host}:${port}`;
+const protocol = process.env.XLN_VITE_FORCE_HTTP === '1' ? 'http' : 'https';
+const baseURL = `${protocol}://${host}:${port}`;
 
 /**
  * Playwright Configuration for XLN Frontend

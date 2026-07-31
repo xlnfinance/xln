@@ -22,16 +22,21 @@ export type WalletModeTradeoffs = {
   summary: string;
   benefits: readonly string[];
   costs: readonly string[];
+  linkedCost?: Readonly<{
+    text: string;
+    href: string;
+    linkText: string;
+  }>;
 };
 
 export const WALLET_MODE_TRADEOFFS: Readonly<Record<'brainvault' | 'mnemonic', WalletModeTradeoffs>> = {
   brainvault: {
     eyebrow: 'Memory-backed recovery',
-    summary: 'Nothing secret to store. Every password guess pays the same Argon2 time and memory cost.',
+    summary: 'No separate recovery secret to record. Every passphrase guess pays the same Argon2 time and memory cost.',
     benefits: [
       'No secret paper, photo, or cloud backup to protect',
       'Each guess requires expensive time and memory work',
-      'No recovery secret remains stored between uses',
+      'No separate recovery artifact to keep between uses',
     ],
     costs: [
       'The passphrase must be unique and non-obvious',
@@ -43,7 +48,7 @@ export const WALLET_MODE_TRADEOFFS: Readonly<Record<'brainvault' | 'mnemonic', W
     eyebrow: 'Physical-backup recovery',
     summary: 'Strong randomness and instant recovery, exchanged for a secret that must remain hidden and available.',
     benefits: [
-      'Fresh seeds use strong cryptographic randomness',
+      'Correct implementations generate high-entropy seeds locally',
       'Fast recovery across standard compatible wallets',
     ],
     costs: [
@@ -51,6 +56,11 @@ export const WALLET_MODE_TRADEOFFS: Readonly<Record<'brainvault' | 'mnemonic', W
       'A photo, camera, visitor, or malware can copy them',
       'Anyone who obtains the words controls the wallet',
     ],
+    linkedCost: {
+      text: 'A faulty device or app RNG can make a generated seed guessable.',
+      href: 'https://www.cryptotimes.io/2026/07/31/bitcoins-invisible-risk-coldcard-mk3-firmware-bug-leaves-btc-wallet-seeds-exposed-38m-drained/',
+      linkText: 'Coldcard RNG incident',
+    },
   },
 };
 
