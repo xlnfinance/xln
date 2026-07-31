@@ -81,7 +81,7 @@ const CORE_FILES = {
     'account/input.ts',      // Canonical AccountInput boundary
     'account/j-finality.ts', // Account-owned unilateral Depository finality
     'account/view-state.ts', // Bilateral state machine (classifyBilateralState)
-    'jurisdiction/batch.ts',            // J-batch system: E-machine accumulates -> jBroadcast -> J-machine
+    'jurisdiction/machine/batch.ts',    // J-batch system: E-machine accumulates -> jBroadcast -> J-machine
 
     // Financial accounting (CRITICAL for bug analysis)
     'account/utils.ts',      // deriveDelta() RCPAN calculation, TOKEN_REGISTRY
@@ -274,11 +274,11 @@ const CROSS_FILES = {
     'account/consensus/index.ts',
     'account/view-state.ts',
     'account/consensus/dispute-policy.ts',
-    'jurisdiction/batch.ts',
-    'jurisdiction/height.ts',
-    'jurisdiction/event-normalization.ts',
-    'jurisdiction/event-observation.ts',
-    'jurisdiction/jurisdiction-runtime.ts',
+    'jurisdiction/machine/batch.ts',
+    'jurisdiction/machine/height.ts',
+    'jurisdiction/machine/event-normalization.ts',
+    'jurisdiction/machine/event-observation.ts',
+    'jurisdiction/machine/jurisdiction-runtime.ts',
     'protocol/htlc/hash-ladder.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
@@ -429,10 +429,10 @@ const RUNTIME_FILES = {
     'account/view-state.ts',
     'account/consensus/propose.ts',
     'account/consensus/types.ts',
-    'jurisdiction/batch.ts',
-    'jurisdiction/height.ts',
-    'jurisdiction/event-normalization.ts',
-    'jurisdiction/event-observation.ts',
+    'jurisdiction/machine/batch.ts',
+    'jurisdiction/machine/height.ts',
+    'jurisdiction/machine/event-normalization.ts',
+    'jurisdiction/machine/event-observation.ts',
     'entity/tx/apply.ts',
     'entity/tx/validation.ts',
     'entity/tx/proposals.ts',
@@ -461,9 +461,9 @@ const RUNTIME_FILES = {
     'entity/replica-clone.ts',
     'runtime/env-events.ts',
     'infra/logger.ts',
-    'jurisdiction/jurisdiction-runtime.ts',
-    'jurisdiction/config.ts',
-    'jurisdiction/jurisdiction-stack.ts',
+    'jurisdiction/machine/jurisdiction-runtime.ts',
+    'jurisdiction/adapter/config.ts',
+    'jurisdiction/machine/jurisdiction-stack.ts',
     'runtime/jurisdiction-api.ts',
     'storage/canonical-hash.ts',
     'storage/hashes.ts',
