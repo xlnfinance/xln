@@ -255,6 +255,94 @@
     min-width: 0;
   }
 
+  .tradeoff-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .tradeoff-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .tradeoff-heading p,
+  .tradeoff-list p,
+  .shared-risk,
+  .rehearsal-active p {
+    margin: 0;
+  }
+
+  .tradeoff-heading p {
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .tradeoff-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .tradeoff-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .tradeoff-list > div {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 7px;
+    align-items: start;
+    min-width: 0;
+  }
+
+  .tradeoff-list > div > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .tradeoff-list p {
+    padding-top: 1px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .benefit-list > div > span {
+    color: #86efac;
+    background: rgba(34, 197, 94, 0.12);
+  }
+
+  .cost-list > div > span {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.11);
+  }
+
+  .shared-risk {
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
   .mnemonic-panel {
     display: flex;
     flex-direction: column;
@@ -557,6 +645,127 @@
   }
   .advanced-panel {
     margin-top: -4px;
+  }
+
+  .work-estimate {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .work-estimate > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.16);
+  }
+
+  .work-estimate span,
+  .work-estimate small {
+    color: rgba(255, 255, 255, 0.43);
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .work-estimate strong {
+    color: rgba(255, 218, 150, 0.94);
+    font-family: 'SF Mono', monospace;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+
+  .measurement-note {
+    margin: 8px 0 0;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    line-height: 1.4;
+    text-align: center;
+  }
+
+  .rehearsal-option {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 11px;
+    align-items: center;
+    margin-top: 18px;
+    padding: 13px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.025);
+    cursor: pointer;
+  }
+
+  .rehearsal-option input {
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    accent-color: #d6a85f;
+  }
+
+  .rehearsal-option > span {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .rehearsal-option strong,
+  .rehearsal-active strong {
+    color: rgba(255, 255, 255, 0.87);
+    font-size: 13px;
+  }
+
+  .rehearsal-option small,
+  .rehearsal-active p {
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .rehearsal-option em {
+    padding: 4px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.055);
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 9px;
+    font-style: normal;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .rehearsal-active {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: center;
+    margin-top: 18px;
+    padding: 14px;
+    border: 1px solid rgba(34, 197, 94, 0.26);
+    border-radius: 9px;
+    background: rgba(34, 197, 94, 0.07);
+  }
+
+  .rehearsal-active > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .rehearsal-active button {
+    min-height: 38px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 11px;
+    cursor: pointer;
   }
 
   /* Connect to live runtime (radapter) */
@@ -1054,28 +1263,6 @@
     padding-right: 80px;
   }
 
-  /* Strength Meter */
-  .strength-meter {
-    height: 2px;
-    background: rgba(180, 140, 80, 0.1);
-    border-radius: 0;
-    margin-top: 10px;
-    overflow: hidden;
-  }
-
-  .strength-bar {
-    height: 100%;
-    transition: all 0.3s;
-    border-radius: 0;
-  }
-
-  .strength-text {
-    font-size: 11px;
-    margin-top: 6px;
-    display: block;
-    letter-spacing: 0.05em;
-  }
-
   /* Factor Buttons - Clean Grid */
   .factor-group {
     margin-bottom: 16px;
@@ -1476,6 +1663,24 @@
       width: 100%;
     }
 
+    .tradeoff-grid,
+    .work-estimate,
+    .rehearsal-active {
+      grid-template-columns: 1fr;
+    }
+
+    .rehearsal-active button {
+      width: 100%;
+    }
+
+    .rehearsal-option {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .rehearsal-option em {
+      display: none;
+    }
+
     .testnet-banner {
       align-items: flex-start;
       flex-direction: column;
@@ -1680,6 +1885,37 @@
   .scheme-light .mnemonic-divider::after { background: var(--l-border); }
   .scheme-light .mnemonic-label-row > span { color: var(--l-text-3); }
   .scheme-light .mnemonic-label-row > span.ready { color: #047857; }
+  .scheme-light .tradeoff-card,
+  .scheme-light .work-estimate > div,
+  .scheme-light .rehearsal-option {
+    background: var(--l-field);
+    border-color: var(--l-border);
+  }
+  .scheme-light .tradeoff-heading p,
+  .scheme-light .tradeoff-list p,
+  .scheme-light .rehearsal-option small,
+  .scheme-light .rehearsal-active p { color: var(--l-text-2); }
+  .scheme-light .shared-risk,
+  .scheme-light .work-estimate span,
+  .scheme-light .work-estimate small,
+  .scheme-light .measurement-note { color: var(--l-text-3); }
+  .scheme-light .shared-risk { border-top-color: var(--l-border); }
+  .scheme-light .work-estimate strong { color: var(--l-accent); }
+  .scheme-light .rehearsal-option strong,
+  .scheme-light .rehearsal-active strong { color: var(--l-text); }
+  .scheme-light .rehearsal-option em {
+    background: rgba(15, 23, 42, 0.05);
+    color: var(--l-text-3);
+  }
+  .scheme-light .rehearsal-active {
+    background: rgba(22, 163, 74, 0.07);
+    border-color: rgba(22, 163, 74, 0.24);
+  }
+  .scheme-light .rehearsal-active button {
+    background: var(--l-card);
+    border-color: var(--l-border-strong);
+    color: var(--l-text-2);
+  }
   .scheme-light .testnet-banner {
     background: rgba(217, 119, 6, 0.07);
     border-color: rgba(217, 119, 6, 0.2);
@@ -1819,8 +2055,6 @@
   .scheme-light .input-wrapper .suggest-btn { color: var(--l-text-3); }
   .scheme-light .input-wrapper .toggle-visibility:hover,
   .scheme-light .input-wrapper .suggest-btn:hover { color: var(--l-accent); }
-
-  .scheme-light .strength-meter { background: rgba(15, 23, 42, 0.08); }
 
   /* Factor buttons */
   .scheme-light .factor-btn {

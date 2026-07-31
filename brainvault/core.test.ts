@@ -8,6 +8,7 @@ import { test, expect } from 'bun:test';
 import {
   createShardSalt, deriveShard, combineShards, deriveKey,
   entropyToMnemonic, deriveEthereumAddress, bytesToHex,
+  factorForShardCount, getShardCount, hexToBytes, validateInputs,
 } from './core.ts';
 
 // Test vectors for v1.0 (simplified: no hashName, direct salt from name)
@@ -41,6 +42,25 @@ test('salt is deterministic', async () => {
     const salt = await createShardSalt(v.name, 0, v.shards);
     expect(bytesToHex(salt)).toBe(v.expect.salt0);
   }
+});
+
+test('factor mapping is integer-only and preserves the V1 formula', () => {
+  for (let shardCount = 1; shardCount <= 100_000; shardCount++) {
+    expect(factorForShardCount(shardCount)).toBe(Math.ceil(Math.log10(shardCount)) + 1);
+  }
+  expect(() => factorForShardCount(Number.NaN)).toThrow('BRAINVAULT_SHARD_COUNT_INVALID');
+  expect(() => factorForShardCount(1.5)).toThrow('BRAINVAULT_SHARD_COUNT_INVALID');
+  expect(() => getShardCount(Number.NaN)).toThrow('Factor must be 1-9');
+  expect(() => getShardCount(1.5)).toThrow('Factor must be 1-9');
+  expect(validateInputs('a', 'aaaaaa', Number.NaN).valid).toBe(false);
+});
+
+test('wallet boundaries fail loudly on malformed bytes', async () => {
+  expect(() => hexToBytes('zz')).toThrow('BRAINVAULT_HEX_INVALID');
+  expect(() => hexToBytes('abc')).toThrow('BRAINVAULT_HEX_INVALID');
+  expect(() => hexToBytes('0xff')).toThrow('BRAINVAULT_HEX_INVALID');
+  expect(() => entropyToMnemonic(new Uint8Array(15))).toThrow('BRAINVAULT_ENTROPY_LENGTH_INVALID:15');
+  expect(() => entropyToMnemonic(new Uint8Array(33))).toThrow('BRAINVAULT_ENTROPY_LENGTH_INVALID:33');
 });
 
 test('single shard derivation is deterministic', async () => {

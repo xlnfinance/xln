@@ -22,7 +22,7 @@ import { Worker } from 'worker_threads';
 import {
   getShardCount, combineShardsWithParams, deriveKey, entropyToMnemonic,
   deriveEthereumAddressMatrix, deriveEthereumPrivateKeyAtPath,
-  formatDuration, hexToBytes, bytesToHex, estimatePasswordStrength,
+  factorForShardCount, formatDuration, hexToBytes, bytesToHex,
   BRAINVAULT_V1, deriveSitePassword,
 } from './core.ts';
 
@@ -144,7 +144,7 @@ async function derive(name: string, passphrase: string, shardInput: number, work
 
   const isPreset = shardInput >= 1 && shardInput <= 5;
   const shardCount = isPreset ? getShardCount(shardInput) : shardInput;
-  const factor = isPreset ? shardInput : Math.ceil(Math.log10(shardCount)) + 1;
+  const factor = isPreset ? shardInput : factorForShardCount(shardCount);
   const kdfAlgId = shardMultiplier === 1 ? BRAINVAULT_V1.ALG_ID : `${BRAINVAULT_V1.ALG_ID}|custom`;
   const shardMemoryKb = BRAINVAULT_V1.SHARD_MEMORY_KB * shardMultiplier;
 

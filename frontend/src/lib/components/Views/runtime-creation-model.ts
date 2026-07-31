@@ -6,72 +6,82 @@ import {
 export type FactorInfo = {
   factor: number;
   shards: number;
-  time: string;
   tier: string;
 };
 
 export const FACTOR_INFO: FactorInfo[] = [
-  { factor: 1, shards: 1, time: '3s', tier: 'Test' },
-  { factor: 2, shards: 10, time: '30s', tier: 'Basic' },
-  { factor: 3, shards: 100, time: '5min', tier: 'Standard' },
-  { factor: 4, shards: 1000, time: '50min', tier: 'Strong' },
-  { factor: 5, shards: 10000, time: '8hr', tier: 'Maximum' },
+  { factor: 1, shards: 1, tier: 'Test' },
+  { factor: 2, shards: 10, tier: 'Basic' },
+  { factor: 3, shards: 100, tier: 'Standard' },
+  { factor: 4, shards: 1000, tier: 'Strong' },
+  { factor: 5, shards: 10000, tier: 'Maximum' },
 ];
 
-export const FAQ_ITEMS = [
-  {
-    q: 'What is BrainVault?',
-    a: 'BrainVault generates a cryptocurrency wallet from something you can remember: a name (public) and passphrase (secret). No need to write down 24 random words - your brain IS the backup.',
-  },
-  {
-    q: 'How is this different from old "brainwallets"?',
-    a: 'Old brainwallets used fast hashing (MD5/SHA256) and were cracked instantly. BrainVault uses Argon2id - a memory-hard algorithm that requires gigabytes of RAM per attempt, making brute-force attacks impractical.',
-  },
-  {
-    q: 'What does "sharded" mean?',
-    a: 'Instead of one giant computation, we split it into many 256MB shards. Your phone computes them sequentially; a powerful computer computes them in parallel. Same wallet, different speeds.',
-  },
-  {
-    q: 'What is the "factor"?',
-    a: 'Factor determines security level. Each factor quadruples the work needed. Factor 5 (~64GB equivalent) is good for most users. Factor 9 (~16TB equivalent) would take attackers millions of years.',
-  },
-  {
-    q: 'Can I recover my wallet anywhere?',
-    a: 'Yes! Same name + passphrase + factor = same wallet on any device, anywhere, forever. No seed phrase backup needed. But remember: if you forget your inputs, your funds are GONE.',
-  },
-  {
-    q: 'What about the 24-word mnemonic?',
-    a: 'BrainVault generates a standard BIP39 mnemonic for compatibility. You can import it into MetaMask, Ledger, or any wallet. The mnemonic IS your wallet - treat it as sensitive as a password.',
-  },
-  {
-    q: 'What is the device passphrase?',
-    a: 'An additional layer for hardware wallets. On Ledger/Trezor, set it as a "hidden wallet" passphrase. The mnemonic alone opens a decoy wallet; add the passphrase for your real wallet.',
-  },
-  {
-    q: 'How strong should my passphrase be?',
-    a: 'At least 6 characters minimum, but longer is better. A memorable sentence works great: "My cat Felix was born in 2019!" is far stronger than "P@ssw0rd123".',
-  },
-  {
-    q: 'What if I forget my name/passphrase/factor?',
-    a: 'Your funds are permanently lost. There is no recovery. This is the tradeoff for not needing a backup. Consider storing a hint somewhere safe, but NEVER the actual passphrase.',
-  },
-  {
-    q: 'Can I use this as a password manager?',
-    a: 'Yes! Once derived, enter any domain to generate a unique strong password for that site. The passwords are deterministically derived from your master key.',
-  },
-  {
-    q: 'How can I verify this code is safe?',
-    a: 'This is 100% open source. View source: github.com/xlnfinance/xln. Run locally: git clone, cd frontend, bun install, bun run dev. Check Network tab - zero external requests. You can even disconnect from internet and it still works.',
-  },
-];
-
-export const STRENGTH_COLORS: Record<string, string> = {
-  weak: '#ef4444',
-  fair: '#f59e0b',
-  good: '#84cc16',
-  strong: '#22c55e',
-  excellent: '#06b6d4',
+export type WalletModeTradeoffs = {
+  eyebrow: string;
+  summary: string;
+  benefits: readonly string[];
+  costs: readonly string[];
 };
+
+export const WALLET_MODE_TRADEOFFS: Readonly<Record<'brainvault' | 'mnemonic', WalletModeTradeoffs>> = {
+  brainvault: {
+    eyebrow: 'Memory-backed recovery',
+    summary: 'Nothing secret to store. Every password guess pays the same Argon2 time and memory cost.',
+    benefits: [
+      'No secret paper, photo, or cloud backup to protect',
+      'Each guess requires expensive time and memory work',
+      'No recovery secret remains stored between uses',
+    ],
+    costs: [
+      'The passphrase must be unique and non-obvious',
+      'Exact name, passphrase, and work factor are required',
+      'Recovery takes time and uses substantial device memory',
+    ],
+  },
+  mnemonic: {
+    eyebrow: 'Physical-backup recovery',
+    summary: 'Strong randomness and instant recovery, exchanged for a secret that must remain hidden and available.',
+    benefits: [
+      'Fresh seeds use strong cryptographic randomness',
+      'Fast recovery across standard compatible wallets',
+    ],
+    costs: [
+      'The words must be recorded securely and never lost',
+      'A photo, camera, visitor, or malware can copy them',
+      'Anyone who obtains the words controls the wallet',
+    ],
+  },
+};
+
+export type BrainVaultWorkEstimate = {
+  recoveryMs: number;
+  totalMemoryWorkMb: number;
+};
+
+export function estimateBrainVaultWork(
+  shardCount: number,
+  shardMemoryMb: number,
+  msPerShard: number,
+  workers: number,
+): BrainVaultWorkEstimate {
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1) {
+    throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${shardCount}`);
+  }
+  if (!Number.isFinite(shardMemoryMb) || shardMemoryMb <= 0) {
+    throw new Error(`BRAINVAULT_SHARD_MEMORY_INVALID:${shardMemoryMb}`);
+  }
+  if (!Number.isFinite(msPerShard) || msPerShard <= 0) {
+    throw new Error(`BRAINVAULT_SHARD_TIME_INVALID:${msPerShard}`);
+  }
+  if (!Number.isSafeInteger(workers) || workers < 1) {
+    throw new Error(`BRAINVAULT_WORKER_COUNT_INVALID:${workers}`);
+  }
+  return {
+    recoveryMs: Math.ceil(shardCount / workers) * msPerShard,
+    totalMemoryWorkMb: shardCount * shardMemoryMb,
+  };
+}
 
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
@@ -113,34 +123,12 @@ export function formatRuntimeDurationRounded(ms: number): string {
 }
 
 export function formatMemoryLabel(memoryMb: number): string {
+  if (memoryMb >= 1024 * 1024 * 1024) return `${(memoryMb / (1024 * 1024 * 1024)).toFixed(1)} PB`;
+  if (memoryMb >= 1024 * 1024) return `${(memoryMb / (1024 * 1024)).toFixed(1)} TB`;
   if (memoryMb >= 1024) return `${(memoryMb / 1024).toFixed(1)} GB`;
   return `${Math.floor(memoryMb)} MB`;
 }
 
-export type PasswordStrengthRating = keyof typeof STRENGTH_COLORS;
-
-export type PasswordStrengthEstimate = {
-  bits: number;
-  rating: PasswordStrengthRating;
-};
-
-export function estimatePasswordStrength(value: string): PasswordStrengthEstimate {
-  const password = String(value || '');
-  if (!password) return { bits: 0, rating: 'weak' };
-
-  let poolSize = 0;
-  if (/[a-z]/.test(password)) poolSize += 26;
-  if (/[A-Z]/.test(password)) poolSize += 26;
-  if (/[0-9]/.test(password)) poolSize += 10;
-  if (/[^a-zA-Z0-9]/.test(password)) poolSize += 33;
-
-  const bits = Math.max(0, Math.round(password.length * Math.log2(Math.max(poolSize, 1))));
-  if (bits >= 110) return { bits, rating: 'excellent' };
-  if (bits >= 80) return { bits, rating: 'strong' };
-  if (bits >= 60) return { bits, rating: 'good' };
-  if (bits >= 40) return { bits, rating: 'fair' };
-  return { bits, rating: 'weak' };
-}
 
 export type LiveRuntimeImportStatusPayload = {
   ready?: boolean;
