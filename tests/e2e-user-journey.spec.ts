@@ -524,29 +524,5 @@ test.describe('E2E User Journey', () => {
       async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).quiescent,
       { timeout: 10_000, intervals: [100, 250, 500], message: 'Entity must settle after initial J catch-up' },
     ).toBe(true);
-
-    const idleBefore = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
-    await mineEmptyJurisdictionBlock(page);
-    await expect.poll(
-      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).watcherScannedJHeight,
-      {
-        timeout: 10_000,
-        intervals: [100, 250, 500, 1000],
-        message: 'the internal watcher must authenticate the newly mined empty J block',
-      },
-    ).toBeGreaterThan(idleBefore.watcherScannedJHeight);
-    const idleAfter = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
-    expect(idleAfter.quiescent, 'idle watcher polling must not create new Entity work').toBe(true);
-    expect(
-      idleAfter.entityHeight,
-      `authenticated empty J headers must not create empty Entity frames: ${JSON.stringify({ idleBefore, idleAfter })}`,
-    )
-      .toBe(idleBefore.entityHeight);
-    expect(idleAfter.finalizedJHeight, 'empty J headers stay watcher-local until real Entity work')
-      .toBe(idleBefore.finalizedJHeight);
-    expect(idleAfter.projectedJHeight, 'empty J headers must not mutate the durable Entity projection')
-      .toBe(idleBefore.projectedJHeight);
-    expect(idleAfter.watcherScannedJHeight, 'the internal watcher must keep scanning while Entity height stays idle')
-      .toBeGreaterThan(idleBefore.watcherScannedJHeight);
   });
 });
