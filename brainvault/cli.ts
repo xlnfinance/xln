@@ -4,7 +4,7 @@
  *
  * Usage:
  *   bun run bv                                  # Interactive
- *   bun run bv test secret123 100 --w=64        # Non-interactive (JSON output)
+ *   bun run bv -- test secret123 100 --w=64     # Non-interactive (JSON output)
  *   bun test brainvault/core.test.ts            # Run deterministic tests
  *   bun run bv --bench                          # Benchmark performance
  *   bun run bv --lib=wasm                       # Force hash-wasm (slower, compat check)
