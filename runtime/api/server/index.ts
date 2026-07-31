@@ -104,6 +104,7 @@ import { readInheritedChildSecrets } from '../../infra/child-secrets';
 import { createLocalPairingController } from './local-pairing';
 import { deriveSignerAddressSync } from '../../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
+import { createBrainVaultOwnerController } from './brainvault-owner';
 import { dbRootPath } from '../../runtime/platform';
 import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
 import type { Server } from 'bun';
@@ -204,6 +205,17 @@ const LOCAL_RUNTIME_OWNER = (() => {
   if (!profileName) throw new Error('XLN_LOCAL_OWNER_PROFILE_NAME_REQUIRED');
   return { label, profileName };
 })();
+const brainVaultOwnerController = createBrainVaultOwnerController({
+  path: String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || ''),
+  ...(process.env['XLN_BRAINVAULT_WORKER_PATH']
+    ? { workerPath: process.env['XLN_BRAINVAULT_WORKER_PATH'] }
+    : {}),
+  profileName: String(process.env['XLN_LOCAL_OWNER_PROFILE_NAME'] || 'xln finance').trim() || 'xln finance',
+  enqueue: enqueueRuntimeInput,
+  onFrameCommit: (targetEnv, callback) =>
+    registerRuntimeFrameCommitCallback(targetEnv, ({ height }) => callback(height)),
+  timeoutMs: STARTUP_STEP_TIMEOUT_MS,
+});
 const FAUCET_SIGNER_LABEL = process.env['FAUCET_SIGNER_LABEL'] ?? 'faucet-1';
 const FAUCET_SEED = process.env['FAUCET_SEED'] ?? `${SERVER_RUNTIME_SEED}:faucet`;
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('100');
@@ -387,6 +399,8 @@ const handleRpcMessage = createServerRpcMessageHandler({
   registerRuntimeInputReceipt: receipt => runtimeIngressReceipts.register(receipt),
   readRuntimeInputReceipt: id => runtimeIngressReceipts.get(id),
   buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
+  deriveBrainVault: (env, input, options) => brainVaultOwnerController.deriveAndInstall(env, input, options),
+  revealBrainVaultMnemonic: () => brainVaultOwnerController.revealMnemonic(),
 });
 
 const maybeHandleControlApi = async (
@@ -1343,6 +1357,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   try {
     serverBootPhase = 'runtime';
     serverLog.info('runtime.init.start');
+    if (String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || '').trim()) {
+      const prewarmed = await brainVaultOwnerController.prewarm(SERVER_RUNTIME_SEED);
+      if (prewarmed) serverLog.info('brainvault_owner.prewarmed');
+    }
     env = await main(SERVER_RUNTIME_SEED, {
       trustedJurisdictionRpcBindings: resolveTrustedServerRestoreRpcBindings(),
       localSigners: [
@@ -1399,6 +1417,17 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         created: result.created,
         height: result.height,
       });
+    }
+
+    if (String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || '').trim()) {
+      const restoredOwner = await brainVaultOwnerController.restore(env);
+      if (restoredOwner) {
+        serverLog.info('brainvault_owner.ready', {
+          entityId: shortId(restoredOwner.entityId, 10),
+          created: restoredOwner.created,
+          height: restoredOwner.height,
+        });
+      }
     }
 
     // J-event watching belongs to the unified runtime loop. The server should

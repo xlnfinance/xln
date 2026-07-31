@@ -10,8 +10,7 @@ Memory-hard brainwallet construction. Derive the same wallet from the exact same
 
 ```bash
 # CLI
-bun brainvault/cli.ts
-./xln-cli.ts brainvault
+bun run bv
 
 # Programmatic
 import { createShardSalt, deriveShard, combineShards } from './brainvault/core.ts';
@@ -28,6 +27,7 @@ bun test brainvault/core.test.ts
 - `bip39-english.ts` - embedded canonical wordlist
 - `encoding.ts` - strict hex boundaries
 - `cli.ts` - CLI tool
+- `native.ts` - bounded native orchestration used by Bun nodes
 - `worker-browser.ts` - browser worker source
 - `worker-native.ts` - Bun worker (@node-rs/argon2)
 - `worker-wasm.ts` - Bun compatibility worker (hash-wasm)
@@ -38,3 +38,5 @@ bun test brainvault/core.test.ts
 All parameters locked for 20+ year compatibility. DO NOT CHANGE.
 
 Name and passphrase are exact inputs: leading/trailing whitespace is significant, then V1 applies NFKD normalization. Older interactive CLI releases trimmed edge whitespace; recover wallets created there by entering the trimmed values.
+
+The repository exposes one CLI route: `bun run bv`. The implementation and every cryptographic source remain inside this directory; do not add root-level wrapper files.

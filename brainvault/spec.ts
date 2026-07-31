@@ -1,10 +1,43 @@
 /**
  * BrainVault V1 frozen derivation parameters and shard-domain separation.
- * Changing any byte here derives different wallets.
+ * Changing any byte here derives different wallets. Do not "strengthen" V1 in
+ * place: publish a new spec ID and retain this implementation for recovery.
+ * Defaults from Argon libraries are never a protocol; every relevant field is
+ * explicit and the full fingerprint is exchanged before expensive work.
+ *
+ * THREAT MODEL (read this before filing "brainwallets are insecure"):
+ *
+ * A classic brainwallet hashes one memorable string once, so GPUs can test
+ * candidates extremely cheaply. BrainVault makes every candidate reproduce
+ * `shards × 256 MiB` of Argon2id work. At the default factor 3 that is 100
+ * independent shards, or 25 GiB of cumulative memory allocation per guess.
+ * Attackers may parallelize too, but every concurrent lane consumes real RAM
+ * and memory bandwidth; there is no shortcut that the legitimate user avoids.
+ *
+ * WHAT WE ACCEPT AND WHY (the paper-seed comparison):
+ * A correctly generated 24-word seed has far more entropy and essentially no
+ * brute-force surface. It is also a physical bearer secret: loss, fire, a
+ * photograph or an accessible cloud copy can permanently lose or transfer the
+ * wallet without any cracking. BrainVault offers a different recovery trade:
+ * exact remembered inputs, paid for with slow memory-hard reconstruction. The
+ * UI presents both choices because neither failure model is best for everyone.
+ *
+ * HONEST WEAKNESSES (known and inherent):
+ * 1. A weak or reused passphrase can still be fatal. Work factor multiplies
+ *    guessing cost; it cannot manufacture missing entropy.
+ * 2. JavaScript strings cannot be reliably zeroed. Workers and request state
+ *    are short-lived, but a compromised recovery device can steal the input.
+ * 3. Users can forget exact capitalization, whitespace, name, passphrase or
+ *    factor. Optional recovery rehearsal checks this; it cannot remember for them.
  */
 
 import { blake3 } from '@noble/hashes/blake3.js';
 
+/**
+ * WALLET-BREAKING: every value below enters a salt, Argon call, validation
+ * rule, or final domain tag. Never edit V1 in place; introduce a separately
+ * versioned spec while preserving this one for recovery.
+ */
 export const BRAINVAULT_V1 = Object.freeze({
   ALG_ID: 'brainvault/argon2id-sharded/v1.0',
   ARGON_VERSION: 0x13,
@@ -26,7 +59,14 @@ export const BRAINVAULT_V1_SPEC_ID = [
   'nfkd-utf8',
 ].join('|');
 
-/** salt = BLAKE3(name_NFKD || ALG_ID || shardCount_u32be || shardIndex_u32be) */
+/**
+ * salt = BLAKE3(name_NFKD || ALG_ID || shardCount_u32be || shardIndex_u32be)
+ *
+ * AUDITOR NOTE: the name is public by design. A salt needs uniqueness, not
+ * secrecy: it separates users and shards so work cannot be reused across them.
+ * All secrecy is in the passphrase. The fixed-width big-endian integers avoid
+ * ambiguous concatenations such as (1, 23) versus (12, 3).
+ */
 export async function createShardSalt(
   name: string,
   shardIndex: number,

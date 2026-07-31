@@ -26,6 +26,8 @@ export const spawnDaemon = ({ instanceId, version, runtimeSeed, authSeed, contro
       XLN_LOCAL_INSTANCE_ID: instanceId,
       XLN_LOCAL_OWNER_LABEL: 'xlnfinance-owner',
       XLN_LOCAL_OWNER_PROFILE_NAME: 'xln finance',
+      XLN_BRAINVAULT_OWNER_PATH: PATHS.brainvaultOwner,
+      XLN_BRAINVAULT_WORKER_PATH: PATHS.brainvaultWorker,
       XLN_RADAPTER_AUTH_SEED: authSeed,
       XLN_RADAPTER_REQUIRE_AUTH_SEED: '1',
       XLN_RUNTIME_SEED: runtimeSeed,

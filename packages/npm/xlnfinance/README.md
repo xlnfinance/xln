@@ -15,4 +15,9 @@ Fresh installs create one deterministic local owner entity before the daemon rep
 ready. Its seed and signer remain in the node runtime; the browser controls it through
 the paired admin capability.
 
+When BrainVault is used from this paired UI, Argon2 runs through the native node
+backend and the resulting signer is stored in the node state directory with owner-only
+permissions. Normal recovery returns only the public address/entity and timing. The
+mnemonic crosses into the browser only after the separate **Show mnemonic** action.
+
 Commands: `daemon`, `open`, `status`, `stop`, `logs`, `update`, and `version`.

@@ -15,6 +15,8 @@ test.describe('Recovery choice guidance', () => {
 
       await expect(page.getByTestId('brainvault-tradeoffs')).toBeVisible();
       await expect(page.getByText('No secret paper, photo, or cloud backup to protect', { exact: true })).toBeVisible();
+      await expect(page.getByTestId('wallet-recovery-warning')).toContainText('Support cannot recover either secret.');
+      await expect(page.getByTestId('wallet-recovery-warning')).toContainText('multisig child entities inside your primary entity');
       await expect(page.getByText(/estimated bits/i)).toHaveCount(0);
       await page.waitForTimeout(800);
       await page.screenshot({ path: testInfo.outputPath(`${viewport.label}-brainvault.png`), fullPage: true });
@@ -41,7 +43,7 @@ test.describe('Recovery choice guidance', () => {
     await page.getByRole('button', { name: /Security work factor/ }).click();
     await page.getByRole('button', { name: '1 Test', exact: true }).click();
     await page.getByTestId('recovery-rehearsal-option').getByRole('checkbox').check();
-    await page.getByRole('button', { name: 'Derive wallet', exact: true }).click();
+    await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
 
     await expect(page.getByTestId('recovery-rehearsal-active')).toBeVisible({ timeout: 60_000 });
     await expect(page.getByLabel('Vault name public derivation input')).toHaveValue('');
@@ -88,7 +90,7 @@ test.describe('Recovery choice guidance', () => {
     await page.getByLabel('Secret passphrase').fill('secret123456');
     await page.getByRole('button', { name: /Security work factor/ }).click();
     await page.getByRole('button', { name: '1 Test', exact: true }).click();
-    await page.getByRole('button', { name: 'Derive wallet', exact: true }).click();
+    await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
     await expect(page.getByText(/BRAINVAULT_WORKER_SPEC_MISMATCH:stale-v0/)).toBeVisible();
   });
 });

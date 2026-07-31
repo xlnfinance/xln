@@ -35,6 +35,11 @@
   import { DEMO_ACCOUNTS, type DemoAccount } from '$lib/config/demo-accounts';
   import { resolveConfiguredApiBase } from '$lib/stores/xlnStore';
   import { runtimeOperations } from '$lib/stores/runtimeStore';
+  import {
+    getRuntimeControllerAdapter,
+    runtimeControllerHandle,
+  } from '$lib/stores/runtimeControllerStore';
+  import type { RuntimeAdapterBrainVaultResult } from '@xln/runtime/api/runtime-adapter/types';
   import { generateLazyEntityIdPreview } from '$lib/utils/lazyEntityId';
   import {
     BRAINVAULT_WORKER_CAP_STORAGE_KEY,
@@ -105,7 +110,7 @@
   // STATE
   // ============================================================================
 
-  type Phase = 'input' | 'deriving' | 'recovery';
+  type Phase = 'input' | 'deriving' | 'recovery' | 'node-ready';
   type InputMode = 'brainvault' | 'mnemonic' | 'testnet';
   type RecoveryRehearsalMode = Exclude<InputMode, 'testnet'>;
   type BrainVaultDerivationRun = Readonly<{
@@ -324,6 +329,15 @@
   let rehearsalExpectedAddress = '';
   let rehearsalFactorConfirmed = true;
   let derivationRun: BrainVaultDerivationRun | null = null;
+  let nodeDerivationAbort: AbortController | null = null;
+  let nodeDerivationResult: RuntimeAdapterBrainVaultResult | null = null;
+  let revealedNodeMnemonic = '';
+  let revealingNodeMnemonic = false;
+
+  $: derivesBrainVaultOnNode = $runtimeControllerHandle.mode === 'remote';
+  $: brainVaultExecutionTarget = derivesBrainVaultOnNode
+    ? `Native node · ${$runtimeControllerHandle.endpoint}`
+    : 'This browser · WebAssembly';
 
   // Compute actual shard count and factor from input (must match cli.ts derive() logic)
   $: isValidShardInput = Number.isSafeInteger(shardInput) && shardInput >= 1 && shardInput <= 100_000;
@@ -430,6 +444,7 @@
   const persistedShardTimeMs = readPersistedShardTime();
   let estimatedShardTimeMs = persistedShardTimeMs ?? 3000;
   let shardTimeMeasured = persistedShardTimeMs !== null;
+  let nodeShardTimeMs = 0;
 
 
   // Result state
@@ -696,7 +711,8 @@
   $: progress = shardCount > 0 ? (shardsCompleted / shardCount) * 100 : 0;
   // Projected ETA based on the current requested worker target.
   $: projectedRemainingMs = shardCount > 0
-    ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(effectiveTargetWorkerCount, 1)) * estimatedShardTimeMs)
+    ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(activeWorkerCount, 1))
+      * (derivesBrainVaultOnNode && nodeShardTimeMs > 0 ? nodeShardTimeMs : estimatedShardTimeMs))
     : 0;
 
   // ============================================================================
@@ -803,6 +819,8 @@
     entityId = '';
     shardResults = new Map();
     shardsCompleted = 0;
+    nodeDerivationResult = null;
+    revealedNodeMnemonic = '';
   }
 
   function beginRecoveryRehearsal(mode: RecoveryRehearsalMode, address: string): void {
@@ -998,6 +1016,11 @@
     shardsCompleted = 0;
     shardResults = new Map();
 
+    if (derivesBrainVaultOnNode) {
+      await startNodeDerivation(run);
+      return;
+    }
+
     // Start with the exact worker count the UI is allowed to request.
     const cpuCores = navigator.hardwareConcurrency || 4;
 
@@ -1076,6 +1099,94 @@
         : `BrainVault worker initialization failed: ${message}`;
       derivationRun = null;
       phase = 'input';
+    }
+  }
+
+  async function startNodeDerivation(run: BrainVaultDerivationRun): Promise<void> {
+    const adapter = getRuntimeControllerAdapter();
+    if (!adapter || adapter.mode !== 'remote' || adapter.status !== 'connected') {
+      failDerivation('The selected node is not connected. Reconnect it before BrainVault recovery.');
+      return;
+    }
+    if (adapter.authLevel !== 'admin') {
+      failDerivation('Admin access to the selected node is required for BrainVault recovery.');
+      return;
+    }
+    const abort = new AbortController();
+    nodeDerivationAbort = abort;
+    nodeShardTimeMs = 0;
+    try {
+      const result = await adapter.deriveBrainVault({
+        specId: BRAINVAULT_V1_SPEC_ID,
+        name: run.name,
+        passphrase: run.passphrase,
+        shardInput,
+        // Ask for the node maximum; the node clamps this against its own CPU
+        // and RAM. Browser hardwareConcurrency must not throttle a remote host.
+        workers: 256,
+      }, {
+        signal: abort.signal,
+        onProgress: sample => {
+          if (sample.total !== run.shardCount || sample.completed < 0 || sample.completed > sample.total) {
+            abort.abort();
+            derivationError = 'The node returned invalid BrainVault progress and was cancelled.';
+            return;
+          }
+          shardCount = sample.total;
+          shardsCompleted = sample.completed;
+          activeWorkerCount = sample.workers;
+          workerCount = sample.workers;
+          nodeShardTimeMs = nodeShardTimeMs > 0
+            ? nodeShardTimeMs * 0.7 + sample.lastShardMs * 0.3
+            : sample.lastShardMs;
+        },
+      });
+      if (abort.signal.aborted) throw new Error('BRAINVAULT_DERIVATION_ABORTED');
+      if (result.specId !== BRAINVAULT_V1_SPEC_ID || result.shardCount !== run.shardCount) {
+        throw new Error('BRAINVAULT_NODE_RESULT_SPEC_MISMATCH');
+      }
+      nodeDerivationResult = result;
+      ethereumAddress = result.ethereumAddress;
+      entityId = result.entityId;
+      shardsCompleted = result.shardCount;
+      passphrase = '';
+      derivationRun = null;
+      if (!acceptRecoveryRehearsal('brainvault', ethereumAddress)) return;
+      phase = 'node-ready';
+    } catch (err) {
+      if (abort.signal.aborted && !derivationError) {
+        phase = 'input';
+      } else {
+        failDerivation(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      if (nodeDerivationAbort === abort) nodeDerivationAbort = null;
+    }
+  }
+
+  async function revealNodeMnemonic(): Promise<void> {
+    const adapter = getRuntimeControllerAdapter();
+    if (!adapter || adapter.mode !== 'remote') {
+      derivationError = 'The node is no longer connected.';
+      return;
+    }
+    revealingNodeMnemonic = true;
+    derivationError = '';
+    try {
+      revealedNodeMnemonic = (await adapter.revealBrainVaultMnemonic()).mnemonic24;
+    } catch (err) {
+      derivationError = err instanceof Error ? err.message : String(err);
+    } finally {
+      revealingNodeMnemonic = false;
+    }
+  }
+
+  function finishNodeWallet(): void {
+    revealedNodeMnemonic = '';
+    vaultUiOperations.hideVault();
+    if (!embedded) {
+      appStateOperations.setMode('user');
+      appStateOperations.setViewMode('home');
     }
   }
 
@@ -1261,6 +1372,8 @@
 
 
   function reset() {
+    nodeDerivationAbort?.abort();
+    nodeDerivationAbort = null;
     phase = 'input';
     terminateWorkers();
     resetRecoveryDecision();
@@ -1278,6 +1391,10 @@
     devicePassphrase = '';
     ethereumAddress = '';
     entityId = '';
+    nodeDerivationResult = null;
+    revealedNodeMnemonic = '';
+    revealingNodeMnemonic = false;
+    nodeShardTimeMs = 0;
     creatingRuntime = false;
     shardsCompleted = 0;
     shardResults = new Map();
@@ -1285,6 +1402,9 @@
 
   onDestroy(() => {
     recoveryRunToken += 1;
+    nodeDerivationAbort?.abort();
+    nodeDerivationAbort = null;
+    revealedNodeMnemonic = '';
     clearLiveRuntimeDiscoveryRetry();
     terminateWorkers();
   });
@@ -1323,6 +1443,16 @@
   });
 
 </script>
+
+{#snippet recoverySecurityWarning()}
+  <aside class="shared-risk" data-testid="wallet-recovery-warning" aria-label="Recovery security warning">
+    <strong>Both recovery methods are vulnerable on an infected device.</strong>
+    <p>A keylogger can steal a Brain Vault passphrase; malware can copy a mnemonic or the private key after derivation.</p>
+    <p>Support cannot recover either secret.</p>
+    <p>Never enter one while sharing your screen, recording video, or allowing remote access.</p>
+    <p>For deeper protection, create multisig child entities inside your primary entity so one compromised signer or device cannot act alone.</p>
+  </aside>
+{/snippet}
 
 <div class="brainvault-wrapper" class:embedded class:scheme-light={scheme === 'light'}>
   <!-- Hierarchical Navigation (only in standalone mode) -->
@@ -1476,8 +1606,16 @@
               {/each}
             </div>
           </div>
-          <p class="shared-risk">Malware during recovery can steal either a passphrase or a mnemonic.</p>
+          {@render recoverySecurityWarning()}
         </div>
+
+        <aside class="execution-target" data-testid="brainvault-execution-target">
+          <span class="section-eyebrow">Derivation target</span>
+          <strong>{brainVaultExecutionTarget}</strong>
+          <p>{derivesBrainVaultOnNode
+            ? 'Exact inputs go through the authenticated control channel. The node derives natively and keeps the signer; mnemonic export happens only on explicit request.'
+            : 'Inputs and the resulting signer stay inside this browser runtime.'}</p>
+        </aside>
 
         <!-- Name Input -->
         <div class="input-group">
@@ -1500,7 +1638,9 @@
         <!-- Passphrase Input -->
         <div class="input-group">
           <label for="passphrase">Secret passphrase</label>
-          <span class="input-hint">Private and exact. It stays on this device.</span>
+          <span class="input-hint">Private and exact. {derivesBrainVaultOnNode
+            ? 'It is sent only to the selected trusted node.'
+            : 'It stays in this browser.'}</span>
           <div class="input-wrapper">
             <input
               type={showPassphrase ? 'text' : 'password'}
@@ -1665,7 +1805,7 @@
                 {/if}
               </div>
             </div>
-            <p class="shared-risk">Malware during recovery can steal either a passphrase or a mnemonic.</p>
+            {@render recoverySecurityWarning()}
           </div>
 
           <div class="mnemonic-generate-row">
@@ -1871,7 +2011,7 @@
             {rehearsalMode !== null
               ? 'Verify recovery'
               : inputMode === 'brainvault'
-                ? 'Derive wallet'
+                ? derivesBrainVaultOnNode ? 'Derive on node' : 'Derive in browser'
                 : 'Continue with seed'}
           </button>
           {#if derivationError}
@@ -1915,7 +2055,7 @@
 
                   <div class="speed-control">
                     <div class="speed-header">
-                      <span class="speed-label">Compute</span>
+                      <span class="speed-label">{derivesBrainVaultOnNode ? 'Native node compute' : 'Browser compute'}</span>
                       <span class="speed-eta">{formatRuntimeDurationRounded(projectedRemainingMs)} left</span>
                     </div>
                     <div class="speed-slider-wrapper">
@@ -1925,6 +2065,7 @@
                         max={usableWorkerCap}
                         bind:value={targetWorkerCount}
                         on:input={adjustWorkers}
+                        disabled={derivesBrainVaultOnNode}
                         class="speed-slider"
                         aria-label="Brain Vault worker count"
                       />
@@ -1948,6 +2089,54 @@
             </div>
           </div>
         {/if}
+      </div>
+    {/if}
+
+    {#if phase === 'node-ready' && nodeDerivationResult}
+      <div class="glass-card input-section node-ready-card" data-testid="brainvault-node-ready">
+        <div class="wallet-create-title">
+          <div>
+            <span class="section-eyebrow">Installed on trusted node</span>
+            <h2>BrainVault signer is ready</h2>
+            <p>The node owns the key. This browser currently holds only the public receipt.</p>
+          </div>
+        </div>
+
+        <div class="node-result-grid">
+          <div><span>Address</span><strong>{shortRuntimeId(nodeDerivationResult.ethereumAddress)}</strong></div>
+          <div><span>Entity</span><strong>{shortRuntimeId(nodeDerivationResult.entityId)}</strong></div>
+          <div><span>Native benchmark</span><strong>{formatRuntimeDurationRounded(nodeDerivationResult.derivationTimeMs)}</strong></div>
+          <div><span>Browser estimate</span><strong>{formatRuntimeDurationRounded(workEstimate.recoveryMs)}</strong></div>
+        </div>
+        <p class="measurement-note">
+          {nodeDerivationResult.shardCount.toLocaleString()} shards · {nodeDerivationResult.workers} native workers ·
+          {workEstimate.recoveryMs > 0
+            ? `${(workEstimate.recoveryMs / Math.max(1, nodeDerivationResult.derivationTimeMs)).toFixed(2)}× versus this browser estimate`
+            : 'browser comparison unavailable'}
+        </p>
+
+        <div class="node-secret-export">
+          {#if revealedNodeMnemonic}
+            <label for="node-mnemonic-export">Recovery mnemonic</label>
+            <textarea id="node-mnemonic-export" readonly rows="4" value={revealedNodeMnemonic}></textarea>
+            <p class="warning-text">Mnemonic is now present in this tab. Hide it before screen sharing or remote access.</p>
+            <button type="button" class="backup-upload-btn" on:click={() => revealedNodeMnemonic = ''}>Hide mnemonic</button>
+          {:else}
+            <button
+              type="button"
+              class="backup-upload-btn"
+              disabled={revealingNodeMnemonic}
+              on:click={revealNodeMnemonic}
+            >
+              {revealingNodeMnemonic ? 'Loading from node…' : 'Show mnemonic'}
+            </button>
+          {/if}
+        </div>
+        {#if derivationError}<div class="matrix-status error">{derivationError}</div>{/if}
+        <div class="recovery-actions">
+          <button type="button" class="derive-btn" on:click={finishNodeWallet}>Open node wallet</button>
+          <button type="button" class="back-to-create compact" on:click={reset}>Back</button>
+        </div>
       </div>
     {/if}
 
