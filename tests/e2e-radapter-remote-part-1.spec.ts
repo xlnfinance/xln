@@ -163,8 +163,10 @@ const installOneMillionRuntimeAdapterSocket = async (
     };
     const counterparties = Array.from({ length: 10 }, (_, index) => `0x${(index + 1).toString(16).padStart(64, '0')}`);
     const accounts = counterparties.map((rightEntity, index) => ({
-      leftEntity,
-      rightEntity,
+      state: {
+        leftEntity,
+        rightEntity,
+      },
       status: 'open',
       currentHeight: 42,
       currentFrame: {
