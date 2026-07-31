@@ -2525,11 +2525,13 @@ async function placeSwapOffer() {
     if (!resolvedCounterparty) {
       throw new Error('Select counterparty from your account list');
     }
+    const placementMode = swapRouteMode;
+    const targetRoute = selectedCrossTarget;
     // Submission is a financial boundary. Re-read the committed source
     // replica instead of trusting the asynchronously rendered workspace
     // projection: a route/identity switch can briefly leave that projection
     // one Runtime frame behind while the source Account is already final.
-    const committedSourceReplica = await readCommittedEntityReplica(sourceEntityId);
+    const committedSourceReplicaPromise = readCommittedEntityReplica(sourceEntityId);
     const giveToken = Number.parseInt(giveTokenId, 10);
     const wantToken = Number.parseInt(wantTokenId, 10);
     if (giveAmount <= 0n || wantAmount <= 0n) {
@@ -2553,41 +2555,41 @@ async function placeSwapOffer() {
     if (!Number.isFinite(wantToken) || !allowedSwapTokenIds.has(wantToken)) {
       throw new Error('Invalid want token');
     }
-    if (giveToken === wantToken && swapRouteMode === 'same') {
+    if (giveToken === wantToken && placementMode === 'same') {
       throw new Error('Give token and want token must be different');
     }
+    const [committedSourceReplica, targetReplica] = await Promise.all([
+      committedSourceReplicaPromise,
+      targetRoute ? readCommittedEntityReplica(targetRoute.targetEntityId) : Promise.resolve(null),
+    ]);
+    const targetAccountExists = Boolean(targetRoute && hasReplicaAccount(targetReplica, targetRoute.targetHubEntityId));
     const liveValidation = {
       ...buildSwapValidationInput(resolvedCounterparty, giveToken, wantToken, effectiveGiveAmount, effectiveWantAmount, canonicalPriceTicks),
       accountIds: Array.from(committedSourceReplica?.state.accounts.keys() ?? []),
     };
     const liveValidationReason =
-      swapRouteMode === 'cross'
-        ? validateCrossSwapForm(liveValidation, selectedCrossTarget, canAutoPrepareCrossInboundCapacity, canAutoOpenCrossTargetAccount)
+      placementMode === 'cross'
+        ? validateCrossSwapForm(liveValidation, targetRoute, canAutoPrepareCrossInboundCapacity || !targetAccountExists, !targetAccountExists)
         : validateSwapForm(liveValidation);
-    if (liveValidationReason && !(swapRouteMode === 'same' && isInboundCapacityValidationError(liveValidationReason) && canAutoPrepareInboundCapacity)) {
+    if (liveValidationReason && !(placementMode === 'same' && isInboundCapacityValidationError(liveValidationReason) && canAutoPrepareInboundCapacity)) {
       throw new Error(liveValidationReason);
     }
     if (!activeXlnFunctions?.planSwapCommand) {
       throw new Error('SWAP_COMMAND_PLANNER_UNAVAILABLE');
     }
     const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(committedSourceReplica);
-    const targetRoute = selectedCrossTarget;
     // Setup is derived from the latest committed target Account, not the
     // asynchronously rendered workspace projection. Otherwise a second order
     // can enqueue openAccount after the first order already committed it,
     // turning harmless UI staleness into a fatal duplicate Entity command.
-    const targetReplica = targetRoute
-      ? await readCommittedEntityReplica(targetRoute.targetEntityId)
-      : null;
-    const targetAccountExists = Boolean(targetRoute && hasReplicaAccount(targetReplica, targetRoute.targetHubEntityId));
     const sourceJurisdictionRef = getReplicaJurisdictionRef(committedSourceReplica);
     if (!sourceJurisdictionRef) throw new Error('Source jurisdiction stack is not available.');
-    if (swapRouteMode === 'cross' && !targetRoute) {
+    if (placementMode === 'cross' && !targetRoute) {
       throw new Error('Select target jurisdiction account.');
     }
     const sourceHubSignerId = resolveSignerId(resolvedCounterparty);
     const commandPlan = activeXlnFunctions.planSwapCommand({
-      mode: swapRouteMode,
+      mode: placementMode,
       logicalTimestamp: logicalNow,
       logicalHeight,
       routeValue: liveSelectedRouteValue,
