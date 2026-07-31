@@ -24,12 +24,23 @@ const assertLocalFile = (alias: string, absolutePath: string, displayedPath: str
   expect(statSync(absolutePath).isFile(), `${alias} entrypoint is not a file: ${displayedPath}`).toBe(true);
 };
 
+const assertExecutable = (alias: string, absolutePath: string, displayedPath: string): void => {
+  assertLocalFile(alias, absolutePath, displayedPath);
+  expect(
+    statSync(absolutePath).mode & 0o111,
+    `${alias} entrypoint is not executable: ${displayedPath}`,
+  ).not.toBe(0);
+};
+
 describe('repository command surface', () => {
-  test('root contains no shell entrypoints', () => {
-    const rootShellScripts = readdirSync(repoRoot)
-      .filter(name => name.endsWith('.sh'))
+  test('root contains no command launchers', () => {
+    const rootCommands = readdirSync(repoRoot)
+      .filter(name => {
+        const absolutePath = join(repoRoot, name);
+        return statSync(absolutePath).isFile() && readFileSync(absolutePath, 'utf8').startsWith('#!');
+      })
       .sort();
-    expect(rootShellScripts).toEqual([]);
+    expect(rootCommands).toEqual([]);
   });
 
   test('canonical command aliases resolve to the intended scripts', () => {
@@ -51,7 +62,7 @@ describe('repository command surface', () => {
     }
   });
 
-  test('every local package entrypoint exists and shell entrypoints are executable', () => {
+  test('every local package entrypoint exists and direct launchers are executable', () => {
     for (const [alias, command] of Object.entries(packageJson.scripts)) {
       let commandCwd = repoRoot;
       for (const segment of commandSegments(command)) {
@@ -65,16 +76,17 @@ describe('repository command surface', () => {
           const displayedPath = match[1];
           if (!displayedPath) continue;
           const absolutePath = resolve(commandCwd, displayedPath);
-          assertLocalFile(alias, absolutePath, displayedPath);
-          expect(
-            statSync(absolutePath).mode & 0o111,
-            `${alias} shell entrypoint is not executable: ${displayedPath}`,
-          ).not.toBe(0);
+          assertExecutable(alias, absolutePath, displayedPath);
         }
 
         let executableIndex = 0;
         while (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(words[executableIndex] ?? '')) executableIndex += 1;
-        if (words[executableIndex] !== 'bun') continue;
+        const executable = words[executableIndex];
+        if (executable?.startsWith('./')) {
+          assertExecutable(alias, resolve(commandCwd, executable), executable);
+          continue;
+        }
+        if (executable !== 'bun') continue;
         executableIndex += 1;
         while ((words[executableIndex] ?? '').startsWith('-')) executableIndex += 1;
         const bunEntrypoint = words[executableIndex];
