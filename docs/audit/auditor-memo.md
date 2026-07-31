@@ -1,4 +1,4 @@
-# XLN auditor memo
+# xln auditor memo
 
 Last updated: 2026-07-09
 

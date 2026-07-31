@@ -1,4 +1,4 @@
-# Optimal LLM Prompts for XLN llms.txt Analysis
+# Audit prompts for xln llms.txt analysis
 
 ## GPT-Pro Deep Swap/Cross-J Design Weakness Audit
 

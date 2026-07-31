@@ -1,4 +1,6 @@
-# Dedup Backlog
+# Dedup audit snapshot — 2026-07-31
+
+Historical audit input only. The canonical live launch list is `/todo.md`.
 
 Snapshot after commit `e25567a0`.
 
