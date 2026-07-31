@@ -173,13 +173,15 @@ export const trailNetworkTimelineSource = (trail: NetworkTrail): NetworkTimeline
  * recorded trail serialize.
  */
 type SnapshotAccount = {
-  leftEntity?: unknown;
-  rightEntity?: unknown;
+  state?: {
+    leftEntity?: unknown;
+    rightEntity?: unknown;
+    deltas?: Map<number, unknown>;
+  };
   status?: unknown;
   mempool?: unknown[];
   currentFrame?: unknown;
   pendingFrame?: unknown;
-  deltas?: Map<number, unknown>;
   currentHeight?: unknown;
   rollbackCount?: unknown;
   lastRollbackFrameHash?: unknown;
@@ -210,14 +212,14 @@ const graphAccountFromSnapshot = (
     : [other, observerEntityId];
   const mempool = Array.isArray(account.mempool) ? account.mempool : [];
   return {
-    leftEntity: normalizeId(account.leftEntity) || leftEntity,
-    rightEntity: normalizeId(account.rightEntity) || rightEntity,
+    leftEntity: normalizeId(account.state?.leftEntity) || leftEntity,
+    rightEntity: normalizeId(account.state?.rightEntity) || rightEntity,
     status: account.status ?? 'open',
     mempool,
     mempoolCount: mempool.length,
     ...(account.currentFrame ? { currentFrame: account.currentFrame } : {}),
     ...(account.pendingFrame ? { pendingFrame: account.pendingFrame } : {}),
-    deltas: account.deltas instanceof Map ? new Map(account.deltas) : new Map(),
+    deltas: account.state?.deltas instanceof Map ? new Map(account.state.deltas) : new Map(),
     currentHeight: integer(account.currentHeight),
     rollbackCount: integer(account.rollbackCount),
     ...(account.lastRollbackFrameHash ? { lastRollbackFrameHash: account.lastRollbackFrameHash } : {}),

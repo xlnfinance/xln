@@ -1,5 +1,19 @@
-import type { EntityReplica } from '@xln/runtime/api/public/runtime-module';
-import type { MergedRuntimeGraph, RuntimeGraphNodeState } from './runtimeGraphProjection';
+import type {
+  MergedRuntimeGraph,
+  RuntimeGraphAccountView,
+  RuntimeGraphNodeState,
+} from './runtimeGraphProjection';
+
+export type RuntimeGraphReplicaView = {
+  entityId: string;
+  signerId: string;
+  state: Record<string, unknown> & {
+    accounts: Map<string, RuntimeGraphAccountView>;
+  };
+  mempool: unknown[];
+  isProposer: boolean;
+  position?: RuntimeGraphNodeState['position'];
+};
 
 const graphReplicaState = (node: RuntimeGraphNodeState): Record<string, unknown> => {
   const replicaState = node.replica?.state as unknown as Record<string, unknown> | undefined;
@@ -20,19 +34,19 @@ const graphReplicaState = (node: RuntimeGraphNodeState): Record<string, unknown>
   };
 };
 
-const graphReplica = (node: RuntimeGraphNodeState): EntityReplica => ({
-  ...(node.replica ?? {} as EntityReplica),
+const graphReplica = (node: RuntimeGraphNodeState): RuntimeGraphReplicaView => ({
+  ...(node.replica ?? {}),
   entityId: node.entityId,
   signerId: node.signerId || `graph:${node.runtimeId}`,
-  state: graphReplicaState(node) as unknown as EntityReplica['state'],
+  state: graphReplicaState(node) as RuntimeGraphReplicaView['state'],
   mempool: [...(node.replica?.mempool ?? [])],
   isProposer: node.replica?.isProposer ?? true,
   ...(node.position ? { position: { ...node.position } } : {}),
 });
 
-export const materializeRuntimeGraphReplicas = (graph: MergedRuntimeGraph): Map<string, EntityReplica> => {
-  const replicas = new Map<string, EntityReplica>();
-  const byEntityId = new Map<string, EntityReplica>();
+export const materializeRuntimeGraphReplicas = (graph: MergedRuntimeGraph): Map<string, RuntimeGraphReplicaView> => {
+  const replicas = new Map<string, RuntimeGraphReplicaView>();
+  const byEntityId = new Map<string, RuntimeGraphReplicaView>();
   for (const node of graph.nodes) {
     const replica = graphReplica(node.selected);
     byEntityId.set(node.entityId, replica);
@@ -45,7 +59,7 @@ export const materializeRuntimeGraphReplicas = (graph: MergedRuntimeGraph): Map<
     const counterpartyId = selected.observerEntityId === selected.leftEntityId
       ? selected.rightEntityId
       : selected.leftEntityId;
-    observer.state.accounts.set(counterpartyId, selected.account as EntityReplica['state']['accounts'] extends Map<string, infer A> ? A : never);
+    observer.state.accounts.set(counterpartyId, selected.account);
   }
   return replicas;
 };

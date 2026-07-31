@@ -1,4 +1,7 @@
 import type { DerivedAccountData } from '$lib/network3d/derivedAccount';
+import type { Delta } from '@xln/runtime/api/public/runtime-module';
+
+type GraphAccountViewLike = { state: { deltas: Map<number, Delta> } };
 
 export type ReserveMapLike = Map<string | number, bigint> | Record<string, unknown> | undefined;
 
@@ -13,7 +16,7 @@ export type GraphReplicaLike = {
   signerId?: string | null;
   state?: {
     reserves?: ReserveMapLike;
-    accounts?: Map<string, { deltas?: Map<number, unknown> }> | null;
+    accounts?: Map<string, GraphAccountViewLike> | null;
   } | null;
 };
 
@@ -376,9 +379,9 @@ export function buildGraphAvailableRoutes(input: {
 export function formatGraphDualConnectionAccountInfo(input: {
   leftId: string;
   rightId: string;
-  accountData: { deltas?: Map<number, unknown> } | null | undefined;
+  accountData: GraphAccountViewLike | null | undefined;
   selectedTokenId: number;
-  getAccountTokenDelta: (accountData: unknown, tokenId: number) => unknown | null;
+  getAccountTokenDelta: (accountData: GraphAccountViewLike, tokenId: number) => Delta | null;
   deriveEntry: (tokenDelta: unknown, isLeft: boolean) => DerivedAccountData;
   getEntityShortName: (entityId: string) => string;
   getTokenDecimals: (tokenId: number) => number;
@@ -388,7 +391,7 @@ export function formatGraphDualConnectionAccountInfo(input: {
   if (!input.accountData) {
     return { left: 'No account', right: 'No account', leftEntity, rightEntity };
   }
-  const deltas = input.accountData.deltas;
+  const deltas = input.accountData.state.deltas;
   const availableTokens = deltas instanceof Map
     ? Array.from(deltas.keys()).sort((a, b) => a - b)
     : [];
@@ -428,7 +431,7 @@ export function formatGraphDualConnectionAccountInfoFromReplicas(input: {
   entityB: string;
   replicas: Map<string, GraphReplicaLike>;
   selectedTokenId: number;
-  getAccountTokenDelta: (accountData: unknown, tokenId: number) => unknown | null;
+  getAccountTokenDelta: (accountData: GraphAccountViewLike, tokenId: number) => Delta | null;
   deriveEntry: (tokenDelta: unknown, isLeft: boolean) => DerivedAccountData;
   getEntityShortName: (entityId: string) => string;
   getTokenDecimals: (tokenId: number) => number;
@@ -436,7 +439,7 @@ export function formatGraphDualConnectionAccountInfoFromReplicas(input: {
   const isALeft = input.entityA < input.entityB;
   const leftId = isALeft ? input.entityA : input.entityB;
   const rightId = isALeft ? input.entityB : input.entityA;
-  let accountData: { deltas?: Map<number, unknown> } | null = null;
+  let accountData: GraphAccountViewLike | null = null;
   const leftReplica = findGraphReplicaByEntityId(input.replicas, leftId);
   if (leftReplica?.state?.accounts) {
     accountData = leftReplica.state.accounts.get(rightId) || null;

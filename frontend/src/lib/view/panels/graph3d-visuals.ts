@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Delta } from '@xln/runtime/api/public/runtime-module';
 import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
 import { toDerivedAccountData, type DerivedAccountData } from '$lib/network3d/derivedAccount';
 import { getGraphThemeColors } from './graph3d-renderer';
@@ -113,8 +114,11 @@ export function createBlockContainer(options: {
   return { container, txCubes };
 }
 
-export function getAccountTokenDelta(account: any, tokenId: number): any | null {
-  return account?.state.deltas?.get(tokenId) ?? null;
+export function getAccountTokenDelta(
+  account: { state: { deltas: Map<number, Delta> } } | null | undefined,
+  tokenId: number,
+): Delta | null {
+  return account?.state.deltas.get(tokenId) ?? null;
 }
 
 export function deriveGraphEntry(

@@ -1,5 +1,6 @@
 import type {
   EntityReplica,
+  Delta,
   RuntimeReplica,
   EnvSnapshot,
   RuntimeAdapterEntitySummary,
@@ -44,7 +45,27 @@ export type RuntimeGraphAccountState = RuntimeGraphSource & {
   leftEntityId: string;
   rightEntityId: string;
   height: number;
-  account: unknown;
+  account: RuntimeGraphAccountView;
+};
+
+export type RuntimeGraphAccountView = {
+  state: {
+    leftEntity: string;
+    rightEntity: string;
+    deltas: Map<number, Delta>;
+  };
+  status?: unknown;
+  mempool: unknown[];
+  currentFrame?: { height?: unknown; accountStateRoot?: unknown; stateHash?: unknown; accountTxs?: unknown[] };
+  pendingFrame?: { height?: unknown; accountStateRoot?: unknown; stateHash?: unknown; accountTxs?: unknown[] };
+  currentHeight: number;
+  rollbackCount: number;
+  lastRollbackFrameHash?: unknown;
+  activeDispute?: {
+    startedByLeft: boolean;
+    disputeTimeout: number;
+    initialDisputeNonce: number;
+  };
 };
 
 export type RuntimeGraphJMachineState = RuntimeGraphSource & {
@@ -104,6 +125,10 @@ type RuntimeGraphEnvFrame = RuntimeReplica | EnvSnapshot;
 
 const text = (value: unknown): string => String(value || '').trim();
 const id = (value: unknown): string => text(value).toLowerCase();
+const record = (value: unknown, error: string): Record<string, unknown> => {
+  if (!value || typeof value !== 'object') throw new Error(error);
+  return value as Record<string, unknown>;
+};
 
 export const resolveActionableGraphNodeRuntimeId = (
   node: MergedRuntimeGraphNode | null | undefined,
@@ -129,6 +154,52 @@ export const requireActionableGraphNodeRuntimeId = (
 const integer = (value: unknown): number => {
   const parsed = Math.floor(Number(value || 0));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+};
+
+/**
+ * Live Runtime snapshots carry AccountReplica while remote graph frames carry a
+ * deliberately smaller wire projection. Normalize that boundary once; renderers
+ * must never branch on transport shape or masquerade a wire DTO as AccountReplica.
+ */
+const projectGraphAccountView = (account: unknown): RuntimeGraphAccountView => {
+  const envelope = record(account, 'RUNTIME_GRAPH_ACCOUNT_INVALID');
+  const committed = 'state' in envelope
+    ? record(envelope['state'], 'RUNTIME_GRAPH_ACCOUNT_STATE_INVALID')
+    : envelope;
+  const leftEntity = id(committed['leftEntity']);
+  const rightEntity = id(committed['rightEntity']);
+  const deltas = committed['deltas'];
+  if (!leftEntity || !rightEntity || !(deltas instanceof Map)) {
+    throw new Error('RUNTIME_GRAPH_ACCOUNT_STATE_INVALID');
+  }
+  const activeDispute = envelope['activeDispute'] === undefined
+    ? undefined
+    : record(envelope['activeDispute'], 'RUNTIME_GRAPH_ACCOUNT_DISPUTE_INVALID');
+  const currentFrame = envelope['currentFrame'] === undefined
+    ? undefined
+    : record(envelope['currentFrame'], 'RUNTIME_GRAPH_ACCOUNT_FRAME_INVALID');
+  const pendingFrame = envelope['pendingFrame'] === undefined
+    ? undefined
+    : record(envelope['pendingFrame'], 'RUNTIME_GRAPH_ACCOUNT_FRAME_INVALID');
+  return {
+    state: { leftEntity, rightEntity, deltas: new Map(deltas) },
+    ...('status' in envelope ? { status: envelope['status'] } : {}),
+    mempool: Array.isArray(envelope['mempool']) ? envelope['mempool'] : [],
+    ...(currentFrame ? { currentFrame } : {}),
+    ...(pendingFrame ? { pendingFrame } : {}),
+    currentHeight: integer(envelope['currentHeight'] ?? currentFrame?.['height']),
+    rollbackCount: integer(envelope['rollbackCount']),
+    ...('lastRollbackFrameHash' in envelope
+      ? { lastRollbackFrameHash: envelope['lastRollbackFrameHash'] }
+      : {}),
+    ...(activeDispute ? {
+      activeDispute: {
+        startedByLeft: activeDispute['startedByLeft'] === true,
+        disputeTimeout: integer(activeDispute['disputeTimeout']),
+        initialDisputeNonce: integer(activeDispute['initialDisputeNonce'] ?? activeDispute['initialNonce']),
+      },
+    } : {}),
+  };
 };
 const sortedUnique = (values: string[]): string[] => Array.from(new Set(values)).sort();
 const reserveVersion = (value: unknown): string => {
@@ -213,11 +284,11 @@ const accountState = (
   counterpartyId: string,
   account: unknown,
 ): RuntimeGraphAccountState => {
-  const value = account as { leftEntity?: unknown; rightEntity?: unknown; currentHeight?: unknown } | null;
+  const value = projectGraphAccountView(account);
   const observer = node.entityId;
   const counterparty = id(counterpartyId);
-  const leftEntityId = id(value?.leftEntity) || [observer, counterparty].sort()[0] || observer;
-  const rightEntityId = id(value?.rightEntity) || [observer, counterparty].sort()[1] || counterparty;
+  const leftEntityId = value.state.leftEntity;
+  const rightEntityId = value.state.rightEntity;
   return {
     ...source,
     accountId: `${leftEntityId}:${rightEntityId}`,
@@ -225,9 +296,9 @@ const accountState = (
     observerIsHub: node.isHub,
     leftEntityId,
     rightEntityId,
-    height: integer(value?.currentHeight ?? node.height),
+    height: integer(value.currentHeight ?? node.height),
     timestamp: node.timestamp,
-    account,
+    account: value,
   };
 };
 

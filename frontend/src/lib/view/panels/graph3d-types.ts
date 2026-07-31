@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import type { Delta } from '@xln/runtime/api/public/runtime-module';
 import type { DerivedAccountData } from '$lib/network3d/derivedAccount';
 
 export type GraphJBlockHistoryEntry = {
@@ -9,7 +10,7 @@ export type GraphJBlockHistoryEntry = {
 };
 
 export type GraphXLNRuntime = {
-  deriveDelta: (delta: { [tokenId: number]: bigint }, isLeft: boolean) => DerivedAccountData;
+  deriveDelta: (delta: Delta, isLeft: boolean) => DerivedAccountData;
   getTokenInfo: (tokenId: number) => { symbol: string; decimals: number } | undefined;
   getEntityShortId: (entityId: string) => string;
   isLeft: (myEntityId: string, counterpartyEntityId: string) => boolean;

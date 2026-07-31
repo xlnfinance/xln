@@ -85,7 +85,13 @@ const account = (
   leftEntityId: 'a',
   rightEntityId: 'b',
   height,
-  account: { status: height % 2 ? 'open' : 'disputed' },
+  account: {
+    state: { leftEntity: 'a', rightEntity: 'b', deltas: new Map() },
+    status: height % 2 ? 'open' : 'disputed',
+    mempool: [],
+    currentHeight: height,
+    rollbackCount: 0,
+  },
 });
 
 const projection = (
@@ -211,7 +217,13 @@ describe('RuntimeGraphProjection', () => {
       activeEntityId: 'a',
       activeEntity: {
         core: { entityId: 'a', signerId: 'alice-signer', height: 9, timestamp: 1_234, profile: {} },
-        accounts: { items: [{ leftEntity: 'a', rightEntity: 'b', currentHeight: 7 }], nextCursor: null },
+        accounts: {
+          items: [{
+            state: { leftEntity: 'a', rightEntity: 'b', deltas: new Map() },
+            currentHeight: 7,
+          }],
+          nextCursor: null,
+        },
         books: { items: [], nextCursor: null },
       },
     } as never;
@@ -239,6 +251,7 @@ describe('RuntimeGraphProjection', () => {
             items: [{
               leftEntity: 'a',
               rightEntity: 'b',
+              deltas: new Map(),
               currentHeight: 7,
               currentFrame: { height: 7, accountStateRoot: 'root-a' },
             }],
@@ -265,15 +278,21 @@ describe('RuntimeGraphProjection', () => {
   test('account desynchronization includes the canonical account-state root', () => {
     const left = account('remote-left', 'a', 7, 1_000);
     left.account = {
+      state: { leftEntity: 'a', rightEntity: 'b', deltas: new Map() },
       status: 'active',
+      mempool: [],
       currentHeight: 7,
       currentFrame: { height: 7, accountStateRoot: 'root-left' },
+      rollbackCount: 0,
     };
     const right = account('remote-right', 'b', 7, 1_000);
     right.account = {
+      state: { leftEntity: 'a', rightEntity: 'b', deltas: new Map() },
       status: 'active',
+      mempool: [],
       currentHeight: 7,
       currentFrame: { height: 7, accountStateRoot: 'root-right' },
+      rollbackCount: 0,
     };
     const merged = mergeRuntimeGraphProjections([
       projection('remote-left', [node('remote-left', 'a', 7, 1_000)], [left]),
