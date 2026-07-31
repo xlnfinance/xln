@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import {
   countMnemonicWords,
-  estimatePasswordStrength,
+  estimateBrainVaultWork,
   formatLiveRuntimeImportStatus,
   hasSupportedMnemonicWordCount,
   normalizeMnemonicPhrase,
@@ -28,11 +28,6 @@ describe('runtime creation live runtime discovery', () => {
     expect(formatLiveRuntimeImportStatus({ ready: true }, 0)).toBe('');
   });
 
-  test('keeps password strength estimation exported for RuntimeCreation', () => {
-    expect(estimatePasswordStrength('').rating).toBe('weak');
-    expect(estimatePasswordStrength('correct horse battery staple').bits).toBeGreaterThan(100);
-  });
-
   test('accepts only the supported 12-word and 24-word mnemonic lengths', () => {
     const words12 = Array.from({ length: 12 }, (_, index) => `word${index + 1}`).join(' ');
     const words24 = Array.from({ length: 24 }, (_, index) => `word${index + 1}`).join('\n');
@@ -42,6 +37,15 @@ describe('runtime creation live runtime discovery', () => {
     expect(hasSupportedMnemonicWordCount(words12)).toBe(true);
     expect(hasSupportedMnemonicWordCount(words24)).toBe(true);
     expect(hasSupportedMnemonicWordCount(`${words12} extra`)).toBe(false);
+  });
+
+  test('reports BrainVault time and memory work without password entropy claims', () => {
+    expect(estimateBrainVaultWork(100, 256, 3_000, 4)).toEqual({
+      recoveryMs: 75_000,
+      totalMemoryWorkMb: 25_600,
+    });
+    expect(() => estimateBrainVaultWork(1.5, 256, 3_000, 1))
+      .toThrow('BRAINVAULT_SHARD_COUNT_INVALID');
   });
 
   test('parses suggested H/MM/Custody runtime choices through the shared import parser', () => {

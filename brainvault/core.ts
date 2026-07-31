@@ -43,10 +43,26 @@ export const BRAINVAULT_V1 = {
  * Factor 5: 10000 shards (2.5TB)
  */
 export function getShardCount(factor: number): number {
-  if (factor < BRAINVAULT_V1.MIN_FACTOR || factor > BRAINVAULT_V1.MAX_FACTOR) {
+  if (
+    !Number.isSafeInteger(factor)
+    || factor < BRAINVAULT_V1.MIN_FACTOR
+    || factor > BRAINVAULT_V1.MAX_FACTOR
+  ) {
     throw new Error(`Factor must be ${BRAINVAULT_V1.MIN_FACTOR}-${BRAINVAULT_V1.MAX_FACTOR}`);
   }
   return Math.pow(10, factor - 1);
+}
+
+/**
+ * Derive the legacy V1 factor for an explicit shard count without floating point.
+ * This is exactly equivalent to ceil(log10(shardCount)) + 1 for positive integers.
+ */
+export function factorForShardCount(shardCount: number): number {
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1) {
+    throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${shardCount}`);
+  }
+  if (shardCount === 1) return 1;
+  return String(shardCount - 1).length + 1;
 }
 
 /**
@@ -87,47 +103,6 @@ export function formatDuration(ms: number): string {
 }
 
 /**
- * Estimate password entropy in bits
- */
-export function estimatePasswordStrength(password: string): {
-  bits: number;
-  rating: 'weak' | 'fair' | 'good' | 'strong' | 'excellent';
-  message: string;
-} {
-  const charsets = {
-    lowercase: /[a-z]/.test(password) ? 26 : 0,
-    uppercase: /[A-Z]/.test(password) ? 26 : 0,
-    digits: /\d/.test(password) ? 10 : 0,
-    special: /[^a-zA-Z0-9]/.test(password) ? 33 : 0,
-  };
-
-  const poolSize = Object.values(charsets).reduce((a, b) => a + b, 0);
-  const bits = poolSize > 0 ? Math.log2(poolSize) * password.length : 0;
-
-  let rating: 'weak' | 'fair' | 'good' | 'strong' | 'excellent';
-  let message: string;
-
-  if (bits < 40) {
-    rating = 'weak';
-    message = 'Add more characters and variety';
-  } else if (bits < 60) {
-    rating = 'fair';
-    message = 'Consider a longer passphrase';
-  } else if (bits < 80) {
-    rating = 'good';
-    message = 'Decent for factor 3-5';
-  } else if (bits < 100) {
-    rating = 'strong';
-    message = 'Good for factor 6-7';
-  } else {
-    rating = 'excellent';
-    message = 'Excellent for any factor';
-  }
-
-  return { bits: Math.round(bits), rating, message };
-}
-
-/**
  * Validate inputs before derivation
  */
 export function validateInputs(name: string, passphrase: string, factor: number): {
@@ -144,7 +119,11 @@ export function validateInputs(name: string, passphrase: string, factor: number)
     errors.push(`Passphrase must be at least ${BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH} characters`);
   }
 
-  if (factor < BRAINVAULT_V1.MIN_FACTOR || factor > BRAINVAULT_V1.MAX_FACTOR) {
+  if (
+    !Number.isSafeInteger(factor)
+    || factor < BRAINVAULT_V1.MIN_FACTOR
+    || factor > BRAINVAULT_V1.MAX_FACTOR
+  ) {
     errors.push(`Factor must be between ${BRAINVAULT_V1.MIN_FACTOR} and ${BRAINVAULT_V1.MAX_FACTOR}`);
   }
 
@@ -319,6 +298,10 @@ export async function deriveKey(
  * Convert entropy to BIP39 mnemonic
  */
 export async function entropyToMnemonic(entropy: Uint8Array): Promise<string> {
+  if (![16, 20, 24, 28, 32].includes(entropy.length)) {
+    throw new Error(`BRAINVAULT_ENTROPY_LENGTH_INVALID:${entropy.length}`);
+  }
+
   // BIP39 wordlist (English)
   const wordlist = await getBIP39Wordlist();
 
@@ -449,6 +432,9 @@ export async function deriveSitePassword(
 // ============================================================================
 
 export function hexToBytes(hex: string): Uint8Array {
+  if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 !== 0) {
+    throw new Error(`BRAINVAULT_HEX_INVALID:${hex.slice(0, 16)}`);
+  }
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);

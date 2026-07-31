@@ -27,7 +27,7 @@
     deriveEthereumAddress,
     deriveKey,
     entropyToMnemonic,
-    estimatePasswordStrength,
+    factorForShardCount,
     getShardCount,
     hexToBytes,
   } from '@xln/brainvault/core';
@@ -44,7 +44,8 @@
   import {
     FACTOR_INFO,
     LIVE_RUNTIME_DISCOVERY_RETRY_MS,
-    STRENGTH_COLORS,
+    WALLET_MODE_TRADEOFFS,
+    estimateBrainVaultWork,
     formatLiveRuntimeImportStatus,
     formatMemoryLabel,
     formatRuntimeDurationRounded,
@@ -94,6 +95,13 @@
 
   type Phase = 'input' | 'deriving' | 'recovery';
   type InputMode = 'brainvault' | 'mnemonic' | 'testnet';
+  type RecoveryRehearsalMode = Exclude<InputMode, 'testnet'>;
+  type BrainVaultDerivationRun = Readonly<{
+    name: string;
+    passphrase: string;
+    shardCount: number;
+    factor: number;
+  }>;
 
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
@@ -108,6 +116,7 @@
 
   function selectInputMode(next: InputMode): void {
     if (phase !== 'input') return;
+    if (rehearsalMode !== null && next !== rehearsalMode) return;
     inputMode = next;
     if (next !== 'testnet' || liveRuntimesLoaded || liveRuntimesLoading) return;
     if (isScenarioPreview()) {
@@ -274,30 +283,16 @@
   let mnemonicInput = ''; // For mnemonic mode
   let showPassphrase = false;
   let shardInput = 3; // Can be 1-5 (factor) or 6+ (custom shards)
+  let rehearsalEnabled = false;
+  let rehearsalMode: RecoveryRehearsalMode | null = null;
+  let rehearsalExpectedAddress = '';
+  let derivationRun: BrainVaultDerivationRun | null = null;
 
   // Compute actual shard count and factor from input (must match cli.ts derive() logic)
-  $: isPreset = shardInput >= 1 && shardInput <= 5;
-  $: actualShardCount = isPreset ? getShardCount(shardInput) : shardInput;
-  $: factor = isPreset ? shardInput : Math.ceil(Math.log10(actualShardCount)) + 1;
-
-  // Dynamic color: red(1) → yellow(3) → green(5+)
-  $: factorColor = (() => {
-    const effective = isPreset ? shardInput : Math.min(5, Math.ceil(Math.log10(shardInput)) + 1);
-    const t = (effective - 1) / 4;
-    if (t < 0.5) {
-      // red to yellow
-      const r = 239;
-      const g = Math.round(68 + (179 - 68) * (t * 2));
-      const b = 68;
-      return `rgb(${r}, ${g}, ${b})`;
-    } else {
-      // yellow to green
-      const r = Math.round(234 - (234 - 34) * ((t - 0.5) * 2));
-      const g = Math.round(179 + (197 - 179) * ((t - 0.5) * 2));
-      const b = Math.round(8 + (94 - 8) * ((t - 0.5) * 2));
-      return `rgb(${r}, ${g}, ${b})`;
-    }
-  })();
+  $: isValidShardInput = Number.isSafeInteger(shardInput) && shardInput >= 1 && shardInput <= 100_000;
+  $: isPreset = isValidShardInput && shardInput >= 1 && shardInput <= 5;
+  $: actualShardCount = !isValidShardInput ? 0 : isPreset ? getShardCount(shardInput) : shardInput;
+  $: factor = actualShardCount > 0 ? (isPreset ? shardInput : factorForShardCount(actualShardCount)) : 0;
 
   type NavigatorWithDeviceMemory = Navigator & { deviceMemory?: number };
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
@@ -321,6 +316,26 @@
   // Allow user to configure beyond hardwareConcurrency (they'll find sweet spot)
   const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
   const SHARD_MEMORY_MB = BRAINVAULT_V1.SHARD_MEMORY_KB / 1024;
+  const BRAINVAULT_SHARD_TIME_STORAGE_KEY = 'xln-brainvault-ms-per-shard';
+
+  function readPersistedShardTime(): number | null {
+    if (typeof localStorage === 'undefined') return null;
+    const value = Number(localStorage.getItem(BRAINVAULT_SHARD_TIME_STORAGE_KEY));
+    return Number.isFinite(value) && value >= 100 && value <= 600_000 ? value : null;
+  }
+
+  function recordMeasuredShardTime(elapsedMs: number): void {
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 100 || elapsedMs > 600_000) {
+      throw new Error(`BRAINVAULT_SHARD_TIME_INVALID:${elapsedMs}`);
+    }
+    estimatedShardTimeMs = shardTimeMeasured
+      ? estimatedShardTimeMs * 0.7 + elapsedMs * 0.3
+      : elapsedMs;
+    shardTimeMeasured = true;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(BRAINVAULT_SHARD_TIME_STORAGE_KEY, String(Math.round(estimatedShardTimeMs)));
+    }
+  }
 
   function readPersistedWorkerCap(): number | null {
     if (typeof localStorage === 'undefined') return null;
@@ -376,8 +391,9 @@
   let shardCount = 0;
   let shardsCompleted = 0;
   let shardResults: Map<number, Uint8Array> = new Map();
-  let shardStatus: ('pending' | 'computing' | 'complete')[] = [];
-  let estimatedShardTimeMs = 3000;
+  const persistedShardTimeMs = readPersistedShardTime();
+  let estimatedShardTimeMs = persistedShardTimeMs ?? 3000;
+  let shardTimeMeasured = persistedShardTimeMs !== null;
 
 
   // Result state
@@ -610,32 +626,29 @@
   // COMPUTED
   // ============================================================================
 
-  $: passwordStrength = (() => {
-    const strength = estimatePasswordStrength(passphrase);
-    return {
-      bits: strength.bits,
-      rating: strength.rating,
-      color: STRENGTH_COLORS[strength.rating] ?? '#666',
-    };
-  })();
-  $: rawWorkFactorBits = actualShardCount > 0 ? Math.log2(actualShardCount) : 0;
-  // Display an attack-cost hint, not a literal entropy claim:
-  // round to whole bits and give a small premium for the real derivation expense.
-  $: workFactorBits = actualShardCount <= 1 ? 0 : Math.round(rawWorkFactorBits + 0.75);
-  $: totalSecurityBits = passwordStrength.bits + workFactorBits;
-  // Compute factorInfo from shardInput
+  // Compute work from measured device time, never from guessed password entropy.
   $: factorInfo = isPreset
     ? FACTOR_INFO[shardInput - 1]!
     : {
         factor: 0,
-        shards: shardInput,
-        time: `~${Math.round(shardInput * 3 / 60)}min`,
+        shards: actualShardCount,
         tier: 'Custom',
-        attackCost: `$${(shardInput * 13000).toLocaleString()}`
       };
+  $: workEstimate = actualShardCount > 0
+    ? estimateBrainVaultWork(
+        actualShardCount,
+        SHARD_MEMORY_MB,
+        estimatedShardTimeMs,
+        Math.max(1, Math.min(effectiveTargetWorkerCount, actualShardCount)),
+      )
+    : { recoveryMs: 0, totalMemoryWorkMb: 0 };
   $: mnemonicWordCount = countMnemonicWords(mnemonicInput);
   $: canDerive = inputMode === 'brainvault'
-    ? (name.length >= BRAINVAULT_V1.MIN_NAME_LENGTH && passphrase.length >= BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH)
+    ? (
+        isValidShardInput
+        && name.length >= BRAINVAULT_V1.MIN_NAME_LENGTH
+        && passphrase.length >= BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH
+      )
     : inputMode === 'mnemonic' && hasSupportedMnemonicWordCount(mnemonicInput);
   $: progress = shardCount > 0 ? (shardsCompleted / shardCount) * 100 : 0;
   // Projected ETA based on the current requested worker target.
@@ -697,8 +710,6 @@
     if (!retryShardQueue.includes(shardIndex)) {
       retryShardQueue.unshift(shardIndex);
     }
-    shardStatus[shardIndex] = 'pending';
-    shardStatus = shardStatus;
     return true;
   }
 
@@ -715,7 +726,61 @@
   function failDerivation(message: string): void {
     derivationError = message;
     terminateWorkers();
+    derivationRun = null;
     phase = 'input';
+  }
+
+  function clearDerivedWalletMaterial(): void {
+    mnemonic24 = '';
+    mnemonic12 = '';
+    devicePassphrase = '';
+    ethereumAddress = '';
+    entityId = '';
+    shardResults = new Map();
+    shardsCompleted = 0;
+  }
+
+  function beginRecoveryRehearsal(mode: RecoveryRehearsalMode, address: string): void {
+    rehearsalMode = mode;
+    rehearsalExpectedAddress = address.toLowerCase();
+    derivationRun = null;
+    clearDerivedWalletMaterial();
+    if (mode === 'brainvault') {
+      name = '';
+      passphrase = '';
+      shardInput = 3;
+    } else {
+      mnemonicInput = '';
+    }
+    inputMode = mode;
+    derivationError = '';
+    phase = 'input';
+  }
+
+  function acceptRecoveryRehearsal(mode: RecoveryRehearsalMode, address: string): boolean {
+    if (!rehearsalEnabled && rehearsalMode === null) return true;
+    if (rehearsalMode === null) {
+      beginRecoveryRehearsal(mode, address);
+      return false;
+    }
+    if (rehearsalMode !== mode || rehearsalExpectedAddress !== address.toLowerCase()) {
+      derivationRun = null;
+      clearDerivedWalletMaterial();
+      derivationError = 'Recovery rehearsal did not reproduce the same wallet. Check every input and try again.';
+      phase = 'input';
+      return false;
+    }
+    rehearsalMode = null;
+    rehearsalExpectedAddress = '';
+    rehearsalEnabled = false;
+    return true;
+  }
+
+  function cancelRecoveryRehearsal(): void {
+    rehearsalEnabled = false;
+    rehearsalMode = null;
+    rehearsalExpectedAddress = '';
+    derivationError = '';
   }
 
   function handleWorkerFailure(worker: Worker, err: unknown): void {
@@ -753,9 +818,13 @@
       if (type === 'ready') {
         opts.onReady?.();
       } else if (type === 'probe_result') {
-        estimatedShardTimeMs = data.estimatedShardTimeMs;
+        const probeTime = Number(data?.estimatedShardTimeMs);
+        if (Number.isFinite(probeTime) && probeTime >= 100 && probeTime <= 600_000) {
+          estimatedShardTimeMs = probeTime;
+        }
       } else if (type === 'shard_complete') {
-        handleShardComplete(worker, data.shardIndex, data.resultHex, data.elapsedMs);
+        void handleShardComplete(worker, data?.shardIndex, data?.resultHex, data?.elapsedMs)
+          .catch((err) => failDerivation(workerErrorMessage(err)));
       } else if (type === 'error') {
         const error = data?.message ?? 'Worker failed';
         opts.onError?.(error);
@@ -789,6 +858,7 @@
         mnemonic12 = '';
 
         ethereumAddress = await deriveEthereumAddress(mnemonic24);
+        if (!acceptRecoveryRehearsal('mnemonic', ethereumAddress)) return;
         createLoginType = 'manual';
         await prepareRecoveryDecisionFromCurrentSeed(`Mnemonic ${ethereumAddress.slice(0, 6)}`);
         await continueAfterRecoveryDiscovery();
@@ -802,7 +872,18 @@
     }
 
     // === BRAINVAULT MODE: Full argon2 derivation ===
-    shardCount = isPreset ? getShardCount(shardInput) : shardInput;
+    if (!isValidShardInput || actualShardCount < 1 || factor < 1) {
+      derivationError = 'Choose a whole shard count between 1 and 100,000.';
+      return;
+    }
+    const run = Object.freeze({
+      name,
+      passphrase,
+      shardCount: actualShardCount,
+      factor,
+    }) satisfies BrainVaultDerivationRun;
+    derivationRun = run;
+    shardCount = run.shardCount;
     const initialUsableCap = Math.max(1, Math.min(maxWorkers, shardCount));
     let initialWorkers = Math.min(effectiveTargetWorkerCount, initialUsableCap);
     workerCount = initialWorkers;
@@ -815,7 +896,6 @@
     shardRetryCounts.clear();
     shardsCompleted = 0;
     shardResults = new Map();
-    shardStatus = Array(shardCount).fill('pending');
 
     // Start with the exact worker count the UI is allowed to request.
     const cpuCores = navigator.hardwareConcurrency || 4;
@@ -885,7 +965,7 @@
       }
 
       // Dispatch initial shards
-      dispatchShards(name);
+      dispatchShards();
     } catch (err) {
       const message = workerErrorMessage(err);
       logRuntimeCreationDiagnostic('BrainVault worker initialization failed', { message });
@@ -893,6 +973,7 @@
       derivationError = isBrainVaultWasmMemoryError(message)
         ? `BrainVault could not allocate browser Wasm memory. Reduce other tabs or retry with 1 worker. ${message}`
         : `BrainVault worker initialization failed: ${message}`;
+      derivationRun = null;
       phase = 'input';
     }
   }
@@ -900,7 +981,7 @@
   let nextShardToDispatch = 0;
   let finalizeInProgress = false;
 
-  function dispatchShards(name: string) {
+  function dispatchShards() {
     nextShardToDispatch = 0;
 
     // Dispatch initial shard to each worker
@@ -910,6 +991,8 @@
   }
 
   function dispatchNextShard(worker: Worker) {
+    const run = derivationRun;
+    if (!run) throw new Error('BRAINVAULT_DERIVATION_RUN_MISSING');
     if (isWorkerDraining(worker)) return;
     while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
       nextShardToDispatch++;
@@ -920,35 +1003,46 @@
     if (retryShardQueue.length === 0 && nextShardToDispatch >= shardCount) return;
 
     const shardIndex = retryShardQueue.length > 0 ? retryShardQueue.shift()! : nextShardToDispatch++;
-    shardStatus[shardIndex] = 'computing';
-    shardStatus = shardStatus; // Trigger reactivity
     workerActiveShard.set(worker, shardIndex);
 
     worker.postMessage({
       type: 'derive_shard',
       id: shardIndex,
       data: {
-        name: name,
-        passphrase,
+        name: run.name,
+        passphrase: run.passphrase,
         shardIndex,
-        shardCount,
+        shardCount: run.shardCount,
       }
     });
   }
 
-  async function handleShardComplete(worker: Worker, shardIndex: number, resultHex: string, elapsedMs: number) {
+  async function handleShardComplete(worker: Worker, shardIndex: unknown, resultHex: unknown, elapsedMs: unknown) {
+    const activeShard = workerActiveShard.get(worker);
+    if (!Number.isSafeInteger(shardIndex) || Number(shardIndex) < 0 || Number(shardIndex) >= shardCount) {
+      throw new Error(`BRAINVAULT_WORKER_SHARD_INDEX_INVALID:${String(shardIndex)}`);
+    }
+    if (activeShard !== shardIndex) {
+      throw new Error(`BRAINVAULT_WORKER_SHARD_MISMATCH:${String(activeShard)}:${String(shardIndex)}`);
+    }
+    if (typeof resultHex !== 'string' || resultHex.length !== BRAINVAULT_V1.SHARD_OUTPUT_BYTES * 2) {
+      throw new Error(`BRAINVAULT_WORKER_RESULT_INVALID:${typeof resultHex === 'string' ? resultHex.length : typeof resultHex}`);
+    }
+    const numericElapsedMs = Number(elapsedMs);
+    if (!Number.isFinite(numericElapsedMs) || numericElapsedMs <= 0) {
+      throw new Error(`BRAINVAULT_WORKER_TIME_INVALID:${String(elapsedMs)}`);
+    }
+    const validatedShardIndex = Number(shardIndex);
     workerActiveShard.delete(worker);
-    if (shardResults.has(shardIndex)) {
-      return;
+    if (shardResults.has(validatedShardIndex)) {
+      throw new Error(`BRAINVAULT_WORKER_DUPLICATE_SHARD:${validatedShardIndex}`);
     }
 
-    shardResults.set(shardIndex, hexToBytes(resultHex));
-    shardStatus[shardIndex] = 'complete';
-    shardStatus = shardStatus;
+    shardResults.set(validatedShardIndex, hexToBytes(resultHex));
     shardsCompleted = shardResults.size;
 
     // Update time estimate (exponential moving average)
-    estimatedShardTimeMs = estimatedShardTimeMs * 0.7 + elapsedMs * 0.3;
+    recordMeasuredShardTime(numericElapsedMs);
 
     if (isWorkerDraining(worker)) {
       shutdownWorker(worker);
@@ -969,6 +1063,8 @@
   }
 
   async function finalizeDeriv() {
+    const run = derivationRun;
+    if (!run) throw new Error('BRAINVAULT_DERIVATION_RUN_MISSING');
     terminateWorkers();
 
     // Collect results in order
@@ -979,7 +1075,7 @@
       orderedResults.push(shard);
     }
 
-    const masterKey = await combineShards(orderedResults, factor);
+    const masterKey = await combineShards(orderedResults, run.factor);
 
     // Derive BIP39 mnemonic (24 words)
     const entropy = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
@@ -996,7 +1092,8 @@
     // Entity ID is a lazy entity ID for a single-signer quorum (matches runtime algorithm)
     entityId = generateLazyEntityIdPreview([ethereumAddress], 1n);
 
-    await prepareRecoveryDecisionFromCurrentSeed(name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);
+    if (!acceptRecoveryRehearsal('brainvault', ethereumAddress)) return;
+    await prepareRecoveryDecisionFromCurrentSeed(run.name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);
     await continueAfterRecoveryDiscovery();
   }
 
@@ -1054,6 +1151,10 @@
     resetRecoveryDecision();
     workerLimitNotice = '';
     createLoginType = 'manual';
+    derivationRun = null;
+    rehearsalEnabled = false;
+    rehearsalMode = null;
+    rehearsalExpectedAddress = '';
     // Keep name and passphrase for convenience
     mnemonic24 = '';
     mnemonic12 = '';
@@ -1063,7 +1164,6 @@
     creatingRuntime = false;
     shardsCompleted = 0;
     shardResults = new Map();
-    shardStatus = [];
   }
 
   onDestroy(() => {
@@ -1179,7 +1279,7 @@
             aria-controls="wallet-panel-brainvault"
             tabindex={inputMode === 'brainvault' ? 0 : -1}
             class:selected={inputMode === 'brainvault'}
-            disabled={phase !== 'input'}
+            disabled={phase !== 'input' || (rehearsalMode !== null && rehearsalMode !== 'brainvault')}
             on:click={() => selectInputMode('brainvault')}
           >
             Brain Vault
@@ -1192,7 +1292,7 @@
             aria-controls="wallet-panel-mnemonic"
             tabindex={inputMode === 'mnemonic' ? 0 : -1}
             class:selected={inputMode === 'mnemonic'}
-            disabled={phase !== 'input'}
+            disabled={phase !== 'input' || (rehearsalMode !== null && rehearsalMode !== 'mnemonic')}
             on:click={() => selectInputMode('mnemonic')}
           >
             Mnemonic
@@ -1205,7 +1305,7 @@
             aria-controls="wallet-panel-testnet"
             tabindex={inputMode === 'testnet' ? 0 : -1}
             class:selected={inputMode === 'testnet'}
-            disabled={phase !== 'input'}
+            disabled={phase !== 'input' || rehearsalMode !== null}
             on:click={() => selectInputMode('testnet')}
           >
             Testnet
@@ -1214,12 +1314,16 @@
 
         <div class="wallet-create-title">
           <div>
-            <h1>{inputMode === 'brainvault'
+            <h1>{rehearsalMode !== null
+              ? 'Verify recovery'
+              : inputMode === 'brainvault'
               ? 'Create xln wallet'
               : inputMode === 'mnemonic'
                 ? 'Create or restore from seed'
                 : 'Testnet controls'}</h1>
-            <p>{inputMode === 'brainvault'
+            <p>{rehearsalMode !== null
+              ? 'Re-enter the same recovery inputs. Only the public wallet fingerprint was kept from the first run.'
+              : inputMode === 'brainvault'
               ? 'Open the same wallet anywhere from the same public name, private secret, and work factor.'
               : inputMode === 'mnemonic'
                 ? 'Generate a new 24-word seed, or continue with a 12- or 24-word seed you already have.'
@@ -1234,6 +1338,26 @@
           role="tabpanel"
           aria-labelledby="wallet-mode-brainvault"
         >
+        <div class="tradeoff-card" data-testid="brainvault-tradeoffs">
+          <div class="tradeoff-heading">
+            <span class="section-eyebrow">{WALLET_MODE_TRADEOFFS.brainvault.eyebrow}</span>
+            <p>{WALLET_MODE_TRADEOFFS.brainvault.summary}</p>
+          </div>
+          <div class="tradeoff-grid">
+            <div class="tradeoff-list benefit-list">
+              {#each WALLET_MODE_TRADEOFFS.brainvault.benefits as item}
+                <div><span aria-hidden="true">+</span><p>{item}</p></div>
+              {/each}
+            </div>
+            <div class="tradeoff-list cost-list">
+              {#each WALLET_MODE_TRADEOFFS.brainvault.costs as item}
+                <div><span aria-hidden="true">−</span><p>{item}</p></div>
+              {/each}
+            </div>
+          </div>
+          <p class="shared-risk">Malware during recovery can steal either a passphrase or a mnemonic.</p>
+        </div>
+
         <!-- Name Input -->
         <div class="input-group">
           <label for="name">Vault name <span class="label-aside">public derivation input</span></label>
@@ -1291,17 +1415,6 @@
               </svg>
             </button>
           </div>
-          {#if passphrase}
-            <div class="strength-meter">
-              <div
-                class="strength-bar"
-                style="width: {Math.min(100, passwordStrength.bits)}%; background: {passwordStrength.color}"
-              ></div>
-            </div>
-            <span class="strength-text" style="color: {passwordStrength.color}">
-              Secret strength: {passwordStrength.rating} · estimated {totalSecurityBits} bits
-            </span>
-          {/if}
         </div>
 
         <!-- Advanced options - collapsed by default to keep the screen minimal -->
@@ -1314,7 +1427,9 @@
         >
           <span class="advanced-toggle-main">
             <span class="advanced-toggle-label">Security work factor</span>
-            <span class="advanced-toggle-summary">{factorInfo.tier} · {factorInfo.shards.toLocaleString()} shards · {factorInfo.time}</span>
+            <span class="advanced-toggle-summary">
+              {factorInfo.tier} · {factorInfo.shards.toLocaleString()} shards · {formatRuntimeDurationRounded(workEstimate.recoveryMs)}
+            </span>
           </span>
           <svg class="advanced-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"/>
@@ -1360,6 +1475,24 @@
               </div>
             {/if}
 
+            <div class="work-estimate" data-testid="brainvault-work-estimate">
+              <div>
+                <span>{shardTimeMeasured ? 'Measured on this device' : 'Initial device estimate'}</span>
+                <strong>{formatRuntimeDurationRounded(workEstimate.recoveryMs)}</strong>
+                <small>{Math.max(1, Math.min(effectiveTargetWorkerCount, actualShardCount || 1))} worker target</small>
+              </div>
+              <div>
+                <span>Every password guess</span>
+                <strong>{actualShardCount.toLocaleString()} × {SHARD_MEMORY_MB} MB</strong>
+                <small>{formatMemoryLabel(workEstimate.totalMemoryWorkMb)} total memory-work</small>
+              </div>
+            </div>
+            <p class="measurement-note">
+              {shardTimeMeasured
+                ? 'Timing uses completed Argon2 work from this browser.'
+                : 'Timing updates and is saved after the first completed shard.'}
+            </p>
+
             <p class="warning-text">Recovery requires the exact same vault name, passphrase, and work factor.</p>
           </div>
         {/if}
@@ -1371,6 +1504,26 @@
           role="tabpanel"
           aria-labelledby="wallet-mode-mnemonic"
         >
+          <div class="tradeoff-card" data-testid="mnemonic-tradeoffs">
+            <div class="tradeoff-heading">
+              <span class="section-eyebrow">{WALLET_MODE_TRADEOFFS.mnemonic.eyebrow}</span>
+              <p>{WALLET_MODE_TRADEOFFS.mnemonic.summary}</p>
+            </div>
+            <div class="tradeoff-grid">
+              <div class="tradeoff-list benefit-list">
+                {#each WALLET_MODE_TRADEOFFS.mnemonic.benefits as item}
+                  <div><span aria-hidden="true">+</span><p>{item}</p></div>
+                {/each}
+              </div>
+              <div class="tradeoff-list cost-list">
+                {#each WALLET_MODE_TRADEOFFS.mnemonic.costs as item}
+                  <div><span aria-hidden="true">−</span><p>{item}</p></div>
+                {/each}
+              </div>
+            </div>
+            <p class="shared-risk">Malware during recovery can steal either a passphrase or a mnemonic.</p>
+          </div>
+
           <div class="mnemonic-generate-row">
             <div>
               <span class="section-eyebrow">New wallet</span>
@@ -1532,6 +1685,27 @@
 
         <!-- Derive Button - only visible in input phase -->
         {#if inputMode !== 'testnet'}
+          {#if rehearsalMode !== null}
+            <div class="rehearsal-active" data-testid="recovery-rehearsal-active">
+              <div>
+                <span class="section-eyebrow">Optional recovery rehearsal</span>
+                <strong>Re-enter to match {shortRuntimeId(rehearsalExpectedAddress)}</strong>
+                <p>The first secret was cleared. Matching this public address proves that your recovery inputs work.</p>
+              </div>
+              <button type="button" on:click={cancelRecoveryRehearsal}>Cancel rehearsal</button>
+            </div>
+          {:else}
+            <label class="rehearsal-option" data-testid="recovery-rehearsal-option">
+              <input type="checkbox" bind:checked={rehearsalEnabled} />
+              <span>
+                <strong>Verify recovery before opening</strong>
+                <small>{inputMode === 'brainvault'
+                  ? 'Optional: clear the inputs after derivation and reproduce the same wallet once.'
+                  : 'Optional: clear the seed after validation and enter it again once.'}</small>
+              </span>
+              <em>Optional</em>
+            </label>
+          {/if}
           <div class="unlock-duration-row">
             <label for="unlock-duration">Keep unlocked for</label>
             <select id="unlock-duration" bind:value={unlockDurationChoice}>
@@ -1548,7 +1722,11 @@
             disabled={!canDerive}
             on:click={startDerivation}
           >
-            {inputMode === 'brainvault' ? 'Derive wallet' : 'Continue with seed'}
+            {rehearsalMode !== null
+              ? 'Verify recovery'
+              : inputMode === 'brainvault'
+                ? 'Derive wallet'
+                : 'Continue with seed'}
           </button>
           {#if derivationError}
             <div class="matrix-status error">{derivationError}</div>
