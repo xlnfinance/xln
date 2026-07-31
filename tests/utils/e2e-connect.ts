@@ -127,13 +127,14 @@ async function isAccountReady(
       const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
       const resolveCounterpartyAccount = (
         accounts: Map<string, {
-          deltas?: Map<number, unknown>;
+          state: {
+            deltas: Map<number, unknown>;
+            leftEntity: string;
+            rightEntity: string;
+          };
           pendingFrame?: unknown;
           currentHeight?: number;
           currentFrame?: { height?: number };
-          leftEntity?: string;
-          rightEntity?: string;
-          counterpartyEntityId?: string;
           proofHeader?: { fromEntity?: string; toEntity?: string };
         }>,
         ownerEntityId: string,
@@ -142,29 +143,23 @@ async function isAccountReady(
         const owner = normalizeEntityId(ownerEntityId);
         const target = normalizeEntityId(counterpartyEntityId);
         const accountBelongsToPair = (account: {
-          leftEntity?: string;
-          rightEntity?: string;
-          counterpartyEntityId?: string;
+          state: { leftEntity: string; rightEntity: string };
           proofHeader?: { fromEntity?: string; toEntity?: string };
         } | null | undefined): boolean => {
           if (!account) return false;
           const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
           const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
           if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
-          const left = normalizeEntityId(account.leftEntity);
-          const right = normalizeEntityId(account.rightEntity);
-          if (left && right) {
-            return (left === owner && right === target) || (left === target && right === owner);
-          }
-          const counterparty = normalizeEntityId(account.counterpartyEntityId);
-          return !counterparty || counterparty === target;
+          const left = normalizeEntityId(account.state.leftEntity);
+          const right = normalizeEntityId(account.state.rightEntity);
+          return (left === owner && right === target) || (left === target && right === owner);
         };
         const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
         if (accountBelongsToPair(direct)) return direct;
         for (const [accountKey, account] of accounts.entries()) {
           if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
-          const left = normalizeEntityId(account.leftEntity);
-          const right = normalizeEntityId(account.rightEntity);
+          const left = normalizeEntityId(account.state.leftEntity);
+          const right = normalizeEntityId(account.state.rightEntity);
           if ((left === owner && right === target) || (right === owner && left === target)) return account;
           if (accountBelongsToPair(account)) return account;
         }
@@ -183,8 +178,8 @@ async function isAccountReady(
 	            : null;
 	          if (!account) continue;
 	          const hasDelta = tokenIds.every((tokenId) => {
-	            if (!(account.deltas instanceof Map)) return false;
-	            for (const [deltaTokenId] of account.deltas.entries()) {
+	            if (!(account.state.deltas instanceof Map)) return false;
+	            for (const [deltaTokenId] of account.state.deltas.entries()) {
 	              if (Number(deltaTokenId) === tokenId) return true;
 	            }
 	            return false;
@@ -650,7 +645,7 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
           currentHeight: Number(account.currentHeight || 0),
           pendingFrameHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
           mempool: (account.mempool || []).map((tx) => String(tx?.type || '')),
-          deltaTokenIds: account.deltas instanceof Map ? Array.from(account.deltas.keys()).map(Number) : [],
+          deltaTokenIds: account.state.deltas instanceof Map ? Array.from(account.state.deltas.keys()).map(Number) : [],
         } : null,
       };
     });
@@ -1199,7 +1194,11 @@ async function getAccountOpenStatus(
             eReplicas?: Map<string, {
               state?: {
                 accounts?: Map<string, {
-                  deltas?: Map<number, unknown>;
+                  state: {
+                    deltas: Map<number, unknown>;
+                    leftEntity: string;
+                    rightEntity: string;
+                  };
                   pendingFrame?: { height?: number };
                   currentHeight?: number;
                 }>;
@@ -1215,13 +1214,14 @@ async function getAccountOpenStatus(
       const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
       const resolveCounterpartyAccount = (
         accounts: Map<string, {
-          deltas?: Map<number, unknown>;
+          state: {
+            deltas: Map<number, unknown>;
+            leftEntity: string;
+            rightEntity: string;
+          };
           pendingFrame?: { height?: number };
           currentHeight?: number;
           currentFrame?: { height?: number };
-          leftEntity?: string;
-          rightEntity?: string;
-          counterpartyEntityId?: string;
           proofHeader?: { fromEntity?: string; toEntity?: string };
         }>,
         ownerEntityId: string,
@@ -1230,29 +1230,23 @@ async function getAccountOpenStatus(
         const owner = normalizeEntityId(ownerEntityId);
         const target = normalizeEntityId(counterpartyEntityId);
         const accountBelongsToPair = (account: {
-          leftEntity?: string;
-          rightEntity?: string;
-          counterpartyEntityId?: string;
+          state: { leftEntity: string; rightEntity: string };
           proofHeader?: { fromEntity?: string; toEntity?: string };
         } | null | undefined): boolean => {
           if (!account) return false;
           const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
           const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
           if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
-          const left = normalizeEntityId(account.leftEntity);
-          const right = normalizeEntityId(account.rightEntity);
-          if (left && right) {
-            return (left === owner && right === target) || (left === target && right === owner);
-          }
-          const counterparty = normalizeEntityId(account.counterpartyEntityId);
-          return !counterparty || counterparty === target;
+          const left = normalizeEntityId(account.state.leftEntity);
+          const right = normalizeEntityId(account.state.rightEntity);
+          return (left === owner && right === target) || (left === target && right === owner);
         };
         const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
         if (accountBelongsToPair(direct)) return direct;
         for (const [accountKey, account] of accounts.entries()) {
           if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
-          const left = normalizeEntityId(account.leftEntity);
-          const right = normalizeEntityId(account.rightEntity);
+          const left = normalizeEntityId(account.state.leftEntity);
+          const right = normalizeEntityId(account.state.rightEntity);
           if ((left === owner && right === target) || (right === owner && left === target)) return account;
           if (accountBelongsToPair(account)) return account;
         }
@@ -1269,8 +1263,8 @@ async function getAccountOpenStatus(
 	          : null;
 	        if (!account) continue;
 	        const hasTokenOneDelta = (() => {
-	          if (!(account.deltas instanceof Map)) return false;
-	          for (const [deltaTokenId] of account.deltas.entries()) {
+	          if (!(account.state.deltas instanceof Map)) return false;
+	          for (const [deltaTokenId] of account.state.deltas.entries()) {
 	            if (Number(deltaTokenId) === 1) return true;
 	          }
 	          return false;
@@ -1307,6 +1301,11 @@ async function getConnectDebugState(
                 currentHeight?: number;
                 pendingFrame?: { height?: number };
                 mempool?: Array<{ type?: string }>;
+                state?: {
+                  leftEntity?: string;
+                  rightEntity?: string;
+                };
+                proofHeader?: { fromEntity?: string; toEntity?: string };
               }>;
             };
           }>;
@@ -1327,48 +1326,45 @@ async function getConnectDebugState(
     const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
     const resolveCounterpartyAccount = (
       accounts: Map<string, {
-	        currentHeight?: number;
-	        pendingFrame?: { height?: number };
-	        mempool?: Array<{ type?: string }>;
-	        leftEntity?: string;
-	        rightEntity?: string;
-	        counterpartyEntityId?: string;
-	        proofHeader?: { fromEntity?: string; toEntity?: string };
-	      }>,
-	      ownerEntityId: string,
-	      counterpartyEntityId: string,
-	    ) => {
-	      const owner = normalizeEntityId(ownerEntityId);
-	      const target = normalizeEntityId(counterpartyEntityId);
-	      const accountBelongsToPair = (account: {
-	        leftEntity?: string;
-	        rightEntity?: string;
-	        counterpartyEntityId?: string;
-	        proofHeader?: { fromEntity?: string; toEntity?: string };
-	      } | null | undefined): boolean => {
-	        if (!account) return false;
-	        const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
-	        const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
-	        if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
-	        const left = normalizeEntityId(account.leftEntity);
-	        const right = normalizeEntityId(account.rightEntity);
-	        if (left && right) {
-	          return (left === owner && right === target) || (left === target && right === owner);
-	        }
-	        const counterparty = normalizeEntityId(account.counterpartyEntityId);
-	        return !counterparty || counterparty === target;
-	      };
-	      const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
-	      if (accountBelongsToPair(direct)) return direct;
-	      for (const [accountKey, account] of accounts.entries()) {
-	        if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
-	        const left = normalizeEntityId(account.leftEntity);
-	        const right = normalizeEntityId(account.rightEntity);
-	        if ((left === owner && right === target) || (right === owner && left === target)) return account;
-	        if (accountBelongsToPair(account)) return account;
-	      }
-	      return null;
-	    };
+        currentHeight?: number;
+        pendingFrame?: { height?: number };
+        mempool?: Array<{ type?: string }>;
+        state?: {
+          leftEntity?: string;
+          rightEntity?: string;
+        };
+        proofHeader?: { fromEntity?: string; toEntity?: string };
+      }>,
+      ownerEntityId: string,
+      counterpartyEntityId: string,
+    ) => {
+      const owner = normalizeEntityId(ownerEntityId);
+      const target = normalizeEntityId(counterpartyEntityId);
+      const accountBelongsToPair = (account: {
+        state?: {
+          leftEntity?: string;
+          rightEntity?: string;
+        };
+        proofHeader?: { fromEntity?: string; toEntity?: string };
+      } | null | undefined): boolean => {
+        if (!account) return false;
+        const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
+        const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
+        if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
+        const left = normalizeEntityId(account.state?.leftEntity);
+        const right = normalizeEntityId(account.state?.rightEntity);
+        return (left === owner && right === target) || (left === target && right === owner);
+      };
+      const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
+      if (accountBelongsToPair(direct)) return direct;
+      for (const [accountKey, account] of accounts.entries()) {
+        if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
+        const left = normalizeEntityId(account.state?.leftEntity);
+        const right = normalizeEntityId(account.state?.rightEntity);
+        if ((left === owner && right === target) || (right === owner && left === target)) return account;
+      }
+      return null;
+    };
     const replica = env?.state?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
     const accounts = replica?.state?.accounts;
     const account = accounts instanceof Map
@@ -1391,15 +1387,15 @@ async function getConnectDebugState(
         queue: env?.infrastructure?.p2p?.getQueueState?.() ?? null,
         reconnect: env?.infrastructure?.p2p?.getReconnectState?.() ?? null,
       },
-	      account: account ? {
-	        currentHeight: Number(account.currentHeight || 0),
-	        pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
-	        mempool: (account.mempool || []).map((tx) => tx.type),
-	        leftEntity: String(account.leftEntity || ''),
-	        rightEntity: String(account.rightEntity || ''),
-	        proofFrom: String(account.proofHeader?.fromEntity || ''),
-	        proofTo: String(account.proofHeader?.toEntity || ''),
-	      } : null,
+      account: account ? {
+        currentHeight: Number(account.currentHeight || 0),
+        pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
+        mempool: (account.mempool || []).map((tx) => tx.type),
+        leftEntity: String(account.state?.leftEntity || ''),
+        rightEntity: String(account.state?.rightEntity || ''),
+        proofFrom: String(account.proofHeader?.fromEntity || ''),
+        proofTo: String(account.proofHeader?.toEntity || ''),
+      } : null,
       runtimeInput: summarizeInputs(env?.runtimeInput?.entityInputs),
       runtimeMempool: summarizeInputs(env?.runtimeMempool?.entityInputs),
       hubProfile: profile ? {
