@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -144,10 +144,15 @@ test('node owner persists recovery secret but ordinary result stays public', asy
   const path = join(directory, 'owner.json');
   const env = makeOwnerEnv();
   let commitCallback: ((height: number) => void) | null = null;
+  const durabilityBoundaries: string[] = [];
+  writeFileSync(`${path}.${process.pid}.tmp`, 'stale interrupted predecessor', 'utf8');
   const controller = createBrainVaultOwnerController({
     path,
     profileName: 'test owner',
     timeoutMs: 2_000,
+    durability: {
+      onBoundary: boundary => { durabilityBoundaries.push(boundary); },
+    },
     onFrameCommit: (_env, callback) => {
       commitCallback = callback;
       return () => { commitCallback = null; };
@@ -176,10 +181,184 @@ test('node owner persists recovery secret but ordinary result stays public', asy
     expect(result.ethereumAddress).toBe('0x93bAb14eD871462D414a7c0357BF1a76DE741397');
     expect('mnemonic24' in result).toBe(false);
     expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(durabilityBoundaries).toEqual([
+      'after-file-write',
+      'after-file-sync',
+      'after-file-rename',
+      'before-parent-dir-sync',
+      'after-parent-dir-sync',
+    ]);
+    expect(readdirSync(directory).filter(name => name.endsWith('.tmp'))).toEqual([
+      `owner.json.${process.pid}.tmp`,
+    ]);
     expect((await controller.revealMnemonic()).mnemonic24).toStartWith('milk click novel');
     const restartedEnv = makeOwnerEnv();
     expect(await controller.prewarm(String(restartedEnv.runtimeSeed))).toBe(true);
     expect((await controller.restore(restartedEnv))?.created).toBe(true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('node owner retries both file and directory durability failures before install', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-brainvault-owner-retry-'));
+  const path = join(directory, 'owner.json');
+  const env = makeOwnerEnv();
+  let failNextFileSync = true;
+  let failNextDirectorySync = true;
+  let directorySyncAttempts = 0;
+  let enqueueCount = 0;
+  let commitCallback: ((height: number) => void) | null = null;
+  const controller = createBrainVaultOwnerController({
+    path,
+    profileName: 'retry owner',
+    timeoutMs: 2_000,
+    durability: {
+      syncFile: async handle => {
+        if (failNextFileSync) {
+          failNextFileSync = false;
+          throw Object.assign(new Error('injected owner sync failure'), { code: 'EIO' });
+        }
+        await handle.sync();
+      },
+      syncDirectory: async handle => {
+        directorySyncAttempts += 1;
+        if (failNextDirectorySync) {
+          failNextDirectorySync = false;
+          throw Object.assign(new Error('injected owner directory sync failure'), { code: 'EIO' });
+        }
+        await handle.sync();
+      },
+    },
+    onFrameCommit: (_env, callback) => {
+      commitCallback = callback;
+      return () => { commitCallback = null; };
+    },
+    enqueue: (targetEnv, input) => {
+      enqueueCount += 1;
+      const tx = input.runtimeTxs[0];
+      if (!tx || tx.type !== 'importReplica') throw new Error('TEST_IMPORT_REPLICA_REQUIRED');
+      targetEnv.state.eReplicas.set(`${tx.entityId}:${tx.signerId}`, {
+        entityId: tx.entityId,
+        signerId: tx.signerId,
+        state: { entityId: tx.entityId },
+      } as EntityReplica);
+      targetEnv.state.height += 1;
+      queueMicrotask(() => commitCallback?.(targetEnv.state.height));
+    },
+  });
+  const input = {
+    specId: BRAINVAULT_V1_SPEC_ID,
+    name: 'alice',
+    passphrase: 'secret123456',
+    shardInput: 1,
+    workers: 1,
+  } as const;
+  const options = { signal: new AbortController().signal, onProgress: () => undefined };
+
+  try {
+    await expect(controller.deriveAndInstall(env, input, options)).rejects.toThrow('injected owner sync failure');
+    expect(enqueueCount).toBe(0);
+    expect(existsSync(path)).toBeFalse();
+    expect(readdirSync(directory).filter(name => name.endsWith('.tmp'))).toEqual([]);
+
+    await expect(controller.deriveAndInstall(env, input, options))
+      .rejects.toThrow('STORAGE_PARENT_DIR_FSYNC_FAILED:code=EIO');
+    expect(enqueueCount).toBe(0);
+    expect(existsSync(path)).toBeTrue();
+    expect(readdirSync(directory).filter(name => name.endsWith('.tmp'))).toEqual([]);
+
+    expect((await controller.deriveAndInstall(env, input, options)).created).toBe(true);
+    expect(enqueueCount).toBe(1);
+    expect(directorySyncAttempts).toBe(2);
+    expect(existsSync(path)).toBeTrue();
+    expect(readdirSync(directory).filter(name => name.endsWith('.tmp'))).toEqual([]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('startup restore excludes a concurrent owner derivation before KDF work', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-brainvault-owner-race-'));
+  const path = join(directory, 'owner.json');
+  writeFileSync(path, `${JSON.stringify({
+    version: 1,
+    specId: BRAINVAULT_V1_SPEC_ID,
+    mnemonic24: 'milk click novel require across cousin good chair street mouse crash movie same daughter air quote total pride crop mention focus sick slice hole',
+    ethereumAddress: '0x93bab14ed871462d414a7c0357bf1a76de741397',
+  })}\n`, { mode: 0o600 });
+  const env = makeOwnerEnv();
+  let commitCallback: ((height: number) => void) | null = null;
+  let releaseCommit: (() => void) | null = null;
+  let notifyEnqueued!: () => void;
+  const enqueued = new Promise<void>(resolve => { notifyEnqueued = resolve; });
+  const controller = createBrainVaultOwnerController({
+    path,
+    profileName: 'race owner',
+    timeoutMs: 2_000,
+    onFrameCommit: (_env, callback) => {
+      commitCallback = callback;
+      return () => { commitCallback = null; };
+    },
+    enqueue: (targetEnv, input) => {
+      const tx = input.runtimeTxs[0];
+      if (!tx || tx.type !== 'importReplica') throw new Error('TEST_IMPORT_REPLICA_REQUIRED');
+      targetEnv.state.eReplicas.set(`${tx.entityId}:${tx.signerId}`, {
+        entityId: tx.entityId,
+        signerId: tx.signerId,
+        state: { entityId: tx.entityId },
+      } as EntityReplica);
+      targetEnv.state.height += 1;
+      releaseCommit = () => commitCallback?.(targetEnv.state.height);
+      notifyEnqueued();
+    },
+  });
+
+  try {
+    const restore = controller.restore(env);
+    await enqueued;
+    await expect(controller.deriveAndInstall(env, {
+      specId: BRAINVAULT_V1_SPEC_ID,
+      name: 'another owner',
+      passphrase: 'another-secret-123',
+      shardInput: 1,
+      workers: 1,
+    }, { signal: new AbortController().signal, onProgress: () => undefined }))
+      .rejects.toThrow('BRAINVAULT_OWNER_OPERATION_PENDING');
+    releaseCommit?.();
+    expect((await restore)?.created).toBe(true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('persisted custody fails closed when directory fsync is unsupported', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'xln-brainvault-owner-unsupported-'));
+  const path = join(directory, 'owner.json');
+  writeFileSync(path, `${JSON.stringify({
+    version: 1,
+    specId: BRAINVAULT_V1_SPEC_ID,
+    mnemonic24: 'milk click novel require across cousin good chair street mouse crash movie same daughter air quote total pride crop mention focus sick slice hole',
+    ethereumAddress: '0x93bab14ed871462d414a7c0357bf1a76de741397',
+  })}\n`, { mode: 0o600 });
+  const controller = createBrainVaultOwnerController({
+    path,
+    profileName: 'unsupported fsync owner',
+    timeoutMs: 2_000,
+    enqueue: () => { throw new Error('TEST_ENQUEUE_FORBIDDEN'); },
+    onFrameCommit: () => () => undefined,
+    durability: {
+      syncDirectory: async () => {
+        throw Object.assign(new Error('directory fsync unsupported'), { code: 'EINVAL' });
+      },
+    },
+  });
+
+  try {
+    await expect(controller.prewarm('unsupported-fsync-runtime'))
+      .rejects.toThrow('BRAINVAULT_OWNER_DIRECTORY_FSYNC_UNSUPPORTED:EINVAL');
+    await expect(controller.restore(makeOwnerEnv()))
+      .rejects.toThrow('BRAINVAULT_OWNER_DIRECTORY_FSYNC_UNSUPPORTED:EINVAL');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

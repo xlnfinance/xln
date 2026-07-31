@@ -40,6 +40,11 @@ type PendingRequest = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+type SocketContext = Readonly<{
+  ws: WebSocket;
+  generation: number;
+}>;
+
 type RuntimeAdapterRequestBody =
   | { op: 'auth'; key?: string; challenge: string; ownerSignature?: string }
   | { op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
@@ -141,6 +146,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   readonly mode = 'remote' as const;
 
   private ws: WebSocket | null = null;
+  private socketGeneration = 0;
+  private authenticatedGeneration: number | null = null;
+  private connectionAttempt = 0;
   private config: RuntimeAdapterConfig | null = null;
   private pending = new Map<string, PendingRequest>();
   private changeCbs = new Set<(height: number) => void>();
@@ -202,38 +210,45 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (config.mode !== 'remote') throw new RuntimeAdapterError('E_BAD_QUERY', 'RemoteRuntimeAdapter requires mode=remote');
     if (!config.wsUrl) throw new RuntimeAdapterError('E_BAD_QUERY', 'wsUrl is required');
     this.config = config;
+    const attempt = ++this.connectionAttempt;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.id = String(config.runtimeId || '').trim().toLowerCase();
-    this.fingerprint = null;
-    this.nextSequence = null;
-    this.laneKind = null;
-    this.setServerCommandReadiness(false, 'adapter-connecting');
+    this.clearAuthenticatedSession('adapter-connecting');
     this.intentionalClose = false;
     this.terminalAuthFailure = false;
     try {
       await this.openSocket();
+      if (attempt !== this.connectionAttempt) {
+        throw new RuntimeAdapterError('E_INTERNAL', 'runtime adapter connection attempt was superseded', true);
+      }
       await this.authenticateIfNeeded();
+      if (attempt !== this.connectionAttempt) {
+        throw new RuntimeAdapterError('E_INTERNAL', 'runtime adapter authentication attempt was superseded', true);
+      }
       this.setStatus('connected');
     } catch (error) {
-      this.handleConnectionFailure(error);
+      this.handleConnectionFailure(error, attempt);
       throw error;
     }
   }
 
   disconnect(): void {
+    this.connectionAttempt += 1;
     this.intentionalClose = true;
     this.terminalAuthFailure = false;
-    this.level = null;
-    this.fingerprint = null;
-    this.nextSequence = null;
-    this.laneKind = null;
-    this.setServerCommandReadiness(false, 'adapter-disconnected');
+    this.clearAuthenticatedSession('adapter-disconnected');
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     this.failPending(new RuntimeAdapterError('E_INTERNAL', 'adapter disconnected', true));
-    this.ws?.close();
+    const socket = this.ws;
     this.ws = null;
+    this.socketGeneration += 1;
+    socket?.close();
     this.setStatus('disconnected');
   }
 
@@ -242,7 +257,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   }
 
   async ensureOwnerCommandLane(): Promise<void> {
-    if (this.laneKind === 'owner') return;
+    if (this.laneKind === 'owner' && this.authenticatedGeneration === this.socketGeneration) return;
     await this.authenticateIfNeeded(true);
   }
 
@@ -280,7 +295,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     input: RuntimeAdapterBrainVaultInput,
     options: RuntimeAdapterBrainVaultOptions = {},
   ): Promise<RuntimeAdapterBrainVaultResult> {
-    if (this.level !== 'admin') throw new RuntimeAdapterError('E_UNAUTHORIZED', 'BrainVault requires admin auth');
+    this.requireFreshAdmin('BrainVault requires fresh admin auth');
     assertBrainVaultTransportIsConfidential(this.config?.wsUrl);
     if (options.signal?.aborted) throw new Error('BRAINVAULT_DERIVATION_ABORTED');
     const jobId = `brainvault-${++this.requestId}`;
@@ -303,7 +318,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   }
 
   async revealBrainVaultMnemonic(): Promise<RuntimeAdapterBrainVaultRecovery> {
-    if (this.level !== 'admin') throw new RuntimeAdapterError('E_UNAUTHORIZED', 'BrainVault export requires admin auth');
+    this.requireFreshAdmin('BrainVault export requires fresh admin auth');
     assertBrainVaultTransportIsConfidential(this.config?.wsUrl);
     return parseBrainVaultRecovery(await this.request<unknown>({ op: 'brainvault-reveal' }));
   }
@@ -335,32 +350,81 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     for (const cb of this.changeCbs) cb(this.height);
   }
 
+  private clearAuthenticatedSession(reason: string): void {
+    this.level = null;
+    this.fingerprint = null;
+    this.nextSequence = null;
+    this.laneKind = null;
+    this.authenticatedGeneration = null;
+    this.setServerCommandReadiness(false, reason);
+  }
+
+  private isCurrentSocket({ ws, generation }: SocketContext): boolean {
+    return this.ws === ws && this.socketGeneration === generation;
+  }
+
+  private requireFreshAdmin(message: string): void {
+    const socket = this.ws;
+    if (
+      this.level !== 'admin'
+      || this.authenticatedGeneration !== this.socketGeneration
+      || !socket
+      || socket.readyState !== WebSocket.OPEN
+    ) {
+      throw new RuntimeAdapterError('E_UNAUTHORIZED', message);
+    }
+  }
+
   private async openSocket(): Promise<void> {
     const wsUrl = this.config?.wsUrl;
     if (!wsUrl) throw new RuntimeAdapterError('E_BAD_QUERY', 'wsUrl is required');
+    const previousSocket = this.ws;
+    this.ws = null;
+    previousSocket?.close();
+    this.failPending(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter socket replaced', true));
+    const generation = ++this.socketGeneration;
+    this.clearAuthenticatedSession('adapter-connecting');
     this.setStatus('connecting');
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
+      const context: SocketContext = { ws, generation };
       ws.binaryType = 'arraybuffer';
       let settled = false;
       ws.onopen = () => {
+        if (generation !== this.socketGeneration) {
+          if (!settled) {
+            settled = true;
+            reject(new RuntimeAdapterError('E_INTERNAL', 'stale runtime adapter socket opened', true));
+          }
+          ws.close();
+          return;
+        }
         settled = true;
         this.ws = ws;
         this.reconnectAttempt = 0;
         resolve();
       };
       ws.onerror = () => {
-        if (!settled) reject(new RuntimeAdapterError('E_INTERNAL', `failed to connect ${wsUrl}`, true));
+        if (!settled) {
+          settled = true;
+          reject(new RuntimeAdapterError('E_INTERNAL', `failed to connect ${wsUrl}`, true));
+        }
       };
-      ws.onmessage = (event) => this.handleMessage(event.data);
-      ws.onclose = () => this.handleClose();
+      ws.onmessage = (event) => this.handleMessage(event.data, context);
+      ws.onclose = () => {
+        if (!settled) {
+          settled = true;
+          reject(new RuntimeAdapterError('E_INTERNAL', `runtime adapter socket closed before open: ${wsUrl}`, true));
+        }
+        this.handleClose(context);
+      };
     });
   }
 
-  private handleClose(): void {
+  private handleClose(context: SocketContext): void {
+    if (!this.isCurrentSocket(context)) return;
     this.ws = null;
-    this.laneKind = null;
-    this.setServerCommandReadiness(false, 'adapter-disconnected');
+    this.clearAuthenticatedSession('adapter-disconnected');
     this.failPending(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter socket closed', true));
     this.setStatus(this.terminalAuthFailure ? 'error' : this.intentionalClose ? 'disconnected' : 'error');
     this.scheduleReconnect();
@@ -372,21 +436,27 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     const delay = nextBackoff(this.reconnectAttempt++, maxMs);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      const attempt = ++this.connectionAttempt;
       this.openSocket()
-        .then(() => this.authenticateIfNeeded())
-        .then(() => this.setStatus('connected'))
-        .catch((error) => this.handleConnectionFailure(error));
+        .then(() => {
+          if (attempt !== this.connectionAttempt) {
+            throw new RuntimeAdapterError('E_INTERNAL', 'runtime adapter reconnect was superseded', true);
+          }
+          return this.authenticateIfNeeded();
+        })
+        .then(() => {
+          if (attempt === this.connectionAttempt && !this.intentionalClose) this.setStatus('connected');
+        })
+        .catch((error) => this.handleConnectionFailure(error, attempt));
     }, delay);
   }
 
-  private handleConnectionFailure(error: unknown): void {
+  private handleConnectionFailure(error: unknown, attempt: number): void {
+    if (attempt !== this.connectionAttempt || this.intentionalClose) return;
     if (isTerminalAuthFailure(error)) {
       this.terminalAuthFailure = true;
       this.intentionalClose = true;
-      this.level = null;
-      this.nextSequence = null;
-      this.laneKind = null;
-      this.setServerCommandReadiness(false, 'adapter-auth-failed');
+      this.clearAuthenticatedSession('adapter-auth-failed');
       this.failPending(error);
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
@@ -394,10 +464,17 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       }
       const socket = this.ws;
       this.ws = null;
+      this.socketGeneration += 1;
       socket?.close();
       this.setStatus('error');
       return;
     }
+    this.clearAuthenticatedSession('adapter-connection-failed');
+    this.failPending(error);
+    const socket = this.ws;
+    this.ws = null;
+    this.socketGeneration += 1;
+    socket?.close();
     this.setStatus('error');
     this.scheduleReconnect();
   }
@@ -409,6 +486,12 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       }
       return;
     }
+    const ws = this.ws;
+    const generation = this.socketGeneration;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      throw new RuntimeAdapterError('E_INTERNAL', 'runtime adapter is not connected', true);
+    }
+    const context: SocketContext = { ws, generation };
     const challenge = createRuntimeAdapterIdentityChallenge();
     const expectedRuntimeId = this.id || String(this.config.runtimeId || '').trim().toLowerCase();
     const ownerSignature = this.config.ownerBindingSigner
@@ -433,7 +516,10 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       key: this.config.authKey,
       challenge,
       ...(ownerSignature ? { ownerSignature } : {}),
-    });
+    }, undefined, context);
+    if (!this.isCurrentSocket(context)) {
+      throw new RuntimeAdapterError('E_INTERNAL', 'runtime adapter auth completed on a stale socket', true);
+    }
     let verified: RuntimeAdapterServerIdentityProof;
     try {
       verified = verifyRuntimeAdapterServerIdentity(
@@ -447,27 +533,32 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
         `runtime adapter server identity verification failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    this.level = response.authLevel;
-    this.id = verified.runtimeId;
-    this.fingerprint = verified.identityFingerprint;
     if (response.commandLaneKind !== 'owner' && response.commandLaneKind !== 'capability') {
       throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server returned an invalid command lane kind');
     }
     if (requireOwner && response.commandLaneKind !== 'owner') {
       throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server did not bind the vault-owner lane');
     }
-    this.laneKind = response.commandLaneKind;
     const nextCommandSequence = Number(response.nextCommandSequence);
     if (!Number.isSafeInteger(nextCommandSequence) || nextCommandSequence <= 0) {
       throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server returned an invalid command frontier');
     }
-    this.nextSequence = nextCommandSequence;
     const readiness = parseCommandReadiness(response);
+    if (!this.isCurrentSocket(context)) {
+      throw new RuntimeAdapterError('E_INTERNAL', 'runtime adapter auth became stale before commit', true);
+    }
+    this.level = response.authLevel;
+    this.id = verified.runtimeId;
+    this.fingerprint = verified.identityFingerprint;
+    this.laneKind = response.commandLaneKind;
+    this.nextSequence = nextCommandSequence;
+    this.authenticatedGeneration = generation;
     this.setServerCommandReadiness(readiness.ready, readiness.reason);
     this.noteHeight(response.currentHeight, { allowDecrease: true });
   }
 
-  private handleMessage(raw: unknown): void {
+  private handleMessage(raw: unknown, context: SocketContext): void {
+    if (!this.isCurrentSocket(context)) return;
     let message: RuntimeAdapterResponse | RuntimeAdapterPush;
     try {
       const decoded = typeof raw === 'string'
@@ -476,9 +567,10 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       if ('id' in decoded) throw new Error('RADAPTER_SERVER_MESSAGE_REQUEST_FORBIDDEN');
       message = decoded;
     } catch (error) {
+      this.clearAuthenticatedSession('adapter-protocol-error');
       this.setStatus('error');
       this.failPending(error);
-      this.ws?.close();
+      context.ws.close();
       return;
     }
 
@@ -508,8 +600,15 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  private request<T>(body: RuntimeAdapterRequestBody, timeoutOverrideMs?: number): Promise<T> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+  private request<T>(
+    body: RuntimeAdapterRequestBody,
+    timeoutOverrideMs?: number,
+    expectedContext?: SocketContext,
+  ): Promise<T> {
+    const context = expectedContext ?? (
+      this.ws ? { ws: this.ws, generation: this.socketGeneration } : null
+    );
+    if (!context || !this.isCurrentSocket(context) || context.ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter is not connected', true));
     }
     const id = `r-${++this.requestId}`;
@@ -539,7 +638,10 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       };
       this.pending.set(id, pending);
       try {
-        this.ws?.send(toWebSocketBuffer(encodeRuntimeAdapterMessage(payload)));
+        if (!this.isCurrentSocket(context)) {
+          throw new RuntimeAdapterError('E_INTERNAL', 'runtime adapter socket changed before send', true);
+        }
+        context.ws.send(toWebSocketBuffer(encodeRuntimeAdapterMessage(payload)));
       } catch (error) {
         this.pending.delete(id);
         clearTimeout(timer);

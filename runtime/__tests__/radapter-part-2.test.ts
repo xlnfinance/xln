@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from 'bun:test';
 
 import { createHmac } from 'crypto';
-
 import { computeAddress, hexlify, keccak256, recoverAddress, SigningKey, toUtf8Bytes } from 'ethers';
 
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
@@ -2867,16 +2866,15 @@ test('storage entity hash docs persist root metadata only', async () => {
   expect(coldDelete.merklePuts.length).toBeLessThan(50);
 });
 
-test('remote runtime adapter reports connected only after auth and retains authority through reconnect', async () => {
+test('a superseded connection failure cannot close the newer authenticated socket', async () => {
   const previousWebSocket = globalThis.WebSocket;
-  let socket: {
-    onmessage: ((event: { data: unknown }) => void) | null;
-    onclose: (() => void) | null;
-  } | null = null;
-  let transportSendCount = 0;
+  const sockets: SupersededAttemptWebSocket[] = [];
   const identityEnv = makeEnv();
+  let releaseFirstSigner!: () => void;
+  let markFirstSignerStarted!: () => void;
+  const firstSignerStarted = new Promise<void>(resolve => { markFirstSignerStarted = resolve; });
 
-  class DelayedAuthWebSocket {
+  class SupersededAttemptWebSocket {
     static readonly OPEN = 1;
 
     binaryType = 'arraybuffer';
@@ -2887,36 +2885,33 @@ test('remote runtime adapter reports connected only after auth and retains autho
     onclose: (() => void) | null = null;
 
     constructor(_url: string) {
-      socket = this;
-      setTimeout(() => {
-        this.readyState = DelayedAuthWebSocket.OPEN;
+      sockets.push(this);
+      queueMicrotask(() => {
+        this.readyState = SupersededAttemptWebSocket.OPEN;
         this.onopen?.();
-      }, 0);
+      });
     }
 
     send(raw: unknown): void {
-      transportSendCount += 1;
       const request = decodeTestRuntimeAdapterMessage<{ id: string; op: string; challenge?: string }>(raw);
       if (request.op !== 'auth') return;
       const identity = signRuntimeAdapterServerIdentity(identityEnv, request.challenge || '');
-      setTimeout(() => {
-        this.onmessage?.({
-          data: encodeRuntimeAdapterMessage({
-            v: 1,
-            inReplyTo: request.id,
-            ok: true,
-            payload: {
-              authLevel: 'inspect',
-              commandLaneKind: 'capability',
-              currentHeight: 10,
-              nextCommandSequence: 1,
-              commandReady: true,
-              commandReadyReason: null,
-              ...identity,
-            },
-          }),
-        });
-      }, 25);
+      queueMicrotask(() => this.onmessage?.({
+        data: encodeRuntimeAdapterMessage({
+          v: 1,
+          inReplyTo: request.id,
+          ok: true,
+          payload: {
+            authLevel: 'admin',
+            commandLaneKind: 'capability',
+            currentHeight: 12,
+            nextCommandSequence: 1,
+            commandReady: true,
+            commandReadyReason: null,
+            ...identity,
+          },
+        }),
+      }));
     }
 
     close(): void {
@@ -2926,61 +2921,39 @@ test('remote runtime adapter reports connected only after auth and retains autho
   }
 
   (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket =
-    DelayedAuthWebSocket as unknown as typeof WebSocket;
+    SupersededAttemptWebSocket as unknown as typeof WebSocket;
   try {
     const adapter = new RemoteRuntimeAdapter();
-    const statuses: string[] = [];
-    const heights: number[] = [];
-    adapter.onStatus(status => statuses.push(status));
-    adapter.onChange(height => heights.push(height));
-
-    const connectPromise = adapter.connect({
+    const firstConnect = adapter.connect({
       mode: 'remote',
-      wsUrl: 'ws://runtime-adapter.invalid/rpc',
-      authKey: 'token',
-      reconnectMaxMs: 1_000,
+      wsUrl: 'ws://localhost/rpc',
+      authKey: 'first-token',
+      ownerBindingSigner: async () => {
+        markFirstSignerStarted();
+        await new Promise<void>(resolve => { releaseFirstSigner = resolve; });
+        return '0x01';
+      },
       requestTimeoutMs: 1_000,
     });
+    await firstSignerStarted;
 
-    await new Promise(resolve => setTimeout(resolve, 5));
-    expect(adapter.status).toBe('connecting');
-    expect(statuses).not.toContain('connected');
-
-    await connectPromise;
-    expect(adapter.status).toBe('connected');
-    expect(adapter.authLevel).toBe('inspect');
-    expect(adapter.currentHeight).toBe(10);
-    expect(adapter.commandReady).toBe(true);
-    expect(adapter.commandReadyReason).toBe(null);
-
-    socket?.onmessage?.({
-      data: encodeRuntimeAdapterMessage({
-        v: 1,
-        op: 'tick',
-        height: 2,
-        commandReady: false,
-        commandReadyReason: 'phase=halted',
-      }),
+    await adapter.connect({
+      mode: 'remote',
+      wsUrl: 'ws://localhost/rpc',
+      authKey: 'second-token',
+      requestTimeoutMs: 1_000,
     });
-    expect(adapter.currentHeight).toBe(2);
-    expect(adapter.commandReady).toBe(false);
-    expect(adapter.commandReadyReason).toBe('phase=halted');
-    expect(heights).toContain(2);
-    const sendsBeforeRejectedCommands = transportSendCount;
-    expect(() =>
-      adapter.send({ runtimeTxs: [], entityInputs: [] }, { commandId: 'command-halted-0001', commandSequence: 1 }),
-    ).toThrow('RUNTIME_COMMAND_NOT_READY:phase=halted');
-    expect(() => adapter.submitCrossJurisdictionIntent({} as CrossJurisdictionSwapRoute)).toThrow(
-      'RUNTIME_COMMAND_NOT_READY:phase=halted',
-    );
-    expect(transportSendCount).toBe(sendsBeforeRejectedCommands);
-    socket?.onclose?.();
-    expect(adapter.status).toBe('error');
-    expect(adapter.authLevel).toBe('inspect');
-    expect(adapter.commandReady).toBe(false);
-    expect(adapter.commandReadyReason).toBe('adapter-error');
+    expect(adapter.status).toBe('connected');
+    expect(adapter.authLevel).toBe('admin');
+    expect(adapter.currentHeight).toBe(12);
+    expect(sockets).toHaveLength(2);
+
+    releaseFirstSigner();
+    await expect(firstConnect).rejects.toThrow('runtime adapter is not connected');
+    expect(adapter.status).toBe('connected');
+    expect(adapter.authLevel).toBe('admin');
+    expect(sockets[1]?.readyState).toBe(SupersededAttemptWebSocket.OPEN);
     adapter.disconnect();
-    expect(adapter.authLevel).toBe(null);
   } finally {
     (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = previousWebSocket;
   }

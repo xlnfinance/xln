@@ -101,9 +101,13 @@
   async function generateRandomMnemonic(): Promise<void> {
     // Generate 256 bits of entropy for 24-word mnemonic
     const entropy = new Uint8Array(32);
-    crypto.getRandomValues(entropy);
-    mnemonicInput = await entropyToMnemonic(entropy);
-    derivationError = '';
+    try {
+      crypto.getRandomValues(entropy);
+      mnemonicInput = await entropyToMnemonic(entropy);
+      derivationError = '';
+    } finally {
+      entropy.fill(0);
+    }
   }
 
   // ============================================================================
@@ -134,6 +138,11 @@
   function selectInputMode(next: InputMode): void {
     if (phase !== 'input') return;
     if (rehearsalMode !== null && next !== rehearsalMode) return;
+    if (next !== inputMode) {
+      if (inputMode === 'brainvault') passphrase = '';
+      if (inputMode === 'mnemonic') mnemonicInput = '';
+      showPassphrase = false;
+    }
     inputMode = next;
     if (next !== 'testnet' || liveRuntimesLoaded || liveRuntimesLoading) return;
     if (isScenarioPreview()) {
@@ -333,6 +342,7 @@
   let nodeDerivationResult: RuntimeAdapterBrainVaultResult | null = null;
   let revealedNodeMnemonic = '';
   let revealingNodeMnemonic = false;
+  let nodeRevealRunToken = 0;
 
   const isCurrentDerivationRun = (run: BrainVaultDerivationRun): boolean =>
     derivationRun === run && phase === 'deriving';
@@ -623,6 +633,7 @@
         entityId = runtime.signers[0]?.entityId || entityId;
       }
       createLoginType = 'manual';
+      clearSensitiveWalletMaterial();
       vaultUiOperations.hideVault();
       if (!embedded) {
         appStateOperations.setMode('user');
@@ -631,6 +642,7 @@
       return true;
     } catch (err) {
       logRuntimeCreationDiagnostic('Failed to create XLN wallet', err);
+      clearSensitiveWalletMaterial();
       derivationError = err instanceof Error ? err.message : 'Failed to create XLN wallet';
       phase = 'input';
       return false;
@@ -814,16 +826,42 @@
     phase = 'input';
   }
 
+  function invalidateNodeReveal(): void {
+    nodeRevealRunToken += 1;
+    revealedNodeMnemonic = '';
+    revealingNodeMnemonic = false;
+  }
+
+  function wipeShardResults(): void {
+    for (const shard of shardResults.values()) shard.fill(0);
+    shardResults.clear();
+    shardResults = new Map();
+  }
+
   function clearDerivedWalletMaterial(): void {
+    derivationRun = null;
     mnemonic24 = '';
     mnemonic12 = '';
     devicePassphrase = '';
     ethereumAddress = '';
     entityId = '';
-    shardResults = new Map();
+    wipeShardResults();
     shardsCompleted = 0;
     nodeDerivationResult = null;
-    revealedNodeMnemonic = '';
+    invalidateNodeReveal();
+  }
+
+  function clearSensitiveWalletMaterial(): void {
+    passphrase = '';
+    mnemonicInput = '';
+    showPassphrase = false;
+    clearDerivedWalletMaterial();
+  }
+
+  function closeWalletEntry(): void {
+    if (creatingRuntime) return;
+    reset();
+    vaultUiOperations.hideVault();
   }
 
   function beginRecoveryRehearsal(mode: RecoveryRehearsalMode, address: string): void {
@@ -867,6 +905,7 @@
   }
 
   function cancelRecoveryRehearsal(): void {
+    clearSensitiveWalletMaterial();
     rehearsalEnabled = false;
     rehearsalMode = null;
     rehearsalExpectedAddress = '';
@@ -975,6 +1014,7 @@
           throw new Error('Enter exactly 12 or 24 BIP39 words.');
         }
         mnemonic24 = cleanMnemonic;
+        mnemonicInput = '';
         // Imported mnemonic is canonical as entered; no extra compatibility phrase.
         mnemonic12 = '';
 
@@ -987,6 +1027,7 @@
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to import mnemonic';
         logRuntimeCreationDiagnostic('Mnemonic import failed', err);
+        clearSensitiveWalletMaterial();
         derivationError = message;
         phase = 'input';
       }
@@ -1005,6 +1046,8 @@
       factor,
     }) satisfies BrainVaultDerivationRun;
     derivationRun = run;
+    invalidateNodeReveal();
+    nodeDerivationResult = null;
     shardCount = run.shardCount;
     const initialUsableCap = Math.max(1, Math.min(maxWorkers, shardCount));
     let initialWorkers = Math.min(effectiveTargetWorkerCount, initialUsableCap);
@@ -1017,7 +1060,7 @@
     retryShardQueue = [];
     shardRetryCounts.clear();
     shardsCompleted = 0;
-    shardResults = new Map();
+    wipeShardResults();
 
     if (derivesBrainVaultOnNode) {
       await startNodeDerivation(run);
@@ -1110,6 +1153,7 @@
   }
 
   async function startNodeDerivation(run: BrainVaultDerivationRun): Promise<void> {
+    invalidateNodeReveal();
     const adapter = getRuntimeControllerAdapter();
     if (!adapter || adapter.mode !== 'remote' || adapter.status !== 'connected') {
       failDerivation('The selected node is not connected. Reconnect it before BrainVault recovery.');
@@ -1178,23 +1222,33 @@
 
   async function revealNodeMnemonic(): Promise<void> {
     const adapter = getRuntimeControllerAdapter();
-    if (!adapter || adapter.mode !== 'remote') {
+    const expectedResult = nodeDerivationResult;
+    if (!adapter || adapter.mode !== 'remote' || phase !== 'node-ready' || !expectedResult) {
       derivationError = 'The node is no longer connected.';
       return;
     }
+    const runToken = ++nodeRevealRunToken;
+    const isCurrentReveal = (): boolean =>
+      runToken === nodeRevealRunToken
+      && phase === 'node-ready'
+      && nodeDerivationResult === expectedResult
+      && getRuntimeControllerAdapter() === adapter;
     revealingNodeMnemonic = true;
     derivationError = '';
     try {
-      revealedNodeMnemonic = (await adapter.revealBrainVaultMnemonic()).mnemonic24;
+      const recovery = await adapter.revealBrainVaultMnemonic();
+      if (!isCurrentReveal()) return;
+      revealedNodeMnemonic = recovery.mnemonic24;
     } catch (err) {
+      if (!isCurrentReveal()) return;
       derivationError = err instanceof Error ? err.message : String(err);
     } finally {
-      revealingNodeMnemonic = false;
+      if (runToken === nodeRevealRunToken) revealingNodeMnemonic = false;
     }
   }
 
   function finishNodeWallet(): void {
-    revealedNodeMnemonic = '';
+    clearSensitiveWalletMaterial();
     vaultUiOperations.hideVault();
     if (!embedded) {
       appStateOperations.setMode('user');
@@ -1299,36 +1353,76 @@
   async function finalizeDeriv() {
     const run = derivationRun;
     if (!run) throw new Error('BRAINVAULT_DERIVATION_RUN_MISSING');
+    const runShardResults = shardResults;
+    const isCurrentRun = (): boolean => isCurrentDerivationRun(run);
+    const wipeRunShards = (): void => {
+      for (const shard of runShardResults.values()) shard.fill(0);
+      runShardResults.clear();
+      if (shardResults === runShardResults) shardResults = new Map();
+    };
     terminateWorkers();
 
     // Collect results in order
     const orderedResults: Uint8Array[] = [];
-    for (let i = 0; i < shardCount; i++) {
-      const shard = shardResults.get(i);
+    for (let i = 0; i < run.shardCount; i++) {
+      const shard = runShardResults.get(i);
       if (!shard) throw new Error(`Missing shard ${i}`);
       orderedResults.push(shard);
     }
 
-    const masterKey = await combineShards(orderedResults, run.factor);
+    let masterKey: Uint8Array | null = null;
+    let entropy: Uint8Array | null = null;
+    let entropy12: Uint8Array | null = null;
+    let deviceKey: Uint8Array | null = null;
+    try {
+      masterKey = await combineShards(orderedResults, run.factor);
+      if (!isCurrentRun()) return;
+      wipeRunShards();
 
-    // Derive BIP39 mnemonic (24 words)
-    const entropy = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
-    mnemonic24 = await entropyToMnemonic(entropy);
-    const entropy12 = await deriveKey(masterKey, 'bip39/entropy-128/v1.0', 16);
-    mnemonic12 = await entropyToMnemonic(entropy12);
+      entropy = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
+      if (!isCurrentRun()) return;
+      const nextMnemonic24 = await entropyToMnemonic(entropy);
+      if (!isCurrentRun()) return;
+      entropy12 = await deriveKey(masterKey, 'bip39/entropy-128/v1.0', 16);
+      if (!isCurrentRun()) return;
+      const nextMnemonic12 = await entropyToMnemonic(entropy12);
+      if (!isCurrentRun()) return;
 
-    // Derive device passphrase
-    const deviceKey = await deriveKey(masterKey, 'bip39/passphrase/v1.0', 32);
-    devicePassphrase = bytesToHex(deviceKey);
+      deviceKey = await deriveKey(masterKey, 'bip39/passphrase/v1.0', 32);
+      if (!isCurrentRun()) return;
+      const nextDevicePassphrase = bytesToHex(deviceKey);
 
-    // Derive Ethereum address using the standard path (m/44'/60'/0'/0/0)
-    ethereumAddress = await deriveEthereumAddress(mnemonic24);
-    // Entity ID is a lazy entity ID for a single-signer quorum (matches runtime algorithm)
-    entityId = generateLazyEntityIdPreview([ethereumAddress], 1n);
+      const nextEthereumAddress = await deriveEthereumAddress(nextMnemonic24);
+      if (!isCurrentRun()) return;
+      const nextEntityId = generateLazyEntityIdPreview([nextEthereumAddress], 1n);
 
-    if (!acceptRecoveryRehearsal('brainvault', ethereumAddress)) return;
-    if (await prepareRecoveryDecisionFromCurrentSeed(run.name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`)) {
-      await continueAfterRecoveryDiscovery();
+      // Commit derived strings together only after every async crypto step
+      // still belongs to the active run. Cancel/reset may start another run
+      // while a WebCrypto promise is pending; partial global writes here would
+      // otherwise resurrect the cancelled wallet or erase the new one.
+      mnemonic24 = nextMnemonic24;
+      mnemonic12 = nextMnemonic12;
+      devicePassphrase = nextDevicePassphrase;
+      ethereumAddress = nextEthereumAddress;
+      entityId = nextEntityId;
+      passphrase = '';
+      derivationRun = null;
+
+      if (!acceptRecoveryRehearsal('brainvault', ethereumAddress)) return;
+      if (await prepareRecoveryDecisionFromCurrentSeed(run.name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`)) {
+        await continueAfterRecoveryDiscovery();
+      }
+    } finally {
+      masterKey?.fill(0);
+      entropy?.fill(0);
+      entropy12?.fill(0);
+      deviceKey?.fill(0);
+      for (const shard of orderedResults) shard.fill(0);
+      wipeRunShards();
+      if (derivationRun === run) {
+        passphrase = '';
+        derivationRun = null;
+      }
     }
   }
 
@@ -1394,34 +1488,25 @@
     phase = 'input';
     terminateWorkers();
     resetRecoveryDecision();
+    derivationError = '';
     workerLimitNotice = '';
     createLoginType = 'manual';
-    derivationRun = null;
     rehearsalEnabled = false;
     rehearsalMode = null;
     rehearsalExpectedAddress = '';
     rehearsalFactorConfirmed = true;
     showAdvanced = false;
-    // Keep name and passphrase for convenience
-    mnemonic24 = '';
-    mnemonic12 = '';
-    devicePassphrase = '';
-    ethereumAddress = '';
-    entityId = '';
-    nodeDerivationResult = null;
-    revealedNodeMnemonic = '';
-    revealingNodeMnemonic = false;
+    clearSensitiveWalletMaterial();
     nodeShardTimeMs = 0;
     creatingRuntime = false;
     shardsCompleted = 0;
-    shardResults = new Map();
   }
 
   onDestroy(() => {
     recoveryRunToken += 1;
     nodeDerivationAbort?.abort();
     nodeDerivationAbort = null;
-    revealedNodeMnemonic = '';
+    clearSensitiveWalletMaterial();
     clearLiveRuntimeDiscoveryRetry();
     terminateWorkers();
   });
@@ -1529,7 +1614,7 @@
         {#if embedded && savedVaults.length > 0}
           <div class="creation-context-bar">
             <div class="creation-context-copy">Create another wallet</div>
-            <button type="button" class="back-to-create" on:click={() => vaultUiOperations.hideVault()}>
+            <button type="button" class="back-to-create" on:click={closeWalletEntry}>
               Back to wallet
             </button>
           </div>
@@ -2150,7 +2235,7 @@
               spellcheck="false"
             ></textarea>
             <p class="warning-text">Mnemonic is now present in this tab. Hide it before screen sharing or remote access.</p>
-            <button type="button" class="backup-upload-btn" on:click={() => revealedNodeMnemonic = ''}>Hide mnemonic</button>
+            <button type="button" class="backup-upload-btn" on:click={invalidateNodeReveal}>Hide mnemonic</button>
           {:else}
             <button
               type="button"

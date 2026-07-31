@@ -71,6 +71,7 @@ import {
   type RelaySocket,
 } from './relay-direct';
 import { createServerRpcMessageHandler } from './rpc-ws';
+import { dispatchRuntimeRpcAfterStartup } from './rpc-startup-gate';
 import {
   buildRuntimeJurisdictionsJson,
   readCanonicalJurisdictionsJson,
@@ -917,16 +918,27 @@ const handleWebSocketMessage = (
   try {
     if (wsType === 'rpc') {
       const request = decodeRuntimeAdapterRequest(message);
-      Promise.resolve(handleRpcMessage(ws, request, session.env)).catch(error => {
-        const reason = getErrorMessage(error);
-        serverLog.error('ws.rpc_handler_error', { reason, op: request.op });
-        pushDebugEvent(relayStore, {
-          event: 'error',
-          reason: 'RPC_HANDLER_EXCEPTION',
-          details: { error: reason, op: request.op },
+      // The HTTP listener is intentionally bound before Runtime recovery, but
+      // authenticated RPC must not observe the half-restored owner or enqueue
+      // work while WAL/J/bootstrap recovery is still in progress. Holding every
+      // RPC message behind the boot barrier also ensures a socket opened early
+      // gets its ticker attached to the final Runtime replica.
+      void dispatchRuntimeRpcAfterStartup(
+        serverStartupBarrier,
+        () => serverBootPhase === 'ready' ? session.env : null,
+        env => attachRuntimeAdapterTicker(env, registerEnvChangeCallback),
+        env => handleRpcMessage(ws, request, env),
+      )
+        .catch(error => {
+          const reason = getErrorMessage(error);
+          serverLog.error('ws.rpc_handler_error', { reason, op: request.op });
+          pushDebugEvent(relayStore, {
+            event: 'error',
+            reason: 'RPC_HANDLER_EXCEPTION',
+            details: { error: reason, op: request.op },
+          });
+          closeInvalidRuntimeAdapterMessage(ws, error);
         });
-        closeInvalidRuntimeAdapterMessage(ws, error);
-      });
       return;
     }
 

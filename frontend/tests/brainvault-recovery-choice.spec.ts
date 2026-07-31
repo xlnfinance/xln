@@ -63,6 +63,8 @@ test.describe('Recovery choice guidance', () => {
     await expect(page.getByRole('button', { name: 'Verify recovery', exact: true })).toBeEnabled();
     await page.waitForTimeout(250);
     await page.screenshot({ path: testInfo.outputPath('rehearsal-ready.png'), fullPage: true });
+    await page.getByRole('button', { name: 'Cancel rehearsal', exact: true }).click();
+    await expect(page.getByLabel('Secret passphrase')).toHaveValue('');
   });
 
   test('wallet tabs follow the keyboard tab pattern', { tag: '@functional' }, async ({ page }) => {
@@ -75,6 +77,17 @@ test.describe('Recovery choice guidance', () => {
     await expect(mnemonicTab).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Home');
     await expect(brainVaultTab).toBeFocused();
+  });
+
+  test('wallet mode navigation drops secret inputs', { tag: '@functional' }, async ({ page }) => {
+    await page.goto(TEST_URL);
+    await page.getByLabel('Secret passphrase').fill('secret123456');
+    await page.getByRole('tab', { name: 'Mnemonic', exact: true }).click();
+    await page.getByLabel('Seed phrase').fill(TEST_MNEMONIC);
+    await page.getByRole('tab', { name: 'Brain Vault', exact: true }).click();
+    await expect(page.getByLabel('Secret passphrase')).toHaveValue('');
+    await page.getByRole('tab', { name: 'Mnemonic', exact: true }).click();
+    await expect(page.getByLabel('Seed phrase')).toHaveValue('');
   });
 
   test('rejects a stale cached worker before deriving', { tag: '@functional' }, async ({ page }) => {
@@ -126,6 +139,8 @@ test.describe('Recovery choice guidance', () => {
 
     await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.getByLabel('Secret passphrase')).toHaveValue('');
+    await page.getByLabel('Secret passphrase').fill('secret123456');
     await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
 
     await page.waitForTimeout(1_300);

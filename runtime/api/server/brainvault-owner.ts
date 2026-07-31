@@ -10,7 +10,8 @@
  */
 
 import { availableParallelism, totalmem } from 'node:os';
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import { getBytes } from 'ethers';
 import {
@@ -27,6 +28,10 @@ import type {
   RuntimeAdapterBrainVaultRecovery,
   RuntimeAdapterBrainVaultResult,
 } from '../runtime-adapter/types';
+import {
+  fsyncStorageParentDirectory,
+  type StorageDurabilityOptions,
+} from '../../storage/fs-durability';
 
 type StoredBrainVaultOwner = Readonly<{
   version: 1;
@@ -55,6 +60,8 @@ type BrainVaultOwnerControllerDeps = Readonly<{
   enqueue: (env: RuntimeReplica, input: RuntimeInput) => void;
   onFrameCommit: (env: RuntimeReplica, callback: (height: number) => void) => () => void;
   timeoutMs: number;
+  /** Fault-boundary injection for real filesystem durability tests. */
+  durability?: StorageDurabilityOptions;
 }>;
 
 const normalizeStoredOwner = async (value: unknown): Promise<StoredBrainVaultOwner> => {
@@ -84,12 +91,58 @@ const readOwner = async (path: string): Promise<StoredBrainVaultOwner | null> =>
   }
 };
 
-const persistOwner = (path: string, owner: StoredBrainVaultOwner): void => {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(owner)}\n`, { mode: 0o600, flag: 'wx' });
-  renameSync(temporary, path);
-  chmodSync(path, 0o600);
+const requireOwnerParentDurable = async (
+  path: string,
+  durability: StorageDurabilityOptions = {},
+): Promise<void> => {
+  const result = await fsyncStorageParentDirectory(path, durability);
+  if (result.status === 'unsupported') {
+    throw new Error(`BRAINVAULT_OWNER_DIRECTORY_FSYNC_UNSUPPORTED:${result.code}`);
+  }
+};
+
+/**
+ * Publish the custody secret only after its complete body is durable.
+ *
+ * A fixed temp name makes one interrupted write permanently block recovery;
+ * renaming before fsync can publish a torn owner after power loss; and omitting
+ * the parent-directory fsync can lose the rename itself. A random same-folder
+ * temp plus write -> file fsync -> rename -> directory fsync closes all three
+ * failure windows while keeping the final file atomic and mode 0600.
+ */
+const persistOwner = async (
+  path: string,
+  owner: StoredBrainVaultOwner,
+  durability: StorageDurabilityOptions = {},
+): Promise<void> => {
+  const fs = await import('node:fs/promises');
+  const parent = dirname(path);
+  await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    const file = await fs.open(temporary, 'wx', 0o600);
+    try {
+      await file.chmod(0o600);
+      await file.writeFile(`${JSON.stringify(owner)}\n`, { encoding: 'utf8' });
+      await durability.onBoundary?.('after-file-write');
+      await (durability.syncFile ?? (handle => handle.sync()))(file);
+      await durability.onBoundary?.('after-file-sync');
+    } finally {
+      await file.close();
+    }
+    await fs.rename(temporary, path);
+    await durability.onBoundary?.('after-file-rename');
+    await requireOwnerParentDurable(path, durability);
+  } catch (error) {
+    try {
+      await fs.unlink(temporary);
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+        throw new AggregateError([error, cleanupError], 'BRAINVAULT_OWNER_PERSIST_AND_CLEANUP_FAILED');
+      }
+    }
+    throw error;
+  }
 };
 
 const nativeWorkerCap = (requested: number): number => {
@@ -102,7 +155,16 @@ export const createBrainVaultOwnerController = (
 ): BrainVaultOwnerController => {
   // One node has exactly one owner slot. Serialize it across admin sockets so
   // two expensive recoveries cannot race the no-overwrite custody decision.
-  let derivationActive = false;
+  let ownerOperationActive = false;
+  const runOwnerOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (ownerOperationActive) throw new Error('BRAINVAULT_OWNER_OPERATION_PENDING');
+    ownerOperationActive = true;
+    try {
+      return await operation();
+    } finally {
+      ownerOperationActive = false;
+    }
+  };
   const requirePath = (): string => {
     const path = String(deps.path || '').trim();
     if (!path) throw new Error('BRAINVAULT_OWNER_PATH_NOT_CONFIGURED');
@@ -140,9 +202,7 @@ export const createBrainVaultOwnerController = (
 
   return {
     async deriveAndInstall(env, input, options) {
-      if (derivationActive) throw new Error('BRAINVAULT_OWNER_DERIVATION_PENDING');
-      derivationActive = true;
-      try {
+      return runOwnerOperation(async () => {
         if (input.specId !== BRAINVAULT_V1_SPEC_ID) {
           throw new Error(`BRAINVAULT_SPEC_MISMATCH:${input.specId}:${BRAINVAULT_V1_SPEC_ID}`);
         }
@@ -162,7 +222,8 @@ export const createBrainVaultOwnerController = (
         if (existing && existing.ethereumAddress !== stored.ethereumAddress) {
           throw new Error(`BRAINVAULT_OWNER_ALREADY_CONFIGURED:${existing.ethereumAddress}`);
         }
-        if (!existing) persistOwner(path, stored);
+        if (existing) await requireOwnerParentDurable(path, deps.durability);
+        else await persistOwner(path, stored, deps.durability);
         const installed = await install(env, existing ?? stored);
         return {
           specId: result.specId,
@@ -176,9 +237,7 @@ export const createBrainVaultOwnerController = (
           created: installed.created,
           height: installed.height,
         };
-      } finally {
-        derivationActive = false;
-      }
+      });
     },
 
     async revealMnemonic() {
@@ -188,8 +247,10 @@ export const createBrainVaultOwnerController = (
     },
 
     async prewarm(runtimeSeed) {
-      const owner = await readOwner(requirePath());
+      const path = requirePath();
+      const owner = await readOwner(path);
       if (!owner) return false;
+      await requireOwnerParentDurable(path, deps.durability);
       // WAL replay can contain signed Entity inputs for this owner. Registering
       // after main() is too late: replay correctly fails on a missing key.
       await registerStoredSigner(runtimeSeed, owner);
@@ -197,21 +258,25 @@ export const createBrainVaultOwnerController = (
     },
 
     async restore(env) {
-      const owner = await readOwner(requirePath());
-      if (!owner) return null;
-      const installed = await install(env, owner);
-      return {
-        specId: owner.specId,
-        backend: 'native-node',
-        shardCount: 0,
-        factor: 0,
-        workers: 0,
-        derivationTimeMs: 0,
-        ethereumAddress: owner.ethereumAddress,
-        entityId: installed.entityId,
-        created: installed.created,
-        height: installed.height,
-      };
+      return runOwnerOperation(async () => {
+        const path = requirePath();
+        const owner = await readOwner(path);
+        if (!owner) return null;
+        await requireOwnerParentDurable(path, deps.durability);
+        const installed = await install(env, owner);
+        return {
+          specId: owner.specId,
+          backend: 'native-node',
+          shardCount: 0,
+          factor: 0,
+          workers: 0,
+          derivationTimeMs: 0,
+          ethereumAddress: owner.ethereumAddress,
+          entityId: installed.entityId,
+          created: installed.created,
+          height: installed.height,
+        };
+      });
     },
   };
 };
