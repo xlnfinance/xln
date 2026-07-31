@@ -127,21 +127,21 @@ const CORE_FILES = {
     'extensions/lending.ts',                              // Hub lending pool math, terms, ids, memos
     'types/lending.ts',                        // Lending pool/loan state model
     'entity/tx/handlers/lending.ts',           // Lending offer/borrow/repay entity tx handlers
-    'server/lending.ts',                       // Hub lending API handlers
+    'api/server/lending.ts',                   // Hub lending API handlers
     'account/tx/handlers/swap-offer.ts',     // Account-level swap offer placement
     'account/tx/handlers/swap-resolve.ts',   // Swap settlement / hashladder resolution
     'account/tx/handlers/swap-cancel.ts',    // Swap cancellation
     'account/tx/handlers/cross-swap-fill-ack.ts', // Cross-j fill acknowledgement processing
     'orderbook/cross-j.ts',                  // Cross-j book types and conversion helpers
-    'relay/market-snapshot.ts',                    // Market snapshot projection
-    'relay/market-subscriptions.ts',         // Orderbook streaming subscriptions
-    'relay/market-subscription-limiter.ts',        // Stream rate limiting
+    'network/relay/market-snapshot.ts',            // Market snapshot projection
+    'network/relay/market-subscriptions.ts',       // Orderbook streaming subscriptions
+    'network/relay/market-subscription-limiter.ts', // Stream rate limiting
     'orchestrator/mm-node.ts',               // Market maker bootstrap, quote loop, cross books
-    'server/market-maker-health.ts',         // Health/self-test contract for MM books
+    'api/server/market-maker-health.ts',     // Health/self-test contract for MM books
     'orchestrator/mesh-common.ts',           // Bootstrap defaults for hubs/MM/accounts
     'protocol/dispute/arguments.ts',                  // Dispute argument builder/evidence inclusion
     'watchtower/action.ts',                  // Watchtower action decisions
-    'server/watchtower-proxy.ts',            // Runtime watchtower proxy API
+    'api/server/watchtower-proxy.ts',        // Runtime watchtower proxy API
 
     'account/tx/apply.ts',   // Account transaction dispatcher
     'account/tx/handlers/add-delta.ts', // Delta addition (payment processing)
@@ -327,18 +327,18 @@ const CROSS_FILES = {
     'orderbook/core.ts',
     'orderbook/cross-j.ts',
     'orderbook/validity.ts',
-    'relay/market-snapshot.ts',
-    'relay/market-subscription-limiter.ts',
-    'relay/market-subscriptions.ts',
+    'network/relay/market-snapshot.ts',
+    'network/relay/market-subscription-limiter.ts',
+    'network/relay/market-subscriptions.ts',
     'orchestrator/mm-node.ts',
     'orchestrator/mesh-common.ts',
     'orchestrator/mesh-jurisdictions.ts',
     'orchestrator/jurisdictions.ts',
-    'server/market-maker-health.ts',
-    'server/jurisdictions.ts',
+    'api/server/market-maker-health.ts',
+    'api/server/jurisdictions.ts',
     'protocol/dispute/arguments.ts',
     'watchtower/action.ts',
-    'server/watchtower-proxy.ts',
+    'api/server/watchtower-proxy.ts',
   ],
   docs: [
     'readme.md',
@@ -525,12 +525,12 @@ const ORDERBOOK_FILES = {
     'orderbook/core.ts',
     'orderbook/cross-j.ts',
     'orderbook/validity.ts',
-    'relay/market-snapshot.ts',
-    'relay/market-subscription-limiter.ts',
-    'relay/market-subscriptions.ts',
+    'network/relay/market-snapshot.ts',
+    'network/relay/market-subscription-limiter.ts',
+    'network/relay/market-subscriptions.ts',
     'orchestrator/mm-node.ts',
     'orchestrator/mm-transport.ts',
-    'server/market-maker-health.ts',
+    'api/server/market-maker-health.ts',
   ],
   docs: [
     'status.md',
@@ -596,8 +596,8 @@ const SWAP_FILES = {
     'orderbook/types.ts',
     'orderbook/core.ts',
     'orderbook/validity.ts',
-    'relay/market-snapshot.ts',
-    'server/market-maker-health.ts',
+    'network/relay/market-snapshot.ts',
+    'api/server/market-maker-health.ts',
   ]),
   docs: [
     'status.md',
