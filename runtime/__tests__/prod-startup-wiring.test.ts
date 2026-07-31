@@ -8,6 +8,8 @@ import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '
 import { expandPlaywrightTargets } from '../scripts/run-e2e-parallel-isolated';
 
 const repoRoot = process.cwd();
+const readPlatformDeploy = (): string =>
+  readFileSync(join(repoRoot, 'scripts/deployment/deploy-platform.sh'), 'utf8');
 
 const readMarketMakerNodeModule = (file: string): string =>
   readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8');
@@ -39,11 +41,7 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 
 describe('production startup wiring', () => {
   test('public direct runtime ports expose only websocket transport routes', () => {
-    const sources = [
-      readFileSync(join(repoRoot, 'deploy.sh'), 'utf8'),
-      readFileSync(join(repoRoot, 'scripts/deployment/setup-server-bun.sh'), 'utf8'),
-      readFileSync(join(repoRoot, 'scripts/deployment/setup-server.sh'), 'utf8'),
-    ];
+    const sources = [readPlatformDeploy()];
 
     for (const source of sources) {
       expect(source).toContain('location = /rpc {');
@@ -51,9 +49,6 @@ describe('production startup wiring', () => {
       expect(source).toContain('return 404;');
       expect(source).not.toMatch(/listen 809[0-3][^}]+location \/ \{\s+proxy_pass/s);
     }
-    expect(sources[2]).not.toContain('proxy_set_header Upgrade \\$http_upgrade;');
-    expect(sources[2]).not.toContain('proxy_set_header Host \\$host;');
-
     for (const source of [
       readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
       readMarketMakerNodeSource(),
@@ -260,7 +255,7 @@ describe('production startup wiring', () => {
   });
 
   test('production frontend deploy builds off-host and uploads a complete artifact', () => {
-    const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const deploy = readPlatformDeploy();
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
@@ -274,10 +269,14 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('scp "$PREBUILT_FRONTEND_ARCHIVE" "$REMOTE_HOST:$remote_frontend_archive"');
     expect(deploy).toContain("tar -xzf '$remote_frontend_archive' -C frontend");
     expect(deploy).toContain(
-      'remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./deploy.sh --runtime-only"',
+      'remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./scripts/deployment/deploy-platform.sh --runtime-only"',
     );
     expect(deploy).toContain('if [ "${XLN_DEPLOY_USE_COMMITTED_CONTRACTS:-0}" = "1" ]');
     expect(deploy).toContain('PRODUCTION_FRONTEND_BUILD_FORBIDDEN');
+    expect(deploy).toContain('if [ "$BUILD_FRONTEND" = "1" ]; then');
+    expect(deploy).not.toContain('|| [ ! -d frontend/build ]');
+    expect(deploy).toContain('PRODUCTION_FRONTEND_ARTIFACT_MISSING');
+    expect(deploy).toContain('DEPLOY_PUSH_REQUIRES_REMOTE');
     expect(deploy).not.toContain('remote_cmd="$remote_cmd --frontend"');
     expect(deploy).toContain('frontend artifact installed without runtime restart');
     expect(packageJson.scripts['deploy:prod:frontend']).toContain('--frontend-only');
@@ -289,7 +288,7 @@ describe('production startup wiring', () => {
       'utf8',
     );
     const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
-    const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const deploy = readPlatformDeploy();
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
 
@@ -1311,7 +1310,7 @@ describe('production startup wiring', () => {
   });
 
   test('deploy starts and checks the production Tron chain', () => {
-    const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const deploy = readPlatformDeploy();
     const startServer = readFileSync(join(repoRoot, 'scripts/start-server.sh'), 'utf8');
     const bootstrapMonitor = readFileSync(join(repoRoot, 'scripts/watch-prod-bootstrap.ts'), 'utf8');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
@@ -2496,7 +2495,7 @@ describe('production startup wiring', () => {
   });
 
   test('fresh deploy stops runtime processes before deleting runtime state', () => {
-    const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const deploy = readPlatformDeploy();
     const stopIndex = deploy.indexOf('pm2 delete xln-server');
     const deleteIndex = deploy.indexOf('rm -rf "$XLN_RDB_ROOT/runtime/prod-main"');
     expect(stopIndex).toBeGreaterThan(0);

@@ -418,7 +418,7 @@ export type QaShardFailureInput = Pick<QaShardManifest, 'status' | 'error' | 'lo
 
 // QA run evidence (per-run artifacts + the history DB) lives under QA_EVIDENCE_ROOT so
 // it can be pinned to a persistent location on prod — outside the git checkout that
-// deploy.sh hard-resets/cleans — while defaulting to the local .logs dir for dev.
+// the canonical platform deploy hard-resets/cleans — while defaulting to local .logs for dev.
 // Curated story screenshots stay tracked in-repo and ship with the code deploy, so
 // their root is intentionally left relative to the checkout.
 export const QA_EVIDENCE_ROOT = process.env['QA_EVIDENCE_ROOT']
@@ -530,4 +530,3 @@ export type QaUxReleasePackAudit = {
 import { resolve } from 'node:path';
 import type { QaCandidateIdentity } from './candidate';
 import type { QaSeveritySignal } from './severity';
-

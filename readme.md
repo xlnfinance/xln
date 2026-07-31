@@ -199,8 +199,6 @@ bun run build            # Build runtime.js for browser
 
 # Jurisdictions (Contracts)
 bun run env:build        # Compile Solidity
-bun run env:deploy       # Deploy to local network
-bun run dev:reset        # Reset all networks + redeploy
 
 # Frontend
 cd frontend && bun run dev      # Vite dev server

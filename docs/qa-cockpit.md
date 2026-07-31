@@ -11,7 +11,7 @@ The QA cockpit is a read-only dashboard for browsing e2e test evidence: run hist
 
 ## Storage layout
 
-Defined in `runtime/qa/report.ts`. Roots derive from `QA_EVIDENCE_ROOT` (default `./.logs`; prod = `/root/xln-qa-evidence`, set by `scripts/start-server.sh` via checkout-path detection so it lives **outside** the git checkout that `deploy.sh` hard-resets):
+Defined in `runtime/qa/report.ts`. Roots derive from `QA_EVIDENCE_ROOT` (default `./.logs`; prod = `/root/xln-qa-evidence`, set by `scripts/start-server.sh` via checkout-path detection so it lives **outside** the git checkout that `bun run deploy` hard-resets):
 
 - `QA_LOGS_ROOT` = `$QA_EVIDENCE_ROOT/e2e-parallel/<runId>/` — per-run artifacts (videos, traces, shard logs, screenshots)
 - `QA_HISTORY_DB_PATH` = `$QA_EVIDENCE_ROOT/qa-history.sqlite` — the run index behind the runs list
@@ -39,6 +39,6 @@ Evidence Summary · Evidence Playlist + Artifacts Below Playback · Application 
 
 ## Notes
 
-- Evidence survives `deploy.sh --fresh` because the prod root is outside the `/root/xln` checkout.
+- Evidence survives `bun run deploy:fresh` because the prod root is outside the `/root/xln` checkout.
 - Curated screenshots deploy with code; videos/run artifacts deploy with `deploy:qa`.
 - Videos exist only for **failed** runs under `retain-on-failure`.

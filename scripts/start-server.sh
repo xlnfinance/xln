@@ -87,8 +87,8 @@ export ANVIL_TMPDIR=${ANVIL_TMPDIR:-${XLN_JDB_ROOT:-$REPO_ROOT/data}/tmp}
 export PATH="${HOME}/.bun/bin:$PATH"
 export XLN_MIN_DISK_FREE_BYTES=${XLN_MIN_DISK_FREE_BYTES:-$((5 * 1024 * 1024 * 1024))}
 
-# QA evidence root: persistent on prod (outside the /root/xln checkout that deploy.sh
-# hard-resets + git-cleans on every deploy), and the local .logs dir for dev. Detected
+# QA evidence root: persistent on prod (outside the /root/xln checkout that the
+# canonical platform deploy hard-resets + git-cleans), and the local .logs dir for dev. Detected
 # by checkout path so the same script works on the Mac and on the server. Run artifacts
 # + the history DB are uploaded here by scripts/deploy-qa-evidence.sh (bun run deploy:qa),
 # decoupled from the code deploy.

@@ -1,8 +1,87 @@
-#!/bin/bash
-set -euo pipefail
+#!/usr/bin/env bash
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT_DIR"
+# xln platform deployment
+# =======================
+#
+# Purpose
+#   Build and roll out the xln application stack. This is the only live
+#   application deployment implementation in the repository. Chain-contract
+#   matrix deployments are separate commands under `jurisdictions/scripts/`.
+#
+# Canonical commands
+#   bun run deploy                    Build locally; restart PM2 when available.
+#   bun run deploy:fresh              Delete local db/log state, then rebuild.
+#   bun run deploy:prod               Full remote public-testnet reset/rollout.
+#   bun run deploy:prod:frontend      Upload frontend without restarting Runtime.
+#   bun run deploy:prod:runtime       Runtime-only public-testnet reset/rollout.
+#   bun run deploy:prod:runtime:reset Explicit alias for the same Runtime reset.
+#
+# Option model
+#   --remote <user@host>   Operate on a remote checkout over SSH. When frontend
+#                          is selected, build it locally and upload the artifact.
+#   --push                 With `--remote`, require clean `main` and push first.
+#   --fresh                Delete checkout-local `db/`, `db-tmp/`, and `logs/*.log`.
+#   --frontend-only        Install the prebuilt frontend artifact only.
+#   --runtime-only         Skip frontend compilation and deploy Runtime services.
+#   --production           Enable production paths, health gates, and state roots.
+#   --code-only            Preserve existing production JDB/RDB mesh state.
+#   --reset-mesh           Delete and bootstrap production mesh state explicitly.
+#
+# Safety boundaries
+#   * Remote `--push` refuses non-main, tracked changes, and untracked files.
+#   * Remote deploy hard-resets the remote checkout to `origin/main`.
+#   * Production persistence belongs under `${XLN_STATE_ROOT:-/var/lib/xln}`;
+#     checkout-local state is migrated once and never treated as authoritative.
+#   * `--reset-mesh` is the destructive production mode. The existing public
+#     testnet production commands intentionally use it for deterministic resets;
+#     this relocation does not change that established rollout policy.
+#   * Production frontend builds happen off-host to avoid starving live chains.
+#
+# Inputs and dependencies
+#   Local builds require bash, Bun, Git, and the contract build dependencies.
+#   Remote frontend rollout additionally requires SSH, SCP, and tar locally.
+#   Production hosts require Bun, Git, curl, nginx, PM2, Foundry, and writable
+#   xln state directories. Environment overrides are named `XLN_*` here.
+#
+# Outputs and failure contract
+#   Every mode refreshes dependencies and the browser Runtime bundle. Frontend
+#   output is rebuilt only when selected. PM2 processes restart when PM2 exists;
+#   production mode also installs nginx config and enforces health gates.
+#   `set -euo pipefail` is the default. Required builds, migrations, process
+#   starts, and health gates fail loud; optional cleanup probes are explicit.
+#
+# Location independence
+#   This file may be invoked from any working directory. All repository paths
+#   resolve from this file's own location before any validation or mutation.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+if [ ! -f "$REPO_ROOT/package.json" ] || [ ! -d "$REPO_ROOT/runtime" ]; then
+  echo "DEPLOY_REPOSITORY_ROOT_INVALID:path=$REPO_ROOT" >&2
+  exit 1
+fi
+cd "$REPO_ROOT"
+
+usage() {
+  cat <<'EOF'
+Usage: bun run deploy [options]
+
+Options:
+  --remote <user@host>  Operate remotely; selected frontend builds locally.
+  --push                With --remote, push a clean main before rollout.
+  --fresh               Delete local db/, db-tmp/, and logs/*.log.
+  --frontend            Build frontend (default).
+  --frontend-only       Upload frontend without restarting Runtime.
+  --runtime-only        Skip frontend build; production requires an artifact.
+  --production          Enable production state paths and health gates.
+  --code-only           Preserve production mesh state.
+  --reset-mesh          Explicitly reset production mesh state.
+  -h, --help            Print this help without changing state.
+EOF
+}
 
 REMOTE_HOST=""
 PUSH=0
@@ -34,8 +113,17 @@ trap cleanup_local_deploy_artifacts EXIT
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
     --remote)
-      REMOTE_HOST="${2:-}"
+      if [ "$#" -lt 2 ] || [ -z "${2:-}" ]; then
+        echo "DEPLOY_REMOTE_HOST_REQUIRED" >&2
+        usage >&2
+        exit 1
+      fi
+      REMOTE_HOST="$2"
       shift 2
       ;;
     --push)
@@ -73,7 +161,7 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: ./deploy.sh [--remote host] [--push] [--fresh] [--frontend|--frontend-only|--runtime-only] [--production] [--code-only|--reset-mesh]" >&2
+      usage >&2
       exit 1
       ;;
   esac
@@ -81,6 +169,11 @@ done
 
 if [ "$FRONTEND_ONLY" = "1" ] && [ -z "$REMOTE_HOST" ]; then
   echo "FRONTEND_ONLY_REQUIRES_REMOTE" >&2
+  exit 1
+fi
+
+if [ "$PUSH" = "1" ] && [ -z "$REMOTE_HOST" ]; then
+  echo "DEPLOY_PUSH_REQUIRES_REMOTE" >&2
   exit 1
 fi
 
@@ -1034,7 +1127,7 @@ run_local_deploy() {
   echo "[deploy] building browser runtime bundle"
   ./scripts/build-runtime.sh
 
-  if [ "$BUILD_FRONTEND" = "1" ] || [ ! -d frontend/build ]; then
+  if [ "$BUILD_FRONTEND" = "1" ]; then
     DEPLOY_BUILD_NUMBER="$(date -u +%Y%m%d%H%M%S)"
     if git rev-parse --short HEAD >/dev/null 2>&1; then
       DEPLOY_BUILD_NUMBER="${DEPLOY_BUILD_NUMBER}-$(git rev-parse --short HEAD)"
@@ -1047,7 +1140,11 @@ run_local_deploy() {
       XLN_BUILD_NUMBER="$DEPLOY_BUILD_NUMBER" bun run build
     )
   else
-    echo "[deploy] skipping frontend build (pass --frontend to force)"
+    echo "[deploy] skipping frontend build (--runtime-only)"
+    if [ "$PRODUCTION" = "1" ] && [ ! -s frontend/build/index.html ]; then
+      echo "PRODUCTION_FRONTEND_ARTIFACT_MISSING: run a frontend deploy before runtime-only" >&2
+      exit 1
+    fi
   fi
 
   if command -v pm2 >/dev/null 2>&1; then
@@ -1224,7 +1321,7 @@ if [ -n "$REMOTE_HOST" ]; then
   if [ "$FRONTEND_ONLY" = "1" ]; then
     remote_cmd="$remote_cmd test -s frontend/build/index.html; echo '[deploy] frontend artifact installed without runtime restart';"
   else
-    remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./deploy.sh --runtime-only"
+    remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./scripts/deployment/deploy-platform.sh --runtime-only"
     if [ "$FRESH" = "1" ]; then
       remote_cmd="$remote_cmd --fresh"
     fi

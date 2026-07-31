@@ -4,7 +4,7 @@
 # generated on the local Mac and rsynced up, so the server never runs e2e itself.
 #
 # Curated story screenshots (tests/e2e/screenshots) are tracked in git and ship via
-# deploy.sh — they are intentionally NOT handled here.
+# `bun run deploy` — they are intentionally NOT handled here.
 #
 # The prod runtime reads this root via QA_EVIDENCE_ROOT (see scripts/start-server.sh),
 # so uploaded runs/videos appear at https://xln.finance/qa without restarting anything.
