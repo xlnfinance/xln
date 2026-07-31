@@ -36,10 +36,7 @@ import {
   parseNetworkMachineConfig,
   type NetworkMachineConfig,
 } from '../../frontend/src/lib/network3d/networkMachine';
-import {
-  readTimelineIndexPages,
-  timelineIndexFromBrowserRuntime,
-} from '../../frontend/src/lib/network3d/networkTimelineLoader';
+import { readTimelineIndexPages } from '../../frontend/src/lib/network3d/networkTimelineLoader';
 import { assertNetworkMachineIsLive } from '../../frontend/src/lib/stores/networkMachineRuntimeStore';
 import {
   beginGraphGesture,
@@ -451,23 +448,15 @@ describe('NetworkMachine', () => {
 });
 
 describe('NetworkMachine runtime indexes', () => {
-  test('browser runtimes expose every materialized R-frame with graph-change metadata', () => {
-    const index = timelineIndexFromBrowserRuntime({
-      id: 'Browser-A',
-      type: 'local',
-      label: 'A',
-      permissions: 'write',
-      status: 'connected',
-      env: {
-        runtimeId: 'browser-a',
-        history: [
-          { height: 1, timestamp: 100, runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] } },
-          { height: 2, timestamp: 200, runtimeInput: { runtimeTxs: [{ type: 'noop' }], jInputs: [], entityInputs: [] } },
-        ],
-      } as never,
-    });
-    expect(index.frames.map((frame) => ({ height: frame.height, graphChanged: frame.graphChanged })))
-      .toEqual([{ height: 1, graphChanged: false }, { height: 2, graphChanged: true }]);
+  test('browser runtimes read their index through the adapter, not from in-memory history', () => {
+    const loader = readFileSync('frontend/src/lib/network3d/networkTimelineLoader.ts', 'utf8');
+
+    // `env.history` is permanently empty (RECENT_RUNTIME_HISTORY_LIMIT = 0), so deriving a
+    // browser timeline from it produced zero frames and a dead time machine.
+    expect(loader).not.toContain('env?.history');
+    expect(loader).not.toContain('timelineIndexFromBrowserRuntime');
+    expect(loader).toContain('adapterNetworkTimelineSource');
+    expect(loader).toContain('getRuntimeControllerAdapter');
   });
 
   test('remote compact indexes paginate without dropping or reordering frames', async () => {

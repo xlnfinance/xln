@@ -620,6 +620,7 @@
         timeIndex={runtimeFrameTimeIndex}
         isLive={runtimeFrameIsLive}
         env={runtimeFrameEnv}
+        dockMode
       />
       {#if !embedMode}
         <button class="collapse-btn" on:click={() => collapsed = !collapsed}>

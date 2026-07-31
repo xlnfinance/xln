@@ -1730,6 +1730,12 @@ const projectTimelineIndex = async (
   if (!ctx.readFrame) throw new RuntimeAdapterError('E_BAD_QUERY', 'timeline-index requires persisted frame storage');
   const head = await readBestHead(ctx);
   const latestHeight = Math.max(0, Math.min(envHeight(ctx.env), Math.floor(Number(head.latestHeight || 0))));
+  const runtimeIdForPage = normalizeEntityId(String(ctx.env.runtimeId || '')) || 'embedded';
+  // A runtime that has not persisted a frame yet is an empty timeline, not a bad request.
+  // Erroring here made every fresh browser runtime report a broken time machine.
+  if (latestHeight < 1 && query?.beforeHeight === undefined) {
+    return { runtimeId: runtimeIdForPage, latestHeight, entries: [], scannedHeights: 0, nextBeforeHeight: null };
+  }
   const beforeHeight = query?.beforeHeight === undefined
     ? latestHeight + 1
     : Math.floor(Number(query.beforeHeight));
@@ -1750,7 +1756,7 @@ const projectTimelineIndex = async (
   if (toTimestamp !== null && (!Number.isFinite(toTimestamp) || toTimestamp < 0)) {
     throw new RuntimeAdapterError('E_BAD_QUERY', 'toTimestamp must be a non-negative integer');
   }
-  const runtimeId = normalizeEntityId(String(ctx.env.runtimeId || '')) || 'embedded';
+  const runtimeId = runtimeIdForPage;
   const entries: RuntimeAdapterTimelineIndexPage['entries'] = [];
   let cursor = Math.min(latestHeight, beforeHeight - 1);
   let scannedHeights = 0;

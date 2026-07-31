@@ -29,20 +29,27 @@ export function buildRuntimeGraphProjections(input: RuntimeGraphProjectionInputs
     const runtimeId = String(runtime.id || '')
       .trim()
       .toLowerCase();
+    const adapterKind = runtime.type === 'local' ? 'browser' : 'remote';
+
+    // Historical: every runtime reads the same graph-frame shape through its adapter,
+    // so a local runtime is no longer a separate branch.
+    if (networkStep) {
+      const frame = input.networkState.frames.get(runtimeId);
+      if (frame) projections.push(projectRuntimeGraphFrame(frame, { runtimeId, label: runtime.label, adapterKind }));
+      continue;
+    }
+
+    // Live: local runtimes project their in-memory env, remote ones their cached frame.
     if (runtime.type === 'local') {
-      const selected = networkStep
-        ? input.networkState.browserFrames.get(runtimeId)
-        : runtimeId === activeId && input.currentEnv
-          ? input.currentEnv
-          : (unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env);
+      const selected = runtimeId === activeId && input.currentEnv
+        ? input.currentEnv
+        : (unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env);
       if (selected) {
         projections.push(projectRuntimeEnv(selected, { runtimeId, label: runtime.label, adapterKind: 'browser' }));
       }
       continue;
     }
-    const frame = networkStep
-      ? (input.networkState.remoteFrames.get(runtimeId) ?? null)
-      : (input.liveRemoteFrames.get(runtimeId) ?? null);
+    const frame = input.liveRemoteFrames.get(runtimeId) ?? null;
     if (frame) {
       projections.push(projectRuntimeGraphFrame(frame, { runtimeId, label: runtime.label, adapterKind: 'remote' }));
     }

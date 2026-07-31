@@ -8,6 +8,7 @@
     networkMachineRuntimeOperations,
   } from '$lib/stores/networkMachineRuntimeStore';
   import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
+  import { captionForStep } from '$lib/network3d/networkCaption';
 
   let playing = false;
   let playbackInterval: number | null = null;
@@ -17,6 +18,13 @@
   $: steps = $networkMachineRuntime.machine?.steps ?? [];
   $: selectedIndex = $networkMachineRuntime.selectedStepIndex;
   $: selected = $networkMachineRuntime.selectedStep;
+  // Global caption for the step: derived from runtime activity, overridden by an authored cue.
+  $: caption = selected
+    ? captionForStep(
+        { runtimeId: selected.activeRuntimeId, height: selected.event.height, cues: selected.cues },
+        $networkMachineRuntime.activity,
+      )
+    : null;
   $: progress = steps.length > 1 && selectedIndex >= 0 ? (selectedIndex / (steps.length - 1)) * 100 : 0;
 
   const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error || 'NetworkMachine failed');
@@ -123,10 +131,13 @@
     </div>
   {/if}
 
-  {#if selected?.cues.length}
-    <div class="cue" data-testid="network-machine-cue">
-      <strong>{selected.cues[0]?.title}</strong>
-      {#if selected.cues[0]?.subtitle}<span>{selected.cues[0]?.subtitle}</span>{/if}
+  {#if caption}
+    <div class="cue" data-testid="network-machine-cue" data-caption-source={caption.source}>
+      <strong>
+        {caption.title}
+        {#if caption.extraCount > 0}<em>+{caption.extraCount}</em>{/if}
+      </strong>
+      {#if caption.subtitle}<span>{caption.subtitle}</span>{/if}
     </div>
   {/if}
 
@@ -141,6 +152,6 @@
 {#if localError || $networkMachineRuntime.error}<div class="network-error" role="alert">{localError || $networkMachineRuntime.error}</div>{/if}
 
 <style>
-  .network-machine{height:48px;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:7px 10px;background:#101317;color:#dce7ee;border-top:1px solid rgba(255,255,255,.08);font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}.navigation{display:flex;gap:2px}.navigation button,.refresh,.dock{display:grid;place-items:center;min-width:27px;height:27px;border:1px solid #293b47;border-radius:5px;background:#15212a;color:#cde7f6}.navigation .play{border-color:#236b8c;color:#5ed0ff}.identity{display:grid;gap:2px;min-width:120px}.identity strong{font-size:11px}.identity span{color:#62d88f}input[type=range]{min-width:120px;flex:1;accent-color:#51d889}.event{display:flex;align-items:center;gap:6px;white-space:nowrap}.event strong{color:var(--runtime-color)}.event time{color:#738897}.dot{width:7px;height:7px;border-radius:50%;background:var(--runtime-color);box-shadow:0 0 9px var(--runtime-color)}.cue{display:grid;max-width:250px;overflow:hidden}.cue strong,.cue span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cue span{color:#879aa7}select{height:27px;border:1px solid #293b47;border-radius:5px;background:#101b23;color:#c7d9e4;font:inherit}.dock{padding:0 9px;color:#d2b8ff;border-color:#5c3f7a}.network-error{position:absolute;left:10px;right:10px;bottom:52px;z-index:40;padding:7px 9px;border:1px solid #713140;background:#230e14;color:#ff9aae;font:11px/1.3 ui-monospace,monospace}
+  .network-machine{height:48px;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:7px 10px;background:#101317;color:#dce7ee;border-top:1px solid rgba(255,255,255,.08);font:11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}.navigation{display:flex;gap:2px}.navigation button,.refresh,.dock{display:grid;place-items:center;min-width:27px;height:27px;border:1px solid #293b47;border-radius:5px;background:#15212a;color:#cde7f6}.navigation .play{border-color:#236b8c;color:#5ed0ff}.identity{display:grid;gap:2px;min-width:120px}.identity strong{font-size:11px}.identity span{color:#62d88f}input[type=range]{min-width:120px;flex:1;accent-color:#51d889}.event{display:flex;align-items:center;gap:6px;white-space:nowrap}.event strong{color:var(--runtime-color)}.event time{color:#738897}.dot{width:7px;height:7px;border-radius:50%;background:var(--runtime-color);box-shadow:0 0 9px var(--runtime-color)}.cue{display:grid;max-width:280px;overflow:hidden}.cue strong,.cue span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cue span{color:#879aa7}.cue em{margin-left:5px;font-style:normal;color:#62d88f}select{height:27px;border:1px solid #293b47;border-radius:5px;background:#101b23;color:#c7d9e4;font:inherit}.dock{padding:0 9px;color:#d2b8ff;border-color:#5c3f7a}.network-error{position:absolute;left:10px;right:10px;bottom:52px;z-index:40;padding:7px 9px;border:1px solid #713140;background:#230e14;color:#ff9aae;font:11px/1.3 ui-monospace,monospace}
   @media(max-width:900px){.cue,.event time,.identity strong{display:none}.identity{min-width:auto}}
 </style>

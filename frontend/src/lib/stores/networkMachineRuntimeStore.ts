@@ -1,9 +1,10 @@
 import { get, writable } from 'svelte/store';
-import type { EnvSnapshot, RuntimeAdapterGraphFrame } from '@xln/runtime/xln-api';
+import type { RuntimeActivityEvent, RuntimeAdapterGraphFrame } from '@xln/runtime/xln-api';
 import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '$lib/network3d/networkMachine';
 import {
   disconnectNetworkTimelineReaders,
   loadNetworkTimelineIndexes,
+  readNetworkRuntimeActivity,
   readNetworkRuntimeFrame,
 } from '$lib/network3d/networkTimelineLoader';
 import { networkMachineConfig } from './networkMachineStore';
@@ -17,8 +18,10 @@ export type NetworkMachineRuntimeState = {
   machine: NetworkMachine | null;
   selectedStepIndex: number;
   selectedStep: NetworkMachineStep | null;
-  browserFrames: Map<string, EnvSnapshot>;
-  remoteFrames: Map<string, RuntimeAdapterGraphFrame>;
+  /** Graph frame per runtime at the selected step. Local and remote read the same shape. */
+  frames: Map<string, RuntimeAdapterGraphFrame>;
+  /** Activity events of the selected step, ordered — the caption source. */
+  activity: RuntimeActivityEvent[];
 };
 
 const emptyState = (): NetworkMachineRuntimeState => ({
@@ -28,8 +31,8 @@ const emptyState = (): NetworkMachineRuntimeState => ({
   machine: null,
   selectedStepIndex: -1,
   selectedStep: null,
-  browserFrames: new Map(),
-  remoteFrames: new Map(),
+  frames: new Map(),
+  activity: [],
 });
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error || 'NetworkMachine failed');
@@ -76,15 +79,15 @@ export const networkMachineRuntimeOperations = {
     networkMachineRuntime.update((state) => ({ ...state, loading: true, error: null, machine }));
     try {
       const runtimeMap = get(runtimes);
-      const browserFrames = new Map<string, EnvSnapshot>();
-      const remoteFrames = new Map<string, RuntimeAdapterGraphFrame>();
+      const frames = new Map<string, RuntimeAdapterGraphFrame>();
+      const activity: RuntimeActivityEvent[] = [];
       for (const [id, selected] of step.selection.byRuntime) {
         if (!selected) continue;
         const runtime = runtimeMap.get(id);
         if (!runtime) throw new Error(`NETWORK_MACHINE_RUNTIME_MISSING:${id}`);
-        const frame = await readNetworkRuntimeFrame(runtime, selected.height);
-        if (runtime.type === 'local') browserFrames.set(id, frame as EnvSnapshot);
-        else remoteFrames.set(id, frame as RuntimeAdapterGraphFrame);
+        frames.set(id, await readNetworkRuntimeFrame(runtime, selected.height));
+        if (id !== step.activeRuntimeId) continue;
+        activity.push(...await readNetworkRuntimeActivity(runtime, selected.height, selected.height));
       }
       if (requestId !== selectionRequestId) return step;
       networkMachineRuntime.set({
@@ -94,8 +97,8 @@ export const networkMachineRuntimeOperations = {
         machine,
         selectedStepIndex: safeIndex,
         selectedStep: step,
-        browserFrames,
-        remoteFrames,
+        frames,
+        activity,
       });
       return step;
     } catch (error) {
@@ -110,8 +113,8 @@ export const networkMachineRuntimeOperations = {
       ...state,
       selectedStepIndex: -1,
       selectedStep: null,
-      browserFrames: new Map(),
-      remoteFrames: new Map(),
+      frames: new Map(),
+      activity: [],
       error: null,
     }));
   },
