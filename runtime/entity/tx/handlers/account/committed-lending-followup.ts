@@ -226,11 +226,11 @@ export function applyCommittedLendingFollowup(
   const account = state.accounts.get(counterpartyId);
   if (!account) throw new Error(`LENDING_ACCOUNT_MISSING:${counterpartyIdRaw}`);
   const context: LendingFollowupContext = {
-    account,
+    account: account.state,
     lending: ensureLendingState(state),
     hubEntityId,
     counterpartyId,
-    proposer: normalizeEntityRef(frame.byLeft ? account.leftEntity : account.rightEntity),
+    proposer: normalizeEntityRef(frame.byLeft ? account.state.leftEntity : account.state.rightEntity),
     now: Math.max(
       Math.floor(Number(frame.timestamp || 0)),
       Math.floor(Number(state.timestamp || 0)),

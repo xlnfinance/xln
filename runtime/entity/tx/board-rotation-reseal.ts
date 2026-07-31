@@ -214,7 +214,7 @@ const buildCertifiedAccountResealDraft = (
       kind: 'board_reseal',
       fromEntityId: state.entityId,
       toEntityId: counterpartyId,
-      domain: structuredClone(account.domain),
+      domain: structuredClone(account.state.domain),
       reseal,
     },
   }]);

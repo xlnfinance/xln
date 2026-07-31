@@ -2593,7 +2593,7 @@ async function placeSwapOffer() {
         hubEntityId: resolvedCounterparty,
         hubSignerId: sourceHubSignerId,
         jurisdiction: sourceJurisdictionRef,
-        account: currentReplica?.state?.accounts?.get?.(resolvedCounterparty) ?? null,
+        account: currentReplica?.state?.accounts?.get?.(resolvedCounterparty)?.state ?? null,
       },
       ...(targetRoute
         ? {
@@ -2603,7 +2603,7 @@ async function placeSwapOffer() {
               hubEntityId: targetRoute.targetHubEntityId,
               hubSignerId: resolveSignerId(targetRoute.targetHubEntityId),
               jurisdiction: targetRoute.targetJurisdictionRef,
-              account: targetReplica?.state?.accounts?.get?.(targetRoute.targetHubEntityId) ?? null,
+              account: targetReplica?.state?.accounts?.get?.(targetRoute.targetHubEntityId)?.state ?? null,
             },
             allowOpenTargetAccount: !targetAccountExists,
           }

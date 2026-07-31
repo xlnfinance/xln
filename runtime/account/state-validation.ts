@@ -95,24 +95,25 @@ const validatePendingSignatures = (
 };
 
 const validateRebalanceState = (
-  account: Record<string, unknown>,
+  state: Record<string, unknown>,
+  replica: Record<string, unknown>,
   context: string,
 ): void => {
   validateRequestedRebalanceAmounts(
-    account['requestedRebalance'],
+    state['requestedRebalance'],
     `${context}.requestedRebalance`,
   );
   validateRequestedRebalanceFeeState(
-    account['requestedRebalanceFeeState'],
+    state['requestedRebalanceFeeState'],
     `${context}.requestedRebalanceFeeState`,
   );
-  if (account['rebalanceFeePolicies'] !== undefined) {
+  if (state['rebalanceFeePolicies'] !== undefined) {
     validateRebalanceFeePolicies(
-      account['rebalanceFeePolicies'],
+      state['rebalanceFeePolicies'],
       `${context}.rebalanceFeePolicies`,
     );
   }
-  const shadow = validateObject(account['shadow'], `${context}.shadow`);
+  const shadow = validateObject(replica['shadow'], `${context}.shadow`);
   const rebalance = validateObject(
     shadow['rebalance'],
     `${context}.shadow.rebalance`,
@@ -128,12 +129,13 @@ const validateRebalanceState = (
  * Decode one bilateral Account snapshot at a trust boundary.
  * Reducers may trust the returned shape; persistence and network callers may not.
  */
-function assertAccountState(
+function assertAccountReplica(
   account: Record<string, unknown>,
   context: string,
 ): asserts account is Record<string, unknown> & AccountReplica {
-  const left = validateString(account['leftEntity'], `${context}.leftEntity`);
-  const right = validateString(account['rightEntity'], `${context}.rightEntity`);
+  const state = validateObject(account['state'], `${context}.state`);
+  const left = validateString(state['leftEntity'], `${context}.state.leftEntity`);
+  const right = validateString(state['rightEntity'], `${context}.state.rightEntity`);
   if (
     left !== left.trim().toLowerCase() ||
     right !== right.trim().toLowerCase()
@@ -148,7 +150,7 @@ function assertAccountState(
     );
   }
   try {
-    normalizeAccountStateDomain(account['domain'] as AccountReplica['domain']);
+    normalizeAccountStateDomain(state['domain'] as AccountReplica['state']['domain']);
   } catch (error) {
     throw new FinancialDataCorruptionError(`${context}.domain is invalid`, {
       cause: error instanceof Error ? error.message : String(error),
@@ -169,42 +171,42 @@ function assertAccountState(
     `${context}.mempool`,
   );
   decodeAccountFrame(account['currentFrame'], `${context}.currentFrame`);
-  const deltas = validateMapInstance(account['deltas'], `${context}.deltas`);
+  const deltas = validateMapInstance(state['deltas'], `${context}.state.deltas`);
   assertAccountDeltaCapacity(deltas.size, `${context}.deltas`);
-  validateMapInstance(account['locks'], `${context}.locks`);
-  validateMapInstance(account['swapOffers'], `${context}.swapOffers`);
-  if (account['pulls'] !== undefined) {
-    validateMapInstance(account['pulls'], `${context}.pulls`);
+  validateMapInstance(state['locks'], `${context}.state.locks`);
+  validateMapInstance(state['swapOffers'], `${context}.state.swapOffers`);
+  if (state['pulls'] !== undefined) {
+    validateMapInstance(state['pulls'], `${context}.state.pulls`);
   }
   validateSwapHistories(account, context);
-  validateLendingIntents(account['lendingIntents'], `${context}.lendingIntents`);
-  validateCreditLimits(account['globalCreditLimits'], `${context}.globalCreditLimits`);
+  validateLendingIntents(state['lendingIntents'], `${context}.state.lendingIntents`);
+  validateCreditLimits(state['globalCreditLimits'], `${context}.state.globalCreditLimits`);
   requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
   validatePendingAccountResend(account, context);
   validatePendingSignatures(account, context);
   requireBoundaryInteger(account['rollbackCount'], `${context}.rollbackCount`);
   assertAccountJClaimAccumulatorState(
-    account['leftPendingJClaims'] as AccountReplica['leftPendingJClaims'],
+    state['leftPendingJClaims'] as AccountReplica['state']['leftPendingJClaims'],
   );
   assertAccountJClaimAccumulatorState(
-    account['rightPendingJClaims'] as AccountReplica['rightPendingJClaims'],
+    state['rightPendingJClaims'] as AccountReplica['state']['rightPendingJClaims'],
   );
   requireBoundaryInteger(
-    account['lastFinalizedJHeight'],
+    state['lastFinalizedJHeight'],
     `${context}.lastFinalizedJHeight`,
   );
   validateMapInstance(account['pendingWithdrawals'], `${context}.pendingWithdrawals`);
-  validateRebalanceState(account, context);
+  validateRebalanceState(state, account, context);
   for (const [tokenId, delta] of deltas) {
     validateDelta(delta, `${context}.deltas[${String(tokenId)}]`);
   }
 }
 
-export const validateAccountState = (
+export const validateAccountReplica = (
   value: unknown,
   context = 'AccountReplica',
 ): AccountReplica => {
   const account = validateObject(value, context);
-  assertAccountState(account, context);
+  assertAccountReplica(account, context);
   return account;
 };

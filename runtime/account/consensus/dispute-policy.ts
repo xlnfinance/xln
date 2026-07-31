@@ -55,8 +55,8 @@ export const freezeAccountForDispute = (
   // in mempool and remain available while the peer is offline.
   prependUniqueMempoolTxs(account, pendingEvidence);
   disputePolicyLog.info('freeze', {
-    leftEntity: account.leftEntity,
-    rightEntity: account.rightEntity,
+    leftEntity: account.state.leftEntity,
+    rightEntity: account.state.rightEntity,
     status: account.status,
     retainOptionalEvidence,
     restoredPendingEvidence: pendingEvidence.map(tx => tx.type),

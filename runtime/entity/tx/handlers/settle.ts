@@ -60,7 +60,7 @@ const buildPostSettlementDisputeProof = (
   const projected = projectAccountAfterSettlement(account, diffs, forgiveTokenIds);
   const { proofBodyHash } = buildAccountProofBodyFromJurisdictions(env.state, projected);
   const disputeHash = createDisputeProofHashWithNonce(
-    account,
+    account.state,
     proofBodyHash,
     { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
     nonce,
@@ -86,11 +86,11 @@ export const buildSettlementSealDraft = (
   counterpartyEntityId: string,
   env: EntityRuntimeContext,
 ): SettlementSealDraft => {
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_WORKSPACE_MISSING');
-  const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+  const workspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);
   if (workspace.status === 'submitted') throw new Error('SETTLEMENT_SEAL_SUBMITTED_FORBIDDEN');
-  const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
+  const { iAmLeft } = getAccountPerspective(account.state, entityState.entityId);
   const existingPostHanko = iAmLeft
     ? workspace.postSettlementDisputeProof?.leftHanko
     : workspace.postSettlementDisputeProof?.rightHanko;
@@ -104,7 +104,7 @@ export const buildSettlementSealDraft = (
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction?.depositoryAddress) throw new Error('SETTLEMENT_JURISDICTION_MISSING');
   const settlementHash = createSettlementHashWithNonce(
-    account,
+    account.state,
     diffs,
     forgiveTokenIds,
     { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
@@ -218,8 +218,8 @@ export async function handleSettlePropose(
 
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
-  if (account.settlementWorkspace) {
-    const revision = account.settlementWorkspace.revision;
+  if (account.state.settlementWorkspace) {
+    const revision = account.state.settlementWorkspace.revision;
     addMessage(newState, `⏭️ Settlement propose skipped: workspace already exists (v${revision})`);
     settleLog.warn('propose.skip_workspace_exists', { counterparty: shortId(counterpartyEntityId), revision });
     return { newState, outputs, accountTxs };
@@ -242,7 +242,7 @@ export async function handleSettlePropose(
     if (newState.settlementContinuations?.has(counterpartyEntityId)) {
       throw new Error(`SETTLEMENT_CONTINUATION_ALREADY_PENDING:${counterpartyEntityId}`);
     }
-    const workspaceHash = createSettlementWorkspaceHash(account, {
+    const workspaceHash = createSettlementWorkspaceHash(account.state, {
       revision: 1,
       ops,
       lastModifiedByLeft: isLeft,
@@ -294,11 +294,11 @@ export async function handleSettleUpdate(
 
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
-  if (!account.settlementWorkspace) throw new Error(`No settlement workspace to update. Use settle_propose first.`);
+  if (!account.state.settlementWorkspace) throw new Error(`No settlement workspace to update. Use settle_propose first.`);
   assertNoPendingSettlementTransition(account);
 
   // Guard 2: Cannot update after signing
-  if (account.settlementWorkspace.leftHanko || account.settlementWorkspace.rightHanko) {
+  if (account.state.settlementWorkspace.leftHanko || account.state.settlementWorkspace.rightHanko) {
     throw new Error(`Cannot update after signing. Use settle_reject to start over.`);
   }
 
@@ -306,8 +306,8 @@ export async function handleSettleUpdate(
 
   // Validate new ops (guard 1: dual-side validation)
   compileOps(ops, isLeft);
-  const workspace = account.settlementWorkspace;
-  const previousWorkspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+  const workspace = account.state.settlementWorkspace;
+  const previousWorkspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);
   const newVersion = workspace.revision + 1;
   const effectiveMemo = memo !== undefined ? memo : workspace.memo;
   accountTxs.push({
@@ -352,16 +352,16 @@ export async function handleSettleApprove(
 
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
-  if (!account.settlementWorkspace) throw new Error(`No settlement workspace to approve.`);
+  if (!account.state.settlementWorkspace) throw new Error(`No settlement workspace to approve.`);
   assertNoPendingSettlementTransition(account);
-  if (account.settlementWorkspace.status === 'submitted') {
+  if (account.state.settlementWorkspace.status === 'submitted') {
     addMessage(newState, `⏭️ settle_execute skipped: workspace already submitted`);
     settleLog.debug('execute.skip_already_submitted', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, accountTxs };
   }
   const canonicalWorkspaceHash = assertCanonicalSettlementWorkspace(
-    account,
-    account.settlementWorkspace,
+    account.state,
+    account.state.settlementWorkspace,
   );
   if (requestedWorkspaceHash !== canonicalWorkspaceHash) {
     throw new Error(
@@ -375,7 +375,7 @@ export async function handleSettleApprove(
   }
   newState.deferredAccountProposals.set(counterpartyEntityId, canonicalWorkspaceHash);
   settleLog.debug('approve.deferred_until_account_idle', {
-    side: getAccountPerspective(account, entityState.entityId).iAmLeft ? 'left' : 'right',
+    side: getAccountPerspective(account.state, entityState.entityId).iAmLeft ? 'left' : 'right',
     workspaceHash: canonicalWorkspaceHash,
   });
   addMessage(newState, `⚖️ Settlement approval accepted; waiting for prior Account work`);
@@ -435,7 +435,7 @@ const prepareSettlementExecution = (
     throw new Error('SETTLEMENT_JURISDICTION_MISSING');
   }
   const expectedSettlementHash = createSettlementHashWithNonce(
-    account,
+    account.state,
     diffs,
     forgiveTokenIds,
     {
@@ -536,7 +536,7 @@ const verifySettlementExecutionHankos = async (
     entityState,
     prepared.postProof.leftHanko!,
     prepared.expectedPostProof.disputeHash,
-    account.leftEntity,
+    account.state.leftEntity,
     'POST_SETTLEMENT_LEFT',
   );
   await verifySettlementHanko(
@@ -544,7 +544,7 @@ const verifySettlementExecutionHankos = async (
     entityState,
     prepared.postProof.rightHanko!,
     prepared.expectedPostProof.disputeHash,
-    account.rightEntity,
+    account.state.rightEntity,
     'POST_SETTLEMENT_RIGHT',
   );
 };
@@ -613,22 +613,22 @@ export async function handleSettleExecute(
     settleLog.warn('execute.skip_no_account', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, accountTxs };
   }
-  if (!account.settlementWorkspace) {
+  if (!account.state.settlementWorkspace) {
     addMessage(newState, `⏭️ settle_execute skipped: no workspace with ${counterpartyEntityId.slice(-4)}`);
     settleLog.warn('execute.skip_no_workspace', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, accountTxs };
   }
 
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   assertNoPendingSettlementTransition(account);
-  const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+  const workspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);
   if (workspace.status === 'submitted') {
     addMessage(newState, `⏭️ settle_execute skipped: settlement already submitted`);
     settleLog.warn('execute.skip_already_submitted', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, accountTxs };
   }
 
-  const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
+  const { iAmLeft } = getAccountPerspective(account.state, entityState.entityId);
   if (workspace.executorIsLeft !== iAmLeft) {
     throw new Error(`SETTLEMENT_EXECUTOR_MISMATCH:expected=${workspace.executorIsLeft ? 'left' : 'right'}`);
   }
@@ -703,27 +703,27 @@ export async function handleSettleReject(
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
 
-  if (!account.settlementWorkspace) {
+  if (!account.state.settlementWorkspace) {
     settleLog.debug('reject.no_workspace', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, accountTxs };
   }
   assertNoPendingSettlementTransition(account);
   if (
-    account.settlementWorkspace.settlementHash ||
-    account.settlementWorkspace.leftHanko ||
-    account.settlementWorkspace.rightHanko ||
-    account.settlementWorkspace.postSettlementDisputeProof
+    account.state.settlementWorkspace.settlementHash ||
+    account.state.settlementWorkspace.leftHanko ||
+    account.state.settlementWorkspace.rightHanko ||
+    account.state.settlementWorkspace.postSettlementDisputeProof
   ) {
     throw new Error('SETTLEMENT_REJECT_SIGNED_FORBIDDEN');
   }
-  const workspaceHash = assertCanonicalSettlementWorkspace(account, account.settlementWorkspace);
+  const workspaceHash = assertCanonicalSettlementWorkspace(account.state, account.state.settlementWorkspace);
   accountTxs.push({
     accountId: counterpartyEntityId,
     tx: {
       type: 'settle_transition',
       data: {
         kind: 'clear',
-        revision: account.settlementWorkspace.revision,
+        revision: account.state.settlementWorkspace.revision,
         workspaceHash,
       },
     },
@@ -770,13 +770,13 @@ export async function processCommittedSettlementTransitionFollowup(
   // final post-state would either fail the Entity frame or authorize stale ops.
   if (hasLaterTransition) return empty();
   if (typeof committedFrame.byLeft !== 'boolean') throw new Error('SETTLEMENT_COMMITTED_FRAME_SIDE_MISSING');
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_COMMITTED_WORKSPACE_MISSING');
-  const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+  const workspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);
   if (workspace.revision !== accountTx.data.revision) {
     throw new Error(`SETTLEMENT_COMMITTED_VERSION_MISMATCH:${workspace.revision}:${accountTx.data.revision}`);
   }
-  const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
+  const { iAmLeft } = getAccountPerspective(account.state, entityState.entityId);
   if (committedFrame.byLeft === iAmLeft) return empty();
   const localPostHanko = iAmLeft
     ? workspace.postSettlementDisputeProof?.leftHanko

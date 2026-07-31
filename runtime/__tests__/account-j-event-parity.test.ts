@@ -12,7 +12,7 @@ import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
 import type { JEventAccountTx } from '../entity/tx/j-events-types';
 import { createEmptyEnv } from '../runtime';
-import type { AccountState, AccountTx } from '../types/account';
+import type { AccountReplica, AccountTx } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { createDefaultDelta } from '../account/delta';
@@ -36,31 +36,33 @@ const settledEvent: JurisdictionEvent = {
   },
 };
 
-const machine = (): AccountState => ({
-  leftEntity: LEFT,
-  rightEntity: RIGHT,
-  domain: DOMAIN,
-  watchSeed: `0x${'55'.repeat(32)}`,
+const machine = (): AccountReplica => ({
+  state: {
+    leftEntity: LEFT,
+    rightEntity: RIGHT,
+    domain: DOMAIN,
+    watchSeed: `0x${'55'.repeat(32)}`,
+    deltas: new Map([[1, createDefaultDelta(1)]]),
+    locks: new Map(),
+    swapOffers: new Map(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    lastFinalizedJHeight: 0,
+    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    jNonce: 0,
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+  },
   status: 'active',
   mempool: [],
   currentFrame: {} as never,
-  deltas: new Map([[1, createDefaultDelta(1)]]),
-  locks: new Map(),
-  swapOffers: new Map(),
-  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
   currentHeight: 0,
   pendingSignatures: [],
   rollbackCount: 0,
-  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  lastFinalizedJHeight: 0,
   proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
-  disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-  jNonce: 0,
   pendingWithdrawals: new Map(),
-  requestedRebalance: new Map(),
-  requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
 } as AccountState);
 
@@ -111,14 +113,14 @@ describe('account J-event validate/commit parity', () => {
     const runtime = env();
     const initial = machine();
     const firstSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
-    const leftClaim = prepareAccountJClaimTx(initial, rawClaim(), DOMAIN, firstSession);
+    const leftClaim = prepareAccountJClaimTx(initial.state, rawClaim(), DOMAIN, firstSession);
     expect(handleJEventClaim(initial, leftClaim, true, 99, false, LEFT, [], runtime.state, firstSession).success)
       .toBe(true);
     cacheCommittedAccountJClaimNodeChanges(runtime, firstSession.changes());
-    expect(initial.leftPendingJClaims.count).toBe(1n);
+    expect(initial.state.leftPendingJClaims.count).toBe(1n);
 
     const proofSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
-    const rightClaim = prepareAccountJClaimTx(initial, rawClaim(), DOMAIN, proofSession);
+    const rightClaim = prepareAccountJClaimTx(initial.state, rawClaim(), DOMAIN, proofSession);
     const validation = structuredClone(initial);
     const commit = structuredClone(initial);
     const validationSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
@@ -132,11 +134,11 @@ describe('account J-event validate/commit parity', () => {
 
     expect(validationResult.success).toBe(true);
     expect(commitResult.success).toBe(true);
-    expect(computeAccountStateRoot(validation)).toBe(computeAccountStateRoot(commit));
-    expect(validation.lastFinalizedJHeight).toBe(7);
-    expect(validation.deltas.get(1)).toEqual(commit.deltas.get(1));
-    expect(validation.leftPendingJClaims.count).toBe(0n);
-    expect(validation.rightPendingJClaims.count).toBe(0n);
+    expect(computeAccountStateRoot(validation.state)).toBe(computeAccountStateRoot(commit.state));
+    expect(validation.state.lastFinalizedJHeight).toBe(7);
+    expect(validation.state.deltas.get(1)).toEqual(commit.state.deltas.get(1));
+    expect(validation.state.leftPendingJClaims.count).toBe(0n);
+    expect(validation.state.rightPendingJClaims.count).toBe(0n);
     expect('jEventChain' in validation).toBe(false);
   });
 

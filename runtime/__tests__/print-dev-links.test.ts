@@ -125,7 +125,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');
   expect(devChild).toContain('XLN_LOG_LEVEL="$MESH_LOG_LEVEL"');
   expect(runtimeWatcher).toContain('set -euo pipefail');
-  expect(runtimeWatcher).toContain('bun --no-orphans build runtime/api/public/browser.ts');
+  expect(runtimeWatcher).toContain('bun --no-orphans build runtime/api/browser.ts');
   expect(runtimeWatcher).toContain('--external buffer');
   expect(runtimeWatcher).toContain('if [[ -z "${line//[[:space:]]/}" ]]');
 });

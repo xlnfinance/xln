@@ -39,7 +39,7 @@ export const applyCommittedSwapCancelsToOrderbook = (
   for (const { accountId, offerId } of cancels) {
     const namespacedOrderId = `${accountId}:${offerId}`;
     if (removeBookOrderById(state, namespacedOrderId, storageChanges)) {
-      const offer = findAccountByCounterparty(state, accountId)?.swapOffers?.get(offerId);
+      const offer = findAccountByCounterparty(state, accountId)?.state.swapOffers?.get(offerId);
       if (offer?.crossJurisdiction) {
         markCrossJurisdictionBookAdmissionClosed(
           state,

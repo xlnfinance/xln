@@ -150,7 +150,7 @@ describe('reachable-only dispute evidence retention', () => {
         },
       },
     };
-    account.settlementWorkspace = {
+    account.state.settlementWorkspace = {
       ops: [],
       lastModifiedByLeft: true,
       status: 'awaiting_counterparty',

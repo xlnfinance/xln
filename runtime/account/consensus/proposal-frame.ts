@@ -31,7 +31,7 @@ export type ProposalFrameBuildResult =
 
 const collectFrameDeltas = (machine: AccountReplica): AccountFrame['deltas'] => {
   const deltas: AccountFrame['deltas'] = [];
-  const sortedTokens = [...machine.deltas.entries()].sort((left, right) => left[0] - right[0]);
+  const sortedTokens = [...machine.state.deltas.entries()].sort((left, right) => left[0] - right[0]);
   for (const [tokenId, delta] of sortedTokens) {
     // Only off-chain bilateral state belongs in frame comparison. `ondelta`
     // follows independently observed J events and may arrive at different
@@ -82,7 +82,7 @@ export const buildProposalFrame = async (
   const stateRootTiming: AccountStateRootTiming = {};
   let accountStateRoot: string;
   try {
-    accountStateRoot = computeAccountStateRoot(candidate, stateRootTiming);
+    accountStateRoot = computeAccountStateRoot(candidate.state, stateRootTiming);
   } catch (error) {
     return {
       success: false,
@@ -108,7 +108,7 @@ export const buildProposalFrame = async (
       height: frameData.height,
       stateHash: frameData.stateHash,
       accountStateRoot,
-      accountStateSectionHashes: computeAccountStateSectionHashes(candidate),
+      accountStateSectionHashes: computeAccountStateSectionHashes(candidate.state),
       txs: frameData.accountTxs.map(tx => tx.type),
     });
   }

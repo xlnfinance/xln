@@ -1,11 +1,10 @@
 import type { BookState } from '../orderbook';
 import { validateBookStructure } from '../orderbook/validity';
 import { verifyAndWarmBookCommitment } from '../orderbook/commitment';
-import { validateAccountState } from '../account/state-validation';
+import { validateAccountReplica } from '../account/state-validation';
 import { validateEntityState } from '../entity/state-validation';
 import { LIMITS } from '../config/constants';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
-import { normalizeAccountStateDomain } from '../account/state-root';
 import { normalizeEntityId } from './keys';
 import { validateSettlementContinuationValue } from '../entity/account-metadata-validation';
 import {
@@ -16,7 +15,6 @@ import {
   requireStorageBigInt,
   requireStorageMap,
   requireStorageString,
-  requireStringArray,
 } from './schema-primitives';
 
 const ENTITY_REQUIRED = [
@@ -36,16 +34,14 @@ const ENTITY_OPTIONAL = [
   'orderbookReferrals', 'lending',
 ] as const;
 
-const ACCOUNT_REQUIRED = [
-  'leftEntity', 'rightEntity', 'domain', 'watchSeed', 'status', 'mempool', 'currentFrame',
-  'deltas', 'locks', 'swapOffers', 'globalCreditLimits', 'currentHeight',
-  'pendingSignatures', 'rollbackCount', 'leftPendingJClaims', 'rightPendingJClaims',
-  'lastFinalizedJHeight', 'proofHeader', 'proofBody', 'disputeConfig', 'jNonce',
-  'pendingWithdrawals', 'requestedRebalance', 'requestedRebalanceFeeState', 'shadow',
+const ACCOUNT_REPLICA_REQUIRED = [
+  'state', 'status', 'mempool', 'currentFrame', 'currentHeight',
+  'pendingSignatures', 'rollbackCount', 'proofHeader', 'proofBody',
+  'pendingWithdrawals', 'shadow',
 ] as const;
 
-const ACCOUNT_OPTIONAL = [
-  'pulls', 'subcontracts', 'lendingIntents', 'pendingFrame', 'pendingAccountInput',
+const ACCOUNT_REPLICA_OPTIONAL = [
+  'pendingFrame', 'pendingAccountInput',
   'lastOutboundFrameAck', 'pendingForwards', 'hankoSignature', 'lastRollbackFrameHash',
   'abiProofBody', 'currentFrameHanko', 'counterpartyFrameHanko', 'boardResealMigration',
   'counterpartyBoardReseal', 'currentDisputeProofHanko', 'currentDisputeProofNonce',
@@ -53,7 +49,18 @@ const ACCOUNT_OPTIONAL = [
   'counterpartyDisputeProofNonce', 'counterpartyDisputeProofBodyHash',
   'counterpartyDisputeHash', 'counterpartySettlementHanko', 'disputeProofNoncesByHash',
   'disputeProofBodiesByHash', 'disputeArgumentSnapshotsByHash', 'disputePrepare',
-  'settlementWorkspace', 'activeDispute', 'swapOrderHistory', 'swapClosedOrders',
+  'activeDispute', 'swapOrderHistory', 'swapClosedOrders',
+] as const;
+
+const ACCOUNT_STATE_REQUIRED = [
+  'leftEntity', 'rightEntity', 'domain', 'watchSeed', 'deltas', 'locks',
+  'swapOffers', 'globalCreditLimits', 'leftPendingJClaims', 'rightPendingJClaims',
+  'lastFinalizedJHeight', 'disputeConfig', 'jNonce', 'requestedRebalance',
+  'requestedRebalanceFeeState',
+] as const;
+
+const ACCOUNT_STATE_OPTIONAL = [
+  'pulls', 'subcontracts', 'lendingIntents', 'settlementWorkspace',
   'rebalanceFeePolicies',
 ] as const;
 
@@ -119,26 +126,10 @@ const validateDeferredAccountProposals = (value: unknown, code: string): void =>
 export const validateStorageAccountDocValue = (value: unknown): StorageAccountDoc => {
   const code = 'STORAGE_ACCOUNT_DOC_INVALID';
   const doc = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(doc, ACCOUNT_REQUIRED, ACCOUNT_OPTIONAL, `${code}_FIELDS`);
-  requireStorageString(doc['leftEntity'], `${code}_LEFT_ENTITY`);
-  requireStorageString(doc['rightEntity'], `${code}_RIGHT_ENTITY`);
-  normalizeAccountStateDomain(doc['domain'] as StorageAccountDoc['domain'], `${code}_DOMAIN`);
-  if (typeof doc['watchSeed'] !== 'string') throw new Error(`${code}_WATCH_SEED`);
-  if (!['active', 'dispute_preparing', 'disputed'].includes(String(doc['status']))) throw new Error(`${code}_STATUS`);
-  requireStorageArray(doc['mempool'], `${code}_MEMPOOL`);
-  requireStorageMap(doc['deltas'], `${code}_DELTAS`);
-  requireStorageMap(doc['locks'], `${code}_LOCKS`);
-  requireStorageMap(doc['swapOffers'], `${code}_SWAP_OFFERS`);
-  requireBoundaryInteger(doc['currentHeight'], `${code}_CURRENT_HEIGHT`);
-  requireStringArray(doc['pendingSignatures'], `${code}_PENDING_SIGNATURES`);
-  requireBoundaryInteger(doc['rollbackCount'], `${code}_ROLLBACK_COUNT`);
-  requireBoundaryInteger(doc['lastFinalizedJHeight'], `${code}_FINALIZED_J_HEIGHT`);
-  requireBoundaryInteger(doc['jNonce'], `${code}_J_NONCE`);
-  requireStorageMap(doc['pendingWithdrawals'], `${code}_PENDING_WITHDRAWALS`);
-  requireStorageMap(doc['requestedRebalance'], `${code}_REQUESTED_REBALANCE`);
-  requireStorageMap(doc['requestedRebalanceFeeState'], `${code}_REBALANCE_FEES`);
-  validateAccountState(doc, code);
-  return doc as StorageAccountDoc;
+  requireExactBoundaryKeys(doc, ACCOUNT_REPLICA_REQUIRED, ACCOUNT_REPLICA_OPTIONAL, `${code}_FIELDS`);
+  const state = requireBoundaryRecord(doc['state'], `${code}_STATE`);
+  requireExactBoundaryKeys(state, ACCOUNT_STATE_REQUIRED, ACCOUNT_STATE_OPTIONAL, `${code}_STATE_FIELDS`);
+  return validateAccountReplica(doc, code);
 };
 
 function assertBookHeader(value: unknown): asserts value is BookState {
@@ -189,7 +180,10 @@ export const assertStorageAccountDocBinding = (
   counterpartyId: string,
   scope: string,
 ): StorageAccountDoc => {
-  const endpoints = new Set([normalizeEntityId(doc.leftEntity), normalizeEntityId(doc.rightEntity)]);
+  const endpoints = new Set([
+    normalizeEntityId(doc.state.leftEntity),
+    normalizeEntityId(doc.state.rightEntity),
+  ]);
   if (!endpoints.has(normalizeEntityId(entityId)) || !endpoints.has(normalizeEntityId(counterpartyId))) {
     throw new Error(`STORAGE_ACCOUNT_DOC_KEY_MISMATCH:scope=${scope}`);
   }

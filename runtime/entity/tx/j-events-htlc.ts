@@ -230,8 +230,8 @@ function queueInboundResolvesByHashlock(
 ): number {
   let queued = 0;
   for (const [counterpartyId, account] of newState.accounts.entries()) {
-    const weAreLeft = account.leftEntity === newState.entityId;
-    for (const lock of account.locks.values()) {
+    const weAreLeft = account.state.leftEntity === newState.entityId;
+    for (const lock of account.state.locks.values()) {
       if (String(lock.hashlock).toLowerCase() !== hashlock) continue;
       const senderIsUs = (lock.senderIsLeft && weAreLeft) || (!lock.senderIsLeft && !weAreLeft);
       if (senderIsUs) continue;

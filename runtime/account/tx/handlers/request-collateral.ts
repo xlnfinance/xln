@@ -32,7 +32,7 @@ const validateCollateralRequest = (account: AccountReplica, data: RequestCollate
   if (!Number.isFinite(data.policyVersion) || data.policyVersion < 1) {
     return `request_collateral: invalid policyVersion ${data.policyVersion}`;
   }
-  if (!account.deltas.has(data.tokenId)) {
+  if (!account.state.deltas.has(data.tokenId)) {
     return `request_collateral: no delta for token ${data.tokenId}`;
   }
   return undefined;
@@ -47,9 +47,9 @@ const storeCollateralRequest = (
   feePaidUpfront: bigint,
   currentTimestamp: number,
 ): void => {
-  account.requestedRebalanceFeeState ||= new Map();
-  account.requestedRebalance.set(tx.data.tokenId, requestedAmount);
-  account.requestedRebalanceFeeState.set(tx.data.tokenId, {
+  account.state.requestedRebalanceFeeState ||= new Map();
+  account.state.requestedRebalance.set(tx.data.tokenId, requestedAmount);
+  account.state.requestedRebalanceFeeState.set(tx.data.tokenId, {
     requestId: `rebalance:${requestedByLeft ? 'left' : 'right'}:${tx.data.tokenId}:${account.currentHeight + 1}`,
     feeTokenId,
     feePaidUpfront,
@@ -71,7 +71,7 @@ export function handleRequestCollateral(
   const validationError = validateCollateralRequest(account, accountTx.data);
   if (validationError) return { success: false, events: [], error: validationError };
 
-  const existingRequest = account.requestedRebalance.get(tokenId) ?? 0n;
+  const existingRequest = account.state.requestedRebalance.get(tokenId) ?? 0n;
   if (existingRequest > 0n) {
     return {
       success: true,
@@ -93,7 +93,7 @@ export function handleRequestCollateral(
   }
 
   const feeToken = feeTokenId ?? tokenId;
-  const feeDelta = account.deltas.get(feeToken);
+  const feeDelta = account.state.deltas.get(feeToken);
   if (!feeDelta) {
     return { success: false, events: [], error: `request_collateral: no delta for fee token ${feeToken}` };
   }
@@ -172,15 +172,15 @@ export function resolveAutoRebalanceFeePolicy(
 ): RebalanceFeePolicy | undefined {
   const ours = ourEntityId.toLowerCase();
   const counterpartySide =
-    ours === account.leftEntity.toLowerCase()
+    ours === account.state.leftEntity.toLowerCase()
       ? 'right'
-      : ours === account.rightEntity.toLowerCase()
+      : ours === account.state.rightEntity.toLowerCase()
         ? 'left'
         : undefined;
   if (!counterpartySide) {
     throw new Error(`REBALANCE_POLICY_ENTITY_NOT_IN_ACCOUNT:${ourEntityId}`);
   }
-  const policy = account.rebalanceFeePolicies?.get(tokenId)?.[counterpartySide];
+  const policy = account.state.rebalanceFeePolicies?.get(tokenId)?.[counterpartySide];
   if (!policy) return undefined;
   return {
     policyVersion: policy.policyVersion,
@@ -196,7 +196,7 @@ export function checkAutoRebalance(account: AccountReplica, ourEntityId: string,
   // New rebalance cycles must not start during settlement. A committed request
   // is immutable until its finalized event clears it. New exposure accumulates
   // independently and is considered by the next cycle after finalization.
-  const settlementInFlight = !!account.settlementWorkspace;
+  const settlementInFlight = !!account.state.settlementWorkspace;
 
   if (account.shadow.rebalance.policy.size === 0) {
     return result;
@@ -212,12 +212,12 @@ export function checkAutoRebalance(account: AccountReplica, ourEntityId: string,
     // Skip manual mode (r2cRequestSoftLimit === hardLimit convention)
     if (policy.r2cRequestSoftLimit === policy.hardLimit) continue;
 
-    const delta = account.deltas.get(tokenId);
+    const delta = account.state.deltas.get(tokenId);
     if (!delta) continue;
 
     const derived = deriveDelta(delta, isLeft);
     const outPeerCredit = derived.outPeerCredit;
-    const existingRequest = account.requestedRebalance.get(tokenId) ?? 0n;
+    const existingRequest = account.state.requestedRebalance.get(tokenId) ?? 0n;
     if (existingRequest > 0n) continue;
     // Rebalance trigger must be based ONLY on uncollateralized peer credit usage.
     //

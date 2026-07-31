@@ -13,8 +13,8 @@ const accountMatchesCounterparty = (
   if (!needle) return false;
 
   const me = String(ownerEntityId || '').toLowerCase();
-  const left = typeof account?.leftEntity === 'string' ? account.leftEntity.toLowerCase() : '';
-  const right = typeof account?.rightEntity === 'string' ? account.rightEntity.toLowerCase() : '';
+  const left = typeof account?.state.leftEntity === 'string' ? account.state.leftEntity.toLowerCase() : '';
+  const right = typeof account?.state.rightEntity === 'string' ? account.state.rightEntity.toLowerCase() : '';
 
   if (left && right) {
     if (left === me && right === needle) return true;
@@ -37,7 +37,7 @@ export const hasAccount = (env: RuntimeReplica, entityId: string, counterpartyId
   return false;
 };
 
-export const getAccountState = (
+export const getAccountReplica = (
   env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,

@@ -87,7 +87,7 @@ const buildCommittedCrossJurisdictionOfferEvent = (
 ): SwapOfferEvent | null => {
   const accountId = findAccountKey(state, route.source.entityId);
   const account = accountId ? state.accounts.get(accountId) : undefined;
-  const offer = account?.swapOffers?.get(route.orderId);
+  const offer = account?.state.swapOffers?.get(route.orderId);
   const remaining = getCrossJurisdictionRouteRemainingAmounts(route);
   if (!accountId || !account || !offer?.crossJurisdiction) {
     // The canonical cross-j book owner may be the target-side hub. In that
@@ -113,8 +113,8 @@ const buildCommittedCrossJurisdictionOfferEvent = (
     offerId: route.orderId,
     accountId,
     makerIsLeft: offer.makerIsLeft,
-    fromEntity: account.leftEntity,
-    toEntity: account.rightEntity,
+    fromEntity: account.state.leftEntity,
+    toEntity: account.state.rightEntity,
     createdHeight: offer.createdHeight,
     giveTokenId: offer.giveTokenId,
     giveAmount: remaining.sourceRemaining,
@@ -443,7 +443,7 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
     );
   }
   const account = newState.accounts.get(entityTx.data.sourceAccountId);
-  const offer = account?.swapOffers?.get(route.orderId);
+  const offer = account?.state.swapOffers?.get(route.orderId);
   const currentRoute = newState.crossJurisdictionSwaps?.get(route.orderId);
   if (!account || !offer?.crossJurisdiction || !currentRoute) {
     throw new Error(

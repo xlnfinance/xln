@@ -246,7 +246,7 @@ import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fai
 
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
-import { cloneAccountState } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state-clone';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -255,7 +255,7 @@ import {
 
 import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 
-import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
+import type { AccountFrame, AccountInput, AccountReplica, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import type { JInput } from '../jurisdiction/machine/input';
@@ -349,11 +349,30 @@ const makeEmptyProofBody = () => ({
   transformers: [],
 });
 
-const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountState => {
+const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountReplica => {
   return {
-    leftEntity,
-    rightEntity,
-    domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+      watchSeed: deriveAccountWatchSeed({
+        runtimeSeed: 'audit-failfast-test-helper',
+        entityId: leftEntity,
+        counterpartyId: rightEntity,
+        timestamp: 0,
+      }),
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+    },
     status: 'active',
     mempool: [...mempool],
     currentFrame: {
@@ -367,36 +386,18 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map(),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    watchSeed: deriveAccountWatchSeed({
-      runtimeSeed: 'audit-failfast-test-helper',
-      entityId: leftEntity,
-      counterpartyId: rightEntity,
-      timestamp: 0,
-    }),
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
-  } as AccountState;
+  };
 };
 
 const setSyntheticPendingAccountProposal = (
-  account: AccountState,
+  account: AccountReplica,
   accountTxs: AccountTx[],
   timestamp: number,
 ): void => {
@@ -413,13 +414,13 @@ const setSyntheticPendingAccountProposal = (
     kind: 'frame',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
-    domain: structuredClone(account.domain),
+    domain: structuredClone(account.state.domain),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
 
 const makeIncomingAccountFrame = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
   byLeft: boolean,
   timestamp = 10_000,
@@ -846,8 +847,8 @@ describe('audit fail-fast regressions', () => {
     attachSigningReplica(env, accountMachine.proofHeader.fromEntity, left.signerId);
     const signingJurisdiction = Array.from(env.state.jReplicas.values()).find(
       replica =>
-        replica.chainId === accountMachine.domain.chainId &&
-        replica.contracts?.depository?.toLowerCase() === accountMachine.domain.depositoryAddress.toLowerCase(),
+        replica.chainId === accountMachine.state.domain.chainId &&
+        replica.contracts?.depository?.toLowerCase() === accountMachine.state.domain.depositoryAddress.toLowerCase(),
     );
     if (!signingJurisdiction?.contracts) throw new Error('TEST_SIGNING_JURISDICTION_MISSING');
     delete signingJurisdiction.contracts.deltaTransformer;
@@ -870,13 +871,13 @@ describe('audit fail-fast regressions', () => {
     const state = makeEntityState(entityId);
     const account = makeProposalAccount([], entityId, counterpartyId);
     const finalProofbody: ProofBodyStruct = {
-      watchSeed: account.watchSeed,
+      watchSeed: account.state.watchSeed,
       offdeltas: [50n],
       tokenIds: [1n],
       transformers: [],
     };
     const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
-    account.deltas.set(1, {
+    account.state.deltas.set(1, {
       tokenId: 1,
       collateral: 100n,
       ondelta: 25n,
@@ -900,7 +901,7 @@ describe('audit fail-fast regressions', () => {
     } as AccountState['activeDispute'];
     // Prime the incremental trie before the jurisdiction event mutates the
     // same Delta objects in place. Dispute finalization must invalidate it.
-    computeAccountStateRoot(account);
+    computeAccountStateRoot(account.state);
     state.accounts.set(counterpartyId, account);
     state.jBatchState = {
       batch: {
@@ -1026,16 +1027,16 @@ describe('audit fail-fast regressions', () => {
     expect(finalized.newState.jBatchState?.status).toBe('accumulating');
     expect(state.jBatchState?.sentBatch?.encodedBatch).toBe(sealedBatchBefore);
     expect(encodeJBatch(state.jBatchState!.sentBatch!.batch)).toBe(sealedBatchBefore);
-    const finalizedDelta = finalized.newState.accounts.get(counterpartyId)?.deltas.get(1);
+    const finalizedDelta = finalized.newState.accounts.get(counterpartyId)?.state.deltas.get(1);
     expect(finalizedDelta?.collateral).toBe(0n);
     expect(finalizedDelta?.ondelta).toBe(0n);
     expect(finalizedDelta?.offdelta).toBe(0n);
     expect(finalizedDelta?.leftAllowance).toBe(0n);
     expect(finalizedDelta?.rightAllowance).toBe(0n);
-    expect(finalized.newState.accounts.get(counterpartyId)?.jNonce).toBe(8);
+    expect(finalized.newState.accounts.get(counterpartyId)?.state.jNonce).toBe(8);
     const finalizedAccount = finalized.newState.accounts.get(counterpartyId);
     if (!finalizedAccount) throw new Error('FINALIZED_ACCOUNT_MISSING');
-    expect(computeAccountStateRoot(finalizedAccount)).toBe(computeAccountStateRootCold(finalizedAccount));
+    expect(computeAccountStateRoot(finalizedAccount.state)).toBe(computeAccountStateRootCold(finalizedAccount.state));
   });
 
   test('DisputeFinalized rejects missing signed final body before mutating account state', async () => {
@@ -1046,7 +1047,7 @@ describe('audit fail-fast regressions', () => {
       transformers: [],
     };
     const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-missing', finalProofbody, false);
-    fixture.account.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
+    fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
     const stateBefore = safeStringify(fixture.state);
 
     await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_EVENT_DISPUTE_FINAL_PROOFBODY_MISSING');
@@ -1100,7 +1101,7 @@ describe('audit fail-fast regressions', () => {
       transformers: [],
     };
     const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-shape', malformedProofbody, true);
-    fixture.account.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
+    fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
 
     await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_DISPUTE_PROOFBODY_LENGTH_MISMATCH');
   });
@@ -1125,13 +1126,13 @@ describe('audit fail-fast regressions', () => {
       ),
       [staleHash]: captureDisputeArgumentSnapshot(fixture.account, staleHash, 6, makeEmptyProofBody()),
     };
-    fixture.account.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
-    fixture.account.deltas.set(2, { ...createDefaultDelta(2), collateral: 200n, offdelta: 75n });
+    fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
+    fixture.account.state.deltas.set(2, { ...createDefaultDelta(2), collateral: 200n, offdelta: 75n });
 
     const finalized = await applyDisputeFinalizedFixture(fixture);
     const account = finalized.newState.accounts.get(fixture.counterpartyId)!;
-    expect(account.deltas.get(1)).toMatchObject({ collateral: 0n, ondelta: 0n, offdelta: 0n });
-    expect(account.deltas.get(2)).toMatchObject({ collateral: 200n, offdelta: 75n });
+    expect(account.state.deltas.get(1)).toMatchObject({ collateral: 0n, ondelta: 0n, offdelta: 0n });
+    expect(account.state.deltas.get(2)).toMatchObject({ collateral: 200n, offdelta: 75n });
     expect(account.disputeProofBodiesByHash).toBeUndefined();
     expect(account.disputeProofNoncesByHash).toBeUndefined();
     expect(account.disputeArgumentSnapshotsByHash).toBeUndefined();
@@ -1158,7 +1159,7 @@ describe('audit fail-fast regressions', () => {
       transformers: [],
     };
     const fixture = makeDisputeFinalizedFixture('dispute-finalized-settlement-race', finalProofbody, true);
-    fixture.account.deltas.set(1, {
+    fixture.account.state.deltas.set(1, {
       ...createDefaultDelta(1),
       collateral: 100n,
       offdelta: 50n,
@@ -1175,19 +1176,19 @@ describe('audit fail-fast regressions', () => {
       },
     };
     expect((await applyAccountTx(fixture.account, upsertTx, true, 1_000)).success).toBe(true);
-    fixture.account.settlementWorkspace!.leftHanko = '0x1234';
-    fixture.account.settlementWorkspace!.nonceAtSign = 8;
-    fixture.account.settlementWorkspace!.settlementHash = `0x${'81'.repeat(32)}`;
+    fixture.account.state.settlementWorkspace!.leftHanko = '0x1234';
+    fixture.account.state.settlementWorkspace!.nonceAtSign = 8;
+    fixture.account.state.settlementWorkspace!.settlementHash = `0x${'81'.repeat(32)}`;
     fixture.account.mempool.push(structuredClone(upsertTx));
     fixture.state.deferredAccountProposals = new Map([
-      [fixture.counterpartyId, fixture.account.settlementWorkspace!.workspaceHash],
+      [fixture.counterpartyId, fixture.account.state.settlementWorkspace!.workspaceHash],
     ]);
-    expect(fixture.account.deltas.get(1)?.leftHold).toBe(4n);
+    expect(fixture.account.state.deltas.get(1)?.leftHold).toBe(4n);
 
     const finalized = await applyDisputeFinalizedFixture(fixture);
     const account = finalized.newState.accounts.get(fixture.counterpartyId)!;
-    expect(account.settlementWorkspace).toBeUndefined();
-    expect(account.deltas.get(1)?.leftHold).toBe(0n);
+    expect(account.state.settlementWorkspace).toBeUndefined();
+    expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
     expect(account.mempool.some(tx => tx.type === 'settle_transition')).toBe(false);
     expect(finalized.newState.deferredAccountProposals?.has(fixture.counterpartyId)).toBe(false);
   });
@@ -1247,9 +1248,9 @@ describe('audit fail-fast regressions', () => {
       },
     } as EntityState['config'];
     const account = makeProposalAccount([], starterId, finalizerId);
-    account.domain = { chainId: 31337, depositoryAddress };
+    account.state.domain = { chainId: 31337, depositoryAddress };
     account.proofHeader = { fromEntity: starterId, toEntity: finalizerId, nextProofNonce: 2 };
-    account.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
+    account.state.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
 
     const initialProof = buildAccountProofBody(account, '');
     storeDisputeArgumentSnapshot(
@@ -1257,7 +1258,7 @@ describe('audit fail-fast regressions', () => {
       captureDisputeArgumentSnapshot(account, initialProof.proofBodyHash, 1, initialProof.proofBodyStruct),
     );
 
-    account.deltas.set(1, { ...createDefaultDelta(1), offdelta: 75n });
+    account.state.deltas.set(1, { ...createDefaultDelta(1), offdelta: 75n });
     const counterProof = buildAccountProofBody(account, '');
     storeDisputeArgumentSnapshot(
       account,
@@ -1271,7 +1272,7 @@ describe('audit fail-fast regressions', () => {
     account.counterpartyDisputeProofNonce = 2;
     account.counterpartyDisputeProofHanko = '0x1234';
     account.counterpartyDisputeHash = createDisputeProofHashWithNonce(
-      account,
+      account.state,
       counterProof.proofBodyHash,
       { chainId: 31337, depositoryAddress },
       2,
@@ -1356,9 +1357,9 @@ describe('audit fail-fast regressions', () => {
     } as EntityState['config'];
 
     const account = makeProposalAccount([], user.entityId, hub.entityId);
-    account.jNonce = 1;
+    account.state.jNonce = 1;
     account.proofHeader = { fromEntity: user.entityId, toEntity: hub.entityId, nextProofNonce: 50 };
-    account.deltas.set(1, { ...createDefaultDelta(1), collateral: 10n });
+    account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 10n });
 
     const transition: AccountTx = {
       type: 'settle_transition',
@@ -1388,7 +1389,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(result.outputs).toEqual([]);
     expect(result.accountTxs).toEqual([]);
-    expect(userState.deferredAccountProposals?.get(hub.entityId)).toBe(account.settlementWorkspace?.workspaceHash);
+    expect(userState.deferredAccountProposals?.get(hub.entityId)).toBe(account.state.settlementWorkspace?.workspaceHash);
     expect(buildSettlementSealDraft(account, userState, hub.entityId, env).tx).toMatchObject({
       type: 'settle_transition',
       data: {
@@ -1397,8 +1398,8 @@ describe('audit fail-fast regressions', () => {
         postProof: { nonce: 51 },
       },
     });
-    expect(account.settlementWorkspace?.nonceAtSign).toBeUndefined();
-    expect(account.settlementWorkspace?.postSettlementDisputeProof).toBeUndefined();
+    expect(account.state.settlementWorkspace?.nonceAtSign).toBeUndefined();
+    expect(account.state.settlementWorkspace?.postSettlementDisputeProof).toBeUndefined();
   });
 
   test('settlement finalization activates post-settlement dispute hash atomically', () => {
@@ -1407,17 +1408,17 @@ describe('audit fail-fast regressions', () => {
     const depositoryAddress = hex20('1');
     const account = makeProposalAccount([], leftId, rightId);
     account.proofHeader = { fromEntity: leftId, toEntity: rightId, nextProofNonce: 2 };
-    account.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
+    account.state.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
 
     const postProof = buildAccountProofBody(account, '');
     const postDisputeHash = createDisputeProofHashWithNonce(
-      account,
+      account.state,
       postProof.proofBodyHash,
       { chainId: 31337, depositoryAddress },
       2,
     );
     account.counterpartyDisputeHash = `0x${'aa'.repeat(32)}`;
-    account.settlementWorkspace = {
+    account.state.settlementWorkspace = {
       workspaceHash: '',
       ops: [],
       lastModifiedByLeft: true,
@@ -1437,7 +1438,7 @@ describe('audit fail-fast regressions', () => {
         nonce: 2,
       },
     };
-    account.settlementWorkspace.workspaceHash = createSettlementWorkspaceHash(account, account.settlementWorkspace);
+    account.state.settlementWorkspace.workspaceHash = createSettlementWorkspaceHash(account.state, account.state.settlementWorkspace);
 
     const settledEvent: JurisdictionEvent = {
       type: 'AccountSettled',
@@ -1453,15 +1454,15 @@ describe('audit fail-fast regressions', () => {
       },
     };
     applyFinalizedAccountJEvents(account, rightId, [settledEvent], '');
-    account.lastFinalizedJHeight = 7;
+    account.state.lastFinalizedJHeight = 7;
 
-    expect(account.settlementWorkspace).toBeUndefined();
+    expect(account.state.settlementWorkspace).toBeUndefined();
     expect(account.currentDisputeHash).toBe(postDisputeHash);
     expect(account.counterpartyDisputeHash).toBe(postDisputeHash);
     expect(account.currentDisputeProofBodyHash).toBe(postProof.proofBodyHash);
     expect(account.counterpartyDisputeProofBodyHash).toBe(postProof.proofBodyHash);
     expect(account.disputeProofNoncesByHash?.[postProof.proofBodyHash]).toBe(2);
-    expect(account.jNonce).toBe(1);
+    expect(account.state.jNonce).toBe(1);
   });
 
   test('disputeStart rejects unsupported incremented argument override instead of silently ignoring it', async () => {
@@ -1650,9 +1651,11 @@ describe('audit fail-fast regressions', () => {
 
   test('htlc_lock refuses to add more than the configured per-account cap', async () => {
     const accountMachine = {
-      deltas: new Map(),
+      state: {
+        deltas: new Map(),
+        locks: new Map(Array.from({ length: LIMITS.MAX_ACCOUNT_HTLC_LOCKS }, (_, index) => [String(index), {}])),
+      },
       currentHeight: 0,
-      locks: new Map(Array.from({ length: LIMITS.MAX_ACCOUNT_HTLC_LOCKS }, (_, index) => [String(index), {}])),
     };
 
     const result = await handleHtlcLock(
@@ -1675,7 +1678,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(`max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`);
-    expect(accountMachine.locks.size).toBe(LIMITS.MAX_ACCOUNT_HTLC_LOCKS);
+    expect(accountMachine.state.locks.size).toBe(LIMITS.MAX_ACCOUNT_HTLC_LOCKS);
   });
 
   test('cross-j committed pull_resolve followup rejects malformed binary instead of skipping it', () => {
@@ -1894,7 +1897,7 @@ describe('audit fail-fast regressions', () => {
     const bookOwnerSigner = bookOwnerIdentity.signerId;
     const collisionSigner = '3';
     attachSigningReplica(env, sourceHub, sourceHubSigner);
-    const makeCanonicalAccount = (selfId: string, counterpartyId: string): AccountState => {
+    const makeCanonicalAccount = (selfId: string, counterpartyId: string): AccountReplica => {
       const [leftEntity, rightEntity] =
         selfId.toLowerCase() < counterpartyId.toLowerCase() ? [selfId, counterpartyId] : [counterpartyId, selfId];
       const account = makeProposalAccount([], leftEntity, rightEntity);
@@ -1999,13 +2002,13 @@ describe('audit fail-fast regressions', () => {
     };
     sourceState.crossJurisdictionSwaps = new Map([[makerRoute.orderId, makerRoute]]);
     const makerSourceAccount = makeCanonicalAccount(sourceHub, remoteMaker);
-    makerSourceAccount.swapOffers.set(makerRoute.orderId, {
+    makerSourceAccount.state.swapOffers.set(makerRoute.orderId, {
       offerId: makerRoute.orderId,
       giveTokenId: makerRoute.source.tokenId,
       giveAmount: makerRoute.source.amount,
       wantTokenId: makerRoute.target.tokenId,
       wantAmount: makerRoute.target.amount,
-      makerIsLeft: makerSourceAccount.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
+      makerIsLeft: makerSourceAccount.state.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
       timeInForce: 0,
       createdHeight: 1,
       priceTicks: 25_000_000n,
@@ -2065,13 +2068,13 @@ describe('audit fail-fast regressions', () => {
     } satisfies OrderbookExtState;
 
     const takerAccount = makeCanonicalAccount(bookOwnerHub, localTaker);
-    takerAccount.swapOffers.set(takerRoute.orderId, {
+    takerAccount.state.swapOffers.set(takerRoute.orderId, {
       offerId: takerRoute.orderId,
       giveTokenId: takerRoute.source.tokenId,
       giveAmount: takerRoute.source.amount,
       wantTokenId: takerRoute.target.tokenId,
       wantAmount: takerRoute.target.amount,
-      makerIsLeft: takerAccount.leftEntity.toLowerCase() === localTaker.toLowerCase(),
+      makerIsLeft: takerAccount.state.leftEntity.toLowerCase() === localTaker.toLowerCase(),
       timeInForce: 0,
       createdHeight: 2,
       priceTicks: 25_000_000n,
@@ -2083,13 +2086,13 @@ describe('audit fail-fast regressions', () => {
     const collisionState = makeEntityState(collisionOwner);
     collisionState.config = makeSingleSignerConfigFor(collisionSigner);
     const collisionAccount = makeCanonicalAccount(collisionOwner, remoteMaker);
-    collisionAccount.swapOffers.set(makerRoute.orderId, {
+    collisionAccount.state.swapOffers.set(makerRoute.orderId, {
       offerId: makerRoute.orderId,
       giveTokenId: makerRoute.source.tokenId,
       giveAmount: makerRoute.source.amount,
       wantTokenId: makerRoute.target.tokenId,
       wantAmount: makerRoute.target.amount,
-      makerIsLeft: collisionAccount.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
+      makerIsLeft: collisionAccount.state.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
       timeInForce: 0,
       createdHeight: 1,
       priceTicks: 25_000_000n,
@@ -2229,13 +2232,13 @@ describe('audit fail-fast regressions', () => {
     installSingleSignerBoard(env, sourceState);
     sourceState.crossJurisdictionSwaps = new Map([[orderId, restingRoute]]);
     const account = makeProposalAccount([], sourceHub, user);
-    account.swapOffers.set(orderId, {
+    account.state.swapOffers.set(orderId, {
       offerId: orderId,
       giveTokenId: restingRoute.source.tokenId,
       giveAmount: restingRoute.source.amount,
       wantTokenId: restingRoute.target.tokenId,
       wantAmount: restingRoute.target.amount,
-      makerIsLeft: account.leftEntity.toLowerCase() === user.toLowerCase(),
+      makerIsLeft: account.state.leftEntity.toLowerCase() === user.toLowerCase(),
       timeInForce: 0,
       createdHeight: 1,
       priceTicks: 25_000_000n,

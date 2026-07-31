@@ -70,7 +70,7 @@ const queueSameTradeFills = (
       currentNamespacedOrderId: offer.namespacedOrderId,
       currentOffer: offer.offer,
       batchOffer: pass.orderbookOfferMeta.get(namespacedOrderId) ?? null,
-      accountOffer: account.swapOffers?.get(offerId) ?? null,
+      accountOffer: account.state.swapOffers?.get(offerId) ?? null,
       book,
       bookKey: offer.bookKey,
       ...(resolveComment ? { resolveComment } : {}),

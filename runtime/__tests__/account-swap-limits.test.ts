@@ -8,6 +8,7 @@ import {
 } from '../account/swap-limits';
 import type { SwapOffer } from '../types/account';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
+import { makeAccount } from './helpers/cross-j';
 
 const offer = (
   offerId: string,
@@ -51,12 +52,8 @@ describe('account economic swap limits', () => {
         return [current.offerId, current] as const;
       }),
     );
-    const account = {
-      leftEntity: 'left',
-      rightEntity: 'right',
-      deltas: new Map(),
-      swapOffers,
-    };
+    const account = makeAccount('left', 'right');
+    account.state.swapOffers = swapOffers;
 
     const result = await handleSwapOffer(account as Parameters<typeof handleSwapOffer>[0], {
       type: 'swap_offer',
@@ -86,7 +83,8 @@ describe('account economic swap limits', () => {
         return [current.offerId, current] as const;
       }),
     );
-    const account = { leftEntity: 'left', rightEntity: 'right', deltas: new Map(), swapOffers };
+    const account = makeAccount('left', 'right');
+    account.state.swapOffers = swapOffers;
     const result = await handleSwapOffer(account as Parameters<typeof handleSwapOffer>[0], {
       type: 'swap_offer',
       data: {

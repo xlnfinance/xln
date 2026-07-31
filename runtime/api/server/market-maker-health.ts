@@ -64,17 +64,17 @@ const getExpectedMarketMakerOffersForPair = (baseTokenId: number, quoteTokenId: 
 const buildMarketMakerPairs = (tokenIds: number[]): MarketMakerPair[] => buildDefaultEntitySwapPairs(tokenIds);
 
 const collectCommittedOfferIdsForAccount = (
-  account: Pick<AccountReplica, 'swapOffers'> | null | undefined,
+  account: Pick<AccountReplica, 'state'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
-  if (account?.swapOffers instanceof Map) {
-    for (const offerId of account.swapOffers.keys()) ids.add(String(offerId));
+  if (account?.state.swapOffers instanceof Map) {
+    for (const offerId of account.state.swapOffers.keys()) ids.add(String(offerId));
   }
   return ids;
 };
 
 const countMarketMakerOffersForHub = (
-  account: Pick<AccountReplica, 'swapOffers' | 'mempool' | 'pendingFrame'> | null,
+  account: AccountReplica | null,
   hubEntityId: string,
 ): number => {
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
@@ -86,7 +86,7 @@ const countMarketMakerOffersForHub = (
 };
 
 const countMarketMakerOffersForHubPair = (
-  account: Pick<AccountReplica, 'swapOffers' | 'mempool' | 'pendingFrame'> | null,
+  account: AccountReplica | null,
   hubEntityId: string,
   pair: Pick<MarketMakerPair, 'baseTokenId' | 'quoteTokenId'>,
 ): number => {
@@ -108,7 +108,7 @@ const accountReady = (
 export const getMarketMakerHealth = (
   env: RuntimeReplica | null,
   state: MarketMakerServerState,
-  getAccountState: (env: RuntimeReplica, entityId: string, counterpartyId: string) => AccountReplica | null,
+  getAccountReplica: (env: RuntimeReplica, entityId: string, counterpartyId: string) => AccountReplica | null,
 ): {
   applicable: boolean;
   enabled: boolean;
@@ -196,7 +196,7 @@ export const getMarketMakerHealth = (
   }
 
   const perHub = hubs.map(hubEntityId => {
-    const account = getAccountState(env, entityId, hubEntityId);
+    const account = getAccountReplica(env, entityId, hubEntityId);
     const isAccountReady = accountReady(account);
     let reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool' | null = null;
     if (!account) reason = 'missing-account';
@@ -225,7 +225,7 @@ export const getMarketMakerHealth = (
         pendingFrame: Boolean(account?.pendingFrame),
         pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
         mempoolLength: Number(account?.mempool?.length || 0),
-        swapOffers: Number(account?.swapOffers?.size || 0),
+        swapOffers: Number(account?.state.swapOffers?.size || 0),
       }] : [],
       pairs: pairHealth,
     };

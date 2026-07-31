@@ -109,7 +109,7 @@
     const account = selectedHubEntityId
       ? replica?.state?.accounts?.get?.(selectedHubEntityId)
       : null;
-    for (const key of account?.deltas?.keys?.() ?? []) {
+    for (const key of account?.state.deltas?.keys?.() ?? []) {
       const id = Number(key);
       if (Number.isInteger(id) && id > 0) ids.add(id);
     }

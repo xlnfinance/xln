@@ -14,9 +14,9 @@ const assertAccountSettledEvent = (
 ): number => {
   const left = normalizedEntityId(event.data.leftEntity);
   const right = normalizedEntityId(event.data.rightEntity);
-  if (left !== account.leftEntity.toLowerCase() || right !== account.rightEntity.toLowerCase()) {
+  if (left !== account.state.leftEntity.toLowerCase() || right !== account.state.rightEntity.toLowerCase()) {
     throw new Error(
-      `ACCOUNT_SETTLED_PAIR_MISMATCH:${left}:${right}:${account.leftEntity.toLowerCase()}:${account.rightEntity.toLowerCase()}`,
+      `ACCOUNT_SETTLED_PAIR_MISMATCH:${left}:${right}:${account.state.leftEntity.toLowerCase()}:${account.state.rightEntity.toLowerCase()}`,
     );
   }
   const nonce = event.data.nonce;
@@ -34,27 +34,27 @@ const applyAccountSettledEvent = (account: AccountReplica, event: JurisdictionEv
   if (event.type !== 'AccountSettled') return;
   const { tokenId, collateral, ondelta } = event.data;
   const tokenIdNum = Number(tokenId);
-  let delta = account.deltas.get(tokenIdNum);
+  let delta = account.state.deltas.get(tokenIdNum);
   if (!delta) {
     const limit = getDefaultCreditLimit(tokenIdNum);
     delta = createDefaultDelta(tokenIdNum, { left: limit, right: limit });
-    account.deltas.set(tokenIdNum, delta);
+    account.state.deltas.set(tokenIdNum, delta);
   }
   const previousCollateral = delta.collateral;
   delta.collateral = BigInt(collateral);
   delta.ondelta = BigInt(ondelta);
-  const requested = account.requestedRebalance?.get(tokenIdNum) ?? 0n;
+  const requested = account.state.requestedRebalance?.get(tokenIdNum) ?? 0n;
   const increase = delta.collateral > previousCollateral ? delta.collateral - previousCollateral : 0n;
   if (requested > 0n && increase > 0n) {
     const remaining = requested > increase ? requested - increase : 0n;
-    if (remaining > 0n) account.requestedRebalance.set(tokenIdNum, remaining);
+    if (remaining > 0n) account.state.requestedRebalance.set(tokenIdNum, remaining);
     else {
-      account.requestedRebalance.delete(tokenIdNum);
-      account.requestedRebalanceFeeState?.delete(tokenIdNum);
+      account.state.requestedRebalance.delete(tokenIdNum);
+      account.state.requestedRebalanceFeeState?.delete(tokenIdNum);
     }
     account.shadow.rebalance.submittedAtByToken.delete(tokenIdNum);
   }
-  invalidateAccountMapCommitment(account, 'deltas', tokenIdNum);
+  invalidateAccountMapCommitment(account.state, 'deltas', tokenIdNum);
 };
 
 const activatePostSettlementProof = (
@@ -63,7 +63,7 @@ const activatePostSettlementProof = (
   finalizedNonce: number,
   deltaTransformerAddress: string,
 ): void => {
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (!workspace) return;
   const isSigned = Boolean(
     workspace.settlementHash || workspace.leftHanko || workspace.rightHanko || workspace.postSettlementDisputeProof,
@@ -97,7 +97,7 @@ const activatePostSettlementProof = (
     );
   }
 
-  const localIsLeft = account.proofHeader.fromEntity.toLowerCase() === account.leftEntity.toLowerCase();
+  const localIsLeft = account.proofHeader.fromEntity.toLowerCase() === account.state.leftEntity.toLowerCase();
   const localHanko = localIsLeft ? proof.leftHanko : proof.rightHanko;
   const counterpartyHanko = localIsLeft ? proof.rightHanko : proof.leftHanko;
   const localNonce = Number(account.currentDisputeProofNonce ?? 0);
@@ -150,7 +150,7 @@ export const applyFinalizedAccountJEvents = (
   );
   if (settledEvents.length === 0) return;
 
-  let previousNonce = account.jNonce ?? 0;
+  let previousNonce = account.state.jNonce ?? 0;
   let finalizedNonce = previousNonce;
   for (const event of settledEvents) {
     const nonce = assertAccountSettledEvent(account, event);
@@ -166,7 +166,7 @@ export const applyFinalizedAccountJEvents = (
   const staged = structuredClone(account);
   for (const event of settledEvents) applyAccountSettledEvent(staged, event);
   activatePostSettlementProof(staged, counterpartyId, finalizedNonce, deltaTransformerAddress);
-  staged.jNonce = finalizedNonce;
+  staged.state.jNonce = finalizedNonce;
   Object.assign(account, staged);
-  if (!staged.settlementWorkspace) delete account.settlementWorkspace;
+  if (!staged.state.settlementWorkspace) delete account.state.settlementWorkspace;
 };

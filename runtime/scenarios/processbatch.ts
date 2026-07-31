@@ -143,8 +143,8 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeReplica): Pr
   await syncChain(env, 6);
 
   for (const spender of spenders) {
-    const hubDelta = findReplica(env, hub.id)[1].state.accounts.get(spender.id)?.deltas.get(USDC);
-    const peerDelta = findReplica(env, spender.id)[1].state.accounts.get(hub.id)?.deltas.get(USDC);
+    const hubDelta = findReplica(env, hub.id)[1].state.accounts.get(spender.id)?.state.deltas.get(USDC);
+    const peerDelta = findReplica(env, spender.id)[1].state.accounts.get(hub.id)?.state.deltas.get(USDC);
     assert(hubDelta?.collateral === INITIAL_COLLATERAL, `${spender.name} seeded collateral on hub side`, env);
     assert(peerDelta?.collateral === INITIAL_COLLATERAL, `${spender.name} seeded collateral on peer side`, env);
   }
@@ -275,10 +275,10 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeReplica): Pr
   assert(hasFinalizedEvent(receiverAFinal, 'AccountSettled'), 'receiver A finalized AccountSettled event', env);
   assert(hasFinalizedEvent(receiverBFinal, 'AccountSettled'), 'receiver B finalized AccountSettled event', env);
 
-  const hubSpenderADelta = hubFinal.state.accounts.get(spenderA.id)?.deltas.get(USDC);
-  const hubSpenderBDelta = hubFinal.state.accounts.get(spenderB.id)?.deltas.get(USDC);
-  const hubReceiverADelta = hubFinal.state.accounts.get(receiverA.id)?.deltas.get(USDC);
-  const hubReceiverBDelta = hubFinal.state.accounts.get(receiverB.id)?.deltas.get(USDC);
+  const hubSpenderADelta = hubFinal.state.accounts.get(spenderA.id)?.state.deltas.get(USDC);
+  const hubSpenderBDelta = hubFinal.state.accounts.get(spenderB.id)?.state.deltas.get(USDC);
+  const hubReceiverADelta = hubFinal.state.accounts.get(receiverA.id)?.state.deltas.get(USDC);
+  const hubReceiverBDelta = hubFinal.state.accounts.get(receiverB.id)?.state.deltas.get(USDC);
 
   assert(!!hubSpenderADelta && !!hubSpenderBDelta && !!hubReceiverADelta && !!hubReceiverBDelta, 'hub deltas exist for all accounts', env);
   assert(hubSpenderADelta!.collateral === INITIAL_COLLATERAL - C2R_A, `spender A collateral reduced by C2R (${hubSpenderADelta!.collateral})`, env);
@@ -297,8 +297,8 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeReplica): Pr
   for (const entity of [spenderA, spenderB, receiverA, receiverB]) {
     const hubAccount = hubFinal.state.accounts.get(entity.id);
     const peerAccount = findReplica(env, entity.id)[1].state.accounts.get(hub.id);
-    assert((hubAccount?.lastFinalizedJHeight || 0) > 0, `hub ${entity.name} lastFinalizedJHeight > 0`, env);
-    assert((peerAccount?.lastFinalizedJHeight || 0) > 0, `${entity.name} lastFinalizedJHeight > 0`, env);
+    assert((hubAccount?.state.lastFinalizedJHeight || 0) > 0, `hub ${entity.name} lastFinalizedJHeight > 0`, env);
+    assert((peerAccount?.state.lastFinalizedJHeight || 0) > 0, `${entity.name} lastFinalizedJHeight > 0`, env);
   }
 
   console.log('\n✅ processbatch mixed scenario passed');

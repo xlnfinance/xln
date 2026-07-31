@@ -13,7 +13,9 @@
 
   type MapRecord<T> = Map<string, T> | Record<string, T>;
   type DeltaLike = { collateral?: bigint | number | string; ondelta?: bigint | number | string };
-  type AccountLike = { deltas?: Map<number, DeltaLike> | Record<string, DeltaLike> };
+  type AccountLike = {
+    state: { deltas?: Map<number, DeltaLike> | Record<string, DeltaLike> };
+  };
   type ReplicaLike = {
     state?: {
       reserves?: MapRecord<bigint | number | string>;
@@ -88,11 +90,11 @@
   })();
 
   function getDelta(acc: AccountLike, tokenId: number): DeltaLike | null {
-    if (!acc?.deltas) return null;
-    if (acc.deltas instanceof Map) {
-      return acc.deltas.get(tokenId) ?? null;
+    if (!acc?.state.deltas) return null;
+    if (acc.state.deltas instanceof Map) {
+      return acc.state.deltas.get(tokenId) ?? null;
     }
-    return acc.deltas[String(tokenId)] ?? null;
+    return acc.state.deltas[String(tokenId)] ?? null;
   }
 
   $: totalCollateral = accounts.reduce((sum: bigint, [, acc]) => {

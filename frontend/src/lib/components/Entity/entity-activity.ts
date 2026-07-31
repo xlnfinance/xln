@@ -293,7 +293,7 @@ export function buildEntityActivityRows(options: BuildEntityActivityRowsOptions)
         byLeft?: boolean,
       ) => {
         if (!Array.isArray(txs) || txs.length === 0) return;
-        const actorMeta = frameActorMeta(account, byLeft, options);
+        const actorMeta = frameActorMeta(account.state, byLeft, options);
         const allLines = txs.map((tx) => summarizeAccountTx(tx, accountId, accountLabel, actorMeta.actor, options));
         const headline = allLines.length === 1 ? allLines[0] ?? 'Account frame action' : `${txs.length} actions in account frame`;
         const bodyLines = allLines.length <= 1
@@ -349,7 +349,7 @@ export function buildEntityActivityRows(options: BuildEntityActivityRowsOptions)
           Number(account.pendingFrame?.height || account.currentHeight || 0),
           Number(account.pendingFrame?.timestamp || account.currentFrame?.timestamp || 0),
           account.mempool,
-          account.leftEntity === (options.replica?.state?.entityId || options.tabEntityId),
+          account.state.leftEntity === (options.replica?.state?.entityId || options.tabEntityId),
         );
       }
 

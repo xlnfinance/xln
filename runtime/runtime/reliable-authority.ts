@@ -287,9 +287,9 @@ const accountStateCovers = (
   const tx = getEffectiveEntityInputTxs(input).find(candidate => candidate.type === 'accountInput');
   if (!tx || tx.type !== 'accountInput') return false;
   const account = [...replica.state.accounts.values()].find(candidate =>
-    [candidate.leftEntity, candidate.rightEntity].map(normalize).includes(normalize(tx.data.fromEntityId)) &&
-    [candidate.leftEntity, candidate.rightEntity].map(normalize).includes(normalize(tx.data.toEntityId)) &&
-    normalize(candidate.watchSeed) === normalize(tx.data.watchSeed));
+    [candidate.state.leftEntity, candidate.state.rightEntity].map(normalize).includes(normalize(tx.data.fromEntityId)) &&
+    [candidate.state.leftEntity, candidate.state.rightEntity].map(normalize).includes(normalize(tx.data.toEntityId)) &&
+    normalize(candidate.state.watchSeed) === normalize(tx.data.watchSeed));
   if (!account || account.currentHeight < identity.height) return false;
   if (account.currentHeight > identity.height) return true;
   return normalize(account.currentFrame?.stateHash) === identity.frameHash;
@@ -445,7 +445,7 @@ const accountForLane = (
   }
   const ids = scope.map(normalize).sort();
   return [...replica.state.accounts.values()].find(account =>
-    [normalize(account.leftEntity), normalize(account.rightEntity)].sort().join(':') === ids.join(':'));
+    [normalize(account.state.leftEntity), normalize(account.state.rightEntity)].sort().join(':') === ids.join(':'));
 };
 
 /**

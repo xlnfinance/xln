@@ -28,10 +28,10 @@ export async function handleSwapCancelRequest(
   const events: string[] = [];
 
   // 1. Find offer
-  if (!account.swapOffers) {
+  if (!account.state.swapOffers) {
     return { success: false, error: `No swap offers exist`, events };
   }
-  const offer = account.swapOffers.get(offerId);
+  const offer = account.state.swapOffers.get(offerId);
   if (!offer) {
     return { success: false, error: `Offer ${offerId} not found`, events };
   }

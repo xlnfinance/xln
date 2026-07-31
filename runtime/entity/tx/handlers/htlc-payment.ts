@@ -48,7 +48,7 @@ const requireOutboundCapacity = (
       `No account with next hop ${formatEntityId(prepared.nextHop)}`,
     );
   }
-  const delta = account.deltas?.get(prepared.tokenId);
+  const delta = account.state.deltas?.get(prepared.tokenId);
   if (!delta) {
     return rejectHtlcPayment(
       newState,
@@ -56,7 +56,7 @@ const requireOutboundCapacity = (
       `No delta state for next hop ${formatEntityId(prepared.nextHop)} token ${prepared.tokenId}`,
     );
   }
-  const senderIsLeft = account.leftEntity === newState.entityId;
+  const senderIsLeft = account.state.leftEntity === newState.entityId;
   const capacity = deriveDelta(delta, senderIsLeft).outCapacity;
   if (prepared.senderLockAmount > capacity) {
     htlcLog.info('rejected', {
@@ -69,7 +69,7 @@ const requireOutboundCapacity = (
     addMessage(newState, '❌ HTLC payment failed: insufficient capacity');
     return { newState, outputs: [], accountTxs: [] };
   }
-  return account;
+  return account.state;
 };
 
 const buildOutboundLockTx = (prepared: PreparedHtlcPayment): AccountTx => ({

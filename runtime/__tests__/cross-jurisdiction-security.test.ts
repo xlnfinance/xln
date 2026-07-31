@@ -78,8 +78,8 @@ describe('cross-jurisdiction security invariants', () => {
     };
     const admittedRoute = route;
     const account = makeAccount(route.source.counterpartyEntityId, route.source.entityId);
-    account.pulls ??= new Map();
-    account.pulls.set(route.sourcePull!.pullId, {
+    account.state.pulls ??= new Map();
+    account.state.pulls.set(route.sourcePull!.pullId, {
       pullId: route.sourcePull!.pullId,
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
@@ -105,7 +105,7 @@ describe('cross-jurisdiction security invariants', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('CROSS_J_SOURCE_PULL_RESOLVE_BEFORE_CLEAR');
-    expect(account.deltas.get(route.source.tokenId)?.offdelta ?? 0n).toBe(0n);
+    expect(account.state.deltas.get(route.source.tokenId)?.offdelta ?? 0n).toBe(0n);
   });
 
   test('source clear fails if account offer route hash diverges from entity route', async () => {
@@ -126,13 +126,13 @@ describe('cross-jurisdiction security invariants', () => {
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const account = state.accounts.get(sourceUser)!;
-    account.swapOffers.set(route.orderId, {
+    account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
       giveTokenId: route.source.tokenId,
       giveAmount: route.source.amount,
       wantTokenId: route.target.tokenId,
       wantAmount: route.target.amount,
-      makerIsLeft: account.leftEntity === sourceUser,
+      makerIsLeft: account.state.leftEntity === sourceUser,
       createdHeight: 1,
       crossJurisdiction: { ...route, routeHash: secret('ff') },
     });
@@ -176,8 +176,8 @@ describe('cross-jurisdiction security invariants', () => {
     const route = buildRoute('cross-target-dispute-needs-source-args', 'cross-target-dispute-needs-source-args');
     const state = makeState(route.target.counterpartyEntityId, addr('41'), tron, route.target.entityId);
     const account = state.accounts.get(route.target.entityId)!;
-    account.pulls ??= new Map();
-    account.pulls.set(route.targetPull!.pullId, {
+    account.state.pulls ??= new Map();
+    account.state.pulls.set(route.targetPull!.pullId, {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
@@ -209,8 +209,8 @@ describe('cross-jurisdiction security invariants', () => {
     const route = buildRoute('cross-target-dispute-with-source-args', 'cross-target-dispute-with-source-args');
     const state = makeState(route.target.counterpartyEntityId, addr('42'), tron, route.target.entityId);
     const account = state.accounts.get(route.target.entityId)!;
-    account.pulls ??= new Map();
-    account.pulls.set(route.targetPull!.pullId, {
+    account.state.pulls ??= new Map();
+    account.state.pulls.set(route.targetPull!.pullId, {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,

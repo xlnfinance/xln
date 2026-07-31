@@ -34,7 +34,7 @@ export const processDisputeDeadlineHook = (
   const account = replica.state.accounts.get(accountId);
   if (!account?.activeDispute) return;
   if (replica.state.hubRebalanceConfig?.disputeAutoFinalizeMode === 'ignore') return;
-  const weAreLeft = account.leftEntity === replica.state.entityId;
+  const weAreLeft = account.state.leftEntity === replica.state.entityId;
   const weAreStarter = weAreLeft === account.activeDispute.startedByLeft;
   const timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
   if (account.activeDispute.observedOnChain !== true) {

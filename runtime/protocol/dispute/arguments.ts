@@ -131,25 +131,25 @@ export function captureDisputeArgumentSnapshot(
   //
   // Cross-j offers are intentionally excluded here: their safety is represented
   // by pull hash-ladders and route-level receipts, not same-j swap fill ratios.
-  const paymentHashlocks = sortTransformerEntries((account.locks ?? new Map()).entries())
+  const paymentHashlocks = sortTransformerEntries((account.state.locks ?? new Map()).entries())
     .map(([, lock]) => String(lock.hashlock));
   const leftSwapOfferIds: string[] = [];
   const rightSwapOfferIds: string[] = [];
-  for (const [offerId, offer] of sortTransformerEntries((account.swapOffers ?? new Map()).entries())) {
+  for (const [offerId, offer] of sortTransformerEntries((account.state.swapOffers ?? new Map()).entries())) {
     if (offer.crossJurisdiction) continue;
     if (offer.makerIsLeft) rightSwapOfferIds.push(offerId);
     else leftSwapOfferIds.push(offerId);
   }
   const leftPullIds: string[] = [];
   const rightPullIds: string[] = [];
-  for (const [pullId, pull] of sortTransformerEntries((account.pulls ?? new Map()).entries())) {
+  for (const [pullId, pull] of sortTransformerEntries((account.state.pulls ?? new Map()).entries())) {
     if (pull.amount >= 0n) leftPullIds.push(pullId);
     else rightPullIds.push(pullId);
   }
   return {
     proofbodyHash,
     nonce,
-    side: account.leftEntity === account.proofHeader.fromEntity ? 'left' : 'right',
+    side: account.state.leftEntity === account.proofHeader.fromEntity ? 'left' : 'right',
     proofBodyStruct,
     plan: { paymentHashlocks, leftSwapOfferIds, rightSwapOfferIds, leftPullIds, rightPullIds },
   };

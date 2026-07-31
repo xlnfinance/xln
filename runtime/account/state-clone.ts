@@ -39,15 +39,15 @@ const cloneCrossJurisdictionState = (
       source.pendingAccountInput,
     );
   }
-  target.swapOffers = new Map(
-    Array.from((source.swapOffers ?? new Map()).entries()).map(([id, offer]) => [
+  target.state.swapOffers = new Map(
+    Array.from((source.state.swapOffers ?? new Map()).entries()).map(([id, offer]) => [
       id,
       cloneCrossJurisdictionSwapOfferRoute(offer),
     ]),
   );
-  if (source.pulls instanceof Map) {
-    target.pulls = new Map(
-      Array.from(source.pulls.entries()).map(([id, pull]) => [
+  if (source.state.pulls instanceof Map) {
+    target.state.pulls = new Map(
+      Array.from(source.state.pulls.entries()).map(([id, pull]) => [
         id,
         pull.crossJurisdiction
           ? {
@@ -62,7 +62,7 @@ const cloneCrossJurisdictionState = (
   } else {
     // Absence is consensus-significant. Normalizing it to an empty Map changes
     // the Entity root and can conflict with the persisted H0 anchor.
-    delete target.pulls;
+    delete target.state.pulls;
   }
   if (source.swapOrderHistory instanceof Map) {
     target.swapOrderHistory = new Map(
@@ -138,14 +138,14 @@ export const applyAccountClonePolicy = (
 ): void => {
   cloneDisputeEvidence(target, source);
   cloneCrossJurisdictionState(target, source);
-  if (!forSnapshot) forkAccountCommitmentCache(source, target);
+  if (!forSnapshot) forkAccountCommitmentCache(source.state, target.state);
 };
 
 export const cloneAccountFrame = (frame: AccountFrame): AccountFrame =>
   cloneIsolatedAccountFrame(frame);
 
-/** Clone Account State into an isolated validation or snapshot candidate. */
-export const cloneAccountState = (
+/** Clone the complete Account replica into an isolated validation or snapshot candidate. */
+export const cloneAccountReplica = (
   account: AccountReplica,
   forSnapshot = false,
 ): AccountReplica => {

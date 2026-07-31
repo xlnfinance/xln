@@ -246,7 +246,7 @@ import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fai
 
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
-import { cloneAccountState } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state-clone';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -255,7 +255,7 @@ import {
 
 import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 
-import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
+import type { AccountFrame, AccountInput, AccountReplica, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import type { JInput } from '../jurisdiction/machine/input';
@@ -349,11 +349,30 @@ const makeEmptyProofBody = () => ({
   transformers: [],
 });
 
-const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountState => {
+const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountReplica => {
   return {
-    leftEntity,
-    rightEntity,
-    domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+      watchSeed: deriveAccountWatchSeed({
+        runtimeSeed: 'audit-failfast-test-helper',
+        entityId: leftEntity,
+        counterpartyId: rightEntity,
+        timestamp: 0,
+      }),
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+    },
     status: 'active',
     mempool: [...mempool],
     currentFrame: {
@@ -367,36 +386,18 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map(),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    watchSeed: deriveAccountWatchSeed({
-      runtimeSeed: 'audit-failfast-test-helper',
-      entityId: leftEntity,
-      counterpartyId: rightEntity,
-      timestamp: 0,
-    }),
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
-  } as AccountState;
+  };
 };
 
 const setSyntheticPendingAccountProposal = (
-  account: AccountState,
+  account: AccountReplica,
   accountTxs: AccountTx[],
   timestamp: number,
 ): void => {
@@ -413,13 +414,13 @@ const setSyntheticPendingAccountProposal = (
     kind: 'frame',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
-    domain: structuredClone(account.domain),
+    domain: structuredClone(account.state.domain),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
 
 const makeIncomingAccountFrame = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
   byLeft: boolean,
   timestamp = 10_000,
@@ -769,7 +770,7 @@ describe('audit fail-fast regressions', () => {
       left.entityId,
       right.entityId,
     );
-    const receiver = cloneAccountState(proposer);
+    const receiver = cloneAccountReplica(proposer);
     receiver.mempool = [];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
@@ -819,7 +820,7 @@ describe('audit fail-fast regressions', () => {
       },
     };
     const proposer = makeProposalAccount([structuredClone(claim)], left.entityId, right.entityId);
-    const receiver = cloneAccountState(proposer);
+    const receiver = cloneAccountReplica(proposer);
     receiver.mempool = [structuredClone(claim)];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
@@ -850,10 +851,10 @@ describe('audit fail-fast regressions', () => {
     expect(flushed.accountInput.proposal.frame.accountTxs.map(tx => tx.type)).toEqual(['j_event_claim']);
     expect(receiver.currentHeight).toBe(1);
     expect(receiver.pendingFrame?.height).toBe(2);
-    expect(receiver.leftPendingJClaims.count).toBe(1n);
-    expect(receiver.rightPendingJClaims.count).toBe(0n);
+    expect(receiver.state.leftPendingJClaims.count).toBe(1n);
+    expect(receiver.state.rightPendingJClaims.count).toBe(0n);
     expect(result.accountJClaimNodeChanges?.newNodes.map(({ hash }) => hash)).toEqual([
-      receiver.leftPendingJClaims.root,
+      receiver.state.leftPendingJClaims.root,
     ]);
     expect(result.accountJClaimNodeChanges?.replacedNodeHashes).toEqual([]);
   });
@@ -899,7 +900,7 @@ describe('audit fail-fast regressions', () => {
   test('late invalid HTLC preimage never becomes dispute evidence', () => {
     const secret = `0x${'82'.repeat(32)}`;
     const account = makeProposalAccount([], 'alice', 'hub');
-    account.locks.set('late-preimage-lock', {
+    account.state.locks.set('late-preimage-lock', {
       lockId: 'late-preimage-lock',
       hashlock: hashHtlcSecret(secret),
       timelock: 10n,
@@ -921,8 +922,8 @@ describe('audit fail-fast regressions', () => {
         false,
       );
 
-    expect(getIncomingAccountDeadlineViolation(account, frameFor(`0x${'83'.repeat(32)}`), context)).toBeUndefined();
-    expect(getIncomingAccountDeadlineViolation(account, frameFor(secret), context)?.evidenceSecrets).toEqual([
+    expect(getIncomingAccountDeadlineViolation(account.state, frameFor(`0x${'83'.repeat(32)}`), context)).toBeUndefined();
+    expect(getIncomingAccountDeadlineViolation(account.state, frameFor(secret), context)?.evidenceSecrets).toEqual([
       { hashlock: hashHtlcSecret(secret), secret },
     ]);
   });
@@ -950,14 +951,14 @@ describe('audit fail-fast regressions', () => {
       data: { lockId, outcome: 'secret', secret },
     };
     const proposer = makeProposalAccount([resolveTx], left.entityId, right.entityId);
-    const receiver = cloneAccountState(proposer);
+    const receiver = cloneAccountReplica(proposer);
     receiver.mempool = [];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
     for (const account of [proposer, receiver]) {
       const delta = createDefaultDelta(1);
       delta.rightHold = amount;
-      account.deltas.set(1, delta);
-      account.locks.set(lockId, {
+      account.state.deltas.set(1, delta);
+      account.state.locks.set(lockId, {
         lockId,
         hashlock,
         timelock,
@@ -1074,11 +1075,11 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
-      domain: structuredClone(receiver.domain),
+      domain: structuredClone(receiver.state.domain),
       proposal: { frame: invalidFrame, frameHanko },
     };
 
-    const accountResult = await applyAccountInput(createAccountConsensusContext(env), cloneAccountState(receiver), accountInput, {
+    const accountResult = await applyAccountInput(createAccountConsensusContext(env), cloneAccountReplica(receiver), accountInput, {
       entityTimestamp: env.state.timestamp,
       finalizedJHeight: 0,
     });
@@ -1096,7 +1097,7 @@ describe('audit fail-fast regressions', () => {
     });
     const rejectedAccount = applied.newState.accounts.get(left.entityId)!;
     expect(rejectedAccount.currentHeight).toBe(0);
-    expect(rejectedAccount.deltas.size).toBe(0);
+    expect(rejectedAccount.state.deltas.size).toBe(0);
     expect(rejectedAccount.status).toBe('dispute_preparing');
     expect(rejectedAccount).not.toHaveProperty('rejectedFrameEvidence');
     expect(rejectedAccount.shadow.rejectedFrameEvidence).toEqual({
@@ -1120,7 +1121,7 @@ describe('audit fail-fast regressions', () => {
 
     const receiver = makeProposalAccount([], left.entityId, right.entityId);
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
-    receiver.deltas.set(1, {
+    receiver.state.deltas.set(1, {
       ...createDefaultDelta(1),
       leftCreditLimit: 10n,
     });
@@ -1140,7 +1141,7 @@ describe('audit fail-fast regressions', () => {
     );
     expect(workspaceResult.success).toBe(true);
     receiver.proofHeader.nextProofNonce = 9;
-    const workspaceHash = receiver.settlementWorkspace!.workspaceHash;
+    const workspaceHash = receiver.state.settlementWorkspace!.workspaceHash;
     const staleSeal: AccountTx = {
       type: 'settle_transition',
       data: {
@@ -1167,7 +1168,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
-      domain: structuredClone(receiver.domain),
+      domain: structuredClone(receiver.state.domain),
       proposal: { frame: staleFrame, frameHanko },
     };
     const before = safeStringify(receiver);
@@ -1184,7 +1185,7 @@ describe('audit fail-fast regressions', () => {
     const receiverState = makeEntityState(right.entityId);
     receiverState.config = makeSingleSignerConfigFor(right.signerId);
     receiverState.timestamp = env.state.timestamp;
-    receiverState.accounts.set(left.entityId, cloneAccountState(receiver));
+    receiverState.accounts.set(left.entityId, cloneAccountReplica(receiver));
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
       data: accountInput,
@@ -1224,10 +1225,10 @@ describe('audit fail-fast regressions', () => {
     };
 
     expect(
-      getIncomingAccountDeadlineViolation(account, makeIncomingAccountFrame(account, htlcTx, true), context)?.reason,
+      getIncomingAccountDeadlineViolation(account.state, makeIncomingAccountFrame(account, htlcTx, true), context)?.reason,
     ).toContain('HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
     expect(
-      getIncomingAccountDeadlineViolation(account, makeIncomingAccountFrame(account, pullTx, true), context)?.reason,
+      getIncomingAccountDeadlineViolation(account.state, makeIncomingAccountFrame(account, pullTx, true), context)?.reason,
     ).toContain('PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
   });
 
@@ -1235,7 +1236,7 @@ describe('audit fail-fast regressions', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const proof = buildHashLadderProof('stale-pull-resolve');
     const reveal = revealHashLadder(proof, 32_768);
-    account.pulls = new Map([
+    account.state.pulls = new Map([
       [
         'pull-1',
         {
@@ -1264,16 +1265,16 @@ describe('audit fail-fast regressions', () => {
     expect(isPullRevealExpired(20_000, 20_999)).toBe(false);
     expect(isPullRevealExpired(20_000, 21_000)).toBe(true);
     expect(
-      getIncomingAccountDeadlineViolation(account, claimFrame, { entityTimestamp: 20_999, finalizedJHeight: 1 }),
+      getIncomingAccountDeadlineViolation(account.state, claimFrame, { entityTimestamp: 20_999, finalizedJHeight: 1 }),
     ).toBeUndefined();
 
     expect(
-      getIncomingAccountDeadlineViolation(account, claimFrame, { entityTimestamp: 21_000, finalizedJHeight: 1 })
+      getIncomingAccountDeadlineViolation(account.state, claimFrame, { entityTimestamp: 21_000, finalizedJHeight: 1 })
         ?.reason,
     ).toContain('PULL_CLAIM_AFTER_LOCAL_EXPIRY');
     expect(
       getIncomingAccountDeadlineViolation(
-        account,
+        account.state,
         makeIncomingAccountFrame(
           account,
           {
@@ -1304,7 +1305,7 @@ describe('audit fail-fast regressions', () => {
   test('receiver-local preflight blocks payer pull cancellation before local expiry', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const proof = buildHashLadderProof('early-pull-cancel');
-    account.pulls = new Map([
+    account.state.pulls = new Map([
       [
         'pull-1',
         {
@@ -1324,7 +1325,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(
       getIncomingAccountDeadlineViolation(
-        account,
+        account.state,
         makeIncomingAccountFrame(
           account,
           {
@@ -1340,7 +1341,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(
       getIncomingAccountDeadlineViolation(
-        account,
+        account.state,
         makeIncomingAccountFrame(
           account,
           {
@@ -1356,7 +1357,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(
       getIncomingAccountDeadlineViolation(
-        account,
+        account.state,
         makeIncomingAccountFrame(
           account,
           {
@@ -1373,7 +1374,7 @@ describe('audit fail-fast regressions', () => {
 
   test('receiver-local preflight blocks payer HTLC timeout using future peer J-height', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
-    account.locks.set('lock-1', {
+    account.state.locks.set('lock-1', {
       lockId: 'lock-1',
       hashlock: `0x${'41'.repeat(32)}`,
       timelock: 120_000n,
@@ -1387,7 +1388,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(
       getIncomingAccountDeadlineViolation(
-        account,
+        account.state,
         makeIncomingAccountFrame(
           account,
           {
@@ -1404,7 +1405,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(
       getIncomingAccountDeadlineViolation(
-        account,
+        account.state,
         makeIncomingAccountFrame(
           account,
           {
@@ -1423,7 +1424,7 @@ describe('audit fail-fast regressions', () => {
   test('receiver-local preflight follows HTLC transitions before checking reused ids', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const secret = `0x${'42'.repeat(32)}`;
-    account.locks.set('reused-lock', {
+    account.state.locks.set('reused-lock', {
       lockId: 'reused-lock',
       hashlock: hashHtlcSecret(secret),
       timelock: 300_000n,
@@ -1455,13 +1456,13 @@ describe('audit fail-fast regressions', () => {
     });
 
     expect(
-      getIncomingAccountDeadlineViolation(account, frame, { entityTimestamp: 100_000, finalizedJHeight: 50 })?.reason,
+      getIncomingAccountDeadlineViolation(account.state, frame, { entityTimestamp: 100_000, finalizedJHeight: 50 })?.reason,
     ).toContain('HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
   });
 
   test('receiver-local preflight never mutates a live HTLC while simulating an offer', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
-    account.locks.set('offer-lock', {
+    account.state.locks.set('offer-lock', {
       lockId: 'offer-lock',
       hashlock: `0x${'44'.repeat(32)}`,
       timelock: 300_000n,
@@ -1472,8 +1473,8 @@ describe('audit fail-fast regressions', () => {
       createdHeight: 0,
       createdTimestamp: 0,
     });
-    const before = structuredClone(account.locks);
-    const beforeRoot = computeAccountStateRootCold(account);
+    const before = structuredClone(account.state.locks);
+    const beforeRoot = computeAccountStateRootCold(account.state);
     const offer: MultiRecipientCiphertext = {
       version: 'xln:htlc-multi-recipient:v1',
       manifest: {} as MultiRecipientCiphertext['manifest'],
@@ -1486,7 +1487,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(
       getIncomingAccountDeadlineViolation(
-        account,
+        account.state,
         makeIncomingAccountFrame(
           account,
           {
@@ -1498,15 +1499,15 @@ describe('audit fail-fast regressions', () => {
         { entityTimestamp: 100_000, finalizedJHeight: 50 },
       ),
     ).toBeUndefined();
-    expect(account.locks).toEqual(before);
-    expect(computeAccountStateRootCold(account)).toBe(beforeRoot);
+    expect(account.state.locks).toEqual(before);
+    expect(computeAccountStateRootCold(account.state)).toBe(beforeRoot);
   });
 
   test('receiver-local preflight follows pull cancellation before checking reused ids', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const existingProof = buildHashLadderProof('existing-reused-pull');
     const replacementProof = buildHashLadderProof('replacement-reused-pull');
-    account.pulls = new Map([
+    account.state.pulls = new Map([
       [
         'reused-pull',
         {
@@ -1545,7 +1546,7 @@ describe('audit fail-fast regressions', () => {
     });
 
     expect(
-      getIncomingAccountDeadlineViolation(account, frame, { entityTimestamp: 121_000, finalizedJHeight: 50 })?.reason,
+      getIncomingAccountDeadlineViolation(account.state, frame, { entityTimestamp: 121_000, finalizedJHeight: 50 })?.reason,
     ).toContain('PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
   });
 
@@ -1580,7 +1581,7 @@ describe('audit fail-fast regressions', () => {
       left,
       right,
     );
-    account.deltas.set(1, {
+    account.state.deltas.set(1, {
       tokenId: 1,
       collateral: 0n,
       ondelta: 0n,
@@ -1629,8 +1630,8 @@ describe('audit fail-fast regressions', () => {
     proposer.currentFrame.stateHash = `0x${'cc'.repeat(32)}`;
     const delta = createDefaultDelta(1);
     delta.leftCreditLimit = 1_000n;
-    proposer.deltas.set(1, delta);
-    const receiver = cloneAccountState(proposer);
+    proposer.state.deltas.set(1, delta);
+    const receiver = cloneAccountReplica(proposer);
     receiver.proofHeader = { fromEntity: right, toEntity: left, nextProofNonce: 0 };
 
     const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp);
@@ -1640,7 +1641,7 @@ describe('audit fail-fast regressions', () => {
 
     const replayed = await applyAccountTx(receiver, pullLock, frame.byLeft!, frame.timestamp, frame.jHeight, true, env);
     expect(replayed.success).toBe(true);
-    expect(computeAccountStateRoot(receiver)).toBe(frame.accountStateRoot);
+    expect(computeAccountStateRoot(receiver.state)).toBe(frame.accountStateRoot);
   });
 
   test('nested Account proposal accepts a future committed Entity timestamp across validator ticks', async () => {
@@ -1658,11 +1659,11 @@ describe('audit fail-fast regressions', () => {
       left.entityId,
       right.entityId,
     );
-    base.deltas.set(1, createDefaultDelta(1));
+    base.state.deltas.set(1, createDefaultDelta(1));
     const committedEntityTimestamp = 1_777;
 
-    const proposer = await proposeAccountFrame(createAccountConsensusContext(proposerEnv), cloneAccountState(base), committedEntityTimestamp);
-    const validator = await proposeAccountFrame(createAccountConsensusContext(validatorEnv), cloneAccountState(base), committedEntityTimestamp);
+    const proposer = await proposeAccountFrame(createAccountConsensusContext(proposerEnv), cloneAccountReplica(base), committedEntityTimestamp);
+    const validator = await proposeAccountFrame(createAccountConsensusContext(validatorEnv), cloneAccountReplica(base), committedEntityTimestamp);
 
     expect(proposer.success).toBe(true);
     expect(validator.success).toBe(true);
@@ -1784,8 +1785,8 @@ describe('audit fail-fast regressions', () => {
     const validatorState = makeEntityState(author.entityId);
     validatorState.config = state.config;
     const validator = await applyEntityTx(validatorEnv, validatorState, materializedTx);
-    expect(validator.newState.accounts.get(targetEntityId)?.watchSeed).toBe(
-      proposer.newState.accounts.get(targetEntityId)?.watchSeed,
+    expect(validator.newState.accounts.get(targetEntityId)?.state.watchSeed).toBe(
+      proposer.newState.accounts.get(targetEntityId)?.state.watchSeed,
     );
   });
 
@@ -1841,7 +1842,7 @@ describe('audit fail-fast regressions', () => {
       left,
       right,
     );
-    account.pulls = new Map([
+    account.state.pulls = new Map([
       [
         'target-pull',
         {
@@ -1991,14 +1992,14 @@ describe('audit fail-fast regressions', () => {
     giveDelta.rightCreditLimit = 10n ** 30n;
     if (makerIsLeft) giveDelta.leftHold = giveAmount;
     else giveDelta.rightHold = giveAmount;
-    account.deltas.set(2, giveDelta);
+    account.state.deltas.set(2, giveDelta);
 
     const wantDelta = createDefaultDelta(1);
     wantDelta.leftCreditLimit = 10n ** 30n;
     wantDelta.rightCreditLimit = 10n ** 30n;
-    account.deltas.set(1, wantDelta);
+    account.state.deltas.set(1, wantDelta);
 
-    account.swapOffers.set('valid-batch-fill', {
+    account.state.swapOffers.set('valid-batch-fill', {
       offerId: 'valid-batch-fill',
       giveTokenId: 2,
       giveAmount,
@@ -2038,7 +2039,7 @@ describe('audit fail-fast regressions', () => {
       const account = makeProposalAccount([], leftEntity, rightEntity);
       account.proofHeader = { fromEntity: proposerId, toEntity: counterpartyId, nextProofNonce: 0 };
       for (const tokenId of [1, 2]) {
-        account.deltas.set(tokenId, {
+        account.state.deltas.set(tokenId, {
           ...createDefaultDelta(tokenId),
           leftCreditLimit: 10n ** 24n,
           rightCreditLimit: 10n ** 24n,

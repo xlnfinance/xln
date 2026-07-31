@@ -53,8 +53,8 @@ export const applyAccountDisputeStarted = (
 
   const startedByLeft = isDisputeStartedByLeft(
     finality.starterEntityId,
-    account.leftEntity,
-    account.rightEntity,
+    account.state.leftEntity,
+    account.state.rightEntity,
   );
   account.status = 'disputed';
   freezeAccountForDispute(account, true);
@@ -73,7 +73,7 @@ export const applyAccountDisputeStarted = (
       : {}),
     finalizeQueued: false,
   };
-  account.jNonce = Math.max(account.jNonce, finality.jNonce);
+  account.state.jNonce = Math.max(account.state.jNonce, finality.jNonce);
 };
 
 const clearFinalizedDeltas = (
@@ -81,7 +81,7 @@ const clearFinalizedDeltas = (
   finalizedTokenIds: readonly number[],
 ): void => {
   for (const tokenId of finalizedTokenIds) {
-    const delta = account.deltas.get(tokenId);
+    const delta = account.state.deltas.get(tokenId);
     if (!delta) continue;
     const changed =
       delta.collateral !== 0n ||
@@ -98,18 +98,18 @@ const clearFinalizedDeltas = (
     delta.rightHold = 0n;
     delta.leftAllowance = 0n;
     delta.rightAllowance = 0n;
-    if (changed) invalidateAccountMapCommitment(account, 'deltas', tokenId);
+    if (changed) invalidateAccountMapCommitment(account.state, 'deltas', tokenId);
   }
 };
 
 const clearFinalizedCollections = (account: AccountReplica): void => {
-  if (account.swapOffers.size > 0) {
-    account.swapOffers.clear();
-    invalidateAccountMapCommitment(account, 'swapOffers');
+  if (account.state.swapOffers.size > 0) {
+    account.state.swapOffers.clear();
+    invalidateAccountMapCommitment(account.state, 'swapOffers');
   }
-  if (account.locks.size > 0) {
-    account.locks.clear();
-    invalidateAccountMapCommitment(account, 'locks');
+  if (account.state.locks.size > 0) {
+    account.state.locks.clear();
+    invalidateAccountMapCommitment(account.state, 'locks');
   }
   delete account.disputeProofBodiesByHash;
   delete account.disputeProofNoncesByHash;
@@ -132,12 +132,12 @@ export const applyAccountDisputeFinality = (
   finalizedTokenIds: readonly number[],
 ): AccountDisputeFinalityResult => {
   const hadActiveDispute = Boolean(account.activeDispute);
-  const hadSettlementWorkspace = Boolean(account.settlementWorkspace);
+  const hadSettlementWorkspace = Boolean(account.state.settlementWorkspace);
   if (hadSettlementWorkspace) clearFinalizedSettlementWorkspace(account);
   const beforeMempool = account.mempool.length;
   account.mempool = account.mempool.filter(tx => tx.type !== 'settle_transition');
 
-  account.jNonce = finalizedJNonce;
+  account.state.jNonce = finalizedJNonce;
   delete account.activeDispute;
   if (account.proofHeader.nextProofNonce <= finalizedJNonce) {
     account.proofHeader.nextProofNonce = finalizedJNonce + 1;

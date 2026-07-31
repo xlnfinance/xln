@@ -174,13 +174,26 @@ const makeEnv = (): RuntimeReplica =>
                 [
                   counterpartyId,
                   {
-                    leftEntity: entityId,
-                    rightEntity: counterpartyId,
-                    domain: {
-                      chainId: 31337,
-                      depositoryAddress: '0x0000000000000000000000000000000000000002',
+                    state: {
+                      leftEntity: entityId,
+                      rightEntity: counterpartyId,
+                      domain: {
+                        chainId: 31337,
+                        depositoryAddress: '0x0000000000000000000000000000000000000002',
+                      },
+                      watchSeed: `0x${'34'.repeat(32)}`,
+                      deltas: new Map(),
+                      locks: new Map(),
+                      swapOffers: new Map(),
+                      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+                      requestedRebalance: new Map(),
+                      requestedRebalanceFeeState: new Map(),
+                      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+                      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+                      lastFinalizedJHeight: 0,
+                      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+                      jNonce: 0,
                     },
-                    watchSeed: `0x${'34'.repeat(32)}`,
                     status: 'active',
                     mempool: [],
                     currentFrame: {
@@ -194,24 +207,13 @@ const makeEnv = (): RuntimeReplica =>
                       byLeft: true,
                       deltas: [],
                     },
-                    deltas: new Map(),
-                    locks: new Map(),
-                    swapOffers: new Map(),
-                    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
                     currentHeight: 1,
                     pendingSignatures: [],
                     rollbackCount: 0,
                     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
                     proofBody: { tokenIds: [], deltas: [] },
                     pendingWithdrawals: new Map(),
-                    requestedRebalance: new Map(),
-                    requestedRebalanceFeeState: new Map(),
                     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-                    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-                    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-                    lastFinalizedJHeight: 0,
-                    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-                    jNonce: 0,
                   },
                 ],
               ]),
@@ -457,7 +459,7 @@ test('runtime adapter solvency-summary returns per-stack asset conservation', as
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
-  account.deltas.set(1, { ...makeTestDelta(1, 0n), collateral: 100n });
+  account.state.deltas.set(1, { ...makeTestDelta(1, 0n), collateral: 100n });
   account.pendingFrame = {
     ...account.currentFrame,
     deltas: [{ ...makeTestDelta(1, 0n), collateral: 50n }],
@@ -671,7 +673,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)! as any;
-  account.watchSeed = `0x${'42'.repeat(32)}`;
+  account.state.watchSeed = `0x${'42'.repeat(32)}`;
   account.mempool = Array.from({ length: 500 }, (_, index) => ({
     type: 'memo',
     data: { index, note: 'm'.repeat(200) },
@@ -696,10 +698,10 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   account.disputeArgumentSnapshotsByHash = {
     [`0x${'bb'.repeat(32)}`]: { args: 'a'.repeat(100_000) },
   };
-  account.settlementWorkspace = { notes: 'w'.repeat(100_000) };
+  account.state.settlementWorkspace = { notes: 'w'.repeat(100_000) };
   account.swapOrderHistory = new Map([['history', { note: 'h'.repeat(100_000), resolves: [] }]]);
   account.swapClosedOrders = new Map([['closed', { note: 'c'.repeat(100_000), resolves: [] }]]);
-  account.swapOffers = new Map(
+  account.state.swapOffers = new Map(
     Array.from({ length: 101 }, (_, index) => [
       `offer-${index}`,
       { offerId: `offer-${index}` },
@@ -767,7 +769,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   const historicalAccount = await resolveRuntimeAdapterRead<typeof liveAccount>(
     {
       env,
-      loadEntityAccountDoc: async () => projectAccountDoc(account),
+      loadEntityAccountDoc: async () => account,
     },
     `entity/${entityId}/account/${counterpartyId}`,
     { atHeight: env.state.height - 1 },
@@ -797,17 +799,17 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     expect(core.jBatchState?.batch?.notes).toBeUndefined();
   }
   for (const doc of [liveAccount, historicalAccount]) {
-    expect(doc.watchSeed).toBe('');
+    expect(doc.state.watchSeed).toBe('');
     expect(doc.mempool).toHaveLength(0);
     expect(doc.pendingSignatures).toHaveLength(0);
     expect(doc.currentFrame.accountTxs.length).toBeLessThanOrEqual(20);
     expect(doc.currentFrame.deltas.length).toBeLessThanOrEqual(100);
     expect(doc.disputeProofBodiesByHash).toBeUndefined();
     expect(doc.disputeArgumentSnapshotsByHash).toBeUndefined();
-    expect(doc.settlementWorkspace).toBeUndefined();
-    expect(doc.swapOffers.size).toBe(100);
-    expect(doc.swapOffers.has('offer-0')).toBe(false);
-    expect(doc.swapOffers.get('offer-100')?.offerId).toBe('offer-100');
+    expect(doc.state.settlementWorkspace).toBeUndefined();
+    expect(doc.state.swapOffers.size).toBe(100);
+    expect(doc.state.swapOffers.has('offer-0')).toBe(false);
+    expect(doc.state.swapOffers.get('offer-100')?.offerId).toBe('offer-100');
     expect(doc.swapOrderHistory).toBeInstanceOf(Map);
     expect(doc.swapOrderHistory?.size).toBe(1);
     expect(doc.swapClosedOrders).toBeInstanceOf(Map);
@@ -825,7 +827,7 @@ test('runtime adapter resolver returns a bounded view frame for the app shell', 
     activeEntityId: string | null;
     activeEntity: {
       core: { entityId: string; profile?: { name?: string } };
-      accounts: { items: Array<{ leftEntity: string; rightEntity: string }>; nextCursor: string | null };
+      accounts: { items: Array<{ state: { leftEntity: string; rightEntity: string } }>; nextCursor: string | null };
       books: { items: unknown[] };
     } | null;
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'view-frame', { accountsLimit: 1, booksLimit: 1 });
@@ -836,8 +838,8 @@ test('runtime adapter resolver returns a bounded view frame for the app shell', 
   expect(frame.activeEntity?.core.entityId).toBe(entityId);
   expect(frame.activeEntity?.core.profile?.name).toBe('Adapter Test');
   expect(frame.activeEntity?.accounts.items).toHaveLength(1);
-  expect(frame.activeEntity?.accounts.items[0]?.leftEntity).toBe(entityId);
-  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
+  expect(frame.activeEntity?.accounts.items[0]?.state.leftEntity).toBe(entityId);
+  expect(frame.activeEntity?.accounts.items[0]?.state.rightEntity).toBe(counterpartyId);
   expect(frame.activeEntity?.accounts.nextCursor).toBe(null);
   expect(frame.activeEntity?.books.items).toEqual([]);
 });
@@ -926,10 +928,10 @@ test('runtime adapter view-frame includes live gossip summaries for visible acco
       isHub?: boolean;
       jurisdiction?: { name?: string; chainId?: number };
     }>;
-    activeEntity: { accounts: { items: Array<{ leftEntity: string; rightEntity: string }> } } | null;
+    activeEntity: { accounts: { items: Array<{ state: { leftEntity: string; rightEntity: string } }> } } | null;
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'view-frame', { accountsLimit: 1, booksLimit: 1 });
 
-  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
+  expect(frame.activeEntity?.accounts.items[0]?.state.rightEntity).toBe(counterpartyId);
   expect(frame.entities.find(entry => entry.entityId === entityId)?.label).toBe('Adapter Test');
   const peer = frame.entities.find(entry => entry.entityId === counterpartyId);
   expect(peer?.label).toBe('H2');
@@ -945,7 +947,7 @@ test('runtime adapter graph-frame keeps gossip peers and complete local account 
   env.gossip.announce(makeHubProfile(entityId, 'H1'));
   env.gossip.announce(makeHubProfile(counterpartyId, 'H2'));
   const account = Array.from(env.state.eReplicas.values())[0]!.state.accounts.get(counterpartyId)!;
-  account.deltas.set(1, makeTestDelta(1, 25n));
+  account.state.deltas.set(1, makeTestDelta(1, 25n));
   const activityTxs: AccountTx[] = [10n, 20n, 30n].map(amount => ({
     type: 'direct_payment',
     data: {
@@ -1422,7 +1424,7 @@ test('runtime adapter view frame defaults to the live entity with real relations
   const frame = await resolveRuntimeAdapterRead<{
     entities: Array<{ entityId: string }>;
     activeEntityId: string | null;
-    activeEntity: { accounts: { items: Array<{ rightEntity: string }> } } | null;
+    activeEntity: { accounts: { items: Array<{ state: { rightEntity: string } }> } } | null;
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'view-frame', { accountsLimit: 10, booksLimit: 10 });
 
   expect(frame.entities.map(entity => entity.entityId)).toEqual([emptyEntityId, entityId]);
@@ -1464,7 +1466,7 @@ test('runtime adapter historical batch without entityId defaults to live entity 
   const batch = await resolveRuntimeAdapterRead<{
     frames: Array<{
       activeEntityId: string | null;
-      activeEntity: { accounts: { items: Array<{ rightEntity: string }> } } | null;
+      activeEntity: { accounts: { items: Array<{ state: { rightEntity: string } }> } } | null;
     }>;
     unavailable: Array<{ height: number; code: string; message: string }>;
   }>(
@@ -1513,7 +1515,7 @@ test('runtime adapter historical batch without entityId defaults to live entity 
   expect(batch.frames).toHaveLength(1);
   expect(batch.frames[0]?.activeEntityId).toBe(entityId);
   expect(batch.frames[0]?.activeEntity?.accounts.items).toHaveLength(1);
-  expect(batch.frames[0]?.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
+  expect(batch.frames[0]?.activeEntity?.accounts.items[0]?.state.rightEntity).toBe(counterpartyId);
 });
 
 test('runtime adapter frame read returns compact summary without raw runtime input', async () => {
@@ -1762,13 +1764,13 @@ test('runtime adapter view frame defaults to 10 accounts and cursor pagination',
     const id = `0x${(i + 1).toString(16).padStart(64, '0')}`;
     replica.state.accounts.set(id, {
       ...base,
-      rightEntity: id,
+      state: { ...base.state, rightEntity: id },
       proofHeader: { ...base.proofHeader, toEntity: id },
     });
   }
 
   const first = await resolveRuntimeAdapterRead<{
-    activeEntity: { accounts: { items: Array<{ rightEntity: string }>; nextCursor: string | null } } | null;
+    activeEntity: { accounts: { items: Array<{ state: { rightEntity: string } }>; nextCursor: string | null } } | null;
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'view-frame');
   expect(first.activeEntity?.accounts.items).toHaveLength(10);
   expect(first.activeEntity?.accounts.nextCursor).toBe(`0x${'0a'.padStart(64, '0')}`);
@@ -1777,12 +1779,12 @@ test('runtime adapter view frame defaults to 10 accounts and cursor pagination',
   expect(first.activeEntity?.accounts.pageCount).toBe(2);
 
   const second = await resolveRuntimeAdapterRead<{
-    items: Array<{ rightEntity: string }>;
+    items: Array<{ state: { rightEntity: string } }>;
     nextCursor: string | null;
     prevCursor?: string | null;
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, `entity/${entityId}/accounts`, { accountsPage: 1 });
   expect(second.items).toHaveLength(2);
-  expect(second.items.map(item => item.rightEntity)).toEqual([
+  expect(second.items.map(item => item.state.rightEntity)).toEqual([
     `0x${'0b'.padStart(64, '0')}`,
     `0x${'0c'.padStart(64, '0')}`,
   ]);
@@ -1790,12 +1792,12 @@ test('runtime adapter view frame defaults to 10 accounts and cursor pagination',
   expect(second.prevCursor).toBe(`0x${'01'.padStart(64, '0')}`);
 
   const found = await resolveRuntimeAdapterRead<{
-    items: Array<{ rightEntity: string }>;
+    items: Array<{ state: { rightEntity: string } }>;
     totalItems?: number;
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, `entity/${entityId}/accounts`, {
     accountId: `0x${'0b'.padStart(64, '0')}`,
   });
-  expect(found.items.map(item => item.rightEntity)).toEqual([`0x${'0b'.padStart(64, '0')}`]);
+  expect(found.items.map(item => item.state.rightEntity)).toEqual([`0x${'0b'.padStart(64, '0')}`]);
   expect(found.totalItems).toBe(1);
 });
 
@@ -1834,7 +1836,7 @@ test('runtime adapter historical view frame uses paged storage loader instead of
   let pagedLoadCalled = false;
 
   const frame = await resolveRuntimeAdapterRead<{
-    activeEntity: { accounts: { items: Array<{ rightEntity: string }> } } | null;
+    activeEntity: { accounts: { items: Array<{ state: { rightEntity: string } }> } } | null;
   }>(
     {
       env,
@@ -1871,7 +1873,7 @@ test('runtime adapter historical view frame uses paged storage loader instead of
   expect(pagedLoadCalled).toBe(true);
   expect(fullLoadCalled).toBe(false);
   expect(frame.activeEntity?.accounts.items).toHaveLength(1);
-  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
+  expect(frame.activeEntity?.accounts.items[0]?.state.rightEntity).toBe(counterpartyId);
 });
 
 test('runtime adapter historical view frame skips missing non-active summaries without hiding active entity failures', async () => {
@@ -2003,7 +2005,7 @@ test('runtime adapter history-frame-batch returns bounded historical view frames
     requestedHeights: number[];
     frames: Array<{
       height: number;
-      activeEntity: { accounts: { items: Array<{ rightEntity: string }> } } | null;
+      activeEntity: { accounts: { items: Array<{ state: { rightEntity: string } }> } } | null;
     }>;
     unavailable: Array<{ height: number; code: string; message: string }>;
   }>(
@@ -2043,7 +2045,7 @@ test('runtime adapter history-frame-batch returns bounded historical view frames
   expect(batch.requestedHeights).toEqual([8, 9, 10]);
   expect(batch.frames.map(frame => frame.height)).toEqual([8, 9]);
   expect(batch.frames.every(frame => frame.activeEntity?.accounts.items.length === 1)).toBe(true);
-  expect(batch.frames.every(frame => frame.activeEntity?.accounts.items[0]?.rightEntity === counterpartyId)).toBe(true);
+  expect(batch.frames.every(frame => frame.activeEntity?.accounts.items[0]?.state.rightEntity === counterpartyId)).toBe(true);
   expect(batch.unavailable).toHaveLength(1);
   expect(batch.unavailable[0]?.height).toBe(10);
   expect(batch.unavailable[0]?.code).toBe('E_NOT_FOUND');
@@ -2486,7 +2488,7 @@ test('runtime adapter historical account search uses the point storage loader', 
   let pointLookup: { entityId: string; counterpartyId: string; height: number } | null = null;
 
   const result = await resolveRuntimeAdapterRead<{
-    items: Array<{ rightEntity: string }>;
+    items: Array<{ state: { rightEntity: string } }>;
     totalItems?: number;
   }>(
     {
@@ -2508,7 +2510,7 @@ test('runtime adapter historical account search uses the point storage loader', 
     },
   );
 
-  expect(result.items.map(item => item.rightEntity)).toEqual([counterpartyId]);
+  expect(result.items.map(item => item.state.rightEntity)).toEqual([counterpartyId]);
   expect(result.totalItems).toBe(1);
   expect(pointLookup).toEqual({ entityId, counterpartyId, height: 8 });
   expect(viewPageCalled).toBe(false);
@@ -2522,7 +2524,7 @@ test('runtime adapter current view frame projects live state without replaying p
   const frame = await resolveRuntimeAdapterRead<{
     activeEntity: {
       accounts: {
-        items: Array<{ rightEntity: string }>;
+        items: Array<{ state: { rightEntity: string } }>;
         summary?: { totalItems: number | null; visibleItems: number; sampleIds: string[] };
       };
     } | null;
@@ -2552,7 +2554,7 @@ test('runtime adapter current view frame projects live state without replaying p
 
   expect(pagedLoadCalled).toBe(false);
   expect(frame.activeEntity?.accounts.items).toHaveLength(1);
-  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
+  expect(frame.activeEntity?.accounts.items[0]?.state.rightEntity).toBe(counterpartyId);
   expect(frame.activeEntity?.accounts.summary).toMatchObject({
     totalItems: 1,
     visibleItems: 1,
@@ -2570,12 +2572,15 @@ test('runtime adapter historical 1M account view-frame stays aggregate-first and
     const id = `0x${(index + 1).toString(16).padStart(64, '0')}`;
     return projectAccountDoc({
       ...account,
-      rightEntity: id,
+      state: {
+        ...account.state,
+        rightEntity: id,
+        deltas: new Map([[1, makeTestDelta(1, BigInt(index + 1) * 1_000n)]]),
+      },
       currentFrame: {
         ...account.currentFrame,
         stateHash: `0x${(index + 1).toString(16).padStart(64, '0')}`,
       },
-      deltas: new Map([[1, makeTestDelta(1, BigInt(index + 1) * 1_000n)]]),
       proofHeader: { ...account.proofHeader, toEntity: id },
     });
   });
@@ -2584,7 +2589,7 @@ test('runtime adapter historical 1M account view-frame stays aggregate-first and
   const frame = await resolveRuntimeAdapterRead<{
     activeEntity: {
       accounts: {
-        items: Array<{ rightEntity: string }>;
+        items: Array<{ state: { rightEntity: string } }>;
         nextCursor: string | null;
         summary?: {
           totalItems: number | null;
@@ -2618,9 +2623,9 @@ test('runtime adapter historical 1M account view-frame stays aggregate-first and
           core: projectEntityReplicaCoreView(replica.state, replica),
           accounts: {
             items: visibleDocs,
-            nextCursor: visibleDocs[visibleDocs.length - 1]!.rightEntity,
-            firstCursor: visibleDocs[0]!.rightEntity,
-            lastCursor: visibleDocs[visibleDocs.length - 1]!.rightEntity,
+            nextCursor: visibleDocs[visibleDocs.length - 1]!.state.rightEntity,
+            firstCursor: visibleDocs[0]!.state.rightEntity,
+            lastCursor: visibleDocs[visibleDocs.length - 1]!.state.rightEntity,
             pageIndex: 0,
             pageCount: 100_000,
             totalItems: 1_000_000,

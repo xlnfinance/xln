@@ -7,7 +7,7 @@ import {
   shouldRejectOffchainFaucetForSettledCapacity,
 } from '../api/server/offchain-faucet-admission';
 import { createRelayStore } from '../network/relay/store';
-import type { AccountFrame, AccountState } from '../types/account';
+import type { AccountFrame, AccountReplica } from '../types/account';
 import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -35,25 +35,27 @@ const makeFrame = (height: number): AccountFrame => ({
 const makeAccount = (input: {
   currentHeight: number;
   pendingFrame?: AccountFrame;
-  mempool?: AccountState['mempool'];
+  mempool?: AccountReplica['mempool'];
   outCapacity?: bigint;
-}, ownerEntityId: string = HUB): AccountState => {
+}, ownerEntityId: string = HUB): AccountReplica => {
   const delta = createDefaultDelta(1);
   delta.leftCreditLimit = input.outCapacity ?? 0n;
   return {
-    leftEntity: ownerEntityId,
-    rightEntity: USER,
+    state: {
+      leftEntity: ownerEntityId,
+      rightEntity: USER,
+      deltas: new Map([[1, delta]]),
+    },
     status: 'active',
     currentHeight: input.currentHeight,
     currentFrame: makeFrame(input.currentHeight),
     ...(input.pendingFrame ? { pendingFrame: input.pendingFrame } : {}),
     mempool: input.mempool ?? [],
-    deltas: new Map([[1, delta]]),
-  } as unknown as AccountState;
+  } as unknown as AccountReplica;
 };
 
 const makeEnv = (
-  account: AccountState,
+  account: AccountReplica,
   hubEntityId: string = HUB,
   hubSignerId: string = HUB_SIGNER,
 ): RuntimeReplica => ({
@@ -83,7 +85,7 @@ const makeEnv = (
 } as unknown as RuntimeReplica);
 
 const callFaucet = async (
-  account: AccountState,
+  account: AccountReplica,
   options: {
     hubEntityId?: string;
     hubSignerId?: string;

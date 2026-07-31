@@ -201,7 +201,7 @@ const ACCOUNT_ENTITY_LOCAL_FIELDS = [
 export type AccountReplicaFieldCoverage = AssertNoMissingAccountStateField<
   Exclude<
     keyof AccountReplica,
-    | (typeof ACCOUNT_ROOT_COMMITTED_FIELDS)[number]
+    | 'state'
     | (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number]
     | (typeof ACCOUNT_ENTITY_LOCAL_FIELDS)[number]
   >

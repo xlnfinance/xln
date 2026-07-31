@@ -774,9 +774,9 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const aliceHubAccount9 = aliceRep9.state.accounts.get(aliceHubKey9);
     console.log(`🔍 ASSERT Frame 9: Account found? ${!!aliceHubAccount9}`);
     if (aliceHubAccount9) {
-      console.log(`🔍 ASSERT Frame 9: Account deltas:`, Array.from(aliceHubAccount9.deltas.keys()));
+      console.log(`🔍 ASSERT Frame 9: Account deltas:`, Array.from(aliceHubAccount9.state.deltas.keys()));
     }
-    const aliceDelta9 = aliceHubAccount9?.deltas.get(USDC_TOKEN_ID);
+    const aliceDelta9 = aliceHubAccount9?.state.deltas.get(USDC_TOKEN_ID);
     console.log(`🔍 ASSERT Frame 9: Delta found? ${!!aliceDelta9}, collateral=${aliceDelta9?.collateral || 0n}`);
     if (!aliceDelta9 || aliceDelta9.collateral !== aliceCollateralAmount) {
       const actual = aliceDelta9?.collateral || 0n;
@@ -802,15 +802,15 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const [, aliceRepSync] = findReplica(env, alice.id);
     const [, hubRepSync] = findReplica(env, hub.id);
     console.log(`\n🔍 PRE-ASSERT STATE DUMP:`);
-    console.log(`Alice account with Hub:`, aliceRepSync.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID));
+    console.log(`Alice account with Hub:`, aliceRepSync.state.accounts.get(hub.id)?.state.deltas.get(USDC_TOKEN_ID));
     console.log(`Alice LEFT/RIGHT obs:`, {
-      left: aliceRepSync.state.accounts.get(hub.id)?.leftPendingJClaims.count ?? 0n,
-      right: aliceRepSync.state.accounts.get(hub.id)?.rightPendingJClaims.count ?? 0n,
+      left: aliceRepSync.state.accounts.get(hub.id)?.state.leftPendingJClaims.count ?? 0n,
+      right: aliceRepSync.state.accounts.get(hub.id)?.state.rightPendingJClaims.count ?? 0n,
     });
-    console.log(`Hub account with Alice:`, hubRepSync.state.accounts.get(alice.id)?.deltas.get(USDC_TOKEN_ID));
+    console.log(`Hub account with Alice:`, hubRepSync.state.accounts.get(alice.id)?.state.deltas.get(USDC_TOKEN_ID));
     console.log(`Hub LEFT/RIGHT obs:`, {
-      left: hubRepSync.state.accounts.get(alice.id)?.leftPendingJClaims.count ?? 0n,
-      right: hubRepSync.state.accounts.get(alice.id)?.rightPendingJClaims.count ?? 0n,
+      left: hubRepSync.state.accounts.get(alice.id)?.state.leftPendingJClaims.count ?? 0n,
+      right: hubRepSync.state.accounts.get(alice.id)?.state.rightPendingJClaims.count ?? 0n,
     });
     assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Alice R2C Collateral');
 
@@ -863,7 +863,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // rightCreditLimit = credit extended by RIGHT to LEFT
     const [, bobRep9] = findReplica(env, bob.id);
     const bobHubAccount9 = bobRep9.state.accounts.get(hub.id); // Account keyed by counterparty
-    const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
+    const bobDelta9 = bobHubAccount9?.state.deltas.get(USDC_TOKEN_ID);
     const counterpartyIsLeft = isLeft(hub.id, bob.id);
     const expectedField = counterpartyIsLeft ? 'leftCreditLimit' : 'rightCreditLimit';
     const actualLimit = bobDelta9 ? bobDelta9[expectedField] : 0n;
@@ -1060,7 +1060,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // Verify Bob's view
     const [, bobRep] = findReplica(env, bob.id);
     const bobHubAcc = bobRep.state.accounts.get(hub.id);
-    const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
+    const bobDelta = bobHubAcc?.state.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
       const bobIsLeftHB = isLeft(bob.id, hub.id);
       const bobDerived = deriveDelta(bobDelta, bobIsLeftHB);
@@ -1287,7 +1287,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // ✅ Store pre-settlement state for assertions
     const [, alicePreSettle] = findReplica(env, alice.id);
     const [, hubPreSettle] = findReplica(env, hub.id);
-    const ahPreCollateral = alicePreSettle.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+    const ahPreCollateral = alicePreSettle.state.accounts.get(hub.id)?.state.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
     const hubPreReserve = hubPreSettle.state.reserves.get(USDC_TOKEN_ID) || 0n;
     console.log(`   A-H pre-settlement: collateral=${ahPreCollateral}, Hub reserve=${hubPreReserve}`);
 
@@ -1312,7 +1312,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // ✅ ASSERT: A-H collateral decreased by $200K (net-sender pulled)
     const [, aliceRepRebal] = findReplica(env, alice.id);
     const ahAccountRebal = aliceRepRebal.state.accounts.get(hub.id);
-    const ahDeltaRebal = ahAccountRebal?.deltas.get(USDC_TOKEN_ID);
+    const ahDeltaRebal = ahAccountRebal?.state.deltas.get(USDC_TOKEN_ID);
     const expectedAHCollateral = ahPreCollateral - rebalanceAmount;
     if (!ahDeltaRebal || ahDeltaRebal.collateral !== expectedAHCollateral) {
       const actual = ahDeltaRebal?.collateral || 0n;
@@ -1399,7 +1399,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
     // ✅ Store pre-settlement state for H-B assertions
     const [, hubPreHBSettle] = findReplica(env, hub.id);
-    const hbPreCollateral = hubPreHBSettle.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+    const hbPreCollateral = hubPreHBSettle.state.accounts.get(bob.id)?.state.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
     const hubPreHBReserve = hubPreHBSettle.state.reserves.get(USDC_TOKEN_ID) || 0n;
     console.log(`   H-B pre-settlement: collateral=${hbPreCollateral}, Hub reserve=${hubPreHBReserve}`);
 
@@ -1438,7 +1438,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // ✅ ASSERT: H-B collateral increased by $200K (net-receiver insured)
     const [, hubRepRebal] = findReplica(env, hub.id);
     const hbAccountRebal = hubRepRebal.state.accounts.get(bob.id);
-    const hbDeltaRebal = hbAccountRebal?.deltas.get(USDC_TOKEN_ID);
+    const hbDeltaRebal = hbAccountRebal?.state.deltas.get(USDC_TOKEN_ID);
     const expectedHBCollateral = hbPreCollateral + rebalanceAmount;
     if (!hbDeltaRebal || hbDeltaRebal.collateral !== expectedHBCollateral) {
       const actual = hbDeltaRebal?.collateral || 0n;
@@ -1526,8 +1526,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const aliceAccount = aliceRep.state.accounts.get(hub.id);
     const hubAccount = hubRep.state.accounts.get(alice.id);
     if (!aliceAccount || !hubAccount) return false;
-    const aliceDelta = aliceAccount.deltas.get(USDC_TOKEN_ID);
-    const hubDelta = hubAccount.deltas.get(USDC_TOKEN_ID);
+    const aliceDelta = aliceAccount.state.deltas.get(USDC_TOKEN_ID);
+    const hubDelta = hubAccount.state.deltas.get(USDC_TOKEN_ID);
     const aliceIsLeftAH6 = isLeft(alice.id, hub.id);
     const creditField = aliceIsLeftAH6 ? 'rightCreditLimit' : 'leftCreditLimit';
     const creditApplied = aliceDelta?.[creditField] === phase6Credit && hubDelta?.[creditField] === phase6Credit;
@@ -1541,8 +1541,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   const [, hubCheck] = findReplica(env, hub.id);
   const aliceIsLeftAH6 = isLeft(alice.id, hub.id);
   const hubIsLeftHA6 = isLeft(hub.id, alice.id);
-  const aliceCap = deriveDelta(aliceCheck.state.accounts.get(hub.id)!.deltas.get(USDC_TOKEN_ID)!, aliceIsLeftAH6).outCapacity;
-  const hubCap = deriveDelta(hubCheck.state.accounts.get(alice.id)!.deltas.get(USDC_TOKEN_ID)!, hubIsLeftHA6).outCapacity;
+  const aliceCap = deriveDelta(aliceCheck.state.accounts.get(hub.id)!.state.deltas.get(USDC_TOKEN_ID)!, aliceIsLeftAH6).outCapacity;
+  const hubCap = deriveDelta(hubCheck.state.accounts.get(alice.id)!.state.deltas.get(USDC_TOKEN_ID)!, hubIsLeftHA6).outCapacity;
 
   console.log(`   Alice capacity: ${aliceCap} (need ${aliceToHub})`);
   console.log(`   Hub capacity: ${hubCap} (need ${hubToAlice})`);
@@ -1718,7 +1718,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   if (!bobHubAccount7) {
     throw new Error('PHASE 7: Bob-Hub account missing');
   }
-  const bobDelta7 = bobHubAccount7.deltas.get(USDC_TOKEN_ID);
+  const bobDelta7 = bobHubAccount7.state.deltas.get(USDC_TOKEN_ID);
   if (!bobDelta7) {
     throw new Error('PHASE 7: Bob-Hub delta missing');
   }
@@ -1788,8 +1788,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       const [, hubRep] = findReplica(env, hub.id);
       const bobAcc = bobRep.state.accounts.get(hub.id);
       const hubAcc = hubRep.state.accounts.get(bob.id);
-      const bobDelta = bobAcc?.deltas.get(USDC_TOKEN_ID);
-      const hubDelta = hubAcc?.deltas.get(USDC_TOKEN_ID);
+      const bobDelta = bobAcc?.state.deltas.get(USDC_TOKEN_ID);
+      const hubDelta = hubAcc?.state.deltas.get(USDC_TOKEN_ID);
       if (!bobDelta || !hubDelta) return false;
       const deltasOk =
         bobDelta.collateral === disputeCollateralTarget &&
@@ -1815,8 +1815,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     if (!settlementApplied()) {
       const [, bobRep] = findReplica(env, bob.id);
       const [, hubRep] = findReplica(env, hub.id);
-      const bobDelta = bobRep.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID);
-      const hubDelta = hubRep.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID);
+      const bobDelta = bobRep.state.accounts.get(hub.id)?.state.deltas.get(USDC_TOKEN_ID);
+      const hubDelta = hubRep.state.accounts.get(bob.id)?.state.deltas.get(USDC_TOKEN_ID);
       console.error('❌ Settlement apply check failed');
       console.error(`   Bob delta: ${safeStringify(bobDelta)}`);
       console.error(`   Hub delta: ${safeStringify(hubDelta)}`);
@@ -1826,7 +1826,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   const [, bobRepAfterSettle] = findReplica(env, bob.id);
   const bobHubAfterSettle = bobRepAfterSettle.state.accounts.get(hub.id);
-  const bobDeltaAfterSettle = bobHubAfterSettle?.deltas.get(USDC_TOKEN_ID);
+  const bobDeltaAfterSettle = bobHubAfterSettle?.state.deltas.get(USDC_TOKEN_ID);
   if (!bobDeltaAfterSettle) {
     throw new Error('PHASE 7: Bob-Hub delta missing after settlement');
   }
@@ -1854,7 +1854,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     await processUntil(env, () => {
       const [, bobCheck] = findReplica(env, bob.id);
       const bobAcc = bobCheck.state.accounts.get(hub.id);
-      const delta = bobAcc?.deltas.get(USDC_TOKEN_ID);
+      const delta = bobAcc?.state.deltas.get(USDC_TOKEN_ID);
       const offdeltaOk = delta?.offdelta === disputeOffdeltaTarget;
       const noPendingFrames =
         !bobAcc?.pendingFrame &&
@@ -1865,7 +1865,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   const [, bobRepTarget] = findReplica(env, bob.id);
   const bobHubTarget = bobRepTarget.state.accounts.get(hub.id);
-  const bobDeltaTarget = bobHubTarget?.deltas.get(USDC_TOKEN_ID);
+  const bobDeltaTarget = bobHubTarget?.state.deltas.get(USDC_TOKEN_ID);
   if (!bobDeltaTarget) {
     throw new Error('PHASE 7: Bob-Hub delta missing at target');
   }
@@ -2511,14 +2511,14 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }]);
     await syncChain(env, 5);
     await processUntil(env, () => {
-      const carolDelta = findReplica(env, carol.id)[1].state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID);
-      const hubDelta = findReplica(env, hub.id)[1].state.accounts.get(carol.id)?.deltas.get(USDC_TOKEN_ID);
+      const carolDelta = findReplica(env, carol.id)[1].state.accounts.get(hub.id)?.state.deltas.get(USDC_TOKEN_ID);
+      const hubDelta = findReplica(env, hub.id)[1].state.accounts.get(carol.id)?.state.deltas.get(USDC_TOKEN_ID);
       return carolDelta?.collateral === carolCollateral && hubDelta?.collateral === carolCollateral;
     }, 20, 'Carol-Hub collateral observation');
 
     const [, carolAfterR2C] = findReplica(env, carol.id);
     const carolAccountInit = carolAfterR2C.state.accounts.get(hub.id);
-    const carolDeltaInit = carolAccountInit?.deltas.get(USDC_TOKEN_ID);
+    const carolDeltaInit = carolAccountInit?.state.deltas.get(USDC_TOKEN_ID);
     assert(carolDeltaInit, 'PHASE 9: Carol-Hub delta missing after R2C');
     assert(carolDeltaInit.collateral === carolCollateral, 'PHASE 9: Carol collateral mismatch after R2C');
 
@@ -2569,7 +2569,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // Re-fetch Carol's delta after payment
     const [, carolAfterPayment] = findReplica(env, carol.id);
     const carolAccount = carolAfterPayment.state.accounts.get(hub.id);
-    const carolDelta = carolAccount?.deltas.get(USDC_TOKEN_ID);
+    const carolDelta = carolAccount?.state.deltas.get(USDC_TOKEN_ID);
     assert(carolDelta, 'PHASE 9: Carol-Hub delta missing after Hub payment');
     console.log(`  Carol position: collateral=${formatUSD(carolDelta.collateral)}, ondelta=${formatUSD(carolDelta.ondelta)}`);
 
@@ -2667,7 +2667,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
         const [, hubRep] = findReplica(env, hub.id);
         const carolAccount = carolRep.state.accounts.get(hub.id);
         const hubAccount = hubRep.state.accounts.get(carol.id);
-        const carolDelta = carolAccount?.deltas.get(USDC_TOKEN_ID);
+        const carolDelta = carolAccount?.state.deltas.get(USDC_TOKEN_ID);
         if (!carolAccount || !hubAccount || !carolDelta) return false;
         const noPendingFrames = !carolAccount.pendingFrame && !hubAccount.pendingFrame;
         const mempoolClear = carolAccount.mempool.length === 0 && hubAccount.mempool.length === 0;
@@ -2675,7 +2675,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       }, 60, 'Carol cooperative close finalize');
 
       const [, carolFinal] = findReplica(env, carol.id);
-      const carolFinalDelta = carolFinal.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID);
+      const carolFinalDelta = carolFinal.state.accounts.get(hub.id)?.state.deltas.get(USDC_TOKEN_ID);
       assert(carolFinalDelta, 'PHASE 9: Carol-Hub delta missing after close');
       assert(carolFinalDelta.collateral === 0n, 'PHASE 9: Carol collateral not zero after close');
       assert(carolFinalDelta.ondelta === 0n, 'PHASE 9: Carol ondelta not zero after close');

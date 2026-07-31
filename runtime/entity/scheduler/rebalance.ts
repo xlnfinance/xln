@@ -164,7 +164,7 @@ const validateR2CRequestPolicy = (
   tokenId: number,
   requestedAmount: bigint,
 ): { requestedAt: number; feePaidUpfront: bigint } | null => {
-  const feeState = account.requestedRebalanceFeeState?.get(tokenId);
+  const feeState = account.state.requestedRebalanceFeeState?.get(tokenId);
   if (!feeState) {
     throw new Error(`REBALANCE_REQUEST_FEE_STATE_MISSING:${counterpartyId}:${tokenId}`);
   }
@@ -248,7 +248,7 @@ const evaluateR2CRequest = (
     requestedAmountRaw,
   );
   if (!request) return null;
-  const delta = account.deltas.get(tokenId);
+  const delta = account.state.deltas.get(tokenId);
   if (!delta) {
     console.warn(
       `⚠️ R→C request ignored (missing delta): token=${tokenId} cp=${counterpartyId.slice(-4)}`,
@@ -311,7 +311,7 @@ const collectR2CTargets = (run: RebalanceRun): R2CTarget[] => {
   for (const counterpartyId of getRebalanceAccountIds(run.replica.state)) {
     const account = run.replica.state.accounts.get(counterpartyId);
     if (!account) throw new Error(`REBALANCE_ACCOUNT_INDEX_STALE:${counterpartyId}`);
-    for (const [tokenId, amount] of account.requestedRebalance ?? []) {
+    for (const [tokenId, amount] of account.state.requestedRebalance ?? []) {
       const target = evaluateR2CRequest(
         run,
         account,
@@ -359,7 +359,7 @@ const queueR2CTargets = (
   const current = run.replica.state.jBatchState!;
   const submissions = targets.map(target => {
     const account = run.replica.state.accounts.get(target.counterpartyId);
-    if (!account?.requestedRebalanceFeeState?.has(target.tokenId)) {
+    if (!account?.state.requestedRebalanceFeeState?.has(target.tokenId)) {
       throw new Error(
         `REBALANCE_TARGET_STATE_CHANGED:${target.counterpartyId}:${target.tokenId}`,
       );
@@ -419,7 +419,7 @@ const collectC2RAccountWork = (
     return { executable: false };
   }
   const hubIsLeft = isLeftEntity(run.hubId, counterpartyId);
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (workspace) {
     const executable =
       canTouchBatch &&
@@ -434,8 +434,8 @@ const collectC2RAccountWork = (
 
   const ops: SettlementOp[] = [];
   let totalAmount = 0n;
-  for (const [tokenId, delta] of account.deltas) {
-    if ((account.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
+  for (const [tokenId, delta] of account.state.deltas) {
+    if ((account.state.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
     const derived = deriveDelta(delta, hubIsLeft);
     if (derived.outTotalHold === undefined) {
       throw new Error(

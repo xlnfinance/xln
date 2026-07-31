@@ -61,9 +61,9 @@ export const validateCounterpartyDisputeSeal = async (
   if (!seal.hanko) throw new Error(`${context}:DISPUTE_SEAL_HANKO_MISSING`);
 
   const expectedHash = createDisputeProofHashWithNonce(
-    account,
+    account.state,
     seal.proofBodyHash,
-    getAccountStateDomain(account),
+    getAccountStateDomain(account.state),
     seal.proofNonce,
   );
   if (String(seal.hash).toLowerCase() !== expectedHash.toLowerCase()) {

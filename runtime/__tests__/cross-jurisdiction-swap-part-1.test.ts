@@ -55,7 +55,7 @@ import { generateLazyEntityId } from '../entity/factory';
 
 import { createDefaultDelta } from '../account/delta';
 
-import { cloneAccountState } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state-clone';
 import { cloneEntityReplica } from '../entity/replica-clone';
 import { cloneEntityState } from '../entity/state-clone';
 
@@ -357,7 +357,7 @@ describe('cross-jurisdiction hashledger swap', () => {
             kind: 'frame',
             fromEntityId,
             toEntityId: entityId,
-            domain: account.domain,
+            domain: account.state.domain,
             proposal: {
               frame: {
                 ...account.currentFrame,
@@ -523,7 +523,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       next.crossJurisdictionSwaps?.set(baseRoute.orderId, clearingRoute);
       const account = next.accounts.get(sourceUser);
       if (!account) throw new Error('TEST_CROSS_J_SOURCE_ACCOUNT_REQUIRED');
-      account.pulls = new Map([
+      account.state.pulls = new Map([
         [
           clearingRoute.sourcePull.pullId,
           {
@@ -1173,11 +1173,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(hubOnlyTargetAccount.pendingFrame?.accountTxs.map(tx => tx.type)).toEqual(['pull_lock']);
     expect(hubOnlySourceAccount.currentFrame.accountTxs).toEqual([]);
     expect(hubOnlyTargetAccount.currentFrame.accountTxs).toEqual([]);
-    expect(hubOnlySourceAccount.pulls?.has(prepared.sourcePull!.pullId) ?? false).toBe(false);
-    expect(hubOnlySourceAccount.swapOffers.has(prepared.orderId)).toBe(false);
+    expect(hubOnlySourceAccount.state.pulls?.has(prepared.sourcePull!.pullId) ?? false).toBe(false);
+    expect(hubOnlySourceAccount.state.swapOffers.has(prepared.orderId)).toBe(false);
     expect(buildAccountProofBody(hubOnlySourceAccount, '').runtimeProofBody.transformers).toEqual([]);
     const hubOnlyResolve = await applyAccountTx(
-      cloneAccountState(hubOnlySourceAccount),
+      cloneAccountReplica(hubOnlySourceAccount),
       {
         type: 'pull_resolve',
         data: { pullId: prepared.sourcePull!.pullId, binary: '0x' },
@@ -1736,7 +1736,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       'CROSS_J_INTENT_ORDER_ID_CONFLICT',
     );
     const targetReceivingAccount = targetUserState.accounts.get(targetHub)!;
-    const targetReceivingDelta = targetReceivingAccount.deltas.get(1)!;
+    const targetReceivingDelta = targetReceivingAccount.state.deltas.get(1)!;
     const previousLeftCredit = targetReceivingDelta.leftCreditLimit;
     const previousRightCredit = targetReceivingDelta.rightCreditLimit;
     targetReceivingDelta.leftCreditLimit = 0n;
@@ -1909,7 +1909,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     };
     clearingHubState.crossJurisdictionSwaps?.set(clearingRoute.orderId, clearingRoute);
     const sourceAccount = clearingHubState.accounts.get(sourceUser)!;
-    sourceAccount.pulls = new Map([
+    sourceAccount.state.pulls = new Map([
       [
         clearingRoute.sourcePull.pullId,
         {
@@ -2010,7 +2010,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const account = state.accounts.get(sourceUser)!;
-    account.swapOffers.set(route.orderId, {
+    account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
       giveTokenId: Number(route.source.tokenId),
       giveAmount: BigInt(route.source.amount),
@@ -2018,7 +2018,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       wantAmount: BigInt(route.target.amount),
       priceTicks: 900n,
       timeInForce: 0,
-      makerIsLeft: account.leftEntity === sourceUser,
+      makerIsLeft: account.state.leftEntity === sourceUser,
       createdHeight: 0,
       crossJurisdiction: { ...route },
     });
@@ -2084,11 +2084,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     const absAmount = sourcePull.signedAmount >= 0n ? sourcePull.signedAmount : -sourcePull.signedAmount;
     const beneficiaryIsLeft = sourcePull.signedAmount > 0n;
     const payerIsLeft = !beneficiaryIsLeft;
-    const delta = account.deltas.get(sourcePull.tokenId) ?? createDefaultDelta(sourcePull.tokenId);
-    account.deltas.set(sourcePull.tokenId, delta);
+    const delta = account.state.deltas.get(sourcePull.tokenId) ?? createDefaultDelta(sourcePull.tokenId);
+    account.state.deltas.set(sourcePull.tokenId, delta);
     if (payerIsLeft) delta.leftHold = absAmount;
     else delta.rightHold = absAmount;
-    account.pulls = new Map([
+    account.state.pulls = new Map([
       [
         sourcePull.pullId,
         {
@@ -2124,8 +2124,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
 
     expect(result.success, result.error).toBe(true);
-    expect(account.pulls?.get(sourcePull.pullId)?.claimedRatio).toBe(32_768);
-    expect(account.pulls?.get(sourcePull.pullId)?.claimedAmount).toBe(500n);
+    expect(account.state.pulls?.get(sourcePull.pullId)?.claimedRatio).toBe(32_768);
+    expect(account.state.pulls?.get(sourcePull.pullId)?.claimedAmount).toBe(500n);
   });
 
   test('source Account never lets the user sibling relay target close economics', () => {
@@ -2780,7 +2780,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       __debugOnly: secret('b6'),
     } as any);
     const account = state.accounts.get(sourceUser)!;
-    account.swapOffers.set(route.orderId, {
+    account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
       giveTokenId: 1,
       giveAmount: 1_000n,
@@ -2788,7 +2788,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       wantAmount: 900n,
       priceTicks: 900n,
       timeInForce: 0,
-      makerIsLeft: account.leftEntity === sourceUser,
+      makerIsLeft: account.state.leftEntity === sourceUser,
       createdHeight: 0,
       crossJurisdiction: { ...route, __debugOnly: secret('b7') } as any,
     });
@@ -2841,7 +2841,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(clonedRoute.target).toEqual(route.target);
     expect(projectedRoute.source).toEqual(route.source);
     expect(projectedRoute.target).toEqual(route.target);
-    expect(clonedAccount.swapOffers.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
+    expect(clonedAccount.state.swapOffers.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
     expect(clonedAccount.mempool[0].data.crossJurisdiction.__debugOnly).toBeUndefined();
     expect(clonedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
     clonedAccount.swapOrderHistory.get(route.orderId).resolves.push({
@@ -2852,7 +2852,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       height: 2,
     });
     expect(account.swapOrderHistory.get(route.orderId)?.resolves).toHaveLength(1);
-    expect(projectedAccount.swapOffers.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
+    expect(projectedAccount.state.swapOffers.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
     expect(projectedAccount.mempool[0].data.crossJurisdiction.__debugOnly).toBeUndefined();
     expect(projectedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
   });

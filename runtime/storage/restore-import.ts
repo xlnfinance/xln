@@ -236,7 +236,7 @@ const prepareCertifiedNodes = (
     return { key: keyAccountJClaimNode(hash), value: encodeBuffer(node) };
   });
   const accountJClaimStates = options.docs.flatMap(doc =>
-    doc.family === 'account' ? [doc.value.leftPendingJClaims, doc.value.rightPendingJClaims] : [],
+    doc.family === 'account' ? [doc.value.state.leftPendingJClaims, doc.value.state.rightPendingJClaims] : [],
   );
   collectReachableAccountJClaimNodes(
     new Map(options.accountJClaimNodes.map(({ hash, node }) => [hash, node])),

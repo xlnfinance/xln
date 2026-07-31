@@ -20,7 +20,7 @@ const targetJurisdiction = `stack:728126428:0x${'62'.repeat(20)}`;
 
 const sourceAccount = () => {
   const account = makeAccount(sourceUser, sourceHub);
-  const token = account.deltas.get(1)!;
+  const token = account.state.deltas.get(1)!;
   token.offdelta = 1_000n;
   return account;
 };
@@ -39,18 +39,18 @@ const baseInput = () => ({
     hubEntityId: sourceHub,
     hubSignerId: sourceHubSigner,
     jurisdiction: sourceJurisdiction,
-    account: sourceAccount(),
+    account: sourceAccount().state,
   },
 });
 
 describe('runtime-owned swap command plan', () => {
   test('builds one exact same-j RuntimeInput including capacity setup and offer', () => {
     const account = sourceAccount();
-    account.deltas.delete(3);
+    account.state.deltas.delete(3);
     const plan = planSwapCommand({
       ...baseInput(),
       mode: 'same',
-      source: { ...baseInput().source, account },
+      source: { ...baseInput().source, account: account.state },
     });
 
     expect(plan.mode).toBe('same');
@@ -152,10 +152,10 @@ describe('runtime-owned swap command plan', () => {
     const readyAccount = makeAccount(targetUser, targetHub);
     const targetToken = createDefaultDelta(1);
     targetToken.rightCreditLimit = 1_000n;
-    readyAccount.deltas.set(1, targetToken);
+    readyAccount.state.deltas.set(1, targetToken);
     expect(() => assertCrossJurisdictionSwapTargetReady(
       planned.crossJurisdictionIntent,
-      readyAccount,
+      readyAccount.state,
     )).not.toThrow();
   });
 });

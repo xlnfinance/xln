@@ -1,4 +1,5 @@
 import type {
+  AccountReplica,
   AccountState,
   EntityReplica,
   PaymentRoute,
@@ -41,24 +42,20 @@ export const emptyPaymentPanelView = (): PaymentPanelView => ({
   networkGraph: null,
 });
 
-type PaymentAccountSource = Pick<AccountState, 'leftEntity' | 'rightEntity'> & {
-  deltas?: AccountState['deltas'];
-  activeDispute?: unknown;
-  status?: unknown;
-};
+type PaymentAccountSource = Pick<AccountReplica, 'state' | 'activeDispute' | 'status'>;
 
 function clonePaymentAccount(account: PaymentAccountSource): LocalAccountLike {
   return {
-    leftEntity: account.leftEntity,
-    rightEntity: account.rightEntity,
-    deltas: account.deltas instanceof Map ? new Map(account.deltas) : new Map(),
+    leftEntity: account.state.leftEntity,
+    rightEntity: account.state.rightEntity,
+    deltas: account.state.deltas instanceof Map ? new Map(account.state.deltas) : new Map(),
   };
 }
 
 function getCounterpartyForAccount(ownerEntityId: string, account: PaymentAccountSource): string {
   const owner = normalizeEntityId(ownerEntityId);
-  const left = normalizeEntityId(account.leftEntity);
-  const right = normalizeEntityId(account.rightEntity);
+  const left = normalizeEntityId(account.state.leftEntity);
+  const right = normalizeEntityId(account.state.rightEntity);
   if (left === owner) return right;
   if (right === owner) return left;
   return '';

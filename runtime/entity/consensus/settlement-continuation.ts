@@ -68,11 +68,11 @@ export const selectSettlementContinuation = (
   if (hasPendingSettlementTransition(account)) {
     return { kind: 'wait', counterpartyId };
   }
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (!workspace) {
     return { kind: 'discard', counterpartyId, reason: 'workspace_missing' };
   }
-  const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+  const workspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);
   if (workspaceHash !== continuation.workspaceHash) {
     return { kind: 'discard', counterpartyId, reason: 'workspace_changed' };
   }
@@ -82,7 +82,7 @@ export const selectSettlementContinuation = (
   if (workspace.status !== 'ready_to_submit') {
     return { kind: 'wait', counterpartyId };
   }
-  if (workspace.executorIsLeft !== getAccountPerspective(account, state.entityId).iAmLeft) {
+  if (workspace.executorIsLeft !== getAccountPerspective(account.state, state.entityId).iAmLeft) {
     throw new Error(`SETTLEMENT_CONTINUATION_EXECUTOR_MISMATCH:${counterpartyId}`);
   }
   if (

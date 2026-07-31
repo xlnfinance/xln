@@ -58,7 +58,7 @@ const verifyPendingAckCertificate = async (
     account.currentDisputeProofBodyHash,
     account.counterpartyDisputeProofBodyHash,
     account.counterpartyDisputeProofNonce,
-    Number(account.jNonce ?? 0),
+    Number(account.state.jNonce ?? 0),
     validatedSeal,
   );
   if (sealError) {
@@ -133,7 +133,7 @@ const applyPendingFrameTransactions = async (
   timedOutHashlocks: string[],
   candidateEffects: AccountOutput[],
 ): Promise<void> => {
-  const jHeight = pendingFrame.jHeight ?? account.lastFinalizedJHeight ?? 0;
+  const jHeight = pendingFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0;
   for (const tx of pendingFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(account);
     const result = await applyAccountTx(
@@ -165,7 +165,7 @@ const applyPendingFrameTransactions = async (
     );
     if (result.timedOutHashlock) timedOutHashlocks.push(result.timedOutHashlock);
   }
-  commitStagedAccountCommitmentCache(account);
+  commitStagedAccountCommitmentCache(account.state);
   assertLiveCommitMatchesFrame(
     account,
     pendingFrame.accountStateRoot,
@@ -202,7 +202,7 @@ const installPendingFrameCommit = (
 
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  discardStagedAccountCommitmentCache(account);
+  discardStagedAccountCommitmentCache(account.state);
   if (
     account.lastOutboundFrameAck
     && Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)
@@ -279,7 +279,7 @@ export const handlePendingFrameAck = async (
     state: shortHash(certificate.frameHash),
   });
   const { counterparty } = getAccountPerspective(
-    account,
+    account.state,
     account.proofHeader.fromEntity,
   );
   await applyPendingFrameTransactions(
@@ -294,7 +294,7 @@ export const handlePendingFrameAck = async (
     side: 'proposer',
     counterparty: shortId(counterparty),
     height: pendingFrame.height,
-    tokens: account.deltas.size,
+    tokens: account.state.deltas.size,
   });
   const committedHeight = installPendingFrameCommit(
     account,

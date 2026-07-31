@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store';
-  import type { AccountState, RuntimeReplica, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
+  import type { AccountReplica, RuntimeReplica, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
   import { xlnFunctions, error } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
@@ -21,7 +21,7 @@
   export let counterpartyId: string | null;
   export let accountIds: string[] = [];
   export let entityNames: Map<string, string> = new Map();
-  export let accountOverride: AccountState | null = null;
+  export let accountOverride: AccountReplica | null = null;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   $: activeXlnFunctions = $xlnFunctions;
@@ -52,7 +52,7 @@
     const account = accountOverride ?? (
       activeEnv ? getCounterpartyAccount(activeEnv, entityId, effectiveCounterparty)?.account ?? null : null
     );
-    const delta = account?.deltas?.get?.(selectedTokenId);
+    const delta = account?.state.deltas?.get?.(selectedTokenId);
     if (!delta) return null;
 
     const isUserLeft =
@@ -132,19 +132,19 @@
   }
 
   function resolveProjectedCounterpartyPolicy(
-    account: AccountState | null | undefined,
+    account: AccountReplica | null | undefined,
     ownerEntityId: string,
     tokenId: number,
   ): CounterpartyFeePolicy | null {
     if (!account) return null;
     const owner = normalizeEntityId(ownerEntityId);
-    const side = owner === normalizeEntityId(account.leftEntity)
+    const side = owner === normalizeEntityId(account.state.leftEntity)
       ? 'right'
-      : owner === normalizeEntityId(account.rightEntity)
+      : owner === normalizeEntityId(account.state.rightEntity)
         ? 'left'
         : null;
     if (!side) return null;
-    const policy = account.rebalanceFeePolicies?.get(tokenId)?.[side];
+    const policy = account.state.rebalanceFeePolicies?.get(tokenId)?.[side];
     if (!policy) return null;
     return {
       policyVersion: policy.policyVersion,

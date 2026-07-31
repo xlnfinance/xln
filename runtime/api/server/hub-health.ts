@@ -4,7 +4,7 @@ import { type RuntimeReplica } from '../../runtime/types';
 import type { JTokenInfo } from '../../jurisdiction/adapter/types';
 import { getBootstrapTokenAmount } from '../../jurisdiction/machine/bootstrap-economy';
 import {
-  getAccountState,
+  getAccountReplica,
   getEntityOutCapacity,
   getEntityReplicaById,
   hasAccount,
@@ -62,12 +62,12 @@ export const getHubMeshHealth = (env: RuntimeReplica | null, activeHubEntityIds:
     for (let j = i + 1; j < hubIds.length; j++) {
       const left = hubIds[i]!;
       const right = hubIds[j]!;
-      const leftAccount = getAccountState(env, left, right);
-      const rightAccount = getAccountState(env, right, left);
+      const leftAccount = getAccountReplica(env, left, right);
+      const rightAccount = getAccountReplica(env, right, left);
       const leftHasAccount = hasAccount(env, left, right);
       const rightHasAccount = hasAccount(env, right, left);
-      const leftOutCapacity = getEntityOutCapacity(leftAccount, left, HUB_MESH_TOKEN_ID);
-      const rightOutCapacity = getEntityOutCapacity(rightAccount, right, HUB_MESH_TOKEN_ID);
+      const leftOutCapacity = getEntityOutCapacity(leftAccount?.state ?? null, left, HUB_MESH_TOKEN_ID);
+      const rightOutCapacity = getEntityOutCapacity(rightAccount?.state ?? null, right, HUB_MESH_TOKEN_ID);
       const ok =
         leftHasAccount &&
         rightHasAccount &&

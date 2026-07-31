@@ -223,7 +223,7 @@ export const applySameHeightIncomingFrameRollback = (
   }
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  discardStagedAccountCommitmentCache(account);
+  discardStagedAccountCommitmentCache(account.state);
   account.rollbackCount = Math.max(1, account.rollbackCount + 1);
   account.lastRollbackFrameHash = receivedFrame.stateHash;
   if (account.rollbackCount > 1) {

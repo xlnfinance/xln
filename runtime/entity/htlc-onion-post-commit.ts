@@ -65,7 +65,7 @@ type HtlcLockEnvelope = NonNullable<Extract<AccountTx, { type: 'htlc_lock' }>['d
 const candidateLocks = (replica: EntityReplica): Array<{ accountId: string; lock: HtlcLock; envelope: HtlcLockEnvelope }> => {
   const candidates: Array<{ accountId: string; lock: HtlcLock; envelope: HtlcLockEnvelope }> = [];
   for (const [accountId, account] of replica.state.accounts) {
-    for (const lock of account.locks.values()) {
+    for (const lock of account.state.locks.values()) {
       if (alreadyAdvanced(replica, accountId, lock)) continue;
       const envelope = committedHtlcLockEnvelope(account, lock.lockId);
       if (envelope) candidates.push({ accountId, lock, envelope });
@@ -79,8 +79,8 @@ const candidateLocks = (replica: EntityReplica): Array<{ accountId: string; lock
 const candidateSecretOffers = (replica: EntityReplica): Array<{ accountId: string; lock: HtlcLock }> => {
   const candidates: Array<{ accountId: string; lock: HtlcLock }> = [];
   for (const [accountId, account] of replica.state.accounts) {
-    const localIsLeft = normalized(account.leftEntity) === normalized(replica.entityId);
-    for (const lock of account.locks.values()) {
+    const localIsLeft = normalized(account.state.leftEntity) === normalized(replica.entityId);
+    for (const lock of account.state.locks.values()) {
       if (!lock.secretOffer || lock.senderIsLeft !== localIsLeft) continue;
       if (hasAccountResolution(replica, accountId, lock.lockId) || hasPendingAdvance(replica, lock.lockId)) continue;
       candidates.push({ accountId, lock });
@@ -244,7 +244,7 @@ export const appendDefaultProposerAcceptedHtlcReveals = async (
           continue;
         }
         if (hasPendingReveal(replica, accountTx.data.lockId)) continue;
-        const lock = account.locks.get(accountTx.data.lockId);
+        const lock = account.state.locks.get(accountTx.data.lockId);
         if (!lock?.secretOffer) throw new Error(`HTLC_ACCEPTED_OFFER_LOCK_MISSING:${accountTx.data.lockId}`);
         const offerHash = hashEncryptedHtlcLayer(lock.secretOffer);
         if (accountTx.data.offerHash.toLowerCase() !== offerHash) {

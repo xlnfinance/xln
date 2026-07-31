@@ -59,7 +59,7 @@ export function routeRemoteCrossJurisdictionBookCancels(
   for (const cancel of cancels) {
     const route = sourceHubState.accounts
       .get(cancel.accountId)
-      ?.swapOffers
+      ?.state.swapOffers
       ?.get(cancel.offerId)
       ?.crossJurisdiction;
     if (!route) {
@@ -127,7 +127,7 @@ export function collectCommittedCrossJurisdictionCancelAcks(
     }
     if (normalizeEntityRef(route.source.counterpartyEntityId) !== currentEntityId) continue;
     const account = sourceHubState.accounts.get(pending.sourceAccountId);
-    if (!account?.swapOffers?.has(admission.orderId)) {
+    if (!account?.state.swapOffers?.has(admission.orderId)) {
       throw new Error(
         `CROSS_J_CANCEL_ACK_SOURCE_OFFER_MISSING:account=${pending.sourceAccountId}:order=${admission.orderId}`,
       );
@@ -162,7 +162,7 @@ export function processOrderbookCancels(
 
   for (const { offerId, accountId } of cancels) {
     const account = hubState.accounts.get(accountId);
-    const hasOffer = Boolean(account?.swapOffers?.has(offerId));
+    const hasOffer = Boolean(account?.state.swapOffers?.has(offerId));
     if (!hasOffer) continue;
 
     const namespacedOrderId = `${accountId}:${offerId}`;
@@ -195,7 +195,7 @@ export function processOrderbookCancels(
       orderbookCancelled = true;
     }
 
-    const offer = account?.swapOffers?.get(offerId);
+    const offer = account?.state.swapOffers?.get(offerId);
     if (offer?.crossJurisdiction) {
       markCrossJurisdictionBookRemovalCommitted(
         hubState,

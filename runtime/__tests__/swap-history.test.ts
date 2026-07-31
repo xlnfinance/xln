@@ -6,11 +6,26 @@ import {
   recordSwapResolveLifecycle,
 } from '../account/tx/handlers/swap-history';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import type { AccountState, SwapOffer } from '../types/account';
+import type { AccountReplica, SwapOffer } from '../types/account';
 
-const makeAccount = (): AccountState => ({
-  leftEntity: 'maker',
-  rightEntity: 'hub',
+const makeAccount = (): AccountReplica => ({
+  state: {
+    leftEntity: 'maker',
+    rightEntity: 'hub',
+    domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+    watchSeed: `0x${'44'.repeat(32)}`,
+    deltas: new Map(),
+    locks: new Map(),
+    swapOffers: new Map(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    lastFinalizedJHeight: 0,
+    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    jNonce: 0,
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+  },
   status: 'active',
   mempool: [],
   currentFrame: {
@@ -23,10 +38,6 @@ const makeAccount = (): AccountState => ({
     stateHash: '',
     byLeft: true,
   },
-  deltas: new Map(),
-  locks: new Map(),
-  swapOffers: new Map(),
-  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
   currentHeight: 0,
   pendingSignatures: [],
   rollbackCount: 0,
@@ -37,11 +48,6 @@ const makeAccount = (): AccountState => ({
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  lastFinalizedJHeight: 0,
-  disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-  jNonce: 0,
 });
 
 describe('swap order history', () => {

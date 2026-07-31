@@ -122,7 +122,7 @@ export const selectFinalProof = (
       ? counterHash!
       : activeDispute.initialProofbodyHash,
     shouldUseCounterProof,
-    callerSide: account.leftEntity === state.entityId ? 'left' : 'right',
+    callerSide: account.state.leftEntity === state.entityId ? 'left' : 'right',
   };
 };
 
@@ -136,7 +136,7 @@ export const verifyCounterProofIdentity = (
   const domain = resolveDepositoryHankoDomain(sourceState);
   if (!domain) throw new Error('DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING');
   const expectedHash = createDisputeProofHashWithNonce(
-    account,
+    account.state,
     selection.finalProofbodyHash,
     domain,
     selection.finalNonce,

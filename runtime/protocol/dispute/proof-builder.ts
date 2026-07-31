@@ -11,7 +11,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { AccountReplica } from '../../types/account.js';
+import type { AccountReplica, AccountState } from '../../types/account.js';
 import type {
   RuntimeProofBody,
   RuntimeTransformerClause,
@@ -41,8 +41,9 @@ import {
 
 export type { DepositoryHankoDomain } from '../../hanko/onchain-domain.ts';
 
-type DisputeHashAccount = Pick<AccountReplica, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
-type SettlementHashAccount = Pick<AccountReplica, 'leftEntity' | 'rightEntity'>;
+type DisputeHashState = Pick<AccountState, 'leftEntity' | 'rightEntity' | 'watchSeed'>;
+type DisputeHashReplica = Pick<AccountReplica, 'state' | 'proofHeader'>;
+type SettlementHashState = Pick<AccountState, 'leftEntity' | 'rightEntity'>;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
@@ -136,7 +137,7 @@ const buildProofDeltaIndex = (account: AccountReplica): ProofDeltaIndex => {
   const tokenIds: number[] = [];
   const offdeltas: bigint[] = [];
   const byTokenId = new Map<number, number>();
-  const sorted = Array.from(account.deltas.entries())
+  const sorted = Array.from(account.state.deltas.entries())
     .sort(([left], [right]) => left - right);
   for (const [tokenId, delta] of sorted) {
     assertFinalDeltaCanFinalize(tokenId, delta.ondelta ?? 0n, delta.offdelta);
@@ -162,7 +163,7 @@ const buildProofPayments = (
   account: AccountReplica,
   deltaIndex: ReadonlyMap<number, number>,
 ): RuntimePayment[] =>
-  sortTransformerEntries(account.locks.entries()).map(([lockId, lock]) => {
+  sortTransformerEntries(account.state.locks.entries()).map(([lockId, lock]) => {
     const revealedUntilTimestamp = Math.floor(Number(lock.timelock) / 1000);
     if (!Number.isFinite(revealedUntilTimestamp) || revealedUntilTimestamp <= 0) {
       throw new Error(`HTLC_LOCK_INVALID_TIMELOCK:${lockId}`);
@@ -183,7 +184,7 @@ const buildProofSwaps = (
   account: AccountReplica,
   deltaIndex: ReadonlyMap<number, number>,
 ): RuntimeSwap[] =>
-  sortTransformerEntries(account.swapOffers.entries()).flatMap(
+  sortTransformerEntries(account.state.swapOffers.entries()).flatMap(
     ([offerId, offer]) => {
       if (offer.crossJurisdiction) return [];
       return [{
@@ -208,7 +209,7 @@ const buildProofPulls = (
   account: AccountReplica,
   deltaIndex: ReadonlyMap<number, number>,
 ): RuntimePull[] =>
-  sortTransformerEntries((account.pulls ?? new Map()).entries())
+  sortTransformerEntries((account.state.pulls ?? new Map()).entries())
     .map(([pullId, pull]) => ({
       deltaIndex: requireProofDeltaIndex(
         deltaIndex,
@@ -231,7 +232,7 @@ const buildProofPulls = (
 const buildSubcontractTransformers = (
   account: AccountReplica,
 ): RuntimeTransformerClause[] =>
-  Array.from(account.subcontracts ?? [])
+  Array.from(account.state.subcontracts ?? [])
     .sort(([left], [right]) => compareStableText(left, right))
     .map(([subcontractId, subcontract]) => {
       const transformerAddress = requireContractAddress(
@@ -296,7 +297,7 @@ export function buildAccountProofBody(
 ): ProofBodyResult {
   const deltaIndex = buildProofDeltaIndex(account);
   const runtimeProofBody: RuntimeProofBody = {
-    watchSeed: normalizeAccountWatchSeed(account.watchSeed, 'PROOF_BODY'),
+    watchSeed: normalizeAccountWatchSeed(account.state.watchSeed, 'PROOF_BODY'),
     offdeltas: deltaIndex.offdeltas,
     tokenIds: deltaIndex.tokenIds,
     transformers: buildProofTransformers(
@@ -373,7 +374,7 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
   };
 }
 
-function getCanonicalAccountKey(account: DisputeHashAccount): string {
+function getCanonicalAccountKey(account: DisputeHashState): string {
   const leftEntity = String(account.leftEntity).toLowerCase();
   const rightEntity = String(account.rightEntity).toLowerCase();
   const [first, second] =
@@ -388,16 +389,16 @@ function getCanonicalAccountKey(account: DisputeHashAccount): string {
  * This is what both parties sign to authorize a dispute proof
  */
 export function createDisputeProofHash(
-  account: DisputeHashAccount,
+  account: DisputeHashReplica,
   proofBodyHash: string,
   domain: DepositoryHankoDomain,
 ): string {
   return hashDisputeProofHankoPayload(
     domain,
-    getCanonicalAccountKey(account),
+    getCanonicalAccountKey(account.state),
     account.proofHeader.nextProofNonce,
     proofBodyHash,
-    normalizeAccountWatchSeed(account.watchSeed, 'DISPUTE_MESSAGE'),
+    normalizeAccountWatchSeed(account.state.watchSeed, 'DISPUTE_MESSAGE'),
   );
 }
 
@@ -413,7 +414,7 @@ export function createDisputeProofHash(
  * at the new nonce.
  */
 export function createDisputeProofHashWithNonce(
-  account: DisputeHashAccount,
+  account: DisputeHashState,
   proofBodyHash: string,
   domain: DepositoryHankoDomain,
   nonce: number,
@@ -425,7 +426,7 @@ export function createDisputeProofHashWithNonce(
 
 /** Matches Account.sol MessageType.CooperativeDisputeProof exactly. */
 export function createCooperativeDisputeProofHash(
-  account: DisputeHashAccount,
+  account: DisputeHashState,
   proofBodyHash: string,
   starterInitialArgumentsHash: string,
   domain: DepositoryHankoDomain,
@@ -449,7 +450,7 @@ export function createCooperativeDisputeProofHash(
  * can reuse an address across chains, so either value alone is not a domain.
  */
 export function createSettlementHashWithNonce(
-  account: SettlementHashAccount,
+  account: SettlementHashState,
   diffs: Array<{
     tokenId: number;
     leftDiff: bigint;

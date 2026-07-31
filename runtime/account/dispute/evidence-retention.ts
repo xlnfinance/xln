@@ -88,7 +88,7 @@ export const collectReachableDisputeEvidenceHashes = (
   addOptionalHash(hashes, account.activeDispute?.initialProofbodyHash, 'account.active');
   addOptionalHash(
     hashes,
-    account.settlementWorkspace?.postSettlementDisputeProof?.proofBodyHash,
+    account.state.settlementWorkspace?.postSettlementDisputeProof?.proofBodyHash,
     'account.pendingSettlement',
   );
   addInputHashes(hashes, account.pendingAccountInput, 'account.pending');

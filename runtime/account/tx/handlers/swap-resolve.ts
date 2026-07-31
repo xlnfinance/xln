@@ -74,11 +74,11 @@ export async function handleSwapResolve(
   _isValidation = false,
 ): Promise<SwapResolveResult> {
   const events: string[] = [];
-  const validated = validateSwapResolve(account, tx, byLeft, events);
+  const validated = validateSwapResolve(account.state, tx, byLeft, events);
   if ('success' in validated) return validated;
-  const applied = applySwapResolveFinancials(account, validated, events);
+  const applied = applySwapResolveFinancials(account.state, validated, events);
   if ('success' in applied) return applied;
-  const remainder = applySwapResolveRemainder(account, applied, events);
+  const remainder = applySwapResolveRemainder(account.state, applied, events);
   if (!remainder.success) return remainder;
 
   recordSwapResolveHistory(

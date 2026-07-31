@@ -26,13 +26,13 @@ export type UnsafeFrameOutcome = {
 const persistDisputeEvidenceSecrets = (context: UnsafeFrameContext): void => {
   const { state, account, counterpartyId, dispute, effects } = context;
   for (const { hashlock, secret } of dispute.evidenceSecrets) {
-    const lock = [...account.locks.values()].find(
+    const lock = [...account.state.locks.values()].find(
       candidate => candidate.hashlock.toLowerCase() === hashlock.toLowerCase(),
     );
     if (!lock) throw new Error(`HTLC_DISPUTE_EVIDENCE_LOCK_MISSING:${hashlock}`);
     persistVerifiedHtlcSecret(state, counterpartyId, lock, secret);
     const route = state.htlcRoutes.get(hashlock)!;
-    const localIsLeft = account.leftEntity.toLowerCase() === state.entityId.toLowerCase();
+    const localIsLeft = account.state.leftEntity.toLowerCase() === state.entityId.toLowerCase();
     const localSentLock = lock.senderIsLeft === localIsLeft;
     if (!localSentLock || !route.inboundEntity || !route.inboundLockId) continue;
     effects.accountTxs.push({

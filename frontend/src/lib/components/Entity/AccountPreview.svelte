@@ -54,7 +54,7 @@
 
   $: counterpartyJurisdiction = normalizeJurisdictionDisplayName(counterpartyProfile?.metadata?.jurisdiction?.name);
   $: counterpartyDisplayName = formatEntityNetworkLabel(counterpartyName || formatEntityId(counterpartyId), counterpartyJurisdiction);
-  $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
+  $: tokenDetails = buildAccountTokenDetails(account.state, entityId, activeXlnFunctions);
 
   // P2P connection state
   $: connState = (() => {
@@ -118,7 +118,7 @@
 
     return { outCap, inCap, outCredit, outColl, outDebt,
              inCredit, inColl, inDebt, outTotal, inTotal, outHold, inHold,
-             tokenCount: account.deltas.size, primaryTokenId, primarySymbol,
+             tokenCount: account.state.deltas.size, primaryTokenId, primarySymbol,
              totalCollateralUsdMicros, totalDebtUsdMicros };
   })();
 
@@ -158,7 +158,7 @@
   $: accountDeltaViewMode = $settings.accountDeltaViewMode ?? 'per-token';
   $: tokenSummaries = (() => {
     if (tokenDetails.length === 0 || !activeXlnFunctions) return [];
-    const isLeft = isAccountLeftPerspective(entityId, account);
+    const isLeft = isAccountLeftPerspective(entityId, account.state);
     const rows: Array<{
       tokenId: number;
       symbol: string;
@@ -226,13 +226,13 @@
   $: statusLabel = getAccountUiStatusLabel(uiStatus);
   $: statusDescription = getAccountUiStatusDescription(uiStatus);
   $: accountHeight = Number(account.currentFrame?.height ?? account.currentHeight ?? 0);
-  $: jFinalizedHeight = Number(account.lastFinalizedJHeight ?? 0);
-  $: pendingLeftJClaim = BigInt(account.leftPendingJClaims?.count ?? 0) > 0n;
-  $: pendingRightJClaim = BigInt(account.rightPendingJClaims?.count ?? 0) > 0n;
+  $: jFinalizedHeight = Number(account.state.lastFinalizedJHeight ?? 0);
+  $: pendingLeftJClaim = BigInt(account.state.leftPendingJClaims?.count ?? 0) > 0n;
+  $: pendingRightJClaim = BigInt(account.state.rightPendingJClaims?.count ?? 0) > 0n;
   $: jPendingSideSuffix = `${pendingLeftJClaim ? '+L' : ''}${pendingRightJClaim ? '+R' : ''}`;
   $: disputeTimeoutBlock = Number(account.activeDispute?.disputeTimeout || 0);
   $: disputeBlocksLeft = hasActiveDispute
-    ? Math.max(0, disputeTimeoutBlock - Number(account.lastFinalizedJHeight || 0))
+    ? Math.max(0, disputeTimeoutBlock - Number(account.state.lastFinalizedJHeight || 0))
     : 0;
   $: compactConsensusLabel = `${statusLabel} · A#${accountHeight} · J#${jFinalizedHeight}${jPendingSideSuffix}`;
   $: consensusUpdatedAt = Number(account.currentFrame?.timestamp ?? account.pendingFrame?.timestamp ?? 0);
@@ -255,7 +255,7 @@
 
   $: pendingRequestedByToken = (() => {
     const out = new Map<number, bigint>();
-    const map = account.requestedRebalance;
+    const map = account.state.requestedRebalance;
     if (!(map instanceof Map)) return out;
     for (const [rawTokenId, rawAmount] of map.entries()) {
       const tokenId = toTokenIdSafe(rawTokenId);
@@ -268,7 +268,7 @@
 
   $: pendingC2RByToken = (() => {
     const out = new Map<number, bigint>();
-    const ws = account.settlementWorkspace;
+    const ws = account.state.settlementWorkspace;
     if (!ws || !Array.isArray(ws.ops)) return out;
     for (const op of ws.ops) {
       if (op?.type !== 'c2r') continue;
@@ -279,10 +279,10 @@
     }
     return out;
   })();
-  $: hasPendingBatch = account.settlementWorkspace?.status === 'submitted';
+  $: hasPendingBatch = account.state.settlementWorkspace?.status === 'submitted';
 
-  $: workspace = account.settlementWorkspace;
-  $: iAmLeft = isAccountLeftPerspective(entityId, account);
+  $: workspace = account.state.settlementWorkspace;
+  $: iAmLeft = isAccountLeftPerspective(entityId, account.state);
   $: disputeStartedByLeft = Boolean(account.activeDispute?.startedByLeft);
   $: disputeRole = hasActiveDispute ? (disputeStartedByLeft === iAmLeft ? 'starter' : 'counterparty') : '';
   $: iAmProposer = workspace ? workspace.lastModifiedByLeft === iAmLeft : false;

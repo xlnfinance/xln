@@ -113,7 +113,7 @@ export const prepareProposalAdmission = (
   selectedMempoolTxs: readonly AccountTx[] | undefined,
 ): ProposalAdmissionResult => {
   const myEntityId = account.proofHeader.fromEntity;
-  const { counterparty } = getAccountPerspective(account, myEntityId);
+  const { counterparty } = getAccountPerspective(account.state, myEntityId);
   const quiet = context.quietLogs;
   if (!quiet) {
     accountLog.debug('proposal.start', {
@@ -147,6 +147,6 @@ export const prepareProposalAdmission = (
     events,
     proposalWindow,
     frameTimestamp: entityFrameTimestamp,
-    frameJHeight: entityJHeight ?? account.lastFinalizedJHeight ?? 0,
+    frameJHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
   };
 };

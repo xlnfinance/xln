@@ -21,9 +21,16 @@ export function materializeAccountView(candidate: AccountReplica | null | undefi
   if (!candidate) return null;
   const materialized: AccountReplica = {
     ...candidate,
-    deltas: candidate.deltas instanceof Map ? new Map(candidate.deltas) : candidate.deltas,
+    state: {
+      ...candidate.state,
+      deltas: candidate.state.deltas instanceof Map
+        ? new Map(candidate.state.deltas)
+        : candidate.state.deltas,
+    },
   };
-  if (candidate.settlementWorkspace) materialized.settlementWorkspace = { ...candidate.settlementWorkspace };
+  if (candidate.state.settlementWorkspace) {
+    materialized.state.settlementWorkspace = { ...candidate.state.settlementWorkspace };
+  }
   if (candidate.activeDispute) materialized.activeDispute = { ...candidate.activeDispute };
   return materialized;
 }
@@ -461,9 +468,9 @@ export function isHubProfile(profile: GossipProfile | undefined): boolean {
 }
 
 export function resolveAccountCounterparty(entityId: string, account: AccountReplica): string {
-  return account.leftEntity.toLowerCase() === entityId.toLowerCase()
-    ? account.rightEntity
-    : account.leftEntity;
+  return account.state.leftEntity.toLowerCase() === entityId.toLowerCase()
+    ? account.state.rightEntity
+    : account.state.leftEntity;
 }
 
 export function findLocalAccountByCounterparty(
@@ -482,9 +489,9 @@ export function findLocalAccountByCounterparty(
 
 export function isAccountLeftPerspective(entityId: string, account: AccountReplica): boolean {
   const owner = String(entityId || '').trim().toLowerCase();
-  const left = String(account.leftEntity || '').trim().toLowerCase();
-  const right = String(account.rightEntity || '').trim().toLowerCase();
+  const left = String(account.state.leftEntity || '').trim().toLowerCase();
+  const right = String(account.state.rightEntity || '').trim().toLowerCase();
   if (owner === left) return true;
   if (owner === right) return false;
-  throw new Error(`Account perspective mismatch: owner=${entityId} left=${account.leftEntity} right=${account.rightEntity}`);
+  throw new Error(`Account perspective mismatch: owner=${entityId} left=${account.state.leftEntity} right=${account.state.rightEntity}`);
 }

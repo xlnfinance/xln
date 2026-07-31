@@ -36,7 +36,7 @@ const dropStaleCollateralToReserve = (state: EntityState): void => {
     const account = [...state.accounts.entries()].find(
       ([accountId]) => accountId.toLowerCase() === counterparty,
     )?.[1];
-    const jNonce = account?.jNonce ?? 0;
+    const jNonce = account?.state.jNonce ?? 0;
     if (operation.nonce > jNonce) return true;
     jBatchActionLog.warn('abort.drop_stale_c2r', {
       entity: shortId(state.entityId),

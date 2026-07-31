@@ -69,7 +69,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
     kind: 'board_reseal',
     fromEntityId: sourceEntityId,
     toEntityId: receiverEntityId,
-    domain: { ...account.domain },
+    domain: { ...account.state.domain },
     reseal: {
       height: 7,
       frameHash,
@@ -95,7 +95,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   expect(account.counterpartyFrameHanko).toBe(frameHanko);
   expect(account.currentFrame).toEqual(beforeFrame);
   expect(account.currentHeight).toBe(7);
-  expect(account.jNonce).toBe(0);
+  expect(account.state.jNonce).toBe(0);
   expect(account.counterpartyBoardReseal).toEqual({
     activationJHeight: 19,
     activationLogIndex: 2,
@@ -153,7 +153,7 @@ test('ACK commit retains the counterparty Hanko needed for later board reseal', 
     height: 1,
     timestamp: 1,
     prevFrameHash: digest('00'),
-    accountStateRoot: computeAccountStateRoot(account),
+    accountStateRoot: computeAccountStateRoot(account.state),
     stateHash: frameHash,
   };
 
@@ -161,7 +161,7 @@ test('ACK commit retains the counterparty Hanko needed for later board reseal', 
     kind: 'ack',
     fromEntityId: peerEntityId,
     toEntityId: localEntityId,
-    domain: { ...account.domain },
+    domain: { ...account.state.domain },
     ack: { height: 1, frameHash, frameHanko: peerHanko },
   });
 
@@ -198,7 +198,7 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
     kind: 'board_reseal',
     fromEntityId: sourceEntityId,
     toEntityId: receiverEntityId,
-    domain: { ...account.domain },
+    domain: { ...account.state.domain },
     reseal: {
       height: 4,
       frameHash,
@@ -419,7 +419,7 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
   expect(certified).toEqual(certifiedBefore);
   expect(uncertified.currentHeight).toBe(1);
   expect(uncertified.currentFrame.stateHash).toBe(digest('d1'));
-  expect(uncertified.jNonce).toBe(0);
+  expect(uncertified.state.jNonce).toBe(0);
   expect(result.accountMigrations).toEqual([
     {
       counterpartyId: uncertifiedId,
@@ -442,7 +442,7 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
   const restored = hydrateAccountDocFromStorage(projectAccountDoc(uncertified));
   expect(restored.boardResealMigration).toEqual(uncertified.boardResealMigration);
   expect(restored.currentFrame).toEqual(uncertified.currentFrame);
-  expect(restored.jNonce).toBe(uncertified.jNonce);
+  expect(restored.state.jNonce).toBe(uncertified.state.jNonce);
 });
 
 test('partial bilateral dispute evidence never emits a frame-only board reseal', () => {

@@ -402,8 +402,8 @@ async function materializeDeferredSettlementApprovals(
     const account = state.accounts.get(accountId);
     if (!account) throw new Error(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${accountId}`);
     if (account.pendingFrame || hasPendingSettlementTransition(account)) continue;
-    const workspace = account.settlementWorkspace;
-    const currentHash = workspace ? assertCanonicalSettlementWorkspace(account, workspace) : undefined;
+    const workspace = account.state.settlementWorkspace;
+    const currentHash = workspace ? assertCanonicalSettlementWorkspace(account.state, workspace) : undefined;
     if (!workspace || currentHash !== approvedHash) {
       deferred.delete(accountId);
       entityLog.warn('settlement.approval_invalidated', {
@@ -428,7 +428,7 @@ async function materializeDeferredSettlementApprovals(
     const admission = await applyAccountInput(
       accountConsensusContext,
       account,
-      createLocalAccountInput(account, state.entityId, [draft.tx]),
+      createLocalAccountInput(account.state, state.entityId, [draft.tx]),
     );
     if (admission.admittedAccountTxCount !== 1) {
       throw new Error(`SETTLEMENT_DEFERRED_SEAL_NOT_ADMITTED:${accountId}`);
@@ -449,9 +449,9 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChang
   for (const accountId of [...getQueuedAccountIds(state)].sort(compareStableText)) {
     const account = state.accounts.get(accountId);
     if (!account) throw new Error(`QUEUED_ACCOUNT_INDEX_STALE:${accountId}`);
-    const workspace = account.settlementWorkspace;
+    const workspace = account.state.settlementWorkspace;
     if (!workspace || workspace.nonceAtSign !== undefined || account.pendingFrame) continue;
-    const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+    const workspaceHash = assertCanonicalSettlementWorkspace(account.state, workspace);
     const expectedNonce = getNextSettlementNonce(account);
     const staleSeals = account.mempool.filter(
       (tx): tx is SettlementSealTx =>
@@ -521,7 +521,7 @@ const proposeAccountFrameCandidate = async (
         const admission = await applyAccountInput(
           context.accountConsensusContext,
           inboundAccount,
-          createLocalAccountInput(inboundAccount, state.entityId, [{
+          createLocalAccountInput(inboundAccount.state, state.entityId, [{
           type: 'htlc_resolve',
           data: {
             lockId: route.inboundLockId,
@@ -609,7 +609,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     processedAccounts.add(accountKey);
     const account = currentEntityState.accounts.get(accountKey);
     const { counterparty: cpId } = account
-      ? getAccountPerspective(account, currentEntityState.entityId)
+      ? getAccountPerspective(account.state, currentEntityState.entityId)
       : { counterparty: 'unknown' };
     if (!account) {
       throw new Error(`ACCOUNT_FLUSH_ACCOUNT_MISSING:${accountKey}`);
@@ -731,7 +731,7 @@ const applyOrderbookAccountTxs = async (
   for (const { accountId, tx } of result.accountTxs) {
     const account = state.accounts.get(accountId);
     if (tx.type === 'swap_resolve') {
-      const offer = account?.swapOffers?.get(tx.data.offerId);
+      const offer = account?.state.swapOffers?.get(tx.data.offerId);
       if (offer?.crossJurisdiction) {
         entityLog.warn('crossj.block_plain_swap_resolve', {
           offer: shortOrder(tx.data.offerId, 8),
@@ -739,12 +739,12 @@ const applyOrderbookAccountTxs = async (
         });
         continue;
       }
-      if (!account?.swapOffers?.has(tx.data.offerId)) {
+      if (!account?.state.swapOffers?.has(tx.data.offerId)) {
         throw new Error(
           `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} entity=${state.entityId}`,
         );
       }
-    } else if (tx.type === 'cross_swap_fill_ack' && !account?.swapOffers?.has(tx.data.offerId)) {
+    } else if (tx.type === 'cross_swap_fill_ack' && !account?.state.swapOffers?.has(tx.data.offerId)) {
       const routed = buildCrossJurisdictionFillNoticeOutput(state, accountId, tx);
       if (routed) {
         allOutputs.push(routed);
@@ -773,7 +773,7 @@ const applyOrderbookAccountTxs = async (
     const admission = await applyAccountInput(
       accountConsensusContext,
       account,
-      createLocalAccountInput(account, state.entityId, [tx]),
+      createLocalAccountInput(account.state, state.entityId, [tx]),
     );
     if (admission.admittedAccountTxCount === 0) continue;
     proposableAccounts.add(accountId);
@@ -887,7 +887,7 @@ async function applySwapCancelRequests(
     const admission = await applyAccountInput(
       accountConsensusContext,
       account,
-      createLocalAccountInput(account, currentEntityState.entityId, [tx]),
+      createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
     );
     if (admission.admittedAccountTxCount === 0) continue;
     proposableAccounts.add(accountId);
@@ -906,7 +906,7 @@ async function applySwapCancelRequests(
       const admission = await applyAccountInput(
         accountConsensusContext,
         account,
-        createLocalAccountInput(account, currentEntityState.entityId, [tx]),
+        createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
       );
       if (admission.admittedAccountTxCount === 0) {
         continue;
@@ -926,8 +926,8 @@ async function applySwapCancelRequests(
   // Fallback: counterparty resolves cancel directly when no orderbook extension is configured.
   for (const { accountId, offerId } of localBookCancels) {
     const account = currentEntityState.accounts.get(accountId);
-    if (!account?.swapOffers?.has(offerId)) continue;
-    const offer = account.swapOffers.get(offerId);
+    if (!account?.state.swapOffers?.has(offerId)) continue;
+    const offer = account.state.swapOffers.get(offerId);
     if (offer?.crossJurisdiction) {
       throw new Error(
         `CROSS_J_ORDERBOOK_EXT_REQUIRED: cancel for ${offerId.slice(-8)} cannot use fallback swap_resolve`,
@@ -939,7 +939,7 @@ async function applySwapCancelRequests(
     const admission = await applyAccountInput(
       accountConsensusContext,
       account,
-      createLocalAccountInput(account, currentEntityState.entityId, [{
+      createLocalAccountInput(account.state, currentEntityState.entityId, [{
         type: 'swap_resolve',
         data: { offerId, fillRatio: 0, cancelRemainder: true },
       }]),

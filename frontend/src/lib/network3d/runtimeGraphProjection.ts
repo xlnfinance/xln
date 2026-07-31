@@ -296,7 +296,7 @@ export const projectRuntimeViewFrame = (
     .sort((left, right) => left.entityId.localeCompare(right.entityId));
   const activeNode = nodes.find((node) => node.entityId === id(frame.activeEntityId));
   const accounts = !activeNode ? [] : frame.activeEntity!.accounts.items
-    .map((account) => accountState(source, activeNode, account.leftEntity === activeNode.entityId ? account.rightEntity : account.leftEntity, account));
+    .map((account) => accountState(source, activeNode, account.state.leftEntity === activeNode.entityId ? account.state.rightEntity : account.state.leftEntity, account));
   const jMachines = sortedUnique(nodes.map((node) => node.jurisdiction).filter(Boolean)).map((name) => ({
     ...source,
     jMachineId: id(name),

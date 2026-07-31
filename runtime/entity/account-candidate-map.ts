@@ -1,4 +1,4 @@
-import { cloneAccountState } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state-clone';
 import type { AccountReplica } from '../types/account';
 import { EntityCandidateMap } from './candidate-map';
 
@@ -9,7 +9,7 @@ import { EntityCandidateMap } from './candidate-map';
 export class EntityAccountCandidateMap
   extends EntityCandidateMap<string, AccountReplica> {
   constructor(base: Map<string, AccountReplica>) {
-    super(base, cloneAccountState, true);
+    super(base, cloneAccountReplica, true);
   }
 
   /**

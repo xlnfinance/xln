@@ -21,7 +21,7 @@ const INTENT_ID_RE = /^(?:lend|borrow|loan)-[0-9a-f]{16}$/;
 const normalized = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 const proposerId = (account: AccountReplica, byLeft: boolean): string =>
-  normalized(byLeft ? account.leftEntity : account.rightEntity);
+  normalized(byLeft ? account.state.leftEntity : account.state.rightEntity);
 
 const requireRole = (
   account: AccountReplica,
@@ -38,8 +38,8 @@ const requireRole = (
 };
 
 const requireCounterparty = (account: AccountReplica, proposer: string, counterparty: string): void => {
-  const left = normalized(account.leftEntity);
-  const right = normalized(account.rightEntity);
+  const left = normalized(account.state.leftEntity);
+  const right = normalized(account.state.rightEntity);
   const expected = proposer === left ? right : left;
   if (normalized(counterparty) !== expected) {
     throw new Error(`LENDING_COUNTERPARTY_INVALID: expected=${expected} got=${normalized(counterparty)}`);
@@ -56,15 +56,15 @@ const requireIntentId = (value: string, prefix: 'lend' | 'borrow' | 'loan'): voi
 const consumeIntent = (
   account: AccountReplica,
   key: string,
-  kind: NonNullable<AccountReplica['lendingIntents']> extends Map<string, infer K> ? K : never,
+  kind: NonNullable<AccountReplica['state']['lendingIntents']> extends Map<string, infer K> ? K : never,
 ): void => {
-  account.lendingIntents ??= new Map();
-  if (account.lendingIntents.has(key)) throw new Error(`LENDING_INTENT_REPLAY:${key}`);
-  account.lendingIntents.set(key, kind);
+  account.state.lendingIntents ??= new Map();
+  if (account.state.lendingIntents.has(key)) throw new Error(`LENDING_INTENT_REPLAY:${key}`);
+  account.state.lendingIntents.set(key, kind);
 };
 
 const requireUnusedIntent = (account: AccountReplica, key: string): void => {
-  if (account.lendingIntents?.has(key)) throw new Error(`LENDING_INTENT_REPLAY:${key}`);
+  if (account.state.lendingIntents?.has(key)) throw new Error(`LENDING_INTENT_REPLAY:${key}`);
 };
 
 const positiveAmount = (value: bigint, context: string): void => {
@@ -150,7 +150,7 @@ export const handleLendingAccountTx = (
     requireRole(account, byLeft, 'hub', tx.data.hubEntityId);
     requireCounterparty(account, normalized(tx.data.hubEntityId), tx.data.borrowerEntityId);
     if (tx.data.creditLimit < 0n) throw new Error(`LENDING_CREDIT_LIMIT_NEGATIVE:${tx.data.creditLimit}`);
-    const result = handleSetCreditLimit(account, {
+    const result = handleSetCreditLimit(account.state, {
       type: 'set_credit_limit',
       data: { tokenId: tx.data.tokenId, amount: tx.data.creditLimit },
     }, byLeft);

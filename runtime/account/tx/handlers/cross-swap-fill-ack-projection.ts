@@ -145,7 +145,7 @@ const closeCrossOffer = (
   outcome: FillOutcome,
 ): CrossSwapFillAckResult => {
   const { account, tx, events } = prepared;
-  account.swapOffers?.delete(tx.data.offerId);
+  account.state.swapOffers?.delete(tx.data.offerId);
   recordSwapClosedLifecycle(account, tx.data.offerId);
   events.push(
     outcome.shouldClose
@@ -179,8 +179,8 @@ const retainCrossOfferRemainder = (
     swapOfferCreated: {
       offerId: tx.data.offerId,
       makerIsLeft: offer.makerIsLeft,
-      fromEntity: account.leftEntity,
-      toEntity: account.rightEntity,
+      fromEntity: account.state.leftEntity,
+      toEntity: account.state.rightEntity,
       createdHeight: offer.createdHeight,
       giveTokenId: offer.giveTokenId,
       giveAmount: offer.giveAmount,

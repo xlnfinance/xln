@@ -564,7 +564,7 @@
     ? Math.max(
         0,
         selectedDisputeTimeout - Math.max(
-          Number(selectedAccount?.lastFinalizedJHeight || 0),
+          Number(selectedAccount?.state.lastFinalizedJHeight || 0),
           Number(currentReplica?.state?.lastFinalizedJHeight || 0),
         ),
       )
@@ -584,7 +584,7 @@
     const owner = String(entityId || '').trim().toLowerCase();
     const counterparty = String(counterpartyEntityId || '').trim().toLowerCase();
     if (!account || !owner || !counterparty || !activeXlnFunctions?.deriveDelta) return null;
-    const delta = account.deltas?.get?.(currentTokenId);
+    const delta = account.state.deltas?.get?.(currentTokenId);
     if (!delta) return null;
     return activeXlnFunctions.deriveDelta(delta, owner < counterparty);
   }
@@ -597,7 +597,7 @@
   }
 
   function isLocalExecutorForWorkspace(counterparty: string, account: AccountReplica | null): boolean {
-    const workspace = account?.settlementWorkspace;
+    const workspace = account?.state.settlementWorkspace;
     const owner = String(entityId || '').trim().toLowerCase();
     const peer = String(counterparty || '').trim().toLowerCase();
     if (!workspace || workspace.status !== 'ready_to_submit' || !owner || !peer) return false;
@@ -605,7 +605,7 @@
   }
 
   function getWorkspaceAutoExecuteKey(counterparty: string, account: AccountReplica | null): string {
-    const workspace = account?.settlementWorkspace;
+    const workspace = account?.state.settlementWorkspace;
     if (!workspace) return '';
     const nonceAtSign = workspace.nonceAtSign ?? 0;
     return `${normalizeEntityId(counterparty)}:${workspace.revision}:${workspace.status}:${nonceAtSign}`;
@@ -875,8 +875,8 @@
       autoExecutingWorkspaceKey = '';
       autoExecuteWorkspaceKey = '';
     } else if (
-      !selectedAccount?.settlementWorkspace
-      || selectedAccount.settlementWorkspace.status !== 'ready_to_submit'
+      !selectedAccount?.state.settlementWorkspace
+      || selectedAccount.state.settlementWorkspace.status !== 'ready_to_submit'
     ) {
       autoExecuteWorkspaceKey = '';
     } else {
@@ -1087,7 +1087,7 @@
 
     {#if action === 'c2r' && selectedSettlementTransition}
       <p class="dispute-state">Committing the settlement workspace in bilateral consensus.</p>
-    {:else if action === 'c2r' && selectedAccount?.settlementWorkspace?.status === 'awaiting_counterparty'}
+    {:else if action === 'c2r' && selectedAccount?.state.settlementWorkspace?.status === 'awaiting_counterparty'}
       <p class="dispute-state">
         Waiting for counterparty signature.
       </p>

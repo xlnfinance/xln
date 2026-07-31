@@ -58,7 +58,7 @@ const applyCollateralRequest = (context: MutationContext): ApplyAccountTxResult 
     context.timestamp,
   );
   const tokenId = Number(context.tx.data.tokenId);
-  const feeState = context.account.requestedRebalanceFeeState?.get(tokenId);
+  const feeState = context.account.state.requestedRebalanceFeeState?.get(tokenId);
   const debug = (payload: Record<string, unknown>): void => {
     context.candidateEffects.push({
       kind: 'debug',
@@ -80,7 +80,7 @@ const applyCollateralRequest = (context: MutationContext): ApplyAccountTxResult 
     });
     return result;
   }
-  const requested = context.account.requestedRebalance.get(tokenId) ?? 0n;
+  const requested = context.account.state.requestedRebalance.get(tokenId) ?? 0n;
   const committed = {
     step: 1,
     status: 'ok',
@@ -113,7 +113,7 @@ const applyHtlcResolve = async (context: MutationContext): Promise<ApplyAccountT
     throw new Error('ACCOUNT_TX_ROUTE_MISMATCH:htlc_resolve');
   }
   const result = await handleHtlcResolve(
-    context.account,
+    context.account.state,
     context.tx,
     context.byLeft,
     context.height,
@@ -170,7 +170,7 @@ export const applyAccountTxMutation = async (
   candidateEffects: AccountOutput[],
 ): Promise<ApplyAccountTxResult> => {
   const myEntityId = account.proofHeader.fromEntity;
-  const { counterparty } = getAccountPerspective(account, myEntityId);
+  const { counterparty } = getAccountPerspective(account.state, myEntityId);
   const context: MutationContext = {
     account,
     tx,
@@ -195,8 +195,8 @@ export const applyAccountTxMutation = async (
   if (freezeError) return { success: false, events: [freezeError], error: freezeError };
 
   switch (tx.type) {
-    case 'add_delta': return handleAddDelta(account, tx);
-    case 'set_credit_limit': return handleSetCreditLimit(account, tx, byLeft);
+    case 'add_delta': return handleAddDelta(account.state, tx);
+    case 'set_credit_limit': return handleSetCreditLimit(account.state, tx, byLeft);
     case 'direct_payment': return handleDirectPayment(account, tx, byLeft);
     case 'lending_fund':
     case 'lending_borrow_request':
@@ -205,19 +205,19 @@ export const applyAccountTxMutation = async (
     case 'lending_close_request':
     case 'lending_close_payout':
       return handleLendingAccountTx(account, tx, byLeft);
-    case 'reserve_to_collateral': return handleReserveToCollateral(account, tx);
+    case 'reserve_to_collateral': return handleReserveToCollateral(account.state, tx);
     case 'request_collateral': return applyCollateralRequest(context);
     case 'rebalance_refund': return handleRebalanceRefund(account, tx, byLeft);
-    case 'rebalance_policy': return handleRebalancePolicy(account, tx, byLeft, timestamp);
+    case 'rebalance_policy': return handleRebalancePolicy(account.state, tx, byLeft, timestamp);
     case 'reopen_disputed': return handleReopenDisputed(account, tx);
     case 'j_event_claim': return applyJEventClaim(context);
     case 'htlc_lock':
       return handleHtlcLock(account, tx, byLeft, timestamp, height, isValidation);
     case 'htlc_resolve': return applyHtlcResolve(context);
-    case 'pull_lock': return handlePullLock(account, tx, byLeft, height, timestamp);
-    case 'pull_resolve': return handlePullResolve(account, tx, byLeft, timestamp);
-    case 'pull_cancel': return handlePullCancel(account, tx, byLeft, timestamp);
-    case 'cross_pull_close': return handleCrossPullClose(account, tx, byLeft, timestamp);
+    case 'pull_lock': return handlePullLock(account.state, tx, byLeft, height, timestamp);
+    case 'pull_resolve': return handlePullResolve(account.state, tx, byLeft, timestamp);
+    case 'pull_cancel': return handlePullCancel(account.state, tx, byLeft, timestamp);
+    case 'cross_pull_close': return handleCrossPullClose(account.state, tx, byLeft, timestamp);
     case 'swap_offer': return handleSwapOffer(account, tx, byLeft, height, isValidation);
     case 'swap_resolve': return handleSwapResolve(account, tx, byLeft, height, isValidation);
     case 'cross_swap_fill_ack':

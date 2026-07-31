@@ -322,16 +322,16 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   const aliceAccount = aliceReplica.state.accounts.get(HUB_ID);
   const hubAccount = hubReplica.state.accounts.get(ALICE_ID);
 
-  assert(aliceAccount?.settlementWorkspace, 'Alice should have settlement workspace', env);
-  assert(hubAccount?.settlementWorkspace, 'Hub should have settlement workspace', env);
-  assert(aliceAccount.settlementWorkspace.revision === 1, 'Workspace should be revision 1');
-  assert(aliceAccount.settlementWorkspace.lastModifiedByLeft === true, 'Alice (left) should be lastModifier');
+  assert(aliceAccount?.state.settlementWorkspace, 'Alice should have settlement workspace', env);
+  assert(hubAccount?.state.settlementWorkspace, 'Hub should have settlement workspace', env);
+  assert(aliceAccount.state.settlementWorkspace.revision === 1, 'Workspace should be revision 1');
+  assert(aliceAccount.state.settlementWorkspace.lastModifiedByLeft === true, 'Alice (left) should be lastModifier');
 
   // TEST: Verify settlement holds are set via frame consensus
   // Alice proposes r2c (proposer=Alice) — compiled diff takes from Alice's reserve side
-  const usdcDelta = aliceAccount.deltas.get(USDC_TOKEN_ID);
+  const usdcDelta = aliceAccount.state.deltas.get(USDC_TOKEN_ID);
   assert(usdcDelta, 'USDC delta should exist', env);
-  const aliceIsLeft = aliceAccount.leftEntity === ALICE_ID;
+  const aliceIsLeft = aliceAccount.state.leftEntity === ALICE_ID;
   const holdField = aliceIsLeft ? 'leftHold' : 'rightHold';
   const actualHold = aliceIsLeft ? (usdcDelta.leftHold || 0n) : (usdcDelta.rightHold || 0n);
   const expectedHold = usd(100);
@@ -339,10 +339,10 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   assert(actualHold === expectedHold, `Settlement hold not set: expected ${expectedHold}, got ${actualHold}`, env);
 
   console.log(`✅ Settlement proposed: Alice → Hub`);
-  console.log(`   Workspace revision: ${aliceAccount.settlementWorkspace.revision}`);
-  console.log(`   Status: ${aliceAccount.settlementWorkspace.status}`);
+  console.log(`   Workspace revision: ${aliceAccount.state.settlementWorkspace.revision}`);
+  console.log(`   Status: ${aliceAccount.state.settlementWorkspace.status}`);
   const hubHankoField = aliceIsLeft ? 'rightHanko' : 'leftHanko';
-  const initialAutoApproved = Boolean(aliceAccount.settlementWorkspace[hubHankoField]);
+  const initialAutoApproved = Boolean(aliceAccount.state.settlementWorkspace[hubHankoField]);
   console.log(`   Auto-approved by Hub: ${initialAutoApproved ? 'yes' : 'no'}`);
 
   snap(env, 'Settlement Proposed', {
@@ -355,7 +355,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   // test reset. Complete the real auto-approved path on-chain before starting
   // a distinct manual negotiation on the now-settled Account.
   assert(
-    aliceAccount.settlementWorkspace.status === 'ready_to_submit',
+    aliceAccount.state.settlementWorkspace.status === 'ready_to_submit',
     'Auto-approved workspace should be fully sealed before execution',
     env,
   );
@@ -372,7 +372,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   }]);
   await syncChain(env, 5);
   const clearedAccount = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(!clearedAccount?.settlementWorkspace, 'Executed auto-approved workspace should finalize and clear', env);
+  assert(!clearedAccount?.state.settlementWorkspace, 'Executed auto-approved workspace should finalize and clear', env);
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 4: SETTLEMENT WORKSPACE UPDATE
@@ -409,8 +409,8 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   }
 
   const manualProposalAccount = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(manualProposalAccount?.settlementWorkspace?.revision === 1, 'Manual workspace should start at revision 1', env);
-  assert(!manualProposalAccount.settlementWorkspace[hubHankoField], 'Manual negotiation workspace should be unsigned before update', env);
+  assert(manualProposalAccount?.state.settlementWorkspace?.revision === 1, 'Manual workspace should start at revision 1', env);
+  assert(!manualProposalAccount.state.settlementWorkspace[hubHankoField], 'Manual negotiation workspace should be unsigned before update', env);
 
   // Hub counters by requesting a transfer from Alice. Alice's reserve falls,
   // so this also remains unsigned until TEST 5 explicitly approves it.
@@ -444,16 +444,16 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
 
   // Verify update
   const aliceAccount2 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(aliceAccount2?.settlementWorkspace?.revision === 2, 'Version should be 2 after update', env);
+  assert(aliceAccount2?.state.settlementWorkspace?.revision === 2, 'Version should be 2 after update', env);
   // Verify compiled ops match expected values
-  const { diffs: compiledDiffs } = compileOps(aliceAccount2.settlementWorkspace.ops, aliceAccount2.settlementWorkspace.lastModifiedByLeft);
+  const { diffs: compiledDiffs } = compileOps(aliceAccount2.state.settlementWorkspace.ops, aliceAccount2.state.settlementWorkspace.lastModifiedByLeft);
   const firstCompiledDiff = compiledDiffs[0];
   assert(firstCompiledDiff, 'Compiled settlement diff should exist', env);
   assert(firstCompiledDiff.leftDiff === -usd(50), 'Compiled diff should reflect update (Alice leftDiff)');
   assert(firstCompiledDiff.rightDiff === usd(50), 'Compiled diff should reflect update (Hub rightDiff)');
 
   console.log(`✅ Settlement updated by Hub`);
-  console.log(`   New revision: ${aliceAccount2.settlementWorkspace.revision}`);
+  console.log(`   New revision: ${aliceAccount2.state.settlementWorkspace.revision}`);
 
   snap(env, 'Settlement Updated', {
     description: 'Hub counter-proposes $50 instead of $100',
@@ -473,7 +473,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
       type: 'settle_approve',
       data: {
         counterpartyEntityId: HUB_ID,
-        workspaceHash: aliceAccount2.settlementWorkspace.workspaceHash,
+        workspaceHash: aliceAccount2.state.settlementWorkspace.workspaceHash,
       }
     }]
   }]);
@@ -481,9 +481,9 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   const aliceHankoField3 = aliceIsLeft ? 'leftHanko' : 'rightHanko';
   await processUntil(env, () => {
     const aliceWorkspace = findReplica(env, ALICE_ID)[1].state.accounts
-      .get(HUB_ID)?.settlementWorkspace;
+      .get(HUB_ID)?.state.settlementWorkspace;
     const hubWorkspace = findReplica(env, HUB_ID)[1].state.accounts
-      .get(ALICE_ID)?.settlementWorkspace;
+      .get(ALICE_ID)?.state.settlementWorkspace;
     return Boolean(
       aliceWorkspace?.status === 'ready_to_submit' &&
       hubWorkspace?.status === 'ready_to_submit' &&
@@ -504,9 +504,9 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
         pendingFrame: account?.pendingFrame?.height ?? null,
         pendingInput: account?.pendingAccountInput?.kind ?? null,
         nextProofNonce: account?.proofHeader.nextProofNonce ?? null,
-        workspaceStatus: account?.settlementWorkspace?.status ?? null,
-        leftHanko: Boolean(account?.settlementWorkspace?.leftHanko),
-        rightHanko: Boolean(account?.settlementWorkspace?.rightHanko),
+        workspaceStatus: account?.state.settlementWorkspace?.status ?? null,
+        leftHanko: Boolean(account?.state.settlementWorkspace?.leftHanko),
+        rightHanko: Boolean(account?.state.settlementWorkspace?.rightHanko),
       })}`);
     }
   });
@@ -514,12 +514,12 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   // Verify Alice's hanko is set on both sides (via bilateral frame consensus)
   const aliceAccount3 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
   assert(
-    aliceAccount3?.settlementWorkspace?.postSettlementDisputeProof?.[aliceHankoField3],
+    aliceAccount3?.state.settlementWorkspace?.postSettlementDisputeProof?.[aliceHankoField3],
     'Alice should have signed the exact post-settlement dispute proof',
     env,
   );
   assert(
-    aliceAccount3.settlementWorkspace.status === 'ready_to_submit',
+    aliceAccount3.state.settlementWorkspace.status === 'ready_to_submit',
     'Settlement should be ready after both role-aware seals',
     env,
   );
@@ -528,12 +528,12 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   // executor, her cooperative settlement Hanko is intentionally absent.
   const hubAccount3 = findReplica(env, HUB_ID)[1].state.accounts.get(ALICE_ID);
   assert(
-    hubAccount3?.settlementWorkspace?.postSettlementDisputeProof?.[aliceHankoField3],
+    hubAccount3?.state.settlementWorkspace?.postSettlementDisputeProof?.[aliceHankoField3],
     'Hub should have received Alice post-settlement proof Hanko',
     env,
   );
   assert(
-    !hubAccount3.settlementWorkspace[aliceHankoField3],
+    !hubAccount3.state.settlementWorkspace[aliceHankoField3],
     'Executor cooperative settlement Hanko must remain absent',
     env,
   );
@@ -541,7 +541,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   console.log(`✅ Alice approved settlement`);
   console.log(
     `   Alice post-proof hanko (${aliceHankoField3}): ` +
-    `${aliceAccount3.settlementWorkspace.postSettlementDisputeProof[aliceHankoField3]?.slice(0, 20)}...`,
+    `${aliceAccount3.state.settlementWorkspace.postSettlementDisputeProof[aliceHankoField3]?.slice(0, 20)}...`,
   );
 
   snap(env, 'Settlement Approved', {
@@ -581,7 +581,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   await syncChain(env, 5);
 
   const aliceState = findReplica(env, ALICE_ID)[1].state;
-  assert(!aliceState.accounts.get(HUB_ID)?.settlementWorkspace, 'Workspace should be cleared after execute', env);
+  assert(!aliceState.accounts.get(HUB_ID)?.state.settlementWorkspace, 'Workspace should be cleared after execute', env);
 
   console.log(`✅ Settlement executed + on-chain confirmed`);
 
@@ -642,7 +642,7 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
   }
 
   const aliceAccount5 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(!aliceAccount5?.settlementWorkspace, 'Workspace should be cleared after reject', env);
+  assert(!aliceAccount5?.state.settlementWorkspace, 'Workspace should be cleared after reject', env);
 
   console.log(`✅ Settlement rejected - workspace cleared`);
 

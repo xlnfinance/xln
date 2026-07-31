@@ -59,8 +59,8 @@ const createHealthDeps = () => {
     },
     activeHubEntityIds: [],
     marketMakerState: createMarketMakerServerState(),
-    getAccountState(): never {
-      throw new Error('getAccountState must not be called without env');
+    getAccountReplica(): never {
+      throw new Error('getAccountReplica must not be called without env');
     },
     ensureTokenCatalog(): never {
       throw new Error('ensureTokenCatalog must not be called without env');

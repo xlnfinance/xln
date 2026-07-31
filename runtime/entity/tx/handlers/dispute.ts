@@ -92,7 +92,7 @@ const removeDisputedAccountOrdersFromBook = (
   let localRemoved = 0;
   let remoteQueued = 0;
   const remoteOrderIds: string[] = [];
-  for (const [offerId, offer] of account.swapOffers ?? new Map<string, SwapOffer>()) {
+  for (const [offerId, offer] of account.state.swapOffers ?? new Map<string, SwapOffer>()) {
     const result = removeOrderbookRowForDispute(
       state,
       outputs,

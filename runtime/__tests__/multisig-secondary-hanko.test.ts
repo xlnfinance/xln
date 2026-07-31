@@ -48,7 +48,7 @@ import {
   getConsumptionKey,
   verifyConsumptionProof,
 } from '../entity/consumption-accumulator';
-import type { AccountState, AccountInput, AccountTx } from '../types/account';
+import type { AccountReplica, AccountInput, AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { ConsensusOutputOrigin, EntityTx } from '../types/entity-tx';
 import type { EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
@@ -161,12 +161,26 @@ const createMultisigAccountState = (
     lastBlockTimestamp: 0,
     position: { x: 0, y: 0, z: 0 },
   } satisfies JReplica);
-  const account = {
-    leftEntity,
-    rightEntity,
-    domain: {
-      chainId: jurisdiction.chainId,
-      depositoryAddress: jurisdiction.depositoryAddress,
+  const account: AccountReplica = {
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: {
+        chainId: jurisdiction.chainId,
+        depositoryAddress: jurisdiction.depositoryAddress,
+      },
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      watchSeed: `0x${'f1'.repeat(32)}`,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
     },
     status: 'active',
     mempool: [{ type: 'add_delta', data: { tokenId: 1 } }],
@@ -181,27 +195,14 @@ const createMultisigAccountState = (
       stateHash: '',
       byLeft: entityId === leftEntity,
     },
-    deltas: new Map(),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    watchSeed: `0x${'f1'.repeat(32)}`,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
-  } as AccountState;
+  };
   const state = {
     entityId,
     height: 0,
@@ -274,15 +275,15 @@ const installCertifiedOutputTargetAccount = (
   source: ReturnType<typeof createMultisigAccountState>,
   targetState: EntityState,
   targetEntityId: string,
-): AccountState => {
+): AccountReplica => {
   const existing = targetState.accounts.get(source.entityId);
   if (existing) return existing;
   const sourceAccount = source.state.accounts.get(source.counterpartyId);
   if (!sourceAccount) throw new Error('TEST_SOURCE_ACCOUNT_MISSING');
   const account = structuredClone(sourceAccount);
   const [leftEntity, rightEntity] = [source.entityId, targetEntityId].sort();
-  account.leftEntity = leftEntity;
-  account.rightEntity = rightEntity;
+  account.state.leftEntity = leftEntity;
+  account.state.rightEntity = rightEntity;
   account.proofHeader = {
     ...account.proofHeader,
     fromEntity: targetEntityId,
@@ -320,7 +321,7 @@ const buildCertifiedBoardResealTx = async (
       kind: 'board_reseal',
       fromEntityId: source.entityId,
       toEntityId: targetEntityId,
-      domain: account.domain,
+      domain: account.state.domain,
       reseal: {
         height: account.currentHeight,
         frameHash,
@@ -441,7 +442,7 @@ describe('multisig secondary Hanko production', () => {
       fromEntity: source.counterpartyId,
       toEntity: source.entityId,
     };
-    targetGenesis.currentFrame.byLeft = source.counterpartyId === targetGenesis.leftEntity;
+    targetGenesis.currentFrame.byLeft = source.counterpartyId === targetGenesis.state.leftEntity;
     target.state.accounts.set(source.entityId, targetGenesis);
 
     const committed = await applyEntityInput(source.env, source.replica, {
@@ -1442,8 +1443,8 @@ describe('multisig secondary Hanko production', () => {
     const secondCounterpartyId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
     const [secondLeft, secondRight] = [setup.entityId, secondCounterpartyId].sort();
     const secondAccount = structuredClone(firstAccount);
-    secondAccount.leftEntity = secondLeft;
-    secondAccount.rightEntity = secondRight;
+    secondAccount.state.leftEntity = secondLeft;
+    secondAccount.state.rightEntity = secondRight;
     secondAccount.proofHeader = {
       ...secondAccount.proofHeader,
       fromEntity: setup.entityId,
@@ -1464,13 +1465,13 @@ describe('multisig secondary Hanko production', () => {
       lastUpdatedAt: setup.env.state.timestamp,
       // Make the local Entity the non-executor on both accounts, so its exact
       // settlement digest and post-proof digest are both quorum-signed.
-      executorIsLeft: setup.entityId.toLowerCase() !== account.leftEntity.toLowerCase(),
+      executorIsLeft: setup.entityId.toLowerCase() !== account.state.leftEntity.toLowerCase(),
       };
-      value.workspaceHash = createSettlementWorkspaceHash(account, value);
+      value.workspaceHash = createSettlementWorkspaceHash(account.state, value);
       return value;
     };
-    firstAccount.settlementWorkspace = workspace(firstAccount);
-    secondAccount.settlementWorkspace = workspace(secondAccount);
+    firstAccount.state.settlementWorkspace = workspace(firstAccount);
+    secondAccount.state.settlementWorkspace = workspace(secondAccount);
     const firstPostHash = digest('1');
     const secondPostHash = digest('2');
     const settlementSeal = (
@@ -1482,7 +1483,7 @@ describe('multisig secondary Hanko production', () => {
       data: {
         kind: 'seal',
         revision: 1,
-        workspaceHash: account.settlementWorkspace!.workspaceHash,
+        workspaceHash: account.state.settlementWorkspace!.workspaceHash,
         settlementNonce: 1,
         settlementHash,
         postProof: {
@@ -1520,7 +1521,7 @@ describe('multisig secondary Hanko production', () => {
     expect(firstSeal.data.settlementHanko).not.toBe(secondSeal.data.settlementHanko);
     expect(firstSeal.data.postProof.hanko).toBe(witness.get(firstPostHash)?.hanko);
     expect(secondSeal.data.postProof.hanko).toBe(witness.get(secondPostHash)?.hanko);
-    expect(firstAccount.settlementWorkspace.leftHanko).toBeUndefined();
-    expect(firstAccount.settlementWorkspace.rightHanko).toBeUndefined();
+    expect(firstAccount.state.settlementWorkspace.leftHanko).toBeUndefined();
+    expect(firstAccount.state.settlementWorkspace.rightHanko).toBeUndefined();
   });
 });

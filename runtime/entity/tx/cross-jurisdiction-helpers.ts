@@ -34,7 +34,7 @@ export const findCrossJurisdictionOfferRoute = (
   if (!accountId) return null;
   const route = state.accounts
     .get(accountId)
-    ?.swapOffers
+    ?.state.swapOffers
     ?.get(orderId)
     ?.crossJurisdiction;
   return route ? { accountId, route } : null;

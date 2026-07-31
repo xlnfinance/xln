@@ -50,7 +50,7 @@ import {
 } from '../jurisdiction/machine/board-registry';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account-consensus-context';
-import { cloneAccountState } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state-clone';
 import type { AccountTx, SettlementOp } from '../types/account';
 import type { EntityState, HashToSign, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
@@ -94,12 +94,12 @@ const signedWorkspaceAccount = async (nonceAtSign: number) => {
     ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
     executorIsLeft: false,
   })).success).toBe(true);
-  account.settlementWorkspace!.leftHanko = '0x1234';
-  account.settlementWorkspace!.rightHanko = '0x5678';
-  account.settlementWorkspace!.nonceAtSign = nonceAtSign;
-  account.settlementWorkspace!.settlementHash = `0x${'81'.repeat(32)}`;
+  account.state.settlementWorkspace!.leftHanko = '0x1234';
+  account.state.settlementWorkspace!.rightHanko = '0x5678';
+  account.state.settlementWorkspace!.nonceAtSign = nonceAtSign;
+  account.state.settlementWorkspace!.settlementHash = `0x${'81'.repeat(32)}`;
   const proofBodyHash = buildAccountProofBody(account, TEST_DELTA_TRANSFORMER).proofBodyHash;
-  account.settlementWorkspace!.postSettlementDisputeProof = {
+  account.state.settlementWorkspace!.postSettlementDisputeProof = {
     leftHanko: '0x9abc',
     rightHanko: '0xdef0',
     disputeHash: `0x${'82'.repeat(32)}`,
@@ -250,9 +250,9 @@ describe('atomic settlement Account transition', () => {
     for (const tokenId of [1, 2]) {
       const delta = createDefaultDelta(tokenId);
       delta.offdelta = -100n;
-      account.deltas.set(tokenId, delta);
-      account.requestedRebalance.set(tokenId, 10n);
-      account.requestedRebalanceFeeState.set(tokenId, {
+      account.state.deltas.set(tokenId, delta);
+      account.state.requestedRebalance.set(tokenId, 10n);
+      account.state.requestedRebalanceFeeState.set(tokenId, {
         feeTokenId: tokenId,
         feePaidUpfront: 10n ** 30n,
         requestedAmount: 10n,
@@ -322,8 +322,8 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'c2r', tokenId: 1, amount: 1n }],
       executorIsLeft: true,
     })).success).toBe(true);
-    account.settlementWorkspace!.rightHanko = '0x1234';
-    expect(account.settlementWorkspace!.status).toBe('awaiting_counterparty');
+    account.state.settlementWorkspace!.rightHanko = '0x1234';
+    expect(account.state.settlementWorkspace!.status).toBe('awaiting_counterparty');
     const replica = env.state.eReplicas.values().next().value;
     if (!replica) throw new Error('SETTLEMENT_SCHEDULER_TEST_REPLICA_MISSING');
 
@@ -361,7 +361,7 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'c2r', tokenId: 1, amount: 1n }],
       executorIsLeft: true,
     })).success).toBe(true);
-    const workspace = account.settlementWorkspace!;
+    const workspace = account.state.settlementWorkspace!;
     workspace.status = 'ready_to_submit';
     workspace.rightHanko = '0x1234';
     account.mempool.push(transition({
@@ -382,7 +382,7 @@ describe('atomic settlement Account transition', () => {
 
     expect(outputs.flatMap(output => output.entityTxs ?? []).map(tx => tx.type))
       .not.toContain('settle_execute');
-    expect(account.settlementWorkspace).toEqual(workspaceBefore);
+    expect(account.state.settlementWorkspace).toEqual(workspaceBefore);
     expect(account.mempool).toEqual(mempoolBefore);
     expect(state.jBatchState).toEqual(batchBefore);
   });
@@ -416,7 +416,7 @@ describe('atomic settlement Account transition', () => {
 
     const approve = {
       type: 'settle_approve',
-      data: { counterpartyEntityId: leftEntity, workspaceHash: account.settlementWorkspace!.workspaceHash },
+      data: { counterpartyEntityId: leftEntity, workspaceHash: account.state.settlementWorkspace!.workspaceHash },
     } as const;
     const proposal = buildCollectiveEntityProposalTx(rightSigner, [approve]);
     const execution = await applyEntityFrame(env, rightState, [
@@ -494,7 +494,7 @@ describe('atomic settlement Account transition', () => {
       executorIsLeft: true,
     }), true, 1_000)).success).toBe(true);
     account.mempool.push({ type: 'direct_payment', data: { tokenId: 1, amount: 1n } });
-    const workspaceHash = account.settlementWorkspace!.workspaceHash;
+    const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
 
     const approved = await handleSettleApprove(state, {
       type: 'settle_approve',
@@ -580,8 +580,8 @@ describe('atomic settlement Account transition', () => {
       false,
       createAccountConsensusContext(env),
     )).success).toBe(true);
-    expect(leftAccount.settlementWorkspace?.rightHanko).toBeDefined();
-    expect(leftAccount.settlementWorkspace?.postSettlementDisputeProof?.rightHanko).toBeDefined();
+    expect(leftAccount.state.settlementWorkspace?.rightHanko).toBeDefined();
+    expect(leftAccount.state.settlementWorkspace?.postSettlementDisputeProof?.rightHanko).toBeDefined();
 
     await processCommittedSettlementTransitionFollowup(
       leftAccount,
@@ -597,7 +597,7 @@ describe('atomic settlement Account transition', () => {
       leftState,
       env,
     );
-    const workspaceHash = leftAccount.settlementWorkspace!.workspaceHash;
+    const workspaceHash = leftAccount.state.settlementWorkspace!.workspaceHash;
     expect(leftState.deferredAccountProposals?.get(rightEntity)).toBe(workspaceHash);
     leftAccount.mempool.push({ type: 'direct_payment', data: { tokenId: 1, amount: 1n } });
 
@@ -629,7 +629,7 @@ describe('atomic settlement Account transition', () => {
       executorIsLeft: false,
     })).success).toBe(true);
     account.proofHeader.nextProofNonce = 5;
-    const workspaceHash = account.settlementWorkspace!.workspaceHash;
+    const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
     const result = await applyAccountTx(account, transition({
       kind: 'seal',
       revision: 1,
@@ -653,9 +653,9 @@ describe('atomic settlement Account transition', () => {
       requiredNonce: 5,
       basis: 'account',
     });
-    expect(account.settlementWorkspace?.nonceAtSign).toBeUndefined();
-    expect(account.settlementWorkspace?.leftHanko).toBeUndefined();
-    expect(account.settlementWorkspace?.postSettlementDisputeProof).toBeUndefined();
+    expect(account.state.settlementWorkspace?.nonceAtSign).toBeUndefined();
+    expect(account.state.settlementWorkspace?.leftHanko).toBeUndefined();
+    expect(account.state.settlementWorkspace?.postSettlementDisputeProof).toBeUndefined();
   });
 
   test('workspace hash binds parties, revision, ops, modifier side, executor, and memo only', () => {
@@ -668,16 +668,16 @@ describe('atomic settlement Account transition', () => {
       executorIsLeft: false,
       memo: 'canonical',
     };
-    const hash = createSettlementWorkspaceHash(leftView, body);
-    expect(createSettlementWorkspaceHash(rightView, body)).toBe(hash);
-    expect(createSettlementWorkspaceHash(leftView, { ...body, revision: 2 })).not.toBe(hash);
-    expect(createSettlementWorkspaceHash(leftView, { ...body, executorIsLeft: true })).not.toBe(hash);
-    expect(createSettlementWorkspaceHash(leftView, { ...body, memo: 'different' })).not.toBe(hash);
-    expect(createSettlementWorkspaceHash(leftView, {
+    const hash = createSettlementWorkspaceHash(leftView.state, body);
+    expect(createSettlementWorkspaceHash(rightView.state, body)).toBe(hash);
+    expect(createSettlementWorkspaceHash(leftView.state, { ...body, revision: 2 })).not.toBe(hash);
+    expect(createSettlementWorkspaceHash(leftView.state, { ...body, executorIsLeft: true })).not.toBe(hash);
+    expect(createSettlementWorkspaceHash(leftView.state, { ...body, memo: 'different' })).not.toBe(hash);
+    expect(createSettlementWorkspaceHash(leftView.state, {
       ...body,
       ops: [{ type: 'r2r', tokenId: 1, amount: 5n }],
     })).not.toBe(hash);
-    expect(createSettlementWorkspaceHash(makeAccount(entity('01'), RIGHT), body)).not.toBe(hash);
+    expect(createSettlementWorkspaceHash(makeAccount(entity('01'), RIGHT).state, body)).not.toBe(hash);
   });
 
   test('Entity proposal only queues the bilateral transition and does not pre-mutate workspace', async () => {
@@ -699,7 +699,7 @@ describe('atomic settlement Account transition', () => {
       },
     }, env);
 
-    expect(result.newState.accounts.get(RIGHT)?.settlementWorkspace).toBeUndefined();
+    expect(result.newState.accounts.get(RIGHT)?.state.settlementWorkspace).toBeUndefined();
     expect(result.outputs).toEqual([]);
     expect(result.accountTxs).toHaveLength(1);
     expect(result.accountTxs[0]?.tx).toMatchObject({
@@ -729,7 +729,7 @@ describe('atomic settlement Account transition', () => {
     const continuation = result.newState.settlementContinuations?.get(RIGHT);
     expect(continuation).toEqual({
       workspaceHash: createSettlementWorkspaceHash(
-        result.newState.accounts.get(RIGHT)!,
+        result.newState.accounts.get(RIGHT)!.state,
         {
           revision: 1,
           ops,
@@ -756,8 +756,8 @@ describe('atomic settlement Account transition', () => {
       lastUpdatedAt: 2,
       executorIsLeft: true,
     };
-    workspace.workspaceHash = createSettlementWorkspaceHash(account, workspace);
-    account.settlementWorkspace = workspace;
+    workspace.workspaceHash = createSettlementWorkspaceHash(account.state, workspace);
+    account.state.settlementWorkspace = workspace;
     state.settlementContinuations = new Map([[
       RIGHT,
       {
@@ -795,10 +795,10 @@ describe('atomic settlement Account transition', () => {
     });
 
     state.jBatchState = initJBatch();
-    account.settlementWorkspace = { ...workspace, memo: 'collision' };
-    account.settlementWorkspace.workspaceHash = createSettlementWorkspaceHash(
-      account,
-      account.settlementWorkspace,
+    account.state.settlementWorkspace = { ...workspace, memo: 'collision' };
+    account.state.settlementWorkspace.workspaceHash = createSettlementWorkspaceHash(
+      account.state,
+      account.state.settlementWorkspace,
     );
     expect(selectSettlementContinuation(state)).toEqual({
       kind: 'discard',
@@ -818,15 +818,15 @@ describe('atomic settlement Account transition', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(account.settlementWorkspace).toMatchObject({
+    expect(account.state.settlementWorkspace).toMatchObject({
       revision: 1,
       lastModifiedByLeft: true,
       executorIsLeft: false,
       memo: 'frame-only proposal',
       status: 'awaiting_counterparty',
     });
-    expect(account.settlementWorkspace?.workspaceHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(account.deltas.get(1)?.leftHold).toBe(4n);
+    expect(account.state.settlementWorkspace?.workspaceHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(account.state.deltas.get(1)?.leftHold).toBe(4n);
   });
 
   test('safe counterparty auto-approval starts only after the upsert Account frame commits', async () => {
@@ -850,10 +850,10 @@ describe('atomic settlement Account transition', () => {
       executorIsLeft: true,
     });
 
-    expect(rightAccount.settlementWorkspace).toBeUndefined();
+    expect(rightAccount.state.settlementWorkspace).toBeUndefined();
     const applied = await applyAccountTx(rightAccount, tx, true, 1_000);
     expect(applied.success).toBe(true);
-    expect(rightAccount.settlementWorkspace?.rightHanko).toBeUndefined();
+    expect(rightAccount.state.settlementWorkspace?.rightHanko).toBeUndefined();
 
     const followup = await processCommittedSettlementTransitionFollowup(
       rightAccount,
@@ -872,12 +872,12 @@ describe('atomic settlement Account transition', () => {
 
     // Auto-approval records exact intent. Consensus materializes its nonce and
     // secondary hashes only after every earlier Account transition drains.
-    expect(rightAccount.settlementWorkspace?.rightHanko).toBeUndefined();
+    expect(rightAccount.state.settlementWorkspace?.rightHanko).toBeUndefined();
     expect(followup.outputs).toEqual([]);
     expect(followup.accountTxs).toEqual([]);
     expect(followup.hashesToSign).toEqual([]);
     expect(rightState.deferredAccountProposals?.get(LEFT))
-      .toBe(rightAccount.settlementWorkspace?.workspaceHash);
+      .toBe(rightAccount.state.settlementWorkspace?.workspaceHash);
   });
 
   test('pure debt forgiveness is never classified as safe for automatic approval', async () => {
@@ -887,7 +887,7 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'forgive', tokenId: 1 }],
       executorIsLeft: true,
     })).success).toBe(true);
-    expect(canAutoApproveWorkspace(pureForgiveness.settlementWorkspace!, false)).toBe(false);
+    expect(canAutoApproveWorkspace(pureForgiveness.state.settlementWorkspace!, false)).toBe(false);
   });
 
   test('pure forgiveness pre-signs a post-settlement proof containing the newly observed token slot', async () => {
@@ -895,7 +895,7 @@ describe('atomic settlement Account transition', () => {
     const state = makeState(LEFT, addr('38'), jurisdiction, RIGHT);
     const account = state.accounts.get(RIGHT)!;
     const tokenId = 9;
-    expect(account.deltas.has(tokenId)).toBe(false);
+    expect(account.state.deltas.has(tokenId)).toBe(false);
     expect((await upsert(account, {
       revision: 1,
       ops: [{ type: 'forgive', tokenId }],
@@ -908,8 +908,8 @@ describe('atomic settlement Account transition', () => {
     if (draft.type !== 'settle_transition' || draft.data.kind !== 'seal') {
       throw new Error('TEST_FORGIVENESS_SETTLEMENT_SEAL_MISSING');
     }
-    const expected = cloneAccountState(account);
-    expected.deltas.set(tokenId, createDefaultDelta(tokenId));
+    const expected = cloneAccountReplica(account);
+    expected.state.deltas.set(tokenId, createDefaultDelta(tokenId));
     expect(draft.data.postProof.proofBodyHash)
       .toBe(buildAccountProofBody(expected, TEST_DELTA_TRANSFORMER).proofBodyHash);
     expect(draft.data.postProof.proofBodyHash)
@@ -932,7 +932,7 @@ describe('atomic settlement Account transition', () => {
     if (draft.type !== 'settle_transition' || draft.data.kind !== 'seal') {
       throw new Error('TEST_FORGIVENESS_SETTLEMENT_SEAL_MISSING');
     }
-    const workspace = account.settlementWorkspace!;
+    const workspace = account.state.settlementWorkspace!;
     workspace.nonceAtSign = draft.data.settlementNonce;
     workspace.settlementHash = draft.data.settlementHash;
     workspace.leftHanko = '0x1234';
@@ -947,11 +947,11 @@ describe('atomic settlement Account transition', () => {
 
     applyFinalizedAccountJEvents(account, RIGHT, [event], TEST_DELTA_TRANSFORMER);
 
-    expect(account.deltas.has(tokenId)).toBe(true);
+    expect(account.state.deltas.has(tokenId)).toBe(true);
     expect(account.currentDisputeProofBodyHash).toBe(draft.data.postProof.proofBodyHash);
     expect(account.counterpartyDisputeProofBodyHash).toBe(draft.data.postProof.proofBodyHash);
     expect(account.currentDisputeProofNonce).toBe(draft.data.postProof.nonce);
-    expect(account.settlementWorkspace).toBeUndefined();
+    expect(account.state.settlementWorkspace).toBeUndefined();
   });
 
   test('a mixed workspace containing debt forgiveness always requires explicit approval', async () => {
@@ -964,7 +964,7 @@ describe('atomic settlement Account transition', () => {
       ],
       executorIsLeft: true,
     })).success).toBe(true);
-    expect(canAutoApproveWorkspace(mixedForgiveness.settlementWorkspace!, false)).toBe(false);
+    expect(canAutoApproveWorkspace(mixedForgiveness.state.settlementWorkspace!, false)).toBe(false);
   });
 
   test('non-executor settlement execution fails before creating any J batch state', async () => {
@@ -979,9 +979,9 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
-    account.settlementWorkspace!.rightHanko = '0x1234';
-    account.settlementWorkspace!.nonceAtSign = 1;
-    account.settlementWorkspace!.settlementHash = `0x${'91'.repeat(32)}`;
+    account.state.settlementWorkspace!.rightHanko = '0x1234';
+    account.state.settlementWorkspace!.nonceAtSign = 1;
+    account.state.settlementWorkspace!.settlementHash = `0x${'91'.repeat(32)}`;
 
     await expect(handleSettleExecute(leftState, {
       type: 'settle_execute',
@@ -1004,8 +1004,8 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     })).success).toBe(true);
-    account.settlementWorkspace!.rightHanko = '0x1234';
-    account.settlementWorkspace!.settlementHash = `0x${'92'.repeat(32)}`;
+    account.state.settlementWorkspace!.rightHanko = '0x1234';
+    account.state.settlementWorkspace!.settlementHash = `0x${'92'.repeat(32)}`;
 
     await expect(handleSettleExecute(leftState, {
       type: 'settle_execute',
@@ -1028,8 +1028,8 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     })).success).toBe(true);
-    account.settlementWorkspace!.rightHanko = '0x1234';
-    account.settlementWorkspace!.nonceAtSign = 1;
+    account.state.settlementWorkspace!.rightHanko = '0x1234';
+    account.state.settlementWorkspace!.nonceAtSign = 1;
 
     await expect(handleSettleExecute(leftState, {
       type: 'settle_execute',
@@ -1070,13 +1070,13 @@ describe('atomic settlement Account transition', () => {
       rightState,
       {
         type: 'settle_approve',
-        data: { counterpartyEntityId: leftEntity, workspaceHash: rightAccount.settlementWorkspace!.workspaceHash },
+        data: { counterpartyEntityId: leftEntity, workspaceHash: rightAccount.state.settlementWorkspace!.workspaceHash },
       },
       rightEnv,
     );
     expect(rightApproval.outputs).toEqual([]);
     expect(rightApproval.newState.deferredAccountProposals?.get(leftEntity))
-      .toBe(rightAccount.settlementWorkspace!.workspaceHash);
+      .toBe(rightAccount.state.settlementWorkspace!.workspaceHash);
     const rightSealDraft = buildSettlementSealDraft(
       rightApproval.newState.accounts.get(leftEntity)!,
       rightApproval.newState,
@@ -1129,7 +1129,7 @@ describe('atomic settlement Account transition', () => {
       leftState,
       {
         type: 'settle_approve',
-        data: { counterpartyEntityId: rightEntity, workspaceHash: leftAccount.settlementWorkspace!.workspaceHash },
+        data: { counterpartyEntityId: rightEntity, workspaceHash: leftAccount.state.settlementWorkspace!.workspaceHash },
       },
       rightEnv,
     );
@@ -1175,8 +1175,8 @@ describe('atomic settlement Account transition', () => {
       createAccountConsensusContext(rightEnv),
     )).success).toBe(true);
 
-    const finalizedLeftWorkspace = leftSealingState.accounts.get(rightEntity)!.settlementWorkspace!;
-    const finalizedRightWorkspace = rightSealingState.accounts.get(leftEntity)!.settlementWorkspace!;
+    const finalizedLeftWorkspace = leftSealingState.accounts.get(rightEntity)!.state.settlementWorkspace!;
+    const finalizedRightWorkspace = rightSealingState.accounts.get(leftEntity)!.state.settlementWorkspace!;
     expect(finalizedLeftWorkspace.status).toBe('ready_to_submit');
     expect(finalizedRightWorkspace.status).toBe('ready_to_submit');
     expect(finalizedLeftWorkspace.leftHanko).toBeUndefined();
@@ -1221,7 +1221,7 @@ describe('atomic settlement Account transition', () => {
         type: 'settle_approve',
         data: {
           counterpartyEntityId: rightEntity,
-          workspaceHash: leftState.accounts.get(rightEntity)!.settlementWorkspace!.workspaceHash,
+          workspaceHash: leftState.accounts.get(rightEntity)!.state.settlementWorkspace!.workspaceHash,
         },
       },
       env,
@@ -1255,7 +1255,7 @@ describe('atomic settlement Account transition', () => {
       createAccountConsensusContext(env),
     );
     expect(result).toMatchObject({ success: true });
-    expect(sealingState.accounts.get(rightEntity)!.settlementWorkspace?.leftHanko).toBeDefined();
+    expect(sealingState.accounts.get(rightEntity)!.state.settlementWorkspace?.leftHanko).toBeDefined();
     const receiverResult = await applyAccountTx(
       rightState.accounts.get(leftEntity)!,
       sealedTx,
@@ -1294,7 +1294,7 @@ describe('atomic settlement Account transition', () => {
     const second = transition({
       kind: 'upsert',
       revision: 2,
-      previousWorkspaceHash: account.settlementWorkspace!.workspaceHash,
+      previousWorkspaceHash: account.state.settlementWorkspace!.workspaceHash,
       ops: [{ type: 'r2r', tokenId: 1, amount: 2n }],
       executorIsLeft: false,
     });
@@ -1329,7 +1329,7 @@ describe('atomic settlement Account transition', () => {
     expect(finalFollowup.accountTxs).toEqual([]);
     expect(finalFollowup.hashesToSign).toEqual([]);
     expect(rightState.deferredAccountProposals?.get(LEFT))
-      .toBe(account.settlementWorkspace?.workspaceHash);
+      .toBe(account.state.settlementWorkspace?.workspaceHash);
   });
 
   test('a multi-token update validates on a clone and commits old-release/new-add atomically', async () => {
@@ -1340,8 +1340,8 @@ describe('atomic settlement Account transition', () => {
     const unrelated = createDefaultDelta(3);
     unrelated.leftHold = 9n;
     unrelated.rightHold = 8n;
-    account.deltas.set(2, token2);
-    account.deltas.set(3, unrelated);
+    account.state.deltas.set(2, token2);
+    account.state.deltas.set(3, unrelated);
 
     const first = await upsert(account, {
       revision: 1,
@@ -1359,10 +1359,10 @@ describe('atomic settlement Account transition', () => {
       executorIsLeft: false,
     });
     expect(first.success).toBe(true);
-    const firstHash = account.settlementWorkspace?.workspaceHash;
+    const firstHash = account.state.settlementWorkspace?.workspaceHash;
     expect(firstHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(account.deltas.get(1)?.leftHold).toBe(3n);
-    expect(account.deltas.get(2)?.rightHold).toBe(2n);
+    expect(account.state.deltas.get(1)?.leftHold).toBe(3n);
+    expect(account.state.deltas.get(2)?.rightHold).toBe(2n);
 
     const invalid = await upsert(account, {
       revision: 2,
@@ -1382,12 +1382,12 @@ describe('atomic settlement Account transition', () => {
     });
 
     expect(invalid.success).toBe(false);
-    expect(account.settlementWorkspace?.workspaceHash).toBe(firstHash);
-    expect(account.settlementWorkspace?.revision).toBe(1);
-    expect(account.deltas.get(1)?.leftHold).toBe(3n);
-    expect(account.deltas.get(2)?.rightHold).toBe(2n);
-    expect(account.deltas.get(3)?.leftHold).toBe(9n);
-    expect(account.deltas.get(3)?.rightHold).toBe(8n);
+    expect(account.state.settlementWorkspace?.workspaceHash).toBe(firstHash);
+    expect(account.state.settlementWorkspace?.revision).toBe(1);
+    expect(account.state.deltas.get(1)?.leftHold).toBe(3n);
+    expect(account.state.deltas.get(2)?.rightHold).toBe(2n);
+    expect(account.state.deltas.get(3)?.leftHold).toBe(9n);
+    expect(account.state.deltas.get(3)?.rightHold).toBe(8n);
 
     const valid = await upsert(account, {
       revision: 2,
@@ -1407,36 +1407,36 @@ describe('atomic settlement Account transition', () => {
     });
 
     expect(valid.success).toBe(true);
-    expect(account.settlementWorkspace?.revision).toBe(2);
-    expect(account.settlementWorkspace?.workspaceHash).not.toBe(firstHash);
-    expect(account.settlementWorkspace?.lastModifiedByLeft).toBe(true);
-    expect(account.deltas.get(1)?.leftHold).toBe(1n);
-    expect(account.deltas.get(2)?.rightHold).toBe(4n);
-    expect(account.deltas.get(3)?.leftHold).toBe(9n);
-    expect(account.deltas.get(3)?.rightHold).toBe(8n);
+    expect(account.state.settlementWorkspace?.revision).toBe(2);
+    expect(account.state.settlementWorkspace?.workspaceHash).not.toBe(firstHash);
+    expect(account.state.settlementWorkspace?.lastModifiedByLeft).toBe(true);
+    expect(account.state.deltas.get(1)?.leftHold).toBe(1n);
+    expect(account.state.deltas.get(2)?.rightHold).toBe(4n);
+    expect(account.state.deltas.get(3)?.leftHold).toBe(9n);
+    expect(account.state.deltas.get(3)?.rightHold).toBe(8n);
   });
 
   test('submit requires the elected executor and exact workspace hash, then releases only workspace holds', async () => {
     const account = makeAccount(LEFT, RIGHT);
-    account.deltas.get(1)!.rightHold = 7n;
+    account.state.deltas.get(1)!.rightHold = 7n;
     const first = await upsert(account, {
       revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
     expect(first.success).toBe(true);
-    const workspaceHash = account.settlementWorkspace!.workspaceHash;
-    account.settlementWorkspace!.leftHanko = '0x1234';
-    account.settlementWorkspace!.nonceAtSign = 1;
-    account.settlementWorkspace!.settlementHash = `0x${'41'.repeat(32)}`;
-    account.settlementWorkspace!.postSettlementDisputeProof = {
+    const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
+    account.state.settlementWorkspace!.leftHanko = '0x1234';
+    account.state.settlementWorkspace!.nonceAtSign = 1;
+    account.state.settlementWorkspace!.settlementHash = `0x${'41'.repeat(32)}`;
+    account.state.settlementWorkspace!.postSettlementDisputeProof = {
       leftHanko: '0x5678',
       rightHanko: '0x9abc',
       disputeHash: `0x${'42'.repeat(32)}`,
       proofBodyHash: `0x${'43'.repeat(32)}`,
       nonce: 2,
     };
-    account.settlementWorkspace!.status = 'ready_to_submit';
+    account.state.settlementWorkspace!.status = 'ready_to_submit';
 
     const wrongSide = await applyAccountTx(account, transition({
       kind: 'submit',
@@ -1444,9 +1444,9 @@ describe('atomic settlement Account transition', () => {
       workspaceHash,
     }), true, 2_000);
     expect(wrongSide.success).toBe(false);
-    expect(account.settlementWorkspace?.status).toBe('ready_to_submit');
-    expect(account.deltas.get(1)?.leftHold).toBe(4n);
-    expect(account.deltas.get(1)?.rightHold).toBe(7n);
+    expect(account.state.settlementWorkspace?.status).toBe('ready_to_submit');
+    expect(account.state.deltas.get(1)?.leftHold).toBe(4n);
+    expect(account.state.deltas.get(1)?.rightHold).toBe(7n);
 
     const submitted = await applyAccountTx(account, transition({
       kind: 'submit',
@@ -1454,9 +1454,9 @@ describe('atomic settlement Account transition', () => {
       workspaceHash,
     }), false, 2_001);
     expect(submitted.success).toBe(true);
-    expect(account.settlementWorkspace?.status).toBe('submitted');
-    expect(account.deltas.get(1)?.leftHold).toBe(0n);
-    expect(account.deltas.get(1)?.rightHold).toBe(7n);
+    expect(account.state.settlementWorkspace?.status).toBe('submitted');
+    expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
+    expect(account.state.deltas.get(1)?.rightHold).toBe(7n);
   });
 
   test('clear derives releases from the exact active workspace and removes it atomically', async () => {
@@ -1467,7 +1467,7 @@ describe('atomic settlement Account transition', () => {
       executorIsLeft: false,
     });
     expect(first.success).toBe(true);
-    const workspaceHash = account.settlementWorkspace!.workspaceHash;
+    const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
 
     const mismatched = await applyAccountTx(account, transition({
       kind: 'clear',
@@ -1475,8 +1475,8 @@ describe('atomic settlement Account transition', () => {
       workspaceHash: `0x${'ff'.repeat(32)}`,
     }), false, 2_000);
     expect(mismatched.success).toBe(false);
-    expect(account.settlementWorkspace?.workspaceHash).toBe(workspaceHash);
-    expect(account.deltas.get(1)?.leftHold).toBe(4n);
+    expect(account.state.settlementWorkspace?.workspaceHash).toBe(workspaceHash);
+    expect(account.state.deltas.get(1)?.leftHold).toBe(4n);
 
     const cleared = await applyAccountTx(account, transition({
       kind: 'clear',
@@ -1484,13 +1484,13 @@ describe('atomic settlement Account transition', () => {
       workspaceHash,
     }), false, 2_001);
     expect(cleared.success).toBe(true);
-    expect(account.settlementWorkspace).toBeUndefined();
-    expect(account.deltas.get(1)?.leftHold).toBe(0n);
+    expect(account.state.settlementWorkspace).toBeUndefined();
+    expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
   });
 
   test('a signed settlement freezes financial Account txs but never blocks dispute reopen', async () => {
     const account = await signedWorkspaceAccount(10);
-    const beforeOffdelta = account.deltas.get(1)?.offdelta;
+    const beforeOffdelta = account.state.deltas.get(1)?.offdelta;
 
     const payment = await applyAccountTx(account, {
       type: 'direct_payment',
@@ -1498,7 +1498,7 @@ describe('atomic settlement Account transition', () => {
     }, true, 2_000);
     expect(payment.success).toBe(false);
     expect(payment.error).toBe('SETTLEMENT_SIGNED_ACCOUNT_FROZEN:direct_payment');
-    expect(account.deltas.get(1)?.offdelta).toBe(beforeOffdelta);
+    expect(account.state.deltas.get(1)?.offdelta).toBe(beforeOffdelta);
 
     account.status = 'disputed';
     const reopen = await applyAccountTx(account, {
@@ -1507,22 +1507,22 @@ describe('atomic settlement Account transition', () => {
     }, true, 2_001);
     expect(reopen.success).toBe(true);
     expect(account.status).toBe('active');
-    expect(account.jNonce).toBe(11);
+    expect(account.state.jNonce).toBe(11);
   });
 
   test('AccountSettled finality wins a submit retry race by releasing exact workspace holds', async () => {
     const account = makeAccount(LEFT, RIGHT);
-    account.deltas.get(1)!.rightHold = 6n;
+    account.state.deltas.get(1)!.rightHold = 6n;
     const first = await upsert(account, {
       revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
     expect(first.success).toBe(true);
-    account.settlementWorkspace!.leftHanko = '0x1234';
-    account.settlementWorkspace!.nonceAtSign = 1;
-    account.settlementWorkspace!.settlementHash = `0x${'51'.repeat(32)}`;
-    account.settlementWorkspace!.postSettlementDisputeProof = {
+    account.state.settlementWorkspace!.leftHanko = '0x1234';
+    account.state.settlementWorkspace!.nonceAtSign = 1;
+    account.state.settlementWorkspace!.settlementHash = `0x${'51'.repeat(32)}`;
+    account.state.settlementWorkspace!.postSettlementDisputeProof = {
       leftHanko: '0x5678',
       rightHanko: '0x9abc',
       disputeHash: `0x${'52'.repeat(32)}`,
@@ -1544,10 +1544,10 @@ describe('atomic settlement Account transition', () => {
       },
     }], TEST_DELTA_TRANSFORMER);
 
-    expect(account.settlementWorkspace).toBeUndefined();
-    expect(account.deltas.get(1)?.leftHold).toBe(0n);
-    expect(account.deltas.get(1)?.rightHold).toBe(6n);
-    expect(account.jNonce).toBe(1);
+    expect(account.state.settlementWorkspace).toBeUndefined();
+    expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
+    expect(account.state.deltas.get(1)?.rightHold).toBe(6n);
+    expect(account.state.jNonce).toBe(1);
   });
 
   test('bilaterally finalized AccountSettled claim deletes the submitted optional workspace', async () => {
@@ -1563,11 +1563,11 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
-    account.settlementWorkspace!.leftHanko = '0x1234';
-    account.settlementWorkspace!.status = 'submitted';
-    account.settlementWorkspace!.nonceAtSign = 1;
-    account.settlementWorkspace!.settlementHash = `0x${'70'.repeat(32)}`;
-    account.settlementWorkspace!.postSettlementDisputeProof = {
+    account.state.settlementWorkspace!.leftHanko = '0x1234';
+    account.state.settlementWorkspace!.status = 'submitted';
+    account.state.settlementWorkspace!.nonceAtSign = 1;
+    account.state.settlementWorkspace!.settlementHash = `0x${'70'.repeat(32)}`;
+    account.state.settlementWorkspace!.postSettlementDisputeProof = {
       leftHanko: '0x5678',
       rightHanko: '0x9abc',
       disputeHash: `0x${'72'.repeat(32)}`,
@@ -1599,43 +1599,43 @@ describe('atomic settlement Account transition', () => {
       depositoryAddress: jurisdiction.depositoryAddress,
     };
     const firstSession = createAccountJClaimSession(getAccountJClaimNodeStore(env));
-    const leftClaim = prepareAccountJClaimTx(account, rawClaim, domain, firstSession);
+    const leftClaim = prepareAccountJClaimTx(account.state, rawClaim, domain, firstSession);
     expect(handleJEventClaim(
       account, leftClaim, true, 2_000, false, LEFT, [], env.state, firstSession,
     ).success).toBe(true);
     cacheCommittedAccountJClaimNodeChanges(env, firstSession.changes());
     const secondSession = createAccountJClaimSession(getAccountJClaimNodeStore(env));
-    const rightClaim = prepareAccountJClaimTx(account, rawClaim, domain, secondSession);
+    const rightClaim = prepareAccountJClaimTx(account.state, rawClaim, domain, secondSession);
     expect(handleJEventClaim(
       account, rightClaim, false, 2_001, false, LEFT, [], env.state, secondSession,
     ).success).toBe(true);
 
-    expect(account.lastFinalizedJHeight).toBe(7);
-    expect(account.leftPendingJClaims.count).toBe(0n);
-    expect(account.rightPendingJClaims.count).toBe(0n);
-    expect(account.settlementWorkspace).toBeUndefined();
+    expect(account.state.lastFinalizedJHeight).toBe(7);
+    expect(account.state.leftPendingJClaims.count).toBe(0n);
+    expect(account.state.rightPendingJClaims.count).toBe(0n);
+    expect(account.state.settlementWorkspace).toBeUndefined();
   });
 
   test('older AccountSettled nonce retains a newer signed workspace and does not activate its proof', async () => {
     const account = await signedWorkspaceAccount(10);
-    const workspaceHash = account.settlementWorkspace!.workspaceHash;
+    const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
 
     applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(9)], TEST_DELTA_TRANSFORMER);
 
-    expect(account.jNonce).toBe(9);
-    expect(account.settlementWorkspace?.workspaceHash).toBe(workspaceHash);
+    expect(account.state.jNonce).toBe(9);
+    expect(account.state.settlementWorkspace?.workspaceHash).toBe(workspaceHash);
     expect(account.currentDisputeHash).toBeUndefined();
     expect(account.currentDisputeProofHanko).toBeUndefined();
   });
 
   test('R2C AccountSettled nonce zero retains a signed workspace for nonce one', async () => {
     const account = await signedWorkspaceAccount(1);
-    const workspaceHash = account.settlementWorkspace!.workspaceHash;
+    const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
 
     applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(0)], TEST_DELTA_TRANSFORMER);
 
-    expect(account.jNonce).toBe(0);
-    expect(account.settlementWorkspace?.workspaceHash).toBe(workspaceHash);
+    expect(account.state.jNonce).toBe(0);
+    expect(account.state.settlementWorkspace?.workspaceHash).toBe(workspaceHash);
     expect(account.currentDisputeHash).toBeUndefined();
     expect(account.currentDisputeProofHanko).toBeUndefined();
   });
@@ -1649,9 +1649,9 @@ describe('atomic settlement Account transition', () => {
     expect(() => applyFinalizedAccountJEvents(account, RIGHT, [event], TEST_DELTA_TRANSFORMER))
       .toThrow('ACCOUNT_SETTLED_PAIR_MISMATCH');
 
-    expect(account.jNonce).toBe(0);
-    expect(account.deltas.get(1)?.collateral).toBe(0n);
-    expect(account.settlementWorkspace).toBeDefined();
+    expect(account.state.jNonce).toBe(0);
+    expect(account.state.deltas.get(1)?.collateral).toBe(0n);
+    expect(account.state.settlementWorkspace).toBeDefined();
   });
 
   test('matching AccountSettled nonce clears the workspace and activates its next proof', async () => {
@@ -1659,8 +1659,8 @@ describe('atomic settlement Account transition', () => {
 
     applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(10)], TEST_DELTA_TRANSFORMER);
 
-    expect(account.jNonce).toBe(10);
-    expect(account.settlementWorkspace).toBeUndefined();
+    expect(account.state.jNonce).toBe(10);
+    expect(account.state.settlementWorkspace).toBeUndefined();
     expect(account.currentDisputeHash).toBe(`0x${'82'.repeat(32)}`);
     expect(account.currentDisputeProofHanko).toBe('0x9abc');
     expect(account.counterpartyDisputeProofHanko).toBe('0xdef0');
@@ -1681,8 +1681,8 @@ describe('atomic settlement Account transition', () => {
 
     applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(2)], TEST_DELTA_TRANSFORMER);
 
-    expect(account.jNonce).toBe(2);
-    expect(account.settlementWorkspace).toBeUndefined();
+    expect(account.state.jNonce).toBe(2);
+    expect(account.state.settlementWorkspace).toBeUndefined();
     expect(account.currentDisputeProofNonce).toBe(4);
     expect(account.currentDisputeProofHanko).toBe('0xaaaa');
     expect(account.currentDisputeProofBodyHash).toBe(`0x${'a1'.repeat(32)}`);
@@ -1696,23 +1696,23 @@ describe('atomic settlement Account transition', () => {
 
   test('matching finality rejects a post-settlement proof that is not exactly nonce plus one', async () => {
     const account = await signedWorkspaceAccount(10);
-    account.settlementWorkspace!.postSettlementDisputeProof!.nonce = 12;
+    account.state.settlementWorkspace!.postSettlementDisputeProof!.nonce = 12;
 
     expect(() => applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(10)], TEST_DELTA_TRANSFORMER))
       .toThrow('POST_SETTLEMENT_PROOF_NONCE_MISMATCH');
 
-    expect(account.settlementWorkspace).toBeDefined();
+    expect(account.state.settlementWorkspace).toBeDefined();
     expect(account.currentDisputeHash).toBeUndefined();
   });
 
   test('a signed workspace without its exact settlement nonce fails loud at finality', async () => {
     const account = await signedWorkspaceAccount(10);
-    delete account.settlementWorkspace!.nonceAtSign;
+    delete account.state.settlementWorkspace!.nonceAtSign;
 
     expect(() => applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(10)], TEST_DELTA_TRANSFORMER))
       .toThrow('SETTLEMENT_SIGNED_NONCE_MISSING');
 
-    expect(account.settlementWorkspace).toBeDefined();
+    expect(account.state.settlementWorkspace).toBeDefined();
     expect(account.currentDisputeHash).toBeUndefined();
   });
 
@@ -1723,13 +1723,13 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
-    expect(account.deltas.get(1)?.leftHold).toBe(4n);
+    expect(account.state.deltas.get(1)?.leftHold).toBe(4n);
 
     applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(1)], TEST_DELTA_TRANSFORMER);
 
-    expect(account.jNonce).toBe(1);
-    expect(account.settlementWorkspace).toBeUndefined();
-    expect(account.deltas.get(1)?.leftHold).toBe(0n);
+    expect(account.state.jNonce).toBe(1);
+    expect(account.state.settlementWorkspace).toBeUndefined();
+    expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
   });
 
   test('R2C AccountSettled nonce zero clears an unsigned workspace with stale capacity holds', async () => {
@@ -1739,14 +1739,14 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
-    expect(account.jNonce).toBe(0);
-    expect(account.deltas.get(1)?.leftHold).toBe(4n);
+    expect(account.state.jNonce).toBe(0);
+    expect(account.state.deltas.get(1)?.leftHold).toBe(4n);
 
     applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(0)], TEST_DELTA_TRANSFORMER);
 
-    expect(account.jNonce).toBe(0);
-    expect(account.settlementWorkspace).toBeUndefined();
-    expect(account.deltas.get(1)?.leftHold).toBe(0n);
+    expect(account.state.jNonce).toBe(0);
+    expect(account.state.settlementWorkspace).toBeUndefined();
+    expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
   });
 
   test('multi-token AccountSettled events sharing one nonce finalize as one settlement', async () => {
@@ -1754,7 +1754,7 @@ describe('atomic settlement Account transition', () => {
     const token2 = createDefaultDelta(2);
     token2.leftCreditLimit = 100n;
     token2.rightCreditLimit = 100n;
-    account.deltas.set(2, token2);
+    account.state.deltas.set(2, token2);
     expect((await upsert(account, {
       revision: 1,
       ops: [
@@ -1763,10 +1763,10 @@ describe('atomic settlement Account transition', () => {
       ],
       executorIsLeft: false,
     })).success).toBe(true);
-    account.settlementWorkspace!.leftHanko = '0x1234';
-    account.settlementWorkspace!.rightHanko = '0x5678';
-    account.settlementWorkspace!.nonceAtSign = 10;
-    account.settlementWorkspace!.postSettlementDisputeProof = {
+    account.state.settlementWorkspace!.leftHanko = '0x1234';
+    account.state.settlementWorkspace!.rightHanko = '0x5678';
+    account.state.settlementWorkspace!.nonceAtSign = 10;
+    account.state.settlementWorkspace!.postSettlementDisputeProof = {
       leftHanko: '0x9abc',
       rightHanko: '0xdef0',
       disputeHash: `0x${'84'.repeat(32)}`,
@@ -1785,12 +1785,12 @@ describe('atomic settlement Account transition', () => {
       TEST_DELTA_TRANSFORMER,
     );
 
-    expect(account.jNonce).toBe(10);
-    expect(account.settlementWorkspace).toBeUndefined();
-    expect(account.deltas.get(1)?.leftHold).toBe(0n);
-    expect(account.deltas.get(2)?.leftHold).toBe(0n);
-    expect(account.deltas.get(2)?.collateral).toBe(25n);
-    expect(account.deltas.get(2)?.ondelta).toBe(7n);
+    expect(account.state.jNonce).toBe(10);
+    expect(account.state.settlementWorkspace).toBeUndefined();
+    expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
+    expect(account.state.deltas.get(2)?.leftHold).toBe(0n);
+    expect(account.state.deltas.get(2)?.collateral).toBe(25n);
+    expect(account.state.deltas.get(2)?.ondelta).toBe(7n);
     expect(account.currentDisputeHash).toBe(`0x${'84'.repeat(32)}`);
   });
 
@@ -1799,8 +1799,8 @@ describe('atomic settlement Account transition', () => {
 
     applyFinalizedAccountJEvents(account, RIGHT, [accountSettledEvent(12)], TEST_DELTA_TRANSFORMER);
 
-    expect(account.jNonce).toBe(12);
-    expect(account.settlementWorkspace).toBeUndefined();
+    expect(account.state.jNonce).toBe(12);
+    expect(account.state.settlementWorkspace).toBeUndefined();
     expect(account.currentDisputeHash).toBeUndefined();
     expect(account.currentDisputeProofHanko).toBeUndefined();
     expect(account.counterpartyDisputeProofHanko).toBeUndefined();
@@ -1814,8 +1814,8 @@ describe('atomic settlement Account transition', () => {
       accountSettledEvent(12),
     ], TEST_DELTA_TRANSFORMER);
 
-    expect(account.jNonce).toBe(12);
-    expect(account.settlementWorkspace).toBeUndefined();
+    expect(account.state.jNonce).toBe(12);
+    expect(account.state.settlementWorkspace).toBeUndefined();
     expect(account.currentDisputeHash).toBeUndefined();
     expect(account.currentDisputeProofHanko).toBeUndefined();
   });
@@ -1848,8 +1848,8 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
-    const workspaceHash = account.settlementWorkspace!.workspaceHash;
-    account.jNonce = 2;
+    const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
+    account.state.jNonce = 2;
     state.jBatchState = {
       batch: createEmptyBatch(),
       jurisdiction: null,
@@ -1886,8 +1886,8 @@ describe('atomic settlement Account transition', () => {
     const resultAccount = result.newState.accounts.get(RIGHT)!;
 
     expect(result.newState.jBatchState?.batch.collateralToReserve).toEqual([]);
-    expect(resultAccount.settlementWorkspace?.workspaceHash).toBe(workspaceHash);
-    expect(resultAccount.deltas.get(1)?.leftHold).toBe(4n);
+    expect(resultAccount.state.settlementWorkspace?.workspaceHash).toBe(workspaceHash);
+    expect(resultAccount.state.deltas.get(1)?.leftHold).toBe(4n);
   });
 
   test('restored Account state continues the same exact workspace hash/revision chain', async () => {
@@ -1898,8 +1898,8 @@ describe('atomic settlement Account transition', () => {
       executorIsLeft: false,
     });
     expect(first.success).toBe(true);
-    const restored = cloneAccountState(live, true);
-    const previousWorkspaceHash = live.settlementWorkspace!.workspaceHash;
+    const restored = cloneAccountReplica(live, true);
+    const previousWorkspaceHash = live.state.settlementWorkspace!.workspaceHash;
     const update = transition({
       kind: 'upsert',
       revision: 2,
@@ -1916,8 +1916,8 @@ describe('atomic settlement Account transition', () => {
 
     expect(liveResult.success).toBe(true);
     expect(restoredResult.success).toBe(true);
-    expect(restored.settlementWorkspace).toEqual(live.settlementWorkspace);
-    expect(restored.deltas.get(1)?.leftHold).toBe(live.deltas.get(1)?.leftHold);
+    expect(restored.state.settlementWorkspace).toEqual(live.state.settlementWorkspace);
+    expect(restored.state.deltas.get(1)?.leftHold).toBe(live.state.deltas.get(1)?.leftHold);
   });
 
   test('Account cloning isolates nested post-settlement proof signatures', async () => {
@@ -1927,16 +1927,16 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
-    account.settlementWorkspace!.postSettlementDisputeProof = {
+    account.state.settlementWorkspace!.postSettlementDisputeProof = {
       disputeHash: `0x${'61'.repeat(32)}`,
       proofBodyHash: `0x${'62'.repeat(32)}`,
       nonce: 2,
     };
 
-    const clone = cloneAccountState(account);
-    clone.settlementWorkspace!.postSettlementDisputeProof!.leftHanko = '0x1234';
+    const clone = cloneAccountReplica(account);
+    clone.state.settlementWorkspace!.postSettlementDisputeProof!.leftHanko = '0x1234';
 
-    expect(account.settlementWorkspace?.postSettlementDisputeProof?.leftHanko).toBeUndefined();
-    expect(clone.settlementWorkspace?.postSettlementDisputeProof?.leftHanko).toBe('0x1234');
+    expect(account.state.settlementWorkspace?.postSettlementDisputeProof?.leftHanko).toBeUndefined();
+    expect(clone.state.settlementWorkspace?.postSettlementDisputeProof?.leftHanko).toBe('0x1234');
   });
 });

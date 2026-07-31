@@ -34,8 +34,10 @@ export type RuntimeNavigationViewProjection = {
       };
       accounts?: {
         items?: Array<{
-          leftEntity?: string;
-          rightEntity?: string;
+          state: {
+            leftEntity?: string;
+            rightEntity?: string;
+          };
         }>;
         totalItems?: number | null;
       };
@@ -78,10 +80,13 @@ const entityAccountCount = (
     : Math.max(0, active.accounts?.items?.length ?? 0);
 };
 
-const accountCounterpartyId = (entityId: string, account: { leftEntity?: string; rightEntity?: string }): string => {
+const accountCounterpartyId = (
+  entityId: string,
+  account: { state: { leftEntity?: string; rightEntity?: string } },
+): string => {
   const selected = normalizeId(entityId);
-  const left = normalizeId(account.leftEntity);
-  const right = normalizeId(account.rightEntity);
+  const left = normalizeId(account.state.leftEntity);
+  const right = normalizeId(account.state.rightEntity);
   return left === selected ? right : left || right;
 };
 

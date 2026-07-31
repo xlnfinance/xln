@@ -79,8 +79,8 @@ const queueDisputeStart = (
   account.activeDispute ??= {
     startedByLeft: isDisputeStartedByLeft(
       sourceState.entityId,
-      account.leftEntity,
-      account.rightEntity,
+      account.state.leftEntity,
+      account.state.rightEntity,
     ),
     initialProofbodyHash: evidence.proofBodyHash,
     initialNonce: evidence.signedNonce,

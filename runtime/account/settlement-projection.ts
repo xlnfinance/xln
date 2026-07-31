@@ -1,4 +1,4 @@
-import { cloneAccountState } from './state-clone';
+import { cloneAccountReplica } from './state-clone';
 import type { AccountReplica, Delta, SettlementDiff } from '../types/account';
 import { createDefaultDelta } from './delta';
 import { invalidateAccountMapCommitment } from './map-commitment';
@@ -14,10 +14,10 @@ const createSettlementDelta = (tokenId: number): Delta => {
 };
 
 const requireProjectedDelta = (account: AccountReplica, tokenId: number): Delta => {
-  const existing = account.deltas.get(tokenId);
+  const existing = account.state.deltas.get(tokenId);
   if (existing) return existing;
   const created = createSettlementDelta(tokenId);
-  account.deltas.set(tokenId, created);
+  account.state.deltas.set(tokenId, created);
   return created;
 };
 
@@ -41,9 +41,9 @@ export const projectAccountAfterSettlement = (
   diffs: readonly SettlementDiff[],
   forgiveTokenIds: readonly number[],
 ): AccountReplica => {
-  const projected = cloneAccountState(account);
+  const projected = cloneAccountReplica(account);
   for (const diff of diffs) applyProjectedDiff(projected, diff);
   for (const tokenId of forgiveTokenIds) requireProjectedDelta(projected, tokenId);
-  invalidateAccountMapCommitment(projected, 'deltas');
+  invalidateAccountMapCommitment(projected.state, 'deltas');
   return projected;
 };

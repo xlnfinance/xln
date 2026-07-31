@@ -122,7 +122,7 @@ export const resolveStartNonce = (
     });
     return null;
   }
-  const jNonce = Number(account.jNonce ?? 0);
+  const jNonce = Number(account.state.jNonce ?? 0);
   disputeLog.debug('start.nonce', {
     counterparty: shortId(counterpartyId),
     signedNonce,
@@ -153,7 +153,7 @@ export const buildStarterArguments = (
   overrideInitial: string | undefined,
   env: EntityRuntimeContext,
 ): Pick<StartEvidence, 'starterInitialArguments' | 'starterIncrementedArguments'> => {
-  const starterIsLeft = account.leftEntity === state.entityId;
+  const starterIsLeft = account.state.leftEntity === state.entityId;
   const starterSide: DisputeArgumentSide = starterIsLeft ? 'left' : 'right';
   const initial = buildDisputeArgumentsForSnapshot(
     account,

@@ -493,20 +493,20 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
 
   const [, bobEthRepBefore] = findReplica(env, bob.id);
   const bobEthAccountBefore = bobEthRepBefore.state.accounts.get(hubEth.id);
-  const bobEthOfferBefore = bobEthAccountBefore?.swapOffers?.get('bob-eth-ask');
+  const bobEthOfferBefore = bobEthAccountBefore?.state.swapOffers?.get('bob-eth-ask');
   if (!bobEthOfferBefore) {
     console.warn('⚠️ Bob ETH ask missing after Phase 1; continuing with baseline order values');
   }
   const [, aliceWbtcRepBefore] = findReplica(env, alice.id);
   const aliceWbtcAccountBefore = aliceWbtcRepBefore.state.accounts.get(hubWbtc.id);
-  const aliceWbtcOfferBefore = aliceWbtcAccountBefore?.swapOffers?.get('alice-wbtc-bid');
+  const aliceWbtcOfferBefore = aliceWbtcAccountBefore?.state.swapOffers?.get('alice-wbtc-bid');
   if (!aliceWbtcOfferBefore) {
     console.warn('⚠️ Alice WBTC bid missing after Phase 1; continuing with baseline order values');
   }
 
   const [, bobDaiRepBefore] = findReplica(env, bob.id);
   const bobDaiAccountBefore = bobDaiRepBefore.state.accounts.get(hubDai.id);
-  const bobDaiOfferBefore = bobDaiAccountBefore?.swapOffers?.get('bob-dai-ask');
+  const bobDaiOfferBefore = bobDaiAccountBefore?.state.swapOffers?.get('bob-dai-ask');
   if (!bobDaiOfferBefore) {
     console.warn('⚠️ Bob DAI ask missing after Phase 1; continuing with baseline order values');
   }
@@ -587,7 +587,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
   // Bob's remaining: 5 - 3 = 2 ETH
   const [, bobEthRepAfter] = findReplica(env, bob.id);
   const bobEthAccountAfter = bobEthRepAfter.state.accounts.get(hubEth.id);
-  const bobEthOfferAfter = bobEthAccountAfter?.swapOffers?.get('bob-eth-ask');
+  const bobEthOfferAfter = bobEthAccountAfter?.state.swapOffers?.get('bob-eth-ask');
 
   // Note: Exact fill amounts depend on orderbook matching semantics
   // We check that SOME fill occurred (remaining < original)
@@ -602,7 +602,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
   // Alice's WBTC bid should match Dave's ask
   const [, aliceWbtcRepAfter] = findReplica(env, alice.id);
   const aliceWbtcAccountAfter = aliceWbtcRepAfter.state.accounts.get(hubWbtc.id);
-  const aliceWbtcBidAfter = aliceWbtcAccountAfter?.swapOffers?.get('alice-wbtc-bid');
+  const aliceWbtcBidAfter = aliceWbtcAccountAfter?.state.swapOffers?.get('alice-wbtc-bid');
   if (aliceWbtcBidAfter) {
     console.log(`  Alice WBTC bid remaining: ${Number(aliceWbtcBidAfter.giveAmount) / 1e18} USDC`);
   } else {
@@ -612,7 +612,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
   // Bob's DAI ask should partially fill
   const [, bobDaiRepAfter] = findReplica(env, bob.id);
   const bobDaiAccountAfter = bobDaiRepAfter.state.accounts.get(hubDai.id);
-  const bobDaiOfferAfter = bobDaiAccountAfter?.swapOffers?.get('bob-dai-ask');
+  const bobDaiOfferAfter = bobDaiAccountAfter?.state.swapOffers?.get('bob-dai-ask');
   if (bobDaiOfferAfter) {
     const remainingDai = bobDaiOfferAfter.giveAmount;
     console.log(`  Bob DAI remaining: ${Number(remainingDai) / 1e18} DAI`);
@@ -680,8 +680,8 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
 
   const [, aliceEthRepAfter] = findReplica(env, alice.id);
   const aliceEthAccountAfter = aliceEthRepAfter.state.accounts.get(hubEth.id);
-  assert(!aliceEthAccountAfter?.swapOffers?.has('alice-eth-ask'), 'Alice ETH ask cancelled');
-  const aliceEthRepricedOffer = aliceEthAccountAfter?.swapOffers?.get('alice-eth-ask-repriced');
+  assert(!aliceEthAccountAfter?.state.swapOffers?.has('alice-eth-ask'), 'Alice ETH ask cancelled');
+  const aliceEthRepricedOffer = aliceEthAccountAfter?.state.swapOffers?.get('alice-eth-ask-repriced');
   if (!aliceEthRepricedOffer) {
     console.warn('[SWAP-MARKET] Alice ETH repriced ask is no longer open (likely rejected or immediately resolved)');
   }
@@ -769,7 +769,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
     const [, rep] = findReplica(env, trader.id);
     const account = rep.state.accounts.get(hubEth.id) || rep.state.accounts.get(hubWbtc.id) || rep.state.accounts.get(hubDai.id);
     if (account) {
-      const deltas = Array.from(account.deltas.values());
+      const deltas = Array.from(account.state.deltas.values());
       console.log(`  ${trader.name}:`);
       for (const delta of deltas) {
         const tokenId = delta.tokenId;

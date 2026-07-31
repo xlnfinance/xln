@@ -114,7 +114,7 @@ export const calculateSolvency = (env: RuntimeReplica, snapshot?: RuntimeReplica
     accountViews += state.accounts.size;
     for (const [counterpartyId, account] of state.accounts) {
       if (!isLeftEntity(state.entityId, counterpartyId)) continue;
-      for (const [tokenId, delta] of account.deltas) {
+      for (const [tokenId, delta] of account.state.deltas) {
         ensureAsset(byAsset, state, tokenId).confirmedCollateral += canonicalAmount(
           delta.collateral,
           `collateral.${tokenId}`,

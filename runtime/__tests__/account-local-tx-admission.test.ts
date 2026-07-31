@@ -9,9 +9,10 @@ import {
   isDisputeStartedByLeft,
 } from '../account/consensus/dispute-policy';
 import { LIMITS } from '../config/constants';
-import type { AccountState, AccountTx } from '../types/account';
+import type { AccountReplica, AccountTx } from '../types/account';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account-consensus-context';
+import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';
 
 const accountContext = () =>
   createAccountConsensusContext(createEmptyEnv('account-local-tx-admission'));
@@ -28,9 +29,12 @@ const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {
   },
 };
 
-const accountWithPending = (tx: AccountTx): Pick<AccountState, 'mempool' | 'pendingFrame'> => ({
-  mempool: [],
-  pendingFrame: {
+const accountWithPending = (tx: AccountTx): AccountReplica => {
+  const account = makeCanonicalAccount('0xsender', '0xrecipient', {
+    chainId: 1,
+    depositoryAddress: `0x${'11'.repeat(20)}`,
+  });
+  account.pendingFrame = {
     height: 7,
     timestamp: 1,
     jHeight: 1,
@@ -39,8 +43,9 @@ const accountWithPending = (tx: AccountTx): Pick<AccountState, 'mempool' | 'pend
     accountStateRoot: '0xroot',
     stateHash: '0xstate',
     deltas: [],
-  },
-});
+  };
+  return account;
+};
 
 describe('account mempool multiplicity', () => {
   test('accepts only an exact bilateral dispute starter', () => {
@@ -51,13 +56,9 @@ describe('account mempool multiplicity', () => {
   });
 
   test('routes local transactions through the canonical AccountInput boundary', async () => {
-    const account = accountWithPending(PAYMENT) as AccountState;
-    account.leftEntity = '0xsender';
-    account.rightEntity = '0xrecipient';
-    account.domain = { chainId: 1, depositoryAddress: '0xdepository' };
-    account.watchSeed = `0x${'11'.repeat(32)}`;
+    const account = accountWithPending(PAYMENT);
 
-    const input = createLocalAccountInput(account, '0xsender', [
+    const input = createLocalAccountInput(account.state, '0xsender', [
       structuredClone(PAYMENT),
     ]);
     const result = await applyAccountInput(accountContext(), account, input, {
@@ -94,7 +95,7 @@ describe('account mempool multiplicity', () => {
       type: 'swap_resolve',
       data: { offerId: 'offer-1', fillRatio: 32_768, cancelRemainder: false },
     };
-    const account = accountWithPending(fill) as AccountState;
+    const account = accountWithPending(fill);
     account.mempool = [
       { type: 'pull_resolve', data: { pullId: 'pull-1', binary: '0x1234' } },
       structuredClone(PAYMENT),
@@ -121,17 +122,13 @@ describe('account mempool multiplicity', () => {
   });
 
   test('rejects an oversized local batch without partially admitting it', async () => {
-    const account = accountWithPending(PAYMENT) as AccountState;
-    account.leftEntity = '0xsender';
-    account.rightEntity = '0xrecipient';
-    account.domain = { chainId: 1, depositoryAddress: '0xdepository' };
-    account.watchSeed = `0x${'11'.repeat(32)}`;
+    const account = accountWithPending(PAYMENT);
     account.mempool = Array.from(
       { length: LIMITS.ACCOUNT_MEMPOOL_SIZE - 2 },
       () => structuredClone(PAYMENT),
     );
     const before = structuredClone(account.mempool);
-    const input = createLocalAccountInput(account, '0xsender', [
+    const input = createLocalAccountInput(account.state, '0xsender', [
       structuredClone(PAYMENT),
       structuredClone(PAYMENT),
     ]);
@@ -142,13 +139,9 @@ describe('account mempool multiplicity', () => {
   });
 
   test('rejects a malformed local envelope before mempool mutation', async () => {
-    const account = accountWithPending(PAYMENT) as AccountState;
-    account.leftEntity = '0xsender';
-    account.rightEntity = '0xrecipient';
-    account.domain = { chainId: 1, depositoryAddress: '0xdepository' };
-    account.watchSeed = `0x${'11'.repeat(32)}`;
+    const account = accountWithPending(PAYMENT);
     const input = {
-      ...createLocalAccountInput(account, '0xsender', [structuredClone(PAYMENT)]),
+      ...createLocalAccountInput(account.state, '0xsender', [structuredClone(PAYMENT)]),
       toEntityId: '0xthird-party',
     };
 
@@ -159,7 +152,7 @@ describe('account mempool multiplicity', () => {
   });
 
   test('rollback restores identical direct payments with their full multiplicity', () => {
-    const account = accountWithPending(PAYMENT) as AccountState;
+    const account = accountWithPending(PAYMENT);
     account.mempool = [structuredClone(PAYMENT)];
 
     expect(prependUniqueMempoolTxs(account, [structuredClone(PAYMENT)])).toBe(1);

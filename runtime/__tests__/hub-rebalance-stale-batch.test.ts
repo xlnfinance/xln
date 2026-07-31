@@ -139,8 +139,8 @@ test('hub crontab cannot unilaterally clear a bilateral rebalance request', asyn
   const tokenId = 1;
   const requestedAmount = 500n;
   const hubAccount = makeAccount(entityId, userId, jurisdiction);
-  hubAccount.requestedRebalance.set(tokenId, requestedAmount);
-  hubAccount.requestedRebalanceFeeState.set(tokenId, {
+  hubAccount.state.requestedRebalance.set(tokenId, requestedAmount);
+  hubAccount.state.requestedRebalanceFeeState.set(tokenId, {
     requestId: 'bilateral-request',
     feeTokenId: tokenId,
     feePaidUpfront: 10n ** 30n,
@@ -150,7 +150,7 @@ test('hub crontab cannot unilaterally clear a bilateral rebalance request', asyn
     requestedByLeft: false,
   });
   const userAccount = structuredClone(hubAccount);
-  const bilateralRoot = computeAccountStateRoot(userAccount);
+  const bilateralRoot = computeAccountStateRoot(userAccount.state);
 
   const env = createEmptyEnv('hub-rebalance-bilateral-clear');
   env.scenarioMode = true;
@@ -169,7 +169,7 @@ test('hub crontab cannot unilaterally clear a bilateral rebalance request', asyn
     accountChanges: new Set(),
   });
 
-  expect(computeAccountStateRoot(hubAccount)).toBe(bilateralRoot);
-  expect(hubAccount.requestedRebalance.get(tokenId)).toBe(requestedAmount);
-  expect(hubAccount.requestedRebalanceFeeState.has(tokenId)).toBe(true);
+  expect(computeAccountStateRoot(hubAccount.state)).toBe(bilateralRoot);
+  expect(hubAccount.state.requestedRebalance.get(tokenId)).toBe(requestedAmount);
+  expect(hubAccount.state.requestedRebalanceFeeState.has(tokenId)).toBe(true);
 });

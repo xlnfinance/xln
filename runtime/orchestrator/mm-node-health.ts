@@ -17,7 +17,7 @@ import type { RuntimeReplica } from '../runtime/types';
 import type { SwapOffer } from '../types/account';
 import {
 HUB_REQUIRED_TOKEN_COUNT,
-getAccountState,
+getAccountReplica,
 getBootstrapCreditAmount,
 getCreditGrantedByEntity,
 getEntityOutCapacity,
@@ -132,7 +132,7 @@ const describeMarketMakerAccountBlocker = (
   entityId: string,
   counterpartyEntityId: string,
 ): MarketMakerCrossRouteBlocker | null => {
-  const account = getAccountState(env, entityId, counterpartyEntityId);
+  const account = getAccountReplica(env, entityId, counterpartyEntityId);
   const status = account ? String(account.status || 'active') : null;
   const currentHeight = account ? Number(account.currentHeight ?? 0) : null;
   const pendingFrame = Boolean(account?.pendingFrame);
@@ -152,7 +152,7 @@ const describeMarketMakerAccountBlocker = (
     pendingFrame,
     pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
     mempoolLength,
-    swapOffers: Number(account?.swapOffers?.size || 0),
+    swapOffers: Number(account?.state.swapOffers?.size || 0),
   };
 };
 
@@ -161,7 +161,7 @@ export const describeMarketMakerSameHubBlocker = (
   entityId: string,
   counterpartyEntityId: string,
 ): MarketMakerAccountBlocker | null => {
-  const account = getAccountState(env, entityId, counterpartyEntityId);
+  const account = getAccountReplica(env, entityId, counterpartyEntityId);
   const status = account ? String(account.status || 'active') : null;
   const currentHeight = account ? Number(account.currentHeight ?? 0) : null;
   const pendingFrame = Boolean(account?.pendingFrame);
@@ -180,7 +180,7 @@ export const describeMarketMakerSameHubBlocker = (
     pendingFrame,
     pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
     mempoolLength,
-    swapOffers: Number(account?.swapOffers?.size || 0),
+    swapOffers: Number(account?.state.swapOffers?.size || 0),
   };
 };
 
@@ -550,7 +550,7 @@ const selectEligibleCrossOfferSpecs = (
       if (excludedOfferIds?.has(spec.offerId)) return false;
       if (excludedOfferIds && attemptedBootstrapIntentOrderIds.has(spec.offerId)) return false;
       if (hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) return false;
-      const targetAccount = getAccountState(env, targetContext.entityId, route.target.entityId);
+      const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);
       if (!targetAccount || String(targetAccount.status || 'active') !== 'active') return false;
       if (!isAccountConsensusReady(targetAccount)) return false;
       return (
@@ -622,7 +622,7 @@ const maintainBootstrapCrossQuotes = async (
     if (!shouldContinue()) return false;
     if (remainingNewOffers <= 0 || remainingSourceHubGroups <= 0) break;
     const sourceHubEntityId = sourceHub.entityId;
-    const account = getAccountState(env, sourceContext.entityId, sourceHubEntityId);
+    const account = getAccountReplica(env, sourceContext.entityId, sourceHubEntityId);
     if (!account || String(account.status || 'active') !== 'active' || !isAccountConsensusReady(account)) continue;
     const sourceHubSpecs = buildMarketMakerCrossOfferSpecs(
       env,
@@ -644,7 +644,7 @@ const maintainBootstrapCrossQuotes = async (
     for (const spec of sourceHubSpecs) {
       const route = spec.crossJurisdiction;
       if (!route) continue;
-      const targetAccount = getAccountState(env, targetContext.entityId, route.target.entityId);
+      const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);
       if (!targetAccount || String(targetAccount.status || 'active') !== 'active') continue;
       if (!isAccountConsensusReady(targetAccount)) continue;
       desiredOffersSeen += 1;
@@ -747,7 +747,7 @@ const maintainSteadyCrossQuotes = async (
   for (const [sourceHubEntityId, specs] of groupedEntries) {
     await yieldMarketMakerApi();
     if (!shouldContinue()) return false;
-    const account = getAccountState(env, sourceContext.entityId, sourceHubEntityId);
+    const account = getAccountReplica(env, sourceContext.entityId, sourceHubEntityId);
     if (!account || String(account.status || 'active') !== 'active' || !isAccountConsensusReady(account)) continue;
     const existingOfferIds = collectOfferIdsForAccount(account);
     const allowedNewOffers = Math.min(
@@ -917,7 +917,7 @@ export const getMarketMakerHealth = (
   }
 
   const hubs = hubEntityIds.map((hubEntityId) => {
-    const account = getAccountState(env, mmEntityId, hubEntityId);
+    const account = getAccountReplica(env, mmEntityId, hubEntityId);
     const blocker = describeMarketMakerSameHubBlocker(env, mmEntityId, hubEntityId);
     const accountReady = !blocker && hasCommittedAccountState(account);
     const offers = countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId);
@@ -944,7 +944,7 @@ export const getMarketMakerHealth = (
   });
 
   const connectivity = hubEntityIds.map((hubEntityId) => {
-    const account = getAccountState(env, mmEntityId, hubEntityId);
+    const account = getAccountReplica(env, mmEntityId, hubEntityId);
     return {
       hubEntityId,
       accountReady: isAccountConsensusReady(account),
@@ -952,7 +952,7 @@ export const getMarketMakerHealth = (
       currentHeight: account ? Number(account.currentHeight ?? 0) : null,
       mempoolLength: Number(account?.mempool?.length || 0),
       pendingFrame: Boolean(account?.pendingFrame),
-      swapOffers: Number(account?.swapOffers?.size || 0),
+      swapOffers: Number(account?.state.swapOffers?.size || 0),
       tokens: tokenIds.map((tokenId) => ({
         tokenId,
         mmGranted: account ? getCreditGrantedByEntity(account, mmEntityId, tokenId).toString() : '0',
@@ -1101,9 +1101,9 @@ const collectCommittedMarketMakerOfferFingerprintsForHub = (
   hubEntityId: string,
   hubRole: string,
 ): Array<Record<string, unknown>> => {
-  const account = getAccountState(env, mmEntityId, hubEntityId);
+  const account = getAccountReplica(env, mmEntityId, hubEntityId);
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
-  return Array.from(account?.swapOffers?.entries?.() ?? [])
+  return Array.from(account?.state.swapOffers?.entries?.() ?? [])
     .filter(([offerId]) => String(offerId).startsWith(prefix))
     .map(([offerId, offer]) => {
       const parsed = parseMarketMakerSameOfferId(String(offerId));

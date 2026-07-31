@@ -28,7 +28,7 @@ const requireCommittedSwapOffer = (
   offer: NormalizedOrderbookOffer,
 ): EntityAccountState => {
   const account = findAccountByCounterparty(state, offer.accountId);
-  const committedOffer = account?.swapOffers?.get(offer.offerId);
+  const committedOffer = account?.state.swapOffers?.get(offer.offerId);
   if (!account || !committedOffer) {
     throw new Error(`ORDERBOOK_ORDER_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId}`);
   }
@@ -54,11 +54,11 @@ const assertSameJurisdictionOrderHoldCommitted = (
   account: EntityAccountState,
   offer: NormalizedOrderbookOffer,
 ): void => {
-  const committedOffer = account.swapOffers.get(offer.offerId);
+  const committedOffer = account.state.swapOffers.get(offer.offerId);
   if (!committedOffer) {
     throw new Error(`ORDERBOOK_ORDER_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId}`);
   }
-  const delta = account.deltas?.get(committedOffer.giveTokenId);
+  const delta = account.state.deltas?.get(committedOffer.giveTokenId);
   const requiredHold = committedOffer.quantizedGive ?? committedOffer.giveAmount;
   const committedHold = committedOffer.makerIsLeft ? (delta?.leftHold ?? 0n) : (delta?.rightHold ?? 0n);
   if (requiredHold <= 0n || committedHold < requiredHold) {
@@ -85,7 +85,7 @@ export const admitOrderbookOfferForMatching = (
     }
     const account = findAccountByCounterparty(state, offer.accountId);
     if ((account?.status ?? 'active') !== 'active') return null;
-    if (account?.swapOffers?.has(offer.offerId)) requireCommittedSwapOffer(state, offer);
+    if (account?.state.swapOffers?.has(offer.offerId)) requireCommittedSwapOffer(state, offer);
     const admissionError = getCrossJurisdictionBookAdmissionError(
       state,
       offer.crossJurisdiction,

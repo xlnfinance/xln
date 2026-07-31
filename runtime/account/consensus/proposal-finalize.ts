@@ -35,7 +35,7 @@ const resolveDisputeSeal = (
     account.currentDisputeHash &&
     account.currentDisputeProofBodyHash?.toLowerCase() ===
       proof.proof.proofBodyHash.toLowerCase() &&
-    Number(account.currentDisputeProofNonce ?? 0) > Number(candidate.jNonce ?? 0)
+    Number(account.currentDisputeProofNonce ?? 0) > Number(candidate.state.jNonce ?? 0)
   ) {
     return {
       hanko: account.currentDisputeProofHanko,
@@ -67,8 +67,8 @@ const buildOutboundAccountInput = (
   const shared = {
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
-    domain: structuredClone(account.domain),
-    watchSeed: account.watchSeed,
+    domain: structuredClone(account.state.domain),
+    watchSeed: account.state.watchSeed,
     proposal,
   };
   if (bundleAck) {
@@ -99,7 +99,7 @@ export const finalizeAccountProposal = (
   // Pending commitment and frame install are one Account-candidate mutation.
   // Late mempool arrivals survive because removal is by exact transaction
   // multiplicity, never by the proposal window's old array position.
-  stageAccountCommitmentCache(account, candidate);
+  stageAccountCommitmentCache(account.state, candidate.state);
   account.pendingFrame = frame;
   account.mempool = removeCommittedTxsFromMempool(
     account.mempool,

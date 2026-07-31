@@ -563,7 +563,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep9] = findReplica(env, alice.id);
     const aliceHubAccount9 = aliceRep9.state.accounts.get(hub.id);
-    const aliceDelta9 = aliceHubAccount9?.deltas.get(USDC_TOKEN_ID);
+    const aliceDelta9 = aliceHubAccount9?.state.deltas.get(USDC_TOKEN_ID);
     if (!aliceDelta9 || aliceDelta9.collateral !== aliceCollateralAmount) {
       const actual = aliceDelta9?.collateral || 0n;
       throw new Error(`ASSERT FAIL Frame 9: Alice-Hub collateral = ${actual}, expected ${aliceCollateralAmount}. R2C j-event NOT delivered!`);
@@ -635,7 +635,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // rightCreditLimit = credit extended by RIGHT to LEFT
     const [, bobRep9] = findReplica(env, bob.id);
     const bobHubAccount9 = bobRep9.state.accounts.get(hub.id); // Account keyed by counterparty
-    const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
+    const bobDelta9 = bobHubAccount9?.state.deltas.get(USDC_TOKEN_ID);
     const counterpartyIsLeft = isLeft(hub.id, bob.id);
     const expectedField = counterpartyIsLeft ? 'leftCreditLimit' : 'rightCreditLimit';
     const actualLimit = bobDelta9 ? bobDelta9[expectedField] : 0n;
@@ -882,7 +882,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // That fee is paid by Bob to Hub, so it offsets (reduces magnitude of) Hub->Bob debt.
     const [, hubRepForHB] = findReplica(env, hub.id);
     const hbAccAtShift = hubRepForHB.state.accounts.get(bob.id);
-    const hbPrepaidFee = hbAccAtShift?.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
+    const hbPrepaidFee = hbAccAtShift?.state.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
     const expectedHBShift = -(payment1 + payment2) + hbPrepaidFee;
 
     if (ahDeltaFinal !== expectedAHShift) {
@@ -897,7 +897,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const expectedBobReceived = payment1 + payment2;
     const [, bobRep] = findReplica(env, bob.id);
     const bobHubAcc = bobRep.state.accounts.get(bob.id);
-    const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
+    const bobDelta = bobHubAcc?.state.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
       const bobIsLeftHB = isLeft(bob.id, hub.id);
       const bobDerived = deriveDelta(bobDelta, bobIsLeftHB);
@@ -973,7 +973,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // A-H should NOT have changed yet (Hub forwarding is in next frame)
     const [, hubRepBH19] = findReplica(env, hub.id);
     const hbAcc19 = hubRepBH19.state.accounts.get(bob.id);
-    const hbPrepaidFee19 = hbAcc19?.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
+    const hbPrepaidFee19 = hbAcc19?.state.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
     const expectedBH19 = -(payment1 + payment2) + reversePayment + hbPrepaidFee19;
     if (bhDelta19 !== expectedBH19) {
       throw new Error(`B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
@@ -1003,7 +1003,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const expectedAH = -(payment1SenderGross + payment2) + reversePayment;
     const [, hubRepBHFinal] = findReplica(env, hub.id);
     const hbAccFinal = hubRepBHFinal.state.accounts.get(bob.id);
-    const hbPrepaidFeeFinal = hbAccFinal?.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
+    const hbPrepaidFeeFinal = hbAccFinal?.state.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
     const expectedBH = -(payment1 + payment2) + reversePayment + hbPrepaidFeeFinal;
 
     if (ahDeltaRev !== expectedAH) {
@@ -1046,7 +1046,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     // ✅ Store pre-rebalance state for assertions
     const [, hubPreRebal] = findReplica(env, hub.id);
-    const hbPreCollateral = hubPreRebal.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+    const hbPreCollateral = hubPreRebal.state.accounts.get(bob.id)?.state.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
     const hubPreReserve = hubPreRebal.state.reserves.get(USDC_TOKEN_ID) || 0n;
 
     console.log(`   Pre-rebalance state:`);
@@ -1144,7 +1144,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // ✅ ASSERT: H-B collateral increased by $200K
     const [, hubRepRebal] = findReplica(env, hub.id);
 
-    const hbDeltaRebal = hubRepRebal.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID);
+    const hbDeltaRebal = hubRepRebal.state.accounts.get(bob.id)?.state.deltas.get(USDC_TOKEN_ID);
     const expectedHBCollateral = hbPreCollateral + rebalanceAmount;
 
     if (!hbDeltaRebal || hbDeltaRebal.collateral !== expectedHBCollateral) {
@@ -1314,16 +1314,16 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const charlieHubAccount = charlieRepBeforeTimeout.state.accounts.get(hub.id);
 
     // H4 AUDIT FIX: Capture balance BEFORE lock for refund verification
-    const hubCharlieOffsetBefore = hubCharlieAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta || 0n;
+    const hubCharlieOffsetBefore = hubCharlieAccount?.state.deltas.get(USDC_TOKEN_ID)?.offdelta || 0n;
     console.log(`💰 Hub-Charlie offdelta BEFORE lock: ${hubCharlieOffsetBefore}`);
 
-    console.log(`🔐 Hub-Charlie account locks: ${hubCharlieAccount?.locks.size || 0}`);
-    console.log(`🔐 Charlie-Hub account locks: ${charlieHubAccount?.locks.size || 0}`);
+    console.log(`🔐 Hub-Charlie account locks: ${hubCharlieAccount?.state.locks.size || 0}`);
+    console.log(`🔐 Charlie-Hub account locks: ${charlieHubAccount?.state.locks.size || 0}`);
     console.log(`📖 Hub lockBook size: ${hubRepBeforeTimeout.state.lockBook.size}\n`);
 
     // Lock might be in mempool or committed, check both
     const lockInMempool = hubCharlieAccount?.mempool.some((tx) => tx.type === 'htlc_lock');
-    const lockCommitted = (hubCharlieAccount?.locks.size || 0) > 0 || (charlieHubAccount?.locks.size || 0) > 0;
+    const lockCommitted = (hubCharlieAccount?.state.locks.size || 0) > 0 || (charlieHubAccount?.state.locks.size || 0) > 0;
 
     if (!lockInMempool && !lockCommitted) {
       console.log('⚠️  HTLC lock not created (likely rejected by validation - shortExpiry may be invalid)');
@@ -1346,20 +1346,20 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
         const hubRepEnd = findReplica(env, hub.id)[1];
         const hubCharlieAccountAfter = hubRepEnd.state.accounts.get(charlie.id);
 
-        console.log(`🔐 Hub-Charlie locks after timeout advance: ${hubCharlieAccountAfter?.locks.size || 0}\n`);
+        console.log(`🔐 Hub-Charlie locks after timeout advance: ${hubCharlieAccountAfter?.state.locks.size || 0}\n`);
 
         // H4 AUDIT FIX: Verify balance restored after timeout
-        const hubCharlieOffsetAfter = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID)?.offdelta || 0n;
+        const hubCharlieOffsetAfter = hubCharlieAccountAfter?.state.deltas.get(USDC_TOKEN_ID)?.offdelta || 0n;
         console.log(`💰 Hub-Charlie offdelta AFTER timeout: ${hubCharlieOffsetAfter}`);
 
-        if ((hubCharlieAccountAfter?.locks.size || 0) === 0) {
+        if ((hubCharlieAccountAfter?.state.locks.size || 0) === 0) {
           console.log('✅ HTLC timeout processing verified');
 
           // H4: Verify offdelta was restored (Hub got refund)
           // When lock expires, Hub's hold is released, offdelta should return to pre-lock value
           const hubIsLeft = hub.id < charlie.id;
           const holdField = hubIsLeft ? 'leftHold' : 'rightHold';
-          const currentHold = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID)?.[holdField] || 0n;
+          const currentHold = hubCharlieAccountAfter?.state.deltas.get(USDC_TOKEN_ID)?.[holdField] || 0n;
           if (currentHold === 0n) {
             console.log(`✅ H4: HTLC hold released (${holdField} = 0)`);
           } else {
@@ -1531,7 +1531,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     // Check locks cleared
     const aliceHubAccount4Hop = aliceRep4Hop.state.accounts.get(hub.id);
-    const aliceHubLockCount = aliceHubAccount4Hop?.locks.size || 0;
+    const aliceHubLockCount = aliceHubAccount4Hop?.state.locks.size || 0;
 
     console.log(`   Locks after 4-hop: Alice-Hub=${aliceHubLockCount}`);
     console.log(`   Alice-Hub mempool: ${aliceHubAccount4Hop?.mempool.length || 0}`);
@@ -1592,8 +1592,8 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const hubBobAccountHostage = hubRepHostage.state.accounts.get(bob.id);
     const bobHubAccountHostage = bobRepHostage.state.accounts.get(hub.id);
 
-    console.log(`🔐 Hub-Bob locks: ${hubBobAccountHostage?.locks.size || 0}`);
-    console.log(`🔐 Bob-Hub locks: ${bobHubAccountHostage?.locks.size || 0}`);
+    console.log(`🔐 Hub-Bob locks: ${hubBobAccountHostage?.state.locks.size || 0}`);
+    console.log(`🔐 Bob-Hub locks: ${bobHubAccountHostage?.state.locks.size || 0}`);
 
     // === HOSTAGE SCENARIO: Hub goes offline, Bob must dispute ===
     console.log(`🔒 HOSTAGE: Hub goes offline - Bob cannot reveal bilaterally`);

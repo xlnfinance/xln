@@ -17,14 +17,14 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     chainId: 31_337,
     depositoryAddress: addr('dd'),
   });
-  const delta = account.deltas.get(1)!;
+  const delta = account.state.deltas.get(1)!;
   delta.collateral = 7n;
   delta.ondelta = 3n;
   delta.offdelta = -2n;
   delta.leftHold = 1n;
 
   const input = createAccountDisputeFinalityInput(
-    account,
+    account.state,
     leftEntity,
     4,
     [1],
@@ -50,9 +50,9 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     removedSettlementTxs: 0,
   });
   expect(account.currentHeight).toBe(0);
-  expect(account.jNonce).toBe(4);
+  expect(account.state.jNonce).toBe(4);
   expect(account.status).toBe('disputed');
-  expect(account.deltas.get(1)).toMatchObject({
+  expect(account.state.deltas.get(1)).toMatchObject({
     collateral: 0n,
     ondelta: 0n,
     offdelta: 0n,
@@ -67,7 +67,7 @@ test('external finality rejects an entity outside the bilateral account', () => 
   );
   expect(() =>
     createAccountDisputeFinalityInput(
-      account,
+      account.state,
       `0x${'33'.repeat(32)}`,
       1,
       [],
@@ -79,7 +79,7 @@ test('DisputeStarted enters Account through the same external-finality boundary'
   const leftEntity = `0x${'11'.repeat(32)}`;
   const rightEntity = `0x${'22'.repeat(32)}`;
   const account = makeAccount(leftEntity, rightEntity);
-  const input = createAccountDisputeStartedInput(account, rightEntity, {
+  const input = createAccountDisputeStartedInput(account.state, rightEntity, {
     kind: 'dispute_started',
     starterEntityId: leftEntity,
     initialProofbodyHash: `0x${'44'.repeat(32)}`,
@@ -107,7 +107,7 @@ test('DisputeStarted enters Account through the same external-finality boundary'
     events: ['ACCOUNT_DISPUTE_STARTED_APPLIED'],
   });
   expect(account.status).toBe('disputed');
-  expect(account.jNonce).toBe(9);
+  expect(account.state.jNonce).toBe(9);
   expect(account.activeDispute).toEqual({
     startedByLeft: true,
     initialProofbodyHash: `0x${'44'.repeat(32)}`,
@@ -128,7 +128,7 @@ test('invalid DisputeStarted finality leaves Account byte-identical', async () =
   const rightEntity = `0x${'22'.repeat(32)}`;
   const account = makeAccount(leftEntity, rightEntity);
   const before = structuredClone(account);
-  const input = createAccountDisputeStartedInput(account, leftEntity, {
+  const input = createAccountDisputeStartedInput(account.state, leftEntity, {
     kind: 'dispute_started',
     starterEntityId: rightEntity,
     initialProofbodyHash: `0x${'44'.repeat(32)}`,

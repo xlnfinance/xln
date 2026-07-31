@@ -4,8 +4,8 @@ import { compareCanonicalText, swapKey } from './swap-execution';
 export function listOpenSwapOffers(state: Pick<EntityState, 'accounts'>): SwapBookEntry[] {
   const offers: SwapBookEntry[] = [];
   for (const [accountId, account] of state.accounts.entries()) {
-    if (!(account?.swapOffers instanceof Map)) continue;
-    for (const [offerId, offer] of account.swapOffers.entries()) {
+    if (!(account?.state.swapOffers instanceof Map)) continue;
+    for (const [offerId, offer] of account.state.swapOffers.entries()) {
       const createdHeight = Math.max(0, Number(offer.createdHeight));
       offers.push({
         offerId: String(offerId),

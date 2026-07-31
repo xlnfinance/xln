@@ -28,8 +28,8 @@ const validateHtlcLock = (
   currentHeight: number,
 ): string | undefined => {
   const { lockId, timelock, revealBeforeHeight, amount } = tx.data;
-  if (account.locks.has(lockId)) return `Lock ${lockId} already exists`;
-  if (account.locks.size >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS) {
+  if (account.state.locks.has(lockId)) return `Lock ${lockId} already exists`;
+  if (account.state.locks.size >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS) {
     return `Too many active HTLC locks: max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`;
   }
   if (isHtlcTimelockExpired(currentTimestamp, timelock)) {
@@ -56,14 +56,14 @@ export async function handleHtlcLock(
   const events: string[] = [];
 
   // Initialize locks Map if not present (defensive - should be initialized at account creation)
-  if (!account.locks) {
-    account.locks = new Map();
+  if (!account.state.locks) {
+    account.state.locks = new Map();
   }
 
   const validationError = validateHtlcLock(account, accountTx, currentTimestamp, currentHeight);
   if (validationError) return { success: false, error: validationError, events };
 
-  const delta = ensureDelta(account, tokenId);
+  const delta = ensureDelta(account.state, tokenId);
 
   // 5. Determine sender perspective (Channel.ts: byLeft = frame proposer = sender)
   const senderIsLeft = byLeft;
@@ -111,7 +111,7 @@ export async function handleHtlcLock(
   // 9. Add lock to locks Map
   // CRITICAL CONSENSUS FIX: Add during validation too (prevents duplicate lockId in same frame)
   // Validation runs on an isolated clone; commit runs on the real machine.
-  account.locks.set(lockId, lock);
+  account.state.locks.set(lockId, lock);
 
   events.push(`🔒 HTLC locked: ${amount} token ${tokenId}, expires block ${revealBeforeHeight}, hash ${hashlock.slice(0,16)}...`);
 

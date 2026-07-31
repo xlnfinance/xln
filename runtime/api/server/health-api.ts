@@ -41,7 +41,7 @@ export type RuntimeHealthDeps = {
   };
   activeHubEntityIds: string[];
   marketMakerState: MarketMakerServerState;
-  getAccountState: Parameters<typeof getMarketMakerHealth>[2];
+  getAccountReplica: Parameters<typeof getMarketMakerHealth>[2];
   ensureTokenCatalog: () => Promise<JTokenInfo[]>;
 };
 
@@ -121,7 +121,7 @@ const buildHealthBodies = async (deps: RuntimeHealthDeps): Promise<HealthBodies>
   const storage = getStorageHealthSnapshotSync();
   const relay = collectRelayHealth(deps);
   const hubs = mergeHubHealth(health, env, deps, relay.activeClientRuntimeIds, relay.profiles);
-  const marketMaker = getMarketMakerHealth(env, deps.marketMakerState, deps.getAccountState);
+  const marketMaker = getMarketMakerHealth(env, deps.marketMakerState, deps.getAccountReplica);
   const meshApplicable = deps.activeHubEntityIds.length > 0;
   const bootstrapReserves = meshApplicable || marketMaker.applicable
     ? await getBootstrapReserveHealth(env, {

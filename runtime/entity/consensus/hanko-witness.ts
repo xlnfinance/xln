@@ -267,12 +267,12 @@ const sealSettlementAccountTx = (
   entityHeight: number,
 ): number => {
   if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return 0;
-  const localIsLeft = state.entityId.toLowerCase() === account.leftEntity.toLowerCase();
-  if (!localIsLeft && state.entityId.toLowerCase() !== account.rightEntity.toLowerCase()) {
+  const localIsLeft = state.entityId.toLowerCase() === account.state.leftEntity.toLowerCase();
+  if (!localIsLeft && state.entityId.toLowerCase() !== account.state.rightEntity.toLowerCase()) {
     throw new Error(`SETTLEMENT_SEAL_LOCAL_ENTITY_MISMATCH:${state.entityId}`);
   }
   let sealed = 0;
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_SEAL_WORKSPACE_MISSING');
   const localIsExecutor = workspace.executorIsLeft === localIsLeft;
   if (localIsExecutor) {
@@ -310,10 +310,10 @@ export const accountTxAwaitsPostCommitHanko = (
 ): boolean => {
   if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return false;
   if (!tx.data.postProof.hanko) return true;
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (!workspace) return false;
-  const localIsLeft = state.entityId.toLowerCase() === account.leftEntity.toLowerCase();
-  if (!localIsLeft && state.entityId.toLowerCase() !== account.rightEntity.toLowerCase()) return false;
+  const localIsLeft = state.entityId.toLowerCase() === account.state.leftEntity.toLowerCase();
+  if (!localIsLeft && state.entityId.toLowerCase() !== account.state.rightEntity.toLowerCase()) return false;
   const localIsExecutor = workspace.executorIsLeft === localIsLeft;
   return !localIsExecutor && !tx.data.settlementHanko;
 };

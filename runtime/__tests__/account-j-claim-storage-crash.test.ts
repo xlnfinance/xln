@@ -81,8 +81,8 @@ describe('Account J-claim real storage crash recovery', () => {
         const replica = Array.from(restored.state.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
         const account = replica?.state.accounts.get(counterpartyId);
         if (!account) throw new Error('ACCOUNT_J_CRASH_RESTORED_ACCOUNT_MISSING');
-        const side = account.leftEntity === entityId ? 'left' as const : 'right' as const;
-        const state = side === 'left' ? account.leftPendingJClaims : account.rightPendingJClaims;
+        const side = account.state.leftEntity === entityId ? 'left' as const : 'right' as const;
+        const state = side === 'left' ? account.state.leftPendingJClaims : account.state.rightPendingJClaims;
         const expectedCount = boundary === 'before-authoritative-history-commit' ? 0n : 1n;
         expect(state.count).toBe(expectedCount);
         if (expectedCount === 0n) return;
@@ -95,8 +95,8 @@ describe('Account J-claim real storage crash recovery', () => {
         const expectedEventsHash = canonicalJurisdictionEventsHash([{
           type: 'AccountSettled',
           data: {
-            leftEntity: account.leftEntity,
-            rightEntity: account.rightEntity,
+            leftEntity: account.state.leftEntity,
+            rightEntity: account.state.rightEntity,
             tokenId: 1,
             leftReserve: '0',
             rightReserve: '0',
@@ -122,8 +122,8 @@ describe('Account J-claim real storage crash recovery', () => {
         ));
         expect(accountDoc?.family === 'account' && (
           side === 'left'
-            ? accountDoc.value.leftPendingJClaims
-            : accountDoc.value.rightPendingJClaims
+            ? accountDoc.value.state.leftPendingJClaims
+            : accountDoc.value.state.rightPendingJClaims
         )).toEqual(state);
         expect(persistedNode).toEqual(getAccountJClaimNodeStore(restored).get(state.root));
 

@@ -44,7 +44,7 @@ export function getCrossJTargetDisputeRiskForState(
       String(route?.target?.counterpartyEntityId || '').toLowerCase() === self &&
       String(route?.target?.entityId || '').toLowerCase() === counterparty &&
       route?.targetPull?.pullId &&
-      account.pulls?.has?.(route.targetPull.pullId)
+      account.state.pulls?.has?.(route.targetPull.pullId)
     ) {
       amount += BigInt(route.target.amount || 0n);
       tokenId = Number(route.target.tokenId || tokenId);

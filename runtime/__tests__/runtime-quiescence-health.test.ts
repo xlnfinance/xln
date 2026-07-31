@@ -7,7 +7,7 @@ import {
   summarizeRuntimeQuiescence,
 } from '../orchestrator/mesh-common';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
-import type { AccountState } from '../types/account';
+import type { AccountReplica } from '../types/account';
 import type { DeliverableEntityInput } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 
@@ -59,15 +59,17 @@ test('committed credit stays usable while an offline peer leaves durable Account
   const leftEntity = `0x${'11'.repeat(32)}`;
   const rightEntity = `0x${'22'.repeat(32)}`;
   const account = {
+    state: {
+      leftEntity,
+      rightEntity,
+      deltas: new Map([[1, { leftCreditLimit: 100n, rightCreditLimit: 100n }]]),
+    },
     status: 'active',
-    leftEntity,
-    rightEntity,
     currentHeight: 7,
     currentFrame: { height: 7 },
     pendingFrame: { height: 8 },
     mempool: [{ type: 'chat', data: { message: 'durable until peer returns' } }],
-    deltas: new Map([[1, { leftCreditLimit: 100n, rightCreditLimit: 100n }]]),
-  } as unknown as AccountState;
+  } as unknown as AccountReplica;
   env.state.eReplicas = new Map([[`${leftEntity}:1`, {
     entityId: leftEntity,
     signerId: '1',

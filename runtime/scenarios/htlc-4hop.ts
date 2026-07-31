@@ -122,12 +122,12 @@ export async function htlc4hop(env: RuntimeReplica): Promise<void> {
   const hub3BobAccount = hub3Rep.state.accounts.get(bob.id);
 
   console.log(`   Locks after settlement:`);
-  console.log(`   Alice-Hub1: ${aliceHub1Account?.locks.size || 0}`);
-  console.log(`   Hub1-Hub2: ${hub1Hub2Account?.locks.size || 0}`);
-  console.log(`   Hub2-Hub3: ${hub2Hub3Account?.locks.size || 0}`);
-  console.log(`   Hub3-Bob: ${hub3BobAccount?.locks.size || 0}\n`);
+  console.log(`   Alice-Hub1: ${aliceHub1Account?.state.locks.size || 0}`);
+  console.log(`   Hub1-Hub2: ${hub1Hub2Account?.state.locks.size || 0}`);
+  console.log(`   Hub2-Hub3: ${hub2Hub3Account?.state.locks.size || 0}`);
+  console.log(`   Hub3-Bob: ${hub3BobAccount?.state.locks.size || 0}\n`);
 
-  assert((aliceHub1Account?.locks.size || 0) === 0, 'All locks cleared after concurrent payments');
+  assert((aliceHub1Account?.state.locks.size || 0) === 0, 'All locks cleared after concurrent payments');
 
   const totalFeesEarned = (hub1Rep.state.htlcFeesEarned || 0n) +
                           (hub2Rep.state.htlcFeesEarned || 0n) +
@@ -146,8 +146,8 @@ export async function htlc4hop(env: RuntimeReplica): Promise<void> {
   }
 
   // Verify deltas (total across all payments)
-  const aliceHub1Delta = aliceHub1Account?.deltas.get(USDC_TOKEN_ID);
-  const hub3BobDelta = hub3BobAccount?.deltas.get(USDC_TOKEN_ID);
+  const aliceHub1Delta = aliceHub1Account?.state.deltas.get(USDC_TOKEN_ID);
+  const hub3BobDelta = hub3BobAccount?.state.deltas.get(USDC_TOKEN_ID);
 
   const totalPaymentAmount = paymentAmounts.reduce((sum, amt) => sum + amt, 0n);
 

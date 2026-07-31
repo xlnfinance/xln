@@ -25,12 +25,13 @@ import {
 } from '../orchestrator/mm-node';
 import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchestrator/mesh-common';
 import { createEmptyEnv } from '../runtime';
-import type { AccountState } from '../types/account';
+import type { AccountReplica, SwapOffer } from '../types/account';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { createDefaultDelta } from '../account/delta';
 import { LIMITS } from '../config/constants';
 import { encodeBuffer } from '../storage/codec';
+import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -86,11 +87,11 @@ test('market maker server health is ready with one committed offer per pair befo
   state.tokenIds = [1, 2, 3];
 
   const account = {
-    swapOffers: new Map([
+    state: { swapOffers: new Map([
       ['mm-abcdef-2-1-ask-1', {}],
       ['mm-abcdef-1-3-ask-1', {}],
       ['mm-abcdef-2-3-ask-1', {}],
-    ]),
+    ]) },
     currentHeight: 1,
     mempool: [],
     pendingFrame: null,
@@ -128,7 +129,7 @@ test('market maker server health reports depthReady at full configured depth', (
     }
   }
   const health = getServerMarketMakerHealth({} as RuntimeReplica, state, () => ({
-    swapOffers: offers,
+    state: { swapOffers: offers },
     currentHeight: 1,
     mempool: [],
     pendingFrame: null,
@@ -160,7 +161,7 @@ test('market maker server health does not count pending offers as bootstrap-read
   }
 
   const health = getServerMarketMakerHealth({} as RuntimeReplica, state, () => ({
-    swapOffers: new Map(),
+    state: { swapOffers: new Map() },
     currentHeight: 1,
     mempool: [],
     pendingFrame: {
@@ -213,18 +214,13 @@ test('market snapshots expose order counts for aggregated price levels', () => {
 const makeAccount = (
   ownerEntityId: string,
   counterpartyEntityId: string,
-  swapOffers: Map<string, unknown> = new Map(),
-): AccountState => ({
-  leftEntity: ownerEntityId,
-  rightEntity: counterpartyEntityId,
-  status: 'active',
-  currentHeight: 1,
-  currentFrame: {},
-  mempool: [],
-  pendingFrame: null,
-  swapOffers,
-  deltas: new Map(),
-} as unknown as AccountState);
+  swapOffers: Map<string, SwapOffer> = new Map(),
+): AccountReplica => {
+  const account = makeCanonicalAccount(ownerEntityId, counterpartyEntityId);
+  account.currentHeight = 1;
+  account.state.swapOffers = swapOffers;
+  return account;
+};
 
 test('five-token market maker depth remains canonical through Account and hub admission', async () => {
   const mmEntityId = entity('a');
@@ -234,7 +230,7 @@ test('five-token market maker depth remains canonical through Account and hub ad
     const delta = createDefaultDelta(tokenId);
     delta.leftCreditLimit = getBootstrapCreditAmount(tokenId);
     delta.rightCreditLimit = getBootstrapCreditAmount(tokenId);
-    account.deltas.set(tokenId, delta);
+    account.state.deltas.set(tokenId, delta);
   }
 
   const specs = buildMarketMakerOfferSpecs([hubEntityId], [1, 2, 3, 4, 5]);
@@ -256,14 +252,14 @@ test('five-token market maker depth remains canonical through Account and hub ad
     expect(result.error).toBeUndefined();
     expect(result.success).toBe(true);
 
-    const offer = account.swapOffers.get(spec.offerId)!;
+    const offer = account.state.swapOffers.get(spec.offerId)!;
     expect(offer.priceTicks).toBe(spec.priceTicks);
     const working = markWorkingOrderbookOffer({
       offerId: offer.offerId,
       accountId: hubEntityId,
       makerIsLeft: offer.makerIsLeft,
-      fromEntity: account.leftEntity,
-      toEntity: account.rightEntity,
+      fromEntity: account.state.leftEntity,
+      toEntity: account.state.rightEntity,
       createdHeight: offer.createdHeight,
       giveTokenId: offer.giveTokenId,
       giveAmount: offer.giveAmount,
@@ -281,8 +277,8 @@ test('five-token market maker depth remains canonical through Account and hub ad
     if (materialized.kind === 'reject') rejected.push(`${spec.offerId}:${materialized.reason}`);
   }
 
-  expect(account.swapOffers.size).toBe(200);
-  expect(encodeBuffer(account.swapOffers).byteLength).toBeGreaterThan(LIMITS.MAX_STORAGE_VALUE_BYTES);
+  expect(account.state.swapOffers.size).toBe(200);
+  expect(encodeBuffer(account.state.swapOffers).byteLength).toBeGreaterThan(LIMITS.MAX_STORAGE_VALUE_BYTES);
   expect(rejected).toEqual([]);
 });
 
@@ -290,7 +286,7 @@ const addReplica = (
   env: RuntimeReplica,
   entityId: string,
   signerId: string,
-  accounts: Map<string, AccountState> = new Map(),
+  accounts: Map<string, AccountReplica> = new Map(),
 ): void => {
   env.state.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
@@ -311,8 +307,21 @@ const addReplica = (
   } as unknown as EntityReplica);
 };
 
-const committedSameChainOffers = (hubEntityId: string, tokenIds: number[]): Map<string, unknown> => {
-  return new Map(buildMarketMakerOfferSpecs([hubEntityId], tokenIds).map(spec => [spec.offerId, {}]));
+const committedSameChainOffers = (hubEntityId: string, tokenIds: number[]): Map<string, SwapOffer> => {
+  return new Map(buildMarketMakerOfferSpecs([hubEntityId], tokenIds).map(spec => [spec.offerId, {
+    offerId: spec.offerId,
+    makerIsLeft: true,
+    fromEntity: 'market-maker',
+    toEntity: hubEntityId,
+    accountId: hubEntityId,
+    createdHeight: 1,
+    giveTokenId: spec.giveTokenId,
+    giveAmount: spec.giveAmount,
+    wantTokenId: spec.wantTokenId,
+    wantAmount: spec.wantAmount,
+    priceTicks: spec.priceTicks,
+    timeInForce: 0,
+  }]));
 };
 
 const buildBootstrapTopology = (): {
@@ -604,12 +613,26 @@ test('runtime market maker health stays red until every byte-budgeted cross mark
     [1, 2, 3],
     [1, 2, 3],
   );
-  const commitOneOfferPerPair = (account: AccountState, specs: ReturnType<typeof buildMarketMakerCrossOfferSpecs>): number => {
+  const commitOneOfferPerPair = (account: AccountReplica, specs: ReturnType<typeof buildMarketMakerCrossOfferSpecs>): number => {
     const coveredPairs = new Set<string>();
     const pairBudget = Math.max(1, new Set(specs.map(spec => spec.pairId)).size - 1);
     for (const spec of specs) {
       if (coveredPairs.has(spec.pairId)) continue;
-      account.swapOffers?.set(spec.offerId, { crossJurisdiction: spec.crossJurisdiction });
+      account.state.swapOffers.set(spec.offerId, {
+        offerId: spec.offerId,
+        makerIsLeft: true,
+        fromEntity: account.state.leftEntity,
+        toEntity: account.state.rightEntity,
+        accountId: account.proofHeader.toEntity,
+        createdHeight: 1,
+        giveTokenId: spec.giveTokenId,
+        giveAmount: spec.giveAmount,
+        wantTokenId: spec.wantTokenId,
+        wantAmount: spec.wantAmount,
+        priceTicks: spec.priceTicks,
+        timeInForce: 0,
+        crossJurisdiction: spec.crossJurisdiction,
+      });
       coveredPairs.add(spec.pairId);
       if (coveredPairs.size >= pairBudget) break;
     }
@@ -654,7 +677,7 @@ test('market maker finalized cross matching tolerates rolling route hash but rej
     [1, 2, 3],
   )[0]!;
   const route = spec.crossJurisdiction!;
-  account.swapOffers.set(spec.offerId, {
+  account.state.swapOffers.set(spec.offerId, {
     offerId: spec.offerId,
     giveTokenId: spec.giveTokenId,
     giveAmount: spec.giveAmount,
@@ -671,8 +694,8 @@ test('market maker finalized cross matching tolerates rolling route hash but rej
   } as any);
 
   expect(hasFinalizedMarketMakerCrossOffer(env, spec)).toBe(true);
-  account.swapOffers.set(spec.offerId, {
-    ...account.swapOffers.get(spec.offerId),
+  account.state.swapOffers.set(spec.offerId, {
+    ...account.state.swapOffers.get(spec.offerId),
     crossJurisdiction: {
       ...route,
       target: {

@@ -25,7 +25,7 @@ import {
   type NormalizedOrderbookOffer,
 } from '../orderbook/swap-execution';
 
-import type { AccountState, AccountTx, SwapOffer } from '../types/account';
+import type { AccountReplica, AccountTx, SwapOffer } from '../types/account';
 import type { EntityCandidateEffect } from '../entity/types';
 
 import { createDefaultDelta } from '../account/delta';
@@ -44,24 +44,45 @@ const processCommittedOrderbookSwaps = (
   options?: Parameters<typeof processOrderbookSwaps>[2],
 ) => processOrderbookSwaps(state, offers.map(markWorkingOrderbookOffer), options);
 
-function makeAccountMachine(offer: SwapOffer): AccountState {
-  const heldGiveAmount = offer.quantizedGive ?? offer.giveAmount;
-  const giveDelta = createDefaultDelta(offer.giveTokenId);
-  giveDelta.leftCreditLimit = 10n ** 30n;
-  giveDelta.rightCreditLimit = 10n ** 30n;
-  if (offer.makerIsLeft) {
-    giveDelta.leftHold = heldGiveAmount;
-  } else {
-    giveDelta.rightHold = heldGiveAmount;
+function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountReplica {
+  const offers = Array.isArray(input) ? input : [input];
+  const firstOffer = offers[0];
+  const deltas = new Map<number, ReturnType<typeof createDefaultDelta>>();
+  for (const offer of offers) {
+    for (const tokenId of [offer.giveTokenId, offer.wantTokenId]) {
+      if (deltas.has(tokenId)) continue;
+      const delta = createDefaultDelta(tokenId);
+      delta.leftCreditLimit = 10n ** 30n;
+      delta.rightCreditLimit = 10n ** 30n;
+      deltas.set(tokenId, delta);
+    }
+    const giveDelta = deltas.get(offer.giveTokenId)!;
+    const heldGiveAmount = offer.quantizedGive ?? offer.giveAmount;
+    if (offer.makerIsLeft) giveDelta.leftHold += heldGiveAmount;
+    else giveDelta.rightHold += heldGiveAmount;
   }
 
-  const wantDelta = createDefaultDelta(offer.wantTokenId);
-  wantDelta.leftCreditLimit = 10n ** 30n;
-  wantDelta.rightCreditLimit = 10n ** 30n;
-
   return {
-    leftEntity: 'maker',
-    rightEntity: 'hub',
+    state: {
+      leftEntity: firstOffer?.fromEntity ?? 'hub-entity',
+      rightEntity: firstOffer?.toEntity ?? 'fixture-peer',
+      domain: {
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+      },
+      watchSeed: `0x${'11'.repeat(32)}`,
+      deltas,
+      locks: new Map(),
+      swapOffers: new Map(offers.map((offer) => [offer.offerId, offer])),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -70,33 +91,43 @@ function makeAccountMachine(offer: SwapOffer): AccountState {
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       deltas: [],
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map([
-      [offer.giveTokenId, giveDelta],
-      [offer.wantTokenId, wantDelta],
-    ]),
-    locks: new Map(),
-    swapOffers: new Map([[offer.offerId, offer]]),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    proofHeader: { fromEntity: 'maker', toEntity: 'hub', nextProofNonce: 0 },
+    proofHeader: {
+      fromEntity: firstOffer?.fromEntity ?? 'hub-entity',
+      toEntity: firstOffer?.toEntity ?? 'fixture-peer',
+      nextProofNonce: 0,
+    },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
   };
+}
+
+/** See part 1: projection-only fixtures still use the canonical AccountReplica shape. */
+function makeAccountIndex(offerIds: readonly string[]): AccountReplica {
+  return makeAccountMachine(
+    offerIds.map((offerId) => ({
+      offerId,
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'fixture-peer',
+      accountId: 'fixture-peer',
+      createdHeight: 0,
+      giveTokenId: 1,
+      giveAmount: SWAP_LOT_SCALE,
+      wantTokenId: 2,
+      wantAmount: SWAP_LOT_SCALE,
+      timeInForce: 0,
+      priceTicks: ORDERBOOK_PRICE_SCALE,
+    })),
+  );
 }
 
 describe('orderbook matching fallback execution mapping', () => {
@@ -474,7 +505,7 @@ describe('orderbook matching fallback execution mapping', () => {
         [
           'maker-account',
           {
-            swapOffers: new Map([['maker-cross-pending', makerOffer]]),
+            ...makeAccountMachine([makerOffer]),
             pendingFrame: {
               accountTxs: [
                 {
@@ -494,7 +525,7 @@ describe('orderbook matching fallback execution mapping', () => {
             },
           },
         ],
-        ['taker-account', { swapOffers: new Map([['taker-cross-pending', takerOffer]]) }],
+        ['taker-account', makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -596,7 +627,7 @@ describe('orderbook matching fallback execution mapping', () => {
         [
           'maker-account',
           {
-            swapOffers: new Map(),
+            ...makeAccountMachine([]),
             pendingFrame: {
               accountTxs: [
                 {
@@ -616,7 +647,7 @@ describe('orderbook matching fallback execution mapping', () => {
             },
           },
         ],
-        ['taker-account', { swapOffers: new Map([['taker-cross-pending', takerOffer]]) }],
+        ['taker-account', makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -795,7 +826,7 @@ describe('orderbook matching fallback execution mapping', () => {
         [
           'maker-pending-account',
           {
-            swapOffers: new Map([['maker-cross-pending', pendingOffer]]),
+            ...makeAccountMachine([pendingOffer]),
             pendingFrame: {
               accountTxs: [
                 {
@@ -815,8 +846,8 @@ describe('orderbook matching fallback execution mapping', () => {
             },
           },
         ],
-        ['maker-committed-account', { swapOffers: new Map([['maker-cross-committed', committedOffer]]) }],
-        ['taker-account', { swapOffers: new Map([['taker-cross', takerOffer]]) }],
+        ['maker-committed-account', makeAccountMachine([committedOffer])],
+        ['taker-account', makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -933,7 +964,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([['local-taker-account', { swapOffers: new Map([['taker-cross', takerOffer]]) }]]),
+      accounts: new Map([['local-taker-account', makeAccountMachine([takerOffer])]]),
       crossJurisdictionBookAdmissions: new Map([
         [
           'remote-maker:maker-cross',
@@ -1059,7 +1090,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['local-taker-account', { swapOffers: new Map([['local-taker-cross-pending-progress', takerOffer]]) }],
+        ['local-taker-account', makeAccountMachine([takerOffer])],
       ]),
       crossJurisdictionBookAdmissions: new Map([
         [
@@ -1197,7 +1228,7 @@ describe('orderbook matching fallback execution mapping', () => {
       entityId: 'hub-entity',
       timestamp: CROSS_J_PENDING_FILL_ACK_TTL_MS + 100,
       accounts: new Map([
-        ['local-taker-account', { swapOffers: new Map([['local-taker-cross-expired-pending-progress', takerOffer]]) }],
+        ['local-taker-account', makeAccountMachine([takerOffer])],
       ]),
       crossJurisdictionBookAdmissions: new Map([
         [
@@ -1359,9 +1390,9 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-account', { swapOffers: new Map([['maker-cross', makerOffer]]) }],
-        ['taker-one-account', { swapOffers: new Map([['taker-one', takerOne]]) }],
-        ['taker-two-account', { swapOffers: new Map([['taker-two', takerTwo]]) }],
+        ['maker-account', makeAccountMachine([makerOffer])],
+        ['taker-one-account', makeAccountMachine([takerOne])],
+        ['taker-two-account', makeAccountMachine([takerTwo])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -1444,7 +1475,7 @@ describe('orderbook matching fallback execution mapping', () => {
     };
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([['maker-account', { swapOffers: new Map([['debug-cross', offer]]) }]]),
+      accounts: new Map([['maker-account', makeAccountMachine([offer])]]),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -1540,9 +1571,9 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-account', { swapOffers: new Map([['maker-ask', makerAsk]]) }],
-        ['crossed-account', { swapOffers: new Map([['crossed-bid', crossedBid]]) }],
-        ['taker-account', { swapOffers: new Map() }],
+        ['maker-account', makeAccountMachine([makerAsk])],
+        ['crossed-account', makeAccountMachine([crossedBid])],
+        ['taker-account', makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -1635,14 +1666,9 @@ describe('orderbook matching fallback execution mapping', () => {
       accounts: new Map([
         [
           'maker-account',
-          {
-            swapOffers: new Map([
-              ['maker-ask-a', makerOfferA],
-              ['maker-ask-b', makerOfferB],
-            ]),
-          },
+          makeAccountMachine([makerOfferA, makerOfferB]),
         ],
-        ['taker-account', { swapOffers: new Map() }],
+        ['taker-account', makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -1723,7 +1749,7 @@ describe('orderbook matching fallback execution mapping', () => {
         [
           'maker-account',
           {
-            swapOffers: new Map([['maker-ask', makerOffer]]),
+            ...makeAccountMachine([makerOffer]),
             mempool: [
               {
                 type: 'swap_resolve',
@@ -1736,7 +1762,7 @@ describe('orderbook matching fallback execution mapping', () => {
             ],
           },
         ],
-        ['taker-account', { swapOffers: new Map() }],
+        ['taker-account', makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -1769,7 +1795,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const overflowPriceTicks = 25_262_625n;
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([['alice', { swapOffers: new Map() }]]),
+      accounts: new Map([['alice', makeAccountMachine([])]]),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -1805,7 +1831,7 @@ describe('orderbook matching fallback execution mapping', () => {
       priceTicks: anchorPriceTicks,
     };
 
-    entityState.accounts.get('alice')!.swapOffers = new Map([['offer-a', anchorOffer]]);
+    entityState.accounts.set('alice', makeAccountMachine([anchorOffer]));
     const firstPass = processCommittedOrderbookSwaps(entityState, [anchorOffer] as any);
     const initialBook = firstPass.bookUpdates.at(-1)?.book;
     expect(initialBook).toBeDefined();
@@ -1839,7 +1865,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const maxOrders = 3;
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([['alice', { swapOffers: new Map() }]]),
+      accounts: new Map([['alice', makeAccountMachine([])]]),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -1944,13 +1970,9 @@ describe('orderbook matching fallback execution mapping', () => {
       accounts: new Map([
         [
           'maker-account',
-          {
-            leftEntity: 'hub-entity',
-            rightEntity: 'maker-entity',
-            swapOffers: new Map([['maker-ask', makerOffer]]),
-          },
+          makeAccountMachine([makerOffer]),
         ],
-        ['taker-account', { swapOffers: new Map() }],
+        ['taker-account', makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -2153,8 +2175,8 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['taker-account', { swapOffers: new Map() }],
-        ['maker-account', { swapOffers: new Map() }],
+        ['taker-account', makeAccountMachine([])],
+        ['maker-account', makeAccountMachine([])],
       ]),
       orderbookExt: {
         hubProfile: {

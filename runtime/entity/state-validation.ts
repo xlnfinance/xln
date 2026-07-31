@@ -1,4 +1,4 @@
-import { validateAccountState } from '../account/state-validation';
+import { validateAccountReplica } from '../account/state-validation';
 import { LIMITS } from '../config/constants';
 import {
   FinancialDataCorruptionError,
@@ -202,12 +202,12 @@ const validateAccounts = (
         { accountId: rawAccountId },
       );
     }
-    const account = validateAccountState(
+    const account = validateAccountReplica(
       value,
       `${context}.accounts[${rawAccountId}]`,
     );
-    const leftEntity = account.leftEntity.trim().toLowerCase();
-    const rightEntity = account.rightEntity.trim().toLowerCase();
+    const leftEntity = account.state.leftEntity.trim().toLowerCase();
+    const rightEntity = account.state.rightEntity.trim().toLowerCase();
     const expectedCounterparty = canonicalEntityId === leftEntity
       ? rightEntity
       : canonicalEntityId === rightEntity

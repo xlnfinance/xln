@@ -60,7 +60,7 @@ export const applyAccountSettledJEvent = (
     return;
   }
   dirtyAccounts.add(counterpartyId.toLowerCase());
-  account.lastFinalizedJHeight ??= 0;
+  account.state.lastFinalizedJHeight ??= 0;
 
   const normalized = requireCanonicalJurisdictionEvents([event]);
   if (normalized.length !== 1 || !normalized[0]) {

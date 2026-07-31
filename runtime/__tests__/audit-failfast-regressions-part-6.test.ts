@@ -246,7 +246,7 @@ import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fai
 
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
-import { cloneAccountState } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state-clone';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -255,7 +255,7 @@ import {
 
 import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 
-import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
+import type { AccountFrame, AccountInput, AccountReplica, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import type { JInput } from '../jurisdiction/machine/input';
@@ -349,11 +349,30 @@ const makeEmptyProofBody = () => ({
   transformers: [],
 });
 
-const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountState => {
+const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountReplica => {
   return {
-    leftEntity,
-    rightEntity,
-    domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+      watchSeed: deriveAccountWatchSeed({
+        runtimeSeed: 'audit-failfast-test-helper',
+        entityId: leftEntity,
+        counterpartyId: rightEntity,
+        timestamp: 0,
+      }),
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+    },
     status: 'active',
     mempool: [...mempool],
     currentFrame: {
@@ -367,36 +386,18 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map(),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    watchSeed: deriveAccountWatchSeed({
-      runtimeSeed: 'audit-failfast-test-helper',
-      entityId: leftEntity,
-      counterpartyId: rightEntity,
-      timestamp: 0,
-    }),
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
-  } as AccountState;
+  };
 };
 
 const setSyntheticPendingAccountProposal = (
-  account: AccountState,
+  account: AccountReplica,
   accountTxs: AccountTx[],
   timestamp: number,
 ): void => {
@@ -413,13 +414,13 @@ const setSyntheticPendingAccountProposal = (
     kind: 'frame',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
-    domain: structuredClone(account.domain),
+    domain: structuredClone(account.state.domain),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
 
 const makeIncomingAccountFrame = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
   byLeft: boolean,
   timestamp = 10_000,
@@ -898,13 +899,13 @@ describe('audit fail-fast regressions', () => {
 
     const stateWithOffer = first.newState;
     const sourceAccount = stateWithOffer.accounts.get(sourceUser)!;
-    sourceAccount.swapOffers.set(orderId, {
+    sourceAccount.state.swapOffers.set(orderId, {
       offerId: orderId,
       giveTokenId: route.source.tokenId,
       giveAmount: route.source.amount,
       wantTokenId: route.target.tokenId,
       wantAmount: route.target.amount,
-      makerIsLeft: sourceAccount.leftEntity.toLowerCase() === sourceUser.toLowerCase(),
+      makerIsLeft: sourceAccount.state.leftEntity.toLowerCase() === sourceUser.toLowerCase(),
       timeInForce: 0,
       createdHeight: 1,
       priceTicks: 25_000_000n,
@@ -1019,7 +1020,7 @@ describe('audit fail-fast regressions', () => {
     const hubState = makeEntityState(hubId);
     hubState.config = makeSingleSignerConfigFor('hub-signer');
     const account = makeProposalAccount([], hubId, userId);
-    account.swapOffers.set(offerId, {
+    account.state.swapOffers.set(offerId, {
       offerId,
       giveTokenId: 1,
       giveAmount: 1_000n,
@@ -1107,7 +1108,7 @@ describe('audit fail-fast regressions', () => {
       },
       { runtimeSeed: 'dispute-start-cross-j-remote-book', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
-    account.swapOffers.set(offerId, {
+    account.state.swapOffers.set(offerId, {
       offerId,
       giveTokenId: 1,
       giveAmount: 1_000n,
@@ -1165,7 +1166,7 @@ describe('audit fail-fast regressions', () => {
     const hubState = makeEntityState(hubId);
     hubState.config = makeSingleSignerConfigFor('hub-signer');
     const account = makeProposalAccount([], hubId, userId);
-    account.swapOffers.set(offerId, {
+    account.state.swapOffers.set(offerId, {
       offerId,
       giveTokenId: 1,
       giveAmount: 1_000n,
@@ -1499,7 +1500,7 @@ describe('audit fail-fast regressions', () => {
     const accountMachine = isLeftEntity(payerId, hubId)
       ? makeProposalAccount([], payerId, hubId)
       : makeProposalAccount([], hubId, payerId);
-    accountMachine.locks.set(lockId, {
+    accountMachine.state.locks.set(lockId, {
       lockId,
       hashlock,
       timelock,
@@ -1512,7 +1513,7 @@ describe('audit fail-fast regressions', () => {
       envelopeHash: hashEncryptedHtlcLayer(encryptedLayer),
     });
     hubState.accounts.set(payerId, accountMachine);
-    const lock = accountMachine.locks.get(lockId);
+    const lock = accountMachine.state.locks.get(lockId);
     if (!lock) throw new Error('TEST_HTLC_LOCK_MISSING');
     const advanceTx = buildHtlcOnionAdvanceTx(hubState, payerId, lock, encryptedLayer, {
       nextHop: nextHopId,
@@ -1715,7 +1716,7 @@ describe('audit fail-fast regressions', () => {
       },
     };
     const account = makeProposalAccount([closeTx], hubId, userId);
-    account.pulls = new Map([
+    account.state.pulls = new Map([
       [
         route.sourcePull!.pullId,
         {
@@ -1735,7 +1736,7 @@ describe('audit fail-fast regressions', () => {
     ]);
     const delta = createDefaultDelta(route.sourcePull!.tokenId);
     delta.rightHold = BigInt(route.sourcePull!.amount);
-    account.deltas.set(route.sourcePull!.tokenId, delta);
+    account.state.deltas.set(route.sourcePull!.tokenId, delta);
     const proposed = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
     expect(proposed.success).toBe(true);
     const pendingHeight = proposed.accountInput!.proposal.frame.height;
@@ -1769,8 +1770,8 @@ describe('audit fail-fast regressions', () => {
     hubState.config = makeSingleSignerConfigFor('hub-signer');
     attachSigningReplica(env, hubId, 'hub-signer');
     const account = makeProposalAccount([], hubId, userId);
-    account.deltas.set(1, createDefaultDelta(1));
-    account.locks.set('counter-await-secret-lock', {
+    account.state.deltas.set(1, createDefaultDelta(1));
+    account.state.locks.set('counter-await-secret-lock', {
       lockId: 'counter-await-secret-lock',
       hashlock: `0x${'55'.repeat(32)}`,
       timelock: BigInt(hubState.timestamp + 60_000),

@@ -21,6 +21,7 @@ export const validatePendingAccountResend = (
   account: Record<string, unknown>,
   context: string,
 ): void => {
+  const state = validateObject(account['state'], `${context}.state`);
   const pendingFrame = account['pendingFrame'];
   const pendingInput = account['pendingAccountInput'];
   const present = [pendingFrame, pendingInput].map(
@@ -71,7 +72,7 @@ export const validatePendingAccountResend = (
   }
   if (
     !sameAccountStateDomain(
-      normalizeAccountStateDomain(account['domain'] as AccountState['domain']),
+      normalizeAccountStateDomain(state['domain'] as AccountState['domain']),
       normalizeAccountStateDomain(input['domain'] as AccountState['domain']),
     )
   ) {

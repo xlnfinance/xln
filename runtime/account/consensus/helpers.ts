@@ -81,7 +81,7 @@ export const buildAccountProofBodyFromJurisdictions = (
 ) =>
   buildAccountProofBody(
     account,
-    requireAccountDeltaTransformerAddress(jurisdictions, account),
+    requireAccountDeltaTransformerAddress(jurisdictions, account.state),
   );
 
 export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
@@ -94,7 +94,7 @@ type SettlementVector = Map<number, { collateral: bigint; ondelta: bigint }>;
 
 export function captureSettlementVector(account: AccountReplica): SettlementVector {
   const out: SettlementVector = new Map();
-  for (const [tokenId, delta] of account.deltas.entries()) {
+  for (const [tokenId, delta] of account.state.deltas.entries()) {
     out.set(tokenId, { collateral: delta.collateral, ondelta: delta.ondelta });
   }
   return out;
@@ -138,7 +138,7 @@ export function assertNoUnilateralSettlementMutation(
   phase: string,
 ): void {
   if (tx.type === 'j_event_claim') return;
-  for (const [tokenId, delta] of account.deltas.entries()) {
+  for (const [tokenId, delta] of account.state.deltas.entries()) {
     const prev = before.get(tokenId);
     const prevCollateral = prev?.collateral ?? 0n;
     const prevOndelta = prev?.ondelta ?? 0n;

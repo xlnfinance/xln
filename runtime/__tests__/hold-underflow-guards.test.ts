@@ -15,8 +15,8 @@ describe('hold underflow guards', () => {
     const accountMachine = makeAccount(entity('11'), entity('22'));
     const delta = createDefaultDelta(1);
     delta.leftHold = 7n;
-    accountMachine.deltas = new Map([[1, delta]]);
-    accountMachine.locks.set(lockId, {
+    accountMachine.state.deltas = new Map([[1, delta]]);
+    accountMachine.state.locks.set(lockId, {
       lockId,
       tokenId: 1,
       amount: 7n,
@@ -29,7 +29,7 @@ describe('hold underflow guards', () => {
     });
 
     const result = await handleHtlcResolve(
-      accountMachine,
+      accountMachine.state,
       {
         type: 'htlc_resolve',
         data: { lockId, outcome: 'error', reason: 'timeout' },
@@ -40,7 +40,7 @@ describe('hold underflow guards', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(accountMachine.locks.has(lockId)).toBe(false);
+    expect(accountMachine.state.locks.has(lockId)).toBe(false);
     expect(delta.leftHold).toBe(0n);
   });
 
@@ -50,8 +50,8 @@ describe('hold underflow guards', () => {
     deltaA.leftHold = 5n;
     const deltaB = createDefaultDelta(2);
     deltaB.rightHold = 1n;
-    accountMachine.deltas = new Map([[1, deltaA], [2, deltaB]]);
-    accountMachine.settlementWorkspace = {
+    accountMachine.state.deltas = new Map([[1, deltaA], [2, deltaB]]);
+    accountMachine.state.settlementWorkspace = {
       workspaceHash: '',
       ops: [
         { type: 'rawDiff', tokenId: 1, leftDiff: -2n, rightDiff: 2n, collateralDiff: 0n, ondeltaDiff: 0n },
@@ -64,9 +64,9 @@ describe('hold underflow guards', () => {
       lastUpdatedAt: 1,
       executorIsLeft: true,
     };
-    accountMachine.settlementWorkspace.workspaceHash = createSettlementWorkspaceHash(
-      accountMachine,
-      accountMachine.settlementWorkspace,
+    accountMachine.state.settlementWorkspace.workspaceHash = createSettlementWorkspaceHash(
+      accountMachine.state,
+      accountMachine.state.settlementWorkspace,
     );
 
     const result = await handleSettleTransition(accountMachine, {
@@ -74,7 +74,7 @@ describe('hold underflow guards', () => {
       data: {
         kind: 'clear',
         revision: 1,
-        workspaceHash: accountMachine.settlementWorkspace.workspaceHash,
+        workspaceHash: accountMachine.state.settlementWorkspace.workspaceHash,
       },
     }, true, 2);
 
@@ -82,7 +82,7 @@ describe('hold underflow guards', () => {
     expect(result.error).toContain('SETTLEMENT_HOLD_UNDERFLOW:right');
     expect(deltaA.leftHold).toBe(5n);
     expect(deltaB.rightHold).toBe(1n);
-    expect(accountMachine.settlementWorkspace).toBeDefined();
+    expect(accountMachine.state.settlementWorkspace).toBeDefined();
   });
 
   test('htlc_resolve(secret) fails closed on hold underflow before mutating delta or deleting the lock', async () => {

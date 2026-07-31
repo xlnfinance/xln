@@ -42,7 +42,7 @@ const installObservedDispute = (state: ReturnType<typeof makeState>): string => 
   const account = state.accounts.get(counterpartyId)!;
   const proofSecret = secret('61');
   const hashlock = hashHtlcSecret(proofSecret);
-  account.locks.set('proof-lock', {
+  account.state.locks.set('proof-lock', {
     lockId: 'proof-lock',
     hashlock,
     timelock: 1_000_000n,

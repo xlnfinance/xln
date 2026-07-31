@@ -109,7 +109,7 @@ const applyAcceptOfferAdvance = (
 
 const nextHopCapacity = (state: EntityState, nextHop: string, tokenId: number) => {
   const account = state.accounts.get(nextHop);
-  const delta = account?.deltas.get(tokenId);
+  const delta = account?.state.deltas.get(tokenId);
   if (!delta) return { outCapacity: 0n, inCapacity: 0n };
   return deriveDelta(delta, isLeft(state.entityId, nextHop));
 };

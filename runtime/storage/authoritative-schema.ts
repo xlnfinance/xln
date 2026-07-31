@@ -202,7 +202,7 @@ const validateStorageDoc = (value: unknown, code: string): StorageDoc => {
     requireStorageString(doc['entityId'], `${code}_ENTITY_ID`);
     requireStorageString(doc['counterpartyId'], `${code}_COUNTERPARTY_ID`);
     const account = validateStorageAccountDocValue(doc['value']);
-    const endpoints = new Set([account.leftEntity, account.rightEntity]);
+    const endpoints = new Set([account.state.leftEntity, account.state.rightEntity]);
     if (!endpoints.has(String(doc['entityId'])) || !endpoints.has(String(doc['counterpartyId']))) {
       throw new Error(`${code}_ACCOUNT_ENDPOINT_MISMATCH`);
     }

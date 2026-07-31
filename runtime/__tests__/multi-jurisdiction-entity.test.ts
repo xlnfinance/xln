@@ -452,15 +452,15 @@ describe('multi-jurisdiction entity binding', () => {
     expect(userAccount?.currentHeight).toBe(2);
     expect(hubAccount?.currentHeight).toBe(2);
     expect(userAccount?.currentFrame.accountTxs.every((tx) => tx.type === 'rebalance_policy')).toBe(true);
-    const hubSide = hubId === userAccount?.leftEntity ? 'left' : 'right';
-    expect(userAccount?.rebalanceFeePolicies?.get(1)?.[hubSide]).toEqual({
+    const hubSide = hubId === userAccount?.state.leftEntity ? 'left' : 'right';
+    expect(userAccount?.state.rebalanceFeePolicies?.get(1)?.[hubSide]).toEqual({
       policyVersion: 3,
       baseFee: 100_000n,
       liquidityFeeBps: 5n,
       gasFee: 0n,
       updatedAt: userAccount?.currentFrame.timestamp,
     });
-    expect(hubAccount?.rebalanceFeePolicies).toEqual(userAccount?.rebalanceFeePolicies);
+    expect(hubAccount?.state.rebalanceFeePolicies).toEqual(userAccount?.state.rebalanceFeePolicies);
   });
 
   test('incoming Account genesis rejects a domain from another jurisdiction', async () => {

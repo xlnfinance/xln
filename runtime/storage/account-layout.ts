@@ -4,6 +4,7 @@ import { decodeBuffer, encodeBuffer } from './codec';
 import { keyLiveAccountField } from './keys';
 import { readRawOrNull } from './level';
 import type { RuntimeDbLike, StorageAccountDoc } from './types';
+import type { AccountReplica, AccountState } from '../types/account';
 import {
   STORAGE_ACCOUNT_FIELD_BY_TAG,
   STORAGE_ACCOUNT_FIELD_TAG,
@@ -109,14 +110,37 @@ export const decodeAccountFieldsManifest = (value: Buffer): AccountFieldsManifes
   return { logicalBytes, logicalHash, fields };
 };
 
+const isStateField = (field: StorageAccountField): field is `state.${keyof AccountState & string}` =>
+  field.startsWith('state.');
+
+const stateFieldName = (field: `state.${keyof AccountState & string}`): keyof AccountState =>
+  field.slice('state.'.length) as keyof AccountState;
+
+const hasAccountField = (doc: StorageAccountDoc, field: StorageAccountField): boolean =>
+  isStateField(field)
+    ? Object.prototype.hasOwnProperty.call(doc.state, stateFieldName(field))
+    : Object.prototype.hasOwnProperty.call(doc, field);
+
+const accountFieldValue = (doc: StorageAccountDoc, field: StorageAccountField): unknown =>
+  isStateField(field)
+    ? doc.state[stateFieldName(field)]
+    : doc[field as keyof AccountReplica];
+
 const encodeFields = (doc: StorageAccountDoc): AccountFieldEntry[] => {
   for (const field of Object.getOwnPropertyNames(doc)) {
-    if (!(field in STORAGE_ACCOUNT_FIELD_TAG)) throw new Error(`STORAGE_ACCOUNT_FIELD_UNKNOWN:${field}`);
+    if (field !== 'state' && !(field in STORAGE_ACCOUNT_FIELD_TAG)) {
+      throw new Error(`STORAGE_ACCOUNT_FIELD_UNKNOWN:${field}`);
+    }
+  }
+  for (const field of Object.getOwnPropertyNames(doc.state)) {
+    if (!(`state.${field}` in STORAGE_ACCOUNT_FIELD_TAG)) {
+      throw new Error(`STORAGE_ACCOUNT_STATE_FIELD_UNKNOWN:${field}`);
+    }
   }
   return (Object.entries(STORAGE_ACCOUNT_FIELD_TAG) as Array<[StorageAccountField, number]>)
-    .filter(([field]) => Object.prototype.hasOwnProperty.call(doc, field))
+    .filter(([field]) => hasAccountField(doc, field))
     .map(([field, tag]) => {
-      const value = encodeBuffer(doc[field]);
+      const value = encodeBuffer(accountFieldValue(doc, field));
       return { field, tag, value, hash: computeIntegrityDigest(value) };
     })
     .sort((left, right) => left.tag - right.tag);
@@ -200,7 +224,8 @@ export const readAccountStorageLayout = async (
   if (!manifest) {
     return { doc: decodeBuffer<StorageAccountDoc>(root), logicalValue: root, representation: 'inline' };
   }
-  const doc: Partial<Record<StorageAccountField, unknown>> = {};
+  const state: Partial<Record<keyof AccountState, unknown>> = {};
+  const replica: Partial<Record<keyof AccountReplica, unknown>> = {};
   for (const entry of manifest.fields) {
     const value = await db.get(accountFieldKey(entityId, counterpartyId, entry.tag));
     const actualHash = computeIntegrityDigest(value);
@@ -209,8 +234,11 @@ export const readAccountStorageLayout = async (
         `STORAGE_ACCOUNT_FIELD_HASH_MISMATCH:field=${entry.field}:actual=${actualHash}:expected=${entry.hash}`,
       );
     }
-    doc[entry.field] = decodeBuffer<unknown>(value);
+    const decoded = decodeBuffer<unknown>(value);
+    if (isStateField(entry.field)) state[stateFieldName(entry.field)] = decoded;
+    else replica[entry.field as keyof AccountReplica] = decoded;
   }
+  const doc = { ...replica, state } as StorageAccountDoc;
   const logicalValue = encodeBuffer(doc);
   if (logicalValue.byteLength !== manifest.logicalBytes) {
     throw new Error(

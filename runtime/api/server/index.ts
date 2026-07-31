@@ -39,7 +39,7 @@ import { serveRuntimeBundle, serveStatic } from './static-assets';
 import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth } from './auth';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from './health-redaction';
 import { listLocalControlEntities } from './control-entities';
-import { getAccountState, getEntityReplicaById } from './entity-lookup';
+import { getAccountReplica, getEntityReplicaById } from './entity-lookup';
 import { createRuntimeIngressReceiptStore } from '../../runtime/ingress-receipts';
 import { createRelayStore, pushDebugEvent, removeClient } from '../../network/relay/store';
 import { openRelayIncidentJournal } from '../../network/relay/incident-journal';
@@ -497,7 +497,7 @@ const maybeHandleRuntimeInfoApi = async (
         },
         activeHubEntityIds: relayStore.activeHubEntityIds,
         marketMakerState,
-        getAccountState,
+        getAccountReplica,
         ensureTokenCatalog: () => tokenCatalogController.ensureTokenCatalog(),
       },
       operatorAuthorized,

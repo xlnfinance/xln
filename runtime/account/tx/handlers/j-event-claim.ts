@@ -26,17 +26,17 @@ export function handleJEventClaim(
 ): { success: boolean; events: string[]; error?: string } {
   const { jHeight, jBlockHash } = accountTx.data;
   jEventClaimLog.debug('claim.received', { jHeight, hash: shortHash(jBlockHash), byLeft });
-  const { counterparty } = getAccountPerspective(account, myEntityId);
+  const { counterparty } = getAccountPerspective(account.state, myEntityId);
   const transition = applyAccountJClaimTransition(
-    account,
+    account.state,
     accountTx,
     byLeft,
-    getAccountStateDomain(account),
+    getAccountStateDomain(account.state),
     session,
   );
   if (transition.status === 'pending' || transition.status === 'idempotent' || transition.status === 'stale') {
-    account.leftPendingJClaims = transition.left;
-    account.rightPendingJClaims = transition.right;
+    account.state.leftPendingJClaims = transition.left;
+    account.state.rightPendingJClaims = transition.right;
     return {
       success: true,
       events: [transition.status === 'pending'
@@ -46,22 +46,22 @@ export function handleJEventClaim(
   }
 
   const staged = structuredClone(account);
-  staged.leftPendingJClaims = transition.left;
-  staged.rightPendingJClaims = transition.right;
+  staged.state.leftPendingJClaims = transition.left;
+  staged.state.rightPendingJClaims = transition.right;
   applyFinalizedAccountJEvents(
     staged,
     counterparty,
     transition.events,
-    requireAccountDeltaTransformerAddress(jurisdictions, staged),
+    requireAccountDeltaTransformerAddress(jurisdictions, staged.state),
   );
-  staged.lastFinalizedJHeight = jHeight;
+  staged.state.lastFinalizedJHeight = jHeight;
   Object.assign(account, staged);
-  if (!staged.settlementWorkspace) delete account.settlementWorkspace;
+  if (!staged.state.settlementWorkspace) delete account.state.settlementWorkspace;
 
   const settledTokenId = Number(
     transition.events.find((event) => event.type === 'AccountSettled')?.data?.tokenId ?? 1,
   );
-  const delta = account.deltas.get(settledTokenId);
+  const delta = account.state.deltas.get(settledTokenId);
   if (!isValidation) {
     const data = {
       entityId: myEntityId,

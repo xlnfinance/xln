@@ -271,8 +271,8 @@ export function resolveHubDiscoveryEntityJurisdictionKey(
 
 function getAccountCounterpartyId(account: AccountReplica, ownerEntityId: string): string {
   const owner = normalizeHubEntityId(ownerEntityId);
-  const left = normalizeHubEntityId(account.leftEntity);
-  const right = normalizeHubEntityId(account.rightEntity);
+  const left = normalizeHubEntityId(account.state.leftEntity);
+  const right = normalizeHubEntityId(account.state.rightEntity);
   if (left === owner) return right;
   if (right === owner) return left;
   return '';

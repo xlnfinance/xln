@@ -8,7 +8,7 @@ import {
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
 } from '../../jurisdiction/machine/event-observation';
-import type { AccountState } from '../../types/account';
+import type { AccountReplica } from '../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
@@ -82,7 +82,7 @@ export const makeAccount = (
     chainId: 31_337,
     depositoryAddress: addr('dd'),
   },
-): AccountState => {
+): AccountReplica => {
   const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
     ? [selfId, counterpartyId]
     : [counterpartyId, selfId];
@@ -90,11 +90,30 @@ export const makeAccount = (
   delta.leftCreditLimit = 10n ** 30n;
   delta.rightCreditLimit = 10n ** 30n;
   return {
-    leftEntity,
-    rightEntity,
-    domain: {
-      chainId: jurisdiction.chainId,
-      depositoryAddress: jurisdiction.depositoryAddress,
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: {
+        chainId: jurisdiction.chainId,
+        depositoryAddress: jurisdiction.depositoryAddress,
+      },
+      watchSeed: deriveAccountWatchSeed({
+        runtimeSeed: 'cross-j-test-helper',
+        entityId: leftEntity,
+        counterpartyId: rightEntity,
+        timestamp: 0,
+      }),
+      deltas: new Map([[1, delta]]),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
     },
     status: 'active',
     mempool: [],
@@ -109,29 +128,12 @@ export const makeAccount = (
       deltas: [],
       byLeft: true,
     },
-    deltas: new Map([[1, delta]]),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    watchSeed: deriveAccountWatchSeed({
-      runtimeSeed: 'cross-j-test-helper',
-      entityId: leftEntity,
-      counterpartyId: rightEntity,
-      timestamp: 0,
-    }),
     proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
 };
@@ -142,7 +144,7 @@ export const makeState = (
   jurisdiction: JurisdictionConfig,
   counterpartyId?: string,
 ): EntityState => {
-  const accounts = new Map<string, AccountState>();
+  const accounts = new Map<string, AccountReplica>();
   if (counterpartyId) {
     const account = makeAccount(entityId, counterpartyId, jurisdiction);
     accounts.set(counterpartyId, account);

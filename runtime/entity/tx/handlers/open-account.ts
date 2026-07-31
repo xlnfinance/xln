@@ -66,10 +66,24 @@ const insertLocalAccount = (
   const leftEntity = isLeft ? originalEntityId : counterpartyId;
   const rightEntity = isLeft ? counterpartyId : originalEntityId;
   upsertSortedStringMapEntry(state.accounts, counterpartyId, {
-    leftEntity,
-    rightEntity,
-    domain: accountDomain,
-    watchSeed,
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: accountDomain,
+      watchSeed,
+      deltas: new Map<number, Delta>(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      pulls: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -83,32 +97,20 @@ const insertLocalAccount = (
       stateHash: '',
       byLeft: isLeft,
     },
-    deltas: new Map<number, Delta>(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: originalEntityId, toEntity: counterpartyId, nextProofNonce: 1 },
     proofBody: { tokenIds: [], deltas: [] },
-    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: {
       rebalance: {
         policy: new Map(),
         submittedAtByToken: new Map(),
       },
     },
-    locks: new Map(),
-    swapOffers: new Map(),
-    pulls: new Map(),
     swapOrderHistory: new Map(),
     swapClosedOrders: new Map(),
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    jNonce: 0,
   });
 };
 
@@ -125,7 +127,7 @@ const seedOpenAccountPolicies = async (
   // accountStateRoot still commits the complete live Account state and becomes
   // the starting root for the first proposal. Treating that root as a frame
   // hash invents evidence neither peer signed and breaks strict WAL replay.
-  account.currentFrame.accountStateRoot = computeAccountStateRoot(account);
+  account.currentFrame.accountStateRoot = computeAccountStateRoot(account.state);
   const tokenId = tx.data.tokenId ?? 1;
   const tokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
     .filter(id => Number.isFinite(id) && id > 0);
@@ -144,7 +146,7 @@ const seedOpenAccountPolicies = async (
   const admission = await applyAccountInput(
     accountConsensusContext,
     account,
-    createLocalAccountInput(account, state.entityId, initialAccountTxs),
+    createLocalAccountInput(account.state, state.entityId, initialAccountTxs),
   );
   if (admission.admittedAccountTxCount !== initialAccountTxs.length) {
     throw new Error(`OPEN_ACCOUNT_INITIAL_TXS_NOT_ADMITTED:${counterpartyId}`);

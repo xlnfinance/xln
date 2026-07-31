@@ -55,7 +55,7 @@ import { reportManagedChildFatal } from './managed-child-fatal-ipc';
 import { deriveMarketMakerChildReadiness } from './market-maker-child-readiness';
 import {
   BOOTSTRAP_POLL_MS,
-  getAccountState,
+  getAccountReplica,
   getEntityOutCapacity,
   getEntityReplicaById,
   isAccountConsensusReady,
@@ -429,7 +429,7 @@ const buildMarketMakerAccountStatusDebug = (
   lastDirectEntityInput: DirectEntityInputDebug | null,
   lastDirectEntityInputError: DirectEntityInputDebug | null,
 ): Record<string, unknown> => {
-  const account = getAccountState(env, entityId, counterpartyEntityId);
+  const account = getAccountReplica(env, entityId, counterpartyEntityId);
   const replica = getEntityReplicaById(env, entityId);
   return {
     success: true,
@@ -442,12 +442,12 @@ const buildMarketMakerAccountStatusDebug = (
     pendingFrameTxs: (account?.pendingFrame?.accountTxs ?? []).map(tx => String(tx?.type || '')),
     mempool: Number(account?.mempool?.length ?? 0),
     mempoolTxs: (account?.mempool ?? []).map(tx => String(tx?.type || '')),
-    swapOffers: Number(account?.swapOffers?.size || 0),
+    swapOffers: Number(account?.state.swapOffers?.size || 0),
     tokens: tokenIds.map(tokenId => ({
       tokenId,
-      hasDelta: Boolean(account?.deltas?.has(tokenId)),
+      hasDelta: Boolean(account?.state.deltas?.has(tokenId)),
       outCapacity: account ? getEntityOutCapacity(account, entityId, tokenId).toString() : '0',
-      delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
+      delta: serializeAccountDelta(account?.state.deltas?.get(tokenId)),
     })),
     runtime: {
       height: Number(env.state.height ?? 0),
@@ -1086,7 +1086,7 @@ const hasMarketMakerCrossAccountBacklog = (
 };
 
 const describeMarketMakerSameQuoteProgress = (env: RuntimeReplica, job: SameQuoteJob): Record<string, unknown> => {
-  const account = getAccountState(env, job.context.entityId, job.hub.entityId);
+  const account = getAccountReplica(env, job.context.entityId, job.hub.entityId);
   return {
     mmEntityId: job.context.entityId,
     jurisdiction: job.context.jurisdictionName,

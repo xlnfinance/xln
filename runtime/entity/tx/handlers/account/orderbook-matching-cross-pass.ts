@@ -136,7 +136,7 @@ export const committedCrossRouteStatus = (
   if (entityRoute?.status) return entityRoute.status;
   const offerRoute = pass.hubState.accounts
     .get(accountId)
-    ?.swapOffers?.get(offerId)
+    ?.state.swapOffers?.get(offerId)
     ?.crossJurisdiction;
   return offerRoute?.status ?? admission?.route?.status;
 };

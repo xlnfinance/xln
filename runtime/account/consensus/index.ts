@@ -6,7 +6,7 @@
 import type { AccountReplica, AccountDisputeSeal, AccountFrame, AccountInput, AccountPeerInput, Delta } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
 import type { AccountConsensusContext } from './context';
-import { cloneAccountFrame, cloneAccountState } from '../state-clone';
+import { cloneAccountFrame, cloneAccountReplica } from '../state-clone';
 import { getAccountPerspective } from '../perspective';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
@@ -120,7 +120,7 @@ const isRefreshableStaleIncomingSettlementSeal = (
     return false;
   }
 
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (!workspace || workspace.nonceAtSign !== undefined) return false;
   const matchingSeals = frame.accountTxs.filter(
     tx =>
@@ -139,7 +139,7 @@ function collectReceiverValidationDeltas(clonedMachine: AccountReplica): {
 } {
   const tokenIds: number[] = [];
   const deltas: Delta[] = [];
-  const sortedOurTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
+  const sortedOurTokens = Array.from(clonedMachine.state.deltas.entries()).sort((a, b) => a[0] - b[0]);
 
   for (const [tokenId, delta] of sortedOurTokens) {
     // CRITICAL: Use offdelta ONLY for frame comparison (same as proposer).
@@ -287,7 +287,7 @@ async function validateIncomingFrameOnClone(
   accountJClaimNodeStore: AccountJClaimNodeStore,
   securityContext: AccountInputSecurityContext,
 ): Promise<IncomingFrameValidationResult> {
-  const clonedMachine = cloneAccountState(account);
+  const clonedMachine = cloneAccountReplica(account);
   const jClaimSession = createAccountJClaimSession(accountJClaimNodeStore);
 
   accountLog.debug('frame.receiver_validate', {
@@ -311,7 +311,7 @@ async function validateIncomingFrameOnClone(
   if (frameHashMismatch) return { kind: 'return', result: frameHashMismatch };
 
   const { deltas: ourFinalDeltas } = collectReceiverValidationDeltas(clonedMachine);
-  const localAccountStateRoot = computeAccountStateRoot(clonedMachine);
+  const localAccountStateRoot = computeAccountStateRoot(clonedMachine.state);
   if (
     localAccountStateRoot !== receivedFrame.accountStateRoot ||
     !accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)
@@ -323,10 +323,10 @@ async function validateIncomingFrameOnClone(
       receivedAccountStateRoot: receivedFrame.accountStateRoot,
       localDeltas: summarizeDeltasForLog(new Map(ourFinalDeltas.map(delta => [delta.tokenId, delta]))),
       receivedDeltas: summarizeDeltasForLog(new Map(receivedFrame.deltas.map(delta => [delta.tokenId, delta]))),
-      localAccountStateSectionHashes: computeAccountStateSectionHashes(clonedMachine),
-      lastFinalizedJHeight: clonedMachine.lastFinalizedJHeight,
-      leftPendingJClaims: clonedMachine.leftPendingJClaims,
-      rightPendingJClaims: clonedMachine.rightPendingJClaims,
+      localAccountStateSectionHashes: computeAccountStateSectionHashes(clonedMachine.state),
+      lastFinalizedJHeight: clonedMachine.state.lastFinalizedJHeight,
+      leftPendingJClaims: clonedMachine.state.leftPendingJClaims,
+      rightPendingJClaims: clonedMachine.state.rightPendingJClaims,
     });
     return { kind: 'return', result: { success: false, error: 'Bilateral account state root mismatch', events } };
   }
@@ -336,7 +336,7 @@ async function validateIncomingFrameOnClone(
     localProofBodyHash,
     account.counterpartyDisputeProofBodyHash,
     account.counterpartyDisputeProofNonce,
-    Number(clonedMachine.jNonce ?? account.jNonce ?? 0),
+    Number(clonedMachine.state.jNonce ?? account.state.jNonce ?? 0),
     validatedCounterpartyDisputeSeal,
   );
   if (frameSealError) {
@@ -409,7 +409,7 @@ async function commitIncomingFrameOnRealState(
   securityContext: AccountInputSecurityContext,
   candidateEffects: AccountOutput[],
 ): Promise<void> {
-  const { counterparty: cpForCommitLog } = getAccountPerspective(account, ourEntityId);
+  const { counterparty: cpForCommitLog } = getAccountPerspective(account.state, ourEntityId);
   if (HEAVY_LOGS) {
     accountLog.debug('receiver.commit.reexecute', {
       txs: receivedFrame.accountTxs.length,
@@ -427,7 +427,7 @@ async function commitIncomingFrameOnRealState(
     candidateEffects,
   );
 
-  forkAccountCommitmentCache(validation.clonedMachine, account);
+  forkAccountCommitmentCache(validation.clonedMachine.state, account.state);
   assertLiveCommitMatchesFrame(
     account,
     receivedFrame.accountStateRoot,
@@ -440,7 +440,7 @@ async function commitIncomingFrameOnRealState(
     side: 'receiver',
     counterparty: shortId(cpForCommitLog),
     height: receivedFrame.height,
-    tokens: account.deltas.size,
+    tokens: account.state.deltas.size,
   });
   if (validation.clonedMachine.pendingForwards?.length) {
     account.pendingForwards = validation.clonedMachine.pendingForwards;
@@ -530,7 +530,7 @@ const selectAckDisputeSeal = (
     account.currentDisputeProofHanko &&
     account.currentDisputeHash &&
     account.currentDisputeProofBodyHash?.toLowerCase() === proofBodyHash.toLowerCase() &&
-    Number(account.currentDisputeProofNonce ?? 0) > Number(account.jNonce ?? 0);
+    Number(account.currentDisputeProofNonce ?? 0) > Number(account.state.jNonce ?? 0);
   if (!reusable) return undefined;
   return {
     hanko: account.currentDisputeProofHanko!,
@@ -553,13 +553,13 @@ async function buildIncomingFrameAckMaterial(
     height: receivedFrame.height,
   });
 
-  const ackHankoDomain = getAccountStateDomain(account);
+  const ackHankoDomain = getAccountStateDomain(account.state);
   const proofChanged =
     ackProofResult.proofBodyHash.toLowerCase() !== account.currentDisputeProofBodyHash?.toLowerCase() ||
-    Number(account.currentDisputeProofNonce ?? 0) <= Number(account.jNonce ?? 0);
-  const ackSignedNonce = Math.max(Number(account.proofHeader.nextProofNonce ?? 0), Number(account.jNonce ?? 0) + 1);
+    Number(account.currentDisputeProofNonce ?? 0) <= Number(account.state.jNonce ?? 0);
+  const ackSignedNonce = Math.max(Number(account.proofHeader.nextProofNonce ?? 0), Number(account.state.jNonce ?? 0) + 1);
   const ackDisputeHash = proofChanged
-    ? createDisputeProofHashWithNonce(account, ackProofResult.proofBodyHash, ackHankoDomain, ackSignedNonce)
+    ? createDisputeProofHashWithNonce(account.state, ackProofResult.proofBodyHash, ackHankoDomain, ackSignedNonce)
     : undefined;
   if (proofChanged) {
     if (!ackDisputeHash) {
@@ -580,8 +580,8 @@ async function buildIncomingFrameAckMaterial(
     kind: 'ack',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: input.fromEntityId,
-    domain: structuredClone(account.domain),
-    watchSeed: account.watchSeed,
+    domain: structuredClone(account.state.domain),
+    watchSeed: account.state.watchSeed,
     ack: {
       height: receivedFrame.height,
       frameHash: receivedFrame.stateHash,
@@ -1022,7 +1022,7 @@ const resolveAccountInputSecurityContext = (
       owningEntityIsHub: false,
       // Account never reaches upward into Entity replicas. Normal Entity
       // routing supplies the current certified height explicitly.
-      finalizedJHeight: account.lastFinalizedJHeight ?? 0,
+      finalizedJHeight: account.state.lastFinalizedJHeight ?? 0,
     }),
     verifyHanko: context.verifyHanko,
   });
@@ -1056,7 +1056,7 @@ export async function applyAccountInput(
   input: AccountInput,
   providedSecurityContext?: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult> {
-  const envelopeError = getAccountInputEnvelopeError(account, input);
+  const envelopeError = getAccountInputEnvelopeError(account.state, input);
   if (envelopeError) {
     return { success: false, error: envelopeError, events: [] };
   }
@@ -1068,7 +1068,7 @@ export async function applyAccountInput(
   const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);
   if (input.watchSeed !== undefined) {
     const inputWatchSeed = normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
-    if (account.watchSeed.toLowerCase() !== inputWatchSeed) {
+    if (account.state.watchSeed.toLowerCase() !== inputWatchSeed) {
       return { success: false, error: `ACCOUNT_WATCH_SEED_MISMATCH:${input.fromEntityId}`, events: [] };
     }
   }

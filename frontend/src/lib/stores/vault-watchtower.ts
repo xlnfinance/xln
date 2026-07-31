@@ -95,7 +95,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
         .toLowerCase();
       const proofHanko = String(account?.counterpartyDisputeProofHanko || '').trim();
       const proofBody = proofBodyHash ? account?.disputeProofBodiesByHash?.[proofBodyHash] : null;
-      const watchSeed = String(account?.watchSeed || '')
+      const watchSeed = String(account?.state.watchSeed || '')
         .trim()
         .toLowerCase();
       if (
@@ -138,8 +138,8 @@ export async function buildDelayedLastResortAppointmentsForTower(
         if (typeof xln.buildDisputeArgumentsForSnapshot !== 'function') {
           throw new Error('WATCHTOWER_ARGUMENT_BUILDER_UNAVAILABLE');
         }
-        const leftEntityId = normalizeEntityId(account.leftEntity);
-        const rightEntityId = normalizeEntityId(account.rightEntity);
+        const leftEntityId = normalizeEntityId(account.state.leftEntity);
+        const rightEntityId = normalizeEntityId(account.state.rightEntity);
         const watchedSide = leftEntityId === entityId ? 'left' : rightEntityId === entityId ? 'right' : null;
         if (!watchedSide) {
           throw new Error(`WATCHTOWER_ACCOUNT_SIDE_UNKNOWN:${entityId}:${counterpartyId}`);

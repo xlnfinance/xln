@@ -8,7 +8,7 @@ import { createStructuredLogger, shortId } from '../../infra/logger';
 import { encodeRebalancePolicyMemo } from '../../extensions/rebalance/policy';
 import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
 import { getErrorMessage, isEntityId32 } from './utils';
-import { getAccountState, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
+import { getAccountReplica, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
 import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../runtime/ingress-receipts';
@@ -240,7 +240,7 @@ const admitFaucetAccount = (
   request: FaucetRequest,
   hub: FaucetHub,
 ): FaucetPhase<FaucetAccountAdmission> => {
-  const account = getAccountState(input.env, hub.entityId, request.userEntityId);
+  const account = getAccountReplica(input.env, hub.entityId, request.userEntityId);
   const knownHubIds = input.relayStore.activeHubEntityIds;
   const accountPresence = knownHubIds.map(hubEntityId => ({
     hubEntityId,
@@ -290,7 +290,7 @@ const admitFaucetAccount = (
     });
   }
   const amountWei = ethers.parseUnits(request.amount, getTokenInfo(request.tokenId).decimals);
-  const currentOutCapacity = getEntityOutCapacity(account, hub.entityId, request.tokenId);
+  const currentOutCapacity = getEntityOutCapacity(account?.state ?? null, hub.entityId, request.tokenId);
   if (shouldRejectOffchainFaucetForSettledCapacity({
     account,
     senderOutCapacity: currentOutCapacity,

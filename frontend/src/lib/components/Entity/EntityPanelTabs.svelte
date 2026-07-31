@@ -1156,7 +1156,7 @@ function getDerivedDeltaForAccount(counterpartyEntityId: string, tokenId: number
     .trim()
     .toLowerCase();
   if (!account || !entityId || !counterpartyId || !activeXlnFunctions?.deriveDelta) return null;
-  const delta = account.deltas?.get?.(tokenId);
+  const delta = account.state.deltas?.get?.(tokenId);
   if (!delta) return null;
   return activeXlnFunctions.deriveDelta(delta, isAccountLeftPerspective(entityId, account));
 }
@@ -1166,7 +1166,7 @@ function getAccountSpendableCapacity(counterpartyEntityId: string, tokenId: numb
   return derived.outCapacity;
 }
 function isLocalExecutorForWorkspace(counterpartyEntityId: string, account: AccountReplica | null): boolean {
-  const workspace = account?.settlementWorkspace;
+  const workspace = account?.state.settlementWorkspace;
   const entityId = String(replica?.state?.entityId || tab.entityId || "")
     .trim()
     .toLowerCase();

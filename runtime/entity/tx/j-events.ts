@@ -395,8 +395,8 @@ const requireFinalizedProofBodyEvidence = (
   try {
     proofbody = canonicalizeProofBodyStruct(
       matches[0]![1] as ProofBodyStruct,
-      account.leftEntity,
-      account.rightEntity,
+      account.state.leftEntity,
+      account.state.rightEntity,
       'jEvent.disputeFinalized',
     );
     assertDisputeProofBodyWithinContractLimits(proofbody, 'jEvent.disputeFinalized');
@@ -482,7 +482,7 @@ const initializeStartedDispute = async (
     'J_EVENT_DISPUTE_J_NONCE_INVALID',
   );
 
-  const accountInput = createAccountDisputeStartedInput(account, entityIdNorm, {
+  const accountInput = createAccountDisputeStartedInput(account.state, entityIdNorm, {
     kind: 'dispute_started',
     starterEntityId: senderStr,
     initialProofbodyHash: String(proofbodyHash),
@@ -661,7 +661,7 @@ const resolveFinalizationEvidence = (
   }
   return {
     evidence,
-    finalizedJNonce: Math.max(Number(account.jNonce ?? 0), eventJNonce),
+    finalizedJNonce: Math.max(Number(account.state.jNonce ?? 0), eventJNonce),
     initialNonce,
   };
 };
@@ -760,7 +760,7 @@ async function applyDisputeFinalizedJEvent(
   // when its numeric nonce is higher; retaining it would strand holds or let a
   // delayed retry resurrect pre-dispute state.
   const accountInput = createAccountDisputeFinalityInput(
-    account,
+    account.state,
     entityIdNorm,
     resolved.finalizedJNonce,
     finalizedProof.tokenIds,

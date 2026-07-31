@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
-import type { AccountReplica, AccountTx, SettlementDiff, SettlementOp, SettlementWorkspace } from '../../../types/account';
-import { cloneAccountState } from '../../state-clone';
+import type { AccountReplica, AccountState, AccountTx, SettlementDiff, SettlementOp, SettlementWorkspace } from '../../../types/account';
+import { cloneAccountReplica } from '../../state-clone';
 import { computeCanonicalMerkleRoot } from '../../state-root';
 import { deriveDelta } from '../../utils';
 import { compileOps, getMinimumSafeSettlementNonce } from '../../../protocol/settlement/operations';
@@ -102,7 +102,7 @@ const assertSettlementOps = (ops: readonly SettlementOp[]): void => {
 };
 
 const canonicalWorkspaceBody = (
-  account: Pick<AccountReplica, 'leftEntity' | 'rightEntity'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
   workspace: Pick<SettlementWorkspace, 'revision' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
 ) => ({
   domain: WORKSPACE_DOMAIN,
@@ -116,14 +116,14 @@ const canonicalWorkspaceBody = (
 });
 
 export const createSettlementWorkspaceHash = (
-  account: Pick<AccountReplica, 'leftEntity' | 'rightEntity'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
   workspace: Pick<SettlementWorkspace, 'revision' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
 ): string => computeCanonicalMerkleRoot('settlement.workspace', [
   ['body', canonicalWorkspaceBody(account, workspace)],
 ]);
 
 export const assertCanonicalSettlementWorkspace = (
-  account: Pick<AccountReplica, 'leftEntity' | 'rightEntity'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
   workspace: SettlementWorkspace,
 ): string => {
   const stored = assertWorkspaceHash(workspace.workspaceHash, 'SETTLEMENT_WORKSPACE_HASH_INVALID');
@@ -146,7 +146,7 @@ const releaseWorkspaceHolds = (
   const { diffs } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
   for (const plan of holdPlan(diffs)) {
     if (plan.left === 0n && plan.right === 0n) continue;
-    const delta = draft.deltas.get(plan.tokenId);
+    const delta = draft.state.deltas.get(plan.tokenId);
     if (!delta) throw new Error(`SETTLEMENT_HOLD_DELTA_MISSING:release:token=${plan.tokenId}`);
     const leftError = releaseHold(
       delta,
@@ -175,7 +175,7 @@ const addWorkspaceHolds = (
   const { diffs } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
   for (const plan of holdPlan(diffs)) {
     if (plan.left === 0n && plan.right === 0n) continue;
-    const delta = draft.deltas.get(plan.tokenId);
+    const delta = draft.state.deltas.get(plan.tokenId);
     if (!delta) throw new Error(`SETTLEMENT_HOLD_DELTA_MISSING:add:token=${plan.tokenId}`);
     const workspaceDiff = diffs.find((diff) => diff.tokenId === plan.tokenId);
     const leftReserveDeposit = (workspaceDiff?.leftDiff ?? 0n) < 0n && (workspaceDiff?.collateralDiff ?? 0n) > 0n;
@@ -201,9 +201,9 @@ const assertCurrentWorkspace = (
   suppliedHash: string,
 ): SettlementWorkspace => {
   assertVersion(revision);
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_WORKSPACE_MISSING');
-  const currentHash = assertCanonicalSettlementWorkspace(account, workspace);
+  const currentHash = assertCanonicalSettlementWorkspace(account.state, workspace);
   const requestedHash = assertWorkspaceHash(suppliedHash, 'SETTLEMENT_WORKSPACE_TARGET_HASH_INVALID');
   if (workspace.revision !== revision) {
     throw new Error(`SETTLEMENT_WORKSPACE_VERSION_MISMATCH:${workspace.revision}:${revision}`);
@@ -256,7 +256,7 @@ const assertSettlementSealNonce = (
   if (settlementNonce !== minimumSafeNonce) {
     throw new SettlementSealNonceMismatchError(
       `SETTLEMENT_SEAL_NONCE_MISMATCH:${settlementNonce}:${minimumSafeNonce}` +
-      `:j=${Number(draft.jNonce ?? 0)}` +
+      `:j=${Number(draft.state.jNonce ?? 0)}` +
       `:next=${Number(draft.proofHeader.nextProofNonce ?? 0)}` +
       `:local=${Number(draft.currentDisputeProofNonce ?? 0)}` +
       `:peer=${Number(draft.counterpartyDisputeProofNonce ?? 0)}`,
@@ -280,10 +280,10 @@ const prepareSettlementSeal = (
   );
   assertSettlementSealNonce(draft, workspace, settlementNonce);
 
-  const domain = getAccountStateDomain(draft);
+  const domain = getAccountStateDomain(draft.state);
   const { diffs, forgiveTokenIds } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
   const expectedSettlementHash = createSettlementHashWithNonce(
-    draft,
+    draft.state,
     diffs,
     forgiveTokenIds,
     domain,
@@ -325,7 +325,7 @@ const prepareSettlementSeal = (
     );
   }
   const expectedDisputeHash = createDisputeProofHashWithNonce(
-    draft,
+    draft.state,
     proofBodyHash,
     domain,
     postNonce,
@@ -371,7 +371,7 @@ const verifySettlementSealHankos = async (
   prepared: PreparedSettlementSeal,
   registeredBoardHash?: string,
 ): Promise<{ postHanko: string; settlementHanko?: string }> => {
-  const sourceEntity = byLeft ? draft.leftEntity : draft.rightEntity;
+  const sourceEntity = byLeft ? draft.state.leftEntity : draft.state.rightEntity;
   const sealBoardHash = await context.resolveSettlementBoardAuthority(
     sourceEntity,
     registeredBoardHash,
@@ -518,7 +518,7 @@ const buildUpsertWorkspace = (
     throw new Error('SETTLEMENT_WORKSPACE_EXECUTOR_INVALID');
   }
   compileOps(transition.ops, byLeft);
-  const current = account.settlementWorkspace;
+  const current = account.state.settlementWorkspace;
   if (transition.revision === 1) {
     if (current) throw new Error('SETTLEMENT_WORKSPACE_ALREADY_EXISTS');
     if (transition.previousWorkspaceHash !== undefined) {
@@ -530,7 +530,7 @@ const buildUpsertWorkspace = (
     if (current.revision + 1 !== transition.revision) {
       throw new Error(`SETTLEMENT_WORKSPACE_NON_CONTIGUOUS_VERSION:${current.revision}:${transition.revision}`);
     }
-    const currentHash = assertCanonicalSettlementWorkspace(account, current);
+    const currentHash = assertCanonicalSettlementWorkspace(account.state, current);
     const previousHash = assertWorkspaceHash(
       transition.previousWorkspaceHash ?? '',
       'SETTLEMENT_WORKSPACE_PREVIOUS_HASH_INVALID',
@@ -550,7 +550,7 @@ const buildUpsertWorkspace = (
     lastUpdatedAt: timestamp,
     executorIsLeft: transition.executorIsLeft,
   };
-  workspace.workspaceHash = createSettlementWorkspaceHash(account, workspace);
+  workspace.workspaceHash = createSettlementWorkspaceHash(account.state, workspace);
   return workspace;
 };
 
@@ -560,27 +560,27 @@ const commitDraft = (
   changedTokens: ReadonlySet<number>,
 ): void => {
   for (const tokenId of changedTokens) {
-    const source = draft.deltas.get(tokenId);
-    const target = account.deltas.get(tokenId);
+    const source = draft.state.deltas.get(tokenId);
+    const target = account.state.deltas.get(tokenId);
     if (!source || !target) throw new Error(`SETTLEMENT_HOLD_COMMIT_DELTA_MISSING:token=${tokenId}`);
     target.leftHold = getHold(source, 'left');
     target.rightHold = getHold(source, 'right');
   }
-  if (draft.settlementWorkspace) account.settlementWorkspace = draft.settlementWorkspace;
-  else delete account.settlementWorkspace;
+  if (draft.state.settlementWorkspace) account.state.settlementWorkspace = draft.state.settlementWorkspace;
+  else delete account.state.settlementWorkspace;
 };
 
 // AccountSettled is bilateral Account consensus too. If it wins a retry race,
 // release the exact workspace holds before removing the workspace body.
 export function clearFinalizedSettlementWorkspace(account: AccountReplica): void {
-  const draft = cloneAccountState(account);
-  const workspace = draft.settlementWorkspace;
+  const draft = cloneAccountReplica(account);
+  const workspace = draft.state.settlementWorkspace;
   if (!workspace) return;
-  assertCanonicalSettlementWorkspace(draft, workspace);
+  assertCanonicalSettlementWorkspace(draft.state, workspace);
   const changed = workspace.status === 'submitted'
     ? new Set<number>()
     : releaseWorkspaceHolds(draft, workspace);
-  delete draft.settlementWorkspace;
+  delete draft.state.settlementWorkspace;
   commitDraft(account, draft, changed);
 }
 
@@ -588,7 +588,7 @@ export const getSignedSettlementWorkspaceTxError = (
   account: AccountReplica,
   tx: AccountTx,
 ): string | undefined => {
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   if (
     !workspace ||
     (!workspace.settlementHash && !workspace.leftHanko && !workspace.rightHanko && !workspace.postSettlementDisputeProof)
@@ -607,16 +607,16 @@ export async function handleSettleTransition(
   registeredBoardHash?: string,
 ): Promise<ApplyAccountTxResult> {
   try {
-    const draft = cloneAccountState(account);
+    const draft = cloneAccountReplica(account);
     const changed = new Set<number>();
     const transition = tx.data;
     if (transition.kind === 'upsert') {
-      const previous = draft.settlementWorkspace;
+      const previous = draft.state.settlementWorkspace;
       const next = buildUpsertWorkspace(draft, transition, byLeft, timestamp);
       if (previous) {
         for (const tokenId of releaseWorkspaceHolds(draft, previous)) changed.add(tokenId);
       }
-      draft.settlementWorkspace = next;
+      draft.state.settlementWorkspace = next;
       for (const tokenId of addWorkspaceHolds(draft, next)) changed.add(tokenId);
       commitDraft(account, draft, changed);
       transitionLog.debug('workspace.upserted', { revision: next.revision, hash: next.workspaceHash });
@@ -660,7 +660,7 @@ export async function handleSettleTransition(
       throw new Error('SETTLEMENT_CLEAR_SIGNED_FORBIDDEN');
     }
     for (const tokenId of releaseWorkspaceHolds(draft, workspace)) changed.add(tokenId);
-    delete draft.settlementWorkspace;
+    delete draft.state.settlementWorkspace;
     commitDraft(account, draft, changed);
     return { success: true, events: [`Settlement workspace v${workspace.revision} cleared`] };
   } catch (error) {

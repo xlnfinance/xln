@@ -402,8 +402,8 @@ export function formatAccount(account: AccountReplica, myEntityId: string, optio
   const output: string[] = [];
 
   // Account header
-  const isLeft = myEntityId === account.leftEntity;
-  const counterparty = isLeft ? account.rightEntity : account.leftEntity;
+  const isLeft = myEntityId === account.state.leftEntity;
+  const counterparty = isLeft ? account.state.rightEntity : account.state.leftEntity;
   const title = `Account: ${formatAddress(myEntityId)} ↔ ${formatAddress(counterparty)}`;
 
   // Sort by importance: state first, then technical
@@ -415,9 +415,9 @@ export function formatAccount(account: AccountReplica, myEntityId: string, optio
   output.push(drawBox(title, summary, indent));
 
   // Deltas per token
-  if (account.deltas.size > 0) {
+  if (account.state.deltas.size > 0) {
     output.push('');
-    for (const [tokenId, delta] of account.deltas) {
+    for (const [tokenId, delta] of account.state.deltas) {
       if (opts.tokenFilter && !opts.tokenFilter.includes(tokenId)) continue;
 
       const symbol = tokenId === 1 ? 'USDC' : 'ETH';
@@ -440,11 +440,11 @@ export function formatAccount(account: AccountReplica, myEntityId: string, optio
   }
 
   // Active locks (show ALL details: lockId, hashlock, sender, expiry)
-  if (account.locks && account.locks.size > 0) {
+  if (account.state.locks && account.state.locks.size > 0) {
     output.push('');
-    output.push(' '.repeat(indent) + `  Locks (${account.locks.size}):`);
+    output.push(' '.repeat(indent) + `  Locks (${account.state.locks.size}):`);
 
-    const locks = Array.from(account.locks.values()).slice(0, opts.maxLocks);
+    const locks = Array.from(account.state.locks.values()).slice(0, opts.maxLocks);
     for (const lock of locks) {
       const timeLeft = formatDuration(Number(lock.timelock) - getWallClockMs());
       const direction = lock.senderIsLeft ? 'L→R' : 'R→L';
@@ -452,17 +452,17 @@ export function formatAccount(account: AccountReplica, myEntityId: string, optio
       output.push(' '.repeat(indent) + `      Hash: ${lock.hashlock.slice(0, 16)}... | ${direction} | Expires: ${timeLeft}`);
     }
 
-    if (account.locks.size > (opts.maxLocks || 10)) {
-      output.push(' '.repeat(indent) + `    ... and ${account.locks.size - (opts.maxLocks || 10)} more locks`);
+    if (account.state.locks.size > (opts.maxLocks || 10)) {
+      output.push(' '.repeat(indent) + `    ... and ${account.state.locks.size - (opts.maxLocks || 10)} more locks`);
     }
   }
 
   // Active swaps (show ALL details: offerId, amounts, fill ratio)
-  if (account.swapOffers && account.swapOffers.size > 0) {
+  if (account.state.swapOffers && account.state.swapOffers.size > 0) {
     output.push('');
-    output.push(' '.repeat(indent) + `  Swap Offers (${account.swapOffers.size}):`);
+    output.push(' '.repeat(indent) + `  Swap Offers (${account.state.swapOffers.size}):`);
 
-    const swaps = Array.from(account.swapOffers.values()).slice(0, opts.maxSwaps);
+    const swaps = Array.from(account.state.swapOffers.values()).slice(0, opts.maxSwaps);
     for (const swap of swaps) {
       const giveSymbol = swap.giveTokenId === 1 ? 'USDC' : 'ETH';
       const wantSymbol = swap.wantTokenId === 1 ? 'USDC' : 'ETH';
@@ -472,8 +472,8 @@ export function formatAccount(account: AccountReplica, myEntityId: string, optio
       output.push(' '.repeat(indent) + `      ${side}`);
     }
 
-    if (account.swapOffers.size > (opts.maxSwaps || 10)) {
-      output.push(' '.repeat(indent) + `    ... and ${account.swapOffers.size - (opts.maxSwaps || 10)} more swaps`);
+    if (account.state.swapOffers.size > (opts.maxSwaps || 10)) {
+      output.push(' '.repeat(indent) + `    ... and ${account.state.swapOffers.size - (opts.maxSwaps || 10)} more swaps`);
     }
   }
 
@@ -608,10 +608,10 @@ export function formatSummary(env: RuntimeReplica): string {
       totalReserves += amount;
     }
     for (const [, account] of replica.state.accounts) {
-      for (const [, delta] of account.deltas) {
+      for (const [, delta] of account.state.deltas) {
         totalCollateral += delta.collateral;
       }
-      totalLocks += account.locks?.size || 0;
+      totalLocks += account.state.locks?.size || 0;
     }
   }
 

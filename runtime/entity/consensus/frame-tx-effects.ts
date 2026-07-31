@@ -42,7 +42,7 @@ const applyReturnedAccountTxs = async (
 ): Promise<void> => {
   for (const { accountId, tx } of accountTxs) {
     const account = state.accounts.get(accountId);
-    if (tx.type === 'cross_swap_fill_ack' && !account?.swapOffers?.has(tx.data.offerId)) {
+    if (tx.type === 'cross_swap_fill_ack' && !account?.state.swapOffers?.has(tx.data.offerId)) {
       const routed = buildCrossJurisdictionFillNoticeOutput(state, accountId, tx);
       if (!routed) {
         if (ownsSourceHubRouteForFillAck(state, tx)) {
@@ -84,7 +84,7 @@ const applyReturnedAccountTxs = async (
     const admission = await applyAccountInput(
       context.accountConsensusContext,
       account,
-      createLocalAccountInput(account, state.entityId, [tx]),
+      createLocalAccountInput(account.state, state.entityId, [tx]),
     );
     if (admission.admittedAccountTxCount === 0) continue;
     context.proposableAccounts.add(accountId);
@@ -113,7 +113,7 @@ const collectSwapEvents = (
   if (created) context.allSwapOffersCreated.push(...created);
   if (cancelRequests) {
     for (const cancel of cancelRequests) {
-      const offer = state.accounts.get(cancel.accountId)?.swapOffers?.get(cancel.offerId);
+      const offer = state.accounts.get(cancel.accountId)?.state.swapOffers?.get(cancel.offerId);
       if (
         offer?.crossJurisdiction &&
         normalizeEntityRef(state.entityId) !==

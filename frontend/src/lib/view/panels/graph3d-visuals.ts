@@ -114,7 +114,7 @@ export function createBlockContainer(options: {
 }
 
 export function getAccountTokenDelta(account: any, tokenId: number): any | null {
-  return account?.deltas?.get(tokenId) ?? null;
+  return account?.state.deltas?.get(tokenId) ?? null;
 }
 
 export function deriveGraphEntry(
@@ -369,7 +369,7 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
     confirmedAccount = leftHeight > rightHeight ? rightAccount : leftAccount;
     pendingAccount = account;
   }
-  if (!account?.deltas || account.deltas.size === 0) {
+  if (!account?.state.deltas || account.state.deltas.size === 0) {
     const bars = new THREE.Group();
     options.graphWorld.add(bars);
     return { bars, mempoolBoxes: [] };
@@ -398,7 +398,7 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
     options.graphWorld,
     options.fromEntity,
     options.toEntity,
-    account.deltas,
+    account.state.deltas,
     fromIsLeft,
     {
       barsMode: options.barsMode,

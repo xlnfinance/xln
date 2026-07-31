@@ -4,7 +4,7 @@ import { applyCommand, createBook, type BookState } from '../orderbook/core';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createOrderbookExtState, ORDERBOOK_PRICE_SCALE, replaceOrderbookPair, SWAP_LOT_SCALE } from '../orderbook/types';
 import { validateBookAgainstOffers, validateBookStructure, validateEntityOrderbooks } from '../orderbook/validity';
-import type { AccountState, SwapOffer } from '../types/account';
+import type { AccountReplica, SwapOffer } from '../types/account';
 import type { EntityState } from '../entity/types';
 
 const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
@@ -20,10 +20,28 @@ const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   ...overrides,
 });
 
-const makeAccount = (offerId: string, offer: SwapOffer): AccountState =>
+const makeAccount = (offerId: string, offer: SwapOffer): AccountReplica =>
   ({
-    leftEntity: 'alice',
-    rightEntity: 'hub',
+    state: {
+      leftEntity: 'alice',
+      rightEntity: 'hub',
+      domain: {
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+      },
+      watchSeed: `0x${'11'.repeat(32)}`,
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map([[offerId, offer]]),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -32,30 +50,19 @@ const makeAccount = (offerId: string, offer: SwapOffer): AccountState =>
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       deltas: [],
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map(),
-    locks: new Map(),
-    swapOffers: new Map([[offerId, offer]]),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: 'alice', toEntity: 'hub', nextProofNonce: 1 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
-  }) as AccountState;
+  });
 
 const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): EntityState => {
   const orderbookExt = createOrderbookExtState({

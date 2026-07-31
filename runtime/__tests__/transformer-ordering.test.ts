@@ -3,7 +3,7 @@ import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumula
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../protocol/transformer-ordering';
 import { asOfferId } from '../orderbook/swap-keys';
-import type { AccountState, SwapOffer } from '../types/account';
+import type { AccountReplica, SwapOffer } from '../types/account';
 
 const MAX_FILL_RATIO = 65535n;
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';
@@ -30,12 +30,29 @@ function makeSwapOffer(
   };
 }
 
-function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountState {
+function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountReplica {
   return {
-    leftEntity: 'left',
-    rightEntity: 'right',
+    state: {
+      leftEntity: 'left',
+      rightEntity: 'right',
+      domain: { chainId: 31_337, depositoryAddress: DELTA_TRANSFORMER },
+      watchSeed: TEST_WATCH_SEED,
+      deltas: new Map([
+        [1, { tokenId: 1, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
+        [2, { tokenId: 2, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
+      ]),
+      locks: new Map(),
+      swapOffers: new Map(swaps),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+    },
     status: 'active',
-    watchSeed: TEST_WATCH_SEED,
     mempool: [],
     currentFrame: {
       height: 0,
@@ -47,28 +64,13 @@ function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountStat
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map([
-      [1, { tokenId: 1, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
-      [2, { tokenId: 2, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
-    ]),
-    locks: new Map(),
-    swapOffers: new Map(swaps),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
   };
 }
 
@@ -148,7 +150,7 @@ describe('transformer ordering', () => {
     const swaps = transformer.batch.swaps;
 
     const { leftFillRatios, rightFillRatios } = buildPositionalSwapFillRatioBuckets(
-      accountMachine.swapOffers.entries(),
+      accountMachine.state.swapOffers.entries(),
       fillRatiosByOfferId,
     );
 
@@ -160,7 +162,7 @@ describe('transformer ordering', () => {
     const contractStyleDeltas = applyDeltaTransformerStyleSwaps(swaps, leftFillRatios, rightFillRatios);
 
     const expectedByOffer = [0n, 0n];
-    for (const [offerId, offer] of sortTransformerEntries(accountMachine.swapOffers.entries())) {
+    for (const [offerId, offer] of sortTransformerEntries(accountMachine.state.swapOffers.entries())) {
       const ratio = BigInt(fillRatiosByOfferId.get(asOfferId(offerId)) ?? 0);
       const addDeltaIndex = offer.giveTokenId - 1;
       const subDeltaIndex = offer.wantTokenId - 1;

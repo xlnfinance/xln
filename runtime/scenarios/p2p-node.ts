@@ -293,7 +293,7 @@ const describeAccount = (account: AccountReplica | undefined) => {
 
 const logAccountState = (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string, label: string) => {
   const account = getAccount(env, entityId, signerId, counterpartyId);
-  const delta = account?.deltas?.get(USDC);
+  const delta = account?.state.deltas?.get(USDC);
   console.log(`[P2P_DEBUG] ${label}`, {
     account: describeAccount(account),
     delta: describeDelta(delta),
@@ -450,7 +450,7 @@ const waitForPayment = async (
     env,
     () => {
       const account = getAccount(env, entityId, signerId, counterpartyId);
-      const delta = account?.deltas?.get(USDC);
+      const delta = account?.state.deltas?.get(USDC);
       return !!delta && delta.offdelta !== 0n;
     },
     maxRounds,
@@ -542,7 +542,7 @@ const waitForCreditLimit = async (
     env,
     () => {
       const account = getAccount(env, entityId, signerId, counterpartyId);
-      const delta = account?.deltas?.get(USDC);
+      const delta = account?.state.deltas?.get(USDC);
       if (!delta) return false;
       // We are waiting for the COUNTERPARTY to extend credit to us.
       // Credit is stored on OUR side of the account (leftCreditLimit if we are left).
@@ -577,7 +577,7 @@ const waitForOwnCreditLimit = async (
     env,
     () => {
       const account = getAccount(env, entityId, signerId, counterpartyId);
-      const delta = account?.deltas?.get(USDC);
+      const delta = account?.state.deltas?.get(USDC);
       if (!delta) return false;
       // We are waiting for OUR credit extension to be acknowledged.
       // Our extension is stored on the counterparty's side of the account.
@@ -911,7 +911,7 @@ const run = async () => {
   // ASSERT: Verify bidirectional capacity exists
   const accountAfterCredit = getAccount(env, entityId, signerId, hubProfile.entityId);
   if (!accountAfterCredit) throw new Error(`${role}: Account with hub missing after credit`);
-  const deltaAfterCredit = accountAfterCredit.deltas?.get(USDC);
+  const deltaAfterCredit = accountAfterCredit.state.deltas?.get(USDC);
   if (!deltaAfterCredit) throw new Error(`${role}: No USDC delta after credit`);
 
   const { weAreLeft } = resolveSides(accountAfterCredit, entityId, hubProfile.entityId);
@@ -1037,7 +1037,7 @@ const run = async () => {
       () => {
         const account = getAccount(env, entityId, signerId, hubProfile.entityId);
         // Payment is done when our account shows the offdelta change and no pending frame
-        const delta = account?.deltas?.get(USDC);
+        const delta = account?.state.deltas?.get(USDC);
         return !!account && !account.pendingFrame && !!delta && delta.offdelta < 0n;
       },
       240,

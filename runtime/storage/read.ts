@@ -227,8 +227,8 @@ const hydrateEntityWithCertifiedBoardNodes = async (
     env,
     db,
     Array.from(state.accounts.values()).flatMap((account) => [
-      account.leftPendingJClaims,
-      account.rightPendingJClaims,
+      account.state.leftPendingJClaims,
+      account.state.rightPendingJClaims,
     ]),
   );
   return state;

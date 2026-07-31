@@ -1077,7 +1077,7 @@ describe('production startup wiring', () => {
       'if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, targetTokenIds)) return;',
     );
     expect(mmNode).toContain(
-      'const targetAccount = getAccountState(env, targetContext.entityId, route.target.entityId);',
+      'const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);',
     );
     expect(hubNode).toContain('isCanonicalAccountOpener(bootstrap.entityId, peer.entityId)');
   });

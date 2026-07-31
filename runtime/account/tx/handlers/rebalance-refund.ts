@@ -13,8 +13,8 @@ export function handleRebalanceRefund(
   if (!requestId || amount <= 0n) {
     return { success: false, events: [], error: 'rebalance_refund: requestId and positive amount required' };
   }
-  const feeState = account.requestedRebalanceFeeState.get(requestTokenId);
-  const requestedAmount = account.requestedRebalance.get(requestTokenId) ?? 0n;
+  const feeState = account.state.requestedRebalanceFeeState.get(requestTokenId);
+  const requestedAmount = account.state.requestedRebalance.get(requestTokenId) ?? 0n;
   if (!feeState || requestedAmount <= 0n || feeState.requestId !== requestId) {
     return { success: false, events: [], error: `rebalance_refund: pending request not found (${requestId})` };
   }
@@ -30,7 +30,7 @@ export function handleRebalanceRefund(
   if (amount > outstanding) {
     return { success: false, events: [], error: `rebalance_refund: amount ${amount} exceeds outstanding ${outstanding}` };
   }
-  const feeDelta = account.deltas.get(feeState.feeTokenId);
+  const feeDelta = account.state.deltas.get(feeState.feeTokenId);
   if (!feeDelta) {
     return { success: false, events: [], error: `rebalance_refund: fee token ${feeState.feeTokenId} missing` };
   }
@@ -42,8 +42,8 @@ export function handleRebalanceRefund(
   feeDelta.offdelta += deriveTransferOffdeltaChange(byLeft, amount);
   const nextRefunded = refundedAmount + amount;
   if (nextRefunded === feeState.feePaidUpfront) {
-    account.requestedRebalance.delete(requestTokenId);
-    account.requestedRebalanceFeeState.delete(requestTokenId);
+    account.state.requestedRebalance.delete(requestTokenId);
+    account.state.requestedRebalanceFeeState.delete(requestTokenId);
     // The submission marker is local execution bookkeeping, but it controls
     // whether a later request may enter J-batch. Clearing the canonical request
     // without clearing this marker permanently suppresses a new request for

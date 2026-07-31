@@ -31,7 +31,7 @@ const assertSettlementNonceCursor = (value: number): number => {
 
 export const getMinimumSafeSettlementNonce = (account: AccountReplica): number =>
   assertSettlementNonceCursor(Math.max(
-    Number(account.jNonce ?? 0) + 1,
+    Number(account.state.jNonce ?? 0) + 1,
     Number(account.proofHeader?.nextProofNonce ?? 0),
     Number(account.currentDisputeProofNonce ?? 0) + 1,
     Number(account.counterpartyDisputeProofNonce ?? 0) + 1,

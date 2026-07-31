@@ -227,26 +227,26 @@ const projectEntityCoreDoc = (state: EntityState): Record<string, unknown> => ({
 });
 
 const projectAccountDoc = (account: AccountReplica): Record<string, unknown> => ({
-  leftEntity: account.leftEntity,
-  rightEntity: account.rightEntity,
+  leftEntity: account.state.leftEntity,
+  rightEntity: account.state.rightEntity,
   status: account.status,
   mempool: account.mempool,
   currentFrame: account.currentFrame,
-  deltas: account.deltas,
-  locks: account.locks,
-  swapOffers: account.swapOffers,
-  globalCreditLimits: account.globalCreditLimits,
+  deltas: account.state.deltas,
+  locks: account.state.locks,
+  swapOffers: account.state.swapOffers,
+  globalCreditLimits: account.state.globalCreditLimits,
   currentHeight: account.currentHeight,
   pendingFrame: account.pendingFrame,
   pendingSignatures: account.pendingSignatures,
   pendingAccountInput: account.pendingAccountInput,
   rollbackCount: account.rollbackCount,
   lastRollbackFrameHash: account.lastRollbackFrameHash,
-  lastFinalizedJHeight: account.lastFinalizedJHeight,
+  lastFinalizedJHeight: account.state.lastFinalizedJHeight,
   proofHeader: account.proofHeader,
   proofBody: account.proofBody,
   abiProofBody: account.abiProofBody,
-  disputeConfig: account.disputeConfig,
+  disputeConfig: account.state.disputeConfig,
   currentFrameHanko: account.currentFrameHanko,
   counterpartyFrameHanko: account.counterpartyFrameHanko,
   currentDisputeProofHanko: account.currentDisputeProofHanko,
@@ -260,13 +260,13 @@ const projectAccountDoc = (account: AccountReplica): Record<string, unknown> => 
   counterpartySettlementHanko: account.counterpartySettlementHanko,
   disputeProofNoncesByHash: account.disputeProofNoncesByHash,
   disputeProofBodiesByHash: account.disputeProofBodiesByHash,
-  jNonce: account.jNonce,
-  settlementWorkspace: account.settlementWorkspace,
+  jNonce: account.state.jNonce,
+  settlementWorkspace: account.state.settlementWorkspace,
   activeDispute: account.activeDispute,
   pendingWithdrawals: account.pendingWithdrawals,
-  requestedRebalance: account.requestedRebalance,
-  requestedRebalanceFeeState: account.requestedRebalanceFeeState,
-  rebalanceFeePolicies: account.rebalanceFeePolicies,
+  requestedRebalance: account.state.requestedRebalance,
+  requestedRebalanceFeeState: account.state.requestedRebalanceFeeState,
+  rebalanceFeePolicies: account.state.rebalanceFeePolicies,
   shadow: account.shadow,
 });
 
@@ -389,7 +389,7 @@ const describeRouteLockRefs = (
   const account = state.accounts.get(counterpartyId);
   if (!account) return 'refs=no-account';
   const refs = [
-    account.locks?.has(lockId) ? 'locks' : '',
+    account.state.locks?.has(lockId) ? 'locks' : '',
     accountFrameHasHtlcLock(account.mempool, lockId) ? 'mempool' : '',
     accountFrameHasHtlcLock(account.pendingFrame?.accountTxs, lockId) ? `pending:${account.pendingFrame?.height ?? '?'}` : '',
     accountFrameHasHtlcLock(account.currentFrame?.accountTxs, lockId) ? `current:${account.currentFrame?.height ?? '?'}` : '',
@@ -418,7 +418,7 @@ const summarizeOpenHtlcLocks = (env: RuntimeReplica): OpenHtlcLockStats => {
       }
     }
     for (const account of replica.state.accounts.values()) {
-      for (const lock of account.locks?.values?.() ?? []) {
+      for (const lock of account.state.locks?.values?.() ?? []) {
         stats.accountLocks += 1;
         if (stats.samples.length < 8) stats.samples.push(`account:${entityId}:${String(lock.lockId).slice(0, 12)}`);
       }

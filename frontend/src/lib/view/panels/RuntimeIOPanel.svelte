@@ -12,7 +12,9 @@
   import type { LogLevel, LogCategory, FrameLogEntry } from '$lib/types/ui';
 
   type DeltaLike = { collateral?: unknown };
-  type AccountLike = { deltas?: Map<unknown, DeltaLike> | Record<string, DeltaLike> };
+  type AccountLike = {
+    state: { deltas?: Map<unknown, DeltaLike> | Record<string, DeltaLike> };
+  };
   type EntityStateLike = {
     height?: number;
     lastFinalizedJHeight?: number;
@@ -244,7 +246,7 @@
               }, 0n)}
               {@const totalCollateral = valuesOf<ReplicaLike>(currentFrame.state.eReplicas).reduce((sum: bigint, replica) => {
                 const collateral = valuesOf<AccountLike>(replica.state?.accounts).reduce((s: bigint, acct) => {
-                  return s + valuesOf<DeltaLike>(acct.deltas).reduce((cs: bigint, delta) => cs + toBigIntValue(delta.collateral), 0n);
+                  return s + valuesOf<DeltaLike>(acct.state.deltas).reduce((cs: bigint, delta) => cs + toBigIntValue(delta.collateral), 0n);
                 }, 0n);
                 return sum + collateral;
               }, 0n)}
@@ -431,7 +433,7 @@
                           {#each accounts as [counterparty, account]}
                             <div class="account-card">
                               <div class="account-header">↔ {shortAddress(counterparty)}</div>
-                              <div class="data-row"><span>Deltas:</span> {countEntries(account.deltas)}</div>
+                              <div class="data-row"><span>Deltas:</span> {countEntries(account.state.deltas)}</div>
                             </div>
                           {/each}
                         {:else}

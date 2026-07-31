@@ -27,39 +27,39 @@ export const assertLiveCommitMatchesFrame = (
   height: number,
   validatedMachine?: AccountReplica,
 ): void => {
-  const incrementalRoot = computeAccountStateRoot(account);
+  const incrementalRoot = computeAccountStateRoot(account.state);
   if (incrementalRoot === expectedRoot) return;
-  const coldRoot = computeAccountStateRootCold(account);
+  const coldRoot = computeAccountStateRootCold(account.state);
   const details = {
     side,
     height,
     expectedRoot,
     incrementalRoot,
     coldRoot,
-    incrementalSectionHashes: computeAccountStateSectionHashes(account),
-    coldSectionHashes: computeAccountStateSectionHashesCold(account),
-    incrementalCommitments: computeAccountCommitmentSectionDetail(account),
-    coldCommitments: computeAccountCommitmentSectionDetailCold(account),
+    incrementalSectionHashes: computeAccountStateSectionHashes(account.state),
+    coldSectionHashes: computeAccountStateSectionHashesCold(account.state),
+    incrementalCommitments: computeAccountCommitmentSectionDetail(account.state),
+    coldCommitments: computeAccountCommitmentSectionDetailCold(account.state),
     pendingFrameTxTypes: account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [],
     commitmentEntryCounts: {
-      locks: account.locks.size,
-      pulls: account.pulls?.size ?? 0,
-      swapOffers: account.swapOffers.size,
-      subcontracts: account.subcontracts?.size ?? 0,
-      lendingIntents: account.lendingIntents?.size ?? 0,
+      locks: account.state.locks.size,
+      pulls: account.state.pulls?.size ?? 0,
+      swapOffers: account.state.swapOffers.size,
+      subcontracts: account.state.subcontracts?.size ?? 0,
+      lendingIntents: account.state.lendingIntents?.size ?? 0,
     },
     liveFinancial: {
-      deltas: Array.from(account.deltas.entries()),
-      globalCreditLimits: account.globalCreditLimits,
-      jNonce: account.jNonce,
-      disputeConfig: account.disputeConfig,
+      deltas: Array.from(account.state.deltas.entries()),
+      globalCreditLimits: account.state.globalCreditLimits,
+      jNonce: account.state.jNonce,
+      disputeConfig: account.state.disputeConfig,
     },
     ...(validatedMachine ? {
       validatedFinancial: {
-        deltas: Array.from(validatedMachine.deltas.entries()),
-        globalCreditLimits: validatedMachine.globalCreditLimits,
-        jNonce: validatedMachine.jNonce,
-        disputeConfig: validatedMachine.disputeConfig,
+        deltas: Array.from(validatedMachine.state.deltas.entries()),
+        globalCreditLimits: validatedMachine.state.globalCreditLimits,
+        jNonce: validatedMachine.state.jNonce,
+        disputeConfig: validatedMachine.state.disputeConfig,
       },
     } : {}),
   };

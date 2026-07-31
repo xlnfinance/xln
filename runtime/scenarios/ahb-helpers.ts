@@ -119,7 +119,7 @@ export function hasExpectedDirection(actual: bigint, expected: bigint): boolean 
 export function getDerivedOutCapacity(env: RuntimeReplica, entityId: string, counterpartyId: string, tokenId: number): bigint {
   const [, replica] = findReplica(env, entityId);
   const account = replica.state.accounts.get(counterpartyId);
-  const delta = account?.deltas.get(tokenId);
+  const delta = account?.state.deltas.get(tokenId);
   if (!delta) return 0n;
   return deriveDelta(delta, isLeft(entityId, counterpartyId)).outCapacity;
 }
@@ -176,7 +176,7 @@ export async function maybeApproveSettlement(
 
   const [, approverRep] = findReplica(env, approver.id);
   const account = approverRep.state.accounts.get(counterpartyId);
-  const workspace = account?.settlementWorkspace;
+  const workspace = account?.state.settlementWorkspace;
   if (!workspace) throw new Error(`SETTLEMENT_WORKSPACE_MISSING:${approver.id}:${counterpartyId}`);
   const approverIsLeft = isLeft(approver.id, counterpartyId);
   const myHanko = approverIsLeft ? workspace.leftHanko : workspace.rightHanko;
@@ -198,7 +198,7 @@ export async function maybeApproveSettlement(
 
   await processUntil(env, () => {
     const [, counterpartyReplica] = findReplica(env, counterpartyId);
-    return counterpartyReplica.state.accounts.get(approver.id)?.settlementWorkspace?.status === 'ready_to_submit';
+    return counterpartyReplica.state.accounts.get(approver.id)?.state.settlementWorkspace?.status === 'ready_to_submit';
   }, 20, `${approver.name} settlement approval delivery`);
   return approved;
 }
@@ -229,7 +229,7 @@ export function getOffdelta(env: RuntimeReplica, entityA: string, entityB: strin
   const account = leftReplica.state.accounts.get(rightEntity);
   if (!account) return 0n;
 
-  const delta = account.deltas.get(tokenId);
+  const delta = account.state.deltas.get(tokenId);
   return delta?.offdelta ?? 0n;
 }
 
@@ -250,8 +250,8 @@ export function assertBilateralSync(env: RuntimeReplica, entityA: string, entity
     throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing account`);
   }
 
-  const deltaFromA = accountFromA.deltas?.get(tokenId);
-  const deltaFromB = accountFromB.deltas?.get(tokenId);
+  const deltaFromA = accountFromA.state.deltas?.get(tokenId);
+  const deltaFromB = accountFromB.state.deltas?.get(tokenId);
   if (!deltaFromA) {
     console.error(`❌ Entity ${entityA.slice(-4)} account has NO delta for token ${tokenId}`);
     throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing delta for token ${tokenId}`);

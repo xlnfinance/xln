@@ -179,13 +179,26 @@ const makeEnv = (): RuntimeReplica =>
                 [
                   counterpartyId,
                   {
-                    leftEntity: entityId,
-                    rightEntity: counterpartyId,
-                    domain: {
-                      chainId: 31337,
-                      depositoryAddress: '0x0000000000000000000000000000000000000002',
+                    state: {
+                      leftEntity: entityId,
+                      rightEntity: counterpartyId,
+                      domain: {
+                        chainId: 31337,
+                        depositoryAddress: '0x0000000000000000000000000000000000000002',
+                      },
+                      watchSeed: `0x${'34'.repeat(32)}`,
+                      deltas: new Map(),
+                      locks: new Map(),
+                      swapOffers: new Map(),
+                      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+                      requestedRebalance: new Map(),
+                      requestedRebalanceFeeState: new Map(),
+                      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+                      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+                      lastFinalizedJHeight: 0,
+                      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+                      jNonce: 0,
                     },
-                    watchSeed: `0x${'34'.repeat(32)}`,
                     status: 'active',
                     mempool: [],
                     currentFrame: {
@@ -199,24 +212,13 @@ const makeEnv = (): RuntimeReplica =>
                       deltas: [],
                       byLeft: true,
                     },
-                    deltas: new Map(),
-                    locks: new Map(),
-                    swapOffers: new Map(),
-                    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
                     currentHeight: 1,
                     pendingSignatures: [],
                     rollbackCount: 0,
                     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
                     proofBody: { tokenIds: [], deltas: [] },
                     pendingWithdrawals: new Map(),
-                    requestedRebalance: new Map(),
-                    requestedRebalanceFeeState: new Map(),
                     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-                    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-                    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-                    lastFinalizedJHeight: 0,
-                    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-                    jNonce: 0,
                   },
                 ],
               ]),
@@ -462,7 +464,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)! as any;
-  account.watchSeed = `0x${'11'.repeat(32)}`;
+  account.state.watchSeed = `0x${'11'.repeat(32)}`;
   account.boardResealMigration = {
     activationJHeight: 9,
     activationLogIndex: 2,
@@ -511,7 +513,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
       { args: 'a'.repeat(800) },
     ]),
   );
-  account.settlementWorkspace = { notes: 's'.repeat(500_000) };
+  account.state.settlementWorkspace = { notes: 's'.repeat(500_000) };
   account.swapOrderHistory = new Map(
     Array.from({ length: 20_000 }, (_, index) => [
       `history-${index}`,
@@ -559,7 +561,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   const compact = frame.activeEntity?.accounts.items[0];
 
   expect(encoded.byteLength).toBeLessThan(1_048_576);
-  expect(compact?.watchSeed).toBe('');
+  expect(compact?.state.watchSeed).toBe('');
   expect(compact?.mempool).toHaveLength(0);
   expect(compact?.pendingSignatures).toHaveLength(0);
   expect(compact?.currentFrame.accountTxs.length ?? 0).toBeLessThanOrEqual(20);
@@ -569,7 +571,7 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact?.abiProofBody).toBeUndefined();
   expect(compact?.disputeProofBodiesByHash).toBeUndefined();
   expect(compact?.disputeArgumentSnapshotsByHash).toBeUndefined();
-  expect(compact?.settlementWorkspace).toBeUndefined();
+  expect(compact?.state.settlementWorkspace).toBeUndefined();
   expect(compact?.swapOrderHistory).toBeUndefined();
   expect(compact?.swapClosedOrders).toBeUndefined();
   expect(accountPoint.swapOrderHistory?.size).toBe(20);
@@ -578,8 +580,8 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(accountPoint.swapClosedOrders?.size).toBe(20);
   expect(accountPoint.swapClosedOrders?.has('closed-0')).toBe(false);
   expect(accountPoint.swapClosedOrders?.has('closed-19999')).toBe(true);
-  expect(compact?.leftPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
-  expect(compact?.rightPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
+  expect(compact?.state.leftPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
+  expect(compact?.state.rightPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.boardResealMigration).toEqual(account.boardResealMigration);
 });
 
@@ -640,7 +642,7 @@ test('storage-backed historical view pages support desc account and book cursors
           encodeBuffer(
             projectAccountDoc({
               ...baseAccount,
-              rightEntity: id,
+              state: { ...baseAccount.state, rightEntity: id },
               proofHeader: { ...baseAccount.proofHeader, toEntity: id },
             }),
           ),
@@ -659,7 +661,7 @@ test('storage-backed historical view pages support desc account and book cursors
     accountQuery: { limit: 2, sortDir: 'desc' },
     bookQuery: { limit: 1 },
   });
-  expect(first?.accounts.items.map(item => item.rightEntity)).toEqual([accountIds[3], accountIds[2]]);
+  expect(first?.accounts.items.map(item => item.state.rightEntity)).toEqual([accountIds[3], accountIds[2]]);
   expect(first?.accounts.nextCursor).toBe(accountIds[2]);
   expect(first?.books.items.map(item => item.pairId)).toEqual(['1/1']);
   expect(first?.books.nextCursor).toBe('1/1');
@@ -673,7 +675,7 @@ test('storage-backed historical view pages support desc account and book cursors
     accountQuery: { limit: 2, sortDir: 'desc', cursor: first?.accounts.nextCursor || undefined },
     bookQuery: { limit: 1, cursor: first?.books.nextCursor || undefined },
   });
-  expect(second?.accounts.items.map(item => item.rightEntity)).toEqual([accountIds[1], accountIds[0]]);
+  expect(second?.accounts.items.map(item => item.state.rightEntity)).toEqual([accountIds[1], accountIds[0]]);
   expect(second?.accounts.nextCursor).toBe(null);
   expect(second?.books.items.map(item => item.pairId)).toEqual(['1/2']);
   expect(second?.books.nextCursor).toBe(null);
@@ -1017,16 +1019,16 @@ test('runtime adapter account pagination avoids full sort materialization', asyn
     const id = `0x${(i + 1).toString(16).padStart(64, '0')}`;
     replica.state.accounts.set(id, {
       ...base,
-      rightEntity: id,
+      state: { ...base.state, rightEntity: id },
       proofHeader: { ...base.proofHeader, toEntity: id },
     });
   }
 
   const first = await resolveRuntimeAdapterRead<{
-    items: Array<{ rightEntity: string }>;
+    items: Array<{ state: { rightEntity: string } }>;
     nextCursor: string | null;
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, `entity/${entityId}/accounts`, { limit: 3 });
-  expect(first.items.map(item => item.rightEntity)).toEqual([
+  expect(first.items.map(item => item.state.rightEntity)).toEqual([
     `0x${'01'.padStart(64, '0')}`,
     `0x${'02'.padStart(64, '0')}`,
     `0x${'03'.padStart(64, '0')}`,
@@ -2663,7 +2665,7 @@ test('storage entity hash docs persist root metadata only', async () => {
       counterpartyId: id,
       value: projectAccountDoc({
         ...base,
-        rightEntity: id,
+        state: { ...base.state, rightEntity: id },
         proofHeader: { ...base.proofHeader, toEntity: id },
       }),
     };
@@ -2699,7 +2701,7 @@ test('storage entity hash docs persist root metadata only', async () => {
         counterpartyId: unchangedId,
         value: projectAccountDoc({
           ...base,
-          rightEntity: unchangedId,
+          state: { ...base.state, rightEntity: unchangedId },
           proofHeader: { ...base.proofHeader, toEntity: unchangedId },
         }),
       },
@@ -2722,7 +2724,7 @@ test('storage entity hash docs persist root metadata only', async () => {
         counterpartyId: changedId,
         value: projectAccountDoc({
           ...base,
-          rightEntity: changedId,
+          state: { ...base.state, rightEntity: changedId },
           currentHeight: 999,
           proofHeader: { ...base.proofHeader, toEntity: changedId },
         }),
@@ -2748,7 +2750,7 @@ test('storage entity hash docs persist root metadata only', async () => {
         counterpartyId: changedId,
         value: projectAccountDoc({
           ...base,
-          rightEntity: changedId,
+          state: { ...base.state, rightEntity: changedId },
           currentHeight: 999,
           proofHeader: { ...base.proofHeader, toEntity: changedId },
         }),
@@ -2776,7 +2778,7 @@ test('storage entity hash docs persist root metadata only', async () => {
         counterpartyId: changedId,
         value: projectAccountDoc({
           ...base,
-          rightEntity: changedId,
+          state: { ...base.state, rightEntity: changedId },
           currentHeight: 999,
           proofHeader: { ...base.proofHeader, toEntity: changedId },
         }),
@@ -2802,7 +2804,7 @@ test('storage entity hash docs persist root metadata only', async () => {
         counterpartyId: changedId,
         value: projectAccountDoc({
           ...base,
-          rightEntity: changedId,
+          state: { ...base.state, rightEntity: changedId },
           currentHeight: 999,
           proofHeader: { ...base.proofHeader, toEntity: changedId },
         }),
@@ -2824,7 +2826,7 @@ test('storage entity hash docs persist root metadata only', async () => {
           counterpartyId: changedId,
           value: projectAccountDoc({
             ...base,
-            rightEntity: changedId,
+            state: { ...base.state, rightEntity: changedId },
             currentHeight: 999,
             proofHeader: { ...base.proofHeader, toEntity: changedId },
           }),
@@ -2843,7 +2845,7 @@ test('storage entity hash docs persist root metadata only', async () => {
         counterpartyId: changedId,
         value: projectAccountDoc({
           ...base,
-          rightEntity: changedId,
+          state: { ...base.state, rightEntity: changedId },
           currentHeight: 999,
           proofHeader: { ...base.proofHeader, toEntity: changedId },
         }),

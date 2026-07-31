@@ -2,7 +2,7 @@ import type { AccountState } from '../../types/account';
 import type { RuntimeInput, RuntimeReplica } from '../../runtime/types';
 import { safeStringify } from '../../protocol/serialization';
 import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
-import { getAccountState, getEntityOutCapacity, hasAccount } from './entity-lookup';
+import { getAccountReplica, getEntityOutCapacity, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import { getRequestCreditCap } from './hub-health';
 import { isEntityId32 } from './utils';
@@ -74,7 +74,7 @@ const admitCreditRequest = (
       knownHubEntityIds: hubs.map(profile => profile.entityId),
     }, 404);
   }
-  const account = getAccountState(env, hub.entityId, request.userEntityId);
+  const account = getAccountReplica(env, hub.entityId, request.userEntityId);
   if (!account || !hasAccount(env, hub.entityId, request.userEntityId)) {
     return json(headers, {
       error: 'No bilateral account with selected hub. Open account first.',
@@ -86,7 +86,7 @@ const admitCreditRequest = (
   return {
     ...request,
     hubEntityId: hub.entityId,
-    account,
+    account: account.state,
     approvedAmount: request.requestedAmount > cap ? cap : request.requestedAmount,
   };
 };

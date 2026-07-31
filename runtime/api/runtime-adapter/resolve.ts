@@ -182,7 +182,7 @@ export type RuntimeAdapterGraphAccount = {
   mempool: RuntimeAdapterGraphAccountActivity[];
   mempoolCount: number;
   currentFrame: RuntimeAdapterGraphAccountFrame;
-  deltas: StorageAccountDoc['deltas'];
+  deltas: StorageAccountDoc['state']['deltas'];
   currentHeight: number;
   pendingFrame?: RuntimeAdapterGraphAccountFrame;
   rollbackCount: number;
@@ -741,12 +741,21 @@ const singleAccountPage = (
 const projectLiveAccountsPage = (
   state: EntityState,
   query?: RuntimeAdapterReadQuery,
+  includeAccountActivity = false,
 ): RuntimeAdapterAccountPage => {
   const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
   const accountId = normalizeEntityId(String(query?.accountId || ''));
   if (accountId) {
     const account = state.accounts.get(accountId);
-    return singleAccountPage(accountId, account ? projectAccountDoc(account) : null, limit);
+    return singleAccountPage(
+      accountId,
+      account
+        ? includeAccountActivity
+          ? projectAccountDoc(account)
+          : compactAccountDocForView(account)
+        : null,
+      limit,
+    );
   }
   const cursor = normalizeEntityId(String(query?.accountsCursor ?? query?.cursor ?? ''));
   const pageIndex = readPageIndex(query?.accountsPage);
@@ -758,7 +767,9 @@ const projectLiveAccountsPage = (
     items: visibleKeys.map((id) => {
       const account = state.accounts.get(id);
       if (!account) throw new RuntimeAdapterError('E_INTERNAL', `live account index is stale: ${id}`);
-      return projectAccountDoc(account);
+      return includeAccountActivity
+        ? projectAccountDoc(account)
+        : compactAccountDocForView(account);
     }),
     ...buildPageMeta(keys, start, limit, visibleKeys),
   };
@@ -793,6 +804,7 @@ const projectLiveEntityViewPage = (
   ctx: RuntimeAdapterResolveContext,
   entityId: string,
   query?: RuntimeAdapterReadQuery,
+  includeAccountActivity = false,
 ): {
   core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
@@ -802,7 +814,7 @@ const projectLiveEntityViewPage = (
   if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
   return {
     core: projectEntityReplicaCoreView(replica.state, replica),
-    accounts: projectLiveAccountsPage(replica.state, query),
+    accounts: projectLiveAccountsPage(replica.state, query, includeAccountActivity),
     books: projectLiveBooksPage(replica.state, query),
   };
 };
@@ -868,35 +880,30 @@ const compactAccountDocForView = (
   doc: StorageAccountDoc,
   includeSwapHistory = false,
 ): StorageAccountDoc => {
+  // Settlement workspaces may contain large transient proof material. They are
+  // consensus data, but aggregate inspection endpoints must expose the compact
+  // settlement status through dedicated views instead of cloning the workspace.
+  const { settlementWorkspace: _settlementWorkspace, ...boundedState } = doc.state;
   const compact: StorageAccountDoc = {
-    leftEntity: doc.leftEntity,
-    rightEntity: doc.rightEntity,
-    domain: structuredClone(doc.domain),
-    watchSeed: '',
+    state: {
+      ...boundedState,
+      domain: structuredClone(doc.state.domain),
+      watchSeed: '',
+      deltas: compactMapHead(doc.state.deltas, 100) ?? new Map(),
+      locks: compactMapTail(doc.state.locks, 20) ?? new Map(),
+      swapOffers: compactMapTail(doc.state.swapOffers, 100) ?? new Map(),
+      requestedRebalance: compactMapHead(doc.state.requestedRebalance, 100) ?? new Map(),
+      requestedRebalanceFeeState: compactMapHead(doc.state.requestedRebalanceFeeState, 100) ?? new Map(),
+    },
     status: doc.status,
     mempool: [],
     currentFrame: compactAccountFrameForView(doc.currentFrame),
-    deltas: compactMapHead(doc.deltas, 100) ?? new Map(),
-    locks: compactMapTail(doc.locks, 20) ?? new Map(),
-    // Open offers are current Account state, not historical decoration. The
-    // storage projection has already removed private route material; retain a
-    // bounded tail so a committed Runtime view can render and cancel recent
-    // orders without reaching into the live mutable replica.
-    swapOffers: compactMapTail(doc.swapOffers, 100) ?? new Map(),
-    globalCreditLimits: doc.globalCreditLimits,
     currentHeight: doc.currentHeight,
     pendingSignatures: [],
     rollbackCount: doc.rollbackCount,
-    leftPendingJClaims: doc.leftPendingJClaims,
-    rightPendingJClaims: doc.rightPendingJClaims,
-    lastFinalizedJHeight: doc.lastFinalizedJHeight,
     proofHeader: doc.proofHeader,
     proofBody: compactAccountProofBodyForView(doc.proofBody),
-    disputeConfig: doc.disputeConfig,
-    jNonce: doc.jNonce,
     pendingWithdrawals: compactMapTail(doc.pendingWithdrawals, 20) ?? new Map(),
-    requestedRebalance: compactMapHead(doc.requestedRebalance, 100) ?? new Map(),
-    requestedRebalanceFeeState: compactMapHead(doc.requestedRebalanceFeeState, 100) ?? new Map(),
     shadow: {
       rebalance: {
         policy: compactMapHead(doc.shadow.rebalance.policy, 100) ?? new Map(),
@@ -907,8 +914,8 @@ const compactAccountDocForView = (
     },
   };
 
-  const pulls = compactMapTail(doc.pulls, 20);
-  if (pulls) compact.pulls = pulls;
+  const pulls = compactMapTail(doc.state.pulls, 20);
+  if (pulls) compact.state.pulls = pulls;
   if (includeSwapHistory) {
     // Account history is a point-read concern. Putting it in every Account of
     // an aggregate Entity view multiplies payload size by the page width and
@@ -935,7 +942,7 @@ const compactAccountDocForView = (
   if (doc.counterpartySettlementHanko) compact.counterpartySettlementHanko = doc.counterpartySettlementHanko;
   const disputeProofNoncesByHash = compactRecordTail(doc.disputeProofNoncesByHash, 20);
   if (disputeProofNoncesByHash) compact.disputeProofNoncesByHash = disputeProofNoncesByHash;
-  if (doc.rebalanceFeePolicies) compact.rebalanceFeePolicies = doc.rebalanceFeePolicies;
+  if (doc.state.rebalanceFeePolicies) compact.state.rebalanceFeePolicies = doc.state.rebalanceFeePolicies;
   return compact;
 };
 
@@ -1118,8 +1125,8 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
 
 const accountCounterpartyIdForView = (entityId: string, doc: StorageAccountDoc): string => {
   const normalized = normalizeEntityId(entityId);
-  const left = normalizeEntityId(doc.leftEntity);
-  const right = normalizeEntityId(doc.rightEntity);
+  const left = normalizeEntityId(doc.state.leftEntity);
+  const right = normalizeEntityId(doc.state.rightEntity);
   return left === normalized ? right : left;
 };
 
@@ -1141,7 +1148,7 @@ const accountPageSummaryForView = (
   const visibleTopDeltas = page.items
     .flatMap((doc) => {
       const counterpartyId = accountCounterpartyIdForView(entityId, doc);
-      return Array.from(doc.deltas.entries()).map(([tokenId, delta]) => {
+      return Array.from(doc.state.deltas.entries()).map(([tokenId, delta]) => {
         const netDelta = BigInt(delta.offdelta ?? 0n) + BigInt(delta.ondelta ?? 0n);
         return {
           counterpartyId,
@@ -1457,13 +1464,13 @@ const projectGraphAccountFrame = (
 });
 
 const projectGraphAccount = (doc: StorageAccountDoc): RuntimeAdapterGraphAccount => ({
-  leftEntity: doc.leftEntity,
-  rightEntity: doc.rightEntity,
+  leftEntity: doc.state.leftEntity,
+  rightEntity: doc.state.rightEntity,
   status: doc.status,
   mempool: projectGraphAccountActivities(doc.mempool),
   mempoolCount: doc.mempool.length,
   currentFrame: projectGraphAccountFrame(doc.currentFrame),
-  deltas: new Map(doc.deltas),
+  deltas: new Map(doc.state.deltas),
   currentHeight: doc.currentHeight,
   ...(doc.pendingFrame ? { pendingFrame: projectGraphAccountFrame(doc.pendingFrame) } : {}),
   rollbackCount: doc.rollbackCount,
@@ -1546,7 +1553,7 @@ const captureLiveGraph = (
       ...query,
       accountsLimit,
       booksLimit: 1,
-    });
+    }, true);
     accountObservationCount += live.accounts.items.length;
     if (accountObservationCount > accountsLimit) {
       throw new RuntimeAdapterError(
@@ -1900,7 +1907,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
           const replica = findReplica(ctx.env, entityId);
           if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
           const account = replica.state.accounts.get(accountId);
-          const page = singleAccountPage(accountId, account ? compactAccountDocForView(projectAccountDoc(account), true) : null, limit);
+          const page = singleAccountPage(accountId, account ? compactAccountDocForView(account, true) : null, limit);
           return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
         }
         if (!ctx.loadEntityAccountDoc) {
@@ -1930,7 +1937,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
       const { state } = await resolveEntityState(ctx, entityId, query);
       const account = state.accounts.get(counterpartyId);
       if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${normalizeEntityId(entityId)}/${counterpartyId}`);
-      return compactAccountDocForView(projectAccountDoc(account), true) as T;
+      return compactAccountDocForView(account, true) as T;
     }
 
     const { state, replica } = await resolveEntityState(ctx, entityId, query);

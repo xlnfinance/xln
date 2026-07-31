@@ -98,7 +98,7 @@ import type { JReplica } from '../types/jurisdiction-runtime';
 import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
-  getAccountState,
+  getAccountReplica,
   getBootstrapCreditAmount,
   getBootstrapTokenAmount,
   getCreditGrantedByEntity,
@@ -1580,7 +1580,7 @@ const planSupportPeerInputs = (
     owner,
   );
   for (const peer of peers) {
-    const account = getAccountState(env, owner.entityId, peer.entityId);
+    const account = getAccountReplica(env, owner.entityId, peer.entityId);
     const canWrite =
       !account?.pendingFrame && Number(account?.mempool?.length || 0) === 0;
     if (
@@ -1644,7 +1644,7 @@ const planHubPeerInputs = (
   const openInputs: EntityInput[] = [];
   const creditInputs: EntityInput[] = [];
   for (const peer of peers) {
-    const account = getAccountState(env, bootstrap.entityId, peer.entityId);
+    const account = getAccountReplica(env, bootstrap.entityId, peer.entityId);
     const canWrite =
       !account?.pendingFrame && Number(account?.mempool?.length || 0) === 0;
     if (
@@ -1726,7 +1726,7 @@ const planMeshBootstrapInputs = (
 
 const buildPairHealth = (env: RuntimeReplica, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
   return peers.map(peer => {
-    const account = getAccountState(env, selfEntityId, peer.entityId);
+    const account = getAccountReplica(env, selfEntityId, peer.entityId);
     const grantedByMe = account ? getCreditGrantedByEntity(account, selfEntityId, HUB_MESH_TOKEN_ID) : 0n;
     const grantedByPeer = account ? getCreditGrantedByEntity(account, peer.entityId, HUB_MESH_TOKEN_ID) : 0n;
     return {
@@ -1848,7 +1848,7 @@ const handleAccountStatusRequest = (
       { status: 400, headers: JSON_HEADERS },
     );
   }
-  const account = getAccountState(env, hubEntityId, counterpartyEntityId);
+  const account = getAccountReplica(env, hubEntityId, counterpartyEntityId);
   const replica = getEntityReplicaById(env, hubEntityId);
   const tokenIds = String(url.searchParams.get('tokenIds') || '')
     .split(',')
@@ -1874,11 +1874,11 @@ const handleAccountStatusRequest = (
       mempool: Number(account?.mempool?.length ?? 0),
       tokens: tokenIds.map(tokenId => ({
         tokenId,
-        hasDelta: Boolean(account?.deltas?.has(tokenId)),
+        hasDelta: Boolean(account?.state.deltas?.has(tokenId)),
         hubOutCapacity: account
           ? getEntityOutCapacity(account, hubEntityId, tokenId).toString()
           : '0',
-        delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
+        delta: serializeAccountDelta(account?.state.deltas?.get(tokenId)),
       })),
       runtime: {
         height: Number(env.state.height ?? 0),
@@ -2359,11 +2359,11 @@ const advanceHubMeshBootstrap = async (
       hasAccount(input.env, input.bootstrap.entityId, peer.entityId) &&
       DEFAULT_ACCOUNT_TOKEN_IDS.every(tokenId =>
         Boolean(
-          getAccountState(
+          getAccountReplica(
             input.env,
             input.bootstrap.entityId,
             peer.entityId,
-          )?.deltas.get(tokenId),
+          )?.state.deltas.get(tokenId),
         ),
       ),
     );

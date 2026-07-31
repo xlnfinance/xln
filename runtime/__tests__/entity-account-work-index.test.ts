@@ -51,7 +51,7 @@ describe('Entity Account work indexes', () => {
       kind: 'frame',
       fromEntityId: self,
       toEntityId: counterparty,
-      domain: account.domain,
+      domain: account.state.domain,
       proposal: {
         frame: pendingFrame,
         disputeSeal: {
@@ -61,7 +61,7 @@ describe('Entity Account work indexes', () => {
         },
       },
     };
-    account.requestedRebalance.set(1, 10n);
+    account.state.requestedRebalance.set(1, 10n);
     refreshAccountWorkIndex(state, counterparty);
     expect([...getPendingAccountIds(state)]).toEqual([counterparty]);
     expect([...getRebalanceAccountIds(state)]).toEqual([counterparty]);
@@ -70,7 +70,7 @@ describe('Entity Account work indexes', () => {
     candidate.accounts.get(counterparty)!.mempool = [];
     candidate.accounts.get(counterparty)!.pendingFrame = undefined;
     candidate.accounts.get(counterparty)!.pendingAccountInput = undefined;
-    candidate.accounts.get(counterparty)!.requestedRebalance.clear();
+    candidate.accounts.get(counterparty)!.state.requestedRebalance.clear();
     refreshAccountWorkIndex(candidate, counterparty);
 
     expect([...getQueuedAccountIds(candidate)]).toEqual([]);

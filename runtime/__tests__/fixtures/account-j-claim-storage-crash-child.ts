@@ -174,8 +174,8 @@ account.mempool = [{
     events: [{
       type: 'AccountSettled',
       data: {
-        leftEntity: account.leftEntity,
-        rightEntity: account.rightEntity,
+        leftEntity: account.state.leftEntity,
+        rightEntity: account.state.rightEntity,
         tokenId: 1,
         leftReserve: '0',
         rightReserve: '0',
@@ -249,8 +249,8 @@ const appliedRuntime = await applyRuntimeInput(env, runtimeInput);
 const committedReplica = Array.from(env.state.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
 const committedAccount = committedReplica?.state.accounts.get(counterpartyId);
 if (!committedAccount) throw new Error('ACCOUNT_J_CRASH_COMMITTED_ACCOUNT_MISSING');
-const side = committedAccount.leftEntity === entityId ? 'left' as const : 'right' as const;
-const state = side === 'left' ? committedAccount.leftPendingJClaims : committedAccount.rightPendingJClaims;
+const side = committedAccount.state.leftEntity === entityId ? 'left' as const : 'right' as const;
+const state = side === 'left' ? committedAccount.state.leftPendingJClaims : committedAccount.state.rightPendingJClaims;
 if (state.count !== 1n) {
   throw new Error(`ACCOUNT_J_CRASH_CLAIM_NOT_APPLIED:${state.count}:` + JSON.stringify({
     appliedInputs: appliedRuntime.appliedRuntimeInput.entityInputs.map(input => ({

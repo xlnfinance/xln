@@ -105,8 +105,8 @@ const validateIncomingFrameProposer = (
   events: string[],
 ): HandleAccountInputResult | undefined => {
   const proposer = input.fromEntityId.toLowerCase();
-  const proposerIsLeft = proposer === account.leftEntity.toLowerCase();
-  if (!proposerIsLeft && proposer !== account.rightEntity.toLowerCase()) {
+  const proposerIsLeft = proposer === account.state.leftEntity.toLowerCase();
+  if (!proposerIsLeft && proposer !== account.state.rightEntity.toLowerCase()) {
     return {
       success: false,
       error: `Frame proposer is not an account party: ` + input.fromEntityId.slice(-8),
@@ -217,7 +217,7 @@ const validateIncomingFrameDeadline = (
     });
   }
 
-  const violation = getIncomingAccountDeadlineViolation(account, receivedFrame, securityContext);
+  const violation = getIncomingAccountDeadlineViolation(account.state, receivedFrame, securityContext);
   if (!violation) return undefined;
   const proposal = accountInputProposal(input);
   if (!proposal?.frameHanko) {
@@ -293,7 +293,7 @@ export const preflightIncomingAccountFrame = async (
     kind: 'continue',
     receivedFrame,
     ourEntityId: account.proofHeader.fromEntity,
-    frameJHeight: receivedFrame.jHeight ?? account.lastFinalizedJHeight ?? 0,
+    frameJHeight: receivedFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0,
     rollbackPendingFrame: sameHeightResolution === true,
   };
 };

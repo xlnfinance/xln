@@ -1,15 +1,11 @@
 import type { AccountReplica } from '../types/account';
 import type { EntityReplica, EntityState } from '../entity/types';
-import { assertAccountJClaimAccumulatorState } from '../account/j-claim-accumulator';
+import { cloneAccountReplica } from '../account/state-clone';
 import { cloneEntityState } from '../entity/state-clone';
 import {
   cloneCrossJurisdictionBookAdmission,
-  cloneCrossJurisdictionAccountFrameRoute,
-  cloneCrossJurisdictionAccountInputRoute,
   cloneCrossJurisdictionAccountTxRoute,
   cloneCrossJurisdictionRoute,
-  cloneCrossJurisdictionSwapHistoryRoute,
-  cloneCrossJurisdictionSwapOfferRoute,
 } from '../extensions/cross-j/index';
 import { encodeBuffer } from './codec';
 import { DEFAULT_ACCOUNT_MERKLE_RADIX, normalizeEntityId } from './keys';
@@ -45,20 +41,6 @@ const publicPendingCrossJurisdictionFillAcks = (
       tx: cloneCrossJurisdictionAccountTxRoute(pending.tx) as typeof pending.tx,
     },
   ])) : undefined;
-
-const publicSwapOffers = (offers: AccountReplica['swapOffers']): AccountReplica['swapOffers'] =>
-  new Map(Array.from((offers ?? new Map()).entries()).map(([id, offer]) => [
-    id,
-    cloneCrossJurisdictionSwapOfferRoute(offer),
-  ]));
-
-const publicSwapHistory = (history: AccountReplica['swapOrderHistory']): AccountReplica['swapOrderHistory'] =>
-  history instanceof Map
-    ? new Map(Array.from(history.entries()).map(([id, entry]) => [
-        id,
-        cloneCrossJurisdictionSwapHistoryRoute(entry),
-      ]))
-    : history;
 
 export const projectEntityCoreDoc = (
   state: EntityState,
@@ -207,71 +189,8 @@ export const encodeReplicaMeta = (
   options,
 ), { omitSymbolKeys: true });
 
-const projectAccountDocFull = (account: AccountReplica): StorageAccountDoc => ({
-  leftEntity: account.leftEntity,
-  rightEntity: account.rightEntity,
-  domain: structuredClone(account.domain),
-  watchSeed: account.watchSeed,
-  status: account.status,
-  mempool: account.mempool.map(cloneCrossJurisdictionAccountTxRoute),
-  currentFrame: cloneCrossJurisdictionAccountFrameRoute(account.currentFrame),
-  deltas: account.deltas,
-  locks: account.locks,
-  swapOffers: publicSwapOffers(account.swapOffers),
-  pulls: account.pulls,
-  ...withProp('subcontracts', account.subcontracts),
-  ...withProp('lendingIntents', account.lendingIntents),
-  globalCreditLimits: account.globalCreditLimits,
-  currentHeight: account.currentHeight,
-  pendingSignatures: account.pendingSignatures,
-  rollbackCount: account.rollbackCount,
-  leftPendingJClaims: assertAccountJClaimAccumulatorState(account.leftPendingJClaims),
-  rightPendingJClaims: assertAccountJClaimAccumulatorState(account.rightPendingJClaims),
-  lastFinalizedJHeight: account.lastFinalizedJHeight,
-  proofHeader: account.proofHeader,
-  proofBody: account.proofBody,
-  disputeConfig: account.disputeConfig,
-  jNonce: account.jNonce,
-  pendingWithdrawals: account.pendingWithdrawals,
-  requestedRebalance: account.requestedRebalance,
-  requestedRebalanceFeeState: account.requestedRebalanceFeeState,
-  shadow: account.shadow,
-  ...withProp('pendingFrame', account.pendingFrame ? cloneCrossJurisdictionAccountFrameRoute(account.pendingFrame) : undefined),
-  ...withProp('pendingAccountInput', account.pendingAccountInput ? cloneCrossJurisdictionAccountInputRoute(account.pendingAccountInput) : undefined),
-  ...withProp('lastOutboundFrameAck', account.lastOutboundFrameAck),
-  ...withProp('pendingForwards', account.pendingForwards),
-  ...withProp('hankoSignature', account.hankoSignature),
-  ...withProp('lastRollbackFrameHash', account.lastRollbackFrameHash),
-  ...withProp('abiProofBody', account.abiProofBody),
-  ...withProp('currentFrameHanko', account.currentFrameHanko),
-  ...withProp('counterpartyFrameHanko', account.counterpartyFrameHanko),
-  ...withProp('boardResealMigration', account.boardResealMigration),
-  ...withProp('counterpartyBoardReseal', account.counterpartyBoardReseal),
-  ...withProp('currentDisputeProofHanko', account.currentDisputeProofHanko),
-  ...withProp('currentDisputeProofNonce', account.currentDisputeProofNonce),
-  ...withProp('currentDisputeProofBodyHash', account.currentDisputeProofBodyHash),
-  ...withProp('currentDisputeHash', account.currentDisputeHash),
-  ...withProp('counterpartyDisputeProofHanko', account.counterpartyDisputeProofHanko),
-  ...withProp('counterpartyDisputeProofNonce', account.counterpartyDisputeProofNonce),
-  ...withProp('counterpartyDisputeProofBodyHash', account.counterpartyDisputeProofBodyHash),
-  ...withProp('counterpartyDisputeHash', account.counterpartyDisputeHash),
-  ...withProp('counterpartySettlementHanko', account.counterpartySettlementHanko),
-  ...withProp('disputeProofNoncesByHash', account.disputeProofNoncesByHash),
-  ...withProp('disputeProofBodiesByHash', account.disputeProofBodiesByHash),
-  ...withProp('disputeArgumentSnapshotsByHash', account.disputeArgumentSnapshotsByHash),
-  ...withProp('disputePrepare', account.disputePrepare),
-  ...withProp('settlementWorkspace', account.settlementWorkspace),
-  ...withProp('activeDispute', account.activeDispute),
-  ...withProp('swapOrderHistory', publicSwapHistory(account.swapOrderHistory)),
-  ...withProp('swapClosedOrders', publicSwapHistory(account.swapClosedOrders)),
-  ...withProp('rebalanceFeePolicies', account.rebalanceFeePolicies),
-});
-
-export const projectAccountDoc = (account: AccountReplica): StorageAccountDoc => {
-  // Historical account frames are not future-consensus state. They are written
-  // to rebuildable history views by deterministic keys and intentionally omitted here.
-  return projectAccountDocFull(account);
-};
+export const projectAccountDoc = (account: AccountReplica): StorageAccountDoc =>
+  cloneAccountReplica(account, true);
 
 export const buildAccountMerkleFromDocs = (
   accounts: ReadonlyMap<string, StorageAccountDoc>,

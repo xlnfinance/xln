@@ -40,9 +40,11 @@ const makeEnv = (): RuntimeReplica => ({
         reserves: new Map([[1, 3n]]),
         accounts: new Map([
           [ENTITY_B, {
-            deltas: new Map([
-              [1, { collateral: 3n }],
-            ]),
+            state: {
+              deltas: new Map([
+                [1, { collateral: 3n }],
+              ]),
+            },
           }],
         ]),
       },
@@ -86,7 +88,7 @@ test('calculate and verify solvency keep every jurisdiction asset independent', 
   try {
     expect(verifySolvency(env, 'unit')).toBe(true);
     env.state.eReplicas.values().next().value!.state.reserves = new Map([[1, 1n], [2, 2n]]);
-    env.state.eReplicas.values().next().value!.state.accounts.get(ENTITY_B)!.deltas = new Map([
+    env.state.eReplicas.values().next().value!.state.accounts.get(ENTITY_B)!.state.deltas = new Map([
       [1, { collateral: 2n }],
       [2, { collateral: 1n }],
     ] as never);
@@ -101,7 +103,7 @@ test('a surplus in one token never covers a deficit in another token', () => {
   const env = makeEnv();
   const state = env.state.eReplicas.values().next().value!.state;
   state.reserves = new Map([[1, 1n], [2, 2n]]);
-  state.accounts.get(ENTITY_B)!.deltas = new Map([
+  state.accounts.get(ENTITY_B)!.state.deltas = new Map([
     [1, { collateral: 2n }],
     [2, { collateral: 1n }],
   ] as never);
@@ -126,7 +128,7 @@ test('the same token id in two Depositories remains two independent assets', () 
   };
   secondReplica.state.reserves = new Map([[1, 7n]]);
   secondReplica.state.accounts = new Map([
-    [ENTITY_D, { deltas: new Map([[1, { collateral: 7n }]]) }],
+    [ENTITY_D, { state: { deltas: new Map([[1, { collateral: 7n }]]) } }],
   ] as never);
   env.state.eReplicas.set('second-stack', secondReplica);
 

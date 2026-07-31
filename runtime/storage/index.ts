@@ -542,7 +542,7 @@ const synchronizeAccountJClaimNodes = async (
     const stored = await readAccountStorageLayout(currentDb, parsed.entityId, parsed.counterpartyId, key);
     if (!stored) throw new Error(`STORAGE_LIVE_ACCOUNT_MISSING:${key.toString('hex')}`);
     const doc = validateStorageAccountDocValue(stored.doc);
-    states.push(doc.leftPendingJClaims, doc.rightPendingJClaims);
+    states.push(doc.state.leftPendingJClaims, doc.state.rightPendingJClaims);
   }
   const authoritative = new Map<string, AccountJClaimNode>();
   const values = new Map<string, Buffer>();
@@ -589,13 +589,13 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
     const docs = await readSnapshotDocs(walDb, height);
     for (const doc of docs) {
       if (doc.family !== 'account') continue;
-      remember(doc.value.leftPendingJClaims);
-      remember(doc.value.rightPendingJClaims);
+      remember(doc.value.state.leftPendingJClaims);
+      remember(doc.value.state.rightPendingJClaims);
     }
     for (const state of await readSnapshotReplicaStates(walDb, height, docs)) {
       for (const account of state.accounts.values()) {
-        remember(account.leftPendingJClaims);
-        remember(account.rightPendingJClaims);
+        remember(account.state.leftPendingJClaims);
+        remember(account.state.rightPendingJClaims);
       }
     }
   }
@@ -606,8 +606,8 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
     }
     for (const doc of diff.puts) {
       if (doc.family !== 'account') continue;
-      remember(doc.value.leftPendingJClaims);
-      remember(doc.value.rightPendingJClaims);
+      remember(doc.value.state.leftPendingJClaims);
+      remember(doc.value.state.rightPendingJClaims);
     }
   }
   const stored = new Map<string, AccountJClaimNode>();

@@ -71,7 +71,7 @@ export const handleLendingOfferEntityTx = (
   const termId = normalizeLendingTerm(entityTx.data.termId);
   const interestBps = normalizeInterestBps(entityTx.data.interestBps);
   const account = entityState.accounts.get(hubEntityId)!;
-  if (!account.deltas.has(entityTx.data.tokenId)) {
+  if (!account.state.deltas.has(entityTx.data.tokenId)) {
     throw new Error(`LENDING_TOKEN_NOT_ENABLED:${entityTx.data.tokenId}`);
   }
   return queueAccountTx(entityState, hubEntityId, {

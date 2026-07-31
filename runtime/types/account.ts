@@ -253,7 +253,9 @@ export interface AccountState {
  * Entity-owned automation. The parent Entity may commit this wider envelope,
  * but Account-root helpers must accept `AccountState`, never the envelope.
  */
-export interface AccountReplica extends AccountState {
+export interface AccountReplica {
+  /** Bilateral state authenticated by AccountFrame.accountStateRoot. */
+  state: AccountState;
   status: AccountStatus; // Manual lifecycle gate for dispute freeze/reopen
 
   mempool: AccountTx[]; // Unprocessed account transactions

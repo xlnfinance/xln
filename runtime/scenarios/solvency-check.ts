@@ -22,7 +22,7 @@ export function checkSolvency(env: RuntimeReplica, expected: bigint, label: stri
 
     for (const [counterpartyId, account] of replica.state.accounts) {
       if (isLeftEntity(replica.state.entityId, counterpartyId)) {
-        for (const [, delta] of account.deltas) {
+        for (const [, delta] of account.state.deltas) {
           collateral += delta.collateral;
         }
       }

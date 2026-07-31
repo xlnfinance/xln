@@ -42,19 +42,19 @@ const buildDisputeProjection = (
       proof.proofBodyHash.toLowerCase() !==
       account.currentDisputeProofBodyHash?.toLowerCase();
     const nonceConsumed =
-      Number(account.currentDisputeProofNonce ?? 0) <= Number(candidate.jNonce ?? 0);
+      Number(account.currentDisputeProofNonce ?? 0) <= Number(candidate.state.jNonce ?? 0);
     if (!bodyChanged && !nonceConsumed) return { proof, nonce: 0 };
     const nonce = Math.max(
       Number(candidate.proofHeader.nextProofNonce ?? 0),
-      Number(candidate.jNonce ?? 0) + 1,
+      Number(candidate.state.jNonce ?? 0) + 1,
     );
     return {
       proof,
       nonce,
       hash: createDisputeProofHashWithNonce(
-        candidate,
+        candidate.state,
         proof.proofBodyHash,
-        getAccountStateDomain(account),
+        getAccountStateDomain(account.state),
         nonce,
       ),
     };
@@ -100,14 +100,14 @@ export const prepareProposalProof = async (
   checkpointProfile: (label: string) => void,
 ): Promise<ProposalProofResult> => {
   const signingEntityId = account.proofHeader.fromEntity;
-  if (!isEntityId32(candidate.leftEntity) || !isEntityId32(candidate.rightEntity)) {
+  if (!isEntityId32(candidate.state.leftEntity) || !isEntityId32(candidate.state.rightEntity)) {
     return {
       success: false,
       result: {
         success: false,
         error:
-          `INVALID_ACCOUNT_ENTITY_ID: left=${String(candidate.leftEntity)} ` +
-          `right=${String(candidate.rightEntity)}`,
+          `INVALID_ACCOUNT_ENTITY_ID: left=${String(candidate.state.leftEntity)} ` +
+          `right=${String(candidate.state.rightEntity)}`,
         events,
       },
     };

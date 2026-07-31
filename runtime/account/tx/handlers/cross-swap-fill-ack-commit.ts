@@ -28,7 +28,7 @@ export const syncSourcePullBinding = (
 ): void => {
   const pullId = route.sourcePull?.pullId;
   if (!pullId) return;
-  const pull = account.pulls?.get(pullId);
+  const pull = account.state.pulls?.get(pullId);
   if (pull) {
     pull.crossJurisdiction =
       buildCommittedCrossJurisdictionPullBinding(route, 'source');
@@ -43,8 +43,8 @@ export const cancelledOfferResult = (
   swapOfferCancelled: {
     offerId: prepared.tx.data.offerId,
     accountId: prepared.offer.makerIsLeft
-      ? prepared.account.leftEntity
-      : prepared.account.rightEntity,
+      ? prepared.account.state.leftEntity
+      : prepared.account.state.rightEntity,
   },
 });
 
@@ -100,7 +100,7 @@ export const applyUnfilledCrossSwapCancellation = (
     executionWantAmount: 0n,
     ...(tx.data.comment ? { comment: tx.data.comment } : {}),
   });
-  account.swapOffers?.delete(tx.data.offerId);
+  account.state.swapOffers?.delete(tx.data.offerId);
   recordSwapClosedLifecycle(account, tx.data.offerId);
   events.push(
     `🌉 Cross-j offer ${tx.data.offerId.slice(0, 8)} cancel requested at ` +

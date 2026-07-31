@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { cloneAccountState } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state-clone';
 import {
   computeAccountStateRoot,
   computeAccountStateRootCold,
@@ -137,25 +137,25 @@ describe('State and Replica boundary characterization', () => {
     expect(account.currentFrame.height).toBe(0);
     expect(account.currentFrame.stateHash).toBe('');
     expect(account.currentFrame.accountStateRoot).toMatch(/^0x[0-9a-f]{64}$/);
-    const accountRoot = computeAccountStateRoot(account);
-    expect(accountRoot).toBe(computeAccountStateRootCold(account));
+    const accountRoot = computeAccountStateRoot(account.state);
+    expect(accountRoot).toBe(computeAccountStateRootCold(account.state));
 
-    const bilateralChange = cloneAccountState(account, true);
-    bilateralChange.deltas.set(1, createDefaultDelta(1));
-    expect(computeAccountStateRoot(bilateralChange)).not.toBe(accountRoot);
-    expect(computeAccountStateRoot(bilateralChange))
-      .toBe(computeAccountStateRootCold(bilateralChange));
+    const bilateralChange = cloneAccountReplica(account, true);
+    bilateralChange.state.deltas.set(1, createDefaultDelta(1));
+    expect(computeAccountStateRoot(bilateralChange.state)).not.toBe(accountRoot);
+    expect(computeAccountStateRoot(bilateralChange.state))
+      .toBe(computeAccountStateRootCold(bilateralChange.state));
 
-    const entityEnvelopeChange = cloneAccountState(account, true);
+    const entityEnvelopeChange = cloneAccountReplica(account, true);
     entityEnvelopeChange.mempool.push({
       type: 'direct_payment',
       data: { tokenId: 1, amount: 5n },
     });
-    expect(computeAccountStateRoot(entityEnvelopeChange)).toBe(accountRoot);
+    expect(computeAccountStateRoot(entityEnvelopeChange.state)).toBe(accountRoot);
 
-    const localWitnessChange = cloneAccountState(account, true);
+    const localWitnessChange = cloneAccountReplica(account, true);
     localWitnessChange.currentFrameHanko = hex('91', 65);
-    expect(computeAccountStateRoot(localWitnessChange)).toBe(accountRoot);
+    expect(computeAccountStateRoot(localWitnessChange.state)).toBe(accountRoot);
   });
 
   test('Entity root commits Account lifecycle but excludes local witnesses and history views', async () => {

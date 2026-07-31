@@ -48,6 +48,7 @@ import {
 } from '../entity/profile-encryption';
 import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
 import { computeProfileHash } from '../entity/profile-signing';
+import { makeAccount } from './helpers/cross-j';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const signerId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -123,13 +124,9 @@ describe('runtime scheduled wake', () => {
     const counterparty = entityId('21');
     const state = makeState(id, proposer, 0);
     state.hubRebalanceConfig = {} as never;
-    state.accounts.set(counterparty, {
-      leftEntity: id,
-      rightEntity: counterparty,
-      pendingFrame: { height: 1, timestamp: 0, accountTxs: [] },
-      requestedRebalance: new Map(),
-      deltas: new Map(),
-    } as never);
+    const account = makeAccount(id, counterparty);
+    account.pendingFrame = { ...account.currentFrame, height: 1, timestamp: 0, accountTxs: [] };
+    state.accounts.set(counterparty, account);
     const replica = makeReplica(state, proposer, true);
 
     expect(entityNeedsPeriodicWake(replica)).toBe(true);
@@ -149,12 +146,9 @@ describe('runtime scheduled wake', () => {
     const counterparty = entityId('23');
     const state = makeState(id, proposer, 0);
     state.hubRebalanceConfig = {} as never;
-    state.accounts.set(counterparty, {
-      leftEntity: id,
-      rightEntity: counterparty,
-      requestedRebalance: new Map([[1, 1n]]),
-      deltas: new Map(),
-    } as never);
+    const account = makeAccount(id, counterparty);
+    account.state.requestedRebalance = new Map([[1, 1n]]);
+    state.accounts.set(counterparty, account);
     const replica = makeReplica(state, proposer, true);
 
     expect(entityNeedsPeriodicWake(replica)).toBe(true);

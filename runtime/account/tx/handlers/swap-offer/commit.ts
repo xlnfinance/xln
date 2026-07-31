@@ -24,7 +24,7 @@ export const commitSwapOffer = (
 ): SwapOfferResult => {
   const { offerId, giveTokenId, wantTokenId, timeInForce, crossJurisdiction } = tx.data;
   const { priceTicks, effectiveGiveAmount, effectiveWantAmount } = prepared;
-  const delta = ensureDelta(account, giveTokenId);
+  const delta = ensureDelta(account.state, giveTokenId);
   // A cross-j source pull already owns the economic lock. Adding a second hold
   // here would double-reserve the same funds; same-j offers lock capacity now.
   if (!crossJurisdiction) {
@@ -59,7 +59,7 @@ export const commitSwapOffer = (
     const holdError = addHold(delta, admission.makerIsLeft ? 'left' : 'right', effectiveGiveAmount);
     if (holdError) return { success: false, error: holdError, events: [] };
   }
-  account.swapOffers!.set(offerId, offer);
+  account.state.swapOffers!.set(offerId, offer);
   recordSwapOfferLifecycle(account, offer);
   const events = [
     `📊 Swap offer created: ${offerId.slice(0, 8)}... give ` +

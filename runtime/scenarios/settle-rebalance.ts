@@ -116,14 +116,14 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   const waitForHubCollateral = async (counterpartyId: string, expected: bigint, label: string, maxRounds = 20): Promise<void> => {
     for (let i = 0; i < maxRounds; i++) {
       const current =
-        findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.deltas.get(USDC)?.collateral || 0n;
+        findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.state.deltas.get(USDC)?.collateral || 0n;
       if (current === expected) return;
       await syncChain(env, 1);
       advanceTime(200);
       await process(env);
     }
     const current =
-      findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.deltas.get(USDC)?.collateral || 0n;
+      findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.state.deltas.get(USDC)?.collateral || 0n;
     assert(current === expected, `${label}: collateral ${current}, expected ${expected}`, env);
   };
 
@@ -246,12 +246,12 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   }]);
   await convergeScenario(env);
 
-  const aliceWs1 = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
+  const aliceWs1 = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.state.settlementWorkspace;
   assert(aliceWs1?.revision === 1, 'Workspace should be revision 1', env);
   assert(aliceWs1?.lastModifiedByLeft === aliceIsLeft, 'Alice should be lastModifier', env);
 
   // 3b: Verify Hub auto-approved (ondelta-neutral r2c from RIGHT proposer)
-  const hubWs1 = findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.settlementWorkspace;
+  const hubWs1 = findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.state.settlementWorkspace;
   assert(hubWs1, 'Hub should have workspace', env);
   const hubIsLeft = !aliceIsLeft;
   const hubHankoField = hubIsLeft ? 'leftHanko' : 'rightHanko';
@@ -277,10 +277,10 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   await syncChain(env, 5);
 
   const aliceAccAfterSettle = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
-  assert(!aliceAccAfterSettle?.settlementWorkspace, 'Workspace should be cleared after execute', env);
+  assert(!aliceAccAfterSettle?.state.settlementWorkspace, 'Workspace should be cleared after execute', env);
 
   // Check nonce incremented
-  const aliceNonce1 = aliceAccAfterSettle?.jNonce || 0;
+  const aliceNonce1 = aliceAccAfterSettle?.state.jNonce || 0;
   assert(aliceNonce1 >= 1, `Alice nonce should be >= 1 after settlement, got ${aliceNonce1}`, env);
 
   console.log = originalLog;
@@ -313,7 +313,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   await convergeScenario(env);
 
   // Workspace must exist on Alice side before explicit reject.
-  const aliceWsReject = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
+  const aliceWsReject = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.state.settlementWorkspace;
   assert(aliceWsReject, 'Alice should have workspace from Hub propose', env);
 
   await process(env, [{
@@ -323,7 +323,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   await convergeScenario(env);
 
   const aliceAccAfterReject = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
-  assert(!aliceAccAfterReject?.settlementWorkspace, 'Workspace should be cleared after reject', env);
+  assert(!aliceAccAfterReject?.state.settlementWorkspace, 'Workspace should be cleared after reject', env);
 
   console.log = originalLog;
   console.log('--- TEST 4 PASSED: reject clears workspace + holds ---');
@@ -370,7 +370,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   // Show imbalances
   const hubAfterPayments = findReplica(env, hub.id)[1].state;
   for (const user of users) {
-    const delta = hubAfterPayments.accounts.get(user.id)?.deltas.get(USDC);
+    const delta = hubAfterPayments.accounts.get(user.id)?.state.deltas.get(USDC);
     if (!delta) continue;
     const hubIsLeft = isLeftEntity(hub.id, user.id);
     const derived = deriveDelta(delta, hubIsLeft);
@@ -431,7 +431,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   console.log = quietLog;
 
   const daveCollateralBeforeHtlc =
-    findReplica(env, dave.id)[1].state.accounts.get(hub.id)?.deltas.get(USDC)?.collateral || 0n;
+    findReplica(env, dave.id)[1].state.accounts.get(hub.id)?.state.deltas.get(USDC)?.collateral || 0n;
   const htlcSecret = ethers.keccak256(ethers.toUtf8Bytes('settle-rebalance-htlc-phase-6-5'));
   const htlcHashlock = hashHtlcSecret(htlcSecret);
   let daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
@@ -468,8 +468,8 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
       advanceTime(i < 20 ? 50 : 100);
       await process(env);
       daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
-      daveRequestedAfterHtlc = daveAccountAfterHtlc?.requestedRebalance.get(USDC) || 0n;
-      daveCollateralAfterHtlc = daveAccountAfterHtlc?.deltas.get(USDC)?.collateral || 0n;
+      daveRequestedAfterHtlc = daveAccountAfterHtlc?.state.requestedRebalance.get(USDC) || 0n;
+      daveCollateralAfterHtlc = daveAccountAfterHtlc?.state.deltas.get(USDC)?.collateral || 0n;
       const phase65Logs = phase65Trace.snapshots.flatMap((snapshot) => snapshot.logs ?? []);
       phase65HtlcReceived = phase65Logs.some((log) => {
         const data = (log.data ?? {}) as Record<string, unknown>;
@@ -528,7 +528,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   const rebalanceEvidenceBefore = new Map<string, { collateral: bigint }>();
   for (const user of users) {
     const account = findReplica(env, hub.id)[1].state.accounts.get(user.id);
-    const coll = account?.deltas.get(USDC)?.collateral || 0n;
+    const coll = account?.state.deltas.get(USDC)?.collateral || 0n;
     rebalanceEvidenceBefore.set(user.id, { collateral: coll });
   }
 
@@ -616,12 +616,12 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   // Mixed flow nonce expectations:
   // - Alice had manual settlement in Phase 3 => nonce >= 1
   // - Other users may also increment nonce if C→R settlement path executed
-  const aliceNonce = hubFinal.accounts.get(alice.id)?.jNonce || 0;
+  const aliceNonce = hubFinal.accounts.get(alice.id)?.state.jNonce || 0;
   assert(aliceNonce >= 1, `Hub<>Alice nonce should be >= 1 after manual settlement (got ${aliceNonce})`, env);
   console.log(`  Hub<>Alice nonce=${aliceNonce}`);
   const nonAliceNonces: Array<{ name: string; nonce: number }> = [];
   for (const user of [bob, charlie, dave]) {
-    const nonce = hubFinal.accounts.get(user.id)?.jNonce || 0;
+    const nonce = hubFinal.accounts.get(user.id)?.state.jNonce || 0;
     nonAliceNonces.push({ name: user.name, nonce });
     console.log(`  Hub<>${user.name} nonce=${nonce}`);
   }
@@ -634,35 +634,35 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   // Workspace cleanup: all should be cleared
   for (const user of users) {
     const acc = hubFinal.accounts.get(user.id);
-    assert(!acc?.settlementWorkspace, `Hub<>${user.name} workspace should be cleared (got ${acc?.settlementWorkspace?.status})`, env);
+    assert(!acc?.state.settlementWorkspace, `Hub<>${user.name} workspace should be cleared (got ${acc?.state.settlementWorkspace?.status})`, env);
   }
 
   // Counterparty nonce check mirrors hub side.
   const [, aliceReplica] = findReplica(env, alice.id);
   const aliceAcc = aliceReplica.state.accounts.get(hub.id);
-  assert((aliceAcc?.jNonce || 0) >= 1, `Alice<>Hub nonce should be >= 1 after manual settlement`, env);
-  assert(!aliceAcc?.settlementWorkspace, `Alice<>Hub workspace should be cleared`, env);
+  assert((aliceAcc?.state.jNonce || 0) >= 1, `Alice<>Hub nonce should be >= 1 after manual settlement`, env);
+  assert(!aliceAcc?.state.settlementWorkspace, `Alice<>Hub workspace should be cleared`, env);
   for (const user of [bob, charlie, dave]) {
     const [, userReplica] = findReplica(env, user.id);
     const userAcc = userReplica.state.accounts.get(hub.id);
-    const hubNonce = hubFinal.accounts.get(user.id)?.jNonce || 0;
-    const userNonce = userAcc?.jNonce || 0;
+    const hubNonce = hubFinal.accounts.get(user.id)?.state.jNonce || 0;
+    const userNonce = userAcc?.state.jNonce || 0;
     assert(
       userNonce === hubNonce,
       `${user.name}<>Hub counterparty nonce should match hub view (user=${userNonce}, hub=${hubNonce})`,
       env,
     );
-    assert(!userAcc?.settlementWorkspace, `${user.name}<>Hub workspace should be cleared`, env);
+    assert(!userAcc?.state.settlementWorkspace, `${user.name}<>Hub workspace should be cleared`, env);
   }
 
   // Final state summary
   const hubFinalReserve = hubFinal.reserves.get(USDC) || 0n;
   console.log(`\n  Hub reserve: $${hubFinalReserve / 10n**18n}`);
   for (const user of users) {
-    const delta = hubFinal.accounts.get(user.id)?.deltas.get(USDC);
+    const delta = hubFinal.accounts.get(user.id)?.state.deltas.get(USDC);
     const hubIsLeft = isLeftEntity(hub.id, user.id);
     const derived = delta ? deriveDelta(delta, hubIsLeft) : null;
-    const nonce = hubFinal.accounts.get(user.id)?.jNonce || 0;
+    const nonce = hubFinal.accounts.get(user.id)?.state.jNonce || 0;
     console.log(`  Hub<>${user.name}: collateral=${delta?.collateral}, outCol=${derived?.outCollateral}, nonce=${nonce}`);
   }
 
@@ -671,7 +671,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   for (const user of users) {
     const before = rebalanceEvidenceBefore.get(user.id) || { collateral: 0n };
     const hubAccount = hubFinal.accounts.get(user.id);
-    const afterCollateral = hubAccount?.deltas.get(USDC)?.collateral || 0n;
+    const afterCollateral = hubAccount?.state.deltas.get(USDC)?.collateral || 0n;
     if (afterCollateral < before.collateral) collateralDecreasedUsers.push(user.name);
     if (afterCollateral > before.collateral) collateralIncreasedUsers.push(user.name);
   }
@@ -682,7 +682,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
     env,
   );
   const hasAboveInitialCollateral = users.some(user => {
-    const after = hubFinal.accounts.get(user.id)?.deltas.get(USDC)?.collateral || 0n;
+    const after = hubFinal.accounts.get(user.id)?.state.deltas.get(USDC)?.collateral || 0n;
     return after > usd(5_000);
   });
   assert(

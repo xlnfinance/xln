@@ -20,9 +20,9 @@ import { createEmptyEnv } from '../runtime';
 import { hydrateAccountDocFromStorage, hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import { signEntityHashes } from '../hanko/signing';
-import type { AccountState, AccountTx } from '../types/account';
+import type { AccountReplica, AccountTx } from '../types/account';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import { validateAccountState } from '../account/state-validation';
+import { validateAccountReplica } from '../account/state-validation';
 import { validateEntityState } from '../entity/state-validation';
 import { sealAccountDraftAsEntity } from './helpers/account-draft';
 
@@ -37,14 +37,28 @@ const jurisdiction: JurisdictionConfig = {
   entityProviderAddress: `0x${'55'.repeat(20)}`,
 };
 
-const makeAccount = (mempool: AccountTx[] = []): AccountState => ({
-  leftEntity: entityId,
-  rightEntity: counterpartyId,
-  domain: {
-    chainId: jurisdiction.chainId,
-    depositoryAddress: jurisdiction.depositoryAddress,
+const makeAccount = (mempool: AccountTx[] = []): AccountReplica => ({
+  state: {
+    leftEntity: entityId,
+    rightEntity: counterpartyId,
+    domain: {
+      chainId: jurisdiction.chainId,
+      depositoryAddress: jurisdiction.depositoryAddress,
+    },
+    watchSeed,
+    deltas: new Map(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+    locks: new Map(),
+    swapOffers: new Map(),
+    pulls: new Map(),
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    lastFinalizedJHeight: 0,
+    jNonce: 0,
   },
-  watchSeed,
   status: 'active',
   mempool,
   currentFrame: {
@@ -58,27 +72,15 @@ const makeAccount = (mempool: AccountTx[] = []): AccountState => ({
     stateHash: '',
     byLeft: true,
   },
-  deltas: new Map(),
-  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
   currentHeight: 0,
   pendingSignatures: [],
   rollbackCount: 0,
   proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
-  disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
   pendingWithdrawals: new Map(),
-  requestedRebalance: new Map(),
-  requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-  locks: new Map(),
-  swapOffers: new Map(),
-  pulls: new Map(),
   swapOrderHistory: new Map(),
   swapClosedOrders: new Map(),
-  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  lastFinalizedJHeight: 0,
-  jNonce: 0,
 });
 
 const makeState = (): EntityState => ({
@@ -278,11 +280,11 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   const proposer = makeAccount([
     { type: 'set_credit_limit', data: { tokenId: 1, amount: 100n } },
   ]);
-  proposer.leftEntity = isLeftEntity(sourceEntityId, targetEntityId) ? sourceEntityId : targetEntityId;
-  proposer.rightEntity = isLeftEntity(sourceEntityId, targetEntityId) ? targetEntityId : sourceEntityId;
-  proposer.currentFrame.byLeft = sourceEntityId === proposer.leftEntity;
+  proposer.state.leftEntity = isLeftEntity(sourceEntityId, targetEntityId) ? sourceEntityId : targetEntityId;
+  proposer.state.rightEntity = isLeftEntity(sourceEntityId, targetEntityId) ? targetEntityId : sourceEntityId;
+  proposer.currentFrame.byLeft = sourceEntityId === proposer.state.leftEntity;
   proposer.proofHeader = { fromEntity: sourceEntityId, toEntity: targetEntityId, nextProofNonce: 1 };
-  proposer.currentFrame.accountStateRoot = computeAccountStateRoot(proposer);
+  proposer.currentFrame.accountStateRoot = computeAccountStateRoot(proposer.state);
   proposer.currentFrame.stateHash = proposer.currentFrame.accountStateRoot;
 
   const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 0);
@@ -330,7 +332,7 @@ test('Account validation and storage hydration reject an undrainable mempool', (
   const account = makeAccount(
     Array.from({ length: LIMITS.ACCOUNT_MEMPOOL_SIZE + 1 }, (_, index) => memoTx(index)),
   );
-  expect(() => validateAccountState(account, 'oversizedAccount')).toThrow(
+  expect(() => validateAccountReplica(account, 'oversizedAccount')).toThrow(
     'ACCOUNT_MEMPOOL_LIMIT_EXCEEDED',
   );
   expect(() => hydrateAccountDocFromStorage(projectAccountDoc(account))).toThrow(
@@ -341,19 +343,19 @@ test('Account validation and storage hydration reject an undrainable mempool', (
 test('Account state decoding never repairs missing or malformed replica fields', () => {
   const missingSignatures = makeAccount();
   delete (missingSignatures as Partial<typeof missingSignatures>).pendingSignatures;
-  expect(() => validateAccountState(missingSignatures, 'missingSignatures'))
+  expect(() => validateAccountReplica(missingSignatures, 'missingSignatures'))
     .toThrow('missingSignatures.pendingSignatures');
 
   const malformedTx = makeAccount([{
     type: 'direct_payment',
     data: { tokenId: 1, amount: 1n, extra: true },
   } as AccountTx]);
-  expect(() => validateAccountState(malformedTx, 'malformedTx'))
+  expect(() => validateAccountReplica(malformedTx, 'malformedTx'))
     .toThrow('malformedTx.mempool_0_DATA_FIELDS');
 
   const fractionalHeight = makeAccount();
   fractionalHeight.currentHeight = 1.5;
-  expect(() => validateAccountState(fractionalHeight, 'fractionalHeight'))
+  expect(() => validateAccountReplica(fractionalHeight, 'fractionalHeight'))
     .toThrow('fractionalHeight.currentHeight');
 });
 
@@ -365,7 +367,7 @@ test('single and batch Account mempool enqueue reject atomically at the shared c
   await expect(applyAccountInput(
     createAccountConsensusContext(env),
     full,
-    createLocalAccountInput(full, entityId, [memoTx(20_000)]),
+    createLocalAccountInput(full.state, entityId, [memoTx(20_000)]),
   )).rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
   expect(full.mempool).toHaveLength(LIMITS.ACCOUNT_MEMPOOL_SIZE);
 

@@ -67,14 +67,14 @@ const buildCommittedSwapOfferEvent = (
   counterpartyId: string,
   offerId: string,
 ): SwapOfferEvent | null => {
-  const offer = account.swapOffers?.get(offerId);
+  const offer = account.state.swapOffers?.get(offerId);
   if (!offer) return null;
   return {
     offerId,
     accountId: counterpartyId,
     makerIsLeft: offer.makerIsLeft,
-    fromEntity: account.leftEntity,
-    toEntity: account.rightEntity,
+    fromEntity: account.state.leftEntity,
+    toEntity: account.state.rightEntity,
     createdHeight: offer.createdHeight,
     giveTokenId: offer.giveTokenId,
     giveAmount: offer.giveAmount,
@@ -200,11 +200,11 @@ const queueInitialHubPolicies = (
 ): void => {
   const { state, account, counterpartyId, createdAccount, effects } = context;
   if (!createdAccount || !committedInboundGenesis || !state.hubRebalanceConfig) return;
-  const localSide = state.entityId.toLowerCase() === account.leftEntity.toLowerCase()
+  const localSide = state.entityId.toLowerCase() === account.state.leftEntity.toLowerCase()
     ? 'left'
     : 'right';
-  for (const tokenId of [...account.deltas.keys()].sort((left, right) => left - right)) {
-    const policy = account.rebalanceFeePolicies?.get(tokenId)?.[localSide];
+  for (const tokenId of [...account.state.deltas.keys()].sort((left, right) => left - right)) {
+    const policy = account.state.rebalanceFeePolicies?.get(tokenId)?.[localSide];
     if (policy?.policyVersion === state.hubRebalanceConfig.policyVersion) continue;
     effects.accountTxs.push({
       accountId: counterpartyId,

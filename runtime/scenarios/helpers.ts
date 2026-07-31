@@ -252,7 +252,7 @@ export function findReplica(env: RuntimeReplica, entityId: string): [string, Ent
 export function getOffdelta(env: RuntimeReplica, leftId: string, rightId: string, tokenId: number): bigint {
   const [, leftRep] = findReplica(env, leftId);
   const account = leftRep.state.accounts.get(rightId);
-  return account?.deltas.get(tokenId)?.offdelta || 0n;
+  return account?.state.deltas.get(tokenId)?.offdelta || 0n;
 }
 
 // ============================================================================
@@ -581,8 +581,8 @@ export function assertBilateralSync(
     throw new Error(`BILATERAL-SYNC FAIL: Missing account at ${label}`);
   }
 
-  const deltaFromA = accountFromA.deltas?.get(tokenId);
-  const deltaFromB = accountFromB.deltas?.get(tokenId);
+  const deltaFromA = accountFromA.state.deltas?.get(tokenId);
+  const deltaFromB = accountFromB.state.deltas?.get(tokenId);
 
   if (!deltaFromA || !deltaFromB) {
     throw new Error(`BILATERAL-SYNC FAIL: Missing delta at ${label}`);

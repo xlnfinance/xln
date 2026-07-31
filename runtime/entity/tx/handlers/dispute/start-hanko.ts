@@ -26,7 +26,7 @@ export const verifyStartHanko = async (
     return false;
   }
   const disputeHash = createDisputeProofHashWithNonce(
-    account,
+    account.state,
     evidence.proofBodyHash,
     domain,
     evidence.signedNonce,
@@ -74,8 +74,8 @@ export const verifyStartHanko = async (
     pendingFrameHeight: account.pendingFrame?.height ?? null,
     currentFrameHeight: account.currentFrame?.height ?? null,
     currentHeight: account.currentHeight,
-    lockCount: account.locks?.size ?? 0,
-    swapOfferCount: account.swapOffers?.size ?? 0,
+    lockCount: account.state.locks?.size ?? 0,
+    swapOfferCount: account.state.swapOffers?.size ?? 0,
     knownDisputeProofHashes: Object.keys(account.disputeProofNoncesByHash ?? {}),
     disputeHashSource: evidence.storedDisputeHash ? 'stored+recomputed' : 'recomputed',
     disputeHash,

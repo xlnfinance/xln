@@ -24,15 +24,15 @@ function matchesCounterparty(
   const target = normalizeEntityId(counterpartyEntityId);
   if (!target) return false;
 
-  const left = normalizeEntityId(account.leftEntity);
-  const right = normalizeEntityId(account.rightEntity);
+  const left = normalizeEntityId(account.state.leftEntity);
+  const right = normalizeEntityId(account.state.rightEntity);
   return (left === owner && right === target) || (right === owner && left === target);
 }
 
 function resolveCounterpartyFromAccount(account: AccountReplica, ownerEntityId: string): string {
   const owner = normalizeEntityId(ownerEntityId);
-  const left = normalizeEntityId(account.leftEntity);
-  const right = normalizeEntityId(account.rightEntity);
+  const left = normalizeEntityId(account.state.leftEntity);
+  const right = normalizeEntityId(account.state.rightEntity);
   if (left === owner) return right;
   if (right === owner) return left;
   return '';

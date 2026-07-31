@@ -1479,7 +1479,7 @@
       if (replica.state?.accounts) {
         for (const [_, account] of replica.state.accounts.entries()) {
           // Sum positive balances (credit extended TO this entity)
-          const deltas = account.deltas;
+          const deltas = account.state.deltas;
           if (deltas) {
             for (const [_, delta] of deltas.entries()) {
               const offdelta = BigInt(delta.offdelta || 0n);

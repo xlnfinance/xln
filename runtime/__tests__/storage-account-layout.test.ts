@@ -16,18 +16,31 @@ const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
 
 const accountDoc = (large: boolean, status = 'active'): StorageAccountDoc => ({
-  leftEntity: entityId,
-  rightEntity: counterpartyId,
+  state: {
+    leftEntity: entityId,
+    rightEntity: counterpartyId,
+    domain: { chainId: 31_337, depositoryAddress: `0x${'33'.repeat(20)}` },
+    watchSeed: `0x${'44'.repeat(32)}`,
+    deltas: new Map(Array.from({ length: large ? 80 : 1 }, (_, index) => [
+      index,
+      { tokenId: index, marker: `delta-${index}-${'x'.repeat(80)}` },
+    ])),
+    locks: new Map(Array.from({ length: large ? 32 : 0 }, (_, index) => [
+      `lock-${index}`,
+      { lockId: `lock-${index}`, marker: 'x'.repeat(100) },
+    ])),
+    swapOffers: new Map(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    leftPendingJClaims: { root: '', count: 0n },
+    rightPendingJClaims: { root: '', count: 0n },
+    lastFinalizedJHeight: 0,
+    disputeConfig: { leftDisputeDelay: 0, rightDisputeDelay: 0 },
+    jNonce: 0,
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+  },
   status,
   currentHeight: 7,
-  deltas: new Map(Array.from({ length: large ? 80 : 1 }, (_, index) => [
-    index,
-    { tokenId: index, marker: `delta-${index}-${'x'.repeat(80)}` },
-  ])),
-  locks: new Map(Array.from({ length: large ? 32 : 0 }, (_, index) => [
-    `lock-${index}`,
-    { lockId: `lock-${index}`, marker: 'x'.repeat(100) },
-  ])),
 } as unknown as StorageAccountDoc);
 
 const accountDocWithEncodedSize = (targetBytes: number): StorageAccountDoc => {
@@ -110,7 +123,7 @@ describe('typed Account persistence rebranching', () => {
     expect(large.puts.some((put) => put.key.equals(keyLiveAccountField(
       entityId,
       counterpartyId,
-      STORAGE_ACCOUNT_FIELD_TAG.deltas,
+      STORAGE_ACCOUNT_FIELD_TAG['state.deltas'],
     )))).toBeTrue();
     await applyLayout(db, large);
 
@@ -149,7 +162,7 @@ describe('typed Account persistence rebranching', () => {
     expect(raw.rows.has(keyLiveAccountField(
       entityId,
       counterpartyId,
-      STORAGE_ACCOUNT_FIELD_TAG.deltas,
+      STORAGE_ACCOUNT_FIELD_TAG['state.deltas'],
     ).toString('hex'))).toBeFalse();
   });
 
@@ -157,7 +170,7 @@ describe('typed Account persistence rebranching', () => {
     const variants = [
       {
         field: 'deltas',
-        tag: STORAGE_ACCOUNT_FIELD_TAG.deltas,
+        tag: STORAGE_ACCOUNT_FIELD_TAG['state.deltas'],
         value: new Map(Array.from({ length: 400 }, (_, index) => [
           index,
           { tokenId: index, marker: `delta-${index}-${'x'.repeat(80)}` },
@@ -165,7 +178,7 @@ describe('typed Account persistence rebranching', () => {
       },
       {
         field: 'locks',
-        tag: STORAGE_ACCOUNT_FIELD_TAG.locks,
+        tag: STORAGE_ACCOUNT_FIELD_TAG['state.locks'],
         value: new Map(Array.from({ length: 400 }, (_, index) => [
           `lock-${index}`,
           { lockId: `lock-${index}`, marker: `lock-${index}-${'y'.repeat(80)}` },
@@ -173,7 +186,7 @@ describe('typed Account persistence rebranching', () => {
       },
       {
         field: 'swapOffers',
-        tag: STORAGE_ACCOUNT_FIELD_TAG.swapOffers,
+        tag: STORAGE_ACCOUNT_FIELD_TAG['state.swapOffers'],
         value: new Map(Array.from({ length: 400 }, (_, index) => [
           `offer-${index}`,
           { offerId: `offer-${index}`, marker: `offer-${index}-${'z'.repeat(80)}` },
@@ -184,14 +197,14 @@ describe('typed Account persistence rebranching', () => {
     for (const variant of variants) {
       const raw = new MemoryRuntimeDb();
       const db = withRebranchedValues(raw);
-      const doc = accountDoc(false) as unknown as Record<string, unknown>;
-      doc[variant.field] = variant.value;
+      const doc = accountDoc(false);
+      (doc.state as unknown as Record<string, unknown>)[variant.field] = variant.value;
       const layout = await prepareAccountStorageLayout(
         db,
         entityId,
         counterpartyId,
         keyLiveAccount(entityId, counterpartyId),
-        doc as unknown as StorageAccountDoc,
+        doc,
       );
       expect(layout.representation).toBe('fields');
       expect(layout.puts.some((put) => put.key.equals(

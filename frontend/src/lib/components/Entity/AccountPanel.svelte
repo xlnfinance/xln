@@ -45,11 +45,11 @@
     tone?: 'default' | 'good' | 'warn' | 'danger';
   };
 
-  $: iAmLeft = isAccountLeftPerspective(entityId, account);
+  $: iAmLeft = isAccountLeftPerspective(entityId, account.state);
   $: activeDispute = account.activeDispute ?? null;
   $: disputeTimeoutBlock = Number(activeDispute?.disputeTimeout ?? 0);
   $: currentJHeight = Math.max(
-    Number(account.lastFinalizedJHeight ?? 0),
+    Number(account.state.lastFinalizedJHeight ?? 0),
     Number(replica?.state?.lastFinalizedJHeight ?? 0),
   );
   $: disputeBlocksLeft = activeDispute ? Math.max(0, disputeTimeoutBlock - currentJHeight) : 0;
@@ -84,7 +84,7 @@
 
   $: counterpartyName = entityNames.get(String(counterpartyId || '').trim().toLowerCase()) || counterpartyId;
 
-  $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
+  $: tokenDetails = buildAccountTokenDetails(account.state, entityId, activeXlnFunctions);
   $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
   $: showTokenDetails = hasCommittedFrame && tokenDetails.length > 0;
   $: activityRows = (() => {

@@ -28,8 +28,8 @@ export const handleSwapOffer = async (
 ): Promise<SwapOfferResult> => {
   // Preserve the canonical empty map even when admission rejects. Both Account
   // frame validation and commit execute this same transition.
-  account.swapOffers ??= new Map();
-  const admissionResult = validateSwapOfferAdmission(account, tx, byLeft);
+  account.state.swapOffers ??= new Map();
+  const admissionResult = validateSwapOfferAdmission(account.state, tx, byLeft);
   if (!admissionResult.admission) {
     return { success: false, error: admissionResult.error!, events: [] };
   }
@@ -37,7 +37,7 @@ export const handleSwapOffer = async (
   if (!amountResult.prepared) {
     return { success: false, error: amountResult.error!, events: [] };
   }
-  const bindingError = validateCrossJurisdictionSourceBinding(account, tx);
+  const bindingError = validateCrossJurisdictionSourceBinding(account.state, tx);
   if (bindingError) {
     return { success: false, error: bindingError, events: [] };
   }

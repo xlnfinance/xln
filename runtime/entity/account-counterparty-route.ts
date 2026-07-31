@@ -23,7 +23,7 @@ export const resolveObserverCertifiedAccountCounterpartyProposer = (
   const hanko = account.counterpartyFrameHanko;
   if (!hanko) return null;
   const counterparty = normalize(counterpartyEntityId);
-  if (counterparty !== normalize(account.leftEntity) && counterparty !== normalize(account.rightEntity)) {
+  if (counterparty !== normalize(account.state.leftEntity) && counterparty !== normalize(account.state.rightEntity)) {
     throw new Error(`ACCOUNT_COUNTERPARTY_ROUTE_ID_MISMATCH:${counterparty}`);
   }
   const frameHash = normalize(account.currentFrame.stateHash);

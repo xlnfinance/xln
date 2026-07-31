@@ -139,13 +139,13 @@ describe('deriveDelta deterministic property invariants', () => {
     for (const debtDirection of ['right-owes-left', 'left-owes-right'] as const) {
       for (const collateral of [0n, 40n, 100n]) {
         const account = makeAccount(leftEntity, rightEntity);
-        const delta = account.deltas.get(1)!;
+        const delta = account.state.deltas.get(1)!;
         delta.collateral = collateral;
         delta.ondelta = debtDirection === 'right-owes-left' ? 80n : -80n;
         delta.offdelta = 0n;
 
         const grantorIsLeft = debtDirection === 'right-owes-left';
-        const revoked = handleSetCreditLimit(account, {
+        const revoked = handleSetCreditLimit(account.state, {
           type: 'set_credit_limit',
           data: { tokenId: 1, amount: 0n },
         }, grantorIsLeft);

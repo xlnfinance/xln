@@ -12,31 +12,39 @@ const PROOF_BODY_HASH = '0x216659016a52d3f9df41568d0c85bd6870ee46705ada7366c9f68
 const TEST_WATCH_SEED = `0x${'11'.repeat(32)}`;
 
 describe('proof-builder dispute hash', () => {
-  const proofAccount = (deltas: Map<number, { ondelta: bigint; offdelta: bigint }>) => ({
-    deltas,
-    locks: new Map(),
-    swapOffers: new Map(),
-    pulls: new Map(),
-    watchSeed: TEST_WATCH_SEED,
+  const proofAccount = (
+    input: Map<number, { ondelta: bigint; offdelta: bigint }> | Record<string, unknown>,
+  ) => ({
+    state: {
+      leftEntity: `0x${'01'.repeat(32)}`,
+      rightEntity: `0x${'02'.repeat(32)}`,
+      locks: new Map(),
+      swapOffers: new Map(),
+      pulls: new Map(),
+      watchSeed: TEST_WATCH_SEED,
+      ...(input instanceof Map ? { deltas: input } : input),
+    },
+    proofHeader: { nextProofNonce: 1 },
   }) as any;
 
+  const disputeAccount = (leftEntity: string, rightEntity: string) => ({
+    state: { leftEntity, rightEntity, watchSeed: TEST_WATCH_SEED },
+    proofHeader: { nextProofNonce: 1 },
+  });
+
   test('uses canonical sorted account key regardless of local left/right orientation', () => {
-    const leftOriented = {
-      leftEntity: '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
-      rightEntity: '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
-      proofHeader: { nextProofNonce: 1 },
-      watchSeed: TEST_WATCH_SEED,
-    };
-    const rightOriented = {
-      leftEntity: leftOriented.rightEntity,
-      rightEntity: leftOriented.leftEntity,
-      proofHeader: { nextProofNonce: 1 },
-      watchSeed: TEST_WATCH_SEED,
-    };
+    const leftOriented = disputeAccount(
+      '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
+      '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
+    );
+    const rightOriented = disputeAccount(
+      leftOriented.state.rightEntity,
+      leftOriented.state.leftEntity,
+    );
 
     const sortedKey = ethers.solidityPacked(
       ['bytes32', 'bytes32'],
-      [leftOriented.leftEntity, leftOriented.rightEntity],
+      [leftOriented.state.leftEntity, leftOriented.state.rightEntity],
     );
     const expected = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
@@ -47,31 +55,27 @@ describe('proof-builder dispute hash', () => {
 
     expect(createDisputeProofHash(leftOriented, PROOF_BODY_HASH, HANKO_DOMAIN)).toBe(expected);
     expect(createDisputeProofHash(rightOriented, PROOF_BODY_HASH, HANKO_DOMAIN)).toBe(expected);
-    expect(createDisputeProofHashWithNonce(leftOriented, PROOF_BODY_HASH, HANKO_DOMAIN, 1)).toBe(expected);
-    expect(createDisputeProofHashWithNonce(rightOriented, PROOF_BODY_HASH, HANKO_DOMAIN, 1)).toBe(expected);
+    expect(createDisputeProofHashWithNonce(leftOriented.state, PROOF_BODY_HASH, HANKO_DOMAIN, 1)).toBe(expected);
+    expect(createDisputeProofHashWithNonce(rightOriented.state, PROOF_BODY_HASH, HANKO_DOMAIN, 1)).toBe(expected);
   });
 
   test('fails fast when depository address is missing', () => {
-    const account = {
-      leftEntity: '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
-      rightEntity: '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
-      proofHeader: { nextProofNonce: 1 },
-      watchSeed: TEST_WATCH_SEED,
-    };
+    const account = disputeAccount(
+      '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
+      '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
+    );
     const missingAddress = { chainId: 31337, depositoryAddress: '' };
     expect(() => createDisputeProofHash(account, PROOF_BODY_HASH, missingAddress)).toThrow('INVALID_HANKO_DEPOSITORY_ADDRESS:missing');
-    expect(() => createDisputeProofHashWithNonce(account, PROOF_BODY_HASH, missingAddress, 1)).toThrow(
+    expect(() => createDisputeProofHashWithNonce(account.state, PROOF_BODY_HASH, missingAddress, 1)).toThrow(
       'INVALID_HANKO_DEPOSITORY_ADDRESS:missing',
     );
   });
 
   test('fails fast when the Hanko chain domain is missing', () => {
-    const account = {
-      leftEntity: '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
-      rightEntity: '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
-      proofHeader: { nextProofNonce: 1 },
-      watchSeed: TEST_WATCH_SEED,
-    };
+    const account = disputeAccount(
+      '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
+      '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
+    );
     expect(() => createDisputeProofHash(
       account,
       PROOF_BODY_HASH,
@@ -80,7 +84,7 @@ describe('proof-builder dispute hash', () => {
   });
 
   test('fails fast when transformer address is missing for HTLC/swaps', () => {
-    const accountMachine = {
+    const accountMachine = proofAccount({
       deltas: new Map([
         [
           1,
@@ -104,13 +108,13 @@ describe('proof-builder dispute hash', () => {
       ]),
       swapOffers: new Map(),
       watchSeed: TEST_WATCH_SEED,
-    } as any;
+    });
 
     expect(() => buildAccountProofBody(accountMachine, '')).toThrow('MISSING_DELTA_TRANSFORMER_ADDRESS');
   });
 
   test('fails fast when an HTLC lock references a token without a delta slot', () => {
-    const accountMachine = {
+    const accountMachine = proofAccount({
       deltas: new Map([[1, { offdelta: 0n }]]),
       locks: new Map([
         ['lock-missing-token', {
@@ -125,7 +129,7 @@ describe('proof-builder dispute hash', () => {
       swapOffers: new Map(),
       pulls: new Map(),
       watchSeed: TEST_WATCH_SEED,
-    } as any;
+    });
 
     expect(() => buildAccountProofBody(accountMachine, '')).toThrow(
       'PROOF_BODY_LOCK_TOKEN_MISSING:lock-missing-token:2',
@@ -133,7 +137,7 @@ describe('proof-builder dispute hash', () => {
   });
 
   test('fails fast when a swap references a token without a delta slot', () => {
-    const accountMachine = {
+    const accountMachine = proofAccount({
       deltas: new Map([[1, { offdelta: 0n }]]),
       locks: new Map(),
       swapOffers: new Map([
@@ -147,7 +151,7 @@ describe('proof-builder dispute hash', () => {
       ]),
       pulls: new Map(),
       watchSeed: TEST_WATCH_SEED,
-    } as any;
+    });
 
     expect(() => buildAccountProofBody(accountMachine, '')).toThrow(
       'PROOF_BODY_SWAP_TOKEN_MISSING:swap-missing-token:give=1:want=2',
@@ -155,7 +159,7 @@ describe('proof-builder dispute hash', () => {
   });
 
   test('fails fast when a pull references a token without a delta slot', () => {
-    const accountMachine = {
+    const accountMachine = proofAccount({
       deltas: new Map([[1, { offdelta: 0n }]]),
       locks: new Map(),
       swapOffers: new Map(),
@@ -170,7 +174,7 @@ describe('proof-builder dispute hash', () => {
         }],
       ]),
       watchSeed: TEST_WATCH_SEED,
-    } as any;
+    });
 
     expect(() => buildAccountProofBody(accountMachine, '')).toThrow(
       'PROOF_BODY_PULL_TOKEN_MISSING:pull-missing-token:2',
@@ -178,7 +182,7 @@ describe('proof-builder dispute hash', () => {
   });
 
   test('builds transformer allowances for payments, swaps, and pulls', () => {
-    const accountMachine = {
+    const accountMachine = proofAccount({
       deltas: new Map([
         [1, { offdelta: 0n }],
         [2, { offdelta: 0n }],
@@ -228,7 +232,7 @@ describe('proof-builder dispute hash', () => {
         }],
       ]),
       watchSeed: TEST_WATCH_SEED,
-    } as any;
+    });
 
     const proof = buildAccountProofBody(accountMachine, DEPOSITORY);
     const allowances = proof.runtimeProofBody.transformers[0]?.allowances;
@@ -257,7 +261,7 @@ describe('proof-builder dispute hash', () => {
 
   test('rejects 33 transformer clauses before their hash can be signed', () => {
     const account = proofAccount(new Map([[1, { ondelta: 0n, offdelta: 0n }]]));
-    account.subcontracts = new Map(Array.from({ length: 33 }, (_, index) => [
+    account.state.subcontracts = new Map(Array.from({ length: 33 }, (_, index) => [
       `subcontract-${index.toString().padStart(2, '0')}`,
       {
         transformerAddress: DEPOSITORY,
@@ -273,7 +277,7 @@ describe('proof-builder dispute hash', () => {
 
   test('rejects a ProofBody above 176 KiB before its hash can be signed', () => {
     const account = proofAccount(new Map([[1, { ondelta: 0n, offdelta: 0n }]]));
-    account.subcontracts = new Map([['oversized', {
+    account.state.subcontracts = new Map([['oversized', {
       transformerAddress: DEPOSITORY,
       encodedBatch: `0x${'ab'.repeat(177 * 1024)}`,
       allowances: [],

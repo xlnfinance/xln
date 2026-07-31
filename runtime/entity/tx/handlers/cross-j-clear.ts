@@ -84,7 +84,7 @@ const requestClearThroughSourceAccount = (
   }
   const sourceAccountId = findAccountKey(newState, sourceHubId);
   const sourceAccount = sourceAccountId ? newState.accounts.get(sourceAccountId) : undefined;
-  const sourceOffer = sourceAccount?.swapOffers?.get(orderId);
+  const sourceOffer = sourceAccount?.state.swapOffers?.get(orderId);
   if (!sourceAccountId || !sourceAccount || !sourceOffer?.crossJurisdiction) {
     throw new Error(`CROSS_J_CLEAR_SOURCE_OFFER_MISSING:${orderId}:${newState.entityId}:${sourceHubId}`);
   }
@@ -116,7 +116,7 @@ const closeLiveSourceOffer = (
 ): CrossJurisdictionClearResult | undefined => {
   const { env, entityState, newState, outputs, accountTxs, orderId, cancelRemainder } = context;
   const account = accountId ? newState.accounts.get(accountId) : undefined;
-  const liveOffer = account?.swapOffers?.get(orderId);
+  const liveOffer = account?.state.swapOffers?.get(orderId);
   const ratio = getCrossJurisdictionCommittedFillAmounts(route).fillRatio;
   if (!liveOffer?.crossJurisdiction || (!cancelRemainder && ratio <= 0)) return undefined;
   if (!accountId || !account) {
@@ -158,7 +158,7 @@ const requestPureCancel = (
     return { newState, outputs, accountTxs };
   }
   const proof = buildCrossJurisdictionCloseProof(route, '0x');
-  if (!accountId || !account?.pulls?.has(route.sourcePull!.pullId)) {
+  if (!accountId || !account?.state.pulls?.has(route.sourcePull!.pullId)) {
     addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for source close proof`);
     return { newState, outputs, accountTxs };
   }
@@ -209,7 +209,7 @@ const requestFilledRouteReveal = (
     addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${route.source.entityId}`);
     return { newState, outputs, accountTxs };
   }
-  if (!account.pulls?.has(route.sourcePull!.pullId)) {
+  if (!account.state.pulls?.has(route.sourcePull!.pullId)) {
     addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull already closed`);
     return { newState, outputs, accountTxs };
   }
@@ -324,10 +324,10 @@ const validateClearMaterialization = (
   }
   const accountId = findAccountKey(state, route.source.entityId);
   const account = accountId ? state.accounts.get(accountId) : undefined;
-  if (!accountId || !account?.pulls?.has(route.sourcePull.pullId)) {
+  if (!accountId || !account?.state.pulls?.has(route.sourcePull.pullId)) {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING:${orderId}`);
   }
-  if (account.swapOffers?.has(orderId)) {
+  if (account.state.swapOffers?.has(orderId)) {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_OFFER_STILL_OPEN:${orderId}`);
   }
   if (accountHasPullResolveQueued(account, route.sourcePull.pullId)) {

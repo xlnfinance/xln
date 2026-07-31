@@ -71,7 +71,7 @@ const requireDefaultProposer = (state: EntityState): string => {
 const accountAndLock = (state: EntityState, inboundEntityId: string, inboundLockId: string): HtlcLock => {
   const account = state.accounts.get(inboundEntityId);
   if (!account) throw new Error('HTLC_ONION_ADVANCE_INBOUND_ACCOUNT_MISSING');
-  const lock = account.locks.get(inboundLockId);
+  const lock = account.state.locks.get(inboundLockId);
   if (!lock) throw new Error('HTLC_ONION_ADVANCE_INBOUND_LOCK_MISSING');
   return lock;
 };

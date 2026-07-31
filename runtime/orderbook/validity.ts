@@ -286,8 +286,8 @@ export function validateBookAgainstOffers(state: EntityState): BookMediumReport 
   const invalidOffers: BookMediumReport['invalidOffers'] = [];
   const expected = new Map<string, ExpectedBookOrder>();
   for (const [accountId, account] of state.accounts.entries()) {
-    for (const [offerId, offer] of account.swapOffers.entries()) {
-      const normalized = normalizeOpenOfferForBook(accountId, account, String(offerId), offer);
+    for (const [offerId, offer] of account.state.swapOffers.entries()) {
+      const normalized = normalizeOpenOfferForBook(accountId, account.state, String(offerId), offer);
       if ('invalid' in normalized) {
         invalidOffers.push(normalized.invalid);
         continue;

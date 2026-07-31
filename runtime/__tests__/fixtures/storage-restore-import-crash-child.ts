@@ -34,7 +34,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
 import type { StoragePersistenceBoundary } from '../../storage';
-import type { AccountState } from '../../types/account';
+import type { AccountReplica } from '../../types/account';
 import type { CertifiedEntityFrameLink, JurisdictionConfig } from '../../entity/types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import { createDefaultDelta } from '../../account/delta';
@@ -101,19 +101,37 @@ const replica = Array.from(env.state.eReplicas.values())[0];
 if (!replica) throw new Error('restore import crash replica missing');
 const counterpartyId = `0x${'ff'.repeat(32)}`;
 const [leftEntity, rightEntity] = [entityId, counterpartyId].sort() as [string, string];
-const oversizedAccount: AccountState = {
-  leftEntity,
-  rightEntity,
-  domain: {
-    chainId: jurisdiction.chainId,
-    depositoryAddress: jurisdiction.depositoryAddress,
+const oversizedAccount: AccountReplica = {
+  state: {
+    leftEntity,
+    rightEntity,
+    domain: {
+      chainId: jurisdiction.chainId,
+      depositoryAddress: jurisdiction.depositoryAddress,
+    },
+    watchSeed: deriveAccountWatchSeed({
+      runtimeSeed: seed,
+      entityId,
+      counterpartyId,
+      timestamp: 0,
+    }),
+    deltas: new Map(Array.from({ length: LIMITS.MAX_ACCOUNT_TOKEN_ROWS }, (_, tokenId) => {
+      const delta = createDefaultDelta(tokenId);
+      delta.offdelta = BigInt(tokenId);
+      return [tokenId, delta];
+    })),
+    locks: new Map(),
+    swapOffers: new Map(),
+    pulls: new Map(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+    jNonce: 0,
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    lastFinalizedJHeight: 0,
   },
-  watchSeed: deriveAccountWatchSeed({
-    runtimeSeed: seed,
-    entityId,
-    counterpartyId,
-    timestamp: 0,
-  }),
   status: 'active',
   mempool: [],
   currentFrame: {
@@ -127,29 +145,13 @@ const oversizedAccount: AccountState = {
     stateHash: '',
     byLeft: entityId === leftEntity,
   },
-  deltas: new Map(Array.from({ length: LIMITS.MAX_ACCOUNT_TOKEN_ROWS }, (_, tokenId) => {
-    const delta = createDefaultDelta(tokenId);
-    delta.offdelta = BigInt(tokenId);
-    return [tokenId, delta];
-  })),
-  locks: new Map(),
-  swapOffers: new Map(),
-  pulls: new Map(),
-  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
   currentHeight: 0,
   pendingSignatures: [],
   rollbackCount: 0,
   proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
   proofBody: { tokenIds: [], deltas: [] },
-  disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
-  jNonce: 0,
   pendingWithdrawals: new Map(),
-  requestedRebalance: new Map(),
-  requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  lastFinalizedJHeight: 0,
 };
 replica.state.accounts.set(counterpartyId, oversizedAccount);
 const consumptionIdentity = (height: number) => ({

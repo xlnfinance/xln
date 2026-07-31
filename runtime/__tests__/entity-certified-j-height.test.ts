@@ -221,7 +221,7 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     account.counterpartyDisputeProofBodyHash = proof.proofBodyHash;
     account.counterpartyDisputeProofNonce = 1;
     account.disputeProofNoncesByHash = { [proof.proofBodyHash]: 1 };
-    const disputeHash = createDisputeProofHashWithNonce(account, proof.proofBodyHash, {
+    const disputeHash = createDisputeProofHashWithNonce(account.state, proof.proofBodyHash, {
       chainId: jurisdiction.chainId!,
       depositoryAddress: jurisdiction.depositoryAddress!,
     }, 1);

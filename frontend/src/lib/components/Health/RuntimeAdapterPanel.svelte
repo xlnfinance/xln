@@ -289,7 +289,7 @@
           </div>
           {#each activeAccounts as account}
             <div class="table-row" data-testid="radapter-account-row">
-              <span>{short(account.leftEntity?.toLowerCase() === selectedEntityId.toLowerCase() ? account.rightEntity : account.leftEntity, 14)}</span>
+              <span>{short(account.state.leftEntity?.toLowerCase() === selectedEntityId.toLowerCase() ? account.state.rightEntity : account.state.leftEntity, 14)}</span>
               <span>{account.status}</span>
               <span>{account.currentHeight}</span>
             </div>

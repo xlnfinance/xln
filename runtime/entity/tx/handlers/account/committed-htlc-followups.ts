@@ -50,7 +50,7 @@ export async function applyCommittedHtlcLockFollowup(
 ): Promise<void> {
   if (accountTx.type !== 'htlc_lock') return;
   const { env, state, input, newState, account } = ctx;
-  const lock = account.locks.get(accountTx.data.lockId);
+  const lock = account.state.locks.get(accountTx.data.lockId);
   if (!lock || accountTx.data.envelope === undefined) return;
   const layer = encryptedHtlcLayer(accountTx.data.envelope);
   if (!layer) throw new Error(`HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);

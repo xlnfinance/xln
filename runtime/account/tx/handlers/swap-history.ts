@@ -49,7 +49,7 @@ const byOldestLifecycle = (
 
 function pruneTerminalSwapHistory(account: AccountReplica): void {
   const terminalHistory = Array.from(ensureSwapOrderHistory(account).entries())
-    .filter(([offerId]) => !account.swapOffers.has(offerId))
+    .filter(([offerId]) => !account.state.swapOffers.has(offerId))
     .sort(byOldestLifecycle);
   const excessHistory = terminalHistory.length - LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY;
   for (const [offerId] of terminalHistory.slice(0, Math.max(0, excessHistory))) {

@@ -21,7 +21,7 @@ import { announceCertifiedLocalProfiles } from '../network/p2p/local-profile-lif
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildQuorumHanko, getEntityConfigBoardHash, verifyHankoForHash } from '../hanko/signing';
-import type { AccountState } from '../types/account';
+import type { AccountReplica, AccountState } from '../types/account';
 import type { CertifiedRegistrationEvidence } from '../types/jurisdiction-runtime';
 import type { EntityCandidateEffect, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
@@ -395,13 +395,13 @@ const certifyRegisteredBoardPrefix = async (
   env.state.eReplicas.set(replicaKey, applied.workingReplica);
 };
 
-const paymentAccount = (sourceEntityId: string, targetEntityId: string): AccountState => {
+const paymentAccount = (sourceEntityId: string, targetEntityId: string): AccountReplica => {
   const [leftEntity, rightEntity] = [sourceEntityId, targetEntityId].sort() as [string, string];
   const sourceIsLeft = sourceEntityId === leftEntity;
   const delta = createDefaultDelta(1);
   if (sourceIsLeft) delta.leftCreditLimit = 1_000n;
   else delta.rightCreditLimit = 1_000n;
-  const currentFrame: AccountState['currentFrame'] = {
+  const currentFrame: AccountReplica['currentFrame'] = {
     height: 0,
     timestamp: 0,
     jHeight: 0,
@@ -413,40 +413,41 @@ const paymentAccount = (sourceEntityId: string, targetEntityId: string): Account
     byLeft: sourceIsLeft,
   };
   return {
-    leftEntity,
-    rightEntity,
-    domain: {
-      chainId: PROCESS_JURISDICTION.chainId,
-      depositoryAddress: PROCESS_JURISDICTION.depositoryAddress,
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: {
+        chainId: PROCESS_JURISDICTION.chainId,
+        depositoryAddress: PROCESS_JURISDICTION.depositoryAddress,
+      },
+      deltas: new Map([[1, delta]]),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      watchSeed: deriveAccountWatchSeed({
+        runtimeSeed: 'multisig-htlc-process-account',
+        entityId: sourceEntityId,
+        counterpartyId: targetEntityId,
+        timestamp: 900,
+      }),
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
     },
     status: 'active',
     mempool: [],
     currentFrame,
-    deltas: new Map([[1, delta]]),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: sourceEntityId, toEntity: targetEntityId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    watchSeed: deriveAccountWatchSeed({
-      runtimeSeed: 'multisig-htlc-process-account',
-      entityId: sourceEntityId,
-      counterpartyId: targetEntityId,
-      timestamp: 900,
-    }),
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
   };
 };
 
@@ -1277,7 +1278,7 @@ describe('multisig HTLC validator encryption', () => {
     );
     const state = senderState();
     const account = paymentAccount(SENDER_ID, ENTITY_ID);
-    account.locks.set(lock.lockId, { ...lock, secretOffer: offer });
+    account.state.locks.set(lock.lockId, { ...lock, secretOffer: offer });
     const frameHash = `0x${'7e'.repeat(32)}`;
     account.pendingFrame = {
       ...account.currentFrame!,

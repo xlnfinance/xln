@@ -109,7 +109,7 @@ assertIncludes(accountFrame, 'jHeight: frame.jHeight,', accountFramePath);
 
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function validateIncomingFrameOnClone',
-  'const clonedMachine = cloneAccountState(account);',
+  'const clonedMachine = cloneAccountReplica(account);',
   'const replayResult = await replayIncomingFrameOnClone(',
   'const frameHashMismatch = await verifySenderFrameHash',
   'const localAccountStateRoot = computeAccountStateRoot(clonedMachine);',

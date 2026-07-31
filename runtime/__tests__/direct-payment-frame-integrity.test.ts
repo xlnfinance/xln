@@ -3,10 +3,11 @@ import { describe, expect, test } from 'bun:test';
 import { handleDirectPayment } from '../account/tx/handlers/direct-payment';
 import { computeFrameHash } from '../account/consensus/frame';
 import { applyPendingForwardFollowup } from '../entity/tx/handlers/account/committed-htlc-followups';
-import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
+import type { AccountFrame, AccountInput, AccountReplica, AccountTx } from '../types/account';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { createDefaultDelta } from '../account/delta';
+import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;
@@ -33,25 +34,17 @@ async function makeHashedFrame(): Promise<AccountFrame> {
   return frame;
 }
 
-async function makeAccount(): Promise<AccountState> {
+async function makeAccount(): Promise<AccountReplica> {
   const delta = {
     ...createDefaultDelta(1),
     collateral: 100_000n,
   };
-  return {
-    proofHeader: { fromEntity: RIGHT, toEntity: LEFT, nextProofNonce: 1 },
-    leftEntity: LEFT,
-    rightEntity: RIGHT,
-    leftEntityId: LEFT,
-    rightEntityId: RIGHT,
-    status: 'active',
-    currentHeight: 1,
-    currentFrame: await makeHashedFrame(),
-    deltas: new Map([[1, delta]]),
-    collateral: new Map(),
-    requestedRebalance: new Map(),
-    mempool: [],
-  } as unknown as AccountState;
+  const account = makeCanonicalAccount(LEFT, RIGHT);
+  account.proofHeader = { fromEntity: RIGHT, toEntity: LEFT, nextProofNonce: 1 };
+  account.currentHeight = 1;
+  account.currentFrame = await makeHashedFrame();
+  account.state.deltas = new Map([[1, delta]]);
+  return account;
 }
 
 describe('direct payment frame integrity', () => {
@@ -76,7 +69,7 @@ describe('direct payment frame integrity', () => {
     const result = handleDirectPayment(account, tx, false);
 
     expect(result.success).toBe(true);
-    expect(account.deltas.get(1)?.offdelta).toBe(100n);
+    expect(account.state.deltas.get(1)?.offdelta).toBe(100n);
     expect(account.currentFrame.stateHash).toBe(frameHashBefore);
     expect(await computeFrameHash(account.currentFrame)).toBe(frameHashBefore);
     expect(JSON.stringify(account.currentFrame, (_key, value) =>
@@ -99,7 +92,7 @@ describe('direct payment frame integrity', () => {
     const result = handleDirectPayment(account, forged, false);
     expect(result.success).toBe(false);
     expect(result.error).toContain('must match the frame proposer');
-    expect(account.deltas.get(1)?.offdelta).toBe(0n);
+    expect(account.state.deltas.get(1)?.offdelta).toBe(0n);
   });
 
   for (const paymentCount of [2, 1_000]) {
@@ -126,7 +119,7 @@ describe('direct payment frame integrity', () => {
 
       const accountTxs: Array<{ accountId: string; tx: AccountTx }> = [];
       const state = { entityId: LEFT } as EntityState;
-      const newState = { entityId: LEFT, accounts: new Map([[NEXT, {} as AccountState]]) } as EntityState;
+      const newState = { entityId: LEFT, accounts: new Map([[NEXT, makeCanonicalAccount(LEFT, NEXT)]]) } as EntityState;
       applyPendingForwardFollowup({
         env: {} as RuntimeReplica,
         state,

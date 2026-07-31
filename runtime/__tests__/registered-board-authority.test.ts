@@ -784,7 +784,7 @@ describe('registered Entity certified board authority', () => {
       counterpartyState.config,
       counterpartyState,
     );
-    account.jNonce = 3;
+    account.state.jNonce = 3;
     baseState.accounts.set(counterpartyEntityId, account);
     const jurisdictionRef = getJEventJurisdictionRef(jurisdiction);
     const rotationData = buildJEventRangeData(baseState, {
@@ -898,7 +898,7 @@ describe('registered Entity certified board authority', () => {
     if (!committedAccount) throw new Error('TEST_BOARD_ROTATION_ACCOUNT_MISSING');
     expect(committedAccount.currentHeight).toBe(7);
     expect(committedAccount.currentFrame.stateHash).toBe(certifiedFrameHash);
-    expect(committedAccount.jNonce).toBe(3);
+    expect(committedAccount.state.jNonce).toBe(3);
     expect(committedAccount.currentDisputeHash).toBe(certifiedDisputeHash);
     expect(committedAccount.currentDisputeProofBodyHash).toBe(certifiedProofBodyHash);
     expect(committedAccount.currentDisputeProofNonce).toBe(certifiedProofNonce);

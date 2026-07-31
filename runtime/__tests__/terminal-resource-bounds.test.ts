@@ -15,7 +15,7 @@ import {
 import { terminateHtlcRoute } from '../entity/tx/htlc-route-lifecycle';
 import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../runtime';
-import type { AccountState, SwapOffer } from '../types/account';
+import type { AccountReplica, SwapOffer } from '../types/account';
 import type {
   EntityCandidateEffect,
   EntityReplica,
@@ -23,7 +23,7 @@ import type {
   Proposal,
 } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';
-import { validateAccountState } from '../account/state-validation';
+import { validateAccountReplica } from '../account/state-validation';
 import { validateEntityReplica } from '../entity/replica-validation';
 import { publishEntityCandidateEffects } from '../runtime/env-events';
 
@@ -31,14 +31,28 @@ const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
 const proposer = `0x${'33'.repeat(20)}`;
 
-const makeAccount = (): AccountState => ({
-  leftEntity,
-  rightEntity,
-  domain: {
-    chainId: 31337,
-    depositoryAddress: `0x${'dd'.repeat(20)}`,
+const makeAccount = (): AccountReplica => ({
+  state: {
+    leftEntity,
+    rightEntity,
+    domain: {
+      chainId: 31337,
+      depositoryAddress: `0x${'dd'.repeat(20)}`,
+    },
+    watchSeed: `0x${'44'.repeat(32)}`,
+    deltas: new Map(),
+    locks: new Map(),
+    swapOffers: new Map(),
+    pulls: new Map(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    lastFinalizedJHeight: 0,
+    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+    jNonce: 0,
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
   },
-  watchSeed: `0x${'44'.repeat(32)}`,
   status: 'active',
   mempool: [],
   currentFrame: {
@@ -52,23 +66,13 @@ const makeAccount = (): AccountState => ({
     stateHash: '',
     byLeft: true,
   },
-  deltas: new Map(),
-  locks: new Map(),
-  swapOffers: new Map(),
-  pulls: new Map(),
   swapOrderHistory: new Map(),
   swapClosedOrders: new Map(),
-  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
   currentHeight: 0,
   pendingSignatures: [],
   rollbackCount: 0,
-  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  lastFinalizedJHeight: 0,
   proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
-  disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
-  jNonce: 0,
   pendingWithdrawals: new Map(),
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
@@ -126,7 +130,7 @@ const makeReplica = (state = makeEntity()): EntityReplica => ({
 test('terminal swap histories retain a deterministic bounded tail without losing active rows', () => {
   const account = makeAccount();
   const activeOffer = makeOffer(9_999);
-  account.swapOffers.set(activeOffer.offerId, activeOffer);
+  account.state.swapOffers.set(activeOffer.offerId, activeOffer);
   recordSwapOfferLifecycle(account, activeOffer);
   const count = LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY + 1;
   for (let index = 0; index < count; index += 1) {
@@ -238,7 +242,7 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
     env,
     state,
     newState: state,
-    input: { fromEntityId: rightEntity, toEntityId: leftEntity, watchSeed: account.watchSeed },
+    input: { fromEntityId: rightEntity, toEntityId: leftEntity, watchSeed: account.state.watchSeed },
     account,
     outputs: [],
     accountTxs: [],
@@ -400,7 +404,7 @@ test('decode validation rejects oversized swap history, resolve history, and HTL
       }];
     },
   ));
-  expect(() => validateAccountState(account, 'oversizedSwapHistory')).toThrow(
+  expect(() => validateAccountReplica(account, 'oversizedSwapHistory')).toThrow(
     'ACCOUNT_TERMINAL_SWAP_HISTORY_LIMIT_EXCEEDED',
   );
 
@@ -422,7 +426,7 @@ test('decode validation rejects oversized swap history, resolve history, and HTL
       (_, index) => ({ fillRatio: index, cancelRemainder: false, height: index }),
     ),
   });
-  expect(() => validateAccountState(oversizedResolves, 'oversizedSwapResolves')).toThrow(
+  expect(() => validateAccountReplica(oversizedResolves, 'oversizedSwapResolves')).toThrow(
     'ACCOUNT_SWAP_RESOLVE_HISTORY_LIMIT_EXCEEDED',
   );
 

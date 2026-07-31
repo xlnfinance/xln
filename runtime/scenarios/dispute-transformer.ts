@@ -138,7 +138,7 @@ const deltaByToken = (frame: AccountFrame, tokenId: number) => {
 };
 
 const currentDelta = (account: AccountReplica, tokenId: number) => {
-  const delta = account.deltas.get(tokenId);
+  const delta = account.state.deltas.get(tokenId);
   if (!delta) throw new Error(`DISPUTE_TRANSFORMER_BASE_DELTA_MISSING:${tokenId}`);
   return delta;
 };

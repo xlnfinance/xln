@@ -15,7 +15,7 @@ export function handleReopenDisputed(
     return { success: false, events, error: 'Cannot reopen while activeDispute exists' };
   }
 
-  const knownJNonce = Number(account.jNonce ?? 0);
+  const knownJNonce = Number(account.state.jNonce ?? 0);
   if (requestedJNonce < knownJNonce) {
     return {
       success: false,
@@ -24,7 +24,7 @@ export function handleReopenDisputed(
     };
   }
 
-  account.jNonce = requestedJNonce;
+  account.state.jNonce = requestedJNonce;
   if (account.proofHeader.nextProofNonce <= requestedJNonce) {
     account.proofHeader.nextProofNonce = requestedJNonce + 1;
   }

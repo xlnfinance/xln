@@ -46,7 +46,7 @@ const requireSwapAccount = (
       `SWAP_REQUEST_ACCOUNT_MISSING:${action}:entity=${state.entityId}:counterparty=${counterpartyEntityId}`,
     );
   }
-  return account;
+  return account.state;
 };
 
 export const handlePlaceSwapOfferRequest = (

@@ -56,11 +56,11 @@ const resolveInboundAccountDomain = (
   input: AccountPeerInput,
   counterpartyId: string,
   existing: AccountReplica | undefined,
-): AccountReplica['domain'] => {
+): AccountReplica['state']['domain'] => {
   if (input.domain === undefined) throw new Error(`ACCOUNT_INPUT_DOMAIN_REQUIRED:${counterpartyId}`);
   const domain = normalizeAccountStateDomain(input.domain, 'ACCOUNT_INPUT_DOMAIN');
   if (existing) {
-    if (!sameAccountStateDomain(domain, existing.domain)) {
+    if (!sameAccountStateDomain(domain, existing.state.domain)) {
       throw new Error(`ACCOUNT_DOMAIN_CHANGED:${counterpartyId}`);
     }
     return domain;
@@ -103,7 +103,7 @@ const assertUnknownAccountGenesis = (
 const createInboundAccountState = (
   state: EntityState,
   counterpartyId: string,
-  domain: AccountReplica['domain'],
+  domain: AccountReplica['state']['domain'],
   watchSeed: string,
 ): AccountReplica => {
   const leftEntity = isLeftEntity(state.entityId, counterpartyId)
@@ -113,10 +113,24 @@ const createInboundAccountState = (
     ? counterpartyId
     : state.entityId;
   const account: AccountReplica = {
-    leftEntity,
-    rightEntity,
-    domain,
-    watchSeed,
+    state: {
+      leftEntity,
+      rightEntity,
+      domain,
+      watchSeed,
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      pulls: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -130,8 +144,6 @@ const createInboundAccountState = (
       stateHash: '',
       byLeft: state.entityId === leftEntity,
     },
-    deltas: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
@@ -142,19 +154,9 @@ const createInboundAccountState = (
     },
     proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    locks: new Map(),
-    swapOffers: new Map(),
-    pulls: new Map(),
     swapOrderHistory: new Map(),
     swapClosedOrders: new Map(),
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
-    jNonce: 0,
   };
   for (const tokenId of DEFAULT_ACCOUNT_TOKEN_IDS) {
     account.shadow.rebalance.policy.set(
@@ -165,7 +167,7 @@ const createInboundAccountState = (
   // The inbound replica knows its complete genesis Account state, so it can
   // commit accountStateRoot immediately. It still has no signed Account frame:
   // stateHash remains empty until bilateral consensus accepts H=1.
-  account.currentFrame.accountStateRoot = computeAccountStateRoot(account);
+  account.currentFrame.accountStateRoot = computeAccountStateRoot(account.state);
   return account;
 };
 
@@ -190,7 +192,7 @@ export const resolveInboundAccount = (
     ? undefined
     : normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
   if (existing) {
-    if (inputWatchSeed && existing.watchSeed.toLowerCase() !== inputWatchSeed) {
+    if (inputWatchSeed && existing.state.watchSeed.toLowerCase() !== inputWatchSeed) {
       throw new Error(`ACCOUNT_WATCH_SEED_MISMATCH:${counterpartyId}`);
     }
     return { account: existing, counterpartyId, createdAccount: false };

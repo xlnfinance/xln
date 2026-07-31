@@ -331,9 +331,9 @@ export const buildCrossMarketOfferFromBookOrder = (
     'ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER',
   );
   const account = state.accounts.get(accountId);
-  const offer = account?.swapOffers?.get(offerId);
+  const offer = account?.state.swapOffers?.get(offerId);
   if (account && offer?.crossJurisdiction) {
-    const entityRefs = resolveStoredOfferEntityRefs(account, offer);
+    const entityRefs = resolveStoredOfferEntityRefs(account.state, offer);
     return buildCrossJurisdictionMarketOffer(
       normalizeSwapOfferForOrderbook(
         {

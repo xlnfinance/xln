@@ -246,7 +246,7 @@ import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fai
 
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
-import { cloneAccountState } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state-clone';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -255,7 +255,7 @@ import {
 
 import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 
-import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
+import type { AccountFrame, AccountInput, AccountReplica, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import type { JInput } from '../jurisdiction/machine/input';
@@ -349,11 +349,30 @@ const makeEmptyProofBody = () => ({
   transformers: [],
 });
 
-const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountState => {
+const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountReplica => {
   return {
-    leftEntity,
-    rightEntity,
-    domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+      watchSeed: deriveAccountWatchSeed({
+        runtimeSeed: 'audit-failfast-test-helper',
+        entityId: leftEntity,
+        counterpartyId: rightEntity,
+        timestamp: 0,
+      }),
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+    },
     status: 'active',
     mempool: [...mempool],
     currentFrame: {
@@ -367,36 +386,18 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map(),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    watchSeed: deriveAccountWatchSeed({
-      runtimeSeed: 'audit-failfast-test-helper',
-      entityId: leftEntity,
-      counterpartyId: rightEntity,
-      timestamp: 0,
-    }),
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
-  } as AccountState;
+  };
 };
 
 const setSyntheticPendingAccountProposal = (
-  account: AccountState,
+  account: AccountReplica,
   accountTxs: AccountTx[],
   timestamp: number,
 ): void => {
@@ -413,13 +414,13 @@ const setSyntheticPendingAccountProposal = (
     kind: 'frame',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
-    domain: structuredClone(account.domain),
+    domain: structuredClone(account.state.domain),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
 
 const makeIncomingAccountFrame = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
   byLeft: boolean,
   timestamp = 10_000,
@@ -1010,10 +1011,12 @@ describe('audit fail-fast regressions', () => {
 
   test('swap_offer refuses to add more than the configured per-account cap', async () => {
     const accountMachine = {
-      leftEntity: 'left',
-      rightEntity: 'right',
-      deltas: new Map(),
-      swapOffers: new Map(Array.from({ length: LIMITS.MAX_ACCOUNT_SWAP_OFFERS }, (_, index) => [String(index), {}])),
+      state: {
+        leftEntity: 'left',
+        rightEntity: 'right',
+        deltas: new Map(),
+        swapOffers: new Map(Array.from({ length: LIMITS.MAX_ACCOUNT_SWAP_OFFERS }, (_, index) => [String(index), {}])),
+      },
     };
 
     const result = await handleSwapOffer(
@@ -1034,7 +1037,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(`max ${LIMITS.MAX_ACCOUNT_SWAP_OFFERS}`);
-    expect(accountMachine.swapOffers.size).toBe(LIMITS.MAX_ACCOUNT_SWAP_OFFERS);
+    expect(accountMachine.state.swapOffers.size).toBe(LIMITS.MAX_ACCOUNT_SWAP_OFFERS);
   });
 
   test('proposeAccountFrame accepts a 1000 tx account frame', async () => {
@@ -1089,7 +1092,7 @@ describe('audit fail-fast regressions', () => {
         kind: 'ack',
         fromEntityId: left.entityId,
         toEntityId: right.entityId,
-        domain: { ...accountMachine.domain },
+        domain: { ...accountMachine.state.domain },
         ack: {
           height: 10,
           frameHash: accountMachine.currentFrame.stateHash,
@@ -1123,12 +1126,12 @@ describe('audit fail-fast regressions', () => {
       left.entityId,
       right.entityId,
     );
-    accountMachine.deltas.set(1, createDefaultDelta(1));
+    accountMachine.state.deltas.set(1, createDefaultDelta(1));
     accountMachine.currentDisputeProofBodyHash = buildAccountProofBody(accountMachine, '').proofBodyHash;
     accountMachine.currentDisputeProofNonce = 1;
-    accountMachine.jNonce = 0;
+    accountMachine.state.jNonce = 0;
     accountMachine.currentDisputeHash = createDisputeProofHashWithNonce(
-      accountMachine,
+      accountMachine.state,
       accountMachine.currentDisputeProofBodyHash,
       { chainId: 31337, depositoryAddress: hex20('dd') },
       1,
@@ -1161,11 +1164,11 @@ describe('audit fail-fast regressions', () => {
       left.entityId,
       right.entityId,
     );
-    accountMachine.deltas.set(1, createDefaultDelta(1));
+    accountMachine.state.deltas.set(1, createDefaultDelta(1));
     const proof = buildAccountProofBody(accountMachine, '');
     accountMachine.currentDisputeProofBodyHash = proof.proofBodyHash;
     accountMachine.currentDisputeProofNonce = 7;
-    accountMachine.jNonce = 8;
+    accountMachine.state.jNonce = 8;
     accountMachine.disputeProofBodiesByHash = undefined;
     accountMachine.disputeProofNoncesByHash = undefined;
     accountMachine.disputeArgumentSnapshotsByHash = undefined;
@@ -1229,7 +1232,7 @@ describe('audit fail-fast regressions', () => {
       };
       const previousStateHash = `0x${'ab'.repeat(32)}`;
       const proposerAccount = makeProposalAccount([htlcTx], left.entityId, right.entityId);
-      proposerAccount.lastFinalizedJHeight = finalizedJHeight;
+      proposerAccount.state.lastFinalizedJHeight = finalizedJHeight;
       proposerAccount.currentHeight = accountHeight;
       proposerAccount.currentFrame = {
         ...proposerAccount.currentFrame,
@@ -1237,7 +1240,7 @@ describe('audit fail-fast regressions', () => {
         timestamp: env.state.timestamp - 1,
         stateHash: previousStateHash,
       };
-      proposerAccount.deltas.set(1, makeFundedDelta());
+      proposerAccount.state.deltas.set(1, makeFundedDelta());
 
       const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposerAccount, env.state.timestamp, 0);
       if (!proposed.success) throw new Error(`ZERO_JHEIGHT_PROPOSAL_FAILED:${proposed.error}`);
@@ -1252,7 +1255,7 @@ describe('audit fail-fast regressions', () => {
 
       const receiverAccount = makeProposalAccount([], left.entityId, right.entityId);
       receiverAccount.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
-      receiverAccount.lastFinalizedJHeight = finalizedJHeight;
+      receiverAccount.state.lastFinalizedJHeight = finalizedJHeight;
       receiverAccount.currentHeight = accountHeight;
       receiverAccount.currentFrame = {
         ...receiverAccount.currentFrame,
@@ -1260,7 +1263,7 @@ describe('audit fail-fast regressions', () => {
         timestamp: env.state.timestamp - 1,
         stateHash: previousStateHash,
       };
-      receiverAccount.deltas.set(1, makeFundedDelta());
+      receiverAccount.state.deltas.set(1, makeFundedDelta());
       const replayedReceiverAccount = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(receiverAccount)));
 
       const result = await applyAccountInput(createAccountConsensusContext(env), receiverAccount, sealedProposal);
@@ -1271,7 +1274,7 @@ describe('audit fail-fast regressions', () => {
       expect(replayResult.success).toBe(true);
       expect(receiverAccount.currentHeight).toBe(accountHeight + 1);
       expect(receiverAccount.currentFrame.jHeight).toBe(0);
-      expect(receiverAccount.locks.has(lockId)).toBe(true);
+      expect(receiverAccount.state.locks.has(lockId)).toBe(true);
       expect(safeStringify(projectAccountDoc(replayedReceiverAccount))).toBe(
         safeStringify(projectAccountDoc(receiverAccount)),
       );
@@ -1299,7 +1302,7 @@ describe('audit fail-fast regressions', () => {
       expect(proposerAccount.currentHeight).toBe(accountHeight + 1);
       expect(proposerAccount.currentFrame.jHeight).toBe(0);
       expect(proposerAccount.currentFrame.stateHash).toBe(receiverAccount.currentFrame.stateHash);
-      expect(proposerAccount.locks.has(lockId)).toBe(true);
+      expect(proposerAccount.state.locks.has(lockId)).toBe(true);
     }
   }, 15_000);
 
@@ -1482,7 +1485,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: replica.entityId,
       toEntityId: counterpartyId,
-      domain: structuredClone(accountMachine.domain),
+      domain: structuredClone(accountMachine.state.domain),
       proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
     };
     const persistedAccount = projectAccountDoc(accountMachine);
@@ -1599,7 +1602,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
-      domain: { ...accountMachine.domain },
+      domain: { ...accountMachine.state.domain },
       signerId: right.signerId,
       proposal: {
         frame: {
@@ -1747,7 +1750,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame_ack',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
-      domain: { ...accountMachine.domain },
+      domain: { ...accountMachine.state.domain },
       ack: {
         height: 10,
         frameHash: accountMachine.currentFrame.stateHash,
@@ -1761,7 +1764,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
-      domain: { ...accountMachine.domain },
+      domain: { ...accountMachine.state.domain },
       signerId: right.signerId,
       proposal: {
         frame: {
@@ -1800,7 +1803,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
-      domain: { ...accountMachine.domain },
+      domain: { ...accountMachine.state.domain },
       signerId: right.signerId,
       proposal: {
         frame: {
@@ -1837,7 +1840,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
-      domain: { ...accountMachine.domain },
+      domain: { ...accountMachine.state.domain },
       ack: { height: 9, frameHash: `0x${'09'.repeat(32)}`, frameHanko: `0x${'12'.repeat(65)}` },
     });
 
@@ -1868,7 +1871,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
-      domain: { ...accountMachine.domain },
+      domain: { ...accountMachine.state.domain },
       ack: { height: 20, frameHash: `0x${'20'.repeat(32)}`, frameHanko: `0x${'12'.repeat(65)}` },
     });
 
@@ -1930,13 +1933,13 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
-      domain: { ...receiverAccount.domain },
+      domain: { ...receiverAccount.state.domain },
       proposal: { frame: maliciousFrame, frameHanko: newHanko! },
     });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Frame proposer side mismatch');
-    expect(receiverAccount.deltas.get(1)?.leftCreditLimit ?? 0n).toBe(0n);
+    expect(receiverAccount.state.deltas.get(1)?.leftCreditLimit ?? 0n).toBe(0n);
   });
 
   test('applyAccountInput rejects dispute seal hash mismatch before committing frame', async () => {
@@ -1991,7 +1994,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
-      domain: { ...receiverAccount.domain },
+      domain: { ...receiverAccount.state.domain },
       proposal: {
         frame,
         frameHanko: newHanko!,
@@ -2007,7 +2010,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('ACCOUNT_PROPOSAL:DISPUTE_SEAL_HASH_MISMATCH');
     expect(receiverAccount.currentHeight).toBe(0);
-    expect(receiverAccount.deltas.get(1)?.leftCreditLimit ?? 0n).toBe(0n);
+    expect(receiverAccount.state.deltas.get(1)?.leftCreditLimit ?? 0n).toBe(0n);
     expect(receiverAccount.counterpartyDisputeHash).toBeUndefined();
   });
 
@@ -2160,12 +2163,12 @@ describe('audit fail-fast regressions', () => {
 
     const receiver = makeProposalAccount([{ type: 'add_delta', data: { tokenId: 2 } }], left.entityId, right.entityId);
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
-    receiver.deltas.set(1, {
+    receiver.state.deltas.set(1, {
       ...createDefaultDelta(1),
       rightCreditLimit: 100n,
       rightHold: 5n,
     });
-    receiver.locks.set('existing-lock', {
+    receiver.state.locks.set('existing-lock', {
       lockId: 'existing-lock',
       hashlock: `0x${'31'.repeat(32)}`,
       timelock: 100_000n,
@@ -2176,7 +2179,7 @@ describe('audit fail-fast regressions', () => {
       createdHeight: 0,
       createdTimestamp: 0,
     });
-    receiver.swapOffers.set('existing-offer', {
+    receiver.state.swapOffers.set('existing-offer', {
       offerId: 'existing-offer',
       giveTokenId: 1,
       giveAmount: 7n,
@@ -2192,8 +2195,8 @@ describe('audit fail-fast regressions', () => {
     }
     const beforeBytes = encodeBuffer(projectAccountDoc(receiver));
     const beforeState = safeStringify(receiver);
-    const beforeRoot = computeAccountStateRoot(receiver);
-    expect(computeAccountStateRootCold(receiver)).toBe(beforeRoot);
+    const beforeRoot = computeAccountStateRoot(receiver.state);
+    expect(computeAccountStateRootCold(receiver.state)).toBe(beforeRoot);
 
     const opaqueOffer = {
       version: 'xln:htlc-multi-recipient:v1',
@@ -2249,7 +2252,7 @@ describe('audit fail-fast regressions', () => {
         kind: 'frame',
         fromEntityId: left.entityId,
         toEntityId: right.entityId,
-        domain: { ...receiver.domain },
+        domain: { ...receiver.state.domain },
         proposal: { frame, frameHanko: frameHanko! },
       },
       {
@@ -2265,11 +2268,11 @@ describe('audit fail-fast regressions', () => {
     expect(receiver.pendingFrame).toEqual(localPending.accountInput.proposal.frame);
     expect(receiver.pendingAccountInput).toEqual(localPending.accountInput);
     expect(receiver.mempool).toEqual([]);
-    expect(receiver.locks.get('existing-lock')?.secretOffer).toBeUndefined();
-    expect(receiver.swapOffers.get('existing-offer')?.giveAmount).toBe(7n);
+    expect(receiver.state.locks.get('existing-lock')?.secretOffer).toBeUndefined();
+    expect(receiver.state.swapOffers.get('existing-offer')?.giveAmount).toBe(7n);
     const afterTiming: Parameters<typeof computeAccountStateRoot>[1] = {};
-    expect(computeAccountStateRoot(receiver, afterTiming)).toBe(beforeRoot);
-    expect(computeAccountStateRootCold(receiver)).toBe(beforeRoot);
+    expect(computeAccountStateRoot(receiver.state, afterTiming)).toBe(beforeRoot);
+    expect(computeAccountStateRootCold(receiver.state)).toBe(beforeRoot);
     for (const namespace of ['deltas', 'locks', 'swapOffers']) {
       expect(afterTiming.mapStatus?.[namespace]).toMatchObject({ mode: 'cached', dirtyKeys: 0 });
     }

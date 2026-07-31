@@ -136,7 +136,7 @@ const admitGeneratedAccountTx = async (
   const result = await applyAccountInput(
     accountConsensusContext,
     account,
-    createLocalAccountInput(account, state.entityId, [tx]),
+    createLocalAccountInput(account.state, state.entityId, [tx]),
   );
   return result.admittedAccountTxCount === 1;
 };
@@ -224,7 +224,7 @@ export const drainPendingCrossJurisdictionFillAcks = async (
       entityLog.warn('crossj.fill_ack_ttl_expired_preserved', payload);
     }
     const account = currentEntityState.accounts.get(pendingAck.accountId);
-    if (!account?.swapOffers?.has(pendingAck.tx.data.offerId)) continue;
+    if (!account?.state.swapOffers?.has(pendingAck.tx.data.offerId)) continue;
     if (await admitGeneratedAccountTx(accountConsensusContext, currentEntityState, account, pendingAck.tx)) {
       proposableAccounts.add(pendingAck.accountId);
       storageChanges.push({

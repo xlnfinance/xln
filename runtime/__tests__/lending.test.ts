@@ -4,7 +4,7 @@ import { applyAccountTx } from '../account/tx/apply';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyCommittedAccountFrameFollowups, type AccountTxTarget } from '../entity/tx/handlers/account';
-import type { AccountFrame, AccountState, AccountTx } from '../types/account';
+import type { AccountFrame, AccountReplica, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityState } from '../entity/types';
 import { createDefaultDelta } from '../account/delta';
 
@@ -43,15 +43,30 @@ const makeState = (): EntityState => ({
   swapTradingPairs: [],
 });
 
-const makeAccount = (counterparty: string): AccountState => {
+const makeAccount = (counterparty: string): AccountReplica => {
   const delta = createDefaultDelta(1);
   delta.collateral = 20_000n;
   delta.leftCreditLimit = 20_000n;
   delta.rightCreditLimit = 20_000n;
   return {
-    leftEntity: HUB,
-    rightEntity: counterparty,
-    watchSeed: `0x${'99'.repeat(32)}`,
+    state: {
+      leftEntity: HUB,
+      rightEntity: counterparty,
+      domain: { chainId: 31_337, depositoryAddress: `0x${'88'.repeat(20)}` },
+      watchSeed: `0x${'99'.repeat(32)}`,
+      deltas: new Map([[1, delta]]),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      pulls: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      jNonce: 0,
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -65,27 +80,15 @@ const makeAccount = (counterparty: string): AccountState => {
       accountStateRoot: `0x${'66'.repeat(32)}`,
       byLeft: true,
     },
-    deltas: new Map([[1, delta]]),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 1,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: HUB, toEntity: counterparty, nextProofNonce: 1 },
     proofBody: { tokenIds: [], deltas: [] },
-    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    locks: new Map(),
-    swapOffers: new Map(),
-    pulls: new Map(),
     swapOrderHistory: new Map(),
     swapClosedOrders: new Map(),
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    jNonce: 0,
   };
 };
 
@@ -212,9 +215,9 @@ describe('payer-authenticated hub lending', () => {
     await expect(applyAccountTx(account, tx, true)).rejects.toThrow('LENDING_LENDER_NOT_PROPOSER');
     const first = await applyAccountTx(account, tx, false);
     expect(first.success).toBe(true);
-    const offdeltaAfterFirst = account.deltas.get(1)!.offdelta;
+    const offdeltaAfterFirst = account.state.deltas.get(1)!.offdelta;
     await expect(applyAccountTx(account, tx, false)).rejects.toThrow('LENDING_INTENT_REPLAY');
-    expect(account.deltas.get(1)!.offdelta).toBe(offdeltaAfterFirst);
+    expect(account.state.deltas.get(1)!.offdelta).toBe(offdeltaAfterFirst);
   });
 
   test('entity frame hash commits hub lending state', async () => {

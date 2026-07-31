@@ -471,7 +471,7 @@ const pendingWithdrawalOverlayState = (
 const accountEntityOverlayState = (account: AccountReplica): unknown => ({
   status: account.status,
   disputePrepare: account.disputePrepare,
-  settlementWorkspace: settlementOverlayState(account.settlementWorkspace),
+  settlementWorkspace: settlementOverlayState(account.state.settlementWorkspace),
   activeDispute: account.activeDispute,
   pendingForwards: account.pendingForwards,
   pendingWithdrawals: pendingWithdrawalOverlayState(account.pendingWithdrawals),

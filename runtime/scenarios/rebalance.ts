@@ -174,13 +174,13 @@ export async function runRebalanceScenario(): Promise<void> {
   const waitForHubCollateral = async (counterpartyId: string, expected: bigint, label: string, maxRounds = 20): Promise<void> => {
     for (let i = 0; i < maxRounds; i++) {
       const current =
-        findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+        findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.state.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
       if (current === expected) return;
       await syncChain();
       await convergeScenario(env);
     }
     const current =
-      findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+      findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.state.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
     assert(current === expected, `${label}: ${current}, expected ${expected}`, env);
   };
 
@@ -407,7 +407,7 @@ export async function runRebalanceScenario(): Promise<void> {
   for (const user of users) {
     const acc = hubAfterPayments.accounts.get(user.id);
     if (!acc) continue;
-    const delta = acc.deltas.get(USDC_TOKEN_ID);
+    const delta = acc.state.deltas.get(USDC_TOKEN_ID);
     if (!delta) continue;
     collateralBeforeRebalance.set(user.id, delta.collateral);
     const hubIsLeft = isLeftEntity(hub.id, user.id);
@@ -453,8 +453,8 @@ export async function runRebalanceScenario(): Promise<void> {
       const [, userReplica] = findReplica(env, user.id);
       const userAcc = userReplica.state.accounts.get(hub.id);
       preRebalanceJProgress.set(user.id, {
-        hub: snapshotAccountJProgress(hubAcc),
-        user: snapshotAccountJProgress(userAcc),
+        hub: snapshotAccountJProgress(hubAcc?.state),
+        user: snapshotAccountJProgress(userAcc?.state),
       });
     }
   }
@@ -487,8 +487,8 @@ export async function runRebalanceScenario(): Promise<void> {
   for (const user of users) {
     const acc = findReplica(env, hub.id)[1].state.accounts.get(user.id);
     if (!acc) continue;
-    const ws = acc.settlementWorkspace;
-    const requested = acc.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
+    const ws = acc.state.settlementWorkspace;
+    const requested = acc.state.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
     pendingRequestedTotal += requested;
     if (requested > 0n) requestedByUser.set(user.id, requested);
     console.log(`    Hub↔${user.name}: ws=${ws?.status || 'none'}, requested=${requested}`);
@@ -543,13 +543,13 @@ export async function runRebalanceScenario(): Promise<void> {
 
   const getRebalanceTargets = (state: typeof hubAfterBroadcast) =>
     [alice.id, bob.id, charlie.id, dave.id].filter(userId => {
-      const after = state.accounts.get(userId)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+      const after = state.accounts.get(userId)?.state.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
       const before = collateralBeforeRebalance.get(userId) ?? INITIAL_COLLATERAL;
       return after > before;
     });
   const getPaymentCollateralizedTargets = (state: typeof hubAfterBroadcast) =>
     [alice.id, bob.id, charlie.id, dave.id].filter(userId => {
-      const after = state.accounts.get(userId)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+      const after = state.accounts.get(userId)?.state.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
       return after > INITIAL_COLLATERAL;
     });
 
@@ -574,8 +574,8 @@ export async function runRebalanceScenario(): Promise<void> {
     const [, userReplica] = findReplica(env, userId);
     const userAcc = userReplica.state.accounts.get(hub.id);
 
-    const hubPost = snapshotAccountJProgress(hubAcc);
-    const userPost = snapshotAccountJProgress(userAcc);
+    const hubPost = snapshotAccountJProgress(hubAcc?.state);
+    const userPost = snapshotAccountJProgress(userAcc?.state);
     const pre = preRebalanceJProgress.get(userId);
     assert(!!pre, `Missing pre-rebalance J-progress snapshot for ${userId.slice(-4)}`, env);
     const preHub = pre!.hub;
@@ -609,8 +609,8 @@ export async function runRebalanceScenario(): Promise<void> {
       env,
     );
 
-    const hubCollateralAfter = hubAcc?.deltas.get(USDC_TOKEN_ID)?.collateral ?? 0n;
-    const userCollateralAfter = userAcc?.deltas.get(USDC_TOKEN_ID)?.collateral ?? 0n;
+    const hubCollateralAfter = hubAcc?.state.deltas.get(USDC_TOKEN_ID)?.collateral ?? 0n;
+    const userCollateralAfter = userAcc?.state.deltas.get(USDC_TOKEN_ID)?.collateral ?? 0n;
 
     assert(
       hubCollateralAfter > INITIAL_COLLATERAL,
@@ -648,15 +648,15 @@ export async function runRebalanceScenario(): Promise<void> {
 
   for (const user of users) {
     const acc = hubFinal.accounts.get(user.id);
-    const delta = acc?.deltas.get(USDC_TOKEN_ID);
+    const delta = acc?.state.deltas.get(USDC_TOKEN_ID);
     const hubIsLeft = isLeftEntity(hub.id, user.id);
     const derived = delta ? deriveDelta(delta, hubIsLeft) : null;
     const hubExposure = derived?.outPeerCredit ?? 0n;
     const hubOutCollateral = derived?.outCollateral ?? 0n;
     const uncollateralized = hubExposure > hubOutCollateral ? hubExposure - hubOutCollateral : 0n;
-    const nonce = acc?.jNonce || 0;
+    const nonce = acc?.state.jNonce || 0;
     console.log(
-      `  Hub↔${user.name}: delta=${derived?.delta ?? 0n}, outCollateral=${hubOutCollateral}, hubExposure=${hubExposure}, uncollateralized=${uncollateralized}, nonce=${nonce}, ws=${acc?.settlementWorkspace?.status || 'none'}`,
+      `  Hub↔${user.name}: delta=${derived?.delta ?? 0n}, outCollateral=${hubOutCollateral}, hubExposure=${hubExposure}, uncollateralized=${uncollateralized}, nonce=${nonce}, ws=${acc?.state.settlementWorkspace?.status || 'none'}`,
     );
   }
 
@@ -665,11 +665,11 @@ export async function runRebalanceScenario(): Promise<void> {
   // Invariant: nonce is bilateral-equal for each account.
   for (const user of users) {
     const hubAcc = hubFinal.accounts.get(user.id);
-    const hubNonce = hubAcc?.jNonce || 0;
+    const hubNonce = hubAcc?.state.jNonce || 0;
     assert(hubNonce >= 0, `Hub↔${user.name} nonce must be non-negative (got ${hubNonce})`, env);
     const [, userReplica] = findReplica(env, user.id);
     const userAcc = userReplica.state.accounts.get(hub.id);
-    const userNonce = userAcc?.jNonce || 0;
+    const userNonce = userAcc?.state.jNonce || 0;
     assert(
       hubNonce === userNonce,
       `Hub↔${user.name} nonce must match counterparty view (hub=${hubNonce}, user=${userNonce})`,
@@ -682,7 +682,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // if user signature was not provided during this scenario.
   for (const user of users) {
     const acc = hubFinal.accounts.get(user.id);
-    const ws = acc?.settlementWorkspace;
+    const ws = acc?.state.settlementWorkspace;
     if (ws) {
       assert(
         ws.status === 'awaiting_counterparty',
@@ -701,13 +701,13 @@ export async function runRebalanceScenario(): Promise<void> {
   let accountsWithTopUp = 0;
   for (const user of users) {
     const acc = hubFinal.accounts.get(user.id);
-    const delta = acc?.deltas.get(USDC_TOKEN_ID);
+    const delta = acc?.state.deltas.get(USDC_TOKEN_ID);
     const before = rebalanceExecuted
       ? (collateralBeforeRebalance.get(user.id) ?? 0n)
       : INITIAL_COLLATERAL;
     const after = delta?.collateral ?? 0n;
     if (after > before) accountsWithTopUp++;
-    const pendingHub = acc?.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
+    const pendingHub = acc?.state.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
     const initialRequest = requestedByUser.get(user.id) ?? 0n;
     if (initialRequest > 0n) {
       assert(
@@ -723,7 +723,7 @@ export async function runRebalanceScenario(): Promise<void> {
   for (const user of users) {
     const [, userReplica] = findReplica(env, user.id);
     const userAcc = userReplica.state.accounts.get(hub.id);
-    const userWs = userAcc?.settlementWorkspace;
+    const userWs = userAcc?.state.settlementWorkspace;
     if (userWs) {
       assert(
         userWs.status === 'awaiting_counterparty',
@@ -736,7 +736,7 @@ export async function runRebalanceScenario(): Promise<void> {
         env,
       );
     }
-    const pendingUser = userAcc?.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
+    const pendingUser = userAcc?.state.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
     const initialRequest = requestedByUser.get(user.id) ?? 0n;
     if (initialRequest > 0n) {
       assert(
@@ -755,8 +755,8 @@ export async function runRebalanceScenario(): Promise<void> {
       const hubAcc = latestHub.accounts.get(user.id);
       const [, userReplica] = findReplica(env, user.id);
       const userAcc = userReplica.state.accounts.get(hub.id);
-      const hubPending = hubAcc?.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
-      const userPending = userAcc?.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
+      const hubPending = hubAcc?.state.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
+      const userPending = userAcc?.state.requestedRebalance?.get(USDC_TOKEN_ID) ?? 0n;
       if (hubPending > 0n || userPending > 0n) {
         pending.push({ userId: user.id, userName: user.name, hubPending, userPending });
       }

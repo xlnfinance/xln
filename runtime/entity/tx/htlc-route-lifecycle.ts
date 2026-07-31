@@ -44,7 +44,7 @@ export function persistVerifiedHtlcSecret(
   }
 
   const account = state.accounts.get(counterpartyId)!;
-  const localSentLock = lock.senderIsLeft === (account.leftEntity.toLowerCase() === state.entityId.toLowerCase());
+  const localSentLock = lock.senderIsLeft === (account.state.leftEntity.toLowerCase() === state.entityId.toLowerCase());
   const endpoint: readonly [string | undefined, string | undefined] = localSentLock
     ? [route.outboundEntity, route.outboundLockId]
     : [route.inboundEntity, route.inboundLockId];
@@ -106,7 +106,7 @@ function accountHasLiveLockReference(state: EntityState, counterpartyId: string 
   const account = state.accounts.get(counterpartyId);
   if (!account) return false;
   return Boolean(
-    account.locks?.has(lockId) ||
+    account.state.locks?.has(lockId) ||
     accountFrameHasLock(account.mempool, lockId) ||
     accountFrameHasLock(account.pendingFrame?.accountTxs, lockId)
   );

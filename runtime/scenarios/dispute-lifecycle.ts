@@ -312,7 +312,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
     );
     const reserveBeforeFinalize = await jadapter.getReserves(alice.id, USDC);
     const hubReserveBeforeFinalize = await jadapter.getReserves(hub.id, USDC);
-    const aliceCollateralBeforeFinalize = aliceAfterStart?.deltas.get(USDC)?.collateral ?? 0n;
+    const aliceCollateralBeforeFinalize = aliceAfterStart?.state.deltas.get(USDC)?.collateral ?? 0n;
 
     await mineUntilHeight(jadapter, timeoutBlock);
 
@@ -361,8 +361,8 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       env,
     );
 
-    const aliceOnChainNonce = Number(aliceAfterFinalize?.jNonce || 0);
-    const hubOnChainNonce = Number(hubAfterFinalize?.jNonce || 0);
+    const aliceOnChainNonce = Number(aliceAfterFinalize?.state.jNonce || 0);
+    const hubOnChainNonce = Number(hubAfterFinalize?.state.jNonce || 0);
     assert(
       Number(aliceAfterFinalize?.proofHeader?.nextProofNonce || 0) >= aliceOnChainNonce + 1,
       'Alice proofHeader.nextProofNonce must be onChain+1 after finalize',
@@ -376,7 +376,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
 
     const reserveAfterFinalize = await jadapter.getReserves(alice.id, USDC);
     const hubReserveAfterFinalize = await jadapter.getReserves(hub.id, USDC);
-    const aliceCollateralAfterFinalize = aliceAfterFinalize?.deltas.get(USDC)?.collateral ?? 0n;
+    const aliceCollateralAfterFinalize = aliceAfterFinalize?.state.deltas.get(USDC)?.collateral ?? 0n;
     const reserveDelta = reserveAfterFinalize - reserveBeforeFinalize;
     const releasedCollateral = aliceCollateralBeforeFinalize - aliceCollateralAfterFinalize;
     assert(

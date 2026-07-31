@@ -35,7 +35,7 @@ const signedWorkspace = (
     lastUpdatedAt: 1,
     executorIsLeft: true,
   };
-  workspace.workspaceHash = createSettlementWorkspaceHash(account, workspace);
+  workspace.workspaceHash = createSettlementWorkspaceHash(account.state, workspace);
   return workspace;
 };
 
@@ -61,7 +61,7 @@ const frozenRepaymentReplica = () => {
   const counterpartyId = generateLazyEntityId([counterpartySignerId], 1n).toLowerCase();
   const state = makeState(entityId, signerId, jurisdiction);
   const account = makeAccount(entityId, counterpartyId, jurisdiction);
-  account.settlementWorkspace = signedWorkspace(account);
+  account.state.settlementWorkspace = signedWorkspace(account);
   account.mempool = [repayment(entityId, counterpartyId)];
   state.accounts.set(counterpartyId, account);
   addReplica(env, state, signerId);
@@ -108,8 +108,8 @@ describe('deferred Account mempool scheduling', () => {
       logIndex: 0,
       type: 'AccountSettled',
       data: {
-        leftEntity: account.leftEntity,
-        rightEntity: account.rightEntity,
+        leftEntity: account.state.leftEntity,
+        rightEntity: account.state.rightEntity,
         tokenId: 1,
         leftReserve: '0',
         rightReserve: '1000000',
@@ -150,7 +150,7 @@ describe('deferred Account mempool scheduling', () => {
     expect(result.outcome).toEqual({ kind: 'committed' });
     expect(result.workingReplica.state.height).toBe(heightBeforeApply + 1);
     expect(result.workingReplica.state.lastFinalizedJHeight).toBe(jHeight);
-    expect(result.workingReplica.state.accounts.get(account.rightEntity === entityId ? account.leftEntity : account.rightEntity)?.mempool)
+    expect(result.workingReplica.state.accounts.get(account.state.rightEntity === entityId ? account.state.leftEntity : account.state.rightEntity)?.mempool)
       .toEqual(expect.arrayContaining([expect.objectContaining({ type: 'lending_repay' })]));
   });
 });

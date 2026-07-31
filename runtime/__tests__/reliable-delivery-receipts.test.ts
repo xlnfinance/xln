@@ -50,7 +50,6 @@ import {
 import { readStorageFrameRecord } from '../storage';
 import { buildRouteOutputKey, getReliableOutputIdentity } from '../runtime/output-routing';
 import { computeAccountStateRoot } from '../account/state-root';
-import type { AccountState } from '../types/account';
 import type { DeliverableEntityInput, RuntimeReplica, ReliableDeliveryReceipt } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';
@@ -418,12 +417,10 @@ const commitTerminalAccountAtReceiver = (
   ensureAppliedAuthority(receiver, output);
   const replica = receiver.state.eReplicas.get(`${output.entityId}:${output.signerId}`);
   if (!replica) throw new Error('TEST_ACCOUNT_RECEIPT_REPLICA_MISSING');
-  replica.state.accounts.set(entityId('d1'), {
-    leftEntity: entityId('d1'),
-    rightEntity: output.entityId,
-    currentHeight: height,
-    currentFrame: { stateHash: frameHash },
-  } as never);
+  const account = makeAccount(output.entityId, entityId('d1'));
+  account.currentHeight = height;
+  account.currentFrame = { ...account.currentFrame, height, stateHash: frameHash };
+  replica.state.accounts.set(entityId('d1'), account);
   const commits = commitReliableIngress(receiver, [output]);
   expect(commits).toHaveLength(1);
   finalizeReliableIngressCommit(receiver, commits);
@@ -537,24 +534,31 @@ describe('durable scoped reliable delivery receipts', () => {
     const sender = runtime('reliable-receipt-staged-account-ack-sender');
     const receiver = runtime('reliable-receipt-staged-account-ack-receiver');
     const output = accountAckOutput(receiver.runtimeId!, 10, '0xaccount-frame-10');
+    const stagedAccount = makeAccount(output.entityId, entityId('d1'));
+    const stagedAckTx = output.entityTxs?.find(tx => tx.type === 'accountInput');
+    if (!stagedAckTx || stagedAckTx.type !== 'accountInput') {
+      throw new Error('TEST_STAGED_ACCOUNT_ACK_TX_MISSING');
+    }
+    stagedAckTx.data.watchSeed = stagedAccount.state.watchSeed;
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, output).kind).toBe('enqueue');
     ensureAppliedAuthority(receiver, output);
     const replica = receiver.state.eReplicas.get(`${output.entityId}:${output.signerId}`);
     if (!replica) throw new Error('TEST_STAGED_ACCOUNT_ACK_REPLICA_MISSING');
     replica.mempool = [];
-    replica.state.accounts.set(entityId('d1'), {
-      leftEntity: entityId('d1'),
-      rightEntity: output.entityId,
-      currentHeight: 9,
-      currentFrame: { height: 9, stateHash: '0xaccount-frame-9' },
-      pendingFrame: {
-        height: 10,
-        prevFrameHash: '0xaccount-frame-9',
-        stateHash: '0xaccount-frame-10',
-      },
-      mempool: [],
-    } as never);
+    stagedAccount.currentHeight = 9;
+    stagedAccount.currentFrame = {
+      ...stagedAccount.currentFrame,
+      height: 9,
+      stateHash: '0xaccount-frame-9',
+    };
+    stagedAccount.pendingFrame = {
+      ...stagedAccount.currentFrame,
+      height: 10,
+      prevFrameHash: '0xaccount-frame-9',
+      stateHash: '0xaccount-frame-10',
+    };
+    replica.state.accounts.set(entityId('d1'), stagedAccount);
 
     // An unrelated Entity transition may persist this exact ACK in the Entity
     // mempool without applying it to the bilateral Account yet. That is not an
@@ -626,7 +630,7 @@ describe('durable scoped reliable delivery receipts', () => {
       height: 10,
       timestamp: 2_000,
       prevFrameHash: account.currentFrame.stateHash,
-      accountStateRoot: computeAccountStateRoot(account),
+      accountStateRoot: computeAccountStateRoot(account.state),
       stateHash: `0x${'10'.repeat(32)}`,
     };
     const ackHanko = await buildQuorumHanko(receiver, sourceEntityId, pendingFrame.stateHash, [{
@@ -638,7 +642,7 @@ describe('durable scoped reliable delivery receipts', () => {
       kind: 'frame',
       fromEntityId: account.proofHeader.fromEntity,
       toEntityId: account.proofHeader.toEntity,
-      domain: structuredClone(account.domain),
+      domain: structuredClone(account.state.domain),
       proposal: {
         frame: structuredClone(pendingFrame),
         frameHanko: `0x${'33'.repeat(65)}`,
@@ -727,8 +731,8 @@ describe('durable scoped reliable delivery receipts', () => {
         kind: 'ack',
         fromEntityId: sourceEntityId,
         toEntityId: targetEntityId,
-        domain: structuredClone(account.domain),
-        watchSeed: account.watchSeed,
+        domain: structuredClone(account.state.domain),
+        watchSeed: account.state.watchSeed,
         ack: {
           height: 10,
           frameHash: pendingFrame.stateHash,
@@ -792,7 +796,7 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(applied.appliedEntityInputs).toHaveLength(1);
     expect(receiver.state.eReplicas.get(`${targetEntityId}:${validatorId}`)?.state.height).toBe(1);
     const committedAccount = receiver.state.eReplicas
-      .get(`${targetEntityId}:${validatorId}`)?.state.accounts.get(sourceEntityId) as AccountState | undefined;
+      .get(`${targetEntityId}:${validatorId}`)?.state.accounts.get(sourceEntityId);
     if (!committedAccount) throw new Error('TEST_FROZEN_PREFIX_ACCOUNT_MISSING');
     expect(committedAccount.currentHeight).toBe(10);
     expect(committedAccount.pendingFrame).toBeUndefined();
@@ -1020,21 +1024,20 @@ describe('durable scoped reliable delivery receipts', () => {
     ensureAppliedAuthority(receiver, first);
     const replica = receiver.state.eReplicas.get(`${first.entityId}:${first.signerId}`);
     if (!replica) throw new Error('TEST_ACCOUNT_SUCCESSOR_REPLICA_MISSING');
-    replica.state.accounts.set(entityId('d1'), {
-      leftEntity: entityId('d1'),
-      rightEntity: first.entityId,
-      currentHeight: 1,
-      currentFrame: {
-        height: 1,
-        stateHash: '0xaccount-frame-1',
-      },
-      pendingFrame: {
-        height: 2,
-        prevFrameHash: '0xaccount-frame-1',
-        stateHash: '0xaccount-frame-2',
-      },
-      mempool: [],
-    } as never);
+    const successorAccount = makeAccount(first.entityId, entityId('d1'));
+    successorAccount.currentHeight = 1;
+    successorAccount.currentFrame = {
+      ...successorAccount.currentFrame,
+      height: 1,
+      stateHash: '0xaccount-frame-1',
+    };
+    successorAccount.pendingFrame = {
+      ...successorAccount.currentFrame,
+      height: 2,
+      prevFrameHash: '0xaccount-frame-1',
+      stateHash: '0xaccount-frame-2',
+    };
+    replica.state.accounts.set(entityId('d1'), successorAccount);
     const account = replica.state.accounts.get(entityId('d1'));
     if (!account) throw new Error('TEST_ACCOUNT_SUCCESSOR_ACCOUNT_MISSING');
     const firstCommits = commitReliableIngress(receiver, [first]);

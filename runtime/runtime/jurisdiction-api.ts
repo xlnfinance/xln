@@ -91,9 +91,9 @@ const findRuntimeAccountWith = (state: EntityState | null, counterpartyId: strin
   const counterparty = normalizeRuntimeEntityId(counterpartyId);
   if (!state || !counterparty) return null;
   for (const [accountId, account] of state.accounts.entries()) {
-    if (normalizeRuntimeEntityId(accountId) === counterparty) return account;
-    if (normalizeRuntimeEntityId(account.leftEntity) === counterparty) return account;
-    if (normalizeRuntimeEntityId(account.rightEntity) === counterparty) return account;
+    if (normalizeRuntimeEntityId(accountId) === counterparty) return account.state;
+    if (normalizeRuntimeEntityId(account.state.leftEntity) === counterparty) return account.state;
+    if (normalizeRuntimeEntityId(account.state.rightEntity) === counterparty) return account.state;
   }
   return null;
 };

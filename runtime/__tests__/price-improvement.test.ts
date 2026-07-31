@@ -21,7 +21,7 @@ import { createBook, applyCommand, type BookState, type BookEvent } from '../ord
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSide } from '../orderbook/types';
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { deriveCanonicalSwapFillRatio } from '../orderbook/swap-execution';
-import type { AccountState, AccountTx, SwapOffer } from '../types/account';
+import type { AccountReplica, AccountTx, SwapOffer } from '../types/account';
 import { createDefaultDelta } from '../account/delta';
 
 // Helpers
@@ -63,7 +63,7 @@ function currentSettlement(giveAmount: bigint, wantAmount: bigint, fillRatio: nu
   return { filledGive, filledWant };
 }
 
-function makeAccountMachine(offer: SwapOffer): AccountState {
+function makeAccountMachine(offer: SwapOffer): AccountReplica {
   const heldGiveAmount = offer.quantizedGive ?? offer.giveAmount;
   const giveDelta = createDefaultDelta(offer.giveTokenId);
   giveDelta.leftCreditLimit = 10n ** 30n;
@@ -79,8 +79,29 @@ function makeAccountMachine(offer: SwapOffer): AccountState {
   wantDelta.rightCreditLimit = 10n ** 30n;
 
   return {
-    leftEntity: 'maker',
-    rightEntity: 'hub',
+    state: {
+      leftEntity: 'maker',
+      rightEntity: 'hub',
+      domain: {
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+      },
+      watchSeed: `0x${'11'.repeat(32)}`,
+      deltas: new Map([
+        [offer.giveTokenId, giveDelta],
+        [offer.wantTokenId, wantDelta],
+      ]),
+      locks: new Map(),
+      swapOffers: new Map([[offer.offerId, offer]]),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -89,32 +110,18 @@ function makeAccountMachine(offer: SwapOffer): AccountState {
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       deltas: [],
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map([
-      [offer.giveTokenId, giveDelta],
-      [offer.wantTokenId, wantDelta],
-    ]),
-    locks: new Map(),
-    swapOffers: new Map([[offer.offerId, offer]]),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: 'maker', toEntity: 'hub', nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
   };
 }
 
@@ -375,10 +382,10 @@ describe('price improvement', () => {
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
       expect(resolveResult.success).toBe(true);
-      expect(accountMachine.swapOffers.has(offerId)).toBe(false);
+      expect(accountMachine.state.swapOffers.has(offerId)).toBe(false);
       // Settlement uses exact quote spent, not limit quote plus bonus leg.
-      expect(accountMachine.deltas.get(1)?.offdelta).toBe(-executionQuoteAmount);
-      expect(accountMachine.deltas.get(2)?.offdelta).toBe(executionBaseAmount);
+      expect(accountMachine.state.deltas.get(1)?.offdelta).toBe(-executionQuoteAmount);
+      expect(accountMachine.state.deltas.get(2)?.offdelta).toBe(executionBaseAmount);
       expect(savedQuoteAmount).toBeGreaterThan(0n);
       console.log(`BUY price improvement: ${savedQuoteAmount}`);
     });
@@ -457,10 +464,10 @@ describe('price improvement', () => {
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
       expect(resolveResult.success).toBe(true);
-      expect(accountMachine.swapOffers.has(offerId)).toBe(false);
+      expect(accountMachine.state.swapOffers.has(offerId)).toBe(false);
       // Settlement uses exact execution proceeds, not proceeds plus bonus leg.
-      expect(accountMachine.deltas.get(2)?.offdelta).toBe(-executionBaseAmount);
-      expect(accountMachine.deltas.get(1)?.offdelta).toBe(executionQuoteAmount);
+      expect(accountMachine.state.deltas.get(2)?.offdelta).toBe(-executionBaseAmount);
+      expect(accountMachine.state.deltas.get(1)?.offdelta).toBe(executionQuoteAmount);
       expect(gainedQuoteAmount).toBeGreaterThan(0n);
       console.log(`SELL price improvement: ${gainedQuoteAmount}`);
     });
@@ -482,7 +489,7 @@ describe('price improvement', () => {
         quantizedWant: ticksLotsToWei(8700n),
       };
       const accountMachine = makeAccountMachine(offer);
-      accountMachine.deltas.get(1)!.rightCreditLimit = executionQuoteAmount - 1n;
+      accountMachine.state.deltas.get(1)!.rightCreditLimit = executionQuoteAmount - 1n;
       const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
         type: 'swap_resolve',
         data: {
@@ -557,7 +564,7 @@ describe('price improvement', () => {
 
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
       expect(resolveResult.success).toBe(true);
-      expect(accountMachine.swapOffers.has(offerId)).toBe(false);
+      expect(accountMachine.state.swapOffers.has(offerId)).toBe(false);
       expect(accountMachine.swapClosedOrders?.get(offerId)?.resolves.at(-1)?.cancelRemainder).toBe(true);
       expect(accountMachine.swapClosedOrders?.get(offerId)?.resolves.at(-1)?.comment).toBe('manual-cancel');
     });
@@ -578,7 +585,7 @@ describe('price improvement', () => {
         quantizedWant: wantAmount,
       };
       const accountMachine = makeAccountMachine(offer);
-      accountMachine.deltas.get(2)!.leftHold = giveAmount - 1n;
+      accountMachine.state.deltas.get(2)!.leftHold = giveAmount - 1n;
       const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
         type: 'swap_resolve',
         data: {
@@ -593,7 +600,7 @@ describe('price improvement', () => {
       const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
       expect(resolveResult.success).toBe(false);
       expect(resolveResult.error).toContain('Hold underflow');
-      expect(accountMachine.swapOffers.has(offerId)).toBe(true);
+      expect(accountMachine.state.swapOffers.has(offerId)).toBe(true);
     });
   });
 });

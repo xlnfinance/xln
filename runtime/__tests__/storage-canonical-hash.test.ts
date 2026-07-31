@@ -14,13 +14,14 @@ import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
 import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';
 import { cloneEntityState } from '../entity/state-clone';
 import type { RuntimeFrame } from '../storage/types';
-import type { AccountState } from '../types/account';
+import type { AccountReplica } from '../types/account';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import {
   buildReplayVerifiableRuntimeMachineSnapshot,
   projectReplayVerifiableRuntimeMachine,
 } from '../storage/wal/snapshot';
+import { makeAccount as makeBaseAccount } from './helpers/cross-j';
 
 const signerIds = [`0x${'11'.repeat(20)}`, `0x${'12'.repeat(20)}`];
 const consensusConfig = {
@@ -32,46 +33,26 @@ const consensusConfig = {
 const entityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
 const counterpartyId = `0x${'ff'.repeat(32)}`;
 
-const makeAccount = (frameStateHash: string): AccountState =>
-  ({
-    leftEntity: entityId,
-    rightEntity: counterpartyId,
-    domain: { chainId: 31337, depositoryAddress: `0x${'de'.repeat(20)}` },
-    watchSeed: `0x${'ac'.repeat(32)}`,
-    status: 'active',
-    mempool: [],
-    currentFrame: {
-      height: 1,
-      timestamp: 100,
-      jHeight: 0,
-      accountTxs: [],
-      prevFrameHash: 'genesis',
-      accountStateRoot: `0x${'00'.repeat(32)}`,
-      stateHash: `0x${'01'.repeat(32)}`,
-      deltas: [],
-      byLeft: entityId < counterpartyId,
-    },
-    deltas: new Map([[1, {
-      tokenId: 1,
-      collateral: 0n,
-      ondelta: 0n,
-      offdelta: 10n,
-      leftCreditLimit: 0n,
-      rightCreditLimit: 0n,
-      leftAllowance: 0n,
-      rightAllowance: 0n,
-      leftHold: 0n,
-      rightHold: 0n,
-    }]]),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
-    currentHeight: 1,
-    pendingSignatures: [],
-    rollbackCount: 0,
-    proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
-    proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [{
+const makeAccount = (frameStateHash: string): AccountReplica => {
+  const account = makeBaseAccount(entityId, counterpartyId, {
+    chainId: 31_337,
+    depositoryAddress: `0x${'de'.repeat(20)}`,
+  });
+  account.state.watchSeed = `0x${'ac'.repeat(32)}`;
+  account.state.deltas.get(1)!.offdelta = 10n;
+  account.currentHeight = 1;
+  account.currentFrame = {
+    height: 1,
+    timestamp: 100,
+    jHeight: 0,
+    accountTxs: [],
+    prevFrameHash: 'genesis',
+    accountStateRoot: `0x${'00'.repeat(32)}`,
+    stateHash: `0x${'01'.repeat(32)}`,
+    deltas: [],
+    byLeft: entityId < counterpartyId,
+  };
+  (account as AccountReplica & { frameHistory: unknown[] }).frameHistory = [{
       height: 1,
       timestamp: 100,
       jHeight: 0,
@@ -81,19 +62,11 @@ const makeAccount = (frameStateHash: string): AccountState =>
       stateHash: frameStateHash,
       deltas: [],
       byLeft: entityId < counterpartyId,
-    }],
-    pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
-    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
-  }) as AccountState;
+    }];
+  return account;
+};
 
-const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): RuntimeReplica =>
+const makeEnv = (account: AccountReplica, reserves: Array<[number, bigint]>): RuntimeReplica =>
   ({
     state: {
       height: 7,
@@ -381,8 +354,8 @@ test('storage projection round-trip preserves canonical account optional-field s
     route: [entityId, counterpartyId],
     description: 'projection-round-trip',
   }];
-  account.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
-  account.subcontracts = new Map([['custom-transformer', {
+  account.state.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
+  account.state.subcontracts = new Map([['custom-transformer', {
     transformerAddress: `0x${'33'.repeat(20)}`,
     encodedBatch: '0x1234',
     allowances: [{ deltaIndex: 0, rightAllowance: 3n, leftAllowance: 4n }],
@@ -431,7 +404,7 @@ test('storage projection round-trip preserves canonical account optional-field s
     hash: `0x${'77'.repeat(32)}`,
   };
 
-  expect(account.pulls).toBeUndefined();
+  expect(account.state.pulls).toBeUndefined();
   expect(account.swapOrderHistory).toBeUndefined();
   expect(account.swapClosedOrders).toBeUndefined();
 
@@ -446,14 +419,14 @@ test('storage projection round-trip preserves canonical account optional-field s
   const before = computeCanonicalEntityHash(replica);
   const after = computeCanonicalEntityHash({ ...replica, state: hydratedState });
 
-  expect(hydratedState.accounts.get(counterpartyId)?.pulls).toBeUndefined();
-  expect(hydratedState.accounts.get(counterpartyId)?.domain).toEqual(account.domain);
+  expect(hydratedState.accounts.get(counterpartyId)?.state.pulls).toBeUndefined();
+  expect(hydratedState.accounts.get(counterpartyId)?.state.domain).toEqual(account.state.domain);
   expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.hankoSignature).toBe(account.hankoSignature);
   expect(hydratedState.accounts.get(counterpartyId)?.pendingForwards).toEqual(account.pendingForwards);
-  expect(hydratedState.accounts.get(counterpartyId)?.lendingIntents).toEqual(account.lendingIntents);
-  expect(hydratedState.accounts.get(counterpartyId)?.subcontracts).toEqual(account.subcontracts);
+  expect(hydratedState.accounts.get(counterpartyId)?.state.lendingIntents).toEqual(account.state.lendingIntents);
+  expect(hydratedState.accounts.get(counterpartyId)?.state.subcontracts).toEqual(account.state.subcontracts);
   expect(hydratedState.accounts.get(counterpartyId)?.disputePrepare).toEqual(account.disputePrepare);
   expect(hydratedState.lending).toEqual(state.lending);
   expect(hydratedState.consumptionAccumulator).toEqual(state.consumptionAccumulator);
@@ -480,7 +453,7 @@ test('replica metadata projection preserves in-flight consensus and layout state
   expect(meta.position).toEqual(replica.position);
   expect(meta.jHistory).toEqual(replica.jHistory);
   expect(meta.state).toEqual(cloneEntityState(replica.state, true));
-  expect(meta.state.accounts.get(counterpartyId)?.pulls).toBeUndefined();
+  expect(meta.state.accounts.get(counterpartyId)?.state.pulls).toBeUndefined();
   expect('entityEncPrivKey' in meta).toBeFalse();
 });
 

@@ -116,7 +116,7 @@ const buildHubPolicyTargets = (
   Array.from(state.accounts.entries())
     .sort(([left], [right]) => left.localeCompare(right))
     .flatMap(([accountId, account]) =>
-      Array.from(account.deltas.keys())
+      Array.from(account.state.deltas.keys())
         .sort((left, right) => left - right)
         .map(tokenId => ({
           accountId,
@@ -279,7 +279,7 @@ export const handleReopenDisputedAccountEntityTx = (
     return { newState: entityState, outputs: [] };
   }
 
-  const jNonce = Number(entityTx.data.jNonce ?? account.jNonce ?? 0);
+  const jNonce = Number(entityTx.data.jNonce ?? account.state.jNonce ?? 0);
   addMessage(newState, `🔓 Reopen requested with ${counterpartyEntityId.slice(-4)} at nonce=${jNonce}`);
 
   return {

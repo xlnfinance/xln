@@ -44,7 +44,7 @@ const collectRegistryPublication = (
       )
     : [];
   const transformerAddress = secrets.length > 0
-    ? requireAccountDeltaTransformerAddress(env.state, account)
+    ? requireAccountDeltaTransformerAddress(env.state, account.state)
     : '';
   if (secrets.length > 0 && !isUsableContractAddress(transformerAddress)) {
     throw new Error('DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS');
@@ -60,7 +60,7 @@ const isFinalizeTimingAllowed = (
   env: EntityRuntimeContext,
 ): boolean => {
   const activeDispute = account.activeDispute!;
-  const callerIsLeft = account.leftEntity === state.entityId;
+  const callerIsLeft = account.state.leftEntity === state.entityId;
   const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
   if (selection.shouldUseCounterProof || !callerIsStarter) return true;
   const currentJBlock = getEntityCertifiedJurisdictionHeight(state);

@@ -59,7 +59,7 @@ export const handleHashlockPaymentEntityTx = (
   while (
     !explicitLockId &&
     (
-      account?.locks?.has(lockId) ||
+      account?.state.locks?.has(lockId) ||
       (account?.mempool ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId) ||
       (account?.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId)
     )
@@ -148,7 +148,7 @@ export const handleResolveHtlcLockEntityTx = (
     return { newState, outputs, accountTxs };
   }
   const account = newState.accounts.get(normalizedCounterparty);
-  const lock = account?.locks?.get(lockId);
+  const lock = account?.state.locks?.get(lockId);
   if (lock && lock.hashlock !== expectedHashlock) {
     addMessage(newState, '❌ HTLC resolve failed: secret/hashlock mismatch');
     return { newState, outputs, accountTxs };

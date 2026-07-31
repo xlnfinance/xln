@@ -150,8 +150,8 @@ const accountMatchesCounterparty = (
   if (cp === needle) return true;
 
   const me = String(ownerEntityId || '').toLowerCase();
-  const left = typeof account?.leftEntity === 'string' ? account.leftEntity.toLowerCase() : '';
-  const right = typeof account?.rightEntity === 'string' ? account.rightEntity.toLowerCase() : '';
+  const left = typeof account?.state.leftEntity === 'string' ? account.state.leftEntity.toLowerCase() : '';
+  const right = typeof account?.state.rightEntity === 'string' ? account.state.rightEntity.toLowerCase() : '';
 
   if (left && right) {
     if (left === me && right === needle) return true;
@@ -287,7 +287,7 @@ export const hasQueuedSwapOffer = (
   offerId: string,
 ): boolean => collectQueuedSwapOfferIds(env, entityId, counterpartyId).has(String(offerId || '').trim());
 
-export const getAccountState = (
+export const getAccountReplica = (
   env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
@@ -320,10 +320,10 @@ export const getCreditGrantedByEntity = (
   ownerEntityId: string,
   tokenId: number,
 ): bigint => {
-  const delta = account.deltas.get(tokenId);
+  const delta = account.state.deltas.get(tokenId);
   if (!delta) return 0n;
   const owner = String(ownerEntityId || '').toLowerCase();
-  const left = String(account.leftEntity || '').toLowerCase();
+  const left = String(account.state.leftEntity || '').toLowerCase();
   const isOwnerLeft = owner.length > 0 && owner === left;
   return BigInt(isOwnerLeft ? (delta.rightCreditLimit ?? 0n) : (delta.leftCreditLimit ?? 0n));
 };
@@ -334,9 +334,9 @@ export const getEntityOutCapacity = (
   tokenId: number,
 ): bigint => {
   if (!account) return 0n;
-  const delta = account.deltas.get(tokenId);
+  const delta = account.state.deltas.get(tokenId);
   if (!delta) return 0n;
-  return deriveDelta(delta, account.leftEntity === ownerEntityId).outCapacity;
+  return deriveDelta(delta, account.state.leftEntity === ownerEntityId).outCapacity;
 };
 
 /** A committed Account remains usable even while its peer is offline. */
@@ -369,8 +369,8 @@ export const hasPairMutualCredit = (
   amount: bigint,
 ): boolean => {
   const account =
-    getAccountState(env, leftEntityId, rightEntityId)
-    ?? getAccountState(env, rightEntityId, leftEntityId);
+    getAccountReplica(env, leftEntityId, rightEntityId)
+    ?? getAccountReplica(env, rightEntityId, leftEntityId);
   if (!hasCommittedAccountState(account)) return false;
   const grantedByLeft = getCreditGrantedByEntity(account, leftEntityId, tokenId);
   const grantedByRight = getCreditGrantedByEntity(account, rightEntityId, tokenId);

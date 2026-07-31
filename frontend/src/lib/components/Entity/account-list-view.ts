@@ -49,7 +49,7 @@ function getAccountsMap(sourceReplica: EntityReplica | null): Map<string, Accoun
 
 function accountMatchesSearch(counterpartyId: string, account: AccountReplica, query: string): boolean {
   if (!query) return true;
-  const fields = [counterpartyId, account.leftEntity, account.rightEntity, account.status];
+  const fields = [counterpartyId, account.state.leftEntity, account.state.rightEntity, account.status];
   return fields.some((field) => String(field || '').toLowerCase().includes(query));
 }
 

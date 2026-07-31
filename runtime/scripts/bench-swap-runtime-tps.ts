@@ -57,10 +57,24 @@ const parseCli = (args: string[]): Cli => ({
 });
 
 const makeAccount = (leftEntity: string, rightEntity: string): AccountReplica => ({
-  leftEntity,
-  rightEntity,
-  domain: { chainId: 31337, depositoryAddress: addr('de') },
-  watchSeed: `0x${'a3'.repeat(32)}`,
+  state: {
+    leftEntity,
+    rightEntity,
+    domain: { chainId: 31337, depositoryAddress: addr('de') },
+    watchSeed: `0x${'a3'.repeat(32)}`,
+    deltas: new Map(),
+    locks: new Map(),
+    pulls: new Map(),
+    swapOffers: new Map(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    lastFinalizedJHeight: 0,
+    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    jNonce: 0,
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+  },
   status: 'active',
   mempool: [],
   currentFrame: {
@@ -74,24 +88,12 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountReplica =>
     deltas: [],
     byLeft: true,
   },
-  deltas: new Map(),
-  locks: new Map(),
-  pulls: new Map(),
-  swapOffers: new Map(),
-  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
   currentHeight: 1,
   pendingSignatures: [],
   rollbackCount: 0,
-  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  lastFinalizedJHeight: 0,
   proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
-  disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-  jNonce: 0,
   pendingWithdrawals: new Map(),
-  requestedRebalance: new Map(),
-  requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
 });
 
@@ -101,7 +103,7 @@ const installDelta = (account: AccountReplica, tokenId: number, credit = 10n ** 
   delta.rightCreditLimit = credit;
   delta.leftHold = 0n;
   delta.rightHold = 0n;
-  account.deltas.set(tokenId, delta);
+  account.state.deltas.set(tokenId, delta);
   return delta;
 };
 
@@ -115,7 +117,7 @@ const seedSameSwapAccount = (swaps: number): AccountReplica => {
   const wantAmount = 3_000n * SWAP_LOT_SCALE;
   giveDelta.leftHold = giveAmount * BigInt(swaps);
   for (let index = 0; index < swaps; index += 1) {
-    account.swapOffers.set(`same-${index}`, {
+    account.state.swapOffers.set(`same-${index}`, {
       offerId: `same-${index}`,
       giveTokenId: 2,
       giveAmount,
@@ -172,7 +174,7 @@ const seedCrossSwapAccount = (swaps: number): AccountReplica => {
     ...template,
     status: 'resting' as const,
   };
-  account.pulls!.set(templateRoute.sourcePull!.pullId, {
+  account.state.pulls!.set(templateRoute.sourcePull!.pullId, {
     pullId: templateRoute.sourcePull!.pullId,
     tokenId: templateRoute.sourcePull!.tokenId,
     amount: templateRoute.sourcePull!.signedAmount,
@@ -198,7 +200,7 @@ const seedCrossSwapAccount = (swaps: number): AccountReplica => {
       targetPull: { ...templateRoute.targetPull! },
       status: 'resting' as const,
     };
-    account.swapOffers.set(orderId, {
+    account.state.swapOffers.set(orderId, {
       offerId: orderId,
       giveTokenId: route.source.tokenId,
       giveAmount: route.source.amount,
@@ -256,13 +258,13 @@ const runPass = async (
 ): Promise<{ same: AccountReplica; cross: AccountReplica; elapsedMs: number; sameElapsedMs: number; crossElapsedMs: number }> => {
   const same = seedSameSwapAccount(1);
   const cross = seedCrossSwapAccount(1);
-  const sameTemplate = structuredClone(same.swapOffers.get('same-0')!);
-  const crossTemplate = structuredClone(cross.swapOffers.get('cross-0')!);
-  same.deltas.get(2)!.leftHold = sameTemplate.giveAmount * BigInt(swaps);
-  cross.deltas.get(1)!.leftHold = crossTemplate.giveAmount * BigInt(swaps);
+  const sameTemplate = structuredClone(same.state.swapOffers.get('same-0')!);
+  const crossTemplate = structuredClone(cross.state.swapOffers.get('cross-0')!);
+  same.state.deltas.get(2)!.leftHold = sameTemplate.giveAmount * BigInt(swaps);
+  cross.state.deltas.get(1)!.leftHold = crossTemplate.giveAmount * BigInt(swaps);
   let sameElapsedMs = 0;
   for (let index = 0; index < swaps; index += 1) {
-    if (index > 0) same.swapOffers.set(`same-${index}`, { ...sameTemplate, offerId: `same-${index}` });
+    if (index > 0) same.state.swapOffers.set(`same-${index}`, { ...sameTemplate, offerId: `same-${index}` });
     const startedAt = getPerfMs();
     const result = await applyAccountTx(same, sameResolveTx(index), false, 2_000 + index, 2 + index);
     sameElapsedMs += getPerfMs() - startedAt;
@@ -270,7 +272,7 @@ const runPass = async (
   }
   let crossElapsedMs = 0;
   for (let index = 0; index < swaps; index += 1) {
-    if (index > 0) cross.swapOffers.set(`cross-${index}`, {
+    if (index > 0) cross.state.swapOffers.set(`cross-${index}`, {
       ...structuredClone(crossTemplate),
       offerId: `cross-${index}`,
     });
@@ -285,8 +287,8 @@ const runPass = async (
 export const runSwapRuntimeBenchmark = async (cli: Cli): Promise<RuntimeSwapBenchmarkResult> => {
   if (cli.warmup > 0) await runPass(cli.warmup);
   const { same, cross, elapsedMs, sameElapsedMs, crossElapsedMs } = await runPass(cli.swaps);
-  if (same.swapOffers.size !== 0) throw new Error(`SAME_OFFERS_LEFT:${same.swapOffers.size}`);
-  if (cross.swapOffers.size !== 0) throw new Error(`CROSS_OFFERS_LEFT:${cross.swapOffers.size}`);
+  if (same.state.swapOffers.size !== 0) throw new Error(`SAME_OFFERS_LEFT:${same.state.swapOffers.size}`);
+  if (cross.state.swapOffers.size !== 0) throw new Error(`CROSS_OFFERS_LEFT:${cross.state.swapOffers.size}`);
   const totalSwaps = cli.swaps * 2;
   const elapsedSeconds = Math.max(elapsedMs / 1000, 0.001);
   const tps = totalSwaps / elapsedSeconds;
@@ -303,7 +305,7 @@ export const runSwapRuntimeBenchmark = async (cli: Cli): Promise<RuntimeSwapBenc
     passed,
     sameTps: Number(sameTps.toFixed(2)),
     crossTps: Number(crossTps.toFixed(2)),
-    sameOffdelta: String(same.deltas.get(2)?.offdelta ?? 0n),
+    sameOffdelta: String(same.state.deltas.get(2)?.offdelta ?? 0n),
     crossFilledSource: String([...(cross.swapOrderHistory ?? new Map()).values()].reduce(
       (sum, entry) => sum + BigInt(entry.resolves.at(-1)?.executionGiveAmount ?? 0n),
       0n,

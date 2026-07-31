@@ -34,7 +34,7 @@ export const committedCrossJSourceDisputeDelayMs = (
   if (!Number.isSafeInteger(blockTimeMs) || blockTimeMs <= 0) {
     throw new Error(`CROSS_J_PREPARED_BLOCK_TIME_MISSING:${route.orderId}`);
   }
-  const disputeConfig = sourceAccount(state, route).disputeConfig;
+  const disputeConfig = sourceAccount(state, route).state.disputeConfig;
   const delayUnits = Math.max(
     Number(disputeConfig.leftDisputeDelay),
     Number(disputeConfig.rightDisputeDelay),

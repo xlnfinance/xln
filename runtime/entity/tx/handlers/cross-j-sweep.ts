@@ -73,7 +73,7 @@ const queueExpiredOfferClosure = (
   const sourceEntityId = route.source.entityId;
   const accountId = findAccountKey(state, sourceEntityId);
   const account = accountId ? state.accounts.get(accountId) : undefined;
-  if (accountId && account?.swapOffers?.has(orderId)) {
+  if (accountId && account?.state.swapOffers?.has(orderId)) {
     cancelOrderbookOfferIfPresent(state, accountId, orderId, storageChanges);
     markCrossJurisdictionBookAdmissionClosed(
       state,
@@ -108,7 +108,7 @@ const transitionExpiredRoute = (
     const proof = buildCrossJurisdictionCloseProof(route, '0x');
     route.sourceCloseProof = proof;
     const pullId = route.sourcePull?.pullId;
-    if (accountId && pullId && account?.pulls?.has(pullId)) {
+    if (accountId && pullId && account?.state.pulls?.has(pullId)) {
       accountTxs.push({
         accountId,
         tx: { type: 'cross_pull_close', data: { pullId, binary: '0x', proof } },

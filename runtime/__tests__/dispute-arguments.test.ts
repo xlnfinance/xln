@@ -12,7 +12,7 @@ import {
   sanitizeOptionalDisputeArgument,
   sanitizeOptionalDisputeStarterArgumentPair,
 } from '../jurisdiction/machine/batch';
-import type { AccountState, AccountTx, SwapOffer } from '../types/account';
+import type { AccountReplica, AccountTx, SwapOffer } from '../types/account';
 import type { EntityState } from '../entity/types';
 
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';
@@ -32,11 +32,32 @@ function offer(offerId: string, makerIsLeft: boolean, giveTokenId: number, wantT
   };
 }
 
-function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountState {
+function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountReplica {
   return {
-    leftEntity: 'left',
-    rightEntity: 'right',
-    watchSeed: TEST_WATCH_SEED,
+    state: {
+      leftEntity: 'left',
+      rightEntity: 'right',
+      domain: {
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+      },
+      watchSeed: TEST_WATCH_SEED,
+      deltas: new Map([
+        [1, { tokenId: 1, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
+        [2, { tokenId: 2, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
+      ]),
+      locks: new Map(),
+      pulls: new Map(),
+      swapOffers: new Map(swaps),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -45,33 +66,18 @@ function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountState {
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: '',
       byLeft: true,
       deltas: [],
     },
-    deltas: new Map([
-      [1, { tokenId: 1, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
-      [2, { tokenId: 2, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
-    ]),
-    locks: new Map(),
-    pulls: new Map(),
-    swapOffers: new Map(swaps),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 1 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
   };
 }
 
@@ -163,8 +169,8 @@ describe('dispute argument snapshots', () => {
       captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
     );
 
-    account.swapOffers.clear();
-    account.swapOffers.set('unrelated', offer('unrelated', true, 1, 2));
+    account.state.swapOffers.clear();
+    account.state.swapOffers.set('unrelated', offer('unrelated', true, 1, 2));
 
     account.mempool = [
       { type: 'swap_resolve', data: { offerId: 'a-left-owned', fillRatio: 111, cancelRemainder: false } },
@@ -265,7 +271,7 @@ describe('dispute argument snapshots', () => {
 
   test('ignores malformed optional HTLC secrets but still requires the exact proof snapshot', () => {
     const account = accountWithSwaps([]);
-    account.locks.set('lock', {
+    account.state.locks.set('lock', {
       lockId: 'lock',
       hashlock: `0x${'ab'.repeat(32)}`,
       timelock: 100_000n,
@@ -275,7 +281,7 @@ describe('dispute argument snapshots', () => {
       createdHeight: 1,
       createdTimestamp: 1,
     });
-    account.pulls.set('pull', {
+    account.state.pulls.set('pull', {
       pullId: 'pull',
       tokenId: 1,
       amount: 1n,

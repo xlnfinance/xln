@@ -72,13 +72,13 @@ const accountHasRebalanceWork = (
   counterpartyId: string,
   account: AccountReplica,
 ): boolean => {
-  if ([...account.requestedRebalance.values()].some(amount => amount > 0n)) {
+  if ([...account.state.requestedRebalance.values()].some(amount => amount > 0n)) {
     return true;
   }
   if (account.pendingFrame || hasPendingSettlementTransition(account)) {
     return false;
   }
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   const hubIsLeft = isLeftEntity(state.entityId, counterpartyId);
   if (workspace) {
     return workspace.status === 'ready_to_submit' &&
@@ -88,8 +88,8 @@ const accountHasRebalanceWork = (
       workspace.ops.every(op => op.type === 'c2r') &&
       Boolean(hubIsLeft ? workspace.rightHanko : workspace.leftHanko);
   }
-  for (const [tokenId, delta] of account.deltas) {
-    if ((account.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
+  for (const [tokenId, delta] of account.state.deltas) {
+    if ((account.state.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
     const derived = deriveDelta(delta, hubIsLeft);
     if (
       derived.outCollateral - derived.outTotalHold >

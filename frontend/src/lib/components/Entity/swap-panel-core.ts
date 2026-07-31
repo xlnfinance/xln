@@ -94,7 +94,7 @@ export const createSwapPanelCore = (deps: SwapPanelCoreDeps) => {
     if (!candidate || !owner || !counterparty || !Number.isSafeInteger(tokenIdValue) || tokenIdValue <= 0) return null;
     const account = candidate.state?.accounts?.get?.(counterparty);
     return runtime.readSwapAccountCapacity({
-      account: account ?? null,
+      account: account?.state ?? null,
       ownerEntityId: owner,
       counterpartyEntityId: counterparty,
       tokenId: tokenIdValue,
@@ -308,7 +308,7 @@ export const createSwapPanelCore = (deps: SwapPanelCoreDeps) => {
     // an openAccount command.
     if (!account && !allowOpenAccount) return null;
     return runtime.planSwapInboundCapacity({
-      account,
+      account: account?.state ?? null,
       ownerEntityId: owner,
       counterpartyEntityId: counterparty,
       tokenId: tokenIdValue,

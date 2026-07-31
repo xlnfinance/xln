@@ -18,6 +18,6 @@ export const assertCrossJurisdictionSwapTargetReadyInEnv = (
   ));
   assertCrossJurisdictionSwapTargetReady(
     route,
-    replica?.state?.accounts?.get(hubEntityId) ?? null,
+    replica?.state?.accounts?.get(hubEntityId)?.state ?? null,
   );
 };

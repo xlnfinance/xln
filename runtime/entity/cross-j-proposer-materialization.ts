@@ -353,8 +353,8 @@ export const appendDefaultProposerCrossJMaterializations = (
     const account = accountId ? replica.state.accounts.get(accountId) : undefined;
     if (
       !account ||
-      account.swapOffers?.has(route.orderId) ||
-      !account.pulls?.has(route.sourcePull.pullId) ||
+      account.state.swapOffers?.has(route.orderId) ||
+      !account.state.pulls?.has(route.sourcePull.pullId) ||
       accountHasPullResolveQueued(account, route.sourcePull.pullId)
     ) continue;
     const reveal = buildCrossJurisdictionPullReveal(

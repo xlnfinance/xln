@@ -18,7 +18,7 @@ const missingCommitmentInvalidation = (_tx: never): never => {
 const swapDeltaKeys = (account: AccountReplica, tx: AccountTx): number[] => {
   if (tx.type === 'swap_offer') return [tx.data.giveTokenId, tx.data.wantTokenId];
   if (tx.type === 'swap_resolve') {
-    const offer = account.swapOffers.get(tx.data.offerId);
+    const offer = account.state.swapOffers.get(tx.data.offerId);
     const keys = [
       offer?.giveTokenId ?? tx.data.restingGiveTokenId,
       offer?.wantTokenId ?? tx.data.restingWantTokenId,
@@ -35,7 +35,7 @@ const invalidateCommittedMapsForTx = (
   deltaKeysBeforeMutation: readonly number[],
 ): void => {
   const invalidate = (namespace: AccountCommittedMap, key?: unknown): void =>
-    invalidateAccountMapCommitment(account, namespace, key);
+    invalidateAccountMapCommitment(account.state, namespace, key);
   switch (tx.type) {
     case 'add_delta':
     case 'set_credit_limit':

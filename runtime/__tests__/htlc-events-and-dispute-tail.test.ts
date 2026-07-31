@@ -12,16 +12,30 @@ import { handleResolveHtlcLockEntityTx } from '../entity/tx/handlers/htlc-direct
 import { pruneSettledOriginatedHtlcRoutes } from '../entity/tx/htlc-route-lifecycle';
 import { publishEntityCandidateEffects } from '../runtime/env-events';
 import { createEmptyEnv } from '../runtime';
-import type { AccountState } from '../types/account';
+import type { AccountReplica } from '../types/account';
 import type { EntityCandidateEffect, EntityReplica } from '../entity/types';
 
 const makeReplica = (entityId: string, counterpartyId: string): EntityReplica => {
-  const account: AccountState = {
-    leftEntity: entityId,
-    rightEntity: counterpartyId,
-    domain: {
-      chainId: 31337,
-      depositoryAddress: `0x${'dd'.repeat(20)}`,
+  const account: AccountReplica = {
+    state: {
+      leftEntity: entityId,
+      rightEntity: counterpartyId,
+      domain: {
+        chainId: 31337,
+        depositoryAddress: `0x${'dd'.repeat(20)}`,
+      },
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      watchSeed: `0x${'f1'.repeat(32)}`,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
     },
     status: 'active',
     mempool: [],
@@ -36,25 +50,13 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map(),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
   };
 
   return {
@@ -105,9 +107,9 @@ describe('htlc event contract and dispute tail', () => {
     const hashlock = `0x4033fb2e6fa5cf816f87a9a40e8ce681fb6d8aa53c5302e72b80f654141a0e65`;
     const replica = makeReplica(entityId, counterpartyId);
     const account = replica.state.accounts.get(counterpartyId)!;
-    account.leftEntity = counterpartyId;
-    account.rightEntity = entityId;
-    account.locks.set(lockId, {
+    account.state.leftEntity = counterpartyId;
+    account.state.rightEntity = entityId;
+    account.state.locks.set(lockId, {
       lockId,
       hashlock,
       tokenId: 1,
@@ -377,7 +379,7 @@ describe('htlc event contract and dispute tail', () => {
     env.quietRuntimeLogs = true;
     const replica = makeReplica(entityId, counterpartyId);
     const account = replica.state.accounts.get(counterpartyId)!;
-    account.locks.set(inboundLockId, {
+    account.state.locks.set(inboundLockId, {
       lockId: inboundLockId,
       hashlock,
       tokenId: 1,
@@ -433,7 +435,7 @@ describe('htlc event contract and dispute tail', () => {
     const hashlock = `0x${'66'.repeat(32)}`;
     const replica = makeReplica(entityId, counterpartyId);
     const account = replica.state.accounts.get(counterpartyId)!;
-    account.locks.set(inboundLockId, {
+    account.state.locks.set(inboundLockId, {
       lockId: inboundLockId,
       hashlock,
       tokenId: 1,
@@ -674,7 +676,7 @@ describe('htlc event contract and dispute tail', () => {
       env.quietRuntimeLogs = true;
       const replica = makeReplica(entityId, outboundEntity);
       const inboundAccount = structuredClone(replica.state.accounts.get(outboundEntity)!);
-      inboundAccount.rightEntity = inboundEntity;
+      inboundAccount.state.rightEntity = inboundEntity;
       replica.state.accounts.set(inboundEntity, inboundAccount);
       replica.state.htlcRoutes.set(hashlock, {
         hashlock,

@@ -16,23 +16,25 @@ const RIGHT = `0x${'22'.repeat(32)}`;
 const DOMAIN = { chainId: 31337, depositoryAddress: `0x${'33'.repeat(20)}` };
 
 const account = (): AccountReplica => ({
-  leftEntity: LEFT,
-  rightEntity: RIGHT,
-  domain: DOMAIN,
-  watchSeed: `0x${'44'.repeat(32)}`,
+  state: {
+    leftEntity: LEFT,
+    rightEntity: RIGHT,
+    domain: DOMAIN,
+    watchSeed: `0x${'44'.repeat(32)}`,
+    deltas: new Map([[1, createDefaultDelta(1)]]),
+    locks: new Map(),
+    pulls: new Map(),
+    swapOffers: new Map(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    jNonce: 0,
+    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    lastFinalizedJHeight: 0,
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+  },
   status: 'active',
-  deltas: new Map([[1, createDefaultDelta(1)]]),
-  locks: new Map(),
-  pulls: new Map(),
-  swapOffers: new Map(),
-  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
-  jNonce: 0,
-  disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-  lastFinalizedJHeight: 0,
-  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  requestedRebalance: new Map(),
-  requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   mempool: [],
   pendingSignatures: [],
@@ -67,11 +69,11 @@ describe('canonical account state root', () => {
 
   test('is independent of host locale for map keys, object keys, and dispute subcontracts', () => {
     const base = account();
-    base.lendingIntents = new Map([
+    base.state.lendingIntents = new Map([
       ['0xaa12', 'fund'],
       ['0xab34', 'fund'],
     ]);
-    base.subcontracts = new Map([
+    base.state.subcontracts = new Map([
       ['0xaa12', {
         transformerAddress: `0x${'66'.repeat(20)}`,
         encodedBatch: '0x12',
@@ -89,7 +91,7 @@ describe('canonical account state root', () => {
         return originalLocaleCompare.call(this, that, locale);
       };
       return {
-        root: computeAccountStateRoot(base),
+        root: computeAccountStateRoot(base.state),
         proofBodyHash: buildAccountProofBody(base, '').proofBodyHash,
       };
     };
@@ -102,14 +104,14 @@ describe('canonical account state root', () => {
 
   test('binds account domain and every financial delta field', () => {
     const base = account();
-    const root = computeAccountStateRoot(base);
+    const root = computeAccountStateRoot(base.state);
 
     const otherParty = account();
-    otherParty.rightEntity = `0x${'55'.repeat(32)}`;
-    expect(computeAccountStateRoot(otherParty)).not.toBe(root);
+    otherParty.state.rightEntity = `0x${'55'.repeat(32)}`;
+    expect(computeAccountStateRoot(otherParty.state)).not.toBe(root);
     const otherDomain = structuredClone(base);
-    otherDomain.domain = { ...DOMAIN, chainId: 1 };
-    expect(computeAccountStateRoot(otherDomain)).not.toBe(root);
+    otherDomain.state.domain = { ...DOMAIN, chainId: 1 };
+    expect(computeAccountStateRoot(otherDomain.state)).not.toBe(root);
 
     for (const mutate of [
       (machine: AccountState) => { machine.deltas.get(1)!.collateral = 1n; },
@@ -120,30 +122,30 @@ describe('canonical account state root', () => {
       (machine: AccountState) => { machine.deltas.get(1)!.leftHold = 1n; },
     ]) {
       const changed = structuredClone(base);
-      mutate(changed);
-      expect(computeAccountStateRoot(changed)).not.toBe(root);
+      mutate(changed.state);
+      expect(computeAccountStateRoot(changed.state)).not.toBe(root);
     }
   });
 
   test('excludes mempool, signatures, pending frames, and proof caches', () => {
     const base = account();
-    const root = computeAccountStateRoot(base);
+    const root = computeAccountStateRoot(base.state);
     base.mempool.push({ type: 'direct_payment', data: { tokenId: 1, amount: 5n } });
     base.pendingSignatures.push('0x1234');
     base.pendingFrame = { stateHash: '0xdead' } as never;
     base.currentDisputeProofHanko = '0xbeef';
     base.disputeProofBodiesByHash = { '0x01': { local: true } };
 
-    expect(computeAccountStateRoot(base)).toBe(root);
+    expect(computeAccountStateRoot(base.state)).toBe(root);
   });
 
   test('commits settlement authority bilaterally while keeping entity-only lifecycle state out', () => {
     const base = account();
-    const bilateralRoot = computeAccountStateRoot(base);
+    const bilateralRoot = computeAccountStateRoot(base.state);
     const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
     const settlement = structuredClone(base);
-    settlement.settlementWorkspace = {
+    settlement.state.settlementWorkspace = {
       workspaceHash: `0x${'88'.repeat(32)}`,
       revision: 1,
       status: 'awaiting_counterparty',
@@ -153,7 +155,7 @@ describe('canonical account state root', () => {
       lastUpdatedAt: 10,
       executorIsLeft: true,
     };
-    expect(computeAccountStateRoot(settlement)).not.toBe(bilateralRoot);
+    expect(computeAccountStateRoot(settlement.state)).not.toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, settlement]]))).not.toBe(overlayRoot);
 
     const disputed = structuredClone(base);
@@ -167,7 +169,7 @@ describe('canonical account state root', () => {
       starterInitialArguments: '0x',
       starterIncrementedArguments: '0x',
     };
-    expect(computeAccountStateRoot(disputed)).toBe(bilateralRoot);
+    expect(computeAccountStateRoot(disputed.state)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, disputed]]))).not.toBe(overlayRoot);
 
     const withdrawal = structuredClone(base);
@@ -179,13 +181,13 @@ describe('canonical account state root', () => {
       direction: 'outgoing',
       status: 'pending',
     });
-    expect(computeAccountStateRoot(withdrawal)).toBe(bilateralRoot);
+    expect(computeAccountStateRoot(withdrawal.state)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, withdrawal]]))).not.toBe(overlayRoot);
   });
 
   test('commits settlement Hankos bilaterally while excluding post-consensus overlay signatures', () => {
     const base = account();
-    base.settlementWorkspace = {
+    base.state.settlementWorkspace = {
       workspaceHash: `0x${'88'.repeat(32)}`,
       revision: 1,
       status: 'ready_to_submit',
@@ -208,27 +210,27 @@ describe('canonical account state root', () => {
       direction: 'outgoing',
       status: 'approved',
     });
-    const bilateralRoot = computeAccountStateRoot(base);
+    const bilateralRoot = computeAccountStateRoot(base.state);
     const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
-    base.settlementWorkspace.leftHanko = '0x1234';
-    base.settlementWorkspace.rightHanko = '0x5678';
-    base.settlementWorkspace.postSettlementDisputeProof!.leftHanko = '0x9abc';
-    base.settlementWorkspace.postSettlementDisputeProof!.rightHanko = '0xdef0';
+    base.state.settlementWorkspace.leftHanko = '0x1234';
+    base.state.settlementWorkspace.rightHanko = '0x5678';
+    base.state.settlementWorkspace.postSettlementDisputeProof!.leftHanko = '0x9abc';
+    base.state.settlementWorkspace.postSettlementDisputeProof!.rightHanko = '0xdef0';
     base.pendingWithdrawals.get('withdraw-1')!.signature = '0xbeef';
 
-    const sealedBilateralRoot = computeAccountStateRoot(base);
+    const sealedBilateralRoot = computeAccountStateRoot(base.state);
     expect(sealedBilateralRoot).not.toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
 
     base.pendingWithdrawals.get('withdraw-1')!.signature = '0xcafe';
-    expect(computeAccountStateRoot(base)).toBe(sealedBilateralRoot);
+    expect(computeAccountStateRoot(base.state)).toBe(sealedBilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
   });
 
   test('separates bilateral state from entity-private automation state', () => {
     const base = account();
-    const bilateralRoot = computeAccountStateRoot(base);
+    const bilateralRoot = computeAccountStateRoot(base.state);
     const shadowRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
     base.shadow.rebalance.policy.set(1, {
@@ -238,28 +240,28 @@ describe('canonical account state root', () => {
     });
     base.shadow.rebalance.submittedAtByToken.set(1, 123);
 
-    expect(computeAccountStateRoot(base)).toBe(bilateralRoot);
+    expect(computeAccountStateRoot(base.state)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).not.toBe(shadowRoot);
   });
 
   test('commits bilateral lending receipts while excluding local lifecycle state', () => {
     const base = account();
-    const root = computeAccountStateRoot(base);
+    const root = computeAccountStateRoot(base.state);
 
-    base.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
+    base.state.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
 
-    expect(computeAccountStateRoot(base)).not.toBe(root);
+    expect(computeAccountStateRoot(base.state)).not.toBe(root);
   });
 
   test('commits generic custom transformers and preserves opaque ProofBody batches', () => {
     const base = account();
-    base.subcontracts = new Map([['custom-risk-engine', {
+    base.state.subcontracts = new Map([['custom-risk-engine', {
       transformerAddress: `0x${'66'.repeat(20)}`,
       encodedBatch: '0x1234',
       allowances: [{ deltaIndex: 0, rightAllowance: 7n, leftAllowance: 9n }],
       leftArgumentsHash: `0x${'77'.repeat(32)}`,
     }]]);
-    const root = computeAccountStateRoot(base);
+    const root = computeAccountStateRoot(base.state);
     const proof = buildAccountProofBody(base, '');
 
     expect(proof.proofBodyStruct.transformers).toContainEqual({
@@ -268,7 +270,7 @@ describe('canonical account state root', () => {
       allowances: [{ deltaIndex: 0n, rightAllowance: 7n, leftAllowance: 9n }],
     });
     const changed = structuredClone(base);
-    changed.subcontracts!.get('custom-risk-engine')!.encodedBatch = '0xabcd';
-    expect(computeAccountStateRoot(changed)).not.toBe(root);
+    changed.state.subcontracts!.get('custom-risk-engine')!.encodedBatch = '0xabcd';
+    expect(computeAccountStateRoot(changed.state)).not.toBe(root);
   });
 });

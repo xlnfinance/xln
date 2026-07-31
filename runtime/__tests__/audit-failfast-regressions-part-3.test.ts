@@ -243,7 +243,7 @@ import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fai
 
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
-import { cloneAccountState } from '../account/state-clone';
+import { cloneAccountReplica } from '../account/state-clone';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
@@ -252,7 +252,7 @@ import {
 
 import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 
-import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
+import type { AccountFrame, AccountInput, AccountReplica, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
@@ -348,11 +348,30 @@ const makeEmptyProofBody = () => ({
   transformers: [],
 });
 
-const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountState => {
+const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountReplica => {
   return {
-    leftEntity,
-    rightEntity,
-    domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
+      watchSeed: deriveAccountWatchSeed({
+        runtimeSeed: 'audit-failfast-test-helper',
+        entityId: leftEntity,
+        counterpartyId: rightEntity,
+        timestamp: 0,
+      }),
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+    },
     status: 'active',
     mempool: [...mempool],
     currentFrame: {
@@ -366,36 +385,18 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       stateHash: '',
       byLeft: true,
     },
-    deltas: new Map(),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
-    watchSeed: deriveAccountWatchSeed({
-      runtimeSeed: 'audit-failfast-test-helper',
-      entityId: leftEntity,
-      counterpartyId: rightEntity,
-      timestamp: 0,
-    }),
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
-  } as AccountState;
+  };
 };
 
 const setSyntheticPendingAccountProposal = (
-  account: AccountState,
+  account: AccountReplica,
   accountTxs: AccountTx[],
   timestamp: number,
 ): void => {
@@ -412,13 +413,13 @@ const setSyntheticPendingAccountProposal = (
     kind: 'frame',
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
-    domain: structuredClone(account.domain),
+    domain: structuredClone(account.state.domain),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
 
 const makeIncomingAccountFrame = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
   byLeft: boolean,
   timestamp = 10_000,
@@ -1657,9 +1658,11 @@ describe('audit fail-fast regressions', () => {
       rightHold: 0n,
     };
     const accountMachine = {
-      deltas: new Map([[1, feeDelta]]),
-      requestedRebalance: new Map<number, bigint>(),
-      requestedRebalanceFeeState: new Map(),
+      state: {
+        deltas: new Map([[1, feeDelta]]),
+        requestedRebalance: new Map<number, bigint>(),
+        requestedRebalanceFeeState: new Map(),
+      },
     };
 
     const result = handleRequestCollateral(
@@ -1674,7 +1677,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('insufficient fee capacity');
-    expect(accountMachine.requestedRebalance.size).toBe(0);
+    expect(accountMachine.state.requestedRebalance.size).toBe(0);
     expect(feeDelta.offdelta).toBe(100n);
   });
 
@@ -1692,21 +1695,23 @@ describe('audit fail-fast regressions', () => {
       rightHold: 0n,
     };
     const accountMachine = {
-      deltas: new Map([[1, delta]]),
-      requestedRebalance: new Map<number, bigint>([[1, 590n]]),
-      requestedRebalanceFeeState: new Map([
-        [
-          1,
-          {
-            feeTokenId: 1,
-            feePaidUpfront: 10n,
-            requestedAmount: 590n,
-            policyVersion: 1,
-            requestedAt: 1,
-            requestedByLeft: true,
-          },
-        ],
-      ]),
+      state: {
+        deltas: new Map([[1, delta]]),
+        requestedRebalance: new Map<number, bigint>([[1, 590n]]),
+        requestedRebalanceFeeState: new Map([
+          [
+            1,
+            {
+              feeTokenId: 1,
+              feePaidUpfront: 10n,
+              requestedAmount: 590n,
+              policyVersion: 1,
+              requestedAt: 1,
+              requestedByLeft: true,
+            },
+          ],
+        ]),
+      },
       shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map([[1, 123]]) } },
     };
 
@@ -1721,8 +1726,8 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(accountMachine.requestedRebalance.get(1)).toBe(590n);
-    expect(accountMachine.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(10n);
+    expect(accountMachine.state.requestedRebalance.get(1)).toBe(590n);
+    expect(accountMachine.state.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(10n);
     expect(accountMachine.shadow.rebalance.submittedAtByToken.get(1)).toBe(123);
     expect(delta.offdelta).toBe(1_000n);
   });
@@ -1730,25 +1735,58 @@ describe('audit fail-fast regressions', () => {
   test('auto-rebalance never tops up an existing pending request', () => {
     const usd = 10n ** 18n;
     const accountMachine = {
-      leftEntity: `0x${'11'.repeat(32)}`,
-      rightEntity: `0x${'ff'.repeat(32)}`,
-      settlementWorkspace: { status: 'sent' },
+      state: {
+        leftEntity: `0x${'11'.repeat(32)}`,
+        rightEntity: `0x${'ff'.repeat(32)}`,
+        settlementWorkspace: { status: 'sent' },
+        requestedRebalance: new Map<number, bigint>([[1, 590n * usd]]),
+        requestedRebalanceFeeState: new Map([
+          [
+            1,
+            {
+              feeTokenId: 1,
+              feePaidUpfront: 10n * usd,
+              requestedAmount: 590n * usd,
+              policyVersion: 1,
+              requestedAt: 1,
+              requestedByLeft: true,
+            },
+          ],
+        ]),
+        deltas: new Map([
+          [
+            1,
+            {
+              tokenId: 1,
+              collateral: 590n * usd,
+              ondelta: 0n,
+              offdelta: 1_390n * usd,
+              leftCreditLimit: 0n,
+              rightCreditLimit: 2_000n * usd,
+              leftAllowance: 0n,
+              rightAllowance: 0n,
+              leftHold: 0n,
+              rightHold: 0n,
+            },
+          ],
+        ]),
+        rebalanceFeePolicies: new Map([
+          [
+            1,
+            {
+              right: {
+                policyVersion: 1,
+                baseFee: 10n * usd,
+                gasFee: 0n,
+                liquidityFeeBps: 0n,
+                updatedAt: 1,
+              },
+            },
+          ],
+        ]),
+      },
       mempool: [],
       pendingFrame: undefined,
-      requestedRebalance: new Map<number, bigint>([[1, 590n * usd]]),
-      requestedRebalanceFeeState: new Map([
-        [
-          1,
-          {
-            feeTokenId: 1,
-            feePaidUpfront: 10n * usd,
-            requestedAmount: 590n * usd,
-            policyVersion: 1,
-            requestedAt: 1,
-            requestedByLeft: true,
-          },
-        ],
-      ]),
       shadow: {
         rebalance: {
           policy: new Map([
@@ -1764,37 +1802,6 @@ describe('audit fail-fast regressions', () => {
           submittedAtByToken: new Map([[1, 123]]),
         },
       },
-      deltas: new Map([
-        [
-          1,
-          {
-            tokenId: 1,
-            collateral: 590n * usd,
-            ondelta: 0n,
-            offdelta: 1_390n * usd,
-            leftCreditLimit: 0n,
-            rightCreditLimit: 2_000n * usd,
-            leftAllowance: 0n,
-            rightAllowance: 0n,
-            leftHold: 0n,
-            rightHold: 0n,
-          },
-        ],
-      ]),
-      rebalanceFeePolicies: new Map([
-        [
-          1,
-          {
-            right: {
-              policyVersion: 1,
-              baseFee: 10n * usd,
-              gasFee: 0n,
-              liquidityFeeBps: 0n,
-              updatedAt: 1,
-            },
-          },
-        ],
-      ]),
     };
 
     const txs = checkAutoRebalance(
@@ -1805,7 +1812,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(txs).toHaveLength(0);
 
-    const delta = accountMachine.deltas.get(1);
+    const delta = accountMachine.state.deltas.get(1);
     if (!delta) throw new Error('TEST_REBALANCE_DELTA_MISSING');
     delta.offdelta = 2_590n * usd;
     expect(
@@ -1839,7 +1846,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(resolveAutoRebalanceFeePolicy(account, entityId, 1)).toBeUndefined();
 
-    account.rebalanceFeePolicies = new Map([
+    account.state.rebalanceFeePolicies = new Map([
       [
         1,
         {
@@ -1865,7 +1872,7 @@ describe('audit fail-fast regressions', () => {
     const leftId = `0x${'15'.repeat(32)}`;
     const rightId = `0x${'f5'.repeat(32)}`;
     const account = makeProposalAccount([], leftId, rightId);
-    account.deltas.set(1, createDefaultDelta(1));
+    account.state.deltas.set(1, createDefaultDelta(1));
     const tx: AccountTx = {
       type: 'rebalance_policy',
       data: {
@@ -1880,20 +1887,20 @@ describe('audit fail-fast regressions', () => {
     const result = await applyAccountTx(account, tx, true, 123, 0);
 
     expect(result.success).toBe(true);
-    expect(account.rebalanceFeePolicies?.get(1)?.left).toEqual({
+    expect(account.state.rebalanceFeePolicies?.get(1)?.left).toEqual({
       policyVersion: 4,
       baseFee: 7n,
       liquidityFeeBps: 5n,
       gasFee: 11n,
       updatedAt: 123,
     });
-    expect(account.rebalanceFeePolicies?.get(1)?.right).toBeUndefined();
+    expect(account.state.rebalanceFeePolicies?.get(1)?.right).toBeUndefined();
 
     const retry = await applyAccountTx(account, tx, true, 999, 0);
     expect(retry.success).toBe(true);
-    expect(account.rebalanceFeePolicies?.get(1)?.left?.updatedAt).toBe(123);
+    expect(account.state.rebalanceFeePolicies?.get(1)?.left?.updatedAt).toBe(123);
 
-    const beforeConflict = computeAccountStateRoot(account);
+    const beforeConflict = computeAccountStateRoot(account.state);
     const conflict = await applyAccountTx(
       account,
       {
@@ -1905,7 +1912,7 @@ describe('audit fail-fast regressions', () => {
       0,
     );
     expect(conflict).toMatchObject({ success: false, error: expect.stringContaining('REBALANCE_POLICY_EQUIVOCATION') });
-    expect(computeAccountStateRoot(account)).toBe(beforeConflict);
+    expect(computeAccountStateRoot(account.state)).toBe(beforeConflict);
 
     const stale = await applyAccountTx(
       account,
@@ -1918,7 +1925,7 @@ describe('audit fail-fast regressions', () => {
       0,
     );
     expect(stale.success).toBe(true);
-    expect(computeAccountStateRoot(account)).toBe(beforeConflict);
+    expect(computeAccountStateRoot(account.state)).toBe(beforeConflict);
 
     const right = await applyAccountTx(
       account,
@@ -1931,16 +1938,16 @@ describe('audit fail-fast regressions', () => {
       0,
     );
     expect(right.success).toBe(true);
-    expect(account.rebalanceFeePolicies?.get(1)?.right?.baseFee).toBe(13n);
-    expect(account.rebalanceFeePolicies?.get(1)?.left?.baseFee).toBe(7n);
+    expect(account.state.rebalanceFeePolicies?.get(1)?.right?.baseFee).toBe(13n);
+    expect(account.state.rebalanceFeePolicies?.get(1)?.left?.baseFee).toBe(7n);
   });
 
   test('rebalance policy rejects non-bigint fee terms before mutating Account state', async () => {
     const leftId = `0x${'18'.repeat(32)}`;
     const rightId = `0x${'f8'.repeat(32)}`;
     const account = makeProposalAccount([], leftId, rightId);
-    account.deltas.set(1, createDefaultDelta(1));
-    const before = computeAccountStateRoot(account);
+    account.state.deltas.set(1, createDefaultDelta(1));
+    const before = computeAccountStateRoot(account.state);
     const malformed = {
       type: 'rebalance_policy',
       data: { tokenId: 1, policyVersion: 1, baseFee: 7, liquidityFeeBps: 5, gasFee: 11 },
@@ -1949,8 +1956,8 @@ describe('audit fail-fast regressions', () => {
     const result = await applyAccountTx(account, malformed, true, 123, 0);
 
     expect(result).toMatchObject({ success: false, error: expect.stringContaining('invalid fee types') });
-    expect(computeAccountStateRoot(account)).toBe(before);
-    expect(account.rebalanceFeePolicies).toBeUndefined();
+    expect(computeAccountStateRoot(account.state)).toBe(before);
+    expect(account.state.rebalanceFeePolicies).toBeUndefined();
   });
 
   test('auto-rebalance output order survives compact storage map canonicalization', () => {
@@ -1961,13 +1968,13 @@ describe('audit fail-fast regressions', () => {
       const delta = createDefaultDelta(tokenId);
       delta.offdelta = 1_000n;
       delta.rightCreditLimit = 2_000n;
-      account.deltas.set(tokenId, delta);
+      account.state.deltas.set(tokenId, delta);
       account.shadow.rebalance.policy.set(tokenId, {
         r2cRequestSoftLimit: 100n,
         hardLimit: 2_000n,
         maxAcceptableFee: 100n,
       });
-      const policies = account.rebalanceFeePolicies ?? new Map();
+      const policies = account.state.rebalanceFeePolicies ?? new Map();
       policies.set(tokenId, {
         right: {
           policyVersion: 1,
@@ -1977,7 +1984,7 @@ describe('audit fail-fast regressions', () => {
           updatedAt: 1,
         },
       });
-      account.rebalanceFeePolicies = policies;
+      account.state.rebalanceFeePolicies = policies;
     }
     const restored = hydrateAccountDocFromStorage(
       decodeValidatedBuffer(encodeBuffer(projectAccountDoc(account)), validateStorageAccountDocValue),
@@ -1996,8 +2003,8 @@ describe('audit fail-fast regressions', () => {
     const userId = `0x${'f6'.repeat(32)}`;
     const state = makeEntityState(hubId);
     const account = makeProposalAccount([], hubId, userId);
-    account.deltas.set(1, createDefaultDelta(1));
-    account.deltas.set(2, createDefaultDelta(2));
+    account.state.deltas.set(1, createDefaultDelta(1));
+    account.state.deltas.set(2, createDefaultDelta(2));
     state.accounts.set(userId, account);
 
     const result = handleSetHubConfigEntityTx(env, state, {
@@ -2037,8 +2044,8 @@ describe('audit fail-fast regressions', () => {
     const leftId = `0x${'17'.repeat(32)}`;
     const rightId = `0x${'f7'.repeat(32)}`;
     const account = makeProposalAccount([], leftId, rightId);
-    account.deltas.set(1, createDefaultDelta(1));
-    account.rebalanceFeePolicies = new Map([
+    account.state.deltas.set(1, createDefaultDelta(1));
+    account.state.rebalanceFeePolicies = new Map([
       [
         1,
         {
@@ -2047,17 +2054,17 @@ describe('audit fail-fast regressions', () => {
         },
       ],
     ]);
-    const root = computeAccountStateRoot(account);
+    const root = computeAccountStateRoot(account.state);
 
     const restored = hydrateAccountDocFromStorage(
       decodeValidatedBuffer(encodeBuffer(projectAccountDoc(account)), validateStorageAccountDocValue),
     );
 
-    expect(restored.rebalanceFeePolicies).toEqual(account.rebalanceFeePolicies);
-    expect(computeAccountStateRoot(restored)).toBe(root);
+    expect(restored.state.rebalanceFeePolicies).toEqual(account.state.rebalanceFeePolicies);
+    expect(computeAccountStateRoot(restored.state)).toBe(root);
 
     const corrupt = projectAccountDoc(account);
-    const left = corrupt.rebalanceFeePolicies?.get(1)?.left;
+    const left = corrupt.state.rebalanceFeePolicies?.get(1)?.left;
     if (!left) throw new Error('TEST_REBALANCE_POLICY_REQUIRED');
     (left as typeof left & { unexpected: boolean }).unexpected = true;
     expect(() => decodeValidatedBuffer(encodeBuffer(corrupt), validateStorageAccountDocValue)).toThrow(
@@ -2069,7 +2076,7 @@ describe('audit fail-fast regressions', () => {
     const entityId = `0x${'15'.repeat(32)}`;
     const hubId = `0x${'f5'.repeat(32)}`;
     const account = makeProposalAccount([], entityId, hubId);
-    account.rebalanceFeePolicies = new Map([
+    account.state.rebalanceFeePolicies = new Map([
       [
         1,
         {
@@ -2091,7 +2098,7 @@ describe('audit fail-fast regressions', () => {
     const delta = createDefaultDelta(1);
     delta.offdelta = 60_000n;
     delta.rightCreditLimit = 100_000n;
-    account.deltas.set(1, delta);
+    account.state.deltas.set(1, delta);
     const withSibling = createEmptyEnv('rebalance-explicit-role-with-sibling');
     const withoutSibling = createEmptyEnv('rebalance-explicit-role-without-sibling');
     const misleadingOwner = makeEntityState(entityId);
@@ -2124,7 +2131,7 @@ describe('audit fail-fast regressions', () => {
     const usd = 10n ** 18n;
     const state = makeEntityState(entityId);
     const account = makeProposalAccount([], entityId, hubId);
-    account.rebalanceFeePolicies = new Map([
+    account.state.rebalanceFeePolicies = new Map([
       [
         1,
         {
@@ -2138,7 +2145,7 @@ describe('audit fail-fast regressions', () => {
         },
       ],
     ]);
-    account.deltas.set(1, {
+    account.state.deltas.set(1, {
       tokenId: 1,
       collateral: 0n,
       ondelta: 0n,
@@ -2190,26 +2197,42 @@ describe('audit fail-fast regressions', () => {
       rightHold: 0n,
     };
     const accountMachine = {
-      leftEntity: `0x${'11'.repeat(32)}`,
-      rightEntity: `0x${'ff'.repeat(32)}`,
-      settlementWorkspace: { status: 'sent' },
+      state: {
+        leftEntity: `0x${'11'.repeat(32)}`,
+        rightEntity: `0x${'ff'.repeat(32)}`,
+        settlementWorkspace: { status: 'sent' },
+        deltas: new Map([[1, delta]]),
+        requestedRebalance: new Map<number, bigint>([[1, previousRequest]]),
+        requestedRebalanceFeeState: new Map([
+          [
+            1,
+            {
+              feeTokenId: 1,
+              feePaidUpfront: previousFee,
+              requestedAmount: previousRequest,
+              policyVersion: 1,
+              requestedAt: 1,
+              requestedByLeft: true,
+            },
+          ],
+        ]),
+        rebalanceFeePolicies: new Map([
+          [
+            1,
+            {
+              right: {
+                policyVersion: 1,
+                baseFee: usd / 10n,
+                gasFee: 0n,
+                liquidityFeeBps: 1n,
+                updatedAt: 1,
+              },
+            },
+          ],
+        ]),
+      },
       mempool: [],
       pendingFrame: undefined,
-      deltas: new Map([[1, delta]]),
-      requestedRebalance: new Map<number, bigint>([[1, previousRequest]]),
-      requestedRebalanceFeeState: new Map([
-        [
-          1,
-          {
-            feeTokenId: 1,
-            feePaidUpfront: previousFee,
-            requestedAmount: previousRequest,
-            policyVersion: 1,
-            requestedAt: 1,
-            requestedByLeft: true,
-          },
-        ],
-      ]),
       shadow: {
         rebalance: {
           policy: new Map([
@@ -2225,20 +2248,6 @@ describe('audit fail-fast regressions', () => {
           submittedAtByToken: new Map([[1, 123]]),
         },
       },
-      rebalanceFeePolicies: new Map([
-        [
-          1,
-          {
-            right: {
-              policyVersion: 1,
-              baseFee: usd / 10n,
-              gasFee: 0n,
-              liquidityFeeBps: 1n,
-              updatedAt: 1,
-            },
-          },
-        ],
-      ]),
     };
 
     const txs = checkAutoRebalance(
@@ -2260,9 +2269,9 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(accountMachine.requestedRebalance.get(1)).toBe(previousRequest);
-    expect(accountMachine.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(previousFee);
-    expect(accountMachine.requestedRebalanceFeeState.get(1)?.requestedAmount).toBe(previousRequest);
+    expect(accountMachine.state.requestedRebalance.get(1)).toBe(previousRequest);
+    expect(accountMachine.state.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(previousFee);
+    expect(accountMachine.state.requestedRebalanceFeeState.get(1)?.requestedAmount).toBe(previousRequest);
     expect(accountMachine.shadow.rebalance.submittedAtByToken.get(1)).toBe(123);
     expect(delta.offdelta).toBe(previousRequest + outPeerCredit);
   });

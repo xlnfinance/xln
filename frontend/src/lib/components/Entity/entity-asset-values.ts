@@ -1,4 +1,4 @@
-import type { AccountState } from '@xln/runtime/api/public/runtime-module';
+import type { AccountReplica } from '@xln/runtime/api/public/runtime-module';
 import { ZeroAddress } from 'ethers';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
@@ -159,7 +159,7 @@ function emptyAccountPortfolioData(): AccountPortfolioData {
 }
 
 export function buildAccountPortfolioData(options: {
-  accounts: Map<string, AccountState> | undefined;
+  accounts: Map<string, AccountReplica> | undefined;
   localEntityId: string;
   deriveDelta: FrontendXlnFunctions['deriveDelta'] | undefined;
   getTokenInfo: (tokenId: number) => AssetTokenInfo;
@@ -169,9 +169,9 @@ export function buildAccountPortfolioData(options: {
 
   for (const [counterpartyId, account] of options.accounts.entries()) {
     out.count++;
-    if (!account.deltas) continue;
+    if (!account.state.deltas) continue;
 
-    for (const [tokenId, delta] of account.deltas.entries()) {
+    for (const [tokenId, delta] of account.state.deltas.entries()) {
       const info = options.getTokenInfo(Number(tokenId));
       const symbol = info.symbol ?? 'UNK';
       const isLeftEntity =
@@ -191,16 +191,16 @@ export function buildAccountPortfolioData(options: {
 }
 
 export function buildAccountSpendableByToken(options: {
-  accounts: Map<string, AccountState> | undefined;
+  accounts: Map<string, AccountReplica> | undefined;
   localEntityId: string;
   deriveDelta: FrontendXlnFunctions['deriveDelta'] | undefined;
 }): Map<number, bigint> {
   const totals = new Map<number, bigint>();
   if (!options.accounts || !options.localEntityId || !options.deriveDelta) return totals;
   for (const [counterpartyId, account] of options.accounts.entries()) {
-    if (!(account?.deltas instanceof Map)) continue;
+    if (!(account?.state.deltas instanceof Map)) continue;
     const isLeftEntity = options.localEntityId.toLowerCase() < String(counterpartyId || '').toLowerCase();
-    for (const [tokenId, delta] of account.deltas.entries()) {
+    for (const [tokenId, delta] of account.state.deltas.entries()) {
       const numericTokenId = Number(tokenId);
       if (!Number.isFinite(numericTokenId) || numericTokenId <= 0) continue;
       const spendable = options.deriveDelta(delta, isLeftEntity)?.outCapacity ?? 0n;

@@ -233,10 +233,23 @@ const makeAccount = (firstEntity: string, secondEntity: string, height: number, 
     ? [firstEntity, secondEntity]
     : [secondEntity, firstEntity];
   return {
-    leftEntity,
-    rightEntity,
-    domain: { chainId: 31337, depositoryAddress: '0x1111111111111111111111111111111111111111' },
-    watchSeed: `0x${'a1'.repeat(32)}`,
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: { chainId: 31337, depositoryAddress: '0x1111111111111111111111111111111111111111' },
+      watchSeed: `0x${'a1'.repeat(32)}`,
+      deltas: new Map(),
+      locks: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 1_000_000_000n, peerLimit: 1_000_000_000n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -250,29 +263,18 @@ const makeAccount = (firstEntity: string, secondEntity: string, height: number, 
       byLeft: true,
       deltas: [],
     },
-    deltas: new Map(),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 1_000_000_000n, peerLimit: 1_000_000_000n },
     currentHeight: height,
     pendingSignatures: [],
     rollbackCount: 0,
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
     proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: height },
     proofBody: { tokenIds: [], deltas: [] },
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
 };
 
 const makeAccountDoc = (leftEntity: string, rightEntity: string, height: number, timestamp: number): StorageAccountDoc =>
-  makeAccount(leftEntity, rightEntity, height, timestamp) as StorageAccountDoc;
+  makeAccount(leftEntity, rightEntity, height, timestamp);
 
 const makeHubState = (entityId: string, height: number, timestamp: number): EntityState => ({
   entityId,
@@ -465,7 +467,7 @@ const seedHubBulk = async (
       const accountHeight = 2;
       const timestamp = 1_000 + accountHeight;
       const account = makeAccount(entityId, counterpartyId, accountHeight, timestamp);
-      appendDoc({ family: 'account', entityId, counterpartyId, value: account as StorageAccountDoc });
+      appendDoc({ family: 'account', entityId, counterpartyId, value: account });
       if (cli.memory === 'all' || (cli.memory === 'hot' && index < cli.hotAccounts)) {
         state.accounts.set(counterpartyId, account);
       }
@@ -607,7 +609,7 @@ const touchAccounts = async (
     account.currentFrame.prevFrameHash = `bench-${env.state.height - 1}`;
     account.currentFrame.stateHash = `0x${createHash('sha256').update(`${env.state.height}:${counterpartyId}`).digest('hex')}`;
     if (state.accounts.has(counterpartyId)) state.accounts.set(counterpartyId, account);
-    docs.push({ family: 'account', entityId, counterpartyId, value: account as StorageAccountDoc });
+    docs.push({ family: 'account', entityId, counterpartyId, value: account });
   }
   docs.push({
     family: 'entity',
@@ -641,7 +643,7 @@ const insertNewAccountsAfterRead = async (
     account.currentFrame.prevFrameHash = `bench-${env.state.height - 1}`;
     account.currentFrame.stateHash = `0x${createHash('sha256').update(`${env.state.height}:${counterpartyId}`).digest('hex')}`;
     if (cli.memory !== 'none') state.accounts.set(counterpartyId, account);
-    docs.push({ family: 'account', entityId, counterpartyId, value: account as StorageAccountDoc });
+    docs.push({ family: 'account', entityId, counterpartyId, value: account });
   }
   docs.push({
     family: 'entity',

@@ -88,7 +88,7 @@ const appendPaymentEvent = (
   events: string[],
 ): string => {
   const { amount, tokenId, description } = payment;
-  const { counterparty } = getAccountPerspective(account, account.proofHeader.fromEntity);
+  const { counterparty } = getAccountPerspective(account.state, account.proofHeader.fromEntity);
   const isOurFrame = byLeft === (account.proofHeader.fromEntity === parties.leftEntity);
   events.push(
     isOurFrame
@@ -152,7 +152,7 @@ export function handleDirectPayment(
   if (envelopeError) return envelopeError;
   const parties = resolvePaymentParties(account, accountTx.data, byLeft, events);
   if ('success' in parties) return parties;
-  const delta = ensureDelta(account, tokenId);
+  const delta = ensureDelta(account.state, tokenId);
   const senderIsLeft = parties.paymentFromEntity === parties.leftEntity;
   const senderDerived = deriveDelta(delta, senderIsLeft);
   if (amount > senderDerived.outCapacity) {

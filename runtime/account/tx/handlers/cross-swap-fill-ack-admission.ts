@@ -36,7 +36,7 @@ export const prepareCrossSwapFillAck = (
   } catch (error) {
     return reject(events, error instanceof Error ? error.message : String(error));
   }
-  const offer = account.swapOffers?.get(tx.data.offerId);
+  const offer = account.state.swapOffers?.get(tx.data.offerId);
   if (!offer) return reject(events, `Offer ${tx.data.offerId} not found`);
   if (!offer.crossJurisdiction) {
     return reject(

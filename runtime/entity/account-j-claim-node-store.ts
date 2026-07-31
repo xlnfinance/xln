@@ -62,7 +62,7 @@ export const getLiveAccountJClaimAccumulatorStates = (env: EntityRuntimeContext)
   const states: AccountJClaimAccumulatorState[] = [];
   for (const { state } of env.state.eReplicas.values()) {
     for (const account of state.accounts.values()) {
-      states.push(account.leftPendingJClaims, account.rightPendingJClaims);
+      states.push(account.state.leftPendingJClaims, account.state.rightPendingJClaims);
     }
   }
   return states;

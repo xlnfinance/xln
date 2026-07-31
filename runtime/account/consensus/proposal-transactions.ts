@@ -1,6 +1,6 @@
 import type { AccountReplica, AccountTx } from '../../types/account';
 import type { AccountConsensusContext } from './context';
-import { cloneAccountState } from '../state-clone';
+import { cloneAccountReplica } from '../state-clone';
 import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
@@ -74,8 +74,8 @@ const isCrossJurisdictionPullResolveTx = (
   tx: AccountTx,
 ): tx is Extract<AccountTx, { type: 'pull_resolve' }> => {
   if (tx.type !== 'pull_resolve') return false;
-  if (account.pulls?.get(tx.data.pullId)?.crossJurisdiction) return true;
-  for (const offer of account.swapOffers?.values() ?? []) {
+  if (account.state.pulls?.get(tx.data.pullId)?.crossJurisdiction) return true;
+  for (const offer of account.state.swapOffers?.values() ?? []) {
     const route = offer.crossJurisdiction;
     if (
       route?.sourcePull?.pullId === tx.data.pullId ||
@@ -97,7 +97,7 @@ const isRefreshableStaleSettlementSeal = (
   ) {
     return false;
   }
-  const workspace = account.settlementWorkspace;
+  const workspace = account.state.settlementWorkspace;
   const requiredNonce = getNextSettlementNonce(account);
   return Boolean(
     workspace &&
@@ -117,7 +117,7 @@ const applyProposalTransaction = async (
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
 ): Promise<AppliedProposalTx> => {
   const preparedTx = tx.type === 'j_event_claim'
-    ? prepareAccountJClaimTx(machine, tx, getAccountStateDomain(machine), jClaimSession)
+    ? prepareAccountJClaimTx(machine.state, tx, getAccountStateDomain(machine.state), jClaimSession)
     : tx;
   const beforeSettlement = captureSettlementVector(machine);
   const result = await applyAccountTx(
@@ -233,7 +233,7 @@ const validateOptimisticBatch = async (
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
 ): Promise<{ machine: AccountReplica; applied: AppliedProposalTx[] } | null> => {
   if (!shouldUseOptimisticProposalBatch(context.proposalWindow)) return null;
-  const machine = cloneAccountState(context.account);
+  const machine = cloneAccountReplica(context.account);
   const applied: AppliedProposalTx[] = [];
   for (const tx of context.proposalWindow) {
     if (HEAVY_LOGS) accountLog.debug('batch.optimistic_tx', { type: tx.type });
@@ -278,10 +278,10 @@ export const validateProposalTransactions = async (
     };
   }
 
-  let clonedMachine = cloneAccountState(context.account);
+  let clonedMachine = cloneAccountReplica(context.account);
   for (const tx of context.proposalWindow) {
     if (HEAVY_LOGS) accountLog.debug('tx.process', { type: tx.type });
-    const txMachine = cloneAccountState(clonedMachine);
+    const txMachine = cloneAccountReplica(clonedMachine);
     const applied = await applyProposalTransaction(context, txMachine, tx, jClaimSession);
     if (!applied.result.success) {
       const disposition = classifyFailedTransaction(context, clonedMachine, applied, effects);

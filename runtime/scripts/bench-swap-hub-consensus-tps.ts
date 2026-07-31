@@ -238,7 +238,7 @@ const installDelta = (account: AccountReplica, tokenId: number, credit = 10n ** 
   const delta = createDefaultDelta(tokenId);
   delta.leftCreditLimit = credit;
   delta.rightCreditLimit = credit;
-  account.deltas.set(tokenId, delta);
+  account.state.deltas.set(tokenId, delta);
   return delta;
 };
 
@@ -247,10 +247,24 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountReplica => 
     ? [selfId, counterpartyId]
     : [counterpartyId, selfId];
   return {
-    leftEntity,
-    rightEntity,
-    domain: { chainId: 999_001, depositoryAddress: addr('de') },
-    watchSeed: `0x${'a2'.repeat(32)}`,
+    state: {
+      leftEntity,
+      rightEntity,
+      domain: { chainId: 999_001, depositoryAddress: addr('de') },
+      watchSeed: `0x${'a2'.repeat(32)}`,
+      deltas: new Map(),
+      locks: new Map(),
+      pulls: new Map(),
+      swapOffers: new Map(),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -264,24 +278,12 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountReplica => 
       deltas: [],
       byLeft: true,
     },
-    deltas: new Map(),
-    locks: new Map(),
-    pulls: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-    lastFinalizedJHeight: 0,
     proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    jNonce: 0,
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
 };
@@ -318,7 +320,7 @@ const makeSameCase = (
   for (let offset = 0; offset < count; offset += 1) {
     const index = startIndex + offset;
     const offerId = `same-${index}`;
-    base.swapOffers.set(offerId, {
+    base.state.swapOffers.set(offerId, {
       offerId,
       giveTokenId: 2,
       giveAmount,
@@ -410,7 +412,7 @@ const makeCrossCase = (
       ...route,
       status: 'resting',
     };
-    base.pulls!.set(admittedRoute.sourcePull!.pullId, {
+    base.state.pulls!.set(admittedRoute.sourcePull!.pullId, {
       pullId: admittedRoute.sourcePull!.pullId,
       tokenId: admittedRoute.sourcePull!.tokenId,
       amount: admittedRoute.sourcePull!.signedAmount,
@@ -423,7 +425,7 @@ const makeCrossCase = (
       createdHeight: 0,
       createdTimestamp: 1_000,
     });
-    base.swapOffers.set(offerId, {
+    base.state.swapOffers.set(offerId, {
       offerId,
       giveTokenId: admittedRoute.source.tokenId,
       giveAmount: admittedRoute.source.amount,
@@ -517,7 +519,7 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
   if (benchCase.proposer.pendingFrame || benchCase.proposer.mempool.length > 0) {
     throw new Error(`${benchCase.kind}:proposer_not_drained`);
   }
-  if (benchCase.proposer.swapOffers.size !== 0 || benchCase.receiver.swapOffers.size !== 0) {
+  if (benchCase.proposer.state.swapOffers.size !== 0 || benchCase.receiver.state.swapOffers.size !== 0) {
     throw new Error(`${benchCase.kind}:offer_not_closed`);
   }
 };

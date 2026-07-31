@@ -24,7 +24,7 @@ const processSecretAckTimeout = (
   if (!route?.secretAckPending) return;
   const account = replica.state.accounts.get(counterpartyEntityId);
   if (!account) return;
-  if (inboundLockId && !account.locks?.has(inboundLockId)) {
+  if (inboundLockId && !account.state.locks?.has(inboundLockId)) {
     terminateHtlcRoute(replica.state, hashlock, replica.state.timestamp);
     return;
   }
@@ -49,7 +49,7 @@ const processDueHook = (
   switch (hook.type) {
     case 'htlc_timeout': {
       const account = replica.state.accounts.get(hook.data.accountId);
-      if (account?.locks?.has(hook.data.lockId)) {
+      if (account?.state.locks?.has(hook.data.lockId)) {
         plan.htlcTimeoutLocks.push(hook.data);
       }
       return;
