@@ -93,4 +93,44 @@ test.describe('Recovery choice guidance', () => {
     await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
     await expect(page.getByText(/BRAINVAULT_WORKER_SPEC_MISMATCH:stale-v0/)).toBeVisible();
   });
+
+  test('cancelled worker initialization cannot terminate a restarted derivation', { tag: '@functional' }, async ({ page }) => {
+    await page.addInitScript(() => {
+      const nativeSetTimeout = window.setTimeout.bind(window);
+      window.setTimeout = ((handler: TimerHandler, timeout = 0, ...args: unknown[]) =>
+        nativeSetTimeout(handler, timeout === 30_000 ? 1_000 : timeout, ...args)) as typeof window.setTimeout;
+    });
+
+    let workerRequests = 0;
+    await page.route(/\/brainvault-worker\.js\?spec=/, async (route) => {
+      workerRequests += 1;
+      const specId = new URL(route.request().url()).searchParams.get('spec') ?? '';
+      await route.fulfill({
+        contentType: 'application/javascript',
+        body: workerRequests === 1
+          ? 'self.onmessage = () => {};'
+          : `self.onmessage = ({ data }) => {
+              if (data.type === 'init') {
+                self.postMessage({ type: 'ready', id: data.id, data: { specId: ${JSON.stringify(specId)} } });
+              }
+            };`,
+      });
+    });
+
+    await page.goto(TEST_URL);
+    await page.getByLabel('Vault name public derivation input').fill('restart-race');
+    await page.getByLabel('Secret passphrase').fill('secret123456');
+    await page.getByRole('button', { name: /Security work factor/ }).click();
+    await page.getByRole('button', { name: '1 Test', exact: true }).click();
+
+    await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'Derive in browser', exact: true }).click();
+
+    await page.waitForTimeout(1_300);
+    await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+    await expect(page.getByText(/Worker init timeout/)).toHaveCount(0);
+    expect(workerRequests).toBe(2);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  });
 });

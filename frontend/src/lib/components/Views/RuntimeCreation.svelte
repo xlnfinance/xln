@@ -334,6 +334,9 @@
   let revealedNodeMnemonic = '';
   let revealingNodeMnemonic = false;
 
+  const isCurrentDerivationRun = (run: BrainVaultDerivationRun): boolean =>
+    derivationRun === run && phase === 'deriving';
+
   $: derivesBrainVaultOnNode = $runtimeControllerHandle.mode === 'remote';
   $: brainVaultExecutionTarget = derivesBrainVaultOnNode
     ? `Native node · ${$runtimeControllerHandle.endpoint}`
@@ -1058,8 +1061,10 @@
         try {
           syncWorkerCounts();
           await Promise.all(workerPromises);
+          if (!isCurrentDerivationRun(run)) return;
           break;
         } catch (err) {
+          if (!isCurrentDerivationRun(run)) return;
           terminateWorkers();
           const message = workerErrorMessage(err);
           if (attempts < 4 && isBrainVaultWasmMemoryError(message) && initialWorkers > 1) {
@@ -1086,11 +1091,13 @@
       if (!isIOSFamilyWebKit) {
         workers[0]?.postMessage({ type: 'probe', id: 0 });
         await new Promise(r => setTimeout(r, 500));
+        if (!isCurrentDerivationRun(run)) return;
       }
 
       // Dispatch initial shards
       dispatchShards();
     } catch (err) {
+      if (!isCurrentDerivationRun(run)) return;
       const message = workerErrorMessage(err);
       logRuntimeCreationDiagnostic('BrainVault worker initialization failed', { message });
       terminateWorkers();
@@ -1114,6 +1121,8 @@
     }
     const abort = new AbortController();
     nodeDerivationAbort = abort;
+    const isCurrentNodeRun = (): boolean =>
+      nodeDerivationAbort === abort && isCurrentDerivationRun(run);
     nodeShardTimeMs = 0;
     try {
       const result = await adapter.deriveBrainVault({
@@ -1127,6 +1136,7 @@
       }, {
         signal: abort.signal,
         onProgress: sample => {
+          if (!isCurrentNodeRun()) return;
           if (sample.total !== run.shardCount || sample.completed < 0 || sample.completed > sample.total) {
             abort.abort();
             derivationError = 'The node returned invalid BrainVault progress and was cancelled.';
@@ -1141,6 +1151,7 @@
             : sample.lastShardMs;
         },
       });
+      if (!isCurrentNodeRun()) return;
       if (abort.signal.aborted) throw new Error('BRAINVAULT_DERIVATION_ABORTED');
       if (result.specId !== BRAINVAULT_V1_SPEC_ID || result.shardCount !== run.shardCount) {
         throw new Error('BRAINVAULT_NODE_RESULT_SPEC_MISMATCH');
@@ -1154,6 +1165,7 @@
       if (!acceptRecoveryRehearsal('brainvault', ethereumAddress)) return;
       phase = 'node-ready';
     } catch (err) {
+      if (!isCurrentNodeRun()) return;
       if (abort.signal.aborted && !derivationError) {
         phase = 'input';
       } else {
@@ -2118,7 +2130,16 @@
         <div class="node-secret-export">
           {#if revealedNodeMnemonic}
             <label for="node-mnemonic-export">Recovery mnemonic</label>
-            <textarea id="node-mnemonic-export" readonly rows="4" value={revealedNodeMnemonic}></textarea>
+            <textarea
+              id="node-mnemonic-export"
+              readonly
+              rows="4"
+              value={revealedNodeMnemonic}
+              autocomplete="off"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+            ></textarea>
             <p class="warning-text">Mnemonic is now present in this tab. Hide it before screen sharing or remote access.</p>
             <button type="button" class="backup-upload-btn" on:click={() => revealedNodeMnemonic = ''}>Hide mnemonic</button>
           {:else}
