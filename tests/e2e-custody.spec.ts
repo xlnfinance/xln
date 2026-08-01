@@ -947,6 +947,7 @@ test.describe('E2E Custody Flow', () => {
         daemonPort,
         custodyPort,
         relayUrl,
+        relayAudience: relayUrl,
         rpcUrl: rpcProxyUrl,
         walletUrl: new URL('/app', APP_BASE_URL).toString(),
         dbRoot: tempRoot,

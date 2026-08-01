@@ -19,7 +19,12 @@ import type { RuntimeWsMessage } from './ws-protocol';
 
 export type RuntimeWsExpectedPeer =
   | { role: typeof RELAY_RESPONDER_ROLE; audience?: string }
-  | { role: typeof DIRECT_RUNTIME_RESPONDER_ROLE; runtimeId: string; encryptionPubKey?: string };
+  | {
+      role: typeof DIRECT_RUNTIME_RESPONDER_ROLE;
+      audience: string;
+      runtimeId: string;
+      encryptionPubKey?: string;
+    };
 
 export type PendingClientHandshake = {
   challenge: RuntimeWsChallengeTranscript;
@@ -56,7 +61,7 @@ const expectedBinding = (
   if (selected.encryptionPubKey && pinnedKey !== receivedKey) {
     throw new Error('WS_HELLO_CHALLENGE_DIRECT_KEY_MISMATCH');
   }
-  return createDirectHandshakeBinding(runtimeId, pinnedKey);
+  return createDirectHandshakeBinding(runtimeId, pinnedKey, selected.audience);
 };
 
 const assertFreshTimestamp = (timestamp: unknown, maxSkewMs: number, code: string): number => {

@@ -32,6 +32,7 @@ const MAIN_API_BASE_URL = requireEnv('CUSTODY_MAIN_API_BASE_URL');
 const MAIN_RPC_URL = requireEnv('CUSTODY_MAIN_RPC_URL');
 const PUBLIC_RPC_URL = process.env['CUSTODY_PUBLIC_RPC_URL'] || 'https://xln.finance/rpc';
 const RELAY_URL = process.env['CUSTODY_RELAY_URL'] || 'wss://xln.finance/relay';
+const RELAY_AUDIENCE = process.env['CUSTODY_PUBLIC_RELAY_URL'] || 'wss://xln.finance/relay';
 const WALLET_URL = process.env['CUSTODY_WALLET_URL'] || 'https://xln.finance/app';
 const DAEMON_PORT = Number(process.env['CUSTODY_DAEMON_PORT'] || '8088');
 const CUSTODY_PORT = Number(process.env['CUSTODY_PORT'] || '8087');
@@ -265,7 +266,8 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
       XLN_EARLY_HTTP_BIND: '1',
       ANVIL_RPC: MAIN_RPC_URL,
       PUBLIC_RPC: PUBLIC_RPC_URL,
-      PUBLIC_RELAY_URL: RELAY_URL,
+      INTERNAL_RELAY_URL: RELAY_URL,
+      PUBLIC_RELAY_URL: RELAY_AUDIENCE,
       RELAY_URL,
       XLN_RADAPTER_AUTH_SEED: DAEMON_AUTH_SEED,
       XLN_RADAPTER_AUDIENCE: DAEMON_AUTH_AUDIENCE,

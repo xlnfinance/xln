@@ -87,6 +87,7 @@ type Args = {
   seed: string;
   signerLabel: string;
   relayUrl: string;
+  relayAudience: string;
   apiHost: string;
   apiPort: number;
   directWsUrl: string;
@@ -472,6 +473,7 @@ const parseArgs = (): Args => {
     seed,
     signerLabel: getArg('--signer-label', 'mm-1'),
     relayUrl: getArg('--relay-url', 'ws://127.0.0.1:20002/relay'),
+    relayAudience: getArg('--relay-audience', getArg('--relay-url', 'ws://127.0.0.1:20002/relay')),
     apiHost: getArg('--api-host', '127.0.0.1'),
     apiPort,
     directWsUrl: getArg('--direct-ws-url', ''),
@@ -491,6 +493,7 @@ const defaultArgsForImport = (): Args => ({
   seed: '',
   signerLabel: 'mm-1',
   relayUrl: 'ws://127.0.0.1:20002/relay',
+  relayAudience: 'ws://127.0.0.1:20002/relay',
   apiHost: '127.0.0.1',
   apiPort: 0,
   directWsUrl: '',

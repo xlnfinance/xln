@@ -6,7 +6,10 @@
  */
 export type RuntimeP2PConfig = {
   relayUrls?: string[];
+  relayAudience?: string | null;
   wsUrl?: string | null;
+  allowDirectClients?: boolean;
+  preferRelayForEntityInput?: boolean;
   seedRuntimeIds?: string[];
   runtimeId?: string;
   signerId?: string;

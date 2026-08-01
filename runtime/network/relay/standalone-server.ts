@@ -3,8 +3,19 @@
  */
 
 import { createRelayStore, removeClient, type RelayStore } from './store';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './router';
-import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../p2p/ws-protocol';
+import {
+  forgetRelaySocketRuntimeId,
+  isRelaySocketAuthenticated,
+  relayRoute,
+  type RelayRouterConfig,
+} from './router';
+import {
+  deserializeWsMessage,
+  makeMessageId,
+  MAX_PREAUTH_WS_MESSAGE_BYTES,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from '../p2p/ws-protocol';
 import { normalizeRuntimeId } from '../p2p/runtime-id';
 import { createStructuredLogger } from '../../infra/logger';
 import { createHelloChallengeRegistry } from '../p2p/hello-challenge';
@@ -19,6 +30,8 @@ type StandaloneRelayOptions = {
   serverId: string;
   serverRuntimeId?: string;
   audience?: string;
+  helloTimeoutMs?: number;
+  maxPendingHandshakes?: number;
   onEntityInput?: (from: string | undefined, msg: RuntimeWsMessage, store: RelayStore) => Promise<void> | void;
 };
 
@@ -31,13 +44,18 @@ export type StandaloneRelayServer = {
 
 const relayStandaloneLog = createStructuredLogger('relay.standalone');
 
-const normalizeMessage = (raw: string | Buffer | ArrayBuffer): RuntimeWsMessage =>
-  deserializeWsMessage(raw);
+const normalizeMessage = (raw: string | Buffer | ArrayBuffer, authenticated: boolean): RuntimeWsMessage =>
+  deserializeWsMessage(raw, authenticated ? undefined : MAX_PREAUTH_WS_MESSAGE_BYTES);
 
 export const startStandaloneRelayServer = (options: StandaloneRelayOptions): StandaloneRelayServer => {
   const store = createRelayStore(options.serverId);
   const localRuntimeId = normalizeRuntimeId(options.serverRuntimeId || options.serverId) || options.serverId;
-  const helloChallenges = createHelloChallengeRegistry();
+  const helloChallenges = createHelloChallengeRegistry({
+    ...(options.helloTimeoutMs !== undefined ? { timeoutMs: options.helloTimeoutMs } : {}),
+    ...(options.maxPendingHandshakes !== undefined
+      ? { maxPending: options.maxPendingHandshakes }
+      : {}),
+  });
   const listenHost = options.host || '0.0.0.0';
   const configuredAudience = String(options.audience || process.env['XLN_RELAY_AUDIENCE'] || '').trim();
   if (!configuredAudience && ['0.0.0.0', '::', '[::]'].includes(listenHost)) {
@@ -75,9 +93,11 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
       message(ws, message) {
         let msg: RuntimeWsMessage;
         try {
-          msg = normalizeMessage(message as string | Buffer | ArrayBuffer);
+          msg = normalizeMessage(message as string | Buffer | ArrayBuffer, isRelaySocketAuthenticated(ws));
         } catch (error) {
           ws.send(serializeWsMessage({ type: 'error', error: `Invalid relay message: ${(error as Error).message}` }));
+          helloChallenges.forget(ws);
+          ws.close(4003, 'protocol-invalid');
           return;
         }
         Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {

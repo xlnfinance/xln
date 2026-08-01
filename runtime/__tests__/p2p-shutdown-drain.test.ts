@@ -228,6 +228,47 @@ test('failed stale-socket drain retains the handle for retry', async () => {
   expect(internals.ws).toBeNull();
 });
 
+test('a failed scheduled reconnect is rescheduled instead of becoming terminal', async () => {
+  const errors: string[] = [];
+  const client = new RuntimeWsClient({
+    url: 'ws://127.0.0.1:1/relay',
+    runtimeId: RUNTIME_ID,
+    onError: error => errors.push(error.message),
+  });
+  const socket = {
+    binaryType: 'arraybuffer',
+    readyState: 0,
+    onopen: null,
+    onmessage: null,
+    onclose: null,
+    onerror: null,
+    send: () => {},
+    close: () => {},
+  };
+  const internals = client as unknown as {
+    ws: typeof socket | null;
+    terminalCloseTimeoutMs: number;
+    reconnectAttempts: number;
+    computeBackoffMs: () => number;
+    scheduleReconnect: () => void;
+  };
+  internals.ws = socket;
+  internals.terminalCloseTimeoutMs = 10;
+  internals.computeBackoffMs = () => 5;
+
+  try {
+    internals.scheduleReconnect();
+    for (let attempt = 0; attempt < 50 && internals.reconnectAttempts < 2; attempt += 1) {
+      await Bun.sleep(2);
+    }
+    expect(errors.some(error => error.includes('WS_CLOSE_TIMEOUT:10'))).toBe(true);
+    expect(internals.reconnectAttempts).toBeGreaterThanOrEqual(2);
+  } finally {
+    socket.readyState = 3;
+    await client.closeAndWait(20);
+  }
+});
+
 test('concurrent websocket shutdown callers await the same drain', async () => {
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',

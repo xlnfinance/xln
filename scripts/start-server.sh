@@ -125,6 +125,7 @@ exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
   --host 127.0.0.1 \
   --port "$API_PORT" \
   --public-ws-base-url "$PUBLIC_WS_BASE_URL" \
+  --public-relay-url "$PUBLIC_RELAY_URL" \
   --node-api-port-base "$XLN_MESH_API_PORT_BASE" \
   --node-public-port-base "$XLN_MESH_PUBLIC_PORT_BASE" \
   --relay-url "$RELAY_URL" \

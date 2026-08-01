@@ -142,6 +142,7 @@ type Args = {
   seed: string;
   signerLabel: string;
   relayUrl: string;
+  relayAudience: string;
   apiHost: string;
   apiPort: number;
   directWsUrl: string;
@@ -426,6 +427,7 @@ const parseArgs = (): Args => {
     seed,
     signerLabel: getArg('--signer-label', 'hub-1'),
     relayUrl: getArg('--relay-url', 'ws://127.0.0.1:20002/relay'),
+    relayAudience: getArg('--relay-audience', getArg('--relay-url', 'ws://127.0.0.1:20002/relay')),
     apiHost: getArg('--api-host', '127.0.0.1'),
     apiPort,
     directWsUrl: getArg('--direct-ws-url', ''),
@@ -2506,6 +2508,7 @@ const startHubHttpSurface = (
   const directRuntimeWs = createHubDirectRuntimeRoute(
     live.env,
     resolvedArgs.seed,
+    directWsUrl,
     () => live.externalIngressReady,
     directInputDebug,
   );
@@ -2744,7 +2747,7 @@ const run = async (): Promise<void> => {
   if (restoredRuntimeRouteRelocated(env.gossip.getProfiles(), {
     runtimeId: String(env.runtimeId || ''),
     wsUrl: directWsUrl,
-    relayUrls: [resolvedArgs.relayUrl],
+    relayUrls: [resolvedArgs.relayAudience],
   })) {
     await clearGossip(env, { runtimeId: String(env.runtimeId || '') });
     nodeLog.info('gossip.relocated_route_cache_cleared', { wsUrl: directWsUrl });
@@ -2819,6 +2822,7 @@ const run = async (): Promise<void> => {
   const p2pConnectStartedAt = startTiming('p2p_connect');
   live.p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
+    relayAudience: resolvedArgs.relayAudience,
     wsUrl: directWsUrl,
     preferRelayForEntityInput: true,
     advertiseEntityIds: live.hubBootstraps.map((entry) => entry.entityId),

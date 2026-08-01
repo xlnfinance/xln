@@ -867,6 +867,31 @@ describe('relay-router gossip fanout', () => {
     );
   });
 
+  test('closes non-hello traffic before relay authentication', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sent: RuntimeWsMessage[] = [];
+    const closed: Array<{ code?: number; reason?: string }> = [];
+    const attacker = {
+      label: 'preauth-ping',
+      readyState: 1,
+      close(code?: number, reason?: string) {
+        closed.push({ code, reason });
+        this.readyState = 3;
+      },
+    };
+
+    await productionRelayRoute({
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (_ws, raw) => { sent.push(deserializeWsMessage(raw)); },
+    }, attacker, { type: 'ping', id: 'preauth-ping-1' });
+
+    expect(sent).toEqual([{ type: 'error', error: 'Relay hello handshake required' }]);
+    expect(closed).toEqual([{ code: 4003, reason: 'handshake-required' }]);
+    expect(store.debugEvents.some(event => event.reason === 'RELAY_MESSAGE_BEFORE_HELLO')).toBe(true);
+  });
+
   test('rejects unencrypted entity_inputs at relay ingress', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();

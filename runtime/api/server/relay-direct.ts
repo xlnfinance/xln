@@ -17,13 +17,23 @@ import {
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 
-export type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
+export type RelaySocketType = 'relay' | 'market' | 'rpc';
+export type RelaySocketData = { type: RelaySocketType; clientIp: string };
 export type RelaySocket = ServerWebSocket<RelaySocketData>;
 export type RelayDirectOneShotLog = (
   key: string,
   message: string,
   fields?: Record<string, unknown>,
 ) => void;
+
+export const resolveUnifiedSocketType = (
+  pathname: string,
+  protocol: string | null,
+): RelaySocketType | null => {
+  if (pathname === '/rpc') return 'rpc';
+  if (pathname !== '/relay') return null;
+  return protocol === 'market' ? 'market' : 'relay';
+};
 
 export const resolveRequestClientIp = (request: Request): string => {
   const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();

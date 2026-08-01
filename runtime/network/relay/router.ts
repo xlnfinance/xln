@@ -77,6 +77,9 @@ const getRememberedSocketRuntimeId = (ws: unknown): string => {
   return normalizeRuntimeKey((ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID] || '');
 };
 
+export const isRelaySocketAuthenticated = (ws: unknown): boolean =>
+  getRememberedSocketRuntimeId(ws).length > 0;
+
 export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
   delete (ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID];
@@ -277,11 +280,13 @@ const handleHello = (context: RelayRouteContext): boolean => {
       details: { traceId },
     });
     send(ws, serializeWsMessage({ type: 'error', error: 'Invalid runtimeId in hello' }));
+    ws.close?.(4003, 'handshake-invalid');
     return true;
   }
   const peerEncryptionKey = normalizeEncryptionPubKey(fromEncryptionPubKey);
   if (!peerEncryptionKey) {
     send(ws, serializeWsMessage({ type: 'error', error: 'Missing or invalid fromEncryptionPubKey' }));
+    ws.close?.(4003, 'handshake-invalid');
     return true;
   }
   let verifiedHello: RuntimeWsHelloTranscript | null = null;
@@ -516,6 +521,23 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
       traceId,
     },
   });
+  return true;
+};
+
+const rejectMessageBeforeHello = (context: RelayRouteContext): boolean => {
+  const { config, ws, type, from, to, traceId, rememberedRuntimeId } = context;
+  if (config.requireHelloAuth === false || rememberedRuntimeId) return false;
+  pushDebugEvent(config.store, {
+    event: 'error',
+    from,
+    to,
+    msgType: type,
+    status: 'rejected',
+    reason: 'RELAY_MESSAGE_BEFORE_HELLO',
+    details: { traceId },
+  });
+  config.send(ws, serializeWsMessage({ type: 'error', error: 'Relay hello handshake required' }));
+  ws.close?.(4003, 'handshake-required');
   return true;
 };
 
@@ -810,6 +832,7 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
       details: { traceId, rememberedRuntimeId },
     });
     send(ws, serializeWsMessage({ type: 'error', error: 'Relay socket runtime mismatch' }));
+    ws.close?.(4003, 'session-invalid');
     return false;
   }
   if (rememberedRuntimeId && fromKey && rememberedRuntimeId === fromKey) {
@@ -840,6 +863,7 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
       details: { traceId },
     });
     send(ws, serializeWsMessage({ type: 'error', error: 'Missing fromEncryptionPubKey' }));
+    ws.close?.(4003, 'session-invalid');
     return false;
   }
   if (from && fromEncryptionPubKey && rememberedRuntimeId === fromKey) {
@@ -892,6 +916,7 @@ export const relayRoute = async (
       details: ff,
     });
     send(ws, serializeWsMessage({ type: 'error', error: `${ff.code}: ${ff.message}` }));
+    ws.close?.(4003, 'protocol-invalid');
     return;
   }
 
@@ -900,6 +925,8 @@ export const relayRoute = async (
   const { type, to, from, traceId } = context;
 
   if (handleHello(context)) return;
+
+  if (rejectMessageBeforeHello(context)) return;
 
   if (await handleGossipAnnounce(context)) return;
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
@@ -18,6 +19,8 @@ const RUNTIME_B = deriveSignerAddressSync(SEED_B, '2').toLowerCase();
 
 let servers: StandaloneRelayServer[] = [];
 let rawServers: Array<ReturnType<typeof Bun.serve>> = [];
+let rawTcpServers: Server[] = [];
+let rawTcpSockets: Socket[] = [];
 let clients: RuntimeWsClient[] = [];
 
 const waitUntil = async (predicate: () => boolean, label: string): Promise<void> => {
@@ -61,6 +64,8 @@ const makeClient = (options: {
   onEntityInputs?: (from: string) => Promise<void> | void;
   onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
   onError?: (error: Error) => void;
+  connectTimeoutMs?: number;
+  helloTimeoutMs?: number;
 }): RuntimeWsClient => {
   const client = new RuntimeWsClient({
     url: options.url,
@@ -74,6 +79,8 @@ const makeClient = (options: {
     onOpen: options.onOpen,
     onRecoveryBundleRequest: options.onRecoveryBundleRequest,
     onError: options.onError,
+    connectTimeoutMs: options.connectTimeoutMs,
+    helloTimeoutMs: options.helloTimeoutMs,
   });
   clients.push(client);
   return client;
@@ -83,6 +90,8 @@ afterEach(() => {
   for (const client of clients.splice(0)) client.close();
   for (const server of servers.splice(0)) server.close();
   for (const server of rawServers.splice(0)) server.stop(true);
+  for (const socket of rawTcpSockets.splice(0)) socket.destroy();
+  for (const server of rawTcpServers.splice(0)) server.close();
 });
 
 describe('runtime websocket recovery requests', () => {
@@ -108,12 +117,15 @@ describe('runtime websocket recovery requests', () => {
         registeredWhenOpened = relay.store.clients.has(RUNTIME_A);
       },
       onError: error => errors.push(error.message),
+      helloTimeoutMs: 25,
     });
 
     await client.connect();
     await waitUntil(() => registeredWhenOpened, 'registered hello acknowledgement');
+    await Bun.sleep(50);
 
     expect(registeredWhenOpened).toBe(true);
+    expect(client.isOpen()).toBe(true);
     expect(errors).toEqual([]);
   });
 
@@ -168,6 +180,151 @@ describe('runtime websocket recovery requests', () => {
     expect(client.isConnecting()).toBe(false);
   });
 
+  test('a queued ACK cannot revive a generation after the handshake fails', async () => {
+    const challenges = createHelloChallengeRegistry();
+    let issuedChallenge: RuntimeWsChallengeTranscript | null = null;
+    let rawServer: ReturnType<typeof Bun.serve> | null = null;
+    rawServer = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request) {
+        if (request.headers.get('upgrade') === 'websocket' && rawServer?.upgrade(request)) return undefined;
+        return new Response('websocket only', { status: 400 });
+      },
+      websocket: {
+        open(ws) {
+          issuedChallenge = challenges.issue(
+            ws,
+            createRelayHandshakeBinding(`ws://127.0.0.1:${rawServer?.port}`),
+          );
+        },
+        message(ws, raw) {
+          const hello = deserializeWsMessage(raw);
+          if (!issuedChallenge) throw new Error('TEST_RELAY_CHALLENGE_MISSING');
+          ws.send(serializeWsMessage({ type: 'error', error: 'reject-before-ack' }));
+          ws.send(serializeWsMessage(relayAck(hello, issuedChallenge)));
+        },
+      },
+    });
+    rawServers.push(rawServer);
+    const errors: string[] = [];
+    let opens = 0;
+    const client = makeClient({
+      url: `ws://127.0.0.1:${rawServer.port}`,
+      seed: SEED_A,
+      runtimeId: RUNTIME_A,
+      signerId: '1',
+      onOpen: () => { opens += 1; },
+      onError: error => errors.push(error.message),
+    });
+
+    await client.connect();
+    await waitUntil(() => errors.some(error => error.includes('WS_ERROR_BEFORE_HANDSHAKE_ACK')), 'failed handshake');
+    await Bun.sleep(25);
+
+    expect(opens).toBe(0);
+    expect(client.isOpen()).toBe(false);
+  });
+
+  test('silent relay handshake times out and reconnects instead of wedging', async () => {
+    let opens = 0;
+    let rawServer: ReturnType<typeof Bun.serve> | null = null;
+    rawServer = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request) {
+        if (request.headers.get('upgrade') === 'websocket' && rawServer?.upgrade(request)) return undefined;
+        return new Response('websocket only', { status: 400 });
+      },
+      websocket: {
+        open() { opens += 1; },
+        message() {},
+      },
+    });
+    rawServers.push(rawServer);
+    const errors: string[] = [];
+    const client = makeClient({
+      url: `ws://127.0.0.1:${rawServer.port}`,
+      seed: SEED_A,
+      runtimeId: RUNTIME_A,
+      signerId: '1',
+      helloTimeoutMs: 25,
+      onError: error => errors.push(error.message),
+    });
+
+    await client.connect();
+    await waitUntil(() => opens >= 2, 'silent relay reconnect');
+
+    expect(errors.some(error => error.includes('WS_HELLO_TIMEOUT'))).toBe(true);
+    expect(client.isOpen()).toBe(false);
+  });
+
+  test('a TCP peer that never upgrades times out and reconnects instead of wedging', async () => {
+    let acceptedConnections = 0;
+    const blackhole = createServer(socket => {
+      acceptedConnections += 1;
+      rawTcpSockets.push(socket);
+    });
+    rawTcpServers.push(blackhole);
+    await new Promise<void>((resolve, reject) => {
+      blackhole.once('error', reject);
+      blackhole.listen(0, '127.0.0.1', resolve);
+    });
+    const address = blackhole.address();
+    if (!address || typeof address === 'string') throw new Error('TEST_TCP_BLACKHOLE_ADDRESS_MISSING');
+    const errors: string[] = [];
+    const client = makeClient({
+      url: `ws://127.0.0.1:${address.port}`,
+      seed: SEED_A,
+      runtimeId: RUNTIME_A,
+      signerId: '1',
+      connectTimeoutMs: 25,
+      onError: error => errors.push(error.message),
+    });
+
+    await client.connect();
+    await waitUntil(() => acceptedConnections >= 2, 'TCP-upgrade blackhole reconnect');
+
+    expect(errors.some(error => error.includes('WS_CONNECT_TIMEOUT'))).toBe(true);
+    expect(client.isOpen()).toBe(false);
+  });
+
+  test('two consecutive clean relay closes each reconnect the authenticated client', async () => {
+    const relay = startRelay();
+    const client = makeClient({
+      url: `ws://127.0.0.1:${relay.server.port}`,
+      seed: SEED_A,
+      runtimeId: RUNTIME_A,
+      signerId: '1',
+    });
+    await client.connect();
+    await waitUntil(() => client.isOpen(), 'initial authenticated relay client');
+    const first = relay.store.clients.get(RUNTIME_A);
+    if (!first?.ws.close) throw new Error('TEST_RELAY_SOCKET_CLOSE_UNAVAILABLE');
+
+    first.ws.close(1001, 'clean-cycle-one');
+    await waitUntil(
+      () => {
+        const current = relay.store.clients.get(RUNTIME_A);
+        return Boolean(client.isOpen() && current && current.ws !== first.ws);
+      },
+      'first clean-close reconnect',
+    );
+    const second = relay.store.clients.get(RUNTIME_A);
+    if (!second?.ws.close) throw new Error('TEST_RELAY_SOCKET_CLOSE_UNAVAILABLE');
+
+    second.ws.close(1001, 'clean-cycle-two');
+    await waitUntil(
+      () => {
+        const current = relay.store.clients.get(RUNTIME_A);
+        return Boolean(client.isOpen() && current && current.ws !== second.ws);
+      },
+      'second clean-close reconnect',
+    );
+
+    expect(client.isOpen()).toBe(true);
+  });
+
   test('requestRecoveryBundles resolves a correlated peer response through relay', async () => {
     const relay = startRelay();
     const url = `ws://127.0.0.1:${relay.server.port}`;
@@ -195,7 +352,7 @@ describe('runtime websocket recovery requests', () => {
 
     await requester.connect();
     await responder.connect();
-    await waitUntil(() => relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B), 'relay clients');
+    await waitUntil(() => requester.isOpen() && responder.isOpen(), 'authenticated relay clients');
 
     const response = await requester.requestRecoveryBundles(RUNTIME_B, 'lookup/key', 1_000);
 
@@ -223,7 +380,7 @@ describe('runtime websocket recovery requests', () => {
     });
 
     await requester.connect();
-    await waitUntil(() => relay.store.clients.has(RUNTIME_A), 'requester relay client');
+    await waitUntil(() => requester.isOpen(), 'authenticated requester relay client');
 
     await expect(requester.requestRecoveryBundles(RUNTIME_B, 'lookup/key', 1_000)).rejects.toThrow(
       'RECOVERY_TARGET_NOT_CONNECTED',
@@ -257,7 +414,7 @@ describe('runtime websocket recovery requests', () => {
     });
     await sender.connect();
     await receiver.connect();
-    await waitUntil(() => relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B), 'relay clients');
+    await waitUntil(() => sender.isOpen() && receiver.isOpen(), 'authenticated relay clients');
 
     expect(
       sender.sendEntityInputsRaw(RUNTIME_B, {

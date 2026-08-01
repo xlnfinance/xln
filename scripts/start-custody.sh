@@ -20,6 +20,7 @@ export CUSTODY_MAIN_API_BASE_URL=${CUSTODY_MAIN_API_BASE_URL:-http://127.0.0.1:$
 export CUSTODY_MAIN_RPC_URL=${CUSTODY_MAIN_RPC_URL:-http://127.0.0.1:${MAIN_RPC_PORT}}
 export CUSTODY_PUBLIC_RPC_URL=${CUSTODY_PUBLIC_RPC_URL:-https://xln.finance/rpc}
 export CUSTODY_RELAY_URL=${CUSTODY_RELAY_URL:-ws://127.0.0.1:${MAIN_API_PORT}/relay}
+export CUSTODY_PUBLIC_RELAY_URL=${CUSTODY_PUBLIC_RELAY_URL:-${PUBLIC_RELAY_URL:-wss://xln.finance/relay}}
 export CUSTODY_WALLET_URL=${CUSTODY_WALLET_URL:-https://xln.finance/app}
 export CUSTODY_JURISDICTION_ID=${CUSTODY_JURISDICTION_ID:-arrakis}
 export CUSTODY_SEED=${CUSTODY_SEED:-$(xln_read_or_create_operator_seed "$RDB_ROOT/secrets/custody.seed")}

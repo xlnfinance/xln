@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { resolveOrderbookRelayWsUrl } from '../../frontend/src/lib/components/Trading/orderbook-relay-url';
+import { resolveUnifiedSocketType } from '../api/server/relay-direct';
 import { resolveOrchestratorSocketType } from '../orchestrator/orchestrator-types';
 
 const localHttps = {
@@ -46,4 +47,11 @@ test('orchestrator sends peer challenges only to peer relay sockets', () => {
   expect(resolveOrchestratorSocketType('market')).toBe('market');
   expect(resolveOrchestratorSocketType(null)).toBe('relay');
   expect(resolveOrchestratorSocketType('unknown')).toBe('relay');
+});
+
+test('unified server isolates public market sockets from authenticated relay sockets', () => {
+  expect(resolveUnifiedSocketType('/relay', 'market')).toBe('market');
+  expect(resolveUnifiedSocketType('/relay', null)).toBe('relay');
+  expect(resolveUnifiedSocketType('/rpc', null)).toBe('rpc');
+  expect(resolveUnifiedSocketType('/other', 'market')).toBeNull();
 });

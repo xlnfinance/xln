@@ -8,6 +8,7 @@ export type Args = {
   host: string;
   port: number;
   relayUrl: string;
+  relayAudience: string;
   publicWsBaseUrl: string;
   nodeApiPortBase: number;
   nodePublicPortBase: number;

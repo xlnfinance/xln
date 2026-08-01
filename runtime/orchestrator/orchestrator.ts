@@ -27,11 +27,22 @@ import {
   type RelayStore,
 } from '../network/relay/store';
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../network/relay/router';
+import { resolveUnifiedRelayEndpoints } from '../network/relay/audience-config';
+import {
+  forgetRelaySocketRuntimeId,
+  isRelaySocketAuthenticated,
+  relayRoute,
+  type RelayRouterConfig,
+} from '../network/relay/router';
 import { closeRelayClientsForReset } from '../network/relay/reset';
-import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import {
+  deserializeWsMessage,
+  MAX_PREAUTH_WS_MESSAGE_BYTES,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
-import { createRelayHandshakeBinding } from '../network/p2p/hello-transcript';
+import { createRelayHandshakeBinding, isLoopbackRuntimeWsHostname } from '../network/p2p/hello-transcript';
 import { type MarketSnapshotPayload } from '../network/relay/market-snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market-subscriptions';
 import {
@@ -232,7 +243,13 @@ const marketMakerReadyRestartLimit = Math.max(
   Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
 );
 const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;
-const relayUrl = args.relayUrl;
+const relayEndpoints = resolveUnifiedRelayEndpoints({
+  port: args.port,
+  publicRelayUrl: args.relayAudience,
+  internalRelayUrl: args.relayUrl,
+});
+const relayUrl = relayEndpoints.internalUrl;
+const relayAudience = relayEndpoints.publicAudience;
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
 const childDiagnosticsDir = join(controlPlaneDir, 'diagnostics');
@@ -419,9 +436,7 @@ const runtimeImportManifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH'
   || join(args.dbRoot, 'runtime-import-manifest.json');
 const runtimeImportLogUrlEnabled = readBooleanEnv('XLN_RUNTIME_IMPORT_LOG_URL', false);
 
-const isLoopbackPublicBase = /^(localhost|127\.|0\.0\.0\.0|::1|\[::1\])/.test(
-  new URL(args.publicWsBaseUrl).hostname,
-);
+const isLoopbackPublicBase = isLoopbackRuntimeWsHostname(new URL(args.publicWsBaseUrl).hostname);
 
 // Externally-reachable radapter /rpc URL for a hub / market-maker node.
 // Prod is fronted by nginx (publicPort -> apiPort, e.g. 8090 -> 18090); local has no proxy,
@@ -1349,7 +1364,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     '--name', child.name,
     '--region', child.region,
     '--signer-label', child.signerLabel,
-    '--relay-url', relayUrl,
+    '--relay-url', relayUrl, '--relay-audience', relayAudience,
     '--api-host', args.host,
     '--api-port', String(child.apiPort),
     '--direct-ws-url', buildPublicDirectWsUrl(child.publicPort),
@@ -1449,7 +1464,7 @@ const spawnMarketMaker = async (): Promise<void> => {
     'runtime/orchestrator/mm-node.ts',
     '--name', marketMakerChild.name,
     '--signer-label', marketMakerChild.signerLabel,
-    '--relay-url', relayUrl,
+    '--relay-url', relayUrl, '--relay-audience', relayAudience,
     '--api-host', args.host,
     '--api-port', String(marketMakerChild.apiPort),
     '--direct-ws-url', buildPublicDirectWsUrl(marketMakerChild.publicPort),
@@ -2381,6 +2396,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
           daemonPort: args.custodyDaemonPort,
           custodyPort: args.custodyPort,
           relayUrl,
+          relayAudience,
           rpcUrl: args.rpcUrl,
           walletUrl: args.walletUrl,
           dbRoot: args.custodyDbRoot,
@@ -2856,7 +2872,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     open(ws) {
       const relayWs = ws;
       if (relayWs.data.type === 'relay') {
-        relayHelloChallenges.issue(relayWs, createRelayHandshakeBinding(relayUrl));
+        relayHelloChallenges.issue(relayWs, createRelayHandshakeBinding(relayAudience));
       }
       pushDebugEvent(relayStore, {
         event: 'ws_open',
@@ -2865,18 +2881,8 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     },
     message(ws, raw) {
       try {
-        let peerMessage: RuntimeWsMessage | null = null;
-        let marketMessage: MarketWireRequest | null = null;
-        try {
-          peerMessage = deserializeWsMessage(raw as string | Buffer | ArrayBuffer);
-        } catch (binaryError) {
-          try {
-            marketMessage = decodeMarketWireRequest(raw.toString());
-          } catch {
-            throw binaryError;
-          }
-        }
-        if (marketMessage) {
+        if (ws.data.type === 'market') {
+          const marketMessage: MarketWireRequest = decodeMarketWireRequest(raw.toString());
           Promise.resolve(marketSubscriptionStack.handleMessage(ws, marketMessage)).catch(error => {
             const reason = serializeError(error);
             pushDebugEvent(relayStore, {
@@ -2892,7 +2898,10 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
           });
           return;
         }
-        if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
+        const peerMessage: RuntimeWsMessage = deserializeWsMessage(
+          raw as string | Buffer | ArrayBuffer,
+          isRelaySocketAuthenticated(ws) ? undefined : MAX_PREAUTH_WS_MESSAGE_BYTES,
+        );
         Promise.resolve(relayRoute(routerConfig, ws, peerMessage)).catch(error => {
           const reason = serializeError(error);
           pushDebugEvent(relayStore, {
@@ -2912,16 +2921,21 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
           }
         });
       } catch (error) {
+        const isMarket = ws.data.type === 'market';
         pushDebugEvent(relayStore, {
           event: 'error',
-          reason: 'INVALID_RELAY_MESSAGE',
+          reason: isMarket ? 'INVALID_MARKET_MESSAGE' : 'INVALID_RELAY_MESSAGE',
           details: { error: serializeError(error) },
         });
         try {
-          ws.send(serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
+          ws.send(isMarket
+            ? encodeMarketWireMessage({ type: 'error', error: 'Invalid market message' })
+            : serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
         } catch (sendError) {
           meshLog.warn('relay.invalid_message_send_failed', { error: serializeError(sendError) });
         }
+        if (!isMarket) relayHelloChallenges.forget(ws);
+        ws.close(4003, 'protocol-invalid');
       }
     },
     close(ws) {
@@ -2956,7 +2970,7 @@ process.on('SIGTERM', () => { requestShutdown('SIGTERM'); });
 process.on('SIGINT', () => { requestShutdown('SIGINT'); });
 
 console.log(
-  `CONTROL_READY host=${args.host} port=${args.port} relay=${relayUrl} rpc=${args.rpcUrl} mm=${args.mmEnabled ? 'on' : 'off'} custody=${args.custodyEnabled ? 'on' : 'off'} reset=${args.resetAllowed ? 'on' : 'off'} deferInitialReset=${args.deferInitialReset ? 'on' : 'off'}`,
+  `CONTROL_READY host=${args.host} port=${args.port} relay=${relayUrl} relayAudience=${relayAudience} rpc=${args.rpcUrl} mm=${args.mmEnabled ? 'on' : 'off'} custody=${args.custodyEnabled ? 'on' : 'off'} reset=${args.resetAllowed ? 'on' : 'off'} deferInitialReset=${args.deferInitialReset ? 'on' : 'off'}`,
 );
 
 assertMinDiskFree();

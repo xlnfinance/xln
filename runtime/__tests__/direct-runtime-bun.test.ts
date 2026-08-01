@@ -2,7 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
-import { hashHelloMessage, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import {
+  deserializeWsMessage,
+  hashHelloMessage,
+  MAX_PREAUTH_WS_MESSAGE_BYTES,
+  serializeWsMessage,
+  serializeWsMessageForDebug,
+  type RuntimeWsMessage,
+} from '../network/p2p/ws-protocol';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 
@@ -64,6 +71,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: deriveSignerAddressSync('direct-upgrade-server', '1').toLowerCase(),
       runtimeSeed: 'direct-upgrade-server',
+      publicWsUrl: 'ws://localhost/ws',
       onEntityInputs: () => undefined,
     });
     const upgradedRequests: Request[] = [];
@@ -91,6 +99,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       onEntityInputs: () => {},
     });
 
@@ -122,6 +131,89 @@ describe('direct runtime websocket route', () => {
     expect(replayed.sent.at(-1)?.error).toContain('challenge missing, expired, or already consumed');
   });
 
+  test('bounds pending handshakes and expires a silent direct socket absolutely', async () => {
+    const serverSeed = 'direct-deadline-server';
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: deriveSignerAddressSync(serverSeed, '1').toLowerCase(),
+      runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
+      helloTimeoutMs: 25,
+      maxPendingHandshakes: 1,
+      onEntityInputs: () => undefined,
+    });
+    const silent = makeFakeWs();
+    const overCapacity = makeFakeWs();
+
+    route.websocket.open(silent.ws);
+    route.websocket.open(overCapacity.ws);
+    expect(overCapacity.closed).toEqual([{ code: 4008, reason: 'hello-capacity' }]);
+
+    await Bun.sleep(50);
+    expect(silent.closed).toEqual([{ code: 4008, reason: 'hello-timeout' }]);
+  });
+
+  test('successful direct hello cancels the absolute server deadline', async () => {
+    const serverSeed = 'direct-deadline-success-server';
+    const clientSeed = 'direct-deadline-success-client';
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: deriveSignerAddressSync(serverSeed, '1').toLowerCase(),
+      runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
+      helloTimeoutMs: 25,
+      onEntityInputs: () => undefined,
+    });
+    const client = makeFakeWs();
+    route.websocket.open(client.ws);
+    const challenge = client.sent[0];
+    await route.websocket.message(client.ws, serializeWsMessage(makeAuthedHello(
+      clientSeed,
+      deriveSignerAddressSync(clientSeed, '1').toLowerCase(),
+      '1',
+      challenge,
+    )));
+
+    await Bun.sleep(50);
+    expect(client.closed).toEqual([]);
+    expect(client.ws.readyState).toBe(1);
+    route.websocket.close(client.ws);
+  });
+
+  test('malformed direct traffic cannot keep a pre-auth socket alive', async () => {
+    const serverSeed = 'direct-preauth-malformed-server';
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: deriveSignerAddressSync(serverSeed, '1').toLowerCase(),
+      runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
+      helloTimeoutMs: 1_000,
+      onEntityInputs: () => undefined,
+    });
+    const client = makeFakeWs();
+    route.websocket.open(client.ws);
+
+    await route.websocket.message(client.ws, new Uint8Array([0xff]));
+
+    expect(client.closed).toEqual([{ code: 4003, reason: 'protocol-invalid' }]);
+  });
+
+  test('rejects an oversized pre-auth frame before MessagePack decoding', async () => {
+    const serverSeed = 'direct-preauth-size-server';
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: deriveSignerAddressSync(serverSeed, '1').toLowerCase(),
+      runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
+      onEntityInputs: () => undefined,
+    });
+    const client = makeFakeWs();
+    route.websocket.open(client.ws);
+
+    await route.websocket.message(client.ws, new Uint8Array(MAX_PREAUTH_WS_MESSAGE_BYTES + 1));
+
+    expect(client.sent.at(-1)?.error).toContain(
+      `WS_MESSAGE_TOO_LARGE:bytes=${MAX_PREAUTH_WS_MESSAGE_BYTES + 1}:max=${MAX_PREAUTH_WS_MESSAGE_BYTES}`,
+    );
+    expect(client.closed).toEqual([{ code: 4003, reason: 'protocol-invalid' }]);
+  });
+
   test('rejects post-handshake encryption-key replacement instead of encrypting to the attacker', async () => {
     const serverSeed = 'direct-key-binding-server';
     const clientSeed = 'direct-key-binding-client';
@@ -131,6 +223,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onEntityInputs: () => undefined,
       onRecoveryBundleRequest: () => ({ bundles: [] }),
@@ -177,6 +270,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onEntityInputs: () => {},
     });
@@ -206,6 +300,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onEntityInputs: (from, envelope, timestamp) => {
         received.push({ from, envelope, timestamp });
@@ -314,6 +409,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onEntityInputs: () => {},
       onReliableReceipt: (from, inboundReceipt) => {
@@ -355,6 +451,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onEntityInputs: (from, envelope, timestamp) => {
         received.push({ from, envelope, timestamp });
@@ -402,6 +499,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onEntityInputs: () => {
         received += 1;
@@ -444,6 +542,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onRecoveryBundleRequest: (from, lookupKey) => {
         requests.push({ from, lookupKey });
@@ -494,6 +593,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onRecoveryBundleRequest: () => {
         calls += 1;
@@ -531,6 +631,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       onEntityInputs: (_from, envelope) => {
         received.push(envelope);
       },
@@ -557,6 +658,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onEntityInputs: () => {},
     });
@@ -596,6 +698,42 @@ describe('direct runtime websocket route', () => {
     expect(second.sent).toEqual([]);
   });
 
+  test('fresh authenticated direct hello supersedes a half-open session', async () => {
+    const serverSeed = 'direct-route-server-auth-reconnect';
+    const clientSeed = 'direct-route-client-auth-reconnect';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
+      onEntityInputs: () => undefined,
+    });
+    const first = makeFakeWs();
+    const second = makeFakeWs();
+    route.websocket.open(first.ws);
+    await route.websocket.message(first.ws, serializeWsMessage(makeAuthedHello(
+      clientSeed,
+      clientRuntimeId,
+      '1',
+      first.sent[0],
+    )));
+    route.websocket.open(second.ws);
+    await route.websocket.message(second.ws, serializeWsMessage(makeAuthedHello(
+      clientSeed,
+      clientRuntimeId,
+      '1',
+      second.sent[0],
+    )));
+
+    expect(first.closed.at(-1)).toEqual({ code: 4009, reason: 'superseded-runtime' });
+    expect(second.ws.readyState).toBe(1);
+    expect(second.sent.at(-1)?.type).toBe('hello_ack');
+    expect(route.getSessionState()).toEqual([
+      expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+    ]);
+  });
+
   test('reports typed miss delivery when target direct socket is absent', () => {
     const serverSeed = 'direct-route-server-miss';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -603,6 +741,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       onEntityInputs: () => undefined,
     });
     const outboundInput: RoutedEntityInput = {
@@ -634,6 +773,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onEntityInputs: () => undefined,
     });
@@ -696,6 +836,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      publicWsUrl: 'ws://localhost/ws',
       requireHelloAuth: false,
       onEntityInputs: () => undefined,
     });

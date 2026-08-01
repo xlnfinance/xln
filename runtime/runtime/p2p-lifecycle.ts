@@ -143,9 +143,13 @@ const buildRuntimeP2POptions = (
   };
   if (config.signerId !== undefined) options.signerId = config.signerId;
   if (config.relayUrls !== undefined) options.relayUrls = config.relayUrls;
+  if (config.relayAudience !== undefined) options.relayAudience = config.relayAudience;
   const wsUrl = (config as P2PConfig & { wsUrl?: string | null }).wsUrl;
   if (wsUrl !== undefined) options.wsUrl = wsUrl;
   if (config.allowDirectClients !== undefined) options.allowDirectClients = config.allowDirectClients;
+  if (config.preferRelayForEntityInput !== undefined) {
+    options.preferRelayForEntityInput = config.preferRelayForEntityInput;
+  }
   if (config.seedRuntimeIds !== undefined) options.seedRuntimeIds = config.seedRuntimeIds;
   if (config.advertiseEntityIds !== undefined) options.advertiseEntityIds = config.advertiseEntityIds;
   if (config.gossipPollMs !== undefined) options.gossipPollMs = config.gossipPollMs;
@@ -172,25 +176,28 @@ export const startRuntimeP2P = (
   config: P2PConfig = {},
   deps: RuntimeP2PLifecycleDeps,
 ): RuntimeP2P | null => {
-  p2pLifecycleLog.debug('start', {
-    runtime: shortId(config.runtimeId || env.runtimeId || 'none', 8),
-    relays: config.relayUrls?.length ?? 0,
-  });
   const state = deps.ensureRuntimeInfrastructure(env);
-  state.lastP2PConfig = config;
+  const effectiveConfig: P2PConfig = state.lastP2PConfig
+    ? { ...state.lastP2PConfig, ...config }
+    : config;
+  p2pLifecycleLog.debug('start', {
+    runtime: shortId(effectiveConfig.runtimeId || env.runtimeId || 'none', 8),
+    relays: effectiveConfig.relayUrls?.length ?? 0,
+  });
+  state.lastP2PConfig = effectiveConfig;
   assertLocalEntityCryptoKeys(env);
-  const resolvedRuntimeId = config.runtimeId || env.runtimeId;
+  const resolvedRuntimeId = effectiveConfig.runtimeId || env.runtimeId;
   if (!resolvedRuntimeId || !isRuntimeId(resolvedRuntimeId)) {
     p2pLifecycleLog.debug('start.pending_runtime_id');
-    state.pendingP2PConfig = config;
+    state.pendingP2PConfig = effectiveConfig;
     return null;
   }
 
-  const reusable = reuseProcessP2P(env, state, config, resolvedRuntimeId) ??
-    reuseAttachedP2P(state, config, resolvedRuntimeId);
+  const reusable = reuseProcessP2P(env, state, effectiveConfig, resolvedRuntimeId) ??
+    reuseAttachedP2P(state, effectiveConfig, resolvedRuntimeId);
   if (reusable) return reusable;
 
-  state.p2p = new RuntimeP2P(buildRuntimeP2POptions(env, state, config, resolvedRuntimeId, deps));
+  state.p2p = new RuntimeP2P(buildRuntimeP2POptions(env, state, effectiveConfig, resolvedRuntimeId, deps));
   p2pState(env)[ENV_P2P_SINGLETON_KEY] = state.p2p;
   enqueueDueProfileCertifications(env, deps);
   state.p2p.connect();

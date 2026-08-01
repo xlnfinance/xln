@@ -2,6 +2,7 @@ import { join, resolve } from 'node:path';
 import { normalizeLoopbackUrl } from '../network/p2p/loopback-url';
 import { readPositiveIntegerEnv } from '../config/environment';
 import { hasCliFlag, readCliOption } from '../config/cli';
+import { canonicalizePublicRuntimeWsAudience } from '../network/p2p/hello-transcript';
 import type { Args } from './orchestrator-types';
 
 const argsRaw = process.argv.slice(2);
@@ -56,13 +57,14 @@ const normalizeWsBaseUrl = (raw: string, fallbackHost: string, fallbackPort: num
   if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
     throw new Error(`Invalid --public-ws-base-url: ${value}`);
   }
+  canonicalizePublicRuntimeWsAudience(parsed.toString());
   parsed.pathname = '';
   parsed.search = '';
   parsed.hash = '';
   return parsed.toString().replace(/\/+$/, '');
 };
 
-const normalizeWsUrl = (raw: string, fallback: string, label: string): string => {
+export const normalizeOrchestratorWsUrl = (raw: string, fallback: string, label: string): string => {
   const value = String(raw || '').trim() || fallback;
   const parsed = new URL(value);
   if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
@@ -70,7 +72,6 @@ const normalizeWsUrl = (raw: string, fallback: string, label: string): string =>
   if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
     throw new Error(`Invalid ${label}: ${value}`);
   }
-  parsed.hash = '';
   return parsed.toString();
 };
 
@@ -107,7 +108,12 @@ export const parseArgs = (): Args => {
   return {
     host,
     port,
-    relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || ''), fallbackRelayUrl.toString(), '--relay-url'),
+    relayUrl: normalizeOrchestratorWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || ''), fallbackRelayUrl.toString(), '--relay-url'),
+    relayAudience: normalizeOrchestratorWsUrl(
+      getArg('--public-relay-url', process.env['PUBLIC_RELAY_URL'] || ''),
+      fallbackRelayUrl.toString(),
+      '--public-relay-url',
+    ),
     publicWsBaseUrl,
     nodeApiPortBase,
     nodePublicPortBase,

@@ -23,6 +23,42 @@ const reservePort = (): Promise<number> => new Promise((resolve, reject) => {
   });
 });
 
+test('startup fails before binding when the public relay audience is absent', async () => {
+  const port = await reservePort();
+  const child = Bun.spawn([
+    'bun',
+    'runtime/api/server/index.ts',
+    '--port',
+    String(port),
+    '--host',
+    '127.0.0.1',
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      INTERNAL_RELAY_URL: `ws://127.0.0.1:${port}/relay`,
+      PUBLIC_RELAY_URL: '',
+      XLN_RUNTIME_SEED: 'missing-public-relay-audience-regression',
+      XLN_SKIP_SERVER_BOOTSTRAP: '1',
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  children.push(child);
+
+  const exitCode = await Promise.race([
+    child.exited,
+    new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error('MISSING_PUBLIC_RELAY_AUDIENCE_DID_NOT_FAIL')), 10_000);
+    }),
+  ]);
+  const output = `${await new Response(child.stdout).text()}\n${await new Response(child.stderr).text()}`;
+
+  expect(exitCode).not.toBe(0);
+  expect(output).toContain('PUBLIC_RELAY_AUDIENCE_REQUIRED');
+  await expect(fetch(`http://127.0.0.1:${port}/api/health`)).rejects.toThrow();
+}, 15_000);
+
 test('startup failure closes the already-bound HTTP listener and exits nonzero', async () => {
   const port = await reservePort();
   const child = Bun.spawn([
@@ -41,6 +77,7 @@ test('startup failure closes the already-bound HTTP listener and exits nonzero',
       XLN_DB_PATH: `/tmp/xln-startup-failure-${process.pid}-${port}`,
       XLN_STORAGE_FORCE_RESTORE: '1',
       XLN_SKIP_SERVER_BOOTSTRAP: '1',
+      PUBLIC_RELAY_URL: `ws://127.0.0.1:${port}/relay`,
     },
     stdout: 'pipe',
     stderr: 'pipe',

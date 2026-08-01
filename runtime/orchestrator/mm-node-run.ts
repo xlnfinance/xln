@@ -2075,6 +2075,7 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
   const directRuntimeWs = createDirectRuntimeWsRoute({
     runtimeId: String(env.runtimeId || ''),
     runtimeSeed: resolvedArgs.seed,
+    publicWsUrl: directWsUrl,
     onRecoveryBundleRequest: async (_from, lookupKey) =>
       resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
     onEntityInputs: async (from, envelope, ingressTimestamp) => {
@@ -2176,6 +2177,7 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
   state.phase = 'start-p2p';
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
+    relayAudience: resolvedArgs.relayAudience,
     wsUrl: directWsUrl,
     allowDirectClients: false,
     preferRelayForEntityInput: true,

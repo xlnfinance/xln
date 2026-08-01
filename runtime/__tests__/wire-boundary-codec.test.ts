@@ -126,6 +126,14 @@ describe('WebSocket trusted decode boundary', () => {
     expect(() => deserializeWsMessage(new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff])))
       .toThrow('WS_MESSAGE_TOO_LARGE:bytes=5:max=4');
   });
+
+  test('supports a stricter pre-authentication limit without weakening the authenticated limit', () => {
+    const message = serializeWsMessage({ type: 'ping' });
+
+    expect(() => deserializeWsMessage(message, message.byteLength - 1))
+      .toThrow(`WS_MESSAGE_TOO_LARGE:bytes=${message.byteLength}:max=${message.byteLength - 1}`);
+    expect(deserializeWsMessage(message)).toEqual({ type: 'ping' });
+  });
 });
 
 describe('rAdapter trusted decode boundary', () => {

@@ -141,6 +141,7 @@ export type StartCustodySupportOptions = {
   daemonPort: number;
   custodyPort: number;
   relayUrl: string;
+  relayAudience: string;
   rpcUrl: string;
   walletUrl: string;
   dbRoot: string;
@@ -625,6 +626,8 @@ export const startCustodySupport = async (
         ANVIL_RPC: options.rpcUrl,
         PUBLIC_RPC: options.rpcUrl,
         XLN_STARTUP_STEP_TIMEOUT_MS: process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '60000',
+        INTERNAL_RELAY_URL: options.relayUrl,
+        PUBLIC_RELAY_URL: options.relayAudience,
         RELAY_URL: options.relayUrl,
         XLN_RUNTIME_SEED: options.daemonRuntimeSeed || `${options.seed}:runtime`,
         XLN_DB_PATH: `${options.dbRoot}/daemon-db`,

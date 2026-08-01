@@ -8,9 +8,9 @@
  * - RPC for remote UI (/rpc)
  * - REST API (/api/*)
  *
- * Usage:
- *   bun runtime/api/server/index.ts                    # Server on :8080
- *   bun runtime/api/server/index.ts --port 9000        # Custom port
+ * Usage (public relay identity is mandatory and independent from loopback transport):
+ *   PUBLIC_RELAY_URL=ws://localhost:8080/relay bun runtime/api/server/index.ts
+ *   bun runtime/api/server/index.ts --port 9000 --public-relay-url wss://wallet.example/relay
  */
 
 import { readPositiveIntegerEnv } from '../../config/environment';
@@ -42,10 +42,21 @@ import { listLocalControlEntities } from './control-entities';
 import { getAccountReplica, getEntityReplicaById } from './entity-lookup';
 import { createRuntimeIngressReceiptStore } from '../../runtime/ingress-receipts';
 import { createRelayStore, pushDebugEvent, removeClient } from '../../network/relay/store';
+import { resolveUnifiedRelayEndpoints } from '../../network/relay/audience-config';
 import { openRelayIncidentJournal } from '../../network/relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../../network/relay/debug-http';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../../network/relay/router';
-import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../../network/p2p/ws-protocol';
+import {
+  forgetRelaySocketRuntimeId,
+  isRelaySocketAuthenticated,
+  relayRoute,
+  type RelayRouterConfig,
+} from '../../network/relay/router';
+import {
+  deserializeWsMessage,
+  MAX_PREAUTH_WS_MESSAGE_BYTES,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from '../../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../../network/p2p/hello-challenge';
 import { createRelayHandshakeBinding } from '../../network/p2p/hello-transcript';
 import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
@@ -54,7 +65,7 @@ import { createStructuredLogger, registerStructuredLogSink, shortId } from '../.
 import { startParentLivenessWatch } from '../../infra/parent-watch';
 import { buildMarketSnapshotForReplica, type MarketSnapshotPayload } from '../../network/relay/market-snapshot';
 import { createMarketSubscriptionStack } from '../../network/relay/market-subscriptions';
-import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../../network/relay/market-wire';
+import { decodeMarketWireRequest, encodeMarketWireMessage } from '../../network/relay/market-wire';
 import { JSON_HEADERS, getErrorMessage, resolveRequiredAnvilRpc } from './utils';
 import { ethers } from 'ethers';
 import {
@@ -67,6 +78,7 @@ import {
   getRelayClientIp,
   hasConnectedEncryptedRelayClient,
   resolveRequestClientIp,
+  resolveUnifiedSocketType,
   sendEntityInputDirectViaRelaySocketDelivery,
   type RelaySocketData,
   type RelaySocket,
@@ -270,6 +282,8 @@ export type XlnServerOptions = {
   host?: string | undefined;
   staticDir?: string | undefined;
   serverId?: string | undefined;
+  publicRelayUrl?: string | undefined;
+  internalRelayUrl?: string | undefined;
 };
 
 const DEFAULT_OPTIONS: XlnServerOptions = {
@@ -278,15 +292,6 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
   staticDir: './frontend/build',
   serverId: 'xln-server',
 };
-const getDefaultLocalRelayUrl = (port?: number): string => `ws://localhost:${port ?? DEFAULT_OPTIONS.port}/relay`;
-const resolveConfiguredRelayUrl = (port?: number): string => {
-  const fallback = getDefaultLocalRelayUrl(port);
-  const candidates = [process.env['INTERNAL_RELAY_URL'], process.env['RELAY_URL']]
-    .map(value => String(value || '').trim())
-    .filter(Boolean);
-  return candidates[0] || fallback;
-};
-
 let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
 registerStructuredLogSink(entry => {
   if (entry.level !== 'error') return;
@@ -831,7 +836,7 @@ const handleHttpRequest = async (
   if (localPairingResponse) return localPairingResponse;
 
   if (req.headers.get('upgrade') === 'websocket') {
-    const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
+    const wsType = resolveUnifiedSocketType(pathname, new URL(req.url).searchParams.get('protocol'));
     if (wsType && server.upgrade(req, { data: { type: wsType, clientIp: resolveRequestClientIp(req) } })) {
       return undefined;
     }
@@ -944,18 +949,8 @@ const handleWebSocketMessage = (
       return;
     }
 
-    let peerMessage: RuntimeWsMessage | null = null;
-    let marketMessage: MarketWireRequest | null = null;
-    try {
-      peerMessage = deserializeWsMessage(message);
-    } catch (binaryError) {
-      try {
-        marketMessage = decodeMarketWireRequest(messageText());
-      } catch {
-        throw binaryError;
-      }
-    }
-    if (marketMessage) {
+    if (wsType === 'market') {
+      const marketMessage = decodeMarketWireRequest(messageText());
       Promise.resolve(marketSubscriptionStack.handleMessage(ws, marketMessage)).catch(error => {
         const reason = getErrorMessage(error);
         serverLog.error('ws.market_handler_error', { reason, type: marketMessage?.type });
@@ -968,7 +963,10 @@ const handleWebSocketMessage = (
       });
       return;
     }
-    if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
+    const peerMessage: RuntimeWsMessage = deserializeWsMessage(
+      message,
+      isRelaySocketAuthenticated(ws) ? undefined : MAX_PREAUTH_WS_MESSAGE_BYTES,
+    );
 
     if (!session.routerConfig && isServerBootInProgress()) {
       void serverStartupBarrier.then(() => routeRelaySocketMessage(session, ws, peerMessage));
@@ -986,8 +984,13 @@ const handleWebSocketMessage = (
     });
     if (wsType === 'rpc') {
       closeInvalidRuntimeAdapterMessage(ws, error);
+    } else if (wsType === 'market') {
+      ws.send(encodeMarketWireMessage({ type: 'error', error: 'Invalid market message' }));
+      ws.close(4003, 'protocol-invalid');
     } else {
       ws.send(serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
+      session.relayHelloChallenges.forget(ws);
+      ws.close(4003, 'protocol-invalid');
     }
   }
 };
@@ -1302,11 +1305,19 @@ const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void>
 
 type BoundServerSession = {
   internalRelayUrl: string;
+  publicRelayAudience: string;
   session: ServerSession;
   server: ReturnType<typeof createHttpServer>;
 };
 
 const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
+  const relayEndpoints = resolveUnifiedRelayEndpoints({
+    port: options.port,
+    publicRelayUrl: String(options.publicRelayUrl || process.env['PUBLIC_RELAY_URL'] || '').trim(),
+    internalRelayUrl: String(
+      options.internalRelayUrl || process.env['INTERNAL_RELAY_URL'] || process.env['RELAY_URL'] || '',
+    ).trim(),
+  });
   const incidentJournalPath = String(
     process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`,
   ).trim();
@@ -1327,15 +1338,15 @@ const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
   serverStartupBarrier = new Promise<void>(resolve => {
     resolveServerStartupBarrier = resolve;
   });
-  const internalRelayUrl = resolveConfiguredRelayUrl(options.port);
   const session: ServerSession = {
     env: null,
     routerConfig: null,
     relayHelloChallenges: createHelloChallengeRegistry(),
-    relayAudience: internalRelayUrl,
+    relayAudience: relayEndpoints.publicAudience,
   };
   return {
-    internalRelayUrl,
+    internalRelayUrl: relayEndpoints.internalUrl,
+    publicRelayAudience: relayEndpoints.publicAudience,
     session,
     server: createHttpServer(options, session),
   };
@@ -1491,7 +1502,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       ...(marketMakerState.entityId ? [marketMakerState.entityId.toLowerCase()] : []),
     ];
     startP2P(env, {
-      relayUrls: [bound.internalRelayUrl],
+      relayUrls: [bound.internalRelayUrl], relayAudience: bound.publicRelayAudience,
       ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
       isHub: hubEntityIds.length > 0,
       gossipPollMs: 250,
@@ -1538,6 +1549,8 @@ if (import.meta.main) {
     host: readCliOption(args, '--host', '127.0.0.1'),
     staticDir: readCliOption(args, '--static-dir', './frontend/build'),
     serverId: readCliOption(args, '--server-id', 'xln-server'),
+    publicRelayUrl: readCliOption(args, '--public-relay-url', process.env['PUBLIC_RELAY_URL'] || ''),
+    internalRelayUrl: readCliOption(args, '--internal-relay-url', process.env['INTERNAL_RELAY_URL'] || ''),
   };
 
   serverLog.info('cli.start', {

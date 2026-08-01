@@ -50,6 +50,7 @@ export const runtimeInputStatusUrl = (id: string): string =>
 export const createHubDirectRuntimeRoute = (
   env: RuntimeReplica,
   runtimeSeed: string,
+  publicWsUrl: string,
   isIngressReady: () => boolean,
   debug: DirectInputDebugState,
 ): ReturnType<typeof createDirectRuntimeWsRoute> => {
@@ -57,6 +58,7 @@ export const createHubDirectRuntimeRoute = (
   route = createDirectRuntimeWsRoute({
     runtimeId: String(env.runtimeId || ''),
     runtimeSeed,
+    publicWsUrl,
     onRecoveryBundleRequest: async (_from, lookupKey) =>
       resolveRuntimeAdapterRead(
         { env },

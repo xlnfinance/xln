@@ -41,6 +41,7 @@ export {
 } from './hello-transcript';
 
 const DEFAULT_MAX_WS_MESSAGE_BYTES = 16 * 1024 * 1024;
+export const MAX_PREAUTH_WS_MESSAGE_BYTES = 64 * 1024;
 
 export type RuntimeWsMessageType =
   | 'hello'
@@ -312,9 +313,9 @@ export const serializeWsMessageForDebug = (msg: RuntimeWsMessage): string =>
 
 export const deserializeWsMessage = (
   raw: string | Buffer | Uint8Array | ArrayBuffer,
+  maxBytes = wsMaxMessageBytes(),
 ): RuntimeWsMessage => {
   const byteLength = wsMessageByteLength(raw);
-  const maxBytes = wsMaxMessageBytes();
   if (byteLength > maxBytes) throw new Error(`WS_MESSAGE_TOO_LARGE:bytes=${byteLength}:max=${maxBytes}`);
   if (typeof raw === 'string') throw new Error('WS_WIRE_BINARY_REQUIRED');
   const bytes = raw instanceof ArrayBuffer

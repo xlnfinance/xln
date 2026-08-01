@@ -4,11 +4,14 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import {
   canonicalizeRuntimeWsAudience,
-  directRuntimeAudience,
 } from '../network/p2p/hello-transcript';
 import { RuntimeWsClient } from '../network/p2p/ws-client';
 import type { RuntimeWsExpectedPeer } from '../network/p2p/ws-client-handshake';
-import { deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
+import {
+  deserializeWsMessage,
+  MAX_PREAUTH_WS_MESSAGE_BYTES,
+  serializeWsMessage,
+} from '../network/p2p/ws-protocol';
 import { startStandaloneRelayServer, type StandaloneRelayServer } from '../network/relay/standalone-server';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 
@@ -91,33 +94,58 @@ const startForwardingProxy = (
   return server;
 };
 
-const startDirectServer = (seed: string) => {
+const startDirectServer = (
+  seed: string,
+  deferAudienceBinding = false,
+  onRecoveryBundleRequest?: () => Promise<unknown> | unknown,
+) => {
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
   const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(seed).publicKey);
-  const route = createDirectRuntimeWsRoute({
-    runtimeId,
-    runtimeSeed: seed,
-    onEntityInputs: () => undefined,
-  });
+  let activeSocket: { send(data: Uint8Array): unknown } | null = null;
+  let route: ReturnType<typeof createDirectRuntimeWsRoute> | null = null;
+  let audience = '';
   let serverRef: ReturnType<typeof Bun.serve> | null = null;
   const server = Bun.serve<{ type: 'direct-runtime' }>({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request, server) {
+      if (!route) return new Response('Starting', { status: 503 });
       const decision = route.maybeUpgrade(request, server);
       if (decision.handled) return decision.response;
       return new Response('Not found', { status: 404 });
     },
     websocket: {
-      open: ws => route.websocket.open(ws),
-      message: (ws, raw) => route.websocket.message(ws, raw as Buffer),
-      close: ws => route.websocket.close(ws),
+      open: ws => {
+        activeSocket = ws;
+        route?.websocket.open(ws);
+      },
+      message: (ws, raw) => route?.websocket.message(ws, raw as Buffer),
+      close: ws => route?.websocket.close(ws),
     },
   });
   serverRef = server;
   void serverRef;
   proxies.push(server);
-  return { server, runtimeId, encryptionPubKey };
+  const bindAudience = (publicWsUrl: string): void => {
+    if (route) throw new Error('DIRECT_TEST_AUDIENCE_ALREADY_BOUND');
+    audience = publicWsUrl;
+    route = createDirectRuntimeWsRoute({
+      runtimeId,
+      runtimeSeed: seed,
+      publicWsUrl,
+      onEntityInputs: () => undefined,
+      ...(onRecoveryBundleRequest ? { onRecoveryBundleRequest } : {}),
+    });
+  };
+  if (!deferAudienceBinding) bindAudience(`ws://127.0.0.1:${server.port}/ws`);
+  return {
+    server,
+    runtimeId,
+    encryptionPubKey,
+    bindAudience,
+    get audience() { return audience; },
+    get socket() { return activeSocket; },
+  };
 };
 
 afterEach(() => {
@@ -125,6 +153,55 @@ afterEach(() => {
   for (const upstream of upstreams.splice(0)) upstream.close();
   for (const proxy of proxies.splice(0)) proxy.stop(true);
   for (const relay of relays.splice(0)) relay.close();
+});
+
+test('standalone relay closes an auto-pong socket at the absolute hello deadline', async () => {
+  const relay = startStandaloneRelayServer({
+    host: '127.0.0.1',
+    port: 0,
+    serverId: 'hello-deadline-relay',
+    helloTimeoutMs: 25,
+  });
+  relays.push(relay);
+  const silent = new WebSocket(`ws://127.0.0.1:${relay.server.port}`);
+  upstreams.push(silent);
+  let closed: { code: number; reason: string } | null = null;
+  silent.addEventListener('close', event => {
+    closed = { code: event.code, reason: event.reason };
+  });
+
+  await waitUntil(() => closed !== null, 'relay absolute hello deadline');
+
+  expect(closed).toEqual({ code: 4008, reason: 'hello-timeout' });
+});
+
+test('standalone relay rejects an oversized frame before pre-auth MessagePack decoding', async () => {
+  const relay = startStandaloneRelayServer({
+    host: '127.0.0.1',
+    port: 0,
+    serverId: 'preauth-size-relay',
+  });
+  relays.push(relay);
+  const socket = new WebSocket(`ws://127.0.0.1:${relay.server.port}`);
+  upstreams.push(socket);
+  let protocolError = '';
+  let closeCode = 0;
+  socket.binaryType = 'arraybuffer';
+  socket.addEventListener('open', () => {
+    socket.send(new Uint8Array(MAX_PREAUTH_WS_MESSAGE_BYTES + 1));
+  });
+  socket.addEventListener('message', event => {
+    const message = deserializeWsMessage(event.data as ArrayBuffer);
+    if (message.type === 'error') protocolError = String(message.error || '');
+  });
+  socket.addEventListener('close', event => { closeCode = event.code; });
+
+  await waitUntil(() => closeCode !== 0, 'relay preauth size rejection');
+
+  expect(protocolError).toContain(
+    `WS_MESSAGE_TOO_LARGE:bytes=${MAX_PREAUTH_WS_MESSAGE_BYTES + 1}:max=${MAX_PREAUTH_WS_MESSAGE_BYTES}`,
+  );
+  expect(closeCode).toBe(4003);
 });
 
 test('a relay cannot use another relay challenge to replace a live victim session', async () => {
@@ -190,6 +267,7 @@ test('direct handshake verifies the signed responder challenge and signed ACK', 
     errors,
     {
       role: 'direct-runtime-server',
+      audience: target.audience,
       runtimeId: target.runtimeId,
       encryptionPubKey: target.encryptionPubKey,
     },
@@ -203,10 +281,48 @@ test('direct handshake verifies the signed responder challenge and signed ACK', 
   expect(errors).toEqual([]);
 });
 
+test('post-auth identity failure rejects an outstanding recovery request immediately', async () => {
+  let recoveryRequested = false;
+  const target = startDirectServer(
+    'direct-session-mismatch-target',
+    false,
+    () => {
+      recoveryRequested = true;
+      return new Promise<never>(() => undefined);
+    },
+  );
+  const errors: string[] = [];
+  const client = makeClient(
+    `ws://127.0.0.1:${target.server.port}/ws`,
+    errors,
+    {
+      role: 'direct-runtime-server',
+      audience: target.audience,
+      runtimeId: target.runtimeId,
+      encryptionPubKey: target.encryptionPubKey,
+    },
+  );
+  await client.connect();
+  await waitUntil(() => client.isOpen(), 'authenticated direct recovery client');
+  const recoveryResult = client.requestRecoveryBundles(target.runtimeId, 'pending-bundle', 5_000)
+    .then(() => 'resolved', error => (error as Error).message);
+  await waitUntil(() => recoveryRequested, 'pending direct recovery request');
+  target.socket?.send(serializeWsMessage({
+    type: 'gossip_announce',
+    from: '0x1111111111111111111111111111111111111111',
+    timestamp: Date.now(),
+    payload: { profiles: [] },
+  }));
+
+  expect(await recoveryResult).toBe('RECOVERY_REQUEST_HANDSHAKE_FAILED');
+  expect(errors.some(error => error.includes('WS_DIRECT_SESSION_RUNTIME_MISMATCH'))).toBeTrue();
+});
+
 test('direct client rejects a challenge replayed under the relay role', async () => {
   const targetSeed = 'direct-cross-role-target';
   const targetRuntimeId = deriveSignerAddressSync(targetSeed, '1').toLowerCase();
   const targetKey = pubKeyToHex(deriveEncryptionKeyPair(targetSeed).publicKey);
+  let targetAudience = '';
   let serverRef: ReturnType<typeof Bun.serve> | null = null;
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -220,7 +336,7 @@ test('direct client rejects a challenge replayed under the relay role', async ()
         ws.send(serializeWsMessage({
           type: 'hello_challenge',
           challenge: `0x${'31'.repeat(32)}`,
-          audience: directRuntimeAudience(targetRuntimeId),
+          audience: targetAudience,
           initiatorRole: 'runtime-client',
           responderRole: 'relay-server',
           from: targetRuntimeId,
@@ -232,12 +348,18 @@ test('direct client rejects a challenge replayed under the relay role', async ()
     },
   });
   serverRef = server;
+  targetAudience = `ws://127.0.0.1:${server.port}/`;
   proxies.push(server);
   const errors: string[] = [];
   const client = makeClient(
     `ws://127.0.0.1:${server.port}`,
     errors,
-    { role: 'direct-runtime-server', runtimeId: targetRuntimeId, encryptionPubKey: targetKey },
+    {
+      role: 'direct-runtime-server',
+      audience: targetAudience,
+      runtimeId: targetRuntimeId,
+      encryptionPubKey: targetKey,
+    },
   );
   await client.connect();
   await waitUntil(() => errors.length > 0, 'cross-role-rejection');
@@ -270,8 +392,37 @@ test('authenticated client rejects a legacy challenge instead of downgrading', a
   expect(errors.some(error => error.includes('WS_HELLO_CHALLENGE_AUDIENCE_MISMATCH'))).toBeTrue();
 });
 
+test('authenticated client treats a pre-ACK error frame as a failed handshake', async () => {
+  let serverRef: ReturnType<typeof Bun.serve> | null = null;
+  let rejectedClose: { code: number; reason: string } | null = null;
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: request => request.headers.get('upgrade') === 'websocket' && serverRef?.upgrade(request)
+      ? undefined
+      : new Response('WebSocket required', { status: 426 }),
+    websocket: {
+      open: ws => ws.send(serializeWsMessage({ type: 'error', error: 'injected-before-ack' })),
+      message() { throw new Error('PRE_ACK_ERROR_MUST_NOT_RECEIVE_HELLO'); },
+      close(_ws, code, reason) {
+        rejectedClose ??= { code, reason };
+      },
+    },
+  });
+  serverRef = server;
+  proxies.push(server);
+  const errors: string[] = [];
+  const client = makeClient(`ws://127.0.0.1:${server.port}`, errors);
+  await client.connect();
+  await waitUntil(() => rejectedClose !== null, 'pre-ACK error rejection');
+
+  expect(client.isOpen()).toBeFalse();
+  expect(rejectedClose?.code).toBe(4003);
+  expect(errors.some(error => error.includes('WS_ERROR_BEFORE_HANDSHAKE_ACK:injected-before-ack'))).toBeTrue();
+});
+
 test('direct client rejects an ACK whose challenge no longer matches the signed hello', async () => {
-  const target = startDirectServer('direct-ack-binding-target');
+  const target = startDirectServer('direct-ack-binding-target', true);
   const targetUrl = `ws://127.0.0.1:${target.server.port}/ws`;
   const proxy = startForwardingProxy(targetUrl, payload => {
     const message = deserializeWsMessage(payload);
@@ -279,12 +430,15 @@ test('direct client rejects an ACK whose challenge no longer matches the signed 
       ? serializeWsMessage({ ...message, challenge: `0x${'ff'.repeat(32)}` })
       : payload;
   });
+  const proxyUrl = `ws://127.0.0.1:${proxy.port}/`;
+  target.bindAudience(proxyUrl);
   const errors: string[] = [];
   const client = makeClient(
-    `ws://127.0.0.1:${proxy.port}`,
+    proxyUrl,
     errors,
     {
       role: 'direct-runtime-server',
+      audience: target.audience,
       runtimeId: target.runtimeId,
       encryptionPubKey: target.encryptionPubKey,
     },

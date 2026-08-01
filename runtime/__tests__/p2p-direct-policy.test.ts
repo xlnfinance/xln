@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../account/crypto';
+import { canonicalizeDirectRuntimeWsAudience } from '../network/p2p/hello-transcript';
 import { RuntimeP2P } from '../network/p2p/p2p';
-import { hexToPubKey } from '../protocol/p2p-crypto';
+import { RuntimeWsClient } from '../network/p2p/ws-client';
+import { isBrowserDirectWsEndpointAllowed } from '../network/p2p/p2p-endpoints';
+import { deriveEncryptionKeyPair, hexToPubKey } from '../protocol/p2p-crypto';
 import type { Profile } from '../entity/profile';
 import type { RuntimeReplica } from '../runtime/types';
 
@@ -57,6 +60,59 @@ const makeP2P = (profiles: Profile[]): RuntimeP2P => new RuntimeP2P({
 });
 
 describe('RuntimeP2P direct transport policy', () => {
+  test('requires TLS for public relay audiences while permitting a separate private dial target', () => {
+    const options = {
+      env: {
+        runtimeSeed: 'p2p-relay-audience-policy',
+        gossip: { getProfiles: () => [] },
+        warn: () => {},
+      } as unknown as RuntimeReplica,
+      runtimeId: runtimeIdFor('relay-audience-policy'),
+      relayUrls: ['ws://10.0.0.2:8080/relay'],
+      onEntityInputs: () => {},
+      onGossipProfiles: () => {},
+    };
+
+    expect(() => new RuntimeP2P(options)).toThrow('RUNTIME_WS_PUBLIC_PLAINTEXT_FORBIDDEN');
+    expect(() => new RuntimeP2P({
+      ...options,
+      relayAudience: 'wss://relay.example/relay',
+    })).toThrow('RUNTIME_WS_PUBLIC_PLAINTEXT_FORBIDDEN');
+    expect(() => new RuntimeP2P({
+      ...options,
+      relayUrls: ['ws://127.0.0.1:8080/relay'],
+      relayAudience: 'wss://relay.example/relay',
+    })).not.toThrow();
+    expect(() => new RuntimeP2P({
+      ...options,
+      relayUrls: ['wss://forwarder.example/relay'],
+      relayAudience: 'wss://relay.example/relay',
+    })).toThrow('P2P_RELAY_TRANSPORT_AUDIENCE_MISMATCH');
+  });
+
+  test('rejects wildcard direct websocket audiences', () => {
+    expect(() => canonicalizeDirectRuntimeWsAudience('wss://0.0.0.0/direct-runtime'))
+      .toThrow('DIRECT_RUNTIME_WS_AUDIENCE_WILDCARD_FORBIDDEN');
+  });
+
+  test('public browser pages never dial a gossip-advertised loopback endpoint', () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { protocol: 'https:', hostname: 'xln.finance' } },
+    });
+    try {
+      expect(isBrowserDirectWsEndpointAllowed('ws://127.0.0.1:8080/direct-runtime')).toBe(false);
+      expect(isBrowserDirectWsEndpointAllowed('wss://localhost:8443/direct-runtime')).toBe(false);
+      expect(isBrowserDirectWsEndpointAllowed('wss://localhost.:8443/direct-runtime')).toBe(false);
+      expect(isBrowserDirectWsEndpointAllowed('wss://[::ffff:7f00:1]:8443/direct-runtime')).toBe(false);
+      expect(isBrowserDirectWsEndpointAllowed('wss://hub.example/direct-runtime')).toBe(true);
+    } finally {
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else delete (globalThis as { window?: unknown }).window;
+    }
+  });
+
   test('rejects malformed X25519 public-key hex instead of decoding zeros', () => {
     expect(() => hexToPubKey(`0x${'zz'.repeat(32)}`)).toThrow('P2P_INVALID_PUBKEY');
   });
@@ -80,6 +136,20 @@ describe('RuntimeP2P direct transport policy', () => {
 
     expect((p2p as unknown as { getDirectPeerEndpoint: (runtimeId: string) => string | null })
       .getDirectPeerEndpoint(hubRuntimeId)).toBe(endpoint);
+  });
+
+  test('ignores a signed public plaintext hub endpoint without throwing out of relay callbacks', () => {
+    const hubRuntimeId = runtimeIdFor('plaintext-public-hub');
+    const p2p = makeP2P([
+      buildProfile('24', hubRuntimeId, key('24'), true, 'ws://attacker.example/direct-runtime'),
+    ]);
+    const internal = p2p as unknown as {
+      getDirectPeerEndpoint: (runtimeId: string) => string | null;
+      syncDirectPeerConnections: () => void;
+    };
+
+    expect(() => internal.syncDirectPeerConnections()).not.toThrow();
+    expect(internal.getDirectPeerEndpoint(hubRuntimeId)).toBeNull();
   });
 
   test('does not use an unverified cached profile as encryption authority', () => {
@@ -133,5 +203,50 @@ describe('RuntimeP2P direct transport policy', () => {
 
     expect(() => internal.resolveTargetEncryptionKey(hubRuntimeId))
       .toThrow('P2P_SIGNED_RUNTIME_KEY_CONFLICT');
+  });
+
+  test('rebuilds and drains a terminal direct client instead of dropping its ownership', async () => {
+    const hubRuntimeId = runtimeIdFor('terminal-direct-client');
+    const endpoint = 'ws://127.0.0.1:1/direct-runtime';
+    const profile = buildProfile('66', hubRuntimeId, key('66'), true, endpoint);
+    const p2p = makeP2P([profile]);
+    const terminalClient = new RuntimeWsClient({
+      url: endpoint,
+      runtimeId: runtimeIdFor('local'),
+      signerId: '1',
+      seed: 'p2p-direct-policy-local',
+      useHelloAuth: true,
+      expectedPeer: {
+        role: 'direct-runtime-server',
+        audience: endpoint,
+        runtimeId: hubRuntimeId,
+        encryptionPubKey: key('66'),
+      },
+      encryptionKeyPair: deriveEncryptionKeyPair('p2p-direct-policy-local'),
+    });
+    terminalClient.close();
+    const internal = p2p as unknown as {
+      directClients: Map<string, RuntimeWsClient>;
+      directClientUrls: Map<string, string>;
+      retiredClients: Set<RuntimeWsClient>;
+      rememberVerifiedProfileRoute: (value: Profile) => void;
+      ensureDirectClientForRuntime: (runtimeId: string) => void;
+    };
+    internal.rememberVerifiedProfileRoute(profile);
+    internal.directClients.set(hubRuntimeId, terminalClient);
+    internal.directClientUrls.set(hubRuntimeId, endpoint);
+    try {
+      internal.ensureDirectClientForRuntime(hubRuntimeId);
+      const replacement = internal.directClients.get(hubRuntimeId);
+
+      expect(replacement).toBeDefined();
+      expect(replacement).not.toBe(terminalClient);
+      expect(replacement?.isTerminallyClosed()).toBe(false);
+      expect(internal.retiredClients.has(terminalClient)).toBe(true);
+      await Bun.sleep(0);
+      expect(internal.retiredClients.has(terminalClient)).toBe(false);
+    } finally {
+      p2p.close();
+    }
   });
 });

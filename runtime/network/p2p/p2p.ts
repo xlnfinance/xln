@@ -24,7 +24,6 @@ import {
   isBrowserDirectWsEndpointAllowed,
   isSameWsUrlList,
   normalizeOptionalWsUrl,
-  sameWsUrl,
   uniqueTransportValues,
 } from './p2p-endpoints';
 import {
@@ -40,6 +39,11 @@ import {
   type ValidatorEncryptionAnnouncement,
 } from '../../entity/profile-encryption';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
+import {
+  canonicalizeDirectRuntimeWsAudience,
+  canonicalizePublicRuntimeWsAudience,
+  isLoopbackRuntimeWsHostname,
+} from './hello-transcript';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
@@ -47,6 +51,34 @@ const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
 const ENTITY_INPUT_TARGET_OFFLINE = 'ENTITY_INPUT_TARGET_NOT_CONNECTED';
 const RELIABLE_RECEIPT_TARGET_OFFLINE = 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
+
+const normalizeOptionalRelayAudience = (value: string | null | undefined): string | null => {
+  const trimmed = String(value || '').trim();
+  return trimmed ? canonicalizePublicRuntimeWsAudience(trimmed) : null;
+};
+
+const assertRelayTransportAudiencesSecure = (
+  relayUrls: readonly string[],
+  relayAudience: string | null,
+): void => {
+  for (const relayUrl of relayUrls) {
+    const transportAudience = canonicalizePublicRuntimeWsAudience(relayUrl);
+    if (
+      relayAudience
+      && !isLoopbackRuntimeWsHostname(new URL(relayUrl).hostname)
+      && transportAudience !== relayAudience
+    ) {
+      throw new Error(
+        `P2P_RELAY_TRANSPORT_AUDIENCE_MISMATCH:transport=${transportAudience}:expected=${relayAudience}`,
+      );
+    }
+  }
+};
+
+const normalizeOptionalDirectWsAudience = (value: string | null | undefined): string | null => {
+  const trimmed = String(value || '').trim();
+  return trimmed ? canonicalizeDirectRuntimeWsAudience(trimmed) : null;
+};
 export const reportRelayClientError = (env: RuntimeReplica, relay: string, error: Error): void => {
   if (error.message === ENTITY_INPUT_TARGET_OFFLINE) {
     env.info('network', 'ENTITY_INPUT_TARGET_OFFLINE', { relay, error: error.message });
@@ -87,6 +119,7 @@ export const reportDirectClientError = (
 
 export type P2PConfig = {
   relayUrls?: string[];
+  relayAudience?: string | null;
   wsUrl?: string | null;
   allowDirectClients?: boolean;
   preferRelayForEntityInput?: boolean;
@@ -103,6 +136,7 @@ type RuntimeP2POptions = {
   runtimeId: string;
   signerId?: string;
   relayUrls?: string[];
+  relayAudience?: string | null;
   wsUrl?: string | null;
   allowDirectClients?: boolean;
   preferRelayForEntityInput?: boolean;
@@ -260,6 +294,7 @@ export class RuntimeP2P {
   private runtimeId: string;
   private signerId: string;
   private relayUrls: string[];
+  private relayAudience: string | null;
   private wsUrl: string | null;
   private allowDirectClients: boolean;
   private preferRelayForEntityInput: boolean;
@@ -271,6 +306,7 @@ export class RuntimeP2P {
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private onEncryptionManifestComplete: RuntimeP2POptions['onEncryptionManifestComplete'];
   private clients: RuntimeWsClient[] = [];
+  private retiredClients = new Set<RuntimeWsClient>();
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
   private directClientErrors = new Map<string, { at: number; error: string }>();
@@ -301,7 +337,9 @@ export class RuntimeP2P {
     this.runtimeId = normalizeRuntimeId(options.runtimeId);
     this.signerId = options.signerId || '1';
     this.relayUrls = uniqueTransportValues(options.relayUrls || [DEFAULT_RELAY_URL]);
-    this.wsUrl = normalizeOptionalWsUrl(options.wsUrl);
+    this.relayAudience = normalizeOptionalRelayAudience(options.relayAudience);
+    assertRelayTransportAudiencesSecure(this.relayUrls, this.relayAudience);
+    this.wsUrl = normalizeOptionalDirectWsAudience(options.wsUrl);
     this.allowDirectClients = options.allowDirectClients !== false;
     this.preferRelayForEntityInput = options.preferRelayForEntityInput === true;
     this.seedRuntimeIds = uniqueTransportValues(options.seedRuntimeIds || []);
@@ -334,6 +372,11 @@ export class RuntimeP2P {
   }
 
   updateConfig(config: P2PConfig) {
+    const nextRelayUrls = config.relayUrls ? uniqueTransportValues(config.relayUrls) : this.relayUrls;
+    const nextRelayAudience = Object.prototype.hasOwnProperty.call(config, 'relayAudience')
+      ? normalizeOptionalRelayAudience(config.relayAudience)
+      : this.relayAudience;
+    assertRelayTransportAudiencesSecure(nextRelayUrls, nextRelayAudience);
     if (config.allowDirectClients !== undefined && this.allowDirectClients !== (config.allowDirectClients !== false)) {
       this.allowDirectClients = config.allowDirectClients !== false;
       if (!this.allowDirectClients) this.closeDirectClients();
@@ -345,8 +388,8 @@ export class RuntimeP2P {
       this.seedRuntimeIds = uniqueTransportValues(config.seedRuntimeIds);
     }
     if (Object.prototype.hasOwnProperty.call(config, 'wsUrl')) {
-      const nextUrl = normalizeOptionalWsUrl(config.wsUrl);
-      if (!sameWsUrl(nextUrl, this.wsUrl)) {
+      const nextUrl = normalizeOptionalDirectWsAudience(config.wsUrl);
+      if (nextUrl !== this.wsUrl) {
         this.wsUrl = nextUrl;
         this.announceLocalProfiles();
       }
@@ -365,13 +408,13 @@ export class RuntimeP2P {
         this.startPolling();
       }
     }
-    if (config.relayUrls) {
-      const nextUrls = uniqueTransportValues(config.relayUrls);
-      if (!isSameWsUrlList(nextUrls, this.relayUrls)) {
-        this.relayUrls = nextUrls;
-        this.reconnect();
-        return;
-      }
+    const reconnectRelayClients = !isSameWsUrlList(nextRelayUrls, this.relayUrls)
+      || nextRelayAudience !== this.relayAudience;
+    this.relayUrls = nextRelayUrls;
+    this.relayAudience = nextRelayAudience;
+    if (reconnectRelayClients) {
+      this.reconnect();
+      return;
     }
     this.announceLocalProfiles();
   }
@@ -381,7 +424,7 @@ export class RuntimeP2P {
     this.registerVisibilityReconnect();
     this.startPolling();
     if (this.hasRelayConnectionActivity()) return;
-    this.closeClients();
+    this.retireRelayClients();
     for (const url of this.relayUrls) {
       const runtimeSeed = this.env.runtimeSeed;
       const client = new RuntimeWsClient({
@@ -390,7 +433,7 @@ export class RuntimeP2P {
         signerId: this.signerId,
         ...(runtimeSeed ? { seed: runtimeSeed } : {}),
         useHelloAuth: true,
-        expectedPeer: { role: 'relay-server', audience: url },
+        expectedPeer: { role: 'relay-server', audience: this.relayAudience || url },
         encryptionKeyPair: this.encryptionKeyPair,
         onPeerEncryptionKey: (fromRuntimeId: string, pubKeyHex: string) => {
           this.handlePeerEncryptionKey(fromRuntimeId, pubKeyHex);
@@ -519,12 +562,12 @@ export class RuntimeP2P {
       if (document.visibilityState !== 'visible') {
         return;
       }
-      if (!activeClient) {
+      if (!this.hasRelayConnectionActivity()) {
         p2pLog.warn('browser.resume_reconnect');
         this.reconnect();
         return;
       }
-      this.requestSeedGossip('incremental');
+      if (activeClient) this.requestSeedGossip('incremental');
     };
     this.visibilityHandler = resume;
     this.focusHandler = resume;
@@ -600,7 +643,7 @@ export class RuntimeP2P {
   }
 
   reconnect() {
-    this.closeClients();
+    this.retireRelayClients();
     this.connect();
   }
 
@@ -1244,7 +1287,7 @@ export class RuntimeP2P {
       const profile = buildLocalEntityProfile(this.env, replica.state, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
       profile.wsUrl = profile.metadata.isHub === true ? this.wsUrl : null;
-      profile.relays = this.relayUrls;
+      profile.relays = this.relayAudience ? [this.relayAudience] : this.relayUrls;
       const profileHash = computeProfileHash(profile);
       const certification = replica.hankoWitness?.get(profileHash);
       if (!certification || certification.type !== 'profile') {
@@ -1478,6 +1521,25 @@ export class RuntimeP2P {
     }
   }
 
+  private retireRelayClients(): void {
+    const retiring = this.clients;
+    this.clients = [];
+    for (const client of retiring) this.retireClient(client);
+  }
+
+  private retireClient(client: RuntimeWsClient): void {
+    if (this.retiredClients.has(client)) return;
+    this.retiredClients.add(client);
+    void client.closeAndWait().then(
+      () => this.retiredClients.delete(client),
+      error => {
+        this.env.warn('network', 'WS_CLIENT_RETIRE_FAILED', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
+  }
+
   private closeDirectClients() {
     // Direct clients follow the same sync-then-awaited lifecycle as relays.
     for (const client of this.directClients.values()) {
@@ -1488,6 +1550,7 @@ export class RuntimeP2P {
   private async drainAllClients(timeoutMs: number): Promise<void> {
     const entries = [
       ...this.clients.map(client => ({ kind: 'relay' as const, key: '', client })),
+      ...[...this.retiredClients].map(client => ({ kind: 'retired' as const, key: '', client })),
       ...[...this.directClients.entries()].map(([key, client]) => ({ kind: 'direct' as const, key, client })),
     ];
     const results = await Promise.allSettled(entries.map(({ client }) => client.closeAndWait(timeoutMs)));
@@ -1501,7 +1564,8 @@ export class RuntimeP2P {
         );
         return;
       }
-      if (entry.kind === 'relay') this.clients = this.clients.filter(client => client !== entry.client);
+      if (entry.kind === 'retired') this.retiredClients.delete(entry.client);
+      else if (entry.kind === 'relay') this.clients = this.clients.filter(client => client !== entry.client);
       else if (this.directClients.get(entry.key) === entry.client) {
         this.directClients.delete(entry.key);
         this.directClientUrls.delete(entry.key);
@@ -1520,8 +1584,23 @@ export class RuntimeP2P {
     for (const profile of profiles) {
       if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) continue;
       if (profile.metadata?.isHub !== true) continue;
-      const endpoint = normalizeOptionalWsUrl(profile.wsUrl);
-      if (endpoint && isBrowserDirectWsEndpointAllowed(endpoint)) return endpoint;
+      const advertisedEndpoint = normalizeOptionalWsUrl(profile.wsUrl);
+      if (!advertisedEndpoint) continue;
+      try {
+        const endpoint = canonicalizeDirectRuntimeWsAudience(advertisedEndpoint);
+        if (isBrowserDirectWsEndpointAllowed(endpoint)) return endpoint;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const previous = this.directClientErrors.get(normalizedTargetRuntimeId);
+        if (previous?.error !== message) {
+          this.env.warn('network', 'P2P_DIRECT_ENDPOINT_REJECTED', {
+            endpoint: advertisedEndpoint,
+            targetRuntimeId: normalizedTargetRuntimeId,
+            error: message,
+          });
+        }
+        this.directClientErrors.set(normalizedTargetRuntimeId, { at: Date.now(), error: message });
+      }
     }
     return null;
   }
@@ -1579,7 +1658,7 @@ export class RuntimeP2P {
     if (!endpoint) return;
     const existing = this.directClients.get(normalizedTargetRuntimeId);
     const existingUrl = this.directClientUrls.get(normalizedTargetRuntimeId);
-    if (existing && existingUrl === endpoint) {
+    if (existing && existingUrl === endpoint && !existing.isTerminallyClosed()) {
       if (!existing.isOpen() && !existing.isConnecting()) {
         existing.connect().catch(error => {
           this.env.warn('network', 'WS_DIRECT_CONNECT_FAILED', {
@@ -1592,7 +1671,7 @@ export class RuntimeP2P {
       return;
     }
     if (existing) {
-      existing.close();
+      this.retireClient(existing);
       this.directClients.delete(normalizedTargetRuntimeId);
       this.directClientUrls.delete(normalizedTargetRuntimeId);
       this.directClientErrors.delete(normalizedTargetRuntimeId);
@@ -1616,6 +1695,7 @@ export class RuntimeP2P {
       useHelloAuth: true,
       expectedPeer: {
         role: 'direct-runtime-server',
+        audience: endpoint,
         runtimeId: normalizedTargetRuntimeId,
         encryptionPubKey: pubKeyToHex(expectedEncryptionKey),
       },
@@ -1680,9 +1760,11 @@ export class RuntimeP2P {
     }
     for (const runtimeId of Array.from(this.directClients.keys())) {
       if (desired.has(runtimeId)) continue;
-      this.directClients.get(runtimeId)?.close();
+      const staleClient = this.directClients.get(runtimeId);
+      if (staleClient) this.retireClient(staleClient);
       this.directClients.delete(runtimeId);
       this.directClientUrls.delete(runtimeId);
+      this.directClientErrors.delete(runtimeId);
     }
   }
 }

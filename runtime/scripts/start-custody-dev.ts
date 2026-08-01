@@ -85,6 +85,7 @@ const main = async (): Promise<void> => {
     daemonPort: DAEMON_PORT,
     custodyPort: CUSTODY_PORT,
     relayUrl: RELAY_URL,
+    relayAudience: RELAY_URL,
     rpcUrl: ANVIL_RPC,
     walletUrl: WALLET_URL,
     dbRoot: DB_ROOT,

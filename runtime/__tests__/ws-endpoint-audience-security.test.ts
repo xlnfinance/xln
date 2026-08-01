@@ -5,6 +5,8 @@ import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { canonicalizeDirectRuntimeWsAudience } from '../network/p2p/hello-transcript';
 import { RuntimeWsClient } from '../network/p2p/ws-client';
 import { resolveUnifiedRelayEndpoints } from '../network/relay/audience-config';
+import { startStandaloneRelayServer } from '../network/relay/standalone-server';
+import { normalizeOrchestratorWsUrl } from '../orchestrator/orchestrator-config';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 
 const servers: Array<ReturnType<typeof Bun.serve>> = [];
@@ -127,10 +129,48 @@ test('direct handshake rejects a transparent proxy serving a different signed en
 test('direct public endpoints require TLS while loopback remains available for local dev', () => {
   expect(canonicalizeDirectRuntimeWsAudience('ws://127.0.0.1:8080/ws')).toBe('ws://127.0.0.1:8080/ws');
   expect(canonicalizeDirectRuntimeWsAudience('ws://localhost:8080/ws')).toBe('ws://localhost:8080/ws');
+  expect(canonicalizeDirectRuntimeWsAudience('ws://localhost.:8080/ws')).toBe('ws://localhost.:8080/ws');
   expect(canonicalizeDirectRuntimeWsAudience('ws://[::1]:8080/ws')).toBe('ws://[::1]:8080/ws');
+  expect(canonicalizeDirectRuntimeWsAudience('ws://[::ffff:7f00:1]:8080/ws'))
+    .toBe('ws://[::ffff:7f00:1]:8080/ws');
   expect(canonicalizeDirectRuntimeWsAudience('wss://Hub.Example/ws')).toBe('wss://hub.example/ws');
+  expect(canonicalizeDirectRuntimeWsAudience('wss://hub.example/ws?tenant=alpha'))
+    .toBe('wss://hub.example/ws?tenant=alpha');
   expect(() => canonicalizeDirectRuntimeWsAudience('ws://hub.example/ws'))
     .toThrow('DIRECT_RUNTIME_WS_PLAINTEXT_PUBLIC_FORBIDDEN');
+  expect(() => canonicalizeDirectRuntimeWsAudience('http://hub.example/ws'))
+    .toThrow('DIRECT_RUNTIME_WS_PLAINTEXT_PUBLIC_FORBIDDEN');
+  expect(() => canonicalizeDirectRuntimeWsAudience('wss://hub.example/ws#other-endpoint'))
+    .toThrow('DIRECT_RUNTIME_WS_AUDIENCE_FRAGMENT_FORBIDDEN');
+});
+
+test('direct client cannot connect one transport while claiming another audience', () => {
+  const seed = 'direct-client-endpoint-mismatch';
+  expect(() => new RuntimeWsClient({
+    url: 'ws://127.0.0.1:8080/ws',
+    runtimeId: deriveSignerAddressSync(seed, '1').toLowerCase(),
+    seed,
+    useHelloAuth: true,
+    expectedPeer: {
+      role: 'direct-runtime-server',
+      audience: 'ws://localhost:8080/ws',
+      runtimeId: '0x1111111111111111111111111111111111111111',
+    },
+  })).toThrow('WS_INIT_DIRECT_ENDPOINT_AUDIENCE_MISMATCH');
+});
+
+test('relay client cannot forward credentials through a different public endpoint', () => {
+  const seed = 'relay-client-endpoint-mismatch';
+  expect(() => new RuntimeWsClient({
+    url: 'wss://forwarder.example/relay',
+    runtimeId: deriveSignerAddressSync(seed, '1').toLowerCase(),
+    seed,
+    useHelloAuth: true,
+    expectedPeer: {
+      role: 'relay-server',
+      audience: 'wss://wallet.example/relay',
+    },
+  })).toThrow('WS_INIT_RELAY_ENDPOINT_AUDIENCE_MISMATCH');
 });
 
 test('unified relay keeps internal transport separate from one public crypto audience', () => {
@@ -151,6 +191,47 @@ test('unified relay keeps internal transport separate from one public crypto aud
     internalUrl: 'ws://127.0.0.1:8080/relay',
     publicAudience: 'wss://wallet.example/relay',
   });
+  expect(() => resolveUnifiedRelayEndpoints({
+    port: 8080,
+    publicRelayUrl: 'wss://wallet.example/relay',
+    internalRelayUrl: 'wss://forwarder.example/relay',
+  })).toThrow('INTERNAL_RELAY_PUBLIC_AUDIENCE_MISMATCH');
+});
+
+test('relay behind a loopback reverse proxy authenticates the configured browser audience', async () => {
+  const publicAudience = 'wss://wallet.example/relay';
+  const relay = startStandaloneRelayServer({
+    host: '127.0.0.1',
+    port: 0,
+    serverId: 'reverse-proxy-audience-relay',
+    audience: publicAudience,
+  });
+  servers.push(relay.server);
+  const proxyUrl = startTransparentProxy(`ws://127.0.0.1:${relay.server.port}/relay`);
+  const seed = 'reverse-proxy-audience-client';
+  const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+  const errors: string[] = [];
+  let opened = false;
+  const client = new RuntimeWsClient({
+    url: proxyUrl,
+    runtimeId,
+    signerId: '1',
+    seed,
+    useHelloAuth: true,
+    expectedPeer: { role: 'relay-server', audience: publicAudience },
+    encryptionKeyPair: deriveEncryptionKeyPair(seed),
+    onOpen: () => { opened = true; },
+    onError: error => errors.push(error.message),
+    maxReconnectAttempts: 1,
+  });
+  clients.push(client);
+
+  await client.connect();
+  await waitUntil(() => opened || errors.length > 0, 'reverse-proxy-relay-auth');
+
+  expect(opened).toBeTrue();
+  expect(errors).toEqual([]);
+  expect(relay.store.clients.has(runtimeId)).toBeTrue();
 });
 
 test('unified relay fails before startup when public audience is absent or malformed', () => {
@@ -162,4 +243,22 @@ test('unified relay fails before startup when public audience is absent or malfo
     port: 8080,
     publicRelayUrl: 'https://wallet.example/not-websocket',
   })).toThrow('PUBLIC_RELAY_AUDIENCE_PATH_INVALID');
+  expect(() => resolveUnifiedRelayEndpoints({
+    port: 8080,
+    publicRelayUrl: 'ws://wallet.example/relay',
+  })).toThrow('PUBLIC_RELAY_PLAINTEXT_FORBIDDEN');
+  expect(() => resolveUnifiedRelayEndpoints({
+    port: 8080,
+    publicRelayUrl: 'wss://0.0.0.0/relay',
+  })).toThrow('PUBLIC_RELAY_WILDCARD_FORBIDDEN');
+  const fragmentAudience = normalizeOrchestratorWsUrl(
+    'wss://wallet.example/relay#wrong',
+    '',
+    '--public-relay-url',
+  );
+  expect(fragmentAudience).toBe('wss://wallet.example/relay#wrong');
+  expect(() => resolveUnifiedRelayEndpoints({
+    port: 8080,
+    publicRelayUrl: fragmentAudience,
+  })).toThrow('PUBLIC_RELAY_AUDIENCE_SUFFIX_FORBIDDEN');
 });

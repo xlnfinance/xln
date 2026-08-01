@@ -8,7 +8,13 @@ import {
 import { compareCanonicalText } from '../../orderbook/swap-keys';
 import { deriveSignerAddressSync, signDigest } from '../../account/crypto';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from '../../protocol/p2p-crypto';
-import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
+import {
+  deserializeWsMessage,
+  makeMessageId,
+  MAX_PREAUTH_WS_MESSAGE_BYTES,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from './ws-protocol';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { verifyHelloAuth } from './hello-auth';
 import { createHelloChallengeRegistry } from './hello-challenge';
@@ -26,14 +32,18 @@ import {
   type RuntimeWsHelloTranscript,
 } from './hello-transcript';
 import { handshakeWireFields } from './ws-client-handshake';
+import { createStructuredLogger } from '../../infra/logger';
 
 type DirectRuntimeWsOptions = {
   runtimeId: string;
   runtimeSeed: Uint8Array | string;
+  publicWsUrl: string;
   runtimeSignerId?: string;
   path?: string;
   requireHelloAuth?: boolean;
   helloSkewMs?: number;
+  helloTimeoutMs?: number;
+  maxPendingHandshakes?: number;
   onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => Promise<void> | void;
   onReliableReceipt?: (from: string, receipt: ReliableDeliveryReceipt) => Promise<void> | void;
   onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
@@ -75,6 +85,7 @@ type DirectRuntimeWsContext = {
 };
 
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
+const directWsLog = createStructuredLogger('runtime.directWs');
 let directWsTimestampCounter = 0;
 
 const nextTimestamp = (): number => {
@@ -134,8 +145,7 @@ const ensureSession = (context: DirectRuntimeWsContext, ws: DirectWebSocket): Di
   return created;
 };
 
-const forgetSession = (context: DirectRuntimeWsContext, ws: DirectWebSocket): void => {
-  context.helloChallenges.forget(ws);
+const forgetSessionState = (context: DirectRuntimeWsContext, ws: DirectWebSocket): void => {
   const session = context.sessions.get(ws);
   if (!session) return;
   context.sessions.delete(ws);
@@ -144,15 +154,32 @@ const forgetSession = (context: DirectRuntimeWsContext, ws: DirectWebSocket): vo
   }
 };
 
+const forgetSession = (context: DirectRuntimeWsContext, ws: DirectWebSocket): void => {
+  context.helloChallenges.forget(ws);
+  forgetSessionState(context, ws);
+};
+
 const rememberRuntimeSession = (
   context: DirectRuntimeWsContext,
   session: DirectWsSession,
   runtimeId: string,
+  replaceAuthenticatedSession: boolean,
 ): boolean => {
   const existing = context.sessionsByRuntime.get(runtimeId);
   if (existing && existing.ws !== session.ws) {
-    if (isSocketOpen(existing.ws)) return false;
+    if (isSocketOpen(existing.ws) && !replaceAuthenticatedSession) return false;
+    existing.duplicateClosing = true;
     context.sessions.delete(existing.ws);
+    if (isSocketOpen(existing.ws)) {
+      try {
+        existing.ws.close(4009, 'superseded-runtime');
+      } catch (error) {
+        directWsLog.warn('superseded_socket.close_failed', {
+          runtimeId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
   session.runtimeId = runtimeId;
   session.handshakeDone = true;
@@ -294,7 +321,8 @@ const handleHandshake = (
   if (session.handshakeDone) return false;
   if (msg.type !== 'hello' || typeof msg.from !== 'string') {
     send(ws, { type: 'error', error: 'Handshake required: send hello with runtimeId' });
-    ws.close();
+    forgetSession(context, ws);
+    ws.close(4003, 'handshake-required');
     return true;
   }
   const normalizedFrom = normalizeRuntimeId(msg.from);
@@ -303,13 +331,15 @@ const handleHandshake = (
       ? 'Direct runtime websocket only accepts inter-runtime peers'
       : 'Invalid runtimeId in hello';
     send(ws, { type: 'error', error });
-    ws.close();
+    forgetSession(context, ws);
+    ws.close(4003, 'handshake-invalid');
     return true;
   }
   const peerKey = normalizeEncryptionPubKey(msg.fromEncryptionPubKey);
   if (!peerKey) {
     send(ws, { type: 'error', error: 'Missing or invalid fromEncryptionPubKey' });
-    ws.close();
+    forgetSession(context, ws);
+    ws.close(4003, 'handshake-invalid');
     return true;
   }
   let verifiedHelloTranscript: RuntimeWsHelloTranscript | null = null;
@@ -317,7 +347,8 @@ const handleHandshake = (
     const consumed = context.helloChallenges.consume(ws, msg);
     if (!consumed.ok) {
       send(ws, { type: 'error', error: consumed.error });
-      ws.close();
+      forgetSession(context, ws);
+      ws.close(4003, 'handshake-invalid');
       return true;
     }
     const helloTranscript: RuntimeWsHelloTranscript = {
@@ -339,14 +370,16 @@ const handleHandshake = (
     );
     if (authError) {
       send(ws, { type: 'error', error: authError });
-      ws.close();
+      forgetSession(context, ws);
+      ws.close(4003, 'handshake-invalid');
       return true;
     }
     verifiedHelloTranscript = helloTranscript;
   }
   session.peerEncryptionPubKey = peerKey;
-  if (!rememberRuntimeSession(context, session, normalizedFrom)) {
+  if (!rememberRuntimeSession(context, session, normalizedFrom, verifiedHelloTranscript !== null)) {
     session.duplicateClosing = true;
+    forgetSession(context, ws);
     ws.close(4009, 'duplicate-runtime');
     return true;
   }
@@ -516,9 +549,11 @@ const handleDirectMessage = async (
   if (session.duplicateClosing) return;
   let msg: RuntimeWsMessage;
   try {
-    msg = deserializeWsMessage(raw);
+    msg = deserializeWsMessage(raw, session.handshakeDone ? undefined : MAX_PREAUTH_WS_MESSAGE_BYTES);
   } catch (error) {
     send(ws, { type: 'error', error: `Invalid wire message: ${(error as Error).message}` });
+    forgetSession(context, ws);
+    ws.close(4003, 'protocol-invalid');
     return;
   }
   if (handleHandshake(context, ws, session, msg)) return;
@@ -554,17 +589,32 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
     throw new Error(`DIRECT_RUNTIME_WS_SIGNER_MISMATCH:runtimeId=${serverRuntimeId}:signerId=${runtimeSignerId}`);
   }
   const keyPair = deriveEncryptionKeyPair(options.runtimeSeed);
+  let contextRef: DirectRuntimeWsContext | null = null;
+  const helloChallenges = createHelloChallengeRegistry({
+    ...(options.helloTimeoutMs !== undefined ? { timeoutMs: options.helloTimeoutMs } : {}),
+    ...(options.maxPendingHandshakes !== undefined
+      ? { maxPending: options.maxPendingHandshakes }
+      : {}),
+    onReject: ws => {
+      if (contextRef) forgetSessionState(contextRef, ws as DirectWebSocket);
+    },
+  });
   const context: DirectRuntimeWsContext = {
     options,
     routePath: options.path || '/ws',
     serverRuntimeId,
     keyPair,
-    handshakeBinding: createDirectHandshakeBinding(serverRuntimeId, pubKeyToHex(keyPair.publicKey)),
+    handshakeBinding: createDirectHandshakeBinding(
+      serverRuntimeId,
+      pubKeyToHex(keyPair.publicKey),
+      options.publicWsUrl,
+    ),
     runtimeSignerId,
     sessions: new Map(),
     sessionsByRuntime: new Map(),
-    helloChallenges: createHelloChallengeRegistry(),
+    helloChallenges,
   };
+  contextRef = context;
   return {
     path: context.routePath,
     getSessionState: (): Array<{ runtimeId: string; open: boolean; lastSeen: number }> =>
@@ -599,11 +649,12 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
       open(ws: DirectWebSocket): void {
         ensureSession(context, ws);
         if (options.requireHelloAuth !== false) {
-          context.helloChallenges.issue(ws, context.handshakeBinding, transcript => {
+          const issued = context.helloChallenges.issue(ws, context.handshakeBinding, transcript => {
             const timestamp = transcript.timestamp;
             const signature = signDigest(options.runtimeSeed, runtimeSignerId, hashHelloChallenge(transcript));
             return { nonce: transcript.challenge, signature, timestamp };
           });
+          if (!issued) forgetSessionState(context, ws);
         }
       },
       message: (ws: DirectWebSocket, raw: string | Buffer | ArrayBuffer): Promise<void> =>

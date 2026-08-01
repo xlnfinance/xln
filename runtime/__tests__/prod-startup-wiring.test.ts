@@ -402,6 +402,7 @@ describe('production startup wiring', () => {
     expect(script).toContain('export RPC_TRON="${RPC_TRON:-$ANVIL_RPC2}"');
     expect(script).toContain('export RELAY_URL=${RELAY_URL:-$INTERNAL_RELAY_URL}');
     expect(script).toContain('--relay-url "$RELAY_URL"');
+    expect(script).toContain('--public-relay-url "$PUBLIC_RELAY_URL"');
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
     expect(script).not.toContain('XLN_RUNTIME_EXIT_ON_FATAL');
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
@@ -461,13 +462,20 @@ describe('production startup wiring', () => {
     const standaloneServer = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
     const custodyBootstrap = readFileSync(join(repoRoot, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
     const startCustodyDev = readFileSync(join(repoRoot, 'runtime/scripts/start-custody-dev.ts'), 'utf8');
+    const startCustodyProd = readFileSync(join(repoRoot, 'runtime/scripts/start-custody-prod.ts'), 'utf8');
+    const startCustodyScript = readFileSync(join(repoRoot, 'scripts/start-custody.sh'), 'utf8');
     const cli = readFileSync(join(repoRoot, 'runtime/api/server/cli.ts'), 'utf8');
     expect(orchestratorConfig).toContain(
-      "relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')",
+      "relayUrl: normalizeOrchestratorWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')",
     );
+    expect(orchestratorConfig).toContain("getArg('--public-relay-url', process.env['PUBLIC_RELAY_URL'] || '')");
     expect(orchestratorConfig).toContain('const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;');
     expect(orchestratorConfig).toContain("readPositiveIntegerEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000)");
-    expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
+    expect(orchestrator).toContain('const relayUrl = relayEndpoints.internalUrl;');
+    expect(orchestrator).toContain('const relayAudience = relayEndpoints.publicAudience;');
+    expect(startCustodyScript).toContain('export CUSTODY_PUBLIC_RELAY_URL=');
+    expect(startCustodyProd).toContain("const RELAY_AUDIENCE = process.env['CUSTODY_PUBLIC_RELAY_URL']");
+    expect(startCustodyProd).toContain('PUBLIC_RELAY_URL: RELAY_AUDIENCE');
     expect(orchestrator).not.toContain('XLN_MARKET_MAKER_INFO_TIMEOUT_MS');
     expect(orchestrator).toContain("process.env['XLN_CHILD_SHUTDOWN_QUIESCE_MS'] || '5000'");
     expect(orchestrator).toContain('const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;');
@@ -657,6 +665,7 @@ describe('production startup wiring', () => {
     const jurisdictionImport = readFileSync(join(repoRoot, 'runtime/runtime/jurisdiction-import.ts'), 'utf8');
     const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/types.ts'), 'utf8');
     const rpcAdapter = readRpcAdapterSource();
+    expect(hubNode).toContain('relayUrls: [resolvedArgs.relayAudience],');
     expect(hubNode).toContain("nodeLog.error('jurisdiction_contracts.code_missing'");
     expect(bootstrapHub).toContain(
       'const blockTimeMs = requireJurisdictionBlockTimeMs({ name, blockTimeMs: jr.blockTimeMs });',
@@ -2249,14 +2258,17 @@ describe('production startup wiring', () => {
   });
 
   test('hub and market maker prefer authenticated direct entity delivery with relay fallback', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const hubTransport = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-runtime-transport.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
     const p2p = readFileSync(join(repoRoot, 'runtime/network/p2p/p2p.ts'), 'utf8');
+    const p2pLifecycle = readFileSync(join(repoRoot, 'runtime/runtime/p2p-lifecycle.ts'), 'utf8');
 
     expect(p2p).toContain('preferRelayForEntityInput?: boolean;');
     expect(p2p).toContain('if (this.preferRelayForEntityInput) {');
     expect(p2p).toContain("transport: 'relay'");
+    expect(p2pLifecycle).toContain('options.preferRelayForEntityInput = config.preferRelayForEntityInput;');
     expect(hubNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(hubTransport).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(mmNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
@@ -2264,6 +2276,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)');
     expect(hubNode).toContain('preferRelayForEntityInput: true');
     expect(mmNode).toContain('preferRelayForEntityInput: true');
+    expect(orchestrator).toContain('createRelayHandshakeBinding(relayAudience)');
+    expect(orchestrator).toContain("'--relay-audience', relayAudience");
+    expect(hubNode).toContain('relayAudience: resolvedArgs.relayAudience');
+    expect(mmNode).toContain('relayAudience: resolvedArgs.relayAudience');
   });
 
   test('hub support-peer provisioning uses full jurisdiction token sets', () => {
@@ -2361,6 +2377,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('continuing market maker startup before failing reset');
     expect(custodyBootstrapSource).toContain('XLN_PREDEPLOYED_JURISDICTION_KEY: options.jurisdictionId');
     expect(custodyBootstrapSource).toContain('discoverHubIds(options.apiBaseUrl, 3, 30_000, jurisdictionTarget)');
+    expect(custodyBootstrapSource).toContain('INTERNAL_RELAY_URL: options.relayUrl');
+    expect(custodyBootstrapSource).toContain('PUBLIC_RELAY_URL: options.relayAudience');
   });
 
   test('custody daemon advertises on relay before opening hub accounts', () => {

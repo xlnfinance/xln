@@ -8,14 +8,28 @@ import {
 } from './hello-transcript';
 import { serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 
-type ChallengeSocket = { send(data: Uint8Array): unknown };
+type ChallengeSocket = {
+  send(data: Uint8Array): unknown;
+  close?(code?: number, reason?: string): unknown;
+};
 type ChallengeSigner = (transcript: RuntimeWsChallengeTranscript) => RuntimeWsAuth;
+
+type HelloChallengeRegistryOptions = {
+  timeoutMs?: number;
+  maxPending?: number;
+  onReject?: (ws: ChallengeSocket, reason: 'hello-timeout' | 'hello-capacity') => void;
+};
 
 export type HelloChallengeConsumption =
   | { ok: true; transcript: RuntimeWsChallengeTranscript }
   | { ok: false; error: string };
 
 let challengeTimestamp = 0;
+const DEFAULT_HELLO_TIMEOUT_MS = 10_000;
+const DEFAULT_MAX_PENDING_HELLOS = 1_024;
+
+const positiveIntegerOr = (value: number | undefined, fallback: number): number =>
+  Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : fallback;
 
 const nextTimestamp = (): number => {
   const timestamp = Date.now();
@@ -48,10 +62,49 @@ const helloMatchesChallenge = (
   return null;
 };
 
-export const createHelloChallengeRegistry = () => {
+export const createHelloChallengeRegistry = (options: HelloChallengeRegistryOptions = {}) => {
   const challenges = new Map<object, RuntimeWsChallengeTranscript>();
+  const timers = new Map<object, ReturnType<typeof setTimeout>>();
+  const timeoutMs = positiveIntegerOr(options.timeoutMs, DEFAULT_HELLO_TIMEOUT_MS);
+  const maxPending = positiveIntegerOr(options.maxPending, DEFAULT_MAX_PENDING_HELLOS);
+  const clearPending = (ws: object): RuntimeWsChallengeTranscript | undefined => {
+    const challenge = challenges.get(ws);
+    challenges.delete(ws);
+    const timer = timers.get(ws);
+    if (timer !== undefined) clearTimeout(timer);
+    timers.delete(ws);
+    return challenge;
+  };
+  const rejectPending = (
+    ws: ChallengeSocket,
+    reason: 'hello-timeout' | 'hello-capacity',
+  ): void => {
+    clearPending(ws);
+    try {
+      options.onReject?.(ws, reason);
+    } finally {
+      ws.close?.(4008, reason);
+    }
+  };
+  const armTimeout = (ws: ChallengeSocket): void => {
+    const timer = setTimeout(() => {
+      if (!challenges.has(ws)) return;
+      rejectPending(ws, 'hello-timeout');
+    }, timeoutMs);
+    (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+    timers.set(ws, timer);
+  };
   return {
-    issue(ws: ChallengeSocket, binding: RuntimeWsHandshakeBinding, sign?: ChallengeSigner): RuntimeWsChallengeTranscript {
+    issue(
+      ws: ChallengeSocket,
+      binding: RuntimeWsHandshakeBinding,
+      sign?: ChallengeSigner,
+    ): RuntimeWsChallengeTranscript | null {
+      clearPending(ws);
+      if (challenges.size >= maxPending) {
+        rejectPending(ws, 'hello-capacity');
+        return null;
+      }
       const transcript: RuntimeWsChallengeTranscript = {
         ...binding,
         challenge: createChallenge(),
@@ -59,30 +112,39 @@ export const createHelloChallengeRegistry = () => {
       };
       const auth = sign?.(transcript);
       challenges.set(ws, transcript);
-      ws.send(serializeWsMessage({
-        type: 'hello_challenge',
-        challenge: transcript.challenge,
-        audience: transcript.audience,
-        initiatorRole: transcript.initiatorRole,
-        responderRole: transcript.responderRole,
-        ...(transcript.responderRuntimeId ? { from: transcript.responderRuntimeId } : {}),
-        ...(transcript.responderEncryptionPubKey
-          ? { fromEncryptionPubKey: transcript.responderEncryptionPubKey }
-          : {}),
-        timestamp: transcript.timestamp,
-        ...(auth ? { auth } : {}),
-      } satisfies RuntimeWsMessage));
+      armTimeout(ws);
+      try {
+        ws.send(serializeWsMessage({
+          type: 'hello_challenge',
+          challenge: transcript.challenge,
+          audience: transcript.audience,
+          initiatorRole: transcript.initiatorRole,
+          responderRole: transcript.responderRole,
+          ...(transcript.responderRuntimeId ? { from: transcript.responderRuntimeId } : {}),
+          ...(transcript.responderEncryptionPubKey
+            ? { fromEncryptionPubKey: transcript.responderEncryptionPubKey }
+            : {}),
+          timestamp: transcript.timestamp,
+          ...(auth ? { auth } : {}),
+        } satisfies RuntimeWsMessage));
+      } catch (error) {
+        clearPending(ws);
+        throw error;
+      }
       return transcript;
     },
     consume(ws: object, hello: RuntimeWsMessage): HelloChallengeConsumption {
-      const expected = challenges.get(ws);
-      challenges.delete(ws);
+      const expected = clearPending(ws);
       if (!expected) return { ok: false, error: 'Hello challenge missing, expired, or already consumed' };
+      if (Date.now() > expected.timestamp + timeoutMs) {
+        return { ok: false, error: 'Hello challenge missing, expired, or already consumed' };
+      }
       const mismatch = helloMatchesChallenge(hello, expected);
       return mismatch ? { ok: false, error: mismatch } : { ok: true, transcript: expected };
     },
     forget(ws: object): void {
-      challenges.delete(ws);
+      clearPending(ws);
     },
+    pendingCount: (): number => challenges.size,
   };
 };

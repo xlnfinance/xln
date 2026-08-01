@@ -33,3 +33,22 @@ test('remote profile endpoints never trigger local relocation cleanup', () => {
     relayUrls: ['ws://127.0.0.1:19804/relay'],
   })).toBe(false);
 });
+
+test('restored public relay audience is independent from the local dial transport', () => {
+  const profile = {
+    runtimeId,
+    wsUrl: 'wss://xln.finance/hub/h1/ws',
+    relays: ['wss://xln.finance/relay'],
+  };
+
+  expect(restoredRuntimeRouteRelocated([profile], {
+    runtimeId,
+    wsUrl: profile.wsUrl,
+    relayUrls: profile.relays,
+  })).toBe(false);
+  expect(restoredRuntimeRouteRelocated([profile], {
+    runtimeId,
+    wsUrl: profile.wsUrl,
+    relayUrls: ['ws://127.0.0.1:8080/relay'],
+  })).toBe(true);
+});

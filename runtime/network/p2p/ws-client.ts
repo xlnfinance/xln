@@ -12,7 +12,14 @@ import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { createStructuredLogger } from '../../infra/logger';
 import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
-import { hashHelloMessage } from './hello-transcript';
+import {
+  DIRECT_RUNTIME_RESPONDER_ROLE,
+  RELAY_RESPONDER_ROLE,
+  canonicalizeDirectRuntimeWsAudience,
+  canonicalizePublicRuntimeWsAudience,
+  hashHelloMessage,
+  isLoopbackRuntimeWsHostname,
+} from './hello-transcript';
 import {
   createHelloTranscript,
   handshakeWireFields,
@@ -128,6 +135,8 @@ export type RuntimeWsClientOptions = {
   useHelloAuth?: boolean;
   expectedPeer?: RuntimeWsExpectedPeer;
   helloSkewMs?: number;
+  connectTimeoutMs?: number;
+  helloTimeoutMs?: number;
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
@@ -194,6 +203,8 @@ export class RuntimeWsClient {
   private static readonly BACKOFF_MAX_MS = 30000;
   private static readonly BACKOFF_MIN_MS = 250;
   private static readonly DEFAULT_MAX_RECONNECT_ATTEMPTS = 0;
+  private static readonly DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+  private static readonly DEFAULT_HELLO_TIMEOUT_MS = 10_000;
   private ws: WebSocketLike | null = null;
   private closed = false;
   private connecting = false;
@@ -203,9 +214,10 @@ export class RuntimeWsClient {
   private terminalCloseTimeoutMs = 1_000;
   private options: RuntimeWsClientOptions;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private helloTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private nextReconnectAt: number = 0;
-  private suppressNextClose = false;
   private helloSent = false;
   private helloAcknowledged = false;
   private pendingHandshake: PendingClientHandshake | null = null;
@@ -222,6 +234,31 @@ export class RuntimeWsClient {
       'RuntimeWsClient runtimeId must be canonical 0x-prefixed 20-byte address',
       { runtimeId: options.runtimeId },
     );
+    if (options.expectedPeer?.role === DIRECT_RUNTIME_RESPONDER_ROLE) {
+      const transportAudience = canonicalizeDirectRuntimeWsAudience(options.url);
+      const expectedAudience = canonicalizeDirectRuntimeWsAudience(options.expectedPeer.audience);
+      if (transportAudience !== expectedAudience) {
+        throw new Error(
+          `WS_INIT_DIRECT_ENDPOINT_AUDIENCE_MISMATCH:transport=${transportAudience}:expected=${expectedAudience}`,
+        );
+      }
+    }
+    if (options.useHelloAuth && options.expectedPeer?.role !== DIRECT_RUNTIME_RESPONDER_ROLE) {
+      const transportAudience = canonicalizePublicRuntimeWsAudience(options.url);
+      const expectedAudience = canonicalizePublicRuntimeWsAudience(
+        options.expectedPeer?.role === RELAY_RESPONDER_ROLE && options.expectedPeer.audience
+          ? options.expectedPeer.audience
+          : options.url,
+      );
+      if (
+        !isLoopbackRuntimeWsHostname(new URL(options.url).hostname)
+        && transportAudience !== expectedAudience
+      ) {
+        throw new Error(
+          `WS_INIT_RELAY_ENDPOINT_AUDIENCE_MISMATCH:transport=${transportAudience}:expected=${expectedAudience}`,
+        );
+      }
+    }
     this.options = { ...options, runtimeId: normalizeRuntimeId(options.runtimeId) };
     this.maxReconnectAttempts = Number.isFinite(options.maxReconnectAttempts as number)
       ? Number(options.maxReconnectAttempts)
@@ -240,15 +277,20 @@ export class RuntimeWsClient {
     this.connecting = true;
     this.helloSent = false;
     this.helloAcknowledged = false;
+    this.clearConnectTimeout();
+    this.clearHelloTimeout();
     this.pendingHandshake = null;
     this.authenticatedDirectPeer = null;
-    this.suppressNextClose = false;
     const generation = ++this.lifecycleGeneration;
+    this.armConnectTimeout(generation);
     const attempt = this.connectForGeneration(generation);
     let tracked: Promise<void>;
     tracked = attempt
       .catch(error => {
-        if (this.lifecycleGeneration === generation) this.connecting = false;
+        if (this.lifecycleGeneration === generation) {
+          this.clearConnectTimeout();
+          this.connecting = false;
+        }
         throw error;
       })
       .finally(() => {
@@ -267,7 +309,6 @@ export class RuntimeWsClient {
         runtimeId: this.options.runtimeId,
         url: this.options.url,
       });
-      this.suppressNextClose = true;
       await waitForSocketClose(staleWs, this.terminalCloseTimeoutMs);
       if (this.ws === staleWs) this.ws = null;
     }
@@ -301,23 +342,24 @@ export class RuntimeWsClient {
 
   private handleSocketOpen(generation: number): void {
     if (this.closed || generation !== this.lifecycleGeneration) return;
+    this.clearConnectTimeout();
     wsLog.debug('connected', { runtimeId: this.options.runtimeId, url: this.options.url });
     if (!this.options.useHelloAuth) {
       this.connecting = false;
       this.reconnectAttempts = 0;
       if (!this.sendHello()) return;
       this.options.onOpen?.();
+      return;
     }
+    this.armHelloTimeout(generation);
   }
 
   private handleSocketClose(generation: number, codeInput: number, reasonInput: string, wasClean?: boolean): void {
     if (generation !== this.lifecycleGeneration) return;
+    this.clearConnectTimeout();
+    this.clearHelloTimeout();
     this.connecting = false;
     this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
-    if (this.suppressNextClose) {
-      this.suppressNextClose = false;
-      return;
-    }
     if (this.closed) return;
     const code = Number(codeInput || 0);
     const reason = String(reasonInput || '');
@@ -338,6 +380,8 @@ export class RuntimeWsClient {
 
   private handleSocketError(generation: number, error: Error): void {
     if (this.closed || generation !== this.lifecycleGeneration) return;
+    this.clearConnectTimeout();
+    this.clearHelloTimeout();
     this.connecting = false;
     this.options.onError?.(error);
     // Some implementations emit only "error" when the handshake fails.
@@ -410,7 +454,10 @@ export class RuntimeWsClient {
       this.reconnectTimer = null;
       this.nextReconnectAt = 0;
       if (this.closed) return;
-      this.connect().catch(error => this.options.onError?.(error as Error));
+      this.connect().catch(error => {
+        this.options.onError?.(error as Error);
+        if (!this.closed) this.scheduleReconnect();
+      });
     }, delayMs);
   }
 
@@ -468,9 +515,74 @@ export class RuntimeWsClient {
     return true;
   }
 
-  private failHandshake(error: Error, reason = 'handshake-invalid'): void {
+  private clearHelloTimeout(): void {
+    if (this.helloTimer === null) return;
+    clearTimeout(this.helloTimer);
+    this.helloTimer = null;
+  }
+
+  private clearConnectTimeout(): void {
+    if (this.connectTimer === null) return;
+    clearTimeout(this.connectTimer);
+    this.connectTimer = null;
+  }
+
+  private armConnectTimeout(generation: number): void {
+    this.clearConnectTimeout();
+    const configured = Number(this.options.connectTimeoutMs);
+    const timeoutMs = Number.isFinite(configured) && configured > 0
+      ? Math.floor(configured)
+      : RuntimeWsClient.DEFAULT_CONNECT_TIMEOUT_MS;
+    this.connectTimer = setTimeout(() => this.handleConnectTimeout(generation, timeoutMs), timeoutMs);
+  }
+
+  private handleConnectTimeout(generation: number, timeoutMs: number): void {
+    this.connectTimer = null;
+    if (this.closed || generation !== this.lifecycleGeneration || !this.connecting) return;
+    const error = new Error(`WS_CONNECT_TIMEOUT:${timeoutMs}`);
+    const socket = this.ws;
+    this.lifecycleGeneration += 1;
+    this.connectPromise = null;
+    this.connecting = false;
     this.options.onError?.(error);
-    this.ws?.close(4003, reason);
+    try {
+      if (socket && readSocketReadyState(socket) < 2) socket.close(4008, 'connect-timeout');
+    } catch (closeError) {
+      this.options.onError?.(closeError instanceof Error ? closeError : new Error(String(closeError)));
+    }
+    this.scheduleReconnect();
+  }
+
+  private armHelloTimeout(generation: number): void {
+    this.clearHelloTimeout();
+    const configured = Number(this.options.helloTimeoutMs);
+    const timeoutMs = Number.isFinite(configured) && configured > 0
+      ? Math.floor(configured)
+      : RuntimeWsClient.DEFAULT_HELLO_TIMEOUT_MS;
+    this.helloTimer = setTimeout(() => {
+      this.helloTimer = null;
+      if (this.closed || generation !== this.lifecycleGeneration || this.helloAcknowledged) return;
+      this.failHandshake(new Error(`WS_HELLO_TIMEOUT:${timeoutMs}`), 'handshake-timeout');
+    }, timeoutMs);
+  }
+
+  private failHandshake(error: Error, reason = 'handshake-invalid'): void {
+    this.clearHelloTimeout();
+    const socket = this.ws;
+    this.lifecycleGeneration += 1;
+    this.connecting = false;
+    this.helloSent = false;
+    this.helloAcknowledged = false;
+    this.pendingHandshake = null;
+    this.authenticatedDirectPeer = null;
+    this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_HANDSHAKE_FAILED'));
+    this.options.onError?.(error);
+    try {
+      socket?.close(4003, reason);
+    } catch (closeError) {
+      this.options.onError?.(closeError instanceof Error ? closeError : new Error(String(closeError)));
+    }
+    this.scheduleReconnect();
   }
 
   private sendHello(challengeMessage?: RuntimeWsMessage): boolean {
@@ -592,6 +704,7 @@ export class RuntimeWsClient {
         if (directPeer) this.options.onPeerEncryptionKey?.(directPeer.runtimeId, directPeer.encryptionPubKey);
         this.authenticatedDirectPeer = directPeer;
         this.helloAcknowledged = true;
+        this.clearHelloTimeout();
         this.connecting = false;
         this.reconnectAttempts = 0;
         this.options.onOpen?.();
@@ -601,6 +714,10 @@ export class RuntimeWsClient {
       return true;
     }
     if (msg.type === 'error') {
+      if (this.options.useHelloAuth && !this.helloAcknowledged) {
+        this.failHandshake(new Error(`WS_ERROR_BEFORE_HANDSHAKE_ACK:${msg.error || 'Unknown error'}`));
+        return true;
+      }
       if (this.settlePendingRecoveryBundleRequest(msg.inReplyTo, undefined, msg.error || 'Unknown error')) {
         return true;
       }
@@ -1003,6 +1120,10 @@ export class RuntimeWsClient {
     return this.connecting;
   }
 
+  isTerminallyClosed(): boolean {
+    return this.closed;
+  }
+
   pause() {
     const socket = this.prepareSocketStop('RECOVERY_REQUEST_SOCKET_PAUSED', false);
     socket?.close();
@@ -1033,8 +1154,9 @@ export class RuntimeWsClient {
     if (terminal) this.closed = true;
     this.lifecycleGeneration += 1;
     this.connecting = false;
+    this.clearConnectTimeout();
+    this.clearHelloTimeout();
     this.rejectPendingRecoveryBundleRequests(new Error(reason));
-    this.suppressNextClose = true;
     this.reconnectAttempts = 0;
     this.nextReconnectAt = 0;
     if (this.reconnectTimer) {

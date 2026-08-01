@@ -1,3 +1,5 @@
+import { isLoopbackRuntimeWsHostname } from './hello-transcript';
+
 const normalizeLoopbackHost = (host: string): string => {
   const normalized = String(host || '').trim().toLowerCase();
   if (normalized === '127.0.0.1' || normalized === '[::1]' || normalized === '::1') {
@@ -55,13 +57,15 @@ export const sameWsUrl = (left: string | null, right: string | null): boolean =>
 export const isBrowserDirectWsEndpointAllowed = (endpoint: string): boolean => {
   if (typeof window === 'undefined') return true;
   const pageProtocol = String(window.location?.protocol || '').toLowerCase();
-  if (pageProtocol !== 'https:') return true;
   try {
     const parsed = new URL(endpoint);
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return false;
+    const pageIsLoopback = isLoopbackRuntimeWsHostname(String(window.location?.hostname || ''));
+    const endpointIsLoopback = isLoopbackRuntimeWsHostname(parsed.hostname);
+    if (endpointIsLoopback && !pageIsLoopback) return false;
+    if (pageProtocol !== 'https:') return true;
     if (parsed.protocol === 'wss:') return true;
-    if (parsed.protocol !== 'ws:') return false;
-    const host = normalizeLoopbackHost(parsed.hostname);
-    return host === 'localhost';
+    return pageIsLoopback && endpointIsLoopback;
   } catch {
     return false;
   }

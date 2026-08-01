@@ -32,6 +32,8 @@ export const spawnDaemon = ({ instanceId, version, runtimeSeed, authSeed, contro
       XLN_RADAPTER_REQUIRE_AUTH_SEED: '1',
       XLN_RUNTIME_SEED: runtimeSeed,
       XLN_SKIP_SERVER_BOOTSTRAP: '1',
+      INTERNAL_RELAY_URL: 'ws://127.0.0.1:8080/relay',
+      PUBLIC_RELAY_URL: 'ws://localhost:8080/relay',
     },
   });
   child.unref();
