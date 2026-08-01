@@ -39,6 +39,7 @@ import {
 } from '../wal/snapshot';
 import { createStructuredLogger } from '../../infra/logger';
 import { verifyRecoveryJournalFrame } from './journal-verification';
+import { assertCrossJLocalCohorts } from '../../runtime/cross-j-topology';
 
 const APPLY_ALLOWED = Symbol.for('xln.runtime.env.apply.allowed');
 const REPLAY_MODE = Symbol.for('xln.runtime.env.replay.mode');
@@ -140,6 +141,7 @@ const replayOneFrame = async (
       env,
       frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
     );
+    assertCrossJLocalCohorts(env);
     const jOutbox = splitJOutboxForDurableSubmit(result.jOutbox);
     registerPendingCommittedJOutbox(env, jOutbox.durable);
     refreshScheduledWakeIndex(

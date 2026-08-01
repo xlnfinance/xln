@@ -179,6 +179,9 @@ const throwCriticalProposalFailure = (
   if (tx.type === 'cross_pull_close') {
     throw new Error(`CROSS_J_PULL_CLOSE_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
   }
+  if (tx.type === 'cross_pull_progress') {
+    throw new Error(`CROSS_J_PULL_PROGRESS_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
+  }
 };
 
 const classifyFailedTransaction = (

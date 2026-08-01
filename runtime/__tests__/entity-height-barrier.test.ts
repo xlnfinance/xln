@@ -67,4 +67,28 @@ describe('Entity durable-height barrier', () => {
     expect(laneHeights(mempool.entityInputs)).toEqual(laneHeights([a2, b9]));
     expect(mempool.queuedAt).toBe(77);
   });
+
+  test('defers both atomic siblings when either lane is height-blocked', () => {
+    const env = createEmptyEnv('entity-height-atomic-barrier');
+    const entityA = entity('aa');
+    const entityB = entity('bb');
+    const signerA = signer('a1');
+    const signerB = signer('b1');
+    installLane(env, entityA, signerA, 0);
+    installLane(env, entityB, signerB, 0);
+
+    const a1 = input(entityA, signerA, 1, 'a1');
+    const a2 = input(entityA, signerA, 2, 'a2');
+    const b1 = input(entityB, signerB, 1, 'b1');
+    const marker = { phase: 'proposal' as const, pairKey: 'height-pair' };
+    const sourceRuntimeFrame = { height: 12, timestamp: 77 };
+    Object.assign(a2, { from: signer('cc'), sourceRuntimeFrame, atomicCrossJurisdictionPair: marker });
+    Object.assign(b1, { from: signer('cc'), sourceRuntimeFrame, atomicCrossJurisdictionPair: marker });
+    const runtimeInput: RuntimeInput = { runtimeTxs: [], entityInputs: [a1, a2, b1] };
+    const mempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
+
+    expect(applyEntityHeightDurabilityBarrier(env, runtimeInput, mempool, 77)).toBe(2);
+    expect(runtimeInput.entityInputs).toEqual([a1]);
+    expect(mempool.entityInputs).toEqual([a2, b1]);
+  });
 });

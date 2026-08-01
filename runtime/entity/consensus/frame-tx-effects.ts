@@ -16,6 +16,7 @@ import {
   ownsSourceHubRouteForFillAck,
   stashPendingCrossJurisdictionFillAck,
 } from './cross-j-fill-ack';
+import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../tx/cross-j-outputs';
 import type { ApplyEntityTxsInOrderContext } from './frame-application-types';
 import type {
   SwapCancelEvent,
@@ -87,6 +88,9 @@ const applyReturnedAccountTxs = async (
       createLocalAccountInput(account.state, state.entityId, [tx]),
     );
     if (admission.admittedAccountTxCount === 0) continue;
+    if (tx.type === 'cross_swap_fill_ack') {
+      appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, context.allOutputs);
+    }
     context.proposableAccounts.add(accountId);
     recordAccountChange(context, state, accountId);
     if (tx.type === 'htlc_lock' && tx.data.timelock && tx.data.lockId && state.crontabState) {
@@ -177,12 +181,14 @@ export const applyEntityTxReturnedEffects = async (
     context.proposableAccounts,
     context.storageChanges,
     context.candidateEffects,
+    context.allOutputs,
   );
   await drainCommittedCrossJurisdictionCancelAcks(
     context.accountConsensusContext,
     state,
     context.proposableAccounts,
     context.storageChanges,
+    context.allOutputs,
   );
   const elapsedMs = Math.round(getPerfMs() - txProfileStartMs);
   const profile = context.frameProfileTxTotals.get(entityTx.type) ?? {

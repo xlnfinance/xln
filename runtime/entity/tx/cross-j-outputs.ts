@@ -1,7 +1,9 @@
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
-import type { EntityInput } from '../types';
+import type { AccountTx } from '../../types/account';
+import type { EntityInput, EntityOutput, EntityState } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../extensions/cross-j/market';
+import { buildCrossJurisdictionFillNoticeTx } from '../../extensions/cross-j/fill-ack';
 
 const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
 
@@ -41,6 +43,37 @@ export const buildCrossJurisdictionEntityOutput = (
     entityTxs,
     localRuntimeProtocol: 'cross-j',
   };
+};
+
+export const buildCrossJurisdictionTargetFillNoticeOutput = (
+  currentEntityState: EntityState,
+  tx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
+): EntityInput => {
+  const route = currentEntityState.crossJurisdictionSwaps?.get(tx.data.offerId);
+  if (!route) throw new Error(`CROSS_J_TARGET_PROGRESS_ROUTE_MISSING:${tx.data.offerId}`);
+  const current = normalizeEntityRef(currentEntityState.entityId);
+  const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
+  if (current !== sourceHub) {
+    throw new Error(`CROSS_J_TARGET_PROGRESS_SOURCE_HUB_REQUIRED:${tx.data.offerId}:${current}:${sourceHub}`);
+  }
+  const targetHub = normalizeEntityRef(route.target.entityId);
+  const targetSigner = normalizeEntityRef(route.targetHubSignerId || '');
+  if (!targetHub || !targetSigner || targetHub === sourceHub) {
+    throw new Error(`CROSS_J_TARGET_PROGRESS_ROUTE_INVALID:${tx.data.offerId}:${sourceHub}:${targetHub}`);
+  }
+  return buildCrossJurisdictionEntityOutput(
+    targetHub,
+    targetSigner,
+    [buildCrossJurisdictionFillNoticeTx(tx, route.source.entityId)],
+  );
+};
+
+export const appendCrossJurisdictionTargetProgressAfterAdmission = (
+  currentEntityState: EntityState,
+  tx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
+  outputs: EntityOutput[],
+): void => {
+  outputs.push(buildCrossJurisdictionTargetFillNoticeOutput(currentEntityState, tx));
 };
 
 /** Generic certified E→E output. Cross-j sibling code must never call this. */

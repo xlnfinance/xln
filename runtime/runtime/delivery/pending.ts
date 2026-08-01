@@ -86,7 +86,10 @@ const isCrossJAdmissionProposal = (output: RoutedEntityInput): boolean =>
     return Boolean(
       proposal?.frame.accountTxs.some(
         accountTx =>
-          (accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction) || accountTx.type === 'cross_pull_close',
+          (accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction) ||
+          accountTx.type === 'cross_pull_close' ||
+          accountTx.type === 'cross_swap_fill_ack' ||
+          accountTx.type === 'cross_pull_progress',
       ),
     );
   });

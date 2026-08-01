@@ -121,6 +121,7 @@ export class RuntimeEntityInputApplyError extends Error {
 export type CrossJCommand = {
   sourceEntityId: string;
   targetEntityId: string;
+  targetSignerId: string;
   entityTxs: EntityTx[];
 };
 

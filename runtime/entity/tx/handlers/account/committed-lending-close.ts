@@ -36,7 +36,7 @@ export function applyLendingCloseRequest(
     pool.updatedAt = now;
     return;
   }
-  const payoutCapacity = getAccountOutCapacity(account, hubEntityId, pool.tokenId);
+  const payoutCapacity = getAccountOutCapacity(account.state, hubEntityId, pool.tokenId);
   if (payoutCapacity < pool.availableAmount) {
     throw new Error(
       `LENDING_CLOSE_PAYOUT_CAPACITY: available=${payoutCapacity} ` +

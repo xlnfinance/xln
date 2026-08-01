@@ -10,6 +10,7 @@ import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityState } from '../../types';
 import type { EntityTx } from '../../../types/entity-tx';
+import type { CrossSwapFillAckData } from '../../../types/account';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import type { AccountTxTarget } from './account';
 
@@ -42,27 +43,84 @@ const sameCommittedFillNotice = (
   );
 };
 
-const requireSourceHubRoute = (
+const requireHubRoute = (
   state: EntityState,
   orderId: string,
-): CrossJurisdictionSwapRoute => {
+): { route: CrossJurisdictionSwapRoute; role: 'source' | 'target' } => {
   const route = state.crossJurisdictionSwaps?.get(orderId);
   if (!route) throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_MISSING: order=${orderId}`);
 
-  // A fill notice writes the source bilateral Account. The book owner may
-  // discover a match, but it cannot repair or impersonate the source hub.
   const currentEntityId = normalizeEntityRef(state.entityId);
   const bookOwner = normalizeEntityRef(
     route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId,
   );
   const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
-  if (sourceHub !== currentEntityId) {
+  const targetHub = normalizeEntityRef(route.target.entityId);
+  if (sourceHub !== currentEntityId && targetHub !== currentEntityId) {
     throw new Error(
       `CROSS_J_FILL_NOTICE_SOURCE_HUB_REQUIRED: order=${orderId} current=${state.entityId} ` +
-      `owner=${bookOwner} sourceHub=${sourceHub}`,
+      `owner=${bookOwner} sourceHub=${sourceHub} targetHub=${targetHub}`,
     );
   }
-  return route;
+  return { route, role: sourceHub === currentEntityId ? 'source' : 'target' };
+};
+
+const buildFillAckData = (
+  route: CrossJurisdictionSwapRoute,
+  data: CrossJurisdictionFillNoticeTx['data'],
+): CrossSwapFillAckData => {
+  const currentFillSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
+  const sameSeqCancel = Boolean(data.cancelRemainder) && data.fillSeq === currentFillSeq;
+  if (sameSeqCancel) {
+    if (!sameCommittedFillNotice(route, data) || data.incrementalSourceAmount !== 0n || data.incrementalTargetAmount !== 0n) {
+      throw new Error(`CROSS_J_FILL_NOTICE_CANCEL_PROGRESS_MISMATCH:${data.orderId}`);
+    }
+    return {
+      offerId: data.orderId,
+      ...(route.routeHash ? { routeHash: route.routeHash } : {}),
+      previousFillSeq: currentFillSeq,
+      fillSeq: currentFillSeq,
+      incrementalSourceAmount: 0n,
+      incrementalTargetAmount: 0n,
+      cumulativeSourceAmount: data.cumulativeSourceAmount,
+      cumulativeTargetAmount: data.cumulativeTargetAmount,
+      cumulativeFillRatio: data.cumulativeFillRatio,
+      ...(data.fillNumerator !== undefined ? { fillNumerator: data.fillNumerator } : {}),
+      ...(data.fillDenominator !== undefined ? { fillDenominator: data.fillDenominator } : {}),
+      ackKind: 'cancel',
+      executionSourceAmount: 0n,
+      executionTargetAmount: 0n,
+      cancelRemainder: true,
+      pairId: data.pairId,
+      comment: 'cross-j-cancel-request',
+    };
+  }
+  const fill = requireCrossJurisdictionFillProgress(route, data, 'CROSS_J_FILL_NOTICE_INVALID');
+  return {
+    offerId: data.orderId,
+    ...(route.routeHash ? { routeHash: route.routeHash } : {}),
+    previousFillSeq: currentFillSeq,
+    fillSeq: fill.fillSeq,
+    incrementalSourceAmount: fill.incrementalSourceAmount,
+    incrementalTargetAmount: fill.incrementalTargetAmount,
+    cumulativeSourceAmount: fill.cumulativeSourceAmount,
+    cumulativeTargetAmount: fill.cumulativeTargetAmount,
+    cumulativeFillRatio: fill.nextRatio,
+    ...(fill.fillNumerator !== undefined ? { fillNumerator: fill.fillNumerator } : {}),
+    ...(fill.fillDenominator !== undefined ? { fillDenominator: fill.fillDenominator } : {}),
+    ackKind: 'fill',
+    executionSourceAmount: (data.priceImprovementAmount ?? 0n) > 0n
+      ? fill.incrementalSourceAmount - (data.priceImprovementAmount ?? 0n)
+      : fill.incrementalSourceAmount,
+    executionTargetAmount: fill.incrementalTargetAmount,
+    ...(data.priceImprovementMode ? { priceImprovementMode: data.priceImprovementMode } : {}),
+    ...(data.priceImprovementAmount !== undefined ? { priceImprovementAmount: data.priceImprovementAmount } : {}),
+    ...(data.priceImprovementTokenId !== undefined ? { priceImprovementTokenId: data.priceImprovementTokenId } : {}),
+    cancelRemainder: Boolean(data.cancelRemainder) || fill.nextRatio >= CROSS_J_MAX_FILL_RATIO,
+    ...(data.priceTicks !== undefined ? { priceTicks: data.priceTicks } : {}),
+    pairId: data.pairId,
+    comment: `cross-j-hashledger-fill:${fill.nextRatio}`,
+  };
 };
 
 const assertFillNoticeSequence = (
@@ -100,25 +158,14 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     orderId,
     routeHash,
     fillSeq,
-    incrementalSourceAmount,
-    incrementalTargetAmount,
-    cumulativeSourceAmount,
-    cumulativeTargetAmount,
-    cumulativeFillRatio,
-    fillNumerator,
-    fillDenominator,
     priceImprovementMode,
-    priceImprovementAmount,
-    priceImprovementTokenId,
     cancelRemainder,
-    priceTicks,
-    pairId,
   } = entityTx.data;
   assertCrossJurisdictionPriceImprovementMode(priceImprovementMode, orderId);
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
-  const route = requireSourceHubRoute(newState, orderId);
+  const { route, role } = requireHubRoute(newState, orderId);
 
   if (
     routeHash &&
@@ -128,8 +175,8 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_HASH_MISMATCH: order=${orderId} got=${routeHash} expected=${route.routeHash}`);
   }
 
-  const currentFillSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
-  if (assertFillNoticeSequence(route, entityTx.data) === 'duplicate') {
+  const sequence = assertFillNoticeSequence(route, entityTx.data);
+  if (sequence === 'duplicate' && !cancelRemainder) {
     addMessage(newState, `🌉 Cross-j fill notice ${orderId} duplicate seq ${Math.floor(Number(fillSeq))}`);
     return { newState, outputs, accountTxs };
   }
@@ -139,54 +186,25 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     throw new Error(`CROSS_J_FILL_NOTICE_STATUS_INVALID: order=${orderId} status=${route.status}`);
   }
 
-  const fill = requireCrossJurisdictionFillProgress(route, {
-    fillSeq,
-    cumulativeFillRatio,
-    fillNumerator,
-    fillDenominator,
-    incrementalSourceAmount,
-    incrementalTargetAmount,
-    cumulativeSourceAmount,
-    cumulativeTargetAmount,
-  }, 'CROSS_J_FILL_NOTICE_INVALID');
-  const accountId = findAccountKey(newState, route.source.entityId);
+  const fillAck = buildFillAckData(route, entityTx.data);
+  if (!route.targetPull) throw new Error(`CROSS_J_TARGET_PULL_MISSING:${orderId}`);
+  const accountPeer = role === 'source'
+    ? route.source.entityId
+    : route.target.counterpartyEntityId;
+  const accountId = findAccountKey(newState, accountPeer);
   if (!accountId) {
-    throw new Error(`CROSS_J_FILL_NOTICE_SOURCE_ACCOUNT_MISSING: order=${orderId} source=${route.source.entityId}`);
+    throw new Error(`CROSS_J_FILL_NOTICE_${role.toUpperCase()}_ACCOUNT_MISSING: order=${orderId} peer=${accountPeer}`);
   }
 
   accountTxs.push({
     accountId,
-    tx: {
-      type: 'cross_swap_fill_ack',
-      data: {
-        offerId: orderId,
-        ...(route.routeHash ? { routeHash: route.routeHash } : {}),
-        previousFillSeq: currentFillSeq,
-        fillSeq: fill.fillSeq,
-        incrementalSourceAmount: fill.incrementalSourceAmount,
-        incrementalTargetAmount: fill.incrementalTargetAmount,
-        cumulativeSourceAmount: fill.cumulativeSourceAmount,
-        cumulativeTargetAmount: fill.cumulativeTargetAmount,
-        cumulativeFillRatio: fill.nextRatio,
-        ...(fill.fillNumerator !== undefined ? { fillNumerator: fill.fillNumerator } : {}),
-        ...(fill.fillDenominator !== undefined ? { fillDenominator: fill.fillDenominator } : {}),
-        executionSourceAmount: (priceImprovementAmount ?? 0n) > 0n
-          ? fill.incrementalSourceAmount - (priceImprovementAmount ?? 0n)
-          : fill.incrementalSourceAmount,
-        executionTargetAmount: fill.incrementalTargetAmount,
-        ...(priceImprovementMode ? { priceImprovementMode } : {}),
-        ...(priceImprovementAmount !== undefined ? { priceImprovementAmount } : {}),
-        ...(priceImprovementTokenId !== undefined ? { priceImprovementTokenId } : {}),
-        cancelRemainder: Boolean(cancelRemainder) || fill.nextRatio >= CROSS_J_MAX_FILL_RATIO,
-        ...(priceTicks !== undefined ? { priceTicks } : {}),
-        pairId,
-        comment: `cross-j-fill-notice:${fill.nextRatio}`,
-      },
-    },
+    tx: role === 'source'
+      ? { type: 'cross_swap_fill_ack', data: fillAck }
+      : { type: 'cross_pull_progress', data: { pullId: route.targetPull.pullId, fill: fillAck } },
   });
 
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-  addMessage(newState, `🌉 Cross-j fill notice ${orderId} queued account ack ${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}`);
+  addMessage(newState, `🌉 Cross-j ${role} progress ${orderId} queued ${fillAck.cumulativeFillRatio}/${CROSS_J_MAX_FILL_RATIO}`);
   return { newState, outputs, accountTxs };
 };

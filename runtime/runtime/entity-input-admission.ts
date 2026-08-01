@@ -62,16 +62,14 @@ export const assertExternalEntityInputAllowed = (
       `RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN:entity=${entityInput.entityId}`,
     );
   }
-  if (
-    !entityInput.from ||
-    !entityInputHasCrossJurisdictionIntraRuntimeTx(entityInput)
-  ) {
-    return;
-  }
+  if (!entityInputHasCrossJurisdictionIntraRuntimeTx(entityInput)) return;
+  const containsRawSalvage = getEffectiveEntityInputTxs(entityInput)
+    .some(tx => tx.type === 'crossJurisdictionSalvage');
+  if (!entityInput.from && !containsRawSalvage) return;
   assertRuntimeEntityIngress(
     false,
     'RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN',
-    'Cross-j Entity inputs are runtime-private and cannot arrive remotely',
+    'Cross-j Entity inputs are runtime-private and require a certified runtimeOutput envelope',
     {
       entityId: entityInput.entityId,
       from: entityInput.from,

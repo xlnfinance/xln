@@ -29,6 +29,18 @@ export const getLocalSignerIdsForEntity = (env: RuntimeReplica, entityId: string
   return [...signerIds];
 };
 
+export const getLocalEntitySignerKeys = (env: RuntimeReplica): Set<string> => {
+  const keys = new Set<string>();
+  for (const replicaKey of env.state.eReplicas.keys()) {
+    const entityId = extractEntityId(replicaKey).toLowerCase();
+    const signerId = extractSignerId(replicaKey).toLowerCase();
+    if (entityId && signerId && getSignerPrivateKeyIfAvailable(env, signerId) !== null) {
+      keys.add(`${entityId}\u0000${signerId}`);
+    }
+  }
+  return keys;
+};
+
 export const hasLocalSignerForEntity = (env: RuntimeReplica, entityId: string): boolean =>
   getLocalSignerIdsForEntity(env, entityId).length > 0;
 

@@ -105,6 +105,7 @@ import {
   ownsSourceHubRouteForFillAck,
   stashPendingCrossJurisdictionFillAck,
 } from './cross-j-fill-ack';
+import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../tx/cross-j-outputs';
 import { isSelfBoardAuthorityTransitionFrame } from './proposal-policy';
 
 const recordFrameAccountChange = (
@@ -234,6 +235,13 @@ const assertEntityTxAuthorization = (
   tx: EntityTx,
 ): void => {
   if (isEntityCommandForbiddenTx(tx)) return;
+  // Salvage is derived from certified source-dispute evidence and mirrored by
+  // Runtime inside one WAL candidate. A signed user/board command is not an
+  // equivalent lane: it could update one sibling or start a target dispute
+  // without the source J event that authorizes the pull reveal.
+  if (tx.type === 'crossJurisdictionSalvage' && !context.authorizedRuntimeOutput) {
+    throw new Error('CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED');
+  }
   if (context.authorizedCommand && !isIndividualEntityCommandTx(tx)) {
     throw new Error(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`);
   }
@@ -787,6 +795,9 @@ const applyOrderbookAccountTxs = async (
       createLocalAccountInput(account.state, state.entityId, [tx]),
     );
     if (admission.admittedAccountTxCount === 0) continue;
+    if (tx.type === 'cross_swap_fill_ack') {
+      appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, allOutputs);
+    }
     proposableAccounts.add(accountId);
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
     entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
@@ -903,6 +914,7 @@ async function applySwapCancelRequests(
       createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
     );
     if (admission.admittedAccountTxCount === 0) continue;
+    appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, allOutputs);
     proposableAccounts.add(accountId);
     recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
   }
@@ -924,6 +936,9 @@ async function applySwapCancelRequests(
       createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
     );
     if (admission.admittedAccountTxCount === 0) continue;
+    if (tx.type === 'cross_swap_fill_ack') {
+      appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, allOutputs);
+    }
     proposableAccounts.add(accountId);
     recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
   }
@@ -1049,12 +1064,14 @@ const primeEntityFrameAccountWork = async (
     context.proposableAccounts,
     context.storageChanges,
     context.candidateEffects,
+    context.allOutputs,
   );
   await drainCommittedCrossJurisdictionCancelAcks(
     context.accountConsensusContext,
     state,
     context.proposableAccounts,
     context.storageChanges,
+    context.allOutputs,
   );
   for (const accountId of getProposableAccountIds(state)) {
     context.proposableAccounts.add(accountId);
@@ -1226,12 +1243,14 @@ const applyPostEntityTxPhases = async (
     context.proposableAccounts,
     context.storageChanges,
     context.candidateEffects,
+    context.allOutputs,
   );
   await drainCommittedCrossJurisdictionCancelAcks(
     context.accountConsensusContext,
     currentEntityState,
     context.proposableAccounts,
     context.storageChanges,
+    context.allOutputs,
   );
   refreshStaleUncommittedSettlementSeals(currentEntityState, context.storageChanges);
   await materializeDeferredSettlementApprovals(

@@ -8,6 +8,7 @@ import type { EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { createDefaultDelta } from '../account/delta';
 import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';
+import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 
 const LEFT = `0x${'aa'.repeat(32)}`;
 const RIGHT = `0x${'bb'.repeat(32)}`;
@@ -185,7 +186,7 @@ describe('direct payment frame integrity', () => {
     expect(account.pendingForwards).toBeUndefined();
   });
 
-  test('fails the containing runtime frame when a routed next-hop account is absent', async () => {
+  test('classifies an absent routed next-hop account as discardable malformed ingress', async () => {
     const account = await makeAccount();
     account.pendingForwards = [{
       tokenId: 1,
@@ -204,7 +205,7 @@ describe('direct payment frame integrity', () => {
       outputs: [],
       accountTxs: [],
       candidateEffects: [],
-    })).toThrow('ROUTED_PAYMENT_NEXT_HOP_ACCOUNT_MISSING');
+    })).toThrow(MalformedEntityFrameInputError);
     expect(account.pendingForwards).toHaveLength(1);
   });
 });

@@ -2,6 +2,7 @@ import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction'
 import type { EntityState } from '../../entity/types';
 import {
   cloneCrossJurisdictionRoute,
+  CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS,
   CROSS_J_MIN_TARGET_RESPONSE_WINDOW_MS,
   CROSS_J_TARGET_REVEAL_SAFETY_MS,
   deriveCrossJurisdictionPullId,
@@ -100,7 +101,7 @@ export const validatePreparedCrossJurisdictionRoute = (
     ),
     'CROSS_J_PREPARED_TARGET_SIGNED_AMOUNT',
   );
-  const sourceDeadline = Number(route.expiresAt);
+  const sourceDeadline = Number(route.expiresAt) + CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS;
   assertEqual(sourcePull.revealedUntilTimestamp, sourceDeadline, 'CROSS_J_PREPARED_SOURCE_DEADLINE');
   const responseWindow = Math.max(
     committedCrossJSourceDisputeDelayMs(state, route),

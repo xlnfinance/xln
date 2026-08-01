@@ -39,6 +39,7 @@ const pendingOrderIds = (replica: EntityReplica, txs: readonly EntityTx[]): Set<
 export const entityTxContainsAccountTransition = (tx: EntityTx): boolean =>
   nestedTxs(tx).some(
     nested =>
+      nested.type === 'crossJurisdictionFillNotice' ||
       nested.type === 'accountInput' ||
       (nested.type === 'consensusOutput' && nested.data.entityTxs.some(outputTx => outputTx.type === 'accountInput')),
   );

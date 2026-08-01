@@ -957,6 +957,7 @@ export function cloneCrossJurisdictionPullBinding(
   }
   if (binding.status) clone.status = binding.status;
   const cumulativeFillRatio = optionalNumber(binding.cumulativeFillRatio);
+  const fillSeq = optionalNumber(binding.fillSeq);
   const fillNumerator = optionalBigInt(binding.fillNumerator);
   const fillDenominator = optionalBigInt(binding.fillDenominator);
   const claimedRatio = optionalNumber(binding.claimedRatio);
@@ -965,6 +966,7 @@ export function cloneCrossJurisdictionPullBinding(
   const sourceClaimed = optionalBigInt(binding.sourceClaimed);
   const targetClaimed = optionalBigInt(binding.targetClaimed);
   if (cumulativeFillRatio !== undefined) clone.cumulativeFillRatio = cumulativeFillRatio;
+  if (fillSeq !== undefined) clone.fillSeq = fillSeq;
   if (fillNumerator !== undefined) clone.fillNumerator = fillNumerator;
   if (fillDenominator !== undefined) clone.fillDenominator = fillDenominator;
   if (claimedRatio !== undefined) clone.claimedRatio = claimedRatio;
@@ -989,6 +991,7 @@ export function buildCrossJurisdictionPullBinding(
     leg,
     ...(canonical.sourceCloseProof ? { sourceCloseProof: canonical.sourceCloseProof } : {}),
     status: canonical.status,
+    ...(canonical.fillSeq !== undefined ? { fillSeq: canonical.fillSeq } : {}),
     ...(canonical.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: canonical.cumulativeFillRatio } : {}),
     ...(canonical.fillNumerator !== undefined ? { fillNumerator: canonical.fillNumerator } : {}),
     ...(canonical.fillDenominator !== undefined ? { fillDenominator: canonical.fillDenominator } : {}),
@@ -1018,6 +1021,7 @@ export function buildCommittedCrossJurisdictionPullBinding(
     leg,
     ...(route.sourceCloseProof ? { sourceCloseProof: route.sourceCloseProof } : {}),
     status: route.status,
+    ...(route.fillSeq !== undefined ? { fillSeq: route.fillSeq } : {}),
     ...(route.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: route.cumulativeFillRatio } : {}),
     ...(route.fillNumerator !== undefined ? { fillNumerator: route.fillNumerator } : {}),
     ...(route.fillDenominator !== undefined ? { fillDenominator: route.fillDenominator } : {}),
@@ -1252,13 +1256,14 @@ export function buildPreparedCrossJurisdictionRoute(
   if (!Number.isFinite(sourceDisputeDelayMs) || sourceDisputeDelayMs <= 0) {
     throw new Error(`CROSS_J_SOURCE_DISPUTE_DELAY_MS_INVALID:${options.sourceDisputeDelayMs}`);
   }
-  const sourceRevealUntilTimestamp = Math.floor(Number(route.expiresAt ?? (now + CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS)));
-  if (!Number.isFinite(sourceRevealUntilTimestamp) || sourceRevealUntilTimestamp <= now) {
+  const marketExpiresAt = Math.floor(Number(route.expiresAt ?? (now + CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS)));
+  const sourceRevealUntilTimestamp = marketExpiresAt + CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS;
+  if (!Number.isFinite(marketExpiresAt) || marketExpiresAt <= now) {
     throw new Error(`CROSS_J_SOURCE_REVEAL_TIMESTAMP_INVALID:${route.orderId}`);
   }
   const canonicalRoute = withCanonicalCrossJurisdictionRouteHash({
     ...route,
-    expiresAt: route.expiresAt ?? sourceRevealUntilTimestamp,
+    expiresAt: marketExpiresAt,
   });
   assertCrossJurisdictionAssetRouteIsUseful(canonicalRoute);
   const privateSeed = deriveCrossJurisdictionPrivateSeed(options.runtimeSeed, canonicalRoute);

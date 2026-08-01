@@ -24,6 +24,7 @@ import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 
 type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;
 type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
+type CrossPullProgressTx = Extract<AccountTx, { type: 'cross_pull_progress' }>;
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -333,4 +334,92 @@ export async function handleCrossPullClose(
     success: true,
     events,
   };
+}
+
+export async function handleCrossPullProgress(
+  account: AccountState,
+  accountTx: CrossPullProgressTx,
+  byLeft: boolean,
+): Promise<{ success: boolean; events: string[]; error?: string }> {
+  const events: string[] = [];
+  const { pullId, fill } = accountTx.data;
+  const pull = account.pulls?.get(pullId);
+  if (!pull) return { success: false, error: `Cross-j target pull ${pullId} not found`, events };
+  const binding = pull.crossJurisdiction;
+  if (binding.leg !== 'target') {
+    return { success: false, error: `Cross-j progress requires target pull`, events };
+  }
+  if (
+    fill.offerId !== binding.orderId ||
+    !fill.routeHash ||
+    fill.routeHash.toLowerCase() !== binding.routeHash.toLowerCase()
+  ) {
+    return { success: false, error: `Cross-j progress route mismatch`, events };
+  }
+
+  const beneficiaryIsLeft = pull.amount > 0n;
+  if (byLeft === beneficiaryIsLeft) {
+    return { success: false, error: `Only the target Hub can advance cross-j pull`, events };
+  }
+  const currentSeq = Math.max(0, Math.floor(Number(binding.fillSeq ?? 0) || 0));
+  const nextSeq = Math.floor(Number(fill.fillSeq));
+  const previousSeq = Math.floor(Number(fill.previousFillSeq));
+  if (fill.ackKind !== 'fill' && fill.ackKind !== 'cancel') {
+    return { success: false, error: `Cross-j progress kind invalid`, events };
+  }
+  const cancelling = fill.ackKind === 'cancel';
+  if (cancelling && fill.cancelRemainder !== true) {
+    return { success: false, error: `Cross-j cancel progress must clear remainder`, events };
+  }
+  if (
+    previousSeq !== currentSeq ||
+    (!cancelling && nextSeq !== currentSeq + 1) ||
+    (cancelling && nextSeq !== currentSeq)
+  ) {
+    return { success: false, error: `Cross-j progress sequence mismatch`, events };
+  }
+
+  let nextRatio: number;
+  try {
+    nextRatio = getCrossJurisdictionCommittedProofRatio({
+      orderId: fill.offerId,
+      cumulativeFillRatio: fill.cumulativeFillRatio,
+      fillNumerator: fill.fillNumerator,
+      fillDenominator: fill.fillDenominator,
+    });
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error), events };
+  }
+  const currentRatio = committedCrossJurisdictionRatio(binding);
+  const priorSource = binding.filledSourceAmount ?? 0n;
+  const priorTarget = binding.filledTargetAmount ?? 0n;
+  const nextSource = fill.cumulativeSourceAmount;
+  const nextTarget = fill.cumulativeTargetAmount;
+  const sourceIncrement = fill.incrementalSourceAmount;
+  const targetIncrement = fill.incrementalTargetAmount;
+  if (
+    nextSource === undefined || nextTarget === undefined ||
+    sourceIncrement === undefined || targetIncrement === undefined ||
+    nextSource < priorSource || nextTarget < priorTarget ||
+    sourceIncrement !== nextSource - priorSource ||
+    targetIncrement !== nextTarget - priorTarget ||
+    nextTarget > absBigInt(pull.amount) ||
+    (!cancelling && (nextRatio <= currentRatio || sourceIncrement <= 0n || targetIncrement <= 0n)) ||
+    (cancelling && (nextRatio !== currentRatio || sourceIncrement !== 0n || targetIncrement !== 0n))
+  ) {
+    return { success: false, error: `Cross-j progress amounts mismatch`, events };
+  }
+
+  binding.fillSeq = nextSeq;
+  binding.cumulativeFillRatio = nextRatio;
+  if (fill.fillNumerator !== undefined) binding.fillNumerator = fill.fillNumerator;
+  if (fill.fillDenominator !== undefined) binding.fillDenominator = fill.fillDenominator;
+  binding.filledSourceAmount = nextSource;
+  binding.filledTargetAmount = nextTarget;
+  binding.status = cancelling || nextRatio >= HASHLADDER_MAX_FILL_RATIO
+    ? 'clear_requested'
+    : 'partially_filled';
+  if (cancelling) binding.clearingPolicy = 'cancel_and_clear';
+  events.push(`🌉 Cross-j target progress ${fill.offerId.slice(0, 8)} ${nextRatio}/${HASHLADDER_MAX_FILL_RATIO}`);
+  return { success: true, events };
 }

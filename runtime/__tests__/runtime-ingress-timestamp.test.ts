@@ -26,6 +26,7 @@ import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { getWallClockMs } from '../infra/time';
 import { attachLiveJAdapter } from '../runtime/live-jadapters';
 import type { JAdapter } from '../jurisdiction/adapter/types';
+import { applyEntityInputFrameCap, applyEntityTxFrameCap } from '../runtime/loop-work';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,
@@ -226,6 +227,68 @@ describe('runtime ingress timestamp', () => {
     await processRuntime(env);
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.runtimeMempool?.queuedAt).toBeUndefined();
+  });
+
+  test('runtime frame caps keep an atomic cross-j sibling cohort indivisible', () => {
+    const marker = { phase: 'proposal' as const, pairKey: 'cross-j-cap-pair' };
+    const sourceRuntimeFrame = { height: 7, timestamp: 1_000 };
+    const inputs = [
+      {
+        entityId: 'ordinary', signerId: 'ordinary',
+        entityTxs: [{ type: 'profile-update' as const, data: {} }],
+      },
+      {
+        entityId: 'source', signerId: 'source', from: 'hub-runtime', sourceRuntimeFrame,
+        atomicCrossJurisdictionPair: marker, entityTxs: [{ type: 'profile-update' as const, data: {} }],
+      },
+      {
+        entityId: 'target', signerId: 'target', from: 'hub-runtime', sourceRuntimeFrame,
+        atomicCrossJurisdictionPair: marker, entityTxs: [{ type: 'profile-update' as const, data: {} }],
+      },
+      { entityId: 'tail', signerId: 'tail', entityTxs: [] },
+    ];
+    const inputCapped = { runtimeTxs: [], entityInputs: structuredClone(inputs) };
+    const inputMempool = { runtimeTxs: [], entityInputs: [] };
+    expect(applyEntityInputFrameCap(inputCapped, inputMempool, 2, 1_000)).toBe(true);
+    expect(inputCapped.entityInputs.map(input => input.entityId)).toEqual(['ordinary']);
+    expect(inputMempool.entityInputs.map(input => input.entityId)).toEqual(['source', 'target', 'tail']);
+
+    const txCapped = { runtimeTxs: [], entityInputs: structuredClone(inputs) };
+    const txMempool = { runtimeTxs: [], entityInputs: [] };
+    expect(applyEntityTxFrameCap(txCapped, txMempool, 2, 1_000)).toBe(true);
+    expect(txCapped.entityInputs.map(input => input.entityId)).toEqual(['ordinary']);
+    expect(txMempool.entityInputs.map(input => input.entityId)).toEqual(['source', 'target', 'tail']);
+
+    const headPair = { runtimeTxs: [], entityInputs: structuredClone(inputs.slice(1)) };
+    const headMempool = { runtimeTxs: [], entityInputs: [] };
+    expect(applyEntityInputFrameCap(headPair, headMempool, 1, 1_000)).toBe(true);
+    expect(headPair.entityInputs.map(input => input.entityId)).toEqual(['source', 'target']);
+    expect(headMempool.entityInputs.map(input => input.entityId)).toEqual(['tail']);
+
+    const headTxPair = { runtimeTxs: [], entityInputs: structuredClone(inputs.slice(1)) };
+    const headTxMempool = { runtimeTxs: [], entityInputs: [] };
+    expect(applyEntityTxFrameCap(headTxPair, headTxMempool, 1, 1_000)).toBe(true);
+    expect(headTxPair.entityInputs.map(input => input.entityId)).toEqual(['source', 'target']);
+    expect(headTxMempool.entityInputs.map(input => input.entityId)).toEqual(['tail']);
+
+    const nextFrame = { height: 8, timestamp: 1_001 };
+    const repeatedMarkerInputs = [
+      ...inputs.slice(1, 3),
+      { ...inputs[1]!, entityId: 'source-2', sourceRuntimeFrame: nextFrame },
+      { ...inputs[2]!, entityId: 'target-2', sourceRuntimeFrame: nextFrame },
+    ];
+    const repeated = { runtimeTxs: [], entityInputs: structuredClone(repeatedMarkerInputs) };
+    const repeatedMempool = { runtimeTxs: [], entityInputs: [] };
+    expect(applyEntityInputFrameCap(repeated, repeatedMempool, 2, 1_000)).toBe(true);
+    expect(repeated.entityInputs.map(input => input.entityId)).toEqual(['source', 'target']);
+    expect(repeatedMempool.entityInputs.map(input => input.entityId)).toEqual(['source-2', 'target-2']);
+
+    const third = { ...inputs[2]!, entityId: 'third' };
+    const malformedHead = { runtimeTxs: [], entityInputs: structuredClone([...inputs.slice(1, 3), third, inputs[3]!]) };
+    const malformedMempool = { runtimeTxs: [], entityInputs: [] };
+    expect(applyEntityInputFrameCap(malformedHead, malformedMempool, 1, 1_000)).toBe(true);
+    expect(malformedHead.entityInputs.map(input => input.entityId)).toEqual(['source', 'target', 'third']);
+    expect(malformedMempool.entityInputs.map(input => input.entityId)).toEqual(['tail']);
   });
 
   test('stale queuedAt without payload cannot spin empty Runtime cycles', () => {

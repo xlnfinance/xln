@@ -327,8 +327,15 @@ const assertCertifiedBookOutputAuthority = (
     }
     case 'crossJurisdictionFillNotice': {
       const route = requireSemanticRoute(currentState, tx.data.orderId);
-      assertSemanticSource(tx.type, source, [routeBookOwner(route)]);
-      assertSemanticTarget(tx.type, target, route.source.counterpartyEntityId);
+      const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
+      const targetHub = normalizeEntityRef(route.target.entityId);
+      if (target === sourceHub) {
+        assertSemanticSource(tx.type, source, [routeBookOwner(route)]);
+      } else if (target === targetHub) {
+        assertSemanticSource(tx.type, source, [sourceHub]);
+      } else {
+        throw new Error(`CONSENSUS_OUTPUT_CROSS_J_PROGRESS_TARGET_INVALID:${target}`);
+      }
       return true;
     }
     default:
@@ -419,8 +426,16 @@ const assertCertifiedCrossJRecoveryAuthority = (
             `${tx.data.sourceCounterpartyEntityId}:${route.source.counterpartyEntityId}`,
         );
       }
-      assertSemanticSource(tx.type, source, [route.source.entityId]);
-      assertSemanticTarget(tx.type, target, route.target.counterpartyEntityId);
+      const normalizedTarget = normalizeEntityRef(target);
+      if (normalizedTarget === normalizeEntityRef(route.target.counterpartyEntityId)) {
+        assertSemanticSource(tx.type, source, [route.source.entityId]);
+        assertSemanticTarget(tx.type, target, route.target.counterpartyEntityId);
+      } else if (normalizedTarget === normalizeEntityRef(route.source.entityId)) {
+        assertSemanticSource(tx.type, source, [route.target.counterpartyEntityId]);
+        assertSemanticTarget(tx.type, target, route.source.entityId);
+      } else {
+        throw new Error(`CONSENSUS_OUTPUT_SALVAGE_TARGET_INVALID:${target}`);
+      }
       return true;
     }
     case 'resolveHtlcLock': {

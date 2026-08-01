@@ -24,7 +24,8 @@ import { ensureRuntimeConfig } from './loop-environment';
 import { enqueueRuntimeInputs } from './loop-infrastructure';
 import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import type { EntityInput, EntityReplica } from '../entity/types';
-import type { RuntimeReplica, RuntimeInput } from './types';
+import type { RoutedEntityInput, RuntimeReplica, RuntimeInput } from './types';
+import { atomicCrossJInputCohortKey } from './entity-routing';
 
 export type RuntimeWorkDeps = {
   runtimeInputHasQueuedWork(input: RuntimeInput): boolean;
@@ -147,6 +148,10 @@ export const prioritizeJEventFrame = (
   const priorityInputs: EntityInput[] = [];
   const deferredInputs: EntityInput[] = [];
   for (const input of runtimeInput.entityInputs) {
+    if (atomicCrossJInputCohortKey(input)) {
+      deferredInputs.push(input);
+      continue;
+    }
     const txs = input.entityTxs ?? [];
     const jEventTxs = txs.filter(tx => tx.type === 'j_event');
     const otherTxs = txs.filter(tx => tx.type !== 'j_event');
@@ -191,11 +196,51 @@ export const applyEntityInputFrameCap = (
 ): boolean => {
   const limit = Math.max(0, Math.floor(Number(maxInputs)));
   if (limit <= 0 || runtimeInput.entityInputs.length <= limit) return false;
-  const deferred = runtimeInput.entityInputs.slice(limit);
-  runtimeInput.entityInputs = runtimeInput.entityInputs.slice(0, limit);
+  const selectedCount = selectAtomicPrefix(runtimeInput.entityInputs, limit, () => 1);
+  const deferred = runtimeInput.entityInputs.slice(selectedCount);
+  runtimeInput.entityInputs = runtimeInput.entityInputs.slice(0, selectedCount);
   mempool.entityInputs = [...deferred, ...mempool.entityInputs];
   mempool.queuedAt ??= timestamp;
   return true;
+};
+
+type AtomicCapInput = EntityInput & Pick<
+  RoutedEntityInput,
+  'atomicCrossJurisdictionPair' | 'sourceRuntimeFrame'
+>;
+
+const atomicCrossJFrameKey = (input: AtomicCapInput): string | null => {
+  return atomicCrossJInputCohortKey(input);
+};
+
+const selectAtomicPrefix = (
+  inputs: readonly AtomicCapInput[],
+  limit: number,
+  weightOf: (input: AtomicCapInput) => number,
+): number => {
+  const lastIndexByKey = new Map<string, number>();
+  for (let index = 0; index < inputs.length; index += 1) {
+    const key = atomicCrossJFrameKey(inputs[index]!);
+    if (key) lastIndexByKey.set(key, index);
+  }
+
+  let cursor = 0;
+  let selectedWeight = 0;
+  while (cursor < inputs.length) {
+    let end = cursor;
+    let unitWeight = 0;
+    for (let index = cursor; index <= end; index += 1) {
+      const input = inputs[index]!;
+      const key = atomicCrossJFrameKey(input);
+      if (key) end = Math.max(end, lastIndexByKey.get(key) ?? index);
+      unitWeight += weightOf(input);
+    }
+    if (selectedWeight > 0 && selectedWeight + unitWeight > limit) break;
+    cursor = end + 1;
+    selectedWeight += unitWeight;
+    if (selectedWeight >= limit) break;
+  }
+  return cursor;
 };
 
 export const applyEntityTxFrameCap = (
@@ -206,26 +251,14 @@ export const applyEntityTxFrameCap = (
 ): boolean => {
   const limit = Math.max(0, Math.floor(Number(maxTxs)));
   if (limit <= 0) return false;
-  let selectedTxs = 0;
-  let capReached = false;
-  const selected: EntityInput[] = [];
-  const deferred: EntityInput[] = [];
-  for (const input of runtimeInput.entityInputs) {
-    const txCount = input.entityTxs?.length ?? 0;
-    const remaining = limit - selectedTxs;
-    // Never split an authenticated Entity envelope into independently durable
-    // prefixes. One oversized head passes whole so FIFO cannot deadlock.
-    if (!capReached && (txCount === 0 || txCount <= remaining || selectedTxs === 0)) {
-      selected.push(input);
-      selectedTxs += txCount;
-      capReached = selectedTxs >= limit;
-    } else {
-      deferred.push(input);
-      capReached = true;
-    }
-  }
-  if (deferred.length === 0) return false;
-  runtimeInput.entityInputs = selected;
+  const selectedCount = selectAtomicPrefix(
+    runtimeInput.entityInputs,
+    limit,
+    input => input.entityTxs?.length ?? 0,
+  );
+  if (selectedCount >= runtimeInput.entityInputs.length) return false;
+  const deferred = runtimeInput.entityInputs.slice(selectedCount);
+  runtimeInput.entityInputs = runtimeInput.entityInputs.slice(0, selectedCount);
   mempool.entityInputs = [...deferred, ...mempool.entityInputs];
   mempool.queuedAt ??= timestamp;
   return true;

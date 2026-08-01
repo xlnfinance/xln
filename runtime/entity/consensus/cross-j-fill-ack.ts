@@ -1,45 +1,3 @@
-const buildCrossJurisdictionFillNoticeTx = (
-  tx: CrossSwapFillAckTx,
-  accountId: string,
-): CrossJurisdictionFillNoticeTx => {
-  const fillSeq = Math.floor(Number(tx.data.fillSeq ?? 0));
-  const cumulativeFillRatio = Math.floor(Number(tx.data.cumulativeFillRatio ?? 0));
-  if (fillSeq <= 0 || cumulativeFillRatio <= 0) {
-    throw new Error(
-      `CROSS_J_FILL_ACK_INVALID_NOTICE: account=${accountId} offer=${tx.data.offerId} ` +
-        `fillSeq=${fillSeq} ratio=${cumulativeFillRatio}`,
-    );
-  }
-  return {
-    type: 'crossJurisdictionFillNotice',
-    data: {
-      orderId: tx.data.offerId,
-      ...(tx.data.routeHash ? { routeHash: tx.data.routeHash } : {}),
-      ...(tx.data.previousFillSeq !== undefined
-        ? { previousFillSeq: Math.floor(Number(tx.data.previousFillSeq)) }
-        : {}),
-      fillSeq,
-      incrementalSourceAmount: tx.data.incrementalSourceAmount ?? tx.data.executionSourceAmount ?? 0n,
-      incrementalTargetAmount: tx.data.incrementalTargetAmount ?? tx.data.executionTargetAmount ?? 0n,
-      cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
-      cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
-      cumulativeFillRatio,
-      ...(tx.data.fillNumerator !== undefined ? { fillNumerator: tx.data.fillNumerator } : {}),
-      ...(tx.data.fillDenominator !== undefined ? { fillDenominator: tx.data.fillDenominator } : {}),
-      ...(tx.data.priceImprovementMode ? { priceImprovementMode: tx.data.priceImprovementMode } : {}),
-      ...(tx.data.priceImprovementAmount !== undefined
-        ? { priceImprovementAmount: tx.data.priceImprovementAmount }
-        : {}),
-      ...(tx.data.priceImprovementTokenId !== undefined
-        ? { priceImprovementTokenId: tx.data.priceImprovementTokenId }
-        : {}),
-      ...(tx.data.cancelRemainder !== undefined ? { cancelRemainder: tx.data.cancelRemainder } : {}),
-      ...(tx.data.priceTicks !== undefined ? { priceTicks: tx.data.priceTicks } : {}),
-      pairId: String(tx.data.pairId || ''),
-    },
-  };
-};
-
 const buildCrossJurisdictionAdmissionFillNoticeOutput = (
   currentEntityState: EntityState,
   accountId: string,
@@ -173,6 +131,7 @@ export const drainPendingCrossJurisdictionFillAcks = async (
   proposableAccounts: Set<string>,
   storageChanges: RuntimeOverlayRecord[],
   candidateEffects: EntityCandidateEffect[],
+  outputs: EntityOutput[],
 ): Promise<number> => {
   const pending = currentEntityState.pendingCrossJurisdictionFillAcks;
   if (!pending || pending.size === 0) return 0;
@@ -226,6 +185,7 @@ export const drainPendingCrossJurisdictionFillAcks = async (
     const account = currentEntityState.accounts.get(pendingAck.accountId);
     if (!account?.state.swapOffers?.has(pendingAck.tx.data.offerId)) continue;
     if (await admitGeneratedAccountTx(accountConsensusContext, currentEntityState, account, pendingAck.tx)) {
+      appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, pendingAck.tx, outputs);
       proposableAccounts.add(pendingAck.accountId);
       storageChanges.push({
         family: 'account',
@@ -253,6 +213,7 @@ export const drainCommittedCrossJurisdictionCancelAcks = async (
   currentEntityState: EntityState,
   proposableAccounts: Set<string>,
   storageChanges: RuntimeOverlayRecord[],
+  outputs: EntityOutput[],
 ): Promise<number> => {
   let queued = 0;
   for (const { accountId, tx } of collectCommittedCrossJurisdictionCancelAcks(currentEntityState)) {
@@ -264,6 +225,7 @@ export const drainCommittedCrossJurisdictionCancelAcks = async (
       throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
     if (!(await admitGeneratedAccountTx(accountConsensusContext, currentEntityState, account, tx))) continue;
+    appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, outputs);
     proposableAccounts.add(accountId);
     storageChanges.push({
       family: 'account',
@@ -277,7 +239,11 @@ export const drainCommittedCrossJurisdictionCancelAcks = async (
 import { applyAccountInput } from '../../account/consensus';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import { createLocalAccountInput } from '../../account/input';
-import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
+import {
+  buildCrossJurisdictionFillId,
+  buildCrossJurisdictionFillNoticeTx,
+  CROSS_J_PENDING_FILL_ACK_TTL_MS,
+} from '../../extensions/cross-j/fill-ack';
 import { cloneCrossJurisdictionAccountTxRoute } from '../../extensions/cross-j';
 import { shortId, shortOrder } from '../../infra/logger';
 import {
@@ -286,15 +252,14 @@ import {
 } from '../../orderbook/cross-j-orderbook';
 import { compareStableText } from '../../protocol/serialization';
 import type { AccountReplica, AccountTx, RuntimeOverlayRecord } from '../../types/account';
-import type { EntityTx } from '../../types/entity-tx';
 import { collectCommittedCrossJurisdictionCancelAcks } from '../tx/handlers/account';
 import type { EntityRuntimeContext } from '../runtime-context';
-import type { EntityCandidateEffect, EntityInput, EntityState } from '../types';
+import type { EntityCandidateEffect, EntityInput, EntityOutput, EntityState } from '../types';
+import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../tx/cross-j-outputs';
 import { entityLog } from './entity-log';
 
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
 
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
-type CrossJurisdictionFillNoticeTx = Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>;
 
 export const MAX_PENDING_CROSS_J_FILL_ACKS = 1024;

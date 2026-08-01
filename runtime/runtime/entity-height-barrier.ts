@@ -3,6 +3,7 @@ import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from './types';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import { getInputReliableIdentity } from './reliable-delivery';
 import { reliableIdentityExactKey } from './reliable-frontier';
+import { atomicCrossJInputCohortKey } from './entity-routing';
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
@@ -102,17 +103,31 @@ export const applyEntityHeightDurabilityBarrier = (
   }
 
   if (laneState.size === 0) return 0;
+  const blockedAtomicCohorts = new Set<string>();
+  for (const input of runtimeInput.entityInputs) {
+    const key = laneKey(input);
+    const state = key ? laneState.get(key) : undefined;
+    if (!state) continue;
+    const candidateHeight = possibleCommittedHeight(input, state.currentHeight);
+    if (candidateHeight !== null && candidateHeight > state.firstFutureHeight) {
+      const cohortKey = atomicCrossJInputCohortKey(input);
+      if (cohortKey) blockedAtomicCohorts.add(cohortKey);
+    }
+  }
+
   const selected: RoutedEntityInput[] = [];
   const deferred: RoutedEntityInput[] = [];
   for (const input of runtimeInput.entityInputs) {
     const key = laneKey(input);
     const state = key ? laneState.get(key) : undefined;
-    if (!state) {
-      selected.push(input);
-      continue;
-    }
-    const candidateHeight = possibleCommittedHeight(input, state.currentHeight);
-    if (candidateHeight !== null && candidateHeight > state.firstFutureHeight) {
+    const candidateHeight = state
+      ? possibleCommittedHeight(input, state.currentHeight)
+      : null;
+    const heightBlocked = Boolean(
+      state && candidateHeight !== null && candidateHeight > state.firstFutureHeight,
+    );
+    const cohortKey = atomicCrossJInputCohortKey(input);
+    if (heightBlocked || (cohortKey !== null && blockedAtomicCohorts.has(cohortKey))) {
       deferred.push(input);
     } else {
       selected.push(input);

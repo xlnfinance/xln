@@ -15,6 +15,7 @@ import { CROSS_J_MAX_FILL_RATIO } from '../../../../extensions/cross-j/index';
 import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../infra/logger';
 import type { AccountTxTarget } from './orderbook-queue';
+import { MalformedEntityFrameInputError } from '../../invariant-errors';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -80,7 +81,10 @@ export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
       throw new Error(`ROUTED_PAYMENT_NEXT_HOP_MISSING:index=${forwardIndex}`);
     }
     if (!newState.accounts.has(nextHop)) {
-      throw new Error(`ROUTED_PAYMENT_NEXT_HOP_ACCOUNT_MISSING:index=${forwardIndex}:nextHop=${nextHop}`);
+      throw new MalformedEntityFrameInputError(
+        'accountInput',
+        `ROUTED_PAYMENT_NEXT_HOP_ACCOUNT_MISSING:index=${forwardIndex}:nextHop=${nextHop}`,
+      );
     }
     accountTxs.push({
       accountId: nextHop,

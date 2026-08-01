@@ -11,6 +11,7 @@ import {
   getCrossJurisdictionCommittedProofRatio,
   getCrossJurisdictionCommittedFillAmounts,
   hashCrossJurisdictionCloseBinary,
+  isCrossJurisdictionRouteExpired,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionCloseProofProgress,
@@ -24,6 +25,7 @@ import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../../infra/logger';
 import { removeCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
 import { addMessage } from '../../frame-events';
+import { cancelHook, scheduleHook } from '../../scheduler';
 import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,
@@ -39,13 +41,13 @@ const normalizeEntityRef = (value: string): string => String(value || '').toLowe
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
   getCrossJurisdictionCommittedProofRatio(route);
 
-const assertSettledPullReplay = (
+const assertTerminalPullReplay = (
   route: CrossJurisdictionSwapRoute,
   fillRatio: number,
   binary: string,
   suppliedProof?: Extract<AccountTx, { type: 'cross_pull_close' }>['data']['proof'],
 ): boolean => {
-  if (route.status !== 'settled') return false;
+  if (!isCrossJurisdictionTerminalStatus(route.status)) return false;
   const proof = route.sourceCloseProof;
   const committed = getCrossJurisdictionCommittedFillAmounts(route);
   const binaryHash = hashCrossJurisdictionCloseBinary(binary);
@@ -57,7 +59,7 @@ const assertSettledPullReplay = (
     proof.cumulativeSourceAmount !== committed.filledSourceAmount ||
     proof.cumulativeTargetAmount !== committed.filledTargetAmount
   ) {
-    throw new Error(`CROSS_J_SETTLED_PULL_REPLAY_MISMATCH: route=${route.orderId} ratio=${fillRatio}`);
+    throw new Error(`CROSS_J_TERMINAL_PULL_REPLAY_MISMATCH: route=${route.orderId} ratio=${fillRatio}`);
   }
   if (
     suppliedProof &&
@@ -70,7 +72,7 @@ const assertSettledPullReplay = (
       normalizeEntityRef(suppliedProof.binaryHash) !== normalizeEntityRef(proof.binaryHash)
     )
   ) {
-    throw new Error(`CROSS_J_SETTLED_PULL_PROOF_REPLAY_MISMATCH: route=${route.orderId}`);
+    throw new Error(`CROSS_J_TERMINAL_PULL_PROOF_REPLAY_MISMATCH: route=${route.orderId}`);
   }
   return true;
 };
@@ -106,10 +108,11 @@ const assertCrossPullCloseAllowed = (
   }
 };
 
-const transitionTargetLegSettled = (
+const transitionTargetLegTerminal = (
   route: CrossJurisdictionSwapRoute,
   updatedAt: number,
-): void => {
+  fillRatio: number,
+): 'settled' | 'cancelled' | 'expired' => {
   if (
     route.status !== 'clearing' &&
     route.status !== 'source_claimed' &&
@@ -120,8 +123,14 @@ const transitionTargetLegSettled = (
     // when that same frame commits, so materialize clearing before settlement.
     transitionCrossJurisdictionRouteStatus(route, 'clearing', updatedAt);
   }
-  transitionCrossJurisdictionRouteStatus(route, 'settled', updatedAt);
-  route.settledAt = updatedAt;
+  const terminal = fillRatio > 0
+    ? 'settled'
+    : isCrossJurisdictionRouteExpired(route, updatedAt)
+      ? 'expired'
+      : 'cancelled';
+  transitionCrossJurisdictionRouteStatus(route, terminal, updatedAt);
+  if (terminal === 'settled') route.settledAt = updatedAt;
+  return terminal;
 };
 
 const routeBookOwnerEntityId = (route: CrossJurisdictionSwapRoute): string =>
@@ -324,6 +333,17 @@ const admitCommittedSourcePullToBook = (
   storageChanges: RuntimeOverlayRecord[],
 ): void => {
   addMessage(state, `🌉 Cross-j swap ${route.orderId} committed by both Account legs`);
+  if (!state.crontabState) throw new Error(`CROSS_J_EXPIRY_CRONTAB_MISSING:${route.orderId}`);
+  const expiresAt = Math.floor(Number(route.expiresAt || 0));
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= state.timestamp) {
+    throw new Error(`CROSS_J_EXPIRY_INVALID:${route.orderId}:${String(route.expiresAt)}`);
+  }
+  scheduleHook(state.crontabState, {
+    id: `cross-j-expiry:${route.orderId}`,
+    type: 'cross_j_orderbook_sweep',
+    triggerAt: expiresAt,
+    data: { reason: `cross-j-expiry:${route.orderId}` },
+  });
   const ownerId = routeBookOwnerEntityId(route);
   const admissionTx: Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }> = {
     type: 'admitCrossJurisdictionBookOrder',
@@ -454,7 +474,7 @@ const applyCrossPullCloseFollowup = (
       counterpartyEntityId === sourceHubId;
 
     if (isSourceHubClose || isSourceUserClose) {
-      if (assertSettledPullReplay(route, fillRatio, accountTx.data.binary, accountTx.data.proof)) {
+      if (assertTerminalPullReplay(route, fillRatio, accountTx.data.binary, accountTx.data.proof)) {
         if (isSourceHubClose) {
           removeOrRouteCrossJurisdictionBookOrder(
             env,
@@ -474,10 +494,11 @@ const applyCrossPullCloseFollowup = (
       );
       route.sourceCloseProof = accountTx.data.proof;
       route.targetCloseProof = accountTx.data.proof;
-      transitionTargetLegSettled(route, newState.timestamp);
+      const terminal = transitionTargetLegTerminal(route, newState.timestamp, fillRatio);
+      if (newState.crontabState) cancelHook(newState.crontabState, `cross-j-expiry:${route.orderId}`);
 
       if (isSourceHubClose) {
-        removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'settled', storageChanges);
+        removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, terminal, storageChanges);
       }
       crossJFollowupLog.debug('pull.close.source_committed', {
         route: shortOrder(route.orderId, 12),
@@ -495,7 +516,7 @@ const applyCrossPullCloseFollowup = (
       currentEntityId === targetHubId &&
       counterpartyEntityId === targetUserId;
     if (isTargetUserClose || isTargetHubClose) {
-      if (assertSettledPullReplay(route, fillRatio, accountTx.data.binary, accountTx.data.proof)) continue;
+      if (assertTerminalPullReplay(route, fillRatio, accountTx.data.binary, accountTx.data.proof)) continue;
       // Account consensus already proved that the target Hub authored this
       // cross_pull_close. currentEntityId only identifies which side is
       // projecting the committed bilateral frame; it never changes authorship.
@@ -506,7 +527,8 @@ const applyCrossPullCloseFollowup = (
       );
       route.sourceCloseProof = accountTx.data.proof;
       route.targetCloseProof = accountTx.data.proof;
-      transitionTargetLegSettled(route, newState.timestamp);
+      transitionTargetLegTerminal(route, newState.timestamp, fillRatio);
+      if (newState.crontabState) cancelHook(newState.crontabState, `cross-j-expiry:${route.orderId}`);
       crossJFollowupLog.debug('pull.close.settled', {
         route: shortOrder(route.orderId, 12),
         ratio: fillRatio,
@@ -664,6 +686,39 @@ const applyFillAckFollowup = (
   return true;
 };
 
+const applyTargetProgressFollowup = (
+  newState: EntityState,
+  counterpartyId: string,
+  accountTx: Extract<AccountTx, { type: 'cross_pull_progress' }>,
+): boolean => {
+  const fillAck: Extract<AccountTx, { type: 'cross_swap_fill_ack' }> = {
+    type: 'cross_swap_fill_ack',
+    data: accountTx.data.fill,
+  };
+  const route = newState.crossJurisdictionSwaps?.get(fillAck.data.offerId);
+  if (!route) {
+    throw new Error(`CROSS_J_TARGET_PROGRESS_ROUTE_MISSING:${fillAck.data.offerId}`);
+  }
+  const role = getCommittedPullRole(
+    route,
+    normalizeEntityRef(newState.entityId),
+    normalizeEntityRef(counterpartyId),
+    accountTx.data.pullId,
+  );
+  if (role?.leg !== 'target') {
+    throw new Error(`CROSS_J_TARGET_PROGRESS_ACCOUNT_MISMATCH:${fillAck.data.offerId}:${accountTx.data.pullId}`);
+  }
+  const ratio = getCrossJurisdictionCommittedProofRatio({
+    orderId: fillAck.data.offerId,
+    cumulativeFillRatio: fillAck.data.cumulativeFillRatio,
+    fillNumerator: fillAck.data.fillNumerator,
+    fillDenominator: fillAck.data.fillDenominator,
+  });
+  applyCommittedFillAckProgress(newState, route, fillAck, ratio);
+  route.updatedAt = newState.timestamp;
+  return true;
+};
+
 export function applyCommittedCrossJurisdictionAccountTxFollowup(
   env: EntityRuntimeContext,
   newState: EntityState,
@@ -689,6 +744,9 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
   }
   if (accountTx.type === 'cross_pull_close') {
     return applyCrossPullCloseFollowup(env, newState, counterpartyId, accountTx, outputs, storageChanges);
+  }
+  if (accountTx.type === 'cross_pull_progress') {
+    return applyTargetProgressFollowup(newState, counterpartyId, accountTx);
   }
   if (accountTx.type === 'cross_swap_fill_ack') {
     return applyFillAckFollowup(

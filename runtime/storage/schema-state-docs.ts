@@ -158,7 +158,8 @@ const validateStorageAccountReplicaCore = (doc: Record<string, unknown>, code: s
   }
   const current = frames[0]!;
   if (current.height !== currentHeight) throw new Error(`${code}_FRAME_HEIGHT`);
-  if (frames[1] && (frames[1].height !== currentHeight + 1 || frames[1].prevFrameHash !== current.stateHash)) {
+  const expectedPendingPrevHash = currentHeight === 0 ? 'genesis' : current.stateHash;
+  if (frames[1] && (frames[1].height !== currentHeight + 1 || frames[1].prevFrameHash !== expectedPendingPrevHash)) {
     throw new Error(`${code}_PENDING_FRAME_LINK`);
   }
   const header = requireBoundaryRecord(doc['proofHeader'], `${code}_PROOF_HEADER`);

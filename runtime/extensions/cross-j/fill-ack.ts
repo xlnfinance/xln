@@ -2,10 +2,55 @@ import { ethers } from 'ethers';
 import { getCrossJurisdictionCommittedProofRatio } from './index';
 import type { AccountTx } from '../../types/account';
 import type { CrossJurisdictionPendingFill } from '../../types/cross-jurisdiction';
+import type { EntityTx } from '../../types/entity-tx';
 
 export const CROSS_J_PENDING_FILL_ACK_TTL_MS = 5 * 60_000;
 
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
+type CrossJurisdictionFillNoticeTx = Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>;
+
+export const buildCrossJurisdictionFillNoticeTx = (
+  tx: CrossSwapFillAckTx,
+  accountId: string,
+): CrossJurisdictionFillNoticeTx => {
+  const fillSeq = Math.floor(Number(tx.data.fillSeq ?? 0));
+  const cumulativeFillRatio = Math.floor(Number(tx.data.cumulativeFillRatio ?? 0));
+  const isCancel = tx.data.ackKind === 'cancel' && tx.data.cancelRemainder === true;
+  if ((!isCancel && (fillSeq <= 0 || cumulativeFillRatio <= 0)) || fillSeq < 0 || cumulativeFillRatio < 0) {
+    throw new Error(
+      `CROSS_J_FILL_ACK_INVALID_NOTICE: account=${accountId} offer=${tx.data.offerId} ` +
+        `fillSeq=${fillSeq} ratio=${cumulativeFillRatio}`,
+    );
+  }
+  return {
+    type: 'crossJurisdictionFillNotice',
+    data: {
+      orderId: tx.data.offerId,
+      ...(tx.data.routeHash ? { routeHash: tx.data.routeHash } : {}),
+      ...(tx.data.previousFillSeq !== undefined
+        ? { previousFillSeq: Math.floor(Number(tx.data.previousFillSeq)) }
+        : {}),
+      fillSeq,
+      incrementalSourceAmount: tx.data.incrementalSourceAmount ?? tx.data.executionSourceAmount ?? 0n,
+      incrementalTargetAmount: tx.data.incrementalTargetAmount ?? tx.data.executionTargetAmount ?? 0n,
+      cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
+      cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
+      cumulativeFillRatio,
+      ...(tx.data.fillNumerator !== undefined ? { fillNumerator: tx.data.fillNumerator } : {}),
+      ...(tx.data.fillDenominator !== undefined ? { fillDenominator: tx.data.fillDenominator } : {}),
+      ...(tx.data.priceImprovementMode ? { priceImprovementMode: tx.data.priceImprovementMode } : {}),
+      ...(tx.data.priceImprovementAmount !== undefined
+        ? { priceImprovementAmount: tx.data.priceImprovementAmount }
+        : {}),
+      ...(tx.data.priceImprovementTokenId !== undefined
+        ? { priceImprovementTokenId: tx.data.priceImprovementTokenId }
+        : {}),
+      ...(tx.data.cancelRemainder !== undefined ? { cancelRemainder: tx.data.cancelRemainder } : {}),
+      ...(tx.data.priceTicks !== undefined ? { priceTicks: tx.data.priceTicks } : {}),
+      pairId: String(tx.data.pairId || ''),
+    },
+  };
+};
 
 const normalizeAckKind = (tx: CrossSwapFillAckTx): CrossJurisdictionPendingFill['ackKind'] => {
   if (tx.data.ackKind === 'cancel') return 'cancel';

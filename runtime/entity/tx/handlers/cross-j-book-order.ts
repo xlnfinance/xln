@@ -16,7 +16,6 @@ import {
   getCrossJurisdictionBookAdmissionError,
   getCrossJurisdictionRouteRemainingAmounts,
   isCrossJurisdictionBookAdmissionPending,
-  buildCrossJurisdictionCancelAck,
   markCrossJurisdictionBookCancelPending,
   markCrossJurisdictionBookAdmissionClosed,
   markCrossJurisdictionBookRemovalCommitted,
@@ -47,7 +46,6 @@ import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,
 } from '../cross-j-outputs';
-import { hasQueuedCrossSwapAckForEntityState } from './account/orderbook-queue';
 import { draftPreparedDisputeStartIfReady } from './dispute';
 
 const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
@@ -476,16 +474,8 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
     );
     return { newState: drafted.newState, outputs: drafted.outputs, accountTxs: [] };
   }
-  const accountTxs = hasQueuedCrossSwapAckForEntityState(
-    newState,
-    entityTx.data.sourceAccountId,
-    route.orderId,
-  ) ? [] : [{
-    accountId: entityTx.data.sourceAccountId,
-    tx: buildCrossJurisdictionCancelAck(route.orderId, currentRoute),
-  }];
   addMessage(newState, `🌉 Cross-j book removal committed ${route.orderId}`);
-  return { newState, outputs: [], accountTxs };
+  return { newState, outputs: [], accountTxs: [] };
 };
 
 export const handleRemoveCrossJurisdictionBookOrderEntityTx = (

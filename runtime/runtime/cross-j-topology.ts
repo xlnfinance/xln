@@ -4,7 +4,7 @@ import {
 } from '../extensions/cross-j/boundary';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import { hasLocalSignerForEntitySigner } from './loop-identity';
+import { getLocalEntitySignerKeys, hasLocalSignerForEntitySigner } from './loop-identity';
 import type { RuntimeReplica } from './types';
 
 type OwnerRole = 'user' | 'hub';
@@ -88,19 +88,21 @@ export const assertCrossJLocalCohorts = (
   env: RuntimeReplica,
   deps: Pick<CrossJTopologyDeps, 'hasLocalSignerForEntitySigner'> = defaultLocalOwnerDeps,
 ): void => {
+  const localOwnerKeys = deps === defaultLocalOwnerDeps ? getLocalEntitySignerKeys(env) : null;
+  const isLocal = (owner: Owner): boolean => localOwnerKeys
+    ? localOwnerKeys.has(`${normalize(owner.entityId)}\u0000${normalize(owner.signerId)}`)
+    : deps.hasLocalSignerForEntitySigner(env, owner.entityId, owner.signerId);
   for (const replica of env.state.eReplicas.values()) {
-    if (!deps.hasLocalSignerForEntitySigner(env, replica.entityId, replica.signerId)) continue;
+    if (!isLocal(replica)) continue;
     for (const route of replica.state.crossJurisdictionSwaps?.values() ?? []) {
       for (const role of ['user', 'hub'] as const) {
         const pair = ownerPair(route, role);
-        const local = pair.map(owner =>
-          deps.hasLocalSignerForEntitySigner(env, owner.entityId, owner.signerId));
+        const local = pair.map(isLocal);
         if (!local.some(Boolean)) continue;
         if (!local.every(Boolean)) {
           throw new Error(`CROSS_J_LOCAL_SIBLING_MISSING:${route.orderId}:${role}`);
         }
-        if (ownerPair(route, role === 'user' ? 'hub' : 'user').some(owner =>
-          deps.hasLocalSignerForEntitySigner(env, owner.entityId, owner.signerId))) {
+        if (ownerPair(route, role === 'user' ? 'hub' : 'user').some(isLocal)) {
           throw new Error(`CROSS_J_OWNER_RUNTIME_COLLISION:${route.orderId}`);
         }
       }

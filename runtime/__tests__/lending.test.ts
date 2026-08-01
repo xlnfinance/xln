@@ -92,11 +92,11 @@ const makeAccount = (counterparty: string): AccountReplica => {
   };
 };
 
-const frame = (tx: AccountTx, byLeft: boolean, timestamp: number): AccountFrame => ({
+const frame = (tx: AccountTx | AccountTx[], byLeft: boolean, timestamp: number): AccountFrame => ({
   height: 2,
   timestamp,
   jHeight: 0,
-  accountTxs: [tx],
+  accountTxs: Array.isArray(tx) ? tx : [tx],
   prevFrameHash: FRAME_HASH,
   deltas: [],
   stateHash: FRAME_HASH,
@@ -119,6 +119,70 @@ const commit = async (
 };
 
 describe('payer-authenticated hub lending', () => {
+  test('projects batched grants and revokes instead of overwriting absolute credit', async () => {
+    const state = makeState();
+    state.accounts.set(LENDER, makeAccount(LENDER));
+    state.accounts.set(BORROWER, makeAccount(BORROWER));
+    await commit(state, LENDER, {
+      type: 'lending_fund',
+      data: {
+        positionId: POSITION_ID,
+        hubEntityId: HUB,
+        lenderEntityId: LENDER,
+        tokenId: 1,
+        amount: 1_000n,
+        termId: '1d',
+        interestBps: 100,
+      },
+    }, false, 1_000);
+
+    const requestIds = ['borrow-aaaaaaaaaaaaaaaa', 'borrow-bbbbbbbbbbbbbbbb'];
+    const borrows: AccountTx[] = [100n, 200n].map((amount, index) => ({
+      type: 'lending_borrow_request',
+      data: {
+        requestId: requestIds[index]!,
+        hubEntityId: HUB,
+        borrowerEntityId: BORROWER,
+        tokenId: 1,
+        amount,
+        termId: '1d',
+        maxInterestBps: 150,
+      },
+    }));
+    const borrowerAccount = state.accounts.get(BORROWER)!;
+    for (const tx of borrows) expect((await applyAccountTx(borrowerAccount, tx, false)).success).toBe(true);
+    const grants: AccountTxTarget[] = [];
+    applyCommittedAccountFrameFollowups(state, BORROWER, frame(borrows, false, 2_000), grants, undefined, []);
+    expect(grants.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
+      .toEqual([20_100n, 20_300n]);
+
+    for (const output of grants) expect((await applyAccountTx(borrowerAccount, output.tx, true)).success).toBe(true);
+    applyCommittedAccountFrameFollowups(
+      state,
+      BORROWER,
+      frame(grants.map(output => output.tx), true, 2_001),
+      [],
+      undefined,
+      [],
+    );
+    const loans = [...state.lending!.loans.values()];
+    const repayments: AccountTx[] = loans.map(loan => ({
+      type: 'lending_repay',
+      data: {
+        loanId: loan.loanId,
+        hubEntityId: HUB,
+        borrowerEntityId: BORROWER,
+        tokenId: 1,
+        amount: loan.repaymentAmount,
+      },
+    }));
+    for (const tx of repayments) expect((await applyAccountTx(borrowerAccount, tx, false)).success).toBe(true);
+    const revokes: AccountTxTarget[] = [];
+    applyCommittedAccountFrameFollowups(state, BORROWER, frame(repayments, false, 3_000), revokes, undefined, []);
+    expect(revokes.map(output => output.tx.type === 'lending_credit' ? output.tx.data.creditLimit : 0n))
+      .toEqual([20_200n, 20_000n]);
+  });
+
   test('fund, borrow, grant, repay, and revoke finalize only after matching bilateral commits', async () => {
     const state = makeState();
     state.accounts.set(LENDER, makeAccount(LENDER));

@@ -63,6 +63,7 @@ const invalidateCommittedMapsForTx = (
       return;
     case 'cross_pull_lock':
     case 'cross_pull_close':
+    case 'cross_pull_progress':
       invalidate('deltas');
       invalidate('pulls', tx.data.pullId);
       return;

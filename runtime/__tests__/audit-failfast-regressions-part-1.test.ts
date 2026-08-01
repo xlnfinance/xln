@@ -181,6 +181,7 @@ import {
 import { createJReplica } from '../scenarios/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
+import { assertExternalEntityInputAllowed } from '../runtime/entity-input-admission';
 import { discardRejectedEntityInput } from '../runtime/frame/input-discard';
 
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
@@ -768,7 +769,7 @@ describe('audit fail-fast regressions', () => {
     expect(getRuntimeJurisdictionHeight(env, 0)).toBe(5794);
   });
 
-  test('cross-j system entity txs reject remote hops outside the two-runtime route topology', async () => {
+  test('cross-j system entity txs reject every raw ingress outside certified runtimeOutput', async () => {
     const env = createEmptyEnv('cross-j-intra-runtime-boundary');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
@@ -789,6 +790,23 @@ describe('audit fail-fast regressions', () => {
         },
       ]),
     ).rejects.toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
+
+    for (const entityId of [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`]) {
+      expect(() => assertExternalEntityInputAllowed({
+        entityId,
+        signerId: `0x${'01'.repeat(20)}`,
+        entityTxs: [{
+          type: 'crossJurisdictionSalvage',
+          data: {
+            routeId: 'raw-local-salvage',
+            binary: '0x01',
+            fillRatio: 1,
+            sourceEntityId: `0x${'11'.repeat(32)}`,
+            sourceCounterpartyEntityId: `0x${'33'.repeat(32)}`,
+          },
+        }],
+      })).toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
+    }
 
     await expect(
       processRuntime(env, [

@@ -41,6 +41,95 @@ state-machine folders.
 
 ---
 
+## Audited module ledger
+
+This ledger is the repository map plus its machine-readable audit state. Scores
+come from `bun tools/audit.ts status`, not from agent opinions. `*` means that
+the registry-derived score is backed only by evidence from an older source
+fingerprint; `N/A` means support, history, generated state, or an audit scope
+that does not yet have a canonical owner. A low score therefore means
+**insufficient current evidence**, not an invented judgement about code style.
+
+### Root folders
+
+| Path | Purpose | Quality /1000 | Current audit note |
+|---|---|---:|---|
+| `.agents/` | Local agent handoffs and working ledgers. | N/A | Process metadata, not production. |
+| `.archive/` | Historical implementations and references. | N/A | Never current protocol authority. |
+| `.claude/` | Claude profiles and launch configuration. | N/A | Development tooling. |
+| `.github/` | CI, deployment, and distribution workflows. | `0*` | Release/supply-chain evidence must be refreshed. |
+| `.obsidian/` | Documentation workspace settings. | N/A | Editor metadata. |
+| `.vscode/` | Editor and debugger settings. | N/A | Editor metadata. |
+| `agents/` | Canonical agent workflow and review templates. | N/A | Assurance process. |
+| `ai/` | Voice and auxiliary AI utilities. | N/A | Outside the fintech core. |
+| `audits/` | Registry, findings, reviews, and evidence receipts. | N/A | Source of audit truth; does not score itself. |
+| `brainvault/` | Deterministic wallet derivation, CLI, and workers. | `400*` | Strong historical tests; current fingerprint needs receipts. |
+| `custody/` | Node signer storage and withdrawal/custody service. | `400*` | API/auth/custody evidence is stale. |
+| `debates/` | Standalone multi-model review experiment. | N/A | Auxiliary application. |
+| `design/` | Product mockups and visual references. | N/A | Design evidence, not executable protocol. |
+| `docs/` | Architecture, protocol, operations, and audit guides. | N/A | Specifications; release-sensitive subsets are gated elsewhere. |
+| `frontend/` | User wallet and developer/diagnostic interfaces. | `0*` | User and developer surfaces are split below. |
+| `jurisdictions/` | Solidity identity, reserves, settlement, and disputes. | `400*` | Contracts are owner-gated; evidence is stale. |
+| `native/` | Desktop/mobile shells and platform security tests. | N/A | Registry ownership is not yet explicit. |
+| `ops/` | Testnet policy and deployment configuration. | N/A | Registry ownership is not yet explicit. |
+| `packages/` | Published CLI and `xlnfinance` packages. | N/A | Release surface lacks direct fingerprint ownership. |
+| `prompts/` | Reusable audit and investigation prompts. | N/A | Review tooling. |
+| `release/` | Release-channel metadata. | N/A | Release input, not directly fingerprinted. |
+| `runtime/` | Deterministic R → E → A core and external boundaries. | `0*` | Conservative minimum; detailed split below. |
+| `scripts/` | Build, deploy, release, and operator commands. | `0*` | Security-sensitive subsets need current release evidence. |
+| `tests/` | Browser, integration, security, and release evidence. | N/A | Tests score the production modules they exercise. |
+| `tools/` | Audit, frozen-core, snapshot, and repository gates. | `0*` | Release/supply-chain evidence must be refreshed. |
+| `types/` | Local TypeScript declaration shims. | N/A | Compile support only. |
+
+### Runtime subfolders
+
+| Path | Purpose | Quality /1000 | Current audit note |
+|---|---|---:|---|
+| `runtime/runtime/` | Single-writer ingress, Runtime frames, WAL boundary, post-commit outputs. | `0*` | Runtime-pipeline evidence is stale. |
+| `runtime/entity/` | Entity transactions, validator proposals, certification, and frames. | `400*` | Entity-consensus evidence is stale. |
+| `runtime/account/` | Bilateral financial state, proposals, ACKs, proofs, and disputes. | `400*` | Account-consensus evidence is stale. |
+| `runtime/storage/` | WAL, snapshots, history, Merkle integrity, and recovery. | `400*` | Recovery evidence is stale. |
+| `runtime/network/` | Authenticated direct/relay P2P, reconnect, and backpressure. | `0*` | Transport evidence and findings need re-adjudication. |
+| `runtime/orchestrator/` | Startup, service composition, health, and recovery ordering. | `0*` | Operations evidence is stale. |
+| `runtime/api/` | Authenticated Runtime adapter, public API, HTTP, and WebSocket delivery. | `0*` | Conservative minimum across API/auth/public-wallet modules. |
+| `runtime/jurisdiction/` | Deterministic chain-event machine and external adapters. | `400*` | Finality/ingress evidence is stale. |
+| `runtime/hanko/` | Entity identity, boards, thresholds, and signatures. | `400*` | Shares governance assurance scope. |
+| `runtime/protocol/` | Canonical codecs, proofs, crypto, payments, and shared rules. | `400*` | Protocol-primitives evidence is stale. |
+| `runtime/types/` | Canonical Runtime, Entity, Account, and finance schemas. | `400*` | Deterministic schema surface. |
+| `runtime/routing/` | Deterministic route and fee mathematics. | `400*` | Protocol-primitives evidence is stale. |
+| `runtime/config/` | Validated configuration and deterministic boundaries. | `400*` | Runtime-platform evidence is stale. |
+| `runtime/infra/` | Platform services, diagnostics, redaction, and process boundaries. | `400*` | Runtime-platform evidence is stale. |
+| `runtime/orderbook/` | Order admission, matching, fills, and cancellation. | `400*` | Markets evidence is stale. |
+| `runtime/extensions/` | Cross-J swaps, lending, rebalance, and finance extensions. | `400*` | Paired-flow evidence must be refreshed. |
+| `runtime/presentation/` | Deterministic public read-model projection. | `0*` | Public-wallet evidence is stale. |
+| `runtime/watchtower/` | Recovery material and dispute observation. | `400*` | Storage/recovery evidence is stale. |
+| `runtime/qa/` | Runtime release checks and evidence probes. | `0*` | Assurance code mapped to release gates. |
+| `runtime/scripts/` | Runtime build, verification, E2E, and release commands. | `0*` | Release evidence is stale. |
+| `runtime/scenarios/` | Real deterministic integration scenarios. | N/A | Evidence producer. |
+| `runtime/__tests__/` | Narrow and targeted regression suites. | N/A | Evidence producer. |
+
+### Frontend product split
+
+| Surface | Main paths | What it owns | Quality /1000 | Current audit note |
+|---|---|---|---:|---|
+| User wallet | `components/Entity/`, `components/Wallet/`, `Views/RuntimeCreation.svelte`, `PaymentSpotlight.svelte`, `/app`, `/address`, `/testnet` | Registration, recovery, accounts, receive, payment, swap, lending, and durable status. | `0*` | Wallet and registration-to-payment evidence is stale. |
+| Developer panels | `components/QA/`, `Tools/`, `Runtime/`, `TimeMachine/`, `lib/network3d/`, `/admin`, `/qa`, `/runs`, `/scenarios`, `/rpc*` | Runtime inspection, Graph3D, QA playback, raw RPC, and operator controls. | N/A | Deliberately peripheral; no canonical audit owner yet. |
+| Shared client | `stores/`, `security/`, `native/`, navigation, and common UI | Runtime connection, command journal, sessions, and client security boundaries. | N/A | Cross-cutting ownership must be made explicit before scoring. |
+| Mobile shells | `frontend/android/`, `frontend/ios/` | Capacitor packaging for mobile clients. | N/A | Release fingerprint ownership is not yet explicit. |
+
+### Current total
+
+| Canonical scope | Coverage /1000 | Quality /1000 | Evidence | Required target |
+|---|---:|---:|---|---:|
+| **17 criticality-weighted modules** | **0** | **244** | **0 current / 33 stale** | **≥990 per module** |
+
+Re-run `bun tools/audit.ts status` for the active source fingerprint after each
+merged candidate. Agent usefulness ratings are intentionally excluded from
+module quality, and an unowned folder stays `N/A` instead of receiving a
+fabricated score.
+
+---
+
 ## 🚀 Quick Start
 
 ```bash

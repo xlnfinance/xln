@@ -1374,6 +1374,24 @@ describe('signed Entity command admission', () => {
     expect(result.newState.entityCommandNonces?.bySigner.get(replica.signerId)?.nonce).toBe(1n);
   });
 
+  test('rejects salvage even after a local board command reaches collective quorum', async () => {
+    const { env, state, replica } = setup('local-salvage-lane');
+    await expect(applyEntityInput(env, replica, {
+      entityId: state.entityId,
+      signerId: replica.signerId,
+      entityTxs: [{
+        type: 'crossJurisdictionSalvage',
+        data: {
+          routeId: 'raw-local-salvage',
+          binary: '0x01',
+          fillRatio: 1,
+          sourceEntityId: state.entityId,
+          sourceCounterpartyEntityId: entityId('aa'),
+        },
+      }],
+    })).rejects.toThrow('CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED');
+  });
+
   test('does not consume a command nonce when nested execution fails', async () => {
     const { env, state, replica } = setup('failed-frame');
     const invalidTx = { type: 'notARealEntityTx', data: {} } as unknown as EntityTx;

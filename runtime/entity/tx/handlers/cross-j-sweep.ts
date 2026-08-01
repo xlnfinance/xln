@@ -1,17 +1,9 @@
 import {
-  buildCrossJurisdictionCloseProof,
-  hasCrossJurisdictionCommittedFill,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   isCrossJurisdictionTerminalStatus,
-  transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
-import {
-  buildCrossJurisdictionCancelAck,
-  markCrossJurisdictionBookAdmissionClosed,
-} from '../../../extensions/cross-j/orderbook';
-import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
@@ -19,13 +11,12 @@ import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../types/account';
-import { findAccountKey } from '../account-key';
 import {
-  accountHasCrossSwapAckQueued,
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
 } from '../cross-jurisdiction-helpers';
 import type { AccountTxTarget } from './account';
+import { handleRequestCrossJurisdictionClearEntityTx } from './cross-j-clear';
 
 type CrossJurisdictionSweepTx = Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>;
 
@@ -37,13 +28,6 @@ type CrossJurisdictionSweepResult = {
 
 const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
   Number(state.timestamp || env.state.timestamp || 0);
-
-const cancelOrderbookOfferIfPresent = (
-  state: EntityState,
-  accountId: string,
-  offerId: string,
-  storageChanges: RuntimeOverlayRecord[],
-): boolean => removeBookOrderById(state, `${accountId}:${offerId}`, storageChanges);
 
 const refreshSweepRoute = (
   state: EntityState,
@@ -60,67 +44,6 @@ const refreshSweepRoute = (
   );
   state.crossJurisdictionSwaps?.set(orderId, route);
   return route;
-};
-
-const queueExpiredOfferClosure = (
-  state: EntityState,
-  orderId: string,
-  route: CrossJurisdictionSwapRoute,
-  now: number,
-  storageChanges: RuntimeOverlayRecord[],
-  accountTxs: AccountTxTarget[],
-): number => {
-  const sourceEntityId = route.source.entityId;
-  const accountId = findAccountKey(state, sourceEntityId);
-  const account = accountId ? state.accounts.get(accountId) : undefined;
-  if (accountId && account?.state.swapOffers?.has(orderId)) {
-    cancelOrderbookOfferIfPresent(state, accountId, orderId, storageChanges);
-    markCrossJurisdictionBookAdmissionClosed(
-      state,
-      sourceEntityId,
-      orderId,
-      now,
-      'sweep_expired',
-    );
-    if (accountHasCrossSwapAckQueued(account, orderId)) return 0;
-    accountTxs.push({ accountId, tx: buildCrossJurisdictionCancelAck(orderId, route) });
-    return 1;
-  }
-  addMessage(
-    state,
-    accountId
-      ? `🌉 Cross-j sweep ${orderId}: no live source offer in ${accountId}`
-      : `🌉 Cross-j sweep ${orderId}: no source account for ${sourceEntityId}`,
-  );
-  return 0;
-};
-
-const transitionExpiredRoute = (
-  state: EntityState,
-  orderId: string,
-  route: CrossJurisdictionSwapRoute,
-  now: number,
-  accountTxs: AccountTxTarget[],
-): void => {
-  const accountId = findAccountKey(state, route.source.entityId);
-  const account = accountId ? state.accounts.get(accountId) : undefined;
-  if (!hasCrossJurisdictionCommittedFill(route)) {
-    const proof = buildCrossJurisdictionCloseProof(route, '0x');
-    route.sourceCloseProof = proof;
-    const pullId = route.sourcePull?.pullId;
-    if (accountId && pullId && account?.state.pulls?.has(pullId)) {
-      accountTxs.push({
-        accountId,
-        tx: { type: 'cross_pull_close', data: { pullId, binary: '0x', proof } },
-      });
-    }
-    transitionCrossJurisdictionRouteStatus(route, 'expired', now);
-  } else {
-    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', now);
-    route.pendingClearRequestedAt = now;
-  }
-  route.clearingPolicy = 'cancel_and_clear';
-  state.crossJurisdictionSwaps?.set(orderId, route);
 };
 
 export const handleOrderbookSweepCrossJurisdictionEntityTx = (
@@ -151,28 +74,22 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
     }
 
     expiredRoutes++;
-    const sourceEntityId = (route.source as { entityId?: string } | undefined)?.entityId;
-    if (!sourceEntityId) {
-      transitionCrossJurisdictionRouteStatus(route, 'failed', now);
-      newState.crossJurisdictionSwaps?.set(orderId, route);
-      addMessage(newState, `🌉 Cross-j sweep ${orderId}: failed malformed route without source entity`);
+    const sourceHubId = String(route.source.counterpartyEntityId || '').toLowerCase();
+    if (!sourceHubId) throw new Error(`CROSS_J_SWEEP_SOURCE_HUB_MISSING:${orderId}`);
+    if (String(newState.entityId || '').toLowerCase() !== sourceHubId) {
+      waitingRoutes++;
       continue;
     }
-
-    closedOffers += queueExpiredOfferClosure(
+    const clear = handleRequestCrossJurisdictionClearEntityTx(
+      env,
       newState,
-      orderId,
-      route,
-      now,
+      { type: 'requestCrossJurisdictionClear', data: { orderId, cancelRemainder: true } },
       storageChanges,
-      accountTxs,
+      true,
     );
-    transitionExpiredRoute(newState, orderId, route, now, accountTxs);
-  }
-
-  if (expiredRoutes > 0) {
-    const firstValidator = entityState.config.validators[0];
-    if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
+    outputs.push(...clear.outputs);
+    accountTxs.push(...(clear.accountTxs ?? []));
+    if (clear.accountTxs?.some(operation => operation.tx.type === 'cross_swap_fill_ack')) closedOffers++;
   }
   addMessage(
     newState,

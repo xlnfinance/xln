@@ -105,6 +105,7 @@ export interface CrossJurisdictionPullBinding {
   sourceCloseProof?: CrossJurisdictionCloseProof;
   status?: CrossJurisdictionSwapStatus;
   cumulativeFillRatio?: number;
+  fillSeq?: number;
   fillNumerator?: bigint;
   fillDenominator?: bigint;
   claimedRatio?: number;

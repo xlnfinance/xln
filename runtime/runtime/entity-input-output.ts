@@ -1,7 +1,6 @@
 import type { EntityTx } from '../types/entity-tx';
 import type { RoutedEntityInput, RuntimeReplica } from './types';
 import { safeStringify } from '../protocol/serialization';
-import { resolveEntityProposerId } from './entity-output-signer';
 import { getPerfMs } from '../infra/time';
 import { shortId } from '../infra/logger';
 import {
@@ -105,9 +104,11 @@ const decodeCrossJCommand = (
   const targetEntityId = String(wrapper.data.targetEntityId || '')
     .trim()
     .toLowerCase();
+  const targetSignerId = String(output.signerId || '').trim().toLowerCase();
   if (
     !sourceEntityId ||
     !targetEntityId ||
+    !targetSignerId ||
     targetEntityId !== String(output.entityId || '').toLowerCase()
   ) {
     throw new Error(
@@ -115,9 +116,9 @@ const decodeCrossJCommand = (
         `target=${targetEntityId || 'missing'}:envelope=${output.entityId}`,
     );
   }
-  if (!findEntityReplicaKey(env, targetEntityId, null)) {
+  if (!findEntityReplicaKey(env, targetEntityId, targetSignerId)) {
     throw new Error(
-      `RUNTIME_CROSS_J_COMMAND_TARGET_NOT_LOCAL:${targetEntityId}`,
+      `RUNTIME_CROSS_J_COMMAND_TARGET_NOT_LOCAL:${targetEntityId}:${targetSignerId}`,
     );
   }
   if (
@@ -129,16 +130,16 @@ const decodeCrossJCommand = (
   return {
     sourceEntityId,
     targetEntityId,
+    targetSignerId,
     entityTxs: structuredClone(wrapper.data.entityTxs),
   };
 };
 
 const commandToEntityInput = (
   command: CrossJCommand,
-  signerId: string,
 ): RoutedEntityInput => ({
   entityId: command.targetEntityId,
-  signerId,
+  signerId: command.targetSignerId,
   entityTxs: [{
     type: 'runtimeOutput',
     data: {
@@ -161,7 +162,7 @@ export const routeCommittedEntityOutputs = (
   for (const output of outputs) {
     if (isCrossJCommandEnvelope(output)) {
       const command = decodeCrossJCommand(env, output);
-      const key = `${command.sourceEntityId}\0${command.targetEntityId}`;
+      const key = `${command.sourceEntityId}\0${command.targetEntityId}\0${command.targetSignerId}`;
       const index = indexes.get(key);
       if (index === undefined) {
         indexes.set(key, commands.length);
@@ -214,12 +215,8 @@ export const drainImmediateCrossJurisdictionOutputs = async (
         `RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${round}:events=${context.localEventCount}`,
       );
     }
-    const signerId = resolveEntityProposerId(
-      env,
-      command.targetEntityId,
-      'cross-j local command',
-    ).trim();
-    const input = commandToEntityInput(command, signerId);
+    const signerId = command.targetSignerId;
+    const input = commandToEntityInput(command);
     const fingerprint = safeStringify(command);
     if (fingerprints.has(fingerprint)) {
       throw new Error(
