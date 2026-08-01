@@ -5,7 +5,7 @@ import { LIMITS } from '../config/constants';
 import type { ConsensusConfig, EntityState, ProposalAction } from './types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityTx } from '../types/entity-tx';
-import { buildCrossJurisdictionPullBinding, isCrossJurisdictionTerminalStatus } from '../extensions/cross-j';
+import { isCrossJurisdictionTerminalStatus } from '../extensions/cross-j';
 
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../protocol/htlc/consensus-secret-guard';
 import { isCrossJurisdictionSiblingPair } from '../extensions/cross-j/boundary';
@@ -262,54 +262,6 @@ const assertSemanticTarget = (txType: string, target: string, expected: unknown)
   }
 };
 
-const requireCertifiedCrossJRoute = (
-  txs: readonly EntityTx[],
-  orderId: string,
-  routeHash: string,
-): CrossJurisdictionSwapRoute => {
-  const routes = txs.flatMap(candidate =>
-    candidate.type === 'registerCrossJurisdictionSwap' &&
-    String(candidate.data.route.orderId) === String(orderId) &&
-    normalizeEntityRef(candidate.data.route.routeHash) === normalizeEntityRef(routeHash)
-      ? [candidate.data.route]
-      : [],
-  );
-  if (routes.length !== 1) {
-    throw new Error(`CONSENSUS_OUTPUT_CROSS_J_PULL_ROUTE_AMBIGUOUS:${orderId}:${routes.length}`);
-  }
-  return routes[0]!;
-};
-
-const assertCertifiedCrossJTargetPull = (
-  source: string,
-  target: string,
-  tx: Extract<EntityTx, { type: 'pullLock' }>,
-  certifiedTxs: readonly EntityTx[],
-): void => {
-  const binding = tx.data.crossJurisdiction;
-  if (!binding || binding.leg !== 'target') {
-    throw new Error('CONSENSUS_OUTPUT_CROSS_J_PULL_BINDING_REQUIRED:pullLock:target');
-  }
-  const route = requireCertifiedCrossJRoute(certifiedTxs, binding.orderId, binding.routeHash);
-  const pull = route.targetPull;
-  if (!pull) throw new Error(`CONSENSUS_OUTPUT_CROSS_J_TARGET_PULL_MISSING:${route.orderId}`);
-  assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
-  assertSemanticTarget(tx.type, target, route.target.entityId);
-  const exactPull =
-    normalizeEntityRef(tx.data.counterpartyEntityId) === normalizeEntityRef(route.target.counterpartyEntityId) &&
-    tx.data.pullId === pull.pullId &&
-    tx.data.tokenId === pull.tokenId &&
-    tx.data.amount === pull.signedAmount &&
-    tx.data.revealedUntilTimestamp === pull.revealedUntilTimestamp &&
-    normalizeEntityRef(tx.data.fullHash) === normalizeEntityRef(pull.fullHash) &&
-    normalizeEntityRef(tx.data.partialRoot) === normalizeEntityRef(pull.partialRoot);
-  const expectedBinding = buildCrossJurisdictionPullBinding(route, 'target');
-  const exactBinding = encodeCanonicalConsensusValue(binding) === encodeCanonicalConsensusValue(expectedBinding);
-  if (!exactPull || !exactBinding) {
-    throw new Error(`CONSENSUS_OUTPUT_CROSS_J_TARGET_PULL_MISMATCH:${route.orderId}`);
-  }
-};
-
 const assertCertifiedCrossJSourceDispute = (
   source: string,
   target: string,
@@ -506,7 +458,6 @@ export const assertCertifiedOutputSemanticAuthority = (
   target: string,
   tx: EntityTx,
   currentState: EntityState,
-  certifiedTxs: readonly EntityTx[] = [tx],
 ): void => {
   // The outer Hanko proves which Entity emitted the output. Every nested
   // variant must also bind that Entity to its economic role; a type allowlist
@@ -531,9 +482,6 @@ export const assertCertifiedOutputSemanticAuthority = (
       }
       return;
     }
-    case 'pullLock':
-      assertCertifiedCrossJTargetPull(source, target, tx, certifiedTxs);
-      return;
     default:
       throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_VARIANT_FORBIDDEN:${tx.type}`);
   }
@@ -578,17 +526,8 @@ export const assertRuntimeOutputAuthorization = (
         : 'data' in tx && tx.data && typeof tx.data === 'object' && 'route' in tx.data
           ? (tx.data as { route?: CrossJurisdictionSwapRoute }).route
           : undefined;
-    const pairedPullRoute =
-      tx.type === 'pullLock' && tx.data.crossJurisdiction
-        ? txs.find(
-            (candidate): candidate is Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }> =>
-              candidate.type === 'registerCrossJurisdictionSwap' &&
-              candidate.data.route.orderId === tx.data.crossJurisdiction?.orderId,
-          )?.data.route
-        : undefined;
     const semanticRoute =
       suppliedRoute ??
-      pairedPullRoute ??
       (() => {
         const orderId =
           tx.type === 'crossJurisdictionFillNotice' ||
@@ -613,7 +552,7 @@ export const assertRuntimeOutputAuthorization = (
     if (!semanticRoute || (!selfSourceRegistration && !isCrossJurisdictionSiblingPair(semanticRoute, source, target))) {
       throw new Error(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`);
     }
-    assertCertifiedOutputSemanticAuthority(source, target, tx, currentState, txs);
+    assertCertifiedOutputSemanticAuthority(source, target, tx, currentState);
   }
 };
 
@@ -633,6 +572,6 @@ export const assertCertifiedEntityOutputAuthorization = (
     if (!selfOutput && !crossEntityCertifiedTxTypes.has(tx.type)) {
       throw new Error(`CONSENSUS_OUTPUT_CROSS_ENTITY_TX_FORBIDDEN:${tx.type}`);
     }
-    if (!selfOutput) assertCertifiedOutputSemanticAuthority(source, target, tx, currentState, txs);
+    if (!selfOutput) assertCertifiedOutputSemanticAuthority(source, target, tx, currentState);
   }
 };

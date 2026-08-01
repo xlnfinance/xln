@@ -55,7 +55,9 @@ An `EntityTx` is not an `AccountTx`. It may deterministically produce a local
 
 ## Direct payment
 
-The user submits:
+`directPayment` is the immediate, non-conditional operation for a trusted
+delivery route. The wallet emits it only when the user explicitly selects
+trusted delivery and the route has a recipient gateway:
 
 ```typescript
 type DirectPaymentIntent = Extract<EntityTx, { type: 'directPayment' }>;
@@ -86,10 +88,22 @@ source Entity
 
 ## Canonical payment operations
 
-- User payments use one Entity transaction: `htlcPayment`, with a prepared encrypted route.
-- Hashlock-based swaps use `pullLock`, which creates the Account `pull_lock`.
-- Cross-jurisdiction swaps use `prepareCrossJurisdictionSwap`, which creates the exact source and target `pull_lock` legs.
+- Trusted immediate payments use `directPayment`, which creates Account `direct_payment`.
+- Trustless `instant` and `async` payments use `htlcPayment`, which creates Account `htlc_lock` along a prepared encrypted route.
+- Same-jurisdiction swaps use `placeSwapOffer`, which creates Account
+  `swap_offer`; canonical matching commits Account `swap_resolve` fills. There
+  is no separate public hashlock-swap transaction.
+- Cross-jurisdiction swaps use `prepareCrossJurisdictionSwap`, followed by
+  proposer materialization and one `registerCrossJurisdictionSwap` at each
+  hub. Those registrations create the exact source and target Account
+  `pull_lock` legs together; there is no public raw pull-lock Entity command.
 - Bilateral credit uses `extendCredit`, which creates the Account `set_credit_limit`.
+- Lending positions use exactly four public Entity operations:
+  `lendingOffer → lending_fund`, `lendingBorrow → lending_borrow_request`,
+  `lendingRepay → lending_repay`, and
+  `lendingClosePosition → lending_close_request`. Account follow-ups grant or
+  revoke loan credit and pay out a closed lender position only after the
+  corresponding bilateral commit.
 
 Cross-jurisdiction swaps never enter the user-payment handler. Their source and
 target legs bind the order, route, jurisdiction evidence, and hash ladder in

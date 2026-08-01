@@ -2,20 +2,16 @@ import type { EntityTxDataSchema } from './fields';
 
 export const ENTITY_TX_PAYMENT_SCHEMAS = {
   directPayment: {
-    required: { targetEntityId: 'string', tokenId: 'integer', amount: 'bigint', route: 'stringArray' },
-    optional: { description: 'string', deliveryMode: 'string', trustedGatewayEntityId: 'string' },
-    literals: { deliveryMode: ['trusted'] },
+    required: {
+      targetEntityId: 'string', tokenId: 'integer', amount: 'bigint', route: 'stringArray',
+      deliveryMode: 'string',
+    },
+    optional: { description: 'string', trustedGatewayEntityId: 'string' },
+    literals: { deliveryMode: ['direct', 'trusted'] },
   },
   resolveHtlcLock: {
     required: { counterpartyEntityId: 'string', lockId: 'string', secret: 'string' },
     optional: { crossJurisdictionRouteId: 'string', description: 'string' },
-  },
-  pullLock: {
-    required: {
-      counterpartyEntityId: 'string', pullId: 'string', tokenId: 'integer', amount: 'bigint',
-      revealedUntilTimestamp: 'integer', fullHash: 'string', partialRoot: 'string',
-    },
-    optional: { crossJurisdiction: 'record', crossJurisdictionRoute: 'record', description: 'string' },
   },
   resolvePull: {
     required: { counterpartyEntityId: 'string', pullId: 'string', binary: 'string' },
@@ -65,10 +61,4 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
     optional: { cooperative: 'boolean', useOnchainRegistry: 'boolean', description: 'string' },
   },
   processHtlcTimeouts: { optional: { expiredLocks: 'array' } },
-  manualHtlcLock: {
-    required: {
-      counterpartyId: 'string', lockId: 'string', hashlock: 'string', timelock: 'bigint',
-      revealBeforeHeight: 'integer', amount: 'bigint', tokenId: 'integer',
-    },
-  },
 } as const satisfies Readonly<Record<string, EntityTxDataSchema>>;

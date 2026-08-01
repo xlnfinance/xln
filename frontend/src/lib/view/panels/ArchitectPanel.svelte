@@ -828,6 +828,7 @@
             tokenId: 1,
             amount: BigInt(amount),
             route: [from, to],
+            deliveryMode: 'direct',
             description: 'Random banker demo payment'
           }
         }]
@@ -921,6 +922,7 @@
             tokenId: 1,
             amount,
             route: [from, to],
+            deliveryMode: 'direct',
             description: '20% balance transfer'
           }
         }]
@@ -1457,6 +1459,7 @@
             tokenId: 1,
             amount: amount,
             route: [fromId, toId],
+            deliveryMode: 'direct',
             description: `20% circular payment`
           }
         }]
@@ -1558,6 +1561,7 @@
                   tokenId: 1,
                   amount: BigInt(amount),
                   route: [fedId, bank],
+                  deliveryMode: 'direct',
                   description: `Fed discount window lending`
                 }
               }]
@@ -1582,6 +1586,7 @@
                   tokenId: 1,
                   amount: BigInt(amount),
                   route: [bank, fedId],
+                  deliveryMode: 'direct',
                   description: `Bank repaying Fed loan`
                 }
               }]
@@ -1627,6 +1632,7 @@
                   tokenId: 1,
                   amount: BigInt(amount),
                   route: [from, to],
+                  deliveryMode: 'direct',
                   description: `Interbank settlement`
                 }
               }]

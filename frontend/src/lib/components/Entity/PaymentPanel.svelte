@@ -54,7 +54,7 @@
   let amount = '';
   let tokenId = 1;
   let description = '';
-  let deliveryMode: PaymentDeliveryMode = 'async';
+  let deliveryMode: PaymentDeliveryMode = 'instant';
   let descriptionLocked = false;
   let invoiceValue = '';
   let invoiceError = '';
@@ -97,17 +97,22 @@
   let paymentSubmitted = false;
   let paymentSubmissionMs = 0;
   let paymentSubmissionTimer: ReturnType<typeof setTimeout> | null = null;
-  let routeListExpanded = false;
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
     { value: 1_000, label: 'Repeat 1s' },
     { value: 10_000, label: 'Repeat 10s' },
     { value: 60_000, label: 'Repeat 1m' },
   ];
-  const DELIVERY_MODES: Array<{ value: PaymentDeliveryMode; label: string; title: string }> = [
-    { value: 'instant', label: 'Instant', title: 'Short-lived atomic payment. Every hop and recipient must be online.' },
-    { value: 'async', label: 'Async', title: 'Default. Keeps the refundable payment in the bilateral inbox for up to 24 hours.' },
-    { value: 'trusted', label: 'Trusted', title: 'Irrevocable delivery through the final gateway. Use only when you trust that hub.' },
+  const DELIVERY_MODES: Array<{
+    value: PaymentDeliveryMode;
+    label: string;
+    description: string;
+    recommended?: boolean;
+  }> = [
+    { value: 'instant', label: 'Instant', description: 'Atomic · recipient online', recommended: true },
+    { value: 'async', label: 'Async', description: 'Atomic · recipient may be offline' },
+    { value: 'direct', label: 'Direct', description: 'One hop · shared account' },
+    { value: 'trusted', label: 'Trusted', description: 'Trusts the selected hub' },
   ];
   // If a hop does not publish fee metadata, use a conservative default so
   // unknown peers cannot appear artificially cheaper than known hubs.
@@ -367,7 +372,6 @@
   function resetQuotedRoutes(): void {
     routes = [];
     selectedRouteIndex = -1;
-    routeListExpanded = false;
     clearRepeatTimer();
     repeatArmed = false;
     repeatStoppedReason = '';
@@ -1235,7 +1239,9 @@
       const resolvedSignerId = resolvePaymentSignerId(currentEnv);
 
       const descriptionValue = description.trim();
+      const isDirect = deliveryMode === 'direct';
       const isTrusted = deliveryMode === 'trusted';
+      const usesDirectPayment = isDirect || isTrusted;
       const conditionalDeliveryMode = deliveryMode === 'instant' ? 'instant' as const : 'async' as const;
       const trustedGatewayEntityId = route.path.length >= 3
         ? route.path[route.path.length - 2]
@@ -1243,10 +1249,13 @@
       if (isTrusted && !trustedGatewayEntityId) {
         throw new Error('Trusted delivery requires a route through a recipient gateway');
       }
+      if (isDirect && route.path.length !== 2) {
+        throw new Error('Direct delivery requires a bilateral route');
+      }
       const paymentInput: EntityInputPayload = {
         entityId,
         signerId: resolvedSignerId,
-        entityTxs: isTrusted
+        entityTxs: usesDirectPayment
           ? [{
               type: 'directPayment' as const,
               data: {
@@ -1254,8 +1263,8 @@
                 tokenId,
                 amount: route.recipientAmount,
                 route: route.path,
-                deliveryMode: 'trusted' as const,
-                trustedGatewayEntityId: trustedGatewayEntityId!,
+                deliveryMode: isTrusted ? 'trusted' as const : 'direct' as const,
+                ...(isTrusted ? { trustedGatewayEntityId: trustedGatewayEntityId! } : {}),
                 ...(descriptionValue ? { description: descriptionValue } : {}),
               },
             }]
@@ -1392,6 +1401,7 @@
     !pendingPaymentCommandId &&
     !paymentSubmitted &&
     !preflightError &&
+    (deliveryMode !== 'direct' || !activeRoute || activeRoute.path.length === 2) &&
     (deliveryMode !== 'trusted' || !activeRoute || activeRoute.path.length >= 3) &&
     (!isSelfRecipient || hasSelectedRoute());
 
@@ -1400,7 +1410,7 @@
     : routes[0] ?? null;
 
   $: isDirectRoute = activeRoute && activeRoute.path.length === 2;
-  $: showRouteList = routes.length > 1 || (routes.length === 1 && !isDirectRoute);
+  $: showRouteList = routes.length > 0;
 
   $: payButtonLabel = (() => {
     if (paymentSubmitted) return '';
@@ -1513,22 +1523,32 @@
     </div>
   </div>
 
-  <div class="delivery-mode" role="group" aria-label="Payment delivery mode">
+  <div class="delivery-mode" role="radiogroup" aria-label="Payment delivery mode">
     {#each DELIVERY_MODES as mode}
       <button
         type="button"
         class:active={deliveryMode === mode.value}
         data-testid={`payment-mode-${mode.value}`}
-        aria-pressed={deliveryMode === mode.value}
-        title={mode.title}
+        role="radio"
+        aria-checked={deliveryMode === mode.value}
         disabled={findingRoutes || sendingPayment}
         on:click={() => { deliveryMode = mode.value; preflightError = null; }}
-      >{mode.label}</button>
+      >
+        <span class="delivery-mode-name">
+          <span class="delivery-mode-radio" aria-hidden="true"></span>
+          {mode.label}
+          {#if mode.recommended}<span class="delivery-mode-default">Default</span>{/if}
+        </span>
+        <span class="delivery-mode-description">{mode.description}</span>
+      </button>
     {/each}
   </div>
 
   {#if deliveryMode === 'trusted' && activeRoute && activeRoute.path.length < 3}
     <div class="form-error">Trusted delivery requires a gateway route.</div>
+  {/if}
+  {#if deliveryMode === 'direct' && activeRoute && activeRoute.path.length !== 2}
+    <div class="form-error">Direct delivery requires a bilateral route.</div>
   {/if}
 
   <!-- ── Note (liquid glass) ── -->
@@ -1559,15 +1579,7 @@
     <div class="self-pay-hint">Self-pay requires an explicit route.</div>
   {/if}
 
-  <!-- ── Route info (inline for direct, expandable for multi) ── -->
-  {#if activeRoute && isDirectRoute && !showRouteList}
-    <div class="route-inline" transition:slide={{ duration: 120 }}>
-      <span class="route-inline-label">Direct</span>
-      <span class="route-inline-dot"></span>
-      <span class="route-inline-fee">Fee {formatCompactRouteFee(tokenId, activeRoute.totalFee)} {getTokenSymbol(tokenId)}</span>
-    </div>
-  {/if}
-
+  <!-- ── Routes ── -->
   {#if showRouteList}
     <div class="routes" transition:slide={{ duration: 150 }}>
       <div class="routes-header">
@@ -1575,51 +1587,44 @@
       </div>
       <div class="routes-scroll">
         {#each routes as route, index}
-          {#if routeListExpanded || index === 0}
-            <label
-              class="route-option"
-              class:selected={selectedRouteIndex === index}
-              data-route-path={route.path.map((hopId) => String(hopId || '').toLowerCase()).join(',')}
-              data-route-index={index}
-            >
-              <input
-                type="radio"
-                bind:group={selectedRouteIndex}
-                value={index}
-                disabled={sendingPayment}
-              />
-              <span class="route-marker" aria-hidden="true"></span>
-              <div class="route-info">
-                <div class="route-cards">
-                  {#each route.path as hopId, hopIndex}
-                    <div class="hop-card" data-hop-entity-id={String(hopId || '').toLowerCase()} data-hop-index={hopIndex}>
-                      <EntityIdentity
-                        entityId={hopId}
-                        name={getEntityName(hopId)}
-                        clickable={false}
-                        copyable={false}
-                        showAddress={false}
-                        size={20}
-                      />
-                    </div>
-                    {#if hopIndex < route.path.length - 1}
-                      <span class="hop-arrow">&#8594;</span>
-                    {/if}
-                  {/each}
-                </div>
-                <span class="route-meta">
-                  Fee {formatCompactRouteFee(tokenId, route.totalFee)} {getTokenSymbol(tokenId)}
-                </span>
+          <label
+            class="route-option"
+            class:selected={selectedRouteIndex === index}
+            data-route-path={route.path.map((hopId) => String(hopId || '').toLowerCase()).join(',')}
+            data-route-index={index}
+          >
+            <input
+              type="radio"
+              bind:group={selectedRouteIndex}
+              value={index}
+              disabled={sendingPayment}
+            />
+            <span class="route-marker" aria-hidden="true"></span>
+            <div class="route-info">
+              <div class="route-cards">
+                {#each route.path as hopId, hopIndex}
+                  <div class="hop-card" data-hop-entity-id={String(hopId || '').toLowerCase()} data-hop-index={hopIndex}>
+                    <EntityIdentity
+                      entityId={hopId}
+                      name={getEntityName(hopId)}
+                      clickable={false}
+                      copyable={false}
+                      showAddress={false}
+                      size={20}
+                    />
+                  </div>
+                  {#if hopIndex < route.path.length - 1}
+                    <span class="hop-arrow">&#8594;</span>
+                  {/if}
+                {/each}
               </div>
-            </label>
-          {/if}
+              <span class="route-meta">
+                Fee {formatCompactRouteFee(tokenId, route.totalFee)} {getTokenSymbol(tokenId)}
+              </span>
+            </div>
+          </label>
         {/each}
       </div>
-      {#if routes.length > 1 && !routeListExpanded}
-        <button type="button" class="routes-expand" on:click={() => { routeListExpanded = true; }}>
-          + {routes.length - 1} more route{routes.length - 1 === 1 ? '' : 's'}
-        </button>
-      {/if}
     </div>
   {/if}
 
@@ -1725,29 +1730,65 @@
 
   .delivery-mode {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 2px;
-    padding: 3px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
     margin: 4px 0 8px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.025);
   }
 
   .delivery-mode button {
     min-width: 0;
-    height: 34px;
-    border: 0;
-    background: transparent;
+    min-height: 52px;
+    padding: 7px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.025);
     color: rgba(255, 255, 255, 0.55);
     font: inherit;
-    font-size: 12px;
-    font-weight: 600;
+    text-align: left;
     cursor: pointer;
   }
 
   .delivery-mode button.active {
-    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.96);
+  }
+
+  .delivery-mode-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .delivery-mode-radio {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 auto;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+  }
+
+  .delivery-mode button.active .delivery-mode-radio {
+    border: 3px solid rgba(255, 255, 255, 0.96);
+  }
+
+  .delivery-mode-default {
+    margin-left: auto;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .delivery-mode-description {
+    display: block;
+    margin-top: 4px;
+    padding-left: 16px;
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 10px;
+    line-height: 1.2;
   }
 
   .delivery-mode button:disabled {
@@ -2036,18 +2077,6 @@
     text-transform: uppercase; letter-spacing: 0.06em;
     font-variant-numeric: tabular-nums;
   }
-
-  :global([data-pp] button.routes-expand) {
-    all: unset !important;
-    box-sizing: border-box !important;
-    display: inline !important;
-    color: #5a5550 !important;
-    font-size: 11px !important;
-    cursor: pointer !important;
-    padding: 6px 0 !important;
-    transition: color 0.15s !important;
-  }
-  :global([data-pp] button.routes-expand:hover) { color: #a09889 !important; }
 
   /* ══ CTA ══ */
   .pay-cta {

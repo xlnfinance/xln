@@ -22,7 +22,6 @@ import { getLiveJAdapterEntries } from '../runtime/live-jadapters';
 import type { EntityInput } from '../entity/types';
 import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
-import { getOpenSwapOfferEntries } from '../orderbook/open-swap-offers';
 import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
@@ -95,7 +94,6 @@ const TRADE_ETH_HALF = TRADE_ETH / 2n;
 const TRADE_ETH_DOUBLE = TRADE_ETH * 2n;
 
 const TRADE_USDC_MAIN_UNITS = TRADE_ETH * ETH_PRICE_MAIN;
-const TRADE_USDC_HALF_UNITS = TRADE_ETH_HALF * ETH_PRICE_MAIN;
 
 const usdcForEth = (ethUnits: bigint, price: bigint) => usdc(ethUnits * price);
 
@@ -121,8 +119,6 @@ const SWAP_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
 
 // Fill ratio constants (uint16)
 const MAX_FILL_RATIO = 65535;
-const FILL_50 = 32768;
-const FULL_FILL = MAX_FILL_RATIO;
 
 const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
   if (denominator === 0n) return 0n;
@@ -356,265 +352,7 @@ export async function swap(env: RuntimeReplica): Promise<void> {
 
   console.log('  ✅ Bidirectional credit established\n');
 
-  // ============================================================================
-  // TEST 1: Simple swap - Alice sells 20% of capacity
-  // ============================================================================
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log(`TEST 1: Alice places limit order - Sell ${TRADE_ETH} ETH for ${TRADE_USDC_MAIN_UNITS} USDC`);
-  console.log('═══════════════════════════════════════════════════════════════\n');
-
-  const offerId1 = 'order-001';
-
-  // Alice places swap offer
-  console.log(`📊 Alice: swap_offer (${TRADE_ETH} ETH → ${TRADE_USDC_MAIN_UNITS} USDC, GTC)`);
-  await process(env, [{
-    entityId: alice.id,
-    signerId: alice.signer,
-    entityTxs: [{
-      type: 'placeSwapOffer',
-      data: {
-        counterpartyEntityId: hub.id,
-        offerId: offerId1,
-        giveTokenId: ETH_TOKEN_ID,
-        giveAmount: eth(TRADE_ETH),
-        wantTokenId: USDC_TOKEN_ID,
-        wantAmount: usdc(TRADE_USDC_MAIN_UNITS),
-      },
-    }],
-  }]);
-  await converge(env); // Wait for full consensus
-
-  // Verify offer was created in A-Machine
-  const [, aliceRep1] = findReplica(env, alice.id);
-  const aliceHubAccount1 = aliceRep1.state.accounts.get(hub.id);
-  assert(aliceHubAccount1?.state.swapOffers?.has(offerId1) === true, 'Offer created in A-Machine account');
-
-  const offer1 = aliceHubAccount1?.state.swapOffers?.get(offerId1);
-  assert(offer1?.giveAmount === eth(TRADE_ETH), `Offer giveAmount = ${TRADE_ETH} ETH`);
-  assert(offer1?.wantAmount === usdc(TRADE_USDC_MAIN_UNITS), `Offer wantAmount = ${TRADE_USDC_MAIN_UNITS} USDC`);
-
-  // Verify offer was added to derived entity open-offers view
-  const swapOffers1 = getOpenSwapOfferEntries(aliceRep1.state);
-  const openOfferKey1 = `${hub.id}:${offerId1}`;
-  assert(swapOffers1.has(openOfferKey1), 'Offer visible in derived open-offers view');
-  const openOfferEntry1 = swapOffers1.get(openOfferKey1);
-  assert(openOfferEntry1?.accountId === hub.id, 'Open-offer entry accountId = canonical(alice, hub)');
-  assert(openOfferEntry1?.giveAmount === eth(TRADE_ETH), `Open-offer giveAmount = ${TRADE_ETH} ETH`);
-  assert(openOfferEntry1?.wantAmount === usdc(TRADE_USDC_MAIN_UNITS), `Open-offer wantAmount = ${TRADE_USDC_MAIN_UNITS} USDC`);
-  console.log('  ✅ Derived entity open-offers updated');
-
-  // Check hold was applied
-  const ethDelta1 = aliceHubAccount1?.state.deltas.get(ETH_TOKEN_ID);
-  assert(ethDelta1?.leftHold === eth(TRADE_ETH), `ETH hold = ${TRADE_ETH} (Alice is LEFT)`);
-  console.log(`  ✅ Swap offer created, ${TRADE_ETH} ETH locked\n`);
-
-  // ============================================================================
-  // TEST 2: Hub fills 50%
-  // ============================================================================
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('TEST 2: Hub fills 50%');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-
-  console.log('💱 Hub: swap_resolve (50% fill)');
-  const partialFill = computeFilledAmounts(eth(TRADE_ETH), usdc(TRADE_USDC_MAIN_UNITS), FILL_50);
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'resolveSwap',
-      data: {
-        counterpartyEntityId: alice.id,
-        offerId: offerId1,
-        fillRatio: FILL_50,
-        cancelRemainder: false, // Keep remainder open
-        executionGiveAmount: partialFill.filledGive,
-        executionWantAmount: partialFill.filledWant,
-      },
-    }],
-  }]);
-  await converge(env);
-
-  // Verify partial fill
-  const [, aliceRep2] = findReplica(env, alice.id);
-  const aliceHubAccount2 = aliceRep2.state.accounts.get(hub.id);
-  const offer2 = aliceHubAccount2?.state.swapOffers?.get(offerId1);
-
-  // The orderbook stores remaining quantity in fixed lots, so exact wei can
-  // differ from ratio math by at most one lot after a partial fill.
-  const expectedRemaining = eth(TRADE_ETH) - (eth(TRADE_ETH) * BigInt(FILL_50)) / BigInt(MAX_FILL_RATIO);
-  assertQuantizedRemaining(offer2?.giveAmount, expectedRemaining, eth(TRADE_ETH), 'Remaining amount');
-
-  // Check offdelta changes
-  const ethDelta2 = aliceHubAccount2?.state.deltas.get(ETH_TOKEN_ID);
-  const usdcDelta2 = aliceHubAccount2?.state.deltas.get(USDC_TOKEN_ID);
-
-  // Alice (LEFT) gave ETH → offdelta decreased (more negative)
-  // Alice (LEFT) received USDC → offdelta increased (more positive)
-  // filledWant is derived from filledGive to preserve exact price ratio
-  const giveAmount = eth(TRADE_ETH);
-  const wantAmount = usdc(TRADE_USDC_MAIN_UNITS);
-  const filled = computeFilledAmounts(giveAmount, wantAmount, FILL_50);
-  const filledEth = filled.filledGive;
-  const filledUsdc = filled.filledWant;
-
-  assert(ethDelta2?.offdelta === -filledEth, `ETH offdelta = -${filledEth} (Alice gave)`);
-  const partialUsdcNet = usdcDelta2?.offdelta ?? 0n;
-  assert(
-    partialUsdcNet > 0n,
-    `USDC offdelta is positive after partial fill (net of rebalance fees): ${partialUsdcNet}`,
-  );
-
-  console.log(`  ✅ 50% filled: Alice gave ${filledEth} ETH, got ${filledUsdc} USDC\n`);
-
-  // ============================================================================
-  // TEST 3: Hub fills remaining (100% of remainder)
-  // ============================================================================
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('TEST 3: Hub fills remaining 100%');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-
-  console.log('💱 Hub: swap_resolve (100% fill, complete)');
-  if (!offer2) throw new Error('SWAP_MISSING_OFFER_REMAINDER: order-001');
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'resolveSwap',
-      data: {
-        counterpartyEntityId: alice.id,
-        offerId: offerId1,
-        fillRatio: FULL_FILL, // Fill 100% of remaining
-        cancelRemainder: false,
-        executionGiveAmount: offer2.giveAmount,
-        executionWantAmount: offer2.wantAmount,
-      },
-    }],
-  }]);
-  await converge(env);
-  await converge(env);
-
-  // Verify offer removed
-  const [, aliceRep3] = findReplica(env, alice.id);
-  const aliceHubAccount3 = aliceRep3.state.accounts.get(hub.id);
-  assert(!aliceHubAccount3?.state.swapOffers?.has(offerId1), 'Offer removed after full fill');
-
-  // Verify holds released
-  const ethDelta3 = aliceHubAccount3?.state.deltas.get(ETH_TOKEN_ID);
-  assert(ethDelta3?.leftHold === 0n, 'ETH hold released');
-
-  // Verify final deltas. The first leg is ratio-derived and the second leg
-  // consumes the canonical lot-quantized remainder, so total executed ETH can
-  // be one lot below the original human-readable order size.
-  const totalExecutedEth = filledEth + offer2.giveAmount;
-  const totalEthDrift = eth(TRADE_ETH) - totalExecutedEth;
-  assert(ethDelta3?.offdelta === -totalExecutedEth, `Final ETH delta = -${totalExecutedEth} (got ${ethDelta3?.offdelta})`);
-  assert(
-    totalEthDrift >= 0n && totalEthDrift <= SWAP_LOT_SCALE,
-    `Final executed ETH is within one orderbook lot of ${TRADE_ETH} ETH (drift=${totalEthDrift})`,
-  );
-  const usdcDelta3 = aliceHubAccount3?.state.deltas.get(USDC_TOKEN_ID);
-  const finalUsdcNet = usdcDelta3?.offdelta ?? 0n;
-  assert(
-    finalUsdcNet > partialUsdcNet,
-    `Final USDC net increased after full fill: ${finalUsdcNet} > ${partialUsdcNet}`,
-  );
-
-  console.log(`  ✅ Swap complete: Alice traded ${TRADE_ETH} ETH for ${TRADE_USDC_MAIN_UNITS} USDC\n`);
-
-  // ============================================================================
-  // TEST 4: Cancel order
-  // ============================================================================
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('TEST 4: Alice cancels an order');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-
-  const offerId2 = 'order-002';
-
-  // Alice places new offer
-  console.log(`📊 Alice: swap_offer (${TRADE_ETH_HALF} ETH → ${TRADE_USDC_HALF_UNITS} USDC)`);
-  await process(env, [{
-    entityId: alice.id,
-    signerId: alice.signer,
-    entityTxs: [{
-      type: 'placeSwapOffer',
-      data: {
-        counterpartyEntityId: hub.id,
-        offerId: offerId2,
-        giveTokenId: ETH_TOKEN_ID,
-        giveAmount: eth(TRADE_ETH_HALF),
-        wantTokenId: USDC_TOKEN_ID,
-        wantAmount: usdc(TRADE_USDC_HALF_UNITS),
-      },
-    }],
-  }]);
-  await converge(env);
-  await converge(env);
-
-  // Verify offer created in A-Machine and E-Machine (using namespaced key)
-  const [, aliceRep4] = findReplica(env, alice.id);
-  const account4 = aliceRep4.state.accounts.get(hub.id);
-  assert(account4?.state.swapOffers?.has(offerId2) === true, 'Order 2 created in A-Machine');
-  const openOfferKey2 = `${hub.id}:${offerId2}`;
-  assert(getOpenSwapOfferEntries(aliceRep4.state).has(openOfferKey2), 'Order 2 in derived open-offers view');
-
-  // Alice requests cancel (maker cannot self-cancel directly)
-  console.log('📊 Alice: proposeCancelSwap');
-  await process(env, [{
-    entityId: alice.id,
-    signerId: alice.signer,
-    entityTxs: [{
-      type: 'proposeCancelSwap',
-      data: {
-        counterpartyEntityId: hub.id,
-        offerId: offerId2,
-      },
-    }],
-  }]);
-  await converge(env);
-
-  // Hub resolves cancel request (explicit counterparty decision).
-  console.log('💱 Hub: resolveSwap(fill=0, cancelRemainder=true)');
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'resolveSwap',
-      data: {
-        counterpartyEntityId: alice.id,
-        offerId: offerId2,
-        fillRatio: 0,
-        cancelRemainder: true,
-      },
-    }],
-  }]);
-  await converge(env);
-  await converge(env);
-
-  // Verify cancelled in A-Machine and E-Machine (using namespaced key)
-  const [, aliceRep5] = findReplica(env, alice.id);
-  const account5 = aliceRep5.state.accounts.get(hub.id);
-  assert(!account5?.state.swapOffers?.has(offerId2), 'Order 2 cancelled in A-Machine by hub resolve');
-  assert(!getOpenSwapOfferEntries(aliceRep5.state).has(openOfferKey2), 'Order 2 removed from derived open-offers view after hub resolve');
-
-  // Verify hold released
-  const ethDelta5 = account5?.state.deltas.get(ETH_TOKEN_ID);
-  assert(ethDelta5?.leftHold === 0n, 'Hold released after cancel');
-
-  console.log('  ✅ Cancel request resolved by hub, open-offers cleaned, hold released\n');
-
-  // ============================================================================
-  // SUMMARY
-  // ============================================================================
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('                     ALL TESTS PASSED! ✅                       ');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-
-  console.log('Summary:');
-  console.log('  1. ✅ swap_offer creates offer, locks capacity');
-  console.log('  2. ✅ swap_resolve fills partially (50%), keeps remainder');
-  console.log('  3. ✅ swap_resolve fills fully, removes offer');
-  console.log('  4. ✅ proposeCancelSwap + hub resolve removes offer, releases hold');
-  console.log('\n');
+  console.log('  ✅ Canonical swap setup complete; orderbook matching owns all fills and cancels\n');
   } finally {
     env.scenarioMode = prevScenarioMode ?? false;
     restoreFailFast();
@@ -971,14 +709,6 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
       }],
     }]);
     await converge(env);
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'resolveSwap',
-        data: { counterpartyEntityId: alice.id, offerId: 'alice-sell-001', fillRatio: 0, cancelRemainder: true },
-      }],
-    }]);
     await converge(env);
   }
 

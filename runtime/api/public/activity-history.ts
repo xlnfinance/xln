@@ -221,7 +221,7 @@ const eventFromSwap = (
   const action =
     txType === 'placeSwapOffer'
       ? 'placed'
-      : txType === 'resolveSwap'
+      : txType === 'swap_resolve'
         ? Number(data['fillRatio'] ?? 0) > 0
           ? 'filled'
           : 'closed'
@@ -360,7 +360,7 @@ const eventFromAccountFrameTx = (
     case 'swap_cancel_request':
       return eventFromSwap(journal, index, inputEntityId, 'proposeCancelSwap', data, viewedEntityId);
     case 'swap_resolve':
-      return eventFromSwap(journal, index, inputEntityId, 'resolveSwap', data, viewedEntityId);
+      return eventFromSwap(journal, index, inputEntityId, 'swap_resolve', data, viewedEntityId);
     case 'add_delta':
       return makeEvent(journal, index, {
         kind: 'offchain',
@@ -451,7 +451,6 @@ const eventFromEntityTx = (
     case 'htlcPayment':
       return null;
     case 'placeSwapOffer':
-    case 'resolveSwap':
     case 'cancelSwap':
     case 'cancelSwapOffer':
     case 'proposeCancelSwap':

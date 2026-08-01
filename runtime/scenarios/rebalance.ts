@@ -327,24 +327,25 @@ export async function runRebalanceScenario(): Promise<void> {
   console.log('✅ All accounts have $500 collateral');
 
   // ══════════════════════════════════════════════════════════════
-  // PAYMENTS: Create imbalances via directPayment (entity-level)
+  // PAYMENTS: Create imbalances via atomic HTLC payments (entity-level)
   // Alice→Hub→Bob: $8K (Hub gains $8K from Alice, owes $8K to Bob)
   // Charlie→Hub→Dave: $12K (Hub gains $12K from Charlie, owes $12K to Dave)
   // After: source accounts become over-collateralized while Bob and Dave need R→C top-ups.
   // ══════════════════════════════════════════════════════════════
   console.log('\n💸 Creating payment imbalances...');
 
-  // Alice → Bob $8K via directPayment (routed through Hub)
+  // Alice → Bob $8K atomically through Hub
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
     entityTxs: [{
-      type: 'directPayment',
+      type: 'htlcPayment',
       data: {
         targetEntityId: bob.id,
         tokenId: USDC_TOKEN_ID,
         amount: usd(8_000),
         route: [alice.id, hub.id, bob.id],
+        deliveryMode: 'instant',
         description: 'Alice→Hub→Bob $8K',
       }
     }]
@@ -352,17 +353,18 @@ export async function runRebalanceScenario(): Promise<void> {
   for (let i = 0; i < 6; i++) await process(env);
   await convergeScenario(env);
 
-  // Charlie → Dave $12K via directPayment (routed through Hub)
+  // Charlie → Dave $12K atomically through Hub
   await process(env, [{
     entityId: charlie.id,
     signerId: charlie.signer,
     entityTxs: [{
-      type: 'directPayment',
+      type: 'htlcPayment',
       data: {
         targetEntityId: dave.id,
         tokenId: USDC_TOKEN_ID,
         amount: usd(12_000),
         route: [charlie.id, hub.id, dave.id],
+        deliveryMode: 'instant',
         description: 'Charlie→Hub→Dave $12K',
       }
     }]

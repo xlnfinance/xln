@@ -8,19 +8,26 @@ import { ethers } from 'ethers';
 
 import type { AccountFrame, AccountInput, AccountReplica } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeReplica } from '../runtime/types';
+import type { RoutedEntityInput, RuntimeReplica } from '../runtime/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { deriveDisputeTokenFinalization } from '../protocol/dispute/finalization';
-import { generateLockId, hashHtlcSecret } from '../protocol/htlc/utils';
+import { hashHtlcSecret } from '../protocol/htlc/utils';
+import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
+import { ASYNC_PAYMENT_EXPIRY_MS } from '../types/payment';
 import { safeStringify } from '../protocol/serialization';
+import { releaseUncommittedReliableIngress } from '../runtime/reliable-delivery';
 import { bootScenario, fundEntities, registerEntities } from './boot';
 import {
   assert,
+  advanceScenarioTime,
   converge,
   enableStrictScenario,
+  findCommittedScenarioHtlcLockId,
   findReplica,
   getProcess,
   processJEvents,
+  processUntilWithoutLocalHtlcAdvance,
+  withholdScenarioLocalHtlcAdvances,
   syncChain,
   usd,
 } from './helpers';
@@ -35,10 +42,46 @@ type Registered = { id: string; signer: string; name: string };
 type MineableProvider = { send(method: string, params: unknown[]): Promise<unknown> };
 type DecodedArguments = { fillRatios: bigint[]; secrets: string[]; pulls: string[] };
 type AccountAckInput = Extract<AccountInput, { kind: 'ack' }>;
+type AccountProposalInput = Extract<AccountInput, { kind: 'frame' } | { kind: 'frame_ack' }>;
 
 const requireRegistered = (value: Registered | undefined, name: string): Registered => {
   if (!value) throw new Error(`DISPUTE_TRANSFORMER_MISSING_ENTITY:${name}`);
   return value;
+};
+
+const takeQueuedEnvelope = (
+  env: RuntimeReplica,
+  matches: (output: RoutedEntityInput) => boolean,
+): RoutedEntityInput | undefined => {
+  const take = (
+    queue: readonly RoutedEntityInput[],
+    assign: (remaining: RoutedEntityInput[]) => void,
+  ): RoutedEntityInput | undefined => {
+    const index = queue.findIndex(matches);
+    if (index < 0) return undefined;
+    const output = queue[index];
+    if (!output) throw new Error('DISPUTE_TRANSFORMER_QUEUED_OUTPUT_MISSING');
+    assign(queue.filter((_, outputIndex) => outputIndex !== index));
+    releaseUncommittedReliableIngress(env, [output], []);
+    return output;
+  };
+  return take(env.pendingOutputs ?? [], (remaining) => { env.pendingOutputs = remaining; })
+    ?? take(env.networkInbox ?? [], (remaining) => { env.networkInbox = remaining; })
+    ?? take(env.pendingNetworkOutputs ?? [], (remaining) => { env.pendingNetworkOutputs = remaining; })
+    ?? take(env.runtimeMempool.entityInputs, (remaining) => { env.runtimeMempool.entityInputs = remaining; });
+};
+
+const offersCommitted = (
+  env: RuntimeReplica,
+  leftEntityId: string,
+  rightEntityId: string,
+  offerIds: readonly string[],
+): boolean => {
+  const left = findReplica(env, leftEntityId)[1].state.accounts.get(rightEntityId);
+  const right = findReplica(env, rightEntityId)[1].state.accounts.get(leftEntityId);
+  return Boolean(left && right && offerIds.every(id =>
+    left.state.swapOffers.has(id) && right.state.swapOffers.has(id)
+  ));
 };
 
 const frameTxTypes = (frame: AccountFrame | undefined): string[] =>
@@ -59,6 +102,60 @@ const findAccountAck = (txs: readonly EntityTx[] | undefined): AccountAckInput |
     }
   }
   return undefined;
+};
+
+const findSwapProposal = (
+  txs: readonly EntityTx[] | undefined,
+  fromEntityId: string,
+  toEntityId: string,
+  offerId: string,
+): AccountProposalInput | undefined => {
+  for (const tx of txs ?? []) {
+    if (tx.type === 'accountInput' && (tx.data.kind === 'frame' || tx.data.kind === 'frame_ack')) {
+      const matchesParticipants = tx.data.fromEntityId === fromEntityId && tx.data.toEntityId === toEntityId;
+      const containsOffer = tx.data.proposal.frame.accountTxs.some((accountTx) =>
+        accountTx.type === 'swap_offer' && accountTx.data.offerId === offerId
+      );
+      if (matchesParticipants && containsOffer) return structuredClone(tx.data);
+    }
+    if (tx.type === 'consensusOutput' || tx.type === 'runtimeOutput') {
+      const nested = findSwapProposal(tx.data.entityTxs, fromEntityId, toEntityId, offerId);
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+};
+
+const takePendingSwapProposal = (
+  env: RuntimeReplica,
+  fromEntityId: string,
+  toEntityId: string,
+  offerId: string,
+): AccountProposalInput | undefined => {
+  const output = takeQueuedEnvelope(env, (candidate) =>
+    findSwapProposal(candidate.entityTxs, fromEntityId, toEntityId, offerId) !== undefined
+  );
+  if (!output) return undefined;
+  const proposal = findSwapProposal(output.entityTxs, fromEntityId, toEntityId, offerId);
+  if (!proposal) throw new Error(`DISPUTE_TRANSFORMER_SWAP_PROPOSAL_MISSING:${offerId}`);
+  return proposal;
+};
+
+const capturePendingSwapProposal = async (
+  env: RuntimeReplica,
+  withheldAdvances: Parameters<typeof withholdScenarioLocalHtlcAdvances>[1],
+  fromEntityId: string,
+  toEntityId: string,
+  offerId: string,
+): Promise<AccountProposalInput> => {
+  const process = await getProcess();
+  for (let cycle = 0; cycle < 24; cycle += 1) {
+    withholdScenarioLocalHtlcAdvances(env, withheldAdvances);
+    const proposal = takePendingSwapProposal(env, fromEntityId, toEntityId, offerId);
+    if (proposal) return proposal;
+    await process(env);
+  }
+  throw new Error(`DISPUTE_TRANSFORMER_SWAP_PROPOSAL_NOT_QUEUED:${offerId}`);
 };
 
 const captureQueuedAck = (env: RuntimeReplica, toEntityId: string): AccountAckInput | undefined => {
@@ -86,27 +183,81 @@ const requirePendingResolution = (account: AccountReplica | undefined, side: str
   return frame;
 };
 
-const dropPartitionedOutputs = (env: RuntimeReplica, entityIds: ReadonlySet<string>): void => {
-  env.pendingOutputs = (env.pendingOutputs ?? []).filter((output) => !entityIds.has(output.entityId));
-  env.networkInbox = (env.networkInbox ?? []).filter((output) => !entityIds.has(output.entityId));
-  env.pendingNetworkOutputs = (env.pendingNetworkOutputs ?? []).filter(
-    (output) => !entityIds.has(output.entityId),
+const requirePendingSwapResolution = (
+  frame: AccountFrame,
+  offerId: string,
+  expectedFillRatio: number,
+): void => {
+  const resolution = frame.accountTxs.find((tx) =>
+    tx.type === 'swap_resolve' && tx.data.offerId === offerId
   );
-  env.runtimeMempool.entityInputs = env.runtimeMempool.entityInputs.filter((input) => {
-    if (!entityIds.has(input.entityId)) return true;
-    return !(input.entityTxs ?? []).some((tx) => tx.type === 'consensusOutput');
-  });
+  if (resolution?.type !== 'swap_resolve') {
+    throw new Error(`DISPUTE_TRANSFORMER_MATCHER_RESOLUTION_MISSING:${offerId}`);
+  }
+  if (resolution.data.fillRatio !== expectedFillRatio) {
+    throw new Error(
+      `DISPUTE_TRANSFORMER_MATCHER_RATIO_MISMATCH:${offerId}:` +
+      `${resolution.data.fillRatio}:${expectedFillRatio}`,
+    );
+  }
+};
+
+const containsPartitionedAccountInput = (
+  txs: readonly EntityTx[] | undefined,
+  leftEntityId: string,
+  rightEntityId: string,
+): boolean => {
+  for (const tx of txs ?? []) {
+    if (tx.type === 'accountInput') {
+      const participants = new Set([tx.data.fromEntityId, tx.data.toEntityId]);
+      if (participants.size === 2 && participants.has(leftEntityId) && participants.has(rightEntityId)) return true;
+    }
+    if (
+      (tx.type === 'consensusOutput' || tx.type === 'runtimeOutput')
+      && containsPartitionedAccountInput(tx.data.entityTxs, leftEntityId, rightEntityId)
+    ) return true;
+  }
+  return false;
+};
+
+const dropPartitionedOutputs = (
+  env: RuntimeReplica,
+  leftEntityId: string,
+  rightEntityId: string,
+): void => {
+  const keep = (output: { entityTxs?: EntityTx[] }): boolean =>
+    !containsPartitionedAccountInput(output.entityTxs, leftEntityId, rightEntityId);
+  env.pendingOutputs = (env.pendingOutputs ?? []).filter(keep);
+  env.networkInbox = (env.networkInbox ?? []).filter(keep);
+  env.pendingNetworkOutputs = (env.pendingNetworkOutputs ?? []).filter(keep);
+  env.runtimeMempool.entityInputs = env.runtimeMempool.entityInputs.filter(keep);
 };
 
 const countOrderbookRows = (env: RuntimeReplica, offerIds: ReadonlySet<string>): number => {
   let rows = 0;
   for (const replica of env.state.eReplicas.values()) {
-    for (const orderId of replica.state.orderbookExt?.orderPairs?.keys() ?? []) {
-      if ([...offerIds].some((offerId) => orderId === offerId || orderId.endsWith(`:${offerId}`))) rows++;
+    for (const book of replica.state.orderbookExt?.books?.values() ?? []) {
+      for (const orderId of book.orders.keys()) {
+        if ([...offerIds].some((offerId) => orderId === offerId || orderId.endsWith(`:${offerId}`))) rows++;
+      }
     }
   }
   return rows;
 };
+
+const orderbookRowsByEntity = (
+  env: RuntimeReplica,
+  offerIds: ReadonlySet<string>,
+): Record<string, string[]> => Object.fromEntries(
+  [...env.state.eReplicas.values()].map((replica) => [
+    replica.state.entityId.slice(-4),
+    [...(replica.state.orderbookExt?.books?.values() ?? [])]
+      .flatMap((book) => [...book.orders.keys()])
+      .filter((orderId) =>
+        [...offerIds].some((offerId) => orderId === offerId || orderId.endsWith(`:${offerId}`))
+      ),
+  ]),
+);
 
 const mineUntil = async (jadapter: JAdapter, target: number): Promise<void> => {
   const provider = jadapter.provider as unknown as Partial<MineableProvider>;
@@ -160,7 +311,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
   const process = await getProcess();
   const { env, jadapter, jurisdiction } = await bootScenario({
     name: 'dispute-transformer',
-    signerIds: ['2', '3'],
+    signerIds: ['2', '3', '4', '5'],
     seed: 'dispute-transformer-deterministic',
     ...(_existingEnv?.scenarioJAdapterMode ? { mode: _existingEnv.scenarioJAdapterMode } : {}),
   });
@@ -172,9 +323,13 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     const registered = await registerEntities(env, jadapter, [
       { name: 'Alice', signer: '2', position: { x: -20, y: -30, z: 0 } },
       { name: 'Hub', signer: '3', position: { x: 20, y: -30, z: 0 } },
+      { name: 'Bob', signer: '4', position: { x: 40, y: -10, z: 0 } },
+      { name: 'Carol', signer: '5', position: { x: -40, y: -10, z: 0 } },
     ], jurisdiction) as Registered[];
     const alice = requireRegistered(registered[0], 'Alice');
     const hub = requireRegistered(registered[1], 'Hub');
+    const bob = requireRegistered(registered[2], 'Bob');
+    const carol = requireRegistered(registered[3], 'Carol');
     assert(alice.id.toLowerCase() < hub.id.toLowerCase(), 'Alice must be canonical left', env);
 
     await fundEntities(env, jadapter, [
@@ -182,23 +337,86 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       { id: hub.id, tokenId: USDC, amount: usd(2_000_000) },
       { id: alice.id, tokenId: WETH, amount: 100n * 10n ** 18n },
       { id: hub.id, tokenId: WETH, amount: 100n * 10n ** 18n },
+      { id: bob.id, tokenId: USDC, amount: usd(2_000_000) },
+      { id: carol.id, tokenId: USDC, amount: usd(2_000_000) },
+      { id: bob.id, tokenId: WETH, amount: 100n * 10n ** 18n },
+      { id: carol.id, tokenId: WETH, amount: 100n * 10n ** 18n },
     ]);
 
-    await process(env, [{
-      entityId: alice.id,
-      signerId: alice.signer,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
-    }]);
+    await process(env, [
+      {
+        entityId: alice.id,
+        signerId: alice.signer,
+        entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+      },
+      {
+        entityId: bob.id,
+        signerId: bob.signer,
+        entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+      },
+      {
+        entityId: carol.id,
+        signerId: carol.signer,
+        entityTxs: [{ type: 'openAccount', data: { targetEntityId: alice.id } }],
+      },
+    ]);
     await converge(env, 12);
-    await process(env, [alice, hub].map((party) => ({
-      entityId: party.id,
-      signerId: party.signer,
-      entityTxs: [
-        { type: 'extendCredit' as const, data: { counterpartyEntityId: party.id === alice.id ? hub.id : alice.id, tokenId: USDC, amount: usd(1_000_000) } },
-        { type: 'extendCredit' as const, data: { counterpartyEntityId: party.id === alice.id ? hub.id : alice.id, tokenId: WETH, amount: 100n * 10n ** 18n } },
-      ],
-    })));
+    await process(env, [
+      {
+        entityId: alice.id,
+        signerId: alice.signer,
+        entityTxs: [
+          { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC, amount: usd(1_000_000) } },
+          { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: WETH, amount: 100n * 10n ** 18n } },
+          { type: 'extendCredit', data: { counterpartyEntityId: carol.id, tokenId: USDC, amount: usd(1_000_000) } },
+          { type: 'extendCredit', data: { counterpartyEntityId: carol.id, tokenId: WETH, amount: 100n * 10n ** 18n } },
+        ],
+      },
+      {
+        entityId: hub.id,
+        signerId: hub.signer,
+        entityTxs: [
+          { type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: USDC, amount: usd(1_000_000) } },
+          { type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: WETH, amount: 100n * 10n ** 18n } },
+          { type: 'extendCredit', data: { counterpartyEntityId: bob.id, tokenId: USDC, amount: usd(1_000_000) } },
+          { type: 'extendCredit', data: { counterpartyEntityId: bob.id, tokenId: WETH, amount: 100n * 10n ** 18n } },
+        ],
+      },
+      {
+        entityId: bob.id,
+        signerId: bob.signer,
+        entityTxs: [
+          { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC, amount: usd(1_000_000) } },
+          { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: WETH, amount: 100n * 10n ** 18n } },
+        ],
+      },
+      {
+        entityId: carol.id,
+        signerId: carol.signer,
+        entityTxs: [
+          { type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: USDC, amount: usd(1_000_000) } },
+          { type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: WETH, amount: 100n * 10n ** 18n } },
+        ],
+      },
+    ]);
     await converge(env, 16);
+
+    const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../orderbook');
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'initOrderbookExt',
+        data: {
+          name: 'Dispute matcher hub',
+          spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+          referenceTokenId: USDC,
+          minTradeSize: 0n,
+          supportedPairs: ['1/2'],
+        },
+      }],
+    }]);
+    await converge(env, 8);
 
     // Capture one genuine, quorum-sealed ACK and let the original delivery
     // settle normally. Replaying this exact ACK after disputeStart proves the
@@ -214,6 +432,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
           tokenId: USDC,
           amount: usd(11),
           route: [hub.id, alice.id],
+          deliveryMode: 'direct',
           description: 'signed-base-payment-and-late-ack-source',
         },
       }],
@@ -230,34 +449,170 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     const hubSecret = ethers.keccak256(ethers.toUtf8Bytes('dispute-transformer:hub-secret'));
     const aliceHashlock = hashHtlcSecret(aliceSecret);
     const hubHashlock = hashHtlcSecret(hubSecret);
-    const revealHeight = Number(env.state.jReplicas.values().next().value?.blockNumber ?? 0n) + 20_000;
-    // Managed scenario Anvil starts at a fixed timestamp. Do not derive signed
-    // Account state from the latest RPC block: watcher scheduling can mine one
-    // extra service block and change the ProofBody by one second.
-    const deadline = SCENARIO_DEADLINE_MS;
-    const aliceLockId = generateLockId(aliceHashlock, revealHeight, 0, env.state.timestamp);
-    const hubLockId = generateLockId(hubHashlock, revealHeight, 1, env.state.timestamp);
+    advanceScenarioTime(
+      env,
+      Number(SCENARIO_DEADLINE_MS) - ASYNC_PAYMENT_EXPIRY_MS - env.state.timestamp,
+      true,
+    );
+    const withheldAdvances = [
+      { entityId: hub.id, signerId: hub.signer, hashlock: aliceHashlock },
+      { entityId: alice.id, signerId: alice.signer, hashlock: hubHashlock },
+    ] as const;
     const giveAmount = MAX_FILL_RATIO * WETH_LOT;
-    const wantAmount = MAX_FILL_RATIO * 3_000n;
+    const aliceWantAmount = MAX_FILL_RATIO * 3_000n;
+    const hubGiveAmount = 32_768n * WETH_LOT;
+    const hubWantAmount = 32_768n * 3_100n;
 
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [
-        { type: 'manualHtlcLock', data: { counterpartyId: hub.id, lockId: aliceLockId, hashlock: aliceHashlock, timelock: deadline, revealBeforeHeight: revealHeight, amount: usd(7), tokenId: USDC } },
-        { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount } },
+        withDeterministicHtlcTestSecret({
+          type: 'htlcPayment',
+          data: {
+            targetEntityId: hub.id,
+            route: [alice.id, hub.id],
+            tokenId: USDC,
+            amount: usd(7),
+            deliveryMode: 'async',
+            hashlock: aliceHashlock,
+            description: 'dispute-transformer-alice-lock',
+          },
+        }, aliceSecret),
+        { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount: aliceWantAmount } },
       ],
     }]);
-    await converge(env, 12);
+    await processUntilWithoutLocalHtlcAdvance(
+      env,
+      withheldAdvances,
+      () => findCommittedScenarioHtlcLockId(env, alice.id, hub.id, aliceHashlock) !== undefined
+        && offersCommitted(env, alice.id, hub.id, ['alice-maker-left']),
+    );
+    const aliceLockId = findCommittedScenarioHtlcLockId(env, alice.id, hub.id, aliceHashlock);
+    if (!aliceLockId) throw new Error('DISPUTE_TRANSFORMER_ALICE_LOCK_NOT_COMMITTED');
+    assert(
+      findReplica(env, alice.id)[1].state.orderbookExt === undefined,
+      'User Entity commits the maker offer without becoming a matcher',
+      env,
+    );
+    assert(
+      countOrderbookRows(env, new Set(['alice-maker-left'])) === 1,
+      'Hub matcher owns the single canonical book row',
+      env,
+    );
+
+    // Initialize the second independent matcher only after Alice's historical
+    // maker commit. Its empty book will later contain only Hub's maker.
+    await process(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'initOrderbookExt',
+        data: {
+          name: 'Dispute matcher alice',
+          spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+          referenceTokenId: USDC,
+          minTradeSize: 0n,
+          supportedPairs: ['1/2'],
+        },
+      }],
+    }]);
+    await processUntilWithoutLocalHtlcAdvance(
+      env,
+      withheldAdvances,
+      () => findReplica(env, alice.id)[1].state.orderbookExt !== undefined,
+      12,
+    );
+
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
       entityTxs: [
-        { type: 'manualHtlcLock', data: { counterpartyId: alice.id, lockId: hubLockId, hashlock: hubHashlock, timelock: deadline, revealBeforeHeight: revealHeight, amount: usd(3), tokenId: USDC } },
-        { type: 'placeSwapOffer', data: { counterpartyEntityId: alice.id, offerId: 'hub-maker-right', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount } },
+        withDeterministicHtlcTestSecret({
+          type: 'htlcPayment',
+          data: {
+            targetEntityId: alice.id,
+            route: [hub.id, alice.id],
+            tokenId: USDC,
+            amount: usd(3),
+            deliveryMode: 'async',
+            hashlock: hubHashlock,
+            description: 'dispute-transformer-hub-lock',
+          },
+        }, hubSecret),
+        {
+          type: 'placeSwapOffer',
+          data: {
+            counterpartyEntityId: alice.id,
+            offerId: 'hub-maker-right',
+            giveTokenId: WETH,
+            giveAmount: hubGiveAmount,
+            wantTokenId: USDC,
+            wantAmount: hubWantAmount,
+          },
+        },
       ],
     }]);
-    await converge(env, 12);
+    await processUntilWithoutLocalHtlcAdvance(
+      env,
+      withheldAdvances,
+      () => findCommittedScenarioHtlcLockId(env, alice.id, hub.id, hubHashlock) !== undefined
+        && offersCommitted(env, alice.id, hub.id, ['alice-maker-left', 'hub-maker-right']),
+    );
+    const hubLockId = findCommittedScenarioHtlcLockId(env, alice.id, hub.id, hubHashlock);
+    if (!hubLockId) throw new Error('DISPUTE_TRANSFORMER_HUB_LOCK_NOT_COMMITTED');
+
+    withholdScenarioLocalHtlcAdvances(env, withheldAdvances);
+
+    // Produce the exact signed peer proposals that the two independent
+    // matchers consume. We intercept them before delivery so the opposing
+    // HTLC resolution enters the same Entity frame as matcher-generated
+    // swap_resolve. No scenario-only Account frame or state mutation exists.
+    await process(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'placeSwapOffer',
+        data: {
+          counterpartyEntityId: hub.id,
+          offerId: 'bob-taker-hub',
+          giveTokenId: USDC,
+          giveAmount: 16_384n * 3_000n,
+          wantTokenId: WETH,
+          wantAmount: 16_384n * WETH_LOT,
+        },
+      }],
+    }]);
+    const bobProposal = await capturePendingSwapProposal(
+      env,
+      withheldAdvances,
+      bob.id,
+      hub.id,
+      'bob-taker-hub',
+    );
+
+    await process(env, [{
+      entityId: carol.id,
+      signerId: carol.signer,
+      entityTxs: [{
+        type: 'placeSwapOffer',
+        data: {
+          counterpartyEntityId: alice.id,
+          offerId: 'carol-taker-alice',
+          giveTokenId: USDC,
+          giveAmount: 32_768n * 3_100n,
+          wantTokenId: WETH,
+          wantAmount: 32_768n * WETH_LOT,
+        },
+      }],
+    }]);
+    const carolProposal = await capturePendingSwapProposal(
+      env,
+      withheldAdvances,
+      carol.id,
+      alice.id,
+      'carol-taker-alice',
+    );
 
     const base = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
     assert(!!base, 'Base bilateral account missing', env);
@@ -269,36 +624,37 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     const baseHeight = base!.currentHeight;
     const baseProofHash = findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.counterpartyDisputeProofBodyHash;
     assert(!!baseProofHash, 'Last mutually signed dispute ProofBody missing', env);
-    const partition = new Set([alice.id, hub.id]);
     await process(env, [
       {
         entityId: alice.id,
         signerId: alice.signer,
         entityTxs: [
+          { type: 'accountInput', data: carolProposal },
           { type: 'resolveHtlcLock', data: { counterpartyEntityId: hub.id, lockId: hubLockId, secret: hubSecret } },
-          { type: 'resolveSwap', data: { counterpartyEntityId: hub.id, offerId: 'hub-maker-right', fillRatio: 32_768, cancelRemainder: false, executionGiveAmount: 32_768n * WETH_LOT, executionWantAmount: 32_768n * 3_000n } },
         ],
       },
       {
         entityId: hub.id,
         signerId: hub.signer,
         entityTxs: [
+          { type: 'accountInput', data: bobProposal },
           { type: 'resolveHtlcLock', data: { counterpartyEntityId: alice.id, lockId: aliceLockId, secret: aliceSecret } },
-          { type: 'resolveSwap', data: { counterpartyEntityId: alice.id, offerId: 'alice-maker-left', fillRatio: 16_384, cancelRemainder: false, executionGiveAmount: 16_384n * WETH_LOT, executionWantAmount: 16_384n * 3_000n } },
         ],
       },
     ]);
-    dropPartitionedOutputs(env, partition);
+    dropPartitionedOutputs(env, alice.id, hub.id);
     for (let round = 0; round < 8; round += 1) {
       const aliceAccount = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
       const hubAccount = findReplica(env, hub.id)[1].state.accounts.get(alice.id);
       if (aliceAccount?.pendingFrame && hubAccount?.pendingFrame) break;
       await process(env);
-      dropPartitionedOutputs(env, partition);
+      dropPartitionedOutputs(env, alice.id, hub.id);
     }
 
     const alicePending = requirePendingResolution(findReplica(env, alice.id)[1].state.accounts.get(hub.id), 'alice');
     const hubPending = requirePendingResolution(findReplica(env, hub.id)[1].state.accounts.get(alice.id), 'hub');
+    requirePendingSwapResolution(alicePending, 'hub-maker-right', 65_535);
+    requirePendingSwapResolution(hubPending, 'alice-maker-left', 16_384);
     console.log(`[DISPUTE_DEBUG:pending-evidence] ${safeStringify({
       alice: accountEvidenceSummary(findReplica(env, alice.id)[1].state.accounts.get(hub.id)),
       hub: accountEvidenceSummary(findReplica(env, hub.id)[1].state.accounts.get(alice.id)),
@@ -316,7 +672,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       });
     }
 
-    dropPartitionedOutputs(env, partition);
+    dropPartitionedOutputs(env, alice.id, hub.id);
     await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [{
       type: 'prepareDispute', data: { counterpartyEntityId: alice.id, description: 'mixed-transformer-prepare' },
     }] }]);
@@ -325,6 +681,9 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     assert(prepared.pendingFrame === undefined, 'Prepare retained an optimistic pending frame', env);
     assert(prepared.currentHeight === baseHeight, 'Prepare changed committed Account height', env);
     assert(prepared.counterpartyDisputeProofBodyHash === baseProofHash, 'Prepare changed signed ProofBody', env);
+    console.log(`[DISPUTE_DEBUG:book-rows-after-prepare] ${safeStringify(
+      orderbookRowsByEntity(env, new Set(['alice-maker-left', 'hub-maker-right'])),
+    )}`);
     assert(
       countOrderbookRows(env, new Set(['alice-maker-left', 'hub-maker-right'])) === 0,
       'Prepare left a disputed swap in an orderbook',

@@ -24,13 +24,11 @@ import { handleR2R } from './handlers/r2r';
 import {
   handleCancelPullEntityTx,
   handleCrossPullCloseEntityTx,
-  handlePullLockEntityTx,
   handleResolvePullEntityTx,
 } from './handlers/pull';
 import {
   handleCancelSwapRequest,
   handlePlaceSwapOfferRequest,
-  handleResolveSwapRequest,
 } from './handlers/swap-requests';
 import { handleJBroadcast } from './handlers/j-broadcast';
 import { handleJRebroadcast } from './handlers/j-rebroadcast';
@@ -56,7 +54,6 @@ import {
 } from './handlers/basic';
 import { handleOpenAccountEntityTx } from './handlers/open-account';
 import {
-  handleManualHtlcLockEntityTx,
   handleProcessHtlcTimeoutsEntityTx,
   handleResolveHtlcLockEntityTx,
 } from './handlers/htlc-direct';
@@ -363,7 +360,6 @@ const entityTxDispatchers = {
   ),
   resolveHtlcLock: (_env, state, tx, options) => handleResolveHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>, options?.mutableFrameState),
   processHtlcTimeouts: (_env, state, tx, options) => handleProcessHtlcTimeoutsEntityTx(state, tx as Extract<EntityTx, { type: 'processHtlcTimeouts' }>, options?.mutableFrameState),
-  manualHtlcLock: (_env, state, tx, options) => handleManualHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'manualHtlcLock' }>, options?.mutableFrameState),
   directPayment: (env, state, tx, options) => handleDirectPaymentEntityTx(
     env,
     state,
@@ -485,7 +481,6 @@ const entityTxDispatchers = {
     tx as Extract<EntityTx, { type: 'reopenDisputedAccount' }>,
     options?.mutableFrameState,
   ),
-  pullLock: (env, state, tx, options) => handlePullLockEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullLock' }>, options),
   resolvePull: (env, state, tx, options) => handleResolvePullEntityTx(env, state, tx as Extract<EntityTx, { type: 'resolvePull' }>, options),
   crossPullClose: (env, state, tx, options) => handleCrossPullCloseEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossPullClose' }>, options),
   cancelPull: (env, state, tx, options) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'cancelPull' }>, options),
@@ -503,8 +498,7 @@ const entityTxDispatchers = {
   applyCrossJurisdictionBookProgress: (env, state, tx, options) => handleApplyCrossJurisdictionBookProgressEntityTx(env, state, tx as Extract<EntityTx, { type: 'applyCrossJurisdictionBookProgress' }>, options),
   removeCrossJurisdictionBookOrder: (env, state, tx, options) => handleRemoveCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'removeCrossJurisdictionBookOrder' }>, options),
   crossJurisdictionBookOrderRemoved: (env, state, tx, options) => handleCrossJurisdictionBookOrderRemovedEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionBookOrderRemoved' }>, options),
-  placeSwapOffer: (env, state, tx, options) => handlePlaceSwapOfferRequest(env, state, tx as Extract<EntityTx, { type: 'placeSwapOffer' }>, options),
-  resolveSwap: (_env, state, tx, options) => handleResolveSwapRequest(state, tx as Extract<EntityTx, { type: 'resolveSwap' }>, options),
+  placeSwapOffer: (_env, state, tx, options) => handlePlaceSwapOfferRequest(state, tx as Extract<EntityTx, { type: 'placeSwapOffer' }>, options),
   proposeCancelSwap: (_env, state, tx, options) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'proposeCancelSwap' }>, options),
   r2e: (_env, state, tx, options) => handleR2E(
     state,

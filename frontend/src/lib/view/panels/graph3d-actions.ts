@@ -18,12 +18,13 @@ export function buildGraphPaymentInput(job: GraphPaymentJob, signerId: string, r
     signerId,
     entityTxs: [
       {
-        type: 'directPayment' as const,
+        type: 'htlcPayment' as const,
         data: {
           targetEntityId: job.to,
           tokenId: job.tokenId,
           amount: parseGraphPaymentAmount(job.amount, decimals),
           route,
+          deliveryMode: 'instant' as const,
           description: `Bird view payment: ${job.amount}`,
         },
       },

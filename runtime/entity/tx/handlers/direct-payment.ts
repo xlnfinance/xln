@@ -38,7 +38,7 @@ const validateEntityPayment = (
   outputs: EntityInput[],
 ): DirectPaymentResult | undefined => {
   const { amount, deliveryMode, targetEntityId, trustedGatewayEntityId } = tx.data;
-  if (deliveryMode && deliveryMode !== 'trusted') {
+  if (deliveryMode !== 'direct' && deliveryMode !== 'trusted') {
     throw directPaymentInvariant('DELIVERY_MODE_INVALID', String(deliveryMode));
   }
   if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
@@ -51,6 +51,10 @@ const validateEntityPayment = (
   }
   if (deliveryMode === 'trusted') {
     requireTrustedPaymentGateway(route, targetEntityId, trustedGatewayEntityId);
+  } else if (trustedGatewayEntityId !== undefined) {
+    throw directPaymentInvariant('DIRECT_GATEWAY_FORBIDDEN', trustedGatewayEntityId);
+  } else if (route.length !== 2) {
+    throw directPaymentInvariant('ROUTE_MUST_BE_BILATERAL', route.join(','));
   }
   return undefined;
 };
@@ -122,7 +126,7 @@ const buildNextHopPayment = (
         description: description || `Payment to ${targetEntityId}`,
         fromEntityId: state.entityId,
         toEntityId: nextHop,
-        ...(deliveryMode ? { deliveryMode } : {}),
+        deliveryMode,
         ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
       },
     },

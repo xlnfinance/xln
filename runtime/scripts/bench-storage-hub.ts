@@ -337,6 +337,7 @@ const paymentTxFor = (
         tokenId,
         amount,
         route: [user.entityId, hub.entityId],
+        deliveryMode: 'direct',
         description,
       },
     };

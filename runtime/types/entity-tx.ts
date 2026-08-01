@@ -1,6 +1,6 @@
 import type { JurisdictionEventData } from './jurisdiction-events';
 import type { AccountPeerInput, AccountStateDomain, SettlementOp } from './account';
-import type { CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
+import type { CrossJurisdictionCloseProof, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './lending';
 import type { ProposalAction } from '../entity/types';
 import type { PaymentDeliveryMode } from './payment';
@@ -237,7 +237,7 @@ type EntityTxPayload =
         amount: bigint;
         route: string[]; // Full path from source to target
         description?: string;
-        deliveryMode?: Extract<PaymentDeliveryMode, 'trusted'>;
+        deliveryMode: Extract<PaymentDeliveryMode, 'direct' | 'trusted'>;
         trustedGatewayEntityId?: string;
       };
     }
@@ -249,7 +249,7 @@ type EntityTxPayload =
         amount: bigint;
         route: string[]; // Full path from source to target
         description?: string;
-        deliveryMode?: Exclude<PaymentDeliveryMode, 'trusted'>;
+        deliveryMode?: Extract<PaymentDeliveryMode, 'instant' | 'async'>;
         startedAtMs?: number;
         /** Raw local-ingress hint only. Stripped before command/frame/WAL. */
         secret?: string;
@@ -324,24 +324,6 @@ type EntityTxPayload =
         lockId: string;
         secret: string;
         crossJurisdictionRouteId?: string;
-        description?: string;
-      };
-    }
-  | {
-      // Create a ratio-gated pull commitment in a bilateral account.
-      // The side losing funds proposes it; the beneficiary resolves it with
-      // hashladder ratio secrets.
-      type: 'pullLock';
-      data: {
-        counterpartyEntityId: string;
-        pullId: string;
-        tokenId: number;
-        amount: bigint;
-        revealedUntilTimestamp: number;
-        fullHash: string;
-        partialRoot: string;
-        crossJurisdiction?: CrossJurisdictionPullBinding;
-        crossJurisdictionRoute?: CrossJurisdictionSwapRoute;
         description?: string;
       };
     }
@@ -775,25 +757,6 @@ type EntityTxPayload =
         // Sent together with give/want for deterministic cross-checking.
         priceTicks?: bigint;
         timeInForce?: 0 | 1 | 2; // 0 = GTC, 1 = IOC, 2 = FOK
-        crossJurisdiction?: CrossJurisdictionSwapRoute;
-      };
-    }
-  | {
-      // Resolve or cancel a swap offer in bilateral account (hub → user).
-      // Non-zero fills must carry exact execution amounts.
-      type: 'resolveSwap';
-      data: {
-        counterpartyEntityId: string; // User who placed the offer
-        offerId: string;
-        fillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
-        fillNumerator?: bigint;
-        fillDenominator?: bigint;
-        cancelRemainder: boolean;
-        comment?: string;
-        feeTokenId?: number;
-        feeAmount?: bigint;
-        executionGiveAmount?: bigint;
-        executionWantAmount?: bigint;
       };
     }
   | {
@@ -885,19 +848,6 @@ type EntityTxPayload =
       type: 'processHtlcTimeouts';
       data: {
         expiredLocks?: Array<{ accountId: string; lockId: string }>;
-      };
-    }
-  | {
-      // Manual HTLC lock creation without envelope (timeout test)
-      type: 'manualHtlcLock';
-      data: {
-        counterpartyId: string;
-        lockId: string;
-        hashlock: string;
-        timelock: bigint;
-        revealBeforeHeight: number;
-        amount: bigint;
-        tokenId: number;
       };
     }
   // ═══════════════════════════════════════════════════════════════

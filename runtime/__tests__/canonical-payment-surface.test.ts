@@ -4,9 +4,15 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ENTITY_TX_TYPES } from '../entity/tx/catalog';
+import { validateEntityTx } from '../entity/tx-validation';
 
 const repoRoot = process.cwd();
-const obsoleteEntityTx = ['hashlock', 'Payment'].join('');
+const removedEntityTxs = [
+  ['hashlock', 'Payment'].join(''),
+  ['manual', 'Htlc', 'Lock'].join(''),
+  ['pull', 'Lock'].join(''),
+  ['resolve', 'Swap'].join(''),
+];
 const historicalPrefixes = ['.archive/', 'docs/archive/', 'docs/releases/'];
 
 const trackedFiles = (): string[] => execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
@@ -20,28 +26,113 @@ const trackedFiles = (): string[] => execFileSync('git', ['ls-files', '--cached'
 
 const source = (path: string): string => readFileSync(join(repoRoot, path), 'utf8');
 
-test('removed parallel payment transaction is absent from source, tests, docs, and generated files', () => {
-  const mentions = trackedFiles().filter(path => source(path).includes(obsoleteEntityTx));
-  expect(mentions).toEqual([]);
+test('removed raw payment transactions stay absent from source, tests, docs, and generated files', () => {
+  const catalog = new Set<string>(ENTITY_TX_TYPES);
+  for (const removedEntityTx of removedEntityTxs) {
+    const forbiddenSpellings = [
+      `'${removedEntityTx}'`,
+      `"${removedEntityTx}"`,
+      `\`${removedEntityTx}\``,
+    ];
+    expect(trackedFiles().filter(path =>
+      forbiddenSpellings.some(spelling => source(path).includes(spelling)),
+    )).toEqual([]);
+    expect(catalog.has(removedEntityTx)).toBe(false);
+  }
 });
 
 test('each payment operation retains one explicit canonical transaction path', () => {
-  expect(ENTITY_TX_TYPES).toEqual(expect.arrayContaining([
-    'htlcPayment',
-    'pullLock',
-    'prepareCrossJurisdictionSwap',
-    'extendCredit',
-  ]));
+  expect(ENTITY_TX_TYPES.includes('directPayment')).toBe(true);
+  expect(ENTITY_TX_TYPES.includes('htlcPayment')).toBe(true);
+  expect(ENTITY_TX_TYPES.includes('placeSwapOffer')).toBe(true);
+  expect(ENTITY_TX_TYPES.includes('prepareCrossJurisdictionSwap')).toBe(true);
+  expect(ENTITY_TX_TYPES.includes('extendCredit')).toBe(true);
+  expect(ENTITY_TX_TYPES.includes('lendingOffer')).toBe(true);
+  expect(ENTITY_TX_TYPES.includes('lendingBorrow')).toBe(true);
+  expect(ENTITY_TX_TYPES.includes('lendingRepay')).toBe(true);
+  expect(ENTITY_TX_TYPES.includes('lendingClosePosition')).toBe(true);
 
+  const paymentPanel = source('frontend/src/lib/components/Entity/PaymentPanel.svelte');
+  expect(paymentPanel).toContain("const isDirect = deliveryMode === 'direct';");
+  expect(paymentPanel).toContain("const isTrusted = deliveryMode === 'trusted';");
+  expect(paymentPanel).toContain('const usesDirectPayment = isDirect || isTrusted;');
+  expect(paymentPanel).toContain("entityTxs: usesDirectPayment\n          ? [{\n              type: 'directPayment' as const");
+  expect(paymentPanel).toContain("          : [{\n              type: 'htlcPayment' as const");
+
+  expect(source('runtime/entity/tx/handlers/direct-payment.ts'))
+    .toContain("type: 'direct_payment'");
   expect(source('runtime/entity/tx/handlers/htlc-payment.ts'))
-    .toContain('const accountTx = buildOutboundLockTx(prepared);');
-  expect(source('runtime/entity/tx/handlers/pull.ts'))
-    .toContain("type: 'pull_lock'");
+    .toContain("type: 'htlc_lock'");
+  expect(source('runtime/entity/tx/handlers/swap-requests.ts'))
+    .toContain("type: 'swap_offer'");
+  expect(source('runtime/entity/consensus/frame-application.ts')).not.toContain('Fallback:');
 
   const crossJurisdiction = source('runtime/entity/tx/handlers/cross-j-setup.ts');
+  expect(crossJurisdiction).toContain("{ type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } }");
   expect(crossJurisdiction).toContain("buildCrossJurisdictionPullBinding(route, 'source')");
   expect(crossJurisdiction).toContain("buildCrossJurisdictionPullBinding(route, 'target')");
 
   expect(source('runtime/entity/tx/handlers/account-admin.ts'))
     .toContain("type: 'set_credit_limit'");
+
+  const lendingPanel = source('frontend/src/lib/components/Entity/LendingPanel.svelte');
+  for (const type of ['lendingOffer', 'lendingBorrow', 'lendingRepay']) {
+    expect(lendingPanel).toContain(`type: '${type}'`);
+  }
+  const lendingHandler = source('runtime/entity/tx/handlers/lending.ts');
+  for (const type of ['lending_fund', 'lending_borrow_request', 'lending_repay', 'lending_close_request']) {
+    expect(lendingHandler).toContain(`type: '${type}'`);
+  }
+});
+
+test('four payment modes stay distinct while retired swap alternatives fail loud', () => {
+  const direct = {
+    type: 'directPayment',
+    data: {
+      targetEntityId: 'recipient', tokenId: 1, amount: 1n,
+      route: ['sender', 'recipient'],
+      deliveryMode: 'direct',
+    },
+  };
+  expect(validateEntityTx(direct, 'CANONICAL_DIRECT').type).toBe('directPayment');
+  expect(() => validateEntityTx({
+    ...direct,
+    data: { ...direct.data, deliveryMode: undefined },
+  }, 'CANONICAL_DIRECT')).toThrow();
+  expect(validateEntityTx({
+    ...direct,
+    data: {
+      ...direct.data,
+      deliveryMode: 'trusted',
+      route: ['sender', 'hub', 'recipient'],
+      trustedGatewayEntityId: 'hub',
+    },
+  }, 'CANONICAL_DIRECT').type).toBe('directPayment');
+
+  const retiredResolveType = ['resolve', 'Swap'].join('');
+  expect(() => validateEntityTx({ type: retiredResolveType, data: {} }, 'CANONICAL_SWAP'))
+    .toThrow('CANONICAL_SWAP_TYPE_UNKNOWN');
+  expect(() => validateEntityTx({
+    type: 'placeSwapOffer',
+    data: {
+      counterpartyEntityId: 'hub', offerId: 'order', giveTokenId: 1,
+      giveAmount: 1n, wantTokenId: 2, wantAmount: 1n,
+      crossJurisdiction: {},
+    },
+  }, 'CANONICAL_SWAP')).toThrow();
+
+  const paymentPanel = source('frontend/src/lib/components/Entity/PaymentPanel.svelte');
+  for (const mode of ['direct', 'instant', 'async', 'trusted']) {
+    expect(paymentPanel).toContain(`value: '${mode}'`);
+  }
+  expect(paymentPanel).toContain("type: 'directPayment' as const");
+});
+
+test('same-j offers are projected only by the counterparty matcher', () => {
+  const frameApplication = source('runtime/entity/consensus/frame-application.ts');
+  expect(frameApplication).toContain('if (!currentEntityState.orderbookExt) return stats;');
+  expect(frameApplication).toContain("entityLog.debug('orderbook.skip_local_maker'");
+  expect(frameApplication).toContain('if (!currentEntityState.orderbookExt) return;');
+  expect(frameApplication).not.toContain('ORDERBOOK_EXTENSION_REQUIRED_FOR_MATCHING');
+  expect(frameApplication).not.toContain('Fallback:');
 });

@@ -7,7 +7,7 @@
  *   Phase 2: Auto-approve logic
  *   Phase 3: Manual settle lifecycle (propose → update → approve → execute → broadcast)
  *   Phase 4: Settle reject
- *   Phase 5: Payment imbalances via directPayment
+ *   Phase 5: Payment imbalances via atomic HTLC payments
  *   Phase 6: Rebalance policies + hub config
  *   Phase 7: Hub crontab rebalance (C→R + R→C in one batch)
  *   Phase 8: Final verification (nonces, workspaces, collateral)
@@ -342,9 +342,10 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   await process(env, [{
     entityId: alice.id, signerId: alice.signer,
     entityTxs: [{
-      type: 'directPayment', data: {
+      type: 'htlcPayment', data: {
         targetEntityId: bob.id, tokenId: USDC, amount: usd(8_000),
         route: [alice.id, hub.id, bob.id], description: 'Alice→Bob $8K',
+        deliveryMode: 'instant',
       }
     }]
   }]);
@@ -355,9 +356,10 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   await process(env, [{
     entityId: charlie.id, signerId: charlie.signer,
     entityTxs: [{
-      type: 'directPayment', data: {
+      type: 'htlcPayment', data: {
         targetEntityId: dave.id, tokenId: USDC, amount: usd(12_000),
         route: [charlie.id, hub.id, dave.id], description: 'Charlie→Dave $12K',
+        deliveryMode: 'instant',
       }
     }]
   }]);

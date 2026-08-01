@@ -384,7 +384,7 @@ export interface AccountReplica {
     amount: bigint;
     route: string[];
     description?: string;
-    deliveryMode?: Extract<PaymentDeliveryMode, 'trusted'>;
+    deliveryMode?: Extract<PaymentDeliveryMode, 'direct' | 'trusted'>;
     trustedGatewayEntityId?: string;
   }>;
 
@@ -715,7 +715,7 @@ export interface DerivedDelta {
 
 // Account transaction types
 export type AccountTx =
-  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string; deliveryMode?: Extract<PaymentDeliveryMode, 'trusted'>; trustedGatewayEntityId?: string } }
+  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string; deliveryMode?: Extract<PaymentDeliveryMode, 'direct' | 'trusted'>; trustedGatewayEntityId?: string } }
   | {
       type: 'lending_fund';
       data: {
@@ -831,7 +831,7 @@ export type AccountTx =
         revealBeforeHeight: number;
         amount: bigint;
         tokenId: number;
-        deliveryMode?: Exclude<PaymentDeliveryMode, 'trusted'>;
+        deliveryMode?: Extract<PaymentDeliveryMode, 'instant' | 'async'>;
         envelope?: import('../protocol/htlc/envelope').HtlcEnvelope
           | import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext
           | string

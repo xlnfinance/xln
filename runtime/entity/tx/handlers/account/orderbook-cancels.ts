@@ -158,7 +158,7 @@ export function processOrderbookCancels(
   const debugProjectionRejects: MatchResult['debugProjectionRejects'] = [];
   const queuedSwapResolutions = new Set<string>();
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
+  if (!ext) throw new Error('ORDERBOOK_EXTENSION_REQUIRED_FOR_CANCEL');
 
   for (const { offerId, accountId } of cancels) {
     const account = hubState.accounts.get(accountId);

@@ -308,6 +308,9 @@ export class DaemonRpcClient {
     const route = normalizeRoute(params.route, sourceEntityId, targetEntityId);
     const description = normalizeDescription(params.description);
     const mode = params.mode ?? 'htlc';
+    if (mode === 'direct' && route.length !== 2) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', 'direct custody payment requires a bilateral route');
+    }
     const commandId = String(params.commandId || '').trim();
     if (!/^[A-Za-z0-9._:-]{16,128}$/.test(commandId)) {
       throw new RuntimeAdapterError('E_BAD_QUERY', 'custody payment commandId must be a stable withdrawal intent id');
@@ -315,7 +318,7 @@ export class DaemonRpcClient {
 
     const data = { targetEntityId, tokenId, amount: BigInt(amount), route, ...(description ? { description } : {}) };
     const entityTx: EntityTx = mode === 'direct'
-      ? { type: 'directPayment', data }
+      ? { type: 'directPayment', data: { ...data, deliveryMode: 'direct' } }
       : { type: 'htlcPayment', data };
     const input: RuntimeInput = {
       runtimeTxs: [],
