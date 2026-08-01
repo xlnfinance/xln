@@ -4,12 +4,14 @@ import { createFrameHash } from '../account/consensus/frame';
 import { computeAccountStateRoot } from '../account/state-root';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { deriveDelta } from '../account/utils';
+import { FINANCIAL, LIMITS, TOKENS } from '../config/constants';
 import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
 import {
   assertStorageAccountDocBinding,
   validateStorageAccountDocValue,
-} from '../storage/schema-state-docs';
+  validateStorageDiffRecordValue,
+} from '../storage/authoritative-schema';
 import type { StorageAccountDoc } from '../storage/types';
 import { entity, makeAccount } from './helpers/cross-j';
 
@@ -198,6 +200,13 @@ const mutations: Mutation[] = [
     mutate: ({ doc }) => { doc.state.deltas.get(1)!.leftCreditLimit = -1n; },
   },
   {
+    name: 'credit limit above the transition ceiling',
+    expected: 'reject',
+    mutate: ({ doc }) => {
+      doc.state.deltas.get(1)!.leftCreditLimit = FINANCIAL.MAX_PAYMENT_AMOUNT * 1000n + 1n;
+    },
+  },
+  {
     name: 'negative allowance',
     expected: 'reject',
     mutate: ({ doc }) => { doc.state.deltas.get(1)!.rightAllowance = -1n; },
@@ -218,9 +227,35 @@ const mutations: Mutation[] = [
     mutate: ({ doc }) => { object(doc.state.locks.get('lock-1'))['hashlock'] = 'not-a-hash'; },
   },
   {
+    name: 'negative HTLC lock amount',
+    expected: 'reject',
+    mutate: ({ doc }) => { object(doc.state.locks.get('lock-1'))['amount'] = -1n; },
+  },
+  {
+    name: 'non-string HTLC hashlock',
+    expected: 'reject',
+    mutate: ({ doc }) => { object(doc.state.locks.get('lock-1'))['hashlock'] = { nested: true }; },
+  },
+  {
+    name: 'HTLC lock map above the transition limit',
+    expected: 'reject',
+    mutate: ({ doc }) => {
+      const lock = doc.state.locks.get('lock-1')!;
+      doc.state.locks = new Map(Array.from(
+        { length: LIMITS.MAX_ACCOUNT_HTLC_LOCKS + 1 },
+        (_, index) => [`lock-${index}`, { ...lock, lockId: `lock-${index}` }],
+      ));
+    },
+  },
+  {
     name: 'malformed bounded pull',
     expected: 'reject',
     mutate: ({ doc }) => { object(doc.state.pulls?.get('pull-1'))['fullHash'] = 'not-a-hash'; },
+  },
+  {
+    name: 'zero-amount pull',
+    expected: 'reject',
+    mutate: ({ doc }) => { object(doc.state.pulls?.get('pull-1'))['amount'] = 0n; },
   },
   {
     name: 'zero-amount bounded swap offer',
@@ -228,9 +263,23 @@ const mutations: Mutation[] = [
     mutate: ({ doc }) => { object(doc.state.swapOffers.get('offer-1'))['wantAmount'] = 0n; },
   },
   {
+    name: 'swap offer token above the protocol maximum',
+    expected: 'reject',
+    mutate: ({ doc }) => { object(doc.state.swapOffers.get('offer-1'))['giveTokenId'] = TOKENS.MAX_TOKEN_ID + 1; },
+  },
+  {
     name: 'malformed bounded subcontract',
     expected: 'reject',
     mutate: ({ doc }) => { object(doc.state.subcontracts?.get('transformer-1'))['transformerAddress'] = digest('95'); },
+  },
+  {
+    name: 'negative subcontract allowance',
+    expected: 'reject',
+    mutate: ({ doc }) => {
+      object(doc.state.subcontracts?.get('transformer-1'))['allowances'] = [
+        { deltaIndex: 0, rightAllowance: -1n, leftAllowance: 2n },
+      ];
+    },
   },
   {
     name: 'malformed settlement workspace',
@@ -287,6 +336,18 @@ const mutations: Mutation[] = [
     expected: 'reject',
     mutate: ({ doc }) => { doc.currentFrame.accountStateRoot = '0x1234'; },
   },
+  {
+    name: 'self-consistent frame above the Account token-row limit',
+    expected: 'reject',
+    mutate: async ({ doc }) => {
+      const delta = doc.currentFrame.deltas[0]!;
+      doc.currentFrame.deltas = Array.from(
+        { length: LIMITS.MAX_ACCOUNT_TOKEN_ROWS + 1 },
+        (_, tokenId) => ({ ...delta, tokenId }),
+      );
+      doc.currentFrame.stateHash = await createFrameHash(doc.currentFrame);
+    },
+  },
 ];
 
 describe('persisted AccountReplica semantic boundary', () => {
@@ -316,9 +377,29 @@ describe('persisted AccountReplica semantic boundary', () => {
     expect(deriveDelta(admitted.state.deltas.get(1)!, true).outCapacity).toBe(baseline);
   });
 
-  test('the audited matrix remains 27 rejects plus 2 design-valid accepts', () => {
-    expect(mutations).toHaveLength(29);
-    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(27);
+  test('the audited matrix remains 35 rejects plus 2 design-valid accepts', () => {
+    expect(mutations).toHaveLength(37);
+    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(35);
     expect(mutations.filter(({ expected }) => expected === 'accept')).toHaveLength(2);
+  });
+
+  test('authoritative WAL diff binds an Account put to its owner/proof orientation', async () => {
+    const fixture = await makeFixture();
+    [fixture.doc.proofHeader.fromEntity, fixture.doc.proofHeader.toEntity] = [
+      fixture.doc.proofHeader.toEntity,
+      fixture.doc.proofHeader.fromEntity,
+    ];
+    const diff = {
+      height: 1,
+      puts: [{
+        family: 'account',
+        entityId: fixture.owner,
+        counterpartyId: fixture.counterparty,
+        value: fixture.doc,
+      }],
+      dels: [],
+    };
+    expect(() => decodeValidatedBuffer(encodeBuffer(diff), validateStorageDiffRecordValue))
+      .toThrow('STORAGE_ACCOUNT_DOC_OWNER_MISMATCH');
   });
 });

@@ -11,7 +11,7 @@ import { FINANCIAL } from '../../../config/constants';
 import { ensureDelta } from '../delta-utils';
 
 // Maximum credit limit (prevents overflow attacks)
-const MAX_CREDIT_LIMIT = FINANCIAL.MAX_PAYMENT_AMOUNT * 1000n; // 1000x max payment
+export const MAX_CREDIT_LIMIT = FINANCIAL.MAX_PAYMENT_AMOUNT * 1000n; // 1000x max payment
 
 export function handleSetCreditLimit(
   account: AccountState,

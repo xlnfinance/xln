@@ -119,12 +119,9 @@ const computeCanonicalAccountFrameHash = (frame: AccountFrame): string => {
   ], 'integrity');
 };
 
-export async function createFrameHash(frame: AccountFrame): Promise<string> {
-  return computeCanonicalAccountFrameHash(frame);
-}
+export async function createFrameHash(frame: AccountFrame): Promise<string> { return computeCanonicalAccountFrameHash(frame); }
 
-/** Verify the signed frame envelope, not the newer live state: J-finality may
- * legitimately advance Account state after the latest bilateral frame. */
+/** Verify the signed frame envelope; J-finality may advance newer live state. */
 export function assertAccountFrameHash(frame: AccountFrame, code: string): void {
   if (computeCanonicalAccountFrameHash(frame) !== frame.stateHash) throw new Error(code);
 }

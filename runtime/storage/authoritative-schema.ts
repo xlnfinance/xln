@@ -26,6 +26,7 @@ import {
   requireStringArray,
 } from './schema-primitives';
 import {
+  assertStorageAccountDocBinding,
   validateStorageAccountDocValue,
   validateStorageBookDocValue,
   validateStorageEntityCoreDocValue,
@@ -201,11 +202,7 @@ const validateStorageDoc = (value: unknown, code: string): StorageDoc => {
     requireExactBoundaryKeys(doc, ['family', 'entityId', 'counterpartyId', 'value'], [], `${code}_FIELDS`);
     requireStorageString(doc['entityId'], `${code}_ENTITY_ID`);
     requireStorageString(doc['counterpartyId'], `${code}_COUNTERPARTY_ID`);
-    const account = validateStorageAccountDocValue(doc['value']);
-    const endpoints = new Set([account.state.leftEntity, account.state.rightEntity]);
-    if (!endpoints.has(String(doc['entityId'])) || !endpoints.has(String(doc['counterpartyId']))) {
-      throw new Error(`${code}_ACCOUNT_ENDPOINT_MISMATCH`);
-    }
+    assertStorageAccountDocBinding(validateStorageAccountDocValue(doc['value']), String(doc['entityId']), String(doc['counterpartyId']), code);
   } else if (doc['family'] === 'book') {
     requireExactBoundaryKeys(doc, ['family', 'entityId', 'pairId', 'value'], [], `${code}_FIELDS`);
     requireStorageString(doc['entityId'], `${code}_ENTITY_ID`);

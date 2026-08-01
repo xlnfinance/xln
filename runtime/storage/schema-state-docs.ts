@@ -4,6 +4,7 @@ import { verifyAndWarmBookCommitment } from '../orderbook/commitment';
 import { assertAccountFrameHash } from '../account/consensus/frame';
 import { validateAccountReplica } from '../account/state-validation';
 import { assertCanonicalSettlementWorkspace } from '../account/tx/handlers/settle-transition';
+import { MAX_CREDIT_LIMIT } from '../account/tx/handlers/set-credit-limit';
 import { validateEntityState } from '../entity/state-validation';
 import { FINANCIAL, LIMITS, TOKENS, UINT16_MAX } from '../config/constants';
 import { normalizeAccountWatchSeed } from '../protocol/account-watch-seed';
@@ -71,8 +72,8 @@ const UINT256_MAX = (1n << 256n) - 1n;
 const INT256_MIN = -(1n << 255n);
 const INT256_MAX = (1n << 255n) - 1n;
 const DELTA_FIELDS = [
-  'tokenId', 'collateral', 'ondelta', 'offdelta', 'leftCreditLimit',
-  'rightCreditLimit', 'leftAllowance', 'rightAllowance', 'leftHold', 'rightHold',
+  'tokenId', 'collateral', 'ondelta', 'offdelta', 'leftCreditLimit', 'rightCreditLimit', 'leftAllowance',
+  'rightAllowance', 'leftHold', 'rightHold',
 ] as const;
 const validateStorageDelta = (value: unknown, code: string): number => {
   const delta = requireBoundaryRecord(value, code);
@@ -80,20 +81,17 @@ const validateStorageDelta = (value: unknown, code: string): number => {
   const tokenId = requireBoundaryInteger(delta['tokenId'], `${code}_TOKEN`);
   if (tokenId > TOKENS.MAX_TOKEN_ID) throw new Error(`${code}_TOKEN`);
   for (const field of ['collateral', 'leftCreditLimit', 'rightCreditLimit', 'leftAllowance', 'rightAllowance', 'leftHold', 'rightHold']) {
-    requireStorageBigInt(delta[field], `${code}_${field}`, 0n, UINT256_MAX);
+    requireStorageBigInt(delta[field], `${code}_${field}`, 0n, field.endsWith('CreditLimit') ? MAX_CREDIT_LIMIT : UINT256_MAX);
   }
-  for (const field of ['ondelta', 'offdelta']) {
-    requireStorageBigInt(delta[field], `${code}_${field}`, INT256_MIN, INT256_MAX);
-  }
+  for (const field of ['ondelta', 'offdelta']) requireStorageBigInt(delta[field], `${code}_${field}`, INT256_MIN, INT256_MAX);
   return tokenId;
 };
 
 const validateStorageAccountStateCore = (state: Record<string, unknown>, code: string): void => {
   normalizeAccountWatchSeed(state['watchSeed'], code);
   for (const [key, value] of requireStorageMap(state['deltas'], `${code}_DELTAS`)) {
-    if (requireBoundaryInteger(key, `${code}_DELTA_KEY`) !== validateStorageDelta(value, `${code}_DELTA`)) {
-      throw new Error(`${code}_DELTA_KEY_MISMATCH`);
-    }
+    const tokenId = requireBoundaryInteger(key, `${code}_DELTA_KEY`);
+    if (tokenId !== validateStorageDelta(value, `${code}_DELTA`)) throw new Error(`${code}_DELTA_KEY_MISMATCH`);
   }
   const credit = requireBoundaryRecord(state['globalCreditLimits'], `${code}_CREDIT`);
   requireExactBoundaryKeys(credit, ['ownLimit', 'peerLimit'], [], `${code}_CREDIT_FIELDS`);
@@ -101,29 +99,40 @@ const validateStorageAccountStateCore = (state: Record<string, unknown>, code: s
   requireStorageBigInt(credit['peerLimit'], `${code}_PEER_CREDIT`, 0n, UINT256_MAX);
   requireBoundaryInteger(state['jNonce'], `${code}_J_NONCE`);
   const dispute = requireBoundaryRecord(state['disputeConfig'], `${code}_DISPUTE`);
-  for (const side of ['leftDisputeDelay', 'rightDisputeDelay']) {
-    if (requireBoundaryInteger(dispute[side], `${code}_${side}`) > UINT16_MAX) throw new Error(`${code}_${side}`);
-  }
+  for (const side of ['leftDisputeDelay', 'rightDisputeDelay']) if (requireBoundaryInteger(dispute[side], `${code}_${side}`) > UINT16_MAX) throw new Error(`${code}_${side}`);
 };
 
 const validateStorageAccountStateMaps = (state: AccountState, code: string): void => {
+  const locks = requireStorageMap(state.locks, `${code}_LOCKS`);
+  if (locks.size > LIMITS.MAX_ACCOUNT_HTLC_LOCKS) throw new Error(`${code}_LOCKS_LIMIT`);
+  for (const [lockId, lock] of locks) {
+    const row = requireBoundaryRecord(lock, `${code}_LOCK`);
+    if (requireStorageString(lockId, `${code}_LOCK_KEY`) !== requireStorageString(row['lockId'], `${code}_LOCK_ID`)) throw new Error(`${code}_LOCK_KEY_MISMATCH`);
+    requireStorageString(row['hashlock'], `${code}_LOCK_HASHLOCK`);
+    requireStorageBigInt(row['amount'], `${code}_LOCK_AMOUNT`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
+  }
   if (state.pulls !== undefined) {
     for (const pull of requireStorageMap(state.pulls, `${code}_PULLS`).values()) {
       const row = requireBoundaryRecord(pull, `${code}_PULL`);
+      const amount = row['amount'];
+      if (typeof amount !== 'bigint' || amount === 0n || (amount < 0n ? -amount : amount) > FINANCIAL.MAX_PAYMENT_AMOUNT) throw new Error(`${code}_PULL_AMOUNT`);
       requireStorageHash(row['fullHash'], `${code}_PULL_FULL_HASH`);
       requireStorageHash(row['partialRoot'], `${code}_PULL_PARTIAL_ROOT`);
     }
   }
   for (const offer of requireStorageMap(state.swapOffers, `${code}_OFFERS`).values()) {
     const row = requireBoundaryRecord(offer, `${code}_OFFER`);
+    for (const field of ['giveTokenId', 'wantTokenId']) if (requireBoundaryInteger(row[field], `${code}_OFFER_TOKEN`) > TOKENS.MAX_TOKEN_ID) throw new Error(`${code}_OFFER_TOKEN`);
     // Zero persisted offers are inert financial state and must not survive hydration.
     requireStorageBigInt(row['giveAmount'], `${code}_OFFER_GIVE`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
     requireStorageBigInt(row['wantAmount'], `${code}_OFFER_WANT`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
   }
   if (state.subcontracts !== undefined) {
     for (const subcontract of requireStorageMap(state.subcontracts, `${code}_SUBCONTRACTS`).values()) {
-      const address = requireStorageString(requireBoundaryRecord(subcontract, `${code}_SUBCONTRACT`)['transformerAddress'], `${code}_TRANSFORMER`);
+      const row = requireBoundaryRecord(subcontract, `${code}_SUBCONTRACT`);
+      const address = requireStorageString(row['transformerAddress'], `${code}_TRANSFORMER`);
       if (!/^0x[0-9a-f]{40}$/.test(address)) throw new Error(`${code}_TRANSFORMER`);
+      for (const allowance of requireStorageArray(row['allowances'], `${code}_ALLOWANCES`)) for (const side of ['leftAllowance', 'rightAllowance']) requireStorageBigInt(requireBoundaryRecord(allowance, `${code}_ALLOWANCE`)[side], `${code}_ALLOWANCE_${side}`, 0n, UINT256_MAX);
     }
   }
   if (state.settlementWorkspace !== undefined) {
@@ -136,9 +145,9 @@ const validateStorageAccountReplicaCore = (doc: Record<string, unknown>, code: s
   const currentHeight = requireBoundaryInteger(doc['currentHeight'], `${code}_CURRENT_HEIGHT`);
   const frames = [doc['currentFrame'], doc['pendingFrame']].filter((frame): frame is AccountFrame => frame !== undefined);
   for (const frame of frames) {
-    for (const delta of requireStorageArray<Delta>(requireBoundaryRecord(frame, `${code}_FRAME`)['deltas'], `${code}_FRAME_DELTAS`)) {
-      validateStorageDelta(delta, `${code}_FRAME_DELTA`);
-    }
+    const deltas = requireStorageArray<Delta>(requireBoundaryRecord(frame, `${code}_FRAME`)['deltas'], `${code}_FRAME_DELTAS`);
+    if (deltas.length > LIMITS.MAX_ACCOUNT_TOKEN_ROWS) throw new Error(`${code}_FRAME_DELTAS_LIMIT`);
+    for (const delta of deltas) validateStorageDelta(delta, `${code}_FRAME_DELTA`);
     if (frame.height > 0) assertAccountFrameHash(frame, `${code}_FRAME_HASH`);
   }
   const current = frames[0]!;
