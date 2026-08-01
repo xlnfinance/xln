@@ -24,8 +24,7 @@ import {
 } from './leader-certificates';
 import { entityLog } from './entity-log';
 import { ensureLocalJPrefixAttestation } from './j-prefix-round';
-import { assertFrameParentMatchesState } from './frame-lineage';
-import { validateProposedFrameLeader } from './proposal-policy';
+import { preauthenticateEntityProposal } from './proposal-preauthentication';
 import { calculateQuorumPower } from './replica-validation';
 import { selectEntityProposal } from './proposal-selection';
 import { commitSingleSignerFrameIfReady } from './single-signer-frame';
@@ -43,7 +42,7 @@ import {
 export type { EntityInputOutcome } from './input-types';
 
 async function handleCommitNotification(context: ApplyEntityInputContext): Promise<ApplyEntityInputResult | null> {
-  const { env, entityInput, workingReplica } = context;
+  const { entityInput, workingReplica } = context;
   const rawFrameCollectedSigs = entityInput.proposedFrame?.collectedSigs;
   if (!rawFrameCollectedSigs?.size || !entityInput.proposedFrame) {
     return null;
@@ -60,6 +59,19 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
   if (proposedFrame.height > workingReplica.state.height + 1) {
     return deferEntityConsensusInput(context, 'COMMIT_CATCH_UP_STATE_WAIT');
   }
+  if (proposedFrame.height < workingReplica.state.height) {
+    return noopEntityConsensusInput(context, 'COMMIT_STALE');
+  }
+  if (workingReplica.state.height === proposedFrame.height) {
+    return workingReplica.state.prevFrameHash === proposedFrame.hash
+      ? noopEntityConsensusInput(context, 'COMMIT_ALREADY_APPLIED')
+      : rejectEntityConsensusInput(context, 'COMMIT_HEIGHT_HASH_CONFLICT');
+  }
+  const authenticationResult = preauthenticateEntityProposal(
+    context,
+    proposedFrame,
+  );
+  if (authenticationResult) return authenticationResult;
   let frameCollectedSigs: Map<string, string[]>;
   try {
     frameCollectedSigs = normalizePrecommitBundles(
@@ -72,18 +84,6 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
     return rejectEntityConsensusInput(context, 'COMMIT_BUNDLE_REJECTED');
   }
   proposedFrame.collectedSigs = frameCollectedSigs;
-  if (proposedFrame.height < workingReplica.state.height) {
-    return noopEntityConsensusInput(context, 'COMMIT_STALE');
-  }
-  if (workingReplica.state.height === proposedFrame.height) {
-    return workingReplica.state.prevFrameHash === proposedFrame.hash
-      ? noopEntityConsensusInput(context, 'COMMIT_ALREADY_APPLIED')
-      : rejectEntityConsensusInput(context, 'COMMIT_HEIGHT_HASH_CONFLICT');
-  }
-  assertFrameParentMatchesState(workingReplica.state, proposedFrame, 'COMMIT_PARENT_MISMATCH');
-  if (!validateProposedFrameLeader(env, workingReplica.state, proposedFrame)) {
-    return rejectEntityConsensusInput(context);
-  }
   const signers = Array.from(frameCollectedSigs.keys());
   const totalPower = calculateQuorumPower(workingReplica.state.config, signers);
   if (totalPower < workingReplica.state.config.threshold) {

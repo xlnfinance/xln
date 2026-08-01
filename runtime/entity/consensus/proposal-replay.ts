@@ -135,7 +135,12 @@ export const replayProposedEntityFrame = async (
         txType: error.txType,
         rejection: error.rejection,
       });
-      return rejectProposal(context, 'PROPOSAL_ENTITY_COMMAND_REJECTED');
+      return rejectProposal(
+        context,
+        error.txType === 'entityCommand'
+          ? 'PROPOSAL_ENTITY_COMMAND_REJECTED'
+          : 'PROPOSAL_FRAME_INPUT_REJECTED',
+      );
     }
     throw error;
   }

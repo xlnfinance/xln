@@ -26,6 +26,7 @@ import {
   isJPrefixLocalFreshnessRace,
 } from './j-prefix-round';
 import { getPrevFrameHash } from './frame-lineage';
+import { MalformedEntityFrameInputError } from '../tx/invariant-errors';
 
 export type CommitExecutionResolution =
   | { kind: 'execution'; execution: EntityCandidate }
@@ -126,6 +127,30 @@ const replayCommitFrame = async (
   const { env, workingReplica } = context;
   const jValidationResult = validateCatchUpJRange(context, frame);
   if (jValidationResult) return { kind: 'result', result: jValidationResult };
+  let applied: Awaited<ReturnType<typeof applyEntityFrame>>;
+  try {
+    applied = await applyEntityFrame(
+      env,
+      workingReplica.state,
+      frame.txs,
+      frame.timestamp,
+    );
+  } catch (error) {
+    if (!(error instanceof MalformedEntityFrameInputError)) throw error;
+    entityLog.info('commit.execution_rejected', {
+      txType: error.txType,
+      rejection: error.rejection,
+    });
+    return {
+      kind: 'result',
+      result: rejectEntityConsensusInput(
+        context,
+        error.txType === 'entityCommand'
+          ? 'COMMIT_ENTITY_COMMAND_REJECTED'
+          : 'COMMIT_FRAME_INPUT_REJECTED',
+      ),
+    };
+  }
   const {
     newState,
     collectedHashes = [],
@@ -136,12 +161,7 @@ const replayCommitFrame = async (
     storageChanges,
     consumptionNodeChanges,
     accountJClaimNodeChanges,
-  } = await applyEntityFrame(
-    env,
-    workingReplica.state,
-    frame.txs,
-    frame.timestamp,
-  );
+  } = applied;
   if (!entityFrameEventsEqual(events, frame.events)) {
     return {
       kind: 'result',

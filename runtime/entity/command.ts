@@ -16,7 +16,7 @@ import { requireCommittedDirectPaymentRoute } from '../protocol/payments/route';
 import type { EntityCommandNonceState, EntityTx, SignedEntityCommandV1 } from '../types/entity-tx';
 import type { EntityState } from './types';
 import type { EntityRuntimeContext } from './runtime-context';
-import { MalformedEntityFrameInputError } from './tx/invariant-errors';
+import { EntityCommandRejectionError } from './tx/invariant-errors';
 import {
   assertEntityCommandTxs,
   assertEntityCommandAuthorBindings,
@@ -134,7 +134,11 @@ export const resolveEntityCommandAuthor = (
 ): ResolvedEntityCommandAuthor => {
   const signerId = canonicalEntityCommandSignerId(rawSignerId);
   const author = board.members.find(member => member.signerId === signerId);
-  if (!author) throw new Error(`ENTITY_COMMAND_AUTHOR_NOT_ON_BOARD:${signerId}`);
+  if (!author) {
+    throw new EntityCommandRejectionError(
+      `ENTITY_COMMAND_AUTHOR_NOT_ON_BOARD:${signerId}`,
+    );
+  }
   return { boardHash: board.boardHash, boardEpoch: board.boardEpoch, signerId, signer: author.signer };
 };
 
@@ -233,25 +237,31 @@ export const getEntityCommandDisposition = (
   const latest = nonceState.bySigner.get(command.authorSignerId);
   if (!latest) {
     if (command.nonce !== 1n) {
-      throw new Error(`ENTITY_COMMAND_NONCE_MISMATCH:${command.nonce.toString()}:1`);
+      throw new EntityCommandRejectionError(
+        `ENTITY_COMMAND_NONCE_MISMATCH:${command.nonce.toString()}:1`,
+      );
     }
     return 'next';
   }
   const commandHash = hashEntityCommand(command);
   if (command.nonce === latest.nonce) {
     if (commandHash !== latest.commandHash) {
-      throw new Error(`ENTITY_COMMAND_NONCE_EQUIVOCATION:${command.authorSignerId}:${command.nonce.toString()}`);
+      throw new EntityCommandRejectionError(
+        `ENTITY_COMMAND_NONCE_EQUIVOCATION:${command.authorSignerId}:${command.nonce.toString()}`,
+      );
     }
     return 'retry';
   }
   if (command.nonce < latest.nonce) {
-    throw new Error(
+    throw new EntityCommandRejectionError(
       `ENTITY_COMMAND_NONCE_STALE:${command.authorSignerId}:${command.nonce.toString()}:${latest.nonce.toString()}`,
     );
   }
   const expectedNonce = latest.nonce + 1n;
   if (command.nonce !== expectedNonce) {
-    throw new Error(`ENTITY_COMMAND_NONCE_MISMATCH:${command.nonce.toString()}:${expectedNonce.toString()}`);
+    throw new EntityCommandRejectionError(
+      `ENTITY_COMMAND_NONCE_MISMATCH:${command.nonce.toString()}:${expectedNonce.toString()}`,
+    );
   }
   return 'next';
 };
@@ -264,28 +274,37 @@ export const assertSignedEntityCommand = (
   const command = normalizeSignedEntityCommand(value);
   const entityId = canonicalEntityCommandEntityId(state.entityId);
   if (command.entityId !== entityId) {
-    throw new Error(`ENTITY_COMMAND_ENTITY_MISMATCH:${command.entityId}:${entityId}`);
+    throw new EntityCommandRejectionError(
+      `ENTITY_COMMAND_ENTITY_MISMATCH:${command.entityId}:${entityId}`,
+    );
   }
   const stackKey = getEntityCommandStackKey(state);
   if (command.stackKey !== stackKey) {
-    throw new Error(`ENTITY_COMMAND_STACK_MISMATCH:${command.stackKey}:${stackKey}`);
+    throw new EntityCommandRejectionError(
+      `ENTITY_COMMAND_STACK_MISMATCH:${command.stackKey}:${stackKey}`,
+    );
   }
   const board = resolveEntityCommandBoard(env, state);
   if (command.boardHash !== board.boardHash) {
-    throw new Error(`ENTITY_COMMAND_BOARD_MISMATCH:${command.boardHash}:${board.boardHash}`);
+    throw new EntityCommandRejectionError(
+      `ENTITY_COMMAND_BOARD_MISMATCH:${command.boardHash}:${board.boardHash}`,
+    );
   }
   if (command.boardEpoch !== board.boardEpoch) {
-    throw new Error(`ENTITY_COMMAND_EPOCH_MISMATCH:${command.boardEpoch}:${board.boardEpoch}`);
+    throw new EntityCommandRejectionError(
+      `ENTITY_COMMAND_EPOCH_MISMATCH:${command.boardEpoch}:${board.boardEpoch}`,
+    );
   }
   const author = resolveEntityCommandAuthor(env, state, command.authorSignerId, board);
   if (command.authorSigner !== author.signer) {
-    throw new Error(`ENTITY_COMMAND_AUTHOR_EOA_MISMATCH:${command.authorSigner}:${author.signer}`);
+    throw new EntityCommandRejectionError(
+      `ENTITY_COMMAND_AUTHOR_EOA_MISMATCH:${command.authorSigner}:${author.signer}`,
+    );
   }
   assertEntityCommandAuthorBindings(command.authorSignerId, command.txs);
   assertIndividualEntityCommandTxs(command.txs);
   if (!verifyAccountSignature(env, author.signer, hashEntityCommand(command), command.signature)) {
-    throw new MalformedEntityFrameInputError(
-      'entityCommand',
+    throw new EntityCommandRejectionError(
       `ENTITY_COMMAND_SIGNATURE_MISMATCH:${author.signerId}:${author.signer}`,
     );
   }

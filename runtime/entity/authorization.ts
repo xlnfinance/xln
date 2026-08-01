@@ -6,6 +6,7 @@ import type { ConsensusConfig, EntityState, ProposalAction } from './types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityTx } from '../types/entity-tx';
 import { buildCrossJurisdictionPullBinding, isCrossJurisdictionTerminalStatus } from '../extensions/cross-j';
+import { EntityCommandRejectionError } from './tx/invariant-errors';
 
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../protocol/htlc/consensus-secret-guard';
 import { isCrossJurisdictionSiblingPair } from '../extensions/cross-j/boundary';
@@ -202,7 +203,9 @@ export const hashEntityProposalAction = (value: unknown): string => {
 export const assertIndividualEntityCommandTxs = (txs: EntityTx[]): void => {
   for (const tx of txs) {
     if (!isIndividualEntityCommandTx(tx)) {
-      throw new Error(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`);
+      throw new EntityCommandRejectionError(
+        `ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`,
+      );
     }
     if (tx.type === 'propose') assertEntityProposalAction(tx.data.action);
   }

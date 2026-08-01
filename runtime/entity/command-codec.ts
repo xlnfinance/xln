@@ -5,6 +5,7 @@ import { LIMITS } from '../config/constants';
 
 import type { EntityTx, SignedEntityCommandV1 } from '../types/entity-tx';
 import { canonicalEntityBoardSignerId, isEntityProtocolTx } from './authorization';
+import { EntityCommandRejectionError } from './tx/invariant-errors';
 
 export const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:v1' as const;
 export const UNREGISTERED_ENTITY_COMMAND_STACK_KEY = ethers
@@ -83,7 +84,9 @@ export const assertEntityCommandAuthorBindings = (authorSignerId: string, txs: E
       .trim()
       .toLowerCase();
     if (claimed !== author) {
-      throw new Error(`ENTITY_COMMAND_AUTHOR_FIELD_MISMATCH:${field}:${claimed || 'missing'}:${author}`);
+      throw new EntityCommandRejectionError(
+        `ENTITY_COMMAND_AUTHOR_FIELD_MISMATCH:${field}:${claimed || 'missing'}:${author}`,
+      );
     }
   };
   for (const tx of txs) {

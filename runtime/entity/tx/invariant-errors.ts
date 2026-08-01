@@ -28,6 +28,14 @@ export class MalformedEntityFrameInputError extends Error {
   }
 }
 
+/** Authenticated frame contains a command that is invalid against committed Entity State. */
+export class EntityCommandRejectionError extends MalformedEntityFrameInputError {
+  constructor(rejection: string) {
+    super('entityCommand', rejection);
+    this.name = 'EntityCommandRejectionError';
+  }
+}
+
 export type EntityInputApplyFailureKind =
   | 'unroutable-ingress'
   | 'malformed-ingress'
