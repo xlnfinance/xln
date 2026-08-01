@@ -120,6 +120,30 @@ export function assertReleaseTagBindsSource(
   if (ancestry.exitCode !== 0) {
     throw new Error(`RELEASE_TAG_ANCESTRY_FAILED:${decode(ancestry.stderr) || `exit=${ancestry.exitCode}`}`);
   }
+
+  const allowedPaths = new Set([
+    `docs/releases/${version}.md`,
+    `docs/releases/data/${version}.json`,
+    'docs/releases/manifest.json',
+  ]);
+  const changed = git(root, [
+    'diff',
+    '--name-only',
+    '--no-renames',
+    '--diff-filter=ACDMRTUXB',
+    '-z',
+    `${sourceCommit}..${targetCommit}`,
+  ]);
+  if (changed.exitCode !== 0) {
+    throw new Error(`RELEASE_TAG_DIFF_FAILED:${decode(changed.stderr) || `exit=${changed.exitCode}`}`);
+  }
+  const unexpected = new TextDecoder()
+    .decode(changed.stdout)
+    .split('\0')
+    .filter((path) => path && !allowedPaths.has(path));
+  if (unexpected.length > 0) {
+    throw new Error(`RELEASE_TAG_UNATTESTED_PATHS:${unexpected.sort().join(',')}`);
+  }
 }
 
 export function assertCleanReleaseSource(root: string): void {

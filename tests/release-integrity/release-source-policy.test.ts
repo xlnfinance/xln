@@ -192,16 +192,40 @@ describe('release source policy', () => {
     try {
       run(root, ['git', 'init', '--quiet', '-b', 'main']);
       writeFileSync(join(root, 'VERSION'), '0.1.8\n');
-      run(root, ['git', 'add', 'VERSION']);
+      writeFileSync(join(root, 'source.ts'), 'export const signed = true;\n');
+      run(root, ['git', 'add', 'VERSION', 'source.ts']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'signed source']);
       const sourceCommit = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: root, stdout: 'pipe' });
       const source = new TextDecoder().decode(sourceCommit.stdout).trim();
 
-      writeFileSync(join(root, 'release.txt'), 'attestation\n');
-      run(root, ['git', 'add', 'release.txt']);
+      mkdirSync(join(root, 'docs', 'releases', 'data'), { recursive: true });
+      writeFileSync(join(root, 'docs', 'releases', '0.1.8.md'), 'release\n');
+      writeFileSync(join(root, 'docs', 'releases', 'data', '0.1.8.json'), '{}\n');
+      writeFileSync(join(root, 'docs', 'releases', 'manifest.json'), '{}\n');
+      run(root, ['git', 'add', 'docs/releases']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'release artifact']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'tag', '-a', 'v0.1.8', '-m', 'release']);
       expect(() => assertReleaseTagBindsSource(root, '0.1.8', source)).not.toThrow();
+
+      run(root, ['git', 'tag', '-d', 'v0.1.8']);
+      writeFileSync(join(root, 'runtime.ts'), 'export const injected = true;\n');
+      run(root, ['git', 'add', 'runtime.ts']);
+      run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'unattested code']);
+      run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'tag', '-a', 'v0.1.8', '-m', 'unsafe release']);
+      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source))
+        .toThrow('RELEASE_TAG_UNATTESTED_PATHS:runtime.ts');
+
+      run(root, ['git', 'tag', '-d', 'v0.1.8']);
+      run(root, ['git', 'checkout', '--quiet', '-b', 'rename-attack', source]);
+      mkdirSync(join(root, 'docs', 'releases', 'data'), { recursive: true });
+      run(root, ['git', 'mv', 'source.ts', 'docs/releases/0.1.8.md']);
+      writeFileSync(join(root, 'docs', 'releases', 'data', '0.1.8.json'), '{}\n');
+      writeFileSync(join(root, 'docs', 'releases', 'manifest.json'), '{}\n');
+      run(root, ['git', 'add', 'docs/releases']);
+      run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'rename signed source']);
+      run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'tag', '-a', 'v0.1.8', '-m', 'rename attack']);
+      expect(() => assertReleaseTagBindsSource(root, '0.1.8', source))
+        .toThrow('RELEASE_TAG_UNATTESTED_PATHS:source.ts');
 
       run(root, ['git', 'tag', '-d', 'v0.1.8']);
       run(root, ['git', 'tag', 'v0.1.8']);
