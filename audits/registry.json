@@ -2061,6 +2061,18 @@
       "state": "PROVISIONAL"
     },
     {
+      "id": "codex-account-storage-fixer",
+      "label": "Minimal Account storage fixer",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-entity-minimal-verifier",
+      "label": "Entity minimality verifier",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
       "id": "codex-entity-consensus-base",
       "label": "Entity consensus base auditor",
       "family": "codex",
@@ -2706,6 +2718,61 @@
       ],
       "candidateFindingIds": [],
       "summary": "Verified all five historical claims against current code with 48 passing adjacent tests and isolated executable PoCs; separated immediate API guards from consensus-semantic fixes requiring owner approval."
+    },
+    {
+      "id": "transport-mvp-fix-20260801",
+      "reviewerId": "codex-transport-auth-fixer",
+      "sourceSha": "d7d553560fda923d74e395b49a8a0da40b82a459",
+      "moduleIds": [
+        "transport-topology",
+        "api-auth-custody"
+      ],
+      "scope": "Minimal public-WSS endpoint binding and explicit public relay audience",
+      "state": "RUNNING",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-TRANSPORT-DIRECT-CHANNEL-INJECTION",
+        "AUD-TRANSPORT-RELAY-AUDIENCE-MISMATCH"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Owner selected the minimal transport option; implementation and targeted regressions are running."
+    },
+    {
+      "id": "account-storage-minimal-fix-20260801",
+      "reviewerId": "codex-account-storage-fixer",
+      "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
+      "moduleIds": [
+        "account-consensus",
+        "storage-recovery"
+      ],
+      "scope": "Minimal deep persisted Account validation without new Hanko or authority plumbing",
+      "state": "RUNNING",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-ACCOUNT-STORAGE-SHALLOW-VALIDATION"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Reusing existing validators for dangerous economics, ownership, map binding, bounds, and frame hash while deleting attempted authority-layer complexity."
+    },
+    {
+      "id": "entity-proposal-minimal-verification-20260801",
+      "reviewerId": "codex-entity-minimal-verifier",
+      "sourceSha": "0d8badb0de23771bf6436efb064439a72cbe8634",
+      "moduleIds": [
+        "entity-consensus",
+        "runtime-pipeline"
+      ],
+      "scope": "Independent exact-SHA Entity proposal security and LOC-minimality review",
+      "state": "RUNNING",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-ENTITY-UNAUTH-PROPOSAL-HALT"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Checking that only authenticated malformed proposals become typed rejection and identifying removable duplication in the 13-file candidate."
     }
   ],
   "moduleReviews": [
