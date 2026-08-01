@@ -51,6 +51,7 @@ import type { AccountReplica, SwapOffer } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
+import { hasLocalSignerForEntitySigner } from '../runtime/loop-identity';
 import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
 import {
   BOOTSTRAP_POLL_MS,
@@ -1227,14 +1228,17 @@ const pushMarketMakerEntityTx = (
 const resolveEntityRuntimeIdForCrossJ = (
   env: RuntimeReplica,
   entityId: string,
+  signerId: string,
 ): string | null => {
   const target = normalizeEntityRef(entityId);
+  const signer = normalizeEntityRef(signerId);
   const localRuntimeId = String(env.runtimeId || '')
     .trim()
     .toLowerCase();
-  if (localRuntimeId && getEntityReplicaById(env, target)) return localRuntimeId;
-  const profile = (env.gossip?.getProfiles?.() || []).find(item => normalizeEntityRef(item.entityId) === target);
-  const runtimeId = String(profile?.runtimeId || '')
+  if (localRuntimeId && hasLocalSignerForEntitySigner(env, target, signer)) return localRuntimeId;
+  const verified = env.infrastructure?.verifiedProfileRoutes?.get(target);
+  if (normalizeEntityRef(verified?.runtimeSignerId || '') !== signer) return null;
+  const runtimeId = String(verified?.runtimeId || '')
     .trim()
     .toLowerCase();
   if (runtimeId) return runtimeId;
@@ -1244,8 +1248,8 @@ const resolveEntityRuntimeIdForCrossJ = (
 const isCrossJurisdictionRouteTwoRuntime = (env: RuntimeReplica, route: CrossJurisdictionSwapRoute): boolean => {
   const canonical = withCanonicalCrossJurisdictionRouteHash(route);
   return Boolean(
-    resolveCrossJurisdictionRuntimeTopology(canonical, entityId =>
-      resolveEntityRuntimeIdForCrossJ(env, entityId),
+    resolveCrossJurisdictionRuntimeTopology(canonical, (entityId, signerId) =>
+      resolveEntityRuntimeIdForCrossJ(env, entityId, signerId),
     ),
   );
 };

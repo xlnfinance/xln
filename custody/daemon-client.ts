@@ -13,6 +13,7 @@ import type {
 } from '../runtime/api/runtime-adapter/types';
 import type { RuntimeInput } from '../runtime/runtime/types';
 import type { EntityTx } from '../runtime/types/entity-tx';
+import type { PaymentDeliveryMode } from '../runtime/types/payment';
 
 export type DaemonAuthKeyProvider = string | (() => string);
 export type DaemonFrameLog = RuntimeAdapterFrameLog;
@@ -27,7 +28,7 @@ export type DaemonQueuePaymentResult = {
   tokenId: number;
   amount: string;
   route: string[];
-  mode: 'direct' | 'htlc';
+  mode: PaymentDeliveryMode;
   description?: string;
   startedAtMs?: number;
   hashlock?: string;
@@ -42,8 +43,8 @@ export type DaemonQueuePaymentParams = {
   tokenId: number;
   amount: string;
   description?: string;
-  route?: string[];
-  mode?: 'direct' | 'htlc';
+  route: string[];
+  mode: PaymentDeliveryMode;
   commandId: string;
   commandSequence?: number;
   onCommandPrepared?: (commandSequence: number) => void | Promise<void>;
@@ -85,6 +86,11 @@ const normalizePositiveAmount = (value: unknown): string => {
     throw new RuntimeAdapterError('E_BAD_QUERY', 'custody payment amount must be a positive integer string');
   }
   return amount;
+};
+
+const normalizePaymentMode = (value: unknown): PaymentDeliveryMode => {
+  if (value === 'instant' || value === 'async' || value === 'direct' || value === 'trusted') return value;
+  throw new RuntimeAdapterError('E_BAD_QUERY', 'custody payment mode is invalid');
 };
 
 const normalizeRoute = (route: string[] | undefined, source: string, target: string): string[] => {
@@ -307,9 +313,12 @@ export class DaemonRpcClient {
     const amount = normalizePositiveAmount(params.amount);
     const route = normalizeRoute(params.route, sourceEntityId, targetEntityId);
     const description = normalizeDescription(params.description);
-    const mode = params.mode ?? 'htlc';
+    const mode = normalizePaymentMode(params.mode);
     if (mode === 'direct' && route.length !== 2) {
       throw new RuntimeAdapterError('E_BAD_QUERY', 'direct custody payment requires a bilateral route');
+    }
+    if (mode === 'trusted' && route.length !== 3) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', 'trusted custody payment requires source, gateway, and recipient');
     }
     const commandId = String(params.commandId || '').trim();
     if (!/^[A-Za-z0-9._:-]{16,128}$/.test(commandId)) {
@@ -317,9 +326,16 @@ export class DaemonRpcClient {
     }
 
     const data = { targetEntityId, tokenId, amount: BigInt(amount), route, ...(description ? { description } : {}) };
-    const entityTx: EntityTx = mode === 'direct'
-      ? { type: 'directPayment', data: { ...data, deliveryMode: 'direct' } }
-      : { type: 'htlcPayment', data };
+    const entityTx: EntityTx = mode === 'instant' || mode === 'async'
+      ? { type: 'htlcPayment', data: { ...data, deliveryMode: mode } }
+      : {
+          type: 'directPayment',
+          data: {
+            ...data,
+            deliveryMode: mode,
+            ...(mode === 'trusted' ? { trustedGatewayEntityId: route[1]! } : {}),
+          },
+        };
     const input: RuntimeInput = {
       runtimeTxs: [],
       entityInputs: [{ entityId: sourceEntityId, signerId, entityTxs: [entityTx] }],
@@ -340,7 +356,7 @@ export class DaemonRpcClient {
       requestId: accepted.result.receipt?.id,
     });
 
-    const committed = mode === 'htlc'
+    const committed = mode === 'instant' || mode === 'async'
       ? await this.waitForInitiatedEvent(accepted.result, {
           sourceEntityId,
           targetEntityId,

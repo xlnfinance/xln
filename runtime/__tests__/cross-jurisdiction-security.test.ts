@@ -2,13 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
 import { ethers } from 'ethers';
 
-import { applyAccountTx } from '../account/tx/apply';
 import { applyEntityTx } from '../entity/tx/apply';
 import {
   buildCrossJurisdictionPullBinding,
-  buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
-  deriveCrossJurisdictionPrivateSeed,
 } from '../extensions/cross-j/index';
 import { validateCrossJurisdictionLocalBinding } from '../entity/tx/cross-jurisdiction-helpers';
 import { createEmptyEnv } from '../runtime';
@@ -69,43 +66,6 @@ describe('cross-jurisdiction security invariants', () => {
     const error = validateCrossJurisdictionLocalBinding(env, state, route);
 
     expect(error).toContain('does not match local jurisdiction');
-  });
-
-  test('source pull reveal requires committed fill progress', async () => {
-    const route = {
-      ...buildRoute('cross-source-reveal-no-fill', 'cross-source-reveal-no-fill'),
-      status: 'resting' as const,
-    };
-    const admittedRoute = route;
-    const account = makeAccount(route.source.counterpartyEntityId, route.source.entityId);
-    account.state.pulls ??= new Map();
-    account.state.pulls.set(route.sourcePull!.pullId, {
-      pullId: route.sourcePull!.pullId,
-      tokenId: route.sourcePull!.tokenId,
-      amount: route.sourcePull!.signedAmount,
-      claimedRatio: 0,
-      claimedAmount: 0n,
-      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
-      fullHash: route.sourcePull!.fullHash,
-      partialRoot: route.sourcePull!.partialRoot,
-      crossJurisdiction: buildCrossJurisdictionPullBinding(admittedRoute, 'source'),
-      createdHeight: 1,
-      createdTimestamp: 1_000,
-    });
-    const binary = buildCrossJurisdictionPullReveal(
-      admittedRoute,
-      65_535,
-      deriveCrossJurisdictionPrivateSeed('cross-source-reveal-no-fill', admittedRoute),
-    ).binary;
-
-    const result = await applyAccountTx(account, {
-      type: 'pull_resolve',
-      data: { pullId: route.sourcePull!.pullId, binary },
-    }, route.sourcePull!.signedAmount > 0n, 2_000, 1);
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('CROSS_J_SOURCE_PULL_RESOLVE_BEFORE_CLEAR');
-    expect(account.state.deltas.get(route.source.tokenId)?.offdelta ?? 0n).toBe(0n);
   });
 
   test('source clear fails if account offer route hash diverges from entity route', async () => {

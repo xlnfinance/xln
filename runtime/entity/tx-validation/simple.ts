@@ -56,4 +56,14 @@ export const validateSimpleEntityTxData = (
 ): void => {
   const schema: EntityTxDataSchema = ENTITY_TX_SIMPLE_SCHEMAS[type];
   validateEntityTxDataFields(value, schema, code);
+  if (type === 'directPayment') {
+    const data = value as Record<string, unknown>;
+    const gateway = data['trustedGatewayEntityId'];
+    if (data['deliveryMode'] === 'trusted' && typeof gateway !== 'string') {
+      throw new Error(`${code}_TRUSTED_GATEWAY_REQUIRED`);
+    }
+    if (data['deliveryMode'] === 'direct' && gateway !== undefined) {
+      throw new Error(`${code}_DIRECT_GATEWAY_FORBIDDEN`);
+    }
+  }
 };

@@ -1072,7 +1072,7 @@ export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEn
 });
 
 export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
-  if (tx.type === 'pull_lock' && tx.data.crossJurisdiction) {
+  if (tx.type === 'cross_pull_lock' && tx.data.crossJurisdiction) {
     return {
       ...tx,
       data: {

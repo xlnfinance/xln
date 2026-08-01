@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
 import {
-  CROSS_J_MAX_FILL_RATIO,
   getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteTransitionAllowed,
@@ -91,7 +90,7 @@ export const handleCrossJurisdictionSalvageEntityTx = (
   entityTx: CrossJurisdictionSalvageTx,
   mutableFrameState = false,
 ): CrossJurisdictionSalvageResult => {
-  const { routeId, binary, fillRatio, sourceEntityId, sourceCounterpartyEntityId } = entityTx.data;
+  const { routeId, binary, fillRatio } = entityTx.data;
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const claimedFillRatio = Math.floor(Number(fillRatio) || 0);
@@ -142,28 +141,15 @@ export const handleCrossJurisdictionSalvageEntityTx = (
   outputs.push({
     entityId: newState.entityId,
     signerId: firstValidator,
-    entityTxs: [
-      {
-        type: 'resolvePull',
-        data: {
-          counterpartyEntityId: targetHubEntityId,
-          pullId: route.targetPull.pullId,
-          binary,
-          description:
-            `Cross-j salvage resolve ${routeId} fill=${verifiedFillRatio}/${CROSS_J_MAX_FILL_RATIO} ` +
-            `source=${sourceEntityId.slice(-4)}:${sourceCounterpartyEntityId.slice(-4)}`,
-        },
+    entityTxs: [{
+      type: 'prepareDispute',
+      data: {
+        counterpartyEntityId: targetHubEntityId,
+        description: `Cross-j salvage prepare ${routeId} fill=${verifiedFillRatio}`,
+        crossJurisdictionRouteId: routeId,
+        starterInitialArguments: buildCrossJurisdictionStarterPullArguments(binary),
       },
-      {
-        type: 'prepareDispute',
-        data: {
-          counterpartyEntityId: targetHubEntityId,
-          description: `Cross-j salvage prepare ${routeId}`,
-          crossJurisdictionRouteId: routeId,
-          starterInitialArguments: buildCrossJurisdictionStarterPullArguments(binary),
-        },
-      },
-    ],
+    }],
   });
   addMessage(newState, `🌉 Cross-j salvage queued for ${routeId}: target dispute vs ${targetHubEntityId.slice(-4)}`);
   return { newState, outputs };

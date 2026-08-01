@@ -5,15 +5,25 @@ import { join } from 'node:path';
 
 import { ENTITY_TX_TYPES } from '../entity/tx/catalog';
 import { validateEntityTx } from '../entity/tx-validation';
+import { decodeAccountTx } from '../account/tx-validation';
 
 const repoRoot = process.cwd();
 const removedEntityTxs = [
   ['hashlock', 'Payment'].join(''),
   ['manual', 'Htlc', 'Lock'].join(''),
   ['pull', 'Lock'].join(''),
+  ['resolve', 'Pull'].join(''),
+  ['cancel', 'Pull'].join(''),
+  ['pull', 'Cancel', 'Expired'].join(''),
   ['resolve', 'Swap'].join(''),
+  ['cross', 'Jurisdiction', 'Settled'].join(''),
 ];
-const historicalPrefixes = ['.archive/', 'docs/archive/', 'docs/releases/'];
+const removedAccountTxs = [
+  ['pull', 'lock'].join('_'),
+  ['pull', 'resolve'].join('_'),
+  ['pull', 'cancel'].join('_'),
+];
+const historicalPrefixes = ['.archive/', 'audits/', 'docs/archive/', 'docs/audit/', 'docs/releases/'];
 
 const trackedFiles = (): string[] => execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
   cwd: repoRoot,
@@ -26,18 +36,30 @@ const trackedFiles = (): string[] => execFileSync('git', ['ls-files', '--cached'
 
 const source = (path: string): string => readFileSync(join(repoRoot, path), 'utf8');
 
-test('removed raw payment transactions stay absent from source, tests, docs, and generated files', () => {
+test('retired payment transactions stay absent from active tracked files', () => {
   const catalog = new Set<string>(ENTITY_TX_TYPES);
-  for (const removedEntityTx of removedEntityTxs) {
+  const activeSources = trackedFiles().map(path => [path, source(path)] as const);
+  for (const removedEntityTx of [...removedEntityTxs, ...removedAccountTxs]) {
     const forbiddenSpellings = [
       `'${removedEntityTx}'`,
       `"${removedEntityTx}"`,
       `\`${removedEntityTx}\``,
     ];
-    expect(trackedFiles().filter(path =>
-      forbiddenSpellings.some(spelling => source(path).includes(spelling)),
-    )).toEqual([]);
-    expect(catalog.has(removedEntityTx)).toBe(false);
+    expect(activeSources.filter(([, text]) =>
+      forbiddenSpellings.some(spelling => text.includes(spelling)),
+    ).map(([path]) => path)).toEqual([]);
+    if (removedEntityTxs.includes(removedEntityTx)) expect(catalog.has(removedEntityTx)).toBe(false);
+  }
+});
+
+test('retired Entity and Account pull discriminants fail at their canonical decoders', () => {
+  for (const type of removedEntityTxs) {
+    expect(() => validateEntityTx({ type, data: {} }, 'CANONICAL_PULL'))
+      .toThrow(`CANONICAL_PULL_TYPE_UNKNOWN:${type}`);
+  }
+  for (const type of removedAccountTxs) {
+    expect(() => decodeAccountTx({ type, data: {} }, 'CANONICAL_PULL'))
+      .toThrow(`CANONICAL_PULL_TYPE_UNKNOWN:${type}`);
   }
 });
 

@@ -1212,8 +1212,48 @@ describe('audit fail-fast regressions', () => {
       },
     };
     const pullProof = buildHashLadderProof('stale-pull-lock');
+    const pullRoute = withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'stale-pull-order',
+      makerEntityId: 'alice',
+      hubEntityId: 'hub',
+      source: {
+        jurisdiction: `stack:1:0x${'11'.repeat(20)}`,
+        entityId: 'alice',
+        counterpartyEntityId: 'hub',
+        tokenId: 1,
+        amount: 1n,
+      },
+      target: {
+        jurisdiction: `stack:2:0x${'22'.repeat(20)}`,
+        entityId: 'target-hub',
+        counterpartyEntityId: 'target-user',
+        tokenId: 2,
+        amount: 1n,
+      },
+      sourcePull: {
+        pullId: 'stale-pull',
+        tokenId: 1,
+        amount: 1n,
+        signedAmount: -1n,
+        revealedUntilTimestamp: 120_000,
+        fullHash: pullProof.fullHash,
+        partialRoot: pullProof.partialRoot,
+      },
+      targetPull: {
+        pullId: 'stale-target-pull',
+        tokenId: 2,
+        amount: 1n,
+        signedAmount: 1n,
+        revealedUntilTimestamp: 180_000,
+        fullHash: pullProof.fullHash,
+        partialRoot: pullProof.partialRoot,
+      },
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+    });
     const pullTx: AccountTx = {
-      type: 'pull_lock',
+      type: 'cross_pull_lock',
       data: {
         pullId: 'stale-pull',
         tokenId: 1,
@@ -1221,6 +1261,8 @@ describe('audit fail-fast regressions', () => {
         revealedUntilTimestamp: 120_000,
         fullHash: pullProof.fullHash,
         partialRoot: pullProof.partialRoot,
+        crossJurisdiction: buildCrossJurisdictionPullBinding(pullRoute, 'source'),
+        crossJurisdictionRoute: pullRoute,
       },
     };
 
@@ -1229,10 +1271,10 @@ describe('audit fail-fast regressions', () => {
     ).toContain('HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
     expect(
       getIncomingAccountDeadlineViolation(account.state, makeIncomingAccountFrame(account, pullTx, true), context)?.reason,
-    ).toContain('PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
+    ).toContain('CROSS_PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
   });
 
-  test('receiver-local preflight matches Solidity pull deadline seconds exactly', () => {
+  test('receiver-local preflight matches Solidity cross-j close deadline seconds exactly', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const proof = buildHashLadderProof('stale-pull-resolve');
     const reveal = revealHashLadder(proof, 32_768);
@@ -1248,16 +1290,39 @@ describe('audit fail-fast regressions', () => {
           revealedUntilTimestamp: 20_000,
           fullHash: proof.fullHash,
           partialRoot: proof.partialRoot,
+          crossJurisdiction: {
+            orderId: 'order-1',
+            routeHash: `0x${'51'.repeat(32)}`,
+            leg: 'source',
+            status: 'clearing',
+            cumulativeFillRatio: reveal.fillRatio,
+            filledSourceAmount: 50n,
+            filledTargetAmount: 50n,
+          },
           createdHeight: 0,
           createdTimestamp: 0,
         },
       ],
     ]);
-    const claimFrame = makeIncomingAccountFrame(
+    const closeFrame = makeIncomingAccountFrame(
       account,
       {
-        type: 'pull_resolve',
-        data: { pullId: 'pull-1', binary: reveal.binary },
+        type: 'cross_pull_close',
+        data: {
+          pullId: 'pull-1',
+          binary: reveal.binary,
+          proof: {
+            orderId: 'order-1',
+            routeHash: `0x${'51'.repeat(32)}`,
+            sourcePullId: 'pull-1',
+            targetPullId: 'pull-2',
+            fillRatio: reveal.fillRatio,
+            cumulativeSourceAmount: 50n,
+            cumulativeTargetAmount: 50n,
+            binaryHash: `0x${'52'.repeat(32)}`,
+            closeMode: 'partial_cancel_remainder',
+          },
+        },
       },
       false,
     );
@@ -1265,111 +1330,13 @@ describe('audit fail-fast regressions', () => {
     expect(isPullRevealExpired(20_000, 20_999)).toBe(false);
     expect(isPullRevealExpired(20_000, 21_000)).toBe(true);
     expect(
-      getIncomingAccountDeadlineViolation(account.state, claimFrame, { entityTimestamp: 20_999, finalizedJHeight: 1 }),
+      getIncomingAccountDeadlineViolation(account.state, closeFrame, { entityTimestamp: 20_999, finalizedJHeight: 1 }),
     ).toBeUndefined();
 
     expect(
-      getIncomingAccountDeadlineViolation(account.state, claimFrame, { entityTimestamp: 21_000, finalizedJHeight: 1 })
+      getIncomingAccountDeadlineViolation(account.state, closeFrame, { entityTimestamp: 21_000, finalizedJHeight: 1 })
         ?.reason,
-    ).toContain('PULL_CLAIM_AFTER_LOCAL_EXPIRY');
-    expect(
-      getIncomingAccountDeadlineViolation(
-        account.state,
-        makeIncomingAccountFrame(
-          account,
-          {
-            type: 'cross_pull_close',
-            data: {
-              pullId: 'pull-1',
-              binary: reveal.binary,
-              proof: {
-                orderId: 'order-1',
-                routeHash: `0x${'51'.repeat(32)}`,
-                sourcePullId: 'pull-1',
-                targetPullId: 'pull-2',
-                fillRatio: reveal.fillRatio,
-                cumulativeSourceAmount: 50n,
-                cumulativeTargetAmount: 50n,
-                binaryHash: `0x${'52'.repeat(32)}`,
-                closeMode: 'partial_cancel_remainder',
-              },
-            },
-          },
-          false,
-        ),
-        { entityTimestamp: 21_000, finalizedJHeight: 1 },
-      )?.reason,
     ).toContain('CROSS_PULL_CLAIM_AFTER_LOCAL_EXPIRY');
-  });
-
-  test('receiver-local preflight blocks payer pull cancellation before local expiry', () => {
-    const account = makeProposalAccount([], 'alice', 'hub');
-    const proof = buildHashLadderProof('early-pull-cancel');
-    account.state.pulls = new Map([
-      [
-        'pull-1',
-        {
-          pullId: 'pull-1',
-          tokenId: 1,
-          amount: -100n,
-          claimedRatio: 0,
-          claimedAmount: 0n,
-          revealedUntilTimestamp: 120_000,
-          fullHash: proof.fullHash,
-          partialRoot: proof.partialRoot,
-          createdHeight: 0,
-          createdTimestamp: 0,
-        },
-      ],
-    ]);
-
-    expect(
-      getIncomingAccountDeadlineViolation(
-        account.state,
-        makeIncomingAccountFrame(
-          account,
-          {
-            type: 'pull_cancel',
-            data: { pullId: 'pull-1', reason: 'expired' },
-          },
-          true,
-          120_001,
-        ),
-        { entityTimestamp: 100_000, finalizedJHeight: 1 },
-      )?.reason,
-    ).toContain('PULL_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY');
-
-    expect(
-      getIncomingAccountDeadlineViolation(
-        account.state,
-        makeIncomingAccountFrame(
-          account,
-          {
-            type: 'pull_cancel',
-            data: { pullId: 'pull-1', reason: 'expired' },
-          },
-          true,
-          120_999,
-        ),
-        { entityTimestamp: 120_999, finalizedJHeight: 1 },
-      )?.reason,
-    ).toContain('PULL_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY');
-
-    expect(
-      getIncomingAccountDeadlineViolation(
-        account.state,
-        makeIncomingAccountFrame(
-          account,
-          {
-            type: 'pull_cancel',
-            data: { pullId: 'pull-1', reason: 'expired' },
-          },
-          true,
-          121_000,
-        ),
-        { entityTimestamp: 121_000, finalizedJHeight: 1 },
-      ),
-    ).toBeUndefined();
   });
 
   test('receiver-local preflight blocks payer HTLC timeout using future peer J-height', () => {
@@ -1503,53 +1470,6 @@ describe('audit fail-fast regressions', () => {
     expect(computeAccountStateRootCold(account.state)).toBe(beforeRoot);
   });
 
-  test('receiver-local preflight follows pull cancellation before checking reused ids', () => {
-    const account = makeProposalAccount([], 'alice', 'hub');
-    const existingProof = buildHashLadderProof('existing-reused-pull');
-    const replacementProof = buildHashLadderProof('replacement-reused-pull');
-    account.state.pulls = new Map([
-      [
-        'reused-pull',
-        {
-          pullId: 'reused-pull',
-          tokenId: 1,
-          amount: -100n,
-          claimedRatio: 0,
-          claimedAmount: 0n,
-          revealedUntilTimestamp: 120_000,
-          fullHash: existingProof.fullHash,
-          partialRoot: existingProof.partialRoot,
-          createdHeight: 0,
-          createdTimestamp: 0,
-        },
-      ],
-    ]);
-    const frame = makeIncomingAccountFrame(
-      account,
-      {
-        type: 'pull_cancel',
-        data: { pullId: 'reused-pull', reason: 'expired' },
-      },
-      true,
-      121_000,
-    );
-    frame.accountTxs.push({
-      type: 'pull_lock',
-      data: {
-        pullId: 'reused-pull',
-        tokenId: 1,
-        amount: -100n,
-        revealedUntilTimestamp: 130_000,
-        fullHash: replacementProof.fullHash,
-        partialRoot: replacementProof.partialRoot,
-      },
-    });
-
-    expect(
-      getIncomingAccountDeadlineViolation(account.state, frame, { entityTimestamp: 121_000, finalizedJHeight: 50 })?.reason,
-    ).toContain('PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
-  });
-
   test('failed account tx mutations do not leak into later valid txs in the same proposal', async () => {
     const env = createEmptyEnv('account-tx-atomicity');
     env.scenarioMode = true;
@@ -1612,8 +1532,48 @@ describe('audit fail-fast regressions', () => {
     const { signerId, entityId: left } = registerLazySigner('account-frame-timestamp-parity', '1');
     attachSigningReplica(env, left, signerId);
     const right = `0x${'ff'.repeat(32)}`;
+    const route = withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'timestamp-parity-order',
+      makerEntityId: left,
+      hubEntityId: right,
+      source: {
+        jurisdiction: `stack:31337:${depositoryAddress}`,
+        entityId: left,
+        counterpartyEntityId: right,
+        tokenId: 1,
+        amount: 100n,
+      },
+      target: {
+        jurisdiction: `stack:31338:0x${'ee'.repeat(20)}`,
+        entityId: `0x${'11'.repeat(32)}`,
+        counterpartyEntityId: `0x${'22'.repeat(32)}`,
+        tokenId: 2,
+        amount: 100n,
+      },
+      sourcePull: {
+        pullId: 'timestamp-parity-pull',
+        tokenId: 1,
+        amount: 100n,
+        signedAmount: -100n,
+        revealedUntilTimestamp: 10_000,
+        fullHash: `0x${'a1'.repeat(32)}`,
+        partialRoot: `0x${'b2'.repeat(32)}`,
+      },
+      targetPull: {
+        pullId: 'timestamp-parity-target-pull',
+        tokenId: 2,
+        amount: 100n,
+        signedAmount: 100n,
+        revealedUntilTimestamp: 20_000,
+        fullHash: `0x${'a1'.repeat(32)}`,
+        partialRoot: `0x${'b2'.repeat(32)}`,
+      },
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+    });
     const pullLock: AccountTx = {
-      type: 'pull_lock',
+      type: 'cross_pull_lock',
       data: {
         pullId: 'timestamp-parity-pull',
         tokenId: 1,
@@ -1621,6 +1581,8 @@ describe('audit fail-fast regressions', () => {
         revealedUntilTimestamp: 10_000,
         fullHash: `0x${'a1'.repeat(32)}`,
         partialRoot: `0x${'b2'.repeat(32)}`,
+        crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+        crossJurisdictionRoute: route,
       },
     };
     const proposer = makeProposalAccount([pullLock], left, right);
@@ -1823,8 +1785,8 @@ describe('audit fail-fast regressions', () => {
     expect(account.mempool).toHaveLength(1);
   });
 
-  test('proposeAccountFrame throws instead of dropping invalid cross-j pull resolve', async () => {
-    const env = createEmptyEnv('cross-pull-resolve-propose-failfast');
+  test('proposeAccountFrame throws instead of dropping invalid cross-j pull close', async () => {
+    const env = createEmptyEnv('cross-pull-close-propose-failfast');
     env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const left = `0x${'11'.repeat(32)}`;
@@ -1832,10 +1794,21 @@ describe('audit fail-fast regressions', () => {
     const account = makeProposalAccount(
       [
         {
-          type: 'pull_resolve',
+          type: 'cross_pull_close',
           data: {
             pullId: 'target-pull',
             binary: '0x1234',
+            proof: {
+              orderId: 'cross-pull-propose-failfast',
+              routeHash: `0x${'cc'.repeat(32)}`,
+              sourcePullId: 'source-pull',
+              targetPullId: 'target-pull',
+              fillRatio: 1,
+              cumulativeSourceAmount: 1n,
+              cumulativeTargetAmount: 1n,
+              binaryHash: `0x${'dd'.repeat(32)}`,
+              closeMode: 'partial_cancel_remainder',
+            },
           },
         },
       ],
@@ -1860,6 +1833,8 @@ describe('audit fail-fast regressions', () => {
             leg: 'target',
             status: 'clearing',
             cumulativeFillRatio: 1,
+            filledSourceAmount: 1n,
+            filledTargetAmount: 1n,
           },
           createdHeight: 0,
           createdTimestamp: 1,
@@ -1868,7 +1843,7 @@ describe('audit fail-fast regressions', () => {
     ]);
 
     await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp)).rejects.toThrow(
-      /CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED/,
+      /CROSS_J_PULL_CLOSE_PROPOSAL_FAILED/,
     );
     expect(account.mempool).toHaveLength(1);
   });

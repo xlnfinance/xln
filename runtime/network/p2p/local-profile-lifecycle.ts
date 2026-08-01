@@ -137,7 +137,10 @@ export const announceCertifiedLocalProfiles = async (
   for (const entityId of [...new Set(entityIds.map(normalize))].sort(compareStableText)) {
     const existing = env.gossip.getProfiles().find((profile) => normalize(profile.entityId) === entityId);
     const candidates = entityReplicas(env, entityId)
-      .filter((replica) => hasLocalSigner(env, replica.signerId))
+      .filter((replica) => (
+        normalize(replica.signerId) === normalize(replica.state.config.validators[0] || '') &&
+        hasLocalSigner(env, replica.signerId)
+      ))
       .sort((left, right) => compareStableText(normalize(left.signerId), normalize(right.signerId)));
     for (const replica of candidates) {
       if (!replica.state.profileEncryptionManifest) continue;

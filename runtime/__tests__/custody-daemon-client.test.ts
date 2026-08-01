@@ -226,7 +226,7 @@ describe('custody daemon rAdapter transport', () => {
       amount: '25',
       description: 'custody-withdrawal:wd_owner_test',
       route: [sourceEntityId, targetEntityId],
-      mode: 'htlc',
+      mode: 'async',
       commandId: 'custody:wd_owner_test',
       onCommandPrepared: sequence => { persistedSequences.push(sequence); },
     });
@@ -251,7 +251,7 @@ describe('custody daemon rAdapter transport', () => {
       amount: '25',
       description: 'custody-withdrawal:wd_owner_test',
       route: [sourceEntityId, targetEntityId],
-      mode: 'htlc',
+      mode: 'async',
       commandId: 'custody:wd_owner_test',
       commandSequence: 9,
     });

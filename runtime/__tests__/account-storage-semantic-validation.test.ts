@@ -55,6 +55,12 @@ const makeFixture = async (): Promise<ValidationContext> => {
     partialRoot: digest('33'),
     createdHeight: 1,
     createdTimestamp: 1_000,
+    crossJurisdiction: {
+      orderId: 'cross-storage-1',
+      routeHash: digest('34'),
+      leg: 'source',
+      status: 'resting',
+    },
   }]]);
   account.state.swapOffers.set('offer-1', {
     offerId: 'offer-1',
@@ -258,6 +264,11 @@ const mutations: Mutation[] = [
     mutate: ({ doc }) => { object(doc.state.pulls?.get('pull-1'))['amount'] = 0n; },
   },
   {
+    name: 'pull without its canonical cross-j binding',
+    expected: 'reject',
+    mutate: ({ doc }) => { delete object(doc.state.pulls?.get('pull-1'))['crossJurisdiction']; },
+  },
+  {
     name: 'zero-amount bounded swap offer',
     expected: 'reject',
     mutate: ({ doc }) => { object(doc.state.swapOffers.get('offer-1'))['wantAmount'] = 0n; },
@@ -377,9 +388,9 @@ describe('persisted AccountReplica semantic boundary', () => {
     expect(deriveDelta(admitted.state.deltas.get(1)!, true).outCapacity).toBe(baseline);
   });
 
-  test('the audited matrix remains 35 rejects plus 2 design-valid accepts', () => {
-    expect(mutations).toHaveLength(37);
-    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(35);
+  test('the audited matrix remains 36 rejects plus 2 design-valid accepts', () => {
+    expect(mutations).toHaveLength(38);
+    expect(mutations.filter(({ expected }) => expected === 'reject')).toHaveLength(36);
     expect(mutations.filter(({ expected }) => expected === 'accept')).toHaveLength(2);
   });
 

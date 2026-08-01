@@ -7,7 +7,6 @@ import {
 } from '../../../runtime/input-schema/registrations';
 import {
   requireArray,
-  requireBoolean,
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
@@ -166,12 +165,9 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
   if (state['pendingHistoryRecords'] !== undefined) requireArray(state['pendingHistoryRecords'], `${code}_HISTORY_VIEW`).forEach((entry, index) => assertAccountFrameRecord(entry, `${code}_HISTORY_VIEW_${index}`));
   if (state['deferredNetworkMeta'] !== undefined) validateStringMap(state['deferredNetworkMeta'], `${code}_DEFERRED_NETWORK`, (entry, entryCode) => {
     const meta = requireBoundaryRecord(entry, entryCode);
-    requireExactBoundaryKeys(meta, ['attempts', 'nextRetryAt'], ['manual'], `${entryCode}_FIELDS`);
+    requireExactBoundaryKeys(meta, ['attempts', 'nextRetryAt'], [], `${entryCode}_FIELDS`);
     requireBoundaryInteger(meta['attempts'], `${entryCode}_ATTEMPTS`);
     requireBoundaryInteger(meta['nextRetryAt'], `${entryCode}_NEXT_RETRY`);
-    if (meta['manual'] !== undefined && requireBoolean(meta['manual'], `${entryCode}_MANUAL`) !== true) {
-      throw new Error(`${entryCode}_MANUAL`);
-    }
   });
   for (const field of [
     'reliableIngressReceiptLedger', 'reliableIngressTerminalWatermarks',

@@ -66,24 +66,8 @@ const shouldUseOptimisticProposalBatch = (txs: readonly AccountTx[]): boolean =>
   txs.every(tx =>
     tx.type === 'swap_resolve' ||
     tx.type === 'cross_swap_fill_ack' ||
-    tx.type === 'pull_lock' ||
+    tx.type === 'cross_pull_lock' ||
     tx.type === 'swap_offer');
-
-const isCrossJurisdictionPullResolveTx = (
-  account: AccountReplica,
-  tx: AccountTx,
-): tx is Extract<AccountTx, { type: 'pull_resolve' }> => {
-  if (tx.type !== 'pull_resolve') return false;
-  if (account.state.pulls?.get(tx.data.pullId)?.crossJurisdiction) return true;
-  for (const offer of account.state.swapOffers?.values() ?? []) {
-    const route = offer.crossJurisdiction;
-    if (
-      route?.sourcePull?.pullId === tx.data.pullId ||
-      route?.targetPull?.pullId === tx.data.pullId
-    ) return true;
-  }
-  return false;
-};
 
 const isRefreshableStaleSettlementSeal = (
   account: AccountReplica,
@@ -168,7 +152,6 @@ const collectSuccessfulTransaction = (
 };
 
 const throwCriticalProposalFailure = (
-  account: AccountReplica,
   tx: AccountTx,
   error: string | undefined,
 ): void => {
@@ -182,7 +165,7 @@ const throwCriticalProposalFailure = (
       `seq=${tx.data.fillSeq} error=${reason}`,
     );
   }
-  if (tx.type === 'pull_lock' && tx.data.crossJurisdiction) {
+  if (tx.type === 'cross_pull_lock') {
     throw new Error(
       `CROSS_J_PULL_LOCK_PROPOSAL_FAILED: pull=${tx.data.pullId} ` +
       `order=${tx.data.crossJurisdiction.orderId} error=${reason}`,
@@ -193,16 +176,12 @@ const throwCriticalProposalFailure = (
       `CROSS_J_SWAP_OFFER_PROPOSAL_FAILED: offer=${tx.data.offerId} error=${reason}`,
     );
   }
-  if (isCrossJurisdictionPullResolveTx(account, tx)) {
-    throw new Error(`CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
-  }
   if (tx.type === 'cross_pull_close') {
     throw new Error(`CROSS_J_PULL_CLOSE_PROPOSAL_FAILED: pull=${tx.data.pullId} error=${reason}`);
   }
 };
 
 const classifyFailedTransaction = (
-  context: ProposalTransactionContext,
   machine: AccountReplica,
   applied: AppliedProposalTx,
   effects: ProposalTransactionEffects,
@@ -216,7 +195,7 @@ const classifyFailedTransaction = (
     accountLog.info('tx.deferred', { type: tx.type, reason: result.error });
     return 'deferred';
   }
-  throwCriticalProposalFailure(context.account, tx, result.error);
+  throwCriticalProposalFailure(tx, result.error);
   accountLog.debug('tx.skipped', { type: tx.type, error: result.error || 'unknown' });
   if (tx.type === 'htlc_lock') {
     effects.failedHtlcLocks.push({
@@ -284,7 +263,7 @@ export const validateProposalTransactions = async (
     const txMachine = cloneAccountReplica(clonedMachine);
     const applied = await applyProposalTransaction(context, txMachine, tx, jClaimSession);
     if (!applied.result.success) {
-      const disposition = classifyFailedTransaction(context, clonedMachine, applied, effects);
+      const disposition = classifyFailedTransaction(clonedMachine, applied, effects);
       if (disposition === 'deferred') deferredTxCount += 1;
       else txsToRemove.push(tx);
       continue;

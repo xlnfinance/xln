@@ -40,7 +40,10 @@ export const entityInputHasCrossJurisdictionIntraRuntimeTx = (
 const normalizeEntityRef = (value: unknown): string => String(value || '').trim().toLowerCase();
 const normalizeRuntimeRef = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-export type CrossJurisdictionRouteRuntimeResolver = (entityId: string) => string | null | undefined;
+export type CrossJurisdictionRouteRuntimeResolver = (
+  entityId: string,
+  signerId: string,
+) => string | null | undefined;
 
 export type CrossJurisdictionRuntimeTopology = {
   sourceUserRuntimeId: string;
@@ -88,12 +91,20 @@ export const resolveCrossJurisdictionRuntimeTopology = (
   const targetUserId = normalizeEntityRef(route.target?.counterpartyEntityId);
   const sourceHubId = normalizeEntityRef(route.source?.counterpartyEntityId);
   const targetHubId = normalizeEntityRef(route.target?.entityId);
-  if (!sourceUserId || !targetUserId || !sourceHubId || !targetHubId) return null;
+  const sourceUserSignerId = normalizeEntityRef(route.sourceSignerId);
+  const targetUserSignerId = normalizeEntityRef(route.targetSignerId);
+  const sourceHubSignerId = normalizeEntityRef(route.sourceHubSignerId);
+  const targetHubSignerId = normalizeEntityRef(route.targetHubSignerId);
+  if (
+    !sourceUserId || !targetUserId || sourceUserId === targetUserId ||
+    !sourceHubId || !targetHubId || sourceHubId === targetHubId ||
+    !sourceUserSignerId || !targetUserSignerId || !sourceHubSignerId || !targetHubSignerId
+  ) return null;
 
-  const sourceUserRuntimeId = normalizeRuntimeRef(resolveRuntimeId(sourceUserId));
-  const targetUserRuntimeId = normalizeRuntimeRef(resolveRuntimeId(targetUserId));
-  const sourceHubRuntimeId = normalizeRuntimeRef(resolveRuntimeId(sourceHubId));
-  const targetHubRuntimeId = normalizeRuntimeRef(resolveRuntimeId(targetHubId));
+  const sourceUserRuntimeId = normalizeRuntimeRef(resolveRuntimeId(sourceUserId, sourceUserSignerId));
+  const targetUserRuntimeId = normalizeRuntimeRef(resolveRuntimeId(targetUserId, targetUserSignerId));
+  const sourceHubRuntimeId = normalizeRuntimeRef(resolveRuntimeId(sourceHubId, sourceHubSignerId));
+  const targetHubRuntimeId = normalizeRuntimeRef(resolveRuntimeId(targetHubId, targetHubSignerId));
   if (!sourceUserRuntimeId || !targetUserRuntimeId || !sourceHubRuntimeId || !targetHubRuntimeId) return null;
   if (sourceUserRuntimeId !== targetUserRuntimeId) return null;
   if (sourceHubRuntimeId !== targetHubRuntimeId) return null;
@@ -101,7 +112,13 @@ export const resolveCrossJurisdictionRuntimeTopology = (
 
   const bookOwnerId = normalizeEntityRef(route.bookOwnerEntityId || route.source?.counterpartyEntityId || route.hubEntityId);
   if (bookOwnerId) {
-    const bookOwnerRuntimeId = normalizeRuntimeRef(resolveRuntimeId(bookOwnerId));
+    const bookOwnerSignerId = bookOwnerId === sourceHubId
+      ? sourceHubSignerId
+      : bookOwnerId === targetHubId
+        ? targetHubSignerId
+        : '';
+    if (!bookOwnerSignerId) return null;
+    const bookOwnerRuntimeId = normalizeRuntimeRef(resolveRuntimeId(bookOwnerId, bookOwnerSignerId));
     if (!bookOwnerRuntimeId || bookOwnerRuntimeId !== sourceHubRuntimeId) return null;
   }
 

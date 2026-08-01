@@ -1,4 +1,4 @@
-import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
+import { HASHLADDER_MAX_FILL_RATIO } from '../../protocol/htlc/hash-ladder';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { hashEncryptedHtlcLayer } from '../../protocol/htlc/onion-layer';
 import type { AccountFrame, AccountState, HtlcLock, PullCommitment } from '../../types/account';
@@ -154,11 +154,11 @@ const inspectPullDeadline = (
   scan: DeadlineScan,
   tx: AccountFrameTx,
 ): IncomingDeadlineViolation | undefined => {
-  if (tx.type === 'pull_lock') {
+  if (tx.type === 'cross_pull_lock') {
     if (scan.pulls.has(tx.data.pullId)) return undefined;
     if (tx.data.revealedUntilTimestamp <= scan.context.entityTimestamp + HTLC_ENFORCEMENT_RESERVE_MS) {
       return deadlineViolation(
-        `PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
+        `CROSS_PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
       );
     }
     scan.pulls.set(tx.data.pullId, {
@@ -170,48 +170,24 @@ const inspectPullDeadline = (
     });
     return undefined;
   }
-  if (tx.type === 'pull_resolve' || tx.type === 'cross_pull_close') {
+  if (tx.type === 'cross_pull_close') {
     const pull = scan.pulls.get(tx.data.pullId);
     if (!pull) return undefined;
     let ratio: number | undefined;
     try {
-      ratio = tx.type === 'cross_pull_close'
-        ? normalizedFillRatio(tx.data.proof.fillRatio)
-        : normalizedFillRatio(verifyHashLadderBinary(
-          { fullHash: pull.fullHash, partialRoot: pull.partialRoot },
-          tx.data.binary,
-        ).fillRatio);
+      ratio = normalizedFillRatio(tx.data.proof.fillRatio);
     } catch {
       // Canonical Account transaction validation owns malformed proof errors.
     }
     if (ratio === undefined || ratio <= normalizedFillRatio(pull.claimedRatio)) return undefined;
     if (isPullRevealExpired(pull.revealedUntilTimestamp, scan.context.entityTimestamp)) {
       return deadlineViolation(
-        `${tx.type === 'cross_pull_close' ? 'CROSS_PULL' : 'PULL'}_CLAIM_AFTER_LOCAL_EXPIRY: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
+        `CROSS_PULL_CLAIM_AFTER_LOCAL_EXPIRY: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
       );
     }
-    if (tx.type === 'cross_pull_close' || ratio >= HASHLADDER_MAX_FILL_RATIO) {
-      scan.pulls.delete(tx.data.pullId);
-    } else {
-      pull.claimedRatio = ratio;
-    }
+    scan.pulls.delete(tx.data.pullId);
     return undefined;
   }
-  if (tx.type !== 'pull_cancel') return undefined;
-
-  const pull = scan.pulls.get(tx.data.pullId);
-  if (!pull) return undefined;
-  const proposerIsPayer = scan.proposerIsLeft === !(pull.amount > 0n);
-  const locallyExpired = isPullRevealExpired(
-    pull.revealedUntilTimestamp,
-    scan.context.entityTimestamp,
-  );
-  if (proposerIsPayer && !locallyExpired) {
-    return deadlineViolation(
-      `PULL_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
-    );
-  }
-  if (!proposerIsPayer || locallyExpired) scan.pulls.delete(tx.data.pullId);
   return undefined;
 };
 

@@ -16,6 +16,7 @@ import { normalizeDbNamespace } from '../runtime-dbs';
 import { restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
 import { validateJReplicas } from '../wal/runtime-machine-schema/j';
+import { assertCrossJLocalCohorts } from '../../runtime/cross-j-topology';
 
 type RuntimeModule = typeof import('../../runtime');
 
@@ -135,6 +136,7 @@ export const decodeCheckpointSnapshot = async (
   env.dbNamespace = normalizeDbNamespace(runtimeId);
 
   const gossipProfiles = restoreCheckpointState(env, normalizedSnapshot);
+  assertCrossJLocalCohorts(env);
   await assertCheckpointCommitments(env);
   return { env, gossipProfiles };
 };

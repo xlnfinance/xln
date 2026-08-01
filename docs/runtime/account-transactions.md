@@ -17,7 +17,7 @@ This folder owns bilateral account transaction application.
 - `handlers/htlc-*.ts`
   HTLC lock/reveal/resolve/cancel lifecycle.
 - `handlers/pull.ts`
-  Pull lock/resolve/cancel lifecycle, including cross-j guardrails.
+  Cross-j-only `cross_pull_lock` / `cross_pull_close` lifecycle.
 - `handlers/swap-offer.ts`, `swap-resolve.ts`, `swap-cancel.ts`
   Same-j order lifecycle at the bilateral layer.
 - `handlers/cross-swap-fill-ack.ts`

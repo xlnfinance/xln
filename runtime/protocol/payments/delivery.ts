@@ -30,8 +30,15 @@ export const requireTrustedPaymentGateway = (
   declaredGatewayEntityId: string | undefined,
 ): string => {
   const routeTarget = route[route.length - 1];
-  const routeGateway = route.length >= 3 ? route[route.length - 2] : undefined;
-  if (routeTarget !== targetEntityId || !routeGateway || routeGateway !== declaredGatewayEntityId) {
+  const routeGateway = route.length === 3 ? route[1] : undefined;
+  const routeSource = route[0];
+  if (
+    routeTarget !== targetEntityId
+    || !routeGateway
+    || routeGateway !== declaredGatewayEntityId
+    || routeGateway === routeSource
+    || routeGateway === routeTarget
+  ) {
     throw new Error(
       `TRUSTED_PAYMENT_GATEWAY_INVALID:declared=${declaredGatewayEntityId ?? ''}:` +
         `routeGateway=${routeGateway ?? ''}:routeTarget=${routeTarget ?? ''}:target=${targetEntityId}`,

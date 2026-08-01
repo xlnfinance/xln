@@ -350,6 +350,7 @@ const paymentTxFor = (
       tokenId,
       amount,
       route: [user.entityId, hub.entityId],
+      deliveryMode: 'async',
       description,
       secret,
       hashlock: hashHtlcSecret(secret),

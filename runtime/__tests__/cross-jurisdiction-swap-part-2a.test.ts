@@ -11,8 +11,6 @@ import { proposeAccountFrame } from '../account/consensus/propose';
 
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 
-import { handlePullCancel } from '../account/tx/handlers/pull';
-
 import { computeAccountStateRoot } from '../account/state-root';
 
 import {
@@ -339,7 +337,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(account.state.swapOffers.get(route.orderId)?.crossJurisdiction).toEqual(route);
   });
 
-  test('account layer rejects source pull reveal before clear', async () => {
+  test('account layer rejects invented fill in both cross-j opening and close', async () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
     const sourceUser = entity('e1');
@@ -403,11 +401,19 @@ describe('cross-jurisdiction hashledger swap', () => {
     const before = account.state.deltas.get(route.source.tokenId)!.offdelta;
     const privateSeed = deriveCrossJurisdictionPrivateSeed('cross-early-source-reveal', route);
     const binary = buildCrossJurisdictionPullReveal(route, 65_535, privateSeed).binary;
+    const forgedProof = buildCrossJurisdictionCloseProof({
+      ...route,
+      cumulativeFillRatio: 65_535,
+      fillNumerator: 1n,
+      fillDenominator: 1n,
+      filledSourceAmount: route.source.amount,
+      filledTargetAmount: route.target.amount,
+    }, binary);
     const result = await applyAccountTx(
       account,
       {
-        type: 'pull_resolve',
-        data: { pullId: route.sourcePull!.pullId, binary },
+        type: 'cross_pull_close',
+        data: { pullId: route.sourcePull!.pullId, binary, proof: forgedProof },
       },
       route.sourcePull!.signedAmount > 0n,
       2_000,
@@ -415,8 +421,31 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('CROSS_J_SOURCE_PULL_RESOLVE_BEFORE_CLEAR');
+    expect(result.error).toContain('Cross-j close proof mismatch');
     expect(account.state.deltas.get(route.source.tokenId)!.offdelta).toBe(before);
+
+    const forgedOpeningRoute = {
+      ...route,
+      filledSourceAmount: 999n,
+      filledTargetAmount: 0n,
+    };
+    const openingAccount = makeAccount(sourceHub, sourceUser);
+    const opening = await applyAccountTx(openingAccount, {
+      type: 'cross_pull_lock',
+      data: {
+        pullId: route.sourcePull!.pullId,
+        tokenId: route.sourcePull!.tokenId,
+        amount: route.sourcePull!.signedAmount,
+        revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+        fullHash: route.sourcePull!.fullHash,
+        partialRoot: route.sourcePull!.partialRoot,
+        crossJurisdiction: buildCrossJurisdictionPullBinding(forgedOpeningRoute, 'source'),
+        crossJurisdictionRoute: forgedOpeningRoute,
+      },
+    }, route.sourcePull!.signedAmount > 0n, 2_000, 1);
+    expect(opening.success).toBe(false);
+    expect(opening.error).toBe('Cross-j pull opening must be a zero-progress resting route');
+    expect(openingAccount.state.pulls?.has(route.sourcePull!.pullId) ?? false).toBe(false);
   });
 
   test('canonical route hash binds cross-j economic terms and terminal states reject overwrite', async () => {
@@ -825,7 +854,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(updatedRoute?.fillSeq).toBe(1);
     expect(updatedRoute?.filledSourceAmount).toBe(500n);
     expect(updatedRoute?.updatedAt).toBe(2_000);
-    expect(account.mempool.some(tx => tx.type === 'pull_resolve')).toBe(false);
+    expect(account.mempool.some(tx => tx.type === 'cross_pull_close')).toBe(false);
   });
 
   test('cross-j fill ack records source-savings price improvement without changing hashledger ratio', async () => {

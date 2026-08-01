@@ -109,6 +109,8 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
                   tokenId: 1,
                   amount: 7n,
                   route: [entityId, hubId, recipientId],
+                  deliveryMode: 'trusted' as const,
+                  trustedGatewayEntityId: hubId,
                 },
               }],
             }],
@@ -146,6 +148,8 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
           tokenId: 1,
           amount: 7n,
           route: [entityId, hubId, recipientId],
+          deliveryMode: 'trusted',
+          trustedGatewayEntityId: hubId,
         },
       }],
     }]);

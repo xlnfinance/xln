@@ -99,6 +99,8 @@ const collectRebalanceFee = (
           toEntityId: originalState.entityId,
           tokenId: rebalanceFeeTokenId,
           amount: rebalanceFeeAmount,
+          route: [originalState.entityId],
+          deliveryMode: 'direct',
           description: `rebalance fee (quoteId: ${rebalanceQuoteId})`,
         },
       },

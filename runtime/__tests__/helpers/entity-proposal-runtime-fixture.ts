@@ -18,6 +18,7 @@ import { createDirectRuntimeWsRoute } from '../../network/p2p/direct-runtime-bun
 import {
   deserializeWsMessage,
   hashHelloMessage,
+  hashRuntimeWsFrame,
   serializeWsMessage,
   type RuntimeWsMessage,
 } from '../../network/p2p/ws-protocol';
@@ -94,22 +95,24 @@ const createSocketHarness = () => {
 const buildAuthenticatedHello = (
   seed: string,
   runtimeId: string,
+  challenge: string,
+  audience: string,
 ): RuntimeWsMessage => {
   const timestamp = Date.now();
-  const nonce = `proposal-wire-${timestamp}`;
   const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(seed).publicKey);
   return {
     type: 'hello',
     from: runtimeId,
     fromEncryptionPubKey: encryptionPubKey,
     timestamp,
+    audience,
     auth: {
-      nonce,
+      nonce: challenge,
       timestamp,
       signature: signDigest(
         seed,
         '1',
-        hashHelloMessage(runtimeId, encryptionPubKey, timestamp, nonce),
+        hashHelloMessage(runtimeId, encryptionPubKey, timestamp, challenge, audience),
       ),
     },
   };
@@ -240,17 +243,23 @@ export const deliverEncryptedProposal = async (
   const route = createDirectRuntimeWsRoute({
     runtimeId: env.runtimeId!,
     runtimeSeed: durableProposalRuntimeSeed,
-    requireHelloAuth: false,
     onEntityInputs: (from, envelope, timestamp) => {
       inboundResults.push(handleInboundP2PEntityInputs(env, from, envelope, timestamp));
     },
   });
   const socket = createSocketHarness();
   route.websocket.open(socket.ws);
+  const challenge = socket.sent[0]?.challenge || '';
+  const audience = socket.sent[0]?.audience || '';
+  if (socket.sent[0]?.type !== 'hello_challenge' || !challenge || !audience) {
+    throw new Error('TEST_DIRECT_CHALLENGE_MISSING');
+  }
+  const hello = buildAuthenticatedHello(remoteSeed, remoteRuntimeId, challenge, audience);
   await route.websocket.message(
     socket.ws,
-    serializeWsMessage(buildAuthenticatedHello(remoteSeed, remoteRuntimeId)),
+    serializeWsMessage(hello),
   );
+  if (socket.sent.at(-1)?.type !== 'hello_ack') throw new Error('TEST_DIRECT_HELLO_ACK_MISSING');
   const envelope: RuntimeEntityInputsEnvelope = {
     sourceRuntimeId: remoteRuntimeId,
     sourceRuntimeHeight: 1,
@@ -262,7 +271,7 @@ export const deliverEncryptedProposal = async (
       proposedFrame: frame,
     }],
   };
-  await route.websocket.message(socket.ws, serializeWsMessage({
+  const message: RuntimeWsMessage = {
     type: 'entity_inputs',
     id: 'byzantine-proposal',
     from: remoteRuntimeId,
@@ -271,6 +280,19 @@ export const deliverEncryptedProposal = async (
     timestamp: 1_000,
     encrypted: true,
     payload: encryptJSON(envelope, deriveEncryptionKeyPair(durableProposalRuntimeSeed).publicKey),
+  };
+  const authTimestamp = hello.auth!.timestamp + 1;
+  await route.websocket.message(socket.ws, serializeWsMessage({
+    ...message,
+    auth: {
+      nonce: challenge,
+      timestamp: authTimestamp,
+      signature: signDigest(
+        remoteSeed,
+        '1',
+        hashRuntimeWsFrame(message, audience, challenge, authTimestamp),
+      ),
+    },
   }));
   return { inboundResults, remoteRuntimeId };
 };

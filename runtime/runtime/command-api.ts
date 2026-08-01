@@ -17,6 +17,7 @@ import {
 } from './jurisdiction-api';
 import { assertRuntimeCommandReady } from './lifecycle';
 import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
+import { assertCrossJLocalOwnerCohort, requireCrossJRuntimeTopology } from './cross-j-topology';
 
 type RuntimeCommandDependencies = Pick<
   ReturnType<typeof createRuntimeLoopApi>,
@@ -46,21 +47,23 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
     if (canonicalRoute.status !== 'intent' || canonicalRoute.sourcePull || canonicalRoute.targetPull) {
       throw new Error(`CROSS_J_INTENT_STATE_INVALID:${canonicalRoute.orderId}`);
     }
+    const routing = dependencies.getRuntimeOutputRoutingDeps();
+    assertCrossJLocalOwnerCohort(env, canonicalRoute, 'user', routing);
     assertCrossJurisdictionSwapTargetReadyInEnv(env, canonicalRoute);
-
-    const targetRuntimeId = dependencies
-      .getRuntimeOutputRoutingDeps()
-      .resolveRuntimeIdForCrossJurisdictionEntity(
-        env,
-        canonicalRoute.source.counterpartyEntityId,
-      );
-    if (!targetRuntimeId) {
-      throw new Error(
-        `CROSS_J_INTENT_HUB_RUNTIME_UNKNOWN:${canonicalRoute.source.counterpartyEntityId}`,
-      );
-    }
     const sourceRuntimeId = normalizeRuntimeId(env.runtimeId);
     if (!sourceRuntimeId) throw new Error('CROSS_J_INTENT_SOURCE_RUNTIME_INVALID');
+    const topology = requireCrossJRuntimeTopology(
+      canonicalRoute,
+      (entityId, signerId) => routing.resolveRuntimeIdForCrossJurisdictionEntity(
+        env,
+        entityId,
+        signerId,
+      ),
+    );
+    if (topology.userRuntimeId !== sourceRuntimeId) {
+      throw new Error(`CROSS_J_RUNTIME_TOPOLOGY_INVALID:${canonicalRoute.orderId}:SOURCE_RUNTIME_MISMATCH`);
+    }
+    const targetRuntimeId = topology.hubRuntimeId;
 
     const envelope: RuntimeEntityInputsEnvelope = {
       sourceRuntimeId,

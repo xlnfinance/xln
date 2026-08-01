@@ -56,32 +56,23 @@ describe('durable output retry', () => {
       .toThrow('TEST_OUTPUT_RETRY:0:OUTPUT_HASH');
   });
 
-  test('preserves an explicit manual retry pause across restart', () => {
+  test('rejects retired manual retry pauses instead of reviving a stuck outbox', () => {
     const output = {
       runtimeId: `0x${'77'.repeat(20)}`,
       entityId: `0x${'88'.repeat(32)}`,
       signerId: `0x${'99'.repeat(20)}`,
       entityTxs: [],
     } as RoutedEntityInput;
-    const liveRouteKey = buildRouteOutputKey(output);
-    const env = {
+    const valid = buildDurableOutputRetryState({
       infrastructure: {
         deferredNetworkMeta: new Map([[
-          liveRouteKey,
-          { attempts: 1, nextRetryAt: 42, manual: true },
+          buildRouteOutputKey(output),
+          { attempts: 1, nextRetryAt: 42 },
         ]]),
       },
-    } as RuntimeReplica;
-
-    const persisted = buildDurableOutputRetryState(env, [output]);
-    const restored = {} as RuntimeReplica;
-    restoreDurableOutputRetryState(restored, persisted, [output]);
-
-    expect(persisted[0]?.manual).toBe(true);
-    expect(restored.infrastructure?.deferredNetworkMeta?.get(liveRouteKey)).toEqual({
-      attempts: 1,
-      nextRetryAt: 42,
-      manual: true,
-    });
+    } as RuntimeReplica, [output]);
+    expect(() => validateDurableOutputRetryState([
+      { ...valid[0]!, manual: true },
+    ], [output], 'TEST_OUTPUT_RETRY')).toThrow('TEST_OUTPUT_RETRY:0:FIELDS');
   });
 });

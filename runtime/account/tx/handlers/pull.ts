@@ -3,10 +3,10 @@ import type { CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '.
 import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../config/constants';
 import {
-  buildCommittedCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionPullBinding,
   getCrossJurisdictionCommittedProofRatio,
+  hasCrossJurisdictionCommittedFill,
   hashCrossJurisdictionCloseBinary,
   projectCrossJurisdictionQuantizedClaim,
   withCanonicalCrossJurisdictionRouteHash,
@@ -22,51 +22,14 @@ import { ensureDelta } from '../delta-utils';
 import { isPullRevealExpired } from '../../pull-deadline';
 import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 
-type PullLockTx = Extract<AccountTx, { type: 'pull_lock' }>;
-type PullResolveTx = Extract<AccountTx, { type: 'pull_resolve' }>;
-type PullCancelTx = Extract<AccountTx, { type: 'pull_cancel' }>;
+type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;
 type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
 const absBigInt = (value: bigint): bigint => value >= 0n ? value : -value;
-const isCrossJurisdictionPullCancelWithinClear = (route: CrossJurisdictionSwapRoute): boolean => (
-  route.status === 'clearing' ||
-  route.status === 'source_claimed' ||
-  route.status === 'target_claimed' ||
-  route.status === 'settled' ||
-  route.clearingPolicy === 'cancel_and_clear' ||
-  route.clearingPolicy === 'full_fill'
-);
-const findCrossJurisdictionRouteForPull = (
-  account: AccountState,
-  pullId: string,
-): { route: CrossJurisdictionSwapRoute; leg: 'source' | 'target' } | undefined => {
-  for (const offer of account.swapOffers?.values() ?? []) {
-    const route = offer.crossJurisdiction;
-    if (!route) continue;
-    if (route.sourcePull?.pullId === pullId) return { route, leg: 'source' };
-    if (route.targetPull?.pullId === pullId) return { route, leg: 'target' };
-  }
-  return undefined;
-};
-
 const committedCrossJurisdictionRatio = (binding: CrossJurisdictionPullBinding): number =>
   getCrossJurisdictionCommittedProofRatio(binding);
-
-const findCrossJurisdictionPullBinding = (
-  account: AccountState,
-  pullId: string,
-): CrossJurisdictionPullBinding | undefined => {
-  // Pull close/resolve validates the pull transformer, so the pull-local
-  // binding is canonical. The account offer mirror can lag by one entity frame
-  // while fill acks and clear requests are merged in the same runtime tick.
-  const pullBinding = account.pulls?.get(pullId)?.crossJurisdiction;
-  if (pullBinding) return pullBinding;
-  const routeMatch = findCrossJurisdictionRouteForPull(account, pullId);
-  if (routeMatch) return buildCommittedCrossJurisdictionPullBinding(routeMatch.route, routeMatch.leg);
-  return undefined;
-};
 
 const crossProofMatchesBinding = (
   binding: CrossJurisdictionPullBinding,
@@ -162,45 +125,9 @@ const validateCrossPullCloseEvidence = (
   return { ok: true, ratio };
 };
 
-const validateCrossJurisdictionPullResolve = (
-  binding: CrossJurisdictionPullBinding | undefined,
-  ratio: number,
-  binary: string,
-): string | null => {
-  if (!binding || ratio <= 0) return null;
-  const status = binding.status || 'intent';
-  const committedRatio = committedCrossJurisdictionRatio(binding);
-  if (binding.leg === 'source') {
-    if (status !== 'clear_requested' && status !== 'clearing') {
-      return `CROSS_J_SOURCE_PULL_RESOLVE_BEFORE_CLEAR:${binding.orderId}:status=${status}`;
-    }
-    if (committedRatio <= 0) return `CROSS_J_SOURCE_PULL_RESOLVE_BEFORE_CLEAR:${binding.orderId}:committed=0`;
-    if (ratio > committedRatio) {
-      return `CROSS_J_SOURCE_PULL_RESOLVE_OVER_COMMITTED:${binding.orderId}:ratio=${ratio}:committed=${committedRatio}`;
-    }
-  } else {
-    const sourceProof = binding.sourceCloseProof;
-    if (!sourceProof) {
-      return `CROSS_J_TARGET_PULL_RESOLVE_BEFORE_SOURCE_CLAIM:${binding.orderId}:sourceProof=missing:status=${status}`;
-    }
-    if (sourceProof.fillRatio !== ratio) {
-      return `CROSS_J_TARGET_PULL_RESOLVE_SOURCE_PROOF_RATIO_MISMATCH:${binding.orderId}:ratio=${ratio}:proof=${sourceProof.fillRatio}`;
-    }
-    const binaryHash = hashCrossJurisdictionCloseBinary(binary);
-    if ((binaryHash || '').toLowerCase() !== (sourceProof.binaryHash || '').toLowerCase()) {
-      return `CROSS_J_TARGET_PULL_RESOLVE_SOURCE_PROOF_BINARY_MISMATCH:${binding.orderId}`;
-    }
-    if (committedRatio > 0 && ratio > committedRatio) {
-      return `CROSS_J_TARGET_PULL_RESOLVE_OVER_COMMITTED:${binding.orderId}:ratio=${ratio}:committed=${committedRatio}`;
-    }
-  }
-  return null;
-};
-
 const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockTx): string | null => {
   const binding = tx.data.crossJurisdiction;
   const supplied = tx.data.crossJurisdictionRoute;
-  if (!binding && !supplied) return null;
   if (!binding || !supplied) return 'Cross-j pull requires both route and binding';
   let route: CrossJurisdictionSwapRoute;
   try {
@@ -209,6 +136,27 @@ const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockT
     return `Cross-j pull route invalid: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (safeStringify(route) !== safeStringify(supplied)) return 'Cross-j pull route is not canonical';
+  if (
+    route.status !== 'resting' ||
+    binding.status !== 'resting' ||
+    hasCrossJurisdictionCommittedFill(route) ||
+    route.sourceCloseProof !== undefined ||
+    route.targetCloseProof !== undefined ||
+    route.fillSeq !== undefined ||
+    route.cumulativeFillRatio !== undefined ||
+    route.fillNumerator !== undefined ||
+    route.fillDenominator !== undefined ||
+    route.filledSourceAmount !== undefined ||
+    route.filledTargetAmount !== undefined ||
+    route.priceImprovementSourceAmount !== undefined ||
+    route.pendingClearRequestedAt !== undefined ||
+    route.claimedRatio !== undefined ||
+    route.sourceClaimed !== undefined ||
+    route.targetClaimed !== undefined ||
+    route.settledAt !== undefined
+  ) {
+    return 'Cross-j pull opening must be a zero-progress resting route';
+  }
   if (safeStringify(binding) !== safeStringify(buildCrossJurisdictionPullBinding(route, binding.leg))) {
     return 'Cross-j pull binding does not match route';
   }
@@ -296,89 +244,13 @@ export async function handlePullLock(
     revealedUntilTimestamp,
     fullHash,
     partialRoot,
-    ...(crossJurisdiction ? { crossJurisdiction: cloneCrossJurisdictionPullBinding(crossJurisdiction) } : {}),
+    crossJurisdiction: cloneCrossJurisdictionPullBinding(crossJurisdiction),
     createdHeight: currentHeight,
     createdTimestamp: currentTimestamp,
   });
 
   events.push(`🪝 Pull locked: ${pullId.slice(0, 8)}... amount ${amount} token${tokenId}`);
   return { success: true, events };
-}
-
-export async function handlePullResolve(
-  account: AccountState,
-  accountTx: PullResolveTx,
-  byLeft: boolean,
-  currentTimestamp: number,
-): Promise<{ success: boolean; events: string[]; error?: string; pullResolved?: { pullId: string; fillRatio: number } }> {
-  const { pullId, binary } = accountTx.data;
-  const events: string[] = [];
-  const pull = account.pulls?.get(pullId);
-  if (!pull) {
-    return { success: false, error: `Pull ${pullId} not found`, events };
-  }
-
-  let decoded: { fillRatio: number };
-  try {
-    decoded = verifyHashLadderBinary(
-      { fullHash: pull.fullHash, partialRoot: pull.partialRoot },
-      binary,
-    );
-  } catch (error) {
-    return { success: false, error: `Invalid pull binary: ${error instanceof Error ? error.message : String(error)}`, events };
-  }
-  const beneficiaryIsLeft = pull.amount > 0n;
-  if (byLeft !== beneficiaryIsLeft) {
-    return { success: false, error: `Only the pull beneficiary can resolve`, events };
-  }
-  const ratio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(decoded.fillRatio) || 0)));
-  const previousRatio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(pull.claimedRatio ?? 0) || 0)));
-  if (ratio <= previousRatio) {
-    events.push(`🪝 Pull resolve ignored: ${pullId.slice(0, 8)}... fill ${ratio}/${HASHLADDER_MAX_FILL_RATIO} already claimed ${previousRatio}/${HASHLADDER_MAX_FILL_RATIO}`);
-    return { success: true, events, pullResolved: { pullId, fillRatio: previousRatio } };
-  }
-  if (ratio > 0 && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp)) {
-    return { success: false, error: `Pull reveal deadline expired`, events };
-  }
-  const crossResolveError = validateCrossJurisdictionPullResolve(
-    findCrossJurisdictionPullBinding(account, pullId),
-    ratio,
-    binary,
-  );
-  if (crossResolveError) return { success: false, error: crossResolveError, events };
-
-  const delta = ensureDelta(account, pull.tokenId);
-
-  const absAmount = absBigInt(pull.amount);
-  const previousClaimed = pull.claimedAmount ?? ((absAmount * BigInt(previousRatio)) / BigInt(HASHLADDER_MAX_FILL_RATIO));
-  const cumulativeClaimed = (absAmount * BigInt(ratio)) / BigInt(HASHLADDER_MAX_FILL_RATIO);
-  const applied = cumulativeClaimed - previousClaimed;
-  if (applied <= 0n) {
-    pull.claimedRatio = ratio;
-    pull.claimedAmount = previousClaimed;
-    events.push(`🪝 Pull resolve ignored: ${pullId.slice(0, 8)}... no incremental claim`);
-    return { success: true, events, pullResolved: { pullId, fillRatio: ratio } };
-  }
-  const loserIsLeft = !beneficiaryIsLeft;
-  const holdError = releaseHold(
-    delta,
-    loserIsLeft ? 'left' : 'right',
-    applied,
-    () => `Pull ${loserIsLeft ? 'left' : 'right'} hold underflow`,
-  );
-  if (holdError) return { success: false, error: holdError, events };
-
-  if (applied > 0n) {
-    delta.offdelta += deriveTransferOffdeltaChange(loserIsLeft, applied);
-  }
-  if (ratio >= HASHLADDER_MAX_FILL_RATIO) {
-    account.pulls?.delete(pullId);
-  } else {
-    pull.claimedRatio = ratio;
-    pull.claimedAmount = cumulativeClaimed;
-  }
-  events.push(`🪝 Pull resolved: ${pullId.slice(0, 8)}... fill ${ratio}/${HASHLADDER_MAX_FILL_RATIO} amount ${applied}`);
-  return { success: true, events, pullResolved: { pullId, fillRatio: ratio } };
 }
 
 export async function handleCrossPullClose(
@@ -390,8 +262,6 @@ export async function handleCrossPullClose(
   success: boolean;
   events: string[];
   error?: string;
-  pullResolved?: { pullId: string; fillRatio: number };
-  pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' };
 }> {
   const { pullId, proof } = accountTx.data;
   const events: string[] = [];
@@ -400,10 +270,9 @@ export async function handleCrossPullClose(
     return {
       success: true,
       events: [`🪝 Cross-j pull close ignored: ${pullId.slice(0, 8)}... already closed`],
-      pullCancelled: { pullId, status: 'already-closed' },
     };
   }
-  const binding = findCrossJurisdictionPullBinding(account, pullId);
+  const binding = pull.crossJurisdiction;
   if (!binding) return { success: false, error: `Cross-j close requires pull binding`, events };
   const evidence = validateCrossPullCloseEvidence(pull, binding, accountTx, currentTimestamp);
   if (!evidence.ok) return { success: false, error: evidence.error, events };
@@ -463,58 +332,5 @@ export async function handleCrossPullClose(
   return {
     success: true,
     events,
-    pullResolved: { pullId, fillRatio: ratio },
-    pullCancelled: { pullId, status: 'cancelled' },
   };
-}
-
-export async function handlePullCancel(
-  account: AccountState,
-  accountTx: PullCancelTx,
-  byLeft: boolean,
-  currentTimestamp: number,
-): Promise<{ success: boolean; events: string[]; error?: string; pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' } }> {
-  const { pullId, reason } = accountTx.data;
-  const events: string[] = [];
-  const pull = account.pulls?.get(pullId);
-  if (!pull) {
-    return {
-      success: true,
-      events: [`🪝 Pull cancel ignored: ${pullId.slice(0, 8)}... already closed`],
-      pullCancelled: { pullId, status: 'already-closed' },
-    };
-  }
-
-  const beneficiaryIsLeft = pull.amount > 0n;
-  const payerIsLeft = !beneficiaryIsLeft;
-  const beneficiaryRelease = byLeft === beneficiaryIsLeft;
-  const expiredPayerCancel = byLeft === payerIsLeft && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp);
-  if (!beneficiaryRelease && !expiredPayerCancel) {
-    return { success: false, error: `Only beneficiary can release an active pull, payer can cancel only after expiry`, events };
-  }
-  const crossRoute = findCrossJurisdictionRouteForPull(account, pullId);
-  if (crossRoute && !isCrossJurisdictionPullCancelWithinClear(crossRoute.route)) {
-    return {
-      success: false,
-      error: `Cross-j ${crossRoute.leg} pull ${pullId.slice(0, 8)} cancel blocked: route ${crossRoute.route.orderId} must clear through requestCrossJurisdictionClear`,
-      events,
-    };
-  }
-
-  const delta = ensureDelta(account, pull.tokenId);
-
-  const absAmount = absBigInt(pull.amount);
-  const claimedAmount = pull.claimedAmount ?? ((absAmount * BigInt(pull.claimedRatio ?? 0)) / BigInt(HASHLADDER_MAX_FILL_RATIO));
-  const remainingHold = absAmount > claimedAmount ? absAmount - claimedAmount : 0n;
-  const holdError = releaseHold(
-    delta,
-    payerIsLeft ? 'left' : 'right',
-    remainingHold,
-    () => `Pull ${payerIsLeft ? 'left' : 'right'} hold underflow`,
-  );
-  if (holdError) return { success: false, error: holdError, events };
-
-  account.pulls?.delete(pullId);
-  events.push(`🪝 Pull cancelled: ${pullId.slice(0, 8)}... released ${remainingHold}${reason ? ` (${reason})` : ''}`);
-  return { success: true, events, pullCancelled: { pullId, status: 'cancelled' } };
 }

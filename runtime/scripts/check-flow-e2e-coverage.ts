@@ -15,6 +15,7 @@ const readText = (path: string): string => {
     'runtime/__tests__/cross-jurisdiction-swap-part-2a.test.ts',
     'runtime/__tests__/cross-jurisdiction-swap-part-2b.test.ts',
     'runtime/__tests__/cross-jurisdiction-swap-part-3.test.ts',
+    'runtime/__tests__/audit-failfast-regressions-part-6.test.ts',
   ].map(file => readFileSync(file, 'utf8')).join('\n');
 };
 
@@ -169,11 +170,12 @@ const requirements: CoverageRequirement[] = [
     area: 'cross-j',
     file: 'runtime/__tests__/cross-jurisdiction-swap.test.ts',
     patterns: [
-      'direct cancelPull cannot release a committed cross-j partial fill',
-      'account-layer pull_cancel cannot release a committed cross-j partial fill',
       'cross-j close proposals are accepted only as one exact source+target cohort',
-      'target user cannot resolve a cross-j pull even after observing the Hub proof',
+      'clear request reveals one source pull binary and can cancel remainder',
+      'target cross_pull_close rejects user-authored economics before target binding has fill progress',
+      'cross-j orderbook sweep closes expired unfilled route instead of being a no-op',
       'production cross-j API exposes only hashledger orderbook flow',
+      'disputeStart treats pending cross_pull_close as foldable dispute evidence',
     ],
   },
 ];

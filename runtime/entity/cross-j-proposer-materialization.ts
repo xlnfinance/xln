@@ -13,7 +13,7 @@ import type { EntityReplica, EntityState } from './types';
 import type { EntityRuntimeContext } from './runtime-context';
 import type { EntityTx } from '../types/entity-tx';
 import { findAccountKey, normalizeEntityRef } from './tx/account-key';
-import { accountHasPullResolveQueued } from './tx/cross-jurisdiction-helpers';
+import { accountHasCrossPullCloseQueued } from './tx/cross-jurisdiction-helpers';
 
 const normalized = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
@@ -98,7 +98,7 @@ type CrossJOpeningLeg = Readonly<{
 const crossJOpeningLegs = (txs: readonly AccountTx[]): CrossJOpeningLeg[] => {
   const byOrderId = new Map<string, CrossJOpeningLeg>();
   for (const tx of txs) {
-    if (tx.type !== 'pull_lock' || !tx.data.crossJurisdiction || !tx.data.crossJurisdictionRoute) continue;
+    if (tx.type !== 'cross_pull_lock' || !tx.data.crossJurisdiction || !tx.data.crossJurisdictionRoute) continue;
     const orderId = normalized(tx.data.crossJurisdiction.orderId);
     if (!orderId) throw new Error('CROSS_J_OPENING_ORDER_ID_REQUIRED');
     byOrderId.set(orderId, { orderId, route: tx.data.crossJurisdictionRoute });
@@ -149,7 +149,7 @@ const siblingKey = (sibling: CrossJSiblingAccount): string =>
   `${sibling.entityId}:${sibling.signerId}:${sibling.accountId}`;
 
 const crossJOpeningOrderId = (tx: AccountTx): string | undefined => {
-  if (tx.type === 'pull_lock' && tx.data.crossJurisdiction) {
+  if (tx.type === 'cross_pull_lock' && tx.data.crossJurisdiction) {
     const orderId = normalized(tx.data.crossJurisdiction.orderId);
     if (!orderId) throw new Error('CROSS_J_OPENING_ORDER_ID_REQUIRED');
     return orderId;
@@ -355,7 +355,7 @@ export const appendDefaultProposerCrossJMaterializations = (
       !account ||
       account.state.swapOffers?.has(route.orderId) ||
       !account.state.pulls?.has(route.sourcePull.pullId) ||
-      accountHasPullResolveQueued(account, route.sourcePull.pullId)
+      accountHasCrossPullCloseQueued(account, route.sourcePull.pullId)
     ) continue;
     const reveal = buildCrossJurisdictionPullReveal(
       route,

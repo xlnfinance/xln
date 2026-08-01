@@ -93,8 +93,8 @@ export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
           description: forward.description || 'Forwarded payment',
           fromEntityId: state.entityId,
           toEntityId: nextHop,
-          ...(forward.deliveryMode ? { deliveryMode: forward.deliveryMode } : {}),
-          ...(forward.trustedGatewayEntityId ? { trustedGatewayEntityId: forward.trustedGatewayEntityId } : {}),
+          deliveryMode: forward.deliveryMode,
+          trustedGatewayEntityId: forward.trustedGatewayEntityId,
         },
       },
     });

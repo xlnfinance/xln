@@ -21,11 +21,7 @@ import { handleHtlcPayment } from './handlers/htlc-payment';
 import { handleR2C } from './handlers/r2c';
 import { handleE2R } from './handlers/e2r';
 import { handleR2R } from './handlers/r2r';
-import {
-  handleCancelPullEntityTx,
-  handleCrossPullCloseEntityTx,
-  handleResolvePullEntityTx,
-} from './handlers/pull';
+import { handleCrossPullCloseEntityTx } from './handlers/pull';
 import {
   handleCancelSwapRequest,
   handlePlaceSwapOfferRequest,
@@ -77,7 +73,6 @@ import {
   handleRegisterCrossJurisdictionSwapEntityTx,
 } from './handlers/cross-j-setup';
 import { handleCrossJurisdictionFillNoticeEntityTx } from './handlers/cross-j-fill';
-import { handleCrossJurisdictionSettledEntityTx } from './handlers/cross-j-settled';
 import {
   handleMaterializeCrossJurisdictionClearEntityTx,
   handleRequestCrossJurisdictionClearEntityTx,
@@ -481,15 +476,11 @@ const entityTxDispatchers = {
     tx as Extract<EntityTx, { type: 'reopenDisputedAccount' }>,
     options?.mutableFrameState,
   ),
-  resolvePull: (env, state, tx, options) => handleResolvePullEntityTx(env, state, tx as Extract<EntityTx, { type: 'resolvePull' }>, options),
   crossPullClose: (env, state, tx, options) => handleCrossPullCloseEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossPullClose' }>, options),
-  cancelPull: (env, state, tx, options) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'cancelPull' }>, options),
-  pullCancelExpired: (env, state, tx, options) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullCancelExpired' }>, options),
   prepareCrossJurisdictionSwap: (env, state, tx, options) => handlePrepareCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'prepareCrossJurisdictionSwap' }>, options),
   materializeCrossJurisdictionSwap: (env, state, tx, options) => handleMaterializeCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionSwap' }>, options),
   registerCrossJurisdictionSwap: (env, state, tx, options) => handleRegisterCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }>, options),
   crossJurisdictionFillNotice: (_env, state, tx, options) => handleCrossJurisdictionFillNoticeEntityTx(state, tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>, options?.mutableFrameState),
-  crossJurisdictionSettled: (_env, state, tx, options) => handleCrossJurisdictionSettledEntityTx(state, tx as Extract<EntityTx, { type: 'crossJurisdictionSettled' }>, options?.mutableFrameState),
   materializeCrossJurisdictionClear: (env, state, tx, options) => handleMaterializeCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionClear' }>, options?.mutableFrameState),
   requestCrossJurisdictionClear: (env, state, tx, options) => handleRequestCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>, options?.storageChanges, options?.mutableFrameState),
   crossJurisdictionSalvage: (env, state, tx, options) => handleCrossJurisdictionSalvageEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>, options?.mutableFrameState),

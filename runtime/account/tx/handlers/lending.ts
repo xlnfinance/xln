@@ -94,9 +94,10 @@ const applyPayment = (
     data: {
       tokenId: data.tokenId,
       amount: data.amount,
-      route: [payer, recipient],
+      route: [recipient],
       fromEntityId: payer,
       toEntityId: recipient,
+      deliveryMode: 'direct',
       description: `xln:${tx.type}`,
     },
   }, byLeft);

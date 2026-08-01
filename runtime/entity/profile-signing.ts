@@ -43,6 +43,9 @@ const boardValidatorFor = (profile: Profile, signerId: string) => {
   );
 };
 
+const defaultProfileSignerId = (profile: Profile): string =>
+  String(profile.metadata.board.validators[0]?.signerId || '').trim().toLowerCase();
+
 const resolveProfileCertifiedBoardHash = (env: EntityRuntimeContext, profile: Profile): string | null => {
   const jurisdiction = profile.metadata.jurisdiction;
   if (
@@ -92,6 +95,9 @@ export async function signProfileRuntimeRoute(
   if (!validator) {
     throw new Error(`PROFILE_ROUTE_SIGNER_NOT_ON_BOARD: entity=${profile.entityId} signerId=${signerId}`);
   }
+  if (validator.signerId !== defaultProfileSignerId(canonicalProfile)) {
+    throw new Error(`PROFILE_ROUTE_SIGNER_NOT_DEFAULT_PROPOSER: entity=${profile.entityId} signerId=${signerId}`);
+  }
   const signerPublicKey = getSignerPublicKey(env, signerId);
   const publicKeyHex = signerPublicKey ? `0x${Buffer.from(signerPublicKey).toString('hex')}`.toLowerCase() : '';
   if (!signerAddress || signerAddress.toLowerCase() !== validator.signer || publicKeyHex !== validator.publicKey) {
@@ -125,6 +131,9 @@ const verifyRuntimeRouteSignature = (profile: Profile): ProfileVerifyResult => {
   const signature = String(profile.runtimeSignature || '').trim().toLowerCase();
   const validator = boardValidatorFor(profile, signerId);
   if (!signerId || !validator) return { valid: false, reason: 'runtime_signer_not_on_board', signerId };
+  if (signerId !== defaultProfileSignerId(profile)) {
+    return { valid: false, reason: 'runtime_signer_not_default_proposer', signerId };
+  }
   if (!hasCanonicalRouteSignature(signature)) return { valid: false, reason: 'runtime_signature_non_canonical', signerId };
   const hash = computeProfileRouteHash(profile);
   if (recoverAddress(hash, signature).toLowerCase() !== validator.signer) {

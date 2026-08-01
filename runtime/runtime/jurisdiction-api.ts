@@ -1,7 +1,7 @@
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j/index';
 import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/machine/jurisdiction-runtime';
-import { resolveEntityProposerId } from './entity-output-signer';
+import { resolveEntityDefaultProposerId } from './entity-output-signer';
 import type { AccountState } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityState } from '../entity/types';
@@ -103,14 +103,21 @@ const resolveCrossJurisdictionSwapContext = (
   params: CrossJurisdictionSwapSubmitParams,
 ) => {
   const now = env.scenarioMode ? env.state.timestamp : getWallClockMs();
-  const sourceUserSignerId = params.sourceUserSignerId ??
-    resolveEntityProposerId(env, params.sourceUserEntityId, 'cross-swap.source-user');
-  const sourceHubSignerId = params.sourceHubSignerId ??
-    resolveEntityProposerId(env, params.sourceHubEntityId, 'cross-swap.source-hub');
-  const targetHubSignerId = params.targetHubSignerId ??
-    resolveEntityProposerId(env, params.targetHubEntityId, 'cross-swap.target-hub');
-  const targetUserSignerId = params.targetUserSignerId ??
-    resolveEntityProposerId(env, params.targetUserEntityId, 'cross-swap.target-user');
+  const canonicalSigner = (entityId: string, requested: string | undefined, role: string): string => {
+    const expected = resolveEntityDefaultProposerId(env, entityId, `cross-swap.${role}`);
+    if (requested && normalizeRuntimeEntityId(requested) !== expected) {
+      throw new Error(`CROSS_SWAP_OWNER_SIGNER_NON_CANONICAL:${role}:${requested}:${expected}`);
+    }
+    return expected;
+  };
+  const sourceUserSignerId = canonicalSigner(
+    params.sourceUserEntityId, params.sourceUserSignerId, 'source-user');
+  const sourceHubSignerId = canonicalSigner(
+    params.sourceHubEntityId, params.sourceHubSignerId, 'source-hub');
+  const targetHubSignerId = canonicalSigner(
+    params.targetHubEntityId, params.targetHubSignerId, 'target-hub');
+  const targetUserSignerId = canonicalSigner(
+    params.targetUserEntityId, params.targetUserSignerId, 'target-user');
   const sourceJurisdiction = requireEntityRuntimeJurisdictionConfig(
     env,
     params.sourceUserEntityId,

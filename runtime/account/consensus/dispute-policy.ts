@@ -21,14 +21,13 @@ export const isAccountControlTx = (txType: string): boolean =>
   txType === 'j_event_claim' || txType === 'reopen_disputed';
 
 const isEvidenceBearingAccountTx = (tx: AccountTx): boolean => {
-  if (tx.type === 'pull_resolve') return typeof tx.data.binary === 'string';
   if (tx.type === 'cross_pull_close') return typeof tx.data.binary === 'string' && Boolean(tx.data.proof);
   return false;
 };
 
 export const isDisputeEvidenceAccountTx = (txOrType: AccountTx | string): boolean => {
   if (typeof txOrType === 'string') {
-    return txOrType === 'pull_resolve' || txOrType === 'cross_pull_close' || txOrType === 'swap_resolve';
+    return txOrType === 'cross_pull_close' || txOrType === 'swap_resolve';
   }
   return txOrType.type === 'swap_resolve' || isEvidenceBearingAccountTx(txOrType);
 };

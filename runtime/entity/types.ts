@@ -308,7 +308,7 @@ export interface EntityState {
   pendingCrossJurisdictionFillAcks?: Map<string, PendingCrossJurisdictionFillAck>;
   // Cross-jurisdiction book admission is local hub gate state. A cross order
   // can enter the shared matcher only after source and target account frames
-  // both committed their pull_lock receipts.
+  // both committed their cross_pull_lock receipts.
   crossJurisdictionBookAdmissions?: Map<string, CrossJurisdictionBookAdmission>;
 
   // 🔄 Rebalance Configuration - Hub-level matching strategy

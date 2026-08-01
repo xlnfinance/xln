@@ -331,19 +331,6 @@ const assertCertifiedBookOutputAuthority = (
       assertSemanticTarget(tx.type, target, route.source.counterpartyEntityId);
       return true;
     }
-    case 'crossJurisdictionSettled': {
-      const route = requireSemanticRoute(currentState, tx.data.orderId);
-      const sourceUser = normalizeEntityRef(route.source.entityId);
-      const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
-      if (target === sourceUser) {
-        assertSemanticSource(tx.type, source, [route.target.counterpartyEntityId]);
-      } else if (target === sourceHub) {
-        assertSemanticSource(tx.type, source, [route.target.entityId]);
-      } else {
-        throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sourceUser},${sourceHub}`);
-      }
-      return true;
-    }
     default:
       return false;
   }
@@ -518,7 +505,6 @@ export const assertRuntimeOutputAuthorization = (
     }
     const suppliedRoute =
       tx.type === 'crossJurisdictionFillNotice' ||
-      tx.type === 'crossJurisdictionSettled' ||
       tx.type === 'applyCrossJurisdictionBookProgress' ||
       tx.type === 'removeCrossJurisdictionBookOrder' ||
       tx.type === 'requestCrossJurisdictionClear' ||
@@ -534,7 +520,6 @@ export const assertRuntimeOutputAuthorization = (
       (() => {
         const orderId =
           tx.type === 'crossJurisdictionFillNotice' ||
-          tx.type === 'crossJurisdictionSettled' ||
           tx.type === 'applyCrossJurisdictionBookProgress'
             ? tx.data.orderId
             : tx.type === 'removeCrossJurisdictionBookOrder' || tx.type === 'requestCrossJurisdictionClear'

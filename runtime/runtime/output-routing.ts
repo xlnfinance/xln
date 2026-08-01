@@ -10,7 +10,6 @@ export {
   buildPendingNetworkOutputs,
   getNextNetworkRetryTimestamp,
   hasReadyPendingNetworkOutputs,
-  markPendingCrossJAdmissionOutputsReady,
   markRestoredReliableOutputsDue,
   mergeRoutedEntityOutput,
   pruneReceiptedReliableOutputs,

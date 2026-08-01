@@ -118,6 +118,12 @@ const validateStorageAccountStateMaps = (state: AccountState, code: string): voi
       if (typeof amount !== 'bigint' || amount === 0n || (amount < 0n ? -amount : amount) > FINANCIAL.MAX_PAYMENT_AMOUNT) throw new Error(`${code}_PULL_AMOUNT`);
       requireStorageHash(row['fullHash'], `${code}_PULL_FULL_HASH`);
       requireStorageHash(row['partialRoot'], `${code}_PULL_PARTIAL_ROOT`);
+      const binding = requireBoundaryRecord(row['crossJurisdiction'], `${code}_PULL_CROSS_J`);
+      requireStorageString(binding['orderId'], `${code}_PULL_CROSS_J_ORDER`);
+      requireStorageHash(binding['routeHash'], `${code}_PULL_CROSS_J_ROUTE_HASH`);
+      if (binding['leg'] !== 'source' && binding['leg'] !== 'target') {
+        throw new Error(`${code}_PULL_CROSS_J_LEG`);
+      }
     }
   }
   for (const offer of requireStorageMap(state.swapOffers, `${code}_OFFERS`).values()) {

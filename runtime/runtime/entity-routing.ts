@@ -17,6 +17,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../extensions/cross-j';
 import { recordRuntimeSecurityIncident } from './security-incidents';
+import { assertInboundCrossJRuntimeTopology } from './cross-j-topology';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
@@ -66,7 +67,7 @@ type CrossJAdmissionCandidate = {
   leg: 'source' | 'target';
   accountInput: AccountInput;
   frame: AccountFrame;
-  pulls: Array<Extract<AccountTx, { type: 'pull_lock' }>>;
+  pulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
   alreadyCommitted: boolean;
 };
 
@@ -105,9 +106,9 @@ const sameSourceRuntimeFrame = (
 const crossPulls = (
   accountTxs: readonly AccountTx[],
   leg: 'source' | 'target',
-): Array<Extract<AccountTx, { type: 'pull_lock' }>> =>
-  accountTxs.filter((tx): tx is Extract<AccountTx, { type: 'pull_lock' }> =>
-    tx.type === 'pull_lock' && tx.data.crossJurisdiction?.leg === leg);
+): Array<Extract<AccountTx, { type: 'cross_pull_lock' }>> =>
+  accountTxs.filter((tx): tx is Extract<AccountTx, { type: 'cross_pull_lock' }> =>
+    tx.type === 'cross_pull_lock' && tx.data.crossJurisdiction?.leg === leg);
 
 type CrossJCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
 
@@ -228,13 +229,13 @@ const targetProposalCandidate = (
 };
 
 const routeForCrossJPull = (
-  pull: Extract<AccountTx, { type: 'pull_lock' }>,
-): NonNullable<Extract<AccountTx, { type: 'pull_lock' }>['data']['crossJurisdictionRoute']> | null =>
+  pull: Extract<AccountTx, { type: 'cross_pull_lock' }>,
+): NonNullable<Extract<AccountTx, { type: 'cross_pull_lock' }>['data']['crossJurisdictionRoute']> | null =>
   pull.data.crossJurisdictionRoute ?? null;
 
 const pairedPullListsMatch = (
-  sourcePulls: readonly Extract<AccountTx, { type: 'pull_lock' }>[],
-  targetPulls: readonly Extract<AccountTx, { type: 'pull_lock' }>[],
+  sourcePulls: readonly Extract<AccountTx, { type: 'cross_pull_lock' }>[],
+  targetPulls: readonly Extract<AccountTx, { type: 'cross_pull_lock' }>[],
 ): boolean => {
   if (sourcePulls.length !== targetPulls.length) return false;
   for (const sourcePull of sourcePulls) {
@@ -334,8 +335,8 @@ type CrossJAdmissionFrameCandidate = {
   phase: 'proposal' | 'ack';
   accountInput: AccountInput;
   frame: AccountFrame;
-  sourcePulls: Array<Extract<AccountTx, { type: 'pull_lock' }>>;
-  targetPulls: Array<Extract<AccountTx, { type: 'pull_lock' }>>;
+  sourcePulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
+  targetPulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
   sourceCloses: CrossJCloseTx[];
   targetCloses: CrossJCloseTx[];
   alreadyCommitted: boolean;
@@ -847,11 +848,14 @@ export const resolveRuntimeIdForEntity = (
 export const resolveRuntimeIdForCrossJurisdictionEntity = (
   env: RuntimeReplica,
   entityId: string,
-  deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeInfrastructure' | 'extractEntityId' | 'hasLocalSignerForEntity'>,
+  signerId: string,
+  deps: Pick<RuntimeEntityRoutingDeps, 'hasLocalSignerForEntitySigner'>,
 ): string | null => {
   const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
-  if (localRuntimeId && deps.hasLocalSignerForEntity(env, entityId)) return localRuntimeId;
-  return resolveRuntimeIdForEntity(env, entityId, deps);
+  if (localRuntimeId && deps.hasLocalSignerForEntitySigner(env, entityId, signerId)) return localRuntimeId;
+  const verified = env.infrastructure?.verifiedProfileRoutes?.get(normalizeEntityKey(entityId));
+  if (normalizeEntityKey(verified?.runtimeSignerId || '') !== normalizeEntityKey(signerId)) return null;
+  return normalizeRuntimeId(String(verified?.runtimeId || '')) || null;
 };
 
 export const registerEntityRuntimeHintWithDeps = (
@@ -1148,16 +1152,11 @@ const appendCrossJurisdictionIntentInput = (
   const targetHubEntityId = normalizeEntityKey(route.target.entityId);
   const sourceHubSignerId = normalizeEntityKey(route.sourceHubSignerId || '');
   const targetHubSignerId = normalizeEntityKey(route.targetHubSignerId || '');
-  if (
-    !sourceHubEntityId ||
-    !targetHubEntityId ||
-    !sourceHubSignerId ||
-    !targetHubSignerId ||
-    !deps.hasLocalSignerForEntitySigner(env, sourceHubEntityId, sourceHubSignerId) ||
-    !deps.hasLocalSignerForEntitySigner(env, targetHubEntityId, targetHubSignerId)
-  ) {
-    throw new Error('INBOUND_CROSS_J_INTENT_HUB_SIBLINGS_NOT_LOCAL');
-  }
+  assertInboundCrossJRuntimeTopology(env, route, transportSource, {
+    hasLocalSignerForEntitySigner: deps.hasLocalSignerForEntitySigner,
+    resolveRuntimeId: (entityId, signerId) =>
+      resolveRuntimeIdForCrossJurisdictionEntity(env, entityId, signerId, deps),
+  });
   const sourceHubReplica = [...env.state.eReplicas.values()].find(replica =>
     normalizeEntityKey(replica.entityId) === sourceHubEntityId &&
     normalizeEntityKey(replica.signerId) === sourceHubSignerId);
@@ -1166,11 +1165,6 @@ const appendCrossJurisdictionIntentInput = (
     normalizeEntityKey(replica.signerId) === targetHubSignerId);
   if (sourceHubReplica?.state.profile.isHub !== true || targetHubReplica?.state.profile.isHub !== true) {
     throw new Error('INBOUND_CROSS_J_INTENT_TARGET_NOT_HUB');
-  }
-  const sourceUserRuntimeId = resolveRuntimeIdForEntity(env, route.source.entityId, deps);
-  const targetUserRuntimeId = resolveRuntimeIdForEntity(env, route.target.counterpartyEntityId, deps);
-  if (sourceUserRuntimeId !== transportSource || targetUserRuntimeId !== transportSource) {
-    throw new Error('INBOUND_CROSS_J_INTENT_USER_RUNTIME_MISMATCH');
   }
   const existingRoute = sourceHubReplica.state.crossJurisdictionSwaps?.get(route.orderId);
   const queuedRoute = (env.runtimeMempool?.entityInputs ?? []).flatMap(input =>
@@ -1210,7 +1204,7 @@ const assertAtomicCrossJEnvelope = (
     effectiveAccountInputs(input).some(accountInput => {
       const proposal = accountInputProposal(accountInput);
       return proposal?.frame.accountTxs.some(tx =>
-        (tx.type === 'pull_lock' && tx.data.crossJurisdiction) ||
+        (tx.type === 'cross_pull_lock' && tx.data.crossJurisdiction) ||
         tx.type === 'cross_pull_close') === true;
     }),
   );
@@ -1301,6 +1295,6 @@ export const createRuntimeOutputRoutingDeps = (
   hasLocalSignerForEntitySigner: deps.hasLocalSignerForEntitySigner,
   resolveSoleLocalSignerForEntity: deps.resolveSoleLocalSignerForEntity,
   resolveRuntimeIdForEntity: (env, entityId) => resolveRuntimeIdForEntity(env, entityId, deps),
-  resolveRuntimeIdForCrossJurisdictionEntity: (env, entityId) =>
-    resolveRuntimeIdForCrossJurisdictionEntity(env, entityId, deps),
+  resolveRuntimeIdForCrossJurisdictionEntity: (env, entityId, signerId) =>
+    resolveRuntimeIdForCrossJurisdictionEntity(env, entityId, signerId, deps),
 });

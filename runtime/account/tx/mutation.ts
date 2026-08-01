@@ -17,9 +17,7 @@ import { handleHtlcLock } from './handlers/htlc-lock';
 import { handleHtlcResolve } from './handlers/htlc-resolve';
 import {
   handleCrossPullClose,
-  handlePullCancel,
   handlePullLock,
-  handlePullResolve,
 } from './handlers/pull';
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
@@ -45,6 +43,11 @@ type MutationContext = {
   candidateEffects: AccountOutput[];
   myEntityId: string;
   counterparty: string;
+};
+
+const unsupportedAccountTx = (tx: unknown): never => {
+  const type = typeof tx === 'object' && tx !== null ? Reflect.get(tx, 'type') : undefined;
+  throw new Error(`ACCOUNT_TX_TYPE_UNSUPPORTED:${String(type ?? 'missing')}`);
 };
 
 const applyCollateralRequest = (context: MutationContext): ApplyAccountTxResult => {
@@ -214,9 +217,7 @@ export const applyAccountTxMutation = async (
     case 'htlc_lock':
       return handleHtlcLock(account, tx, byLeft, timestamp, height, isValidation);
     case 'htlc_resolve': return applyHtlcResolve(context);
-    case 'pull_lock': return handlePullLock(account.state, tx, byLeft, height, timestamp);
-    case 'pull_resolve': return handlePullResolve(account.state, tx, byLeft, timestamp);
-    case 'pull_cancel': return handlePullCancel(account.state, tx, byLeft, timestamp);
+    case 'cross_pull_lock': return handlePullLock(account.state, tx, byLeft, height, timestamp);
     case 'cross_pull_close': return handleCrossPullClose(account.state, tx, byLeft, timestamp);
     case 'swap_offer': return handleSwapOffer(account, tx, byLeft, height, isValidation);
     case 'swap_resolve': return handleSwapResolve(account, tx, byLeft, height, isValidation);
@@ -233,5 +234,7 @@ export const applyAccountTxMutation = async (
         consensusContext,
         counterpartyCertifiedBoardHash,
       );
+    default:
+      return unsupportedAccountTx(tx);
   }
 };

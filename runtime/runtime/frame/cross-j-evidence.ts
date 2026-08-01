@@ -53,7 +53,7 @@ export const summarizeAtomicCrossJAccountInput = (
     const proposal = accountInputProposal(tx.data);
     const crossPulls =
       proposal?.frame.accountTxs.flatMap(accountTx => {
-        if (accountTx.type !== 'pull_lock' || !accountTx.data.crossJurisdiction) return [];
+        if (accountTx.type !== 'cross_pull_lock' || !accountTx.data.crossJurisdiction) return [];
         return [{
           leg: accountTx.data.crossJurisdiction.leg,
           orderId: accountTx.data.crossJurisdiction.orderId,

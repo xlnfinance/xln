@@ -50,6 +50,38 @@ const replayOutputSignerHint = (env: RuntimeReplica, entityId: string): string |
   return hints instanceof Map ? String(hints.get(entityId) || '') || null : null;
 };
 
+/** Cross-j ownership is pinned to the Entity's canonical default proposer. */
+export const resolveEntityDefaultProposerId = (
+  env: RuntimeReplica,
+  entityId: string,
+  context: string,
+): string => {
+  const target = String(entityId || '').trim().toLowerCase();
+  const local = new Set<string>();
+  for (const replica of env.state.eReplicas.values()) {
+    if (String(replica.entityId || '').trim().toLowerCase() !== target) continue;
+    const signerId = String(replica.state.config.validators[0] || '').trim().toLowerCase();
+    if (signerId) local.add(signerId);
+  }
+  if (local.size > 1) throw new Error(`DEFAULT_PROPOSER_CONFLICT:${context}:entityId=${entityId}`);
+  const localSigner = local.values().next().value as string | undefined;
+  if (localSigner) return localSigner;
+  const verifiedSigner = String(
+    env.infrastructure?.verifiedProfileRoutes?.get(target)?.runtimeSignerId || '',
+  ).trim().toLowerCase();
+  if (verifiedSigner) return verifiedSigner;
+  const profile = (env.gossip?.getProfiles?.() as Profile[] | undefined)?.find(
+    candidate => String(candidate.entityId || '').trim().toLowerCase() === target,
+  );
+  const remoteSigner = String(
+    profile?.metadata.board.validators[0]?.signerId ||
+    profile?.metadata.board.validators[0]?.signer ||
+    '',
+  ).trim().toLowerCase();
+  if (remoteSigner) return remoteSigner;
+  throw new Error(`DEFAULT_PROPOSER_RESOLUTION_FAILED:${context}:entityId=${entityId}`);
+};
+
 /**
  * Resolve which local signer may emit a committed Entity output.
  *

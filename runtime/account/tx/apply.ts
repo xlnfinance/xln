@@ -61,9 +61,7 @@ const invalidateCommittedMapsForTx = (
       invalidate('deltas');
       invalidate('locks', tx.data.lockId);
       return;
-    case 'pull_lock':
-    case 'pull_resolve':
-    case 'pull_cancel':
+    case 'cross_pull_lock':
     case 'cross_pull_close':
       invalidate('deltas');
       invalidate('pulls', tx.data.pullId);

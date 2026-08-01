@@ -279,6 +279,7 @@ export class RuntimeP2P {
     string,
     {
       runtimeId: string;
+      runtimeSignerId: string;
       runtimeEncPubKey: string;
       lastUpdated: number;
     }
@@ -581,6 +582,7 @@ export class RuntimeP2P {
     if (existing && existing.lastUpdated >= profile.lastUpdated) return;
     this.verifiedProfileRoutes.set(key, {
       runtimeId: normalizeRuntimeId(profile.runtimeId),
+      runtimeSignerId: String(profile.runtimeSignerId || '').trim().toLowerCase(),
       runtimeEncPubKey: profile.runtimeEncPubKey,
       lastUpdated: profile.lastUpdated,
     });

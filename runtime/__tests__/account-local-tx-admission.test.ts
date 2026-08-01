@@ -97,14 +97,25 @@ describe('account mempool multiplicity', () => {
     };
     const account = accountWithPending(fill);
     account.mempool = [
-      { type: 'pull_resolve', data: { pullId: 'pull-1', binary: '0x1234' } },
+      {
+        type: 'cross_pull_close',
+        data: {
+          pullId: 'pull-1', binary: '0x1234',
+          proof: {
+            orderId: 'order-1', routeHash: `0x${'11'.repeat(32)}`,
+            sourcePullId: 'pull-1', targetPullId: 'pull-2', fillRatio: 1,
+            cumulativeSourceAmount: 1n, cumulativeTargetAmount: 1n,
+            binaryHash: `0x${'22'.repeat(32)}`, closeMode: 'partial_cancel_remainder',
+          },
+        },
+      },
       structuredClone(PAYMENT),
     ];
 
     freezeAccountForDispute(account, true);
 
     expect(account.pendingFrame).toBeUndefined();
-    expect(account.mempool.map(tx => tx.type)).toEqual(['swap_resolve', 'pull_resolve']);
+    expect(account.mempool.map(tx => tx.type)).toEqual(['swap_resolve', 'cross_pull_close']);
     expect(account.mempool[0]).toEqual(fill);
   });
 

@@ -925,7 +925,7 @@ describe('multisig HTLC validator encryption', () => {
     )).valid).toBe(true);
     expect(recoverAddress(routeHash, profile.runtimeSignature).toLowerCase()).toBe(first.signer);
     expect(await verifyProfileSignature({ ...profile, runtimeSignerId: aliases[1] }))
-      .toMatchObject({ valid: false, reason: 'runtime_signature_invalid', signerId: aliases[1] });
+      .toMatchObject({ valid: false, reason: 'runtime_signer_not_default_proposer', signerId: aliases[1] });
 
     const forgedBinding = structuredClone(profile);
     forgedBinding.metadata.board.validators[0]!.signer = second.signer;

@@ -693,6 +693,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           tokenId: USDC_TOKEN_ID,
           amount: payment1,
           route: [alice.id, hub.id, bob.id],
+          deliveryMode: 'async',
           description: 'HTLC Payment 1 of 2',
           hashlock: htlc1.hashlock,
         }
@@ -1490,6 +1491,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           route: [alice.id, hub.id, hub2.id, bob.id], // Explicit 4-hop route
           tokenId: USDC_TOKEN_ID,
           amount: payment4Hop,
+          deliveryMode: 'async',
           description: '4-hop onion routing test',
           hashlock: htlc4.hashlock,
         }

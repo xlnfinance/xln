@@ -66,9 +66,9 @@ export const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): bool
     const proposal = accountInputProposal(tx.data);
     if (!proposal) return false;
     const sourcePull = proposal.frame.accountTxs.find(
-      accountTx => accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction?.leg === 'source',
+      accountTx => accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction?.leg === 'source',
     );
-    const binding = sourcePull?.type === 'pull_lock' ? sourcePull.data.crossJurisdiction : undefined;
+    const binding = sourcePull?.type === 'cross_pull_lock' ? sourcePull.data.crossJurisdiction : undefined;
     if (!binding) return false;
     return proposal.frame.accountTxs.some(
       accountTx =>
@@ -86,7 +86,7 @@ const isCrossJAdmissionProposal = (output: RoutedEntityInput): boolean =>
     return Boolean(
       proposal?.frame.accountTxs.some(
         accountTx =>
-          (accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction) || accountTx.type === 'cross_pull_close',
+          (accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction) || accountTx.type === 'cross_pull_close',
       ),
     );
   });
@@ -109,7 +109,7 @@ export const summarizeAccountEnvelopeOutputs = (outputs: readonly RoutedEntityIn
           proposalHeight: proposal?.frame.height ?? null,
           crossPulls:
             proposal?.frame.accountTxs.flatMap(accountTx =>
-              accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction
+              accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction
                 ? [
                     {
                       leg: accountTx.data.crossJurisdiction.leg,
@@ -378,7 +378,11 @@ export type RuntimeOutputRoutingDeps = {
   hasLocalSignerForEntitySigner(env: RuntimeReplica, entityId: string, signerId: string): boolean;
   resolveSoleLocalSignerForEntity(env: RuntimeReplica, entityId: string): string | null;
   resolveRuntimeIdForEntity(env: RuntimeReplica, entityId: string): string | null;
-  resolveRuntimeIdForCrossJurisdictionEntity(env: RuntimeReplica, entityId: string): string | null;
+  resolveRuntimeIdForCrossJurisdictionEntity(
+    env: RuntimeReplica,
+    entityId: string,
+    signerId: string,
+  ): string | null;
 };
 
 const getDeferredNetworkMeta = (
@@ -526,7 +530,7 @@ export const splitPendingOutputsByRetryWindow = (
       const identity = getReliableOutputIdentity(output);
       if (!identity || !isAccountAckIdentity(identity)) return [];
       const retry = meta.get(buildRouteOutputKey(output));
-      return !retry || (!retry.manual && retry.nextRetryAt <= nowMs) ? [identity.laneKey] : [];
+      return !retry || retry.nextRetryAt <= nowMs ? [identity.laneKey] : [];
     }),
   );
 
@@ -541,14 +545,12 @@ export const splitPendingOutputsByRetryWindow = (
         .map(output => getReliableOutputIdentity(output)!)
         .filter((identity): identity is ReliableOutputIdentity => identity !== null);
       const retryFenceOutputs = reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
-      const manuallyPaused = retryFenceOutputs.some(output => meta.get(buildRouteOutputKey(output))?.manual === true);
       const due =
-        !manuallyPaused &&
-        ((restoredReliableDue && reliable.length > 0) ||
-          retryFenceOutputs.some(output => {
-            const entry = meta.get(buildRouteOutputKey(output));
-            return !entry || entry.nextRetryAt <= nowMs;
-          }));
+        (restoredReliableDue && reliable.length > 0) ||
+        retryFenceOutputs.some(output => {
+          const entry = meta.get(buildRouteOutputKey(output));
+          return !entry || entry.nextRetryAt <= nowMs;
+        });
       if (due) {
         ready.push(...unit.outputs);
       } else {
@@ -589,9 +591,7 @@ export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeO
   const meta = getDeferredNetworkMeta(env, deps);
   if (
     hasRestoredReliableOutputsDue(env) &&
-    pending.some(
-      output => getReliableOutputIdentity(output) !== null && meta.get(buildRouteOutputKey(output))?.manual !== true,
-    )
+    pending.some(output => getReliableOutputIdentity(output) !== null)
   )
     return 0;
   let nextRetryAt = Infinity;
@@ -608,7 +608,6 @@ export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeO
   });
   for (const output of retryScheduledOutputs) {
     const retry = meta.get(buildRouteOutputKey(output));
-    if (retry?.manual) continue;
     const ownRetryAt = retry?.nextRetryAt ?? 0;
     const reliable = getReliableOutputIdentity(output);
     if (!reliable) {
@@ -890,15 +889,10 @@ export const rescheduleDeferredOutputs = (
   const retriedReliableLanes = new Set<string>();
   for (const unit of groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(failed))) {
     if (!unit.complete) continue;
-    // A cross-j Account cohort must remain one durable envelope, but it must not
-    // replay itself after a peer outage. The operator explicitly re-arms it once
-    // that peer is known online; until then both Account frames stay paused here.
-    // Proposal cohorts are ordinary Account frames, while ACK cohorts carry
-    // reliable identities. Both phases still have the same retry contract:
-    // after one transport attempt the complete envelope stays paused until an
-    // operator explicitly re-arms it. Fencing only reliable outputs made the
-    // proposal phase immediately due again and replayed both money legs on
-    // every Runtime tick.
+    // Cross-j Account cohorts retry as one envelope. Both proposal legs are
+    // idempotent certified frames; ACK legs additionally carry reliable
+    // identities. A bounded retry preserves liveness without splitting money
+    // legs or spinning every Runtime tick after a peer outage.
     const retryOutputs = unit.outputs;
     for (const output of retryOutputs) {
       const reliable = getReliableOutputIdentity(output);
@@ -908,12 +902,11 @@ export const rescheduleDeferredOutputs = (
       }
       const key = buildRouteOutputKey(output);
       const attempts = (meta.get(key)?.attempts ?? 0) + 1;
-      const retryMaxMs = reliable ? RELIABLE_NETWORK_RETRY_MAX_MS : NETWORK_RETRY_MAX_MS;
+      const retryMaxMs = unit.atomic || reliable ? RELIABLE_NETWORK_RETRY_MAX_MS : NETWORK_RETRY_MAX_MS;
       const delayMs = Math.min(retryMaxMs, NETWORK_RETRY_BASE_MS * 2 ** Math.min(attempts - 1, 5));
       meta.set(key, {
         attempts,
-        nextRetryAt: unit.atomic ? nowMs : nowMs + delayMs,
-        ...(unit.atomic ? { manual: true as const } : {}),
+        nextRetryAt: nowMs + delayMs,
       });
       if (reliable) retriedReliableLanes.add(reliable.laneKey);
     }
@@ -924,32 +917,4 @@ export const rescheduleDeferredOutputs = (
   }
 
   return buildPendingNetworkOutputs([...failed, ...waiting]);
-};
-
-export const markPendingCrossJAdmissionOutputsReady = (
-  env: RuntimeReplica,
-  deps: RuntimeOutputRoutingDeps,
-  targetRuntimeId?: string,
-): number => {
-  const normalizedTarget = targetRuntimeId ? normalizeRuntimeId(targetRuntimeId) : '';
-  const meta = getDeferredNetworkMeta(env, deps);
-  const nowMs = getNetworkRetryNowMs(env);
-  let readyEnvelopes = 0;
-  for (const unit of groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(env.pendingNetworkOutputs ?? []))) {
-    if (!unit.atomic || !unit.complete) continue;
-    if (normalizedTarget && unit.outputs.some(output => normalizeRuntimeId(output.runtimeId) !== normalizedTarget)) {
-      continue;
-    }
-    const retryOutputs = unit.outputs;
-    if (!retryOutputs.some(output => meta.get(buildRouteOutputKey(output))?.manual === true)) continue;
-    for (const output of retryOutputs) {
-      const key = buildRouteOutputKey(output);
-      meta.set(key, {
-        attempts: meta.get(key)?.attempts ?? 0,
-        nextRetryAt: nowMs,
-      });
-    }
-    readyEnvelopes += 1;
-  }
-  return readyEnvelopes;
 };

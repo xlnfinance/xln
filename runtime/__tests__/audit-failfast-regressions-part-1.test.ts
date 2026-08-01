@@ -2211,7 +2211,7 @@ describe('audit fail-fast regressions', () => {
       sourceHubState,
       sourceUser,
       {
-        type: 'pull_lock',
+        type: 'cross_pull_lock',
         data: {
           pullId: route.sourcePull!.pullId,
           tokenId: route.sourcePull!.tokenId,

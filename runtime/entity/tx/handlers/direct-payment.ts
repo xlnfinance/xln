@@ -59,34 +59,13 @@ const validateEntityPayment = (
   return undefined;
 };
 
-const emitPaymentInitiated = (
-  effects: EntityCandidateEffect[],
-  fromEntity: string,
-  tx: DirectPaymentEntityTx,
-  route: string[],
-): void => {
-  effects.push({
-    kind: 'runtimeEvent',
-    eventName: 'HtlcInitiated',
-    data: {
-      fromEntity,
-      toEntity: tx.data.targetEntityId,
-      tokenId: tx.data.tokenId,
-      amount: tx.data.amount.toString(),
-      route,
-    },
-  });
-};
-
 const finishReceivedPayment = (
   state: EntityState,
   tx: DirectPaymentEntityTx,
   route: string[],
-  effects: EntityCandidateEffect[],
   trace: PaymentTrace,
 ): DirectPaymentResult | undefined => {
   if (route.length !== 1 || route[0] !== tx.data.targetEntityId) return undefined;
-  emitPaymentInitiated(effects, state.entityId, tx, route);
   trace('final_destination', {
     entity: shortId(state.entityId),
     tokenId: tx.data.tokenId,
@@ -137,7 +116,7 @@ export const handleDirectPaymentEntityTx = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: DirectPaymentEntityTx,
-  candidateEffects: EntityCandidateEffect[] = [],
+  _candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
 ): Promise<DirectPaymentResult> => {
   const trace = createPaymentTrace(env);
@@ -161,7 +140,7 @@ export const handleDirectPaymentEntityTx = async (
 
   const validationError = validateEntityPayment(newState, entityTx, route, []);
   if (validationError) return validationError;
-  const received = finishReceivedPayment(newState, entityTx, route, candidateEffects, trace);
+  const received = finishReceivedPayment(newState, entityTx, route, trace);
   if (received) return received;
   const { nextHop, accountTx } = buildNextHopPayment(newState, entityTx, route);
   accountTxs.push({ accountId: nextHop, tx: accountTx });
@@ -179,8 +158,6 @@ export const handleDirectPaymentEntityTx = async (
     newState,
     `💸 Sending ${entityTx.data.amount} (token ${entityTx.data.tokenId}) to ${entityTx.data.targetEntityId} via ${route.length - 1} hops`,
   );
-  emitPaymentInitiated(candidateEffects, entityState.entityId, entityTx, route);
-
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) {
     outputs.push({

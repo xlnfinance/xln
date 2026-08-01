@@ -13,13 +13,10 @@ import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
-import { findCrossJurisdictionPullRoute, isCrossJurisdictionPullCancelWithinClear } from '../cross-jurisdiction-helpers';
 import type { ApplyEntityTxOptions } from '../apply';
 import type { AccountTxTarget } from './account';
 
-type ResolvePullTx = Extract<EntityTx, { type: 'resolvePull' }>;
 type CrossPullCloseTx = Extract<EntityTx, { type: 'crossPullClose' }>;
-type CancelPullTx = Extract<EntityTx, { type: 'cancelPull' | 'pullCancelExpired' }>;
 type PullResult = { newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] };
 
 const now = (state: EntityState, env: EntityRuntimeContext): number => Number(state.timestamp || env.state.timestamp || 0);
@@ -37,9 +34,9 @@ const requestFrame = (state: EntityState, outputs: EntityInput[]): void => {
   if (signerId) outputs.push({ entityId: state.entityId, signerId, entityTxs: [] });
 };
 
-const resolveCounterparty = (result: PullResult, counterpartyEntityId: string, action: 'resolve' | 'cancel'): string | null => {
+const resolveCounterparty = (result: PullResult, counterpartyEntityId: string): string | null => {
   const accountId = findAccountKey(result.newState, counterpartyEntityId);
-  if (!accountId) fail(result, `❌ Pull ${action} failed: no account with ${counterpartyEntityId}`);
+  if (!accountId) fail(result, `❌ Cross-j pull close failed: no account with ${counterpartyEntityId}`);
   return accountId;
 };
 
@@ -48,13 +45,6 @@ const findCrossSourceRoute = (state: EntityState, pullId: string, counterpartyEn
     route.sourcePull?.pullId === pullId &&
     normalizeEntityRef(route.source.counterpartyEntityId) === normalizeEntityRef(state.entityId) &&
     normalizeEntityRef(route.source.entityId) === normalizeEntityRef(counterpartyEntityId),
-  );
-
-const findCrossTargetRoute = (state: EntityState, pullId: string, counterpartyEntityId: string) =>
-  [...(state.crossJurisdictionSwaps?.values?.() ?? [])].find(route =>
-    route.targetPull?.pullId === pullId &&
-    normalizeEntityRef(route.target.counterpartyEntityId) === normalizeEntityRef(state.entityId) &&
-    normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyEntityId),
   );
 
 const findCrossTargetHubRoute = (state: EntityState, pullId: string, counterpartyEntityId: string) =>
@@ -81,7 +71,7 @@ const closeProofsMatch = (
 };
 
 const proofRouteError = (
-  route: NonNullable<ReturnType<typeof findCrossSourceRoute>> | NonNullable<ReturnType<typeof findCrossTargetRoute>>,
+  route: NonNullable<ReturnType<typeof findCrossSourceRoute>> | NonNullable<ReturnType<typeof findCrossTargetHubRoute>>,
   proof: CrossPullCloseTx['data']['proof'],
   binary: string,
   leg: 'source' | 'target',
@@ -134,34 +124,10 @@ const proofRouteError = (
   return null;
 };
 
-export const handleResolvePullEntityTx = (_env: EntityRuntimeContext, state: EntityState, tx: ResolvePullTx, options?: ApplyEntityTxOptions): PullResult => {
-  const result = createResult(state, options);
-  const { counterpartyEntityId, pullId, binary } = tx.data;
-  const accountId = resolveCounterparty(result, counterpartyEntityId, 'resolve');
-  if (!accountId) return result;
-  const sourceRoute = findCrossSourceRoute(result.newState, pullId, counterpartyEntityId);
-  if (sourceRoute && sourceRoute.status !== 'clearing') {
-    return fail(result, `❌ Cross-j source pull ${pullId.slice(0, 8)} resolve blocked: use requestCrossJurisdictionClear`);
-  }
-  const targetRoute = findCrossTargetRoute(result.newState, pullId, counterpartyEntityId);
-  if (targetRoute) {
-    return fail(
-      result,
-      `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: only the Hub atomic close cohort may settle it`,
-    );
-  }
-  result.accountTxs.push({
-    accountId,
-    tx: { type: 'pull_resolve', data: { pullId, binary } },
-  });
-  requestFrame(state, result.outputs);
-  return result;
-};
-
 export const handleCrossPullCloseEntityTx = (env: EntityRuntimeContext, state: EntityState, tx: CrossPullCloseTx, options?: ApplyEntityTxOptions): PullResult => {
   const result = createResult(state, options);
   const { counterpartyEntityId, pullId, binary, proof, route: commandRoute } = tx.data;
-  const accountId = resolveCounterparty(result, counterpartyEntityId, 'resolve');
+  const accountId = resolveCounterparty(result, counterpartyEntityId);
   if (!accountId) return result;
   const sourceRoute = findCrossSourceRoute(result.newState, pullId, counterpartyEntityId);
   const targetRoute = findCrossTargetHubRoute(result.newState, pullId, counterpartyEntityId);
@@ -194,30 +160,5 @@ export const handleCrossPullCloseEntityTx = (env: EntityRuntimeContext, state: E
   result.newState.crossJurisdictionSwaps?.set(route.orderId, route);
   result.accountTxs.push({ accountId, tx: { type: 'cross_pull_close', data: { pullId, binary, proof } } });
   requestFrame(state, result.outputs);
-  return result;
-};
-
-export const handleCancelPullEntityTx = (_env: EntityRuntimeContext, state: EntityState, tx: CancelPullTx, options?: ApplyEntityTxOptions): PullResult => {
-  const result = createResult(state, options);
-  const { counterpartyEntityId, pullId } = tx.data;
-  const accountId = resolveCounterparty(result, counterpartyEntityId, 'cancel');
-  if (!accountId) return result;
-  const crossPullRoute = findCrossJurisdictionPullRoute(result.newState, pullId);
-  if (
-    crossPullRoute &&
-    !isCrossJurisdictionTerminalStatus(crossPullRoute.route.status) &&
-    !isCrossJurisdictionPullCancelWithinClear(crossPullRoute.route)
-  ) {
-    return fail(
-      result,
-      `❌ Cross-j ${crossPullRoute.leg} pull ${pullId.slice(0, 8)} cancel blocked: route ${crossPullRoute.route.orderId} must clear through requestCrossJurisdictionClear`,
-    );
-  }
-  result.accountTxs.push({
-    accountId,
-    tx: { type: 'pull_cancel', data: { pullId, reason: tx.type === 'pullCancelExpired' ? 'expired' : 'beneficiary_release' } },
-  });
-  requestFrame(state, result.outputs);
-  addMessage(result.newState, `🪝 Pull cancel queued: ${pullId.slice(0, 8)}`);
   return result;
 };

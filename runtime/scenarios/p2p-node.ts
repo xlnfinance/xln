@@ -1018,6 +1018,7 @@ const run = async () => {
               tokenId: USDC,
               amount: HTLC_AMOUNT,
               route: [entityId, hubProfile.entityId, bobProfile.entityId],
+              deliveryMode: 'async',
               description: 'p2p-htlc',
               hashlock,
             },

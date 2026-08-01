@@ -107,7 +107,7 @@ const hasCrossJurisdictionSourcePullProposal = (input: EntityConsensusInput): bo
   getEffectiveEntityInputTxs(input).some(tx =>
     tx.type === 'accountInput' &&
     accountInputProposal(tx.data)?.frame.accountTxs.some(accountTx =>
-      accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction?.leg === 'source') === true);
+      accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction?.leg === 'source') === true);
 
 /**
  * Keep account/Entity/J consensus responsive when a runtime also receives a

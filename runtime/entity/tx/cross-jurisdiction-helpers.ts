@@ -140,15 +140,6 @@ export const findCrossJurisdictionPullRoute = (
   return null;
 };
 
-export const isCrossJurisdictionPullCancelWithinClear = (route: CrossJurisdictionSwapRoute): boolean => (
-  route.status === 'clearing' ||
-  route.status === 'source_claimed' ||
-  route.status === 'target_claimed' ||
-  route.status === 'settled' ||
-  route.clearingPolicy === 'cancel_and_clear' ||
-  route.clearingPolicy === 'full_fill'
-);
-
 export const canonicalizeCrossJurisdictionRouteForKnownEntities = (
   env: EntityRuntimeContext,
   state: EntityState,
@@ -226,12 +217,12 @@ export const validateCrossJurisdictionLocalBinding = (
 
 type AccountStateFromEntity = EntityState['accounts'] extends Map<string, infer T> ? T : never;
 
-export const accountHasPullResolveQueued = (
+export const accountHasCrossPullCloseQueued = (
   account: AccountStateFromEntity,
   pullId: string,
 ): boolean => {
   const isResolve = (tx: AccountTx): boolean =>
-    (tx.type === 'pull_resolve' || tx.type === 'cross_pull_close') && tx.data.pullId === pullId;
+    tx.type === 'cross_pull_close' && tx.data.pullId === pullId;
   return account.mempool.some(isResolve) ||
     Boolean(account.pendingFrame?.accountTxs?.some(isResolve));
 };

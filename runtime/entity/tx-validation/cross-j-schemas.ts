@@ -19,9 +19,6 @@ export const ENTITY_TX_CROSS_J_SCHEMAS = {
     },
     literals: { priceImprovementMode: ['source_savings'] },
   },
-  crossJurisdictionSettled: {
-    required: { orderId: 'string', routeHash: 'string', binary: 'string', proof: 'record' },
-  },
   requestCrossJurisdictionClear: {
     required: { orderId: 'string' },
     optional: { cancelRemainder: 'boolean', route: 'record' },

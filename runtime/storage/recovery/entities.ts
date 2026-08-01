@@ -27,6 +27,7 @@ import { computeCanonicalEntityHash } from '../canonical-hash';
 import type { PersistedStorageReadApi } from '../persisted-read';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 import { assertPersistedJurisdictionsAvailable, resolvePersistedReplicaIdentity } from './identity';
+import { assertCrossJLocalCohorts } from '../../runtime/cross-j-topology';
 
 const installPersistedEntityReplicas = async (
   reads: PersistedStorageReadApi,
@@ -213,6 +214,7 @@ export const restorePersistedEntityGraph = async (
     latestHeight,
     selectedSnapshotHeight,
   );
+  assertCrossJLocalCohorts(env);
   await hydrateRestoredEntityDags(deps, env);
   assertPersistedJurisdictionsAvailable(env);
   await assertCertifiedRegistrationEvidenceStore(env);

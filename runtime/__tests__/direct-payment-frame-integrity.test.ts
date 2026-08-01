@@ -9,10 +9,9 @@ import type { RuntimeReplica } from '../runtime/types';
 import { createDefaultDelta } from '../account/delta';
 import { makeAccount as makeCanonicalAccount } from './helpers/cross-j';
 
-const LEFT = `0x${'11'.repeat(32)}`;
-const RIGHT = `0x${'22'.repeat(32)}`;
-const NEXT = `0x${'33'.repeat(32)}`;
-const FINAL = `0x${'44'.repeat(32)}`;
+const LEFT = `0x${'aa'.repeat(32)}`;
+const RIGHT = `0x${'bb'.repeat(32)}`;
+const NEXT = `0x${'cc'.repeat(32)}`;
 
 async function makeHashedFrame(): Promise<AccountFrame> {
   const delta = {
@@ -59,9 +58,10 @@ describe('direct payment frame integrity', () => {
       data: {
         tokenId: 1,
         amount: 100n,
-        route: [RIGHT, LEFT],
+        route: [LEFT],
         fromEntityId: RIGHT,
         toEntityId: LEFT,
+        deliveryMode: 'direct',
         description: 'integrity-regression',
       },
     };
@@ -84,8 +84,10 @@ describe('direct payment frame integrity', () => {
       data: {
         tokenId: 1,
         amount: 100n,
+        route: [RIGHT],
         fromEntityId: LEFT,
         toEntityId: RIGHT,
+        deliveryMode: 'direct',
       },
     };
 
@@ -105,9 +107,11 @@ describe('direct payment frame integrity', () => {
         data: {
           tokenId: 1,
           amount: 1n,
-          route: [LEFT, NEXT, FINAL],
+          route: [LEFT, NEXT],
           fromEntityId: RIGHT,
           toEntityId: LEFT,
+          deliveryMode: 'trusted',
+          trustedGatewayEntityId: LEFT,
           description: 'identical-routed-payment',
         },
       };
@@ -137,9 +141,59 @@ describe('direct payment frame integrity', () => {
     });
   }
 
+  test('queues a trusted forward when canonical entity ids arrive with mixed case', async () => {
+    const account = await makeAccount();
+    account.proofHeader.fromEntity = LEFT;
+    account.proofHeader.toEntity = RIGHT;
+    const result = handleDirectPayment(account, {
+      type: 'direct_payment',
+      data: {
+        tokenId: 1,
+        amount: 1n,
+        route: [LEFT.toUpperCase(), NEXT],
+        fromEntityId: RIGHT,
+        toEntityId: LEFT.toUpperCase(),
+        deliveryMode: 'trusted',
+        trustedGatewayEntityId: LEFT.toUpperCase(),
+      },
+    }, false);
+
+    expect(result.success).toBe(true);
+    expect(account.state.deltas.get(1)?.offdelta).toBe(1n);
+    expect(account.pendingForwards).toHaveLength(1);
+    expect(account.pendingForwards?.[0]?.route).toEqual([LEFT.toUpperCase(), NEXT]);
+  });
+
+  test('rejects direct multihop and trusted multi-gateway routes before mutation', async () => {
+    const account = await makeAccount();
+    const payment = (deliveryMode: 'direct' | 'trusted', route: string[]) => handleDirectPayment(account, {
+      type: 'direct_payment',
+      data: {
+        tokenId: 1,
+        amount: 100n,
+        route,
+        fromEntityId: RIGHT,
+        toEntityId: LEFT,
+        deliveryMode,
+        ...(deliveryMode === 'trusted' ? { trustedGatewayEntityId: LEFT } : {}),
+      },
+    }, false);
+
+    expect(payment('direct', [LEFT, NEXT]).success).toBe(false);
+    expect(payment('trusted', [LEFT, NEXT, `0x${'44'.repeat(32)}`]).success).toBe(false);
+    expect(account.state.deltas.get(1)?.offdelta).toBe(0n);
+    expect(account.pendingForwards).toBeUndefined();
+  });
+
   test('fails the containing runtime frame when a routed next-hop account is absent', async () => {
     const account = await makeAccount();
-    account.pendingForwards = [{ tokenId: 1, amount: 1n, route: [LEFT, NEXT, FINAL] }];
+    account.pendingForwards = [{
+      tokenId: 1,
+      amount: 1n,
+      route: [LEFT, NEXT],
+      deliveryMode: 'trusted',
+      trustedGatewayEntityId: LEFT,
+    }];
 
     expect(() => applyPendingForwardFollowup({
       env: {} as RuntimeReplica,

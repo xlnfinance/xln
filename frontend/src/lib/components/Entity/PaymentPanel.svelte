@@ -114,6 +114,8 @@
     { value: 'direct', label: 'Direct', description: 'One hop · shared account' },
     { value: 'trusted', label: 'Trusted', description: 'Trusts the selected hub' },
   ];
+  const usesConditionalDelivery = (mode: PaymentDeliveryMode): boolean =>
+    mode === 'instant' || mode === 'async';
   // If a hop does not publish fee metadata, use a conservative default so
   // unknown peers cannot appear artificially cheaper than known hubs.
   const DEFAULT_UNKNOWN_HOP_FEE_PPM = 1;
@@ -222,7 +224,7 @@
   }
 
   function buildAutoRouteKey(): string {
-    return [targetEntityId, amount, tokenId, description].join('|');
+    return [targetEntityId, amount, tokenId, description, deliveryMode].join('|');
   }
 
   function requestAutoFindRoutes(): void {
@@ -957,6 +959,8 @@
     if (!targetEntityId || !amount) return false;
 
     const viewportY = typeof window === 'undefined' ? 0 : window.scrollY;
+    const requestedDeliveryMode = deliveryMode;
+    const requireEncryption = usesConditionalDelivery(requestedDeliveryMode);
     findingRoutes = true;
     routes = [];
     selectedRouteIndex = -1;
@@ -967,7 +971,7 @@
 
     try {
       await refreshGossipOnDemand('route-preflight', [entityId, targetEntityId]);
-      await ensureRecipientProfileReady();
+      if (requireEncryption) await ensureRecipientProfileReady();
 
       const amountInSmallestUnit = parseTokenAmountInput(amount, getTokenDecimals(tokenId));
       if (amountInSmallestUnit <= 0n) {
@@ -1116,14 +1120,19 @@
         quotedRoutes = quoteCandidateRoutes(foundPaths);
       }
 
-      routes = sortRoutesList(quotedRoutes).slice(0, MAX_ROUTES);
+      const eligibleRoutes = quotedRoutes.filter((route) => {
+        if (requestedDeliveryMode === 'direct') return route.path.length === 2;
+        if (requestedDeliveryMode === 'trusted') return route.path.length === 3 && route.totalFee === 0n;
+        return true;
+      });
+      routes = sortRoutesList(eligibleRoutes).slice(0, MAX_ROUTES);
 
       if (routes.length === 0) {
         throw new Error('No route has enough real capacity for this amount');
       }
 
-      for (const route of routes) {
-        await ensureRouteKeyCoverage(route.path);
+      if (requireEncryption) {
+        for (const route of routes) await ensureRouteKeyCoverage(route.path);
       }
 
       if (routes.length > 0) selectedRouteIndex = 0;
@@ -1224,7 +1233,8 @@
     try {
       if (!activeIsLive) throw new Error('Payments are only available in LIVE mode');
       preflightError = null;
-      await ensureRecipientProfileReady();
+      const requireEncryption = usesConditionalDelivery(deliveryMode);
+      if (requireEncryption) await ensureRecipientProfileReady();
 
       // Timer-driven sends must refresh route quotes to avoid reusing stale capacities.
       if (!manual) {
@@ -1233,7 +1243,7 @@
 
       const route = routes[selectedRouteIndex];
       if (!route) throw new Error('Selected route is no longer available');
-      await ensureRouteKeyCoverage(route.path);
+      if (requireEncryption) await ensureRouteKeyCoverage(route.path);
       const routeTargetEntityId = route.path[route.path.length - 1] || targetEntityId;
 
       const resolvedSignerId = resolvePaymentSignerId(currentEnv);
@@ -1243,11 +1253,11 @@
       const isTrusted = deliveryMode === 'trusted';
       const usesDirectPayment = isDirect || isTrusted;
       const conditionalDeliveryMode = deliveryMode === 'instant' ? 'instant' as const : 'async' as const;
-      const trustedGatewayEntityId = route.path.length >= 3
-        ? route.path[route.path.length - 2]
+      const trustedGatewayEntityId = route.path.length === 3
+        ? route.path[1]
         : undefined;
-      if (isTrusted && !trustedGatewayEntityId) {
-        throw new Error('Trusted delivery requires a route through a recipient gateway');
+      if (isTrusted && (!trustedGatewayEntityId || route.totalFee !== 0n)) {
+        throw new Error('Trusted delivery requires exactly one fee-free gateway');
       }
       if (isDirect && route.path.length !== 2) {
         throw new Error('Direct delivery requires a bilateral route');
@@ -1402,7 +1412,7 @@
     !paymentSubmitted &&
     !preflightError &&
     (deliveryMode !== 'direct' || !activeRoute || activeRoute.path.length === 2) &&
-    (deliveryMode !== 'trusted' || !activeRoute || activeRoute.path.length >= 3) &&
+    (deliveryMode !== 'trusted' || !activeRoute || (activeRoute.path.length === 3 && activeRoute.totalFee === 0n)) &&
     (!isSelfRecipient || hasSelectedRoute());
 
   $: activeRoute = selectedRouteIndex >= 0 && routes[selectedRouteIndex]
@@ -1532,7 +1542,12 @@
         role="radio"
         aria-checked={deliveryMode === mode.value}
         disabled={findingRoutes || sendingPayment}
-        on:click={() => { deliveryMode = mode.value; preflightError = null; }}
+        on:click={() => {
+          deliveryMode = mode.value;
+          preflightError = null;
+          resetQuotedRoutes();
+          requestAutoFindRoutes();
+        }}
       >
         <span class="delivery-mode-name">
           <span class="delivery-mode-radio" aria-hidden="true"></span>
@@ -1544,8 +1559,8 @@
     {/each}
   </div>
 
-  {#if deliveryMode === 'trusted' && activeRoute && activeRoute.path.length < 3}
-    <div class="form-error">Trusted delivery requires a gateway route.</div>
+  {#if deliveryMode === 'trusted' && activeRoute && (activeRoute.path.length !== 3 || activeRoute.totalFee !== 0n)}
+    <div class="form-error">Trusted delivery requires one fee-free gateway.</div>
   {/if}
   {#if deliveryMode === 'direct' && activeRoute && activeRoute.path.length !== 2}
     <div class="form-error">Direct delivery requires a bilateral route.</div>

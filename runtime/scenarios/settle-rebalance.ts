@@ -457,6 +457,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
           tokenId: USDC,
           amount: usd(2_000),
           route: [hub.id, dave.id],
+          deliveryMode: 'async',
           description: 'hub->dave htlc rebalance trigger',
           hashlock: htlcHashlock,
         },

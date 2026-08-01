@@ -21,7 +21,6 @@ export type DurableOutputRetryState = {
   outputHash: string;
   attempts: number;
   retryAt: number;
-  manual?: true;
 };
 
 export const validateDurableOutputRetryState = (
@@ -36,21 +35,17 @@ export const validateDurableOutputRetryState = (
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${code}:${index}`);
     const record = raw as Record<string, unknown>;
     const keys = Object.keys(record).sort();
-    if (keys.join(',') !== 'attempts,outputHash,retryAt' &&
-      keys.join(',') !== 'attempts,manual,outputHash,retryAt') throw new Error(`${code}:${index}:FIELDS`);
+    if (keys.join(',') !== 'attempts,outputHash,retryAt') throw new Error(`${code}:${index}:FIELDS`);
     const outputHash = typeof record['outputHash'] === 'string' ? record['outputHash'] : '';
     if (!OUTPUT_HASH_PATTERN.test(outputHash) || seen.has(outputHash)) {
       throw new Error(`${code}:${index}:OUTPUT_HASH`);
     }
     if (!outputRoutes.has(outputHash)) throw new Error(`${code}:${index}:ORPHAN_OUTPUT`);
     seen.add(outputHash);
-    const manual = record['manual'];
-    if (manual !== undefined && manual !== true) throw new Error(`${code}:${index}:MANUAL`);
     return {
       outputHash,
       attempts: requireSafeNonNegativeInteger(record['attempts'], `${code}:${index}:ATTEMPTS`),
       retryAt: requireSafeNonNegativeInteger(record['retryAt'], `${code}:${index}:RETRY_AT`),
-      ...(manual === true ? { manual: true } : {}),
     };
   });
   for (let index = 1; index < entries.length; index += 1) {
@@ -69,7 +64,6 @@ export const buildDurableOutputRetryState = (
     outputHash: hashOutput(output),
     attempts: meta.attempts,
     retryAt: meta.nextRetryAt,
-    ...(meta.manual ? { manual: true as const } : {}),
   }] : [];
 }).sort((left, right) => left.outputHash.localeCompare(right.outputHash));
 
@@ -84,14 +78,13 @@ export const restoreDurableOutputRetryState = (
     return;
   }
   const outputRoutes = indexOutputs(outputs);
-  const restored = new Map<string, { attempts: number; nextRetryAt: number; manual?: true }>();
+  const restored = new Map<string, { attempts: number; nextRetryAt: number }>();
   for (const entry of entries) {
     const liveRouteKey = outputRoutes.get(entry.outputHash);
     if (!liveRouteKey) throw new Error(`RUNTIME_OUTPUT_RETRY_STATE_ORPHAN:${entry.outputHash}`);
     restored.set(liveRouteKey, {
       attempts: entry.attempts,
       nextRetryAt: entry.retryAt,
-      ...(entry.manual ? { manual: true as const } : {}),
     });
   }
   env.infrastructure.deferredNetworkMeta = restored;

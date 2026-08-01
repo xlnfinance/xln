@@ -213,7 +213,7 @@ const buildSourceRegistrationTxs = (
     {
       accountId,
       tx: {
-        type: 'pull_lock',
+        type: 'cross_pull_lock',
         data: {
           pullId: sourcePull.pullId,
           tokenId: sourcePull.tokenId,
@@ -256,7 +256,7 @@ const buildTargetRegistrationTxs = (
   return [{
     accountId,
     tx: {
-      type: 'pull_lock',
+      type: 'cross_pull_lock',
       data: {
         pullId: targetPull.pullId,
         tokenId: targetPull.tokenId,

@@ -11,8 +11,6 @@ import { proposeAccountFrame } from '../account/consensus/propose';
 
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 
-import { handlePullCancel } from '../account/tx/handlers/pull';
-
 import { computeAccountStateRoot } from '../account/state-root';
 
 import {
@@ -1204,6 +1202,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,
+          crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
           createdHeight: 0,
           createdTimestamp: 1_000,
         },
@@ -1218,11 +1217,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.accountTxs?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack', 'cross_pull_close']);
     expect((result.accountTxs?.[1]?.tx as any).data.binary).toBe('0x');
     expect((result.accountTxs?.[1]?.tx as any).data.proof.fillRatio).toBe(0);
-    expect(
-      result.outputs.some(
-        output => output.entityId === targetUser && output.entityTxs?.some(tx => tx.type === 'cancelPull'),
-      ),
-    ).toBe(false);
+    expect(result.outputs).toEqual([{
+      entityId: sourceHub,
+      signerId: state.config.validators[0]!,
+      entityTxs: [],
+    }]);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('expired');
   });
 
@@ -1912,16 +1911,19 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(result.outputs).toHaveLength(1);
     expect(result.outputs?.[0]?.entityId).toBe(targetUser);
-    expect(result.outputs?.[0]?.entityTxs).toHaveLength(2);
-    expect(result.outputs?.[0]?.entityTxs?.[0]?.type).toBe('resolvePull');
-    expect(result.outputs?.[0]?.entityTxs?.[1]?.type).toBe('prepareDispute');
+    expect(result.outputs?.[0]?.entityTxs).toHaveLength(1);
+    expect(result.outputs?.[0]?.entityTxs?.[0]?.type).toBe('prepareDispute');
     expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).counterpartyEntityId).toBe(targetHub);
-    expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).binary).toBe(binary);
-    expect((result.outputs?.[0]?.entityTxs?.[1]?.data as any).counterpartyEntityId).toBe(targetHub);
-    const starterInitialArguments = (result.outputs?.[0]?.entityTxs?.[1]?.data as any).starterInitialArguments;
+    const starterInitialArguments = (result.outputs?.[0]?.entityTxs?.[0]?.data as any).starterInitialArguments;
     expect(typeof starterInitialArguments).toBe('string');
     expect(starterInitialArguments).toMatch(/^0x[0-9a-f]+$/i);
-    expect(starterInitialArguments.length).toBeGreaterThan(2);
+    const abi = ethers.AbiCoder.defaultAbiCoder();
+    const [wrapped] = abi.decode(['bytes[]'], starterInitialArguments) as unknown as [string[]];
+    const [decoded] = abi.decode(
+      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      wrapped[0]!,
+    ) as unknown as [{ pulls: string[] }];
+    expect(Array.from(decoded.pulls)).toEqual([binary]);
 
     let chainedState = state;
     const nestedOutputs: EntityInput[] = [];

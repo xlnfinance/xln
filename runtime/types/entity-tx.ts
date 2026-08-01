@@ -249,7 +249,7 @@ type EntityTxPayload =
         amount: bigint;
         route: string[]; // Full path from source to target
         description?: string;
-        deliveryMode?: Extract<PaymentDeliveryMode, 'instant' | 'async'>;
+        deliveryMode: Extract<PaymentDeliveryMode, 'instant' | 'async'>;
         startedAtMs?: number;
         /** Raw local-ingress hint only. Stripped before command/frame/WAL. */
         secret?: string;
@@ -328,23 +328,6 @@ type EntityTxPayload =
       };
     }
   | {
-      type: 'resolvePull';
-      data: {
-        counterpartyEntityId: string;
-        pullId: string;
-        binary: string;
-        description?: string;
-      };
-    }
-  | {
-      type: 'cancelPull';
-      data: {
-        counterpartyEntityId: string;
-        pullId: string;
-        description?: string;
-      };
-    }
-  | {
       type: 'crossPullClose';
       data: {
         counterpartyEntityId: string;
@@ -352,14 +335,6 @@ type EntityTxPayload =
         binary: string;
         proof: CrossJurisdictionCloseProof;
         route?: CrossJurisdictionSwapRoute;
-        description?: string;
-      };
-    }
-  | {
-      type: 'pullCancelExpired';
-      data: {
-        counterpartyEntityId: string;
-        pullId: string;
         description?: string;
       };
     }
@@ -460,22 +435,6 @@ type EntityTxPayload =
         cancelRemainder?: boolean;
         priceTicks?: bigint;
         pairId: string;
-      };
-    }
-  | {
-      /**
-       * A committed target Account close advances the matching source sibling
-       * inside the same Runtime. This is a local protocol input, never a
-       * network receipt or an independently authorizable close.
-       */
-      type: 'crossJurisdictionSettled';
-      data: {
-        orderId: string;
-        routeHash: string;
-        /** The exact reveal already committed by the target bilateral Account. */
-        binary: string;
-        /** The source close proof already validated by that target Account. */
-        proof: CrossJurisdictionCloseProof;
       };
     }
   | {

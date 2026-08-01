@@ -3,6 +3,7 @@ import { validateEntityTx } from '../entity/tx-validation';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
+const gatewayId = `0x${'44'.repeat(32)}`;
 const hash = `0x${'33'.repeat(32)}`;
 
 describe('persisted EntityTx decoder', () => {
@@ -31,6 +32,7 @@ describe('persisted EntityTx decoder', () => {
         tokenId: '1',
         amount: 10n,
         route: [entityId, counterpartyId],
+        deliveryMode: 'direct',
       },
     }, 'WAL_DIRECT_PAYMENT')).toThrow('WAL_DIRECT_PAYMENT_DATA_TOKENID');
 
@@ -46,6 +48,17 @@ describe('persisted EntityTx decoder', () => {
     }, 'WAL_DIRECT_PAYMENT')).toThrow('WAL_DIRECT_PAYMENT_DATA_DELIVERYMODE_VALUE');
 
     expect(() => validateEntityTx({
+      type: 'directPayment',
+      data: {
+        targetEntityId: counterpartyId,
+        tokenId: 1,
+        amount: 10n,
+        route: [entityId, gatewayId, counterpartyId],
+        deliveryMode: 'trusted',
+      },
+    }, 'WAL_DIRECT_PAYMENT')).toThrow('WAL_DIRECT_PAYMENT_DATA_TRUSTED_GATEWAY_REQUIRED');
+
+    expect(() => validateEntityTx({
       type: 'mintReserves',
       data: { tokenId: 1, amount: 10n, ignored: true },
     }, 'WAL_MINT')).toThrow('WAL_MINT_DATA_FIELDS');
@@ -58,8 +71,9 @@ describe('persisted EntityTx decoder', () => {
         targetEntityId: counterpartyId,
         tokenId: 1,
         amount: 10n,
-        route: [entityId, counterpartyId],
+        route: [entityId, gatewayId, counterpartyId],
         deliveryMode: 'trusted',
+        trustedGatewayEntityId: gatewayId,
       },
     }, 'WAL_DIRECT_PAYMENT').type).toBe('directPayment');
 

@@ -288,6 +288,9 @@ describe('dispute argument snapshots', () => {
       revealedUntilTimestamp: 100,
       fullHash: `0x${'cd'.repeat(32)}`,
       partialRoot: `0x${'ef'.repeat(32)}`,
+      crossJurisdiction: {
+        orderId: 'order', routeHash: `0x${'12'.repeat(32)}`, leg: 'source', status: 'resting',
+      },
       createdHeight: 1,
       createdTimestamp: 1,
     });
@@ -303,9 +306,15 @@ describe('dispute argument snapshots', () => {
         inboundEntity: 'right',
       }]]),
     } as unknown as EntityState;
+    const closeProof = {
+      orderId: 'order', routeHash: `0x${'12'.repeat(32)}`,
+      sourcePullId: 'pull', targetPullId: 'target', fillRatio: 1,
+      cumulativeSourceAmount: 1n, cumulativeTargetAmount: 1n,
+      binaryHash: `0x${'34'.repeat(32)}`, closeMode: 'partial_cancel_remainder' as const,
+    };
     account.mempool = [
-      { type: 'pull_resolve', data: { pullId: 'pull', binary: '0x1234' } } as AccountTx,
-      { type: 'pull_resolve', data: { pullId: 'pull', binary: '0x5678' } } as AccountTx,
+      { type: 'cross_pull_close', data: { pullId: 'pull', binary: '0x1234', proof: closeProof } },
+      { type: 'cross_pull_close', data: { pullId: 'pull', binary: '0x5678', proof: closeProof } },
     ];
 
     const args = buildDisputeArgumentsForSnapshot(account, state, 'right', proof.proofBodyHash, {

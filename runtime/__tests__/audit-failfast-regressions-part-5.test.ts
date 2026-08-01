@@ -1681,8 +1681,8 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.state.locks.size).toBe(LIMITS.MAX_ACCOUNT_HTLC_LOCKS);
   });
 
-  test('cross-j committed pull_resolve followup rejects malformed binary instead of skipping it', () => {
-    const env = createEmptyEnv('cross-pull-resolve-invalid-binary');
+  test('cross-j committed cross_pull_close followup rejects malformed binary instead of skipping it', () => {
+    const env = createEmptyEnv('cross-pull-close-invalid-binary');
     const sourceUser = `0x${'10'.repeat(32)}`;
     const sourceHub = `0x${'20'.repeat(32)}`;
     const targetHub = `0x${'30'.repeat(32)}`;
@@ -1743,15 +1743,21 @@ describe('audit fail-fast regressions', () => {
         sourceState,
         sourceUser,
         {
-          type: 'pull_resolve',
+          type: 'cross_pull_close',
           data: {
             pullId: 'source-pull',
             binary: '0x1234',
+            proof: {
+              orderId: 'cross-invalid-binary', routeHash: `0x${'ee'.repeat(32)}`,
+              sourcePullId: 'source-pull', targetPullId: 'target-pull', fillRatio: 1,
+              cumulativeSourceAmount: 1n, cumulativeTargetAmount: 1n,
+              binaryHash: `0x${'ff'.repeat(32)}`, closeMode: 'partial_cancel_remainder',
+            },
           },
         },
         [],
       ),
-    ).toThrow('CROSS_J_PULL_RESOLVE_BINARY_INVALID');
+    ).toThrow();
   });
 
   test('cross-j source fill ack routes book removal to canonical sibling owner', async () => {

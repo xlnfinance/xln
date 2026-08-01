@@ -720,7 +720,7 @@ requestCrossJurisdictionSwap
   -> admitCrossJurisdictionBookOrder at canonical book owner
   -> orderbook-matching-cross records a firm fill
   -> cross_swap_fill_ack mirrors the fill into the source account
-  -> pull/swap resolve claims hashladder-backed ratios on both legs
+  -> paired cross_pull_close claims the hashladder-backed ratio on both legs
   -> clear/sweep closes terminal book and route state
   -> salvage/dispute path handles non-cooperative completion
 \`\`\`
@@ -1043,7 +1043,7 @@ requestCrossJurisdictionSwap
   -> remote book order
   -> book owner matching
   -> cross_swap_fill_ack / fill notice
-  -> pull/swap resolve on both sides
+  -> paired cross_pull_close on both sides
   -> clear/sweep/salvage if something breaks
   -> dispute path if salvage cannot finish off-chain
 \`\`\`

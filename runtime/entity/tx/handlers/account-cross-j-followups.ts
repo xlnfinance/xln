@@ -4,7 +4,6 @@ import type { EntityCandidateEffect, EntityInput, EntityState } from '../../type
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import {
-  buildCrossJurisdictionCloseProof,
   cloneCrossJurisdictionRoute,
   CROSS_J_MAX_FILL_RATIO,
   applyCrossJurisdictionFillProgress,
@@ -15,7 +14,6 @@ import {
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionCloseProofProgress,
-  withCrossJurisdictionClaimProgress,
 } from '../../../extensions/cross-j/index';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
 import {
@@ -77,109 +75,35 @@ const assertSettledPullReplay = (
   return true;
 };
 
-const assertPullResolveAllowed = (
+const assertCrossPullCloseAllowed = (
   route: CrossJurisdictionSwapRoute,
   fillRatio: number,
-  leg: 'source' | 'target_user' | 'target_hub',
+  leg: 'source' | 'target',
 ): void => {
   if (fillRatio <= 0) return;
   if (isCrossJurisdictionTerminalStatus(route.status)) {
-    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} status=${route.status}`);
+    throw new Error(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} status=${route.status}`);
   }
   if (leg === 'source' && route.status !== 'clearing' && route.status !== 'clear_requested') {
-    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=source status=${route.status}`);
-  }
-  if (leg === 'target_user' && route.status !== 'clearing' && route.status !== 'source_claimed') {
-    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
+    throw new Error(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=source status=${route.status}`);
   }
   if (
-    leg === 'target_hub' &&
+    leg === 'target' &&
     route.status !== 'resting' &&
     route.status !== 'partially_filled' &&
     route.status !== 'clear_requested' &&
     route.status !== 'clearing' &&
     route.status !== 'source_claimed'
   ) {
-    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=target_hub status=${route.status}`);
+    throw new Error(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
   }
   const committedRatio = committedCrossJurisdictionRatio(route);
   if (committedRatio > 0 && fillRatio > committedRatio) {
     throw new Error(
-      `CROSS_J_PULL_RESOLVE_OVER_COMMITTED: route=${route.orderId} ` +
+      `CROSS_J_PULL_CLOSE_OVER_COMMITTED: route=${route.orderId} ` +
       `ratio=${fillRatio} committed=${committedRatio}`,
     );
   }
-};
-
-const backfillCommittedFillFromResolvedPull = (
-  route: CrossJurisdictionSwapRoute,
-  fillRatio: number,
-  updatedAt: number,
-): void => {
-  if (committedCrossJurisdictionRatio(route) > 0) return;
-  // Network delivery may commit the bilateral pull_resolve before the route's
-  // cross_swap_fill_ack mirror reaches this runtime. The pull_resolve is itself
-  // a committed account frame carrying a valid hash-ladder reveal, so we can
-  // backfill the committed fill fields while preserving the current lifecycle
-  // status chosen by the route FSM.
-  const { status: _status, ...fillFields } = applyCrossJurisdictionFillProgress(
-    route,
-    { cumulativeFillRatio: fillRatio },
-    updatedAt,
-    'CROSS_J_PULL_RESOLVE_NO_COMMITTED_FILL',
-  );
-  Object.assign(route, fillFields);
-};
-
-const settleTargetLegAndNotifySourceSibling = (
-  newState: EntityState,
-  route: CrossJurisdictionSwapRoute,
-  fillRatio: number,
-  binary: string,
-  closeProof: ReturnType<typeof buildCrossJurisdictionCloseProof> | undefined,
-  outputs: EntityInput[],
-  currentEntityId: string,
-): void => {
-  const targetUserId = normalizeEntityRef(route.target.counterpartyEntityId);
-  const targetHubId = normalizeEntityRef(route.target.entityId);
-  const sourceSiblingId = currentEntityId === targetUserId
-    ? route.source.entityId
-    : currentEntityId === targetHubId
-      ? route.source.counterpartyEntityId
-      : null;
-  if (!sourceSiblingId) {
-    throw new Error(`CROSS_J_TARGET_SETTLE_PARTICIPANT_INVALID: route=${route.orderId} entity=${newState.entityId}`);
-  }
-  if (!route.routeHash) {
-    throw new Error(`CROSS_J_TARGET_SETTLE_ROUTE_HASH_MISSING: route=${route.orderId}`);
-  }
-
-  const committed = getCrossJurisdictionCommittedFillAmounts(route);
-  if (committed.fillRatio !== fillRatio) {
-    throw new Error(
-      `CROSS_J_TARGET_SETTLE_RATIO_MISMATCH: route=${route.orderId} ` +
-        `resolved=${fillRatio} committed=${committed.fillRatio}`,
-    );
-  }
-  const proof = closeProof ?? buildCrossJurisdictionCloseProof(route, binary);
-  outputs.push(buildCrossJurisdictionEntityOutput(
-    sourceSiblingId,
-    requireRouteSignerHint(route, sourceSiblingId),
-    [{
-      type: 'crossJurisdictionSettled',
-      data: {
-        orderId: route.orderId,
-        routeHash: route.routeHash,
-        binary,
-        proof,
-      },
-    }],
-  ));
-  crossJFollowupLog.debug('pull.target_settled.notify_source', {
-    route: shortOrder(route.orderId, 12),
-    source: shortId(sourceSiblingId),
-    ratio: fillRatio,
-  });
 };
 
 const transitionTargetLegSettled = (
@@ -339,7 +263,7 @@ const applyOrRouteCrossJurisdictionBookProgress = (
 };
 
 const committedPullMatchesRoute = (
-  accountTx: Extract<AccountTx, { type: 'pull_lock' }>,
+  accountTx: Extract<AccountTx, { type: 'cross_pull_lock' }>,
   route: CrossJurisdictionSwapRoute,
   leg: 'source' | 'target',
 ): boolean => {
@@ -429,7 +353,7 @@ const queueBookAdmissionOnCommittedPull = (
   env: EntityRuntimeContext,
   newState: EntityState,
   counterpartyId: string,
-  accountTx: Extract<AccountTx, { type: 'pull_lock' }>,
+  accountTx: Extract<AccountTx, { type: 'cross_pull_lock' }>,
   outputs: EntityInput[],
   committedAt: number,
   swapOffersCreated: SwapOfferEvent[],
@@ -495,140 +419,6 @@ const queueBookAdmissionOnCommittedPull = (
   return handled;
 };
 
-const applySourcePullResolve = (
-  env: EntityRuntimeContext,
-  state: EntityState,
-  route: CrossJurisdictionSwapRoute,
-  accountTx: Extract<AccountTx, { type: 'pull_resolve' }>,
-  fillRatio: number,
-  currentEntityId: string,
-  counterpartyEntityId: string,
-  outputs: EntityInput[],
-  storageChanges: RuntimeOverlayRecord[],
-): boolean => {
-  const sourceUserId = normalizeEntityRef(route.source.entityId);
-  const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
-  const isHub =
-    route.sourcePull?.pullId === accountTx.data.pullId &&
-    route.targetPull?.pullId !== undefined &&
-    currentEntityId === sourceHubId &&
-    counterpartyEntityId === sourceUserId;
-  const isUser =
-    route.sourcePull?.pullId === accountTx.data.pullId &&
-    currentEntityId === sourceUserId &&
-    counterpartyEntityId === sourceHubId;
-  if (!isHub && !isUser) return false;
-  if (assertSettledPullReplay(route, fillRatio, accountTx.data.binary)) {
-    if (isHub) {
-      removeOrRouteCrossJurisdictionBookOrder(env, state, route, outputs, 'settled', storageChanges);
-    }
-    return true;
-  }
-  assertPullResolveAllowed(route, fillRatio, 'source');
-  backfillCommittedFillFromResolvedPull(route, fillRatio, state.timestamp);
-  Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, state.timestamp));
-  route.sourceCloseProof = buildCrossJurisdictionCloseProof(route, accountTx.data.binary);
-  transitionCrossJurisdictionRouteStatus(route, 'source_claimed', state.timestamp);
-  // Both participants project the Account frame, but only the Hub owns the
-  // sibling book and may emit its removal.
-  if (isHub) {
-    removeOrRouteCrossJurisdictionBookOrder(env, state, route, outputs, 'source_claimed', storageChanges);
-  }
-  return true;
-};
-
-const applyTargetPullResolve = (
-  state: EntityState,
-  route: CrossJurisdictionSwapRoute,
-  accountTx: Extract<AccountTx, { type: 'pull_resolve' }>,
-  fillRatio: number,
-  currentEntityId: string,
-  counterpartyEntityId: string,
-  outputs: EntityInput[],
-): boolean => {
-  const targetHubId = normalizeEntityRef(route.target.entityId);
-  const targetUserId = normalizeEntityRef(route.target.counterpartyEntityId);
-  const isUser =
-    route.targetPull?.pullId === accountTx.data.pullId &&
-    currentEntityId === targetUserId &&
-    counterpartyEntityId === targetHubId;
-  const isHub =
-    route.targetPull?.pullId === accountTx.data.pullId &&
-    currentEntityId === targetHubId &&
-    counterpartyEntityId === targetUserId;
-  if (!isUser && !isHub) return false;
-  if (assertSettledPullReplay(route, fillRatio, accountTx.data.binary)) return true;
-  assertPullResolveAllowed(route, fillRatio, isHub ? 'target_hub' : 'target_user');
-  backfillCommittedFillFromResolvedPull(route, fillRatio, state.timestamp);
-  Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, state.timestamp));
-  transitionTargetLegSettled(route, state.timestamp);
-  settleTargetLegAndNotifySourceSibling(
-    state,
-    route,
-    fillRatio,
-    accountTx.data.binary,
-    undefined,
-    outputs,
-    currentEntityId,
-  );
-  crossJFollowupLog.debug('pull.resolve.settled', {
-    route: shortOrder(route.orderId, 12),
-    ratio: fillRatio,
-  });
-  return true;
-};
-
-const applyPullResolveFollowup = (
-  env: EntityRuntimeContext,
-  newState: EntityState,
-  counterpartyId: string,
-  accountTx: Extract<AccountTx, { type: 'pull_resolve' }>,
-  outputs: EntityInput[],
-  storageChanges: RuntimeOverlayRecord[],
-): boolean => {
-  if (!newState.crossJurisdictionSwaps?.size) return true;
-  let fillRatio = 0;
-  try {
-    fillRatio = decodeHashLadderBinary(accountTx.data.binary).fillRatio;
-  } catch (error) {
-    // Account consensus should never commit an invalid pull_resolve binary. If it
-    // happens here, treating it as ratio=0 would silently skip a money-moving
-    // cross-j claim followup and leave source/target legs inconsistent.
-    throw new Error(
-      `CROSS_J_PULL_RESOLVE_BINARY_INVALID: pull=${accountTx.data.pullId} ` +
-        `${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  if (fillRatio <= 0) return true;
-
-  const currentEntityId = normalizeEntityRef(newState.entityId);
-  const counterpartyEntityId = normalizeEntityRef(counterpartyId);
-
-  for (const route of newState.crossJurisdictionSwaps.values()) {
-    if (applySourcePullResolve(
-      env,
-      newState,
-      route,
-      accountTx,
-      fillRatio,
-      currentEntityId,
-      counterpartyEntityId,
-      outputs,
-      storageChanges,
-    )) continue;
-    applyTargetPullResolve(
-      newState,
-      route,
-      accountTx,
-      fillRatio,
-      currentEntityId,
-      counterpartyEntityId,
-      outputs,
-    );
-  }
-  return true;
-};
-
 const applyCrossPullCloseFollowup = (
   env: EntityRuntimeContext,
   newState: EntityState,
@@ -677,7 +467,7 @@ const applyCrossPullCloseFollowup = (
         }
         continue;
       }
-      assertPullResolveAllowed(route, fillRatio, 'source');
+      assertCrossPullCloseAllowed(route, fillRatio, 'source');
       Object.assign(
         route,
         withCrossJurisdictionCloseProofProgress(route, accountTx.data.proof, newState.timestamp),
@@ -709,7 +499,7 @@ const applyCrossPullCloseFollowup = (
       // Account consensus already proved that the target Hub authored this
       // cross_pull_close. currentEntityId only identifies which side is
       // projecting the committed bilateral frame; it never changes authorship.
-      assertPullResolveAllowed(route, fillRatio, 'target_hub');
+      assertCrossPullCloseAllowed(route, fillRatio, 'target');
       Object.assign(
         route,
         withCrossJurisdictionCloseProofProgress(route, accountTx.data.proof, newState.timestamp),
@@ -885,7 +675,7 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
   storageChanges: RuntimeOverlayRecord[],
   candidateEffects: EntityCandidateEffect[],
 ): boolean {
-  if (accountTx.type === 'pull_lock') {
+  if (accountTx.type === 'cross_pull_lock') {
     return queueBookAdmissionOnCommittedPull(
       env,
       newState,
@@ -896,9 +686,6 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
       swapOffersCreated,
       storageChanges,
     );
-  }
-  if (accountTx.type === 'pull_resolve') {
-    return applyPullResolveFollowup(env, newState, counterpartyId, accountTx, outputs, storageChanges);
   }
   if (accountTx.type === 'cross_pull_close') {
     return applyCrossPullCloseFollowup(env, newState, counterpartyId, accountTx, outputs, storageChanges);

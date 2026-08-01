@@ -47,17 +47,15 @@ const cloneCrossJurisdictionState = (
   );
   if (source.state.pulls instanceof Map) {
     target.state.pulls = new Map(
-      Array.from(source.state.pulls.entries()).map(([id, pull]) => [
-        id,
-        pull.crossJurisdiction
-          ? {
-              ...pull,
-              crossJurisdiction: cloneCrossJurisdictionPullBinding(
-                pull.crossJurisdiction,
-              ),
-            }
-          : { ...pull },
-      ]),
+      Array.from(source.state.pulls.entries()).map(([id, pull]) => {
+        if (!pull.crossJurisdiction) throw new Error(`CROSS_J_PULL_BINDING_MISSING:${id}`);
+        return [id, {
+          ...pull,
+          crossJurisdiction: cloneCrossJurisdictionPullBinding(
+            pull.crossJurisdiction,
+          ),
+        }];
+      }),
     );
   } else {
     // Absence is consensus-significant. Normalizing it to an empty Map changes

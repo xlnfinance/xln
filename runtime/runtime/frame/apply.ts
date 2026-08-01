@@ -21,6 +21,7 @@ import {
   ACCOUNT_CAUSAL_TRACE,
   type RuntimeProcessProfile,
 } from './process-profile';
+import { assertCrossJLocalCohorts } from '../cross-j-topology';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -122,6 +123,9 @@ export const applyPreparedRuntimeFrame = async (
       deps.setApplyAllowed(env, true);
       const reducerStartedAt = profile.enabled ? getPerfMs() : 0;
       const result = await deps.applyRuntimeInput(env, input);
+      // A Runtime frame may create/import both siblings together, never leave
+      // a live half-cohort that would only be discovered after restart.
+      assertCrossJLocalCohorts(env);
       if (profile.enabled) profile.metrics.reducerMs = getPerfMs() - reducerStartedAt;
       profile.mark('apply');
       if (!quietLogs && (result.entityOutbox.length > 0 || result.jOutbox.length > 0)) {

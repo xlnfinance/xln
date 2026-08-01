@@ -300,6 +300,7 @@ export async function testHtlcRoute(
       route: [from.id, ...route.map(e => e.id), to.id],
       tokenId,
       amount,
+      deliveryMode: 'async' as const,
       description,
       ...(opts?.hashlock ? { hashlock: opts.hashlock } : {}),
     },

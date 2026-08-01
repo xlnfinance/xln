@@ -8,7 +8,6 @@ import {
   getNextNetworkRetryTimestamp,
   getReliableOutputIdentity,
   hasReadyPendingNetworkOutputs,
-  markPendingCrossJAdmissionOutputsReady,
   markRestoredReliableOutputsDue,
   rescheduleDeferredOutputs,
   sendEntityInputWithRouting,
@@ -170,7 +169,7 @@ const crossJProposalOutput = (
   const { signedAmount, ...pullProof } = pull;
   const accountTxs: AccountTx[] = [
     {
-      type: 'pull_lock',
+      type: 'cross_pull_lock',
       data: {
         ...pullProof,
         amount: signedAmount,
@@ -350,6 +349,7 @@ describe('ordered reliable output lanes', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = sourceRuntimeId;
     env.dbNamespace = sourceRuntimeId;
+    env.scenarioMode = true;
     env.state.height = 1;
     env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
@@ -383,7 +383,7 @@ describe('ordered reliable output lanes', () => {
       expect(lostEnvelopes[0]?.entityInputs).toHaveLength(2);
       env.pendingNetworkOutputs = rescheduleDeferredOutputs(env, [], failed, [], lostDeps);
       expect(env.pendingNetworkOutputs).toHaveLength(2);
-      expect([...env.infrastructure!.deferredNetworkMeta!.values()].every(meta => meta.manual === true)).toBe(true);
+      expect([...env.infrastructure!.deferredNetworkMeta!.values()].every(meta => meta.nextRetryAt === 2_000)).toBe(true);
 
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, env.pendingNetworkOutputs);
       await closeRuntimeDb(env);
@@ -391,19 +391,18 @@ describe('ordered reliable output lanes', () => {
 
       const restored = await loadEnvFromDB(sourceRuntimeId, seed);
       if (!restored) throw new Error('TEST_CROSS_J_RESTART_DID_NOT_RESTORE');
+      restored.scenarioMode = true;
       restored.state.timestamp = 1_000_000;
       const deliveredEnvelopes: RuntimeEntityInputsEnvelope[] = [];
       const restoredDeps = routingDeps(() => ({
         enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
           deliveredEnvelopes.push(envelope);
-          return deliveryAccepted('TEST_MANUAL_CROSS_J_RETRY_DELIVERED');
+          return deliveryAccepted('TEST_AUTOMATIC_CROSS_J_RETRY_DELIVERED');
         },
       }));
       try {
         expect(restored.pendingNetworkOutputs).toHaveLength(2);
-        expect(hasReadyPendingNetworkOutputs(restored, restoredDeps, restored.state.timestamp)).toBe(false);
-        expect(deliveredEnvelopes).toHaveLength(0);
-        expect(markPendingCrossJAdmissionOutputsReady(restored, restoredDeps, targetRuntimeId)).toBe(1);
+        expect(hasReadyPendingNetworkOutputs(restored, restoredDeps, restored.state.timestamp)).toBe(true);
 
         const retryWindow = splitPendingOutputsByRetryWindow(
           restored,
@@ -431,22 +430,28 @@ describe('ordered reliable output lanes', () => {
     }
   });
 
-  test('atomic cross-j envelope waits for an explicit retry trigger', () => {
+  test('atomic cross-j envelope retries automatically as one bounded cohort', () => {
     const frame = { height: 77, timestamp: 1_000 };
     const pair = { phase: 'ack' as const, pairKey: 'atomic-ack-pair-77' };
     const sourceAck = { ...accountAckOutput(3), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
     const targetAck = { ...accountAckOutput(4), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
     const env = {
+      runtimeId: runtimeId('90'),
       scenarioMode: true,
       state: {
-  timestamp: 1_000,
+        height: 77,
+        timestamp: 1_000,
       },
       infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
-    const deps = {
-      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
-    } as RuntimeOutputRoutingDeps;
+    const delivered: RuntimeEntityInputsEnvelope[] = [];
+    const deps = routingDeps(() => ({
+      enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+        delivered.push(envelope);
+        return deliveryAccepted('TEST_ATOMIC_RETRY_DELIVERED');
+      },
+    }));
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
       env,
@@ -455,14 +460,20 @@ describe('ordered reliable output lanes', () => {
       [],
       deps,
     );
-    expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
+    expect(getNextNetworkRetryTimestamp(env, deps)).toBe(2_000);
+    env.state.timestamp = 2_000;
+    const ready = splitPendingOutputsByRetryWindow(env, env.pendingNetworkOutputs ?? [], deps);
+    expect(ready.ready).toHaveLength(2);
+    dispatchEntityOutputs(
+      env,
+      ready.ready.map(output => ({ output, targetRuntimeId })),
+      deps,
+    );
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.entityInputs).toHaveLength(2);
     markRestoredReliableOutputsDue(env);
-    expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
-    env.state.timestamp = 1_000_000;
-    expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(false);
-    expect(markPendingCrossJAdmissionOutputsReady(env, deps, targetRuntimeId)).toBe(1);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBe(0);
-    expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(true);
+    expect(hasReadyPendingNetworkOutputs(env, deps, env.state.timestamp)).toBe(true);
   });
 
   test('pairs sibling cross-j proposals certified in adjacent Runtime frames into one envelope', () => {
@@ -498,7 +509,7 @@ describe('ordered reliable output lanes', () => {
     expect(envelopes[0]?.atomicCrossJurisdictionPair?.phase).toBe('proposal');
   });
 
-  test('ordinary cross-j proposal legs also wait for an explicit retry trigger', () => {
+  test('ordinary cross-j proposal legs also retry automatically as one cohort', () => {
     const frame = { height: 77, timestamp: 1_000 };
     const pair = { phase: 'proposal' as const, pairKey: 'atomic-proposal-pair-77' };
     const sourceProposal = {
@@ -534,12 +545,27 @@ describe('ordered reliable output lanes', () => {
     );
 
     expect(env.infrastructure?.deferredNetworkMeta?.size).toBe(2);
-    expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
-    env.state.timestamp = 1_000_000;
-    expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(false);
-    expect(markPendingCrossJAdmissionOutputsReady(env, deps, targetRuntimeId)).toBe(1);
-    expect(getNextNetworkRetryTimestamp(env, deps)).toBe(1_000_000);
-    expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(true);
+    expect(getNextNetworkRetryTimestamp(env, deps)).toBe(2_000);
+    expect(hasReadyPendingNetworkOutputs(env, deps, 1_999)).toBe(false);
+    let due = 2_000;
+    for (let attempt = 2; attempt <= 6; attempt += 1) {
+      env.state.timestamp = due;
+      env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+        env,
+        env.pendingNetworkOutputs ?? [],
+        env.pendingNetworkOutputs ?? [],
+        [],
+        deps,
+      );
+      const nextDue = getNextNetworkRetryTimestamp(env, deps);
+      expect(nextDue).not.toBeNull();
+      expect(nextDue! - due).toBeLessThanOrEqual(4_000);
+      expect([...env.infrastructure!.deferredNetworkMeta!.values()].every(meta => meta.attempts === attempt))
+        .toBe(true);
+      due = nextDue!;
+    }
+    env.state.timestamp = due;
+    expect(hasReadyPendingNetworkOutputs(env, deps, due)).toBe(true);
   });
 
   test('one cohort keeps both cross-j Account ACKs atomic', () => {
@@ -569,17 +595,15 @@ describe('ordered reliable output lanes', () => {
 
     expect(env.pendingNetworkOutputs).toHaveLength(2);
     expect(env.infrastructure?.deferredNetworkMeta?.size).toBe(2);
-    expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
+    expect(getNextNetworkRetryTimestamp(env, deps)).toBe(2_000);
     expect([...env.infrastructure!.deferredNetworkMeta!.values()]).toEqual([
       {
         attempts: 1,
-        nextRetryAt: 1_000,
-        manual: true,
+        nextRetryAt: 2_000,
       },
       {
         attempts: 1,
-        nextRetryAt: 1_000,
-        manual: true,
+        nextRetryAt: 2_000,
       },
     ]);
   });

@@ -167,8 +167,8 @@ const normalizeHashlock = (value: unknown): string => {
   return hashlock;
 };
 
-const RAW_PAYMENT_REQUIRED_FIELDS = ['amount', 'route', 'targetEntityId', 'tokenId'] as const;
-const RAW_PAYMENT_OPTIONAL_FIELDS = ['deliveryMode', 'description', 'hashlock', 'startedAtMs'] as const;
+const RAW_PAYMENT_REQUIRED_FIELDS = ['amount', 'deliveryMode', 'route', 'targetEntityId', 'tokenId'] as const;
+const RAW_PAYMENT_OPTIONAL_FIELDS = ['description', 'hashlock', 'startedAtMs'] as const;
 const PREPARED_PAYMENT_FIELDS = [
   'amount',
   'deliveryMode',
@@ -601,7 +601,7 @@ export const prepareHtlcPaymentEntityTx = async (
   const targetEntityId = normalizeEntityId(tx.data.targetEntityId, 'HTLC_PAYMENT_TARGET_INVALID');
   const recipientAmount = parsePositiveBigInt(tx.data.amount, 'HTLC_PAYMENT_AMOUNT_INVALID');
   if (!Number.isSafeInteger(tx.data.tokenId) || tx.data.tokenId < 0) throw new Error('HTLC_PAYMENT_TOKEN_INVALID');
-  const deliveryMode = tx.data.deliveryMode ?? 'async';
+  const deliveryMode = tx.data.deliveryMode;
   if (deliveryMode !== 'instant' && deliveryMode !== 'async') throw new Error('HTLC_PAYMENT_DELIVERY_MODE_INVALID');
   const injectedSecret = getDeterministicHtlcTestSecret(tx);
   if (!injectedSecret && tx.data.hashlock !== undefined) {
@@ -723,7 +723,7 @@ const validatePreparedPaymentBasics = (state: EntityState, tx: HtlcPaymentTx): P
   const route = normalizeRoute(tx.data.route, state.entityId.toLowerCase(), targetEntityId);
   const recipientAmount = parsePositiveBigInt(tx.data.amount, 'HTLC_PAYMENT_AMOUNT_INVALID');
   if (!Number.isSafeInteger(tx.data.tokenId) || tx.data.tokenId < 0) throw new Error('HTLC_PAYMENT_TOKEN_INVALID');
-  const deliveryMode = tx.data.deliveryMode ?? 'async';
+  const deliveryMode = tx.data.deliveryMode;
   if (deliveryMode !== 'instant' && deliveryMode !== 'async') throw new Error('HTLC_PAYMENT_DELIVERY_MODE_INVALID');
   const description = normalizeDescription(tx.data.description);
   if (tx.data.description !== description) throw new Error('HTLC_PAYMENT_DESCRIPTION_NON_CANONICAL');

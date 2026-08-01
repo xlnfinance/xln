@@ -570,7 +570,6 @@ export interface RuntimeInfrastructure {
   deferredNetworkMeta?: Map<string, {
     attempts: number;
     nextRetryAt: number;
-    manual?: true;
   }>;
   /** Durable receiver active exact frontier, keyed by authenticated source runtime + lane. */
   reliableIngressReceiptLedger?: Map<string, ReliableDeliveryReceipt>;
@@ -586,6 +585,7 @@ export interface RuntimeInfrastructure {
   reliableIngressCommitting?: Set<string>;
   verifiedProfileRoutes?: Map<string, {
     runtimeId: string;
+    runtimeSignerId: string;
     runtimeEncPubKey: string;
     lastUpdated: number;
   }>;

@@ -96,7 +96,9 @@ source Entity
 - Cross-jurisdiction swaps use `prepareCrossJurisdictionSwap`, followed by
   proposer materialization and one `registerCrossJurisdictionSwap` at each
   hub. Those registrations create the exact source and target Account
-  `pull_lock` legs together; there is no public raw pull-lock Entity command.
+  `cross_pull_lock` legs together. The exact paired Runtime cohort is the only
+  opening path, and `cross_pull_close` is the only terminal path; there is no
+  generic pull product or public raw pull Entity command.
 - Bilateral credit uses `extendCredit`, which creates the Account `set_credit_limit`.
 - Lending positions use exactly four public Entity operations:
   `lendingOffer → lending_fund`, `lendingBorrow → lending_borrow_request`,

@@ -13,21 +13,9 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
     required: { counterpartyEntityId: 'string', lockId: 'string', secret: 'string' },
     optional: { crossJurisdictionRouteId: 'string', description: 'string' },
   },
-  resolvePull: {
-    required: { counterpartyEntityId: 'string', pullId: 'string', binary: 'string' },
-    optional: { description: 'string' },
-  },
-  cancelPull: {
-    required: { counterpartyEntityId: 'string', pullId: 'string' },
-    optional: { description: 'string' },
-  },
   crossPullClose: {
     required: { counterpartyEntityId: 'string', pullId: 'string', binary: 'string', proof: 'record' },
     optional: { route: 'record', description: 'string' },
-  },
-  pullCancelExpired: {
-    required: { counterpartyEntityId: 'string', pullId: 'string' },
-    optional: { description: 'string' },
   },
   requestCollateral: {
     required: {

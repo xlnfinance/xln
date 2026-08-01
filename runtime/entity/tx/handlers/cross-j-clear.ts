@@ -19,7 +19,7 @@ import type { RuntimeOverlayRecord } from '../../../types/account';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import {
   accountHasCrossSwapAckQueued,
-  accountHasPullResolveQueued,
+  accountHasCrossPullCloseQueued,
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
 } from '../cross-jurisdiction-helpers';
@@ -213,8 +213,8 @@ const requestFilledRouteReveal = (
     addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull already closed`);
     return { newState, outputs, accountTxs };
   }
-  if (accountHasPullResolveQueued(account, route.sourcePull!.pullId)) {
-    addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull resolve already queued`);
+  if (accountHasCrossPullCloseQueued(account, route.sourcePull!.pullId)) {
+    addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull close already queued`);
     return { newState, outputs, accountTxs };
   }
 
@@ -330,7 +330,7 @@ const validateClearMaterialization = (
   if (account.state.swapOffers?.has(orderId)) {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_OFFER_STILL_OPEN:${orderId}`);
   }
-  if (accountHasPullResolveQueued(account, route.sourcePull.pullId)) {
+  if (accountHasCrossPullCloseQueued(account, route.sourcePull.pullId)) {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED:${orderId}`);
   }
   return { route, accountId, fillRatio, proof: expectedProof };
@@ -360,7 +360,8 @@ const buildSourceCloseAccountTxs = (
       data: {
         tokenId: Number(route.source.tokenId),
         amount: sourceSavingsAmount,
-        route: [],
+        route: [route.source.entityId],
+        deliveryMode: 'direct',
         description: `cross-j-source-savings:${route.orderId}`,
         fromEntityId: route.source.counterpartyEntityId,
         toEntityId: route.source.entityId,

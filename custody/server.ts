@@ -467,7 +467,7 @@ const submitWithdrawal = async (withdrawal: WithdrawalRecord) => await withPayme
     amount: withdrawal.requestedAmountMinor.toString(),
     description: withdrawal.description,
     route,
-    mode: 'htlc',
+    mode: 'async',
     commandId: withdrawal.commandId,
     ...(withdrawal.commandSequence !== null ? { commandSequence: withdrawal.commandSequence } : {}),
     onCommandPrepared: commandSequence => {

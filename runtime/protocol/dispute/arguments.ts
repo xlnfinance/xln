@@ -77,10 +77,10 @@ const buildPendingSwapFillRatios = (
   return ratios;
 };
 
-const collectPullResolves = (account: AccountReplica): Map<string, string> => {
+const collectPullCloseEvidence = (account: AccountReplica): Map<string, string> => {
   const resolves = new Map<string, string>();
   for (const tx of [...(account.pendingFrame?.accountTxs ?? []), ...(account.mempool ?? [])]) {
-    if (tx.type !== 'pull_resolve') continue;
+    if (tx.type !== 'cross_pull_close') continue;
     if (resolves.has(tx.data.pullId)) {
       resolves.set(tx.data.pullId, '0x');
       continue;
@@ -193,7 +193,7 @@ export function buildDisputeArgumentsFromSnapshot(
   // empty/no-op so the sender cannot block finalization of unrelated claims.
   const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'build');
   const fillRatios = buildPendingSwapFillRatios(account, snapshot);
-  const resolves = collectPullResolves(account);
+  const resolves = collectPullCloseEvidence(account);
   const leftFillRatios = snapshot.plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const rightFillRatios = snapshot.plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const leftSecrets = options.secretsSide === 'left' ? [...secrets] : [];

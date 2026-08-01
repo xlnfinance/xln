@@ -41,7 +41,7 @@ describe('payment delivery modes', () => {
     expect(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS).toBeGreaterThan(1);
   });
 
-  test('trusted delivery binds the declared gateway to the penultimate hop', () => {
+  test('trusted delivery permits exactly one declared gateway', () => {
     expect(requireTrustedPaymentGateway(['sender', 'hub', 'recipient'], 'recipient', 'hub')).toBe('hub');
     expect(() => requireTrustedPaymentGateway(['sender', 'recipient'], 'recipient', undefined)).toThrow(
       'TRUSTED_PAYMENT_GATEWAY_INVALID',
@@ -49,5 +49,11 @@ describe('payment delivery modes', () => {
     expect(() => requireTrustedPaymentGateway(['sender', 'hub', 'recipient'], 'recipient', 'other')).toThrow(
       'TRUSTED_PAYMENT_GATEWAY_INVALID',
     );
+    expect(() => requireTrustedPaymentGateway(
+      ['sender', 'untrusted', 'hub', 'recipient'], 'recipient', 'hub',
+    )).toThrow('TRUSTED_PAYMENT_GATEWAY_INVALID');
+    expect(() => requireTrustedPaymentGateway(
+      ['sender', 'sender', 'recipient'], 'recipient', 'sender',
+    )).toThrow('TRUSTED_PAYMENT_GATEWAY_INVALID');
   });
 });

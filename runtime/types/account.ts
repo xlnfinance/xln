@@ -65,7 +65,7 @@ export interface PullCommitment {
   revealedUntilTimestamp: number;
   fullHash: string;
   partialRoot: string;
-  crossJurisdiction?: CrossJurisdictionPullBinding;
+  crossJurisdiction: CrossJurisdictionPullBinding;
   createdHeight: number;
   createdTimestamp: number;
 }
@@ -384,8 +384,8 @@ export interface AccountReplica {
     amount: bigint;
     route: string[];
     description?: string;
-    deliveryMode?: Extract<PaymentDeliveryMode, 'direct' | 'trusted'>;
-    trustedGatewayEntityId?: string;
+    deliveryMode: 'trusted';
+    trustedGatewayEntityId: string;
   }>;
 
   // Withdrawal tracking (Phase 2: C→R)
@@ -715,7 +715,7 @@ export interface DerivedDelta {
 
 // Account transaction types
 export type AccountTx =
-  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string; deliveryMode?: Extract<PaymentDeliveryMode, 'direct' | 'trusted'>; trustedGatewayEntityId?: string } }
+  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route: string[]; description?: string; fromEntityId: string; toEntityId: string; deliveryMode: Extract<PaymentDeliveryMode, 'direct' | 'trusted'>; trustedGatewayEntityId?: string } }
   | {
       type: 'lending_fund';
       data: {
@@ -863,30 +863,16 @@ export type AccountTx =
           };
     }
   | {
-      type: 'pull_lock';
+      type: 'cross_pull_lock';
       data: {
         pullId: string;
         tokenId: number;
         amount: bigint;
-	        revealedUntilTimestamp: number;
-	        fullHash: string;
-	        partialRoot: string;
-	        crossJurisdiction?: CrossJurisdictionPullBinding;
-	        crossJurisdictionRoute?: CrossJurisdictionSwapRoute;
-	      };
-	    }
-  | {
-      type: 'pull_resolve';
-      data: {
-        pullId: string;
-        binary: string;
-      };
-    }
-  | {
-      type: 'pull_cancel';
-      data: {
-        pullId: string;
-        reason?: 'beneficiary_release' | 'expired' | 'cross_j_cancel_no_fill' | 'cross_j_source_remainder_release';
+        revealedUntilTimestamp: number;
+        fullHash: string;
+        partialRoot: string;
+        crossJurisdiction: CrossJurisdictionPullBinding;
+        crossJurisdictionRoute: CrossJurisdictionSwapRoute;
       };
     }
   | {

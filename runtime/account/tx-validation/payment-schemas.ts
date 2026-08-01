@@ -2,10 +2,12 @@ import type { AccountTxDataSchema } from './fields';
 
 export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
   direct_payment: {
-    required: { tokenId: 'integer', amount: 'bigint' },
+    required: {
+      tokenId: 'integer', amount: 'bigint', route: 'stringArray', deliveryMode: 'string',
+      fromEntityId: 'string', toEntityId: 'string',
+    },
     optional: {
-      route: 'stringArray', description: 'string', fromEntityId: 'string',
-      toEntityId: 'string', deliveryMode: 'string', trustedGatewayEntityId: 'string',
+      description: 'string', trustedGatewayEntityId: 'string',
     },
     literals: { deliveryMode: ['direct', 'trusted'] },
   },
@@ -36,22 +38,11 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
       liquidityFeeBps: 'bigint', gasFee: 'bigint',
     },
   },
-  pull_lock: {
+  cross_pull_lock: {
     required: {
       pullId: 'string', tokenId: 'integer', amount: 'bigint',
       revealedUntilTimestamp: 'integer', fullHash: 'string', partialRoot: 'string',
-    },
-    optional: { crossJurisdiction: 'record', crossJurisdictionRoute: 'record' },
-  },
-  pull_resolve: { required: { pullId: 'string', binary: 'string' } },
-  pull_cancel: {
-    required: { pullId: 'string' },
-    optional: { reason: 'string' },
-    literals: {
-      reason: [
-        'beneficiary_release', 'expired', 'cross_j_cancel_no_fill',
-        'cross_j_source_remainder_release',
-      ],
+      crossJurisdiction: 'record', crossJurisdictionRoute: 'record',
     },
   },
   swap_offer: {
