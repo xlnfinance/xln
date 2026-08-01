@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+  "createdAt": "2026-08-01T00:31:00Z",
+  "evidence": [
+    {
+      "id": "api-secret.code-trace.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run claude-opus-wallet-delta-20260801",
+      "state": "PASS",
+      "summary": "Traced transport delta reachability into BrainVault, custody, WAL, logs, RPC startup, reveal, and reconnect boundaries; no secret-bearing path changed."
+    },
+    {
+      "id": "api-secret.l1.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun test brainvault/core.test.ts tests/unit/brainvault-native.test.ts",
+      "state": "PASS",
+      "summary": "Browser/native V1 vectors, strict protocol, public-only derive, owner durability, cancellation, and startup races passed 19/19 with 100084 assertions."
+    },
+    {
+      "id": "api-secret.l2.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
+      "state": "PASS",
+      "summary": "Packed native derive stayed public-only, reveal remained separate, admin write advanced 4 to 5, and restart restored owner state in 182 ms."
+    },
+    {
+      "id": "api-secret.failure.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "state": "PASS",
+      "summary": "Fsync, spec mismatch, cancellation, startup failure, concurrent restore, and stale authority generation injections passed 12/12."
+    },
+    {
+      "id": "api-secret.l3.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun run check:brainvault",
+      "state": "PASS",
+      "summary": "Owning BrainVault, native worker, custody, startup, and reconnect suite passed 26/26 with 100128 assertions."
+    },
+    {
+      "id": "api-secret.independent.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
+      "state": "PASS",
+      "summary": "Blind Fable and Sonnet delta audits independently found no reachable P0-P2; combined with Opus and current tests, adjudicated confidence is 98%."
+    },
+    {
+      "id": "api-authority.code-trace.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run claude-opus-wallet-delta-20260801",
+      "state": "PASS",
+      "summary": "Traced authenticated socket generation, RPC startup gate, remote adapter, native owner, derive, and separate reveal authority."
+    },
+    {
+      "id": "api-authority.l1.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun test brainvault/core.test.ts tests/unit/brainvault-native.test.ts",
+      "state": "PASS",
+      "summary": "Exact adapter message validation and admin-only node-owner operations passed alongside frozen wallet vectors."
+    },
+    {
+      "id": "api-authority.l2.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
+      "state": "PASS",
+      "summary": "Packaged authenticated admin lifecycle exercised derive, separate reveal, write, restart, and restored ownership."
+    },
+    {
+      "id": "api-authority.failure.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "state": "PASS",
+      "summary": "Malformed secret-bearing messages, stale reconnect generation, failed startup, and concurrent owner restore all failed closed."
+    },
+    {
+      "id": "api-authority.l3.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun run check:brainvault",
+      "state": "PASS",
+      "summary": "The complete authority and custody owning suite passed on the current module fingerprint."
+    },
+    {
+      "id": "api-authority.independent.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
+      "state": "PASS",
+      "summary": "Independent model-family panel found no transport-to-authority regression after tracing the authenticated and RPC call graph."
+    },
+    {
+      "id": "wallet-secret.code-trace.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run claude-opus-wallet-delta-20260801",
+      "state": "PASS",
+      "summary": "Traced cancel, back, mode switch, stale worker, restart, reveal, and persistence boundaries across the unchanged wallet lifecycle."
+    },
+    {
+      "id": "wallet-secret.l1.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts --grep 'wallet persistence becomes an explicit point of no return'",
+      "state": "PASS",
+      "summary": "The narrow persistence point-of-no-return wallet regression passed 1/1."
+    },
+    {
+      "id": "wallet-secret.l2.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts",
+      "state": "PASS",
+      "summary": "Responsive recovery choice, rehearsal, keyboard, stale-worker, cancellation, secret-drop, and persistence flow passed 9/9."
+    },
+    {
+      "id": "wallet-secret.l3.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "cd frontend && bun run check",
+      "state": "PASS",
+      "summary": "Frontend diagnostics and production build completed with zero errors and zero warnings."
+    },
+    {
+      "id": "wallet-secret.independent.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
+      "state": "PASS",
+      "summary": "Blind Fable and Sonnet audits found no reachable transport regression in cancel, stale worker, public derive, or reveal behavior."
+    }
+  ]
+}

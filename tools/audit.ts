@@ -109,7 +109,8 @@ const statusCommand = (registry: AuditRegistry, json: boolean): void => {
     || left.id.localeCompare(right.id)
   ));
   for (const module of modules) {
-    console.log(`${`${module.coverage}%`.padStart(5)}  ${`${module.quality}%`.padStart(5)}  ${`${100 - module.quality}%`.padStart(5)}  ${String(module.openHighFindings).padStart(4)}  ${module.state.padEnd(10)}  ${module.criticality.padEnd(8)}  ${module.id} · ${nextModuleStep(registry, invariantStatuses, module.id)}`);
+    const qualityLeft = Math.round((100 - module.quality) * 10) / 10;
+    console.log(`${`${module.coverage}%`.padStart(5)}  ${`${module.quality}%`.padStart(5)}  ${`${qualityLeft}%`.padStart(5)}  ${String(module.openHighFindings).padStart(4)}  ${module.state.padEnd(10)}  ${module.criticality.padEnd(8)}  ${module.id} · ${nextModuleStep(registry, invariantStatuses, module.id)}`);
   }
   printAgentLedger(registry);
 };
@@ -118,19 +119,17 @@ const verifyCommand = (registry: AuditRegistry, json: boolean): void => {
   const errors = validateAuditRegistry(registry, ROOT);
   const fingerprints = errors.length === 0 ? computeModuleFingerprints(ROOT, registry) : new Map<string, string>();
   const environmentFingerprint = computeEnvironmentFingerprint(ROOT);
-  const stale = registry.evidence.filter(item => {
-    const invariant = registry.invariants.find(candidate => candidate.id === item.invariantId);
-    return invariant
-      ? fingerprints.get(invariant.moduleId) !== item.moduleFingerprint
-        || item.environmentFingerprint !== environmentFingerprint
-      : true;
-  });
+  // Evidence is append-only audit history. An old row is no longer a blocker
+  // once every required evidence kind has a current replacement.
+  const status = errors.length === 0
+    ? computeAuditStatus(registry, fingerprints, readCurrentSha(ROOT), environmentFingerprint)
+    : undefined;
   const result = {
-    ok: errors.length === 0 && stale.length === 0,
+    ok: errors.length === 0 && status?.staleEvidence === 0,
     modules: registry.modules.length,
     invariants: registry.invariants.length,
     evidence: registry.evidence.length,
-    staleEvidence: stale.length,
+    staleEvidence: status?.staleEvidence ?? 0,
     findings: registry.findings.length,
     agentRuns: registry.agentRuns.length,
     errors,

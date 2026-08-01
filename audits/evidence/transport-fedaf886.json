@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+  "createdAt": "2026-08-01T00:30:00Z",
+  "evidence": [
+    {
+      "id": "transport-send.code-trace.fedaf886",
+      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "command": "agent-run transport-send-fix-20260801",
+      "state": "PASS",
+      "summary": "Traced one canonical Bun send classifier through direct, relay, fallback, pending-prefix, and byte-accounting paths."
+    },
+    {
+      "id": "transport-send.l1.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'websocket send result classifier|commits an accepted prefix|fails loud and retains an invalid first send'",
+      "state": "PASS",
+      "summary": "Classifier, invalid-first retention, and accepted-prefix checkpoint passed 3/3 with 18 assertions."
+    },
+    {
+      "id": "transport-send.l2.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun test runtime/__tests__/direct-runtime-bun.test.ts runtime/__tests__/relay-direct.test.ts runtime/__tests__/relay-router.test.ts runtime/__tests__/relay-store.test.ts",
+      "state": "PASS",
+      "summary": "Direct runtime, direct relay, router, and pending-store flow passed 56/56 with 247 assertions."
+    },
+    {
+      "id": "transport-send.failure.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'commits an accepted prefix|fails loud and retains an invalid first send'",
+      "state": "PASS",
+      "summary": "Invalid-first retained exact bytes; accepted prefix committed before fail-loud invalid-result propagation."
+    },
+    {
+      "id": "transport-send.l3.fedaf886",
+      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "command": "bun run check",
+      "state": "PASS",
+      "summary": "Full repository check exited zero on the final transport SHA with frozen core unchanged."
+    },
+    {
+      "id": "transport-send.independent.fedaf886",
+      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "command": "agent-run transport-final-verification-20260801",
+      "state": "PASS",
+      "summary": "Independent verifier reproduced queue-prefix, byte delta, fail-loud, and classifier behavior at 99% confidence."
+    }
+  ]
+}

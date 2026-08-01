@@ -24,7 +24,7 @@ describe('canonical audit registry', () => {
     expect(validateAuditRegistry(REGISTRY, ROOT)).toEqual([]);
     expect(REGISTRY.modules).toHaveLength(17);
     expect(REGISTRY.modules.every(module => REGISTRY.invariants.some(invariant => invariant.moduleId === module.id))).toBe(true);
-    expect(REGISTRY.agentRuns).toHaveLength(12);
+    expect(REGISTRY.agentRuns.length).toBeGreaterThanOrEqual(12);
     expect(REGISTRY.agentRuns.every(run => run.provisional)).toBe(true);
   });
 
@@ -105,6 +105,7 @@ describe('canonical audit registry', () => {
       ],
     };
     const reAudited = computeAuditStatus(refreshed, fingerprints, CURRENT_SHA, CURRENT_ENVIRONMENT);
+    expect(reAudited.staleEvidence).toBe(0);
     expect(reAudited.modules.find(module => module.id === target.moduleId)).toMatchObject({
       state: 'IN_REVIEW',
       currentEvidence: 6,
@@ -200,6 +201,26 @@ describe('canonical audit registry', () => {
     const errors = validateAuditRegistry(fabricated);
     expect(errors.some(error => error.includes('has no attesting agent run'))).toBe(true);
     expect(errors).toContain(`finding ${REGISTRY.findings[0]!.id} has invalid severity P9`);
+
+    const splitTarget = REGISTRY.invariants.find(
+      invariant => invariant.id === 'api-auth-custody.secret-confinement',
+    )!;
+    const splitSourceSha = REGISTRY.agentRuns.find(
+      run => run.id === 'transport-topology-primary-20260801',
+    )!.sourceSha;
+    const splitAttestation: AuditRegistry = {
+      ...REGISTRY,
+      evidence: [{
+        ...REGISTRY.evidence[0]!,
+        id: 'split-attestation',
+        invariantId: splitTarget.id,
+        sourceSha: splitSourceSha,
+        agentRunIds: ['wallet-hardening-xhigh-20260801', 'transport-topology-primary-20260801'],
+      }],
+    };
+    expect(validateAuditRegistry(splitAttestation)).toContain(
+      `evidence split-attestation has no same-run attester scoped to ${splitTarget.moduleId} on source SHA ${splitSourceSha}`,
+    );
   });
 
   test('merge and release gates consume blockers, confidence, staleness, and coverage policy', () => {

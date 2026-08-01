@@ -184,11 +184,13 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
       const run = agentRunsById.get(runId);
       return run ? [run] : [];
     });
-    if (invariant && !attestingRuns.some(run => run.moduleIds.includes(invariant.moduleId))) {
-      errors.push(`evidence ${evidence.id} has no attester scoped to ${invariant.moduleId}`);
-    }
-    if (!attestingRuns.some(run => run.sourceSha === evidence.sourceSha)) {
-      errors.push(`evidence ${evidence.id} has no attester on source SHA ${evidence.sourceSha}`);
+    if (invariant && !attestingRuns.some(run => (
+      run.moduleIds.includes(invariant.moduleId)
+      && run.sourceSha === evidence.sourceSha
+    ))) {
+      errors.push(
+        `evidence ${evidence.id} has no same-run attester scoped to ${invariant.moduleId} on source SHA ${evidence.sourceSha}`,
+      );
     }
   }
 

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+  "createdAt": "2026-08-01T00:32:00Z",
+  "evidence": [
+    {
+      "id": "runtime-rejection.code-trace.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run audit-registry-integration-20260801",
+      "state": "FAIL",
+      "summary": "Trace confirmed mutationStarted precedes business reducers and any later expected command rejection enters the fatal Runtime halt path."
+    },
+    {
+      "id": "runtime-rejection.l2.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run audit-registry-integration-20260801 real-processRuntime reproducer",
+      "state": "FAIL",
+      "summary": "A real signed missing-next-hop payment produced DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING, halted the Runtime, and made the next call fail RUNTIME_PROCESS_HALTED."
+    },
+    {
+      "id": "runtime-rejection.independent.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run runtime-payment-current-recheck-20260801",
+      "state": "FAIL",
+      "summary": "Independent current-SHA reviewer reproduced the sticky halt through production processRuntime at 100% confidence."
+    },
+    {
+      "id": "payment-terminal.code-trace.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run audit-registry-integration-20260801",
+      "state": "FAIL",
+      "summary": "Trace confirmed insufficient capacity emits no Account transaction or semantic effect while raw committed HTLC input is projected as Payment started."
+    },
+    {
+      "id": "payment-terminal.l2.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run audit-registry-integration-20260801 insufficient-capacity and activity projection reproducer",
+      "state": "FAIL",
+      "summary": "Narrow tests returned accountTxs=0 and no effects, while the current activity projection returned title Payment started and status started."
+    },
+    {
+      "id": "payment-terminal.independent.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run runtime-payment-current-recheck-20260801",
+      "state": "FAIL",
+      "summary": "Independent current-SHA reviewer confirmed the durable semantic-status defect at 99% confidence."
+    },
+    {
+      "id": "wallet-payment-status.code-trace.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run audit-registry-integration-20260801",
+      "state": "FAIL",
+      "summary": "Trace confirmed the wallet promotes ingress observed or committed into payment success without a durable semantic outcome."
+    },
+    {
+      "id": "wallet-payment-status.independent.fff938ba9",
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "command": "agent-run runtime-payment-current-recheck-20260801",
+      "state": "FAIL",
+      "summary": "Independent reviewer tied the false durable activity to current PaymentPanel and command-bus behavior."
+    }
+  ]
+}

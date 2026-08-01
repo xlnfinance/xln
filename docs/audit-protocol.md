@@ -375,7 +375,25 @@ Never maintain parallel task lists in audit reports.
   mutable percentages or duplicate findings.
 - Dashboards and status tables are generated from the registry.
 
-## 14. Adoption sequence
+## 14. Canonical command surface
+
+The repository exposes one generated view of the registry:
+
+```bash
+bun run audit:status          # all module percentages and reviewer ledger
+bun run audit:plan            # next work ranked by risk and missing evidence
+bun run audit:verify          # schema, ownership, artifacts, and staleness
+bun run audit:gate:merge      # current evidence plus P0/P1 merge policy
+bun run audit:gate:release    # merge policy plus release coverage thresholds
+```
+
+`verify` treats evidence as append-only history: an archival row may have an
+old fingerprint, but every required evidence kind must have a current
+replacement. `status` and both gates use the same derived staleness model, so a
+dashboard cannot disagree with automation. Percentages, module states, and
+reviewer rankings are outputs; hand-edited copies are never canonical.
+
+## 15. Adoption sequence
 
 1. Create a module inventory without claiming coverage.
 2. Define critical invariants, paths, failure boundaries, and dependency globs.
@@ -396,7 +414,7 @@ The protocol is working when a new engineer can answer, from generated data:
 - why the next task is the highest-priority one;
 - what must pass before merge or release.
 
-## 15. Prohibited shortcuts
+## 16. Prohibited shortcuts
 
 - one unexplained “audited %” or “quality %”;
 - severity without a reachable trigger;
