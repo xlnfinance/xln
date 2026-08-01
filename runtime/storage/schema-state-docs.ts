@@ -2,13 +2,6 @@ import type { BookState } from '../orderbook';
 import { validateBookStructure } from '../orderbook/validity';
 import { verifyAndWarmBookCommitment } from '../orderbook/commitment';
 import { validateAccountReplica } from '../account/state-validation';
-import { validatePersistedAccountReplicaEnvelope } from '../account/persisted-replica-envelope';
-import { validatePersistedAccountStateCore } from '../account/persisted-state-core';
-import { validatePersistedAccountStateMaps } from '../account/persisted-state-maps';
-import { validatePersistedSettlementWorkspace } from '../account/persisted-settlement-validation';
-import {
-  assertPersistedAccountReplicaIntegrity,
-} from '../account/persisted-integrity';
 import { validateEntityState } from '../entity/state-validation';
 import { LIMITS } from '../config/constants';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
@@ -23,6 +16,7 @@ import {
   requireStorageMap,
   requireStorageString,
 } from './schema-primitives';
+import { assertStorageAccountDocSemantics } from './account-doc-validation';
 
 const ENTITY_REQUIRED = [
   'entityId', 'height', 'timestamp', 'nonces', 'proposals', 'config',
@@ -136,16 +130,8 @@ export const validateStorageAccountDocValue = (value: unknown): StorageAccountDo
   requireExactBoundaryKeys(doc, ACCOUNT_REPLICA_REQUIRED, ACCOUNT_REPLICA_OPTIONAL, `${code}_FIELDS`);
   const state = requireBoundaryRecord(doc['state'], `${code}_STATE`);
   requireExactBoundaryKeys(state, ACCOUNT_STATE_REQUIRED, ACCOUNT_STATE_OPTIONAL, `${code}_STATE_FIELDS`);
-  const account = validateAccountReplica(doc, code);
-  validatePersistedAccountStateCore(state, `${code}.state`);
-  validatePersistedAccountStateMaps(state, `${code}.state`);
-  validatePersistedSettlementWorkspace(
-    state as Record<string, unknown> & StorageAccountDoc['state'],
-    `${code}.state`,
-  );
-  validatePersistedAccountReplicaEnvelope(doc, code);
-  assertPersistedAccountReplicaIntegrity(account, code);
-  return account;
+  assertStorageAccountDocSemantics(doc, code);
+  return validateAccountReplica(doc, code);
 };
 
 function assertBookHeader(value: unknown): asserts value is BookState {
@@ -213,6 +199,9 @@ export const assertStorageAccountDocBinding = (
     normalizeEntityId(doc.proofHeader.toEntity) !== counterparty
   ) {
     throw new Error(`STORAGE_ACCOUNT_DOC_OWNER_MISMATCH:scope=${scope}`);
+  }
+  if (doc.pendingFrame?.byLeft !== undefined && doc.pendingFrame.byLeft !== (owner === doc.state.leftEntity)) {
+    throw new Error(`STORAGE_ACCOUNT_DOC_PENDING_OWNER_MISMATCH:scope=${scope}`);
   }
   return doc;
 };

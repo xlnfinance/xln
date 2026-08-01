@@ -5,7 +5,6 @@ import { createHmac } from 'crypto';
 import { computeAddress, hexlify, keccak256, recoverAddress, SigningKey, toUtf8Bytes } from 'ethers';
 
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import { createFrameHashSync } from '../account/consensus/frame';
 
 import {
   deriveRuntimeAdapterCapabilityToken,
@@ -94,7 +93,7 @@ import type {
   StorageSnapshotManifest,
 } from '../storage/types';
 
-import type { AccountFrame, AccountTx, Delta } from '../types/account';
+import type { AccountTx, Delta } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeInput } from '../runtime/types';
@@ -115,22 +114,6 @@ const entityId = `0x${'aa'.repeat(32)}`;
 const counterpartyId = `0x${'bb'.repeat(32)}`;
 
 const adapterAuthChallenge = `0x${'41'.repeat(32)}`;
-
-const makeStoredAccountFrame = (): AccountFrame => {
-  const frame: AccountFrame = {
-    height: 1,
-    timestamp: 700,
-    jHeight: 0,
-    accountTxs: [],
-    prevFrameHash: 'genesis',
-    stateHash: '',
-    accountStateRoot: `0x${'01'.repeat(32)}`,
-    deltas: [],
-    byLeft: true,
-  };
-  frame.stateHash = createFrameHashSync(frame);
-  return frame;
-};
 
 process.env['XLN_RADAPTER_AUTH_SEED'] = process.env['XLN_RADAPTER_AUTH_SEED'] || 'seed';
 
@@ -217,7 +200,17 @@ const makeEnv = (): RuntimeReplica =>
                     },
                     status: 'active',
                     mempool: [],
-                    currentFrame: makeStoredAccountFrame(),
+                    currentFrame: {
+                      height: 1,
+                      timestamp: 700,
+                      jHeight: 0,
+                      accountTxs: [],
+                      prevFrameHash: 'genesis',
+                      stateHash: '0x3ac8cd1532f1e010bb75ac9d5618680f0676e843b0fba7f9a81e3d13b61f670d',
+                      accountStateRoot: `0x${'01'.repeat(32)}`,
+                      deltas: [],
+                      byLeft: true,
+                    },
                     currentHeight: 1,
                     pendingSignatures: [],
                     rollbackCount: 0,
