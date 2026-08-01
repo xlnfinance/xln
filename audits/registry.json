@@ -1769,6 +1769,21 @@
       "reproduction": "Stage an atomic pair whose first leg creates consumption or Account J-claim nodes and whose second leg rejects, then commit unrelated retained work and compare live/pending infrastructure node maps against the pre-pair snapshot."
     },
     {
+      "id": "AUD-ACCOUNT-STORAGE-SHALLOW-VALIDATION",
+      "rootCauseKey": "persisted-account-replica-lacks-deep-semantic-validation",
+      "moduleId": "storage-recovery",
+      "invariantIds": [
+        "storage-recovery.exact-restart",
+        "account-consensus.bilateral-convergence"
+      ],
+      "title": "Persisted AccountReplica hydration accepts malformed ownership, frame, delta, capacity, nonce, lock, dispute, and proof fields.",
+      "severity": "P1",
+      "confidence": 99,
+      "state": "CONFIRMED",
+      "sourceSha": "23d2322a9a4142f95a5325b253aef92f43088246",
+      "reproduction": "Encode a valid AccountReplica storage document, mutate each semantic field while preserving schema shape, then run the production codec, storage binding check, and hydration path; 26 of 29 invalid mutations reach live state, including negative allowance or hold values that create positive derived out-capacity."
+    },
+    {
       "id": "AUD-RUNTIME-STICKY-REJECTION",
       "rootCauseKey": "expected-local-command-sticky-runtime-halt",
       "moduleId": "runtime-pipeline",
@@ -1928,6 +1943,12 @@
     {
       "id": "codex-account-consensus-base",
       "label": "Account consensus base auditor",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-account-storage-verifier",
+      "label": "Account storage independent verifier",
       "family": "codex",
       "state": "PROVISIONAL"
     },
@@ -2347,17 +2368,41 @@
     {
       "id": "account-consensus-base-20260801",
       "reviewerId": "codex-account-consensus-base",
-      "sourceSha": "c769a22e3bce083896f14a42c0ad932094ba44ea",
+      "sourceSha": "612d5f1a8bdb37c30403f193ccc8cec29c710f32",
       "moduleIds": [
-        "account-consensus"
+        "account-consensus",
+        "registration-payment",
+        "storage-recovery"
       ],
       "scope": "Bilateral AccountReplica convergence, nonce, collision, ACK/resend, proof, conservation, and rollback boundaries",
-      "state": "RUNNING",
-      "usefulnessScore": 0,
+      "state": "COMPLETED",
+      "usefulnessScore": 1000,
       "provisional": true,
-      "confirmedFindingIds": [],
+      "confirmedFindingIds": [
+        "AUD-PAYMENT-FALSE-STARTED"
+      ],
+      "candidateFindingIds": [
+        "AUD-ACCOUNT-STORAGE-SHALLOW-VALIDATION"
+      ],
+      "summary": "Ran 342 Account tests with 23,188 assertions, durable restart and collision scenarios; found shallow persisted-state validation and independently reproduced the false-started payment boundary."
+    },
+    {
+      "id": "account-storage-independent-verification-20260801",
+      "reviewerId": "codex-account-storage-verifier",
+      "sourceSha": "23d2322a9a4142f95a5325b253aef92f43088246",
+      "moduleIds": [
+        "account-consensus",
+        "storage-recovery"
+      ],
+      "scope": "Independent production-codec, storage-binding, hydration, capacity, and legal J-finality mutation audit",
+      "state": "COMPLETED",
+      "usefulnessScore": 995,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-ACCOUNT-STORAGE-SHALLOW-VALIDATION"
+      ],
       "candidateFindingIds": [],
-      "summary": "Read-only base audit is running."
+      "summary": "Confirmed 26 of 29 malformed AccountReplica snapshots hydrate into live state, reproduced false capacity from negative hold, rejected remote-theft inflation, and proved live/root divergence is legal after J-finality."
     },
     {
       "id": "entity-consensus-base-20260801",
