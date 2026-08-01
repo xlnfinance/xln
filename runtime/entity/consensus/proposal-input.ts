@@ -20,14 +20,13 @@ import {
   getReplicaJRangeValidationError,
   isJPrefixLocalFreshnessRace,
 } from './j-prefix-round';
-import { assertFrameParentMatchesState } from './frame-lineage';
-import { validateProposedFrameLeader } from './proposal-policy';
+import { preauthenticateEntityProposal } from './proposal-preauthentication';
 
 const validateProposalEnvelope = (
   context: ApplyEntityInputContext,
   frame: EntityFrame,
 ): ApplyEntityInputResult | null => {
-  const { env, workingReplica } = context;
+  const { workingReplica } = context;
   if (frame.height < workingReplica.state.height) {
     return noopEntityConsensusInput(context, 'PROPOSAL_STALE');
   }
@@ -56,18 +55,6 @@ const validateProposalEnvelope = (
       expectedPrevHeight: expectedPreviousHeight,
     });
     return deferEntityConsensusInput(context, 'PROPOSAL_CATCH_UP_STATE_WAIT');
-  }
-  assertFrameParentMatchesState(
-    workingReplica.state,
-    frame,
-    'PROPOSAL_PARENT_MISMATCH',
-  );
-  if (!validateProposedFrameLeader(env, workingReplica.state, frame)) {
-    entityLog.error('proposal.leader_rejected', {
-      proposer: shortId(frame.leader?.proposerSignerId ?? ''),
-      view: frame.leader?.view ?? null,
-    });
-    return rejectEntityConsensusInput(context);
   }
   return null;
 };
@@ -232,6 +219,8 @@ export const handleProposedFramePrecommit = async (
   if (!frame) return null;
   const envelopeResult = validateProposalEnvelope(context, frame);
   if (envelopeResult) return envelopeResult;
+  const authenticationResult = preauthenticateEntityProposal(context, frame);
+  if (authenticationResult) return authenticationResult;
   const consensusResult = validateProposalViewAndJRange(context, frame);
   if (consensusResult) return consensusResult;
   return signAndLockProposal(context, frame);

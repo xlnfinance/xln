@@ -22,6 +22,7 @@ import {
 } from './leader-certificates';
 import { entityLog } from './entity-log';
 import { getPrevFrameHash } from './frame-lineage';
+import { MalformedEntityFrameInputError } from '../tx/invariant-errors';
 
 export type ProposalReplayResult =
   | { accepted: true; execution: EntityCandidate }
@@ -120,6 +121,24 @@ export const replayProposedEntityFrame = async (
   context: ApplyEntityInputContext,
   frame: EntityFrame,
 ): Promise<ProposalReplayResult> => {
+  let applied: Awaited<ReturnType<typeof applyEntityFrame>>;
+  try {
+    applied = await applyEntityFrame(
+      context.env,
+      context.workingReplica.state,
+      frame.txs,
+      frame.timestamp,
+    );
+  } catch (error) {
+    if (error instanceof MalformedEntityFrameInputError) {
+      entityLog.info('proposal.execution_rejected', {
+        txType: error.txType,
+        rejection: error.rejection,
+      });
+      return rejectProposal(context, 'PROPOSAL_ENTITY_COMMAND_REJECTED');
+    }
+    throw error;
+  }
   const {
     newState,
     collectedHashes = [],
@@ -130,12 +149,7 @@ export const replayProposedEntityFrame = async (
     storageChanges,
     consumptionNodeChanges,
     accountJClaimNodeChanges,
-  } = await applyEntityFrame(
-    context.env,
-    context.workingReplica.state,
-    frame.txs,
-    frame.timestamp,
-  );
+  } = applied;
   if (!entityFrameEventsEqual(events, frame.events)) {
     return rejectProposal(context, 'PROPOSAL_FRAME_EVENTS_MISMATCH');
   }

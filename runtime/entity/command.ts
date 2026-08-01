@@ -16,6 +16,7 @@ import { requireCommittedDirectPaymentRoute } from '../protocol/payments/route';
 import type { EntityCommandNonceState, EntityTx, SignedEntityCommandV1 } from '../types/entity-tx';
 import type { EntityState } from './types';
 import type { EntityRuntimeContext } from './runtime-context';
+import { MalformedEntityFrameInputError } from './tx/invariant-errors';
 import {
   assertEntityCommandTxs,
   assertEntityCommandAuthorBindings,
@@ -283,7 +284,10 @@ export const assertSignedEntityCommand = (
   assertEntityCommandAuthorBindings(command.authorSignerId, command.txs);
   assertIndividualEntityCommandTxs(command.txs);
   if (!verifyAccountSignature(env, author.signer, hashEntityCommand(command), command.signature)) {
-    throw new Error(`ENTITY_COMMAND_SIGNATURE_MISMATCH:${author.signerId}:${author.signer}`);
+    throw new MalformedEntityFrameInputError(
+      'entityCommand',
+      `ENTITY_COMMAND_SIGNATURE_MISMATCH:${author.signerId}:${author.signer}`,
+    );
   }
   getEntityCommandDisposition(state, command);
   return command;

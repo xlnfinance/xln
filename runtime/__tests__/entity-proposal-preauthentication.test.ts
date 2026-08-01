@@ -119,7 +119,6 @@ const bindMutatedFrame = (
 describe('Entity proposal pre-authentication', () => {
   test('rejects a proposal with no active proposer signature before replay', async () => {
     const { frame } = await buildHonestProposal();
-    mutateNestedCommand(frame);
     frame.collectedSigs = new Map();
     const validator = createValidator('2');
 
