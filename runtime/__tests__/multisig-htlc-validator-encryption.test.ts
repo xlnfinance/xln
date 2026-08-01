@@ -1550,6 +1550,51 @@ describe('multisig HTLC validator encryption', () => {
     }
   });
 
+  test('records every local HTLC admission rejection as one deterministic failure effect', async () => {
+    const profile = await certifiedGossipProfile();
+    const senderProfile = await certifiedSenderGossipProfile();
+    const admittedState = senderState();
+    admittedState.accounts.set(ENTITY_ID, paymentAccount(SENDER_ID, ENTITY_ID));
+    const env = {
+      state: { height: 10, timestamp: admittedState.timestamp, eReplicas: new Map() },
+      runtimeSeed: 'htlc-admission-failure-effects',
+      quietRuntimeLogs: true,
+      gossip: {
+        getProfiles: () => [senderProfile, profile],
+        getNetworkGraph: () => ({ findPaths: async () => [] }),
+      },
+    } as unknown as RuntimeReplica;
+    const prepared = await prepareHtlcPaymentEntityTx(env, admittedState, withDeterministicHtlcTestSecret({
+      type: 'htlcPayment',
+      data: { targetEntityId: ENTITY_ID, tokenId: 1, amount: 1_001n, route: [SENDER_ID, ENTITY_ID] },
+    }, `0x${'be'.repeat(32)}`));
+    env.gossip = undefined;
+
+    const missingAccount = structuredClone(admittedState);
+    missingAccount.accounts.clear();
+    const missingDelta = structuredClone(admittedState);
+    missingDelta.accounts.get(ENTITY_ID)!.state.deltas.clear();
+    for (const [reason, state] of [
+      ['next-hop-account-missing', missingAccount],
+      ['token-delta-missing', missingDelta],
+      ['insufficient-capacity', admittedState],
+    ] as const) {
+      const effects: EntityCandidateEffect[] = [];
+      const result = await handleHtlcPayment(state, prepared, env, effects);
+      expect(result.accountTxs).toHaveLength(0);
+      expect(result.newState.htlcRoutes.has(prepared.data.hashlock)).toBe(false);
+      expect(result.newState.lockBook.has(prepared.data.preparedLockId)).toBe(false);
+      expect(effects).toEqual([expect.objectContaining({
+        kind: 'runtimeEvent', eventName: 'HtlcFailed',
+        data: expect.objectContaining({
+          entityId: SENDER_ID, fromEntity: SENDER_ID, toEntity: ENTITY_ID,
+          tokenId: 1, amount: '1001', hashlock: prepared.data.hashlock,
+          lockId: prepared.data.preparedLockId, reason,
+        }),
+      })]);
+    }
+  });
+
   test('emits a public HTLC initiation only after queuing the exact account lock', async () => {
     const profile = await certifiedGossipProfile();
     const senderProfile = await certifiedSenderGossipProfile();
@@ -1731,6 +1776,42 @@ describe('multisig HTLC validator encryption', () => {
     expect(uiLikeDurablePayment?.data).not.toHaveProperty('secret');
     expect(uiLikeDurablePayment?.data.hashlock).toMatch(/^0x[0-9a-f]{64}$/);
     expect(uiLikeDurablePayment?.data.hashlock).not.toBe(durablePayment.data.hashlock);
+    const overCapacityPayment = {
+      type: 'htlcPayment' as const,
+      data: {
+        targetEntityId: destination.entityId,
+        tokenId: 1,
+        amount: 1_001n,
+        route: [sourceEntityId, destination.entityId],
+        description: 'rejected payment truth',
+      },
+    };
+    await processRuntime(env, [{
+      entityId: sourceEntityId,
+      signerId: source.signer,
+      entityTxs: [overCapacityPayment],
+    }]);
+    const rejectedSnapshot = historyTrace.snapshots.at(-1);
+    const rejectedPayment = rejectedSnapshot?.runtimeInput.entityInputs
+      .flatMap(input => input.entityTxs ?? [])
+      .find((tx): tx is Extract<typeof tx, { type: 'htlcPayment' }> =>
+        tx.type === 'htlcPayment' && tx.data.description === 'rejected payment truth'
+      );
+    if (!rejectedPayment) throw new Error('HTLC_REJECTED_DURABLE_FRAME_MISSING');
+    expect(rejectedSnapshot?.logs).toContainEqual(expect.objectContaining({
+      message: 'HtlcFailed',
+      data: expect.objectContaining({
+        entityId: sourceEntityId,
+        toEntity: destination.entityId,
+        amount: '1001',
+        hashlock: rejectedPayment.data.hashlock,
+        lockId: rejectedPayment.data.preparedLockId,
+        reason: 'insufficient-capacity',
+      }),
+    }));
+    const liveSource = env.state.eReplicas.get(`${sourceEntityId}:${source.signer}`)?.state;
+    expect(liveSource?.htlcRoutes.has(rejectedPayment.data.hashlock)).toBe(false);
+    expect(liveSource?.lockBook.has(rejectedPayment.data.preparedLockId)).toBe(false);
     const signedPaymentProposal = signedEntityCommandTx(buildSignedEntityCommand(
       env,
       initialState,

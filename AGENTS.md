@@ -40,6 +40,13 @@ This vocabulary is a protocol invariant, not a stylistic preference:
 - A `FROZEN_CORE_VIOLATION` is a hard stop. Report the old/new hashes and wait for owner approval.
 - Do not edit `frozen-core.json` manually or bypass/remove `frozen-core:check` from any gate.
 
+## SINGLE CANONICAL PRODUCTION PATH
+
+- Production has no legacy behavior, compatibility aliases, fallback readers/writers, or parallel financial formulas.
+- Obsolete persisted data requires an explicit offline migration or a loud rejection; never infer or silently downgrade.
+- Availability routing such as direct-to-relay failover is one explicit canonical policy, not a compatibility fallback.
+- Every temporary compatibility path is a release blocker and must be removed before merge.
+
 ## 🚫 ZERO TOLERANCE: NO HACKS, NO WORKAROUNDS
 
 **ABSOLUTE RULE - violation = stop and report immediately:**

@@ -196,6 +196,37 @@ describe('runtime activity history', () => {
     });
   });
 
+  test('projects HTLC truth only from certified lifecycle logs', () => {
+    const rawPayment = {
+      type: 'htlcPayment',
+      data: { targetEntityId: hub, tokenId: 1, amount: 7n, hashlock: '0xhash' },
+    };
+    const activity = (message: 'HtlcInitiated' | 'HtlcFailed') => buildRuntimeActivityEvents({
+      height: 23,
+      timestamp: 1_700_000_033_000,
+      runtimeInput: {
+        runtimeTxs: [],
+        entityInputs: [{ entityId: alice, signerId: alice, entityTxs: [rawPayment] }],
+      },
+      logs: [{
+        id: 4,
+        timestamp: 1_700_000_033_000,
+        level: 'info',
+        category: 'entity',
+        message,
+        entityId: alice,
+        data: { entityId: alice, fromEntity: alice, toEntity: hub, amount: '7', tokenId: 1 },
+      }],
+    } as any, { entityId: alice, types: ['payment'] });
+
+    expect(activity('HtlcInitiated')).toMatchObject([{
+      source: 'runtime_log', title: 'Payment started', status: 'started', amount: '7',
+    }]);
+    expect(activity('HtlcFailed')).toMatchObject([{
+      source: 'runtime_log', title: 'Payment failed', status: 'failed', amount: '7',
+    }]);
+  });
+
   test('expands accountInput frame transactions into payment history', () => {
     const events = buildRuntimeActivityEvents({
       height: 25,
