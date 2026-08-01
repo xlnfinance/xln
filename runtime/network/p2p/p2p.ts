@@ -8,6 +8,7 @@
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from '../../entity/profile';
 import { RuntimeWsClient } from './ws-client';
+import { directRuntimeWsAudience } from './ws-protocol';
 import { buildLocalEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../../protocol/identity';
 import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../../account/crypto';
@@ -1599,6 +1600,7 @@ export class RuntimeP2P {
     const client = new RuntimeWsClient({
       url: endpoint,
       runtimeId: this.runtimeId,
+      helloAudience: directRuntimeWsAudience(normalizedTargetRuntimeId),
       signerId: this.signerId,
       ...(this.env.runtimeSeed ? { seed: this.env.runtimeSeed } : {}),
       useHelloAuth: true,

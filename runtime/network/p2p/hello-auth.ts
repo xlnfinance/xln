@@ -1,6 +1,6 @@
 import * as secp256k1 from '@noble/secp256k1';
 import { keccak256 } from 'ethers';
-import { hashHelloMessage, type RuntimeWsAuth } from './ws-protocol';
+import { hashHelloMessage, hashRuntimeWsFrame, type RuntimeWsAuth, type RuntimeWsMessage } from './ws-protocol';
 
 let authClock = 0;
 
@@ -33,6 +33,7 @@ export const verifyHelloAuth = (
   encryptionPubKey: string,
   auth: RuntimeWsAuth | undefined,
   maxSkewMs: number,
+  audience: string,
 ): string | null => {
   if (!auth?.nonce || !auth.signature || !auth.timestamp) {
     return 'Missing auth fields';
@@ -41,7 +42,7 @@ export const verifyHelloAuth = (
   if (Math.abs(nowTs - auth.timestamp) > maxSkewMs) {
     return `Hello timestamp skew too large (${nowTs - auth.timestamp}ms)`;
   }
-  const digest = hashHelloMessage(runtimeId, encryptionPubKey, auth.timestamp, auth.nonce);
+  const digest = hashHelloMessage(runtimeId, encryptionPubKey, auth.timestamp, auth.nonce, audience);
   let recovered: string;
   try {
     recovered = recoverHelloAddress(digest, auth.signature);
@@ -52,4 +53,31 @@ export const verifyHelloAuth = (
     return 'Hello signature does not match runtimeId';
   }
   return null;
+};
+
+export const verifyRuntimeWsFrameAuth = (
+  runtimeId: string,
+  message: RuntimeWsMessage,
+  auth: RuntimeWsAuth | undefined,
+  maxSkewMs: number,
+  audience: string,
+  nonce: string,
+): string | null => {
+  if (!auth?.signature || auth.nonce !== nonce || !Number.isSafeInteger(auth.timestamp)) {
+    return 'Missing or invalid session frame auth';
+  }
+  const nowTs = now();
+  if (Math.abs(nowTs - auth.timestamp) > maxSkewMs) {
+    return `Frame timestamp skew too large (${nowTs - auth.timestamp}ms)`;
+  }
+  let recovered: string;
+  try {
+    recovered = recoverHelloAddress(
+      hashRuntimeWsFrame(message, audience, nonce, auth.timestamp),
+      auth.signature,
+    );
+  } catch (error) {
+    return `Frame signature invalid: ${(error as Error).message}`;
+  }
+  return recovered === runtimeId.toLowerCase() ? null : 'Frame signature does not match session runtimeId';
 };

@@ -29,7 +29,7 @@ import {
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../network/relay/router';
 import { closeRelayClientsForReset } from '../network/relay/reset';
-import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
 import { type MarketSnapshotPayload } from '../network/relay/market-snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market-subscriptions';
@@ -233,6 +233,21 @@ const marketMakerReadyRestartLimit = Math.max(
 );
 const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;
 const relayUrl = args.relayUrl;
+const relayAudiences = new Set([
+  canonicalizeRuntimeWsAudience(relayUrl),
+  canonicalizeRuntimeWsAudience(new URL('/relay', args.publicWsBaseUrl).toString()),
+]);
+
+const resolveRelayUpgradeData = (
+  request: Request,
+  url: URL,
+): OrchestratorWebSocket['data'] | null => {
+  const type = resolveOrchestratorSocketType(url.searchParams.get('protocol'));
+  const audience = canonicalizeRuntimeWsAudience(request.url);
+  // Host is caller-controlled; it selects only among operator-configured URLs.
+  if (type === 'relay' && !relayAudiences.has(audience)) return null;
+  return { type, audience, clientIp: resolveRequestClientIp(request) };
+};
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
 const childDiagnosticsDir = join(controlPlaneDir, 'diagnostics');
@@ -2737,11 +2752,12 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     if (assistantResponse) return assistantResponse;
 
     if (request.headers.get('upgrade') === 'websocket' && pathname === '/relay') {
+      const socketData = resolveRelayUpgradeData(request, url);
+      if (!socketData) {
+        return new Response('WebSocket audience not configured', { status: 400 });
+      }
       const upgraded = serverRef.upgrade(request, {
-        data: {
-          type: resolveOrchestratorSocketType(url.searchParams.get('protocol')),
-          clientIp: resolveRequestClientIp(request),
-        },
+        data: socketData,
       });
       if (upgraded) return undefined;
       return new Response('WebSocket upgrade failed', { status: 400 });
@@ -2859,7 +2875,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
   websocket: {
     open(ws) {
       const relayWs = ws;
-      if (relayWs.data.type === 'relay') relayHelloChallenges.issue(relayWs);
+      if (relayWs.data.type === 'relay') relayHelloChallenges.issue(relayWs, relayWs.data.audience);
       pushDebugEvent(relayStore, {
         event: 'ws_open',
         details: { wsType: relayWs.data.type },

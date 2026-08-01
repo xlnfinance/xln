@@ -120,6 +120,7 @@ describe('runtime websocket recovery requests', () => {
             serializeWsMessage({
               type: 'hello_challenge',
               challenge: 'runtime-ws-auth-readiness',
+              audience: `ws://127.0.0.1:${rawServer!.port}/`,
             }),
           );
         },
@@ -282,6 +283,7 @@ describe('runtime websocket recovery requests', () => {
             serializeWsMessage({
               type: 'hello_challenge',
               challenge: 'runtime-ws-recovery-timeout',
+              audience: `ws://127.0.0.1:${rawServer!.port}/`,
             }),
           );
         },

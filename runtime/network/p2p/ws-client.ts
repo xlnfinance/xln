@@ -1,7 +1,9 @@
 import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import {
+  canonicalizeRuntimeWsAudience,
   deserializeWsMessage,
   hashHelloMessage,
+  hashRuntimeWsFrame,
   makeMessageId,
   serializeWsMessage,
   type RuntimeWsMessage,
@@ -118,6 +120,8 @@ export type RuntimeWsClientOptions = {
   signerId?: string;
   seed?: Uint8Array | string;
   useHelloAuth?: boolean;
+  /** Exact server-selected hello audience; direct peers use their runtime identity. */
+  helloAudience?: string;
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
@@ -198,6 +202,8 @@ export class RuntimeWsClient {
   private suppressNextClose = false;
   private helloSent = false;
   private helloAcknowledged = false;
+  private helloAudience: string | null = null;
+  private helloNonce: string | null = null;
   private readonly maxReconnectAttempts: number;
   private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
 
@@ -228,6 +234,8 @@ export class RuntimeWsClient {
     this.connecting = true;
     this.helloSent = false;
     this.helloAcknowledged = false;
+    this.helloAudience = null;
+    this.helloNonce = null;
     this.suppressNextClose = false;
     const generation = ++this.lifecycleGeneration;
     const attempt = this.connectForGeneration(generation);
@@ -454,7 +462,7 @@ export class RuntimeWsClient {
     return true;
   }
 
-  private sendHello(challenge?: string): boolean {
+  private sendHello(challengeMessage?: RuntimeWsMessage): boolean {
     if (this.helloSent) return true;
     const encryptionKeyPair = this.options.encryptionKeyPair;
     if (!encryptionKeyPair) {
@@ -467,25 +475,41 @@ export class RuntimeWsClient {
         this.ws?.close();
         return false;
       }
-      if (!challenge) {
+      if (!challengeMessage?.challenge || !challengeMessage.audience) {
         this.options.onError?.(new Error('WS_HELLO_CHALLENGE_MISSING'));
         this.ws?.close();
         return false;
       }
       // Relay routers require signed hello; direct test servers can still opt out.
       try {
+        const expectedAudience = this.options.helloAudience
+          ?? canonicalizeRuntimeWsAudience(this.options.url);
+        if (challengeMessage.audience !== expectedAudience) {
+          throw new Error(
+            `WS_HELLO_AUDIENCE_MISMATCH:expected=${expectedAudience}:received=${challengeMessage.audience}`,
+          );
+        }
         const timestamp = nextTimestamp();
         const encryptionPubKey = pubKeyToHex(encryptionKeyPair.publicKey);
-        const nonce = challenge;
-        const digest = hashHelloMessage(this.options.runtimeId, encryptionPubKey, timestamp, nonce);
+        const nonce = challengeMessage.challenge;
+        const digest = hashHelloMessage(
+          this.options.runtimeId,
+          encryptionPubKey,
+          timestamp,
+          nonce,
+          expectedAudience,
+        );
         const signature = signDigest(this.options.seed, this.options.signerId, digest);
         this.sendRaw({
           type: 'hello',
           from: this.options.runtimeId,
           fromEncryptionPubKey: encryptionPubKey,
           timestamp,
+          audience: expectedAudience,
           auth: { nonce, signature, timestamp },
         });
+        this.helloAudience = expectedAudience;
+        this.helloNonce = nonce;
         this.helloSent = true;
         return true;
       } catch (error) {
@@ -540,7 +564,7 @@ export class RuntimeWsClient {
 
   private handleHandshakeMessage(msg: RuntimeWsMessage): boolean {
     if (msg.type === 'hello_challenge') {
-      if (this.options.useHelloAuth && msg.challenge) this.sendHello(msg.challenge);
+      if (this.options.useHelloAuth) this.sendHello(msg);
       return true;
     }
     if (msg.type === 'hello_ack') {
@@ -920,6 +944,23 @@ export class RuntimeWsClient {
           'Outgoing WS message missing id',
           { msgType: outboundMsg.type },
         );
+      }
+      if (this.options.useHelloAuth && outboundMsg.type !== 'hello') {
+        failfastAssert(
+          !!this.options.seed && !!this.options.signerId && !!this.helloAudience && !!this.helloNonce,
+          'WS_SEND_SESSION_AUTH_MISSING',
+          'Authenticated WS frame requires a completed bound hello',
+        );
+        const authTimestamp = nextTimestamp();
+        outboundMsg.auth = {
+          nonce: this.helloNonce!,
+          timestamp: authTimestamp,
+          signature: signDigest(
+            this.options.seed!,
+            this.options.signerId!,
+            hashRuntimeWsFrame(outboundMsg, this.helloAudience!, this.helloNonce!, authTimestamp),
+          ),
+        };
       }
     } catch (error) {
       this.options.onError?.(error as Error);

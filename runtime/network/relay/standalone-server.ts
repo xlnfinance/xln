@@ -4,7 +4,7 @@
 
 import { createRelayStore, removeClient, type RelayStore } from './store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './router';
-import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../p2p/ws-protocol';
+import { canonicalizeRuntimeWsAudience, deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../p2p/ws-protocol';
 import { normalizeRuntimeId } from '../p2p/runtime-id';
 import { createStructuredLogger } from '../../infra/logger';
 import { createHelloChallengeRegistry } from '../p2p/hello-challenge';
@@ -13,6 +13,7 @@ type StandaloneRelayOptions = {
   host?: string;
   port: number;
   serverId: string;
+  audience?: string;
   serverRuntimeId?: string;
   onEntityInput?: (from: string | undefined, msg: RuntimeWsMessage, store: RelayStore) => Promise<void> | void;
 };
@@ -34,6 +35,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
   const localRuntimeId = normalizeRuntimeId(options.serverRuntimeId || options.serverId) || options.serverId;
   const helloChallenges = createHelloChallengeRegistry();
   let serverRef: Bun.Server<undefined> | null = null;
+  let relayAudience = '';
 
   const routerConfig: RelayRouterConfig = {
     store,
@@ -58,7 +60,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
     websocket: {
       open(ws) {
         store.wsCounter += 1;
-        helloChallenges.issue(ws);
+        helloChallenges.issue(ws, relayAudience);
       },
       message(ws, message) {
         let msg: RuntimeWsMessage;
@@ -81,6 +83,12 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
   });
 
   serverRef = server;
+  const audienceHost = !options.host || options.host === '0.0.0.0' || options.host === '::'
+    ? '127.0.0.1'
+    : options.host;
+  relayAudience = canonicalizeRuntimeWsAudience(
+    options.audience || `ws://${audienceHost}:${server.port}/`,
+  );
   relayStandaloneLog.info('service.listen', {
     serverId: options.serverId,
     host: options.host || '0.0.0.0',
@@ -113,5 +121,10 @@ if (import.meta.main) {
     ? String(args[hostArgIdx + 1])
     : process.env['WS_HOST'] || '0.0.0.0';
   const serverId = process.env['WS_SERVER_ID'] || 'relay';
-  startStandaloneRelayServer({ host, port, serverId });
+  startStandaloneRelayServer({
+    host,
+    port,
+    serverId,
+    ...(process.env['RELAY_URL'] ? { audience: process.env['RELAY_URL'] } : {}),
+  });
 }

@@ -1,0 +1,226 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+
+import { deriveSignerAddressSync, signDigest } from '../account/crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
+import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
+import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
+import { RuntimeWsClient } from '../network/p2p/ws-client';
+import {
+  deserializeWsMessage,
+  hashHelloMessage,
+  hashRuntimeWsFrame,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from '../network/p2p/ws-protocol';
+import { relayRoute } from '../network/relay/router';
+import { createRelayStore } from '../network/relay/store';
+
+const SERVER_SEED = 'transport-session-auth-server';
+const CLIENT_SEED = 'transport-session-auth-client';
+const SERVER_RUNTIME_ID = deriveSignerAddressSync(SERVER_SEED, '1').toLowerCase();
+const CLIENT_RUNTIME_ID = deriveSignerAddressSync(CLIENT_SEED, '1').toLowerCase();
+const CLIENT_KEY = pubKeyToHex(deriveEncryptionKeyPair(CLIENT_SEED).publicKey);
+
+type FakeSocket = ReturnType<typeof makeSocket>;
+const makeSocket = () => {
+  const sent: RuntimeWsMessage[] = [];
+  const closed: Array<{ code?: number; reason?: string }> = [];
+  const ws = {
+    readyState: 1,
+    send(raw: string | Uint8Array) {
+      sent.push(deserializeWsMessage(raw));
+      return 1;
+    },
+    close(code?: number, reason?: string) {
+      closed.push({ code, reason });
+      this.readyState = 3;
+    },
+  };
+  return { ws, sent, closed };
+};
+
+const signHello = (challenge: string, audience: string): RuntimeWsMessage => {
+  const timestamp = Date.now();
+  return {
+    type: 'hello',
+    from: CLIENT_RUNTIME_ID,
+    fromEncryptionPubKey: CLIENT_KEY,
+    timestamp,
+    audience,
+    auth: {
+      nonce: challenge,
+      timestamp,
+      signature: signDigest(
+        CLIENT_SEED,
+        '1',
+        hashHelloMessage(CLIENT_RUNTIME_ID, CLIENT_KEY, timestamp, challenge, audience),
+      ),
+    },
+  };
+};
+
+const signFrame = (
+  message: RuntimeWsMessage,
+  challenge: string,
+  audience: string,
+): RuntimeWsMessage => {
+  const timestamp = Date.now();
+  return {
+    ...message,
+    auth: {
+      nonce: challenge,
+      timestamp,
+      signature: signDigest(
+        CLIENT_SEED,
+        '1',
+        hashRuntimeWsFrame(message, audience, challenge, timestamp),
+      ),
+    },
+  };
+};
+
+const openAuthenticatedDirect = async (
+  onRecoveryBundleRequest: () => unknown,
+): Promise<{
+  route: ReturnType<typeof createDirectRuntimeWsRoute>;
+  socket: FakeSocket;
+  challenge: string;
+  audience: string;
+}> => {
+  const route = createDirectRuntimeWsRoute({
+    runtimeId: SERVER_RUNTIME_ID,
+    runtimeSeed: SERVER_SEED,
+    onEntityInputs: () => undefined,
+    onRecoveryBundleRequest,
+  });
+  const socket = makeSocket();
+  route.websocket.open(socket.ws);
+  const challenge = socket.sent[0]?.challenge || '';
+  const audience = socket.sent[0]?.audience || '';
+  await route.websocket.message(socket.ws, serializeWsMessage(signHello(challenge, audience)));
+  expect(socket.sent.at(-1)?.type).toBe('hello_ack');
+  return { route, socket, challenge, audience };
+};
+
+const servers: Array<ReturnType<typeof Bun.serve>> = [];
+const clients: RuntimeWsClient[] = [];
+
+afterEach(() => {
+  for (const client of clients.splice(0)) client.close();
+  for (const server of servers.splice(0)) server.stop(true);
+});
+
+describe('bound websocket session authority', () => {
+  test('client refuses a challenge forwarded from another endpoint', async () => {
+    const received: RuntimeWsMessage[] = [];
+    const errors: string[] = [];
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request, bunServer) {
+        if (request.headers.get('upgrade') === 'websocket' && bunServer.upgrade(request)) return;
+        return new Response('websocket only', { status: 400 });
+      },
+      websocket: {
+        open(ws) {
+          ws.send(serializeWsMessage({
+            type: 'hello_challenge',
+            challenge: `0x${'12'.repeat(32)}`,
+            audience: 'wss://honest-target.example/relay',
+          }));
+        },
+        message(_ws, raw) {
+          received.push(deserializeWsMessage(raw));
+        },
+      },
+    });
+    servers.push(server);
+    const client = new RuntimeWsClient({
+      url: `ws://127.0.0.1:${server.port}`,
+      runtimeId: CLIENT_RUNTIME_ID,
+      signerId: '1',
+      seed: CLIENT_SEED,
+      useHelloAuth: true,
+      encryptionKeyPair: deriveEncryptionKeyPair(CLIENT_SEED),
+      maxReconnectAttempts: 1,
+      onError: error => errors.push(error.message),
+    });
+    clients.push(client);
+
+    await client.connect();
+    for (let attempt = 0; attempt < 100 && errors.length === 0; attempt += 1) await Bun.sleep(5);
+
+    expect(errors.some(error => error.includes('WS_HELLO_AUDIENCE_MISMATCH'))).toBe(true);
+    expect(received).toEqual([]);
+  });
+
+  test('target rejects a forwarded challenge whose audience was rewritten', async () => {
+    const registry = createHelloChallengeRegistry();
+    const socket = makeSocket();
+    const targetAudience = 'wss://honest-target.example/relay';
+    const attackerAudience = 'wss://attacker.example/relay';
+    const binding = registry.issue(socket.ws, targetAudience);
+    socket.sent.length = 0;
+
+    await relayRoute({
+      store: createRelayStore(SERVER_RUNTIME_ID),
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => undefined,
+      send: (ws, raw) => ws.send(raw),
+      consumeHelloChallenge: (ws, challenge) => registry.consume(ws, challenge),
+    }, socket.ws, signHello(binding.challenge, attackerAudience));
+
+    expect(socket.sent.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'Hello challenge missing, expired, or already consumed',
+    });
+  });
+
+  test('direct server accepts a signed frame but rejects unsigned injection and key rebinding', async () => {
+    let acceptedRequests = 0;
+    const accepted = await openAuthenticatedDirect(() => {
+      acceptedRequests += 1;
+      return { ok: true };
+    });
+    const request: RuntimeWsMessage = {
+      type: 'recovery_bundle_request',
+      id: 'signed-request',
+      from: CLIENT_RUNTIME_ID,
+      fromEncryptionPubKey: CLIENT_KEY,
+      to: SERVER_RUNTIME_ID,
+      timestamp: Date.now(),
+      payload: { lookupKey: 'signed' },
+    };
+    await accepted.route.websocket.message(
+      accepted.socket.ws,
+      serializeWsMessage(signFrame(request, accepted.challenge, accepted.audience)),
+    );
+    expect(acceptedRequests).toBe(1);
+    expect(accepted.socket.sent.at(-1)?.type).toBe('recovery_bundle_response');
+
+    let injectedRequests = 0;
+    const injected = await openAuthenticatedDirect(() => {
+      injectedRequests += 1;
+      return {};
+    });
+    await injected.route.websocket.message(injected.socket.ws, serializeWsMessage({
+      ...request,
+      id: 'unsigned-injection',
+    }));
+    expect(injectedRequests).toBe(0);
+    expect(injected.socket.closed.at(-1)).toEqual({ code: 4003, reason: 'session-auth-invalid' });
+
+    let reboundRequests = 0;
+    const rebound = await openAuthenticatedDirect(() => {
+      reboundRequests += 1;
+      return {};
+    });
+    const reboundMessage = { ...request, id: 'key-rebind', fromEncryptionPubKey: `0x${'99'.repeat(32)}` };
+    await rebound.route.websocket.message(
+      rebound.socket.ws,
+      serializeWsMessage(signFrame(reboundMessage, rebound.challenge, rebound.audience)),
+    );
+    expect(reboundRequests).toBe(0);
+    expect(rebound.socket.sent.at(-1)?.error).toBe('Direct session encryption key mismatch');
+  });
+});

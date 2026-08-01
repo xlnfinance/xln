@@ -17,7 +17,7 @@ import {
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 
-export type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
+export type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string; audience: string };
 export type RelaySocket = ServerWebSocket<RelaySocketData>;
 export type RelayDirectOneShotLog = (
   key: string,

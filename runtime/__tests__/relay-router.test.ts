@@ -94,6 +94,7 @@ describe('relay-router gossip fanout', () => {
     const ws: FakeWs = { label: 'bigint' };
     await relayRoute({
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: () => {},
@@ -111,6 +112,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -158,6 +160,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -216,6 +219,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -270,6 +274,7 @@ describe('relay-router gossip fanout', () => {
     let failPendingOnce = true;
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -339,6 +344,7 @@ describe('relay-router gossip fanout', () => {
     let freshCloseCount = 0;
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -381,6 +387,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -407,6 +414,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -455,6 +463,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -560,6 +569,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -611,6 +621,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -656,6 +667,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -711,6 +723,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -762,6 +775,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -813,6 +827,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -860,6 +875,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {
         throw new Error('NO_LOCAL_REPLICA: entityId=0xabc');
@@ -908,6 +924,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -971,6 +988,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: true,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -984,7 +1002,10 @@ describe('relay-router gossip fanout', () => {
     await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
 
     expect(store.clients.has(RUNTIME_A)).toBe(false);
-    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({ type: 'error', error: 'Missing auth fields' });
+    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'Hello challenge missing, expired, or already consumed',
+    });
   });
 
   test('drops unsigned gossip profiles when no verifier override is installed', async () => {
@@ -992,6 +1013,7 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
+      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {

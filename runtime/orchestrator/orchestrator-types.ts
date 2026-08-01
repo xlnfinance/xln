@@ -31,7 +31,7 @@ export type OrchestratorSocketType = 'relay' | 'market';
 export const resolveOrchestratorSocketType = (protocol: string | null): OrchestratorSocketType =>
   protocol === 'market' ? 'market' : 'relay';
 
-export type OrchestratorWebSocket = ServerWebSocket<{ type: OrchestratorSocketType; clientIp: string }>;
+export type OrchestratorWebSocket = ServerWebSocket<{ type: OrchestratorSocketType; clientIp: string; audience: string }>;
 
 export type StageTiming = {
   startedAt: number | null;

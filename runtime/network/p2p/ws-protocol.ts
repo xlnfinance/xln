@@ -66,6 +66,7 @@ export type RuntimeWsMessage = {
   txs?: number;
   auth?: RuntimeWsAuth;
   challenge?: string;
+  audience?: string;
   inReplyTo?: string;
   error?: string;
 };
@@ -81,7 +82,7 @@ const requiredFields = (
 ): void => requireExactBoundaryKeys(
   message,
   ['v', 'type', ...required],
-  optional,
+  optional.includes('auth') ? optional : [...optional, 'auth'],
   `WS_MESSAGE_FIELDS_INVALID:type=${String(message['type'] || 'missing')}`,
 );
 
@@ -116,11 +117,11 @@ const validateRuntimeWsEnvelope = (value: unknown): RuntimeWsEnvelope => {
 
   switch (type as RuntimeWsMessageType) {
     case 'hello':
-      requiredFields(message, ['from', 'fromEncryptionPubKey', 'timestamp'], ['auth']);
+      requiredFields(message, ['from', 'fromEncryptionPubKey', 'timestamp'], ['auth', 'audience']);
       validateWsAuth(message['auth']);
       break;
     case 'hello_challenge':
-      requiredFields(message, ['challenge'], []);
+      requiredFields(message, ['challenge', 'audience'], []);
       break;
     case 'hello_ack':
       requiredFields(message, ['to'], ['from', 'fromEncryptionPubKey']);
@@ -182,6 +183,7 @@ const validateRuntimeWsEnvelope = (value: unknown): RuntimeWsEnvelope => {
     'to',
     'entityId',
     'challenge',
+    'audience',
     'inReplyTo',
     'error',
   ]);
@@ -192,6 +194,7 @@ const validateRuntimeWsEnvelope = (value: unknown): RuntimeWsEnvelope => {
   if (message['encrypted'] !== undefined && typeof message['encrypted'] !== 'boolean') {
     throw new Error('WS_MESSAGE_ENCRYPTED_INVALID');
   }
+  validateWsAuth(message['auth']);
   return message as RuntimeWsEnvelope;
 };
 
@@ -280,18 +283,51 @@ export const makeMessageId = (): string => {
 };
 
 const HELLO_DOMAIN = `xln-ws-hello:v${XLN_PROTOCOL_VERSION}`;
+const FRAME_DOMAIN = `xln-ws-frame:v${XLN_PROTOCOL_VERSION}`;
+
+export const canonicalizeRuntimeWsAudience = (input: string): string => {
+  const parsed = new URL(input);
+  const protocol = parsed.protocol === 'http:' ? 'ws:' : parsed.protocol === 'https:' ? 'wss:' : parsed.protocol;
+  if (protocol !== 'ws:' && protocol !== 'wss:') {
+    throw new Error(`WS_AUDIENCE_PROTOCOL_INVALID:${parsed.protocol}`);
+  }
+  if (parsed.username || parsed.password) throw new Error('WS_AUDIENCE_CREDENTIALS_FORBIDDEN');
+  const pathname = parsed.pathname.length > 1 ? parsed.pathname.replace(/\/+$/, '') : parsed.pathname || '/';
+  return `${protocol}//${parsed.host.toLowerCase()}${pathname}${parsed.search}`;
+};
+
+export const directRuntimeWsAudience = (runtimeId: string): string =>
+  `xln-runtime:${runtimeId.toLowerCase()}`;
 
 export const buildHelloMessage = (
   runtimeId: string,
   encryptionPubKey: string,
   timestamp: number,
   nonce: string,
+  audience: string,
 ): string => {
-  return `${HELLO_DOMAIN}:${runtimeId}:${encryptionPubKey.toLowerCase()}:${timestamp}:${nonce}`;
+  return `${HELLO_DOMAIN}:${audience}:${runtimeId}:${encryptionPubKey.toLowerCase()}:${timestamp}:${nonce}`;
 };
 
-export const hashHelloMessage = (runtimeId: string, encryptionPubKey: string, timestamp: number, nonce: string): string => {
-  return keccak256(toUtf8Bytes(buildHelloMessage(runtimeId, encryptionPubKey, timestamp, nonce)));
+export const hashHelloMessage = (
+  runtimeId: string,
+  encryptionPubKey: string,
+  timestamp: number,
+  nonce: string,
+  audience: string,
+): string => keccak256(toUtf8Bytes(buildHelloMessage(runtimeId, encryptionPubKey, timestamp, nonce, audience)));
+
+export const hashRuntimeWsFrame = (
+  message: RuntimeWsMessage,
+  audience: string,
+  nonce: string,
+  authTimestamp: number,
+): string => {
+  // A signed hello alone is insufficient: a transparent proxy can forward the
+  // handshake and then inject a different application request. Bind every
+  // client frame to the single-use hello nonce and exact endpoint audience.
+  const { auth: _auth, ...unsigned } = message;
+  return keccak256(toUtf8Bytes(serializeTaggedJson([FRAME_DOMAIN, audience, nonce, authTimestamp, unsigned])));
 };
 
 export const makeHelloNonce = (): string => {

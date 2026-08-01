@@ -32,7 +32,8 @@ describe('global network protocol version', () => {
       `0x${'22'.repeat(32)}`,
       1_700_000_000_000,
       'nonce-1',
-    )).toBe('0x2764d423135d36be821244a0860b06311de1a49a02cc54ec222c013aa015506e');
+      'wss://xln.finance/relay',
+    )).toBe('0x4434ed36645e6be2c9cae9321c1bd2f3032399ab3e40abb613dcddba46a98640');
   });
 });
 

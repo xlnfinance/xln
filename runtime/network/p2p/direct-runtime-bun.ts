@@ -7,9 +7,9 @@ import {
 } from '../../protocol/payments/delivery-result';
 import { compareCanonicalText } from '../../orderbook/swap-keys';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from '../../protocol/p2p-crypto';
-import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
+import { deserializeWsMessage, directRuntimeWsAudience, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
-import { verifyHelloAuth } from './hello-auth';
+import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from './hello-auth';
 import { createHelloChallengeRegistry } from './hello-challenge';
 import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
 import {
@@ -48,6 +48,8 @@ type DirectWsSession = {
   handshakeDone: boolean;
   duplicateClosing: boolean;
   peerEncryptionPubKey: string | null;
+  authAudience: string | null;
+  authNonce: string | null;
   lastSeen: number;
 };
 
@@ -115,6 +117,8 @@ const ensureSession = (context: DirectRuntimeWsContext, ws: DirectWebSocket): Di
     handshakeDone: false,
     duplicateClosing: false,
     peerEncryptionPubKey: null,
+    authAudience: null,
+    authNonce: null,
     lastSeen: Date.now(),
   };
   context.sessions.set(ws, created);
@@ -300,13 +304,17 @@ const handleHandshake = (
     return true;
   }
   if (context.options.requireHelloAuth !== false) {
-    const challengeAccepted = context.helloChallenges.consume(ws, msg.auth?.nonce);
-    const authError = challengeAccepted
+    const binding = context.helloChallenges.consume(ws, {
+      challenge: msg.auth?.nonce,
+      audience: msg.audience,
+    });
+    const authError = binding
       ? verifyHelloAuth(
           normalizedFrom,
           peerKey,
           msg.auth,
           context.options.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
+          binding.audience,
         )
       : 'Hello challenge missing, expired, or already consumed';
     if (authError) {
@@ -314,6 +322,8 @@ const handleHandshake = (
       ws.close();
       return true;
     }
+    session.authAudience = binding!.audience;
+    session.authNonce = binding!.challenge;
   }
   session.peerEncryptionPubKey = peerKey;
   if (!rememberRuntimeSession(context, session, normalizedFrom)) {
@@ -465,6 +475,24 @@ const handleDirectMessage = async (
     return;
   }
   if (handleHandshake(context, ws, session, msg)) return;
+  if (context.options.requireHelloAuth !== false) {
+    const peerKey = normalizeEncryptionPubKey(msg.fromEncryptionPubKey);
+    const frameError = peerKey !== session.peerEncryptionPubKey
+      ? 'Direct session encryption key mismatch'
+      : verifyRuntimeWsFrameAuth(
+          sessionRuntimeId(session),
+          msg,
+          msg.auth,
+          context.options.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
+          session.authAudience || '',
+          session.authNonce || '',
+        );
+    if (frameError) {
+      send(ws, { type: 'error', error: frameError });
+      ws.close(4003, 'session-auth-invalid');
+      return;
+    }
+  }
   if (msg.type === 'ping') {
     session.lastSeen = Date.now();
     send(ws, { type: 'pong', inReplyTo: msg.id || makeMessageId() });
@@ -472,8 +500,6 @@ const handleDirectMessage = async (
   }
   if (msg.type === 'hello' || msg.type === 'debug_event') return;
   session.lastSeen = Date.now();
-  const peerKey = normalizeEncryptionPubKey(msg.fromEncryptionPubKey);
-  if (peerKey) session.peerEncryptionPubKey = peerKey;
   if (await handleRecoveryRequest(context, ws, session, msg)) return;
   if (await handleReliableReceipt(context, ws, session, msg)) return;
   await handleEntityInputs(context, ws, session, msg);
@@ -526,7 +552,9 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
     websocket: {
       open(ws: DirectWebSocket): void {
         ensureSession(context, ws);
-        if (options.requireHelloAuth !== false) context.helloChallenges.issue(ws);
+        if (options.requireHelloAuth !== false) {
+          context.helloChallenges.issue(ws, directRuntimeWsAudience(context.serverRuntimeId));
+        }
       },
       message: (ws: DirectWebSocket, raw: string | Buffer | ArrayBuffer): Promise<void> =>
         handleDirectMessage(context, ws, raw),

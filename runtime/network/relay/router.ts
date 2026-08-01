@@ -30,15 +30,20 @@ import {
 import { classifyWebSocketSendResult } from '../websocket-send-result';
 import type { Profile } from '../../entity/profile';
 import { verifyProfileSignature, type ProfileVerifyResult } from '../../entity/profile-signing';
-import { verifyHelloAuth } from '../p2p/hello-auth';
+import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../p2p/hello-auth';
+import type { HelloChallengeBinding } from '../p2p/hello-challenge';
 import { isDeliveryDelivered, type DeliveryResult } from '../../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
+const SOCKET_AUTH_BINDING = Symbol.for('xln.relay.socketAuthBinding');
 type RememberedRelaySocket = object & { [SOCKET_RUNTIME_ID]?: string };
 type DuplicateClosingRelaySocket = object & { [SOCKET_DUPLICATE_CLOSING]?: boolean };
+type AuthenticatedRelaySocket = object & {
+  [SOCKET_AUTH_BINDING]?: HelloChallengeBinding & { encryptionPubKey: string };
+};
 const NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS = [
   'invalid tag',
   'P2P_DECRYPT_ERROR',
@@ -70,9 +75,27 @@ const getRememberedSocketRuntimeId = (ws: unknown): string => {
   return normalizeRuntimeKey((ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID] || '');
 };
 
+const rememberSocketAuthBinding = (
+  ws: unknown,
+  binding: HelloChallengeBinding & { encryptionPubKey: string },
+): void => {
+  if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
+  Object.defineProperty(ws as AuthenticatedRelaySocket, SOCKET_AUTH_BINDING, {
+    value: binding,
+    enumerable: false,
+    configurable: true,
+  });
+};
+
+const getSocketAuthBinding = (ws: unknown): AuthenticatedRelaySocket[typeof SOCKET_AUTH_BINDING] =>
+  ws && (typeof ws === 'object' || typeof ws === 'function')
+    ? (ws as AuthenticatedRelaySocket)[SOCKET_AUTH_BINDING]
+    : undefined;
+
 export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
   delete (ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID];
+  delete (ws as AuthenticatedRelaySocket)[SOCKET_AUTH_BINDING];
 };
 
 const markDuplicateClosingSocket = (ws: unknown): void => {
@@ -129,7 +152,7 @@ export type RelayRouterConfig = {
   /** Defaults to true. Unsigned hello cannot claim a runtime slot. */
   requireHelloAuth?: boolean;
   helloSkewMs?: number;
-  consumeHelloChallenge?: (ws: object, challenge: unknown) => boolean;
+  consumeHelloChallenge?: (ws: object, claim: unknown) => HelloChallengeBinding | null;
   verifyProfile?: (profile: Profile) => Promise<ProfileVerifyResult> | ProfileVerifyResult;
 };
 
@@ -244,13 +267,17 @@ const handleHello = (context: RelayRouteContext): boolean => {
     return true;
   }
   if (config.requireHelloAuth !== false) {
-    const challengeAccepted = config.consumeHelloChallenge?.(ws as object, context.msg.auth?.nonce) ?? true;
-    const authError = challengeAccepted
+    const binding = config.consumeHelloChallenge?.(
+      ws as object,
+      { challenge: context.msg.auth?.nonce, audience: context.msg.audience },
+    ) ?? null;
+    const authError = binding
       ? verifyHelloAuth(
           fromKey,
           fromEncryptionPubKey!,
           context.msg.auth,
           config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
+          binding.audience,
         )
       : 'Hello challenge missing, expired, or already consumed';
     if (authError) {
@@ -266,6 +293,7 @@ const handleHello = (context: RelayRouteContext): boolean => {
       send(ws, serializeWsMessage({ type: 'error', error: authError }));
       return true;
     }
+    rememberSocketAuthBinding(ws, { ...binding!, encryptionPubKey: fromEncryptionPubKey! });
   }
   const existingClient = store.clients.get(fromKey);
   if (existingClient && existingClient.ws !== ws) {
@@ -727,6 +755,7 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
     fromEncryptionPubKey,
   } = context;
   const { store, send } = config;
+  const authBinding = getSocketAuthBinding(ws);
   if (rememberedRuntimeId && fromKey && rememberedRuntimeId !== fromKey) {
     pushDebugEvent(store, {
       event: 'error',
@@ -739,6 +768,30 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
     });
     send(ws, serializeWsMessage({ type: 'error', error: 'Relay socket runtime mismatch' }));
     return false;
+  }
+  if (type !== 'hello' && config.requireHelloAuth !== false) {
+    // The hello key is immutable for this socket. Re-caching a later advertised
+    // key would redirect the next encrypted envelope to an injected key.
+    const authError = !rememberedRuntimeId || !fromKey || !authBinding
+      ? 'Relay session authentication missing'
+      : fromEncryptionPubKey?.toLowerCase() !== authBinding.encryptionPubKey.toLowerCase()
+        ? 'Relay session encryption key mismatch'
+        : verifyRuntimeWsFrameAuth(
+            rememberedRuntimeId,
+            msg,
+            msg.auth,
+            config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
+            authBinding.audience,
+            authBinding.challenge,
+          );
+    if (authError) {
+      pushDebugEvent(store, {
+        event: 'error', from, to, msgType: type, status: 'rejected',
+        reason: 'RELAY_SESSION_AUTH_INVALID', details: { traceId, authError },
+      });
+      send(ws, serializeWsMessage({ type: 'error', error: authError }));
+      return false;
+    }
   }
   if (rememberedRuntimeId && fromKey && rememberedRuntimeId === fromKey) {
     const existing = store.clients.get(rememberedRuntimeId);
@@ -769,9 +822,6 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
     });
     send(ws, serializeWsMessage({ type: 'error', error: 'Missing fromEncryptionPubKey' }));
     return false;
-  }
-  if (from && fromEncryptionPubKey && rememberedRuntimeId === fromKey) {
-    cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
   }
   if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
     relayLog(`[RELAY-MSG] type=${type} from=${from || 'none'} to=${to || 'none'}`);
