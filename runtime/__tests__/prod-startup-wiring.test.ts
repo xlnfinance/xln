@@ -401,6 +401,9 @@ describe('production startup wiring', () => {
     expect(script).toContain('export ANVIL_RPC2="${ANVIL_RPC2:-http://127.0.0.1:${RPC2_PORT}}"');
     expect(script).toContain('export RPC_TRON="${RPC_TRON:-$ANVIL_RPC2}"');
     expect(script).toContain('export RELAY_URL=${RELAY_URL:-$INTERNAL_RELAY_URL}');
+    expect(script).toContain('export XLN_PUBLIC_FAUCET=${XLN_PUBLIC_FAUCET:-1}');
+    expect(script).toContain('export XLN_FAUCET_MAX_AMOUNT=${XLN_FAUCET_MAX_AMOUNT:-100}');
+    expect(script).toContain('export XLN_FAUCET_MAX_GAS_AMOUNT=${XLN_FAUCET_MAX_GAS_AMOUNT:-0.1}');
     expect(script).toContain('--relay-url "$RELAY_URL"');
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
     expect(script).not.toContain('XLN_RUNTIME_EXIT_ON_FATAL');

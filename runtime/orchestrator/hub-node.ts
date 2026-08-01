@@ -73,6 +73,7 @@ import { handleLendingStateRequest } from '../api/server/lending';
 import { handleRuntimeActivityRequest } from '../api/server/activity-api';
 import { handleReserveFaucet } from '../api/server/reserve-faucet';
 import { handleOffchainFaucet } from '../api/server/offchain-faucet';
+import { enforceFaucetPolicy } from '../api/server/faucet-policy';
 import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
 import { handleRuntimeInputStatus } from '../api/server/runtime-input-control';
 import {
@@ -2128,6 +2129,8 @@ const handleHubHttpRequest = async (
       { status: 403, headers: JSON_HEADERS },
     );
   }
+  const faucetPolicyResponse = await enforceFaucetPolicy(request, operatorAuthorized, process.env, JSON_HEADERS);
+  if (faucetPolicyResponse) return faucetPolicyResponse;
   const statusResponse = context.handleStatus(url, operatorAuthorized);
   if (statusResponse) return statusResponse;
   const accountStatusResponse = handleAccountStatusRequest(
