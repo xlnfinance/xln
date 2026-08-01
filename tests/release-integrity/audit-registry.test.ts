@@ -30,7 +30,10 @@ describe('canonical audit registry', () => {
     expect(REGISTRY.modules).toHaveLength(17);
     expect(REGISTRY.modules.every(module => REGISTRY.invariants.some(invariant => invariant.moduleId === module.id))).toBe(true);
     expect(REGISTRY.agentRuns.length).toBeGreaterThanOrEqual(12);
-    expect(REGISTRY.agentRuns.every(run => run.provisional)).toBe(true);
+    const reviewers = new Map(REGISTRY.reviewers.map(reviewer => [reviewer.id, reviewer]));
+    expect(REGISTRY.agentRuns.every(run => run.provisional || (
+      run.state === 'COMPLETED' && reviewers.get(run.reviewerId)?.state === 'RANKED'
+    ))).toBe(true);
   });
 
   test('fingerprints are deterministic and dependency-aware', () => {
@@ -84,7 +87,7 @@ describe('canonical audit registry', () => {
       recordedAt: `2026-08-01T00:00:0${index}Z`,
       agentRunIds: [],
     }));
-    const registry: AuditRegistry = { ...REGISTRY, evidence };
+    const registry: AuditRegistry = { ...REGISTRY, evidence, findings: [] };
     const fingerprints = new Map(REGISTRY.modules.map(module => [module.id, `sha256:${'b'.repeat(64)}`]));
     fingerprints.set(target.moduleId, currentFingerprint);
     const current = computeAuditStatus(registry, fingerprints, CURRENT_SHA, CURRENT_ENVIRONMENT);

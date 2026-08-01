@@ -1852,7 +1852,7 @@
       "title": "Anonymous faucet routes accept caller-selected amounts without a shared enablement, cap, quota, or reservation policy.",
       "severity": "P0",
       "confidence": 99.5,
-      "state": "CONFIRMED",
+      "state": "VERIFIED",
       "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
       "reproduction": "Submit an anonymous ERC20 faucet request for 999999999999 and observe it reach the funding sink; separately request the full offchain outbound capacity and observe admission rather than rejection."
     },
@@ -2125,6 +2125,18 @@
       "label": "Claude Opus contracts base auditor",
       "family": "claude",
       "state": "PROVISIONAL"
+    },
+    {
+      "id": "claude-opus-faucet-policy",
+      "label": "Claude Opus Faucet policy auditor",
+      "family": "claude",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-faucet-policy-verifier",
+      "label": "Faucet policy independent verifier",
+      "family": "codex",
+      "state": "RANKED"
     }
   ],
   "agentRuns": [
@@ -2773,6 +2785,40 @@
       ],
       "candidateFindingIds": [],
       "summary": "Checking that only authenticated malformed proposals become typed rejection and identifying removable duplication in the 13-file candidate."
+    },
+    {
+      "id": "opus-faucet-policy-audit-20260801",
+      "reviewerId": "claude-opus-faucet-policy",
+      "sourceSha": "bfed689d7eaf4d8414d91e1c0a57cf608c5b6153",
+      "moduleIds": [
+        "public-wallet-api"
+      ],
+      "scope": "Independent faucet route, cap, operator, proxy, and deployment-policy audit",
+      "state": "COMPLETED",
+      "usefulnessScore": 800,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-FAUCET-PUBLIC-UNBOUNDED"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Confirmed the shared public cap and route placement, then caught a trusted-operator release regression before merge; scored the superseded candidate 720/1000."
+    },
+    {
+      "id": "faucet-policy-final-verification-20260801",
+      "reviewerId": "codex-faucet-policy-verifier",
+      "sourceSha": "b9c3e5fcde75d2ec9c3f6165fa05ad2008a30c5f",
+      "moduleIds": [
+        "public-wallet-api"
+      ],
+      "scope": "Independent exact-route, adversarial JSON, operator-boundary, cap, CORS, and managed-testnet verification",
+      "state": "COMPLETED",
+      "usefulnessScore": 1000,
+      "provisional": false,
+      "confirmedFindingIds": [
+        "AUD-FAUCET-PUBLIC-UNBOUNDED"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Verified deterministic rejection of scalar-type bypasses, all four public caps, unspoofable trusted-operator scope, explicit managed-testnet enablement, and zero remaining P0-P2 at 99.8% confidence."
     }
   ],
   "moduleReviews": [
@@ -2807,6 +2853,19 @@
       ],
       "summary": "Authenticated proposal ordering and adversarial replay containment remain release blockers despite strong state-root and isolation primitives.",
       "recordedAt": "2026-08-01T01:12:10Z"
+    },
+    {
+      "id": "faucet-policy-final-review-20260801",
+      "moduleId": "public-wallet-api",
+      "agentRunId": "faucet-policy-final-verification-20260801",
+      "sourceSha": "b9c3e5fcde75d2ec9c3f6165fa05ad2008a30c5f",
+      "moduleFingerprint": "sha256:43729a9b553d11dcecc4a3e55a90c822d15b974034cd795ebab50986458f7fa4",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "score": 1000,
+      "confidence": 100,
+      "blockerFindingIds": [],
+      "summary": "All public faucet routes are deployment-opt-in and exactly capped; malformed JSON cannot bypass or crash policy, while trusted local release tooling remains compatible.",
+      "recordedAt": "2026-08-01T03:55:00Z"
     }
   ]
 }
