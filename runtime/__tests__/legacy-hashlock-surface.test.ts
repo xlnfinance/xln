@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { join } from 'node:path';
 import { buildRuntimeActivityEvents } from '../api/public/activity-history';
 import { decodeValidatedBuffer } from '../storage/codec';
 import { validateStoredRuntimeActivityValue } from '../storage/history-view-schema';
@@ -15,7 +15,7 @@ const productionRoots = [
 const nonProductionPaths = [
   /^brainvault\/.*\.(?:test|spec)\.[^/]+$/u,
   /^debates\/tests\//u,
-  /^frontend\/android\/app\/src\/test\//u,
+  /^frontend\/android\/app\/src\/(?:androidTest|test)\//u,
   /^frontend\/(?:\.svelte-kit|build|tests)\//u,
   /^frontend\/static\/(?:contracts|docs-catalog|docs-static)\//u,
   /^frontend\/static\/(?:runtime\.js|hash-wasm-)/u,
@@ -23,9 +23,6 @@ const nonProductionPaths = [
   /^native\/__tests__\//u,
   /^runtime\/(?:__tests__|scenarios)\//u,
 ];
-const sourceExtensions = new Set([
-  '.cjs', '.html', '.js', '.jsx', '.json', '.mjs', '.sh', '.sol', '.svelte', '.ts', '.tsx',
-]);
 const allowedRoles: Record<string, { count: number; fragments: readonly string[] }> = {
   'runtime/api/public/activity-history.ts': {
     count: 1,
@@ -71,30 +68,46 @@ const trackedEntries = (): TrackedEntry[] =>
       return { mode: match[1]!, path: match[2]! };
     });
 
-const productionEntries = (): TrackedEntry[] => trackedEntries().filter((entry) => {
+const rootedOrTopLevelEntries = (): TrackedEntry[] => trackedEntries().filter(entry =>
+  !entry.path.includes('/') || productionRoots.some(root => entry.path.startsWith(root))
+);
+
+const productionEntries = (entries: readonly TrackedEntry[]): TrackedEntry[] => entries.filter((entry) => {
   if (nonProductionPaths.some(pattern => pattern.test(entry.path))) return false;
-  const rooted = productionRoots.some(root => entry.path.startsWith(root));
-  const topLevelLauncher = !entry.path.includes('/')
-    && (entry.mode === '100755' || entry.path === 'package.json' || sourceExtensions.has(extname(entry.path)));
-  return (rooted || topLevelLauncher)
-    && (entry.mode === '100755' || sourceExtensions.has(extname(entry.path)));
+  return entry.path.includes('/') || entry.mode === '100755' || entry.path === 'package.json';
 });
 
+const countLiteral = (bytes: Buffer, literal: Buffer): number => {
+  let count = 0;
+  for (let offset = bytes.indexOf(literal); offset >= 0; offset = bytes.indexOf(literal, offset + literal.length)) {
+    count += 1;
+  }
+  return count;
+};
+
 test('legacy hashlockPayment stays confined to exact production roles', () => {
-  const inventory = productionEntries();
-  expect(inventory.filter(({ mode, path }) =>
-    mode === '120000' || lstatSync(join(repoRoot, path)).isSymbolicLink()
-  ).map(entry => entry.path)).toEqual([]);
+  const scopedEntries = rootedOrTopLevelEntries();
+  expect(scopedEntries.flatMap(({ mode, path }) => {
+    const stat = lstatSync(join(repoRoot, path));
+    return mode === '120000' || stat.isSymbolicLink() || !stat.isFile()
+      ? [`${mode}:${path}`]
+      : [];
+  })).toEqual([]);
+  const inventory = productionEntries(scopedEntries);
   const paths = inventory.map(entry => entry.path);
   expect(paths).toEqual(expect.arrayContaining([
     'package.json', 'custody/server.ts', 'native/desktop/main.cjs',
     'packages/npm/xlnfinance/lib/api.js', 'frontend/src/routes/scenarios/+page.svelte',
+    'frontend/android/app/build.gradle', 'frontend/android/gradlew', 'frontend/android/gradlew.bat',
+    'frontend/android/app/src/main/AndroidManifest.xml',
+    'frontend/android/app/src/main/java/finance/xln/wallet/MainActivity.java',
+    'frontend/ios/App/App/AppDelegate.swift',
   ]));
 
   const mentions = inventory.flatMap(({ path }) => {
-    const source = readFileSync(join(repoRoot, path), 'utf8');
-    const count = source.match(/hashlockPayment/g)?.length ?? 0;
-    return count > 0 ? [{ path, source, count }] : [];
+    const bytes = readFileSync(join(repoRoot, path));
+    const count = countLiteral(bytes, Buffer.from('hashlockPayment'));
+    return count > 0 ? [{ path, source: bytes.toString('utf8'), count }] : [];
   });
   expect(mentions.map(entry => entry.path).sort()).toEqual(Object.keys(allowedRoles).sort());
   for (const mention of mentions) {
