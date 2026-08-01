@@ -85,7 +85,7 @@ import {
 } from './relay-direct';
 import { createServerRpcMessageHandler } from './rpc-ws';
 import { dispatchRuntimeRpcAfterStartup } from './rpc-startup-gate';
-import { createRelayStartupMessageGate } from './relay-startup-gate';
+import { createRelayStartupMessageGate, decodeRelayStartupHello } from './relay-startup-gate';
 import {
   buildRuntimeJurisdictionsJson,
   readCanonicalJurisdictionsJson,
@@ -965,12 +965,15 @@ const handleWebSocketMessage = (
       });
       return;
     }
-    const peerMessage: RuntimeWsMessage = deserializeWsMessage(
-      message,
-      isRelaySocketAuthenticated(ws) ? undefined : MAX_PREAUTH_WS_MESSAGE_BYTES,
-    );
+    const relayStartupPending = !session.routerConfig && isServerBootInProgress();
+    const peerMessage: RuntimeWsMessage = relayStartupPending
+      ? decodeRelayStartupHello(message)
+      : deserializeWsMessage(
+        message,
+        isRelaySocketAuthenticated(ws) ? undefined : MAX_PREAUTH_WS_MESSAGE_BYTES,
+      );
 
-    if (!session.routerConfig && isServerBootInProgress()) {
+    if (relayStartupPending) {
       session.relayStartupGate.deferHello(
         serverStartupBarrier,
         ws,

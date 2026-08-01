@@ -1,3 +1,5 @@
+import { deserializeWsMessage, type RuntimeWsMessage } from '../../network/p2p/ws-protocol';
+
 export type RelayStartupRejectReason =
   | 'startup-hello-required'
   | 'startup-hello-pending'
@@ -13,10 +15,18 @@ export type RelayStartupGateResult = 'deferred' | 'rejected';
  * cancels the pending hello: the socket is being closed, so its deferred frame
  * must never authenticate later if the close callback races the boot barrier.
  */
-const DEFAULT_MAX_PENDING_STARTUP_HELLOS = 1_024;
+// A fully bound signed direct-runtime hello is currently 578 bytes. Four KiB
+// leaves >7x protocol-growth margin. Sixty-four concurrent handshakes cover a
+// startup burst; excess sockets close and use the client's normal reconnect.
+export const MAX_RELAY_STARTUP_HELLO_BYTES = 4 * 1024;
+export const MAX_PENDING_RELAY_STARTUP_HELLOS = 64;
+
+export const decodeRelayStartupHello = (
+  raw: Parameters<typeof deserializeWsMessage>[0],
+): RuntimeWsMessage => deserializeWsMessage(raw, MAX_RELAY_STARTUP_HELLO_BYTES);
 
 export const createRelayStartupMessageGate = (
-  maxPendingHellos = DEFAULT_MAX_PENDING_STARTUP_HELLOS,
+  maxPendingHellos = MAX_PENDING_RELAY_STARTUP_HELLOS,
 ) => {
   if (!Number.isSafeInteger(maxPendingHellos) || maxPendingHellos <= 0) {
     throw new Error('RELAY_STARTUP_HELLO_CAPACITY_INVALID');
