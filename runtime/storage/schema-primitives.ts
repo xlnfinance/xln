@@ -27,8 +27,9 @@ export const requireStorageBigInt = (
   value: unknown,
   code: string,
   minimum = 0n,
+  maximum?: bigint,
 ): bigint => {
-  if (typeof value !== 'bigint' || value < minimum) throw new Error(code);
+  if (typeof value !== 'bigint' || value < minimum || (maximum !== undefined && value > maximum)) throw new Error(code);
   return value;
 };
 

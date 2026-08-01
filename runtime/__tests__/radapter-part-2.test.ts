@@ -206,7 +206,7 @@ const makeEnv = (): RuntimeReplica =>
                       jHeight: 0,
                       accountTxs: [],
                       prevFrameHash: 'genesis',
-                      stateHash: `0x${'02'.repeat(32)}`,
+                      stateHash: '0x3ac8cd1532f1e010bb75ac9d5618680f0676e843b0fba7f9a81e3d13b61f670d',
                       accountStateRoot: `0x${'01'.repeat(32)}`,
                       deltas: [],
                       byLeft: true,

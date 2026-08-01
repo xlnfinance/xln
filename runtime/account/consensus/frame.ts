@@ -103,7 +103,7 @@ export const canonicalAccountTxForFrameHash = (tx: AccountTx): Record<string, un
   };
 };
 
-export async function createFrameHash(frame: AccountFrame): Promise<string> {
+const computeCanonicalAccountFrameHash = (frame: AccountFrame): string => {
   assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
   return computeCanonicalMerkleRoot('account.frame', [
     ['transition', {
@@ -117,6 +117,16 @@ export async function createFrameHash(frame: AccountFrame): Promise<string> {
     ['deltas', frame.deltas],
     ['accountStateRoot', frame.accountStateRoot],
   ], 'integrity');
+};
+
+export async function createFrameHash(frame: AccountFrame): Promise<string> {
+  return computeCanonicalAccountFrameHash(frame);
+}
+
+/** Verify the signed frame envelope, not the newer live state: J-finality may
+ * legitimately advance Account state after the latest bilateral frame. */
+export function assertAccountFrameHash(frame: AccountFrame, code: string): void {
+  if (computeCanonicalAccountFrameHash(frame) !== frame.stateHash) throw new Error(code);
 }
 
 export async function computeFrameHash(frame: AccountFrame): Promise<string> {
