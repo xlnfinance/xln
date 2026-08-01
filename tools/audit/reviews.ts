@@ -1,6 +1,7 @@
 /** Current-fingerprint module-review quorum and score-floor derivation. */
 
 import type { AuditModuleReview, AuditRegistry } from './types';
+import { runCoversWholeModule } from './review-validation';
 
 export type ModuleReviewStatus = Readonly<{
   floor: number;
@@ -33,11 +34,13 @@ export const computeModuleReviewStatus = (
   environmentFingerprint: string,
 ): ModuleReviewStatus => {
   const moduleReviews = registry.moduleReviews.filter(review => review.moduleId === moduleId);
-  const current = latestReviewsByReviewer(registry, moduleReviews.filter(review => (
-    review.moduleFingerprint === moduleFingerprint
-    && review.environmentFingerprint === environmentFingerprint
-  )));
   const runs = new Map(registry.agentRuns.map(run => [run.id, run]));
+  const current = latestReviewsByReviewer(registry, moduleReviews.filter(review => {
+    const run = runs.get(review.agentRunId);
+    return review.moduleFingerprint === moduleFingerprint
+      && review.environmentFingerprint === environmentFingerprint
+      && Boolean(run && runCoversWholeModule(registry, run, moduleId, moduleFingerprint));
+  }));
   const reviewers = new Map(registry.reviewers.map(reviewer => [reviewer.id, reviewer]));
   const families = new Set(current.flatMap(review => {
     const reviewerId = runs.get(review.agentRunId)?.reviewerId;

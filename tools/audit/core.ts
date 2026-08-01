@@ -14,6 +14,7 @@ export {
 
 export { computeAuditStatus, evaluateAuditGate } from './status';
 export { computeModuleReviewStatus } from './reviews';
+export { validateEvidenceArtifactBinding } from './root-validation';
 
 export {
   loadAuditRegistry,

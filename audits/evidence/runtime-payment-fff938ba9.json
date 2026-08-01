@@ -1,63 +1,119 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
   "createdAt": "2026-08-01T00:32:00Z",
   "evidence": [
     {
       "id": "runtime-rejection.code-trace.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run audit-registry-integration-20260801",
+      "invariantId": "runtime-pipeline.expected-rejection-isolation",
+      "kind": "codeTrace",
       "state": "FAIL",
-      "summary": "Trace confirmed mutationStarted precedes business reducers and any later expected command rejection enters the fatal Runtime halt path."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:d90a9f000ed65fe121ec1bd2dfdabd626aa16cd48745cacf0e837ba30f7358cb",
+      "command": "agent-run audit-registry-integration-20260801",
+      "summary": "Trace confirmed mutationStarted precedes business reducers and any later expected command rejection enters the fatal Runtime halt path.",
+      "recordedAt": "2026-08-01T00:42:00Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "runtime-rejection.l2.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run audit-registry-integration-20260801 real-processRuntime reproducer",
+      "invariantId": "runtime-pipeline.expected-rejection-isolation",
+      "kind": "l2TargetedFlow",
       "state": "FAIL",
-      "summary": "A real signed missing-next-hop payment produced DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING, halted the Runtime, and made the next call fail RUNTIME_PROCESS_HALTED."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:d90a9f000ed65fe121ec1bd2dfdabd626aa16cd48745cacf0e837ba30f7358cb",
+      "command": "agent-run audit-registry-integration-20260801 real-processRuntime reproducer",
+      "summary": "A real signed missing-next-hop payment produced DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING, halted the Runtime, and made the next call fail RUNTIME_PROCESS_HALTED.",
+      "recordedAt": "2026-08-01T00:42:01Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "runtime-rejection.independent.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run runtime-payment-current-recheck-20260801",
+      "invariantId": "runtime-pipeline.expected-rejection-isolation",
+      "kind": "independentVerification",
       "state": "FAIL",
-      "summary": "Independent current-SHA reviewer reproduced the sticky halt through production processRuntime at 100% confidence."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:d90a9f000ed65fe121ec1bd2dfdabd626aa16cd48745cacf0e837ba30f7358cb",
+      "command": "agent-run runtime-payment-current-recheck-20260801",
+      "summary": "Independent current-SHA reviewer reproduced the sticky halt through production processRuntime at 100% confidence.",
+      "recordedAt": "2026-08-01T00:42:02Z",
+      "agentRunIds": [
+        "runtime-payment-current-recheck-20260801"
+      ]
     },
     {
       "id": "payment-terminal.code-trace.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run audit-registry-integration-20260801",
+      "invariantId": "registration-payment.terminal-truth",
+      "kind": "codeTrace",
       "state": "FAIL",
-      "summary": "Trace confirmed insufficient capacity emits no Account transaction or semantic effect while raw committed HTLC input is projected as Payment started."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:74cbb326d1f6a313612da0a4644a1b2949f2a341929f5f18b7a2b9bb305c6a4c",
+      "command": "agent-run audit-registry-integration-20260801",
+      "summary": "Trace confirmed insufficient capacity emits no Account transaction or semantic effect while raw committed HTLC input is projected as Payment started.",
+      "recordedAt": "2026-08-01T00:42:03Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "payment-terminal.l2.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run audit-registry-integration-20260801 insufficient-capacity and activity projection reproducer",
+      "invariantId": "registration-payment.terminal-truth",
+      "kind": "l2TargetedFlow",
       "state": "FAIL",
-      "summary": "Narrow tests returned accountTxs=0 and no effects, while the current activity projection returned title Payment started and status started."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:74cbb326d1f6a313612da0a4644a1b2949f2a341929f5f18b7a2b9bb305c6a4c",
+      "command": "agent-run audit-registry-integration-20260801 insufficient-capacity and activity projection reproducer",
+      "summary": "Narrow tests returned accountTxs=0 and no effects, while the current activity projection returned title Payment started and status started.",
+      "recordedAt": "2026-08-01T00:42:04Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "payment-terminal.independent.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run runtime-payment-current-recheck-20260801",
+      "invariantId": "registration-payment.terminal-truth",
+      "kind": "independentVerification",
       "state": "FAIL",
-      "summary": "Independent current-SHA reviewer confirmed the durable semantic-status defect at 99% confidence."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:74cbb326d1f6a313612da0a4644a1b2949f2a341929f5f18b7a2b9bb305c6a4c",
+      "command": "agent-run runtime-payment-current-recheck-20260801",
+      "summary": "Independent current-SHA reviewer confirmed the durable semantic-status defect at 99% confidence.",
+      "recordedAt": "2026-08-01T00:42:05Z",
+      "agentRunIds": [
+        "runtime-payment-current-recheck-20260801"
+      ]
     },
     {
       "id": "wallet-payment-status.code-trace.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run audit-registry-integration-20260801",
+      "invariantId": "wallet-frontend.durable-status-truth",
+      "kind": "codeTrace",
       "state": "FAIL",
-      "summary": "Trace confirmed the wallet promotes ingress observed or committed into payment success without a durable semantic outcome."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd",
+      "command": "agent-run audit-registry-integration-20260801",
+      "summary": "Trace confirmed the wallet promotes ingress observed or committed into payment success without a durable semantic outcome.",
+      "recordedAt": "2026-08-01T00:42:06Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "wallet-payment-status.independent.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run runtime-payment-current-recheck-20260801",
+      "invariantId": "wallet-frontend.durable-status-truth",
+      "kind": "independentVerification",
       "state": "FAIL",
-      "summary": "Independent reviewer tied the false durable activity to current PaymentPanel and command-bus behavior."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd",
+      "command": "agent-run runtime-payment-current-recheck-20260801",
+      "summary": "Independent reviewer tied the false durable activity to current PaymentPanel and command-bus behavior.",
+      "recordedAt": "2026-08-01T00:42:07Z",
+      "agentRunIds": [
+        "runtime-payment-current-recheck-20260801"
+      ]
     }
   ]
 }

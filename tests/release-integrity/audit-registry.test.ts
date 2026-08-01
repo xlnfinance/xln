@@ -239,7 +239,7 @@ describe('canonical audit registry', () => {
       }],
     };
     expect(validateAuditRegistry(splitAttestation)).toContain(
-      `evidence split-attestation has no same-run attester scoped to ${splitTarget.moduleId} on source SHA ${splitSourceSha}`,
+      `evidence split-attestation has no exact attester for ${splitTarget.id} at ${REGISTRY.evidence[0]!.moduleFingerprint}`,
     );
   });
 

@@ -1,6 +1,6 @@
 /** Fail-loud validation for exact-snapshot module scorecards. */
 
-import type { AuditRegistry } from './types';
+import type { AuditAgentRun, AuditRegistry } from './types';
 
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/;
 const FINGERPRINT_PATTERN = /^sha256:[0-9a-f]{64}$/;
@@ -8,6 +8,21 @@ const ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 
 const isBoundedInteger = (value: number, minimum: number, maximum: number): boolean =>
   Number.isInteger(value) && value >= minimum && value <= maximum;
+
+/** A narrow Faucet review must not become a score for every wallet invariant. */
+export const runCoversWholeModule = (
+  registry: AuditRegistry,
+  run: AuditAgentRun,
+  moduleId: string,
+  moduleFingerprint: string,
+): boolean => {
+  const invariantIds = registry.invariants
+    .filter(invariant => invariant.moduleId === moduleId)
+    .map(invariant => invariant.id);
+  return invariantIds.length > 0
+    && invariantIds.every(invariantId => run.invariantIds.includes(invariantId))
+    && run.moduleFingerprints[moduleId] === moduleFingerprint;
+};
 
 export const validateModuleReviews = (registry: AuditRegistry): string[] => {
   const errors: string[] = [];
@@ -45,6 +60,9 @@ export const validateModuleReviews = (registry: AuditRegistry): string[] => {
       }
       if (run.sourceSha !== review.sourceSha) {
         errors.push(`module review ${review.id} source SHA differs from run ${run.id}`);
+      }
+      if (!runCoversWholeModule(registry, run, review.moduleId, review.moduleFingerprint)) {
+        errors.push(`module review ${review.id} run ${run.id} lacks exact whole-module scope`);
       }
     }
     if (!SHA_PATTERN.test(review.sourceSha)) errors.push(`module review ${review.id} has invalid source SHA`);

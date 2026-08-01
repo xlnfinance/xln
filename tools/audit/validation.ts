@@ -2,11 +2,11 @@
 
 import { readFileSync } from 'node:fs';
 
+import { validateAgentRuns } from './agent-run-validation';
 import { sha256Text } from './fingerprint';
 import { validateModuleReviews } from './review-validation';
 import { validateAuditRegistryRoot } from './root-validation';
 import {
-  AGENT_RUN_STATES,
   EVIDENCE_KINDS,
   EVIDENCE_STATES,
   FINDING_SEVERITIES,
@@ -39,7 +39,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const topLevelShapeErrors = (value: unknown): string[] => {
   if (!isRecord(value)) return ['registry root must be an object'];
   const errors: string[] = [];
-  if (value['schemaVersion'] !== 1) errors.push('schemaVersion must equal 1');
+  if (value['schemaVersion'] !== 2) errors.push('schemaVersion must equal 2');
   if (typeof value['protocol'] !== 'string' || !value['protocol']) errors.push('protocol must be a non-empty path');
   const scope = value['scope'];
   if (!isRecord(scope)) errors.push('scope must be an object');
@@ -51,6 +51,24 @@ const topLevelShapeErrors = (value: unknown): string[] => {
   if (!isRecord(value['policy'])) errors.push('policy must be an object');
   for (const field of ['modules', 'invariants', 'evidence', 'findings', 'reviewers', 'agentRuns', 'moduleReviews']) {
     if (!Array.isArray(value[field])) errors.push(`${field} must be an array`);
+  }
+  if (Array.isArray(value['invariants'])) {
+    for (const [index, invariant] of value['invariants'].entries()) {
+      if (!isRecord(invariant)) errors.push(`invariants[${index}] must be an object`);
+      else {
+        if (!Array.isArray(invariant['sourceGlobs'])) errors.push(`invariants[${index}].sourceGlobs must be an array`);
+        if (!Array.isArray(invariant['testGlobs'])) errors.push(`invariants[${index}].testGlobs must be an array`);
+      }
+    }
+  }
+  if (Array.isArray(value['agentRuns'])) {
+    for (const [index, run] of value['agentRuns'].entries()) {
+      if (!isRecord(run)) errors.push(`agentRuns[${index}] must be an object`);
+      else {
+        if (!Array.isArray(run['invariantIds'])) errors.push(`agentRuns[${index}].invariantIds must be an array`);
+        if (!isRecord(run['moduleFingerprints'])) errors.push(`agentRuns[${index}].moduleFingerprints must be an object`);
+      }
+    }
   }
   return errors;
 };
@@ -93,6 +111,7 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
     ...duplicateIds(registry.findings, 'finding'),
     ...duplicateIds(registry.reviewers, 'reviewer'),
     ...duplicateIds(registry.agentRuns, 'agent run'),
+    ...validateAgentRuns(registry),
     ...validateModuleReviews(registry),
   ];
   if (registry.modules.length < 10) errors.push('registry must map at least 10 modules');
@@ -103,9 +122,6 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
   }
   const moduleIds = new Set(registry.modules.map(module => module.id));
   const invariantIds = new Set(registry.invariants.map(invariant => invariant.id));
-  const findingIds = new Set(registry.findings.map(finding => finding.id));
-  const findingsById = new Map(registry.findings.map(finding => [finding.id, finding]));
-  const reviewerIds = new Set(registry.reviewers.map(reviewer => reviewer.id));
   const agentRunIds = new Set(registry.agentRuns.map(run => run.id));
   const invariantsById = new Map(registry.invariants.map(invariant => [invariant.id, invariant]));
   const agentRunsById = new Map(registry.agentRuns.map(run => [run.id, run]));
@@ -115,7 +131,6 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
   const findingSeverities = new Set<string>(FINDING_SEVERITIES);
   const findingStates = new Set<string>(FINDING_STATES);
   const reviewerStates = new Set<string>(REVIEWER_STATES);
-  const agentRunStates = new Set<string>(AGENT_RUN_STATES);
   const weightTotal = EVIDENCE_KINDS.reduce((sum, kind) => sum + registry.policy.evidenceWeights[kind], 0);
   for (const kind of EVIDENCE_KINDS) {
     const weight = registry.policy.evidenceWeights[kind];
@@ -153,6 +168,10 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
     if (!ID_PATTERN.test(invariant.id)) errors.push(`invalid invariant id: ${invariant.id}`);
     if (!moduleIds.has(invariant.moduleId)) errors.push(`invariant ${invariant.id} has unknown module ${invariant.moduleId}`);
     if (invariant.importance < 1 || invariant.importance > 100) errors.push(`invariant ${invariant.id} importance must be 1..100`);
+    if (invariant.sourceGlobs.length === 0) errors.push(`invariant ${invariant.id} has no source globs`);
+    if (invariant.testGlobs.length === 0) errors.push(`invariant ${invariant.id} has no test globs`);
+    if (new Set(invariant.sourceGlobs).size !== invariant.sourceGlobs.length) errors.push(`invariant ${invariant.id} repeats source globs`);
+    if (new Set(invariant.testGlobs).size !== invariant.testGlobs.length) errors.push(`invariant ${invariant.id} repeats test globs`);
     if (invariant.requiredEvidence.length === 0) errors.push(`invariant ${invariant.id} requires no evidence`);
     if (new Set(invariant.requiredEvidence).size !== invariant.requiredEvidence.length) errors.push(`invariant ${invariant.id} repeats required evidence`);
     for (const kind of invariant.requiredEvidence) {
@@ -188,11 +207,12 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
       return run ? [run] : [];
     });
     if (invariant && !attestingRuns.some(run => (
-      run.moduleIds.includes(invariant.moduleId)
-      && run.sourceSha === evidence.sourceSha
+      run.sourceSha === evidence.sourceSha
+      && run.invariantIds.includes(evidence.invariantId)
+      && run.moduleFingerprints[invariant.moduleId] === evidence.moduleFingerprint
     ))) {
       errors.push(
-        `evidence ${evidence.id} has no same-run attester scoped to ${invariant.moduleId} on source SHA ${evidence.sourceSha}`,
+        `evidence ${evidence.id} has no exact attester for ${evidence.invariantId} at ${evidence.moduleFingerprint}`,
       );
     }
   }
@@ -237,24 +257,6 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
     if (!ID_PATTERN.test(reviewer.id)) errors.push(`invalid reviewer id: ${reviewer.id}`);
     if (!reviewer.label || !reviewer.family) errors.push(`reviewer ${reviewer.id} requires label and family`);
     if (!reviewerStates.has(reviewer.state)) errors.push(`reviewer ${reviewer.id} has invalid state ${String(reviewer.state)}`);
-  }
-
-  for (const run of registry.agentRuns) {
-    if (!ID_PATTERN.test(run.id)) errors.push(`invalid agent run id: ${run.id}`);
-    if (!reviewerIds.has(run.reviewerId)) errors.push(`agent run ${run.id} has unknown reviewer ${run.reviewerId}`);
-    if (!SHA_PATTERN.test(run.sourceSha)) errors.push(`agent run ${run.id} has invalid source SHA`);
-    if (!agentRunStates.has(run.state)) errors.push(`agent run ${run.id} has invalid state ${String(run.state)}`);
-    if (run.usefulnessScore < 0 || run.usefulnessScore > 1000) errors.push(`agent run ${run.id} usefulness must be 0..1000`);
-    for (const moduleId of run.moduleIds) {
-      if (!moduleIds.has(moduleId)) errors.push(`agent run ${run.id} has unknown module ${moduleId}`);
-    }
-    for (const findingId of [...run.confirmedFindingIds, ...run.candidateFindingIds]) {
-      if (!findingIds.has(findingId)) errors.push(`agent run ${run.id} has unknown finding ${findingId}`);
-      const finding = findingsById.get(findingId);
-      if (finding && !run.moduleIds.includes(finding.moduleId)) {
-        errors.push(`agent run ${run.id} is not scoped to finding module ${finding.moduleId}`);
-      }
-    }
   }
 
   if (root) errors.push(...validateAuditRegistryRoot(registry, root));

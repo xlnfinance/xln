@@ -1,49 +1,91 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
   "createdAt": "2026-08-01T00:30:00Z",
   "evidence": [
     {
       "id": "transport-send.code-trace.fedaf886",
-      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
-      "command": "agent-run transport-send-fix-20260801",
+      "invariantId": "transport-topology.send-result-contract",
+      "kind": "codeTrace",
       "state": "PASS",
-      "summary": "Traced one canonical Bun send classifier through direct, relay, fallback, pending-prefix, and byte-accounting paths."
+      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
+      "command": "agent-run transport-send-fix-20260801",
+      "summary": "Traced one canonical Bun send classifier through direct, relay, fallback, pending-prefix, and byte-accounting paths.",
+      "recordedAt": "2026-08-01T00:40:00Z",
+      "agentRunIds": [
+        "transport-send-fix-20260801"
+      ]
     },
     {
       "id": "transport-send.l1.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'websocket send result classifier|commits an accepted prefix|fails loud and retains an invalid first send'",
+      "invariantId": "transport-topology.send-result-contract",
+      "kind": "l1Regression",
       "state": "PASS",
-      "summary": "Classifier, invalid-first retention, and accepted-prefix checkpoint passed 3/3 with 18 assertions."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
+      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'websocket send result classifier|commits an accepted prefix|fails loud and retains an invalid first send'",
+      "summary": "Classifier, invalid-first retention, and accepted-prefix checkpoint passed 3/3 with 18 assertions.",
+      "recordedAt": "2026-08-01T00:40:01Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "transport-send.l2.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun test runtime/__tests__/direct-runtime-bun.test.ts runtime/__tests__/relay-direct.test.ts runtime/__tests__/relay-router.test.ts runtime/__tests__/relay-store.test.ts",
+      "invariantId": "transport-topology.send-result-contract",
+      "kind": "l2TargetedFlow",
       "state": "PASS",
-      "summary": "Direct runtime, direct relay, router, and pending-store flow passed 56/56 with 247 assertions."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
+      "command": "bun test runtime/__tests__/direct-runtime-bun.test.ts runtime/__tests__/relay-direct.test.ts runtime/__tests__/relay-router.test.ts runtime/__tests__/relay-store.test.ts",
+      "summary": "Direct runtime, direct relay, router, and pending-store flow passed 56/56 with 247 assertions.",
+      "recordedAt": "2026-08-01T00:40:02Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "transport-send.failure.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'commits an accepted prefix|fails loud and retains an invalid first send'",
+      "invariantId": "transport-topology.send-result-contract",
+      "kind": "failureInjection",
       "state": "PASS",
-      "summary": "Invalid-first retained exact bytes; accepted prefix committed before fail-loud invalid-result propagation."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
+      "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'commits an accepted prefix|fails loud and retains an invalid first send'",
+      "summary": "Invalid-first retained exact bytes; accepted prefix committed before fail-loud invalid-result propagation.",
+      "recordedAt": "2026-08-01T00:40:03Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "transport-send.l3.fedaf886",
-      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
-      "command": "bun run check",
+      "invariantId": "transport-topology.send-result-contract",
+      "kind": "l3BroadGate",
       "state": "PASS",
-      "summary": "Full repository check exited zero on the final transport SHA with frozen core unchanged."
+      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
+      "command": "bun run check",
+      "summary": "Full repository check exited zero on the final transport SHA with frozen core unchanged.",
+      "recordedAt": "2026-08-01T00:40:04Z",
+      "agentRunIds": [
+        "transport-send-fix-20260801"
+      ]
     },
     {
       "id": "transport-send.independent.fedaf886",
-      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
-      "command": "agent-run transport-final-verification-20260801",
+      "invariantId": "transport-topology.send-result-contract",
+      "kind": "independentVerification",
       "state": "PASS",
-      "summary": "Independent verifier reproduced queue-prefix, byte delta, fail-loud, and classifier behavior at 99% confidence."
+      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "moduleFingerprint": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
+      "command": "agent-run transport-final-verification-20260801",
+      "summary": "Independent verifier reproduced queue-prefix, byte delta, fail-loud, and classifier behavior at 99% confidence.",
+      "recordedAt": "2026-08-01T00:40:05Z",
+      "agentRunIds": [
+        "transport-final-verification-20260801"
+      ]
     }
   ]
 }

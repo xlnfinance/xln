@@ -30,6 +30,10 @@ test('module scores require a current three-reviewer two-family 990 floor', () =
     reviewerId: reviewer.id,
     sourceSha: CURRENT_SHA,
     moduleIds: [moduleId],
+    invariantIds: REGISTRY.invariants
+      .filter(invariant => invariant.moduleId === moduleId)
+      .map(invariant => invariant.id),
+    moduleFingerprints: { [moduleId]: fingerprint },
     confirmedFindingIds: [],
     candidateFindingIds: [],
   }));

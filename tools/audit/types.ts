@@ -71,6 +71,8 @@ export type AuditInvariant = Readonly<{
   moduleId: string;
   title: string;
   importance: number;
+  sourceGlobs: readonly string[];
+  testGlobs: readonly string[];
   requiredEvidence: readonly EvidenceKind[];
 }>;
 
@@ -117,6 +119,8 @@ export type AuditAgentRun = Readonly<{
   reviewerId: string;
   sourceSha: string;
   moduleIds: readonly string[];
+  invariantIds: readonly string[];
+  moduleFingerprints: Readonly<Record<string, string>>;
   scope: string;
   state: AgentRunState;
   usefulnessScore: number;
@@ -141,7 +145,7 @@ export type AuditModuleReview = Readonly<{
 }>;
 
 export type AuditRegistry = Readonly<{
-  schemaVersion: 1;
+  schemaVersion: 2;
   protocol: string;
   scope: AuditScope;
   policy: AuditPolicy;

@@ -99,6 +99,10 @@ dependencies · entry points · outputs/effects · state · authorities
 invariants · paths · failure boundaries · required evidence · release profile
 ```
 
+Every invariant also owns explicit source and test globs. Its invariant ID is
+the claim scope: a run that names only a module has inspected that module but
+has not attested any invariant. Free-form prose must never widen claim scope.
+
 An exclusion always has a reason. “Partial coverage” without omitted paths and
 their risk is invalid output.
 
@@ -240,6 +244,12 @@ explicit exclusions · threat/failure boundaries · required output schema
 commands allowed · no-edit/read-only rule · confidence requirement
 ```
 
+The completed run records exact `invariantIds` and the corresponding
+`moduleFingerprints`. Evidence counts only when an attesting completed run
+names that invariant, records the same module fingerprint, and shares the
+evidence source SHA. A module scorecard counts only when its run names every
+current invariant in that module at the scorecard's exact fingerprint.
+
 Roles are separated:
 
 1. **Mapper:** defines ownership, dependency cone, invariants, and gaps.
@@ -322,11 +332,17 @@ must be recorded so the comparison is meaningful.
 
 ## 11. Delta audits and evidence caching
 
-Every evidence record is keyed by:
+Every evidence record retains its source SHA for provenance. Eligibility for a
+current audit state is keyed by:
 
 ```text
-source SHA + module fingerprint + command hash + environment fingerprint
+invariant ID + module fingerprint + evidence kind + environment fingerprint
 ```
+
+An old-SHA result remains reusable when the exact module fingerprint and
+environment still match; requiring the repository HEAD alone would discard
+valid evidence after an unrelated commit. The attesting run and immutable
+artifact remain bound to the evidence's recorded source SHA.
 
 The module fingerprint covers owned paths plus declared dependencies. On a
 change:
@@ -393,6 +409,9 @@ Never maintain parallel task lists in audit reports.
 - The backlog stores only accepted, still-open remediation with stable audit IDs.
 - Immutable artifacts store full logs outside the source tree or in a dedicated
   evidence store.
+- Every artifact entry exact-binds its invariant ID, evidence kind, module
+  fingerprint, attesting run IDs, and recorded timestamp; relabeling any one of
+  these fields invalidates the artifact.
 - Human documentation explains the protocol and architecture; it does not copy
   mutable percentages or duplicate findings.
 - Dashboards and status tables are generated from the registry.

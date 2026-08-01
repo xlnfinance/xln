@@ -71,6 +71,8 @@ const invariantStatus = (
   weights: AuditRegistry['policy']['evidenceWeights'],
 ): InvariantAuditStatus => {
   const all = evidence.filter(item => item.invariantId === invariant.id);
+  // Source SHA is provenance, not eligibility: unrelated commits may retain an
+  // identical dependency-cone fingerprint and therefore reusable evidence.
   const current = latestEvidenceByKind(all.filter(item => (
     item.moduleFingerprint === currentFingerprint
     && item.environmentFingerprint === currentEnvironmentFingerprint

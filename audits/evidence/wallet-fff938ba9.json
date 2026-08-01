@@ -1,126 +1,248 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
   "createdAt": "2026-08-01T00:31:00Z",
   "evidence": [
     {
       "id": "api-secret.code-trace.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run claude-opus-wallet-delta-20260801",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "codeTrace",
       "state": "PASS",
-      "summary": "Traced transport delta reachability into BrainVault, custody, WAL, logs, RPC startup, reveal, and reconnect boundaries; no secret-bearing path changed."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "agent-run claude-opus-wallet-delta-20260801",
+      "summary": "Traced transport delta reachability into BrainVault, custody, WAL, logs, RPC startup, reveal, and reconnect boundaries; no secret-bearing path changed.",
+      "recordedAt": "2026-08-01T00:41:00Z",
+      "agentRunIds": [
+        "claude-opus-wallet-delta-20260801"
+      ]
     },
     {
       "id": "api-secret.l1.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun test brainvault/core.test.ts tests/unit/brainvault-native.test.ts",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "l1Regression",
       "state": "PASS",
-      "summary": "Browser/native V1 vectors, strict protocol, public-only derive, owner durability, cancellation, and startup races passed 19/19 with 100084 assertions."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "bun test brainvault/core.test.ts tests/unit/brainvault-native.test.ts",
+      "summary": "Browser/native V1 vectors, strict protocol, public-only derive, owner durability, cancellation, and startup races passed 19/19 with 100084 assertions.",
+      "recordedAt": "2026-08-01T00:41:01Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-secret.l2.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "l2TargetedFlow",
       "state": "PASS",
-      "summary": "Packed native derive stayed public-only, reveal remained separate, admin write advanced 4 to 5, and restart restored owner state in 182 ms."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
+      "summary": "Packed native derive stayed public-only, reveal remained separate, admin write advanced 4 to 5, and restart restored owner state in 182 ms.",
+      "recordedAt": "2026-08-01T00:41:02Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-secret.failure.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "failureInjection",
       "state": "PASS",
-      "summary": "Fsync, spec mismatch, cancellation, startup failure, concurrent restore, and stale authority generation injections passed 12/12."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "summary": "Fsync, spec mismatch, cancellation, startup failure, concurrent restore, and stale authority generation injections passed 12/12.",
+      "recordedAt": "2026-08-01T00:41:03Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-secret.l3.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun run check:brainvault",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "l3BroadGate",
       "state": "PASS",
-      "summary": "Owning BrainVault, native worker, custody, startup, and reconnect suite passed 26/26 with 100128 assertions."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "bun run check:brainvault",
+      "summary": "Owning BrainVault, native worker, custody, startup, and reconnect suite passed 26/26 with 100128 assertions.",
+      "recordedAt": "2026-08-01T00:41:04Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-secret.independent.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "independentVerification",
       "state": "PASS",
-      "summary": "Blind Fable and Sonnet delta audits independently found no reachable P0-P2; combined with Opus and current tests, adjudicated confidence is 98%."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
+      "summary": "Blind Fable and Sonnet delta audits independently found no reachable P0-P2; combined with Opus and current tests, adjudicated confidence is 98%.",
+      "recordedAt": "2026-08-01T00:41:05Z",
+      "agentRunIds": [
+        "claude-fable-wallet-delta-20260801",
+        "claude-sonnet-wallet-delta-20260801"
+      ]
     },
     {
       "id": "api-authority.code-trace.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run claude-opus-wallet-delta-20260801",
+      "invariantId": "api-auth-custody.command-authority",
+      "kind": "codeTrace",
       "state": "PASS",
-      "summary": "Traced authenticated socket generation, RPC startup gate, remote adapter, native owner, derive, and separate reveal authority."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "agent-run claude-opus-wallet-delta-20260801",
+      "summary": "Traced authenticated socket generation, RPC startup gate, remote adapter, native owner, derive, and separate reveal authority.",
+      "recordedAt": "2026-08-01T00:41:06Z",
+      "agentRunIds": [
+        "claude-opus-wallet-delta-20260801"
+      ]
     },
     {
       "id": "api-authority.l1.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun test brainvault/core.test.ts tests/unit/brainvault-native.test.ts",
+      "invariantId": "api-auth-custody.command-authority",
+      "kind": "l1Regression",
       "state": "PASS",
-      "summary": "Exact adapter message validation and admin-only node-owner operations passed alongside frozen wallet vectors."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "bun test brainvault/core.test.ts tests/unit/brainvault-native.test.ts",
+      "summary": "Exact adapter message validation and admin-only node-owner operations passed alongside frozen wallet vectors.",
+      "recordedAt": "2026-08-01T00:41:07Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-authority.l2.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
+      "invariantId": "api-auth-custody.command-authority",
+      "kind": "l2TargetedFlow",
       "state": "PASS",
-      "summary": "Packaged authenticated admin lifecycle exercised derive, separate reveal, write, restart, and restored ownership."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
+      "summary": "Packaged authenticated admin lifecycle exercised derive, separate reveal, write, restart, and restored ownership.",
+      "recordedAt": "2026-08-01T00:41:08Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-authority.failure.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "invariantId": "api-auth-custody.command-authority",
+      "kind": "failureInjection",
       "state": "PASS",
-      "summary": "Malformed secret-bearing messages, stale reconnect generation, failed startup, and concurrent owner restore all failed closed."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "summary": "Malformed secret-bearing messages, stale reconnect generation, failed startup, and concurrent owner restore all failed closed.",
+      "recordedAt": "2026-08-01T00:41:09Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-authority.l3.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "bun run check:brainvault",
+      "invariantId": "api-auth-custody.command-authority",
+      "kind": "l3BroadGate",
       "state": "PASS",
-      "summary": "The complete authority and custody owning suite passed on the current module fingerprint."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "bun run check:brainvault",
+      "summary": "The complete authority and custody owning suite passed on the current module fingerprint.",
+      "recordedAt": "2026-08-01T00:41:10Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-authority.independent.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
+      "invariantId": "api-auth-custody.command-authority",
+      "kind": "independentVerification",
       "state": "PASS",
-      "summary": "Independent model-family panel found no transport-to-authority regression after tracing the authenticated and RPC call graph."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+      "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
+      "summary": "Independent model-family panel found no transport-to-authority regression after tracing the authenticated and RPC call graph.",
+      "recordedAt": "2026-08-01T00:41:11Z",
+      "agentRunIds": [
+        "claude-fable-wallet-delta-20260801",
+        "claude-sonnet-wallet-delta-20260801"
+      ]
     },
     {
       "id": "wallet-secret.code-trace.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-run claude-opus-wallet-delta-20260801",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "codeTrace",
       "state": "PASS",
-      "summary": "Traced cancel, back, mode switch, stale worker, restart, reveal, and persistence boundaries across the unchanged wallet lifecycle."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd",
+      "command": "agent-run claude-opus-wallet-delta-20260801",
+      "summary": "Traced cancel, back, mode switch, stale worker, restart, reveal, and persistence boundaries across the unchanged wallet lifecycle.",
+      "recordedAt": "2026-08-01T00:41:12Z",
+      "agentRunIds": [
+        "claude-opus-wallet-delta-20260801"
+      ]
     },
     {
       "id": "wallet-secret.l1.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts --grep 'wallet persistence becomes an explicit point of no return'",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "l1Regression",
       "state": "PASS",
-      "summary": "The narrow persistence point-of-no-return wallet regression passed 1/1."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd",
+      "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts --grep 'wallet persistence becomes an explicit point of no return'",
+      "summary": "The narrow persistence point-of-no-return wallet regression passed 1/1.",
+      "recordedAt": "2026-08-01T00:41:13Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "wallet-secret.l2.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "l2TargetedFlow",
       "state": "PASS",
-      "summary": "Responsive recovery choice, rehearsal, keyboard, stale-worker, cancellation, secret-drop, and persistence flow passed 9/9."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd",
+      "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts",
+      "summary": "Responsive recovery choice, rehearsal, keyboard, stale-worker, cancellation, secret-drop, and persistence flow passed 9/9.",
+      "recordedAt": "2026-08-01T00:41:14Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "wallet-secret.l3.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "cd frontend && bun run check",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "l3BroadGate",
       "state": "PASS",
-      "summary": "Frontend diagnostics and production build completed with zero errors and zero warnings."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd",
+      "command": "cd frontend && bun run check",
+      "summary": "Frontend diagnostics and production build completed with zero errors and zero warnings.",
+      "recordedAt": "2026-08-01T00:41:15Z",
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "wallet-secret.independent.fff938ba9",
-      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
-      "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "independentVerification",
       "state": "PASS",
-      "summary": "Blind Fable and Sonnet audits found no reachable transport regression in cancel, stale worker, public derive, or reveal behavior."
+      "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
+      "moduleFingerprint": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd",
+      "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
+      "summary": "Blind Fable and Sonnet audits found no reachable transport regression in cancel, stale worker, public derive, or reveal behavior.",
+      "recordedAt": "2026-08-01T00:41:16Z",
+      "agentRunIds": [
+        "claude-fable-wallet-delta-20260801",
+        "claude-sonnet-wallet-delta-20260801"
+      ]
     }
   ]
 }

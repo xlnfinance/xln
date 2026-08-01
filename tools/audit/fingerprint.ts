@@ -141,6 +141,8 @@ const canonicalModuleBoundary = (module: AuditModule, registry: AuditRegistry): 
       id: invariant.id,
       title: invariant.title,
       importance: invariant.importance,
+      sourceGlobs: [...invariant.sourceGlobs].sort(),
+      testGlobs: [...invariant.testGlobs].sort(),
       requiredEvidence: [...invariant.requiredEvidence].sort(),
     }))
     .sort((left, right) => left.id.localeCompare(right.id)),

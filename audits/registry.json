@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "protocol": "docs/audit-protocol.md",
   "scope": {
     "sourceGlobs": [
@@ -244,7 +244,12 @@
       "testGlobs": [
         "runtime/__tests__/**/*activity-history*",
         "runtime/__tests__/**/*external-wallet*",
-        "runtime/__tests__/public-*.test.ts"
+        "runtime/__tests__/public-*.test.ts",
+        "runtime/__tests__/**/*faucet*",
+        "runtime/__tests__/reserve-faucet.test.ts",
+        "runtime/__tests__/orchestrator-rpc-public-routes.test.ts",
+        "runtime/__tests__/signer-public-key-binding.test.ts",
+        "runtime/__tests__/htlc-dispute-secret-publication.test.ts"
       ],
       "dependencies": [
         "api-auth-custody",
@@ -454,6 +459,14 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "jurisdictions/contracts/**/*.sol",
+        "runtime/hanko/**/*.ts"
+      ],
+      "testGlobs": [
+        "jurisdictions/test/**/*EntityProvider*",
+        "runtime/__tests__/**/*hanko*"
       ]
     },
     {
@@ -468,6 +481,15 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "jurisdictions/contracts/Depository.sol",
+        "jurisdictions/contracts/Account.sol",
+        "jurisdictions/contracts/DeltaTransformer.sol"
+      ],
+      "testGlobs": [
+        "jurisdictions/test/**/*Depository*",
+        "jurisdictions/test/foundry/**/*.sol"
       ]
     },
     {
@@ -482,6 +504,17 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/protocol/**/*.ts",
+        "runtime/types/**/*.ts",
+        "runtime/routing/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*crypto*",
+        "runtime/__tests__/**/*protocol*",
+        "runtime/__tests__/**/*routing*",
+        "runtime/__tests__/**/*serialization*"
       ]
     },
     {
@@ -496,6 +529,15 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/config/**/*.ts",
+        "runtime/infra/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*environment*",
+        "runtime/__tests__/**/*infra*",
+        "runtime/__tests__/**/*process*"
       ]
     },
     {
@@ -510,6 +552,12 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/account/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*account*"
       ]
     },
     {
@@ -524,6 +572,12 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/entity/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*entity*"
       ]
     },
     {
@@ -538,6 +592,15 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/storage/**/*.ts",
+        "runtime/watchtower/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*storage*",
+        "runtime/__tests__/**/*recovery*",
+        "runtime/__tests__/**/*watchtower*"
       ]
     },
     {
@@ -552,6 +615,17 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/network/**/*.ts",
+        "runtime/api/server/relay-direct.ts",
+        "runtime/scripts/check-delivery-boundary-scan.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*p2p*",
+        "runtime/__tests__/**/*relay*",
+        "runtime/__tests__/direct-runtime-bun.test.ts",
+        "runtime/scenarios/p2p-*.ts"
       ]
     },
     {
@@ -566,6 +640,17 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/network/**/*.ts",
+        "runtime/api/server/relay-direct.ts",
+        "runtime/scripts/check-delivery-boundary-scan.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*p2p*",
+        "runtime/__tests__/**/*relay*",
+        "runtime/__tests__/direct-runtime-bun.test.ts",
+        "runtime/scenarios/p2p-*.ts"
       ]
     },
     {
@@ -580,6 +665,17 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/network/**/*.ts",
+        "runtime/api/server/relay-direct.ts",
+        "runtime/scripts/check-delivery-boundary-scan.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*p2p*",
+        "runtime/__tests__/**/*relay*",
+        "runtime/__tests__/direct-runtime-bun.test.ts",
+        "runtime/scenarios/p2p-*.ts"
       ]
     },
     {
@@ -594,6 +690,18 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/api/runtime-adapter/**/*.ts",
+        "runtime/api/server/**/*.ts",
+        "brainvault/**/*.ts",
+        "custody/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*radapter*",
+        "runtime/__tests__/**/*rpc*",
+        "tests/unit/brainvault-*.test.ts",
+        "brainvault/*.test.ts"
       ]
     },
     {
@@ -608,13 +716,137 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/api/runtime-adapter/**/*.ts",
+        "runtime/api/server/**/*.ts",
+        "brainvault/**/*.ts",
+        "custody/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*radapter*",
+        "runtime/__tests__/**/*rpc*",
+        "tests/unit/brainvault-*.test.ts",
+        "brainvault/*.test.ts"
       ]
     },
     {
-      "id": "public-wallet-api.truthful-authorized-projection",
+      "id": "public-wallet-api.faucet-policy",
       "moduleId": "public-wallet-api",
-      "title": "Every public wallet response is authority-scoped, durable-state-derived, redacted, and semantically truthful.",
-      "importance": 100,
+      "title": "Public faucet routes are explicitly enabled, authority-bounded, and exactly capped.",
+      "importance": 18,
+      "sourceGlobs": [
+        "runtime/api/public/external-wallet/faucet-*.ts",
+        "runtime/api/public/external-wallet/context.ts",
+        "runtime/api/public/external-wallet/http.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*faucet*",
+        "runtime/__tests__/reserve-faucet.test.ts"
+      ],
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "public-wallet-api.authority-binding",
+      "moduleId": "public-wallet-api",
+      "title": "Every public command and projection is bound to its authenticated caller authority.",
+      "importance": 24,
+      "sourceGlobs": [
+        "runtime/api/public/external-wallet-api.ts",
+        "runtime/api/public/external-wallet/context.ts",
+        "runtime/api/public/external-wallet/http.ts",
+        "runtime/api/public/runtime-module-guard.ts",
+        "runtime/api/public/runtime-module.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/external-wallet-api.test.ts",
+        "runtime/__tests__/orchestrator-rpc-public-routes.test.ts",
+        "runtime/__tests__/signer-public-key-binding.test.ts"
+      ],
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "public-wallet-api.durable-projection",
+      "moduleId": "public-wallet-api",
+      "title": "Public wallet projections derive only from durable committed state.",
+      "importance": 20,
+      "sourceGlobs": [
+        "runtime/api/public/activity-history.ts",
+        "runtime/api/public/external-wallet/snapshot-handler.ts",
+        "runtime/api/public/external-wallet/tokens-handler.ts",
+        "runtime/api/public/runtime-public.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*activity-history*",
+        "runtime/__tests__/external-wallet-state.test.ts",
+        "runtime/__tests__/public-discovery.test.ts"
+      ],
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "public-wallet-api.secret-redaction",
+      "moduleId": "public-wallet-api",
+      "title": "Public wallet responses never disclose private keys, mnemonics, or unrevealed secrets.",
+      "importance": 20,
+      "sourceGlobs": [
+        "runtime/api/public/external-wallet-api.ts",
+        "runtime/api/public/external-wallet/snapshot-handler.ts",
+        "runtime/api/public/external-wallet/tokens-handler.ts",
+        "runtime/api/public/public-utilities.ts",
+        "runtime/api/public/runtime-public.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/external-wallet-api.test.ts",
+        "runtime/__tests__/external-wallet-state.test.ts",
+        "runtime/__tests__/htlc-dispute-secret-publication.test.ts"
+      ],
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "public-wallet-api.semantic-truth",
+      "moduleId": "public-wallet-api",
+      "title": "Public balances, activities, identities, and statuses preserve their committed protocol meaning.",
+      "importance": 18,
+      "sourceGlobs": [
+        "runtime/api/public/activity-history.ts",
+        "runtime/api/public/external-wallet/snapshot-handler.ts",
+        "runtime/api/public/external-wallet/tokens-handler.ts",
+        "runtime/api/public/runtime-public.ts",
+        "runtime/presentation/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*activity-history*",
+        "runtime/__tests__/external-wallet-state.test.ts",
+        "runtime/__tests__/public-discovery.test.ts"
+      ],
       "requiredEvidence": [
         "codeTrace",
         "l1Regression",
@@ -636,6 +868,15 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/jurisdiction/**/*.ts",
+        "jurisdictions/scripts/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*jurisdiction*",
+        "runtime/__tests__/**/*jadapter*",
+        "jurisdictions/test/**/*"
       ]
     },
     {
@@ -650,6 +891,14 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/runtime.ts",
+        "runtime/runtime/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*runtime*",
+        "runtime/scenarios/**/*.ts"
       ]
     },
     {
@@ -664,6 +913,14 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/runtime.ts",
+        "runtime/runtime/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*runtime*",
+        "runtime/scenarios/**/*.ts"
       ]
     },
     {
@@ -678,6 +935,16 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/runtime/registration/**/*.ts",
+        "runtime/protocol/payments/**/*.ts",
+        "runtime/protocol/htlc/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*payment*",
+        "runtime/__tests__/**/*htlc*",
+        "runtime/scenarios/htlc-*.ts"
       ]
     },
     {
@@ -692,6 +959,15 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "runtime/orderbook/**/*.ts",
+        "runtime/extensions/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*orderbook*",
+        "runtime/__tests__/**/*swap*",
+        "runtime/scenarios/swap*.ts"
       ]
     },
     {
@@ -706,6 +982,14 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "frontend/src/lib/components/Views/RuntimeCreation.svelte",
+        "frontend/src/lib/components/Entity/**/*",
+        "frontend/src/lib/stores/xlnStore.ts"
+      ],
+      "testGlobs": [
+        "frontend/tests/brainvault-*.spec.ts"
       ]
     },
     {
@@ -720,6 +1004,14 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "frontend/src/lib/components/Views/RuntimeCreation.svelte",
+        "frontend/src/lib/components/Entity/**/*",
+        "frontend/src/lib/stores/xlnStore.ts"
+      ],
+      "testGlobs": [
+        "frontend/tests/brainvault-*.spec.ts"
       ]
     },
     {
@@ -733,6 +1025,15 @@
         "l2TargetedFlow",
         "failureInjection",
         "l3BroadGate"
+      ],
+      "sourceGlobs": [
+        "runtime/orchestrator/**/*.ts",
+        "scripts/deployment/**/*.sh",
+        "runtime/api/server/health*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*health*",
+        "runtime/__tests__/**/*prod*"
       ]
     },
     {
@@ -747,6 +1048,31 @@
         "failureInjection",
         "l3BroadGate",
         "independentVerification"
+      ],
+      "sourceGlobs": [
+        "scripts/release/**/*.ts",
+        "runtime/qa/**/*.ts",
+        "runtime/scripts/**/*.ts",
+        "tools/audit.ts",
+        "tools/audit/**/*.ts",
+        "tools/frozen-core.ts",
+        "tools/frozen-core/**/*.ts",
+        "tools/release-snapshot/**/*.ts",
+        "tools/release-snapshot.ts",
+        "docs/audit-protocol.md",
+        "docs/security/frozen-core.md",
+        ".github/workflows/*.yml",
+        "frozen-core.json",
+        "package.json"
+      ],
+      "testGlobs": [
+        "tests/release-integrity/**/*.ts",
+        "runtime/__tests__/**/*.ts",
+        "runtime/scenarios/**/*.ts",
+        "jurisdictions/test/**/*",
+        "tests/**/*.ts",
+        "brainvault/**/*.test.ts",
+        "frontend/tests/**/*.ts"
       ]
     }
   ],
@@ -756,7 +1082,7 @@
       "commandFingerprint": "sha256:58ee378a4550a9d515afc07056037775e338d99a96b42b5c84a0e04206a0f7fe",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "codeTrace",
       "state": "PASS",
@@ -774,7 +1100,7 @@
       "commandFingerprint": "sha256:88f92c81dbb3e4f30e43ea46c431e9960770b34a419ec68d30b4418026b4f64f",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "l1Regression",
       "state": "PASS",
@@ -792,7 +1118,7 @@
       "commandFingerprint": "sha256:4befaefeeb0e0b690979d8b10ab5b64ebe984470df3deda856dfcacc911b0ba2",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "l2TargetedFlow",
       "state": "PASS",
@@ -810,7 +1136,7 @@
       "commandFingerprint": "sha256:8c51037fb2ea125e408b8fbfb2f8b9d4d11e63523243fd3761de05d57a9494e8",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "failureInjection",
       "state": "PASS",
@@ -828,7 +1154,7 @@
       "commandFingerprint": "sha256:63dec8353e51c65817391feadd75be2f6aa3ca1aa6819c05e2b738694b704bd4",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "l3BroadGate",
       "state": "PASS",
@@ -846,7 +1172,7 @@
       "commandFingerprint": "sha256:58ee378a4550a9d515afc07056037775e338d99a96b42b5c84a0e04206a0f7fe",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "independentVerification",
       "state": "PASS",
@@ -864,7 +1190,7 @@
       "commandFingerprint": "sha256:58ee378a4550a9d515afc07056037775e338d99a96b42b5c84a0e04206a0f7fe",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "codeTrace",
       "state": "PASS",
@@ -882,7 +1208,7 @@
       "commandFingerprint": "sha256:f78ef2252b2cb10c9a4c59ef80bcb2c0e6240dc993d322f242ebb03bc7e772d4",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "l1Regression",
       "state": "PASS",
@@ -900,7 +1226,7 @@
       "commandFingerprint": "sha256:b21be91ff8bf286d2c88de6f23b431c79631f717d883b65e3d182a1a1b941c81",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "l2TargetedFlow",
       "state": "PASS",
@@ -918,7 +1244,7 @@
       "commandFingerprint": "sha256:63dec8353e51c65817391feadd75be2f6aa3ca1aa6819c05e2b738694b704bd4",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "l3BroadGate",
       "state": "PASS",
@@ -936,7 +1262,7 @@
       "commandFingerprint": "sha256:58ee378a4550a9d515afc07056037775e338d99a96b42b5c84a0e04206a0f7fe",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "independentVerification",
       "state": "PASS",
@@ -954,7 +1280,7 @@
       "commandFingerprint": "sha256:f30d1891336b5c3a0c03eb97e505a5f7803e9ef305bb49b3ad63b79de791f9ae",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "contracts-governance.active-domain-binding",
       "kind": "codeTrace",
       "state": "FAIL",
@@ -972,7 +1298,7 @@
       "commandFingerprint": "sha256:59240b27512210e151a386b17856010bccf4d1a305959febe781a15abf139922",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "contracts-governance.active-domain-binding",
       "kind": "independentVerification",
       "state": "FAIL",
@@ -990,7 +1316,7 @@
       "commandFingerprint": "sha256:e6e050c31795f343bbf740ab89853943ff1bbb41035a687f4c99eefd35c0e0f3",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "transport-topology.send-result-contract",
       "kind": "codeTrace",
       "state": "FAIL",
@@ -1008,7 +1334,7 @@
       "commandFingerprint": "sha256:3cd5328f107cb49f83e14034bb5a3e2fc8c43a92364a740994ab8c9d2db2b26d",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "transport-topology.send-result-contract",
       "kind": "l1Regression",
       "state": "FAIL",
@@ -1026,7 +1352,7 @@
       "commandFingerprint": "sha256:90a4d53c753449bab26fa0bf13d56c48653eef4fdf98796bc79bf650c456154a",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "transport-topology.send-result-contract",
       "kind": "independentVerification",
       "state": "FAIL",
@@ -1044,7 +1370,7 @@
       "commandFingerprint": "sha256:20a1c4295e2db5800e8bf13c9c6b0c92f6a439b92cb75d74cac2ab8759802363",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "runtime-pipeline.expected-rejection-isolation",
       "kind": "codeTrace",
       "state": "FAIL",
@@ -1062,7 +1388,7 @@
       "commandFingerprint": "sha256:4c3b82487c8bcfe61b3998c01e1a9ff5205a36f356588c2ab6f6e3684046673d",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "runtime-pipeline.expected-rejection-isolation",
       "kind": "l2TargetedFlow",
       "state": "FAIL",
@@ -1080,7 +1406,7 @@
       "commandFingerprint": "sha256:721b058348fcdc57c386efaa67f6d17010267ceddc954632beced27f004bbee2",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "runtime-pipeline.expected-rejection-isolation",
       "kind": "independentVerification",
       "state": "FAIL",
@@ -1098,7 +1424,7 @@
       "commandFingerprint": "sha256:20a1c4295e2db5800e8bf13c9c6b0c92f6a439b92cb75d74cac2ab8759802363",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "registration-payment.terminal-truth",
       "kind": "codeTrace",
       "state": "FAIL",
@@ -1116,7 +1442,7 @@
       "commandFingerprint": "sha256:9034494756e9a9bf18d8e836a2effbd7f22b1b408cd21db524da20949197c336",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "registration-payment.terminal-truth",
       "kind": "l2TargetedFlow",
       "state": "FAIL",
@@ -1134,7 +1460,7 @@
       "commandFingerprint": "sha256:721b058348fcdc57c386efaa67f6d17010267ceddc954632beced27f004bbee2",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "registration-payment.terminal-truth",
       "kind": "independentVerification",
       "state": "FAIL",
@@ -1152,7 +1478,7 @@
       "commandFingerprint": "sha256:20a1c4295e2db5800e8bf13c9c6b0c92f6a439b92cb75d74cac2ab8759802363",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "wallet-frontend.durable-status-truth",
       "kind": "codeTrace",
       "state": "FAIL",
@@ -1170,7 +1496,7 @@
       "commandFingerprint": "sha256:721b058348fcdc57c386efaa67f6d17010267ceddc954632beced27f004bbee2",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/baseline-458082a0c.json",
-      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "artifactFingerprint": "sha256:98196b219b0b06648841981be9e131c8c8ee7107e1d696dae8c5a027e079d0c9",
       "invariantId": "wallet-frontend.durable-status-truth",
       "kind": "independentVerification",
       "state": "FAIL",
@@ -1188,7 +1514,7 @@
       "commandFingerprint": "sha256:ad6d03b4d5b4be152692178447d358de08a574e21bed34d4629636810eaf10b5",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/transport-fedaf886.json",
-      "artifactFingerprint": "sha256:bdfc79c91f76709f4ca8beeade6d60021f01aab7744ff15c3af17750ec2fea9a",
+      "artifactFingerprint": "sha256:d18763e40fb20ea282fb0915cd6ffc22eaf025161bc90c96cdb29bbb254efe09",
       "invariantId": "transport-topology.send-result-contract",
       "kind": "codeTrace",
       "state": "PASS",
@@ -1197,14 +1523,16 @@
       "command": "agent-run transport-send-fix-20260801",
       "summary": "Traced one canonical Bun send classifier through direct, relay, fallback, pending-prefix, and byte-accounting paths.",
       "recordedAt": "2026-08-01T00:40:00Z",
-      "agentRunIds": ["transport-send-fix-20260801"]
+      "agentRunIds": [
+        "transport-send-fix-20260801"
+      ]
     },
     {
       "id": "transport-send.l1.fff938ba9",
       "commandFingerprint": "sha256:c4c55a8d67aba1e8f9663ddd5922190285e1179116f22585d97a79645132ef1d",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/transport-fedaf886.json",
-      "artifactFingerprint": "sha256:bdfc79c91f76709f4ca8beeade6d60021f01aab7744ff15c3af17750ec2fea9a",
+      "artifactFingerprint": "sha256:d18763e40fb20ea282fb0915cd6ffc22eaf025161bc90c96cdb29bbb254efe09",
       "invariantId": "transport-topology.send-result-contract",
       "kind": "l1Regression",
       "state": "PASS",
@@ -1213,14 +1541,16 @@
       "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'websocket send result classifier|commits an accepted prefix|fails loud and retains an invalid first send'",
       "summary": "Classifier, invalid-first retention, and accepted-prefix checkpoint passed 3/3 with 18 assertions.",
       "recordedAt": "2026-08-01T00:40:01Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "transport-send.l2.fff938ba9",
       "commandFingerprint": "sha256:85f0b5a24cc3a01fc4c324b973743601af141bfd421ab8b2c161f9a0349c411f",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/transport-fedaf886.json",
-      "artifactFingerprint": "sha256:bdfc79c91f76709f4ca8beeade6d60021f01aab7744ff15c3af17750ec2fea9a",
+      "artifactFingerprint": "sha256:d18763e40fb20ea282fb0915cd6ffc22eaf025161bc90c96cdb29bbb254efe09",
       "invariantId": "transport-topology.send-result-contract",
       "kind": "l2TargetedFlow",
       "state": "PASS",
@@ -1229,14 +1559,16 @@
       "command": "bun test runtime/__tests__/direct-runtime-bun.test.ts runtime/__tests__/relay-direct.test.ts runtime/__tests__/relay-router.test.ts runtime/__tests__/relay-store.test.ts",
       "summary": "Direct runtime, direct relay, router, and pending-store flow passed 56/56 with 247 assertions.",
       "recordedAt": "2026-08-01T00:40:02Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "transport-send.failure.fff938ba9",
       "commandFingerprint": "sha256:1bbf94123a454928c6b5849738beb97fa21f7e3f5d4def955f4043e2e93c32df",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/transport-fedaf886.json",
-      "artifactFingerprint": "sha256:bdfc79c91f76709f4ca8beeade6d60021f01aab7744ff15c3af17750ec2fea9a",
+      "artifactFingerprint": "sha256:d18763e40fb20ea282fb0915cd6ffc22eaf025161bc90c96cdb29bbb254efe09",
       "invariantId": "transport-topology.send-result-contract",
       "kind": "failureInjection",
       "state": "PASS",
@@ -1245,14 +1577,16 @@
       "command": "bun test runtime/__tests__/relay-store.test.ts --test-name-pattern 'commits an accepted prefix|fails loud and retains an invalid first send'",
       "summary": "Invalid-first retained exact bytes; accepted prefix committed before fail-loud invalid-result propagation.",
       "recordedAt": "2026-08-01T00:40:03Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "transport-send.l3.fedaf886",
       "commandFingerprint": "sha256:63dec8353e51c65817391feadd75be2f6aa3ca1aa6819c05e2b738694b704bd4",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/transport-fedaf886.json",
-      "artifactFingerprint": "sha256:bdfc79c91f76709f4ca8beeade6d60021f01aab7744ff15c3af17750ec2fea9a",
+      "artifactFingerprint": "sha256:d18763e40fb20ea282fb0915cd6ffc22eaf025161bc90c96cdb29bbb254efe09",
       "invariantId": "transport-topology.send-result-contract",
       "kind": "l3BroadGate",
       "state": "PASS",
@@ -1261,14 +1595,16 @@
       "command": "bun run check",
       "summary": "Full repository check exited zero on the final transport SHA with frozen core unchanged.",
       "recordedAt": "2026-08-01T00:40:04Z",
-      "agentRunIds": ["transport-send-fix-20260801"]
+      "agentRunIds": [
+        "transport-send-fix-20260801"
+      ]
     },
     {
       "id": "transport-send.independent.fedaf886",
       "commandFingerprint": "sha256:bc64c6ef5d6799453c04c6a03674c268f39dc8fe2f6aeb72630573ab8c2526d2",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/transport-fedaf886.json",
-      "artifactFingerprint": "sha256:bdfc79c91f76709f4ca8beeade6d60021f01aab7744ff15c3af17750ec2fea9a",
+      "artifactFingerprint": "sha256:d18763e40fb20ea282fb0915cd6ffc22eaf025161bc90c96cdb29bbb254efe09",
       "invariantId": "transport-topology.send-result-contract",
       "kind": "independentVerification",
       "state": "PASS",
@@ -1277,14 +1613,16 @@
       "command": "agent-run transport-final-verification-20260801",
       "summary": "Independent verifier reproduced queue-prefix, byte delta, fail-loud, and classifier behavior at 99% confidence.",
       "recordedAt": "2026-08-01T00:40:05Z",
-      "agentRunIds": ["transport-final-verification-20260801"]
+      "agentRunIds": [
+        "transport-final-verification-20260801"
+      ]
     },
     {
       "id": "api-secret.code-trace.fff938ba9",
       "commandFingerprint": "sha256:05d3f359be582b733318fbee6adf655d234223a0c530d1605349efd3b5075351",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "codeTrace",
       "state": "PASS",
@@ -1293,14 +1631,16 @@
       "command": "agent-run claude-opus-wallet-delta-20260801",
       "summary": "Traced transport delta reachability into BrainVault, custody, WAL, logs, RPC startup, reveal, and reconnect boundaries; no secret-bearing path changed.",
       "recordedAt": "2026-08-01T00:41:00Z",
-      "agentRunIds": ["claude-opus-wallet-delta-20260801"]
+      "agentRunIds": [
+        "claude-opus-wallet-delta-20260801"
+      ]
     },
     {
       "id": "api-secret.l1.fff938ba9",
       "commandFingerprint": "sha256:a960eaf97c85222253e5734dbccc8675c0ae0b1ef736f8a22907b40f3169b984",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "l1Regression",
       "state": "PASS",
@@ -1309,14 +1649,16 @@
       "command": "bun test brainvault/core.test.ts tests/unit/brainvault-native.test.ts",
       "summary": "Browser/native V1 vectors, strict protocol, public-only derive, owner durability, cancellation, and startup races passed 19/19 with 100084 assertions.",
       "recordedAt": "2026-08-01T00:41:01Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-secret.l2.fff938ba9",
       "commandFingerprint": "sha256:4befaefeeb0e0b690979d8b10ab5b64ebe984470df3deda856dfcacc911b0ba2",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "l2TargetedFlow",
       "state": "PASS",
@@ -1325,14 +1667,16 @@
       "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
       "summary": "Packed native derive stayed public-only, reveal remained separate, admin write advanced 4 to 5, and restart restored owner state in 182 ms.",
       "recordedAt": "2026-08-01T00:41:02Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-secret.failure.fff938ba9",
       "commandFingerprint": "sha256:8c51037fb2ea125e408b8fbfb2f8b9d4d11e63523243fd3761de05d57a9494e8",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "failureInjection",
       "state": "PASS",
@@ -1341,14 +1685,16 @@
       "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
       "summary": "Fsync, spec mismatch, cancellation, startup failure, concurrent restore, and stale authority generation injections passed 12/12.",
       "recordedAt": "2026-08-01T00:41:03Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-secret.l3.fff938ba9",
       "commandFingerprint": "sha256:88f92c81dbb3e4f30e43ea46c431e9960770b34a419ec68d30b4418026b4f64f",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "l3BroadGate",
       "state": "PASS",
@@ -1357,14 +1703,16 @@
       "command": "bun run check:brainvault",
       "summary": "Owning BrainVault, native worker, custody, startup, and reconnect suite passed 26/26 with 100128 assertions.",
       "recordedAt": "2026-08-01T00:41:04Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-secret.independent.fff938ba9",
       "commandFingerprint": "sha256:8813048b81dd50a05ecb174a9e53590baeab37ad16c39d10a89984cf74545f23",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.secret-confinement",
       "kind": "independentVerification",
       "state": "PASS",
@@ -1373,14 +1721,17 @@
       "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
       "summary": "Blind Fable and Sonnet delta audits independently found no reachable P0-P2; combined with Opus and current tests, adjudicated confidence is 98%.",
       "recordedAt": "2026-08-01T00:41:05Z",
-      "agentRunIds": ["claude-fable-wallet-delta-20260801", "claude-sonnet-wallet-delta-20260801"]
+      "agentRunIds": [
+        "claude-fable-wallet-delta-20260801",
+        "claude-sonnet-wallet-delta-20260801"
+      ]
     },
     {
       "id": "api-authority.code-trace.fff938ba9",
       "commandFingerprint": "sha256:05d3f359be582b733318fbee6adf655d234223a0c530d1605349efd3b5075351",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.command-authority",
       "kind": "codeTrace",
       "state": "PASS",
@@ -1389,14 +1740,16 @@
       "command": "agent-run claude-opus-wallet-delta-20260801",
       "summary": "Traced authenticated socket generation, RPC startup gate, remote adapter, native owner, derive, and separate reveal authority.",
       "recordedAt": "2026-08-01T00:41:06Z",
-      "agentRunIds": ["claude-opus-wallet-delta-20260801"]
+      "agentRunIds": [
+        "claude-opus-wallet-delta-20260801"
+      ]
     },
     {
       "id": "api-authority.l1.fff938ba9",
       "commandFingerprint": "sha256:a960eaf97c85222253e5734dbccc8675c0ae0b1ef736f8a22907b40f3169b984",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.command-authority",
       "kind": "l1Regression",
       "state": "PASS",
@@ -1405,14 +1758,16 @@
       "command": "bun test brainvault/core.test.ts tests/unit/brainvault-native.test.ts",
       "summary": "Exact adapter message validation and admin-only node-owner operations passed alongside frozen wallet vectors.",
       "recordedAt": "2026-08-01T00:41:07Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-authority.l2.fff938ba9",
       "commandFingerprint": "sha256:4befaefeeb0e0b690979d8b10ab5b64ebe984470df3deda856dfcacc911b0ba2",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.command-authority",
       "kind": "l2TargetedFlow",
       "state": "PASS",
@@ -1421,14 +1776,16 @@
       "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
       "summary": "Packaged authenticated admin lifecycle exercised derive, separate reveal, write, restart, and restored ownership.",
       "recordedAt": "2026-08-01T00:41:08Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-authority.failure.fff938ba9",
       "commandFingerprint": "sha256:8c51037fb2ea125e408b8fbfb2f8b9d4d11e63523243fd3761de05d57a9494e8",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.command-authority",
       "kind": "failureInjection",
       "state": "PASS",
@@ -1437,14 +1794,16 @@
       "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
       "summary": "Malformed secret-bearing messages, stale reconnect generation, failed startup, and concurrent owner restore all failed closed.",
       "recordedAt": "2026-08-01T00:41:09Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-authority.l3.fff938ba9",
       "commandFingerprint": "sha256:88f92c81dbb3e4f30e43ea46c431e9960770b34a419ec68d30b4418026b4f64f",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.command-authority",
       "kind": "l3BroadGate",
       "state": "PASS",
@@ -1453,14 +1812,16 @@
       "command": "bun run check:brainvault",
       "summary": "The complete authority and custody owning suite passed on the current module fingerprint.",
       "recordedAt": "2026-08-01T00:41:10Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "api-authority.independent.fff938ba9",
       "commandFingerprint": "sha256:8813048b81dd50a05ecb174a9e53590baeab37ad16c39d10a89984cf74545f23",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "api-auth-custody.command-authority",
       "kind": "independentVerification",
       "state": "PASS",
@@ -1469,14 +1830,17 @@
       "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
       "summary": "Independent model-family panel found no transport-to-authority regression after tracing the authenticated and RPC call graph.",
       "recordedAt": "2026-08-01T00:41:11Z",
-      "agentRunIds": ["claude-fable-wallet-delta-20260801", "claude-sonnet-wallet-delta-20260801"]
+      "agentRunIds": [
+        "claude-fable-wallet-delta-20260801",
+        "claude-sonnet-wallet-delta-20260801"
+      ]
     },
     {
       "id": "wallet-secret.code-trace.fff938ba9",
       "commandFingerprint": "sha256:05d3f359be582b733318fbee6adf655d234223a0c530d1605349efd3b5075351",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "codeTrace",
       "state": "PASS",
@@ -1485,14 +1849,16 @@
       "command": "agent-run claude-opus-wallet-delta-20260801",
       "summary": "Traced cancel, back, mode switch, stale worker, restart, reveal, and persistence boundaries across the unchanged wallet lifecycle.",
       "recordedAt": "2026-08-01T00:41:12Z",
-      "agentRunIds": ["claude-opus-wallet-delta-20260801"]
+      "agentRunIds": [
+        "claude-opus-wallet-delta-20260801"
+      ]
     },
     {
       "id": "wallet-secret.l1.fff938ba9",
       "commandFingerprint": "sha256:843c2c4ca8f5b5256847117aba9824b76ca6751d775433062f96208044d93a42",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "l1Regression",
       "state": "PASS",
@@ -1501,14 +1867,16 @@
       "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts --grep 'wallet persistence becomes an explicit point of no return'",
       "summary": "The narrow persistence point-of-no-return wallet regression passed 1/1.",
       "recordedAt": "2026-08-01T00:41:13Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "wallet-secret.l2.fff938ba9",
       "commandFingerprint": "sha256:b21be91ff8bf286d2c88de6f23b431c79631f717d883b65e3d182a1a1b941c81",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "l2TargetedFlow",
       "state": "PASS",
@@ -1517,14 +1885,16 @@
       "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts",
       "summary": "Responsive recovery choice, rehearsal, keyboard, stale-worker, cancellation, secret-drop, and persistence flow passed 9/9.",
       "recordedAt": "2026-08-01T00:41:14Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "wallet-secret.l3.fff938ba9",
       "commandFingerprint": "sha256:6d7f93c22e4ffe3d590a9a6220b4591156e723f2e506bccefead713d9cf21427",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "l3BroadGate",
       "state": "PASS",
@@ -1533,14 +1903,16 @@
       "command": "cd frontend && bun run check",
       "summary": "Frontend diagnostics and production build completed with zero errors and zero warnings.",
       "recordedAt": "2026-08-01T00:41:15Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "wallet-secret.independent.fff938ba9",
       "commandFingerprint": "sha256:8813048b81dd50a05ecb174a9e53590baeab37ad16c39d10a89984cf74545f23",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/wallet-fff938ba9.json",
-      "artifactFingerprint": "sha256:f92ee9509607ccf6559bf71cccb11fb9c1fe1896921de26daebe83803594f5d3",
+      "artifactFingerprint": "sha256:4b40086819366678baefde8590754ec1250d85fe5dc2e4add92b873e1a905f13",
       "invariantId": "wallet-frontend.secret-lifecycle",
       "kind": "independentVerification",
       "state": "PASS",
@@ -1549,14 +1921,17 @@
       "command": "agent-panel claude-fable-sonnet-wallet-delta-20260801",
       "summary": "Blind Fable and Sonnet audits found no reachable transport regression in cancel, stale worker, public derive, or reveal behavior.",
       "recordedAt": "2026-08-01T00:41:16Z",
-      "agentRunIds": ["claude-fable-wallet-delta-20260801", "claude-sonnet-wallet-delta-20260801"]
+      "agentRunIds": [
+        "claude-fable-wallet-delta-20260801",
+        "claude-sonnet-wallet-delta-20260801"
+      ]
     },
     {
       "id": "runtime-rejection.code-trace.fff938ba9",
       "commandFingerprint": "sha256:ad8955eeff2c637e334c435ebdf113d069096273e151cd5856844d90d3f04576",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/runtime-payment-fff938ba9.json",
-      "artifactFingerprint": "sha256:1eb283ca6572648e064e67b07dbf7817085ecc78c4318bdece3736fa4f432e3c",
+      "artifactFingerprint": "sha256:8558e219f1136910013a0105630cf01cfda68f5a6bdf8d2f3dde6623d459acec",
       "invariantId": "runtime-pipeline.expected-rejection-isolation",
       "kind": "codeTrace",
       "state": "FAIL",
@@ -1565,14 +1940,16 @@
       "command": "agent-run audit-registry-integration-20260801",
       "summary": "Trace confirmed mutationStarted precedes business reducers and any later expected command rejection enters the fatal Runtime halt path.",
       "recordedAt": "2026-08-01T00:42:00Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "runtime-rejection.l2.fff938ba9",
       "commandFingerprint": "sha256:00896fec6b26ba959bd8de50ffadab14258b11353481f88719f5ca2abf610483",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/runtime-payment-fff938ba9.json",
-      "artifactFingerprint": "sha256:1eb283ca6572648e064e67b07dbf7817085ecc78c4318bdece3736fa4f432e3c",
+      "artifactFingerprint": "sha256:8558e219f1136910013a0105630cf01cfda68f5a6bdf8d2f3dde6623d459acec",
       "invariantId": "runtime-pipeline.expected-rejection-isolation",
       "kind": "l2TargetedFlow",
       "state": "FAIL",
@@ -1581,14 +1958,16 @@
       "command": "agent-run audit-registry-integration-20260801 real-processRuntime reproducer",
       "summary": "A real signed missing-next-hop payment produced DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING, halted the Runtime, and made the next call fail RUNTIME_PROCESS_HALTED.",
       "recordedAt": "2026-08-01T00:42:01Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "runtime-rejection.independent.fff938ba9",
       "commandFingerprint": "sha256:bd9ddb228a75deff556cf1e00ed137bbbb6eea7c831f262d112ea2ba4da433a0",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/runtime-payment-fff938ba9.json",
-      "artifactFingerprint": "sha256:1eb283ca6572648e064e67b07dbf7817085ecc78c4318bdece3736fa4f432e3c",
+      "artifactFingerprint": "sha256:8558e219f1136910013a0105630cf01cfda68f5a6bdf8d2f3dde6623d459acec",
       "invariantId": "runtime-pipeline.expected-rejection-isolation",
       "kind": "independentVerification",
       "state": "FAIL",
@@ -1597,14 +1976,16 @@
       "command": "agent-run runtime-payment-current-recheck-20260801",
       "summary": "Independent current-SHA reviewer reproduced the sticky halt through production processRuntime at 100% confidence.",
       "recordedAt": "2026-08-01T00:42:02Z",
-      "agentRunIds": ["runtime-payment-current-recheck-20260801"]
+      "agentRunIds": [
+        "runtime-payment-current-recheck-20260801"
+      ]
     },
     {
       "id": "payment-terminal.code-trace.fff938ba9",
       "commandFingerprint": "sha256:ad8955eeff2c637e334c435ebdf113d069096273e151cd5856844d90d3f04576",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/runtime-payment-fff938ba9.json",
-      "artifactFingerprint": "sha256:1eb283ca6572648e064e67b07dbf7817085ecc78c4318bdece3736fa4f432e3c",
+      "artifactFingerprint": "sha256:8558e219f1136910013a0105630cf01cfda68f5a6bdf8d2f3dde6623d459acec",
       "invariantId": "registration-payment.terminal-truth",
       "kind": "codeTrace",
       "state": "FAIL",
@@ -1613,14 +1994,16 @@
       "command": "agent-run audit-registry-integration-20260801",
       "summary": "Trace confirmed insufficient capacity emits no Account transaction or semantic effect while raw committed HTLC input is projected as Payment started.",
       "recordedAt": "2026-08-01T00:42:03Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "payment-terminal.l2.fff938ba9",
       "commandFingerprint": "sha256:11bd6fa8dc1cd67f3816bbec1d575720d9555c5e5307187a8971873986376986",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/runtime-payment-fff938ba9.json",
-      "artifactFingerprint": "sha256:1eb283ca6572648e064e67b07dbf7817085ecc78c4318bdece3736fa4f432e3c",
+      "artifactFingerprint": "sha256:8558e219f1136910013a0105630cf01cfda68f5a6bdf8d2f3dde6623d459acec",
       "invariantId": "registration-payment.terminal-truth",
       "kind": "l2TargetedFlow",
       "state": "FAIL",
@@ -1629,14 +2012,16 @@
       "command": "agent-run audit-registry-integration-20260801 insufficient-capacity and activity projection reproducer",
       "summary": "Narrow tests returned accountTxs=0 and no effects, while the current activity projection returned title Payment started and status started.",
       "recordedAt": "2026-08-01T00:42:04Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "payment-terminal.independent.fff938ba9",
       "commandFingerprint": "sha256:bd9ddb228a75deff556cf1e00ed137bbbb6eea7c831f262d112ea2ba4da433a0",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/runtime-payment-fff938ba9.json",
-      "artifactFingerprint": "sha256:1eb283ca6572648e064e67b07dbf7817085ecc78c4318bdece3736fa4f432e3c",
+      "artifactFingerprint": "sha256:8558e219f1136910013a0105630cf01cfda68f5a6bdf8d2f3dde6623d459acec",
       "invariantId": "registration-payment.terminal-truth",
       "kind": "independentVerification",
       "state": "FAIL",
@@ -1645,14 +2030,16 @@
       "command": "agent-run runtime-payment-current-recheck-20260801",
       "summary": "Independent current-SHA reviewer confirmed the durable semantic-status defect at 99% confidence.",
       "recordedAt": "2026-08-01T00:42:05Z",
-      "agentRunIds": ["runtime-payment-current-recheck-20260801"]
+      "agentRunIds": [
+        "runtime-payment-current-recheck-20260801"
+      ]
     },
     {
       "id": "wallet-payment-status.code-trace.fff938ba9",
       "commandFingerprint": "sha256:ad8955eeff2c637e334c435ebdf113d069096273e151cd5856844d90d3f04576",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/runtime-payment-fff938ba9.json",
-      "artifactFingerprint": "sha256:1eb283ca6572648e064e67b07dbf7817085ecc78c4318bdece3736fa4f432e3c",
+      "artifactFingerprint": "sha256:8558e219f1136910013a0105630cf01cfda68f5a6bdf8d2f3dde6623d459acec",
       "invariantId": "wallet-frontend.durable-status-truth",
       "kind": "codeTrace",
       "state": "FAIL",
@@ -1661,14 +2048,16 @@
       "command": "agent-run audit-registry-integration-20260801",
       "summary": "Trace confirmed the wallet promotes ingress observed or committed into payment success without a durable semantic outcome.",
       "recordedAt": "2026-08-01T00:42:06Z",
-      "agentRunIds": ["audit-registry-integration-20260801"]
+      "agentRunIds": [
+        "audit-registry-integration-20260801"
+      ]
     },
     {
       "id": "wallet-payment-status.independent.fff938ba9",
       "commandFingerprint": "sha256:bd9ddb228a75deff556cf1e00ed137bbbb6eea7c831f262d112ea2ba4da433a0",
       "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
       "artifactPath": "audits/evidence/runtime-payment-fff938ba9.json",
-      "artifactFingerprint": "sha256:1eb283ca6572648e064e67b07dbf7817085ecc78c4318bdece3736fa4f432e3c",
+      "artifactFingerprint": "sha256:8558e219f1136910013a0105630cf01cfda68f5a6bdf8d2f3dde6623d459acec",
       "invariantId": "wallet-frontend.durable-status-truth",
       "kind": "independentVerification",
       "state": "FAIL",
@@ -1677,7 +2066,9 @@
       "command": "agent-run runtime-payment-current-recheck-20260801",
       "summary": "Independent reviewer tied the false durable activity to current PaymentPanel and command-bus behavior.",
       "recordedAt": "2026-08-01T00:42:07Z",
-      "agentRunIds": ["runtime-payment-current-recheck-20260801"]
+      "agentRunIds": [
+        "runtime-payment-current-recheck-20260801"
+      ]
     }
   ],
   "findings": [
@@ -1846,7 +2237,7 @@
       "rootCauseKey": "financial-faucet-routes-bypass-operator-policy-and-server-budgets",
       "moduleId": "public-wallet-api",
       "invariantIds": [
-        "public-wallet-api.truthful-authorized-projection",
+        "public-wallet-api.faucet-policy",
         "api-auth-custody.command-authority"
       ],
       "title": "Anonymous faucet routes accept caller-selected amounts without a shared enablement, cap, quota, or reservation policy.",
@@ -2168,7 +2559,15 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Found five race and durability edges; final re-audit reported no actionable findings at 97% confidence."
+      "summary": "Found five race and durability edges; final re-audit reported no actionable findings at 97% confidence.",
+      "invariantIds": [
+        "api-auth-custody.secret-confinement",
+        "wallet-frontend.secret-lifecycle"
+      ],
+      "moduleFingerprints": {
+        "api-auth-custody": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
+        "wallet-frontend": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c"
+      }
     },
     {
       "id": "solidity-deployment-primary-20260801",
@@ -2186,7 +2585,13 @@
         "AUD-SEPOLIA-DOMAIN-V1-V3"
       ],
       "candidateFindingIds": [],
-      "summary": "Found deployed V3 versus current V1 domain drift and verifier binding weakness."
+      "summary": "Found deployed V3 versus current V1 domain drift and verifier binding weakness.",
+      "invariantIds": [
+        "contracts-governance.active-domain-binding"
+      ],
+      "moduleFingerprints": {
+        "contracts-governance": "sha256:4bc3ba4d8cf17fb48a08cbc0ae9bd535bd8d5c2c33e2555e25cd2ed49e664349"
+      }
     },
     {
       "id": "sepolia-domain-second-20260801",
@@ -2204,7 +2609,13 @@
         "AUD-SEPOLIA-DOMAIN-V1-V3"
       ],
       "candidateFindingIds": [],
-      "summary": "Independently reproduced domain digests, on-chain getters, bytecode mismatch, and false-green verifier."
+      "summary": "Independently reproduced domain digests, on-chain getters, bytecode mismatch, and false-green verifier.",
+      "invariantIds": [
+        "contracts-governance.active-domain-binding"
+      ],
+      "moduleFingerprints": {
+        "contracts-governance": "sha256:4bc3ba4d8cf17fb48a08cbc0ae9bd535bd8d5c2c33e2555e25cd2ed49e664349"
+      }
     },
     {
       "id": "transport-topology-primary-20260801",
@@ -2221,7 +2632,13 @@
         "AUD-TRANSPORT-BUN-SEND"
       ],
       "candidateFindingIds": [],
-      "summary": "Mapped the full topology and found the Bun send-result inversion plus direct-policy gaps."
+      "summary": "Mapped the full topology and found the Bun send-result inversion plus direct-policy gaps.",
+      "invariantIds": [
+        "transport-topology.send-result-contract"
+      ],
+      "moduleFingerprints": {
+        "transport-topology": "sha256:035c73247033ec8fee9f2434f9c214466abd49523cffd7185178740bbea21625"
+      }
     },
     {
       "id": "runtime-payment-primary-20260801",
@@ -2241,7 +2658,17 @@
         "AUD-PAYMENT-FALSE-STARTED"
       ],
       "candidateFindingIds": [],
-      "summary": "Discovered both Runtime/payment P1 root causes later reproduced independently."
+      "summary": "Discovered both Runtime/payment P1 root causes later reproduced independently.",
+      "invariantIds": [
+        "runtime-pipeline.expected-rejection-isolation",
+        "registration-payment.terminal-truth",
+        "wallet-frontend.durable-status-truth"
+      ],
+      "moduleFingerprints": {
+        "runtime-pipeline": "sha256:ba8e314b4adc994ce6711a07baf0fff0bf7a73ea56122649d4659844cad265c6",
+        "registration-payment": "sha256:b83843cea7500b6d613b5bf3d48ba042e33933c043079a9213da3fd297cb5f3d",
+        "wallet-frontend": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c"
+      }
     },
     {
       "id": "audit-hierarchy-design-20260801",
@@ -2257,7 +2684,9 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Designed the registry, state machines, scoring, independent review, and evidence-cache protocol."
+      "summary": "Designed the registry, state machines, scoring, independent review, and evidence-cache protocol.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "transport-send-second-20260801",
@@ -2274,7 +2703,13 @@
         "AUD-TRANSPORT-BUN-SEND"
       ],
       "candidateFindingIds": [],
-      "summary": "Confirmed -1 queued and 0 dropped with Bun types, official API, live socket behavior, and fallback trace."
+      "summary": "Confirmed -1 queued and 0 dropped with Bun types, official API, live socket behavior, and fallback trace.",
+      "invariantIds": [
+        "transport-topology.send-result-contract"
+      ],
+      "moduleFingerprints": {
+        "transport-topology": "sha256:035c73247033ec8fee9f2434f9c214466abd49523cffd7185178740bbea21625"
+      }
     },
     {
       "id": "runtime-payment-second-20260801",
@@ -2294,7 +2729,17 @@
         "AUD-PAYMENT-FALSE-STARTED"
       ],
       "candidateFindingIds": [],
-      "summary": "Reproduced both P1s through real processRuntime and production activity/UI paths at 99-100% confidence."
+      "summary": "Reproduced both P1s through real processRuntime and production activity/UI paths at 99-100% confidence.",
+      "invariantIds": [
+        "runtime-pipeline.expected-rejection-isolation",
+        "registration-payment.terminal-truth",
+        "wallet-frontend.durable-status-truth"
+      ],
+      "moduleFingerprints": {
+        "runtime-pipeline": "sha256:ba8e314b4adc994ce6711a07baf0fff0bf7a73ea56122649d4659844cad265c6",
+        "registration-payment": "sha256:b83843cea7500b6d613b5bf3d48ba042e33933c043079a9213da3fd297cb5f3d",
+        "wallet-frontend": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c"
+      }
     },
     {
       "id": "transport-send-fix-20260801",
@@ -2311,7 +2756,13 @@
         "AUD-TRANSPORT-BUN-SEND"
       ],
       "candidateFindingIds": [],
-      "summary": "Implemented the canonical classifier and two verifier-driven follow-ups; final transport suite passed 56/56 with 247 assertions."
+      "summary": "Implemented the canonical classifier and two verifier-driven follow-ups; final transport suite passed 56/56 with 247 assertions.",
+      "invariantIds": [
+        "transport-topology.send-result-contract"
+      ],
+      "moduleFingerprints": {
+        "transport-topology": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f"
+      }
     },
     {
       "id": "wallet-final-verification-20260801",
@@ -2327,7 +2778,15 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Independently re-audited the final wallet candidate and reported no actionable findings at 97% confidence."
+      "summary": "Independently re-audited the final wallet candidate and reported no actionable findings at 97% confidence.",
+      "invariantIds": [
+        "api-auth-custody.secret-confinement",
+        "wallet-frontend.secret-lifecycle"
+      ],
+      "moduleFingerprints": {
+        "api-auth-custody": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
+        "wallet-frontend": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c"
+      }
     },
     {
       "id": "transport-final-verification-20260801",
@@ -2344,7 +2803,13 @@
         "AUD-TRANSPORT-BUN-SEND"
       ],
       "candidateFindingIds": [],
-      "summary": "Blocked two incomplete candidates, reproduced duplicate-prefix risk, then verified the exact final SHA green at 99% confidence."
+      "summary": "Blocked two incomplete candidates, reproduced duplicate-prefix risk, then verified the exact final SHA green at 99% confidence.",
+      "invariantIds": [
+        "transport-topology.send-result-contract"
+      ],
+      "moduleFingerprints": {
+        "transport-topology": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f"
+      }
     },
     {
       "id": "audit-registry-verification-20260801",
@@ -2360,7 +2825,9 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Reproduced four P1 and two P2 defects in the registry implementation; every issue entered the fix loop."
+      "summary": "Reproduced four P1 and two P2 defects in the registry implementation; every issue entered the fix loop.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "audit-registry-integration-20260801",
@@ -2383,7 +2850,23 @@
         "AUD-PAYMENT-FALSE-STARTED"
       ],
       "candidateFindingIds": [],
-      "summary": "Reproduced both current Runtime/payment P1s and reran transport, custody, package, wallet, and frontend gates."
+      "summary": "Reproduced both current Runtime/payment P1s and reran transport, custody, package, wallet, and frontend gates.",
+      "invariantIds": [
+        "transport-topology.send-result-contract",
+        "api-auth-custody.secret-confinement",
+        "api-auth-custody.command-authority",
+        "wallet-frontend.secret-lifecycle",
+        "runtime-pipeline.expected-rejection-isolation",
+        "registration-payment.terminal-truth",
+        "wallet-frontend.durable-status-truth"
+      ],
+      "moduleFingerprints": {
+        "transport-topology": "sha256:fc6c044eec5246e86356dbae63d5e2a5aba460312d0a6a4dcc2bb8cce3aa589f",
+        "api-auth-custody": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+        "wallet-frontend": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd",
+        "runtime-pipeline": "sha256:d90a9f000ed65fe121ec1bd2dfdabd626aa16cd48745cacf0e837ba30f7358cb",
+        "registration-payment": "sha256:74cbb326d1f6a313612da0a4644a1b2949f2a341929f5f18b7a2b9bb305c6a4c"
+      }
     },
     {
       "id": "claude-opus-wallet-delta-20260801",
@@ -2399,7 +2882,16 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Proved the custody fingerprint drift was entirely relay-direct transport code and found no reachable P0-P2 at 93% confidence."
+      "summary": "Proved the custody fingerprint drift was entirely relay-direct transport code and found no reachable P0-P2 at 93% confidence.",
+      "invariantIds": [
+        "api-auth-custody.secret-confinement",
+        "api-auth-custody.command-authority",
+        "wallet-frontend.secret-lifecycle"
+      ],
+      "moduleFingerprints": {
+        "api-auth-custody": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+        "wallet-frontend": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd"
+      }
     },
     {
       "id": "claude-fable-wallet-delta-20260801",
@@ -2415,7 +2907,16 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Blindly traced logging, reveal, signer persistence, socket generation, and pending-prefix paths; no P0-P2 at 92% confidence."
+      "summary": "Blindly traced logging, reveal, signer persistence, socket generation, and pending-prefix paths; no P0-P2 at 92% confidence.",
+      "invariantIds": [
+        "api-auth-custody.secret-confinement",
+        "api-auth-custody.command-authority",
+        "wallet-frontend.secret-lifecycle"
+      ],
+      "moduleFingerprints": {
+        "api-auth-custody": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+        "wallet-frontend": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd"
+      }
     },
     {
       "id": "claude-sonnet-wallet-delta-20260801",
@@ -2431,7 +2932,16 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Found no import or reachable path from the send classifier delta into authenticated RPC, adapter, reveal, or browser worker lifecycle."
+      "summary": "Found no import or reachable path from the send classifier delta into authenticated RPC, adapter, reveal, or browser worker lifecycle.",
+      "invariantIds": [
+        "api-auth-custody.secret-confinement",
+        "api-auth-custody.command-authority",
+        "wallet-frontend.secret-lifecycle"
+      ],
+      "moduleFingerprints": {
+        "api-auth-custody": "sha256:f21678e370876f34f1f7e68d2e13bc4a731c91bb881bf9d589b2d01427c4ba0e",
+        "wallet-frontend": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd"
+      }
     },
     {
       "id": "runtime-payment-current-recheck-20260801",
@@ -2451,7 +2961,17 @@
         "AUD-PAYMENT-FALSE-STARTED"
       ],
       "candidateFindingIds": [],
-      "summary": "Reproduced sticky Runtime halt and false Payment started state on the current dependency fingerprints at 99-100% confidence."
+      "summary": "Reproduced sticky Runtime halt and false Payment started state on the current dependency fingerprints at 99-100% confidence.",
+      "invariantIds": [
+        "runtime-pipeline.expected-rejection-isolation",
+        "registration-payment.terminal-truth",
+        "wallet-frontend.durable-status-truth"
+      ],
+      "moduleFingerprints": {
+        "runtime-pipeline": "sha256:d90a9f000ed65fe121ec1bd2dfdabd626aa16cd48745cacf0e837ba30f7358cb",
+        "registration-payment": "sha256:74cbb326d1f6a313612da0a4644a1b2949f2a341929f5f18b7a2b9bb305c6a4c",
+        "wallet-frontend": "sha256:de5cda920bc20c5618a0d3c947790423f73e2757ad617229028e4cd5684b17bd"
+      }
     },
     {
       "id": "evidence-refresh-design-20260801",
@@ -2466,7 +2986,9 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Mapped all 22 stale evidence kinds and found the split-attester validation gap now covered by a regression."
+      "summary": "Mapped all 22 stale evidence kinds and found the split-attester validation gap now covered by a regression.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "transport-exact-hop-primary-20260801",
@@ -2483,7 +3005,9 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Mapped actual hop behavior and produced four P1 plus three P2 candidates with 186/186 narrow tests; independent adjudication is running."
+      "summary": "Mapped actual hop behavior and produced four P1 plus three P2 candidates with 186/186 narrow tests; independent adjudication is running.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "claude-opus-transport-auth-20260801",
@@ -2502,7 +3026,9 @@
         "AUD-TRANSPORT-KEY-REBIND"
       ],
       "candidateFindingIds": [],
-      "summary": "Discovered the live challenge-forwarding confused-deputy chain and unsigned post-handshake encryption-key rebinding with concrete source traces."
+      "summary": "Discovered the live challenge-forwarding confused-deputy chain and unsigned post-handshake encryption-key rebinding with concrete source traces.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "transport-auth-independent-verification-20260801",
@@ -2521,7 +3047,9 @@
         "AUD-TRANSPORT-KEY-REBIND"
       ],
       "candidateFindingIds": [],
-      "summary": "Reproduced both findings with real ephemeral Bun relay sockets and the production direct handler at 99% confidence; no victim seed was available to the attacker."
+      "summary": "Reproduced both findings with real ephemeral Bun relay sockets and the production direct handler at 99% confidence; no victim seed was available to the attacker.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "account-consensus-base-20260801",
@@ -2542,7 +3070,9 @@
       "candidateFindingIds": [
         "AUD-ACCOUNT-STORAGE-SHALLOW-VALIDATION"
       ],
-      "summary": "Ran 342 Account tests with 23,188 assertions, durable restart and collision scenarios; found shallow persisted-state validation and independently reproduced the false-started payment boundary."
+      "summary": "Ran 342 Account tests with 23,188 assertions, durable restart and collision scenarios; found shallow persisted-state validation and independently reproduced the false-started payment boundary.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "account-storage-independent-verification-20260801",
@@ -2560,7 +3090,9 @@
         "AUD-ACCOUNT-STORAGE-SHALLOW-VALIDATION"
       ],
       "candidateFindingIds": [],
-      "summary": "Confirmed 26 of 29 malformed AccountReplica snapshots hydrate into live state, reproduced false capacity from negative hold, rejected remote-theft inflation, and proved live/root divergence is legal after J-finality."
+      "summary": "Confirmed 26 of 29 malformed AccountReplica snapshots hydrate into live state, reproduced false capacity from negative hold, rejected remote-theft inflation, and proved live/root divergence is legal after J-finality.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "entity-consensus-base-20260801",
@@ -2581,7 +3113,13 @@
       "candidateFindingIds": [
         "AUD-ENTITY-ATOMIC-CAS-LEAK"
       ],
-      "summary": "Found an executable unauthenticated proposal-to-Runtime-halt P0 candidate, independently confirmed the business-rejection P1, and identified a bounded CAS staging leak candidate; 178 tests and 1,843 assertions passed."
+      "summary": "Found an executable unauthenticated proposal-to-Runtime-halt P0 candidate, independently confirmed the business-rejection P1, and identified a bounded CAS staging leak candidate; 178 tests and 1,843 assertions passed.",
+      "invariantIds": [
+        "entity-consensus.certified-state-only"
+      ],
+      "moduleFingerprints": {
+        "entity-consensus": "sha256:10ef5d421988b372a2330870bbb64a1df414271b2cedaf52904746b1a9849fd5"
+      }
     },
     {
       "id": "transport-auth-fix-20260801",
@@ -2602,7 +3140,9 @@
       "candidateFindingIds": [
         "AUD-TRANSPORT-RELAY-AUDIENCE-MISMATCH"
       ],
-      "summary": "Built audience-bound mutual authentication and immutable session keys, restored the relay launcher, passed 19 targeted tests and the full check, then independently reproduced the remaining post-handshake transparent-proxy injection before merge."
+      "summary": "Built audience-bound mutual authentication and immutable session keys, restored the relay launcher, passed 19 targeted tests and the full check, then independently reproduced the remaining post-handshake transparent-proxy injection before merge.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "transport-channel-xhigh-review-20260801",
@@ -2622,7 +3162,9 @@
       "candidateFindingIds": [
         "AUD-TRANSPORT-RELAY-AUDIENCE-MISMATCH"
       ],
-      "summary": "Found both remaining transport gaps and scored the candidate 590/1000; its original shell reproduction was malformed, but the author independently rebuilt and confirmed the P1 with a clean live PoC."
+      "summary": "Found both remaining transport gaps and scored the candidate 590/1000; its original shell reproduction was malformed, but the author independently rebuilt and confirmed the P1 with a clean live PoC.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "transport-diff-direction-review-20260801",
@@ -2637,7 +3179,9 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Reviewed the diff in the wrong direction and produced no usable finding; result was rejected rather than counted toward confidence or score."
+      "summary": "Reviewed the diff in the wrong direction and produced no usable finding; result was rejected rather than counted toward confidence or score.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "claude-opus-runtime-base-20260801",
@@ -2654,7 +3198,9 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul."
+      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "claude-fable-account-base-20260801",
@@ -2669,7 +3215,9 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul."
+      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "claude-sonnet-entity-base-20260801",
@@ -2684,7 +3232,9 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul."
+      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "claude-opus-contracts-base-20260801",
@@ -2700,7 +3250,9 @@
       "provisional": true,
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul."
+      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "entity-proposal-independent-verification-20260801",
@@ -2718,7 +3270,13 @@
         "AUD-ENTITY-UNAUTH-PROPOSAL-HALT"
       ],
       "candidateFindingIds": [],
-      "summary": "Reproduced empty-signature, encrypted wire, and captured-signature body-mutation variants; established recoverable remote DoS as P1 at 99.5% confidence."
+      "summary": "Reproduced empty-signature, encrypted wire, and captured-signature body-mutation variants; established recoverable remote DoS as P1 at 99.5% confidence.",
+      "invariantIds": [
+        "entity-consensus.certified-state-only"
+      ],
+      "moduleFingerprints": {
+        "entity-consensus": "sha256:10ef5d421988b372a2330870bbb64a1df414271b2cedaf52904746b1a9849fd5"
+      }
     },
     {
       "id": "legacy-top-security-reaudit-20260801",
@@ -2743,7 +3301,9 @@
         "AUD-CROSS-PULL-FORGED-CUMULATIVE"
       ],
       "candidateFindingIds": [],
-      "summary": "Verified all five historical claims against current code with 48 passing adjacent tests and isolated executable PoCs; separated immediate API guards from consensus-semantic fixes requiring owner approval."
+      "summary": "Verified all five historical claims against current code with 48 passing adjacent tests and isolated executable PoCs; separated immediate API guards from consensus-semantic fixes requiring owner approval.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "transport-mvp-fix-20260801",
@@ -2762,7 +3322,9 @@
         "AUD-TRANSPORT-RELAY-AUDIENCE-MISMATCH"
       ],
       "candidateFindingIds": [],
-      "summary": "Owner selected the minimal transport option; implementation and targeted regressions are running."
+      "summary": "Owner selected the minimal transport option; implementation and targeted regressions are running.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "account-storage-minimal-fix-20260801",
@@ -2780,7 +3342,9 @@
         "AUD-ACCOUNT-STORAGE-SHALLOW-VALIDATION"
       ],
       "candidateFindingIds": [],
-      "summary": "Reusing existing validators for dangerous economics, ownership, map binding, bounds, and frame hash while deleting attempted authority-layer complexity."
+      "summary": "Reusing existing validators for dangerous economics, ownership, map binding, bounds, and frame hash while deleting attempted authority-layer complexity.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "entity-proposal-minimal-verification-20260801",
@@ -2798,7 +3362,9 @@
         "AUD-ENTITY-UNAUTH-PROPOSAL-HALT"
       ],
       "candidateFindingIds": [],
-      "summary": "Checking that only authenticated malformed proposals become typed rejection and identifying removable duplication in the 13-file candidate."
+      "summary": "Checking that only authenticated malformed proposals become typed rejection and identifying removable duplication in the 13-file candidate.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "opus-faucet-policy-audit-20260801",
@@ -2815,7 +3381,9 @@
         "AUD-FAUCET-PUBLIC-UNBOUNDED"
       ],
       "candidateFindingIds": [],
-      "summary": "Confirmed the shared public cap and route placement, then caught a trusted-operator release regression before merge; scored the superseded candidate 720/1000."
+      "summary": "Confirmed the shared public cap and route placement, then caught a trusted-operator release regression before merge; scored the superseded candidate 720/1000.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     },
     {
       "id": "faucet-policy-final-verification-20260801",
@@ -2832,7 +3400,13 @@
         "AUD-FAUCET-PUBLIC-UNBOUNDED"
       ],
       "candidateFindingIds": [],
-      "summary": "Verified deterministic rejection of scalar-type bypasses, all four public caps, unspoofable trusted-operator scope, explicit managed-testnet enablement, and zero remaining P0-P2 at 99.8% confidence."
+      "summary": "Verified deterministic rejection of scalar-type bypasses, all four public caps, unspoofable trusted-operator scope, explicit managed-testnet enablement, and zero remaining P0-P2 at 99.8% confidence.",
+      "invariantIds": [
+        "public-wallet-api.faucet-policy"
+      ],
+      "moduleFingerprints": {
+        "public-wallet-api": "sha256:43729a9b553d11dcecc4a3e55a90c822d15b974034cd795ebab50986458f7fa4"
+      }
     },
     {
       "id": "registration-payment-truth-audit-9bfd78ab9-20260801",
@@ -2853,7 +3427,9 @@
         "AUD-REGISTRATION-INTENT-BYPASS"
       ],
       "candidateFindingIds": [],
-      "summary": "Confirmed that both existing Runtime/payment blockers remain reachable and found the production wallet registration path bypassing the existing crash-safe numbered-registration intent; no broad PASS evidence or module review was recorded."
+      "summary": "Confirmed that both existing Runtime/payment blockers remain reachable and found the production wallet registration path bypassing the existing crash-safe numbered-registration intent; no broad PASS evidence or module review was recorded.",
+      "invariantIds": [],
+      "moduleFingerprints": {}
     }
   ],
   "moduleReviews": [
@@ -2888,19 +3464,6 @@
       ],
       "summary": "Authenticated proposal ordering and adversarial replay containment remain release blockers despite strong state-root and isolation primitives.",
       "recordedAt": "2026-08-01T01:12:10Z"
-    },
-    {
-      "id": "faucet-policy-final-review-20260801",
-      "moduleId": "public-wallet-api",
-      "agentRunId": "faucet-policy-final-verification-20260801",
-      "sourceSha": "b9c3e5fcde75d2ec9c3f6165fa05ad2008a30c5f",
-      "moduleFingerprint": "sha256:43729a9b553d11dcecc4a3e55a90c822d15b974034cd795ebab50986458f7fa4",
-      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
-      "score": 1000,
-      "confidence": 100,
-      "blockerFindingIds": [],
-      "summary": "All public faucet routes are deployment-opt-in and exactly capped; malformed JSON cannot bypass or crash policy, while trusted local release tooling remains compatible.",
-      "recordedAt": "2026-08-01T03:55:00Z"
     }
   ]
 }

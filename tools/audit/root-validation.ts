@@ -8,7 +8,7 @@ import {
   listCurrentSourceFiles,
   matchesAuditGlob,
 } from './fingerprint';
-import type { AuditRegistry } from './types';
+import type { AuditEvidence, AuditRegistry } from './types';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -27,6 +27,35 @@ const validateModuleGlobs = (
     for (const pattern of module.testGlobs) {
       if (!files.some(path => matchesAuditGlob(path, pattern))) {
         errors.push(`module ${module.id} test glob matches no current file: ${pattern}`);
+      }
+    }
+  }
+  return errors;
+};
+
+const validateInvariantGlobs = (
+  registry: AuditRegistry,
+  files: readonly string[],
+): string[] => {
+  const errors: string[] = [];
+  const modules = new Map(registry.modules.map(module => [module.id, module]));
+  for (const invariant of registry.invariants) {
+    const module = modules.get(invariant.moduleId);
+    if (!module) continue;
+    for (const [kind, patterns, modulePatterns] of [
+      ['source', invariant.sourceGlobs, module.sourceGlobs],
+      ['test', invariant.testGlobs, module.testGlobs],
+    ] as const) {
+      for (const pattern of patterns) {
+        const matches = files.filter(path => matchesAuditGlob(path, pattern));
+        if (matches.length === 0) {
+          errors.push(`invariant ${invariant.id} ${kind} glob matches no current file: ${pattern}`);
+        }
+        for (const path of matches) {
+          if (!modulePatterns.some(modulePattern => matchesAuditGlob(path, modulePattern))) {
+            errors.push(`invariant ${invariant.id} ${kind} file is outside module scope: ${path}`);
+          }
+        }
       }
     }
   }
@@ -75,6 +104,35 @@ const readArtifact = (path: string, errors: string[]): unknown => {
   }
 };
 
+const arraysEqual = (left: unknown, right: readonly string[]): boolean =>
+  Array.isArray(left)
+  && left.length === right.length
+  && left.every((item, index) => item === right[index]);
+
+/** Prevent a valid artifact from being relabeled as proof of a different claim. */
+export const validateEvidenceArtifactBinding = (
+  evidence: AuditEvidence,
+  artifact: unknown,
+): string[] => {
+  if (!isRecord(artifact) || artifact['schemaVersion'] !== 2 || !Array.isArray(artifact['evidence'])) {
+    return [`evidence ${evidence.id} artifact schema must equal 2`];
+  }
+  const entries = artifact['evidence'].filter(candidate => isRecord(candidate) && candidate['id'] === evidence.id);
+  if (entries.length !== 1) return [`evidence ${evidence.id} must have exactly one artifact entry`];
+  const entry = entries[0]!;
+  const matches = entry['invariantId'] === evidence.invariantId
+    && entry['kind'] === evidence.kind
+    && entry['command'] === evidence.command
+    && entry['state'] === evidence.state
+    && entry['summary'] === evidence.summary
+    && entry['sourceSha'] === evidence.sourceSha
+    && entry['moduleFingerprint'] === evidence.moduleFingerprint
+    && entry['recordedAt'] === evidence.recordedAt
+    && arraysEqual(entry['agentRunIds'], evidence.agentRunIds)
+    && artifact['environmentFingerprint'] === evidence.environmentFingerprint;
+  return matches ? [] : [`evidence ${evidence.id} does not exactly match its artifact`];
+};
+
 const validateEvidenceArtifacts = (registry: AuditRegistry, root: string): string[] => {
   const errors: string[] = [];
   const artifactRoot = resolve(root, 'audits/evidence');
@@ -95,19 +153,7 @@ const validateEvidenceArtifacts = (registry: AuditRegistry, root: string): strin
     }
     if (!cache.has(absolutePath)) cache.set(absolutePath, readArtifact(absolutePath, errors));
     const artifact = cache.get(absolutePath);
-    if (!isRecord(artifact) || !Array.isArray(artifact['evidence'])) {
-      errors.push(`evidence artifact has invalid shape: ${evidence.artifactPath}`);
-      continue;
-    }
-    const entry = artifact['evidence'].find(candidate => isRecord(candidate) && candidate['id'] === evidence.id);
-    if (!isRecord(entry)
-      || entry['command'] !== evidence.command
-      || entry['state'] !== evidence.state
-      || entry['summary'] !== evidence.summary
-      || entry['sourceSha'] !== evidence.sourceSha
-      || artifact['environmentFingerprint'] !== evidence.environmentFingerprint) {
-      errors.push(`evidence ${evidence.id} does not match its artifact`);
-    }
+    errors.push(...validateEvidenceArtifactBinding(evidence, artifact));
   }
   return errors;
 };
@@ -117,6 +163,7 @@ export const validateAuditRegistryRoot = (registry: AuditRegistry, root: string)
   return [
     ...(existsSync(resolve(root, registry.protocol)) ? [] : [`protocol file is missing: ${registry.protocol}`]),
     ...validateModuleGlobs(registry, files),
+    ...validateInvariantGlobs(registry, files),
     ...validateScopeOwnership(registry, files),
     ...validateEvidenceArtifacts(registry, root),
   ];
