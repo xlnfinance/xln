@@ -22,6 +22,20 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
   delta.ondelta = 3n;
   delta.offdelta = -2n;
   delta.leftHold = 1n;
+  account.state.pulls = new Map([
+    ['stale-after-finality', {
+      pullId: 'stale-after-finality',
+      tokenId: 1,
+      amount: -1n,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: 10_000,
+      fullHash: `0x${'aa'.repeat(32)}`,
+      partialRoot: `0x${'bb'.repeat(32)}`,
+      createdHeight: 1,
+      createdTimestamp: 1,
+    }],
+  ]);
 
   const input = createAccountDisputeFinalityInput(
     account.state,
@@ -58,6 +72,7 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     offdelta: 0n,
     leftHold: 0n,
   });
+  expect(account.state.pulls?.size).toBe(0);
 });
 
 test('external finality rejects an entity outside the bilateral account', () => {

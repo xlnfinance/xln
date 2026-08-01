@@ -999,6 +999,136 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(account.state.pulls?.has(targetPull.pullId)).toBe(true);
   });
 
+  test('source cross_pull_close cannot invent fill progress or a cumulative debit', async () => {
+    const env = createEmptyEnv('cross-close-forged-source-economics');
+    env.state.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('6a');
+    const sourceHub = entity('6b');
+    const targetHub = entity('6c');
+    const targetUser = entity('6d');
+    const prepared = buildPreparedCrossJurisdictionRoute(
+      {
+        orderId: 'cross-close-forged-source-economics',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        source: {
+          jurisdiction: jref(eth),
+          entityId: sourceUser,
+          counterpartyEntityId: sourceHub,
+          tokenId: 1,
+          amount: 1_000n,
+        },
+        target: {
+          jurisdiction: jref(base),
+          entityId: targetHub,
+          counterpartyEntityId: targetUser,
+          tokenId: 1,
+          amount: 900n,
+        },
+        status: 'resting',
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
+        expiresAt: 70_000,
+      },
+      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+    );
+    const fillRatio = 0x8000;
+    const privateSeed = deriveCrossJurisdictionPrivateSeed(env.runtimeSeed!, prepared);
+    const binary = buildCrossJurisdictionPullReveal(prepared, fillRatio, privateSeed).binary;
+    const honestProof = buildCrossJurisdictionCloseProof({
+      ...prepared,
+      status: 'clearing',
+      cumulativeFillRatio: fillRatio,
+      claimedRatio: fillRatio,
+      filledSourceAmount: 500n,
+      filledTargetAmount: 450n,
+      sourceClaimed: 500n,
+      targetClaimed: 450n,
+    }, binary);
+    const account = makeAccount(sourceUser, sourceHub);
+    const sourcePull = prepared.sourcePull!;
+    const delta = account.state.deltas.get(sourcePull.tokenId) ?? createDefaultDelta(sourcePull.tokenId);
+    account.state.deltas.set(sourcePull.tokenId, delta);
+    const held = sourcePull.signedAmount >= 0n ? sourcePull.signedAmount : -sourcePull.signedAmount;
+    if (sourcePull.signedAmount > 0n) delta.rightHold = held;
+    else delta.leftHold = held;
+    account.state.pulls = new Map([
+      [sourcePull.pullId, {
+        pullId: sourcePull.pullId,
+        tokenId: sourcePull.tokenId,
+        amount: sourcePull.signedAmount,
+        claimedRatio: 0,
+        claimedAmount: 0n,
+        revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
+        fullHash: sourcePull.fullHash,
+        partialRoot: sourcePull.partialRoot,
+        crossJurisdiction: buildCrossJurisdictionPullBinding(prepared, 'source'),
+        createdHeight: 0,
+        createdTimestamp: env.state.timestamp,
+      }],
+    ]);
+    const initialRoot = computeAccountStateRoot(account.state);
+    const uncommittedResult = await applyAccountTx(
+      account,
+      {
+        type: 'cross_pull_close',
+        data: {
+          pullId: sourcePull.pullId,
+          binary,
+          proof: { ...honestProof, cumulativeSourceAmount: 999n },
+        },
+      },
+      sourceHub.toLowerCase() < sourceUser.toLowerCase(),
+      env.state.timestamp,
+      1,
+    );
+
+    expect(uncommittedResult.success).toBe(false);
+    expect(uncommittedResult.error).toContain('ratio');
+    expect(computeAccountStateRoot(account.state)).toBe(initialRoot);
+    expect(account.state.pulls?.has(sourcePull.pullId)).toBe(true);
+
+    const committedAccount = cloneAccountReplica(account);
+    const binding = committedAccount.state.pulls!.get(sourcePull.pullId)!.crossJurisdiction!;
+    binding.status = 'clearing';
+    binding.cumulativeFillRatio = fillRatio;
+    const committedRoot = computeAccountStateRoot(committedAccount.state);
+    const forgedAmountResult = await applyAccountTx(
+      committedAccount,
+      {
+        type: 'cross_pull_close',
+        data: {
+          pullId: sourcePull.pullId,
+          binary,
+          proof: { ...honestProof, cumulativeSourceAmount: 999n },
+        },
+      },
+      sourceHub.toLowerCase() < sourceUser.toLowerCase(),
+      env.state.timestamp,
+      2,
+    );
+
+    expect(forgedAmountResult.success).toBe(false);
+    expect(forgedAmountResult.error).toContain('source amount 999 != committed 500');
+    expect(computeAccountStateRoot(committedAccount.state)).toBe(committedRoot);
+
+    const canonicalAmountResult = await applyAccountTx(
+      committedAccount,
+      {
+        type: 'cross_pull_close',
+        data: { pullId: sourcePull.pullId, binary, proof: honestProof },
+      },
+      sourceHub.toLowerCase() < sourceUser.toLowerCase(),
+      env.state.timestamp,
+      3,
+    );
+    expect(canonicalAmountResult.success, canonicalAmountResult.error).toBe(true);
+    expect(committedAccount.state.pulls?.has(sourcePull.pullId)).toBe(false);
+  });
+
   test('direct cancelPull cannot release a committed cross-j partial fill', async () => {
     const env = createEmptyEnv('cross-direct-cancel-blocked');
     env.state.timestamp = 90_000;

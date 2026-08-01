@@ -8,6 +8,7 @@ import {
   cloneCrossJurisdictionPullBinding,
   getCrossJurisdictionCommittedProofRatio,
   hashCrossJurisdictionCloseBinary,
+  projectCrossJurisdictionQuantizedClaim,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
 import { getJurisdictionStackId } from '../../../jurisdiction/machine/jurisdiction-stack';
@@ -70,8 +71,9 @@ const findCrossJurisdictionPullBinding = (
 const crossProofMatchesBinding = (
   binding: CrossJurisdictionPullBinding,
   proof: CrossPullCloseTx['data']['proof'],
-  pullId: string,
+  pull: PullCommitment,
 ): string | null => {
+  const pullId = pull.pullId;
   if (proof.orderId !== binding.orderId) return `order ${proof.orderId} != ${binding.orderId}`;
   if ((proof.routeHash || '').toLowerCase() !== (binding.routeHash || '').toLowerCase()) {
     return `routeHash ${proof.routeHash} != ${binding.routeHash}`;
@@ -79,13 +81,27 @@ const crossProofMatchesBinding = (
   const expectedPullId = binding.leg === 'source' ? proof.sourcePullId : proof.targetPullId;
   if (expectedPullId !== pullId) return `${binding.leg} pull ${expectedPullId} != ${pullId}`;
   const bindingRatio = committedCrossJurisdictionRatio(binding);
-  if (bindingRatio > 0 && proof.fillRatio !== bindingRatio) {
+  if ((binding.leg === 'source' || bindingRatio > 0) && proof.fillRatio !== bindingRatio) {
     return `ratio ${proof.fillRatio} != committed ${bindingRatio}`;
   }
   const bindingSourceAmount = binding.filledSourceAmount ?? binding.sourceClaimed;
   const bindingTargetAmount = binding.filledTargetAmount ?? binding.targetClaimed;
-  if (bindingSourceAmount !== undefined && proof.cumulativeSourceAmount !== bindingSourceAmount) {
-    return `source amount ${proof.cumulativeSourceAmount} != ${bindingSourceAmount}`;
+  // The source Hub is the source-pull beneficiary, so its signed Account frame
+  // must never choose the payer's debit. An initial binding intentionally has
+  // no filledSourceAmount; in that case the pull total plus the committed
+  // exact/coarse ratio is the only canonical amount (ratio zero means zero).
+  const expectedSourceAmount = bindingSourceAmount ?? (
+    binding.leg === 'source'
+      ? projectCrossJurisdictionQuantizedClaim(absBigInt(pull.amount), {
+          cumulativeFillRatio: bindingRatio,
+          ...(binding.fillNumerator !== undefined ? { fillNumerator: binding.fillNumerator } : {}),
+          ...(binding.fillDenominator !== undefined ? { fillDenominator: binding.fillDenominator } : {}),
+          orderId: binding.orderId,
+        }).exactClaim
+      : undefined
+  );
+  if (expectedSourceAmount !== undefined && proof.cumulativeSourceAmount !== expectedSourceAmount) {
+    return `source amount ${proof.cumulativeSourceAmount} != committed ${expectedSourceAmount}`;
   }
   if (bindingTargetAmount !== undefined && proof.cumulativeTargetAmount !== bindingTargetAmount) {
     return `target amount ${proof.cumulativeTargetAmount} != ${bindingTargetAmount}`;
@@ -114,8 +130,8 @@ const validateCrossPullCloseEvidence = (
   tx: CrossPullCloseTx,
   currentTimestamp: number,
 ): Readonly<{ ok: true; ratio: number } | { ok: false; error: string }> => {
-  const { pullId, binary, proof } = tx.data;
-  const proofError = crossProofMatchesBinding(binding, proof, pullId);
+  const { binary, proof } = tx.data;
+  const proofError = crossProofMatchesBinding(binding, proof, pull);
   if (proofError) return { ok: false, error: `Cross-j close proof mismatch: ${proofError}` };
   const binaryHash = hashCrossJurisdictionCloseBinary(binary);
   if (binaryHash.toLowerCase() !== proof.binaryHash.toLowerCase()) {

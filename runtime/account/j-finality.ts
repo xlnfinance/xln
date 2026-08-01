@@ -111,6 +111,10 @@ const clearFinalizedCollections = (account: AccountReplica): void => {
     account.state.locks.clear();
     invalidateAccountMapCommitment(account.state, 'locks');
   }
+  if (account.state.pulls && account.state.pulls.size > 0) {
+    account.state.pulls.clear();
+    invalidateAccountMapCommitment(account.state, 'pulls');
+  }
   delete account.disputeProofBodiesByHash;
   delete account.disputeProofNoncesByHash;
   delete account.disputeArgumentSnapshotsByHash;
