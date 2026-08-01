@@ -3,6 +3,73 @@ import type { JAdapter, JWalletAllowanceRead } from '../../../jurisdiction/adapt
 import { createStructuredLogger } from '../../../infra/logger';
 import { safeStringify } from '../../../protocol/serialization';
 
+export const MAX_WALLET_SNAPSHOT_BODY_BYTES = 32 * 1024;
+export const MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES = 128;
+export const MAX_WALLET_SNAPSHOT_ALLOWANCES = 128;
+
+/** Stream-counted admission errors are safe to expose as typed 400/413 responses. */
+export class RequestBodyError extends Error {
+  constructor(
+    readonly status: 400 | 413,
+    readonly code: string,
+    details: string,
+  ) {
+    super(`${code}:${details}`);
+    this.name = 'RequestBodyError';
+  }
+}
+
+export const readCappedRequestText = async (
+  request: Request,
+  maxBytes: number,
+  codePrefix: string,
+): Promise<string> => {
+  const declared = Number(request.headers.get('content-length') || '');
+  if (Number.isSafeInteger(declared) && declared > maxBytes) {
+    throw new RequestBodyError(413, `${codePrefix}_BODY_TOO_LARGE`, `bytes=${declared}:max=${maxBytes}`);
+  }
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let text = '';
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw new RequestBodyError(413, `${codePrefix}_BODY_TOO_LARGE`, `bytes>${maxBytes}`);
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    if (error instanceof RequestBodyError) throw error;
+    throw new RequestBodyError(400, `${codePrefix}_JSON_INVALID`, 'invalid-utf8');
+  }
+};
+
+const parseCappedJsonRecord = async (
+  request: Request,
+  maxBytes: number,
+  codePrefix: string,
+): Promise<Record<string, unknown>> => {
+  const raw = await readCappedRequestText(request, maxBytes, codePrefix);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new RequestBodyError(400, `${codePrefix}_JSON_INVALID`, 'expected-object');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new RequestBodyError(400, `${codePrefix}_BODY_INVALID`, 'expected-object');
+  }
+  return parsed as Record<string, unknown>;
+};
+
 export interface FaucetRequestBody {
   userAddress: string;
   tokenSymbol: string;
@@ -95,27 +162,91 @@ export const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequ
   };
 };
 
+const requireSnapshotString = (value: unknown, label: string): string => {
+  if (typeof value !== 'string') {
+    throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_FIELD_INVALID', label);
+  }
+  return value.trim();
+};
+
+const normalizeSnapshotAddress = (value: unknown, label: string): string => {
+  const raw = requireSnapshotString(value, label);
+  if (!ethers.isAddress(raw)) {
+    throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_ADDRESS_INVALID', label);
+  }
+  return ethers.getAddress(raw).toLowerCase();
+};
+
+const requireSnapshotArray = (
+  body: Record<string, unknown>,
+  key: 'tokenAddresses' | 'allowances',
+  maximum: number,
+): unknown[] | undefined => {
+  if (!(key in body)) return undefined;
+  const values = body[key];
+  if (!Array.isArray(values)) {
+    throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_FIELD_INVALID', key);
+  }
+  if (values.length > maximum) {
+    throw new RequestBodyError(413, 'EXTERNAL_WALLET_SNAPSHOT_CARDINALITY_EXCEEDED', `${key}:max=${maximum}`);
+  }
+  return values;
+};
+
+export const normalizeWalletSnapshotTokenAddresses = (
+  values: readonly unknown[],
+  label = 'tokenAddresses',
+): string[] => {
+  if (values.length > MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES) {
+    throw new RequestBodyError(
+      413,
+      'EXTERNAL_WALLET_SNAPSHOT_CARDINALITY_EXCEEDED',
+      `${label}:max=${MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES}`,
+    );
+  }
+  const seen = new Set<string>();
+  return values.map((value, index) => {
+    const address = normalizeSnapshotAddress(value, `${label}[${index}]`);
+    if (seen.has(address)) {
+      throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_DUPLICATE', `${label}:${address}`);
+    }
+    seen.add(address);
+    return address;
+  });
+};
+
 export const readWalletSnapshotBody = async (request: Request): Promise<WalletSnapshotRequestBody> => {
-  const body = (await request.json()) as Record<string, unknown>;
-  const tokenAddresses = Array.isArray(body['tokenAddresses'])
-    ? body['tokenAddresses'].map(value => String(value || '').trim()).filter(Boolean)
+  const body = await parseCappedJsonRecord(
+    request,
+    MAX_WALLET_SNAPSHOT_BODY_BYTES,
+    'EXTERNAL_WALLET_SNAPSHOT',
+  );
+  const rawTokens = requireSnapshotArray(body, 'tokenAddresses', MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES);
+  const rawAllowances = requireSnapshotArray(body, 'allowances', MAX_WALLET_SNAPSHOT_ALLOWANCES);
+  const tokenAddresses = rawTokens
+    ? normalizeWalletSnapshotTokenAddresses(rawTokens)
     : undefined;
-  const allowances = Array.isArray(body['allowances'])
-    ? body['allowances']
-        .map(value => {
-          const entry = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-          return {
-            tokenAddress: String(entry['tokenAddress'] || '').trim(),
-            spender: String(entry['spender'] || '').trim(),
-          };
-        })
-        .filter(entry => ethers.isAddress(entry.tokenAddress) && ethers.isAddress(entry.spender))
-    : undefined;
+  const allowanceKeys = new Set<string>();
+  const allowances = rawAllowances?.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_FIELD_INVALID', `allowances[${index}]`);
+    }
+    const entry = value as Record<string, unknown>;
+    const tokenAddress = normalizeSnapshotAddress(
+      entry['tokenAddress'],
+      `allowances[${index}].tokenAddress`,
+    );
+    const spender = normalizeSnapshotAddress(entry['spender'], `allowances[${index}].spender`);
+    const key = `${tokenAddress}:${spender}`;
+    if (allowanceKeys.has(key)) {
+      throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_DUPLICATE', `allowances:${key}`);
+    }
+    allowanceKeys.add(key);
+    return { tokenAddress, spender };
+  });
   return {
-    entityId: String(body['entityId'] || '')
-      .trim()
-      .toLowerCase(),
-    owner: String(body['owner'] || '').trim(),
+    entityId: requireSnapshotString(body['entityId'], 'entityId').toLowerCase(),
+    owner: requireSnapshotString(body['owner'], 'owner'),
     ...(tokenAddresses ? { tokenAddresses } : {}),
     ...(allowances ? { allowances } : {}),
   };

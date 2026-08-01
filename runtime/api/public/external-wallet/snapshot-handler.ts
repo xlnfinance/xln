@@ -4,8 +4,10 @@ import {
   assertSnapshotArrayLength,
   createJsonResponse,
   externalWalletLog,
+  normalizeWalletSnapshotTokenAddresses,
   readExternalWalletSnapshotSource,
   readWalletSnapshotBody,
+  RequestBodyError,
   requireSnapshotBigInt,
 } from './http';
 
@@ -63,21 +65,21 @@ const buildAllowances = (
 
 export const handleWalletSnapshot = async (context: ExternalWalletApiContext, request: Request): Promise<Response> => {
   try {
+    const body = await readWalletSnapshotBody(request);
     const adapter = context.getJAdapter();
     if (!adapter) {
       return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
     }
-    const body = await readWalletSnapshotBody(request);
-    if (!body.entityId.startsWith('0x') || body.entityId.length !== 66) {
+    if (!/^0x[0-9a-f]{64}$/.test(body.entityId)) {
       return createJsonResponse(context.jsonHeaders, { error: 'Invalid entityId' }, 400);
     }
     if (!ethers.isAddress(body.owner)) {
       return createJsonResponse(context.jsonHeaders, { error: 'Invalid owner' }, 400);
     }
     const tokenCatalog = await context.getTokenCatalog();
-    const tokenAddresses = (
-      body.tokenAddresses?.length ? body.tokenAddresses : tokenCatalog.map(token => token.address)
-    ).filter(ethers.isAddress);
+    const tokenAddresses = body.tokenAddresses?.length
+      ? body.tokenAddresses
+      : normalizeWalletSnapshotTokenAddresses(tokenCatalog.map(token => token.address), 'tokenCatalog');
     const allowanceRequests = body.allowances ?? [];
     const owner = ethers.getAddress(body.owner).toLowerCase();
     const source = await readExternalWalletSnapshotSource(adapter);
@@ -112,7 +114,18 @@ export const handleWalletSnapshot = async (context: ExternalWalletApiContext, re
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    externalWalletLog.error('snapshot.failed', { error: message });
-    return createJsonResponse(context.jsonHeaders, { error: message }, 500);
+    if (error instanceof RequestBodyError) {
+      externalWalletLog.warn('snapshot.rejected', { code: error.code, error: message });
+    } else {
+      externalWalletLog.error('snapshot.failed', { error: message });
+    }
+    return createJsonResponse(
+      context.jsonHeaders,
+      {
+        error: message,
+        ...(error instanceof RequestBodyError ? { code: error.code } : {}),
+      },
+      error instanceof RequestBodyError ? error.status : 500,
+    );
   }
 };

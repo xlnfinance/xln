@@ -3,6 +3,10 @@ import { ethers } from 'ethers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createExternalWalletApi, type ExternalWalletApiContext } from '../api/public/external-wallet-api';
+import {
+  MAX_WALLET_SNAPSHOT_BODY_BYTES,
+  MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES,
+} from '../api/public/external-wallet/http';
 import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 
@@ -410,5 +414,199 @@ describe('external wallet API faucet transaction gate', () => {
     } finally {
       provider.destroy();
     }
+  });
+});
+
+describe('external wallet snapshot admission bounds', () => {
+  const entityId = `0x${'44'.repeat(32)}`;
+  const addressFor = (value: number): string => `0x${value.toString(16).padStart(40, '0')}`;
+  const rawRequest = (body: BodyInit, headers: Record<string, string> = {}): Request =>
+    new Request('http://localhost/api/external-wallet/snapshot', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body,
+    });
+  const request = (body: Record<string, unknown>, headers: Record<string, string> = {}): Request =>
+    rawRequest(JSON.stringify(body), headers);
+
+  const makeApi = (tokenCatalog: Array<{
+    tokenId: number;
+    symbol: string;
+    name: string;
+    address: string;
+    decimals: number;
+  }> = []) => {
+    const calls = { catalog: 0, source: 0, snapshot: 0 };
+    const adapter = {
+      mode: 'rpc',
+      chainId: 31337,
+      provider: {
+        getBlock: async () => {
+          calls.source += 1;
+          return { hash: `0x${'55'.repeat(32)}` };
+        },
+      },
+      getCurrentBlockNumber: async () => 55,
+      getFinalityDepth: () => 0,
+      readWalletSnapshot: async (input: { tokenAddresses: string[]; allowances: unknown[] }) => {
+        calls.snapshot += 1;
+        return {
+          nativeBalance: 1n,
+          tokenBalances: input.tokenAddresses.map(() => 2n),
+          allowances: input.allowances.map(() => 3n),
+        };
+      },
+    } as unknown as JAdapter;
+    const api = createExternalWalletApi({
+      ...makeContext(adapter, async () => false),
+      getTokenCatalog: async () => {
+        calls.catalog += 1;
+        return tokenCatalog;
+      },
+    });
+    return { api, calls };
+  };
+
+  test('accepts the exact 128 token and allowance boundary', async () => {
+    const { api, calls } = makeApi();
+    const tokenAddresses = Array.from(
+      { length: MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES },
+      (_, index) => addressFor(index + 1),
+    );
+    const allowances = tokenAddresses.map((tokenAddress, index) => ({
+      tokenAddress,
+      spender: addressFor(index + 1_000),
+    }));
+    const response = await api.handleWalletSnapshot(request({
+      entityId,
+      owner: USER_ADDRESS,
+      tokenAddresses,
+      allowances,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(calls).toEqual({ catalog: 1, source: 1, snapshot: 1 });
+  });
+
+  test('accepts an exact 32 KiB streamed JSON body', async () => {
+    const { api, calls } = makeApi();
+    const prefix = `{"entityId":"${entityId}","owner":"${USER_ADDRESS}","padding":"`;
+    const suffix = '"}';
+    const fixedBytes = new TextEncoder().encode(prefix + suffix).byteLength;
+    const body = `${prefix}${'x'.repeat(MAX_WALLET_SNAPSHOT_BODY_BYTES - fixedBytes)}${suffix}`;
+
+    expect(new TextEncoder().encode(body).byteLength).toBe(MAX_WALLET_SNAPSHOT_BODY_BYTES);
+    const response = await api.handleWalletSnapshot(rawRequest(body));
+    expect(response.status).toBe(200);
+    expect(calls).toEqual({ catalog: 1, source: 1, snapshot: 1 });
+  });
+
+  test('rejects raw cardinality overflow before catalog or RPC work', async () => {
+    const { api, calls } = makeApi();
+    const overflow = Array.from(
+      { length: MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES + 1 },
+      (_, index) => addressFor(index + 1),
+    );
+    const tokens = await api.handleWalletSnapshot(request({
+      entityId,
+      owner: USER_ADDRESS,
+      tokenAddresses: overflow,
+    }));
+    const allowances = await api.handleWalletSnapshot(request({
+      entityId,
+      owner: USER_ADDRESS,
+      allowances: overflow.map((tokenAddress, index) => ({
+        tokenAddress,
+        spender: addressFor(index + 1_000),
+      })),
+    }));
+
+    expect(tokens.status).toBe(413);
+    expect(allowances.status).toBe(413);
+    expect(calls).toEqual({ catalog: 0, source: 0, snapshot: 0 });
+  });
+
+  test('rejects malformed and duplicate addresses instead of silently filtering', async () => {
+    const { api, calls } = makeApi();
+    const address = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const duplicate = ethers.getAddress(address);
+    const responses = await Promise.all([
+      api.handleWalletSnapshot(request({ entityId, owner: USER_ADDRESS, tokenAddresses: ['invalid'] })),
+      api.handleWalletSnapshot(request({ entityId, owner: USER_ADDRESS, tokenAddresses: [address, duplicate] })),
+      api.handleWalletSnapshot(request({ entityId, owner: USER_ADDRESS, allowances: [{ tokenAddress: address }] })),
+      api.handleWalletSnapshot(request({
+        entityId,
+        owner: USER_ADDRESS,
+        allowances: [
+          { tokenAddress: address, spender: USER_ADDRESS },
+          { tokenAddress: duplicate, spender: USER_ADDRESS.toLowerCase() },
+        ],
+      })),
+    ]);
+
+    expect(responses.map(response => response.status)).toEqual([400, 400, 400, 400]);
+    expect(calls).toEqual({ catalog: 0, source: 0, snapshot: 0 });
+  });
+
+  test('rejects malformed UTF-8 without rewriting request bytes', async () => {
+    const { api, calls } = makeApi();
+    const encoder = new TextEncoder();
+    const body = new Blob([
+      encoder.encode(`{"entityId":"${entityId}","owner":"${USER_ADDRESS}","padding":"`),
+      new Uint8Array([0xff]),
+      encoder.encode('"}'),
+    ]);
+    const response = await api.handleWalletSnapshot(rawRequest(body));
+    const payload = (await response.json()) as { code?: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.code).toBe('EXTERNAL_WALLET_SNAPSHOT_JSON_INVALID');
+    expect(calls).toEqual({ catalog: 0, source: 0, snapshot: 0 });
+  });
+
+  test('rejects declared and streamed body overflow before downstream work', async () => {
+    const { api, calls } = makeApi();
+    const declared = await api.handleWalletSnapshot(request(
+      { entityId, owner: USER_ADDRESS },
+      { 'content-length': String(MAX_WALLET_SNAPSHOT_BODY_BYTES + 1) },
+    ));
+    const streamed = await api.handleWalletSnapshot(request({
+      entityId,
+      owner: USER_ADDRESS,
+      padding: 'x'.repeat(MAX_WALLET_SNAPSHOT_BODY_BYTES),
+    }));
+    const chunks = [
+      new Uint8Array(MAX_WALLET_SNAPSHOT_BODY_BYTES),
+      new Uint8Array([0]),
+    ];
+    const multiChunk = await api.handleWalletSnapshot(rawRequest(new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    })));
+
+    expect(declared.status).toBe(413);
+    expect(streamed.status).toBe(413);
+    expect(multiChunk.status).toBe(413);
+    expect(calls).toEqual({ catalog: 0, source: 0, snapshot: 0 });
+  });
+
+  test('applies the same cap and validation to catalog fallback', async () => {
+    const catalog = Array.from(
+      { length: MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES + 1 },
+      (_, index) => ({
+        tokenId: index + 1,
+        symbol: `T${index + 1}`,
+        name: `Token ${index + 1}`,
+        address: addressFor(index + 1),
+        decimals: 18,
+      }),
+    );
+    const { api, calls } = makeApi(catalog);
+    const response = await api.handleWalletSnapshot(request({ entityId, owner: USER_ADDRESS }));
+
+    expect(response.status).toBe(413);
+    expect(calls).toEqual({ catalog: 1, source: 0, snapshot: 0 });
   });
 });

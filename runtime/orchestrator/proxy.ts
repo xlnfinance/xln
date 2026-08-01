@@ -1,6 +1,11 @@
 import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 import { safeStringify } from '../protocol/serialization';
 import { readPositiveIntegerEnv } from '../config/environment';
+import {
+  MAX_WALLET_SNAPSHOT_BODY_BYTES,
+  readCappedRequestText,
+  RequestBodyError,
+} from '../api/public/external-wallet/http';
 import type { HubChild } from './orchestrator-types';
 
 type ProxyHubEndpoint =
@@ -312,11 +317,31 @@ const proxyEntityHubApi = async (
     let bodyText = '';
     let bodyJson: { entityId?: string } | null = null;
     try {
-      bodyText = await request.text();
-      bodyJson = bodyText ? JSON.parse(bodyText) as { entityId?: string } : {};
+      bodyText = await readCappedRequestText(
+        request,
+        MAX_WALLET_SNAPSHOT_BODY_BYTES,
+        'EXTERNAL_WALLET_SNAPSHOT',
+      );
+      const parsed: unknown = bodyText ? JSON.parse(bodyText) : {};
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_BODY_INVALID', 'expected-object');
+      }
+      bodyJson = parsed as { entityId?: string };
+      if (typeof bodyJson.entityId !== 'string') {
+        throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_ENTITY_ID_INVALID', 'entityId');
+      }
+      bodyJson.entityId = bodyJson.entityId.trim().toLowerCase();
+      if (!/^0x[0-9a-f]{64}$/.test(bodyJson.entityId)) {
+        throw new RequestBodyError(400, 'EXTERNAL_WALLET_SNAPSHOT_ENTITY_ID_INVALID', 'entityId');
+      }
     } catch (error) {
-      return new Response(safeStringify({ success: false, error: `Invalid JSON: ${serializeError(error)}` }), {
-        status: 400,
+      const requestBodyError = error instanceof RequestBodyError ? error : null;
+      return new Response(safeStringify({
+        success: false,
+        error: requestBodyError?.message ?? `Invalid JSON: ${serializeError(error)}`,
+        ...(requestBodyError ? { code: requestBodyError.code } : {}),
+      }), {
+        status: requestBodyError?.status ?? 400,
         headers: proxyHeaders(),
       });
     }

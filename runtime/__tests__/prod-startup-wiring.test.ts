@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discoverHubIds } from '../orchestrator/custody-bootstrap';
 import { createOrchestratorProxyHandlers } from '../orchestrator/proxy';
+import { MAX_WALLET_SNAPSHOT_BODY_BYTES } from '../api/public/external-wallet/http';
 import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../scripts/e2e-fatal-log-monitor';
 import { expandPlaywrightTargets } from '../scripts/run-e2e-parallel-isolated';
 
@@ -2679,6 +2680,99 @@ describe('production startup wiring', () => {
     expect(pollCalls).toBe(1);
     expect(healthyHubCalls).toBe(0);
     expect(response.headers.get('x-xln-proxy-health-polled')).toBe('1');
+  });
+
+  test('entity-scoped wallet proxy rejects oversized bodies before routing or upstream work', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    let lookupCalls = 0;
+    let pollCalls = 0;
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      return Response.json({ success: true });
+    }) as typeof fetch;
+    try {
+      const handlers = createOrchestratorProxyHandlers({
+        host: '127.0.0.1',
+        defaultRpcUrl: '',
+        pollAllHubHealth: async () => {
+          pollCalls += 1;
+        },
+        getHubChildByEntityId: () => {
+          lookupCalls += 1;
+          return null;
+        },
+        getHealthyHub: () => null,
+      });
+      const declared = await handlers.proxyEntityHubApi(
+        new Request('http://xln.local/api/external-wallet/snapshot', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(MAX_WALLET_SNAPSHOT_BODY_BYTES + 1),
+          },
+          body: '{}',
+        }),
+        '/api/external-wallet/snapshot',
+      );
+      const streamed = await handlers.proxyEntityHubApi(
+        new Request('http://xln.local/api/external-wallet/snapshot', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ padding: 'x'.repeat(MAX_WALLET_SNAPSHOT_BODY_BYTES) }),
+        }),
+        '/api/external-wallet/snapshot',
+      );
+
+      expect(declared.status).toBe(413);
+      expect(streamed.status).toBe(413);
+      expect(await declared.json()).toMatchObject({
+        success: false,
+        code: 'EXTERNAL_WALLET_SNAPSHOT_BODY_TOO_LARGE',
+      });
+      expect(await streamed.json()).toMatchObject({
+        success: false,
+        code: 'EXTERNAL_WALLET_SNAPSHOT_BODY_TOO_LARGE',
+      });
+      expect({ fetchCalls, lookupCalls, pollCalls }).toEqual({ fetchCalls: 0, lookupCalls: 0, pollCalls: 0 });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('entity-scoped wallet proxy canonicalizes entity id before routing', async () => {
+    const originalFetch = globalThis.fetch;
+    const suppliedEntityId = `0X${'AB'.repeat(32)}`;
+    const canonicalEntityId = suppliedEntityId.toLowerCase();
+    let routedEntityId = '';
+    globalThis.fetch = (async () => Response.json({ success: true })) as typeof fetch;
+    try {
+      const handlers = createOrchestratorProxyHandlers({
+        host: '127.0.0.1',
+        defaultRpcUrl: '',
+        pollAllHubHealth: async () => {
+          throw new Error('canonical entity lookup should hit the cached child');
+        },
+        getHubChildByEntityId: entityId => {
+          routedEntityId = entityId;
+          return entityId === canonicalEntityId ? ({ apiPort: 19303 } as any) : null;
+        },
+        getHealthyHub: () => null,
+      });
+      const response = await handlers.proxyEntityHubApi(
+        new Request('http://xln.local/api/external-wallet/snapshot', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ entityId: suppliedEntityId }),
+        }),
+        '/api/external-wallet/snapshot',
+      );
+
+      expect(response.status).toBe(200);
+      expect(routedEntityId).toBe(canonicalEntityId);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test('RPC watcher pauses during persistence quiesce instead of entering j-event ingress', () => {
