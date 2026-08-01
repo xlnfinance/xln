@@ -3,10 +3,11 @@ import { expect } from "chai";
 import hre from "hardhat";
 import type { DeltaTransformer } from "../typechain-types/index.js";
 import { buildAccountProofBody } from "../../runtime/protocol/dispute/proof-builder.ts";
+import { createEmptyAccountJClaimAccumulator } from "../../runtime/account/j-claim-accumulator.ts";
 import { buildPositionalSwapFillRatioBuckets } from "../../runtime/protocol/transformer-ordering.ts";
 import { asOfferId } from "../../runtime/orderbook/swap-keys.ts";
 import { deriveSwapOffdeltaChanges } from "../../runtime/orderbook/swap-execution.ts";
-import type { AccountState, SwapOffer } from "../../runtime/types.ts";
+import type { AccountReplica, SwapOffer } from "../../runtime/types.ts";
 
 const { ethers } = hre;
 const MAX_FILL_RATIO = 65535n;
@@ -33,11 +34,31 @@ function makeSwapOffer(
   };
 }
 
-function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountState {
+function makeProofAccountReplica(swaps: Array<[string, SwapOffer]>): AccountReplica {
   return {
-    leftEntity: "left",
-    rightEntity: "right",
-    watchSeed: TEST_WATCH_SEED,
+    state: {
+      leftEntity: "left",
+      rightEntity: "right",
+      domain: {
+        chainId: 31_337,
+        depositoryAddress: "0x1111111111111111111111111111111111111111",
+      },
+      watchSeed: TEST_WATCH_SEED,
+      deltas: new Map([
+        [1, { tokenId: 1, collateral: 0n, ondelta: 0n, offdelta: 111n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
+        [2, { tokenId: 2, collateral: 0n, ondelta: 0n, offdelta: -222n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
+      ]),
+      locks: new Map(),
+      swapOffers: new Map(swaps),
+      globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      lastFinalizedJHeight: 0,
+      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      jNonce: 0,
+    },
     status: "active",
     mempool: [],
     currentFrame: {
@@ -46,34 +67,17 @@ function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountStat
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: "",
-      tokenIds: [],
       deltas: [],
       stateHash: "",
       byLeft: true,
     },
-    deltas: new Map([
-      [1, { tokenId: 1, collateral: 0n, ondelta: 0n, offdelta: 111n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
-      [2, { tokenId: 2, collateral: 0n, ondelta: 0n, offdelta: -222n, leftCreditLimit: 0n, rightCreditLimit: 0n, leftAllowance: 0n, rightAllowance: 0n }],
-    ]),
-    locks: new Map(),
-    swapOffers: new Map(swaps),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    proofHeader: { fromEntity: "left", toEntity: "right", nonce: 0 },
+    proofHeader: { fromEntity: "left", toEntity: "right", nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
-    frameHistory: [],
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
-    rebalancePolicy: new Map(),
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
-    lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    onChainSettlementNonce: 0,
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
 }
 
@@ -512,7 +516,7 @@ describe("DeltaTransformer", function () {
     const { transformer } = await loadFixture(deployFixture);
     const transformerAddress = await transformer.getAddress();
 
-    const accountMachine = makeProofAccountMachine([
+    const accountReplica = makeProofAccountReplica([
       ["b2", makeSwapOffer("b2", false, 2, 400n, 1, 800n)],
       ["a10", makeSwapOffer("a10", true, 1, 100n, 2, 200n)],
       ["a2", makeSwapOffer("a2", true, 1, 200n, 2, 500n)],
@@ -526,7 +530,7 @@ describe("DeltaTransformer", function () {
       [asOfferId("b2"), 8192],
     ]);
 
-    const proofBody = buildAccountProofBody(accountMachine, transformerAddress);
+    const proofBody = buildAccountProofBody(accountReplica, transformerAddress);
     const proofTransformer = proofBody.proofBodyStruct.transformers[0];
     const runtimeTransformer = proofBody.runtimeProofBody.transformers[0];
     if (!proofTransformer || !runtimeTransformer) {
@@ -534,7 +538,7 @@ describe("DeltaTransformer", function () {
     }
 
     const { leftFillRatios, rightFillRatios } = buildPositionalSwapFillRatioBuckets(
-      accountMachine.swapOffers.entries(),
+      accountReplica.state.swapOffers.entries(),
       fillRatiosByOfferId,
     );
 
