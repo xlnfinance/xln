@@ -186,6 +186,27 @@ test('closing a startup socket cancels its deferred hello', async () => {
   expect(gate.pendingCount()).toBe(0);
 });
 
+test('malformed second startup frame cancels its deferred hello before the barrier', async () => {
+  let releaseStartup!: () => void;
+  const startupBarrier = new Promise<void>(resolve => { releaseStartup = resolve; });
+  const gate = createRelayStartupMessageGate();
+  const ws = {};
+  let dispatched = 0;
+
+  gate.deferHello(startupBarrier, ws, 'hello', () => { dispatched += 1; }, () => undefined);
+  expect(gate.pendingCount()).toBe(1);
+  expect(() => decodeRelayStartupHello(new Uint8Array([0x01, 0xff]))).toThrow();
+  // Mirrors the server parse catch: malformed follow-up traffic owns no
+  // deferred hello, even when the socket close races startup completion.
+  gate.forget(ws);
+  expect(gate.pendingCount()).toBe(0);
+
+  releaseStartup();
+  await startupBarrier;
+  await Promise.resolve();
+  expect(dispatched).toBe(0);
+});
+
 test('relay startup gate caps pending hellos without retaining closed-socket churn', async () => {
   let releaseStartup!: () => void;
   const startupBarrier = new Promise<void>(resolve => { releaseStartup = resolve; });

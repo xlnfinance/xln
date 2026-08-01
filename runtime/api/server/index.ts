@@ -55,6 +55,7 @@ import {
   deserializeWsMessage,
   MAX_PREAUTH_WS_MESSAGE_BYTES,
   serializeWsMessage,
+  wsMessageByteLength,
   type RuntimeWsMessage,
 } from '../../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../../network/p2p/hello-challenge';
@@ -996,7 +997,7 @@ const handleWebSocketMessage = (
     }
     routeRelaySocketMessage(session, ws, peerMessage);
   } catch (error) {
-    const byteLength = wsType === 'rpc' ? runtimeAdapterMessageByteLength(message) : messageText().length;
+    const byteLength = wsType === 'rpc' ? runtimeAdapterMessageByteLength(message) : wsMessageByteLength(message);
     const errorMessage = getErrorMessage(error);
     serverLog.error('ws.parse_error', { type: wsType, len: byteLength, error: errorMessage });
     pushDebugEvent(relayStore, {
@@ -1012,6 +1013,7 @@ const handleWebSocketMessage = (
     } else {
       ws.send(serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
       session.relayHelloChallenges.forget(ws);
+      session.relayStartupGate.forget(ws);
       ws.close(4003, 'protocol-invalid');
     }
   }

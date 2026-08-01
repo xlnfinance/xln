@@ -5,6 +5,7 @@ import {
   deserializeWsMessage,
   serializeWsMessage,
   serializeWsMessageForDebug,
+  wsMessageByteLength,
   type RuntimeWsMessage,
 } from '../network/p2p/ws-protocol';
 import {
@@ -31,6 +32,17 @@ afterEach(() => {
 });
 
 describe('WebSocket trusted decode boundary', () => {
+  test('reports oversized binary length without decoding its UTF-8 contents', () => {
+    const binary = new Uint8Array(4_100);
+    for (let offset = 0; offset < binary.byteLength; offset += 4) {
+      binary.set([0xf0, 0x9f, 0x92, 0xa9], offset);
+    }
+
+    expect(new TextDecoder().decode(binary).length).toBe(2_050);
+    expect(wsMessageByteLength(binary)).toBe(4_100);
+    expect(() => deserializeWsMessage(binary, 4_096)).toThrow('WS_MESSAGE_TOO_LARGE:bytes=4100:max=4096');
+  });
+
   test('pins every canonical envelope variant to an independent golden hash', () => {
     const handshake = {
       audience: 'wss://relay.example/relay',

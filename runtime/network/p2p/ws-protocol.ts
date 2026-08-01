@@ -276,7 +276,7 @@ const RUNTIME_WS_MESSAGE_TYPES = new Set<RuntimeWsMessageType>([
   'pong',
 ]);
 
-const wsMessageByteLength = (raw: string | Buffer | Uint8Array | ArrayBuffer): number => {
+export const wsMessageByteLength = (raw: string | Buffer | Uint8Array | ArrayBuffer): number => {
   if (typeof raw === 'string') return new TextEncoder().encode(raw).byteLength;
   return raw.byteLength;
 };
