@@ -1493,6 +1493,20 @@ describe('production startup wiring', () => {
     expect(runtimeCreation).toBeGreaterThan(activation);
   });
 
+  test('node orchestrators validate J adapters without mutating committed replicas', () => {
+    const sources = [
+      readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
+      readMarketMakerNodeModule('mm-node-core.ts'),
+    ];
+    for (const source of sources) {
+      expect(source).toContain('assertJStackAddressMatch(');
+      expect(source).toContain('attachLiveJAdapter(env, activeName, jadapter);');
+      expect(source).not.toMatch(
+        /\breplica\.(?:depositoryAddress|entityProviderAddress|contracts|rpcs|chainId)\s*=/,
+      );
+    }
+  });
+
   test('market maker cross readiness only expects feasible cross specs', () => {
     const mmNode = readMarketMakerNodeSource();
     const buildExpectedStart = mmNode.indexOf('const buildExpectedMarketMakerCrossRouteGroups = (');

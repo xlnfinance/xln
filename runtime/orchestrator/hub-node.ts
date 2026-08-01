@@ -12,6 +12,7 @@ import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/machine/default-tokens';
 import { deployMissingDefaultTokens } from '../jurisdiction/adapter/dev-token-deployment';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
+import { assertJStackAddressMatch } from '../jurisdiction/adapter/stack-binding';
 import { attachLiveJAdapter, getLiveJAdapter } from '../runtime/live-jadapters';
 import {
   normalizeJurisdictionKey,
@@ -801,22 +802,42 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
   resetMeshJurisdictionsCache();
 };
 
-const syncEnvJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapter, rpcUrl: string): void => {
+const assertHubJAdapterBinding = (
+  name: string,
+  replica: JReplica,
+  jadapter: JAdapter,
+  rpcUrl: string,
+): void => {
+  const expectedRpc = replica.rpcs?.length === 1
+    ? new URL(replica.rpcs[0]!).toString()
+    : '';
+  const actualRpc = new URL(rpcUrl).toString();
+  const actualChainId = requireJurisdictionChainId(jadapter.chainId, 'HUB_JADAPTER_CHAIN_ID_INVALID');
+  if (Number(replica.chainId) !== actualChainId || expectedRpc !== actualRpc) {
+    throw new Error(
+      `HUB_JADAPTER_IDENTITY_MISMATCH:${name}:` +
+      `chain=${String(replica.chainId)}/${actualChainId}:rpc=${expectedRpc || 'missing'}/${actualRpc}`,
+    );
+  }
+  const bindings = [
+    ['account', replica.contracts?.account, jadapter.addresses.account],
+    ['depository', replica.depositoryAddress, jadapter.addresses.depository],
+    ['depository_contract', replica.contracts?.depository, jadapter.addresses.depository],
+    ['entity_provider', replica.entityProviderAddress, jadapter.addresses.entityProvider],
+    ['entity_provider_contract', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
+    ['delta_transformer', replica.contracts?.deltaTransformer, jadapter.addresses.deltaTransformer],
+  ] as const;
+  for (const [contract, expected, actual] of bindings) {
+    assertJStackAddressMatch(`${name}:${contract}`, expected, actual);
+  }
+};
+
+const attachValidatedJurisdictionAdapter = (env: RuntimeReplica, jadapter: JAdapter, rpcUrl: string): void => {
   const activeName = env.activeJurisdiction || Array.from(env.state.jReplicas?.keys?.() || [])[0];
-  if (!activeName) return;
+  if (!activeName) throw new Error('HUB_JURISDICTION_REPLICA_MISSING:active');
   const replica = env.state.jReplicas?.get(activeName);
-  if (!replica) return;
-  replica.depositoryAddress = jadapter.addresses.depository;
-  replica.entityProviderAddress = jadapter.addresses.entityProvider;
-  replica.contracts = {
-    ...(replica.contracts ?? {}),
-    account: jadapter.addresses.account,
-    depository: jadapter.addresses.depository,
-    entityProvider: jadapter.addresses.entityProvider,
-    deltaTransformer: jadapter.addresses.deltaTransformer,
-  };
-  replica.rpcs = [rpcUrl];
-  replica.chainId = requireJurisdictionChainId(jadapter.chainId, 'HUB_JADAPTER_CHAIN_ID_INVALID');
+  if (!replica) throw new Error(`HUB_JURISDICTION_REPLICA_MISSING:${activeName}`);
+  assertHubJAdapterBinding(activeName, replica, jadapter, rpcUrl);
   attachLiveJAdapter(env, activeName, jadapter);
 };
 
@@ -893,7 +914,7 @@ const ensureRpcStackReady = async (env: RuntimeReplica, jadapter: JAdapter): Pro
         jurisdictionImportDiagnostics.mode = 'connect-existing';
       }
     }
-    syncEnvJurisdictionReplica(env, jadapter, resolvedArgs.rpcUrl);
+    attachValidatedJurisdictionAdapter(env, jadapter, resolvedArgs.rpcUrl);
     if (resolvedArgs.deployTokens) {
       await writeJurisdictionAddresses(jadapter, resolvedArgs.rpcUrl);
     }

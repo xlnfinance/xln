@@ -24,6 +24,7 @@ import {
 import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { createStructuredLogger } from '../infra/logger';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
+import { assertJStackAddressMatch } from '../jurisdiction/adapter/stack-binding';
 import {
   attachLiveJAdapter,
   getLiveJAdapter,
@@ -51,6 +52,7 @@ import type { AccountReplica, SwapOffer } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import { hasLocalSignerForEntitySigner } from '../runtime/loop-identity';
 import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
 import {
@@ -715,22 +717,42 @@ const waitForReplicaReady = async (env: RuntimeReplica, entityId: string, rounds
   }
 };
 
+const assertMarketMakerJAdapterBinding = (
+  name: string,
+  replica: JReplica,
+  jadapter: JAdapter,
+  rpcUrl: string,
+): void => {
+  const expectedRpc = replica.rpcs?.length === 1
+    ? new URL(replica.rpcs[0]!).toString()
+    : '';
+  const actualRpc = new URL(rpcUrl).toString();
+  const actualChainId = requireJurisdictionChainId(jadapter.chainId, 'MM_JADAPTER_CHAIN_ID_INVALID');
+  if (Number(replica.chainId) !== actualChainId || expectedRpc !== actualRpc) {
+    throw new Error(
+      `MM_JADAPTER_IDENTITY_MISMATCH:${name}:` +
+      `chain=${String(replica.chainId)}/${actualChainId}:rpc=${expectedRpc || 'missing'}/${actualRpc}`,
+    );
+  }
+  const bindings = [
+    ['account', replica.contracts?.account, jadapter.addresses.account],
+    ['depository', replica.depositoryAddress, jadapter.addresses.depository],
+    ['depository_contract', replica.contracts?.depository, jadapter.addresses.depository],
+    ['entity_provider', replica.entityProviderAddress, jadapter.addresses.entityProvider],
+    ['entity_provider_contract', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
+    ['delta_transformer', replica.contracts?.deltaTransformer, jadapter.addresses.deltaTransformer],
+  ] as const;
+  for (const [contract, expected, actual] of bindings) {
+    assertJStackAddressMatch(`${name}:${contract}`, expected, actual);
+  }
+};
+
 export const ensureJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapter, rpcUrl: string): void => {
   const activeName = env.activeJurisdiction || Array.from(env.state.jReplicas?.keys?.() || [])[0];
-  if (!activeName) return;
+  if (!activeName) throw new Error('MM_JURISDICTION_REPLICA_MISSING:active');
   const replica = env.state.jReplicas?.get(activeName);
-  if (!replica) return;
-  replica.depositoryAddress = jadapter.addresses.depository;
-  replica.entityProviderAddress = jadapter.addresses.entityProvider;
-  replica.contracts = {
-    ...(replica.contracts ?? {}),
-    account: jadapter.addresses.account,
-    depository: jadapter.addresses.depository,
-    entityProvider: jadapter.addresses.entityProvider,
-    deltaTransformer: jadapter.addresses.deltaTransformer,
-  };
-  replica.rpcs = [rpcUrl];
-  replica.chainId = requireJurisdictionChainId(jadapter.chainId, 'MM_JADAPTER_CHAIN_ID_INVALID');
+  if (!replica) throw new Error(`MM_JURISDICTION_REPLICA_MISSING:${activeName}`);
+  assertMarketMakerJAdapterBinding(activeName, replica, jadapter, rpcUrl);
   attachLiveJAdapter(env, activeName, jadapter);
 };
 
