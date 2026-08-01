@@ -2,6 +2,10 @@ import type { BookState } from '../orderbook';
 import { validateBookStructure } from '../orderbook/validity';
 import { verifyAndWarmBookCommitment } from '../orderbook/commitment';
 import { validateAccountReplica } from '../account/state-validation';
+import {
+  assertPersistedAccountReplicaIntegrity,
+  type PersistedAccountHankoVerifier,
+} from '../account/persisted-integrity';
 import { validateEntityState } from '../entity/state-validation';
 import { LIMITS } from '../config/constants';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
@@ -180,12 +184,45 @@ export const assertStorageAccountDocBinding = (
   counterpartyId: string,
   scope: string,
 ): StorageAccountDoc => {
+  const owner = normalizeEntityId(entityId);
+  const counterparty = normalizeEntityId(counterpartyId);
+  if (owner === counterparty) {
+    throw new Error(`STORAGE_ACCOUNT_DOC_SELF_RELATIONSHIP:scope=${scope}`);
+  }
   const endpoints = new Set([
     normalizeEntityId(doc.state.leftEntity),
     normalizeEntityId(doc.state.rightEntity),
   ]);
-  if (!endpoints.has(normalizeEntityId(entityId)) || !endpoints.has(normalizeEntityId(counterpartyId))) {
+  if (endpoints.size !== 2 || !endpoints.has(owner) || !endpoints.has(counterparty)) {
     throw new Error(`STORAGE_ACCOUNT_DOC_KEY_MISMATCH:scope=${scope}`);
   }
+  if (
+    normalizeEntityId(doc.proofHeader.fromEntity) !== owner ||
+    normalizeEntityId(doc.proofHeader.toEntity) !== counterparty
+  ) {
+    throw new Error(`STORAGE_ACCOUNT_DOC_OWNER_MISMATCH:scope=${scope}`);
+  }
+  return doc;
+};
+
+/** Complete Account storage boundary, including canonical frame digests. */
+export const validateStorageAccountDocIntegrity = async (options: {
+  value: unknown;
+  entityId: string;
+  counterpartyId: string;
+  scope: string;
+  verifyHanko?: PersistedAccountHankoVerifier;
+}): Promise<StorageAccountDoc> => {
+  const doc = assertStorageAccountDocBinding(
+    validateStorageAccountDocValue(options.value),
+    options.entityId,
+    options.counterpartyId,
+    options.scope,
+  );
+  await assertPersistedAccountReplicaIntegrity(
+    doc,
+    `storage.account:${options.scope}`,
+    options.verifyHanko,
+  );
   return doc;
 };

@@ -23,6 +23,10 @@ import {
 } from './rebalance-validation';
 import { normalizeAccountStateDomain } from './state-root';
 import { validateSwapHistoryMap } from './swap-history-validation';
+import { validatePersistedAccountReplicaEnvelope } from './persisted-replica-envelope';
+import { validatePersistedAccountStateCore } from './persisted-state-core';
+import { validatePersistedAccountStateMaps } from './persisted-state-maps';
+import { validatePersistedSettlementWorkspace } from './persisted-settlement-validation';
 
 const LENDING_INTENTS = new Set([
   'fund',
@@ -171,6 +175,7 @@ function assertAccountReplica(
     `${context}.mempool`,
   );
   decodeAccountFrame(account['currentFrame'], `${context}.currentFrame`);
+  validatePersistedAccountStateCore(state, `${context}.state`);
   const deltas = validateMapInstance(state['deltas'], `${context}.state.deltas`);
   assertAccountDeltaCapacity(deltas.size, `${context}.deltas`);
   validateMapInstance(state['locks'], `${context}.state.locks`);
@@ -197,6 +202,12 @@ function assertAccountReplica(
   );
   validateMapInstance(account['pendingWithdrawals'], `${context}.pendingWithdrawals`);
   validateRebalanceState(state, account, context);
+  validatePersistedAccountStateMaps(state, `${context}.state`);
+  validatePersistedSettlementWorkspace(
+    state as Record<string, unknown> & AccountReplica['state'],
+    `${context}.state`,
+  );
+  validatePersistedAccountReplicaEnvelope(account, context);
   for (const [tokenId, delta] of deltas) {
     validateDelta(delta, `${context}.deltas[${String(tokenId)}]`);
   }

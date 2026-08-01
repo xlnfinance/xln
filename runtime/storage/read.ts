@@ -76,6 +76,7 @@ import {
   type AccountJClaimAccumulatorState,
 } from '../account/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
+import { assertPersistedAccountReplicaIntegrity } from '../account/persisted-integrity';
 import {
   validateEntityReplica,
   validateEntityReplicaMetadata,
@@ -231,6 +232,12 @@ const hydrateEntityWithCertifiedBoardNodes = async (
       account.state.rightPendingJClaims,
     ]),
   );
+  for (const [counterpartyId, account] of state.accounts) {
+    await assertPersistedAccountReplicaIntegrity(
+      account,
+      `storage.entity:${state.entityId}:account:${counterpartyId}`,
+    );
+  }
   return state;
 };
 
