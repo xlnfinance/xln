@@ -6,6 +6,7 @@ export {
   computeEnvironmentFingerprint,
   computeFileFingerprint,
   listCurrentSourceFiles,
+  listModuleFingerprintFiles,
   matchesAuditGlob,
   readCurrentSha,
   sha256Text,

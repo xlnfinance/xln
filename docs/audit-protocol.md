@@ -341,6 +341,13 @@ Higher release gates consume structured artifacts from lower gates instead of
 rerunning identical security packs or E2E suites. Cache reuse is allowed only
 when all four key parts match.
 
+The canonical fingerprint also follows real relative imports and reverse test
+imports. This closes two dangerous gaps that hand-maintained globs miss: a
+module importing financial constants or jurisdiction normalizers outside its
+folder, and a regression test whose filename does not contain the module name.
+Cycles are included as actual file reachability; a broad invalidation cone is
+an architecture-coupling signal to refactor, never a reason to omit evidence.
+
 ## 12. Merge and release gates
 
 Merge requires:

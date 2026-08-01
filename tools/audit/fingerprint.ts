@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, normalize, resolve } from 'node:path';
 
 import type { AuditModule, AuditRegistry } from './types';
 
@@ -51,6 +51,81 @@ const moduleOwnFiles = (
   ));
 };
 
+const moduleOwnSourceFiles = (
+  module: AuditModule,
+  trackedFiles: readonly string[],
+): string[] => trackedFiles.filter(path => (
+  module.sourceGlobs.some(pattern => matchesAuditGlob(path, pattern))
+  && !module.exclusions.some(exclusion => matchesAuditGlob(path, exclusion.glob))
+));
+
+type ImportGraph = ReadonlyMap<string, readonly string[]>;
+
+const importSpecifiers = (source: string): string[] => {
+  const specifiers: string[] = [];
+  const pattern = /\b(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/gu;
+  for (const match of source.matchAll(pattern)) specifiers.push(match[1]!);
+  return specifiers;
+};
+
+const resolveTrackedImport = (
+  sourcePath: string,
+  specifier: string,
+  tracked: ReadonlySet<string>,
+): string | undefined => {
+  const joined = normalize(`${dirname(sourcePath)}/${specifier}`).replaceAll('\\', '/');
+  if (joined.startsWith('../')) return undefined;
+  const withoutJs = joined.replace(/\.(?:c|m)?js$/u, '');
+  const candidates = [
+    joined,
+    `${withoutJs}.ts`,
+    `${withoutJs}.tsx`,
+    `${withoutJs}.svelte`,
+    `${withoutJs}.js`,
+    `${withoutJs}.cjs`,
+    `${withoutJs}.mjs`,
+    `${withoutJs}.sol`,
+    `${withoutJs}.json`,
+    `${withoutJs}/index.ts`,
+    `${withoutJs}/index.tsx`,
+    `${withoutJs}/index.js`,
+  ];
+  return candidates.find(candidate => tracked.has(candidate));
+};
+
+const buildImportGraph = (
+  root: string,
+  trackedFiles: readonly string[],
+): ImportGraph => {
+  const tracked = new Set(trackedFiles);
+  const graph = new Map<string, readonly string[]>();
+  const textFile = /\.(?:[cm]?[jt]sx?|svelte|sol)$/u;
+  for (const path of trackedFiles.filter(candidate => textFile.test(candidate))) {
+    const targets = importSpecifiers(readFileSync(resolve(root, path), 'utf8'))
+      .flatMap(specifier => {
+        const target = resolveTrackedImport(path, specifier, tracked);
+        return target ? [target] : [];
+      });
+    graph.set(path, [...new Set(targets)].sort());
+  }
+  return graph;
+};
+
+const importClosure = (
+  seeds: readonly string[],
+  graph: ImportGraph,
+): ReadonlySet<string> => {
+  const closure = new Set<string>();
+  const pending = [...seeds];
+  while (pending.length > 0) {
+    const path = pending.pop()!;
+    if (closure.has(path)) continue;
+    closure.add(path);
+    for (const target of graph.get(path) ?? []) pending.push(target);
+  }
+  return closure;
+};
+
 const canonicalModuleBoundary = (module: AuditModule, registry: AuditRegistry): string => JSON.stringify({
   id: module.id,
   criticality: module.criticality,
@@ -85,22 +160,45 @@ const dependencyClosure = (
   return output;
 };
 
+export const listModuleFingerprintFiles = (
+  root: string,
+  moduleId: string,
+  registry: AuditRegistry,
+  trackedFiles = listCurrentSourceFiles(root),
+  graph = buildImportGraph(root, trackedFiles),
+): string[] => {
+  const modules = new Map(registry.modules.map(module => [module.id, module]));
+  const module = modules.get(moduleId);
+  if (!module) throw new Error(`AUDIT_MODULE_UNKNOWN:${moduleId}`);
+  const closure = dependencyClosure(module, modules);
+  const closureModules = [...closure].map(id => modules.get(id)!);
+  const sourceSeeds = closureModules.flatMap(candidate => moduleOwnSourceFiles(candidate, trackedFiles));
+  const sourceClosure = importClosure(sourceSeeds, graph);
+  const scopedTests = trackedFiles.filter(path => registry.scope.testGlobs.some(
+    pattern => matchesAuditGlob(path, pattern),
+  ));
+  const reverseTests = scopedTests.filter(path => {
+    const imported = importClosure([path], graph);
+    return [...sourceClosure].some(sourcePath => imported.has(sourcePath));
+  });
+  const explicit = closureModules.flatMap(candidate => moduleOwnFiles(candidate, trackedFiles));
+  return [...importClosure([...explicit, ...sourceClosure, ...reverseTests], graph)].sort();
+};
+
 export const computeModuleFingerprint = (
   root: string,
   moduleId: string,
   registry: AuditRegistry,
   trackedFiles = listCurrentSourceFiles(root),
+  graph = buildImportGraph(root, trackedFiles),
 ): string => {
   const modules = new Map(registry.modules.map(module => [module.id, module]));
   const module = modules.get(moduleId);
   if (!module) throw new Error(`AUDIT_MODULE_UNKNOWN:${moduleId}`);
   const closure = dependencyClosure(module, modules);
-  const files = [...new Set(
-    [...closure]
-      .flatMap(id => moduleOwnFiles(modules.get(id)!, trackedFiles)),
-  )].sort();
+  const files = listModuleFingerprintFiles(root, moduleId, registry, trackedFiles, graph);
   const digest = createHash('sha256');
-  digest.update('audit-module-fingerprint-v2\0');
+  digest.update('audit-module-fingerprint-v3-import-closure\0');
   digest.update(JSON.stringify({
     sourceGlobs: [...registry.scope.sourceGlobs].sort(),
     testGlobs: [...registry.scope.testGlobs].sort(),
@@ -127,9 +225,10 @@ export const computeModuleFingerprints = (
   registry: AuditRegistry,
 ): ReadonlyMap<string, string> => {
   const trackedFiles = listCurrentSourceFiles(root);
+  const graph = buildImportGraph(root, trackedFiles);
   return new Map(registry.modules.map(module => [
     module.id,
-    computeModuleFingerprint(root, module.id, registry, trackedFiles),
+    computeModuleFingerprint(root, module.id, registry, trackedFiles, graph),
   ]));
 };
 

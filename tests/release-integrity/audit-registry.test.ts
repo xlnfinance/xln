@@ -7,6 +7,7 @@ import {
   computeEnvironmentFingerprint,
   computeModuleFingerprints,
   evaluateAuditGate,
+  listModuleFingerprintFiles,
   parseAuditRegistry,
   sha256Text,
   validateAuditRegistry,
@@ -50,7 +51,19 @@ describe('canonical audit registry', () => {
     };
     const changed = computeModuleFingerprints(ROOT, changedProtocol);
     expect(changed.get('account-consensus')).not.toBe(first.get('account-consensus'));
-  });
+
+    const accountFiles = listModuleFingerprintFiles(ROOT, 'account-consensus', REGISTRY);
+    for (const coupledPath of [
+      'runtime/config/constants.ts',
+      'runtime/extensions/cross-j/index.ts',
+      'runtime/jurisdiction/machine/event-normalization.ts',
+      'runtime/orderbook/swap-execution.ts',
+      'runtime/__tests__/direct-payment-frame-integrity.test.ts',
+      'jurisdictions/test/DeltaTransformer.test.ts',
+    ]) {
+      expect(accountFiles).toContain(coupledPath);
+    }
+  }, 20_000);
 
   test('coverage requires every current evidence class and becomes stale on fingerprint drift', () => {
     const target = REGISTRY.invariants.find(invariant => invariant.id === 'api-auth-custody.secret-confinement')!;

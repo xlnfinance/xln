@@ -1747,11 +1747,26 @@
         "runtime-pipeline.expected-rejection-isolation"
       ],
       "title": "An unauthenticated remote Entity proposal is replayed before proposer signature verification and can sticky-halt the receiving Runtime.",
-      "severity": "P0",
-      "confidence": 99,
-      "state": "CANDIDATE",
+      "severity": "P1",
+      "confidence": 99.5,
+      "state": "CONFIRMED",
       "sourceSha": "c769a22e3bce083896f14a42c0ad932094ba44ea",
       "reproduction": "Queue an active-leader frame whose nested EntityCommand has a zero signature and whose collectedSigs are empty; observe ENTITY_COMMAND_SIGNATURE_MISMATCH halt the Runtime before any proposer precommit is verified, then observe RUNTIME_PROCESS_HALTED on the next input."
+    },
+    {
+      "id": "AUD-ENTITY-ATOMIC-CAS-LEAK",
+      "rootCauseKey": "atomic-entity-staging-publishes-cas-nodes-before-pair-acceptance",
+      "moduleId": "runtime-pipeline",
+      "invariantIds": [
+        "runtime-pipeline.commit-before-effect",
+        "storage-recovery.exact-restart"
+      ],
+      "title": "A rejected second leg may leave first-leg consumption or J-claim CAS nodes in shared pending infrastructure.",
+      "severity": "P2",
+      "confidence": 86,
+      "state": "CANDIDATE",
+      "sourceSha": "612d5f1a8bdb37c30403f193ccc8cec29c710f32",
+      "reproduction": "Stage an atomic pair whose first leg creates consumption or Account J-claim nodes and whose second leg rejects, then commit unrelated retained work and compare live/pending infrastructure node maps against the pre-pair snapshot."
     },
     {
       "id": "AUD-RUNTIME-STICKY-REJECTION",
@@ -1932,6 +1947,12 @@
       "id": "claude-opus-runtime-base",
       "label": "Claude Opus Runtime base auditor",
       "family": "claude",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-entity-proposal-verifier",
+      "label": "Entity proposal independent verifier",
+      "family": "codex",
       "state": "PROVISIONAL"
     },
     {
@@ -2341,19 +2362,23 @@
     {
       "id": "entity-consensus-base-20260801",
       "reviewerId": "codex-entity-consensus-base",
-      "sourceSha": "c769a22e3bce083896f14a42c0ad932094ba44ea",
+      "sourceSha": "612d5f1a8bdb37c30403f193ccc8cec29c710f32",
       "moduleIds": [
-        "entity-consensus"
+        "entity-consensus",
+        "runtime-pipeline"
       ],
       "scope": "EntityReplica certification, batch atomicity, Account child input ownership, mutation isolation, and rollback boundaries",
-      "state": "RUNNING",
-      "usefulnessScore": 0,
+      "state": "COMPLETED",
+      "usefulnessScore": 1000,
       "provisional": true,
-      "confirmedFindingIds": [],
-      "candidateFindingIds": [
-        "AUD-ENTITY-UNAUTH-PROPOSAL-HALT"
+      "confirmedFindingIds": [
+        "AUD-ENTITY-UNAUTH-PROPOSAL-HALT",
+        "AUD-RUNTIME-STICKY-REJECTION"
       ],
-      "summary": "Read-only base audit found a reproducible unauthenticated proposal-to-Runtime-halt P0 candidate; independent verification is pending."
+      "candidateFindingIds": [
+        "AUD-ENTITY-ATOMIC-CAS-LEAK"
+      ],
+      "summary": "Found an executable unauthenticated proposal-to-Runtime-halt P0 candidate, independently confirmed the business-rejection P1, and identified a bounded CAS staging leak candidate; 178 tests and 1,843 assertions passed."
     },
     {
       "id": "transport-auth-fix-20260801",
@@ -2435,7 +2460,58 @@
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
       "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul."
+    },
+    {
+      "id": "entity-proposal-independent-verification-20260801",
+      "reviewerId": "codex-entity-proposal-verifier",
+      "sourceSha": "612d5f1a8bdb37c30403f193ccc8cec29c710f32",
+      "moduleIds": [
+        "entity-consensus",
+        "runtime-pipeline"
+      ],
+      "scope": "Independent real-wire unauthenticated and Byzantine proposal replay-to-Runtime-halt verification",
+      "state": "COMPLETED",
+      "usefulnessScore": 995,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-ENTITY-UNAUTH-PROPOSAL-HALT"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Reproduced empty-signature, encrypted wire, and captured-signature body-mutation variants; established recoverable remote DoS as P1 at 99.5% confidence."
     }
   ],
-  "moduleReviews": []
+  "moduleReviews": [
+    {
+      "id": "entity-consensus-base-review-20260801",
+      "moduleId": "entity-consensus",
+      "agentRunId": "entity-consensus-base-20260801",
+      "sourceSha": "612d5f1a8bdb37c30403f193ccc8cec29c710f32",
+      "moduleFingerprint": "sha256:10ef5d421988b372a2330870bbb64a1df414271b2cedaf52904746b1a9849fd5",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "score": 640,
+      "confidence": 99,
+      "blockerFindingIds": [
+        "AUD-ENTITY-UNAUTH-PROPOSAL-HALT",
+        "AUD-RUNTIME-STICKY-REJECTION"
+      ],
+      "summary": "Strong deterministic core, but unauthenticated proposal replay can halt Runtime and business-invalid commands lack typed atomic rejection.",
+      "recordedAt": "2026-08-01T01:04:52Z"
+    },
+    {
+      "id": "entity-proposal-verifier-review-20260801",
+      "moduleId": "entity-consensus",
+      "agentRunId": "entity-proposal-independent-verification-20260801",
+      "sourceSha": "612d5f1a8bdb37c30403f193ccc8cec29c710f32",
+      "moduleFingerprint": "sha256:10ef5d421988b372a2330870bbb64a1df414271b2cedaf52904746b1a9849fd5",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "score": 560,
+      "confidence": 82,
+      "blockerFindingIds": [
+        "AUD-ENTITY-UNAUTH-PROPOSAL-HALT",
+        "AUD-RUNTIME-STICKY-REJECTION"
+      ],
+      "summary": "Authenticated proposal ordering and adversarial replay containment remain release blockers despite strong state-root and isolation primitives.",
+      "recordedAt": "2026-08-01T01:12:10Z"
+    }
+  ]
 }
