@@ -1987,25 +1987,6 @@
     font-size: 12px;
   }
 
-  /* ══ Route inline ══ */
-  .route-inline {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 8px 0;
-    color: #5a5550;
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0.04em;
-  }
-  .route-inline-dot {
-    width: 3px; height: 3px;
-    border-radius: 999px;
-    background: #3a3632;
-  }
-  .route-inline-fee { font-variant-numeric: tabular-nums; }
-
   /* ══ Route list ══ */
   .routes { padding-top: 8px; }
   .routes-header { margin-bottom: 8px; }
