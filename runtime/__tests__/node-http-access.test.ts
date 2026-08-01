@@ -11,6 +11,7 @@ describe('node HTTP access boundary', () => {
       '/api/debug/activity',
       '/api/health/full',
       '/api/health?full=1',
+      '/api/runtime-import',
     ];
     for (const path of privateUrls) {
       expect(requiresLocalNodeOperator(new URL(`http://node${path}`))).toBe(true);

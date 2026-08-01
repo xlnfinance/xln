@@ -161,6 +161,7 @@ import {
   type HubBaselineProgressState,
 } from './hub-baseline-progress';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
+import { requiresLocalNodeOperator } from '../api/server/node-http-access';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
 import {
   attachManagedChildFatalIpc,
@@ -2523,6 +2524,12 @@ const handleRuntimeImportRequest = async (
     request.method !== 'GET'
   ) {
     return null;
+  }
+  if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
+    return new Response(
+      safeStringify({ error: 'Operator access required' }),
+      { status: 403, headers },
+    );
   }
   await getStorageHealth();
   await refreshChildHealthForResponse();

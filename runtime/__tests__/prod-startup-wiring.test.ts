@@ -90,6 +90,20 @@ describe('production startup wiring', () => {
     }
   });
 
+  test('runtime import rejects public callers before minting admin capabilities', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const handler = orchestrator.indexOf('const handleRuntimeImportRequest = async');
+    const operatorGate = orchestrator.indexOf(
+      'if (requiresLocalNodeOperator(url) && !operatorAuthorized)',
+      handler,
+    );
+    const manifestMint = orchestrator.indexOf('const manifest = buildRuntimeImportManifest();', handler);
+
+    expect(handler).toBeGreaterThanOrEqual(0);
+    expect(operatorGate).toBeGreaterThan(handler);
+    expect(manifestMint).toBeGreaterThan(operatorGate);
+  });
+
   test('deterministic replay oracle is release-only and has its own timeout', () => {
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
