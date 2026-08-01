@@ -62,6 +62,12 @@ describe('repository command surface', () => {
     }
   });
 
+  test('local relay alias uses an explicit loopback listener', () => {
+    expect(packageJson.scripts['relay']).toBe(
+      'bun runtime/network/relay/standalone-server.ts --host 127.0.0.1 --port 9000',
+    );
+  });
+
   test('every local package entrypoint exists and direct launchers are executable', () => {
     for (const [alias, command] of Object.entries(packageJson.scripts)) {
       let commandCwd = repoRoot;
