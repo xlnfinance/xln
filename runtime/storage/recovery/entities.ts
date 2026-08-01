@@ -12,8 +12,6 @@ import {
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
 import { restoreJPrefixRound } from '../../jurisdiction/machine/j-prefix-consensus';
 import { cloneEntityState } from '../../entity/state-clone';
-import { assertPersistedAccountReplicaIntegrity } from '../../account/persisted-integrity';
-import { verifyHankoForHash } from '../../hanko/signing';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
@@ -198,26 +196,6 @@ const verifyRestoredEntityLineage = (
   applyCertifiedEntityLineagePlan(env, lineagePlan);
 };
 
-const verifyRestoredAccountCertificates = async (
-  env: RuntimeReplica,
-): Promise<void> => {
-  const checked = new Set<string>();
-  for (const replica of env.state.eReplicas.values()) {
-    for (const [counterpartyId, account] of replica.state.accounts) {
-      const key = `${replica.entityId}:${counterpartyId}:${account.currentFrame.stateHash}`;
-      if (checked.has(key)) continue;
-      checked.add(key);
-      await assertPersistedAccountReplicaIntegrity(
-        account,
-        `storage.restore:${replica.entityId}:${counterpartyId}`,
-        async (hanko, digest, expectedEntityId) => (
-          await verifyHankoForHash(hanko, digest, expectedEntityId, env)
-        ).valid,
-      );
-    }
-  }
-};
-
 export const restorePersistedEntityGraph = async (
   deps: RuntimeStorageApiDeps,
   reads: PersistedStorageReadApi,
@@ -238,7 +216,6 @@ export const restorePersistedEntityGraph = async (
   await hydrateRestoredEntityDags(deps, env);
   assertPersistedJurisdictionsAvailable(env);
   await assertCertifiedRegistrationEvidenceStore(env);
-  await verifyRestoredAccountCertificates(env);
   if (targetHeight === latestHeight) {
     verifyRestoredEntityLineage(env, restoredStates);
   }

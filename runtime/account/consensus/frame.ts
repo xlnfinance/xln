@@ -103,7 +103,7 @@ export const canonicalAccountTxForFrameHash = (tx: AccountTx): Record<string, un
   };
 };
 
-export async function createFrameHash(frame: AccountFrame): Promise<string> {
+export function createFrameHashSync(frame: AccountFrame): string {
   assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
   return computeCanonicalMerkleRoot('account.frame', [
     ['transition', {
@@ -117,6 +117,10 @@ export async function createFrameHash(frame: AccountFrame): Promise<string> {
     ['deltas', frame.deltas],
     ['accountStateRoot', frame.accountStateRoot],
   ], 'integrity');
+}
+
+export async function createFrameHash(frame: AccountFrame): Promise<string> {
+  return createFrameHashSync(frame);
 }
 
 export async function computeFrameHash(frame: AccountFrame): Promise<string> {

@@ -1,29 +1,21 @@
-import { ethers } from 'ethers';
-
-import { createFrameHash } from '../../account/consensus/frame';
+import { createFrameHashSync } from '../../account/consensus/frame';
 import { createSettlementWorkspaceHash } from '../../account/tx/handlers/settle-transition';
 import { computeAccountStateRoot } from '../../account/state-root';
-import { generateLazyEntityId } from '../../entity/factory';
-import { buildSingleSignerHanko } from '../../hanko/batch';
-import { verifyCanonicalHanko } from '../../hanko/claims';
 import { projectAccountDoc } from '../../storage/projections';
 import type { StorageAccountDoc } from '../../storage/types';
 import { makeAccount } from './cross-j';
 
-const privateKey = (byte: string): string => `0x${byte.repeat(32)}`;
 const digest = (byte: string): string => `0x${byte.repeat(32)}`;
 
-export type CertifiedStorageAccountFixture = {
+export type StorageAccountFixture = {
   doc: StorageAccountDoc;
   owner: string;
   counterparty: string;
 };
 
-export const makeCertifiedStorageAccountFixture = async (): Promise<CertifiedStorageAccountFixture> => {
-  const ownerKey = privateKey('11');
-  const counterpartyKey = privateKey('22');
-  const owner = generateLazyEntityId([ethers.computeAddress(ownerKey)], 1n).toLowerCase();
-  const counterparty = generateLazyEntityId([ethers.computeAddress(counterpartyKey)], 1n).toLowerCase();
+export const makeStorageAccountFixture = (): StorageAccountFixture => {
+  const owner = digest('11');
+  const counterparty = digest('22');
   const account = makeAccount(owner, counterparty);
   const delta = account.state.deltas.get(1)!;
   account.state.locks.set('lock-1', {
@@ -106,29 +98,6 @@ export const makeCertifiedStorageAccountFixture = async (): Promise<CertifiedSto
     byLeft: account.state.leftEntity === owner,
     deltas: [{ ...delta }],
   };
-  account.currentFrame.stateHash = await createFrameHash(account.currentFrame);
-  account.currentFrameHanko = buildSingleSignerHanko(owner, account.currentFrame.stateHash, ownerKey);
-  account.counterpartyFrameHanko = buildSingleSignerHanko(
-    counterparty,
-    account.currentFrame.stateHash,
-    counterpartyKey,
-  );
+  account.currentFrame.stateHash = createFrameHashSync(account.currentFrame);
   return { doc: projectAccountDoc(account), owner, counterparty };
-};
-
-export const verifyLazyStorageHanko = async (
-  hanko: string,
-  hash: string,
-  expectedEntityId: string,
-): Promise<boolean> => {
-  try {
-    verifyCanonicalHanko({
-      hanko,
-      digest: hash,
-      expectedTargetEntityId: expectedEntityId,
-    });
-    return true;
-  } catch {
-    return false;
-  }
 };

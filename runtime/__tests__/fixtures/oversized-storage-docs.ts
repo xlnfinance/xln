@@ -110,7 +110,7 @@ export const oversizedAccount = (): StorageAccountDoc => ({
   },
   currentHeight: 0,
   pendingSignatures: [],
-  hankoSignature: 'h'.repeat(24_000),
+  hankoSignature: `0x${'11'.repeat(12_000)}`,
   rollbackCount: 0,
   proofHeader: {
     fromEntity: storageEntityId,

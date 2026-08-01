@@ -1480,6 +1480,17 @@ describe('audit fail-fast regressions', () => {
       byLeft: true,
     };
     const accountMachine = makeProposalAccount([], replica.entityId, counterpartyId);
+    accountMachine.currentHeight = 10;
+    accountMachine.currentFrame = {
+      ...accountMachine.currentFrame,
+      height: 10,
+      timestamp: 1,
+      prevFrameHash: `0x${'aa'.repeat(32)}`,
+      stateHash: '',
+    };
+    accountMachine.currentFrame.stateHash = await createFrameHash(accountMachine.currentFrame);
+    pendingFrame.prevFrameHash = accountMachine.currentFrame.stateHash;
+    pendingFrame.stateHash = await createFrameHash(pendingFrame);
     accountMachine.pendingFrame = pendingFrame;
     accountMachine.pendingAccountInput = {
       kind: 'frame',
