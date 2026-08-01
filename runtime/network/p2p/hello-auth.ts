@@ -1,6 +1,14 @@
 import * as secp256k1 from '@noble/secp256k1';
 import { keccak256 } from 'ethers';
-import { hashHelloMessage, type RuntimeWsAuth } from './ws-protocol';
+import {
+  hashHelloAck,
+  hashHelloChallenge,
+  hashHelloMessage,
+  type RuntimeWsAckTranscript,
+  type RuntimeWsAuth,
+  type RuntimeWsChallengeTranscript,
+  type RuntimeWsHelloTranscript,
+} from './hello-transcript';
 
 let authClock = 0;
 
@@ -28,20 +36,23 @@ export const recoverHelloAddress = (digestHex: string, signatureHex: string): st
   return `0x${hash.slice(-40)}`.toLowerCase();
 };
 
-export const verifyHelloAuth = (
+const verifyHandshakeAuth = (
   runtimeId: string,
-  encryptionPubKey: string,
+  digest: string,
   auth: RuntimeWsAuth | undefined,
+  expectedNonce: string,
+  expectedTimestamp: number,
   maxSkewMs: number,
 ): string | null => {
   if (!auth?.nonce || !auth.signature || !auth.timestamp) {
     return 'Missing auth fields';
   }
+  if (auth.nonce !== expectedNonce) return 'Handshake signature nonce mismatch';
+  if (auth.timestamp !== expectedTimestamp) return 'Handshake signature timestamp mismatch';
   const nowTs = now();
   if (Math.abs(nowTs - auth.timestamp) > maxSkewMs) {
     return `Hello timestamp skew too large (${nowTs - auth.timestamp}ms)`;
   }
-  const digest = hashHelloMessage(runtimeId, encryptionPubKey, auth.timestamp, auth.nonce);
   let recovered: string;
   try {
     recovered = recoverHelloAddress(digest, auth.signature);
@@ -53,3 +64,42 @@ export const verifyHelloAuth = (
   }
   return null;
 };
+
+export const verifyHelloAuth = (
+  transcript: RuntimeWsHelloTranscript,
+  auth: RuntimeWsAuth | undefined,
+  maxSkewMs: number,
+): string | null => verifyHandshakeAuth(
+  transcript.initiatorRuntimeId,
+  hashHelloMessage(transcript),
+  auth,
+  transcript.challenge,
+  transcript.timestamp,
+  maxSkewMs,
+);
+
+export const verifyHelloChallengeAuth = (
+  transcript: RuntimeWsChallengeTranscript,
+  auth: RuntimeWsAuth | undefined,
+  maxSkewMs: number,
+): string | null => verifyHandshakeAuth(
+  transcript.responderRuntimeId,
+  hashHelloChallenge(transcript),
+  auth,
+  transcript.challenge,
+  transcript.timestamp,
+  maxSkewMs,
+);
+
+export const verifyHelloAckAuth = (
+  transcript: RuntimeWsAckTranscript,
+  auth: RuntimeWsAuth | undefined,
+  maxSkewMs: number,
+): string | null => verifyHandshakeAuth(
+  transcript.responderRuntimeId,
+  hashHelloAck(transcript),
+  auth,
+  transcript.challenge,
+  transcript.timestamp,
+  maxSkewMs,
+);

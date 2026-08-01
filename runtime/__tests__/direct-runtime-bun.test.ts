@@ -10,17 +10,33 @@ const makeAuthedHello = (
   seed: string,
   runtimeId: string,
   signerId = '1',
-  challenge?: string,
+  challengeMessage?: RuntimeWsMessage,
 ): RuntimeWsMessage => {
   const timestamp = Date.now();
-  const nonce = challenge ?? `nonce-${runtimeId.slice(-6)}-${timestamp}`;
+  const nonce = challengeMessage?.challenge ?? `nonce-${runtimeId.slice(-6)}-${timestamp}`;
   const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(seed).publicKey);
-  const digest = hashHelloMessage(runtimeId, encryptionPubKey, timestamp, nonce);
+  const responderRuntimeId = String(challengeMessage?.from || '').toLowerCase();
+  const digest = hashHelloMessage({
+    audience: challengeMessage?.audience || 'legacy-test-audience',
+    initiatorRole: challengeMessage?.initiatorRole || 'runtime-client',
+    responderRole: challengeMessage?.responderRole || 'direct-runtime-server',
+    responderRuntimeId,
+    responderEncryptionPubKey: String(challengeMessage?.fromEncryptionPubKey || '').toLowerCase(),
+    challenge: nonce,
+    challengeTimestamp: challengeMessage?.timestamp ?? timestamp,
+    initiatorRuntimeId: runtimeId,
+    initiatorEncryptionPubKey: encryptionPubKey,
+    timestamp,
+  });
   const signature = signDigest(seed, signerId, digest);
   return {
     type: 'hello',
     from: runtimeId,
     fromEncryptionPubKey: encryptionPubKey,
+    ...(responderRuntimeId ? { to: responderRuntimeId } : {}),
+    ...(challengeMessage?.audience ? { audience: challengeMessage.audience } : {}),
+    ...(challengeMessage?.initiatorRole ? { initiatorRole: challengeMessage.initiatorRole } : {}),
+    ...(challengeMessage?.responderRole ? { responderRole: challengeMessage.responderRole } : {}),
     timestamp,
     auth: { nonce, signature, timestamp },
   };
@@ -80,7 +96,7 @@ describe('direct runtime websocket route', () => {
 
     const forged = makeFakeWs();
     route.websocket.open(forged.ws);
-    const forgedChallenge = forged.sent[0]?.challenge;
+    const forgedChallenge = forged.sent[0];
     const signed = makeAuthedHello(clientSeed, clientRuntimeId, '1', forgedChallenge);
     await route.websocket.message(forged.ws, serializeWsMessage({
       ...signed,
@@ -90,7 +106,7 @@ describe('direct runtime websocket route', () => {
 
     const accepted = makeFakeWs();
     route.websocket.open(accepted.ws);
-    const acceptedChallenge = accepted.sent[0]?.challenge;
+    const acceptedChallenge = accepted.sent[0];
     const acceptedHello = makeAuthedHello(clientSeed, clientRuntimeId, '1', acceptedChallenge);
     await route.websocket.message(accepted.ws, serializeWsMessage(acceptedHello));
     expect(accepted.sent.at(-1)).toMatchObject({

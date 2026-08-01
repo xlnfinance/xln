@@ -6,6 +6,7 @@ import {
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import { compareCanonicalText } from '../../orderbook/swap-keys';
+import { deriveSignerAddressSync, signDigest } from '../../account/crypto';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from '../../protocol/p2p-crypto';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
@@ -16,10 +17,20 @@ import {
   classifyWebSocketSendResult,
   type WebSocketSendResult,
 } from '../websocket-send-result';
+import {
+  createDirectHandshakeBinding,
+  hashHelloAck,
+  hashHelloChallenge,
+  type RuntimeWsAckTranscript,
+  type RuntimeWsHandshakeBinding,
+  type RuntimeWsHelloTranscript,
+} from './hello-transcript';
+import { handshakeWireFields } from './ws-client-handshake';
 
 type DirectRuntimeWsOptions = {
   runtimeId: string;
   runtimeSeed: Uint8Array | string;
+  runtimeSignerId?: string;
   path?: string;
   requireHelloAuth?: boolean;
   helloSkewMs?: number;
@@ -56,6 +67,8 @@ type DirectRuntimeWsContext = {
   routePath: string;
   serverRuntimeId: string;
   keyPair: ReturnType<typeof deriveEncryptionKeyPair>;
+  handshakeBinding: RuntimeWsHandshakeBinding;
+  runtimeSignerId: string;
   sessions: Map<DirectWebSocket, DirectWsSession>;
   sessionsByRuntime: Map<string, DirectWsSession>;
   helloChallenges: ReturnType<typeof createHelloChallengeRegistry>;
@@ -299,21 +312,37 @@ const handleHandshake = (
     ws.close();
     return true;
   }
+  let verifiedHelloTranscript: RuntimeWsHelloTranscript | null = null;
   if (context.options.requireHelloAuth !== false) {
-    const challengeAccepted = context.helloChallenges.consume(ws, msg.auth?.nonce);
-    const authError = challengeAccepted
-      ? verifyHelloAuth(
-          normalizedFrom,
-          peerKey,
-          msg.auth,
-          context.options.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
-        )
-      : 'Hello challenge missing, expired, or already consumed';
+    const consumed = context.helloChallenges.consume(ws, msg);
+    if (!consumed.ok) {
+      send(ws, { type: 'error', error: consumed.error });
+      ws.close();
+      return true;
+    }
+    const helloTranscript: RuntimeWsHelloTranscript = {
+      audience: consumed.transcript.audience,
+      initiatorRole: consumed.transcript.initiatorRole,
+      responderRole: consumed.transcript.responderRole,
+      responderRuntimeId: consumed.transcript.responderRuntimeId,
+      responderEncryptionPubKey: consumed.transcript.responderEncryptionPubKey,
+      challenge: consumed.transcript.challenge,
+      challengeTimestamp: consumed.transcript.timestamp,
+      initiatorRuntimeId: normalizedFrom,
+      initiatorEncryptionPubKey: peerKey,
+      timestamp: Number(msg.timestamp),
+    };
+    const authError = verifyHelloAuth(
+      helloTranscript,
+      msg.auth,
+      context.options.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
+    );
     if (authError) {
       send(ws, { type: 'error', error: authError });
       ws.close();
       return true;
     }
+    verifiedHelloTranscript = helloTranscript;
   }
   session.peerEncryptionPubKey = peerKey;
   if (!rememberRuntimeSession(context, session, normalizedFrom)) {
@@ -323,9 +352,37 @@ const handleHandshake = (
   }
   send(ws, {
     type: 'hello_ack',
-    from: context.serverRuntimeId,
-    fromEncryptionPubKey: pubKeyToHex(context.keyPair.publicKey),
     to: normalizedFrom,
+    ...(context.options.requireHelloAuth === false
+      ? {
+          from: context.serverRuntimeId,
+          fromEncryptionPubKey: pubKeyToHex(context.keyPair.publicKey),
+        }
+      : (() => {
+          if (!verifiedHelloTranscript) throw new Error('DIRECT_RUNTIME_WS_VERIFIED_HELLO_MISSING');
+          const challenge = verifiedHelloTranscript.challenge;
+          const helloTimestamp = verifiedHelloTranscript.timestamp;
+          const timestamp = nextTimestamp();
+          const transcript: RuntimeWsAckTranscript = {
+            ...verifiedHelloTranscript,
+            helloTimestamp,
+            timestamp,
+          };
+          const signature = signDigest(
+            context.options.runtimeSeed,
+            context.runtimeSignerId,
+            hashHelloAck(transcript),
+          );
+          return {
+            from: context.serverRuntimeId,
+            fromEncryptionPubKey: context.handshakeBinding.responderEncryptionPubKey,
+            ...handshakeWireFields(context.handshakeBinding),
+            challenge,
+            helloTimestamp,
+            timestamp,
+            auth: { nonce: challenge, signature, timestamp },
+          };
+        })()),
   });
   return true;
 };
@@ -473,7 +530,12 @@ const handleDirectMessage = async (
   if (msg.type === 'hello' || msg.type === 'debug_event') return;
   session.lastSeen = Date.now();
   const peerKey = normalizeEncryptionPubKey(msg.fromEncryptionPubKey);
-  if (peerKey) session.peerEncryptionPubKey = peerKey;
+  if (msg.fromEncryptionPubKey !== undefined && peerKey !== session.peerEncryptionPubKey) {
+    send(ws, { type: 'error', error: 'Direct session encryption key mismatch' });
+    forgetSession(context, ws);
+    ws.close(4003, 'encryption-key-mismatch');
+    return;
+  }
   if (await handleRecoveryRequest(context, ws, session, msg)) return;
   if (await handleReliableReceipt(context, ws, session, msg)) return;
   await handleEntityInputs(context, ws, session, msg);
@@ -484,11 +546,21 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
   if (!serverRuntimeId || !isRuntimeId(serverRuntimeId)) {
     throw new Error(`DIRECT_RUNTIME_WS_INVALID_RUNTIME_ID: ${String(options.runtimeId || '')}`);
   }
+  const runtimeSignerId = options.runtimeSignerId || '1';
+  if (
+    options.requireHelloAuth !== false &&
+    deriveSignerAddressSync(options.runtimeSeed, runtimeSignerId).toLowerCase() !== serverRuntimeId
+  ) {
+    throw new Error(`DIRECT_RUNTIME_WS_SIGNER_MISMATCH:runtimeId=${serverRuntimeId}:signerId=${runtimeSignerId}`);
+  }
+  const keyPair = deriveEncryptionKeyPair(options.runtimeSeed);
   const context: DirectRuntimeWsContext = {
     options,
     routePath: options.path || '/ws',
     serverRuntimeId,
-    keyPair: deriveEncryptionKeyPair(options.runtimeSeed),
+    keyPair,
+    handshakeBinding: createDirectHandshakeBinding(serverRuntimeId, pubKeyToHex(keyPair.publicKey)),
+    runtimeSignerId,
     sessions: new Map(),
     sessionsByRuntime: new Map(),
     helloChallenges: createHelloChallengeRegistry(),
@@ -526,7 +598,13 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
     websocket: {
       open(ws: DirectWebSocket): void {
         ensureSession(context, ws);
-        if (options.requireHelloAuth !== false) context.helloChallenges.issue(ws);
+        if (options.requireHelloAuth !== false) {
+          context.helloChallenges.issue(ws, context.handshakeBinding, transcript => {
+            const timestamp = transcript.timestamp;
+            const signature = signDigest(options.runtimeSeed, runtimeSignerId, hashHelloChallenge(transcript));
+            return { nonce: transcript.challenge, signature, timestamp };
+          });
+        }
       },
       message: (ws: DirectWebSocket, raw: string | Buffer | ArrayBuffer): Promise<void> =>
         handleDirectMessage(context, ws, raw),

@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
 import { RuntimeWsClient } from '../network/p2p/ws-client';
-import { deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
+import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
+import { createRelayHandshakeBinding, type RuntimeWsChallengeTranscript } from '../network/p2p/hello-transcript';
+import { handshakeWireFields } from '../network/p2p/ws-client-handshake';
 import { startStandaloneRelayServer, type StandaloneRelayServer } from '../network/relay/standalone-server';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
@@ -25,6 +28,18 @@ const waitUntil = async (predicate: () => boolean, label: string): Promise<void>
   }
   throw new Error(`WAIT_TIMEOUT:${label}`);
 };
+
+const relayAck = (
+  hello: ReturnType<typeof deserializeWsMessage>,
+  challenge: RuntimeWsChallengeTranscript,
+) => ({
+  type: 'hello_ack' as const,
+  to: String(hello.from || ''),
+  ...handshakeWireFields(challenge),
+  challenge: challenge.challenge,
+  helloTimestamp: Number(hello.timestamp),
+  timestamp: Date.now(),
+});
 
 const startRelay = (): StandaloneRelayServer => {
   const server = startStandaloneRelayServer({
@@ -106,6 +121,9 @@ describe('runtime websocket recovery requests', () => {
     let socket: { send: (payload: string | ArrayBufferView | ArrayBuffer) => number } | null = null;
     const receivedTypes: string[] = [];
     let rawServer: ReturnType<typeof Bun.serve> | null = null;
+    const challenges = createHelloChallengeRegistry();
+    let issuedChallenge: RuntimeWsChallengeTranscript | null = null;
+    let receivedHello: RuntimeWsMessage | null = null;
     rawServer = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
@@ -116,15 +134,15 @@ describe('runtime websocket recovery requests', () => {
       websocket: {
         open(ws) {
           socket = ws;
-          ws.send(
-            serializeWsMessage({
-              type: 'hello_challenge',
-              challenge: 'runtime-ws-auth-readiness',
-            }),
+          issuedChallenge = challenges.issue(
+            ws,
+            createRelayHandshakeBinding(`ws://127.0.0.1:${rawServer?.port}`),
           );
         },
         message(_ws, raw) {
-          receivedTypes.push(deserializeWsMessage(raw).type);
+          const message = deserializeWsMessage(raw);
+          receivedTypes.push(message.type);
+          if (message.type === 'hello') receivedHello = message;
         },
       },
     });
@@ -144,7 +162,8 @@ describe('runtime websocket recovery requests', () => {
     expect(client.sendGossipAnnounce(RUNTIME_A, { profiles: [] })).toBe(false);
     expect(receivedTypes).toEqual(['hello']);
 
-    socket?.send(serializeWsMessage({ type: 'hello_ack', to: RUNTIME_A }));
+    if (!receivedHello || !issuedChallenge) throw new Error('TEST_RELAY_HELLO_MISSING');
+    socket?.send(serializeWsMessage(relayAck(receivedHello, issuedChallenge)));
     await waitUntil(() => client.isOpen(), 'authenticated client ready');
     expect(client.isConnecting()).toBe(false);
   });
@@ -267,6 +286,8 @@ describe('runtime websocket recovery requests', () => {
 
   test('requestRecoveryBundles times out when a connected peer never answers', async () => {
     let rawServer: ReturnType<typeof Bun.serve> | null = null;
+    const challenges = createHelloChallengeRegistry();
+    let issuedChallenge: RuntimeWsChallengeTranscript | null = null;
     rawServer = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
@@ -278,17 +299,16 @@ describe('runtime websocket recovery requests', () => {
       },
       websocket: {
         open(ws) {
-          ws.send(
-            serializeWsMessage({
-              type: 'hello_challenge',
-              challenge: 'runtime-ws-recovery-timeout',
-            }),
+          issuedChallenge = challenges.issue(
+            ws,
+            createRelayHandshakeBinding(`ws://127.0.0.1:${rawServer?.port}`),
           );
         },
         message(ws, raw) {
           const message = deserializeWsMessage(raw);
           if (message.type === 'hello') {
-            ws.send(serializeWsMessage({ type: 'hello_ack', to: RUNTIME_A }));
+            if (!issuedChallenge) throw new Error('TEST_RELAY_CHALLENGE_MISSING');
+            ws.send(serializeWsMessage(relayAck(message, issuedChallenge)));
           }
         },
       },

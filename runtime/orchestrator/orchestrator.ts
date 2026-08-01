@@ -31,6 +31,7 @@ import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '
 import { closeRelayClientsForReset } from '../network/relay/reset';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
+import { createRelayHandshakeBinding } from '../network/p2p/hello-transcript';
 import { type MarketSnapshotPayload } from '../network/relay/market-snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market-subscriptions';
 import {
@@ -277,7 +278,7 @@ const routerConfig: RelayRouterConfig = {
   localRuntimeId: 'mesh-relay',
   localDeliver: async () => {},
   send: (ws, data) => ws.send(data),
-  consumeHelloChallenge: (ws, challenge) => relayHelloChallenges.consume(ws, challenge),
+  consumeHelloChallenge: (ws, hello) => relayHelloChallenges.consume(ws, hello),
 };
 
 const timings: TimingMap = {
@@ -2854,7 +2855,9 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
   websocket: {
     open(ws) {
       const relayWs = ws;
-      if (relayWs.data.type === 'relay') relayHelloChallenges.issue(relayWs);
+      if (relayWs.data.type === 'relay') {
+        relayHelloChallenges.issue(relayWs, createRelayHandshakeBinding(relayUrl));
+      }
       pushDebugEvent(relayStore, {
         event: 'ws_open',
         details: { wsType: relayWs.data.type },

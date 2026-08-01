@@ -390,6 +390,7 @@ export class RuntimeP2P {
         signerId: this.signerId,
         ...(runtimeSeed ? { seed: runtimeSeed } : {}),
         useHelloAuth: true,
+        expectedPeer: { role: 'relay-server', audience: url },
         encryptionKeyPair: this.encryptionKeyPair,
         onPeerEncryptionKey: (fromRuntimeId: string, pubKeyHex: string) => {
           this.handlePeerEncryptionKey(fromRuntimeId, pubKeyHex);
@@ -1596,12 +1597,28 @@ export class RuntimeP2P {
       this.directClientUrls.delete(normalizedTargetRuntimeId);
       this.directClientErrors.delete(normalizedTargetRuntimeId);
     }
+    const expectedEncryptionKey = this.resolveTargetEncryptionKey(normalizedTargetRuntimeId);
+    if (!expectedEncryptionKey) {
+      const error = `P2P_DIRECT_TARGET_KEY_MISSING:${normalizedTargetRuntimeId}`;
+      this.directClientErrors.set(normalizedTargetRuntimeId, { at: Date.now(), error });
+      this.env.warn('network', 'WS_DIRECT_CONNECT_REJECTED', {
+        endpoint,
+        targetRuntimeId: normalizedTargetRuntimeId,
+        error,
+      });
+      return;
+    }
     const client = new RuntimeWsClient({
       url: endpoint,
       runtimeId: this.runtimeId,
       signerId: this.signerId,
       ...(this.env.runtimeSeed ? { seed: this.env.runtimeSeed } : {}),
       useHelloAuth: true,
+      expectedPeer: {
+        role: 'direct-runtime-server',
+        runtimeId: normalizedTargetRuntimeId,
+        encryptionPubKey: pubKeyToHex(expectedEncryptionKey),
+      },
       encryptionKeyPair: this.encryptionKeyPair,
       getTargetEncryptionKey: (targetRuntimeId: string) => {
         return this.resolveTargetEncryptionKey(targetRuntimeId);

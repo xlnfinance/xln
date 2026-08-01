@@ -156,6 +156,7 @@ export const buildRuntimeWsRecoveryPeerSource = (options: {
     signerId: options.requesterSignerId || '1',
     seed: requesterSeed,
     useHelloAuth: true,
+    expectedPeer: { role: 'direct-runtime-server', runtimeId: peerRuntimeId },
     encryptionKeyPair: deriveEncryptionKeyPair(requesterSeed),
     maxReconnectAttempts: 1,
   });

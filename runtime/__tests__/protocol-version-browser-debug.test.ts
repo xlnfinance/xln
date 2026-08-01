@@ -28,11 +28,19 @@ describe('global network protocol version', () => {
 
   test('pins hello authentication to protocol version 1', () => {
     expect(hashHelloMessage(
-      '0x1111111111111111111111111111111111111111',
-      `0x${'22'.repeat(32)}`,
-      1_700_000_000_000,
-      'nonce-1',
-    )).toBe('0x2764d423135d36be821244a0860b06311de1a49a02cc54ec222c013aa015506e');
+      {
+        audience: 'xln-runtime:0x3333333333333333333333333333333333333333',
+        initiatorRole: 'runtime-client',
+        responderRole: 'direct-runtime-server',
+        responderRuntimeId: '0x3333333333333333333333333333333333333333',
+        responderEncryptionPubKey: `0x${'44'.repeat(32)}`,
+        challenge: `0x${'55'.repeat(32)}`,
+        challengeTimestamp: 1_699_999_999_000,
+        initiatorRuntimeId: '0x1111111111111111111111111111111111111111',
+        initiatorEncryptionPubKey: `0x${'22'.repeat(32)}`,
+        timestamp: 1_700_000_000_000,
+      },
+    )).toBe('0x7c610749ddfc934b54eb8af81a702420cba85321683ee8f539f6cc276aad98d9');
   });
 });
 

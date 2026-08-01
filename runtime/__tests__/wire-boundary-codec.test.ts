@@ -32,10 +32,25 @@ afterEach(() => {
 
 describe('WebSocket trusted decode boundary', () => {
   test('pins every canonical envelope variant to an independent golden hash', () => {
+    const handshake = {
+      audience: 'wss://relay.example/relay',
+      initiatorRole: 'runtime-client' as const,
+      responderRole: 'relay-server' as const,
+    };
+    const runtimeId = `0x${'11'.repeat(20)}`;
+    const encryptionKey = `0x${'22'.repeat(32)}`;
+    const challenge = `0x${'33'.repeat(32)}`;
     const variants = {
-      hello: { type: 'hello', from: 'a', fromEncryptionPubKey: 'k', timestamp: 1 },
-      hello_challenge: { type: 'hello_challenge', challenge: 'c' },
-      hello_ack: { type: 'hello_ack', to: 'a' },
+      hello: {
+        type: 'hello',
+        from: runtimeId,
+        fromEncryptionPubKey: encryptionKey,
+        timestamp: 2,
+        ...handshake,
+        auth: { nonce: challenge, signature: `0x${'44'.repeat(65)}`, timestamp: 2 },
+      },
+      hello_challenge: { type: 'hello_challenge', challenge, timestamp: 1, ...handshake },
+      hello_ack: { type: 'hello_ack', to: runtimeId, challenge, helloTimestamp: 2, timestamp: 3, ...handshake },
       entity_inputs: { type: 'entity_inputs', from: 'a', to: 'b', payload: 'cipher', encrypted: true },
       entity_input_receipt: { type: 'entity_input_receipt', from: 'a', to: 'b', payload: { body: {}, signature: 's' } },
       debug_event: { type: 'debug_event', payload: { level: 'info' } },
@@ -52,9 +67,9 @@ describe('WebSocket trusted decode boundary', () => {
       pong: { type: 'pong' },
     } satisfies Record<string, RuntimeWsMessage>;
     const expected = {
-      hello: '0x423cfb7fbf1b9cf067bd5d3f89afbeb3c6f19c03e8f9410bae38b3d43e2529cb',
-      hello_challenge: '0x3f7788d14487e6b59f9441b65d8bc9dba8266eb9f910cbb0fff3b243138db87a',
-      hello_ack: '0x01c85fe2130cce80700f27ad3a4b9c5ce3f03c044b0502b7903d0d21558ee2ad',
+      hello: '0x5640fbdac8afba97555880be25940f93d84775d4f256b167ddb10080ebfd332e',
+      hello_challenge: '0xe122247b559b2b8d5471b3b881bfc358af215aa87e3592cf56f7ddf53c6242dd',
+      hello_ack: '0x2427f2c46b9788e8ee7b4da621110b7ac9fa10e372e700b83243ca0cf6e03459',
       entity_inputs: '0x449d22e5c7ccfcdc8c4d93b1437c45b608fa6e88deba3d45f22d0d39fafb3702',
       entity_input_receipt: '0x32e7f1648fdd73e30679ce2aa7e2932dae420c073268b7cfbf27b75307cf1c12',
       debug_event: '0x7cd307e43d877b5741a93f7ca02fdcddd13a91489798f133b65be0cbb0dfc897',

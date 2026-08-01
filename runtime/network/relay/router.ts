@@ -31,14 +31,21 @@ import { classifyWebSocketSendResult } from '../websocket-send-result';
 import type { Profile } from '../../entity/profile';
 import { verifyProfileSignature, type ProfileVerifyResult } from '../../entity/profile-signing';
 import { verifyHelloAuth } from '../p2p/hello-auth';
+import type { HelloChallengeConsumption } from '../p2p/hello-challenge';
+import {
+  type RuntimeWsHelloTranscript,
+} from '../p2p/hello-transcript';
+import { handshakeWireFields } from '../p2p/ws-client-handshake';
 import { isDeliveryDelivered, type DeliveryResult } from '../../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
+const SOCKET_ENCRYPTION_KEY = Symbol.for('xln.relay.socketEncryptionKey');
 type RememberedRelaySocket = object & { [SOCKET_RUNTIME_ID]?: string };
 type DuplicateClosingRelaySocket = object & { [SOCKET_DUPLICATE_CLOSING]?: boolean };
+type KeyBoundRelaySocket = object & { [SOCKET_ENCRYPTION_KEY]?: string };
 const NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS = [
   'invalid tag',
   'P2P_DECRYPT_ERROR',
@@ -73,7 +80,29 @@ const getRememberedSocketRuntimeId = (ws: unknown): string => {
 export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
   delete (ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID];
+  delete (ws as KeyBoundRelaySocket)[SOCKET_ENCRYPTION_KEY];
 };
+
+const normalizeEncryptionPubKey = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const normalized = value.startsWith('0x') ? value.toLowerCase() : `0x${value.toLowerCase()}`;
+  return /^0x[0-9a-f]{64}$/.test(normalized) ? normalized : '';
+};
+
+const rememberSocketEncryptionKey = (ws: unknown, value: string): void => {
+  if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
+  Object.defineProperty(ws as KeyBoundRelaySocket, SOCKET_ENCRYPTION_KEY, {
+    value,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+};
+
+const getRememberedSocketEncryptionKey = (ws: unknown): string =>
+  !!ws && (typeof ws === 'object' || typeof ws === 'function')
+    ? normalizeEncryptionPubKey((ws as KeyBoundRelaySocket)[SOCKET_ENCRYPTION_KEY])
+    : '';
 
 const markDuplicateClosingSocket = (ws: unknown): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
@@ -129,11 +158,18 @@ export type RelayRouterConfig = {
   /** Defaults to true. Unsigned hello cannot claim a runtime slot. */
   requireHelloAuth?: boolean;
   helloSkewMs?: number;
-  consumeHelloChallenge?: (ws: object, challenge: unknown) => boolean;
+  consumeHelloChallenge?: (ws: object, hello: RuntimeWsMessage) => HelloChallengeConsumption;
   verifyProfile?: (profile: Profile) => Promise<ProfileVerifyResult> | ProfileVerifyResult;
 };
 
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
+let relayHandshakeTimestamp = 0;
+
+const nextRelayHandshakeTimestamp = (): number => {
+  const timestamp = Date.now();
+  relayHandshakeTimestamp = timestamp <= relayHandshakeTimestamp ? relayHandshakeTimestamp + 1 : timestamp;
+  return relayHandshakeTimestamp;
+};
 
 const flushPendingToSocket = <Socket>(
   store: RelayStore,
@@ -243,16 +279,37 @@ const handleHello = (context: RelayRouteContext): boolean => {
     send(ws, serializeWsMessage({ type: 'error', error: 'Invalid runtimeId in hello' }));
     return true;
   }
+  const peerEncryptionKey = normalizeEncryptionPubKey(fromEncryptionPubKey);
+  if (!peerEncryptionKey) {
+    send(ws, serializeWsMessage({ type: 'error', error: 'Missing or invalid fromEncryptionPubKey' }));
+    return true;
+  }
+  let verifiedHello: RuntimeWsHelloTranscript | null = null;
   if (config.requireHelloAuth !== false) {
-    const challengeAccepted = config.consumeHelloChallenge?.(ws as object, context.msg.auth?.nonce) ?? true;
-    const authError = challengeAccepted
-      ? verifyHelloAuth(
-          fromKey,
-          fromEncryptionPubKey!,
-          context.msg.auth,
-          config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
-        )
-      : 'Hello challenge missing, expired, or already consumed';
+    const consumed = config.consumeHelloChallenge?.(ws as object, context.msg)
+      ?? { ok: false as const, error: 'Hello challenge verifier unavailable' };
+    if (!consumed.ok) {
+      send(ws, serializeWsMessage({ type: 'error', error: consumed.error }));
+      ws.close?.(4003, 'handshake-invalid');
+      return true;
+    }
+    const transcript: RuntimeWsHelloTranscript = {
+      audience: consumed.transcript.audience,
+      initiatorRole: consumed.transcript.initiatorRole,
+      responderRole: consumed.transcript.responderRole,
+      responderRuntimeId: consumed.transcript.responderRuntimeId,
+      responderEncryptionPubKey: consumed.transcript.responderEncryptionPubKey,
+      challenge: consumed.transcript.challenge,
+      challengeTimestamp: consumed.transcript.timestamp,
+      initiatorRuntimeId: fromKey,
+      initiatorEncryptionPubKey: peerEncryptionKey,
+      timestamp: Number(context.msg.timestamp),
+    };
+    const authError = verifyHelloAuth(
+      transcript,
+      context.msg.auth,
+      config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
+    );
     if (authError) {
       pushDebugEvent(store, {
         event: 'hello',
@@ -264,8 +321,10 @@ const handleHello = (context: RelayRouteContext): boolean => {
         details: { traceId, authError },
       });
       send(ws, serializeWsMessage({ type: 'error', error: authError }));
+      ws.close?.(4003, 'handshake-invalid');
       return true;
     }
+    verifiedHello = transcript;
   }
   const existingClient = store.clients.get(fromKey);
   if (existingClient && existingClient.ws !== ws) {
@@ -297,7 +356,8 @@ const handleHello = (context: RelayRouteContext): boolean => {
     return true;
   }
   rememberSocketRuntimeId(ws, fromKey);
-  if (fromEncryptionPubKey) cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
+  rememberSocketEncryptionKey(ws, peerEncryptionKey);
+  cacheEncryptionKey(store, fromKey, peerEncryptionKey);
   pushDebugEvent(store, {
     event: 'hello',
     runtimeId: from,
@@ -306,7 +366,19 @@ const handleHello = (context: RelayRouteContext): boolean => {
     status: 'connected',
     details: { traceId },
   });
-  send(ws, serializeWsMessage({ type: 'hello_ack', to: fromKey }));
+  send(ws, serializeWsMessage(config.requireHelloAuth === false
+    ? { type: 'hello_ack', to: fromKey }
+    : (() => {
+        if (!verifiedHello) throw new Error('RELAY_VERIFIED_HELLO_MISSING');
+        return {
+          type: 'hello_ack',
+          to: fromKey,
+          ...handshakeWireFields(verifiedHello),
+          challenge: verifiedHello.challenge,
+          helloTimestamp: verifiedHello.timestamp,
+          timestamp: nextRelayHandshakeTimestamp(),
+        } satisfies RuntimeWsMessage;
+      })()));
   flushPendingToSocket(store, fromKey, ws, send);
   return true;
 };
@@ -771,7 +843,13 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
     return false;
   }
   if (from && fromEncryptionPubKey && rememberedRuntimeId === fromKey) {
-    cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
+    const sessionKey = getRememberedSocketEncryptionKey(ws);
+    const messageKey = normalizeEncryptionPubKey(fromEncryptionPubKey);
+    if (!sessionKey || !messageKey || sessionKey !== messageKey) {
+      send(ws, serializeWsMessage({ type: 'error', error: 'Relay session encryption key mismatch' }));
+      ws.close?.(4003, 'encryption-key-mismatch');
+      return false;
+    }
   }
   if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
     relayLog(`[RELAY-MSG] type=${type} from=${from || 'none'} to=${to || 'none'}`);

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Profile } from '../entity/profile';
-import { relayRoute } from '../network/relay/router';
+import { relayRoute as productionRelayRoute } from '../network/relay/router';
 import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../network/relay/store';
 import {
   deserializeWsMessage,
@@ -32,12 +32,26 @@ const ENTITY_A = deriveSingleSignerFixtureEntityId(SEED_A, '1');
 const ENTITY_B = deriveSingleSignerFixtureEntityId(SEED_B, '2');
 const ENTITY_C = deriveSingleSignerFixtureEntityId(SEED_C, '3');
 
+const relayRoute: typeof productionRelayRoute = (config, ws, message) =>
+  productionRelayRoute({ requireHelloAuth: false, ...config }, ws, message);
+
 type FakeWs = { label: string; readyState?: number };
 
 const helloAuth = (runtimeId: string, seed: string, key: string, signerId = '1') => {
   const timestamp = Date.now();
   const nonce = makeHelloNonce();
-  const signature = signDigest(seed, signerId, hashHelloMessage(runtimeId, key, timestamp, nonce));
+  const signature = signDigest(seed, signerId, hashHelloMessage({
+    audience: 'ws://relay.test/',
+    initiatorRole: 'runtime-client',
+    responderRole: 'relay-server',
+    responderRuntimeId: '',
+    responderEncryptionPubKey: '',
+    challenge: nonce,
+    challengeTimestamp: timestamp,
+    initiatorRuntimeId: runtimeId,
+    initiatorEncryptionPubKey: key,
+    timestamp,
+  }));
   return { nonce, signature, timestamp };
 };
 
@@ -45,6 +59,7 @@ const signedHello = (runtimeId: string, seed: string, key: string, signerId = '1
   type: 'hello',
   from: runtimeId,
   fromEncryptionPubKey: key,
+  timestamp: Date.now(),
   auth: helloAuth(runtimeId, seed, key, signerId),
 });
 
@@ -1025,10 +1040,13 @@ describe('relay-router gossip fanout', () => {
     };
     const wsA: FakeWs = { label: 'A' };
 
-    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+    await productionRelayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
 
     expect(store.clients.has(RUNTIME_A)).toBe(false);
-    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({ type: 'error', error: 'Missing auth fields' });
+    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'Hello challenge verifier unavailable',
+    });
   });
 
   test('drops unsigned gossip profiles when no verifier override is installed', async () => {

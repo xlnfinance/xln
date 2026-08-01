@@ -16,7 +16,6 @@
  */
 
 import { serializeTaggedJson } from '../../protocol/serialization';
-import { keccak256, toUtf8Bytes } from 'ethers';
 import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../../storage/binary-codec';
 import type { Codec } from '../../protocol/codec';
 import { XLN_PROTOCOL_VERSION, type XlnProtocolVersion } from '../../protocol/version';
@@ -25,6 +24,21 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
+import {
+  DIRECT_RUNTIME_RESPONDER_ROLE,
+  RELAY_RESPONDER_ROLE,
+  RUNTIME_WS_INITIATOR_ROLE,
+  type RuntimeWsAuth,
+  type RuntimeWsInitiatorRole,
+  type RuntimeWsResponderRole,
+} from './hello-transcript';
+
+export {
+  buildHelloMessage,
+  hashHelloMessage,
+  type RuntimeWsAuth,
+  type RuntimeWsHelloTranscript,
+} from './hello-transcript';
 
 const DEFAULT_MAX_WS_MESSAGE_BYTES = 16 * 1024 * 1024;
 
@@ -47,12 +61,6 @@ export type RuntimeWsMessageType =
   | 'ping'
   | 'pong';
 
-export type RuntimeWsAuth = {
-  nonce: string;
-  signature: string;
-  timestamp: number;
-};
-
 export type RuntimeWsMessage = {
   type: RuntimeWsMessageType;
   id?: string;
@@ -66,6 +74,10 @@ export type RuntimeWsMessage = {
   txs?: number;
   auth?: RuntimeWsAuth;
   challenge?: string;
+  audience?: string;
+  initiatorRole?: RuntimeWsInitiatorRole;
+  responderRole?: RuntimeWsResponderRole;
+  helloTimestamp?: number;
   inReplyTo?: string;
   error?: string;
 };
@@ -116,14 +128,38 @@ const validateRuntimeWsEnvelope = (value: unknown): RuntimeWsEnvelope => {
 
   switch (type as RuntimeWsMessageType) {
     case 'hello':
-      requiredFields(message, ['from', 'fromEncryptionPubKey', 'timestamp'], ['auth']);
+      requiredFields(
+        message,
+        ['from', 'fromEncryptionPubKey', 'timestamp'],
+        ['auth', 'audience', 'initiatorRole', 'responderRole', 'to'],
+      );
       validateWsAuth(message['auth']);
       break;
     case 'hello_challenge':
-      requiredFields(message, ['challenge'], []);
+      requiredFields(
+        message,
+        ['challenge'],
+        ['audience', 'initiatorRole', 'responderRole', 'from', 'fromEncryptionPubKey', 'timestamp', 'auth'],
+      );
+      validateWsAuth(message['auth']);
       break;
     case 'hello_ack':
-      requiredFields(message, ['to'], ['from', 'fromEncryptionPubKey']);
+      requiredFields(
+        message,
+        ['to'],
+        [
+          'from',
+          'fromEncryptionPubKey',
+          'audience',
+          'initiatorRole',
+          'responderRole',
+          'challenge',
+          'helloTimestamp',
+          'timestamp',
+          'auth',
+        ],
+      );
+      validateWsAuth(message['auth']);
       break;
     case 'entity_inputs':
       requiredFields(
@@ -182,11 +218,30 @@ const validateRuntimeWsEnvelope = (value: unknown): RuntimeWsEnvelope => {
     'to',
     'entityId',
     'challenge',
+    'audience',
+    'initiatorRole',
+    'responderRole',
     'inReplyTo',
     'error',
   ]);
   if (message['timestamp'] !== undefined) {
     requireBoundaryInteger(message['timestamp'], 'WS_MESSAGE_TIMESTAMP_INVALID');
+  }
+  if (message['helloTimestamp'] !== undefined) {
+    requireBoundaryInteger(message['helloTimestamp'], 'WS_MESSAGE_HELLO_TIMESTAMP_INVALID');
+  }
+  if (
+    message['initiatorRole'] !== undefined &&
+    message['initiatorRole'] !== RUNTIME_WS_INITIATOR_ROLE
+  ) {
+    throw new Error(`WS_MESSAGE_INITIATOR_ROLE_INVALID:${String(message['initiatorRole'])}`);
+  }
+  if (
+    message['responderRole'] !== undefined &&
+    message['responderRole'] !== DIRECT_RUNTIME_RESPONDER_ROLE &&
+    message['responderRole'] !== RELAY_RESPONDER_ROLE
+  ) {
+    throw new Error(`WS_MESSAGE_RESPONDER_ROLE_INVALID:${String(message['responderRole'])}`);
   }
   if (message['txs'] !== undefined) requireBoundaryInteger(message['txs'], 'WS_MESSAGE_TXS_INVALID');
   if (message['encrypted'] !== undefined && typeof message['encrypted'] !== 'boolean') {
@@ -277,21 +332,6 @@ export const makeMessageId = (): string => {
   const id = messageCounter;
   messageCounter += 1;
   return `msg_${id}`;
-};
-
-const HELLO_DOMAIN = `xln-ws-hello:v${XLN_PROTOCOL_VERSION}`;
-
-export const buildHelloMessage = (
-  runtimeId: string,
-  encryptionPubKey: string,
-  timestamp: number,
-  nonce: string,
-): string => {
-  return `${HELLO_DOMAIN}:${runtimeId}:${encryptionPubKey.toLowerCase()}:${timestamp}:${nonce}`;
-};
-
-export const hashHelloMessage = (runtimeId: string, encryptionPubKey: string, timestamp: number, nonce: string): string => {
-  return keccak256(toUtf8Bytes(buildHelloMessage(runtimeId, encryptionPubKey, timestamp, nonce)));
 };
 
 export const makeHelloNonce = (): string => {

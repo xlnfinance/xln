@@ -47,6 +47,7 @@ import { maybeHandleRelayDebugRequest } from '../../network/relay/debug-http';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../../network/relay/router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../../network/p2p/hello-challenge';
+import { createRelayHandshakeBinding } from '../../network/p2p/hello-transcript';
 import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
 import { createStructuredLogger, registerStructuredLogSink, shortId } from '../../infra/logger';
@@ -816,6 +817,7 @@ type ServerSession = {
   env: RuntimeReplica | null;
   routerConfig: RelayRouterConfig | null;
   relayHelloChallenges: ReturnType<typeof createHelloChallengeRegistry>;
+  relayAudience: string;
 };
 
 const handleHttpRequest = async (
@@ -1028,7 +1030,9 @@ const createHttpServer = (options: XlnServerOptions, session: ServerSession) =>
         if (ws.data.type === 'rpc' && session.env) {
           attachRuntimeAdapterTicker(session.env, registerEnvChangeCallback);
         }
-        if (ws.data.type === 'relay') session.relayHelloChallenges.issue(ws);
+        if (ws.data.type === 'relay') {
+          session.relayHelloChallenges.issue(ws, createRelayHandshakeBinding(session.relayAudience));
+        }
         pushDebugEvent(relayStore, { event: 'ws_open', details: { wsType: ws.data.type } });
       },
       message: (ws, message) => handleWebSocketMessage(session, ws, message),
@@ -1323,13 +1327,15 @@ const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
   serverStartupBarrier = new Promise<void>(resolve => {
     resolveServerStartupBarrier = resolve;
   });
+  const internalRelayUrl = resolveConfiguredRelayUrl(options.port);
   const session: ServerSession = {
     env: null,
     routerConfig: null,
     relayHelloChallenges: createHelloChallengeRegistry(),
+    relayAudience: internalRelayUrl,
   };
   return {
-    internalRelayUrl: resolveConfiguredRelayUrl(options.port),
+    internalRelayUrl,
     session,
     server: createHttpServer(options, session),
   };
@@ -1453,7 +1459,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       localRuntimeId: String(env.runtimeId),
       localDeliver,
       send: (ws, data) => ws.send(data),
-      consumeHelloChallenge: (ws, challenge) => bound.session.relayHelloChallenges.consume(ws, challenge),
+      consumeHelloChallenge: (ws, hello) => bound.session.relayHelloChallenges.consume(ws, hello),
       onGossipStore: profile => {
         try {
           runtimeEnv.gossip?.announce?.(profile);

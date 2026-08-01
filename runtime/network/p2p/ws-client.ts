@@ -1,7 +1,6 @@
 import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import {
   deserializeWsMessage,
-  hashHelloMessage,
   makeMessageId,
   serializeWsMessage,
   type RuntimeWsMessage,
@@ -13,6 +12,15 @@ import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { createStructuredLogger } from '../../infra/logger';
 import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
+import { hashHelloMessage } from './hello-transcript';
+import {
+  createHelloTranscript,
+  handshakeWireFields,
+  verifyServerAck,
+  verifyServerChallenge,
+  type PendingClientHandshake,
+  type RuntimeWsExpectedPeer,
+} from './ws-client-handshake';
 
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
 const wsLog = createStructuredLogger('runtime.wsClient');
@@ -22,7 +30,7 @@ interface BrowserWebSocket {
   binaryType: string;
   readyState: number;
   send(data: string | ArrayBuffer | ArrayBufferView | Blob): void;
-  close(): void;
+  close(code?: number, reason?: string): void;
   onopen: ((this: WebSocket, ev: Event) => void) | null;
   onmessage: ((this: WebSocket, ev: MessageEvent) => void) | null;
   onclose: ((this: WebSocket, ev: CloseEvent) => void) | null;
@@ -33,7 +41,7 @@ interface NodeWebSocket {
   binaryType?: string;
   readyState?: number;
   send(data: string | Buffer | Uint8Array): void;
-  close(): void;
+  close(code?: number, reason?: string): void;
   on(event: 'open', cb: () => void): void;
   on(event: 'message', cb: (data: Buffer) => void): void;
   on(event: 'close', cb: (code: number, reason: Buffer) => void): void;
@@ -118,6 +126,8 @@ export type RuntimeWsClientOptions = {
   signerId?: string;
   seed?: Uint8Array | string;
   useHelloAuth?: boolean;
+  expectedPeer?: RuntimeWsExpectedPeer;
+  helloSkewMs?: number;
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
@@ -198,6 +208,8 @@ export class RuntimeWsClient {
   private suppressNextClose = false;
   private helloSent = false;
   private helloAcknowledged = false;
+  private pendingHandshake: PendingClientHandshake | null = null;
+  private authenticatedDirectPeer: { runtimeId: string; encryptionPubKey: string } | null = null;
   private readonly maxReconnectAttempts: number;
   private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
 
@@ -228,6 +240,8 @@ export class RuntimeWsClient {
     this.connecting = true;
     this.helloSent = false;
     this.helloAcknowledged = false;
+    this.pendingHandshake = null;
+    this.authenticatedDirectPeer = null;
     this.suppressNextClose = false;
     const generation = ++this.lifecycleGeneration;
     const attempt = this.connectForGeneration(generation);
@@ -454,8 +468,16 @@ export class RuntimeWsClient {
     return true;
   }
 
-  private sendHello(challenge?: string): boolean {
-    if (this.helloSent) return true;
+  private failHandshake(error: Error, reason = 'handshake-invalid'): void {
+    this.options.onError?.(error);
+    this.ws?.close(4003, reason);
+  }
+
+  private sendHello(challengeMessage?: RuntimeWsMessage): boolean {
+    if (this.helloSent) {
+      this.failHandshake(new Error('WS_HELLO_CHALLENGE_DUPLICATE'));
+      return false;
+    }
     const encryptionKeyPair = this.options.encryptionKeyPair;
     if (!encryptionKeyPair) {
       throw new Error(`WS_HELLO_ENCRYPTION_KEY_MISSING: runtimeId=${this.options.runtimeId}`);
@@ -467,30 +489,41 @@ export class RuntimeWsClient {
         this.ws?.close();
         return false;
       }
-      if (!challenge) {
-        this.options.onError?.(new Error('WS_HELLO_CHALLENGE_MISSING'));
-        this.ws?.close();
+      if (!challengeMessage) {
+        this.failHandshake(new Error('WS_HELLO_CHALLENGE_MISSING'));
         return false;
       }
-      // Relay routers require signed hello; direct test servers can still opt out.
       try {
+        const challenge = verifyServerChallenge({
+          message: challengeMessage,
+          url: this.options.url,
+          ...(this.options.expectedPeer ? { expectedPeer: this.options.expectedPeer } : {}),
+          maxSkewMs: this.options.helloSkewMs ?? 5 * 60 * 1000,
+        });
         const timestamp = nextTimestamp();
         const encryptionPubKey = pubKeyToHex(encryptionKeyPair.publicKey);
-        const nonce = challenge;
-        const digest = hashHelloMessage(this.options.runtimeId, encryptionPubKey, timestamp, nonce);
+        const transcript = createHelloTranscript({
+          challenge,
+          runtimeId: this.options.runtimeId,
+          encryptionPubKey,
+          timestamp,
+        });
+        const digest = hashHelloMessage(transcript);
         const signature = signDigest(this.options.seed, this.options.signerId, digest);
         this.sendRaw({
           type: 'hello',
           from: this.options.runtimeId,
           fromEncryptionPubKey: encryptionPubKey,
+          ...(challenge.responderRuntimeId ? { to: challenge.responderRuntimeId } : {}),
+          ...handshakeWireFields(challenge),
           timestamp,
-          auth: { nonce, signature, timestamp },
+          auth: { nonce: challenge.challenge, signature, timestamp },
         });
+        this.pendingHandshake = { challenge, hello: transcript };
         this.helloSent = true;
         return true;
       } catch (error) {
-        this.options.onError?.(error as Error);
-        this.ws?.close();
+        this.failHandshake(error as Error);
         return false;
       }
     }
@@ -540,28 +573,31 @@ export class RuntimeWsClient {
 
   private handleHandshakeMessage(msg: RuntimeWsMessage): boolean {
     if (msg.type === 'hello_challenge') {
-      if (this.options.useHelloAuth && msg.challenge) this.sendHello(msg.challenge);
+      if (this.options.useHelloAuth) this.sendHello(msg);
       return true;
     }
     if (msg.type === 'hello_ack') {
-      const expectedRuntimeId = this.options.runtimeId.toLowerCase();
-      const acknowledgedRuntimeId = String(msg.to || '').toLowerCase();
-      if (!this.options.useHelloAuth || !this.helloSent || acknowledgedRuntimeId !== expectedRuntimeId) {
-        const error = new Error(
-          `WS_HELLO_ACK_INVALID: expected=${expectedRuntimeId} received=${acknowledgedRuntimeId || 'missing'}`,
-        );
-        this.options.onError?.(error);
-        this.ws?.close();
+      if (!this.options.useHelloAuth || !this.helloSent || !this.pendingHandshake) {
+        this.failHandshake(new Error('WS_HELLO_ACK_WITHOUT_PENDING_HANDSHAKE'));
         return true;
       }
       if (this.helloAcknowledged) return true;
-      this.helloAcknowledged = true;
-      this.connecting = false;
-      this.reconnectAttempts = 0;
-      if (typeof msg.from === 'string' && typeof msg.fromEncryptionPubKey === 'string') {
-        this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
+      try {
+        const directPeer = verifyServerAck({
+          message: msg,
+          pending: this.pendingHandshake,
+          clientRuntimeId: this.options.runtimeId,
+          maxSkewMs: this.options.helloSkewMs ?? 5 * 60 * 1000,
+        });
+        if (directPeer) this.options.onPeerEncryptionKey?.(directPeer.runtimeId, directPeer.encryptionPubKey);
+        this.authenticatedDirectPeer = directPeer;
+        this.helloAcknowledged = true;
+        this.connecting = false;
+        this.reconnectAttempts = 0;
+        this.options.onOpen?.();
+      } catch (error) {
+        this.failHandshake(error as Error);
       }
-      this.options.onOpen?.();
       return true;
     }
     if (msg.type === 'error') {
@@ -709,6 +745,24 @@ export class RuntimeWsClient {
     if (this.closed || generation !== this.lifecycleGeneration) return;
     const msg = this.decodeMessage(raw);
     if (!msg || this.handleHandshakeMessage(msg)) return;
+    if (this.options.useHelloAuth && !this.helloAcknowledged) {
+      this.failHandshake(new Error(`WS_MESSAGE_BEFORE_HANDSHAKE_ACK:type=${msg.type}`));
+      return;
+    }
+    if (this.authenticatedDirectPeer && typeof msg.from === 'string') {
+      const receivedRuntimeId = normalizeRuntimeId(msg.from);
+      if (receivedRuntimeId !== this.authenticatedDirectPeer.runtimeId) {
+        this.failHandshake(new Error('WS_DIRECT_SESSION_RUNTIME_MISMATCH'), 'session-identity-mismatch');
+        return;
+      }
+      if (
+        typeof msg.fromEncryptionPubKey === 'string' &&
+        msg.fromEncryptionPubKey.toLowerCase() !== this.authenticatedDirectPeer.encryptionPubKey
+      ) {
+        this.failHandshake(new Error('WS_DIRECT_SESSION_ENCRYPTION_KEY_MISMATCH'), 'encryption-key-mismatch');
+        return;
+      }
+    }
     if (typeof msg.from === 'string' && typeof msg.fromEncryptionPubKey === 'string') {
       this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
     }

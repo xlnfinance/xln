@@ -8,12 +8,17 @@ import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWs
 import { normalizeRuntimeId } from '../p2p/runtime-id';
 import { createStructuredLogger } from '../../infra/logger';
 import { createHelloChallengeRegistry } from '../p2p/hello-challenge';
+import {
+  canonicalizeRuntimeWsAudience,
+  createRelayHandshakeBinding,
+} from '../p2p/hello-transcript';
 
 type StandaloneRelayOptions = {
   host?: string;
   port: number;
   serverId: string;
   serverRuntimeId?: string;
+  audience?: string;
   onEntityInput?: (from: string | undefined, msg: RuntimeWsMessage, store: RelayStore) => Promise<void> | void;
 };
 
@@ -33,6 +38,12 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
   const store = createRelayStore(options.serverId);
   const localRuntimeId = normalizeRuntimeId(options.serverRuntimeId || options.serverId) || options.serverId;
   const helloChallenges = createHelloChallengeRegistry();
+  const listenHost = options.host || '0.0.0.0';
+  const configuredAudience = String(options.audience || process.env['XLN_RELAY_AUDIENCE'] || '').trim();
+  if (!configuredAudience && ['0.0.0.0', '::', '[::]'].includes(listenHost)) {
+    throw new Error('RELAY_AUDIENCE_REQUIRED_FOR_WILDCARD_LISTENER');
+  }
+  let relayAudience = '';
   let serverRef: Bun.Server<undefined> | null = null;
 
   const routerConfig: RelayRouterConfig = {
@@ -42,11 +53,11 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
       await options.onEntityInput?.(from, msg, store);
     },
     send: (ws, data) => ws.send(data),
-    consumeHelloChallenge: (ws, challenge) => helloChallenges.consume(ws, challenge),
+    consumeHelloChallenge: (ws, hello) => helloChallenges.consume(ws, hello),
   };
 
   const server = Bun.serve<undefined>({
-    hostname: options.host || '0.0.0.0',
+    hostname: listenHost,
     port: options.port,
     fetch(request) {
       if (request.headers.get('upgrade') !== 'websocket') {
@@ -58,7 +69,8 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
     websocket: {
       open(ws) {
         store.wsCounter += 1;
-        helloChallenges.issue(ws);
+        if (!relayAudience) throw new Error('RELAY_AUDIENCE_NOT_INITIALIZED');
+        helloChallenges.issue(ws, createRelayHandshakeBinding(relayAudience));
       },
       message(ws, message) {
         let msg: RuntimeWsMessage;
@@ -81,6 +93,9 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
   });
 
   serverRef = server;
+  relayAudience = canonicalizeRuntimeWsAudience(
+    configuredAudience || `ws://${listenHost}:${server.port}/`,
+  );
   relayStandaloneLog.info('service.listen', {
     serverId: options.serverId,
     host: options.host || '0.0.0.0',
