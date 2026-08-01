@@ -6,7 +6,9 @@ import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
 import { RuntimeWsClient } from '../network/p2p/ws-client';
 import {
+  canonicalizeRuntimeWsAudience,
   deserializeWsMessage,
+  directRuntimeWsAudience,
   hashHelloMessage,
   hashRuntimeWsFrame,
   serializeWsMessage,
@@ -20,6 +22,11 @@ const CLIENT_SEED = 'transport-session-auth-client';
 const SERVER_RUNTIME_ID = deriveSignerAddressSync(SERVER_SEED, '1').toLowerCase();
 const CLIENT_RUNTIME_ID = deriveSignerAddressSync(CLIENT_SEED, '1').toLowerCase();
 const CLIENT_KEY = pubKeyToHex(deriveEncryptionKeyPair(CLIENT_SEED).publicKey);
+let authClock = 0;
+const nextAuthTimestamp = (): number => {
+  authClock = Math.max(Date.now(), authClock + 1);
+  return authClock;
+};
 
 type FakeSocket = ReturnType<typeof makeSocket>;
 const makeSocket = () => {
@@ -40,7 +47,7 @@ const makeSocket = () => {
 };
 
 const signHello = (challenge: string, audience: string): RuntimeWsMessage => {
-  const timestamp = Date.now();
+  const timestamp = nextAuthTimestamp();
   return {
     type: 'hello',
     from: CLIENT_RUNTIME_ID,
@@ -64,7 +71,7 @@ const signFrame = (
   challenge: string,
   audience: string,
 ): RuntimeWsMessage => {
-  const timestamp = Date.now();
+  const timestamp = nextAuthTimestamp();
   return {
     ...message,
     auth: {
@@ -138,9 +145,9 @@ describe('bound websocket session authority', () => {
     const client = new RuntimeWsClient({
       url: `ws://127.0.0.1:${server.port}`,
       runtimeId: CLIENT_RUNTIME_ID,
+      helloAudience: canonicalizeRuntimeWsAudience(`ws://127.0.0.1:${server.port}`),
       signerId: '1',
       seed: CLIENT_SEED,
-      useHelloAuth: true,
       encryptionKeyPair: deriveEncryptionKeyPair(CLIENT_SEED),
       maxReconnectAttempts: 1,
       onError: error => errors.push(error.message),
@@ -222,5 +229,98 @@ describe('bound websocket session authority', () => {
     );
     expect(reboundRequests).toBe(0);
     expect(rebound.socket.sent.at(-1)?.error).toBe('Direct session encryption key mismatch');
+  });
+
+  test('direct and relay sessions reject an exact captured-frame replay', async () => {
+    let directAccepted = 0;
+    const direct = await openAuthenticatedDirect(() => {
+      directAccepted += 1;
+      return { ok: true };
+    });
+    const request = signFrame({
+      type: 'recovery_bundle_request',
+      id: 'captured-direct',
+      from: CLIENT_RUNTIME_ID,
+      fromEncryptionPubKey: CLIENT_KEY,
+      to: SERVER_RUNTIME_ID,
+      payload: { lookupKey: 'captured' },
+    }, direct.challenge, direct.audience);
+    const wire = serializeWsMessage(request);
+    await direct.route.websocket.message(direct.socket.ws, wire);
+    await direct.route.websocket.message(direct.socket.ws, wire);
+    expect(directAccepted).toBe(1);
+    expect(direct.socket.sent.at(-1)?.error).toBe('Session frame replay or reordering');
+
+    const registry = createHelloChallengeRegistry();
+    const relaySocket = makeSocket();
+    const binding = registry.issue(relaySocket.ws, 'wss://relay.test/relay');
+    relaySocket.sent.length = 0;
+    let relayAccepted = 0;
+    const config = {
+      store: createRelayStore(SERVER_RUNTIME_ID),
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => { relayAccepted += 1; },
+      send: (ws: FakeSocket['ws'], raw: Uint8Array) => ws.send(raw),
+      consumeHelloChallenge: (ws: object, claim: unknown) => registry.consume(ws, claim),
+    };
+    await relayRoute(config, relaySocket.ws, signHello(binding.challenge, binding.audience));
+    const relayFrame = signFrame({
+      type: 'entity_input_receipt',
+      id: 'captured-relay',
+      from: CLIENT_RUNTIME_ID,
+      fromEncryptionPubKey: CLIENT_KEY,
+      to: SERVER_RUNTIME_ID,
+      payload: { captured: true },
+    }, binding.challenge, binding.audience);
+    await relayRoute(config, relaySocket.ws, relayFrame);
+    await relayRoute(config, relaySocket.ws, relayFrame);
+    expect(relayAccepted).toBe(1);
+    expect(relaySocket.sent.at(-1)?.error).toBe('Session frame replay or reordering');
+  });
+
+  test('direct client rejects an unsigned acknowledgement from the claimed target runtime', async () => {
+    const errors: string[] = [];
+    const audience = directRuntimeWsAudience(SERVER_RUNTIME_ID);
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request, bunServer) {
+        if (request.headers.get('upgrade') === 'websocket' && bunServer.upgrade(request)) return;
+        return new Response('websocket only', { status: 400 });
+      },
+      websocket: {
+        open(ws) {
+          ws.send(serializeWsMessage({
+            type: 'hello_challenge',
+            challenge: `0x${'34'.repeat(32)}`,
+            audience,
+          }));
+        },
+        message(ws) {
+          ws.send(serializeWsMessage({
+            type: 'hello_ack',
+            from: SERVER_RUNTIME_ID,
+            fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(SERVER_SEED).publicKey),
+            to: CLIENT_RUNTIME_ID,
+          }));
+        },
+      },
+    });
+    servers.push(server);
+    const client = new RuntimeWsClient({
+      url: `ws://127.0.0.1:${server.port}`,
+      runtimeId: CLIENT_RUNTIME_ID,
+      helloAudience: audience,
+      signerId: '1',
+      seed: CLIENT_SEED,
+      encryptionKeyPair: deriveEncryptionKeyPair(CLIENT_SEED),
+      maxReconnectAttempts: 1,
+      onError: error => errors.push(error.message),
+    });
+    clients.push(client);
+    await client.connect();
+    for (let attempt = 0; attempt < 100 && errors.length === 0; attempt += 1) await Bun.sleep(5);
+    expect(errors.some(error => error.includes('WS_DIRECT_SERVER_AUTH_INVALID'))).toBe(true);
+    expect(client.isOpen()).toBe(false);
   });
 });

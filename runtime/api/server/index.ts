@@ -45,7 +45,7 @@ import { createRelayStore, pushDebugEvent, removeClient } from '../../network/re
 import { openRelayIncidentJournal } from '../../network/relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../../network/relay/debug-http';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../../network/relay/router';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../../network/p2p/ws-protocol';
+import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsRelayAudience, serializeWsMessage, type RuntimeWsMessage } from '../../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../../network/p2p/hello-challenge';
 import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
@@ -819,7 +819,8 @@ type ServerSession = {
   env: RuntimeReplica | null;
   routerConfig: RelayRouterConfig | null;
   relayHelloChallenges: ReturnType<typeof createHelloChallengeRegistry>;
-  relayAudiences: ReadonlySet<string>;
+  internalRelayAudience: string;
+  publicRelayAudience: string | null;
 };
 
 const handleHttpRequest = async (
@@ -834,9 +835,13 @@ const handleHttpRequest = async (
 
   if (req.headers.get('upgrade') === 'websocket') {
     const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
-    const audience = canonicalizeRuntimeWsAudience(req.url);
+    const requestAudience = canonicalizeRuntimeWsAudience(req.url);
+    const relayAudience = wsType === 'relay'
+      ? resolveRuntimeWsRelayAudience(req.url, session.internalRelayAudience, session.publicRelayAudience)
+      : null;
+    const audience = relayAudience ?? requestAudience;
     // Never mint an authentication audience from an arbitrary Host header.
-    if (wsType && (wsType === 'rpc' || session.relayAudiences.has(audience))
+    if (wsType && (wsType === 'rpc' || !!relayAudience)
       && server.upgrade(req, { data: { type: wsType, clientIp: resolveRequestClientIp(req), audience } })) {
       return undefined;
     }
@@ -1334,9 +1339,10 @@ const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
     env: null,
     routerConfig: null,
     relayHelloChallenges: createHelloChallengeRegistry(),
-    relayAudiences: new Set([resolveConfiguredRelayUrl(options.port), process.env['PUBLIC_RELAY_URL']]
-      .filter((value): value is string => !!value)
-      .map(canonicalizeRuntimeWsAudience)),
+    internalRelayAudience: canonicalizeRuntimeWsAudience(resolveConfiguredRelayUrl(options.port)),
+    publicRelayAudience: process.env['PUBLIC_RELAY_URL']
+      ? canonicalizeRuntimeWsAudience(process.env['PUBLIC_RELAY_URL'])
+      : null,
   };
   return {
     internalRelayUrl: resolveConfiguredRelayUrl(options.port),

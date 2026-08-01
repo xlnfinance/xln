@@ -6,6 +6,7 @@ import { deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
 import { stopRuntimeP2P, stopRuntimeP2PAndWait } from '../runtime/p2p-lifecycle';
 import { createEmptyEnv } from '../runtime';
 import type { RuntimeReplica } from '../runtime/types';
+import { canonicalizeRuntimeWsAudience } from '../network/p2p/ws-protocol';
 
 const RUNTIME_ID = `0x${'11'.repeat(20)}`;
 
@@ -59,7 +60,7 @@ test('direct runtime quiesce is info-level backpressure, not a transport warning
   expect(warnings).toEqual(['WS_DIRECT_ERROR']);
 });
 
-test('websocket client remains connecting until the transport handshake settles', async () => {
+test('websocket client remains closed until the authenticated hello settles', async () => {
   let releaseHandshake!: () => void;
   const handshakeGate = new Promise<void>((resolve) => { releaseHandshake = resolve; });
   const server = Bun.serve({
@@ -79,6 +80,7 @@ test('websocket client remains connecting until the transport handshake settles'
   const client = new RuntimeWsClient({
     url: `ws://127.0.0.1:${server.port}/relay`,
     runtimeId: RUNTIME_ID,
+    helloAudience: canonicalizeRuntimeWsAudience(`ws://127.0.0.1:${server.port}/relay`),
     encryptionKeyPair: deriveEncryptionKeyPair('p2p-handshake-lifecycle'),
     maxReconnectAttempts: 1,
   });
@@ -104,13 +106,14 @@ test('websocket client remains connecting until the transport handshake settles'
   expect(connectingDuringHandshake).toBe(true);
   expect(duplicateConnectError).toBeNull();
   expect(generationAfterDuplicateConnect).toBe(generationDuringHandshake);
-  expect(openedAfterHandshake).toBe(true);
+  expect(openedAfterHandshake).toBe(false);
 });
 
 test('websocket shutdown waits for the transport close handshake', async () => {
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
     runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
   });
   let closeObserved = false;
   const socket = {
@@ -142,6 +145,7 @@ test('websocket shutdown rejects a missing close handshake', async () => {
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
     runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
   });
   const socket = {
     binaryType: 'arraybuffer',
@@ -162,6 +166,7 @@ test('websocket shutdown observes a close racing listener registration', async (
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
     runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
   });
   let closeCalls = 0;
   const socket = {
@@ -185,6 +190,7 @@ test('connect racing terminal shutdown cannot publish a late socket', async () =
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
     runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
   });
   const internals = client as unknown as { ws: { close: () => void } | null };
   const connecting = client.connect().catch(() => {});
@@ -202,6 +208,7 @@ test('failed stale-socket drain retains the handle for retry', async () => {
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
     runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
   });
   const socket = {
     binaryType: 'arraybuffer',
@@ -232,6 +239,7 @@ test('concurrent websocket shutdown callers await the same drain', async () => {
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
     runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
   });
   let closeObserved = false;
   const socket = {
@@ -264,6 +272,7 @@ test('synchronous websocket close retains ownership for a later awaited drain', 
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
     runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
   });
   let closeObserved = false;
   const socket = {
@@ -299,6 +308,7 @@ test('synchronous websocket close keeps a missing handshake loud during awaited 
   const client = new RuntimeWsClient({
     url: 'ws://127.0.0.1:1/relay',
     runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
   });
   const socket = {
     binaryType: 'arraybuffer',

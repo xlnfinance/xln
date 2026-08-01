@@ -3,10 +3,9 @@
  *
  * SECURITY MODEL: P2P layer is a "dumb pipe" - transport only.
  *
- * This layer does NOT provide replay protection for messages. That's intentional:
- * - Account consensus layer handles replay protection via frame heights
- * - Each accountFrame has monotonic height - can't replay height=5 after height=6 exists
- * - Entity transactions are signed and verified at consensus layer
+ * Transport rejects replayed or reordered signed frames within each WebSocket
+ * session. Account/Entity consensus still owns semantic transaction replay via
+ * committed frame heights; the transport fence only prevents socket injection.
  *
  * Hello auth proves runtimeId ownership and binds the advertised encryption key
  * to a server-issued, single-use challenge. This prevents a recorded hello from
@@ -294,6 +293,17 @@ export const canonicalizeRuntimeWsAudience = (input: string): string => {
   if (parsed.username || parsed.password) throw new Error('WS_AUDIENCE_CREDENTIALS_FORBIDDEN');
   const pathname = parsed.pathname.length > 1 ? parsed.pathname.replace(/\/+$/, '') : parsed.pathname || '/';
   return `${protocol}//${parsed.host.toLowerCase()}${pathname}${parsed.search}`;
+};
+
+export const resolveRuntimeWsRelayAudience = (
+  requestUrl: string,
+  internalUrl: string,
+  publicUrl?: string | null,
+): string | null => {
+  const requestAudience = canonicalizeRuntimeWsAudience(requestUrl);
+  if (publicUrl) return canonicalizeRuntimeWsAudience(publicUrl);
+  const internalAudience = canonicalizeRuntimeWsAudience(internalUrl);
+  return requestAudience === internalAudience ? internalAudience : null;
 };
 
 export const directRuntimeWsAudience = (runtimeId: string): string =>

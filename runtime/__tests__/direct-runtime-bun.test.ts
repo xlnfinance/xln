@@ -1,8 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync, signDigest } from '../account/crypto';
-import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
+import { createDirectRuntimeWsRoute as createProductionDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
-import { hashHelloMessage, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 
@@ -13,6 +13,7 @@ const makeAuthedHello = (
   challenge?: string,
   audience = '',
 ): RuntimeWsMessage => {
+  signerByRuntime.set(runtimeId.toLowerCase(), { seed, signerId });
   const timestamp = Date.now();
   const nonce = challenge ?? `nonce-${runtimeId.slice(-6)}-${timestamp}`;
   const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(seed).publicKey);
@@ -28,13 +29,99 @@ const makeAuthedHello = (
   };
 };
 
+const signerByRuntime = new Map<string, { seed: string; signerId: string }>();
+const socketChallenge = new Map<object, { challenge: string; audience: string }>();
+let testAuthClock = 0;
+const nextTestAuthTimestamp = (): number => {
+  testAuthClock = Math.max(Date.now(), testAuthClock + 1);
+  return testAuthClock;
+};
+
+afterEach(() => {
+  signerByRuntime.clear();
+  socketChallenge.clear();
+});
+
+const createDirectRuntimeWsRoute = (
+  options: Parameters<typeof createProductionDirectRuntimeWsRoute>[0],
+): ReturnType<typeof createProductionDirectRuntimeWsRoute> => {
+  const route = createProductionDirectRuntimeWsRoute(options);
+  const sessions = new Map<object, { challenge: string; audience: string }>();
+  const productionMessage = route.websocket.message;
+  return {
+    ...route,
+    websocket: {
+      ...route.websocket,
+      async message(ws, raw) {
+        let message: RuntimeWsMessage;
+        try {
+          message = deserializeWsMessage(raw);
+        } catch {
+          await productionMessage(ws, raw);
+          return;
+        }
+        const identity = message.from ? signerByRuntime.get(message.from.toLowerCase()) : undefined;
+        if (message.type === 'hello' && identity) {
+          const binding = socketChallenge.get(ws);
+          if (!binding) throw new Error('TEST_DIRECT_CHALLENGE_MISSING');
+          const timestamp = nextTestAuthTimestamp();
+          message = {
+            ...message,
+            timestamp,
+            audience: binding.audience,
+            auth: {
+              nonce: binding.challenge,
+              timestamp,
+              signature: signDigest(
+                identity.seed,
+                identity.signerId,
+                hashHelloMessage(
+                  message.from!,
+                  message.fromEncryptionPubKey!,
+                  timestamp,
+                  binding.challenge,
+                  binding.audience,
+                ),
+              ),
+            },
+          };
+          sessions.set(ws, binding);
+        } else if (identity) {
+          const binding = sessions.get(ws);
+          if (binding) {
+            const timestamp = nextTestAuthTimestamp();
+            message = {
+              ...message,
+              auth: {
+                nonce: binding.challenge,
+                timestamp,
+                signature: signDigest(
+                  identity.seed,
+                  identity.signerId,
+                  hashRuntimeWsFrame(message, binding.audience, binding.challenge, timestamp),
+                ),
+              },
+            };
+          }
+        }
+        await productionMessage(ws, serializeWsMessage(message));
+      },
+    },
+  };
+};
+
 const makeFakeWs = () => {
   const sent: RuntimeWsMessage[] = [];
   const closed: Array<{ code?: number; reason?: string }> = [];
   const ws = {
     readyState: 1,
     send(raw: string | Uint8Array) {
-      sent.push(deserializeWsMessage(raw));
+      const message = deserializeWsMessage(raw);
+      if (message.type === 'hello_challenge') {
+        socketChallenge.set(this, { challenge: message.challenge!, audience: message.audience! });
+      } else {
+        sent.push(message);
+      }
       return true;
     },
     close(code?: number, reason?: string) {
@@ -47,7 +134,7 @@ const makeFakeWs = () => {
 
 describe('direct runtime websocket route', () => {
   test('marks a successful websocket upgrade handled so HTTP dispatch cannot fall through', () => {
-    const route = createDirectRuntimeWsRoute({
+    const route = createProductionDirectRuntimeWsRoute({
       runtimeId: deriveSignerAddressSync('direct-upgrade-server', '1').toLowerCase(),
       runtimeSeed: 'direct-upgrade-server',
       onEntityInputs: () => undefined,
@@ -74,7 +161,7 @@ describe('direct runtime websocket route', () => {
     const clientSeed = 'direct-challenge-client';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
     const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
-    const route = createDirectRuntimeWsRoute({
+    const route = createProductionDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
       onEntityInputs: () => {},
@@ -82,8 +169,9 @@ describe('direct runtime websocket route', () => {
 
     const forged = makeFakeWs();
     route.websocket.open(forged.ws);
-    const forgedChallenge = forged.sent[0]?.challenge;
-    const forgedAudience = forged.sent[0]?.audience;
+    const forgedBinding = socketChallenge.get(forged.ws)!;
+    const forgedChallenge = forgedBinding.challenge;
+    const forgedAudience = forgedBinding.audience;
     const signed = makeAuthedHello(clientSeed, clientRuntimeId, '1', forgedChallenge, forgedAudience);
     await route.websocket.message(forged.ws, serializeWsMessage({
       ...signed,
@@ -93,14 +181,16 @@ describe('direct runtime websocket route', () => {
 
     const accepted = makeFakeWs();
     route.websocket.open(accepted.ws);
-    const acceptedChallenge = accepted.sent[0]?.challenge;
-    const acceptedAudience = accepted.sent[0]?.audience;
+    const acceptedBinding = socketChallenge.get(accepted.ws)!;
+    const acceptedChallenge = acceptedBinding.challenge;
+    const acceptedAudience = acceptedBinding.audience;
     const acceptedHello = makeAuthedHello(clientSeed, clientRuntimeId, '1', acceptedChallenge, acceptedAudience);
     await route.websocket.message(accepted.ws, serializeWsMessage(acceptedHello));
     expect(accepted.sent.at(-1)).toMatchObject({
       type: 'hello_ack',
       from: serverRuntimeId,
       to: clientRuntimeId,
+      auth: expect.objectContaining({ nonce: acceptedChallenge }),
     });
     route.websocket.close(accepted.ws);
 
@@ -132,7 +222,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onEntityInputs: () => {},
     });
     const { ws, sent } = makeFakeWs();
@@ -143,7 +232,9 @@ describe('direct runtime websocket route', () => {
     const sentBeforeDebug = sent.length;
     await route.websocket.message(ws, serializeWsMessage({
       type: 'debug_event',
+      id: 'client-debug',
       from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
       to: serverRuntimeId,
       payload: { level: 'info', code: 'RECEIPT_DEFERRED' },
     }));
@@ -161,7 +252,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onEntityInputs: (from, envelope, timestamp) => {
         received.push({ from, envelope, timestamp });
       },
@@ -269,7 +359,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onEntityInputs: () => {},
       onReliableReceipt: (from, inboundReceipt) => {
         received.push({ from, receipt: inboundReceipt });
@@ -294,6 +383,7 @@ describe('direct runtime websocket route', () => {
       v: 1,
       type: 'entity_input_receipt',
       from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
       to: serverRuntimeId,
       payload: inboundReceipt,
     }, 'msgpack'));
@@ -310,7 +400,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onEntityInputs: (from, envelope, timestamp) => {
         received.push({ from, envelope, timestamp });
       },
@@ -357,7 +446,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onEntityInputs: () => {
         received += 1;
       },
@@ -399,7 +487,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onRecoveryBundleRequest: (from, lookupKey) => {
         requests.push({ from, lookupKey });
         return {
@@ -449,7 +536,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onRecoveryBundleRequest: () => {
         calls += 1;
         return {};
@@ -512,7 +598,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onEntityInputs: () => {},
     });
 
@@ -589,7 +674,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onEntityInputs: () => undefined,
     });
     const { ws, sent } = makeFakeWs();
@@ -651,7 +735,6 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      requireHelloAuth: false,
       onEntityInputs: () => undefined,
     });
     const { ws } = makeFakeWs();

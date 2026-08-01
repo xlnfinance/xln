@@ -543,9 +543,9 @@ describe('remote runtime import manager utilities', () => {
     expect(clientOptions[0]).toMatchObject({
       url: 'ws://127.0.0.1:8092/ws',
       runtimeId: requesterRuntimeId,
+      helloAudience: `xln-runtime:${peerRuntimeId}`,
       signerId: '7',
       seed: 'test test test test test test test test test test test junk',
-      useHelloAuth: true,
       maxReconnectAttempts: 1,
     });
     expect((clientOptions[0] as { encryptionKeyPair?: { publicKey?: Uint8Array; privateKey?: Uint8Array } })

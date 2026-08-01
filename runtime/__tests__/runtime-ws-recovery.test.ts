@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
 import { RuntimeWsClient } from '../network/p2p/ws-client';
-import { deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
+import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
 import { startStandaloneRelayServer, type StandaloneRelayServer } from '../network/relay/standalone-server';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
@@ -50,9 +50,9 @@ const makeClient = (options: {
   const client = new RuntimeWsClient({
     url: options.url,
     runtimeId: options.runtimeId,
+    helloAudience: canonicalizeRuntimeWsAudience(options.url),
     signerId: options.signerId,
     seed: options.seed,
-    useHelloAuth: true,
     encryptionKeyPair: deriveEncryptionKeyPair(options.seed),
     getTargetEncryptionKey: options.getTargetEncryptionKey,
     onEntityInputs: options.onEntityInputs,

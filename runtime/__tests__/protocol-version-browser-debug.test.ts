@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   deserializeWsMessage,
   hashHelloMessage,
+  resolveRuntimeWsRelayAudience,
   serializeWsMessage,
 } from '../network/p2p/ws-protocol';
 import {
@@ -34,6 +35,18 @@ describe('global network protocol version', () => {
       'nonce-1',
       'wss://xln.finance/relay',
     )).toBe('0x4434ed36645e6be2c9cae9321c1bd2f3032399ab3e40abb613dcddba46a98640');
+  });
+
+  test('binds reverse-proxy relay challenges to the configured public audience', () => {
+    expect(resolveRuntimeWsRelayAudience(
+      'ws://runtime-internal:8080/relay',
+      'ws://127.0.0.1:8080/relay',
+      'wss://xln.finance/relay',
+    )).toBe('wss://xln.finance/relay');
+    expect(resolveRuntimeWsRelayAudience(
+      'ws://untrusted-host:8080/relay',
+      'ws://127.0.0.1:8080/relay',
+    )).toBeNull();
   });
 });
 

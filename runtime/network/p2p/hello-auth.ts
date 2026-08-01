@@ -62,6 +62,7 @@ export const verifyRuntimeWsFrameAuth = (
   maxSkewMs: number,
   audience: string,
   nonce: string,
+  lastTimestamp: number,
 ): string | null => {
   if (!auth?.signature || auth.nonce !== nonce || !Number.isSafeInteger(auth.timestamp)) {
     return 'Missing or invalid session frame auth';
@@ -79,5 +80,8 @@ export const verifyRuntimeWsFrameAuth = (
   } catch (error) {
     return `Frame signature invalid: ${(error as Error).message}`;
   }
-  return recovered === runtimeId.toLowerCase() ? null : 'Frame signature does not match session runtimeId';
+  if (recovered !== runtimeId.toLowerCase()) return 'Frame signature does not match session runtimeId';
+  // WebSocket delivery is ordered, so a signed timestamp is also the smallest
+  // session-bound replay fence: accepting equality would replay the exact frame.
+  return auth.timestamp > lastTimestamp ? null : 'Session frame replay or reordering';
 };

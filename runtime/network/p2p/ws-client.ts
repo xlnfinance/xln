@@ -1,6 +1,5 @@
 import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import {
-  canonicalizeRuntimeWsAudience,
   deserializeWsMessage,
   hashHelloMessage,
   hashRuntimeWsFrame,
@@ -15,8 +14,10 @@ import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { createStructuredLogger } from '../../infra/logger';
 import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
+import { verifyRuntimeWsFrameAuth } from './hello-auth';
 
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
+const DEFAULT_WS_AUTH_SKEW_MS = 5 * 60 * 1000;
 const wsLog = createStructuredLogger('runtime.wsClient');
 
 // Separate interfaces for browser and Node.js WebSocket implementations
@@ -119,9 +120,8 @@ export type RuntimeWsClientOptions = {
   runtimeId: string;
   signerId?: string;
   seed?: Uint8Array | string;
-  useHelloAuth?: boolean;
   /** Exact server-selected hello audience; direct peers use their runtime identity. */
-  helloAudience?: string;
+  helloAudience: string;
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
@@ -204,12 +204,15 @@ export class RuntimeWsClient {
   private helloAcknowledged = false;
   private helloAudience: string | null = null;
   private helloNonce: string | null = null;
+  private directPeerEncryptionPubKey: string | null = null;
+  private lastInboundAuthTimestamp = 0;
   private readonly maxReconnectAttempts: number;
   private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
 
   constructor(options: RuntimeWsClientOptions) {
     failfastAssert(!!options.url, 'WS_INIT_URL_MISSING', 'RuntimeWsClient url is required');
     failfastAssert(!!options.runtimeId, 'WS_INIT_RUNTIME_MISSING', 'RuntimeWsClient runtimeId is required');
+    failfastAssert(!!options.helloAudience, 'WS_INIT_AUDIENCE_MISSING', 'RuntimeWsClient audience is required');
     failfastAssert(
       isRuntimeId(options.runtimeId),
       'WS_INIT_RUNTIME_INVALID',
@@ -236,6 +239,8 @@ export class RuntimeWsClient {
     this.helloAcknowledged = false;
     this.helloAudience = null;
     this.helloNonce = null;
+    this.directPeerEncryptionPubKey = null;
+    this.lastInboundAuthTimestamp = 0;
     this.suppressNextClose = false;
     const generation = ++this.lifecycleGeneration;
     const attempt = this.connectForGeneration(generation);
@@ -296,12 +301,6 @@ export class RuntimeWsClient {
   private handleSocketOpen(generation: number): void {
     if (this.closed || generation !== this.lifecycleGeneration) return;
     wsLog.debug('connected', { runtimeId: this.options.runtimeId, url: this.options.url });
-    if (!this.options.useHelloAuth) {
-      this.connecting = false;
-      this.reconnectAttempts = 0;
-      if (!this.sendHello()) return;
-      this.options.onOpen?.();
-    }
   }
 
   private handleSocketClose(generation: number, codeInput: number, reasonInput: string, wasClean?: boolean): void {
@@ -468,64 +467,49 @@ export class RuntimeWsClient {
     if (!encryptionKeyPair) {
       throw new Error(`WS_HELLO_ENCRYPTION_KEY_MISSING: runtimeId=${this.options.runtimeId}`);
     }
-    if (this.options.useHelloAuth) {
-      if (!this.options.signerId || !this.options.seed) {
-        const error = new Error(`WS_HELLO_AUTH_KEY_MISSING: runtimeId=${this.options.runtimeId}`);
-        this.options.onError?.(error);
-        this.ws?.close();
-        return false;
-      }
-      if (!challengeMessage?.challenge || !challengeMessage.audience) {
-        this.options.onError?.(new Error('WS_HELLO_CHALLENGE_MISSING'));
-        this.ws?.close();
-        return false;
-      }
-      // Relay routers require signed hello; direct test servers can still opt out.
-      try {
-        const expectedAudience = this.options.helloAudience
-          ?? canonicalizeRuntimeWsAudience(this.options.url);
-        if (challengeMessage.audience !== expectedAudience) {
-          throw new Error(
-            `WS_HELLO_AUDIENCE_MISMATCH:expected=${expectedAudience}:received=${challengeMessage.audience}`,
-          );
-        }
-        const timestamp = nextTimestamp();
-        const encryptionPubKey = pubKeyToHex(encryptionKeyPair.publicKey);
-        const nonce = challengeMessage.challenge;
-        const digest = hashHelloMessage(
-          this.options.runtimeId,
-          encryptionPubKey,
-          timestamp,
-          nonce,
-          expectedAudience,
-        );
-        const signature = signDigest(this.options.seed, this.options.signerId, digest);
-        this.sendRaw({
-          type: 'hello',
-          from: this.options.runtimeId,
-          fromEncryptionPubKey: encryptionPubKey,
-          timestamp,
-          audience: expectedAudience,
-          auth: { nonce, signature, timestamp },
-        });
-        this.helloAudience = expectedAudience;
-        this.helloNonce = nonce;
-        this.helloSent = true;
-        return true;
-      } catch (error) {
-        this.options.onError?.(error as Error);
-        this.ws?.close();
-        return false;
-      }
+    if (!this.options.signerId || !this.options.seed) {
+      const error = new Error(`WS_HELLO_AUTH_KEY_MISSING: runtimeId=${this.options.runtimeId}`);
+      this.options.onError?.(error);
+      this.ws?.close();
+      return false;
     }
-    this.sendRaw({
-      type: 'hello',
-      from: this.options.runtimeId,
-      fromEncryptionPubKey: pubKeyToHex(encryptionKeyPair.publicKey),
-      timestamp: nextTimestamp(),
-    });
-    this.helloSent = true;
-    return true;
+    if (!challengeMessage?.challenge || !challengeMessage.audience) {
+      this.options.onError?.(new Error('WS_HELLO_CHALLENGE_MISSING'));
+      this.ws?.close();
+      return false;
+    }
+    try {
+      const expectedAudience = this.options.helloAudience;
+      if (challengeMessage.audience !== expectedAudience) {
+        throw new Error(
+          `WS_HELLO_AUDIENCE_MISMATCH:expected=${expectedAudience}:received=${challengeMessage.audience}`,
+        );
+      }
+      const timestamp = nextTimestamp();
+      const encryptionPubKey = pubKeyToHex(encryptionKeyPair.publicKey);
+      const nonce = challengeMessage.challenge;
+      const signature = signDigest(
+        this.options.seed,
+        this.options.signerId,
+        hashHelloMessage(this.options.runtimeId, encryptionPubKey, timestamp, nonce, expectedAudience),
+      );
+      this.sendRaw({
+        type: 'hello',
+        from: this.options.runtimeId,
+        fromEncryptionPubKey: encryptionPubKey,
+        timestamp,
+        audience: expectedAudience,
+        auth: { nonce, signature, timestamp },
+      });
+      this.helloAudience = expectedAudience;
+      this.helloNonce = nonce;
+      this.helloSent = true;
+      return true;
+    } catch (error) {
+      this.options.onError?.(error as Error);
+      this.ws?.close();
+      return false;
+    }
   }
 
   private dispatchMessage(data: string | Buffer | ArrayBuffer, generation: number): void {
@@ -564,19 +548,43 @@ export class RuntimeWsClient {
 
   private handleHandshakeMessage(msg: RuntimeWsMessage): boolean {
     if (msg.type === 'hello_challenge') {
-      if (this.options.useHelloAuth) this.sendHello(msg);
+      this.sendHello(msg);
       return true;
     }
     if (msg.type === 'hello_ack') {
       const expectedRuntimeId = this.options.runtimeId.toLowerCase();
       const acknowledgedRuntimeId = String(msg.to || '').toLowerCase();
-      if (!this.options.useHelloAuth || !this.helloSent || acknowledgedRuntimeId !== expectedRuntimeId) {
+      if (!this.helloSent || acknowledgedRuntimeId !== expectedRuntimeId) {
         const error = new Error(
           `WS_HELLO_ACK_INVALID: expected=${expectedRuntimeId} received=${acknowledgedRuntimeId || 'missing'}`,
         );
         this.options.onError?.(error);
         this.ws?.close();
         return true;
+      }
+      const directPeerRuntimeId = this.helloAudience?.startsWith('xln-runtime:')
+        ? normalizeRuntimeId(this.helloAudience.slice('xln-runtime:'.length))
+        : '';
+      if (directPeerRuntimeId) {
+        const peerKey = typeof msg.fromEncryptionPubKey === 'string' ? msg.fromEncryptionPubKey.toLowerCase() : '';
+        const authError = normalizeRuntimeId(msg.from || '') !== directPeerRuntimeId || !peerKey
+          ? 'Direct hello acknowledgement identity missing or mismatched'
+          : verifyRuntimeWsFrameAuth(
+              directPeerRuntimeId,
+              msg,
+              msg.auth,
+              DEFAULT_WS_AUTH_SKEW_MS,
+              this.helloAudience!,
+              this.helloNonce!,
+              0,
+            );
+        if (authError) {
+          this.options.onError?.(new Error(`WS_DIRECT_SERVER_AUTH_INVALID:${authError}`));
+          this.ws?.close();
+          return true;
+        }
+        this.directPeerEncryptionPubKey = peerKey;
+        this.lastInboundAuthTimestamp = msg.auth!.timestamp;
       }
       if (this.helloAcknowledged) return true;
       this.helloAcknowledged = true;
@@ -595,6 +603,33 @@ export class RuntimeWsClient {
       this.options.onError?.(new Error(msg.error || 'Unknown error'));
       return true;
     }
+    return false;
+  }
+
+  private verifyInboundDirectFrame(msg: RuntimeWsMessage): boolean {
+    const directPeerRuntimeId = this.helloAudience?.startsWith('xln-runtime:')
+      ? normalizeRuntimeId(this.helloAudience.slice('xln-runtime:'.length))
+      : '';
+    if (!directPeerRuntimeId) return true;
+    const peerKey = typeof msg.fromEncryptionPubKey === 'string' ? msg.fromEncryptionPubKey.toLowerCase() : '';
+    const verifiedError = normalizeRuntimeId(msg.from || '') !== directPeerRuntimeId
+      || peerKey !== this.directPeerEncryptionPubKey
+      ? 'Direct server identity or encryption key mismatch'
+      : verifyRuntimeWsFrameAuth(
+          directPeerRuntimeId,
+          msg,
+          msg.auth,
+          DEFAULT_WS_AUTH_SKEW_MS,
+          this.helloAudience!,
+          this.helloNonce!,
+          this.lastInboundAuthTimestamp,
+        );
+    if (!verifiedError) {
+      this.lastInboundAuthTimestamp = msg.auth!.timestamp;
+      return true;
+    }
+    this.options.onError?.(new Error(`WS_DIRECT_SERVER_AUTH_INVALID:${verifiedError}`));
+    this.ws?.close();
     return false;
   }
 
@@ -733,6 +768,7 @@ export class RuntimeWsClient {
     if (this.closed || generation !== this.lifecycleGeneration) return;
     const msg = this.decodeMessage(raw);
     if (!msg || this.handleHandshakeMessage(msg)) return;
+    if (!this.verifyInboundDirectFrame(msg)) return;
     if (typeof msg.from === 'string' && typeof msg.fromEncryptionPubKey === 'string') {
       this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
     }
@@ -945,7 +981,7 @@ export class RuntimeWsClient {
           { msgType: outboundMsg.type },
         );
       }
-      if (this.options.useHelloAuth && outboundMsg.type !== 'hello') {
+      if (outboundMsg.type !== 'hello') {
         failfastAssert(
           !!this.options.seed && !!this.options.signerId && !!this.helloAudience && !!this.helloNonce,
           'WS_SEND_SESSION_AUTH_MISSING',
@@ -983,7 +1019,7 @@ export class RuntimeWsClient {
 
   isOpen(): boolean {
     const transportOpen = !!this.ws && 'readyState' in this.ws && this.ws.readyState === 1;
-    return transportOpen && (!this.options.useHelloAuth || this.helloAcknowledged);
+    return transportOpen && this.helloAcknowledged;
   }
 
   isConnecting(): boolean {

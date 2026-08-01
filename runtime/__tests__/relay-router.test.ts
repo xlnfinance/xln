@@ -1,10 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Profile } from '../entity/profile';
-import { relayRoute } from '../network/relay/router';
+import { relayRoute as productionRelayRoute } from '../network/relay/router';
 import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../network/relay/store';
-import { deserializeWsMessage, hashHelloMessage, makeHelloNonce } from '../network/p2p/ws-protocol';
+import { deserializeWsMessage, hashHelloMessage, hashRuntimeWsFrame, makeHelloNonce } from '../network/p2p/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { encryptJSON, deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
 import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
@@ -42,6 +42,87 @@ const signedHello = (runtimeId: string, seed: string, key: string, signerId = '1
   fromEncryptionPubKey: key,
   auth: helloAuth(runtimeId, seed, key, signerId),
 });
+
+const TEST_RELAY_AUDIENCE = 'wss://relay.test/relay';
+const relayIdentity = new Map([
+  [RUNTIME_A.toLowerCase(), { seed: SEED_A, signerId: '1' }],
+  [RUNTIME_B.toLowerCase(), { seed: SEED_B, signerId: '2' }],
+]);
+type TestAuthState = {
+  pending: Map<object, { challenge: string; audience: string }>;
+  sessions: Map<object, { challenge: string; audience: string }>;
+};
+const relayAuthStates = new Map<object, TestAuthState>();
+let relayAuthCounter = 0;
+let relayAuthClock = 0;
+afterEach(() => relayAuthStates.clear());
+const relayRoute = async (
+  config: Parameters<typeof productionRelayRoute>[0],
+  ws: Parameters<typeof productionRelayRoute>[1],
+  rawMessage: Parameters<typeof productionRelayRoute>[2],
+): Promise<boolean> => {
+  const configKey = config as object;
+  const state = relayAuthStates.get(configKey) ?? {
+    pending: new Map(),
+    sessions: new Map(),
+  };
+  relayAuthStates.set(configKey, state);
+  const consumeHelloChallenge = (socket: object, claim: unknown) => {
+    const binding = state.pending.get(socket);
+    state.pending.delete(socket);
+    const received = claim as { challenge?: unknown; audience?: unknown } | null;
+    return binding && received?.challenge === binding.challenge && received.audience === binding.audience
+      ? binding
+      : null;
+  };
+  let message = rawMessage;
+  const identity = message.from ? relayIdentity.get(message.from.toLowerCase()) : undefined;
+  if (message.type === 'hello' && identity) {
+    relayAuthCounter += 1;
+    const binding = { challenge: `relay-test-${relayAuthCounter}`, audience: TEST_RELAY_AUDIENCE };
+    const timestamp = relayAuthClock = Math.max(Date.now(), relayAuthClock + 1);
+    state.pending.set(ws as object, binding);
+    state.sessions.set(ws as object, binding);
+    message = {
+      ...message,
+      timestamp,
+      audience: binding.audience,
+      auth: {
+        nonce: binding.challenge,
+        timestamp,
+        signature: signDigest(
+          identity.seed,
+          identity.signerId,
+          hashHelloMessage(
+            message.from!,
+            message.fromEncryptionPubKey!,
+            timestamp,
+            binding.challenge,
+            binding.audience,
+          ),
+        ),
+      },
+    };
+  } else if (identity) {
+    const binding = state.sessions.get(ws as object);
+    if (binding) {
+      const timestamp = relayAuthClock = Math.max(Date.now(), relayAuthClock + 1);
+      message = {
+        ...message,
+        auth: {
+          nonce: binding.challenge,
+          timestamp,
+          signature: signDigest(
+            identity.seed,
+            identity.signerId,
+            hashRuntimeWsFrame(message, binding.audience, binding.challenge, timestamp),
+          ),
+        },
+      };
+    }
+  }
+  return productionRelayRoute({ ...config, consumeHelloChallenge }, ws, message);
+};
 
 const buildProfile = (
   entityId: string,
@@ -92,14 +173,18 @@ describe('relay-router gossip fanout', () => {
   test('records a nonzero message size for tagged BigInt payloads', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const ws: FakeWs = { label: 'bigint' };
-    await relayRoute({
+    const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: () => {},
-    }, ws, {
+    };
+    await relayRoute(config, ws, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, ws, {
       type: 'unsupported_bigint_probe',
+      id: 'bigint-probe',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
       amount: 1n,
     });
 
@@ -112,7 +197,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -160,7 +244,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -219,7 +302,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -274,7 +356,6 @@ describe('relay-router gossip fanout', () => {
     let failPendingOnce = true;
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -344,7 +425,6 @@ describe('relay-router gossip fanout', () => {
     let freshCloseCount = 0;
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -387,7 +467,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -414,7 +493,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -463,7 +541,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -569,7 +646,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -621,7 +697,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -667,7 +742,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -723,7 +797,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -775,7 +848,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -812,12 +884,10 @@ describe('relay-router gossip fanout', () => {
     for (const [index, response] of (sentBySocket.get(attacker) ?? []).entries()) {
       expect(response).toMatchObject({
         type: 'error',
-        error: 'Routable message requires registered relay hello',
-        inReplyTo: `unauthenticated-${index}`,
-        to: RUNTIME_B,
+        error: 'Relay session authentication missing',
       });
     }
-    expect(store.debugEvents.filter(event => event.reason === 'ROUTABLE_MESSAGE_UNREGISTERED_RUNTIME')).toHaveLength(
+    expect(store.debugEvents.filter(event => event.reason === 'RELAY_SESSION_AUTH_INVALID')).toHaveLength(
       routableTypes.length,
     );
   });
@@ -827,7 +897,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -875,7 +944,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {
         throw new Error('NO_LOCAL_REPLICA: entityId=0xabc');
@@ -924,7 +992,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -988,7 +1055,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: true,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {
@@ -999,7 +1065,11 @@ describe('relay-router gossip fanout', () => {
     };
     const wsA: FakeWs = { label: 'A' };
 
-    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+    await productionRelayRoute(config, wsA, {
+      type: 'hello',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+    });
 
     expect(store.clients.has(RUNTIME_A)).toBe(false);
     expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
@@ -1013,7 +1083,6 @@ describe('relay-router gossip fanout', () => {
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
       store,
-      requireHelloAuth: false,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       send: (ws: FakeWs, raw: Uint8Array) => {

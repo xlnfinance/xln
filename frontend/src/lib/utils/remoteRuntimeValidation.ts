@@ -1,6 +1,7 @@
 import { RemoteRuntimeAdapter } from '../../../../runtime/api/runtime-adapter/remote';
 import { RuntimeWsClient, type RuntimeWsClientOptions } from '../../../../runtime/network/p2p/ws-client';
 import { deriveEncryptionKeyPair } from '../../../../runtime/protocol/p2p-crypto';
+import { directRuntimeWsAudience } from '../../../../runtime/network/p2p/ws-protocol';
 import { RuntimeQueryClient } from '$lib/stores/runtimeQueryClient';
 import {
   assertRemoteRuntimeTokenFresh,
@@ -153,9 +154,9 @@ export const buildRuntimeWsRecoveryPeerSource = (options: {
   const makeClientOptions = (): RuntimeWsClientOptions => ({
     url: wsUrl,
     runtimeId: requesterRuntimeId,
+    helloAudience: directRuntimeWsAudience(peerRuntimeId),
     signerId: options.requesterSignerId || '1',
     seed: requesterSeed,
-    useHelloAuth: true,
     encryptionKeyPair: deriveEncryptionKeyPair(requesterSeed),
     maxReconnectAttempts: 1,
   });

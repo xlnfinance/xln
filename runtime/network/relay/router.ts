@@ -42,7 +42,7 @@ const SOCKET_AUTH_BINDING = Symbol.for('xln.relay.socketAuthBinding');
 type RememberedRelaySocket = object & { [SOCKET_RUNTIME_ID]?: string };
 type DuplicateClosingRelaySocket = object & { [SOCKET_DUPLICATE_CLOSING]?: boolean };
 type AuthenticatedRelaySocket = object & {
-  [SOCKET_AUTH_BINDING]?: HelloChallengeBinding & { encryptionPubKey: string };
+  [SOCKET_AUTH_BINDING]?: HelloChallengeBinding & { encryptionPubKey: string; lastAuthTimestamp: number };
 };
 const NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS = [
   'invalid tag',
@@ -77,7 +77,7 @@ const getRememberedSocketRuntimeId = (ws: unknown): string => {
 
 const rememberSocketAuthBinding = (
   ws: unknown,
-  binding: HelloChallengeBinding & { encryptionPubKey: string },
+  binding: HelloChallengeBinding & { encryptionPubKey: string; lastAuthTimestamp: number },
 ): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
   Object.defineProperty(ws as AuthenticatedRelaySocket, SOCKET_AUTH_BINDING, {
@@ -149,8 +149,6 @@ export type RelayRouterConfig = {
   send: (ws: RelaySocketLike, data: Uint8Array) => RelaySendResult;
   /** Hook to mirror gossip into env. */
   onGossipStore?: (profile: Profile) => void;
-  /** Defaults to true. Unsigned hello cannot claim a runtime slot. */
-  requireHelloAuth?: boolean;
   helloSkewMs?: number;
   consumeHelloChallenge?: (ws: object, claim: unknown) => HelloChallengeBinding | null;
   verifyProfile?: (profile: Profile) => Promise<ProfileVerifyResult> | ProfileVerifyResult;
@@ -266,35 +264,32 @@ const handleHello = (context: RelayRouteContext): boolean => {
     send(ws, serializeWsMessage({ type: 'error', error: 'Invalid runtimeId in hello' }));
     return true;
   }
-  if (config.requireHelloAuth !== false) {
-    const binding = config.consumeHelloChallenge?.(
-      ws as object,
-      { challenge: context.msg.auth?.nonce, audience: context.msg.audience },
-    ) ?? null;
-    const authError = binding
-      ? verifyHelloAuth(
-          fromKey,
-          fromEncryptionPubKey!,
-          context.msg.auth,
-          config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
-          binding.audience,
-        )
-      : 'Hello challenge missing, expired, or already consumed';
-    if (authError) {
-      pushDebugEvent(store, {
-        event: 'hello',
-        runtimeId: from,
-        from,
-        msgType: type,
-        status: 'rejected',
-        reason: 'HELLO_AUTH_INVALID',
-        details: { traceId, authError },
-      });
-      send(ws, serializeWsMessage({ type: 'error', error: authError }));
-      return true;
-    }
-    rememberSocketAuthBinding(ws, { ...binding!, encryptionPubKey: fromEncryptionPubKey! });
+  const binding = config.consumeHelloChallenge?.(
+    ws as object,
+    { challenge: context.msg.auth?.nonce, audience: context.msg.audience },
+  ) ?? null;
+  const authError = binding
+    ? verifyHelloAuth(
+        fromKey,
+        fromEncryptionPubKey!,
+        context.msg.auth,
+        config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
+        binding.audience,
+      )
+    : 'Hello challenge missing, expired, or already consumed';
+  if (authError) {
+    pushDebugEvent(store, {
+      event: 'hello', runtimeId: from, from, msgType: type, status: 'rejected',
+      reason: 'HELLO_AUTH_INVALID', details: { traceId, authError },
+    });
+    send(ws, serializeWsMessage({ type: 'error', error: authError }));
+    return true;
   }
+  rememberSocketAuthBinding(ws, {
+    ...binding!,
+    encryptionPubKey: fromEncryptionPubKey!,
+    lastAuthTimestamp: context.msg.auth!.timestamp,
+  });
   const existingClient = store.clients.get(fromKey);
   if (existingClient && existingClient.ws !== ws) {
     // A fresh challenge signed by the same runtime key proves reconnect
@@ -769,10 +764,10 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
     send(ws, serializeWsMessage({ type: 'error', error: 'Relay socket runtime mismatch' }));
     return false;
   }
-  if (type !== 'hello' && config.requireHelloAuth !== false) {
+  if (type !== 'hello') {
     // The hello key is immutable for this socket. Re-caching a later advertised
     // key would redirect the next encrypted envelope to an injected key.
-    const authError = !rememberedRuntimeId || !fromKey || !authBinding
+    const verifiedError = !rememberedRuntimeId || !fromKey || !authBinding
       ? 'Relay session authentication missing'
       : fromEncryptionPubKey?.toLowerCase() !== authBinding.encryptionPubKey.toLowerCase()
         ? 'Relay session encryption key mismatch'
@@ -783,15 +778,17 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
             config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
             authBinding.audience,
             authBinding.challenge,
+            authBinding.lastAuthTimestamp,
           );
-    if (authError) {
+    if (verifiedError) {
       pushDebugEvent(store, {
         event: 'error', from, to, msgType: type, status: 'rejected',
-        reason: 'RELAY_SESSION_AUTH_INVALID', details: { traceId, authError },
+        reason: 'RELAY_SESSION_AUTH_INVALID', details: { traceId, authError: verifiedError },
       });
-      send(ws, serializeWsMessage({ type: 'error', error: authError }));
+      send(ws, serializeWsMessage({ type: 'error', error: verifiedError }));
       return false;
     }
+    authBinding!.lastAuthTimestamp = msg.auth!.timestamp;
   }
   if (rememberedRuntimeId && fromKey && rememberedRuntimeId === fromKey) {
     const existing = store.clients.get(rememberedRuntimeId);
