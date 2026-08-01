@@ -91,36 +91,3 @@ export const handleProcessHtlcTimeoutsEntityTx = (
 
   return { newState, outputs, accountTxs };
 };
-
-export const handleManualHtlcLockEntityTx = (
-  entityState: EntityState,
-  entityTx: EntityTxOf<'manualHtlcLock'>,
-  mutableFrameState = false,
-): HtlcEntityTxResult => {
-  const newState = prepareEntityTxState(entityState, mutableFrameState);
-  const outputs: EntityInput[] = [];
-  const accountTxs: AccountTxTarget[] = [];
-
-  const { counterpartyId, lockId, hashlock } = entityTx.data;
-  const timelock = BigInt(entityTx.data.timelock);
-  const revealBeforeHeight = Number(entityTx.data.revealBeforeHeight);
-  const amount = BigInt(entityTx.data.amount);
-  const tokenId = Number(entityTx.data.tokenId);
-
-  accountTxs.push({
-    accountId: counterpartyId,
-    tx: {
-      type: 'htlc_lock',
-      data: {
-        lockId,
-        hashlock,
-        timelock,
-        revealBeforeHeight,
-        amount,
-        tokenId,
-      },
-    },
-  });
-
-  return { newState, outputs, accountTxs };
-};

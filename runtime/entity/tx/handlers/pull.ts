@@ -17,7 +17,6 @@ import { findCrossJurisdictionPullRoute, isCrossJurisdictionPullCancelWithinClea
 import type { ApplyEntityTxOptions } from '../apply';
 import type { AccountTxTarget } from './account';
 
-type PullLockTx = Extract<EntityTx, { type: 'pullLock' }>;
 type ResolvePullTx = Extract<EntityTx, { type: 'resolvePull' }>;
 type CrossPullCloseTx = Extract<EntityTx, { type: 'crossPullClose' }>;
 type CancelPullTx = Extract<EntityTx, { type: 'cancelPull' | 'pullCancelExpired' }>;
@@ -38,50 +37,10 @@ const requestFrame = (state: EntityState, outputs: EntityInput[]): void => {
   if (signerId) outputs.push({ entityId: state.entityId, signerId, entityTxs: [] });
 };
 
-const resolveCounterparty = (result: PullResult, counterpartyEntityId: string, action: 'lock' | 'resolve' | 'cancel'): string | null => {
+const resolveCounterparty = (result: PullResult, counterpartyEntityId: string, action: 'resolve' | 'cancel'): string | null => {
   const accountId = findAccountKey(result.newState, counterpartyEntityId);
   if (!accountId) fail(result, `❌ Pull ${action} failed: no account with ${counterpartyEntityId}`);
   return accountId;
-};
-
-export const handlePullLockEntityTx = (_env: EntityRuntimeContext, state: EntityState, tx: PullLockTx, options?: ApplyEntityTxOptions): PullResult => {
-  const result = createResult(state, options);
-  const {
-    counterpartyEntityId,
-    pullId,
-    tokenId,
-    amount,
-    revealedUntilTimestamp,
-    fullHash,
-    partialRoot,
-    crossJurisdiction,
-    crossJurisdictionRoute,
-  } = tx.data;
-  const accountId = resolveCounterparty(result, counterpartyEntityId, 'lock');
-  if (!accountId) return result;
-  result.accountTxs.push({
-    accountId,
-    tx: {
-      type: 'pull_lock',
-      data: {
-        pullId,
-        tokenId: Number(tokenId),
-        amount: BigInt(amount),
-        revealedUntilTimestamp: Number(revealedUntilTimestamp),
-        fullHash,
-        partialRoot,
-        ...(crossJurisdiction ? { crossJurisdiction } : {}),
-        ...(crossJurisdictionRoute ? { crossJurisdictionRoute } : {}),
-      },
-    },
-  });
-  // Cross-j sibling delivery is already being applied inside a committed
-  // Entity frame. Its Account mempool op is proposed before that same frame
-  // completes, so a self-wake would create a redundant Runtime input. Ordinary
-  // user pull commands retain the historical wake until their wider flow is
-  // reviewed independently.
-  if (!crossJurisdiction) requestFrame(state, result.outputs);
-  return result;
 };
 
 const findCrossSourceRoute = (state: EntityState, pullId: string, counterpartyEntityId: string) =>

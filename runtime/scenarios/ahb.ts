@@ -914,12 +914,13 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
-        type: 'directPayment',
+        type: 'htlcPayment',
         data: {
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: payment1,
           route: [alice.id, hub.id, bob.id],
+          deliveryMode: 'instant',
           description: 'Payment 1 of 2'
         }
       }]
@@ -998,12 +999,13 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
-        type: 'directPayment',
+        type: 'htlcPayment',
         data: {
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: payment2,
           route: [alice.id, hub.id, bob.id],
+          deliveryMode: 'instant',
           description: 'Payment 2 of 2'
         }
       }]
@@ -1099,12 +1101,13 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       entityId: bob.id,
       signerId: bob.signer,
       entityTxs: [{
-        type: 'directPayment',
+        type: 'htlcPayment',
         data: {
           targetEntityId: alice.id,
           tokenId: USDC_TOKEN_ID,
           amount: reversePayment,
           route: [bob.id, hub.id, alice.id],  // CRITICAL: B→H→A route
+          deliveryMode: 'instant',
           description: 'Reverse payment: Bob pays Alice'
         }
       }]
@@ -1568,6 +1571,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
           tokenId: USDC_TOKEN_ID,
           amount: aliceToHub,
           route: [alice.id, hub.id],
+          deliveryMode: 'direct',
           description: 'Alice pays Hub $10K (simultaneous test)'
         }
       }]
@@ -1582,6 +1586,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
           tokenId: USDC_TOKEN_ID,
           amount: hubToAlice,
           route: [hub.id, alice.id],
+          deliveryMode: 'direct',
           description: 'Hub pays Alice $5K (simultaneous test)'
         }
       }]
@@ -1847,6 +1852,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
           tokenId: USDC_TOKEN_ID,
           amount: payAmount,
           route: [payer.id, recipient.id],
+          deliveryMode: 'direct',
           description: 'Dispute setup: adjust offdelta'
         }
       }]
@@ -2339,6 +2345,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
               tokenId: USDC_TOKEN_ID,
               amount: stressAmount,
               route: [alice.id, hub.id],
+              deliveryMode: 'direct',
               description: `Stress A→H #${i + 1}`
             }
           }]
@@ -2353,6 +2360,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
               tokenId: USDC_TOKEN_ID,
               amount: stressAmount,
               route: [hub.id, alice.id],
+              deliveryMode: 'direct',
               description: `Stress H→A #${i + 1}`
             }
           }]
@@ -2545,7 +2553,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
           targetEntityId: carol.id,
           tokenId: USDC_TOKEN_ID,
           amount: hubPaymentToCarol,
-          route: [hub.id, carol.id]
+          route: [hub.id, carol.id],
+          deliveryMode: 'direct',
         }
       }]
     }]);

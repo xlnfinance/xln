@@ -41,10 +41,7 @@ import {
 } from '../entity/consensus/frame';
 import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { encodeBoard, hashBoard } from '../entity/factory';
-import {
-  buildCrossJurisdictionPullBinding,
-  withCanonicalCrossJurisdictionRouteHash,
-} from '../extensions/cross-j';
+import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
 import { routeInboundP2PEntityInput } from '../runtime/entity-routing';
 import {
   buildValidatorEncryptionBoard,
@@ -1193,19 +1190,6 @@ describe('signed Entity command admission', () => {
       binaryHash: entityId('21'),
       closeMode: 'partial_cancel_remainder' as const,
     };
-    const targetPullLock: EntityTx = {
-      type: 'pullLock',
-      data: {
-        counterpartyEntityId: targetUser,
-        pullId: route.targetPull.pullId,
-        tokenId: route.targetPull.tokenId,
-        amount: route.targetPull.signedAmount,
-        revealedUntilTimestamp: route.targetPull.revealedUntilTimestamp,
-        fullHash: route.targetPull.fullHash,
-        partialRoot: route.targetPull.partialRoot,
-        crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
-      },
-    };
     const targetRegistration: EntityTx = {
       type: 'registerCrossJurisdictionSwap', data: { route },
     };
@@ -1224,7 +1208,7 @@ describe('signed Entity command admission', () => {
       {
         source: sourceHub,
         target: targetHub,
-        txs: [targetRegistration, targetPullLock],
+        txs: [targetRegistration],
       },
       {
         source: sourceHub,
@@ -1375,15 +1359,6 @@ describe('signed Entity command admission', () => {
       [targetRegistration],
       stateFor(targetHub),
     )).toThrow('RUNTIME_OUTPUT_SELF_FORBIDDEN');
-    const tamperedPull = structuredClone(targetPullLock);
-    if (tamperedPull.type !== 'pullLock') throw new Error('TEST_TARGET_PULL_TYPE_INVALID');
-    tamperedPull.data.amount += 1n;
-    expect(() => assertRuntimeOutputAuthorization(
-      sourceHub,
-      targetHub,
-      [targetRegistration, tamperedPull],
-      stateFor(targetHub),
-    )).toThrow('CONSENSUS_OUTPUT_CROSS_J_TARGET_PULL_MISMATCH');
   });
 
   test('turns local raw user txs into a signed frame command and commits its nonce', async () => {

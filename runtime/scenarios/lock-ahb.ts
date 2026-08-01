@@ -18,7 +18,7 @@
 import type { RuntimeReplica } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry } from './helpers';
+import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, processUntilWithoutLocalHtlcAdvance, withholdScenarioLocalHtlcAdvances } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from './boot';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { isLeft } from '../account/utils';
@@ -820,12 +820,13 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
-        type: 'directPayment',
+        type: 'htlcPayment',
         data: {
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: payment2,
           route: [alice.id, hub.id, bob.id],
+          deliveryMode: 'instant',
           description: 'Payment 2 of 2'
         }
       }]
@@ -934,12 +935,13 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       entityId: bob.id,
       signerId: bob.signer,
       entityTxs: [{
-        type: 'directPayment',
+        type: 'htlcPayment',
         data: {
           targetEntityId: alice.id,
           tokenId: USDC_TOKEN_ID,
           amount: reversePayment,
           route: [bob.id, hub.id, alice.id],  // CRITICAL: B→H→A route
+          deliveryMode: 'instant',
           description: 'Reverse payment: Bob pays Alice'
         }
       }]
@@ -1273,106 +1275,79 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const [, charlieRepSynced] = findReplica(env, charlie.id);
     console.log(`   Charlie lastFinalizedJHeight after sync: ${charlieRepSynced.state.lastFinalizedJHeight || 0}\n`);
 
-    // Create HTLC with short expiry (no secret shared - will timeout)
-    const currentJHeight = env.state.jReplicas.get('AHB Demo')?.blockNumber || 0n;
-    const shortExpiry = Number(currentJHeight) + 3; // Expires in 3 blocks
+    // Create a canonical conditional payment, then stop only Charlie's exact
+    // local onion continuation. Account consensus remains live and must commit.
+    const { secret: testSecret, hashlock: testHashlock } = rng.nextHashlock();
+    const timeoutTargets = [{
+      entityId: charlie.id,
+      signerId: charlie.signer,
+      hashlock: testHashlock,
+    }] as const;
+    const hubCharlieBefore = findReplica(env, hub.id)[1].state.accounts.get(charlie.id);
+    if (!hubCharlieBefore) throw new Error('HTLC_TIMEOUT_ACCOUNT_MISSING');
+    const hubIsLeft = hub.id < charlie.id;
+    const holdField = hubIsLeft ? 'leftHold' : 'rightHold';
+    const deltaBefore = hubCharlieBefore.state.deltas.get(USDC_TOKEN_ID);
+    const offsetBefore = deltaBefore?.offdelta ?? 0n;
+    const holdBefore = deltaBefore?.[holdField] ?? 0n;
 
-    console.log(`📋 Hub creates HTLC to Charlie (no secret), expires at height ${shortExpiry}\n`);
-
-    // Generate hashlock without sharing secret with Charlie (timeout test)
-    const { generateLockId } = await import('../protocol/htlc/utils');
-    const { hashlock: testHashlock } = rng.nextHashlock();
-    const testLockId = generateLockId(testHashlock, shortExpiry, 0, env.state.timestamp);
-
-    console.log(`   Lock ID: ${testLockId.slice(0,16)}...`);
-    console.log(`   Hashlock: ${testHashlock.slice(0,16)}...`);
-    console.log(`   Secret withheld from Charlie (will timeout)\n`);
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
-      entityTxs: [{
-        type: 'manualHtlcLock',
+      entityTxs: [withDeterministicHtlcTestSecret({
+        type: 'htlcPayment',
         data: {
-          counterpartyId: charlie.id,
-          lockId: testLockId,
-          hashlock: testHashlock,
-          // This fixture tests J-height expiry. Keep the independent wall-clock
-          // deadline beyond the receiver enforcement reserve so admission is valid.
-          timelock: BigInt(env.state.timestamp + 60_000),
-          revealBeforeHeight: shortExpiry,
+          targetEntityId: charlie.id,
+          route: [hub.id, charlie.id],
+          tokenId: USDC_TOKEN_ID,
           amount: usd(10_000),
-          tokenId: USDC_TOKEN_ID
-        }
-      }]
+          deliveryMode: 'instant',
+          hashlock: testHashlock,
+          description: 'canonical timeout proof',
+        },
+      }, testSecret)],
     }]);
-    await converge(env);
+    await processUntilWithoutLocalHtlcAdvance(
+      env,
+      timeoutTargets,
+      () => findCommittedScenarioHtlcLockId(env, hub.id, charlie.id, testHashlock) !== undefined,
+    );
 
-    // Verify lock created and committed
-    const [, hubRepBeforeTimeout] = findReplica(env, hub.id);
-    const [, charlieRepBeforeTimeout] = findReplica(env, charlie.id);
-    const hubCharlieAccount = hubRepBeforeTimeout.state.accounts.get(charlie.id);
-    const charlieHubAccount = charlieRepBeforeTimeout.state.accounts.get(hub.id);
+    const testLockId = findCommittedScenarioHtlcLockId(env, hub.id, charlie.id, testHashlock);
+    if (!testLockId) throw new Error('HTLC_TIMEOUT_LOCK_NOT_COMMITTED');
+    const committedLock = findReplica(env, hub.id)[1].state.accounts
+      .get(charlie.id)?.state.locks.get(testLockId);
+    if (!committedLock) throw new Error('HTLC_TIMEOUT_LOCK_STATE_MISSING');
+    console.log(`Canonical HTLC committed: ${testLockId.slice(0, 16)}...`);
 
-    // H4 AUDIT FIX: Capture balance BEFORE lock for refund verification
-    const hubCharlieOffsetBefore = hubCharlieAccount?.state.deltas.get(USDC_TOKEN_ID)?.offdelta || 0n;
-    console.log(`💰 Hub-Charlie offdelta BEFORE lock: ${hubCharlieOffsetBefore}`);
+    advanceScenarioTime(
+      env,
+      Number(committedLock.timelock) - env.state.timestamp + 1,
+      true,
+    );
+    await processUntilWithoutLocalHtlcAdvance(
+      env,
+      timeoutTargets,
+      () => {
+        const hubAccount = findReplica(env, hub.id)[1].state.accounts.get(charlie.id);
+        const charlieAccount = findReplica(env, charlie.id)[1].state.accounts.get(hub.id);
+        return !hubAccount?.state.locks.has(testLockId)
+          && !charlieAccount?.state.locks.has(testLockId)
+          && !hubAccount?.pendingFrame
+          && !charlieAccount?.pendingFrame;
+      },
+    );
 
-    console.log(`🔐 Hub-Charlie account locks: ${hubCharlieAccount?.state.locks.size || 0}`);
-    console.log(`🔐 Charlie-Hub account locks: ${charlieHubAccount?.state.locks.size || 0}`);
-    console.log(`📖 Hub lockBook size: ${hubRepBeforeTimeout.state.lockBook.size}\n`);
-
-    // Lock might be in mempool or committed, check both
-    const lockInMempool = hubCharlieAccount?.mempool.some((tx) => tx.type === 'htlc_lock');
-    const lockCommitted = (hubCharlieAccount?.state.locks.size || 0) > 0 || (charlieHubAccount?.state.locks.size || 0) > 0;
-
-    if (!lockInMempool && !lockCommitted) {
-      console.log('⚠️  HTLC lock not created (likely rejected by validation - shortExpiry may be invalid)');
-      console.log(`   Hub-Charlie mempool: ${hubCharlieAccount?.mempool.length || 0} txs`);
-      console.log(`   Skipping timeout test (validation safety checks working!)\n`);
-    } else {
-      console.log(`✅ HTLC lock exists (mempool=${lockInMempool}, committed=${lockCommitted})\n`);
-
-      // Only test timeout if lock was actually created
-      if (lockInMempool || lockCommitted) {
-        // Advance J-blocks past expiry (Charlie doesn't reveal)
-        console.log(`\n⏰ Timeout test: Advancing time (lock expires at height ${shortExpiry})...\n`);
-
-        // Advance time significantly
-        for (let i = 0; i < 10; i++) {
-          env.state.timestamp += 5000; // Advance 5s per cycle
-          await process(env);
-        }
-
-        const hubRepEnd = findReplica(env, hub.id)[1];
-        const hubCharlieAccountAfter = hubRepEnd.state.accounts.get(charlie.id);
-
-        console.log(`🔐 Hub-Charlie locks after timeout advance: ${hubCharlieAccountAfter?.state.locks.size || 0}\n`);
-
-        // H4 AUDIT FIX: Verify balance restored after timeout
-        const hubCharlieOffsetAfter = hubCharlieAccountAfter?.state.deltas.get(USDC_TOKEN_ID)?.offdelta || 0n;
-        console.log(`💰 Hub-Charlie offdelta AFTER timeout: ${hubCharlieOffsetAfter}`);
-
-        if ((hubCharlieAccountAfter?.state.locks.size || 0) === 0) {
-          console.log('✅ HTLC timeout processing verified');
-
-          // H4: Verify offdelta was restored (Hub got refund)
-          // When lock expires, Hub's hold is released, offdelta should return to pre-lock value
-          const hubIsLeft = hub.id < charlie.id;
-          const holdField = hubIsLeft ? 'leftHold' : 'rightHold';
-          const currentHold = hubCharlieAccountAfter?.state.deltas.get(USDC_TOKEN_ID)?.[holdField] || 0n;
-          if (currentHold === 0n) {
-            console.log(`✅ H4: HTLC hold released (${holdField} = 0)`);
-          } else {
-            console.log(`⚠️  H4: HTLC hold still present: ${currentHold}`);
-          }
-          console.log('✅ H4: Timeout refund verified\n');
-        } else {
-          console.log(`   ⚠️  Lock still pending (crontab needs entity.timestamp sync)\n`);
-        }
-      }
-
-      console.log(`   ✅ Timeout infrastructure: Crontab + handler + dual-check complete\n`);
-    }
+    const hubCharlieAfter = findReplica(env, hub.id)[1].state.accounts.get(charlie.id);
+    const finalDelta = hubCharlieAfter?.state.deltas.get(USDC_TOKEN_ID);
+    assert(!hubCharlieAfter?.state.locks.has(testLockId), 'Timeout removed payer lock');
+    assert(
+      !findReplica(env, charlie.id)[1].state.accounts.get(hub.id)?.state.locks.has(testLockId),
+      'Timeout removed beneficiary lock',
+    );
+    assert((finalDelta?.[holdField] ?? 0n) === holdBefore, 'Timeout released the exact payer hold');
+    assert((finalDelta?.offdelta ?? 0n) === offsetBefore, 'Timeout restored the exact payer offdelta');
+    console.log('Canonical HTLC timeout + bilateral hold release verified\n');
 
     // ============================================================================
     // PHASE 7: 4-HOP ROUTE TEST
@@ -1554,37 +1529,44 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('🔓 PHASE 8: HTLC HOSTAGE REVEAL TEST');
     console.log('═══════════════════════════════════════\n');
 
-    // Create a new HTLC that Bob will have to reveal on-chain
-    // Deterministic secret from seeded RNG (generateLockId already imported above)
+    // Create the lock through the only user-facing conditional payment path.
+    // Bob's exact final onion continuation is withheld to model the hostage
+    // boundary before the preimage is learned out of band.
     const hostageSecret = rng.nextHashlock();
-    const currentJHeightHostage = env.state.jReplicas.get('AHB Demo')?.blockNumber || 0n;
-    const hostageExpiry = Number(currentJHeightHostage) + 100; // Long expiry
-    const hostageLockId = generateLockId(hostageSecret.hashlock, hostageExpiry, 0, env.state.timestamp);
     const hostageAmount = usd(5_000);
+    const hostageTargets = [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      hashlock: hostageSecret.hashlock,
+    }] as const;
 
-    console.log(`📋 Creating HTLC Hub→Bob that Bob will reveal on-chain`);
-    console.log(`   LockId: ${hostageLockId.slice(0, 16)}...`);
-    console.log(`   Hashlock: ${hostageSecret.hashlock.slice(0, 16)}...`);
-    console.log(`   Secret: ${hostageSecret.secret.slice(0, 16)}...\n`);
-
-    // Hub creates HTLC lock to Bob (manually so we control the secret)
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
-      entityTxs: [{
-        type: 'manualHtlcLock',
+      entityTxs: [withDeterministicHtlcTestSecret({
+        type: 'htlcPayment',
         data: {
-          counterpartyId: bob.id,
-          lockId: hostageLockId,
-          hashlock: hostageSecret.hashlock,
-          timelock: BigInt(env.state.timestamp + 100000), // Long timelock
-          revealBeforeHeight: hostageExpiry,
+          targetEntityId: bob.id,
+          route: [hub.id, bob.id],
+          tokenId: USDC_TOKEN_ID,
           amount: hostageAmount,
-          tokenId: USDC_TOKEN_ID
-        }
-      }]
+          deliveryMode: 'async',
+          hashlock: hostageSecret.hashlock,
+          description: 'canonical hostage proof',
+        },
+      }, hostageSecret.secret)],
     }]);
-    await converge(env);
+    await processUntilWithoutLocalHtlcAdvance(
+      env,
+      hostageTargets,
+      () => findCommittedScenarioHtlcLockId(env, hub.id, bob.id, hostageSecret.hashlock) !== undefined,
+    );
+    const hostageLockId = findCommittedScenarioHtlcLockId(env, hub.id, bob.id, hostageSecret.hashlock);
+    if (!hostageLockId) throw new Error('HOSTAGE_LOCK_NOT_COMMITTED');
+    withholdScenarioLocalHtlcAdvances(env, hostageTargets);
+
+    console.log(`Canonical hostage HTLC committed: ${hostageLockId.slice(0, 16)}...`);
+    console.log(`Hashlock: ${hostageSecret.hashlock.slice(0, 16)}...`);
 
     // Verify lock exists on Hub-Bob account
     const [, hubRepHostage] = findReplica(env, hub.id);
@@ -1838,6 +1820,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           tokenId: USDC_TOKEN_ID,
           amount: offlineAmount,
           route: [alice.id, hub.id],
+          deliveryMode: 'direct',
           description: 'Offline sim: A→H'
         }
       }]
@@ -1864,6 +1847,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           tokenId: USDC_TOKEN_ID,
           amount: offlineAmount,
           route: [hub.id, alice.id],
+          deliveryMode: 'direct',
           description: 'Offline sim: H→A (net zero)'
         }
       }]

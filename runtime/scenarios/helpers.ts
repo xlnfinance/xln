@@ -4,6 +4,7 @@
 
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import type { EntityInput, EntityReplica } from '../entity/types';
+import type { EntityTx } from '../types/entity-tx';
 import type { Delta } from '../types/account';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { setFailFastErrors } from '../infra/logger';
@@ -35,6 +36,79 @@ export const commitRuntimeInput = async (env: RuntimeReplica, runtimeInput: Runt
   runtime.enqueueRuntimeInput(env, runtimeInput);
   return runtime.processRuntime(env);
 };
+
+export type ScenarioHtlcAdvanceTarget = Readonly<{
+  entityId: string;
+  signerId: string;
+  hashlock: string;
+}>;
+
+const matchingLocalHtlcAdvance = (
+  input: { entityId: string; signerId: string; entityTxs?: EntityTx[] },
+  targets: readonly ScenarioHtlcAdvanceTarget[],
+): boolean => (input.entityTxs ?? []).some(tx => {
+  if (tx.type !== 'htlcOnionAdvance') return false;
+  const targeted = targets.some(target =>
+    input.entityId.toLowerCase() === target.entityId.toLowerCase()
+      && input.signerId.toLowerCase() === target.signerId.toLowerCase()
+      && tx.data.hashlock.toLowerCase() === target.hashlock.toLowerCase()
+  );
+  if (targeted && tx.data.advance.kind !== 'final') {
+    throw new Error(`SCENARIO_HTLC_ADVANCE_PHASE_UNEXPECTED:${tx.data.advance.kind}`);
+  }
+  return targeted;
+});
+
+/** Withhold one exact local custody continuation; Account consensus remains untouched. */
+export function withholdScenarioLocalHtlcAdvances(
+  env: RuntimeReplica,
+  targets: readonly ScenarioHtlcAdvanceTarget[],
+): void {
+  const escaped = [env.pendingOutputs, env.networkInbox, env.pendingNetworkOutputs]
+    .flatMap(queue => queue ?? [])
+    .filter(input => matchingLocalHtlcAdvance(input, targets));
+  if (escaped.length > 0) throw new Error('SCENARIO_HTLC_ADVANCE_ESCAPED_LOCAL_INGRESS');
+  const queued = env.runtimeMempool.entityInputs;
+  const dropped = queued.filter(input => matchingLocalHtlcAdvance(input, targets));
+  for (const input of dropped) {
+    const txs = input.entityTxs ?? [];
+    if (txs.length !== 1 || txs[0]?.type !== 'htlcOnionAdvance') {
+      throw new Error('SCENARIO_HTLC_ADVANCE_MIXED_WITH_DURABLE_INPUT');
+    }
+  }
+  env.runtimeMempool.entityInputs = queued.filter(input => !matchingLocalHtlcAdvance(input, targets));
+  releaseUncommittedReliableIngress(env, dropped, []);
+}
+
+export async function processUntilWithoutLocalHtlcAdvance(
+  env: RuntimeReplica,
+  targets: readonly ScenarioHtlcAdvanceTarget[],
+  ready: () => boolean,
+  maxCycles = 32,
+): Promise<void> {
+  const process = await getProcess();
+  for (let cycle = 0; cycle < maxCycles; cycle += 1) {
+    withholdScenarioLocalHtlcAdvances(env, targets);
+    if (ready()) return;
+    await process(env);
+  }
+  withholdScenarioLocalHtlcAdvances(env, targets);
+  if (!ready()) throw new Error(`SCENARIO_HTLC_STATE_NOT_REACHED:${maxCycles}`);
+}
+
+export function findCommittedScenarioHtlcLockId(
+  env: RuntimeReplica,
+  leftEntityId: string,
+  rightEntityId: string,
+  hashlock: string,
+): string | undefined {
+  const find = (ownerId: string, counterpartyId: string) => [...(
+    findReplica(env, ownerId)[1].state.accounts.get(counterpartyId)?.state.locks.values() ?? []
+  )].find(lock => lock.hashlock.toLowerCase() === hashlock.toLowerCase())?.lockId;
+  const leftId = find(leftEntityId, rightEntityId);
+  const rightId = find(rightEntityId, leftEntityId);
+  return leftId && leftId === rightId ? leftId : undefined;
+}
 
 export { checkSolvency } from './solvency-check';
 

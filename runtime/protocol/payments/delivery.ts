@@ -5,7 +5,7 @@ import {
   type PaymentDeliveryMode,
 } from '../../types/payment';
 
-export type ConditionalPaymentMode = Exclude<PaymentDeliveryMode, 'trusted'>;
+export type ConditionalPaymentMode = Extract<PaymentDeliveryMode, 'instant' | 'async'>;
 
 export const resolvePaymentDeadlineWindow = (input: {
   mode: ConditionalPaymentMode;

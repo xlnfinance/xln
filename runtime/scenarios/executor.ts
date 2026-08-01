@@ -798,12 +798,13 @@ async function handlePayRandom(
       entityId: sourceEntityId,
       signerId: signerId,
       entityTxs: [{
-        type: 'directPayment',
+        type: 'htlcPayment',
         data: {
           targetEntityId: destEntityId,
           tokenId: token,
           amount: amount,
           route,
+          deliveryMode: 'instant',
           description: `Random payment #${i + 1}`
         }
       }]

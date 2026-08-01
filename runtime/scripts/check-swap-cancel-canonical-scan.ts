@@ -24,13 +24,18 @@ const assertNotIncludes = (text: string, needle: string, path: string): void => 
 
 const entityTypesPath = 'runtime/types/entity-tx.ts';
 const entityTypes = readText(entityTypesPath);
+const retiredResolve = ['resolve', 'Swap'].join('');
+assertIncludes(entityTypes, "type: 'placeSwapOffer';", entityTypesPath);
 assertIncludes(entityTypes, "type: 'proposeCancelSwap';", entityTypesPath);
+assertNotIncludes(entityTypes, `type: '${retiredResolve}';`, entityTypesPath);
 assertNotIncludes(entityTypes, "type: 'cancelSwap';", entityTypesPath);
 assertNotIncludes(entityTypes, "type: 'cancelSwapOffer';", entityTypesPath);
 
 const applyPath = 'runtime/entity/tx/apply.ts';
 const apply = readText(applyPath);
+assertIncludes(apply, 'placeSwapOffer: (_env, state, tx, options) => handlePlaceSwapOfferRequest', applyPath);
 assertIncludes(apply, 'proposeCancelSwap: (_env, state, tx, options) => handleCancelSwapRequest', applyPath);
+assertNotIncludes(apply, `${retiredResolve}:`, applyPath);
 assertNotIncludes(apply, 'cancelSwapOffer:', applyPath);
 assertNotIncludes(apply, 'cancelSwap:', applyPath);
 
@@ -39,6 +44,7 @@ const handler = readText(handlerPath);
 assertIncludes(handler, "Extract<EntityTx, { type: 'proposeCancelSwap' }>", handlerPath);
 assertIncludes(handler, 'const requireSwapAccount =', handlerPath);
 assertIncludes(handler, 'SWAP_REQUEST_ACCOUNT_MISSING:${action}', handlerPath);
+assertNotIncludes(handler, `Extract<EntityTx, { type: '${retiredResolve}' }>`, handlerPath);
 assertNotIncludes(handler, "'cancelSwapOffer' | 'cancelSwap' | 'proposeCancelSwap'", handlerPath);
 assertNotIncludes(handler, 'console.error', handlerPath);
 assertNotIncludes(handler, 'return { newState: entityState, outputs: [] };', handlerPath);
@@ -75,15 +81,14 @@ assertIncludes(readText(commandRoutePath), 'withCanonicalCrossJurisdictionRouteH
 
 const activityPath = 'runtime/api/public/activity-history.ts';
 const activity = readText(activityPath);
-assertIncludes(activity, "case 'cancelSwap':", activityPath);
-assertIncludes(activity, "case 'cancelSwapOffer':", activityPath);
+assertIncludes(activity, "case 'swap_resolve':", activityPath);
 assertIncludes(activity, "case 'proposeCancelSwap':", activityPath);
+assertNotIncludes(activity, `case '${retiredResolve}':`, activityPath);
 
 const regressionPath = 'runtime/__tests__/audit-failfast-regressions.test.ts';
 const regression = readText(regressionPath);
 assertIncludes(regression, 'swap requests fail loud when the target account is missing', regressionPath);
 assertIncludes(regression, "rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer')", regressionPath);
-assertIncludes(regression, "rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:resolveSwap')", regressionPath);
 assertIncludes(regression, "rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:proposeCancelSwap')", regressionPath);
 
 console.log('swap cancel canonical scan check passed');

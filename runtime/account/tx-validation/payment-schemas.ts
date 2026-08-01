@@ -7,7 +7,7 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
       route: 'stringArray', description: 'string', fromEntityId: 'string',
       toEntityId: 'string', deliveryMode: 'string', trustedGatewayEntityId: 'string',
     },
-    literals: { deliveryMode: ['trusted'] },
+    literals: { deliveryMode: ['direct', 'trusted'] },
   },
   add_delta: { required: { tokenId: 'integer' } },
   set_credit_limit: { required: { tokenId: 'integer', amount: 'bigint' } },

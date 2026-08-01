@@ -33,13 +33,11 @@
  *  TC16:      Overspend rejection
  *  TC17:      Reverse payment + netting
  *  TC18:      Self-pay loop (Frank→H1→H2→H3→Frank)
- *  TC19:      HTLC timeout/cancellation
  *
  * Prereqs: localhost:8080, xln.finance with 3 hubs (H1/H2/H3)
  */
 
 import { test, expect, type BrowserContext, type Page } from './global-setup.mts';
-import { ethers } from 'ethers';
 import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
 import { APP_BASE_URL, API_BASE_URL } from './utils/e2e-baseline';
 import { timedStep } from './utils/e2e-timing.mts';
@@ -55,7 +53,6 @@ import {
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
-import { HTLC_ENFORCEMENT_RESERVE_MS } from '../runtime/account/consensus/deadline-policy';
 import { getTokenInfo } from '../runtime/account/utils';
 import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 
@@ -275,36 +272,6 @@ async function getLockCount(page: Page, entityId: string): Promise<number> {
   }, { entityId });
 }
 
-/** Get lock count from a specific bilateral account */
-async function getAccountLockCount(page: Page, entityId: string, counterpartyId: string): Promise<number> {
-  return page.evaluate(({ entityId, counterpartyId }) => {
-    const findAccount = (accounts: any, ownerId: string, cpId: string) => {
-      if (!(accounts instanceof Map)) return null;
-      const owner = String(ownerId || '').toLowerCase();
-      const cp = String(cpId || '').toLowerCase();
-      for (const [accountKey, account] of accounts.entries()) {
-        if (String(accountKey || '').toLowerCase() === cp) return account;
-        const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-          ? String(account.counterpartyEntityId).toLowerCase()
-          : '';
-        if (canonicalCp === cp) return account;
-        const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
-        const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
-        if (left && right && ((left === owner && right === cp) || (right === owner && left === cp))) return account;
-      }
-      return null;
-    };
-
-    const env = (window as any).isolatedEnv;
-    for (const [k, rep] of (env?.state?.eReplicas ?? new Map()).entries()) {
-      if (!String(k).startsWith(entityId + ':')) continue;
-      const account = findAccount((rep as any)?.state?.accounts, entityId, counterpartyId);
-      return account?.locks?.size || 0;
-    }
-    return -1;
-  }, { entityId, counterpartyId });
-}
-
 async function assertHubMeshReady(page: Page, retries = 5): Promise<string[]> {
   const apiBase = await getActiveApiBase(page);
   let lastHealth: any = null;
@@ -337,7 +304,7 @@ async function resetProdServer(page: Page) {
 
 // ─── Test ────────────────────────────────────────────────────────
 
-test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
+test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
   test.setTimeout(600_000);
 
   test('full mesh routing with diverse payment patterns', { tag: '@functional' }, async ({ browser, page }) => {
@@ -812,110 +779,6 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     console.log(`[E2E] TC18 PASS: Self-pay loop, fee=${formatUsd(selfPayFee)}, 0 locks`);
 
     // ═══════════════════════════════════════════════════════════════
-    // PHASE J: HTLC TIMEOUT / CANCELLATION
-    // ═══════════════════════════════════════════════════════════════
-    console.log('\n[E2E] === PHASE J: HTLC TIMEOUT ===');
-
-    // TC19: Create a manual HTLC lock beyond the mandatory enforcement reserve,
-    // then verify it expires and gets cleaned up.
-    const manualLockLifetimeMs = HTLC_ENFORCEMENT_RESERVE_MS + 5_000;
-    console.log(`[E2E] TC19: Manual HTLC lock with ${manualLockLifetimeMs}ms timeout`);
-
-    const lockCountBefore = await getAccountLockCount(pageFor('alice'), users.alice!.entityId, h1!);
-    console.log(`[E2E] Alice account locks before: ${lockCountBefore}`);
-
-    // A shorter lock is correctly rejected because the receiver would not have
-    // enough time to enforce a revealed secret on-chain.
-    const tcLockId = ethers.hexlify(ethers.randomBytes(32));
-    const tcSecret = ethers.hexlify(ethers.randomBytes(32));
-    const tcHashlock = ethers.keccak256(ethers.solidityPacked(['bytes32'], [tcSecret]));
-
-    await enqueueEntityTxs(pageFor('alice'), users.alice!.entityId, users.alice!.signerId, [{
-      type: 'manualHtlcLock',
-      data: {
-        counterpartyId: h1!,
-        lockId: tcLockId,
-        hashlock: tcHashlock,
-        timelock: BigInt(Date.now() + manualLockLifetimeMs),
-        revealBeforeHeight: 999_999_999,
-        amount: USDC_SCALE,
-        tokenId: 1,
-      },
-    }]);
-
-    // Wait for lock to be committed (bilateral consensus)
-    await pageFor('alice').waitForTimeout(5000);
-    const lockCountAfterCreate = await getAccountLockCount(pageFor('alice'), users.alice!.entityId, h1!);
-    console.log(`[E2E] Alice account locks after create: ${lockCountAfterCreate}`);
-    expect(lockCountAfterCreate, 'TC19: Lock should be created').toBeGreaterThan(lockCountBefore);
-
-    // Diagnose: inspect hook state + entity timestamp + runtime events
-    const hookDiag1 = await pageFor('alice').evaluate(({ entityId }) => {
-      const env = (window as any).isolatedEnv;
-      for (const [k, rep] of (env?.state?.eReplicas ?? new Map()).entries()) {
-        if (!String(k).startsWith(entityId + ':')) continue;
-        const cs = (rep as any).state?.crontabState;
-        const hooks = cs?.hooks;
-        const hookList = hooks ? Array.from(hooks.entries()).map(([id, h]: any) => ({
-          id: String(id).slice(0, 30),
-          triggerAt: h.triggerAt,
-          type: h.type,
-        })) : [];
-        return {
-          entityTimestamp: (rep as any).state?.timestamp,
-          envTimestamp: env?.state?.timestamp,
-          hookCount: hooks?.size ?? -1,
-          hooks: hookList,
-          crontabExists: !!cs,
-          hooksMapExists: !!hooks,
-        };
-      }
-      return { error: 'entity not found' };
-    }, { entityId: users.alice!.entityId });
-    console.log(`[E2E] TC19 hook diag after lock: ${JSON.stringify(hookDiag1)}`);
-
-    // Wait for timeout to expire with an additional scheduler/network buffer.
-    const timeoutWaitMs = manualLockLifetimeMs + 10_000;
-    console.log(`[E2E] Waiting ${timeoutWaitMs}ms for HTLC timeout hook to fire...`);
-    await pageFor('alice').waitForTimeout(timeoutWaitMs);
-
-    // Check hook state and events after timeout period
-    const hookDiag2 = await pageFor('alice').evaluate(({ entityId }) => {
-      const env = (window as any).isolatedEnv;
-      // Check env.frameLogs for hook-related events
-      const hookEvents = (env?.frameLogs ?? [])
-        .filter((e: any) => String(e?.type ?? '').includes('Hook') || String(e?.type ?? '').includes('htlc_timeout'))
-        .slice(-10)
-        .map((e: any) => ({ type: e.type, data: JSON.stringify(e.data ?? {}).slice(0, 100) }));
-      for (const [k, rep] of (env?.state?.eReplicas ?? new Map()).entries()) {
-        if (!String(k).startsWith(entityId + ':')) continue;
-        const cs = (rep as any).state?.crontabState;
-        const hooks = cs?.hooks;
-        return {
-          entityTimestamp: (rep as any).state?.timestamp,
-          envTimestamp: env?.state?.timestamp,
-          hookCount: hooks?.size ?? -1,
-          hooksRemaining: hooks ? Array.from(hooks.entries()).map(([id, h]: any) => ({
-            id: String(id).slice(0, 30), triggerAt: h.triggerAt,
-          })) : [],
-          hookEvents,
-        };
-      }
-      return { error: 'entity not found' };
-    }, { entityId: users.alice!.entityId });
-    console.log(`[E2E] TC19 hook diag after wait: ${JSON.stringify(hookDiag2)}`);
-    expect(hookDiag2?.hookCount, 'TC19: timeout hook should be consumed').toBe(0);
-
-    await expect.poll(
-      () => getAccountLockCount(pageFor('alice'), users.alice!.entityId, h1!),
-      { timeout: 10_000, message: 'TC19: expired HTLC lock must be removed' },
-    ).toBe(lockCountBefore);
-    const lockCountAfterTimeout = await getAccountLockCount(pageFor('alice'), users.alice!.entityId, h1!);
-    console.log(`[E2E] Alice account locks after timeout: ${lockCountAfterTimeout}`);
-    expect(lockCountAfterTimeout, 'TC19: timeout flow must restore the prior lock count').toBe(lockCountBefore);
-    console.log('[E2E] TC19 PASS: HTLC timeout hook fired and removed the expired lock');
-
-    // ═══════════════════════════════════════════════════════════════
     // PHASE K: PERSISTENCE (reload page, hard-assert balances survive)
     // ═══════════════════════════════════════════════════════════════
     console.log('\n[E2E] === PHASE K: PERSISTENCE CHECK ===');
@@ -974,10 +837,9 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     console.log('[E2E]  OVERSPEND:  TC16     — rejected, balance unchanged');
     console.log('[E2E]  REVERSE:    TC17     — Eve->Bob $5, netting verified');
     console.log(`[E2E]  SELF-PAY:   TC18     — Frank loop, fee=${formatUsd(selfPayFee)}`);
-    console.log('[E2E]  TIMEOUT:    TC19     — manual lock, expired, cleaned up');
     console.log(`[E2E]  PERSIST:    ${persistenceFailures === 0 ? 'All 6 survive reload' : `${persistenceFailures}/6 FAILED`}`);
     console.log('[E2E]');
-    console.log('[E2E]  TOTAL: 19 test cases + persistence');
+    console.log('[E2E]  TOTAL: 18 test cases + persistence');
     console.log('[E2E]  Every payment: sender balance verified, receiver exact, fees > 0');
     console.log('[E2E] ======================================================');
 

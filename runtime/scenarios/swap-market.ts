@@ -641,19 +641,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
     }],
   }]);
   await converge(env);
-  await process(env, [{
-    entityId: hubEth.id,
-    signerId: hubEth.signer,
-    entityTxs: [{
-      type: 'resolveSwap',
-      data: {
-        counterpartyEntityId: alice.id,
-        offerId: 'alice-eth-ask',
-        fillRatio: 0,
-        cancelRemainder: true,
-      },
-    }],
-  }]);
+  await converge(env);
   console.log('  ✅ Cancel request resolved by hub\n');
 
   // Alice replaces with better price

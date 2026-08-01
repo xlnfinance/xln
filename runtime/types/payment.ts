@@ -1,4 +1,4 @@
-export const PAYMENT_DELIVERY_MODES = ['instant', 'async', 'trusted'] as const;
+export const PAYMENT_DELIVERY_MODES = ['direct', 'instant', 'async', 'trusted'] as const;
 
 export type PaymentDeliveryMode = (typeof PAYMENT_DELIVERY_MODES)[number];
 

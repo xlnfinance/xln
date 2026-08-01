@@ -696,6 +696,17 @@ const collectOffersForMatching = (
     const key = swapKey(offer.accountId, offer.offerId);
     if (seen.has(key)) continue;
     seen.add(key);
+    // Same-j Account frames are committed by both endpoints, but an offer is
+    // listed only by its counterparty matcher. A maker that also operates an
+    // orderbook must not duplicate its own offer in a second canonical book.
+    const makerEntityId = offer.makerIsLeft ? offer.fromEntity : offer.toEntity;
+    if (!offer.crossJurisdiction && makerEntityId === hubEntity) {
+      entityLog.debug('orderbook.skip_local_maker', {
+        offer: shortOrder(offer.offerId, 8),
+        entity: shortId(state.entityId, 8),
+      });
+      continue;
+    }
     if (
       offer.crossJurisdiction &&
       crossJurisdictionBookOwnerRef(offer.crossJurisdiction) !== hubEntity
@@ -823,10 +834,12 @@ async function applyOrderbookMatching(
       String(pairId).startsWith('cross:'),
     ),
   );
-  if (
-    (allSwapOffersCreated.length === 0 && !stats.hasPersistedCrossJurisdictionBook) ||
-    !currentEntityState.orderbookExt
-  ) {
+  // Account offer commits are bilateral, so both endpoint Entities observe
+  // them. Only the endpoint that explicitly owns orderbookExt is a matcher;
+  // the user endpoint commits Account state and intentionally does no book
+  // work. This is an ownership boundary, not an alternate settlement path.
+  if (!currentEntityState.orderbookExt) return stats;
+  if (allSwapOffersCreated.length === 0 && !stats.hasPersistedCrossJurisdictionBook) {
     return stats;
   }
 
@@ -896,59 +909,29 @@ async function applySwapCancelRequests(
 
   const localBookCancels = routedCancels.localBookCancels;
   if (localBookCancels.length === 0) return;
+  // The same bilateral cancel event is visible to the user and matcher. Only
+  // the matcher owns the canonical book and may enqueue its swap_resolve.
+  // The removed non-matcher fallback must never be synthesized here.
+  if (!currentEntityState.orderbookExt) return;
 
-  if (currentEntityState.orderbookExt) {
-    const cancelResult = processOrderbookCancels(currentEntityState, localBookCancels);
-
-    for (const { accountId, tx } of cancelResult.accountTxs) {
-      const account = currentEntityState.accounts.get(accountId);
-      if (!account) continue;
-      const admission = await applyAccountInput(
-        accountConsensusContext,
-        account,
-        createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
-      );
-      if (admission.admittedAccountTxCount === 0) {
-        continue;
-      }
-      proposableAccounts.add(accountId);
-      recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
-    }
-
-    const ext = currentEntityState.orderbookExt as OrderbookExtState;
-    for (const { pairId, book } of cancelResult.bookUpdates) {
-      replaceOrderbookPair(ext, pairId, book);
-      recordFrameBookChange(storageChanges, currentEntityState.entityId, pairId);
-    }
-    return;
-  }
-
-  // Fallback: counterparty resolves cancel directly when no orderbook extension is configured.
-  for (const { accountId, offerId } of localBookCancels) {
+  const cancelResult = processOrderbookCancels(currentEntityState, localBookCancels);
+  for (const { accountId, tx } of cancelResult.accountTxs) {
     const account = currentEntityState.accounts.get(accountId);
-    if (!account?.state.swapOffers?.has(offerId)) continue;
-    const offer = account.state.swapOffers.get(offerId);
-    if (offer?.crossJurisdiction) {
-      throw new Error(
-        `CROSS_J_ORDERBOOK_EXT_REQUIRED: cancel for ${offerId.slice(-8)} cannot use fallback swap_resolve`,
-      );
-    }
-    // Fallback cancel resolution is synthesized by the orchestrator itself.
-    // It must land in the same working-state mempool so the later account
-    // proposal step sees it in this frame.
+    if (!account) continue;
     const admission = await applyAccountInput(
       accountConsensusContext,
       account,
-      createLocalAccountInput(account.state, currentEntityState.entityId, [{
-        type: 'swap_resolve',
-        data: { offerId, fillRatio: 0, cancelRemainder: true },
-      }]),
+      createLocalAccountInput(account.state, currentEntityState.entityId, [tx]),
     );
-    if (admission.admittedAccountTxCount === 0) {
-      continue;
-    }
+    if (admission.admittedAccountTxCount === 0) continue;
     proposableAccounts.add(accountId);
     recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
+  }
+
+  const ext = currentEntityState.orderbookExt as OrderbookExtState;
+  for (const { pairId, book } of cancelResult.bookUpdates) {
+    replaceOrderbookPair(ext, pairId, book);
+    recordFrameBookChange(storageChanges, currentEntityState.entityId, pairId);
   }
 }
 

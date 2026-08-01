@@ -90,19 +90,8 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
       counterpartyEntityId: 'string', offerId: 'string', giveTokenId: 'integer',
       giveAmount: 'bigint', wantTokenId: 'integer', wantAmount: 'bigint',
     },
-    optional: { priceTicks: 'bigint', timeInForce: 'integer', crossJurisdiction: 'record' },
+    optional: { priceTicks: 'bigint', timeInForce: 'integer' },
     literals: { timeInForce: [0, 1, 2] },
-  },
-  resolveSwap: {
-    required: {
-      counterpartyEntityId: 'string', offerId: 'string', fillRatio: 'integer',
-      cancelRemainder: 'boolean',
-    },
-    optional: {
-      fillNumerator: 'bigint', fillDenominator: 'bigint', comment: 'string',
-      feeTokenId: 'integer', feeAmount: 'bigint', executionGiveAmount: 'bigint',
-      executionWantAmount: 'bigint',
-    },
   },
   proposeCancelSwap: { required: { counterpartyEntityId: 'string', offerId: 'string' } },
   initOrderbookExt: {

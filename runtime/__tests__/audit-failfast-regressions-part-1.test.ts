@@ -1924,18 +1924,6 @@ describe('audit fail-fast regressions', () => {
 
     await expect(
       applyEntityTx(env, state, {
-        type: 'resolveSwap',
-        data: {
-          counterpartyEntityId: missingCounterparty,
-          offerId: 'missing-account-offer',
-          fillRatio: 0,
-          cancelRemainder: true,
-        },
-      } as any),
-    ).rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:resolveSwap');
-
-    await expect(
-      applyEntityTx(env, state, {
         type: 'proposeCancelSwap',
         data: {
           counterpartyEntityId: missingCounterparty,
@@ -2004,11 +1992,20 @@ describe('audit fail-fast regressions', () => {
     await expect(
       applyEntityTx(env, state, {
         type: 'directPayment',
+        data: { targetEntityId: target, tokenId: 1, amount: 100n, route: [source, target] },
+      } as any),
+    ).rejects.toThrow('DIRECT_PAYMENT_DELIVERY_MODE_INVALID');
+
+    await expect(
+      applyEntityTx(env, state, {
+        type: 'directPayment',
         data: {
           targetEntityId: target,
           tokenId: 1,
           amount: 100n,
           route: [source, missingNextHop, target],
+          deliveryMode: 'trusted',
+          trustedGatewayEntityId: missingNextHop,
         },
       } as any),
     ).rejects.toThrow('DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING');

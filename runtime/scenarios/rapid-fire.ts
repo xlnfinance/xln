@@ -185,12 +185,13 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
         entityId: alice.id,
         signerId: alice.signer,
         entityTxs: [{
-          type: 'directPayment',
+          type: 'htlcPayment',
           data: {
             targetEntityId: bob.id,
             tokenId: USDC,
             amount: paymentAmount,
             route: [alice.id, hub.id, bob.id],
+            deliveryMode: 'instant',
             description: `Forward #${forwardCount++}`,
           },
         }],
@@ -201,12 +202,13 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
         entityId: bob.id,
         signerId: bob.signer,
         entityTxs: [{
-          type: 'directPayment',
+          type: 'htlcPayment',
           data: {
             targetEntityId: alice.id,
             tokenId: USDC,
             amount: paymentAmount,
             route: [bob.id, hub.id, alice.id],
+            deliveryMode: 'instant',
             description: `Reverse #${reverseCount++}`,
           },
         }],

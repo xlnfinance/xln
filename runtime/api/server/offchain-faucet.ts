@@ -337,6 +337,7 @@ const buildFaucetRuntimeInput = (
       tokenId: request.tokenId,
       amount: amountWei,
       route: [hub.entityId, request.userEntityId],
+      deliveryMode: 'direct',
       description,
     },
   }];
