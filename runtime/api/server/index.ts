@@ -85,6 +85,7 @@ import {
 } from './relay-direct';
 import { createServerRpcMessageHandler } from './rpc-ws';
 import { dispatchRuntimeRpcAfterStartup } from './rpc-startup-gate';
+import { createRelayStartupMessageGate } from './relay-startup-gate';
 import {
   buildRuntimeJurisdictionsJson,
   readCanonicalJurisdictionsJson,
@@ -822,6 +823,7 @@ type ServerSession = {
   env: RuntimeReplica | null;
   routerConfig: RelayRouterConfig | null;
   relayHelloChallenges: ReturnType<typeof createHelloChallengeRegistry>;
+  relayStartupGate: ReturnType<typeof createRelayStartupMessageGate>;
   relayAudience: string;
 };
 
@@ -969,7 +971,24 @@ const handleWebSocketMessage = (
     );
 
     if (!session.routerConfig && isServerBootInProgress()) {
-      void serverStartupBarrier.then(() => routeRelaySocketMessage(session, ws, peerMessage));
+      session.relayStartupGate.deferHello(
+        serverStartupBarrier,
+        ws,
+        peerMessage.type,
+        () => routeRelaySocketMessage(session, ws, peerMessage),
+        reason => {
+          session.relayHelloChallenges.forget(ws);
+          ws.send(serializeWsMessage({
+            type: 'error',
+            error: reason === 'startup-hello-required'
+              ? 'Only relay hello is accepted while Runtime starts'
+              : reason === 'startup-hello-pending'
+                ? 'Relay hello is already pending while Runtime starts'
+                : 'Relay startup hello capacity reached',
+          }));
+          ws.close(4003, reason);
+        },
+      );
       return;
     }
     routeRelaySocketMessage(session, ws, peerMessage);
@@ -997,6 +1016,7 @@ const handleWebSocketMessage = (
 
 const handleWebSocketClose = (session: ServerSession, ws: RelaySocket, code: number, reason: string | Buffer): void => {
   session.relayHelloChallenges.forget(ws);
+  session.relayStartupGate.forget(ws);
   cleanupRpcMarketSubscription(ws);
   forgetRuntimeAdapterClient(ws);
   forgetRelaySocketRuntimeId(ws);
@@ -1342,6 +1362,7 @@ const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
     env: null,
     routerConfig: null,
     relayHelloChallenges: createHelloChallengeRegistry(),
+    relayStartupGate: createRelayStartupMessageGate(),
     relayAudience: relayEndpoints.publicAudience,
   };
   return {
