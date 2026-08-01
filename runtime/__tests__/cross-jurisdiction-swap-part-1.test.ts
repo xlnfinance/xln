@@ -264,38 +264,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     return { env, state, sourceUser, sourceHub, targetHub, sourceSigner, buildRoute };
   };
 
-  test('hashlockPayment creates a direct hashlock-only account lock', async () => {
-    const env = createEmptyEnv('cross-hashlock-payment');
-    env.scenarioMode = true;
-    env.state.timestamp = 1_000;
-    env.quietRuntimeLogs = true;
-    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
-    const user = entity('01');
-    const hub = entity('02');
-    const signer = addr('31');
-    const state = makeState(user, signer, eth, hub);
-    const hashlock = hashHtlcSecret(secret('44'));
-
-    const result = await applyEntityTx(env, state, {
-      type: 'hashlockPayment',
-      data: {
-        targetEntityId: hub,
-        tokenId: 1,
-        amount: 25n,
-        hashlock,
-        lockId: `0x${'55'.repeat(32)}`,
-        timelock: 130_000n,
-        revealBeforeHeight: 50,
-      },
-    });
-
-    expect(result.accountTxs).toHaveLength(1);
-    expect(result.accountTxs?.[0]?.tx.type).toBe('htlc_lock');
-    expect((result.accountTxs?.[0]?.tx as any).data.envelope).toBeUndefined();
-    expect(result.newState.htlcRoutes.get(hashlock)?.outboundLockId).toBe(`0x${'55'.repeat(32)}`);
-    expect(result.newState.lockBook.get(`0x${'55'.repeat(32)}`)?.direction).toBe('outgoing');
-  });
-
   test('cross-j close proposals are accepted only as one exact source+target cohort', () => {
     const env = createEmptyEnv('cross-j-close-cohort');
     env.state.timestamp = 10_000;

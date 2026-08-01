@@ -1,7 +1,5 @@
-import { getEntityCertifiedJurisdictionHeight } from '../../../jurisdiction/machine/height';
-import { generateLockId, hashHtlcSecret } from '../../../protocol/htlc/utils';
+import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import type { EntityInput, EntityState } from '../../types';
-import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
@@ -22,104 +20,6 @@ const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const wakeLocalProposer = (state: EntityState, outputs: EntityInput[]): void => {
   const firstValidator = state.config.validators[0];
   if (firstValidator) outputs.push({ entityId: state.entityId, signerId: firstValidator, entityTxs: [] });
-};
-
-export const handleHashlockPaymentEntityTx = (
-  _env: EntityRuntimeContext,
-  entityState: EntityState,
-  entityTx: EntityTxOf<'hashlockPayment'>,
-  mutableFrameState = false,
-): HtlcEntityTxResult => {
-  const newState = prepareEntityTxState(entityState, mutableFrameState);
-  const outputs: EntityInput[] = [];
-  const accountTxs: AccountTxTarget[] = [];
-  const { targetEntityId, tokenId, amount, hashlock } = entityTx.data;
-  const normalizedTarget = findAccountKey(newState, targetEntityId);
-  if (!normalizedTarget) {
-    addMessage(newState, `❌ Hashlock payment failed: no account with ${targetEntityId}`);
-    return { newState, outputs, accountTxs };
-  }
-  const amountBig = typeof amount === 'bigint' ? amount : BigInt(String(amount));
-  if (amountBig <= 0n) {
-    addMessage(newState, '❌ Hashlock payment failed: invalid amount');
-    return { newState, outputs, accountTxs };
-  }
-  if (!HEX_32_RE.test(hashlock)) {
-    addMessage(newState, '❌ Hashlock payment failed: invalid hashlock');
-    return { newState, outputs, accountTxs };
-  }
-
-  const account = newState.accounts.get(normalizedTarget);
-  const preparedLockId = typeof entityTx.data.lockId === 'string' ? entityTx.data.lockId : '';
-  const explicitLockId = HEX_32_RE.test(preparedLockId);
-  let lockNonce = (account?.currentHeight ?? 0) + (account?.mempool?.length ?? 0);
-  let lockId = explicitLockId
-    ? preparedLockId
-    : generateLockId(hashlock, newState.height, lockNonce, newState.timestamp);
-  while (
-    !explicitLockId &&
-    (
-      account?.state.locks?.has(lockId) ||
-      (account?.mempool ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId) ||
-      (account?.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId)
-    )
-  ) {
-    lockNonce += 1;
-    lockId = generateLockId(hashlock, newState.height, lockNonce, newState.timestamp);
-  }
-  const timelock = entityTx.data.timelock !== undefined
-    ? BigInt(entityTx.data.timelock)
-    : BigInt(newState.timestamp + 120_000);
-  const revealBeforeHeight = entityTx.data.revealBeforeHeight !== undefined
-    ? Number(entityTx.data.revealBeforeHeight)
-    : getEntityCertifiedJurisdictionHeight(newState) + 50;
-  if (timelock <= BigInt(newState.timestamp) || !Number.isFinite(revealBeforeHeight) || revealBeforeHeight <= newState.lastFinalizedJHeight) {
-    addMessage(newState, '❌ Hashlock payment failed: invalid deadline');
-    return { newState, outputs, accountTxs };
-  }
-
-  accountTxs.push({
-    accountId: normalizedTarget,
-    tx: {
-      type: 'htlc_lock',
-      data: {
-        lockId,
-        hashlock,
-        timelock,
-        revealBeforeHeight,
-        amount: amountBig,
-        tokenId: Number(tokenId),
-      },
-    },
-  });
-
-  const startedAtMs = typeof entityTx.data.startedAtMs === 'number'
-    ? entityTx.data.startedAtMs
-    : newState.timestamp;
-  newState.htlcRoutes.set(hashlock, {
-    hashlock,
-    tokenId: Number(tokenId),
-    amount: amountBig,
-    startedAtMs,
-    originated: true,
-    outboundEntity: normalizedTarget,
-    outboundLockId: lockId,
-    ...(entityTx.data.crossJurisdictionRelay ? { crossJurisdictionRelay: entityTx.data.crossJurisdictionRelay } : {}),
-    createdTimestamp: newState.timestamp,
-  });
-  newState.lockBook.set(lockId, {
-    lockId,
-    accountId: normalizedTarget,
-    tokenId: Number(tokenId),
-    amount: amountBig,
-    hashlock,
-    timelock,
-    direction: 'outgoing',
-    createdAt: BigInt(newState.timestamp),
-  });
-  addMessage(newState, `🔒 Hashlock payment locked ${amountBig} token ${tokenId} to ${normalizedTarget}`);
-  wakeLocalProposer(entityState, outputs);
-  return { newState, outputs, accountTxs };
 };
 
 export const handleResolveHtlcLockEntityTx = (

@@ -449,7 +449,6 @@ const eventFromEntityTx = (
     case 'directPayment':
       return eventFromDirectPayment(journal, index, normalizeId(inputEntityId), data, viewedEntityId);
     case 'htlcPayment':
-    case 'hashlockPayment':
       return null;
     case 'placeSwapOffer':
     case 'resolveSwap':

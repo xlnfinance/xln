@@ -8,8 +8,6 @@ import {
 } from '../account/crypto';
 import { handleScheduledWakeEntityTx } from '../entity/tx/handlers/scheduled-wake';
 import { handleDisputeFinalize, handleDisputeStart } from '../entity/tx/handlers/dispute';
-import { handleHashlockPaymentEntityTx } from '../entity/tx/handlers/htlc-direct';
-import { applyEntityTx } from '../entity/tx/apply';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
@@ -22,7 +20,6 @@ import {
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../protocol/dispute/arguments';
-import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { createEmptyEnv } from '../runtime';
 import { cloneEntityState } from '../entity/state-clone';
 import type { EntityState } from '../entity/types';
@@ -35,7 +32,6 @@ import {
   installJurisdictions,
   makeJurisdiction,
   makeState,
-  secret,
 } from './helpers/cross-j';
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
@@ -90,7 +86,7 @@ const installDispute = (state: EntityState, timeout: number): void => {
 };
 
 describe('two-validator replay uses Entity-certified jurisdiction height', () => {
-  test('rejects disagreement between the certified anchor fields during replay', async () => {
+  test('rejects disagreement between the certified anchor fields during replay', () => {
     const state = baseState();
     state.jHistoryFinality = {
       jurisdictionRef: 'ethereum',
@@ -104,45 +100,6 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     };
     expect(() => getEntityCertifiedJurisdictionHeight(state))
       .toThrow('ENTITY_J_FINALITY_HEIGHT_MISMATCH');
-    await expect(applyEntityTx(envAt(110, 5), state, {
-      type: 'hashlockPayment',
-      data: {
-        targetEntityId: counterpartyId,
-        tokenId: 1,
-        amount: 1n,
-        hashlock: hashHtlcSecret(secret('45')),
-        timelock: 130_000n,
-      },
-    })).rejects.toThrow('ENTITY_J_FINALITY_HEIGHT_MISMATCH');
-  });
-
-  test('hashlock default deadline is independent of validator-local scan height', () => {
-    const state = baseState();
-    const tx = {
-      type: 'hashlockPayment',
-      data: {
-        targetEntityId: counterpartyId,
-        tokenId: 1,
-        amount: 25n,
-        hashlock: hashHtlcSecret(secret('44')),
-        timelock: 130_000n,
-      },
-    } satisfies Extract<EntityTx, { type: 'hashlockPayment' }>;
-    const applyAt = (height: number, delay: number) => {
-      const result = handleHashlockPaymentEntityTx(envAt(height, delay), state, tx);
-      const op = result.accountTxs[0]!;
-      result.newState.accounts.get(op.accountId)!.mempool.push(op.tx);
-      return result;
-    };
-    const lagging = applyAt(110, 5);
-    const leading = applyAt(130, 5_760);
-
-    expect(lagging.accountTxs).toEqual(leading.accountTxs);
-    expect(lagging.outputs).toEqual(leading.outputs);
-    expect((lagging.accountTxs[0]!.tx as Extract<typeof lagging.accountTxs[0]['tx'], { type: 'htlc_lock' }>).data.revealBeforeHeight)
-      .toBe(150);
-    expect(computeCanonicalEntityConsensusStateHash(lagging.newState))
-      .toBe(computeCanonicalEntityConsensusStateHash(leading.newState));
   });
 
   test('dispute finalize readiness is independent of validator-local scan height', async () => {

@@ -36,7 +36,7 @@ const nestedEntityTxs = (
   }
 };
 
-const noteBinding = (tx: EntityTx, replica: EntityReplica): NoteBinding | null => {
+const noteBinding = (tx: EntityTx): NoteBinding | null => {
   if (tx.type === 'htlcPayment') {
     const description = tx.data.description?.trim();
     const hashlock = tx.data.hashlock;
@@ -44,17 +44,6 @@ const noteBinding = (tx: EntityTx, replica: EntityReplica): NoteBinding | null =
     return {
       hashlock,
       ...(tx.data.preparedLockId ? { lockId: tx.data.preparedLockId } : {}),
-      description,
-    };
-  }
-  if (tx.type === 'hashlockPayment') {
-    const description = tx.data.description?.trim();
-    if (!description) return null;
-    const lockId = tx.data.lockId
-      ?? replica.state.htlcRoutes.get(tx.data.hashlock)?.outboundLockId;
-    return {
-      hashlock: tx.data.hashlock,
-      ...(lockId ? { lockId } : {}),
       description,
     };
   }
@@ -95,7 +84,7 @@ const indexTx = (
   notes: Map<HtlcNoteKey, string>,
   tx: EntityTx,
 ): void => {
-  const binding = noteBinding(tx, replica);
+  const binding = noteBinding(tx);
   if (binding) {
     putNote(notes, `hashlock:${binding.hashlock}`, binding.description);
     if (binding.lockId) putNote(notes, `lock:${binding.lockId}`, binding.description);

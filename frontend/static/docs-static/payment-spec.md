@@ -176,10 +176,10 @@ case 'direct-payment': {
 }
 ```
 
-## 2. Hashlock Payment with Onion Routing
+## 2. HTLC Payment with Onion Routing
 
 ### 2.1 Overview
-Hashlock payments enable trustless multi-hop payments through intermediary entities. Uses HTLCs (Hash Time-Locked Contracts) and onion routing for privacy.
+HTLC payments enable trustless multi-hop payments through intermediary entities. They use hash time-locks and onion routing for privacy.
 
 ### 2.2 Data Structures
 
@@ -198,9 +198,9 @@ interface HashlockEntry {
   outgoingChannelId?: string; // Where we forwarded to
 }
 
-// Entity-level hashlock payment
-interface HashlockPaymentEntityTx {
-  type: 'hashlock-payment';
+// Canonical Entity-level routed payment
+interface HtlcPaymentEntityTx {
+  type: 'htlcPayment';
   data: {
     route: string[]; // Entity IDs forming the payment path
     finalRecipient: string;
@@ -306,15 +306,15 @@ export function peelOnionLayer(
 }
 ```
 
-### 2.4 Hashlock Payment Flow
+### 2.4 HTLC Payment Flow
 
-#### Step 1: E-Machine Initiates Hashlock Payment
+#### Step 1: E-Machine Initiates HTLC Payment
 ```typescript
 // In entity-tx/handlers/payment.ts
-async function applyHashlockPaymentTx(
+async function applyHtlcPaymentTx(
   env: Env,
   entityState: EntityState,
-  tx: HashlockPaymentEntityTx,
+  tx: HtlcPaymentEntityTx,
   signerId: string
 ): Promise<{ events: string[]; accountInputs: AccountInput[] }> {
   // Generate payment secret and hash
@@ -356,7 +356,7 @@ async function applyHashlockPaymentTx(
   };
 
   return {
-    events: [`🔒 Initiating hashlock payment via ${route.join(' → ')}`],
+    events: [`🔒 Initiating HTLC payment via ${route.join(' → ')}`],
     accountInputs: [accountInput]
   };
 }
@@ -773,10 +773,10 @@ function buildNetworkGraph(env: Env, tokenId: number): NetworkGraph {
 6. Counterparty A-Machine acknowledges
 7. Payment complete, balances updated
 
-### Hashlock Payment Flow
+### HTLC Payment Flow
 1. User initiates: `entity.sendPayment(recipientId, tokenId, amount)`
 2. E-Machine finds route using PathFinder
-3. E-Machine creates HashlockPaymentEntityTx with route
+3. E-Machine creates HtlcPaymentEntityTx with route
 4. E-Machine generates secret, creates onion packet
 5. First hop A-Machine receives add-hashlock
 6. Each intermediary:
@@ -888,7 +888,7 @@ function buildNetworkGraph(env: Env, tokenId: number): NetworkGraph {
   entityId: "entity123",
   signerId: "signer456",
   entityTxs: [{
-    type: "hashlock-payment",
+    type: "htlcPayment",
     data: {
       route: ["hub1", "hub2"],
       finalRecipient: "entity789",

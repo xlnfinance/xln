@@ -16,7 +16,7 @@ export const ENTITY_TX_TYPES = [
   'crossJurisdictionSalvage', 'crossJurisdictionSettled',
   'crossPullClose', 'directPayment', 'disputeFinalize', 'disputeStart', 'e2r',
   'entityCommand', 'entityProviderCancelAction', 'entityProviderReleaseControlShares',
-  'entityProviderTransfer', 'extendCredit', 'hashlockPayment', 'htlcOnionAdvance', 'htlcPayment',
+  'entityProviderTransfer', 'extendCredit', 'htlcOnionAdvance', 'htlcPayment',
   'initOrderbookExt', 'j_abort_sent_batch', 'j_broadcast', 'j_clear_batch', 'j_event',
   'j_rebroadcast', 'lendingBorrow', 'lendingClosePosition',
   'lendingOffer', 'lendingRepay', 'manualHtlcLock', 'mintReserves', 'openAccount',
