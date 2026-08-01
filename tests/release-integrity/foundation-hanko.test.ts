@@ -187,6 +187,18 @@ describe('Foundation release Hanko', () => {
     expect(verifyReleaseManifestSnapshotBinding(MANIFEST_017, snapshotModuleTamper)).toBe(false);
   });
 
+  test('keeps every attested release snapshot bound to its manifest entry', () => {
+    for (const entry of MANIFEST.releases) {
+      const snapshot = JSON.parse(
+        readFileSync(resolve(ROOT, `docs/releases/data/${entry.version}.json`), 'utf8'),
+      ) as ReleaseSnapshot;
+
+      expect(verifyReleaseSnapshot(snapshot)).toBe(true);
+      expect(verifyReleaseManifestEntry(entry)).toBe(true);
+      expect(verifyReleaseManifestSnapshotBinding(entry, snapshot)).toBe(true);
+    }
+  });
+
   test('labels mutable release notes outside the verified snapshot boundary', () => {
     const directory = mkdtempSync(join(tmpdir(), 'xln-release-notes-'));
     const markdownPath = join(directory, '0.1.7.md');
