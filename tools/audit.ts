@@ -4,7 +4,8 @@
  * Canonical audit-registry CLI.
  *
  * Commands:
- *   bun tools/audit.ts verify      Validate schema, references, and source globs.
+ *   bun tools/audit.ts validate    Validate schema, references, artifacts, and source globs.
+ *   bun tools/audit.ts verify      Validate the registry and require current evidence.
  *   bun tools/audit.ts status      Derive coverage, quality, state, and agent ledger.
  *   bun tools/audit.ts plan        Rank missing invariant evidence and open findings.
  *   bun tools/audit.ts fingerprint [module-id] [--json]
@@ -149,6 +150,27 @@ const verifyCommand = (registry: AuditRegistry, json: boolean): void => {
   if (!result.ok) process.exitCode = 1;
 };
 
+const validateCommand = (registry: AuditRegistry, json: boolean): void => {
+  const errors = validateAuditRegistry(registry, ROOT);
+  const result = {
+    ok: errors.length === 0,
+    modules: registry.modules.length,
+    invariants: registry.invariants.length,
+    evidence: registry.evidence.length,
+    findings: registry.findings.length,
+    agentRuns: registry.agentRuns.length,
+    errors,
+  };
+  if (json) console.log(JSON.stringify(result, null, 2));
+  else if (result.ok) {
+    console.log(`AUDIT_REGISTRY_VALID modules=${result.modules} invariants=${result.invariants} evidence=${result.evidence} findings=${result.findings} agents=${result.agentRuns}`);
+  } else {
+    console.error(`AUDIT_REGISTRY_INVALID errors=${errors.length}`);
+    for (const error of errors) console.error(`- ${error}`);
+  }
+  if (!result.ok) process.exitCode = 1;
+};
+
 const gateCommand = (registry: AuditRegistry, args: CliArgs): void => {
   const profile = args.positional[0];
   if (profile !== 'merge' && profile !== 'release' && profile !== 'ideal') {
@@ -227,6 +249,7 @@ const fingerprintCommand = (registry: AuditRegistry, args: CliArgs): void => {
 export const runAuditCli = (argv = process.argv.slice(2)): void => {
   const args = parseArgs(argv);
   const registry = loadAuditRegistry(args.registryPath);
+  if (args.command === 'validate') return validateCommand(registry, args.json);
   if (args.command === 'verify') return verifyCommand(registry, args.json);
   const errors = validateAuditRegistry(registry, ROOT);
   if (errors.length > 0) throw new Error(`AUDIT_REGISTRY_INVALID\n${errors.join('\n')}`);

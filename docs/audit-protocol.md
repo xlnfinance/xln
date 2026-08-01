@@ -404,11 +404,16 @@ The repository exposes one generated view of the registry:
 ```bash
 bun run audit:status          # all module percentages and reviewer ledger
 bun run audit:plan            # next work ranked by risk and missing evidence
-bun run audit:verify          # schema, ownership, artifacts, and staleness
+bun run audit:validate        # schema, ownership, artifacts, and source globs
+bun run audit:verify          # validation plus current-evidence requirement
 bun run audit:gate:merge      # current evidence plus P0/P1 merge policy
 bun run audit:gate:release    # merge policy plus release coverage thresholds
 bun run audit:gate:ideal      # every module 100% with 990/1000 review quorum
 ```
+
+`bun run check` uses `validate`, so an honest incomplete audit does not make an
+otherwise healthy checkout permanently red. Merge/release decisions use
+`verify` and the profile gates; stale evidence therefore still fails closed.
 
 `verify` treats evidence as append-only history: an archival row may have an
 old fingerprint, but every required evidence kind must have a current
