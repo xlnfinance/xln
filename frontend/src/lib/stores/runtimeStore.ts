@@ -95,7 +95,6 @@ type RuntimeAdapterStorageSnapshot = {
   mode: string | null;
   wsUrl: string | null;
   access: string | null;
-  localKey: string | null;
   sessionKey: string | null;
 };
 
@@ -137,7 +136,6 @@ const readRuntimeAdapterStorageSnapshot = (): RuntimeAdapterStorageSnapshot | nu
     mode: localStorage.getItem('xln-runtime-adapter-mode'),
     wsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
     access: localStorage.getItem('xln-runtime-adapter-access'),
-    localKey: localStorage.getItem('xln-runtime-adapter-key'),
     sessionKey: sessionStorage.getItem('xln-runtime-adapter-key'),
   };
 };
@@ -156,7 +154,7 @@ const restoreRuntimeAdapterStorageSnapshot = (snapshot: RuntimeAdapterStorageSna
   writeStorageValue(localStorage, 'xln-runtime-adapter-mode', snapshot.mode);
   writeStorageValue(localStorage, 'xln-runtime-adapter-ws', snapshot.wsUrl);
   writeStorageValue(localStorage, 'xln-runtime-adapter-access', snapshot.access);
-  writeStorageValue(localStorage, 'xln-runtime-adapter-key', snapshot.localKey);
+  localStorage.removeItem('xln-runtime-adapter-key');
   writeStorageValue(sessionStorage, 'xln-runtime-adapter-key', snapshot.sessionKey);
 };
 

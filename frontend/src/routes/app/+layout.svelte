@@ -50,9 +50,7 @@
     hasAcceptedRemoteRuntime,
     persistRemoteRuntimeRequest,
     readRemoteRuntimeImportPayloadFromHash,
-    readRemoteRuntimeImportPayloadFromUrl,
     readRemoteRuntimeImportSourceFromHash,
-    readRemoteRuntimeImportSourceFromUrl,
     readRemoteRuntimeRequestFromUrl,
     remoteAcceptKey,
     stripRemoteRuntimeParamsFromHistory,
@@ -170,14 +168,7 @@
 
   function shouldBootRemoteRuntime(): boolean {
     if (!browser) return false;
-    const params = new URLSearchParams(window.location.search);
-    const rawMode = (
-      params.get('runtime') ||
-      params.get('adapter') ||
-      localStorage.getItem('xln-runtime-adapter-mode') ||
-      ''
-    ).trim().toLowerCase();
-    return rawMode === 'remote' || rawMode === 'ws' || params.has('ws') || params.has('runtimeWs');
+    return localStorage.getItem('xln-runtime-adapter-mode') === 'remote';
   }
 
   function stripRemoteRuntimeParams(): void {
@@ -227,8 +218,8 @@
 
   async function processRemoteRuntimeBootstrapFromLocation(): Promise<RemoteRuntimeBootstrapResult> {
     const pairingToken = readLocalRuntimePairingToken();
-    const importPayload = readRemoteRuntimeImportPayloadFromUrl() || readRemoteRuntimeImportPayloadFromHash();
-    const importSource = readRemoteRuntimeImportSourceFromUrl() || readRemoteRuntimeImportSourceFromHash();
+    const importPayload = readRemoteRuntimeImportPayloadFromHash();
+    const importSource = readRemoteRuntimeImportSourceFromHash();
     const remoteRequest = readRemoteRuntimeRequestFromUrl();
     await pairLocalRuntimeIntoApp(pairingToken);
     await importRemoteRuntimesIntoApp({
@@ -251,8 +242,8 @@
   async function processRuntimeImportLocationChange(): Promise<void> {
     if (runtimeImportLocationInFlight || !hasActiveTabLock || isInactiveTabStandby()) return;
     const pairingToken = readLocalRuntimePairingToken();
-    const importPayload = readRemoteRuntimeImportPayloadFromUrl() || readRemoteRuntimeImportPayloadFromHash();
-    const importSource = readRemoteRuntimeImportSourceFromUrl() || readRemoteRuntimeImportSourceFromHash();
+    const importPayload = readRemoteRuntimeImportPayloadFromHash();
+    const importSource = readRemoteRuntimeImportSourceFromHash();
     if (!pairingToken && !importPayload && !importSource) return;
     runtimeImportLocationInFlight = true;
     try {
@@ -519,8 +510,8 @@
 
     void (async () => {
       const pairingToken = readLocalRuntimePairingToken();
-      const importPayload = readRemoteRuntimeImportPayloadFromUrl() || readRemoteRuntimeImportPayloadFromHash();
-      const importSource = readRemoteRuntimeImportSourceFromUrl() || readRemoteRuntimeImportSourceFromHash();
+      const importPayload = readRemoteRuntimeImportPayloadFromHash();
+      const importSource = readRemoteRuntimeImportSourceFromHash();
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
       if (await maybeHandleResetHash()) return;
       const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importPayload || importSource || remoteRequest);

@@ -50,7 +50,12 @@ test(
   async ({ page }) => {
     await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
     const capability = await readH1AdminCapability(page);
-    const remoteUrl = `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(capability.wsUrl)}&token=${encodeURIComponent(capability.token)}`;
+    const hash = new URLSearchParams({
+      runtime: 'remote',
+      ws: capability.wsUrl,
+      token: capability.token,
+    });
+    const remoteUrl = `${APP_BASE_URL}/app#${hash.toString()}`;
     await page.goto(remoteUrl, { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('remote-runtime-login-screen')).not.toBeVisible({ timeout: 30_000 });
     await page.waitForFunction(() => {

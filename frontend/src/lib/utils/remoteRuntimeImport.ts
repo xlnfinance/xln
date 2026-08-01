@@ -375,33 +375,29 @@ export const mergeStoredRemoteRuntimeImports = (
   return limitRemoteRuntimeImportEntries(merged);
 };
 
-const remoteRuntimePersistentStorage = (): Storage | null => {
-  if (typeof localStorage !== 'undefined') return localStorage;
-  if (typeof sessionStorage !== 'undefined') return sessionStorage;
-  return null;
-};
-
-const remoteRuntimeSessionStorage = (): Storage | null =>
+const remoteRuntimeCapabilityStorage = (): Storage | null =>
   typeof sessionStorage !== 'undefined' ? sessionStorage : null;
 
+const clearPersistentRemoteRuntimeCapabilities = (): void => {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY);
+  }
+};
+
 export const writeStoredRemoteRuntimeImports = (entries: StoredRemoteRuntimeImportEntry[]): void => {
-  const storage = remoteRuntimePersistentStorage();
+  const storage = remoteRuntimeCapabilityStorage();
   if (!storage) return;
   storage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify(limitRemoteRuntimeImportEntries(entries)));
-  if (storage !== remoteRuntimeSessionStorage()) {
-    remoteRuntimeSessionStorage()?.removeItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY);
-  }
+  clearPersistentRemoteRuntimeCapabilities();
 };
 
 export const readStoredRemoteRuntimeImports = (
   options: { dropExpired?: boolean; dropInvalid?: boolean } = {},
 ): StoredRemoteRuntimeImportEntry[] => {
-  const storage = remoteRuntimePersistentStorage();
-  const session = remoteRuntimeSessionStorage();
-  if (!storage && !session) return [];
-  const persistentRaw = String(storage?.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY) || '').trim();
-  const sessionRaw = String(session?.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY) || '').trim();
-  const raw = persistentRaw || sessionRaw;
+  const storage = remoteRuntimeCapabilityStorage();
+  clearPersistentRemoteRuntimeCapabilities();
+  if (!storage) return [];
+  const raw = String(storage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY) || '').trim();
   if (!raw) return [];
   let parsed: unknown;
   let rawEntries: unknown[];
@@ -410,8 +406,7 @@ export const readStoredRemoteRuntimeImports = (
     rawEntries = rawImportEntriesFromUnknown(parsed);
   } catch (error) {
     if (options.dropInvalid === true) {
-      storage?.removeItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY);
-      session?.removeItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY);
+      storage.removeItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY);
       return [];
     }
     throw error;
@@ -443,10 +438,9 @@ export const readStoredRemoteRuntimeImports = (
     });
   }
   const limited = limitRemoteRuntimeImportEntries(entries);
-  if (options.dropExpired === true && limited.length !== rawEntries.length && storage) {
+  if (options.dropExpired === true && limited.length !== rawEntries.length) {
     writeStoredRemoteRuntimeImports(limited);
   }
-  if (!persistentRaw && sessionRaw && storage) writeStoredRemoteRuntimeImports(limited);
   return limited;
 };
 

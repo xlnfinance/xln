@@ -201,6 +201,9 @@ test('direct remote runtime URL reuses saved capability before showing paste pro
   expect(payloadStart).toBeGreaterThan(readStart);
   const readSource = source.slice(readStart, payloadStart);
 
+  expect(readSource).toContain('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN');
+  expect(readSource).toContain('window.location.hash');
+  expect(readSource).not.toContain("params.get('token')");
   expect(readSource).toContain('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()');
   expect(readSource).toContain('const requiresAuthPaste = !authKey');
   expect(readSource.indexOf('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()'))
@@ -700,6 +703,7 @@ test('direct remote adapter config carries token audience runtime identity', () 
   const resolveSource = source.slice(resolveStart, nextHelperStart);
   expect(resolveSource).toContain('const runtimeId = readRemoteRuntimeTokenAudience(authKey)');
   expect(resolveSource).toContain('...(runtimeId ? { runtimeId } : {})');
+  expect(resolveSource).not.toContain('window.location.search');
 });
 
 test('remote app can page through full hub account and book projections', () => {

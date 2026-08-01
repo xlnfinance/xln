@@ -91,11 +91,19 @@ export function remoteAccessFromAuthKey(authKey: string): 'admin' {
 
 export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
   if (typeof window === 'undefined') return null;
-  const params = new URLSearchParams(window.location.search);
-  const mode = String(params.get('runtime') || params.get('adapter') || '').trim().toLowerCase();
-  const wsParam = String(params.get('ws') || params.get('runtimeWs') || '').trim();
+  const query = new URLSearchParams(window.location.search);
+  if (RUNTIME_PARAM_KEYS.some(key => query.has(key))) {
+    stripRemoteRuntimeParamsFromHistory();
+    throw new Error('REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN');
+  }
+  const hash = new URLSearchParams(window.location.hash.replace(/^#\??/, ''));
+  const mode = String(hash.get('runtime') || hash.get('adapter') || '').trim().toLowerCase();
+  const wsParam = String(hash.get('ws') || hash.get('runtimeWs') || '').trim();
   if (mode !== 'remote' || !wsParam) return null;
-  const keyParam = String(params.get('token') || params.get('authKey') || params.get('key') || params.get('auth') || '').trim();
+  const keyParam = String(
+    hash.get('token') || hash.get('authKey') || hash.get('key') || hash.get('auth') || '',
+  ).trim();
+  if (keyParam) stripRemoteRuntimeParamsFromHistory();
   const wsUrl = normalizeRuntimeWsUrl(wsParam);
   const authKey = keyParam.startsWith('xlnra1.')
     ? keyParam
@@ -128,11 +136,6 @@ export function runtimeImportSourceFromParams(params: URLSearchParams): string {
   return String(params.get(REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM) || '').trim();
 }
 
-export function readRemoteRuntimeImportPayloadFromUrl(): string {
-  if (typeof window === 'undefined') return '';
-  return runtimeImportPayloadFromParams(new URLSearchParams(window.location.search));
-}
-
 export function readRemoteRuntimeImportPayloadFromHash(): string {
   if (typeof window === 'undefined') return '';
   const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
@@ -140,11 +143,6 @@ export function readRemoteRuntimeImportPayloadFromHash(): string {
   if (!hash) return '';
   const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
   return runtimeImportPayloadFromParams(params);
-}
-
-export function readRemoteRuntimeImportSourceFromUrl(): string {
-  if (typeof window === 'undefined') return '';
-  return runtimeImportSourceFromParams(new URLSearchParams(window.location.search));
 }
 
 export function readRemoteRuntimeImportSourceFromHash(): string {
@@ -211,13 +209,11 @@ export function stripRemoteRuntimeParamsFromHistory(): void {
     }
   }
   const nextPath = `${url.pathname}${url.search}${url.hash}`;
-  setTimeout(() => {
-    try {
-      replaceState(nextPath, {});
-    } catch {
-      window.history.replaceState(window.history.state, '', nextPath);
-    }
-  }, 0);
+  try {
+    replaceState(nextPath, {});
+  } catch {
+    window.history.replaceState(window.history.state, '', nextPath);
+  }
 }
 
 function waitForRuntimeConnected(timeoutMs = PROJECTION_RUNTIME_CONNECT_TIMEOUT_MS): Promise<RuntimeHandle> {
@@ -240,14 +236,7 @@ function waitForRuntimeConnected(timeoutMs = PROJECTION_RUNTIME_CONNECT_TIMEOUT_
 
 function hasStoredRemoteRuntimePreference(): boolean {
   if (typeof window === 'undefined') return false;
-  const params = new URLSearchParams(window.location.search);
-  const rawMode = String(
-    params.get('runtime') ||
-    params.get('adapter') ||
-    localStorage.getItem('xln-runtime-adapter-mode') ||
-    '',
-  ).trim().toLowerCase();
-  return rawMode === 'remote' || rawMode === 'ws' || params.has('ws') || params.has('runtimeWs');
+  return localStorage.getItem('xln-runtime-adapter-mode') === 'remote';
 }
 
 async function runProjectionRuntimeBootstrap(task: () => Promise<void>): Promise<void> {
@@ -262,7 +251,7 @@ async function runProjectionRuntimeBootstrap(task: () => Promise<void>): Promise
 export async function ensureProjectionRuntimeConnected(): Promise<RuntimeHandle> {
   const request = readRemoteRuntimeRequestFromUrl();
   if (request?.requiresAuthPaste) {
-    throw new Error('Remote runtime link is missing a capability token. Open /app to paste the token, or pass token=xlnra1...');
+    throw new Error('Remote runtime link is missing a capability token. Open /app and paste a fresh capability.');
   }
   if (request) {
     persistRemoteRuntimeRequest(request);

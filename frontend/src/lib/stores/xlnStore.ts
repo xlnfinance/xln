@@ -551,25 +551,13 @@ const readOrCreateEmbeddedRuntimeSeed = async (): Promise<string | undefined> =>
 
 const resolveAppRuntimeAdapterConfig = async (): Promise<RuntimeAdapterConfig> => {
   if (typeof window === 'undefined') return { mode: 'embedded' };
-  const params = new URLSearchParams(window.location.search);
-  const rawMode = (
-    params.get('runtime') ||
-    params.get('adapter') ||
-    readStoredAdapterValue('xln-runtime-adapter-mode') ||
-    ''
-  ).trim().toLowerCase();
-  const remoteRequested = rawMode === 'remote' || rawMode === 'ws' || params.has('ws') || params.has('runtimeWs');
+  const remoteRequested = readStoredAdapterValue('xln-runtime-adapter-mode') === 'remote';
   if (!remoteRequested) {
     const seed = await readOrCreateEmbeddedRuntimeSeed();
     return seed ? { mode: 'embedded', seed } : { mode: 'embedded' };
   }
 
-  const wsUrl = (
-    params.get('ws') ||
-    params.get('runtimeWs') ||
-    readStoredAdapterValue('xln-runtime-adapter-ws') ||
-    defaultRemoteAdapterWsUrl()
-  ).trim();
+  const wsUrl = (readStoredAdapterValue('xln-runtime-adapter-ws') || defaultRemoteAdapterWsUrl()).trim();
   const normalizedWsUrl = normalizeWsConnectUrl(wsUrl);
   const storedAuthKey = readStoredAdapterValue('xln-runtime-adapter-key').trim();
   let restoredAuthKey = '';

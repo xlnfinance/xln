@@ -30,6 +30,12 @@ const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last
 
 const REMOTE_E2E_WAIT_MS = 15_000;
 
+const remoteRuntimeUrl = (path: string, wsUrl: string, token?: string): string => {
+  const hash = new URLSearchParams({ runtime: 'remote', ws: wsUrl });
+  if (token) hash.set('token', token);
+  return `${APP_BASE_URL}${path}#${hash.toString()}`;
+};
+
 type RuntimeImportSummary = {
   ok: boolean;
   count: number;
@@ -687,7 +693,7 @@ test('remote /app opens an existing hub runtime through radapter', { tag: '@func
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const wsUrl = h1Endpoint.wsUrl;
   const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
-  const url = `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(key)}#accounts`;
+  const url = remoteRuntimeUrl('/app', wsUrl, key);
 
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
@@ -808,7 +814,7 @@ test(
     });
 
     await page.goto(
-      `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(key)}`,
+      remoteRuntimeUrl('/app', wsUrl, key),
       {
         waitUntil: 'domcontentloaded',
       },
@@ -937,7 +943,7 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
   });
 
   await page.goto(
-    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(key)}#accounts`,
+    remoteRuntimeUrl('/app', h1Endpoint.wsUrl, key),
     {
       waitUntil: 'domcontentloaded',
     },
@@ -1049,7 +1055,7 @@ test('remote /app pasted capability connects without reloading the page', { tag:
   const wsUrl = h1Endpoint.wsUrl;
   const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
 
-  await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}#accounts`, {
+  await page.goto(remoteRuntimeUrl('/app', wsUrl), {
     waitUntil: 'domcontentloaded',
   });
   const remotePrompt = page.getByTestId('remote-runtime-login-screen');
@@ -1108,7 +1114,7 @@ test(
     const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
 
     await page.goto(
-      `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(key)}`,
+      remoteRuntimeUrl('/app', wsUrl, key),
       {
         waitUntil: 'domcontentloaded',
       },
@@ -1425,7 +1431,7 @@ test(
     page.on('pageerror', error => consoleProblems.push(`pageerror: ${error.message}`));
 
     await page.goto(
-      `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
+      remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey),
       {
         waitUntil: 'domcontentloaded',
       },
@@ -1480,7 +1486,7 @@ test('admin remote runtime opens normal app workspace', { tag: '@functional' }, 
   page.on('pageerror', error => consoleProblems.push(`pageerror: ${error.message}`));
 
   await page.goto(
-    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
+    remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey),
     { waitUntil: 'domcontentloaded' },
   );
 
@@ -1558,7 +1564,7 @@ test(
     page.on('pageerror', error => consoleProblems.push(`pageerror: ${error.message}`));
 
     await page.goto(
-      `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
+      remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey),
       { waitUntil: 'domcontentloaded' },
     );
 
@@ -1677,7 +1683,7 @@ test(
     page.on('pageerror', error => consoleProblems.push(`pageerror: ${error.message}`));
 
     await page.goto(
-      `${APP_BASE_URL}/address?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}`,
+      remoteRuntimeUrl('/address', h1Endpoint.wsUrl, adminKey),
       { waitUntil: 'domcontentloaded' },
     );
 
@@ -1760,7 +1766,7 @@ test(
     page.on('pageerror', error => consoleProblems.push(`pageerror:${error.message}`));
 
     await page.goto(
-      `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#settings`,
+      remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey),
       { waitUntil: 'domcontentloaded' },
     );
 
@@ -1901,10 +1907,12 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
     { timeout: REMOTE_E2E_WAIT_MS },
   );
 
-  await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(adminKey)}`, {
+  const rejected = await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=forbidden`, {
     waitUntil: 'domcontentloaded',
   });
-  await expect(page).toHaveURL(/\/app#accounts$/);
+  expect(rejected?.status()).toBe(400);
+  await page.goto(`${APP_BASE_URL}/radapter`, { waitUntil: 'domcontentloaded' });
+  await expect(page).toHaveURL(/\/app$/);
   await page.waitForFunction(
     () => {
       const view = window as typeof window & {
@@ -2044,7 +2052,7 @@ test(
     });
 
     await page.goto(
-      `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(fixture.wsUrl)}&token=${encodeURIComponent(token)}#accounts`,
+      remoteRuntimeUrl('/app', fixture.wsUrl, token),
       { waitUntil: 'domcontentloaded' },
     );
     await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
@@ -2148,7 +2156,7 @@ test(
     const adminKey = (await resolveRuntimeImportCapability(page, h2Endpoint, 'admin')).token;
 
     await page.goto(
-      `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h2Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
+      remoteRuntimeUrl('/app', h2Endpoint.wsUrl, adminKey),
       { waitUntil: 'domcontentloaded' },
     );
     await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });

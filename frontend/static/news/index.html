@@ -1921,10 +1921,10 @@
             const toast = document.createElement('div');
             toast.className = 'toast';
             toast.innerHTML = `
-                <span class="toast-icon">${icon}</span>
+                <span class="toast-icon">${escapeHtml(icon)}</span>
                 <div class="toast-content">
-                    <div class="toast-title">${title}</div>
-                    <div class="toast-message">${message}</div>
+                    <div class="toast-title">${escapeHtml(title)}</div>
+                    <div class="toast-message">${escapeHtml(message)}</div>
                 </div>
             `;
             document.body.appendChild(toast);
@@ -1953,12 +1953,14 @@
 
         // Fetch helpers
         async function fetchItem(id) {
-            if (itemCache.has(id)) {
-                return itemCache.get(id);
+            const itemId = safeInteger(id);
+            if (itemId <= 0) throw new Error('invalid Hacker News item id');
+            if (itemCache.has(itemId)) {
+                return itemCache.get(itemId);
             }
-            const res = await fetch(`${API_BASE}/item/${id}.json`);
+            const res = await fetch(`${API_BASE}/item/${itemId}.json`);
             const item = await res.json();
-            itemCache.set(id, item);
+            itemCache.set(itemId, item);
             return item;
         }
 
@@ -2008,8 +2010,23 @@
 
         function escapeHtml(text) {
             const div = document.createElement('div');
-            div.textContent = text;
+            div.textContent = String(text ?? '');
             return div.innerHTML;
+        }
+
+        function safeInteger(value) {
+            const number = Number(value);
+            return Number.isSafeInteger(number) ? number : 0;
+        }
+
+        function safeExternalUrl(value) {
+            if (!value) return '#';
+            try {
+                const url = new URL(String(value || ''), window.location.origin);
+                return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : '#';
+            } catch {
+                return '#';
+            }
         }
 
         // Bookmark functions
@@ -2200,15 +2217,19 @@
                     }
                 }
             } catch (err) {
-                content.innerHTML = `<div class="summary-error">❌ ${err.message}</div>`;
+                        content.innerHTML = `<div class="summary-error">❌ ${escapeHtml(err.message)}</div>`;
             }
         }
 
         // markdown to html with link support
         function markdownToHtml(md) {
-            return md
+            // Escape model, HN, and digest text before adding our tiny tag set.
+            // Formatting first would reactivate attacker-supplied tags and handlers.
+            return escapeHtml(md)
                 // links first
-                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, href) =>
+                    `<a href="${safeExternalUrl(href.replaceAll('&amp;', '&'))}" target="_blank" rel="noopener">${label}</a>`
+                )
                 // headers
                 .replace(/^### (.+)$/gm, '<h3>$1</h3>')
                 .replace(/^## (.+)$/gm, '<h2>$1</h2>')
@@ -2350,6 +2371,9 @@
 
         // Render story card
         function renderStory(story, rank) {
+            const storyId = safeInteger(story.id);
+            const storyScore = safeInteger(story.score);
+            const commentCount = safeInteger(story.descendants);
             const domain = getDomain(story.url);
             const { score: relevanceScore, matchedKeywords } = calculateRelevance(story);
             const relevanceLevel = getRelevanceLevel(relevanceScore);
@@ -2363,13 +2387,13 @@
             const discussionHeat = getDiscussionHeat(story);
 
             // check if we have cached TL;DR
-            const cachedTldr = summaryCache[story.id]?.short || null;
+            const cachedTldr = summaryCache[storyId]?.short || null;
 
             const card = document.createElement('article');
             card.className = `story-card ${relevanceScore >= 3 ? relevanceLevel + '-relevance' : ''} ${read ? 'read' : ''}`;
             card.dataset.relevance = relevanceScore;
             card.dataset.categories = categories.join(',');
-            card.dataset.storyId = story.id;
+            card.dataset.storyId = String(storyId);
 
             const tagsHtml = matchedKeywords.slice(0, 3).map(kw =>
                 `<span class="tag xln">${kw}</span>`
@@ -2383,11 +2407,11 @@
                 <div class="story-header">
                     <div class="story-rank">${rank}</div>
                     <div class="story-content">
-                        <a href="${story.url || '#'}" class="story-title" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+                        <a href="${escapeHtml(safeExternalUrl(story.url || `https://news.ycombinator.com/item?id=${storyId}`))}" class="story-title" target="_blank" rel="noopener" onclick="event.stopPropagation()">
                             ${emoji} ${escapeHtml(story.title)}
                         </a>
                         <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                            ${domain ? `<span class="story-domain">🔗 ${domain}</span>` : ''}
+                            ${domain ? `<span class="story-domain">🔗 ${escapeHtml(domain)}</span>` : ''}
                             ${relevanceScore >= 3 ? `
                                 <span class="relevance-badge ${relevanceLevel}">
                                     ⚡ XLN <span class="relevance-score">${relevanceScore}</span>
@@ -2397,28 +2421,28 @@
                         <div class="story-meta">
                             <span class="points">
                                 <span class="points-icon" onclick="event.stopPropagation(); vote(this)">▲</span>
-                                <span class="animated-number">${story.score || 0}</span> pts
+                                <span class="animated-number">${storyScore}</span> pts
                                 ${trending ? '<span class="trending">🔥 trending</span>' : ''}
                                 ${controversial ? '<span class="controversial">⚡ controversial</span>' : ''}
                             </span>
                             <span class="reading-time">📖 ${readingTime} min</span>
-                            <span>by <a href="https://news.ycombinator.com/user?id=${story.by}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${story.by}</a></span>
-                            <span>🕐 ${timeAgo(story.time)}</span>
+                            <span>by <a href="https://news.ycombinator.com/user?id=${encodeURIComponent(String(story.by || ''))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${escapeHtml(story.by)}</a></span>
+                            <span>🕐 ${timeAgo(safeInteger(story.time))}</span>
                             <span class="comments-link">
-                                <a href="#" onclick="event.preventDefault(); event.stopPropagation(); viewItem(${story.id})">
-                                    💬 ${story.descendants || 0}
+                                <a href="#" onclick="event.preventDefault(); event.stopPropagation(); viewItem(${storyId})">
+                                    💬 ${commentCount}
                                     ${discussionHeat ? `<span class="heat heat-${discussionHeat.level}">${discussionHeat.emoji}</span>` : ''}
                                 </a>
                             </span>
-                            <button class="bookmark-btn ${bookmarked ? 'saved' : ''}" onclick="event.stopPropagation();" data-story-id="${story.id}">
+                            <button class="bookmark-btn ${bookmarked ? 'saved' : ''}" onclick="event.stopPropagation();" data-story-id="${storyId}">
                                 ${bookmarked ? '🔖' : '📑'}
                             </button>
                             ${canSummarize(story) ? `
-                                <button class="summarize-btn" onclick="event.stopPropagation();" data-story-id="${story.id}">
+                                <button class="summarize-btn" onclick="event.stopPropagation();" data-story-id="${storyId}">
                                     📝 memo
                                 </button>
                             ` : ''}
-                            <button class="share-btn" onclick="event.stopPropagation();" data-story-id="${story.id}" title="share">
+                            <button class="share-btn" onclick="event.stopPropagation();" data-story-id="${storyId}" title="share">
                                 ↗
                             </button>
                         </div>
@@ -2431,7 +2455,7 @@
                         ${cachedTldr ? `
                             <div class="story-tldr">
                                 <span class="story-tldr-label">⚡ tl;dr</span>
-                                ${cachedTldr.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}
+                                ${markdownToHtml(cachedTldr)}
                             </div>
                         ` : ''}
                     </div>
@@ -2469,14 +2493,14 @@
 
             // Mark as read when clicking title or card
             card.addEventListener('click', () => {
-                markAsRead(story.id);
+                markAsRead(storyId);
                 card.classList.add('read');
-                viewItem(story.id);
+                viewItem(storyId);
             });
 
             const titleLink = card.querySelector('.story-title');
             titleLink.addEventListener('click', (e) => {
-                markAsRead(story.id);
+                markAsRead(storyId);
                 card.classList.add('read');
             });
 
@@ -2529,18 +2553,19 @@
             cronFeed.stories.forEach((story, i) => {
                 const summary = story.summaries?.medium || story.summaries?.short || '';
                 if (!summary) return;
+                const storyId = safeInteger(story.hn_id);
 
                 html += `
                     <div class="digest-card">
                         <h2>
                             <span>${i + 1}.</span>
-                            <a href="https://news.ycombinator.com/item?id=${story.hn_id}" target="_blank" rel="noopener">
-                                ${story.title}
+                            <a href="https://news.ycombinator.com/item?id=${storyId}" target="_blank" rel="noopener">
+                                ${escapeHtml(story.title)}
                             </a>
                         </h2>
                         <div class="digest-card-meta">
-                            ${story.score} pts • ${story.comments_count} comments
-                            ${story.url ? ` • <a href="${story.url}" target="_blank">${getDomain(story.url)}</a>` : ''}
+                            ${Number(story.score) || 0} pts • ${Number(story.comments_count) || 0} comments
+                            ${story.url ? ` • <a href="${escapeHtml(safeExternalUrl(story.url))}" target="_blank" rel="noopener">${escapeHtml(getDomain(story.url))}</a>` : ''}
                         </div>
                         <div class="digest-card-summary">
                             ${markdownToHtml(summary)}
@@ -2679,6 +2704,8 @@
 
         // Item/Comments view
         async function viewItem(id) {
+            const itemId = safeInteger(id);
+            if (itemId <= 0) throw new Error('invalid Hacker News item id');
             document.querySelector('.stories-view').classList.add('hidden');
             const itemView = document.getElementById('itemView');
             itemView.classList.add('active');
@@ -2690,7 +2717,10 @@
             commentsEl.innerHTML = '';
 
             try {
-                const item = await fetchItem(id);
+                const item = await fetchItem(itemId);
+                const author = String(item.by || '');
+                const score = safeInteger(item.score);
+                const itemTime = safeInteger(item.time);
                 const domain = getDomain(item.url);
                 const { score: relevanceScore, matchedKeywords } = calculateRelevance(item);
                 const relevanceLevel = getRelevanceLevel(relevanceScore);
@@ -2703,11 +2733,11 @@
                 headerEl.innerHTML = `
                     <h1 class="item-title">
                         ${emoji} ${item.url
-                            ? `<a href="${item.url}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>`
+                            ? `<a href="${escapeHtml(safeExternalUrl(item.url))}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>`
                             : escapeHtml(item.title)}
                     </h1>
                     <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
-                        ${domain ? `<span class="story-domain">🔗 ${domain}</span>` : ''}
+                        ${domain ? `<span class="story-domain">🔗 ${escapeHtml(domain)}</span>` : ''}
                         ${relevanceScore >= 3 ? `
                             <span class="relevance-badge ${relevanceLevel}">
                                 ⚡ XLN Relevance: <span class="relevance-score">${relevanceScore}</span>
@@ -2715,15 +2745,15 @@
                         ` : ''}
                     </div>
                     <div class="story-meta">
-                        <span class="points">▲ ${item.score || 0} points</span>
-                        <span>by <a href="https://news.ycombinator.com/user?id=${item.by}" target="_blank" rel="noopener">${item.by}</a></span>
-                        <span>🕐 ${timeAgo(item.time)}</span>
+                        <span class="points">▲ ${score} points</span>
+                        <span>by <a href="https://news.ycombinator.com/user?id=${encodeURIComponent(author)}" target="_blank" rel="noopener">${escapeHtml(author)}</a></span>
+                        <span>🕐 ${timeAgo(itemTime)}</span>
                     </div>
                     ${tagsHtml ? `<div class="story-tags" style="margin-top: 12px;">${tagsHtml}</div>` : ''}
-                    ${item.text ? `<div class="item-text">${item.text}</div>` : ''}
+                    ${item.text ? `<div class="item-text">${escapeHtml(item.text)}</div>` : ''}
                 `;
 
-                document.getElementById('commentsTitle').textContent = `💬 ${item.descendants || 0} Comments`;
+                document.getElementById('commentsTitle').textContent = `💬 ${safeInteger(item.descendants)} Comments`;
 
                 if (item.kids && item.kids.length > 0) {
                     commentsEl.innerHTML = '<div class="loading"><div class="spinner"></div>Loading comments...</div>';
@@ -2746,18 +2776,21 @@
 
             for (const comment of comments) {
                 if (!comment || comment.deleted || comment.dead) continue;
+                const commentId = safeInteger(comment.id);
+                const author = String(comment.by || '');
+                const commentTime = safeInteger(comment.time);
 
                 const repliesHtml = comment.kids ? await renderComments(comment.kids, depth + 1) : '';
 
                 html += `
-                    <div class="comment" id="comment-${comment.id}">
+                    <div class="comment" id="comment-${commentId}">
                         <div class="comment-meta">
-                            <a href="https://news.ycombinator.com/user?id=${comment.by}" target="_blank" rel="noopener">${comment.by}</a>
+                            <a href="https://news.ycombinator.com/user?id=${encodeURIComponent(author)}" target="_blank" rel="noopener">${escapeHtml(author)}</a>
                             <span>•</span>
-                            <span>${timeAgo(comment.time)}</span>
-                            <button class="collapse-btn" onclick="toggleComment(${comment.id})">−</button>
+                            <span>${timeAgo(commentTime)}</span>
+                            <button class="collapse-btn" onclick="toggleComment(${commentId})">−</button>
                         </div>
-                        <div class="comment-text">${comment.text || ''}</div>
+                        <div class="comment-text">${escapeHtml(comment.text)}</div>
                         ${repliesHtml ? `<div class="comment-replies">${repliesHtml}</div>` : ''}
                     </div>
                 `;
@@ -2891,7 +2924,7 @@
                     e.preventDefault();
                     const story = getSelectedStory();
                     if (story && story.url) {
-                        window.open(story.url, '_blank');
+                        window.open(safeExternalUrl(story.url), '_blank', 'noopener');
                     }
                     break;
                 case 'c': // open comments

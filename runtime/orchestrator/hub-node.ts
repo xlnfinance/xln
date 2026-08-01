@@ -636,9 +636,11 @@ const buildRuntimeAdminUrl = (env: RuntimeReplica): string | null => {
     tokenId: `admin-${String(env.runtimeId || resolvedArgs.name || 'hub').toLowerCase()}-${Date.now()}`,
   });
   const url = new URL(resolveOperatorAppUrl());
-  url.searchParams.set('runtime', 'remote');
-  url.searchParams.set('ws', runtimeAdapterUrl.toString());
-  url.searchParams.set('token', token);
+  url.hash = new URLSearchParams({
+    runtime: 'remote',
+    ws: runtimeAdapterUrl.toString(),
+    token,
+  }).toString();
   return url.toString();
 };
 

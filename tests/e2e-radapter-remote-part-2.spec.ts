@@ -30,6 +30,11 @@ const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last
 
 const REMOTE_E2E_WAIT_MS = 15_000;
 
+const remoteRuntimeUrl = (path: string, wsUrl: string, token: string): string => {
+  const hash = new URLSearchParams({ runtime: 'remote', ws: wsUrl, token });
+  return `${APP_BASE_URL}${path}#${hash.toString()}`;
+};
+
 type RuntimeImportSummary = {
   ok: boolean;
   count: number;
@@ -693,7 +698,7 @@ test(
       localStorage.setItem('xln-settings', JSON.stringify({ showTimeMachine: true }));
     });
     await page.goto(
-      `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
+      remoteRuntimeUrl('/app', wsUrl, adminKey),
       {
         waitUntil: 'domcontentloaded',
       },
@@ -741,8 +746,8 @@ test(
     });
     expect(accessBeforeReload.authLevel).toBe('admin');
     expect(accessBeforeReload.storedAccess).toBe('admin');
-    expect(accessBeforeReload.registryStoredLocally).toBe(true);
-    expect(accessBeforeReload.registryStoredInSession).toBe(false);
+    expect(accessBeforeReload.registryStoredLocally).toBe(false);
+    expect(accessBeforeReload.registryStoredInSession).toBe(true);
     expect(accessBeforeReload.activeKeyPresent).toBe(true);
     expect(accessBeforeReload.readOnlyWarningCount).toBe(0);
 
@@ -790,8 +795,8 @@ test(
     });
     expect(accessAfterReload.authLevel).toBe('admin');
     expect(accessAfterReload.storedAccess).toBe('admin');
-    expect(accessAfterReload.registryStoredLocally).toBe(true);
-    expect(accessAfterReload.registryStoredInSession).toBe(false);
+    expect(accessAfterReload.registryStoredLocally).toBe(false);
+    expect(accessAfterReload.registryStoredInSession).toBe(true);
     expect(accessAfterReload.activeKeyPresent).toBe(true);
     expect(accessAfterReload.readOnlyWarningCount).toBe(0);
     await expect(page.getByTestId('hub-discovery-card').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
@@ -886,8 +891,8 @@ test(
     expect(accessAfterRegistryReload.authLevel).toBe('admin');
     expect(accessAfterRegistryReload.activeKeyAccess).toBe('full');
     expect(accessAfterRegistryReload.storedAccess).toBe('admin');
-    expect(accessAfterRegistryReload.registryStoredLocally).toBe(true);
-    expect(accessAfterRegistryReload.registryStoredInSession).toBe(false);
+    expect(accessAfterRegistryReload.registryStoredLocally).toBe(false);
+    expect(accessAfterRegistryReload.registryStoredInSession).toBe(true);
     expect(accessAfterRegistryReload.activeKeyPresent).toBe(true);
     expect(accessAfterRegistryReload.readOnlyWarningCount).toBe(0);
 
@@ -1424,7 +1429,7 @@ test(
 
     const h1Key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
     await page.goto(
-      `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1WsUrl)}&token=${encodeURIComponent(h1Key)}`,
+      remoteRuntimeUrl('/app', h1WsUrl, h1Key),
       {
         waitUntil: 'domcontentloaded',
       },
@@ -1493,7 +1498,7 @@ test(
     );
 
     const managerState = await page.evaluate(expectedWsUrl => {
-      const importsRaw = localStorage.getItem('xln-remote-runtime-imports') || '[]';
+      const importsRaw = sessionStorage.getItem('xln-remote-runtime-imports') || '[]';
       const imports = JSON.parse(importsRaw) as Array<{
         label?: string;
         wsUrl?: string;
@@ -1509,7 +1514,7 @@ test(
     }, h2WsUrl);
 
     expect(managerState.activeWsUrl).toBe(h2WsUrl);
-    expect(managerState.sessionRegistryPresent).toBe(false);
+    expect(managerState.sessionRegistryPresent).toBe(true);
     expect(managerState.imports.length).toBeGreaterThanOrEqual(5);
     expect(managerState.imports.length).toBeLessThanOrEqual(100);
     expect(managerState.h2Import?.label).toBe('H2');
@@ -1667,7 +1672,7 @@ test(
         activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
         activeMode: localStorage.getItem('xln-runtime-adapter-mode'),
         authLevel: String((window as any).__xln?.adapter?.status?.().authLevel || ''),
-        importCount: JSON.parse(localStorage.getItem('xln-remote-runtime-imports') || '[]').length,
+        importCount: JSON.parse(sessionStorage.getItem('xln-remote-runtime-imports') || '[]').length,
         url: window.location.href,
         expectedWsUrl,
       }),

@@ -571,10 +571,9 @@ test('radapter page redirects remote users into the canonical app workspace', ()
   const route = readFileSync('frontend/src/routes/radapter/+page.ts', 'utf8');
   const panel = readFileSync('frontend/src/lib/components/Health/RuntimeAdapterPanel.svelte', 'utf8');
 
-  expect(route).toContain("new URL('/app', url.origin)");
-  expect(route).toContain("target.searchParams.set('runtime', 'remote')");
-  expect(route).toContain("target.hash = 'accounts'");
-  expect(route).toContain('throw redirect(307');
+  expect(route).toContain("throw error(400, 'REMOTE_RUNTIME_QUERY_BOOTSTRAP_FORBIDDEN')");
+  expect(route).toContain("throw redirect(307, '/app')");
+  expect(route).not.toContain("searchParams.get('token'");
   expect(panel).toContain('href="/app"');
   expect(panel).not.toContain('Runtime Adapter Inspector');
   expect(panel).not.toContain('autoConnect');

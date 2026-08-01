@@ -303,7 +303,7 @@ describe('remote runtime import manager utilities', () => {
       ...makeStored('Custody', 8088, 1),
       token: `xlnra1.full.${Date.now() - 1}.aud.kid.jti.sig`,
     };
-    localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify([expired]));
+    sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify([expired]));
 
     expect(() => readStoredRemoteRuntimeImports()).toThrow('REMOTE_RUNTIME_TOKEN_EXPIRED:Custody');
 
@@ -314,9 +314,9 @@ describe('remote runtime import manager utilities', () => {
     expect(readStoredRemoteRuntimeImports().map(entry => entry.label)).toEqual(['H1']);
   });
 
-  test('fresh import merge migrates legacy source-wrapper storage', () => {
+  test('fresh import merge reads a session-scoped source wrapper', () => {
     const legacy = makeStored('legacy H1', 8092, 1);
-    localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({
+    sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({
       ok: true,
       ready: true,
       manifest: {
@@ -333,13 +333,13 @@ describe('remote runtime import manager utilities', () => {
   });
 
   test('fresh import merge drops invalid remote-runtime cache without weakening strict reads', () => {
-    localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({ ok: true, ready: false }));
+    sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({ ok: true, ready: false }));
 
     expect(() => readStoredRemoteRuntimeImports()).toThrow('REMOTE_RUNTIME_IMPORT_ENTRIES_MISSING');
     expect(readStoredRemoteRuntimeImports({ dropInvalid: true })).toEqual([]);
-    expect(localStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toBeNull();
+    expect(sessionStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toBeNull();
 
-    localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({ ok: true, ready: false }));
+    sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({ ok: true, ready: false }));
     const fresh = makeStored('Custody', 8088, 2);
     const merged = persistRemoteRuntimeImports([fresh], { merge: true });
 
@@ -347,23 +347,23 @@ describe('remote runtime import manager utilities', () => {
     expect(readStoredRemoteRuntimeImports().map(entry => entry.label)).toEqual(['Custody']);
   });
 
-  test('persists remote runtime capabilities in local storage across reloads', () => {
+  test('persists remote runtime capabilities only for the current browser session', () => {
     const admin = makeStored('H1 admin', 8092, 1, 'admin');
     persistRemoteRuntimeImports([admin]);
 
-    expect(localStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toContain(admin.token);
-    expect(sessionStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toBeNull();
+    expect(sessionStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toContain(admin.token);
+    expect(localStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toBeNull();
     expect(resolveStoredRemoteRuntimeAuthKey('ws://localhost:8092/rpc'))
       .toBe(admin.token);
   });
 
-  test('migrates old session-scoped remote runtime capabilities into local storage', () => {
+  test('discards old persistent remote runtime capabilities', () => {
     const admin = makeStored('H1 admin', 8092, 1, 'admin');
-    sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify([admin]));
+    localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify([admin]));
 
-    expect(readStoredRemoteRuntimeImports()[0]?.token).toBe(admin.token);
-    expect(localStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toContain(admin.token);
+    expect(readStoredRemoteRuntimeImports()).toEqual([]);
     expect(sessionStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toBeNull();
   });
 
   test('persists websocket-derived hub metadata across reloads', () => {
@@ -685,9 +685,11 @@ describe('remote runtime import manager utilities', () => {
     expect(appLayout).toContain('persistActiveRemoteRuntimeImport(first)');
     expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importPayload || importSource || remoteRequest);');
     expect(appLayout).toContain('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;');
-    expect(appLayout.indexOf('const importPayload = readRemoteRuntimeImportPayloadFromUrl()')).toBeLessThan(
+    expect(appLayout.indexOf('const importPayload = readRemoteRuntimeImportPayloadFromHash()')).toBeLessThan(
       appLayout.indexOf('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;'),
     );
+    expect(appLayout).not.toContain('readRemoteRuntimeImportPayloadFromUrl');
+    expect(appLayout).not.toContain('readRemoteRuntimeImportSourceFromUrl');
     expect(appLayout).not.toContain('redirectRemoteRuntimeImportToManager');
     expect(importFlow).toContain('export const importRemoteRuntimeEntries = async');
     expect(importFlow).toContain('runtimeOperations.upsertRemoteRuntimeImports(validated)');
