@@ -1739,6 +1739,21 @@
       "reproduction": "Complete signed hello, send a later application frame with the attacker's fromEncryptionPubKey, then prove the attacker decrypts the next outbound entity-input envelope while the original peer receives invalid tag."
     },
     {
+      "id": "AUD-ENTITY-UNAUTH-PROPOSAL-HALT",
+      "rootCauseKey": "entity-proposal-replay-before-proposer-authentication",
+      "moduleId": "entity-consensus",
+      "invariantIds": [
+        "entity-consensus.certified-state-only",
+        "runtime-pipeline.expected-rejection-isolation"
+      ],
+      "title": "An unauthenticated remote Entity proposal is replayed before proposer signature verification and can sticky-halt the receiving Runtime.",
+      "severity": "P0",
+      "confidence": 99,
+      "state": "CANDIDATE",
+      "sourceSha": "c769a22e3bce083896f14a42c0ad932094ba44ea",
+      "reproduction": "Queue an active-leader frame whose nested EntityCommand has a zero signature and whose collectedSigs are empty; observe ENTITY_COMMAND_SIGNATURE_MISMATCH halt the Runtime before any proposer precommit is verified, then observe RUNTIME_PROCESS_HALTED on the next input."
+    },
+    {
       "id": "AUD-RUNTIME-STICKY-REJECTION",
       "rootCauseKey": "expected-local-command-sticky-runtime-halt",
       "moduleId": "runtime-pipeline",
@@ -2335,8 +2350,10 @@
       "usefulnessScore": 0,
       "provisional": true,
       "confirmedFindingIds": [],
-      "candidateFindingIds": [],
-      "summary": "Read-only base audit is running."
+      "candidateFindingIds": [
+        "AUD-ENTITY-UNAUTH-PROPOSAL-HALT"
+      ],
+      "summary": "Read-only base audit found a reproducible unauthenticated proposal-to-Runtime-halt P0 candidate; independent verification is pending."
     },
     {
       "id": "transport-auth-fix-20260801",

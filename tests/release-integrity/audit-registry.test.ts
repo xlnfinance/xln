@@ -254,5 +254,15 @@ describe('canonical audit registry', () => {
     const errors = validateAuditRegistry(duplicate);
     expect(errors).toContain(`module id is duplicated: ${REGISTRY.modules[0]!.id}`);
     expect(errors).toContain('finding AUD-DANGLING-INVARIANT has unknown invariant missing.invariant');
+
+    const wrongFindingScope: AuditRegistry = {
+      ...REGISTRY,
+      agentRuns: REGISTRY.agentRuns.map(run => run.id === 'account-consensus-base-20260801'
+        ? { ...run, candidateFindingIds: ['AUD-ENTITY-UNAUTH-PROPOSAL-HALT'] }
+        : run),
+    };
+    expect(validateAuditRegistry(wrongFindingScope)).toContain(
+      'agent run account-consensus-base-20260801 is not scoped to finding module entity-consensus',
+    );
   });
 });

@@ -104,6 +104,7 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
   const moduleIds = new Set(registry.modules.map(module => module.id));
   const invariantIds = new Set(registry.invariants.map(invariant => invariant.id));
   const findingIds = new Set(registry.findings.map(finding => finding.id));
+  const findingsById = new Map(registry.findings.map(finding => [finding.id, finding]));
   const reviewerIds = new Set(registry.reviewers.map(reviewer => reviewer.id));
   const agentRunIds = new Set(registry.agentRuns.map(run => run.id));
   const invariantsById = new Map(registry.invariants.map(invariant => [invariant.id, invariant]));
@@ -249,6 +250,10 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
     }
     for (const findingId of [...run.confirmedFindingIds, ...run.candidateFindingIds]) {
       if (!findingIds.has(findingId)) errors.push(`agent run ${run.id} has unknown finding ${findingId}`);
+      const finding = findingsById.get(findingId);
+      if (finding && !run.moduleIds.includes(finding.moduleId)) {
+        errors.push(`agent run ${run.id} is not scoped to finding module ${finding.moduleId}`);
+      }
     }
   }
 
