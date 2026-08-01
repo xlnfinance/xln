@@ -14,6 +14,7 @@ import type {
   ModuleAuditStatus,
   ModuleCriticality,
 } from './types';
+import { computeModuleReviewStatus } from './reviews';
 
 const criticalityWeight: Readonly<Record<ModuleCriticality, number>> = {
   critical: 4,
@@ -161,6 +162,12 @@ export const computeAuditStatus = (
       dependencyModuleIds.has(finding.moduleId)
       || finding.invariantIds.some(invariantId => dependencyInvariantIds.has(invariantId))
     ));
+    const reviews = computeModuleReviewStatus(
+      registry,
+      module.id,
+      currentFingerprint,
+      environmentFingerprint,
+    );
     return {
       id: module.id,
       title: module.title,
@@ -172,6 +179,11 @@ export const computeAuditStatus = (
       staleEvidence,
       openFindings: findings.length,
       openHighFindings: findings.filter(finding => finding.severity === 'P0' || finding.severity === 'P1').length,
+      reviewFloor: reviews.floor,
+      reviewCount: reviews.count,
+      reviewFamilyCount: reviews.familyCount,
+      staleReviews: reviews.stale,
+      reviewGoalMet: reviews.goalMet,
     };
   });
   const weighted = modules.reduce((sum, module) => sum + criticalityWeight[module.criticality], 0);
@@ -195,7 +207,7 @@ export const computeAuditStatus = (
   };
 };
 
-export type AuditGateProfile = 'merge' | 'release';
+export type AuditGateProfile = 'merge' | 'release' | 'ideal';
 
 export type AuditGateResult = Readonly<{
   ok: boolean;
@@ -220,11 +232,25 @@ export const evaluateAuditGate = (
     }
     failures.push(`open ${finding.severity}: ${finding.id}`);
   }
-  if (profile === 'release') {
+  if (profile === 'release' || profile === 'ideal') {
     for (const module of status.modules) {
       if (module.criticality === 'critical' && module.coverage < registry.policy.releaseCoverageMinimum) {
         failures.push(`critical coverage ${module.coverage}% < ${registry.policy.releaseCoverageMinimum}%: ${module.id}`);
       }
+      const reviewRequired = profile === 'ideal' || module.criticality === 'critical';
+      if (reviewRequired && !module.reviewGoalMet) {
+        failures.push(
+          `review goal unmet ${module.reviewFloor}/1000, ${module.reviewCount}/${registry.policy.idealReviewQuorum} reviewers, `
+          + `${module.reviewFamilyCount}/${registry.policy.idealReviewFamilyQuorum} families: ${module.id}`,
+        );
+      }
+      if (profile === 'ideal' && module.coverage < 100) failures.push(`ideal coverage below 100%: ${module.id}`);
+      if (profile === 'ideal' && module.quality < 100) failures.push(`ideal quality below 100%: ${module.id}`);
+    }
+  }
+  if (profile === 'ideal') {
+    for (const finding of registry.findings) {
+      if (findingIsOpen(finding)) failures.push(`open ${finding.severity} blocks ideal gate: ${finding.id}`);
     }
   }
   return { ok: failures.length === 0, profile, failures };

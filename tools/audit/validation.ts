@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 
 import { sha256Text } from './fingerprint';
+import { validateModuleReviews } from './review-validation';
 import { validateAuditRegistryRoot } from './root-validation';
 import {
   AGENT_RUN_STATES,
@@ -48,7 +49,7 @@ const topLevelShapeErrors = (value: unknown): string[] => {
     if (!Array.isArray(scope['exclusions'])) errors.push('scope.exclusions must be an array');
   }
   if (!isRecord(value['policy'])) errors.push('policy must be an object');
-  for (const field of ['modules', 'invariants', 'evidence', 'findings', 'reviewers', 'agentRuns']) {
+  for (const field of ['modules', 'invariants', 'evidence', 'findings', 'reviewers', 'agentRuns', 'moduleReviews']) {
     if (!Array.isArray(value[field])) errors.push(`${field} must be an array`);
   }
   return errors;
@@ -92,6 +93,7 @@ export const validateAuditRegistry = (registry: AuditRegistry, root?: string): s
     ...duplicateIds(registry.findings, 'finding'),
     ...duplicateIds(registry.reviewers, 'reviewer'),
     ...duplicateIds(registry.agentRuns, 'agent run'),
+    ...validateModuleReviews(registry),
   ];
   if (registry.modules.length < 10) errors.push('registry must map at least 10 modules');
   if (registry.scope.sourceGlobs.length === 0) errors.push('audit scope has no source globs');

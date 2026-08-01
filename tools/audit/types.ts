@@ -43,6 +43,9 @@ export type AuditPolicy = Readonly<{
   evidenceWeights: Readonly<Record<EvidenceKind, number>>;
   releaseCoverageMinimum: number;
   independentConfidenceThreshold: number;
+  idealModuleScoreMinimum: number;
+  idealReviewQuorum: number;
+  idealReviewFamilyQuorum: number;
 }>;
 
 export type AuditScope = Readonly<{
@@ -123,6 +126,20 @@ export type AuditAgentRun = Readonly<{
   summary: string;
 }>;
 
+export type AuditModuleReview = Readonly<{
+  id: string;
+  moduleId: string;
+  agentRunId: string;
+  sourceSha: string;
+  moduleFingerprint: string;
+  environmentFingerprint: string;
+  score: number;
+  confidence: number;
+  blockerFindingIds: readonly string[];
+  summary: string;
+  recordedAt: string;
+}>;
+
 export type AuditRegistry = Readonly<{
   schemaVersion: 1;
   protocol: string;
@@ -134,6 +151,7 @@ export type AuditRegistry = Readonly<{
   findings: readonly AuditFinding[];
   reviewers: readonly AuditReviewer[];
   agentRuns: readonly AuditAgentRun[];
+  moduleReviews: readonly AuditModuleReview[];
 }>;
 
 export type InvariantAuditStatus = Readonly<{
@@ -157,6 +175,11 @@ export type ModuleAuditStatus = Readonly<{
   staleEvidence: number;
   openFindings: number;
   openHighFindings: number;
+  reviewFloor: number;
+  reviewCount: number;
+  reviewFamilyCount: number;
+  staleReviews: number;
+  reviewGoalMet: boolean;
 }>;
 
 export type AuditStatus = Readonly<{

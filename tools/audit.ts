@@ -8,7 +8,7 @@
  *   bun tools/audit.ts status      Derive coverage, quality, state, and agent ledger.
  *   bun tools/audit.ts plan        Rank missing invariant evidence and open findings.
  *   bun tools/audit.ts fingerprint [module-id] [--json]
- *   bun tools/audit.ts gate <merge|release> [--json]
+ *   bun tools/audit.ts gate <merge|release|ideal> [--json]
  *
  * Percentages are always derived from audits/registry.json plus current module
  * fingerprints. This tool never edits the registry or silently blesses stale
@@ -60,11 +60,13 @@ const criticalityOrder: Readonly<Record<ModuleCriticality, number>> = {
 const printAgentLedger = (registry: AuditRegistry): void => {
   const completed = registry.agentRuns.filter(run => run.state === 'COMPLETED').length;
   const running = registry.agentRuns.filter(run => run.state === 'RUNNING').length;
-  console.log(`\nAGENTS total=${registry.agentRuns.length} completed=${completed} active=${running}`);
+  const blocked = registry.agentRuns.filter(run => run.state === 'BLOCKED').length;
+  console.log(`\nAGENTS total=${registry.agentRuns.length} completed=${completed} active=${running} blocked=${blocked}`);
   const reviewers = new Map(registry.reviewers.map(reviewer => [reviewer.id, reviewer]));
   for (const run of [...registry.agentRuns].sort((left, right) => right.usefulnessScore - left.usefulnessScore)) {
     const marker = run.provisional ? 'PROVISIONAL' : 'ADJUDICATED';
-    console.log(`${String(run.usefulnessScore).padStart(4)}  ${marker.padEnd(12)}  ${reviewers.get(run.reviewerId)?.label ?? run.reviewerId} · ${run.scope}`);
+    const score = run.state === 'COMPLETED' ? String(run.usefulnessScore).padStart(4) : '   -';
+    console.log(`${score}  ${run.state.padEnd(9)}  ${marker.padEnd(12)}  ${reviewers.get(run.reviewerId)?.label ?? run.reviewerId} · ${run.scope}`);
   }
 };
 
@@ -101,7 +103,7 @@ const statusCommand = (registry: AuditRegistry, json: boolean): void => {
     return;
   }
   console.log(`AUDIT STATUS sha=${status.sourceSha.slice(0, 10)} coverage=${status.coverage}% quality=${status.quality}% evidence=${status.currentEvidence} current/${status.staleEvidence} stale`);
-  console.log('COV    QUAL   LEFT   P0/1  STATE       CRIT      MODULE · NEXT');
+  console.log('COV    QUAL   SCORE  REV/FAM  LEFT   P0/1  STATE       CRIT      MODULE · NEXT');
   const invariantStatuses = new Map(status.invariants.map(invariant => [invariant.id, invariant]));
   const modules = [...status.modules].sort((left, right) => (
     criticalityOrder[left.criticality] - criticalityOrder[right.criticality]
@@ -110,7 +112,8 @@ const statusCommand = (registry: AuditRegistry, json: boolean): void => {
   ));
   for (const module of modules) {
     const qualityLeft = Math.round((100 - module.quality) * 10) / 10;
-    console.log(`${`${module.coverage}%`.padStart(5)}  ${`${module.quality}%`.padStart(5)}  ${`${qualityLeft}%`.padStart(5)}  ${String(module.openHighFindings).padStart(4)}  ${module.state.padEnd(10)}  ${module.criticality.padEnd(8)}  ${module.id} · ${nextModuleStep(registry, invariantStatuses, module.id)}`);
+    const reviewers = `${module.reviewCount}/${module.reviewFamilyCount}`;
+    console.log(`${`${module.coverage}%`.padStart(5)}  ${`${module.quality}%`.padStart(5)}  ${String(module.reviewFloor).padStart(5)}  ${reviewers.padStart(7)}  ${`${qualityLeft}%`.padStart(5)}  ${String(module.openHighFindings).padStart(4)}  ${module.state.padEnd(10)}  ${module.criticality.padEnd(8)}  ${module.id} · ${nextModuleStep(registry, invariantStatuses, module.id)}`);
   }
   printAgentLedger(registry);
 };
@@ -148,7 +151,7 @@ const verifyCommand = (registry: AuditRegistry, json: boolean): void => {
 
 const gateCommand = (registry: AuditRegistry, args: CliArgs): void => {
   const profile = args.positional[0];
-  if (profile !== 'merge' && profile !== 'release') {
+  if (profile !== 'merge' && profile !== 'release' && profile !== 'ideal') {
     throw new Error(`AUDIT_GATE_PROFILE_UNKNOWN:${String(profile)}`);
   }
   const fingerprints = computeModuleFingerprints(ROOT, registry);

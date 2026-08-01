@@ -12,6 +12,7 @@ export {
 } from './fingerprint';
 
 export { computeAuditStatus, evaluateAuditGate } from './status';
+export { computeModuleReviewStatus } from './reviews';
 
 export {
   loadAuditRegistry,

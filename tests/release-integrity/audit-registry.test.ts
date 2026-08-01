@@ -11,7 +11,11 @@ import {
   sha256Text,
   validateAuditRegistry,
 } from '../../tools/audit/core';
-import { EVIDENCE_KINDS, type AuditEvidence, type AuditRegistry } from '../../tools/audit/types';
+import {
+  EVIDENCE_KINDS,
+  type AuditEvidence,
+  type AuditRegistry,
+} from '../../tools/audit/types';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const REGISTRY_PATH = resolve(ROOT, 'audits/registry.json');
@@ -230,6 +234,8 @@ describe('canonical audit registry', () => {
     const release = evaluateAuditGate(REGISTRY, status, 'release');
     expect(release.ok).toBe(false);
     expect(release.failures.some(failure => failure.includes('critical coverage'))).toBe(true);
+    expect(release.failures.some(failure => failure.includes('review goal unmet'))).toBe(true);
+    expect(evaluateAuditGate(REGISTRY, status, 'ideal').ok).toBe(false);
   });
 
   test('duplicate and dangling references fail loudly', () => {

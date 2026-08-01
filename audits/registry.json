@@ -44,7 +44,10 @@
       "independentVerification": 5
     },
     "releaseCoverageMinimum": 90,
-    "independentConfidenceThreshold": 95
+    "independentConfidenceThreshold": 95,
+    "idealModuleScoreMinimum": 990,
+    "idealReviewQuorum": 3,
+    "idealReviewFamilyQuorum": 2
   },
   "modules": [
     {
@@ -1891,6 +1894,48 @@
       "label": "Transport-auth independent verifier",
       "family": "codex",
       "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-account-consensus-base",
+      "label": "Account consensus base auditor",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-entity-consensus-base",
+      "label": "Entity consensus base auditor",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-transport-auth-fixer",
+      "label": "Transport-auth P0 fixer",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "claude-opus-runtime-base",
+      "label": "Claude Opus Runtime base auditor",
+      "family": "claude",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "claude-fable-account-base",
+      "label": "Claude Fable Account base auditor",
+      "family": "claude",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "claude-sonnet-entity-base",
+      "label": "Claude Sonnet Entity base auditor",
+      "family": "claude",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "claude-opus-contracts-base",
+      "label": "Claude Opus contracts base auditor",
+      "family": "claude",
+      "state": "PROVISIONAL"
     }
   ],
   "agentRuns": [
@@ -2262,6 +2307,118 @@
       ],
       "candidateFindingIds": [],
       "summary": "Reproduced both findings with real ephemeral Bun relay sockets and the production direct handler at 99% confidence; no victim seed was available to the attacker."
+    },
+    {
+      "id": "account-consensus-base-20260801",
+      "reviewerId": "codex-account-consensus-base",
+      "sourceSha": "c769a22e3bce083896f14a42c0ad932094ba44ea",
+      "moduleIds": [
+        "account-consensus"
+      ],
+      "scope": "Bilateral AccountReplica convergence, nonce, collision, ACK/resend, proof, conservation, and rollback boundaries",
+      "state": "RUNNING",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Read-only base audit is running."
+    },
+    {
+      "id": "entity-consensus-base-20260801",
+      "reviewerId": "codex-entity-consensus-base",
+      "sourceSha": "c769a22e3bce083896f14a42c0ad932094ba44ea",
+      "moduleIds": [
+        "entity-consensus"
+      ],
+      "scope": "EntityReplica certification, batch atomicity, Account child input ownership, mutation isolation, and rollback boundaries",
+      "state": "RUNNING",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Read-only base audit is running."
+    },
+    {
+      "id": "transport-auth-fix-20260801",
+      "reviewerId": "codex-transport-auth-fixer",
+      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "moduleIds": [
+        "transport-topology"
+      ],
+      "scope": "Audience-bound mutual WebSocket authentication and immutable session encryption key",
+      "state": "RUNNING",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-TRANSPORT-HELLO-AUDIENCE",
+        "AUD-TRANSPORT-KEY-REBIND"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Three exploit regressions are red; the root-cause implementation is running in an isolated worktree."
+    },
+    {
+      "id": "claude-opus-runtime-base-20260801",
+      "reviewerId": "claude-opus-runtime-base",
+      "sourceSha": "884eb0ca27bb9dbbbc86f8ad836cb054b28f7603",
+      "moduleIds": [
+        "runtime-pipeline",
+        "runtime-platform",
+        "storage-recovery"
+      ],
+      "scope": "Blind Runtime state-machine, WAL, rejection, restart, and effect-boundary audit",
+      "state": "BLOCKED",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul."
+    },
+    {
+      "id": "claude-fable-account-base-20260801",
+      "reviewerId": "claude-fable-account-base",
+      "sourceSha": "884eb0ca27bb9dbbbc86f8ad836cb054b28f7603",
+      "moduleIds": [
+        "account-consensus"
+      ],
+      "scope": "Blind Account consensus base audit",
+      "state": "BLOCKED",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul."
+    },
+    {
+      "id": "claude-sonnet-entity-base-20260801",
+      "reviewerId": "claude-sonnet-entity-base",
+      "sourceSha": "884eb0ca27bb9dbbbc86f8ad836cb054b28f7603",
+      "moduleIds": [
+        "entity-consensus"
+      ],
+      "scope": "Blind Entity consensus base audit",
+      "state": "BLOCKED",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul."
+    },
+    {
+      "id": "claude-opus-contracts-base-20260801",
+      "reviewerId": "claude-opus-contracts-base",
+      "sourceSha": "884eb0ca27bb9dbbbc86f8ad836cb054b28f7603",
+      "moduleIds": [
+        "contracts-governance",
+        "contracts-money-court"
+      ],
+      "scope": "Blind Solidity authority, domain, conservation, dispute, build, and deployment-readiness audit",
+      "state": "BLOCKED",
+      "usefulnessScore": 0,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Claude CLI session quota was exhausted before producing an audit; retry after 05:00 Europe/Istanbul."
     }
-  ]
+  ],
+  "moduleReviews": []
 }

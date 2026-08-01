@@ -39,7 +39,11 @@ combining them into one optimistic percentage hides risk.
 9. **Priority and confidence are separate.** High impact with low confidence is
    sent to a second audit immediately, not buried and not implemented blindly.
 10. **Release gates consume evidence; they do not invent it.** A release is a
-    deterministic query over current proofs, accepted risk, and policy.
+   deterministic query over current proofs, accepted risk, and policy.
+11. **Ideal means unanimous current evidence, not score negotiation.** Each
+    module needs three independent current-fingerprint reviews from at least two
+    model families; every score must be at least 990/1000. A changed dependency
+    invalidates old scores, and an objection is fixed or reproducibly refuted.
 
 ## 2. Canonical hierarchy
 
@@ -367,6 +371,11 @@ Uncapped production/mainnet requires 100% coverage for all critical invariants
 and mandatory paths, a full independent audit on the exact SHA, soak evidence,
 and zero unresolved high-impact candidates.
 
+The separate ideal gate is stricter than release: every mapped module must have
+100% coverage, 100% derived quality, no open finding of any severity, and a
+current review floor of 990/1000 across at least three reviewers and two model
+families. Scores are never averaged; the minimum current score governs.
+
 ## 13. Canonical storage model
 
 Use one machine-readable audit registry for modules, invariants, runs, evidence,
@@ -391,6 +400,7 @@ bun run audit:plan            # next work ranked by risk and missing evidence
 bun run audit:verify          # schema, ownership, artifacts, and staleness
 bun run audit:gate:merge      # current evidence plus P0/P1 merge policy
 bun run audit:gate:release    # merge policy plus release coverage thresholds
+bun run audit:gate:ideal      # every module 100% with 990/1000 review quorum
 ```
 
 `verify` treats evidence as append-only history: an archival row may have an
