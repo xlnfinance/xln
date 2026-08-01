@@ -72,6 +72,27 @@ describe('durable numbered registration intent', () => {
         payerSignerId: env.runtimeId,
         entities: [{ name: 'one', validators: [proposer], threshold: 1n }],
       });
+      const beforeFailedCommit = buildDurableRuntimeMachineSnapshot(env);
+      const commitFailure = {
+        commit: async (): Promise<void> => {
+          throw new Error('REGISTRATION_INTENT_RECORD_COMMIT_FAILED');
+        },
+        drain: async (): Promise<void> => {
+          throw new Error('REGISTRATION_INTENT_MUST_NOT_DRAIN');
+        },
+      };
+      const prematureBroadcast = spyOn(adapter.provider, 'broadcastTransaction');
+      const failedCommit = spyOn(commitFailure, 'commit');
+      const prematureDrain = spyOn(commitFailure, 'drain');
+      await expect(runNumberedRegistrationIntent(env, adapter, request, failedCommit, prematureDrain))
+        .rejects.toThrow('REGISTRATION_INTENT_RECORD_COMMIT_FAILED');
+      expect(failedCommit.mock.calls[0]?.[0].map(tx => tx.type)).toEqual(['recordNumberedRegistrationIntent']);
+      expect([failedCommit.mock.calls.length, prematureBroadcast.mock.calls.length, prematureDrain.mock.calls.length])
+        .toEqual([1, 0, 0]);
+      expect([getNumberedRegistrationRecord(env, request.intentId), env.state.eReplicas.size]).toEqual([undefined, 0]);
+      expect(buildDurableRuntimeMachineSnapshot(env)).toEqual(beforeFailedCommit);
+      expect(await adapter.entityProvider.nextNumber()).toBe(2n);
+      prematureBroadcast.mockRestore();
       const pending = await prepareNumberedRegistrationIntent(env, adapter, request);
       expect(pending.status).toBe('pending');
       await commitRuntimeInput(env, {
