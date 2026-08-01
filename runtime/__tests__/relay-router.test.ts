@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import type { Profile } from '../entity/profile';
 import { relayRoute } from '../network/relay/router';
 import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../network/relay/store';
-import { deserializeWsMessage, hashHelloMessage, makeHelloNonce } from '../network/p2p/ws-protocol';
+import {
+  deserializeWsMessage,
+  hashHelloMessage,
+  makeHelloNonce,
+  type RuntimeWsMessage,
+} from '../network/p2p/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { encryptJSON, deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
 import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
@@ -151,6 +156,45 @@ describe('relay-router gossip fanout', () => {
     expect(gossipUpdate?.payload?.profiles?.[0]?.entityId).toBe(ENTITY_A);
     expect(sentBySocket.get(wsA)?.some((message) => (message as { type?: string }).type === 'gossip_update') ?? false).toBeFalse();
     expect(store.gossipProfiles.get(ENTITY_A)?.profile?.name).toBe('alice');
+  });
+
+  test('rejects post-handshake relay encryption-key replacement and preserves the authenticated key', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sent: RuntimeWsMessage[] = [];
+    const closed: Array<{ code?: number; reason?: string }> = [];
+    const ws = {
+      label: 'key-rewrite',
+      readyState: 1,
+      close(code?: number, reason?: string) {
+        closed.push({ code, reason });
+        this.readyState = 3;
+      },
+    };
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (_target: FakeWs, raw: Uint8Array) => {
+        sent.push(deserializeWsMessage(raw));
+      },
+    };
+    await relayRoute(config, ws, signedHello(RUNTIME_A, SEED_A, KEY_A));
+
+    await relayRoute(config, ws, {
+      type: 'gossip_request',
+      id: 'rewrite-relay-session-key',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_B,
+      to: SERVER_RUNTIME_ID,
+      payload: { mode: 'full' },
+    });
+
+    expect(closed.at(-1)).toEqual({ code: 4003, reason: 'encryption-key-mismatch' });
+    expect(sent.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'Relay session encryption key mismatch',
+    });
+    expect(resolveEncryptionPublicKeyHex(store, RUNTIME_A)).toBe(KEY_A);
   });
 
   test('serves batched gossip by ids and set filters', async () => {

@@ -106,6 +106,39 @@ describe('direct runtime websocket route', () => {
     expect(replayed.sent.at(-1)?.error).toContain('challenge missing, expired, or already consumed');
   });
 
+  test('rejects post-handshake encryption-key replacement instead of encrypting to the attacker', async () => {
+    const serverSeed = 'direct-key-binding-server';
+    const clientSeed = 'direct-key-binding-client';
+    const attackerSeed = 'direct-key-binding-attacker';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onEntityInputs: () => undefined,
+      onRecoveryBundleRequest: () => ({ bundles: [] }),
+    });
+    const { ws, sent, closed } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+
+    await route.websocket.message(ws, serializeWsMessage({
+      type: 'recovery_bundle_request',
+      id: 'rewrite-direct-session-key',
+      from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(attackerSeed).publicKey),
+      to: serverRuntimeId,
+      payload: { lookupKey: 'victim-recovery-key' },
+    }));
+
+    expect(closed.at(-1)).toEqual({ code: 4003, reason: 'encryption-key-mismatch' });
+    expect(sent.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'Direct session encryption key mismatch',
+    });
+  });
+
   test('uses MessagePack on the wire and tagged JSON only for debug', () => {
     const message: RuntimeWsMessage = {
       type: 'debug_event',
