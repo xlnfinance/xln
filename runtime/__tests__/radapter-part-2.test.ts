@@ -2128,40 +2128,23 @@ test('BrainVault mnemonic export emits one redacted security audit event', async
   const env = makeEnv();
   const unregister = registerStructuredLogSink(event => auditEvents.push(event));
   try {
-    await handleRuntimeAdapterMessage(socket, {
-      v: 1,
-      id: 'auth-admin-brainvault',
-      op: 'auth',
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-admin-brainvault', op: 'auth',
       key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
       challenge: adapterAuthChallenge,
     }, env, { enqueueRuntimeInput: () => {} });
     messages.length = 0;
     auditEvents.length = 0;
-
-    await handleRuntimeAdapterMessage(socket, {
-      v: 1,
-      id: 'brainvault-reveal-audit',
-      op: 'brainvault-reveal',
-    }, env, {
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'brainvault-reveal-audit', op: 'brainvault-reveal' }, env, {
       enqueueRuntimeInput: () => {},
       revealBrainVaultMnemonic: async () => ({ mnemonic24 }),
     });
-
-    const response = decodeTestRuntimeAdapterMessage<{
-      ok: true;
-      payload: { mnemonic24: string };
-    }>(messages.pop());
+    const response = decodeTestRuntimeAdapterMessage<{ ok: true; payload: { mnemonic24: string } }>(messages.pop());
     expect(response.payload.mnemonic24).toBe(mnemonic24);
-    const mnemonicExports = auditEvents.filter(event => (
-      event['scope'] === 'runtime.radapter'
-      && event['message'] === 'brainvault.mnemonic_exported'
-    ));
+    const mnemonicExports = auditEvents.filter(event => event['scope'] === 'runtime.radapter'
+      && event['message'] === 'brainvault.mnemonic_exported');
     expect(mnemonicExports).toHaveLength(1);
     expect(mnemonicExports[0]).toEqual(expect.objectContaining({
-      level: 'warn',
-      scope: 'runtime.radapter',
-      message: 'brainvault.mnemonic_exported',
-      authLevel: 'admin',
+      level: 'warn', scope: 'runtime.radapter', message: 'brainvault.mnemonic_exported', authLevel: 'admin',
     }));
     expect(JSON.stringify(auditEvents)).not.toContain(mnemonic24);
   } finally {
