@@ -1840,6 +1840,79 @@
       "state": "CONFIRMED",
       "sourceSha": "fff938ba98902fc14e1b05388f6c74303f186c8b",
       "reproduction": "Initiate a payment above available capacity and compare ingress receipt, durable activity projection, and user-visible terminal state."
+    },
+    {
+      "id": "AUD-FAUCET-PUBLIC-UNBOUNDED",
+      "rootCauseKey": "financial-faucet-routes-bypass-operator-policy-and-server-budgets",
+      "moduleId": "public-wallet-api",
+      "invariantIds": [
+        "public-wallet-api.truthful-authorized-projection",
+        "api-auth-custody.command-authority"
+      ],
+      "title": "Anonymous faucet routes accept caller-selected amounts without a shared enablement, cap, quota, or reservation policy.",
+      "severity": "P0",
+      "confidence": 99.5,
+      "state": "CONFIRMED",
+      "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
+      "reproduction": "Submit an anonymous ERC20 faucet request for 999999999999 and observe it reach the funding sink; separately request the full offchain outbound capacity and observe admission rather than rejection."
+    },
+    {
+      "id": "AUD-WATCHTOWER-PROXY-TRAVERSAL",
+      "rootCauseKey": "watchtower-proxy-allows-raw-path-and-caller-loopback-target",
+      "moduleId": "api-auth-custody",
+      "invariantIds": [
+        "api-auth-custody.command-authority"
+      ],
+      "title": "Raw path allowlisting and a caller-selected loopback target let the public watchtower proxy reach operator endpoints.",
+      "severity": "P2",
+      "confidence": 100,
+      "state": "CONFIRMED",
+      "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
+      "reproduction": "Proxy /api/tower/receipt/../../../api/control/runtime/quiesce to a caller-selected loopback port and observe URL normalization produce an allowed operator POST."
+    },
+    {
+      "id": "AUD-ROUTING-FEE-INVERSION-HANG",
+      "rootCauseKey": "unbounded-fee-inversion-at-or-above-full-amount",
+      "moduleId": "markets",
+      "invariantIds": [
+        "markets.conserved-order-lifecycle",
+        "transport-topology.exact-hop-matrix"
+      ],
+      "title": "Certified routing fees can reach 100% or more and make three unbounded inbound-amount inversion loops hang.",
+      "severity": "P2",
+      "confidence": 100,
+      "state": "CONFIRMED",
+      "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
+      "reproduction": "Run findRoutes over one edge with feePPM 1000000 and observe it fail to terminate within 300 ms while the doubling BigInt loop continues."
+    },
+    {
+      "id": "AUD-DISPUTE-FINALITY-STALE-PULL",
+      "rootCauseKey": "dispute-finality-clears-holds-but-retains-pull-commitments",
+      "moduleId": "account-consensus",
+      "invariantIds": [
+        "account-consensus.bilateral-convergence"
+      ],
+      "title": "Dispute finality clears holds but retains pulls, so reopen followed by cancel or resolve underflows.",
+      "severity": "P3",
+      "confidence": 100,
+      "state": "CONFIRMED",
+      "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
+      "reproduction": "Finalize an account with one pull and leftHold 100, reopen after finality leaves pulls=1 and hold=0, then pull_cancel fails with left hold underflow."
+    },
+    {
+      "id": "AUD-CROSS-PULL-FORGED-CUMULATIVE",
+      "rootCauseKey": "cross-pull-close-trusts-optional-caller-cumulative-economics",
+      "moduleId": "account-consensus",
+      "invariantIds": [
+        "account-consensus.bilateral-convergence",
+        "markets.conserved-order-lifecycle"
+      ],
+      "title": "cross_pull_close accepts a caller-selected cumulative source amount when committed fill amounts are absent.",
+      "severity": "P2",
+      "confidence": 100,
+      "state": "CONFIRMED",
+      "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
+      "reproduction": "Use an authorized source Hub and valid binary with expected source claim 500 but cumulativeSourceAmount 999; observe success, pull deletion, hold zero, and offdelta -999."
     }
   ],
   "reviewers": [
@@ -1978,6 +2051,12 @@
     {
       "id": "codex-account-storage-verifier",
       "label": "Account storage independent verifier",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-legacy-top-security",
+      "label": "Current top-security re-auditor",
       "family": "codex",
       "state": "PROVISIONAL"
     },
@@ -2602,6 +2681,31 @@
       ],
       "candidateFindingIds": [],
       "summary": "Reproduced empty-signature, encrypted wire, and captured-signature body-mutation variants; established recoverable remote DoS as P1 at 99.5% confidence."
+    },
+    {
+      "id": "legacy-top-security-reaudit-20260801",
+      "reviewerId": "codex-legacy-top-security",
+      "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
+      "moduleIds": [
+        "account-consensus",
+        "api-auth-custody",
+        "markets",
+        "public-wallet-api",
+        "transport-topology"
+      ],
+      "scope": "Current executable re-audit of faucet, watchtower proxy, routing fee inversion, dispute pull finality, and cross-pull economics",
+      "state": "COMPLETED",
+      "usefulnessScore": 1000,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-FAUCET-PUBLIC-UNBOUNDED",
+        "AUD-WATCHTOWER-PROXY-TRAVERSAL",
+        "AUD-ROUTING-FEE-INVERSION-HANG",
+        "AUD-DISPUTE-FINALITY-STALE-PULL",
+        "AUD-CROSS-PULL-FORGED-CUMULATIVE"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Verified all five historical claims against current code with 48 passing adjacent tests and isolated executable PoCs; separated immediate API guards from consensus-semantic fixes requiring owner approval."
     }
   ],
   "moduleReviews": [
