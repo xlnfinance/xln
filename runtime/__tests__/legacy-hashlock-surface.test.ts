@@ -1,62 +1,141 @@
 import { expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { lstatSync, readFileSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import { buildRuntimeActivityEvents } from '../api/public/activity-history';
-import { validateEntityTx } from '../entity/tx-validation';
-import { decode, encode } from '../storage/snapshot-coder';
+import { decodeValidatedBuffer } from '../storage/codec';
+import { validateStoredRuntimeActivityValue } from '../storage/history-view-schema';
 import type { PersistedActivityJournal } from '../storage/views/activity-types';
 
 const repoRoot = process.cwd();
-const roots = ['runtime', 'frontend/src', 'scripts', 'tools', 'jurisdictions'];
-const excludedDirectories = new Set([
-  '__tests__', 'test', 'tests', 'scenarios', 'fixtures', 'generated', 'static',
+const productionRoots = [
+  'brainvault/', 'custody/', 'debates/', 'frontend/', 'jurisdictions/', 'native/',
+  'ops/', 'packages/npm/', 'release/', 'runtime/', 'scripts/', 'tools/', 'types/',
+];
+const nonProductionPaths = [
+  /^brainvault\/.*\.(?:test|spec)\.[^/]+$/u,
+  /^debates\/tests\//u,
+  /^frontend\/android\/app\/src\/test\//u,
+  /^frontend\/(?:\.svelte-kit|build|tests)\//u,
+  /^frontend\/static\/(?:contracts|docs-catalog|docs-static)\//u,
+  /^frontend\/static\/(?:runtime\.js|hash-wasm-)/u,
+  /^jurisdictions\/(?:artifacts|cache|test|typechain-types)\//u,
+  /^native\/__tests__\//u,
+  /^runtime\/(?:__tests__|scenarios)\//u,
+];
+const sourceExtensions = new Set([
+  '.cjs', '.html', '.js', '.jsx', '.json', '.mjs', '.sh', '.sol', '.svelte', '.ts', '.tsx',
 ]);
-const allowedMentions = {
-  'runtime/api/public/activity-history.ts': 1,
-  'runtime/entity/htlc/note-index.ts': 1,
-  'runtime/entity/tx-validation/payment-schemas.ts': 1,
-  'runtime/entity/tx/apply.ts': 2,
-  'runtime/entity/tx/catalog.ts': 1,
-  'runtime/entity/tx/handlers/htlc-direct.ts': 1,
-  'runtime/types/entity-tx.ts': 1,
+const allowedRoles: Record<string, { count: number; fragments: readonly string[] }> = {
+  'runtime/api/public/activity-history.ts': {
+    count: 1,
+    fragments: ["case 'hashlockPayment': {"],
+  },
+  'runtime/entity/htlc/note-index.ts': {
+    count: 1,
+    fragments: ["if (tx.type === 'hashlockPayment') {"],
+  },
+  'runtime/entity/tx-validation/payment-schemas.ts': {
+    count: 1,
+    fragments: ["hashlockPayment: {\n    required: { targetEntityId: 'string', tokenId: 'integer', amount: 'bigint', hashlock: 'string' },"],
+  },
+  'runtime/entity/tx/apply.ts': {
+    count: 2,
+    fragments: [
+      'hashlockPayment: (env, state, tx, options) => handleHashlockPaymentEntityTx(',
+      "Extract<EntityTx, { type: 'hashlockPayment' }>",
+    ],
+  },
+  'runtime/entity/tx/catalog.ts': {
+    count: 1,
+    fragments: ["'extendCredit', 'hashlockPayment', 'htlcOnionAdvance'"],
+  },
+  'runtime/entity/tx/handlers/htlc-direct.ts': {
+    count: 1,
+    fragments: ["entityTx: EntityTxOf<'hashlockPayment'>,"],
+  },
+  'runtime/types/entity-tx.ts': {
+    count: 1,
+    fragments: ["// Direct hashlock-only HTLC. Used for cross-jurisdiction swaps where\n      // the sender must not know the preimage at lock time.\n      type: 'hashlockPayment';"],
+  },
 };
 
-const collectFiles = (directory: string): string[] =>
-  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if (entry.isDirectory() && excludedDirectories.has(entry.name)) return [];
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) return collectFiles(path);
-    return entry.isFile() ? [path] : [];
-  });
+type TrackedEntry = { mode: string; path: string };
+const trackedEntries = (): TrackedEntry[] =>
+  execFileSync('git', ['ls-files', '--stage', '-z'], { cwd: repoRoot, encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean)
+    .map((line) => {
+      const match = /^(\d{6}) [0-9a-f]+ \d+\t(.+)$/u.exec(line);
+      if (!match) throw new Error(`LEGACY_HASHLOCK_TRACKED_ENTRY_INVALID:${line}`);
+      return { mode: match[1]!, path: match[2]! };
+    });
 
-test('legacy hashlockPayment stays confined to its frozen production surface', () => {
-  const mentions = Object.fromEntries(
-    roots.flatMap(root => collectFiles(join(repoRoot, root)))
-      .map(path => [
-        relative(repoRoot, path),
-        readFileSync(path, 'utf8').match(/hashlockPayment/g)?.length ?? 0,
-      ] as const)
-      .filter((entry): entry is readonly [string, number] => entry[1] > 0)
-      .sort(([left], [right]) => left.localeCompare(right)),
-  );
-  expect(mentions).toEqual(allowedMentions);
+const productionEntries = (): TrackedEntry[] => trackedEntries().filter((entry) => {
+  if (nonProductionPaths.some(pattern => pattern.test(entry.path))) return false;
+  const rooted = productionRoots.some(root => entry.path.startsWith(root));
+  const topLevelLauncher = !entry.path.includes('/')
+    && (entry.mode === '100755' || entry.path === 'package.json' || sourceExtensions.has(extname(entry.path)));
+  return (rooted || topLevelLauncher)
+    && (entry.mode === '100755' || sourceExtensions.has(extname(entry.path)));
 });
 
-test('persisted legacy payload still decodes and preserves its activity rawType', () => {
+test('legacy hashlockPayment stays confined to exact production roles', () => {
+  const inventory = productionEntries();
+  expect(inventory.filter(({ mode, path }) =>
+    mode === '120000' || lstatSync(join(repoRoot, path)).isSymbolicLink()
+  ).map(entry => entry.path)).toEqual([]);
+  const paths = inventory.map(entry => entry.path);
+  expect(paths).toEqual(expect.arrayContaining([
+    'package.json', 'custody/server.ts', 'native/desktop/main.cjs',
+    'packages/npm/xlnfinance/lib/api.js', 'frontend/src/routes/scenarios/+page.svelte',
+  ]));
+
+  const mentions = inventory.flatMap(({ path }) => {
+    const source = readFileSync(join(repoRoot, path), 'utf8');
+    const count = source.match(/hashlockPayment/g)?.length ?? 0;
+    return count > 0 ? [{ path, source, count }] : [];
+  });
+  expect(mentions.map(entry => entry.path).sort()).toEqual(Object.keys(allowedRoles).sort());
+  for (const mention of mentions) {
+    const role = allowedRoles[mention.path]!;
+    expect(mention.count).toBe(role.count);
+    for (const fragment of role.fragments) expect(mention.source).toContain(fragment);
+  }
+});
+
+const frozenLegacyActivityBytes = Buffer.from([
+  'AdRyQJakbG9nc6xydW50aW1lSW5wdXSpdGltZXN0YW1wr3RvdWNoZWRBY2NvdW50c7N0b3VjaGVkQm9va0VudGl0aWVzr3',
+  'RvdWNoZWRFbnRpdGllc5DUckGRrGVudGl0eUlucHV0c5HUckKSqGVudGl0eUlkqWVudGl0eVR4c9lCMHgxMTExMTExMTEx',
+  'MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExkdRyQ5KkZGF0YaR0eXBl1H',
+  'JElKZhbW91bnSoaGFzaGxvY2uudGFyZ2V0RW50aXR5SWSndG9rZW5JZNMAAAAAAAAAB9lCMHgzMzMzMzMzMzMzMzMzMzMz',
+  'MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz2UIweDIyMjIyMjIyMjIyMjIyMjIyMj',
+  'IyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIBr2hhc2hsb2NrUGF5bWVudMtCeLz+VoAA',
+  'AJCQktlCMHgxMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMT',
+  'Ex2UIweDIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI=',
+].join(''), 'base64');
+
+test('frozen persisted legacy bytes retain the exact payment projection', () => {
+  const stored = decodeValidatedBuffer(
+    frozenLegacyActivityBytes,
+    value => validateStoredRuntimeActivityValue(value, 9),
+  );
   const alice = `0x${'11'.repeat(32)}`;
   const bob = `0x${'22'.repeat(32)}`;
-  const payload = {
-    type: 'hashlockPayment' as const,
+  expect(stored.runtimeInput.entityInputs[0]?.entityTxs?.[0]).toEqual({
+    type: 'hashlockPayment',
     data: { targetEntityId: bob, tokenId: 1, amount: 7n, hashlock: `0x${'33'.repeat(32)}` },
-  };
-  const journal = decode<PersistedActivityJournal>(encode({
+  });
+  const journal: PersistedActivityJournal = {
     height: 9,
-    timestamp: 1_700_000_000_000,
-    runtimeInput: { runtimeTxs: [], entityInputs: [{ entityId: alice, entityTxs: [payload] }] },
-    logs: [],
-  }));
-  const restored = journal.runtimeInput?.entityInputs[0]?.entityTxs?.[0];
-  expect(validateEntityTx(restored, 'LEGACY_HASHLOCK_WAL')).toEqual(payload);
-  expect(buildRuntimeActivityEvents(journal, { entityId: alice })[0]?.rawType)
-    .toBe('hashlockPayment');
+    timestamp: stored.timestamp,
+    runtimeInput: { runtimeTxs: [], entityInputs: stored.runtimeInput.entityInputs },
+    logs: stored.logs,
+  };
+  expect(buildRuntimeActivityEvents(journal, { entityId: alice })).toEqual([{
+    id: 'r9:runtime_input:0:hashlockPayment', height: 9, timestamp: 1_700_000_000_000,
+    kind: 'offchain', type: 'payment', source: 'runtime_input', direction: 'out',
+    title: 'Payment started', subtitle: '7 token 1 to 0x2222...2222', status: 'started',
+    entityId: alice, counterpartyId: bob, tokenId: 1, amount: '7', rawType: 'hashlockPayment',
+  }]);
 });
