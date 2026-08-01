@@ -1,9 +1,12 @@
 import { decodeAccountPeerInput } from '../account/input-validation';
+import { sameAccountStateDomain } from '../account/state-root';
 import { FINANCIAL, LIMITS } from '../config/constants';
+import type { AccountFrame, AccountState } from '../types/account';
 import {
   boundedArray,
   bytes,
   flag,
+  hex,
   integer,
   shape,
   text,
@@ -12,15 +15,6 @@ import {
   validateFrame,
 } from './account-doc-validation-primitives';
 import { requireBoundaryRecord } from './schema-primitives';
-
-const exactHex = (value: unknown, code: string): string => {
-  if (
-    typeof value !== 'string' ||
-    value.length > LIMITS.MAX_FRAME_SIZE_BYTES * 2 + 2 ||
-    !/^0x(?:[0-9a-f]{2})*$/.test(value)
-  ) throw new Error(code);
-  return value;
-};
 
 export const validateStoredPendingForwards = (
   account: Record<string, unknown>,
@@ -61,8 +55,8 @@ export const validateStoredActiveDispute = (
   const timeout = uint(dispute['disputeTimeout'], `${code}_TIMEOUT`);
   const jNonce = uint(dispute['jNonce'], `${code}_J_NONCE`);
   if (jNonce > stateJNonce) throw new Error(`${code}_J_NONCE_FUTURE`);
-  exactHex(dispute['starterInitialArguments'], `${code}_INITIAL_ARGS`);
-  exactHex(dispute['starterIncrementedArguments'], `${code}_INCREMENTED_ARGS`);
+  hex(dispute['starterInitialArguments'], `${code}_INITIAL_ARGS`);
+  hex(dispute['starterIncrementedArguments'], `${code}_INCREMENTED_ARGS`);
   if (dispute['observedOnChain'] !== undefined) flag(dispute['observedOnChain'], `${code}_OBSERVED`);
   if (dispute['finalizeQueued'] !== undefined) flag(dispute['finalizeQueued'], `${code}_FINALIZE_QUEUED`);
   const observed = dispute['observedOnChain'] === true;
@@ -90,4 +84,40 @@ export const validateStoredPendingAccountInput = (
   const proposal = requireBoundaryRecord(input['proposal'], `${code}_PROPOSAL`);
   validateFrame(proposal['frame'], `${code}_PROPOSAL_FRAME`);
   decodeAccountPeerInput(input, code);
+};
+
+export const validateStoredLastOutboundFrameAck = (
+  account: Record<string, unknown>,
+  proofHeader: { fromEntity: string; toEntity: string },
+  currentFrame: AccountFrame,
+  code: string,
+): void => {
+  if (account['lastOutboundFrameAck'] === undefined) return;
+  const cached = shape(
+    account['lastOutboundFrameAck'],
+    ['height', 'counterpartyEntityId', 'response'],
+    [],
+    code,
+  );
+  const height = uint(cached['height'], `${code}_HEIGHT`);
+  const response = decodeAccountPeerInput(cached['response'], `${code}_RESPONSE`);
+  if (response.kind !== 'ack') throw new Error(`${code}_KIND`);
+  if (
+    height !== currentFrame.height
+    || response.ack.height !== height
+    || response.ack.frameHash !== currentFrame.stateHash
+  ) throw new Error(`${code}_FRAME_BINDING`);
+  if (
+    cached['counterpartyEntityId'] !== proofHeader.toEntity
+    || response.fromEntityId !== proofHeader.fromEntity
+    || response.toEntityId !== proofHeader.toEntity
+  ) throw new Error(`${code}_ENDPOINT_BINDING`);
+  const state = requireBoundaryRecord(account['state'], `${code}_STATE`);
+  if (
+    !sameAccountStateDomain(
+      response.domain,
+      state['domain'] as AccountState['domain'],
+    )
+    || response.watchSeed !== state['watchSeed']
+  ) throw new Error(`${code}_ACCOUNT_BINDING`);
 };

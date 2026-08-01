@@ -41,7 +41,7 @@ const ACCOUNT_REPLICA_REQUIRED = [
   'pendingWithdrawals', 'shadow',
 ] as const;
 
-const ACCOUNT_REPLICA_OPTIONAL = [
+export const ACCOUNT_REPLICA_OPTIONAL = [
   'pendingFrame', 'pendingAccountInput',
   'lastOutboundFrameAck', 'pendingForwards', 'hankoSignature', 'lastRollbackFrameHash',
   'abiProofBody', 'currentFrameHanko', 'counterpartyFrameHanko', 'boardResealMigration',

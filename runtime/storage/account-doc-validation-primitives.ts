@@ -45,13 +45,22 @@ export const integer = (value: unknown, minimum: bigint, maximum: bigint, code: 
 };
 export const uint256 = (value: unknown, code: string): bigint => integer(value, 0n, UINT256_MAX, code);
 export const int256 = (value: unknown, code: string): bigint => integer(value, INT256_MIN, INT256_MAX, code);
-export const text = (value: unknown, code: string, maximum = 256): string => {
-  if (typeof value !== 'string' || value.length === 0 || value.length > maximum) throw new Error(code);
+export const text = (value: unknown, code: string, maximum?: number): string => {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || (maximum !== undefined && value.length > maximum)
+  ) throw new Error(code);
   return value;
 };
 export const bytes = (value: unknown, size: number, code: string): string => {
   const encoded = text(value, code, 2 + size * 2);
   if (!new RegExp(`^0x[0-9a-f]{${size * 2}}$`).test(encoded)) throw new Error(code);
+  return encoded;
+};
+export const hex = (value: unknown, code: string): string => {
+  const encoded = text(value, code, LIMITS.MAX_FRAME_SIZE_BYTES * 2 + 2);
+  if (!/^0x(?:[0-9a-f]{2})*$/.test(encoded)) throw new Error(code);
   return encoded;
 };
 export const flag = (value: unknown, code: string): boolean => {

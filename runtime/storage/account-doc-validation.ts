@@ -11,11 +11,7 @@ import {
   validateStoredCrossJurisdictionPullBinding,
   validateStoredCrossJurisdictionRoute,
 } from './account-doc-cross-j-validation';
-import {
-  validateStoredActiveDispute,
-  validateStoredPendingAccountInput,
-  validateStoredPendingForwards,
-} from './account-doc-replica-validation';
+import { validateStoredAccountReplicaOptionals } from './account-doc-optional-validation';
 import {
   UINT256_MAX,
   boundedArray,
@@ -90,7 +86,7 @@ const validateStateMaps = (state: Record<string, unknown>, code: string): void =
   for (const [key, raw] of boundedMap(state['locks'], LIMITS.MAX_ACCOUNT_HTLC_LOCKS, `${code}_LOCKS`)) {
     const lock = shape(raw, ['lockId', 'hashlock', 'timelock', 'revealBeforeHeight', 'amount', 'tokenId', 'senderIsLeft', 'createdHeight', 'createdTimestamp'], ['envelopeHash', 'secretOffer'], `${code}_LOCK`);
     if (text(lock['lockId'], `${code}_LOCK_ID`) !== key) throw new Error(`${code}_LOCK_KEY`);
-    bytes(lock['hashlock'], 32, `${code}_HASHLOCK`);
+    text(lock['hashlock'], `${code}_HASHLOCK`);
     uint256(lock['timelock'], `${code}_TIMELOCK`);
     uint(lock['revealBeforeHeight'], `${code}_REVEAL_HEIGHT`);
     integer(lock['amount'], 1n, FINANCIAL.MAX_PAYMENT_AMOUNT, `${code}_LOCK_AMOUNT`);
@@ -247,12 +243,16 @@ const validateReplicaEnvelope = (account: Record<string, unknown>, code: string)
     token(request['tokenId'], `${code}_SHADOW_REQUEST_TOKEN`); uint256(request['targetAmount'], `${code}_SHADOW_REQUEST_AMOUNT`);
   }
   const currentHeight = uint(account['currentHeight'], `${code}_CURRENT_HEIGHT`);
-  validateStoredPendingForwards(account, from, to, `${code}_FORWARDS`);
-  validateStoredActiveDispute(account, uint(requireBoundaryRecord(account['state'], `${code}_STATE`)['jNonce'], `${code}_STATE_J_NONCE`), `${code}_ACTIVE_DISPUTE`);
-  validateStoredPendingAccountInput(account, `${code}_PENDING_INPUT`);
   uint(account['rollbackCount'], `${code}_ROLLBACKS`);
   const current = validateFrame(account['currentFrame'], `${code}_CURRENT_FRAME`);
   if (current.height !== currentHeight) throw new Error(`${code}_CURRENT_FRAME_HEIGHT`);
+  validateStoredAccountReplicaOptionals(
+    account,
+    { fromEntity: from, toEntity: to },
+    current,
+    uint(requireBoundaryRecord(account['state'], `${code}_STATE`)['jNonce'], `${code}_STATE_J_NONCE`),
+    `${code}_OPTIONAL`,
+  );
   if (account['pendingFrame'] !== undefined) {
     const pending = validateFrame(account['pendingFrame'], `${code}_PENDING_FRAME`);
     if (pending.height !== currentHeight + 1) throw new Error(`${code}_PENDING_HEIGHT`);

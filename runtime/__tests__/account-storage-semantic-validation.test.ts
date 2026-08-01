@@ -1,8 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createFrameHash } from '../account/consensus/frame';
+import { buildDuplicateCommittedFrameAck } from '../account/consensus/replay';
 import { applyAccountDisputeStarted } from '../account/j-finality';
 import { computeAccountStateRoot } from '../account/state-root';
+import { applyAccountTx } from '../account/tx/apply';
+import { captureDisputeArgumentSnapshot } from '../protocol/dispute/arguments';
+import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import { clearFinalizedSettlementWorkspace } from '../account/tx/handlers/settle-transition';
 import {
   buildCrossJurisdictionPullBinding,
@@ -14,8 +18,11 @@ import {
   validateStorageDiffRecordValue,
 } from '../storage/authoritative-schema';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
+import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
+import { ACCOUNT_REPLICA_OPTIONAL } from '../storage/schema-state-docs';
 import { safeStringify } from '../protocol/serialization';
 import type { StorageAccountDoc } from '../storage/types';
+import type { AccountReplica, AccountTx } from '../types/account';
 import { computeStorageAccountFrameHash } from '../storage/account-doc-validation-primitives';
 import { makeStorageAccountFixture } from './helpers/account-storage-integrity';
 import { jref, makeJurisdiction } from './helpers/cross-j';
@@ -46,6 +53,160 @@ const installPendingProposal = async (value: ValidationContext): Promise<void> =
     kind: 'frame', fromEntityId: value.owner, toEntityId: value.counterparty,
     domain: value.doc.state.domain, proposal: { frame: structuredClone(pending) },
   };
+};
+
+const installLastOutboundAck = (value: ValidationContext): void => {
+  value.doc.lastOutboundFrameAck = {
+    height: value.doc.currentFrame.height,
+    counterpartyEntityId: value.counterparty,
+    response: {
+      kind: 'ack',
+      fromEntityId: value.owner,
+      toEntityId: value.counterparty,
+      domain: structuredClone(value.doc.state.domain),
+      watchSeed: value.doc.state.watchSeed,
+      ack: {
+        height: value.doc.currentFrame.height,
+        frameHash: value.doc.currentFrame.stateHash,
+      },
+    },
+  };
+};
+
+const buildEvidence = (value: ValidationContext) => {
+  const account = hydrateAccountDocFromStorage(value.doc);
+  const proof = buildAccountProofBody(account, `0x${'35'.repeat(20)}`);
+  return {
+    proof,
+    snapshot: captureDisputeArgumentSnapshot(
+      account,
+      proof.proofBodyHash,
+      1,
+      proof.proofBodyStruct,
+    ),
+  };
+};
+
+const swapHistoryEntry = (offerId: string) => ({
+  offerId,
+  giveTokenId: 1,
+  giveAmount: 4n,
+  wantTokenId: 2,
+  wantAmount: 3n,
+  createdHeight: 1,
+  cancelRequested: false,
+  lastUpdatedHeight: 1,
+  resolves: [],
+});
+
+const optionalInstallers: Readonly<Record<
+  (typeof ACCOUNT_REPLICA_OPTIONAL)[number],
+  (value: ValidationContext) => void | Promise<void>
+>> = {
+  pendingFrame: installPendingProposal,
+  pendingAccountInput: installPendingProposal,
+  lastOutboundFrameAck: installLastOutboundAck,
+  pendingForwards: value => { value.doc.pendingForwards = [{ tokenId: 1, amount: 1n, route: [value.owner, digest('33')] }]; },
+  hankoSignature: value => { value.doc.hankoSignature = '0x01'; },
+  lastRollbackFrameHash: value => { value.doc.lastRollbackFrameHash = value.doc.currentFrame.stateHash; },
+  abiProofBody: value => {
+    const { proof } = buildEvidence(value);
+    value.doc.abiProofBody = {
+      encodedProofBody: proof.encodedProofBody,
+      proofBodyHash: proof.proofBodyHash,
+      lastUpdatedHeight: value.doc.currentHeight,
+    };
+  },
+  currentFrameHanko: value => { value.doc.currentFrameHanko = '0x02'; },
+  counterpartyFrameHanko: value => { value.doc.counterpartyFrameHanko = '0x03'; },
+  boardResealMigration: value => {
+    value.doc.boardResealMigration = { activationJHeight: 1, activationLogIndex: 0, reason: 'pending' };
+  },
+  counterpartyBoardReseal: value => {
+    value.doc.counterpartyBoardReseal = {
+      activationJHeight: 1, activationLogIndex: 0,
+      frameHeight: value.doc.currentHeight, frameHash: value.doc.currentFrame.stateHash,
+    };
+  },
+  currentDisputeProofHanko: value => { value.doc.currentDisputeProofHanko = '0x04'; },
+  currentDisputeProofNonce: value => { value.doc.currentDisputeProofNonce = 1; },
+  currentDisputeProofBodyHash: value => { value.doc.currentDisputeProofBodyHash = digest('a4'); },
+  currentDisputeHash: value => { value.doc.currentDisputeHash = digest('a5'); },
+  counterpartyDisputeProofHanko: value => { value.doc.counterpartyDisputeProofHanko = '0x05'; },
+  counterpartyDisputeProofNonce: value => { value.doc.counterpartyDisputeProofNonce = 1; },
+  counterpartyDisputeProofBodyHash: value => { value.doc.counterpartyDisputeProofBodyHash = digest('a6'); },
+  counterpartyDisputeHash: value => { value.doc.counterpartyDisputeHash = digest('a7'); },
+  counterpartySettlementHanko: value => { value.doc.counterpartySettlementHanko = '0x06'; },
+  disputeProofNoncesByHash: value => {
+    const { proof } = buildEvidence(value);
+    value.doc.disputeProofNoncesByHash = { [proof.proofBodyHash]: 1 };
+  },
+  disputeProofBodiesByHash: value => {
+    const { proof } = buildEvidence(value);
+    value.doc.disputeProofBodiesByHash = { [proof.proofBodyHash]: proof.proofBodyStruct };
+  },
+  disputeArgumentSnapshotsByHash: value => {
+    const { proof, snapshot } = buildEvidence(value);
+    value.doc.disputeArgumentSnapshotsByHash = { [proof.proofBodyHash]: snapshot };
+  },
+  disputePrepare: value => {
+    value.doc.disputePrepare = {
+      startedAt: 1,
+      readyAfter: 2,
+      reason: 'storage-audit',
+      pendingOrderbookRemovalIds: ['route-1'],
+      startIntent: {
+        crossJurisdictionRouteId: '',
+        starterInitialArguments: '',
+        description: '',
+        allowUnsafeCrossJTargetDispute: false,
+        acceptedCrossJTargetLossAmount: -1n,
+      },
+    };
+  },
+  activeDispute: value => {
+    value.doc.status = 'disputed';
+    value.doc.activeDispute = {
+      startedByLeft: true, initialProofbodyHash: digest('a8'), initialNonce: 1,
+      disputeTimeout: 0, jNonce: 0, starterInitialArguments: '0x', starterIncrementedArguments: '0x',
+    };
+  },
+  swapOrderHistory: value => { value.doc.swapOrderHistory = new Map([['history-open', swapHistoryEntry('history-open')]]); },
+  swapClosedOrders: value => { value.doc.swapClosedOrders = new Map([['history-closed', swapHistoryEntry('history-closed')]]); },
+};
+
+const codecValidateHydrate = (value: ValidationContext): AccountReplica =>
+  hydrateAccountDocFromStorage(assertStorageAccountDocBinding(
+    decodeValidatedBuffer(
+      encodeBuffer(value.doc),
+      validateStorageAccountDocValue,
+    ),
+    value.owner,
+    value.counterparty,
+    'codec-parity',
+  ));
+
+const commitTransition = async (
+  account: AccountReplica,
+  tx: AccountTx,
+  byLeft: boolean,
+): Promise<void> => {
+  const previous = account.currentFrame.stateHash;
+  const result = await applyAccountTx(account, tx, byLeft, 2_000, 2);
+  if (!result.success) throw new Error(`TEST_ACCOUNT_TRANSITION_FAILED:${result.error}`);
+  account.currentHeight = 2;
+  account.currentFrame = {
+    height: 2,
+    timestamp: 2_000,
+    jHeight: account.state.lastFinalizedJHeight,
+    accountTxs: [tx],
+    prevFrameHash: previous,
+    accountStateRoot: computeAccountStateRoot(account.state),
+    stateHash: '',
+    byLeft,
+    deltas: [{ ...account.state.deltas.get(1)! }],
+  };
+  account.currentFrame.stateHash = await createFrameHash(account.currentFrame);
 };
 
 const installCrossJurisdictionOffer = (
@@ -129,6 +290,33 @@ const mutations: Mutation[] = [
   ['pending input ghost field', async value => {
     await installPendingProposal(value); object(value.doc.pendingAccountInput)['ghost'] = true;
   }],
+  ['cached ACK wrapper ghost field', value => {
+    installLastOutboundAck(value); object(value.doc.lastOutboundFrameAck)['ghost'] = true;
+  }],
+  ['cached ACK non-ACK response', value => {
+    installLastOutboundAck(value); object(value.doc.lastOutboundFrameAck!.response)['kind'] = 'dispute';
+  }],
+  ['cached ACK outer height mismatch', value => {
+    installLastOutboundAck(value); value.doc.lastOutboundFrameAck!.height += 1;
+  }],
+  ['cached ACK inner height mismatch', value => {
+    installLastOutboundAck(value); value.doc.lastOutboundFrameAck!.response.ack.height += 1;
+  }],
+  ['cached ACK frame hash mismatch', value => {
+    installLastOutboundAck(value); value.doc.lastOutboundFrameAck!.response.ack.frameHash = digest('97');
+  }],
+  ['cached ACK counterparty mismatch', value => {
+    installLastOutboundAck(value); value.doc.lastOutboundFrameAck!.counterpartyEntityId = digest('98');
+  }],
+  ['cached ACK response endpoint mismatch', value => {
+    installLastOutboundAck(value); value.doc.lastOutboundFrameAck!.response.toEntityId = digest('99');
+  }],
+  ['cached ACK domain mismatch', value => {
+    installLastOutboundAck(value); value.doc.lastOutboundFrameAck!.response.domain.chainId += 1;
+  }],
+  ['cached ACK watch seed mismatch', value => {
+    installLastOutboundAck(value); value.doc.lastOutboundFrameAck!.response.watchSeed = digest('9a');
+  }],
   ['cross-j route ghost field', value => { installCrossJurisdictionOffer(value)['ghost'] = true; }],
   ['cross-j source leg ghost field', value => {
     object(installCrossJurisdictionOffer(value)['source'])['ghost'] = true;
@@ -199,6 +387,160 @@ describe('persisted AccountReplica semantic boundary', () => {
       makerIsLeft: false,
     });
     expect(validate(rightMaker)).toBe(rightMaker.doc);
+  });
+
+  test('codec-hydrated cached ACK is exact and safe for duplicate-frame resend', async () => {
+    const fixture = await makeStorageAccountFixture();
+    installLastOutboundAck(fixture);
+    const restored = codecValidateHydrate(fixture);
+    const duplicateInput = {
+      kind: 'frame' as const,
+      fromEntityId: fixture.counterparty,
+      toEntityId: fixture.owner,
+      domain: structuredClone(fixture.doc.state.domain),
+      watchSeed: fixture.doc.state.watchSeed,
+      proposal: { frame: structuredClone(fixture.doc.currentFrame) },
+    };
+    const replay = buildDuplicateCommittedFrameAck(
+      restored,
+      duplicateInput,
+      [],
+      restored.currentHeight,
+      restored.currentFrame,
+    );
+    expect(replay?.success).toBe(true);
+    expect(replay?.response).toEqual(restored.lastOutboundFrameAck?.response);
+  });
+
+  test('transition-projected text fields survive codec validation without storage-only semantics', async () => {
+    const cases: Array<{
+      name: string;
+      tx: (fixture: ValidationContext) => AccountTx;
+      byLeft: boolean;
+      verify: (account: AccountReplica) => unknown;
+    }> = [
+      {
+        name: '300-character pullId',
+        tx: () => ({
+          type: 'pull_lock',
+          data: {
+            pullId: 'p'.repeat(300), tokenId: 1, amount: 1n,
+            revealedUntilTimestamp: 10_000, fullHash: digest('a2'), partialRoot: digest('a3'),
+          },
+        }),
+        byLeft: true,
+        verify: account => account.state.pulls?.get('p'.repeat(300))?.pullId,
+      },
+      {
+        name: '300-character direct-payment description',
+        tx: fixture => ({
+          type: 'direct_payment',
+          data: {
+            tokenId: 1, amount: 1n,
+            route: [fixture.owner, digest('33'), digest('44')],
+            description: 'd'.repeat(300),
+          },
+        }),
+        byLeft: false,
+        verify: account => account.pendingForwards?.[0]?.description,
+      },
+      {
+        name: 'arbitrary HTLC hashlock',
+        tx: () => ({
+          type: 'htlc_lock',
+          data: {
+            lockId: 'storage-arbitrary-hashlock', hashlock: 'canonical-transition-allows-this-string',
+            timelock: 10_000n, revealBeforeHeight: 10, amount: 1n, tokenId: 1,
+          },
+        }),
+        byLeft: true,
+        verify: account => account.state.locks.get('storage-arbitrary-hashlock')?.hashlock,
+      },
+    ];
+
+    for (const parity of cases) {
+      const fixture = await makeStorageAccountFixture();
+      const account = hydrateAccountDocFromStorage(fixture.doc);
+      const tx = parity.tx(fixture);
+      await commitTransition(account, tx, parity.byLeft);
+      fixture.doc = projectAccountDoc(account);
+      const restored = codecValidateHydrate(fixture);
+      expect(parity.verify(restored), parity.name).toEqual(parity.verify(account));
+    }
+  });
+
+  test('all 27 optional replica fields have a codec-to-hydration validation owner', async () => {
+    expect(Object.keys(optionalInstallers).sort()).toEqual([...ACCOUNT_REPLICA_OPTIONAL].sort());
+    expect(ACCOUNT_REPLICA_OPTIONAL).toHaveLength(27);
+    for (const field of ACCOUNT_REPLICA_OPTIONAL) {
+      const fixture = await makeStorageAccountFixture();
+      await optionalInstallers[field](fixture);
+      const restored = codecValidateHydrate(fixture);
+      expect(Object.hasOwn(restored, field), field).toBe(true);
+    }
+  });
+
+  test('structured optional fields reject ghosts, broken hashes, and unsafe consumer shapes', async () => {
+    const cases: Array<readonly [
+      string,
+      (value: ValidationContext) => void | Promise<void>,
+      (value: ValidationContext) => void,
+    ]> = [
+      ['ABI proof ghost', optionalInstallers.abiProofBody, value => { object(value.doc.abiProofBody)['ghost'] = true; }],
+      ['ABI proof hash mismatch', optionalInstallers.abiProofBody, value => { value.doc.abiProofBody!.proofBodyHash = digest('b1'); }],
+      ['board migration ghost', optionalInstallers.boardResealMigration, value => { object(value.doc.boardResealMigration)['ghost'] = true; }],
+      ['counterparty board reseal ghost', optionalInstallers.counterpartyBoardReseal, value => { object(value.doc.counterpartyBoardReseal)['ghost'] = true; }],
+      ['evidence nonce value', optionalInstallers.disputeProofNoncesByHash, value => {
+        const key = Object.keys(value.doc.disputeProofNoncesByHash!)[0]!;
+        value.doc.disputeProofNoncesByHash![key] = -1;
+      }],
+      ['evidence body hash mismatch', optionalInstallers.disputeProofBodiesByHash, value => {
+        const body = Object.values(value.doc.disputeProofBodiesByHash!)[0]!;
+        value.doc.disputeProofBodiesByHash = { [digest('b2')]: body };
+      }],
+      ['evidence body ghost', optionalInstallers.disputeProofBodiesByHash, value => {
+        object(Object.values(value.doc.disputeProofBodiesByHash!)[0])['ghost'] = true;
+      }],
+      ['snapshot plan ghost', optionalInstallers.disputeArgumentSnapshotsByHash, value => {
+        const snapshot = object(Object.values(value.doc.disputeArgumentSnapshotsByHash!)[0]);
+        object(snapshot['plan'])['ghost'] = true;
+      }],
+      ['dispute prepare ghost', optionalInstallers.disputePrepare, value => { object(value.doc.disputePrepare)['ghost'] = true; }],
+      ['dispute intent ghost', optionalInstallers.disputePrepare, value => { object(value.doc.disputePrepare!.startIntent)['ghost'] = true; }],
+      ['swap history ghost', optionalInstallers.swapOrderHistory, value => {
+        object(value.doc.swapOrderHistory!.get('history-open'))['ghost'] = true;
+      }],
+    ];
+    for (const [name, install, mutate] of cases) {
+      const fixture = await makeStorageAccountFixture();
+      await install(fixture);
+      mutate(fixture);
+      expect(() => codecValidateHydrate(fixture), name).toThrow();
+    }
+  });
+
+  test('all opaque optional scalars reject values their consumers cannot dereference', async () => {
+    const malformed: Readonly<Record<string, unknown>> = {
+      hankoSignature: {},
+      lastRollbackFrameHash: 'not-a-frame-hash',
+      currentFrameHanko: {},
+      counterpartyFrameHanko: {},
+      currentDisputeProofHanko: {},
+      currentDisputeProofNonce: -1,
+      currentDisputeProofBodyHash: 'not-a-proof-hash',
+      currentDisputeHash: 'not-a-dispute-hash',
+      counterpartyDisputeProofHanko: {},
+      counterpartyDisputeProofNonce: -1,
+      counterpartyDisputeProofBodyHash: 'not-a-proof-hash',
+      counterpartyDisputeHash: 'not-a-dispute-hash',
+      counterpartySettlementHanko: {},
+    };
+    for (const [field, invalid] of Object.entries(malformed)) {
+      const fixture = await makeStorageAccountFixture();
+      await optionalInstallers[field as keyof typeof optionalInstallers](fixture);
+      object(fixture.doc)[field] = invalid;
+      expect(() => codecValidateHydrate(fixture), field).toThrow();
+    }
   });
 
   for (const [name, mutate] of mutations) {
