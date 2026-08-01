@@ -1,5 +1,12 @@
 const ALLOWED_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
 
+const allowedLocalPorts = (): ReadonlySet<string> => new Set(
+  String(process.env['XLN_WATCHTOWER_PROXY_PORTS'] || process.env['XLN_WATCHTOWER_PORT'] || '9100')
+    .split(',')
+    .map(port => port.trim())
+    .filter(port => /^\d{1,5}$/.test(port) && Number(port) <= 65_535),
+);
+
 const isAllowedTowerPath = (path: string): boolean =>
   path === '/'
   || path === '/healthz'
@@ -17,10 +24,14 @@ const resolveLocalTowerUrl = (target: string, path: string): URL => {
   if (baseUrl.protocol !== 'http:' || !ALLOWED_LOCAL_HOSTS.has(baseUrl.hostname)) {
     throw new Error('WATCHTOWER_PROXY_TARGET_NOT_ALLOWED');
   }
-  if (!isAllowedTowerPath(path)) {
-    throw new Error(`WATCHTOWER_PROXY_PATH_NOT_ALLOWED: ${path}`);
+  if (!allowedLocalPorts().has(baseUrl.port || '80')) {
+    throw new Error('WATCHTOWER_PROXY_PORT_NOT_ALLOWED');
   }
-  return new URL(path, `${baseUrl.toString().replace(/\/+$/, '')}/`);
+  const resolvedUrl = new URL(path, `${baseUrl.toString().replace(/\/+$/, '')}/`);
+  if (resolvedUrl.origin !== baseUrl.origin || !isAllowedTowerPath(resolvedUrl.pathname)) {
+    throw new Error(`WATCHTOWER_PROXY_PATH_NOT_ALLOWED: ${resolvedUrl.pathname}`);
+  }
+  return resolvedUrl;
 };
 
 export const handleWatchtowerProxy = async (req: Request): Promise<Response> => {

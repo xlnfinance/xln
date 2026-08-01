@@ -121,6 +121,35 @@ describe('Routing metadata hard requirements', () => {
     expect(() => parseProfile(malformed)).toThrow('GOSSIP_PROFILE_ACCOUNT_OUT_CAPACITY_INVALID');
   });
 
+  test('rejects unsatisfiable routing fees at profile ingress', () => {
+    const malformed = profile(ALICE, ALICE.slice(0, 42), {
+      routingFeePPM: 1_000_000,
+      baseFee: 0n,
+      isHub: false,
+      board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
+    }, []);
+
+    expect(() => parseProfile(malformed)).toThrow('GOSSIP_PROFILE_ROUTING_FEE_PPM_INVALID');
+  });
+
+  test('rejects an impossible edge without entering fee inversion', () => {
+    const graph = {
+      nodes: new Set([ALICE, BOB]),
+      edges: new Map([[ALICE, [{
+        from: ALICE,
+        to: BOB,
+        tokenId: TOKEN_ID,
+        capacity: AMOUNT * 2n,
+        baseFee: 0n,
+        feePPM: 1_000_000,
+        disabled: false,
+      }]]]),
+      accountCapacities: new Map(),
+    };
+
+    expect(new PathFinder(graph).findRoutes(ALICE, BOB, AMOUNT, TOKEN_ID)).toEqual([]);
+  });
+
   test('rejects non-numeric and overflowing uint16 board values', () => {
     const validProfile = profile(ALICE, ALICE.slice(0, 42), {
       routingFeePPM: 10_000,

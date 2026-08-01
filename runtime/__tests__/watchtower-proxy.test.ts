@@ -54,6 +54,42 @@ describe('watchtower same-origin proxy', () => {
     expect(payload.details).toContain('WATCHTOWER_PROXY_PATH_NOT_ALLOWED');
   });
 
+  test('normalizes receipt paths before applying the public allowlist', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalled = false;
+    globalThis.fetch = (async () => {
+      fetchCalled = true;
+      return new Response('unexpected');
+    }) as typeof fetch;
+
+    try {
+      const response = await handleWatchtowerProxy(new Request(
+        'https://localhost:8080/api/watchtower-proxy?' +
+          'target=http%3A%2F%2F127.0.0.1%3A9100&' +
+          'path=%2Fapi%2Ftower%2Freceipt%2F..%2F..%2F..%2Fapi%2Fcontrol%2Fp2p%2Fstop',
+        { method: 'POST' },
+      ));
+      const payload = await response.json() as { details?: string };
+
+      expect(response.status).toBe(503);
+      expect(payload.details).toContain('WATCHTOWER_PROXY_PATH_NOT_ALLOWED');
+      expect(fetchCalled).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rejects caller-selected loopback ports outside the operator allowlist', async () => {
+    const response = await handleWatchtowerProxy(new Request(
+      'https://localhost:8080/api/watchtower-proxy?' +
+        'target=http%3A%2F%2F127.0.0.1%3A8080&path=%2Fapi%2Ftower%2Fhealthz',
+    ));
+    const payload = await response.json() as { details?: string };
+
+    expect(response.status).toBe(503);
+    expect(payload.details).toContain('WATCHTOWER_PROXY_PORT_NOT_ALLOWED');
+  });
+
   test('allows signed public push registration paths', async () => {
     const originalFetch = globalThis.fetch;
     const calls: Array<{ url: string; method?: string }> = [];

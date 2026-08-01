@@ -60,7 +60,7 @@ const DEFAULT_CONFIG: HubConfig = {
   name: getArg('--name', 'Main Hub'),
   region: getArg('--region', 'global'),
   signerId: getArg('--signer', 'hub-validator'),
-  seed: getArg('--seed', 'xln-main-hub-2026'),
+  seed: getArg('--seed', process.env['XLN_RUNTIME_SEED'] ?? ''),
   routingFeePPM: parseInt(getArg('--fee', '100')),
   swapTakerFeeBps: parseInt(getArg('--swap-taker-fee-bps', '1')),
   relayUrl: getArg('--relay', 'wss://xln.finance/relay'),
@@ -240,6 +240,9 @@ export async function bootstrapHubs(env: RuntimeReplica, configs: HubConfig[]): 
 }
 
 if (import.meta.main) {
+  if (!DEFAULT_CONFIG.seed) {
+    throw new Error('Hub seed is required via --seed or XLN_RUNTIME_SEED');
+  }
   bootstrapHub(undefined, DEFAULT_CONFIG).catch(err => {
     console.error('[BOOTSTRAP] ❌ Failed:', err);
     process.exit(1);

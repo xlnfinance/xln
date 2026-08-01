@@ -15,6 +15,7 @@ import {
   type ValidatorEncryptionManifest,
 } from '../protocol/htlc/validator-encryption';
 import { normalizeEntityName } from './profile-name';
+import { MAX_ROUTING_FEE_PPM } from '../routing/fees';
 
 export type BoardValidator = {
   signer: string; // canonical recovered signer address (0x...)
@@ -68,6 +69,14 @@ export type ProfileAccount = {
   tokenCapacities:
     | Map<number | string, ProfileTokenCapacity>
     | Record<string, ProfileTokenCapacity>;
+};
+
+const parseRoutingFeePPM = (raw: unknown, entityId: string): number => {
+  const value = raw === undefined ? 1 : Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > MAX_ROUTING_FEE_PPM) {
+    throw new Error(`GOSSIP_PROFILE_ROUTING_FEE_PPM_INVALID: entity=${entityId}`);
+  }
+  return value;
 };
 
 export type Profile = {
@@ -580,10 +589,7 @@ export const parseProfile = (raw: unknown): Profile => {
   const metadata: ProfileMetadata = {
     isHub: metadataRaw['isHub'] === true,
     ...(hubName ? { hubName } : {}),
-    routingFeePPM: Math.max(
-      0,
-      Number.isFinite(Number(metadataRaw['routingFeePPM'])) ? Math.floor(Number(metadataRaw['routingFeePPM'])) : 1,
-    ),
+    routingFeePPM: parseRoutingFeePPM(metadataRaw['routingFeePPM'], entityId),
     baseFee: parseBigIntValue(metadataRaw['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
     ...(metadataRaw['swapTakerFeeBps'] !== undefined
       ? { swapTakerFeeBps: parseUint16(metadataRaw['swapTakerFeeBps'], 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId) }
@@ -673,7 +679,7 @@ export const canonicalizeProfile = (
   const jurisdiction = parseProfileJurisdiction(metadata['jurisdiction'], entityId, 'GOSSIP_PROFILE_JURISDICTION');
   const mirrors = parseProfileMirrors(metadata['mirrors'], entityId);
   const hubName = typeof metadata['hubName'] === 'string' ? metadata['hubName'].trim() : '';
-  const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata['routingFeePPM'])) ? Math.floor(Number(metadata['routingFeePPM'])) : 1);
+  const routingFeePPM = parseRoutingFeePPM(metadata['routingFeePPM'], entityId);
   const baseFee = parseBigIntValue(metadata['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId);
   const swapTakerFeeBps = metadata['swapTakerFeeBps'] !== undefined
     ? parseUint16(metadata['swapTakerFeeBps'], 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId)

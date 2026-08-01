@@ -101,7 +101,7 @@ export class PathFinder {
         );
 
         // Skip if insufficient capacity
-        if (requiredAmount > edge.capacity) continue;
+        if (requiredAmount === null || requiredAmount > edge.capacity) continue;
 
         // Calculate fee for this edge
         const edgeFee = this.calculateFee(edge, requiredAmount);
@@ -134,6 +134,25 @@ export class PathFinder {
     return edge.baseFee + proportionalFee;
   }
 
+  private calculateInboundAmount(edge: AccountEdge, forwardAmount: bigint): bigint | null {
+    // At 100% PPM, `inbound - fee(inbound)` can never grow to the requested
+    // output; doubling `high` would only grow a BigInt forever.
+    if (!Number.isInteger(edge.feePPM) || edge.feePPM < 0 || edge.feePPM >= 1_000_000) return null;
+    let low = forwardAmount + edge.baseFee;
+    let high = low;
+    const forwardOut = (inbound: bigint): bigint => inbound - this.calculateFee(edge, inbound);
+    for (let iteration = 0; forwardOut(high) < forwardAmount && iteration < 128; iteration += 1) {
+      high *= 2n;
+    }
+    if (forwardOut(high) < forwardAmount) return null;
+    while (low < high) {
+      const mid = (low + high) / 2n;
+      if (forwardOut(mid) >= forwardAmount) high = mid;
+      else low = mid + 1n;
+    }
+    return low;
+  }
+
   /**
    * Calculate required amount at each hop (working backwards from target)
    */
@@ -142,7 +161,7 @@ export class PathFinder {
     path: string[],
     target: string,
     tokenId: number
-  ): bigint {
+  ): bigint | null {
     let amount = finalAmount;
 
     // Work backwards from target to source
@@ -154,16 +173,9 @@ export class PathFinder {
         // Invert forward equation:
         //   forward = inbound - fee(inbound)
         // solve minimal inbound s.t. forward >= amount.
-        let low = amount + edge.baseFee;
-        let high = low;
-        const forwardOut = (inbound: bigint): bigint => inbound - this.calculateFee(edge, inbound);
-        while (forwardOut(high) < amount) high *= 2n;
-        while (low < high) {
-          const mid = (low + high) / 2n;
-          if (forwardOut(mid) >= amount) high = mid;
-          else low = mid + 1n;
-        }
-        amount = low;
+        const inbound = this.calculateInboundAmount(edge, amount);
+        if (inbound === null) return null;
+        amount = inbound;
       }
     }
 
@@ -192,16 +204,9 @@ export class PathFinder {
       const forwardAmount = inboundAmounts[i + 1]!;
       // Binary search inversion of forward fee equation:
       // forward = inbound - (baseFee + inbound*ppm/1e6)
-      let low = forwardAmount + edge.baseFee;
-      let high = low;
-      const forwardOut = (inbound: bigint): bigint => inbound - this.calculateFee(edge, inbound);
-      while (forwardOut(high) < forwardAmount) high *= 2n;
-      while (low < high) {
-        const mid = (low + high) / 2n;
-        if (forwardOut(mid) >= forwardAmount) high = mid;
-        else low = mid + 1n;
-      }
-      inboundAmounts[i] = low;
+      const inbound = this.calculateInboundAmount(edge, forwardAmount);
+      if (inbound === null) return null;
+      inboundAmounts[i] = inbound;
     }
 
     for (let i = 0; i < path.length - 1; i++) {
@@ -240,16 +245,9 @@ export class PathFinder {
     for (let i = path.length - 2; i >= 0; i--) {
       const edge = getEdge(this.graph, path[i]!, path[i + 1]!, tokenId);
       if (!edge) continue;
-      let low = inboundAmounts[i + 1]! + edge.baseFee;
-      let high = low;
-      const forwardOut = (inbound: bigint): bigint => inbound - this.calculateFee(edge, inbound);
-      while (forwardOut(high) < inboundAmounts[i + 1]!) high *= 2n;
-      while (low < high) {
-        const mid = (low + high) / 2n;
-        if (forwardOut(mid) >= inboundAmounts[i + 1]!) high = mid;
-        else low = mid + 1n;
-      }
-      inboundAmounts[i] = low;
+      const inbound = this.calculateInboundAmount(edge, inboundAmounts[i + 1]!);
+      if (inbound === null) return 0;
+      inboundAmounts[i] = inbound;
     }
 
     for (let i = 0; i < path.length - 1; i++) {

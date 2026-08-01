@@ -6,6 +6,7 @@
  * effectivePPM = basePPM * (1 + utilization)
  */
 export const PPM_DENOM = 1_000_000n;
+export const MAX_ROUTING_FEE_PPM = 999_999;
 export const DIRECTIONAL_UTIL_STEP_PPM = 50_000n; // 5% utilization buckets
 export const DIRECTIONAL_UTIL_CAP_PPM = 500_000n; // cap uplift at +50% (1.5x base fee)
 
@@ -16,7 +17,7 @@ export const sanitizeFeePPM = (raw: unknown, fallback: number = 1): number => {
   if (!Number.isFinite(n)) return fallback;
   const v = Math.floor(n);
   if (v < 0) return 0;
-  if (v > 1_000_000) return 1_000_000;
+  if (v > MAX_ROUTING_FEE_PPM) return MAX_ROUTING_FEE_PPM;
   return v;
 };
 
@@ -45,7 +46,9 @@ export const calculateDirectionalFeePPM = (
   utilScaled = (utilScaled / DIRECTIONAL_UTIL_STEP_PPM) * DIRECTIONAL_UTIL_STEP_PPM;
   const effective = BigInt(base) + (BigInt(base) * utilScaled) / PPM_DENOM;
   const asNumber = Number(effective);
-  return Number.isFinite(asNumber) ? Math.max(0, Math.floor(asNumber)) : base;
+  return Number.isFinite(asNumber)
+    ? Math.min(MAX_ROUTING_FEE_PPM, Math.max(0, Math.floor(asNumber)))
+    : base;
 };
 
 export const calculateHopFee = (amountIn: bigint, feePPM: number, baseFee: bigint): bigint => {
