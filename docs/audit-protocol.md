@@ -357,6 +357,12 @@ Release requires:
 - independent delta-audit on the exact release SHA;
 - release, topology, restart, package, and user-path evidence green.
 
+Public contract deployment additionally requires 100% current coverage for
+every contract authority, signature-domain, value-conservation, bytecode, ABI,
+and deployment-binding invariant. A locally green build is necessary evidence,
+not permission to deploy; historical public deployments remain unchanged until
+the exact candidate satisfies this gate.
+
 Uncapped production/mainnet requires 100% coverage for all critical invariants
 and mandatory paths, a full independent audit on the exact SHA, soak evidence,
 and zero unresolved high-impact candidates.

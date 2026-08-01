@@ -554,8 +554,22 @@
     {
       "id": "transport-topology.exact-hop-matrix",
       "moduleId": "transport-topology",
-      "title": "User-to-hub and hub-to-hub are one direct hop; only user-to-user may use relay.",
+      "title": "Every participant maintains an authenticated relay fail-safe; user-to-hub, hub-to-hub, and market-maker-to-hub prefer one direct hop and fall back to relay only while direct delivery is unavailable.",
       "importance": 98,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "transport-topology.bound-session-authority",
+      "moduleId": "transport-topology",
+      "title": "Every WebSocket session cryptographically binds both endpoint identities, transport role, audience, and immutable encryption key before carrying authenticated traffic.",
+      "importance": 100,
       "requiredEvidence": [
         "codeTrace",
         "l1Regression",
@@ -638,7 +652,7 @@
     {
       "id": "runtime-pipeline.expected-rejection-isolation",
       "moduleId": "runtime-pipeline",
-      "title": "Expected local command rejection is durable and visible without halting unrelated Runtime work.",
+      "title": "A business-invalid command atomically rolls back its candidate, returns an explicit rejection, and never halts or partially mutates unrelated Runtime work.",
       "importance": 96,
       "requiredEvidence": [
         "codeTrace",
@@ -1694,6 +1708,34 @@
       "reproduction": "Exercise real Bun ServerWebSocket backpressure and trace direct fallback plus relay pending flush for -1 and 0."
     },
     {
+      "id": "AUD-TRANSPORT-HELLO-AUDIENCE",
+      "rootCauseKey": "websocket-hello-missing-responder-audience-binding",
+      "moduleId": "transport-topology",
+      "invariantIds": [
+        "transport-topology.bound-session-authority"
+      ],
+      "title": "A malicious endpoint can forward another server's challenge to a victim and take over the victim's authenticated relay session without its signing key.",
+      "severity": "P0",
+      "confidence": 99,
+      "state": "CONFIRMED",
+      "sourceSha": "884eb0ca27bb9dbbbc86f8ad836cb054b28f7603",
+      "reproduction": "Use two ephemeral Bun relays: forward the target challenge through the malicious endpoint to a real RuntimeWsClient, return the victim-signed hello to the target, and observe the legitimate victim session close with 4009 while the proxy is accepted as the victim."
+    },
+    {
+      "id": "AUD-TRANSPORT-KEY-REBIND",
+      "rootCauseKey": "post-handshake-encryption-key-rebinding",
+      "moduleId": "transport-topology",
+      "invariantIds": [
+        "transport-topology.bound-session-authority"
+      ],
+      "title": "An authenticated session accepts an unsigned post-handshake encryption-key replacement and redirects later envelopes to the attacker's key.",
+      "severity": "P1",
+      "confidence": 99,
+      "state": "CONFIRMED",
+      "sourceSha": "884eb0ca27bb9dbbbc86f8ad836cb054b28f7603",
+      "reproduction": "Complete signed hello, send a later application frame with the attacker's fromEncryptionPubKey, then prove the attacker decrypts the next outbound entity-input envelope while the original peer receives invalid tag."
+    },
+    {
       "id": "AUD-RUNTIME-STICKY-REJECTION",
       "rootCauseKey": "expected-local-command-sticky-runtime-halt",
       "moduleId": "runtime-pipeline",
@@ -1835,6 +1877,18 @@
     {
       "id": "codex-transport-exact-hop",
       "label": "Transport exact-hop primary",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "claude-opus-transport-auth",
+      "label": "Claude Opus transport-auth discovery",
+      "family": "claude",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-transport-auth-verifier",
+      "label": "Transport-auth independent verifier",
       "family": "codex",
       "state": "PROVISIONAL"
     }
@@ -2170,6 +2224,44 @@
       "confirmedFindingIds": [],
       "candidateFindingIds": [],
       "summary": "Mapped actual hop behavior and produced four P1 plus three P2 candidates with 186/186 narrow tests; independent adjudication is running."
+    },
+    {
+      "id": "claude-opus-transport-auth-20260801",
+      "reviewerId": "claude-opus-transport-auth",
+      "sourceSha": "884eb0ca27bb9dbbbc86f8ad836cb054b28f7603",
+      "moduleIds": [
+        "transport-topology",
+        "api-auth-custody"
+      ],
+      "scope": "Blind exact-hop authentication, challenge transcript, session replacement, and transport encryption-key authority",
+      "state": "COMPLETED",
+      "usefulnessScore": 1000,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-TRANSPORT-HELLO-AUDIENCE",
+        "AUD-TRANSPORT-KEY-REBIND"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Discovered the live challenge-forwarding confused-deputy chain and unsigned post-handshake encryption-key rebinding with concrete source traces."
+    },
+    {
+      "id": "transport-auth-independent-verification-20260801",
+      "reviewerId": "codex-transport-auth-verifier",
+      "sourceSha": "884eb0ca27bb9dbbbc86f8ad836cb054b28f7603",
+      "moduleIds": [
+        "transport-topology",
+        "api-auth-custody"
+      ],
+      "scope": "Independent executable challenge-forwarding session-takeover and post-handshake key-rewrite verification",
+      "state": "COMPLETED",
+      "usefulnessScore": 1000,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-TRANSPORT-HELLO-AUDIENCE",
+        "AUD-TRANSPORT-KEY-REBIND"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Reproduced both findings with real ephemeral Bun relay sockets and the production direct handler at 99% confidence; no victim seed was available to the attacker."
     }
   ]
 }
