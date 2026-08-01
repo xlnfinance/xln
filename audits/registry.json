@@ -8,8 +8,13 @@
       "brainvault/**/*.ts",
       "custody/**/*.ts",
       "frontend/src/lib/components/Entity/**/*",
+      "frontend/src/lib/components/PaymentSpotlight.svelte",
       "frontend/src/lib/components/Views/RuntimeCreation.svelte",
-      "frontend/src/lib/stores/xlnStore.ts"
+      "frontend/src/lib/stores/paymentTerminalMonitor.ts",
+      "frontend/src/lib/stores/paymentSpotlightStore.ts",
+      "frontend/src/lib/view/View.svelte",
+      "frontend/src/lib/stores/xlnStore.ts",
+      "frontend/src/lib/utils/xlnInvoice.ts"
     ],
     "testGlobs": [
       "runtime/__tests__/**/*.ts",
@@ -316,12 +321,23 @@
       "sourceGlobs": [
         "runtime/runtime/registration/**/*.ts",
         "runtime/protocol/payments/**/*.ts",
-        "runtime/protocol/htlc/**/*.ts"
+        "runtime/protocol/htlc/**/*.ts",
+        "frontend/src/lib/components/Entity/PaymentPanel.svelte",
+        "frontend/src/lib/components/PaymentSpotlight.svelte",
+        "frontend/src/lib/stores/paymentSpotlightStore.ts",
+        "frontend/src/lib/stores/paymentTerminalMonitor.ts",
+        "frontend/src/lib/view/View.svelte",
+        "frontend/src/lib/utils/xlnInvoice.ts"
       ],
       "testGlobs": [
         "runtime/__tests__/**/*payment*",
         "runtime/__tests__/**/*htlc*",
-        "runtime/scenarios/htlc-*.ts"
+        "runtime/scenarios/htlc-*.ts",
+        "tests/e2e-payment.spec.ts",
+        "tests/frontend/payment-panel-view.test.ts",
+        "tests/frontend/payment-terminal-monitor.test.ts",
+        "tests/frontend/runtime-command-bus.test.ts",
+        "runtime/__tests__/frontend-xln-invoice.test.ts"
       ],
       "dependencies": [
         "runtime-pipeline",
@@ -360,10 +376,20 @@
       "sourceGlobs": [
         "frontend/src/lib/components/Views/RuntimeCreation.svelte",
         "frontend/src/lib/components/Entity/**/*",
-        "frontend/src/lib/stores/xlnStore.ts"
+        "frontend/src/lib/components/PaymentSpotlight.svelte",
+        "frontend/src/lib/stores/paymentSpotlightStore.ts",
+        "frontend/src/lib/stores/paymentTerminalMonitor.ts",
+        "frontend/src/lib/view/View.svelte",
+        "frontend/src/lib/stores/xlnStore.ts",
+        "frontend/src/lib/utils/xlnInvoice.ts"
       ],
       "testGlobs": [
-        "frontend/tests/brainvault-*.spec.ts"
+        "frontend/tests/brainvault-*.spec.ts",
+        "tests/e2e-payment.spec.ts",
+        "tests/frontend/payment-panel-view.test.ts",
+        "tests/frontend/payment-terminal-monitor.test.ts",
+        "tests/frontend/runtime-command-bus.test.ts",
+        "runtime/__tests__/frontend-xln-invoice.test.ts"
       ],
       "dependencies": [
         "api-auth-custody",
@@ -941,12 +967,23 @@
       "sourceGlobs": [
         "runtime/runtime/registration/**/*.ts",
         "runtime/protocol/payments/**/*.ts",
-        "runtime/protocol/htlc/**/*.ts"
+        "runtime/protocol/htlc/**/*.ts",
+        "frontend/src/lib/components/Entity/PaymentPanel.svelte",
+        "frontend/src/lib/components/PaymentSpotlight.svelte",
+        "frontend/src/lib/stores/paymentSpotlightStore.ts",
+        "frontend/src/lib/stores/paymentTerminalMonitor.ts",
+        "frontend/src/lib/view/View.svelte",
+        "frontend/src/lib/utils/xlnInvoice.ts"
       ],
       "testGlobs": [
         "runtime/__tests__/**/*payment*",
         "runtime/__tests__/**/*htlc*",
-        "runtime/scenarios/htlc-*.ts"
+        "runtime/scenarios/htlc-*.ts",
+        "tests/e2e-payment.spec.ts",
+        "tests/frontend/payment-panel-view.test.ts",
+        "tests/frontend/payment-terminal-monitor.test.ts",
+        "tests/frontend/runtime-command-bus.test.ts",
+        "runtime/__tests__/frontend-xln-invoice.test.ts"
       ]
     },
     {
@@ -1010,10 +1047,20 @@
       "sourceGlobs": [
         "frontend/src/lib/components/Views/RuntimeCreation.svelte",
         "frontend/src/lib/components/Entity/**/*",
-        "frontend/src/lib/stores/xlnStore.ts"
+        "frontend/src/lib/components/PaymentSpotlight.svelte",
+        "frontend/src/lib/stores/paymentSpotlightStore.ts",
+        "frontend/src/lib/stores/paymentTerminalMonitor.ts",
+        "frontend/src/lib/view/View.svelte",
+        "frontend/src/lib/stores/xlnStore.ts",
+        "frontend/src/lib/utils/xlnInvoice.ts"
       ],
       "testGlobs": [
-        "frontend/tests/brainvault-*.spec.ts"
+        "frontend/tests/brainvault-*.spec.ts",
+        "tests/e2e-payment.spec.ts",
+        "tests/frontend/payment-panel-view.test.ts",
+        "tests/frontend/payment-terminal-monitor.test.ts",
+        "tests/frontend/runtime-command-bus.test.ts",
+        "runtime/__tests__/frontend-xln-invoice.test.ts"
       ]
     },
     {

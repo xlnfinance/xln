@@ -8,6 +8,7 @@ import {
   computeModuleFingerprints,
   evaluateAuditGate,
   listModuleFingerprintFiles,
+  matchesAuditGlob,
   parseAuditRegistry,
   sha256Text,
   validateAuditRegistry,
@@ -67,6 +68,48 @@ describe('canonical audit registry', () => {
       expect(accountFiles).toContain(coupledPath);
     }
   }, 20_000);
+
+  test('durable payment implementation and regressions are fingerprint-owned', () => {
+    const registration = REGISTRY.modules.find(module => module.id === 'registration-payment')!;
+    const wallet = REGISTRY.modules.find(module => module.id === 'wallet-frontend')!;
+    const terminalTruth = REGISTRY.invariants.find(
+      invariant => invariant.id === 'registration-payment.terminal-truth',
+    )!;
+    const durableStatus = REGISTRY.invariants.find(
+      invariant => invariant.id === 'wallet-frontend.durable-status-truth',
+    )!;
+    const sources = [
+      'frontend/src/lib/components/Entity/PaymentPanel.svelte',
+      'frontend/src/lib/components/PaymentSpotlight.svelte',
+      'frontend/src/lib/stores/paymentSpotlightStore.ts',
+      'frontend/src/lib/stores/paymentTerminalMonitor.ts',
+      'frontend/src/lib/view/View.svelte',
+      'frontend/src/lib/utils/xlnInvoice.ts',
+    ];
+    const tests = [
+      'tests/e2e-payment.spec.ts',
+      'tests/frontend/payment-panel-view.test.ts',
+      'tests/frontend/payment-terminal-monitor.test.ts',
+      'tests/frontend/runtime-command-bus.test.ts',
+      'runtime/__tests__/frontend-xln-invoice.test.ts',
+    ];
+    const owns = (path: string, globs: readonly string[]): boolean =>
+      globs.some(glob => matchesAuditGlob(path, glob));
+
+    for (const path of sources) {
+      expect(owns(path, REGISTRY.scope.sourceGlobs)).toBe(true);
+      expect(owns(path, registration.sourceGlobs)).toBe(true);
+      expect(owns(path, wallet.sourceGlobs)).toBe(true);
+      expect(owns(path, terminalTruth.sourceGlobs)).toBe(true);
+      expect(owns(path, durableStatus.sourceGlobs)).toBe(true);
+    }
+    for (const path of tests) {
+      expect(owns(path, registration.testGlobs)).toBe(true);
+      expect(owns(path, wallet.testGlobs)).toBe(true);
+      expect(owns(path, terminalTruth.testGlobs)).toBe(true);
+      expect(owns(path, durableStatus.testGlobs)).toBe(true);
+    }
+  });
 
   test('coverage requires every current evidence class and becomes stale on fingerprint drift', () => {
     const target = REGISTRY.invariants.find(invariant => invariant.id === 'api-auth-custody.secret-confinement')!;
