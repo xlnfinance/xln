@@ -852,7 +852,9 @@ const handleRuntimeAdapterBrainVaultReveal = async (
   if (!deps.revealBrainVaultMnemonic) {
     throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault mnemonic export is unavailable');
   }
-  sendOk(ws, msg.id, await deps.revealBrainVaultMnemonic(), diagnostic());
+  const recovery = await deps.revealBrainVaultMnemonic();
+  runtimeAdapterLog.warn('brainvault.mnemonic_exported', { authLevel: state.authLevel });
+  sendOk(ws, msg.id, recovery, diagnostic());
 };
 
 const sendCommittedRuntimeAdapterCommand = (

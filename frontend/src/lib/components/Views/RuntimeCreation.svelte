@@ -1850,9 +1850,11 @@
             {:else}
               <div class="work-estimate" data-testid="brainvault-work-estimate">
                 <div>
-                  <span>{shardTimeMeasured ? 'Measured on this device' : 'Initial device estimate'}</span>
+                  <span>{derivesBrainVaultOnNode
+                    ? shardTimeMeasured ? 'Browser benchmark' : 'Initial browser estimate'
+                    : shardTimeMeasured ? 'Measured on this device' : 'Initial device estimate'}</span>
                   <strong>{formatRuntimeDurationRounded(workEstimate.recoveryMs)}</strong>
-                  <small>{Math.max(1, Math.min(effectiveTargetWorkerCount, actualShardCount || 1))} worker target</small>
+                  <small>{Math.max(1, Math.min(effectiveTargetWorkerCount, actualShardCount || 1))} {derivesBrainVaultOnNode ? 'browser workers' : 'worker target'}</small>
                 </div>
                 <div>
                   <span>Every password guess</span>
@@ -1861,7 +1863,9 @@
                 </div>
               </div>
               <p class="measurement-note">
-                {shardTimeMeasured
+                {derivesBrainVaultOnNode
+                  ? 'Browser comparison only. The native node benchmark appears after derivation.'
+                  : shardTimeMeasured
                   ? 'Timing uses completed Argon2 work from this browser.'
                   : 'Timing updates and is saved after the first completed shard.'}
               </p>

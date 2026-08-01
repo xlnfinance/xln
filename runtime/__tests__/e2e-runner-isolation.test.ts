@@ -108,6 +108,7 @@ describe('isolated E2E runner resources', () => {
     expect(runner).not.toContain("runE2ECommand('bun', ['run', 'build']");
     expect(runner).toContain("const webUrl = `http://localhost:${webPort}`");
     expect(runner).toContain("XLN_VITE_FORCE_HTTP: '1'");
+    expect(runner).toContain("PW_PROFILE: args.pwProject === 'brainvault' ? 'brainvault' : ''");
     expect(runner).toContain('Math.min(args.stackTimeoutMs, 30_000)');
     expect(viteConfig).toContain("const FORCE_HTTP = process.env['XLN_VITE_FORCE_HTTP'] === '1'");
     expect(runtimeImport).not.toContain("return 'http://127.0.0.1:8082'");

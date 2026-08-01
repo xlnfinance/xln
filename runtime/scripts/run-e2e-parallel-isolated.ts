@@ -2287,6 +2287,7 @@ const runShard = async (
         PLAYWRIGHT_HTML_OPEN: 'never',
         PW_BASE_URL: webUrl,
         PW_SKIP_WEBSERVER: '1',
+        PW_PROFILE: args.pwProject === 'brainvault' ? 'brainvault' : '',
         PW_WORKERS: String(args.workersPerShard),
         PW_TEST_TIMEOUT: String(args.testTimeoutMs),
         PW_VIDEO: args.videoMode,

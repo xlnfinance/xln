@@ -37,6 +37,8 @@ bun test brainvault/core.test.ts
 
 All parameters locked for 20+ year compatibility. DO NOT CHANGE.
 
-Name and passphrase are exact inputs: leading/trailing whitespace is significant, then V1 applies NFKD normalization. Older interactive CLI releases trimmed edge whitespace; recover wallets created there by entering the trimmed values.
+Name and passphrase are exact inputs: leading/trailing whitespace is significant, then V1 applies NFKD normalization. There is no trimming or compatibility path.
+
+A node-owned recovery mnemonic is stored as plaintext JSON in the configured operator file with mode `0600`. Mode `0600` limits operating-system access; it is not encryption. Disk snapshots and backups can copy the mnemonic, so encrypt and restrict those backups. Export is available only through the explicit authenticated admin reveal action.
 
 The repository exposes one CLI route: `bun run bv`. The implementation and every cryptographic source remain inside this directory; do not add root-level wrapper files.

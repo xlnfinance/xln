@@ -36,7 +36,7 @@ test.describe('BrainVault default flow', () => {
     await page.getByRole('button', { name: /Security work factor/i }).click();
     await page.getByRole('button', { name: /^1\s+Test$/ }).click();
 
-    const deriveButton = page.getByRole('button', { name: /^Derive wallet$/i });
+    const deriveButton = page.getByRole('button', { name: 'Derive in browser', exact: true });
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 
@@ -58,7 +58,7 @@ test.describe('BrainVault default flow', () => {
     await page.getByRole('button', { name: /Security work factor/i }).click();
     await page.getByRole('button', { name: /^2\s+Basic$/ }).click();
 
-    const deriveButton = page.getByRole('button', { name: /^Derive wallet$/i });
+    const deriveButton = page.getByRole('button', { name: 'Derive in browser', exact: true });
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 
