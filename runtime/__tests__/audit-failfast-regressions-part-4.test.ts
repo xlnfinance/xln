@@ -1507,7 +1507,10 @@ describe('audit fail-fast regressions', () => {
     if (!corruptFrameBinding.pendingAccountInput || corruptFrameBinding.pendingAccountInput.kind !== 'frame') {
       throw new Error('TEST_PENDING_ACCOUNT_INPUT_REQUIRED');
     }
-    corruptFrameBinding.pendingAccountInput.proposal.frame.stateHash = `0x${'ff'.repeat(32)}`;
+    corruptFrameBinding.pendingAccountInput.proposal.frame.timestamp += 1;
+    corruptFrameBinding.pendingAccountInput.proposal.frame.stateHash = await createFrameHash(
+      corruptFrameBinding.pendingAccountInput.proposal.frame,
+    );
     expect(() => decodeValidatedBuffer(encodeBuffer(corruptFrameBinding), validateStorageAccountDocValue)).toThrow(
       'pendingAccountInput proposal must exactly match pendingFrame',
     );

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createFrameHash } from '../account/consensus/frame';
+import { applyAccountDisputeStarted } from '../account/j-finality';
 import { computeAccountStateRoot } from '../account/state-root';
 import { clearFinalizedSettlementWorkspace } from '../account/tx/handlers/settle-transition';
 import {
@@ -12,7 +13,7 @@ import {
   validateStorageAccountDocValue,
   validateStorageDiffRecordValue,
 } from '../storage/authoritative-schema';
-import { hydrateAccountDocFromStorage } from '../storage/projections';
+import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
 import { safeStringify } from '../protocol/serialization';
 import type { StorageAccountDoc } from '../storage/types';
 import { computeStorageAccountFrameHash } from '../storage/account-doc-validation-primitives';
@@ -47,12 +48,17 @@ const installPendingProposal = async (value: ValidationContext): Promise<void> =
   };
 };
 
-const installCrossJurisdictionOffer = (value: ValidationContext): Record<string, unknown> => {
+const installCrossJurisdictionOffer = (
+  value: ValidationContext,
+  options: { makerIsLeft?: boolean; sourceEntity?: string; sourceCounterparty?: string } = {},
+): Record<string, unknown> => {
   const source = makeJurisdiction('storage-source', 1, '31', '32');
   const target = makeJurisdiction('storage-target', 8_453, '41', '42');
+  const sourceEntity = options.sourceEntity ?? value.owner;
+  const sourceCounterparty = options.sourceCounterparty ?? value.counterparty;
   const prepared = buildPreparedCrossJurisdictionRoute({
-    orderId: 'storage-cross-j', makerEntityId: value.owner, hubEntityId: value.counterparty,
-    source: { jurisdiction: jref(source), entityId: value.owner, counterpartyEntityId: value.counterparty, tokenId: 1, amount: 4n },
+    orderId: 'storage-cross-j', makerEntityId: sourceEntity, hubEntityId: sourceCounterparty,
+    source: { jurisdiction: jref(source), entityId: sourceEntity, counterpartyEntityId: sourceCounterparty, tokenId: 1, amount: 4n },
     target: { jurisdiction: jref(target), entityId: digest('33'), counterpartyEntityId: digest('44'), tokenId: 2, amount: 3n },
     priceTicks: 2n, status: 'intent', createdAt: 1_000, updatedAt: 1_000, expiresAt: 61_000,
   }, { runtimeSeed: 'storage-cross-j-fixture', sourceDisputeDelayMs: 10_000, now: 1_000 });
@@ -66,7 +72,7 @@ const installCrossJurisdictionOffer = (value: ValidationContext): Record<string,
   }]]);
   value.doc.state.swapOffers.set(route.orderId, {
     offerId: route.orderId, giveTokenId: 1, giveAmount: 4n, wantTokenId: 2,
-    wantAmount: 3n, makerIsLeft: true, createdHeight: 1, priceTicks: 2n,
+    wantAmount: 3n, makerIsLeft: options.makerIsLeft ?? true, createdHeight: 1, priceTicks: 2n,
     quantizedGive: 4n, quantizedWant: 3n, crossJurisdiction: route,
   });
   return object(route);
@@ -132,6 +138,18 @@ const mutations: Mutation[] = [
     const pull = value.doc.state.pulls!.get(String(object(route['sourcePull'])['pullId']))!;
     object(pull.crossJurisdiction)['ghost'] = true;
   }],
+  ['cross-j maker side inversion', value => {
+    const route = installCrossJurisdictionOffer(value);
+    value.doc.state.swapOffers.get(String(route['orderId']))!.makerIsLeft = false;
+  }],
+  ['cross-j alien source account', value => {
+    installCrossJurisdictionOffer(value, {
+      sourceEntity: digest('55'), sourceCounterparty: digest('66'), makerIsLeft: true,
+    });
+  }],
+  ['cross-j target pull token mismatch', value => {
+    object(installCrossJurisdictionOffer(value)['targetPull'])['tokenId'] = 3;
+  }],
   ['cross-j route hash mismatch', value => { installCrossJurisdictionOffer(value)['routeHash'] = digest('ff'); }],
 ];
 
@@ -150,15 +168,20 @@ describe('persisted AccountReplica semantic boundary', () => {
 
   test('accepts exact forward, dispute, pending-input, and cross-j persisted shapes', async () => {
     const forward = await makeStorageAccountFixture();
-    forward.doc.pendingForwards = [{ tokenId: 1, amount: 1n, route: [forward.owner, digest('33')] }];
-    expect(validate(forward)).toBe(forward.doc);
+    const repeatedRoute = [forward.owner, digest('33'), forward.owner, digest('44')];
+    forward.doc.pendingForwards = [{ tokenId: 1, amount: 1n, route: repeatedRoute }];
+    expect(hydrateAccountDocFromStorage(validate(forward)).pendingForwards?.[0]?.route)
+      .toEqual(repeatedRoute);
 
     const dispute = await makeStorageAccountFixture();
-    dispute.doc.status = 'disputed'; dispute.doc.activeDispute = {
-      startedByLeft: true, initialProofbodyHash: digest('a1'), initialNonce: 1,
-      disputeTimeout: 0, jNonce: 0, starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x', observedOnChain: false, finalizeQueued: false,
-    };
+    const disputedAccount = hydrateAccountDocFromStorage(validate(dispute));
+    applyAccountDisputeStarted(disputedAccount, {
+      kind: 'dispute_started', starterEntityId: dispute.owner,
+      initialProofbodyHash: digest('a1'), initialNonce: 7, disputeTimeout: 120,
+      jNonce: 9, starterInitialArguments: '0x1234', starterIncrementedArguments: '0x5678',
+      observedBlockNumber: 100, batchNonce: 3,
+    });
+    dispute.doc = projectAccountDoc(disputedAccount);
     expect(validate(dispute)).toBe(dispute.doc);
 
     const pending = await makeStorageAccountFixture();
@@ -168,6 +191,14 @@ describe('persisted AccountReplica semantic boundary', () => {
     const crossJurisdiction = await makeStorageAccountFixture();
     installCrossJurisdictionOffer(crossJurisdiction);
     expect(validate(crossJurisdiction)).toBe(crossJurisdiction.doc);
+
+    const rightMaker = await makeStorageAccountFixture();
+    installCrossJurisdictionOffer(rightMaker, {
+      sourceEntity: rightMaker.counterparty,
+      sourceCounterparty: rightMaker.owner,
+      makerIsLeft: false,
+    });
+    expect(validate(rightMaker)).toBe(rightMaker.doc);
   });
 
   for (const [name, mutate] of mutations) {

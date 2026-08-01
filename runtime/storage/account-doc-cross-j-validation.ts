@@ -200,12 +200,18 @@ export const assertStoredCrossJurisdictionOfferBinding = (
   route: CrossJurisdictionSwapRoute,
   offer: Record<string, unknown>,
   pulls: Map<unknown, unknown>,
+  leftEntity: string,
+  rightEntity: string,
   code: string,
 ): void => {
   const sourcePull = route.sourcePull; const targetPull = route.targetPull;
   if (!sourcePull || !targetPull) throw new Error(`${code}_PULLS_MISSING`);
   if (route.orderId !== offer['offerId'] || route.source.tokenId !== offer['giveTokenId'] || route.target.tokenId !== offer['wantTokenId']) throw new Error(`${code}_OFFER_TERMS`);
+  const maker = offer['makerIsLeft'] === true ? leftEntity : rightEntity;
+  const sourceParties = new Set([route.source.entityId, route.source.counterpartyEntityId]);
+  if (route.makerEntityId !== maker || sourceParties.size !== 2 || !sourceParties.has(leftEntity) || !sourceParties.has(rightEntity)) throw new Error(`${code}_ACCOUNT_BINDING`);
   if (sourcePull.pullId !== deriveCrossJurisdictionPullId(route, 'source') || targetPull.pullId !== deriveCrossJurisdictionPullId(route, 'target')) throw new Error(`${code}_PULL_IDS`);
+  if (sourcePull.tokenId !== route.source.tokenId || targetPull.tokenId !== route.target.tokenId) throw new Error(`${code}_PULL_TOKENS`);
   if (sourcePull.amount !== route.source.amount || targetPull.amount !== route.target.amount) throw new Error(`${code}_PULL_AMOUNTS`);
   if (sourcePull.signedAmount !== signedCrossJurisdictionAmountForBeneficiary(route.source.counterpartyEntityId, route.source.entityId, route.source.amount) || targetPull.signedAmount !== signedCrossJurisdictionAmountForBeneficiary(route.target.counterpartyEntityId, route.target.entityId, route.target.amount)) throw new Error(`${code}_SIGNED_AMOUNTS`);
   if (sourcePull.fullHash !== targetPull.fullHash || sourcePull.partialRoot !== targetPull.partialRoot || sourcePull.revealedUntilTimestamp !== route.expiresAt || targetPull.revealedUntilTimestamp <= sourcePull.revealedUntilTimestamp) throw new Error(`${code}_PULL_PROOF`);

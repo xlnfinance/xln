@@ -130,7 +130,10 @@ const validateStateMaps = (state: Record<string, unknown>, code: string): void =
     if (offer['quantizedWant'] !== undefined && integer(offer['quantizedWant'], 1n, FINANCIAL.MAX_PAYMENT_AMOUNT, `${code}_QUANT_WANT`) !== offer['wantAmount']) throw new Error(`${code}_QUANT_WANT_MISMATCH`);
     if (offer['crossJurisdiction'] !== undefined) {
       const route = validateStoredCrossJurisdictionRoute(offer['crossJurisdiction'], `${code}_OFFER_CROSS_J`);
-      assertStoredCrossJurisdictionOfferBinding(route, offer, pulls, `${code}_OFFER_CROSS_J`);
+      assertStoredCrossJurisdictionOfferBinding(
+        route, offer, pulls, String(state['leftEntity']), String(state['rightEntity']),
+        `${code}_OFFER_CROSS_J`,
+      );
     }
   }
   const deltaCount = (state['deltas'] as Map<unknown, unknown>).size;

@@ -37,7 +37,6 @@ export const validateStoredPendingForwards = (
     const route = boundedArray(forward['route'], FINANCIAL.MAX_ROUTE_HOPS, `${itemCode}_ROUTE`)
       .map((entityId, routeIndex) => bytes(entityId, 32, `${itemCode}_ROUTE_${routeIndex}`));
     if (route.length < 2 || route[0] !== fromEntity || route[1] === toEntity) throw new Error(`${itemCode}_ROUTE_CONTINUATION`);
-    if (new Set(route).size !== route.length) throw new Error(`${itemCode}_ROUTE_LOOP`);
     if (forward['description'] !== undefined) text(forward['description'], `${itemCode}_DESCRIPTION`);
     if (forward['deliveryMode'] !== undefined && forward['deliveryMode'] !== 'trusted') throw new Error(`${itemCode}_DELIVERY_MODE`);
     const gateway = forward['trustedGatewayEntityId'];
@@ -58,11 +57,10 @@ export const validateStoredActiveDispute = (
   ], ['observedOnChain', 'observedBlockNumber', 'batchNonce', 'finalizeQueued'], code);
   flag(dispute['startedByLeft'], `${code}_STARTER`);
   bytes(dispute['initialProofbodyHash'], 32, `${code}_PROOF_HASH`);
-  const initialNonce = uint(dispute['initialNonce'], `${code}_INITIAL_NONCE`);
+  uint(dispute['initialNonce'], `${code}_INITIAL_NONCE`);
   const timeout = uint(dispute['disputeTimeout'], `${code}_TIMEOUT`);
   const jNonce = uint(dispute['jNonce'], `${code}_J_NONCE`);
   if (jNonce > stateJNonce) throw new Error(`${code}_J_NONCE_FUTURE`);
-  if (initialNonce <= jNonce) throw new Error(`${code}_NONCE_ORDER`);
   exactHex(dispute['starterInitialArguments'], `${code}_INITIAL_ARGS`);
   exactHex(dispute['starterIncrementedArguments'], `${code}_INCREMENTED_ARGS`);
   if (dispute['observedOnChain'] !== undefined) flag(dispute['observedOnChain'], `${code}_OBSERVED`);
