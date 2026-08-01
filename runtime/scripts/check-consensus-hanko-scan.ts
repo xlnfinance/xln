@@ -1,11 +1,38 @@
 #!/usr/bin/env bun
 
 import { readFileSync } from 'node:fs';
+import * as ts from 'typescript';
 
 const readText = (path: string): string => readFileSync(path, 'utf8');
 
 const assertIncludes = (text: string, needle: string, path: string): void => {
   if (!text.includes(needle)) throw new Error(`${path} is missing required text: ${needle}`);
+};
+
+/**
+ * Require an exact TypeScript initializer while ignoring harmless formatting.
+ * This is used for consensus fallbacks whose operator and state ownership are
+ * protocol invariants; raw substring checks made the release gate go stale
+ * when AccountReplica fields moved under its committed `state` envelope.
+ */
+const assertInitializer = (path: string, name: string, expected: string): void => {
+  const text = readText(path);
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const canonical = (value: string): string => value.replace(/\s+/g, '');
+  let matched = false;
+  const visit = (node: ts.Node): void => {
+    const variableInitializer =
+      ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name
+        ? node.initializer
+        : undefined;
+    const propertyInitializer =
+      ts.isPropertyAssignment(node) && node.name.getText(source) === name ? node.initializer : undefined;
+    const initializer = variableInitializer ?? propertyInitializer;
+    if (initializer && canonical(initializer.getText(source)) === canonical(expected)) matched = true;
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  if (!matched) throw new Error(`${path} is missing ${name} initializer: ${expected}`);
 };
 
 const assertNotMatches = (text: string, pattern: RegExp, path: string, label: string): void => {
@@ -40,6 +67,7 @@ const accountProposePaths = [
 const accountProposePath = accountProposePaths.join(', ');
 const accountFramePath = 'runtime/account/consensus/frame.ts';
 const entityConsensusPaths = [
+  'runtime/entity/consensus/replica-validation.ts',
   'runtime/entity/consensus/leader-certificates.ts',
   'runtime/entity/consensus/j-prefix-round.ts',
   'runtime/entity/consensus/input-ingress.ts',
@@ -93,16 +121,20 @@ const auditDoc = readText(auditDocPath);
 
 assertNotMatches(accountConsensus, /\bjHeight\s*\|\|/g, accountConsensusPath, 'jHeight || fallback');
 assertNotMatches(accountPropose, /\bjHeight\s*\|\||entityJHeight\s*\|\|/g, accountProposePath, 'jHeight/entityJHeight || fallback');
-assertIncludes(
-  accountPropose,
-  'frameJHeight: entityJHeight ?? account.lastFinalizedJHeight ?? 0,',
-  accountProposePath,
+assertInitializer(
+  'runtime/account/consensus/proposal-admission.ts',
+  'frameJHeight',
+  'entityJHeight ?? account.state.lastFinalizedJHeight ?? 0',
 );
-assertIncludes(accountConsensus, 'const jHeight = pendingFrame.jHeight ?? account.lastFinalizedJHeight ?? 0;', accountConsensusPath);
-assertIncludes(
-  accountConsensus,
-  'frameJHeight: receivedFrame.jHeight ?? account.lastFinalizedJHeight ?? 0,',
-  accountConsensusPath,
+assertInitializer(
+  'runtime/account/consensus/ack-commit.ts',
+  'jHeight',
+  'pendingFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0',
+);
+assertInitializer(
+  'runtime/account/consensus/incoming-preflight.ts',
+  'frameJHeight',
+  'receivedFrame.jHeight ?? account.state.lastFinalizedJHeight ?? 0',
 );
 assertIncludes(accountFrame, 'if (!Number.isSafeInteger(frame.jHeight) || frame.jHeight < 0)', accountFramePath);
 assertIncludes(accountFrame, 'jHeight: frame.jHeight,', accountFramePath);
@@ -112,10 +144,10 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'const clonedMachine = cloneAccountReplica(account);',
   'const replayResult = await replayIncomingFrameOnClone(',
   'const frameHashMismatch = await verifySenderFrameHash',
-  'const localAccountStateRoot = computeAccountStateRoot(clonedMachine);',
+  'const localAccountStateRoot = computeAccountStateRoot(clonedMachine.state);',
   'localAccountStateRoot !== receivedFrame.accountStateRoot',
   '!accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)',
-  'const proofResult = buildAccountProofBodyFromJurisdictions(env, clonedMachine);',
+  'const proofResult = buildAccountProofBodyFromJurisdictions(context, clonedMachine);',
   'const localProofBodyHash = proofResult.proofBodyHash;',
   'const frameSealError = getDisputeSealRequirementError(',
 ]);
@@ -131,7 +163,7 @@ assertOrder(accountConsensus, accountConsensusPath, [
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function commitIncomingFrameOnRealState',
   'await reexecuteIncomingFrame(',
-  'forkAccountCommitmentCache(validation.clonedMachine, account);',
+  'forkAccountCommitmentCache(validation.clonedMachine.state, account.state);',
   'assertLiveCommitMatchesFrame(',
   'account.currentFrame = structuredClone(receivedFrame);',
   'const committedFrame = cloneAccountFrame(receivedFrame);',
