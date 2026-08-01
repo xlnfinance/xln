@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../.."
+  },
+  "include": [
+    "../audit.ts",
+    "./**/*.ts",
+    "../../tests/release-integrity/audit-registry.test.ts"
+  ],
+  "exclude": []
+}

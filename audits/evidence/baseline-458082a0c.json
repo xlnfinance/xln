@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+  "createdAt": "2026-08-01T00:30:00Z",
+  "evidence": [
+    {
+      "id": "api-secret.code-trace.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "agent-run wallet-hardening-xhigh-20260801",
+      "state": "PASS",
+      "summary": "Traced BrainVault input, remote adapter, node-owner persistence, reveal, WAL, log, cancellation, and restart boundaries."
+    },
+    {
+      "id": "api-secret.l1.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "bun run check:brainvault",
+      "state": "PASS",
+      "summary": "26 tests passed with 100128 assertions, including custody durability, startup gate, and reconnect authority."
+    },
+    {
+      "id": "api-secret.l2.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
+      "state": "PASS",
+      "summary": "Packed native derive stayed public-only, reveal was separate, admin write persisted, and owner restored after restart."
+    },
+    {
+      "id": "api-secret.failure.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "state": "PASS",
+      "summary": "Injected file/directory fsync failure, unsupported durability, restore/derive race, stale sockets, malformed protocol, and superseded connect."
+    },
+    {
+      "id": "api-secret.l3.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "bun run check",
+      "state": "PASS",
+      "summary": "Repository check exited 0, frozen core unchanged, and frontend reported zero errors and warnings."
+    },
+    {
+      "id": "api-secret.independent.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "agent-run wallet-hardening-xhigh-20260801",
+      "state": "PASS",
+      "summary": "Independent xhigh re-audit reported no actionable findings at 97% confidence."
+    },
+    {
+      "id": "wallet-secret.code-trace.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "agent-run wallet-hardening-xhigh-20260801",
+      "state": "PASS",
+      "summary": "Traced cancel, back, mode switch, destroy, reveal, and stale async derivation ownership."
+    },
+    {
+      "id": "wallet-secret.l1.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts --grep 'wallet mode navigation drops secret inputs'",
+      "state": "PASS",
+      "summary": "The narrow wallet navigation secret-drop regression passed."
+    },
+    {
+      "id": "wallet-secret.l2.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts",
+      "state": "PASS",
+      "summary": "Nine responsive wallet recovery, rehearsal, keyboard, stale-worker, and persistence scenarios passed."
+    },
+    {
+      "id": "wallet-secret.l3.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "bun run check",
+      "state": "PASS",
+      "summary": "Full frontend diagnostics and production build passed with zero errors and warnings."
+    },
+    {
+      "id": "wallet-secret.independent.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "agent-run wallet-hardening-xhigh-20260801",
+      "state": "PASS",
+      "summary": "Independent re-audit confirmed the secret-clear and stale-run guards; exact finalize interruption remains the missing failure evidence."
+    },
+    {
+      "id": "contract-domain.code-trace.458082a0c",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "command": "agent-run solidity-deployment-primary-20260801",
+      "state": "FAIL",
+      "summary": "Trace disproved the invariant: active Sepolia uses V3 while current source and signer use V1."
+    },
+    {
+      "id": "contract-domain.independent.458082a0c",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "command": "agent-run sepolia-domain-second-20260801",
+      "state": "FAIL",
+      "summary": "Second reviewer reproduced on-chain getters, digest mismatch, bytecode mismatch, and stale verifier acceptance."
+    },
+    {
+      "id": "transport-send.code-trace.458082a0c",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "command": "agent-run transport-topology-primary-20260801",
+      "state": "FAIL",
+      "summary": "Trace found -1 queued and 0 dropped interpreted in reverse across direct and relay paths."
+    },
+    {
+      "id": "transport-send.l1.458082a0c",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "command": "bun test runtime/__tests__/relay-store.test.ts",
+      "state": "FAIL",
+      "summary": "Existing regression encoded the inverted -1 failure and 0 success contract."
+    },
+    {
+      "id": "transport-send.independent.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "agent-run transport-send-second-20260801",
+      "state": "FAIL",
+      "summary": "Independent live Bun socket reproducer proved -1 delivery, 0 drop, duplicate fallback, and pending loss."
+    },
+    {
+      "id": "runtime-rejection.code-trace.458082a0c",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "command": "agent-run runtime-payment-primary-20260801",
+      "state": "FAIL",
+      "summary": "Trace showed mutation is marked started before business rejection and any exception then sticky-halts Runtime."
+    },
+    {
+      "id": "runtime-rejection.l2.458082a0c",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "command": "agent-run runtime-payment-primary-20260801 real-processRuntime reproducer",
+      "state": "FAIL",
+      "summary": "Duplicate open and missing next-hop payment both set halted=true and reject all later work."
+    },
+    {
+      "id": "runtime-rejection.independent.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "agent-run runtime-payment-second-20260801",
+      "state": "FAIL",
+      "summary": "Independent xhigh confirmed the P1 availability failure at 100% confidence."
+    },
+    {
+      "id": "payment-terminal.code-trace.458082a0c",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "command": "agent-run runtime-payment-primary-20260801",
+      "state": "FAIL",
+      "summary": "Activity derives Payment started from raw committed input even when no HTLC transaction or effect exists."
+    },
+    {
+      "id": "payment-terminal.l2.458082a0c",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "command": "agent-run runtime-payment-primary-20260801 insufficient-capacity reproducer",
+      "state": "FAIL",
+      "summary": "Real prepared payment produced no account transaction/effect but projected durable Payment started."
+    },
+    {
+      "id": "payment-terminal.independent.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "agent-run runtime-payment-second-20260801",
+      "state": "FAIL",
+      "summary": "Independent xhigh confirmed the P1 semantic-status failure at 99% confidence."
+    },
+    {
+      "id": "wallet-payment-status.code-trace.458082a0c",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "command": "agent-run runtime-payment-primary-20260801",
+      "state": "FAIL",
+      "summary": "UI treats transport-observed/committed as successful progress without a semantic payment outcome."
+    },
+    {
+      "id": "wallet-payment-status.independent.458082a0c",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "command": "agent-run runtime-payment-second-20260801",
+      "state": "FAIL",
+      "summary": "Independent trace tied the false durable activity to PaymentPanel and xlnStore success behavior."
+    }
+  ]
+}

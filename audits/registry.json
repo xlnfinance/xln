@@ -1,0 +1,1514 @@
+{
+  "schemaVersion": 1,
+  "protocol": "docs/audit-protocol.md",
+  "scope": {
+    "sourceGlobs": [
+      "runtime/**/*.ts",
+      "jurisdictions/contracts/**/*.sol",
+      "brainvault/**/*.ts",
+      "custody/**/*.ts",
+      "frontend/src/lib/components/Entity/**/*",
+      "frontend/src/lib/components/Views/RuntimeCreation.svelte",
+      "frontend/src/lib/stores/xlnStore.ts"
+    ],
+    "testGlobs": [
+      "runtime/__tests__/**/*.ts",
+      "runtime/scenarios/**/*.ts",
+      "jurisdictions/test/**/*",
+      "tests/**/*.ts",
+      "brainvault/**/*.test.ts",
+      "frontend/tests/**/*.ts"
+    ],
+    "exclusions": [
+      {
+        "glob": "runtime/jurisdiction/adapter/browservm-*.ts",
+        "reason": "BrowserVM is peripheral to the production remote-jurisdiction release path."
+      },
+      {
+        "glob": "frontend/src/lib/components/Graph3D/**/*",
+        "reason": "Graph3D is a peripheral visualization outside the wallet release face."
+      },
+      {
+        "glob": "frontend/src/lib/components/Dock/**/*",
+        "reason": "Dock and debug panels are outside the user-wallet acceptance path."
+      }
+    ]
+  },
+  "policy": {
+    "evidenceWeights": {
+      "codeTrace": 15,
+      "l1Regression": 20,
+      "l2TargetedFlow": 25,
+      "failureInjection": 25,
+      "l3BroadGate": 10,
+      "independentVerification": 5
+    },
+    "releaseCoverageMinimum": 90,
+    "independentConfidenceThreshold": 95
+  },
+  "modules": [
+    {
+      "id": "contracts-governance",
+      "title": "Contracts and governance",
+      "purpose": "Entity identity, Hanko authorization, boards, thresholds, governance nonces, and recovery authority.",
+      "criticality": "critical",
+      "structuralDebt": 0,
+      "sourceGlobs": [
+        "jurisdictions/contracts/**/*.sol",
+        "runtime/hanko/**/*.ts"
+      ],
+      "testGlobs": [
+        "jurisdictions/test/**/*EntityProvider*",
+        "runtime/__tests__/**/*hanko*"
+      ],
+      "dependencies": [],
+      "exclusions": []
+    },
+    {
+      "id": "contracts-money-court",
+      "title": "Contracts money court",
+      "purpose": "Deposits, reserves, settlement, disputes, debt, withdrawals, and enforceable account state.",
+      "criticality": "critical",
+      "structuralDebt": 0,
+      "sourceGlobs": [
+        "jurisdictions/contracts/Depository.sol",
+        "jurisdictions/contracts/Account.sol",
+        "jurisdictions/contracts/DeltaTransformer.sol"
+      ],
+      "testGlobs": [
+        "jurisdictions/test/**/*Depository*",
+        "jurisdictions/test/foundry/**/*.sol"
+      ],
+      "dependencies": [
+        "contracts-governance"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "protocol-primitives",
+      "title": "Protocol primitives",
+      "purpose": "Canonical codecs, cryptography, identities, proofs, shared financial types, and deterministic routing math.",
+      "criticality": "critical",
+      "structuralDebt": 0,
+      "sourceGlobs": [
+        "runtime/protocol/**/*.ts",
+        "runtime/types/**/*.ts",
+        "runtime/routing/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*crypto*",
+        "runtime/__tests__/**/*protocol*",
+        "runtime/__tests__/**/*routing*",
+        "runtime/__tests__/**/*serialization*"
+      ],
+      "dependencies": [],
+      "exclusions": []
+    },
+    {
+      "id": "runtime-platform",
+      "title": "Runtime platform",
+      "purpose": "Configuration, deterministic time boundaries, process lifecycle, diagnostics, redaction, and platform services.",
+      "criticality": "critical",
+      "structuralDebt": 2,
+      "sourceGlobs": [
+        "runtime/config/**/*.ts",
+        "runtime/infra/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*environment*",
+        "runtime/__tests__/**/*infra*",
+        "runtime/__tests__/**/*process*"
+      ],
+      "dependencies": [
+        "protocol-primitives"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "account-consensus",
+      "title": "Account consensus",
+      "purpose": "Bilateral Account state, frames, proofs, ACK/resend, collisions, and deterministic transaction application.",
+      "criticality": "critical",
+      "structuralDebt": 0,
+      "sourceGlobs": [
+        "runtime/account/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*account*"
+      ],
+      "dependencies": [
+        "protocol-primitives"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "entity-consensus",
+      "title": "Entity consensus",
+      "purpose": "Entity proposals, validator certification, local Account inputs, and committed Entity frames.",
+      "criticality": "critical",
+      "structuralDebt": 0,
+      "sourceGlobs": [
+        "runtime/entity/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*entity*"
+      ],
+      "dependencies": [
+        "account-consensus",
+        "protocol-primitives"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "storage-recovery",
+      "title": "Storage and recovery",
+      "purpose": "WAL, snapshots, Merkle integrity, history, restart recovery, and watchtower-owned recovery material.",
+      "criticality": "critical",
+      "structuralDebt": 0,
+      "sourceGlobs": [
+        "runtime/storage/**/*.ts",
+        "runtime/watchtower/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*storage*",
+        "runtime/__tests__/**/*recovery*",
+        "runtime/__tests__/**/*watchtower*"
+      ],
+      "dependencies": [
+        "protocol-primitives",
+        "runtime-platform"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "transport-topology",
+      "title": "Transport topology",
+      "purpose": "Authenticated sockets, exact direct/relay hop policy, reconnect, backpressure, and bounded connection ownership.",
+      "criticality": "critical",
+      "structuralDebt": 8,
+      "sourceGlobs": [
+        "runtime/network/**/*.ts",
+        "runtime/api/server/relay-direct.ts",
+        "runtime/scripts/check-delivery-boundary-scan.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*p2p*",
+        "runtime/__tests__/**/*relay*",
+        "runtime/__tests__/direct-runtime-bun.test.ts",
+        "runtime/scenarios/p2p-*.ts"
+      ],
+      "dependencies": [
+        "protocol-primitives",
+        "runtime-platform"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "api-auth-custody",
+      "title": "API authentication and custody",
+      "purpose": "Runtime adapter authority, RPC confidentiality, node-owned signers, BrainVault, and secret lifecycle.",
+      "criticality": "critical",
+      "structuralDebt": 0,
+      "sourceGlobs": [
+        "runtime/api/runtime-adapter/**/*.ts",
+        "runtime/api/server/**/*.ts",
+        "brainvault/**/*.ts",
+        "custody/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*radapter*",
+        "runtime/__tests__/**/*rpc*",
+        "tests/unit/brainvault-*.test.ts",
+        "brainvault/*.test.ts"
+      ],
+      "dependencies": [
+        "storage-recovery",
+        "protocol-primitives",
+        "runtime-platform"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "public-wallet-api",
+      "title": "Public wallet API",
+      "purpose": "Read models, activity history, faucet boundaries, external-wallet endpoints, and public state exposed to wallet users.",
+      "criticality": "critical",
+      "structuralDebt": 4,
+      "sourceGlobs": [
+        "runtime/api/public/**/*.ts",
+        "runtime/presentation/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*activity-history*",
+        "runtime/__tests__/**/*external-wallet*",
+        "runtime/__tests__/public-*.test.ts"
+      ],
+      "dependencies": [
+        "api-auth-custody",
+        "registration-payment",
+        "markets"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "jurisdiction-ingress",
+      "title": "Jurisdiction ingress",
+      "purpose": "Chain events, finality, normalization, contract-stack binding, write sequencing, and cross-jurisdiction ingress.",
+      "criticality": "critical",
+      "structuralDebt": 3,
+      "sourceGlobs": [
+        "runtime/jurisdiction/**/*.ts",
+        "jurisdictions/scripts/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*jurisdiction*",
+        "runtime/__tests__/**/*jadapter*",
+        "jurisdictions/test/**/*"
+      ],
+      "dependencies": [
+        "contracts-governance",
+        "contracts-money-court",
+        "storage-recovery"
+      ],
+      "exclusions": [
+        {
+          "glob": "runtime/jurisdiction/adapter/browservm-*.ts",
+          "reason": "BrowserVM is peripheral to the production remote-jurisdiction release path and receives a lower evidence profile."
+        }
+      ]
+    },
+    {
+      "id": "runtime-pipeline",
+      "title": "Runtime pipeline",
+      "purpose": "Ingress, deterministic planning, mutation, WAL commit, outbox publication, and external-effect dispatch.",
+      "criticality": "critical",
+      "structuralDebt": 2,
+      "sourceGlobs": [
+        "runtime/runtime.ts",
+        "runtime/runtime/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*runtime*",
+        "runtime/scenarios/**/*.ts"
+      ],
+      "dependencies": [
+        "entity-consensus",
+        "storage-recovery",
+        "transport-topology",
+        "jurisdiction-ingress"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "registration-payment",
+      "title": "Registration to payment",
+      "purpose": "User registration, Entity and Account establishment, payment/HTLC delivery, and durable terminal receipts.",
+      "criticality": "critical",
+      "structuralDebt": 4,
+      "sourceGlobs": [
+        "runtime/runtime/registration/**/*.ts",
+        "runtime/protocol/payments/**/*.ts",
+        "runtime/protocol/htlc/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*payment*",
+        "runtime/__tests__/**/*htlc*",
+        "runtime/scenarios/htlc-*.ts"
+      ],
+      "dependencies": [
+        "runtime-pipeline",
+        "account-consensus",
+        "transport-topology"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "markets",
+      "title": "Markets",
+      "purpose": "Orderbooks, swaps, fills, cancellation, market making, lending, and rebalance accounting.",
+      "criticality": "high",
+      "structuralDebt": 5,
+      "sourceGlobs": [
+        "runtime/orderbook/**/*.ts",
+        "runtime/extensions/**/*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*orderbook*",
+        "runtime/__tests__/**/*swap*",
+        "runtime/scenarios/swap*.ts"
+      ],
+      "dependencies": [
+        "account-consensus",
+        "protocol-primitives"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "wallet-frontend",
+      "title": "Wallet frontend",
+      "purpose": "User-visible onboarding, recovery, wallet, account, payment, swap, and truthful durable status UX.",
+      "criticality": "high",
+      "structuralDebt": 3,
+      "sourceGlobs": [
+        "frontend/src/lib/components/Views/RuntimeCreation.svelte",
+        "frontend/src/lib/components/Entity/**/*",
+        "frontend/src/lib/stores/xlnStore.ts"
+      ],
+      "testGlobs": [
+        "frontend/tests/brainvault-*.spec.ts"
+      ],
+      "dependencies": [
+        "api-auth-custody",
+        "public-wallet-api",
+        "registration-payment",
+        "markets"
+      ],
+      "exclusions": [
+        {
+          "glob": "frontend/src/lib/components/Graph3D/**/*",
+          "reason": "Graph3D is a peripheral visualization and excluded from the wallet release face."
+        },
+        {
+          "glob": "frontend/src/lib/components/Dock/**/*",
+          "reason": "Dock/debug surfaces are not part of the user wallet acceptance path."
+        }
+      ]
+    },
+    {
+      "id": "ops-observability",
+      "title": "Operations and observability",
+      "purpose": "Deployment, health, structured diagnostics, secret redaction, supervision, rollback, and operator recovery.",
+      "criticality": "high",
+      "structuralDebt": 3,
+      "sourceGlobs": [
+        "runtime/orchestrator/**/*.ts",
+        "scripts/deployment/**/*.sh",
+        "runtime/api/server/health*.ts"
+      ],
+      "testGlobs": [
+        "runtime/__tests__/**/*health*",
+        "runtime/__tests__/**/*prod*"
+      ],
+      "dependencies": [
+        "storage-recovery",
+        "transport-topology",
+        "api-auth-custody"
+      ],
+      "exclusions": []
+    },
+    {
+      "id": "release-supply-chain",
+      "title": "Release and supply chain",
+      "purpose": "Builds, packages, native shells, manifests, frozen core, CI, and exact-source release evidence.",
+      "criticality": "high",
+      "structuralDebt": 2,
+      "sourceGlobs": [
+        "scripts/release/**/*.ts",
+        "runtime/qa/**/*.ts",
+        "runtime/scripts/**/*.ts",
+        "tools/audit.ts",
+        "tools/audit/**/*.ts",
+        "tools/frozen-core.ts",
+        "tools/frozen-core/**/*.ts",
+        "tools/release-snapshot/**/*.ts",
+        "tools/release-snapshot.ts",
+        "docs/audit-protocol.md",
+        "docs/security/frozen-core.md",
+        ".github/workflows/*.yml",
+        "frozen-core.json",
+        "package.json"
+      ],
+      "testGlobs": [
+        "tests/release-integrity/**/*.ts",
+        "runtime/__tests__/**/*.ts",
+        "runtime/scenarios/**/*.ts",
+        "jurisdictions/test/**/*",
+        "tests/**/*.ts",
+        "brainvault/**/*.test.ts",
+        "frontend/tests/**/*.ts"
+      ],
+      "dependencies": [
+        "contracts-governance",
+        "contracts-money-court",
+        "runtime-pipeline",
+        "public-wallet-api",
+        "wallet-frontend",
+        "ops-observability"
+      ],
+      "exclusions": []
+    }
+  ],
+  "invariants": [
+    {
+      "id": "contracts-governance.active-domain-binding",
+      "moduleId": "contracts-governance",
+      "title": "Runtime signing domains and verified bytecode match every active deployment.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "contracts-money-court.enforceable-conservation",
+      "moduleId": "contracts-money-court",
+      "title": "Deposits, disputes, debts, and withdrawals conserve enforceable value under adversarial calls.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "protocol-primitives.canonical-determinism",
+      "moduleId": "protocol-primitives",
+      "title": "Canonical codecs, hashes, proofs, identities, and routing math are deterministic and reject non-canonical inputs.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "runtime-platform.deterministic-boundaries",
+      "moduleId": "runtime-platform",
+      "title": "Platform time, configuration, process, logging, and secret boundaries cannot inject nondeterminism or hide fatal failure.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "account-consensus.bilateral-convergence",
+      "moduleId": "account-consensus",
+      "title": "Both peers deterministically converge under collision, duplicate, resend, and restart.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "entity-consensus.certified-state-only",
+      "moduleId": "entity-consensus",
+      "title": "Only validator-certified Entity state commits and local Account inputs never enter routing.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "storage-recovery.exact-restart",
+      "moduleId": "storage-recovery",
+      "title": "Crash and restart restore the exact durable head without torn authority or replay drift.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "transport-topology.send-result-contract",
+      "moduleId": "transport-topology",
+      "title": "Queued, dropped, and delivered WebSocket sends cannot duplicate or lose a financial envelope.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "transport-topology.exact-hop-matrix",
+      "moduleId": "transport-topology",
+      "title": "User-to-hub and hub-to-hub are one direct hop; only user-to-user may use relay.",
+      "importance": 98,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "api-auth-custody.secret-confinement",
+      "moduleId": "api-auth-custody",
+      "title": "Secrets stay out of RuntimeInput, WAL, logs, ordinary responses, and stale socket generations.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "api-auth-custody.command-authority",
+      "moduleId": "api-auth-custody",
+      "title": "Every read, command, reveal, and signer operation is bound to the current authenticated authority generation.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "public-wallet-api.truthful-authorized-projection",
+      "moduleId": "public-wallet-api",
+      "title": "Every public wallet response is authority-scoped, durable-state-derived, redacted, and semantically truthful.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "jurisdiction-ingress.finalized-canonical-events",
+      "moduleId": "jurisdiction-ingress",
+      "title": "Only canonically normalized and sufficiently finalized chain events become Runtime inputs.",
+      "importance": 98,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "runtime-pipeline.commit-before-effect",
+      "moduleId": "runtime-pipeline",
+      "title": "WAL commit precedes every external effect and failed planning cannot partially mutate live state.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "runtime-pipeline.expected-rejection-isolation",
+      "moduleId": "runtime-pipeline",
+      "title": "Expected local command rejection is durable and visible without halting unrelated Runtime work.",
+      "importance": 96,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "registration-payment.terminal-truth",
+      "moduleId": "registration-payment",
+      "title": "Registration through payment ends in a durable success or explicit terminal failure receipt.",
+      "importance": 100,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "markets.conserved-order-lifecycle",
+      "moduleId": "markets",
+      "title": "Offer, fill, cancellation, resolve, and cross-j settlement conserve quantity and authority.",
+      "importance": 90,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "wallet-frontend.secret-lifecycle",
+      "moduleId": "wallet-frontend",
+      "title": "Cancel, back, mode change, stale async completion, and destroy cannot retain or resurrect wallet secrets.",
+      "importance": 94,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "wallet-frontend.durable-status-truth",
+      "moduleId": "wallet-frontend",
+      "title": "User-visible payment and swap states never claim success or progress beyond durable Runtime evidence.",
+      "importance": 92,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    },
+    {
+      "id": "ops-observability.fail-loud-redacted",
+      "moduleId": "ops-observability",
+      "title": "Production failures are loud and actionable while health, logs, and diagnostics remain secret-free.",
+      "importance": 88,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate"
+      ]
+    },
+    {
+      "id": "release-supply-chain.exact-artifact-binding",
+      "moduleId": "release-supply-chain",
+      "title": "Published artifacts, manifests, deployments, verification records, and frozen core bind to the exact source.",
+      "importance": 98,
+      "requiredEvidence": [
+        "codeTrace",
+        "l1Regression",
+        "l2TargetedFlow",
+        "failureInjection",
+        "l3BroadGate",
+        "independentVerification"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "api-secret.code-trace.458082a0c",
+      "commandFingerprint": "sha256:58ee378a4550a9d515afc07056037775e338d99a96b42b5c84a0e04206a0f7fe",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "codeTrace",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
+      "command": "agent-run wallet-hardening-xhigh-20260801",
+      "summary": "Traced BrainVault input, remote adapter, node-owner persistence, reveal, WAL, log, cancellation, and restart boundaries.",
+      "recordedAt": "2026-08-01T00:10:00Z",
+      "agentRunIds": [
+        "wallet-hardening-xhigh-20260801"
+      ]
+    },
+    {
+      "id": "api-secret.l1.458082a0c",
+      "commandFingerprint": "sha256:88f92c81dbb3e4f30e43ea46c431e9960770b34a419ec68d30b4418026b4f64f",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "l1Regression",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
+      "command": "bun run check:brainvault",
+      "summary": "26 tests passed with 100128 assertions, including custody durability, startup gate, and reconnect authority.",
+      "recordedAt": "2026-08-01T00:11:00Z",
+      "agentRunIds": [
+        "wallet-hardening-xhigh-20260801"
+      ]
+    },
+    {
+      "id": "api-secret.l2.458082a0c",
+      "commandFingerprint": "sha256:4befaefeeb0e0b690979d8b10ab5b64ebe984470df3deda856dfcacc911b0ba2",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "l2TargetedFlow",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
+      "command": "bun scripts/release/build-xlnfinance-package.ts --skip-build --pack --smoke",
+      "summary": "Packed native derive stayed public-only, reveal was separate, admin write persisted, and owner restored after restart.",
+      "recordedAt": "2026-08-01T00:12:00Z",
+      "agentRunIds": [
+        "wallet-hardening-xhigh-20260801"
+      ]
+    },
+    {
+      "id": "api-secret.failure.458082a0c",
+      "commandFingerprint": "sha256:8c51037fb2ea125e408b8fbfb2f8b9d4d11e63523243fd3761de05d57a9494e8",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "failureInjection",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
+      "command": "bun test tests/unit/brainvault-native.test.ts runtime/__tests__/server-rpc-startup-gate.test.ts runtime/__tests__/radapter-remote-reconnect.test.ts",
+      "summary": "Injected file/directory fsync failure, unsupported durability, restore/derive race, stale sockets, malformed protocol, and superseded connect.",
+      "recordedAt": "2026-08-01T00:13:00Z",
+      "agentRunIds": [
+        "wallet-hardening-xhigh-20260801"
+      ]
+    },
+    {
+      "id": "api-secret.l3.458082a0c",
+      "commandFingerprint": "sha256:63dec8353e51c65817391feadd75be2f6aa3ca1aa6819c05e2b738694b704bd4",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "l3BroadGate",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
+      "command": "bun run check",
+      "summary": "Repository check exited 0, frozen core unchanged, and frontend reported zero errors and warnings.",
+      "recordedAt": "2026-08-01T00:14:00Z",
+      "agentRunIds": [
+        "wallet-hardening-xhigh-20260801"
+      ]
+    },
+    {
+      "id": "api-secret.independent.458082a0c",
+      "commandFingerprint": "sha256:58ee378a4550a9d515afc07056037775e338d99a96b42b5c84a0e04206a0f7fe",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "api-auth-custody.secret-confinement",
+      "kind": "independentVerification",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:54474950a5a9d384ef322bd20f45bf1930afc252406d478886fde31639572d4b",
+      "command": "agent-run wallet-hardening-xhigh-20260801",
+      "summary": "Independent xhigh re-audit reported no actionable findings at 97% confidence.",
+      "recordedAt": "2026-08-01T00:15:00Z",
+      "agentRunIds": [
+        "wallet-final-verification-20260801"
+      ]
+    },
+    {
+      "id": "wallet-secret.code-trace.458082a0c",
+      "commandFingerprint": "sha256:58ee378a4550a9d515afc07056037775e338d99a96b42b5c84a0e04206a0f7fe",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "codeTrace",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c",
+      "command": "agent-run wallet-hardening-xhigh-20260801",
+      "summary": "Traced cancel, back, mode switch, destroy, reveal, and stale async derivation ownership.",
+      "recordedAt": "2026-08-01T00:16:00Z",
+      "agentRunIds": [
+        "wallet-hardening-xhigh-20260801"
+      ]
+    },
+    {
+      "id": "wallet-secret.l1.458082a0c",
+      "commandFingerprint": "sha256:f78ef2252b2cb10c9a4c59ef80bcb2c0e6240dc993d322f242ebb03bc7e772d4",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "l1Regression",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c",
+      "command": "XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts --grep 'wallet mode navigation drops secret inputs'",
+      "summary": "The narrow wallet navigation secret-drop regression passed.",
+      "recordedAt": "2026-08-01T00:17:00Z",
+      "agentRunIds": [
+        "wallet-hardening-xhigh-20260801"
+      ]
+    },
+    {
+      "id": "wallet-secret.l2.458082a0c",
+      "commandFingerprint": "sha256:b21be91ff8bf286d2c88de6f23b431c79631f717d883b65e3d182a1a1b941c81",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "l2TargetedFlow",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c",
+      "command": "cd frontend && XLN_VITE_FORCE_HTTP=1 bun run test -- tests/brainvault-recovery-choice.spec.ts",
+      "summary": "Nine responsive wallet recovery, rehearsal, keyboard, stale-worker, and persistence scenarios passed.",
+      "recordedAt": "2026-08-01T00:18:00Z",
+      "agentRunIds": [
+        "wallet-hardening-xhigh-20260801"
+      ]
+    },
+    {
+      "id": "wallet-secret.l3.458082a0c",
+      "commandFingerprint": "sha256:63dec8353e51c65817391feadd75be2f6aa3ca1aa6819c05e2b738694b704bd4",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "l3BroadGate",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c",
+      "command": "bun run check",
+      "summary": "Full frontend diagnostics and production build passed with zero errors and warnings.",
+      "recordedAt": "2026-08-01T00:19:00Z",
+      "agentRunIds": [
+        "wallet-hardening-xhigh-20260801"
+      ]
+    },
+    {
+      "id": "wallet-secret.independent.458082a0c",
+      "commandFingerprint": "sha256:58ee378a4550a9d515afc07056037775e338d99a96b42b5c84a0e04206a0f7fe",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "wallet-frontend.secret-lifecycle",
+      "kind": "independentVerification",
+      "state": "PASS",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c",
+      "command": "agent-run wallet-hardening-xhigh-20260801",
+      "summary": "Independent re-audit confirmed the secret-clear and stale-run guards; exact finalize interruption remains the missing failure evidence.",
+      "recordedAt": "2026-08-01T00:20:00Z",
+      "agentRunIds": [
+        "wallet-final-verification-20260801"
+      ]
+    },
+    {
+      "id": "contract-domain.code-trace.458082a0c",
+      "commandFingerprint": "sha256:f30d1891336b5c3a0c03eb97e505a5f7803e9ef305bb49b3ad63b79de791f9ae",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "contracts-governance.active-domain-binding",
+      "kind": "codeTrace",
+      "state": "FAIL",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleFingerprint": "sha256:4bc3ba4d8cf17fb48a08cbc0ae9bd535bd8d5c2c33e2555e25cd2ed49e664349",
+      "command": "agent-run solidity-deployment-primary-20260801",
+      "summary": "Trace disproved the invariant: active Sepolia uses V3 while current source and signer use V1.",
+      "recordedAt": "2026-08-01T00:21:00Z",
+      "agentRunIds": [
+        "solidity-deployment-primary-20260801"
+      ]
+    },
+    {
+      "id": "contract-domain.independent.458082a0c",
+      "commandFingerprint": "sha256:59240b27512210e151a386b17856010bccf4d1a305959febe781a15abf139922",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "contracts-governance.active-domain-binding",
+      "kind": "independentVerification",
+      "state": "FAIL",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleFingerprint": "sha256:4bc3ba4d8cf17fb48a08cbc0ae9bd535bd8d5c2c33e2555e25cd2ed49e664349",
+      "command": "agent-run sepolia-domain-second-20260801",
+      "summary": "Second reviewer reproduced on-chain getters, digest mismatch, bytecode mismatch, and stale verifier acceptance.",
+      "recordedAt": "2026-08-01T00:22:00Z",
+      "agentRunIds": [
+        "sepolia-domain-second-20260801"
+      ]
+    },
+    {
+      "id": "transport-send.code-trace.458082a0c",
+      "commandFingerprint": "sha256:e6e050c31795f343bbf740ab89853943ff1bbb41035a687f4c99eefd35c0e0f3",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "transport-topology.send-result-contract",
+      "kind": "codeTrace",
+      "state": "FAIL",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleFingerprint": "sha256:035c73247033ec8fee9f2434f9c214466abd49523cffd7185178740bbea21625",
+      "command": "agent-run transport-topology-primary-20260801",
+      "summary": "Trace found -1 queued and 0 dropped interpreted in reverse across direct and relay paths.",
+      "recordedAt": "2026-08-01T00:23:00Z",
+      "agentRunIds": [
+        "transport-topology-primary-20260801"
+      ]
+    },
+    {
+      "id": "transport-send.l1.458082a0c",
+      "commandFingerprint": "sha256:3cd5328f107cb49f83e14034bb5a3e2fc8c43a92364a740994ab8c9d2db2b26d",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "transport-topology.send-result-contract",
+      "kind": "l1Regression",
+      "state": "FAIL",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleFingerprint": "sha256:035c73247033ec8fee9f2434f9c214466abd49523cffd7185178740bbea21625",
+      "command": "bun test runtime/__tests__/relay-store.test.ts",
+      "summary": "Existing regression encoded the inverted -1 failure and 0 success contract.",
+      "recordedAt": "2026-08-01T00:24:00Z",
+      "agentRunIds": [
+        "transport-topology-primary-20260801"
+      ]
+    },
+    {
+      "id": "transport-send.independent.458082a0c",
+      "commandFingerprint": "sha256:90a4d53c753449bab26fa0bf13d56c48653eef4fdf98796bc79bf650c456154a",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "transport-topology.send-result-contract",
+      "kind": "independentVerification",
+      "state": "FAIL",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:035c73247033ec8fee9f2434f9c214466abd49523cffd7185178740bbea21625",
+      "command": "agent-run transport-send-second-20260801",
+      "summary": "Independent live Bun socket reproducer proved -1 delivery, 0 drop, duplicate fallback, and pending loss.",
+      "recordedAt": "2026-08-01T00:25:00Z",
+      "agentRunIds": [
+        "transport-send-second-20260801"
+      ]
+    },
+    {
+      "id": "runtime-rejection.code-trace.458082a0c",
+      "commandFingerprint": "sha256:20a1c4295e2db5800e8bf13c9c6b0c92f6a439b92cb75d74cac2ab8759802363",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "runtime-pipeline.expected-rejection-isolation",
+      "kind": "codeTrace",
+      "state": "FAIL",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleFingerprint": "sha256:ba8e314b4adc994ce6711a07baf0fff0bf7a73ea56122649d4659844cad265c6",
+      "command": "agent-run runtime-payment-primary-20260801",
+      "summary": "Trace showed mutation is marked started before business rejection and any exception then sticky-halts Runtime.",
+      "recordedAt": "2026-08-01T00:26:00Z",
+      "agentRunIds": [
+        "runtime-payment-primary-20260801"
+      ]
+    },
+    {
+      "id": "runtime-rejection.l2.458082a0c",
+      "commandFingerprint": "sha256:4c3b82487c8bcfe61b3998c01e1a9ff5205a36f356588c2ab6f6e3684046673d",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "runtime-pipeline.expected-rejection-isolation",
+      "kind": "l2TargetedFlow",
+      "state": "FAIL",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleFingerprint": "sha256:ba8e314b4adc994ce6711a07baf0fff0bf7a73ea56122649d4659844cad265c6",
+      "command": "agent-run runtime-payment-primary-20260801 real-processRuntime reproducer",
+      "summary": "Duplicate open and missing next-hop payment both set halted=true and reject all later work.",
+      "recordedAt": "2026-08-01T00:27:00Z",
+      "agentRunIds": [
+        "runtime-payment-primary-20260801"
+      ]
+    },
+    {
+      "id": "runtime-rejection.independent.458082a0c",
+      "commandFingerprint": "sha256:721b058348fcdc57c386efaa67f6d17010267ceddc954632beced27f004bbee2",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "runtime-pipeline.expected-rejection-isolation",
+      "kind": "independentVerification",
+      "state": "FAIL",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:ba8e314b4adc994ce6711a07baf0fff0bf7a73ea56122649d4659844cad265c6",
+      "command": "agent-run runtime-payment-second-20260801",
+      "summary": "Independent xhigh confirmed the P1 availability failure at 100% confidence.",
+      "recordedAt": "2026-08-01T00:28:00Z",
+      "agentRunIds": [
+        "runtime-payment-second-20260801"
+      ]
+    },
+    {
+      "id": "payment-terminal.code-trace.458082a0c",
+      "commandFingerprint": "sha256:20a1c4295e2db5800e8bf13c9c6b0c92f6a439b92cb75d74cac2ab8759802363",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "registration-payment.terminal-truth",
+      "kind": "codeTrace",
+      "state": "FAIL",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleFingerprint": "sha256:b83843cea7500b6d613b5bf3d48ba042e33933c043079a9213da3fd297cb5f3d",
+      "command": "agent-run runtime-payment-primary-20260801",
+      "summary": "Activity derives Payment started from raw committed input even when no HTLC transaction or effect exists.",
+      "recordedAt": "2026-08-01T00:29:00Z",
+      "agentRunIds": [
+        "runtime-payment-primary-20260801"
+      ]
+    },
+    {
+      "id": "payment-terminal.l2.458082a0c",
+      "commandFingerprint": "sha256:9034494756e9a9bf18d8e836a2effbd7f22b1b408cd21db524da20949197c336",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "registration-payment.terminal-truth",
+      "kind": "l2TargetedFlow",
+      "state": "FAIL",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleFingerprint": "sha256:b83843cea7500b6d613b5bf3d48ba042e33933c043079a9213da3fd297cb5f3d",
+      "command": "agent-run runtime-payment-primary-20260801 insufficient-capacity reproducer",
+      "summary": "Real prepared payment produced no account transaction/effect but projected durable Payment started.",
+      "recordedAt": "2026-08-01T00:30:00Z",
+      "agentRunIds": [
+        "runtime-payment-primary-20260801"
+      ]
+    },
+    {
+      "id": "payment-terminal.independent.458082a0c",
+      "commandFingerprint": "sha256:721b058348fcdc57c386efaa67f6d17010267ceddc954632beced27f004bbee2",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "registration-payment.terminal-truth",
+      "kind": "independentVerification",
+      "state": "FAIL",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:b83843cea7500b6d613b5bf3d48ba042e33933c043079a9213da3fd297cb5f3d",
+      "command": "agent-run runtime-payment-second-20260801",
+      "summary": "Independent xhigh confirmed the P1 semantic-status failure at 99% confidence.",
+      "recordedAt": "2026-08-01T00:31:00Z",
+      "agentRunIds": [
+        "runtime-payment-second-20260801"
+      ]
+    },
+    {
+      "id": "wallet-payment-status.code-trace.458082a0c",
+      "commandFingerprint": "sha256:20a1c4295e2db5800e8bf13c9c6b0c92f6a439b92cb75d74cac2ab8759802363",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "wallet-frontend.durable-status-truth",
+      "kind": "codeTrace",
+      "state": "FAIL",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleFingerprint": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c",
+      "command": "agent-run runtime-payment-primary-20260801",
+      "summary": "UI treats transport-observed/committed as successful progress without a semantic payment outcome.",
+      "recordedAt": "2026-08-01T00:32:00Z",
+      "agentRunIds": [
+        "runtime-payment-primary-20260801"
+      ]
+    },
+    {
+      "id": "wallet-payment-status.independent.458082a0c",
+      "commandFingerprint": "sha256:721b058348fcdc57c386efaa67f6d17010267ceddc954632beced27f004bbee2",
+      "environmentFingerprint": "sha256:bc3abb7bfc99a7caba2c1da5b8e8ce8cab69d2b7076b5fb9801b3487fbb04478",
+      "artifactPath": "audits/evidence/baseline-458082a0c.json",
+      "artifactFingerprint": "sha256:0a4700da7f7dede4db888faf600880a93f81d85ad8918462015d2b169c0488cf",
+      "invariantId": "wallet-frontend.durable-status-truth",
+      "kind": "independentVerification",
+      "state": "FAIL",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleFingerprint": "sha256:7b20f7f01088a84c918c4ea9f3370e7945215d1db45ab14cfb47c424668f439c",
+      "command": "agent-run runtime-payment-second-20260801",
+      "summary": "Independent trace tied the false durable activity to PaymentPanel and xlnStore success behavior.",
+      "recordedAt": "2026-08-01T00:33:00Z",
+      "agentRunIds": [
+        "runtime-payment-second-20260801"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "AUD-SEPOLIA-DOMAIN-V1-V3",
+      "rootCauseKey": "sepolia-entity-provider-domain-build-drift",
+      "moduleId": "contracts-governance",
+      "invariantIds": [
+        "contracts-governance.active-domain-binding",
+        "release-supply-chain.exact-artifact-binding"
+      ],
+      "title": "Active Sepolia EntityProvider uses V3 domains while current signer/source use V1; verifier accepts stale exact_match.",
+      "severity": "P1",
+      "confidence": 99,
+      "state": "CONFIRMED",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "reproduction": "Read on-chain BOARD_PROPOSAL_DOMAIN and cancel domain, compare fixed V1/V3 digests, then compare linked deployed bytecode with the current build."
+    },
+    {
+      "id": "AUD-TRANSPORT-BUN-SEND",
+      "rootCauseKey": "bun-websocket-send-result-inversion",
+      "moduleId": "transport-topology",
+      "invariantIds": [
+        "transport-topology.send-result-contract"
+      ],
+      "title": "Bun -1 queued and 0 dropped send results are interpreted in reverse across direct and relay delivery.",
+      "severity": "P1",
+      "confidence": 99.5,
+      "state": "CONFIRMED",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "reproduction": "Exercise real Bun ServerWebSocket backpressure and trace direct fallback plus relay pending flush for -1 and 0."
+    },
+    {
+      "id": "AUD-RUNTIME-STICKY-REJECTION",
+      "rootCauseKey": "expected-local-command-sticky-runtime-halt",
+      "moduleId": "runtime-pipeline",
+      "invariantIds": [
+        "runtime-pipeline.expected-rejection-isolation"
+      ],
+      "title": "Expected local command rejection can sticky-halt the entire Runtime after mutation begins.",
+      "severity": "P1",
+      "confidence": 100,
+      "state": "CONFIRMED",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "reproduction": "Submit duplicate open or a stale/missing-next-hop direct payment and trace failure classification after mutation starts."
+    },
+    {
+      "id": "AUD-PAYMENT-FALSE-STARTED",
+      "rootCauseKey": "insufficient-capacity-nonterminal-payment-activity",
+      "moduleId": "registration-payment",
+      "invariantIds": [
+        "registration-payment.terminal-truth",
+        "wallet-frontend.durable-status-truth"
+      ],
+      "title": "Insufficient-capacity payment can be consumed while durable activity remains HtlcInitiated/Payment started.",
+      "severity": "P1",
+      "confidence": 99,
+      "state": "CONFIRMED",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "reproduction": "Initiate a payment above available capacity and compare ingress receipt, durable activity projection, and user-visible terminal state."
+    }
+  ],
+  "reviewers": [
+    {
+      "id": "codex-wallet-xhigh",
+      "label": "Wallet hardening xhigh",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-sepolia-primary",
+      "label": "Solidity deployment primary",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-sepolia-second",
+      "label": "Sepolia domain second opinion",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-transport-primary",
+      "label": "Transport topology primary",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-runtime-payment",
+      "label": "Runtime payment primary",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-audit-design",
+      "label": "Audit hierarchy designer",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-transport-second",
+      "label": "Transport send second opinion",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-runtime-payment-second",
+      "label": "Runtime payment second opinion",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-transport-fixer",
+      "label": "Transport send fixer",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-wallet-final-verifier",
+      "label": "Wallet final verifier",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-transport-final-verifier",
+      "label": "Transport final verifier",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-audit-registry-verifier",
+      "label": "Audit registry verifier",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    }
+  ],
+  "agentRuns": [
+    {
+      "id": "wallet-hardening-xhigh-20260801",
+      "reviewerId": "codex-wallet-xhigh",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleIds": [
+        "api-auth-custody",
+        "wallet-frontend"
+      ],
+      "scope": "BrainVault custody, reconnect, startup, and secret lifecycle",
+      "state": "COMPLETED",
+      "usefulnessScore": 970,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Found five race and durability edges; final re-audit reported no actionable findings at 97% confidence."
+    },
+    {
+      "id": "solidity-deployment-primary-20260801",
+      "reviewerId": "codex-sepolia-primary",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleIds": [
+        "contracts-governance",
+        "release-supply-chain"
+      ],
+      "scope": "Active Sepolia domain and deployed-build binding",
+      "state": "COMPLETED",
+      "usefulnessScore": 930,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-SEPOLIA-DOMAIN-V1-V3"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Found deployed V3 versus current V1 domain drift and verifier binding weakness."
+    },
+    {
+      "id": "sepolia-domain-second-20260801",
+      "reviewerId": "codex-sepolia-second",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleIds": [
+        "contracts-governance",
+        "release-supply-chain"
+      ],
+      "scope": "Independent Sepolia V1/V3 and bytecode verification",
+      "state": "COMPLETED",
+      "usefulnessScore": 980,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-SEPOLIA-DOMAIN-V1-V3"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Independently reproduced domain digests, on-chain getters, bytecode mismatch, and false-green verifier."
+    },
+    {
+      "id": "transport-topology-primary-20260801",
+      "reviewerId": "codex-transport-primary",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleIds": [
+        "transport-topology"
+      ],
+      "scope": "Socket ownership, exact hops, relay policy, and backpressure",
+      "state": "COMPLETED",
+      "usefulnessScore": 950,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-TRANSPORT-BUN-SEND"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Mapped the full topology and found the Bun send-result inversion plus direct-policy gaps."
+    },
+    {
+      "id": "runtime-payment-primary-20260801",
+      "reviewerId": "codex-runtime-payment",
+      "sourceSha": "e7ee6dfa37fe9128bbd3ef45d709471c57c9cb87",
+      "moduleIds": [
+        "runtime-pipeline",
+        "registration-payment",
+        "wallet-frontend"
+      ],
+      "scope": "Registration through payment rejection and terminal receipt behavior",
+      "state": "COMPLETED",
+      "usefulnessScore": 940,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-RUNTIME-STICKY-REJECTION",
+        "AUD-PAYMENT-FALSE-STARTED"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Discovered both Runtime/payment P1 root causes later reproduced independently."
+    },
+    {
+      "id": "audit-hierarchy-design-20260801",
+      "reviewerId": "codex-audit-design",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleIds": [
+        "release-supply-chain",
+        "ops-observability"
+      ],
+      "scope": "Canonical module, evidence, finding, agent, and gate hierarchy",
+      "state": "COMPLETED",
+      "usefulnessScore": 920,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Designed the registry, state machines, scoring, independent review, and evidence-cache protocol."
+    },
+    {
+      "id": "transport-send-second-20260801",
+      "reviewerId": "codex-transport-second",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleIds": [
+        "transport-topology"
+      ],
+      "scope": "Independent Bun send semantics and fallback reproduction",
+      "state": "COMPLETED",
+      "usefulnessScore": 990,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-TRANSPORT-BUN-SEND"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Confirmed -1 queued and 0 dropped with Bun types, official API, live socket behavior, and fallback trace."
+    },
+    {
+      "id": "runtime-payment-second-20260801",
+      "reviewerId": "codex-runtime-payment-second",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleIds": [
+        "runtime-pipeline",
+        "registration-payment",
+        "wallet-frontend"
+      ],
+      "scope": "Independent real-process Runtime rejection and payment terminal-state reproduction",
+      "state": "COMPLETED",
+      "usefulnessScore": 995,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-RUNTIME-STICKY-REJECTION",
+        "AUD-PAYMENT-FALSE-STARTED"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Reproduced both P1s through real processRuntime and production activity/UI paths at 99-100% confidence."
+    },
+    {
+      "id": "transport-send-fix-20260801",
+      "reviewerId": "codex-transport-fixer",
+      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "moduleIds": [
+        "transport-topology"
+      ],
+      "scope": "Canonical Bun send classifier, direct fallback, relay, and pending flush fix",
+      "state": "COMPLETED",
+      "usefulnessScore": 960,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-TRANSPORT-BUN-SEND"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Implemented the canonical classifier and two verifier-driven follow-ups; final transport suite passed 56/56 with 247 assertions."
+    },
+    {
+      "id": "wallet-final-verification-20260801",
+      "reviewerId": "codex-wallet-final-verifier",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleIds": [
+        "api-auth-custody",
+        "wallet-frontend"
+      ],
+      "scope": "Independent final BrainVault custody and wallet secret-lifecycle verification",
+      "state": "COMPLETED",
+      "usefulnessScore": 965,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Independently re-audited the final wallet candidate and reported no actionable findings at 97% confidence."
+    },
+    {
+      "id": "transport-final-verification-20260801",
+      "reviewerId": "codex-transport-final-verifier",
+      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "moduleIds": [
+        "transport-topology"
+      ],
+      "scope": "Independent final send-result, fail-loud, queue-prefix, and byte-accounting verification",
+      "state": "COMPLETED",
+      "usefulnessScore": 998,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-TRANSPORT-BUN-SEND"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Blocked two incomplete candidates, reproduced duplicate-prefix risk, then verified the exact final SHA green at 99% confidence."
+    },
+    {
+      "id": "audit-registry-verification-20260801",
+      "reviewerId": "codex-audit-registry-verifier",
+      "sourceSha": "458082a0c26029204233dde3bcb8dde0915aa525",
+      "moduleIds": [
+        "release-supply-chain",
+        "protocol-primitives"
+      ],
+      "scope": "Independent evidence-integrity, fingerprint-closure, gate, schema, timestamp, and blocker propagation audit",
+      "state": "COMPLETED",
+      "usefulnessScore": 999,
+      "provisional": true,
+      "confirmedFindingIds": [],
+      "candidateFindingIds": [],
+      "summary": "Reproduced four P1 and two P2 defects in the registry implementation; every issue entered the fix loop."
+    }
+  ]
+}

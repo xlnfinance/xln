@@ -1,0 +1,20 @@
+/** Stable import surface for the canonical audit registry implementation. */
+
+export {
+  computeModuleFingerprint,
+  computeModuleFingerprints,
+  computeEnvironmentFingerprint,
+  computeFileFingerprint,
+  listCurrentSourceFiles,
+  matchesAuditGlob,
+  readCurrentSha,
+  sha256Text,
+} from './fingerprint';
+
+export { computeAuditStatus, evaluateAuditGate } from './status';
+
+export {
+  loadAuditRegistry,
+  parseAuditRegistry,
+  validateAuditRegistry,
+} from './validation';
