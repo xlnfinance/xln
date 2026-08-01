@@ -1913,6 +1913,20 @@
       "state": "CONFIRMED",
       "sourceSha": "6004b0ced0d2b40fe7a4de009638ba10a115557f",
       "reproduction": "Use an authorized source Hub and valid binary with expected source claim 500 but cumulativeSourceAmount 999; observe success, pull deletion, hold zero, and offdelta -999."
+    },
+    {
+      "id": "AUD-REGISTRATION-INTENT-BYPASS",
+      "rootCauseKey": "wallet-numbered-registration-bypasses-durable-intent",
+      "moduleId": "registration-payment",
+      "invariantIds": [
+        "registration-payment.terminal-truth"
+      ],
+      "title": "Wallet numbered registration performs the contract effect before recording its durable Runtime intent.",
+      "severity": "P1",
+      "confidence": 97,
+      "state": "CONFIRMED",
+      "sourceSha": "9bfd78ab95d11244d8cb8bcb3551db9c8520b0ea",
+      "reproduction": "Start numbered registration through FormationPanel, allow registerNumberedEntity to return its receipt, then terminate before the following importReplica RuntimeInput commits; the contract registration survives while Runtime has neither a numberedRegistrationIntent nor the imported replica, and retrying invokes a fresh registration."
     }
   ],
   "reviewers": [
@@ -2819,6 +2833,27 @@
       ],
       "candidateFindingIds": [],
       "summary": "Verified deterministic rejection of scalar-type bypasses, all four public caps, unspoofable trusted-operator scope, explicit managed-testnet enablement, and zero remaining P0-P2 at 99.8% confidence."
+    },
+    {
+      "id": "registration-payment-truth-audit-9bfd78ab9-20260801",
+      "reviewerId": "codex-runtime-payment-current",
+      "sourceSha": "9bfd78ab95d11244d8cb8bcb3551db9c8520b0ea",
+      "moduleIds": [
+        "runtime-pipeline",
+        "registration-payment",
+        "wallet-frontend"
+      ],
+      "scope": "Exact-SHA registration through first successful payment truth-path audit",
+      "state": "COMPLETED",
+      "usefulnessScore": 995,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-RUNTIME-STICKY-REJECTION",
+        "AUD-PAYMENT-FALSE-STARTED",
+        "AUD-REGISTRATION-INTENT-BYPASS"
+      ],
+      "candidateFindingIds": [],
+      "summary": "Confirmed that both existing Runtime/payment blockers remain reachable and found the production wallet registration path bypassing the existing crash-safe numbered-registration intent; no broad PASS evidence or module review was recorded."
     }
   ],
   "moduleReviews": [
