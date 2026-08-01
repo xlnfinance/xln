@@ -40,23 +40,33 @@ export const computeEnvironmentFingerprint = (root: string): string => {
   }));
 };
 
+export const isModuleFileExcluded = (
+  registry: AuditRegistry,
+  module: AuditModule,
+  path: string,
+): boolean => [...registry.scope.exclusions, ...module.exclusions].some(
+  exclusion => matchesAuditGlob(path, exclusion.glob),
+);
+
 const moduleOwnFiles = (
   module: AuditModule,
+  registry: AuditRegistry,
   trackedFiles: readonly string[],
 ): string[] => {
   const patterns = [...module.sourceGlobs, ...module.testGlobs];
   return trackedFiles.filter(path => (
     patterns.some(pattern => matchesAuditGlob(path, pattern))
-    && !module.exclusions.some(exclusion => matchesAuditGlob(path, exclusion.glob))
+    && !isModuleFileExcluded(registry, module, path)
   ));
 };
 
 const moduleOwnSourceFiles = (
   module: AuditModule,
+  registry: AuditRegistry,
   trackedFiles: readonly string[],
 ): string[] => trackedFiles.filter(path => (
   module.sourceGlobs.some(pattern => matchesAuditGlob(path, pattern))
-  && !module.exclusions.some(exclusion => matchesAuditGlob(path, exclusion.glob))
+  && !isModuleFileExcluded(registry, module, path)
 ));
 
 type ImportGraph = ReadonlyMap<string, readonly string[]>;
@@ -174,7 +184,7 @@ export const listModuleFingerprintFiles = (
   if (!module) throw new Error(`AUDIT_MODULE_UNKNOWN:${moduleId}`);
   const closure = dependencyClosure(module, modules);
   const closureModules = [...closure].map(id => modules.get(id)!);
-  const sourceSeeds = closureModules.flatMap(candidate => moduleOwnSourceFiles(candidate, trackedFiles));
+  const sourceSeeds = closureModules.flatMap(candidate => moduleOwnSourceFiles(candidate, registry, trackedFiles));
   const sourceClosure = importClosure(sourceSeeds, graph);
   const scopedTests = trackedFiles.filter(path => registry.scope.testGlobs.some(
     pattern => matchesAuditGlob(path, pattern),
@@ -183,7 +193,7 @@ export const listModuleFingerprintFiles = (
     const imported = importClosure([path], graph);
     return [...sourceClosure].some(sourcePath => imported.has(sourcePath));
   });
-  const explicit = closureModules.flatMap(candidate => moduleOwnFiles(candidate, trackedFiles));
+  const explicit = closureModules.flatMap(candidate => moduleOwnFiles(candidate, registry, trackedFiles));
   return [...importClosure([...explicit, ...sourceClosure, ...reverseTests], graph)].sort();
 };
 

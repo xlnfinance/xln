@@ -5,10 +5,12 @@ import { resolve } from 'node:path';
 import {
   computeAuditStatus,
   computeEnvironmentFingerprint,
+  listCurrentSourceFiles,
   parseAuditRegistry,
   sha256Text,
   validateAuditRegistry,
   validateEvidenceArtifactBinding,
+  validateInvariantCoverage,
 } from '../../tools/audit/core';
 import {
   EVIDENCE_KINDS,
@@ -188,4 +190,52 @@ test('schema v2 rejects missing exact-scope fields before validation can crash',
   delete malformed.agentRuns[0]!['moduleFingerprints'];
   expect(() => parseAuditRegistry(JSON.stringify(malformed))).toThrow('invariants[0].sourceGlobs must be an array');
   expect(() => parseAuditRegistry(JSON.stringify(malformed))).toThrow('agentRuns[0].moduleFingerprints must be an object');
+});
+
+test('every effective module file has atomic scope while exclusions stay excluded', () => {
+  expect(validateInvariantCoverage(REGISTRY, listCurrentSourceFiles(ROOT))).toEqual([]);
+  const module = {
+    ...REGISTRY.modules[0]!,
+    id: 'fixture',
+    sourceGlobs: ['fixture/source/**/*.ts'],
+    testGlobs: ['fixture/test/**/*.test.ts'],
+    dependencies: [],
+    exclusions: [],
+  };
+  const invariant = {
+    ...REGISTRY.invariants[0]!,
+    id: 'fixture.atomic',
+    moduleId: module.id,
+    sourceGlobs: ['fixture/source/covered.ts'],
+    testGlobs: ['fixture/test/covered.test.ts'],
+  };
+  const fixture: AuditRegistry = {
+    ...REGISTRY,
+    scope: { ...REGISTRY.scope, exclusions: [] },
+    modules: [module],
+    invariants: [invariant],
+  };
+  const files = [
+    'fixture/source/covered.ts',
+    'fixture/source/orphan.ts',
+    'fixture/test/covered.test.ts',
+    'fixture/test/orphan.test.ts',
+  ];
+  expect(validateInvariantCoverage(fixture, files)).toEqual([
+    'module fixture source file has no invariant scope: fixture/source/orphan.ts',
+    'module fixture test file has no invariant scope: fixture/test/orphan.test.ts',
+  ]);
+
+  const excluded: AuditRegistry = {
+    ...fixture,
+    scope: {
+      ...fixture.scope,
+      exclusions: [{ glob: 'fixture/source/orphan.ts', reason: 'Positive global exclusion fixture.' }],
+    },
+    modules: [{
+      ...module,
+      exclusions: [{ glob: 'fixture/test/orphan.test.ts', reason: 'Positive module exclusion fixture.' }],
+    }],
+  };
+  expect(validateInvariantCoverage(excluded, files)).toEqual([]);
 });

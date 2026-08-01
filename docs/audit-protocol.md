@@ -101,7 +101,9 @@ invariants · paths · failure boundaries · required evidence · release profil
 
 Every invariant also owns explicit source and test globs. Its invariant ID is
 the claim scope: a run that names only a module has inspected that module but
-has not attested any invariant. Free-form prose must never widen claim scope.
+has not attested any invariant. The union of invariant globs must cover every
+non-excluded module source and test file. Free-form prose must never widen
+claim scope.
 
 An exclusion always has a reason. “Partial coverage” without omitted paths and
 their risk is invalid output.

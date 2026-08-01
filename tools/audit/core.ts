@@ -7,6 +7,7 @@ export {
   computeFileFingerprint,
   listCurrentSourceFiles,
   listModuleFingerprintFiles,
+  isModuleFileExcluded,
   matchesAuditGlob,
   readCurrentSha,
   sha256Text,
@@ -14,7 +15,10 @@ export {
 
 export { computeAuditStatus, evaluateAuditGate } from './status';
 export { computeModuleReviewStatus } from './reviews';
-export { validateEvidenceArtifactBinding } from './root-validation';
+export {
+  validateEvidenceArtifactBinding,
+  validateInvariantCoverage,
+} from './root-validation';
 
 export {
   loadAuditRegistry,

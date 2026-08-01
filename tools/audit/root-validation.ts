@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 import {
   computeFileFingerprint,
+  isModuleFileExcluded,
   listCurrentSourceFiles,
   matchesAuditGlob,
 } from './fingerprint';
@@ -55,6 +56,35 @@ const validateInvariantGlobs = (
           if (!modulePatterns.some(modulePattern => matchesAuditGlob(path, modulePattern))) {
             errors.push(`invariant ${invariant.id} ${kind} file is outside module scope: ${path}`);
           }
+        }
+      }
+    }
+  }
+  return errors;
+};
+
+const matchesAny = (path: string, patterns: readonly string[]): boolean =>
+  patterns.some(pattern => matchesAuditGlob(path, pattern));
+
+/** Every effective module file must belong to at least one atomic claim. */
+export const validateInvariantCoverage = (
+  registry: AuditRegistry,
+  files: readonly string[],
+): string[] => {
+  const errors: string[] = [];
+  for (const module of registry.modules) {
+    const invariants = registry.invariants.filter(invariant => invariant.moduleId === module.id);
+    for (const [kind, moduleGlobs, invariantField] of [
+      ['source', module.sourceGlobs, 'sourceGlobs'],
+      ['test', module.testGlobs, 'testGlobs'],
+    ] as const) {
+      const effectiveFiles = files.filter(path => (
+        matchesAny(path, moduleGlobs)
+        && !isModuleFileExcluded(registry, module, path)
+      ));
+      for (const path of effectiveFiles) {
+        if (!invariants.some(invariant => matchesAny(path, invariant[invariantField]))) {
+          errors.push(`module ${module.id} ${kind} file has no invariant scope: ${path}`);
         }
       }
     }
@@ -164,6 +194,7 @@ export const validateAuditRegistryRoot = (registry: AuditRegistry, root: string)
     ...(existsSync(resolve(root, registry.protocol)) ? [] : [`protocol file is missing: ${registry.protocol}`]),
     ...validateModuleGlobs(registry, files),
     ...validateInvariantGlobs(registry, files),
+    ...validateInvariantCoverage(registry, files),
     ...validateScopeOwnership(registry, files),
     ...validateEvidenceArtifacts(registry, root),
   ];

@@ -759,6 +759,7 @@
       "title": "Every public command and projection is bound to its authenticated caller authority.",
       "importance": 24,
       "sourceGlobs": [
+        "runtime/api/public/browser.ts",
         "runtime/api/public/external-wallet-api.ts",
         "runtime/api/public/external-wallet/context.ts",
         "runtime/api/public/external-wallet/http.ts",
@@ -810,6 +811,7 @@
       "title": "Public wallet responses never disclose private keys, mnemonics, or unrevealed secrets.",
       "importance": 20,
       "sourceGlobs": [
+        "runtime/api/public/browser.ts",
         "runtime/api/public/external-wallet-api.ts",
         "runtime/api/public/external-wallet/snapshot-handler.ts",
         "runtime/api/public/external-wallet/tokens-handler.ts",
