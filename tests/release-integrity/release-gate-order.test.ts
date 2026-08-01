@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 describe('release gate ordering', () => {
   test('runs one full E2E only after every cheaper release check', () => {
@@ -20,5 +21,18 @@ describe('release gate ordering', () => {
     expect(result.exitCode).toBe(0);
     expect(browserE2eCommands).toEqual(['bun run test:e2e:full']);
     expect(commands.at(-1)).toBe('bun run test:e2e:full');
+  });
+
+  test('publishes only a checked canonical tag through immutable actions', () => {
+    const workflow = readFileSync('.github/workflows/distribution-release.yml', 'utf8');
+    const actions = [...workflow.matchAll(/uses:\s+\S+@([^\s#]+)/g)].map((match) => match[1]);
+
+    expect(actions.length).toBeGreaterThan(0);
+    expect(actions.every((revision) => /^[0-9a-f]{40}$/.test(revision))).toBe(true);
+    expect(workflow).toContain('permissions:\n  contents: read');
+    expect(workflow).toContain('run: test "$RELEASE_TAG" = "v$(tr -d \'\\n\' < VERSION)"');
+    expect(workflow).toContain('- run: bun run check');
+    expect(workflow).toContain('gh release create "$RELEASE_TAG"');
+    expect(workflow).not.toContain('gh release create "${{ inputs.tag }}"');
   });
 });
