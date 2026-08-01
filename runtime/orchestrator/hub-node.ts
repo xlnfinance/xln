@@ -4,6 +4,7 @@ import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createExternalWalletApi } from '../api/public/external-wallet-api';
+import { createBrainVaultOwnerController, type BrainVaultOwnerController } from '../api/server/brainvault-owner';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
@@ -251,6 +252,7 @@ type HubNodeLiveContext = {
   activeTokenCatalog: JTokenInfo[];
   p2p: ReturnType<typeof startP2P> | null;
   externalIngressReady: boolean;
+  brainVaultReady: boolean;
   shuttingDown: boolean;
   meshLoopProgress: BootstrapProgress;
   meshLoopInFlight: boolean;
@@ -552,6 +554,31 @@ const MESH_BOOTSTRAP_STALL_TIMEOUT_MS = Math.max(
   Math.floor(Number(process.env['XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS'] || '30000')),
 );
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
+const createHubBrainVaultOwner = (): BrainVaultOwnerController => createBrainVaultOwnerController({
+  path: String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || ''),
+  ...(process.env['XLN_BRAINVAULT_WORKER_PATH']
+    ? { workerPath: process.env['XLN_BRAINVAULT_WORKER_PATH'] }
+    : {}),
+  profileName: String(process.env['XLN_LOCAL_OWNER_PROFILE_NAME'] || 'xln finance').trim() || 'xln finance',
+  enqueue: enqueueRuntimeInput,
+  onFrameCommit: (targetEnv, callback) =>
+    registerRuntimeFrameCommitCallback(targetEnv, ({ height }) => callback(height)),
+  timeoutMs: 60_000,
+});
+
+const restoreHubBrainVaultOwner = async (
+  live: HubNodeLiveContext,
+  brainVaultOwner: BrainVaultOwnerController,
+): Promise<void> => {
+  const restored = await brainVaultOwner.restore(live.env);
+  live.brainVaultReady = true;
+  if (!restored) return;
+  nodeLog.info('brainvault_owner.ready', {
+    entityId: restored.entityId,
+    created: restored.created,
+    height: restored.height,
+  });
+};
 let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
 const HUB_RUNTIME_TICK_DELAY_MS = Math.max(
   0,
@@ -2501,6 +2528,7 @@ const startHubHttpSurface = (
   live: HubNodeLiveContext,
   runtimeIngressReceipts: ReturnType<typeof createRuntimeIngressReceiptStore>,
   faucetRelayStore: ReturnType<typeof createRelayStore>,
+  brainVaultOwner: BrainVaultOwnerController,
   pauseBootstrap: () => Promise<void>,
   bootstrapClockMs: () => number,
 ): HubHttpSurface => {
@@ -2516,6 +2544,8 @@ const startHubHttpSurface = (
     live.env,
     runtimeIngressReceipts,
     () => live.externalIngressReady,
+    brainVaultOwner,
+    () => live.brainVaultReady,
   );
   const httpDrain = createHttpDrainTracker();
   const handleControl = createHubControlRequestHandler({
@@ -2736,6 +2766,8 @@ const run = async (): Promise<void> => {
 
   const runtimeBootStartedAt = startTiming('runtime_boot');
   const localSignerLabels = buildLocalHubSignerLabels();
+  const brainVaultOwner = createHubBrainVaultOwner();
+  await brainVaultOwner.prewarm(resolvedArgs.seed);
   const env = await main(resolvedArgs.seed, {
     localSigners: localSignerLabels.map(label => ({ label })),
     trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(
@@ -2768,6 +2800,7 @@ const run = async (): Promise<void> => {
     activeTokenCatalog: [],
     p2p: null,
     externalIngressReady: false,
+    brainVaultReady: false,
     shuttingDown: false,
     meshLoopProgress: beginBootstrapProgress(getPerfMs()),
     meshLoopInFlight: false,
@@ -2781,6 +2814,7 @@ const run = async (): Promise<void> => {
     live,
     runtimeIngressReceipts,
     faucetRelayStore,
+    brainVaultOwner,
     meshController.pauseAndWait,
     bootstrapClockMs,
   );
@@ -2840,6 +2874,7 @@ const run = async (): Promise<void> => {
       });
     },
   });
+  await restoreHubBrainVaultOwner(live, brainVaultOwner);
   finishTiming('p2p_connect', p2pConnectStartedAt);
 
   meshController.start(jurisdiction, tokenCatalog, httpSurface.externalWalletApi);

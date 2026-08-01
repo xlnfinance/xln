@@ -26,6 +26,7 @@ import {
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
 import type { RuntimeReplica } from '../runtime/types';
+import type { BrainVaultOwnerController } from '../api/server/brainvault-owner';
 
 export type HubServerSocket = DirectWebSocket &
   RuntimeAdapterSocket & { data?: { type?: string } };
@@ -133,6 +134,8 @@ export const createHubRadapterMessageHandler = (
   env: RuntimeReplica,
   receipts: ReturnType<typeof createRuntimeIngressReceiptStore>,
   isIngressReady: () => boolean,
+  brainVaultOwner: BrainVaultOwnerController,
+  isBrainVaultReady: () => boolean,
 ): ((
   ws: HubServerSocket,
   raw: string | Buffer | ArrayBuffer,
@@ -156,6 +159,14 @@ export const createHubRadapterMessageHandler = (
         readReceipt: id => receipts.get(id),
         buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
         isMutatingIngressReady: isIngressReady,
+        deriveBrainVault: async (targetEnv, input, options) => {
+          if (!isBrainVaultReady()) throw new Error('BRAINVAULT_OWNER_STARTUP_PENDING');
+          return brainVaultOwner.deriveAndInstall(targetEnv, input, options);
+        },
+        revealBrainVaultMnemonic: async () => {
+          if (!isBrainVaultReady()) throw new Error('BRAINVAULT_OWNER_STARTUP_PENDING');
+          return brainVaultOwner.revealMnemonic();
+        },
         readHead: targetEnv => readPersistedStorageHead(targetEnv),
         readFrame: (targetEnv, height) =>
           readPersistedStorageFrameRecord(targetEnv, height),

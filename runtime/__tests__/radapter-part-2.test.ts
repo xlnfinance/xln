@@ -2152,7 +2152,12 @@ test('BrainVault mnemonic export emits one redacted security audit event', async
       payload: { mnemonic24: string };
     }>(messages.pop());
     expect(response.payload.mnemonic24).toBe(mnemonic24);
-    expect(auditEvents).toContainEqual(expect.objectContaining({
+    const mnemonicExports = auditEvents.filter(event => (
+      event['scope'] === 'runtime.radapter'
+      && event['message'] === 'brainvault.mnemonic_exported'
+    ));
+    expect(mnemonicExports).toHaveLength(1);
+    expect(mnemonicExports[0]).toEqual(expect.objectContaining({
       level: 'warn',
       scope: 'runtime.radapter',
       message: 'brainvault.mnemonic_exported',

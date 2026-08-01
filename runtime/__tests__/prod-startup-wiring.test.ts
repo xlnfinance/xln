@@ -41,6 +41,27 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
+  test('managed hub BrainVault prewarms before WAL replay and opens custody only after restore', () => {
+    const hub = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const transport = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-runtime-transport.ts'), 'utf8');
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const prewarm = hub.indexOf('await brainVaultOwner.prewarm(resolvedArgs.seed);');
+    const runtimeMain = hub.indexOf('const env = await main(resolvedArgs.seed', prewarm);
+    const runtimeLoop = hub.indexOf('startRuntimeLoop(env, {', runtimeMain);
+    const restore = hub.indexOf('await restoreHubBrainVaultOwner(live, brainVaultOwner);', runtimeLoop);
+    const helperRestore = hub.indexOf('const restored = await brainVaultOwner.restore(live.env);');
+    const helperReady = hub.indexOf('live.brainVaultReady = true;', helperRestore);
+
+    expect(prewarm).toBeGreaterThanOrEqual(0);
+    expect(prewarm).toBeLessThan(runtimeMain);
+    expect(runtimeMain).toBeLessThan(runtimeLoop);
+    expect(runtimeLoop).toBeLessThan(restore);
+    expect(helperRestore).toBeGreaterThanOrEqual(0);
+    expect(helperRestore).toBeLessThan(helperReady);
+    expect(transport).toContain("throw new Error('BRAINVAULT_OWNER_STARTUP_PENDING')");
+    expect(orchestrator).toContain("XLN_BRAINVAULT_OWNER_PATH: join(child.dbPath, 'brainvault-owner.json')");
+  });
+
   test('public direct runtime ports expose only websocket transport routes', () => {
     const sources = [readPlatformDeploy()];
 

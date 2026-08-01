@@ -1367,6 +1367,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     env: sanitizeChildProcessEnv({
       ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: child.dbPath,
+      XLN_BRAINVAULT_OWNER_PATH: join(child.dbPath, 'brainvault-owner.json'),
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
       USE_ANVIL: 'true',
