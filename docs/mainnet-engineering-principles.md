@@ -3,8 +3,10 @@
 These are permanent constraints, not tasks. They do not belong in the active
 TODO and cannot be “completed”.
 
-- Keep one implementation, persisted format and version. Before mainnet there
-  are no legacy paths, fallback readers/writers or parallel financial formulas.
+- Keep one implementation, persisted format and version. Production has no
+  compatibility aliases, legacy paths, fallback readers/writers, or parallel
+  financial formulas. Obsolete data requires an explicit offline migration or
+  a loud rejection; transport route failover remains one canonical policy.
 - Keep RJEA pure and deterministic. Runtime enforces policy, WAL commit precedes
   dispatch, failures are loud, finance uses canonical bigint reducers and
   frozen-core changes require owner approval.

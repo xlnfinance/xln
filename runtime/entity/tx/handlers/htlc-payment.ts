@@ -36,12 +36,36 @@ const rejectHtlcPayment = (
   return { newState, outputs: [], accountTxs: [] };
 };
 
+const recordFailedHtlc = (
+  state: EntityState,
+  prepared: PreparedHtlcPayment,
+  effects: EntityCandidateEffect[],
+  reason: 'next-hop-account-missing' | 'token-delta-missing' | 'insufficient-capacity',
+): void => {
+  effects.push({
+    kind: 'runtimeEvent',
+    eventName: 'HtlcFailed',
+    data: {
+      entityId: state.entityId,
+      fromEntity: state.entityId,
+      toEntity: prepared.targetEntityId,
+      tokenId: prepared.tokenId,
+      amount: prepared.recipientAmount.toString(),
+      hashlock: prepared.hashlock,
+      lockId: prepared.lockId,
+      reason,
+    },
+  });
+};
+
 const requireOutboundCapacity = (
   newState: EntityState,
   prepared: PreparedHtlcPayment,
+  candidateEffects: EntityCandidateEffect[],
 ): AccountState | HtlcPaymentResult => {
   const account = newState.accounts.get(prepared.nextHop);
   if (!account) {
+    recordFailedHtlc(newState, prepared, candidateEffects, 'next-hop-account-missing');
     return rejectHtlcPayment(
       newState,
       `❌ HTLC payment failed: No account with ${formatEntityId(prepared.nextHop)}`,
@@ -50,6 +74,7 @@ const requireOutboundCapacity = (
   }
   const delta = account.state.deltas?.get(prepared.tokenId);
   if (!delta) {
+    recordFailedHtlc(newState, prepared, candidateEffects, 'token-delta-missing');
     return rejectHtlcPayment(
       newState,
       '❌ HTLC payment failed: missing account state',
@@ -67,6 +92,7 @@ const requireOutboundCapacity = (
       available: capacity,
     });
     addMessage(newState, '❌ HTLC payment failed: insufficient capacity');
+    recordFailedHtlc(newState, prepared, candidateEffects, 'insufficient-capacity');
     return { newState, outputs: [], accountTxs: [] };
   }
   return account.state;
@@ -150,7 +176,7 @@ export async function handleHtlcPayment(
     route: prepared.route.map(shortId),
   });
   const newState = prepareEntityTxState(entityState, mutableFrameState);
-  const account = requireOutboundCapacity(newState, prepared);
+  const account = requireOutboundCapacity(newState, prepared, candidateEffects);
   if ('newState' in account) return account;
 
   recordOriginatedHtlc(newState, prepared, candidateEffects);

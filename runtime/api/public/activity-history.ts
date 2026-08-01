@@ -449,24 +449,8 @@ const eventFromEntityTx = (
     case 'directPayment':
       return eventFromDirectPayment(journal, index, normalizeId(inputEntityId), data, viewedEntityId);
     case 'htlcPayment':
-    case 'hashlockPayment': {
-      const targetEntityId = normalizeId(data['targetEntityId']);
-      const direction = inferDirection(normalizeId(inputEntityId), targetEntityId, viewedEntityId);
-      return makeEvent(journal, index, {
-        kind: 'offchain',
-        type: 'payment',
-        source: 'runtime_input',
-        direction,
-        title: direction === 'in' ? 'Payment incoming' : 'Payment started',
-        subtitle: `${bigintText(data['amount']) ?? '0'} token ${numberValue(data['tokenId']) ?? '?'} ${direction === 'in' ? `from ${shortId(inputEntityId)}` : `to ${shortId(targetEntityId)}`}`,
-        status: 'started',
-        entityId: viewedEntityId || normalizeId(inputEntityId),
-        counterpartyId: direction === 'in' ? normalizeId(inputEntityId) : targetEntityId,
-        tokenId: numberValue(data['tokenId']),
-        amount: bigintText(data['amount']),
-        rawType: txType,
-      });
-    }
+    case 'hashlockPayment':
+      return null;
     case 'placeSwapOffer':
     case 'resolveSwap':
     case 'cancelSwap':
