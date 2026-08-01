@@ -1739,6 +1739,35 @@
       "reproduction": "Complete signed hello, send a later application frame with the attacker's fromEncryptionPubKey, then prove the attacker decrypts the next outbound entity-input envelope while the original peer receives invalid tag."
     },
     {
+      "id": "AUD-TRANSPORT-DIRECT-CHANNEL-INJECTION",
+      "rootCauseKey": "direct-websocket-authentication-not-bound-to-post-handshake-frames",
+      "moduleId": "transport-topology",
+      "invariantIds": [
+        "transport-topology.bound-session-authority",
+        "api-auth-custody.secret-confinement"
+      ],
+      "title": "A transparent direct-WebSocket proxy can forward mutual authentication and then inject post-handshake requests as the victim.",
+      "severity": "P1",
+      "confidence": 99,
+      "state": "CONFIRMED",
+      "sourceSha": "62569b0d11db24fc6ac0db52df5dad7a8f168708",
+      "reproduction": "Place a transparent proxy between RuntimeWsClient and an honest target, forward the signed challenge, hello, and ACK, then inject recovery_bundle_request on the authenticated upstream socket and observe the target return the bundle while the victim remains connected with no errors."
+    },
+    {
+      "id": "AUD-TRANSPORT-RELAY-AUDIENCE-MISMATCH",
+      "rootCauseKey": "relay-cryptographic-audience-derived-from-internal-url",
+      "moduleId": "transport-topology",
+      "invariantIds": [
+        "transport-topology.bound-session-authority"
+      ],
+      "title": "Unified relay authentication derives its audience from an internal localhost URL that can differ from the browser's signed public endpoint.",
+      "severity": "P2",
+      "confidence": 95,
+      "state": "CANDIDATE",
+      "sourceSha": "62569b0d11db24fc6ac0db52df5dad7a8f168708",
+      "reproduction": "Start the unified API with its default internal relay URL and connect through 127.0.0.1 or a public reverse-proxy hostname; compare the server transcript audience with the browser audience derived from the page URL."
+    },
+    {
       "id": "AUD-ENTITY-UNAUTH-PROPOSAL-HALT",
       "rootCauseKey": "entity-proposal-replay-before-proposer-authentication",
       "moduleId": "entity-consensus",
@@ -1961,6 +1990,18 @@
     {
       "id": "codex-transport-auth-fixer",
       "label": "Transport-auth P0 fixer",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-transport-channel-xhigh",
+      "label": "Transport channel-binding xhigh reviewer",
+      "family": "codex",
+      "state": "PROVISIONAL"
+    },
+    {
+      "id": "codex-transport-diff-reviewer",
+      "label": "Transport diff-direction reviewer",
       "family": "codex",
       "state": "PROVISIONAL"
     },
@@ -2428,20 +2469,58 @@
     {
       "id": "transport-auth-fix-20260801",
       "reviewerId": "codex-transport-auth-fixer",
-      "sourceSha": "fedaf886f1da4ac11de6310291068a431422e78f",
+      "sourceSha": "d7d553560fda923d74e395b49a8a0da40b82a459",
       "moduleIds": [
         "transport-topology"
       ],
       "scope": "Audience-bound mutual WebSocket authentication and immutable session encryption key",
-      "state": "RUNNING",
-      "usefulnessScore": 0,
+      "state": "COMPLETED",
+      "usefulnessScore": 995,
       "provisional": true,
       "confirmedFindingIds": [
         "AUD-TRANSPORT-HELLO-AUDIENCE",
-        "AUD-TRANSPORT-KEY-REBIND"
+        "AUD-TRANSPORT-KEY-REBIND",
+        "AUD-TRANSPORT-DIRECT-CHANNEL-INJECTION"
       ],
+      "candidateFindingIds": [
+        "AUD-TRANSPORT-RELAY-AUDIENCE-MISMATCH"
+      ],
+      "summary": "Built audience-bound mutual authentication and immutable session keys, restored the relay launcher, passed 19 targeted tests and the full check, then independently reproduced the remaining post-handshake transparent-proxy injection before merge."
+    },
+    {
+      "id": "transport-channel-xhigh-review-20260801",
+      "reviewerId": "codex-transport-channel-xhigh",
+      "sourceSha": "62569b0d11db24fc6ac0db52df5dad7a8f168708",
+      "moduleIds": [
+        "transport-topology",
+        "api-auth-custody"
+      ],
+      "scope": "Independent direct transcript, replay, unknown-key-share, channel injection, and relay audience audit",
+      "state": "COMPLETED",
+      "usefulnessScore": 900,
+      "provisional": true,
+      "confirmedFindingIds": [
+        "AUD-TRANSPORT-DIRECT-CHANNEL-INJECTION"
+      ],
+      "candidateFindingIds": [
+        "AUD-TRANSPORT-RELAY-AUDIENCE-MISMATCH"
+      ],
+      "summary": "Found both remaining transport gaps and scored the candidate 590/1000; its original shell reproduction was malformed, but the author independently rebuilt and confirmed the P1 with a clean live PoC."
+    },
+    {
+      "id": "transport-diff-direction-review-20260801",
+      "reviewerId": "codex-transport-diff-reviewer",
+      "sourceSha": "62569b0d11db24fc6ac0db52df5dad7a8f168708",
+      "moduleIds": [
+        "transport-topology"
+      ],
+      "scope": "Independent WebSocket deployment, lifecycle, direct-first, and relay-fallback diff review",
+      "state": "COMPLETED",
+      "usefulnessScore": 100,
+      "provisional": true,
+      "confirmedFindingIds": [],
       "candidateFindingIds": [],
-      "summary": "Three exploit regressions are red; the root-cause implementation is running in an isolated worktree."
+      "summary": "Reviewed the diff in the wrong direction and produced no usable finding; result was rejected rather than counted toward confidence or score."
     },
     {
       "id": "claude-opus-runtime-base-20260801",
