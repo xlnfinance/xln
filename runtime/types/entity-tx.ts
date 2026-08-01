@@ -1,5 +1,5 @@
 import type { JurisdictionEventData } from './jurisdiction-events';
-import type { AccountPeerInput, AccountStateDomain, CrossJurisdictionSecretRelay, SettlementOp } from './account';
+import type { AccountPeerInput, AccountStateDomain, SettlementOp } from './account';
 import type { CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './lending';
 import type { ProposalAction } from '../entity/types';
@@ -314,23 +314,6 @@ type EntityTxPayload =
               forwardAmount: bigint;
               innerEnvelope: MultiRecipientCiphertext;
             };
-      };
-    }
-  | {
-      // Direct hashlock-only HTLC. Used for cross-jurisdiction swaps where
-      // the sender must not know the preimage at lock time.
-      type: 'hashlockPayment';
-      data: {
-        targetEntityId: string;
-        tokenId: number;
-        amount: bigint;
-        hashlock: string;
-        lockId?: string;
-        timelock?: bigint;
-        revealBeforeHeight?: number;
-        description?: string;
-        startedAtMs?: number;
-        crossJurisdictionRelay?: CrossJurisdictionSecretRelay;
       };
     }
   | {

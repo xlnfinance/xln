@@ -84,11 +84,16 @@ source Entity
                       └─ ...
 ```
 
-## HTLC payment
+## Canonical payment operations
 
-`htlcPayment` uses a prepared encrypted route. `hashlockPayment` is the
-hashlock-only form used when the sender must not know the preimage, including
-cross-jurisdiction swaps.
+- User payments use one Entity transaction: `htlcPayment`, with a prepared encrypted route.
+- Hashlock-based swaps use `pullLock`, which creates the Account `pull_lock`.
+- Cross-jurisdiction swaps use `prepareCrossJurisdictionSwap`, which creates the exact source and target `pull_lock` legs.
+- Bilateral credit uses `extendCredit`, which creates the Account `set_credit_limit`.
+
+Cross-jurisdiction swaps never enter the user-payment handler. Their source and
+target legs bind the order, route, jurisdiction evidence, and hash ladder in
+the Account state where settlement is enforced.
 
 Each hop commits an `htlc_lock` Account transaction containing:
 

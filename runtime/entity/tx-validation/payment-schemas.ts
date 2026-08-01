@@ -6,13 +6,6 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
     optional: { description: 'string', deliveryMode: 'string', trustedGatewayEntityId: 'string' },
     literals: { deliveryMode: ['trusted'] },
   },
-  hashlockPayment: {
-    required: { targetEntityId: 'string', tokenId: 'integer', amount: 'bigint', hashlock: 'string' },
-    optional: {
-      lockId: 'string', timelock: 'bigint', revealBeforeHeight: 'integer',
-      description: 'string', startedAtMs: 'integer', crossJurisdictionRelay: 'record',
-    },
-  },
   resolveHtlcLock: {
     required: { counterpartyEntityId: 'string', lockId: 'string', secret: 'string' },
     optional: { crossJurisdictionRouteId: 'string', description: 'string' },

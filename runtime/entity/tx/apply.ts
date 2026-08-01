@@ -56,7 +56,6 @@ import {
 } from './handlers/basic';
 import { handleOpenAccountEntityTx } from './handlers/open-account';
 import {
-  handleHashlockPaymentEntityTx,
   handleManualHtlcLockEntityTx,
   handleProcessHtlcTimeoutsEntityTx,
   handleResolveHtlcLockEntityTx,
@@ -362,7 +361,6 @@ const entityTxDispatchers = {
     options?.candidateEffects ?? [],
     options?.mutableFrameState,
   ),
-  hashlockPayment: (env, state, tx, options) => handleHashlockPaymentEntityTx(env, state, tx as Extract<EntityTx, { type: 'hashlockPayment' }>, options?.mutableFrameState),
   resolveHtlcLock: (_env, state, tx, options) => handleResolveHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>, options?.mutableFrameState),
   processHtlcTimeouts: (_env, state, tx, options) => handleProcessHtlcTimeoutsEntityTx(state, tx as Extract<EntityTx, { type: 'processHtlcTimeouts' }>, options?.mutableFrameState),
   manualHtlcLock: (_env, state, tx, options) => handleManualHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'manualHtlcLock' }>, options?.mutableFrameState),

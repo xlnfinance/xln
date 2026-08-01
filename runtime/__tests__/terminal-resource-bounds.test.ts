@@ -266,8 +266,11 @@ test('HTLC note insertion rejects atomically at the Entity cap', () => {
   const lockId = `0x${'ef'.repeat(32)}`;
 
   expect(() => indexCertifiedEntityFrameNotes(replica, { txs: [{
-    type: 'hashlockPayment',
-    data: { targetEntityId: rightEntity, tokenId: 1, amount: 1n, hashlock, lockId, description: 'new note' },
+    type: 'htlcPayment',
+    data: {
+      targetEntityId: rightEntity, tokenId: 1, amount: 1n, route: [leftEntity, rightEntity],
+      hashlock, preparedLockId: lockId, description: 'new note',
+    },
   }] })).toThrow(
     'ENTITY_HTLC_NOTE_LIMIT_EXCEEDED',
   );
@@ -281,13 +284,14 @@ test('HTLC note text validation rejects before adding either lookup key', () => 
   const hashlock = `0x${'12'.repeat(32)}`;
   const lockId = `0x${'34'.repeat(32)}`;
   expect(() => indexCertifiedEntityFrameNotes(replica, { txs: [{
-    type: 'hashlockPayment',
+    type: 'htlcPayment',
     data: {
       targetEntityId: rightEntity,
       tokenId: 1,
       amount: 1n,
+      route: [leftEntity, rightEntity],
       hashlock,
-      lockId,
+      preparedLockId: lockId,
       description: 'x'.repeat(LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH + 1),
     },
   }] })).toThrow('ENTITY_HTLC_NOTE_INVALID_LENGTH');
@@ -298,13 +302,14 @@ test('certified proposal and executed vote frames index nested HTLC descriptions
   const hashlock = `0x${'45'.repeat(32)}`;
   const lockId = `0x${'56'.repeat(32)}`;
   const nestedPayment = {
-    type: 'hashlockPayment',
+    type: 'htlcPayment',
     data: {
       targetEntityId: rightEntity,
       tokenId: 1,
       amount: 1n,
+      route: [leftEntity, rightEntity],
       hashlock,
-      lockId,
+      preparedLockId: lockId,
       description: 'nested invoice',
     },
   } satisfies EntityTx;
