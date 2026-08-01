@@ -30,6 +30,8 @@ describe('release gate ordering', () => {
     expect(actions.length).toBeGreaterThan(0);
     expect(actions.every((revision) => /^[0-9a-f]{40}$/.test(revision))).toBe(true);
     expect(workflow).toContain('permissions:\n  contents: read');
+    expect(workflow.match(/persist-credentials: false/g)).toHaveLength(4);
+    expect(workflow.match(/working-directory: jurisdictions/g)).toHaveLength(3);
     expect(workflow).toContain('run: test "$RELEASE_TAG" = "v$(tr -d \'\\n\' < VERSION)"');
     expect(workflow).toContain('- run: bun run check');
     expect(workflow).toContain('gh release create "$RELEASE_TAG"');
