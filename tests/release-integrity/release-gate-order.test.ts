@@ -37,6 +37,8 @@ describe('release gate ordering', () => {
     expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$RELEASE_SHA"');
     expect(workflow).toContain('- run: bun run check');
     expect(workflow).toContain('- run: bun run test:release-integrity');
+    expect(workflow).toContain('git ls-remote --exit-code origin "refs/tags/$RELEASE_TAG^{}"');
+    expect(workflow).toContain('test "$remote_sha" = "$RELEASE_SHA"');
     expect(workflow).toContain('gh release create "$RELEASE_TAG"');
     expect(workflow).not.toContain('inputs.tag');
   });

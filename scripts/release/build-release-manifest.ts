@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, extname, join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 import { safeStringify } from '../../runtime/protocol/serialization';
 
@@ -25,6 +25,8 @@ type ReleaseAsset = Readonly<{
 
 const ROOT = resolve(import.meta.dir, '../..');
 const OUT_DIR = join(ROOT, 'native/dist');
+const ASSET_DIR = join(OUT_DIR, 'release-assets');
+const REQUIRED_KINDS = ['launcher', 'desktop', 'android', 'chrome'] as const;
 const VERSION_PATHS = [
   'package.json',
   'frontend/package.json',
@@ -58,24 +60,31 @@ const classify = (path: string, releaseVersion: string): Omit<ReleaseAsset, 'byt
   return null;
 };
 
-const main = (): void => {
-  const releaseVersion = version();
-  const candidates = [
-    ...walk(join(ROOT, 'packages/npm/xlnfinance')).filter(path => extname(path) === '.tgz'),
-    ...walk(OUT_DIR),
-  ];
-  const assets = candidates.flatMap(path => {
+export const collectReleaseAssets = (assetDir: string, releaseVersion: string): ReleaseAsset[] => {
+  const assets = walk(assetDir).map(path => {
     const identity = classify(path, releaseVersion);
-    if (!identity) return [];
-    return [{
+    if (!identity) throw new Error(`RELEASE_ASSET_UNCLASSIFIED:${path.slice(assetDir.length + 1)}`);
+    return {
       ...identity,
       bytes: statSync(path).size,
       sha256: digest(path),
       url: `https://github.com/xlnfinance/xln/releases/download/v${releaseVersion}/${identity.name}`,
-    } satisfies ReleaseAsset];
+    } satisfies ReleaseAsset;
   }).sort((left, right) => left.name.localeCompare(right.name));
-  if (assets.length === 0) throw new Error('RELEASE_ASSETS_MISSING');
-  if (new Set(assets.map(asset => asset.name)).size !== assets.length) throw new Error('RELEASE_ASSET_NAME_COLLISION');
+
+  if (new Set(assets.map(asset => asset.name)).size !== assets.length) {
+    throw new Error('RELEASE_ASSET_NAME_COLLISION');
+  }
+  for (const kind of REQUIRED_KINDS) {
+    const count = assets.filter(asset => asset.kind === kind).length;
+    if (count !== 1) throw new Error(`RELEASE_ASSET_KIND_COUNT:${kind}:${count}`);
+  }
+  return assets;
+};
+
+const main = (): void => {
+  const releaseVersion = version();
+  const assets = collectReleaseAssets(ASSET_DIR, releaseVersion);
 
   const commit = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: ROOT }).stdout.toString().trim();
   const distribution = readJson<Record<string, unknown>>(join(ROOT, 'release/channels.json'));
@@ -95,4 +104,4 @@ const main = (): void => {
   console.log(`xln ${releaseVersion}: release manifest contains ${assets.length} artifact(s)`);
 };
 
-main();
+if (import.meta.main) main();
