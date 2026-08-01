@@ -94,9 +94,9 @@
   let payMaxAmount = 0n;
   let canPayNow = false;
   let showNoteField = false;
-  let paySuccess = false;
-  let paySuccessMs = 0;
-  let paySuccessTimer: ReturnType<typeof setTimeout> | null = null;
+  let paymentSubmitted = false;
+  let paymentSubmissionMs = 0;
+  let paymentSubmissionTimer: ReturnType<typeof setTimeout> | null = null;
   let routeListExpanded = false;
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
@@ -1176,14 +1176,14 @@
     await payNowCheapestTracked();
   }
 
-  function flashPaySuccess(elapsedMs: number): void {
-    paySuccess = true;
-    paySuccessMs = elapsedMs;
-    if (paySuccessTimer) clearTimeout(paySuccessTimer);
-    paySuccessTimer = setTimeout(() => {
-      paySuccess = false;
-      paySuccessMs = 0;
-      paySuccessTimer = null;
+  function flashPaymentSubmitted(elapsedMs: number): void {
+    paymentSubmitted = true;
+    paymentSubmissionMs = elapsedMs;
+    if (paymentSubmissionTimer) clearTimeout(paymentSubmissionTimer);
+    paymentSubmissionTimer = setTimeout(() => {
+      paymentSubmitted = false;
+      paymentSubmissionMs = 0;
+      paymentSubmissionTimer = null;
     }, 2800);
   }
 
@@ -1197,7 +1197,7 @@
       result = await payNowCheapestTracked();
     }
     if (result.queued) {
-      flashPaySuccess(Math.round(performance.now() - t0));
+      flashPaymentSubmitted(Math.round(performance.now() - t0));
     }
   }
 
@@ -1291,7 +1291,7 @@
         && latestReceipt.receiptId !== priorRuntimeReceiptId
       ) {
         pendingPaymentCommandId = latestReceipt.commandId;
-        paymentPendingMessage = 'Payment confirmation pending. Reconnect or unlock to resume the original payment; do not send a second payment.';
+        paymentPendingMessage = 'Payment submission pending. Reconnect or unlock to resume the original payment; do not send a second payment.';
         preflightError = null;
         stopRepeatTimer(paymentPendingMessage);
         if (paymentPendingToastId) toasts.remove(paymentPendingToastId);
@@ -1371,8 +1371,8 @@
       pendingPaymentCommandId = null;
       paymentPendingMessage = '';
       preflightError = null;
-      flashPaySuccess(0);
-      toasts.success('Payment confirmed.');
+      flashPaymentSubmitted(0);
+      toasts.info('Payment submitted.');
     } else if (receipt.status === 'error' && !receipt.failureRetryable) {
       if (paymentPendingToastId) toasts.remove(paymentPendingToastId);
       paymentPendingToastId = null;
@@ -1390,7 +1390,7 @@
     !findingRoutes &&
     !sendingPayment &&
     !pendingPaymentCommandId &&
-    !paySuccess &&
+    !paymentSubmitted &&
     !preflightError &&
     (deliveryMode !== 'trusted' || !activeRoute || activeRoute.path.length >= 3) &&
     (!isSelfRecipient || hasSelectedRoute());
@@ -1403,8 +1403,8 @@
   $: showRouteList = routes.length > 1 || (routes.length === 1 && !isDirectRoute);
 
   $: payButtonLabel = (() => {
-    if (paySuccess) return '';
-    if (pendingPaymentCommandId) return 'Payment pending...';
+    if (paymentSubmitted) return '';
+    if (pendingPaymentCommandId) return 'Submission pending...';
     if (sendingPayment) return 'Sending...';
     if (findingRoutes) return 'Finding route...';
     if (activeRoute && amount) return `Pay ${amount} ${getTokenSymbol(tokenId)}`;
@@ -1627,20 +1627,20 @@
   <div class="pay-cta">
     <button
       class="btn-pay"
-      class:success={paySuccess}
+      class:success={paymentSubmitted}
       class:sending={sendingPayment || Boolean(pendingPaymentCommandId)}
       class:finding={findingRoutes && !sendingPayment}
-      aria-label={paySuccess
-        ? 'Payment complete'
+      aria-label={paymentSubmitted
+        ? 'Payment submitted'
         : pendingPaymentCommandId
-          ? 'Payment confirmation pending'
+          ? 'Payment submission pending'
           : 'Pay now'}
       on:click={() => void payUsingCurrentIntent()}
       disabled={!canPayNow}
     >
-      {#if paySuccess}
+      {#if paymentSubmitted}
         <Check size={20} strokeWidth={2.5} />
-        <span>Paid{paySuccessMs ? ` in ${paySuccessMs}ms` : ''}</span>
+        <span>Submitted{paymentSubmissionMs ? ` in ${paymentSubmissionMs}ms` : ''}</span>
       {:else if sendingPayment || findingRoutes || pendingPaymentCommandId}
         <span class="pay-spinner"></span>
         <span>{payButtonLabel}</span>

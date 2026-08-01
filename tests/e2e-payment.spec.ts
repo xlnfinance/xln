@@ -123,9 +123,11 @@ test.describe('E2E HTLC Payment Flow', () => {
     // Send payment and assert durable HTLC finalize on the sender side.
     const paymentCursor = await getPersistedReceiptCursor(page);
     const finalizedEvent = await timedStep('payment.send_to_finalize', async () => {
-      const sendPaymentBtn = page.getByRole('button', { name: 'Pay now' });
+      const sendPaymentBtn = page.locator('[data-pp] button.btn-pay').first();
+      await expect(sendPaymentBtn).toHaveAccessibleName('Pay now');
       await expect(sendPaymentBtn).toBeEnabled({ timeout: 5000 });
       await sendPaymentBtn.click();
+      await expect(sendPaymentBtn).toHaveAccessibleName('Payment submitted', { timeout: 5000 });
 
       return waitForPersistedFrameEventMatch(page, {
         cursor: paymentCursor,
@@ -145,7 +147,6 @@ test.describe('E2E HTLC Payment Flow', () => {
     expect(Number(finalizedEvent.data?.finalizedAtMs || 0), 'sender finalized event should include finalizedAtMs').toBeGreaterThan(0);
     expect(Number(finalizedEvent.data?.elapsedMs || 0), 'sender finalized event should include elapsedMs').toBeGreaterThan(0);
     expect(Number(finalizedEvent.data?.finalizedInMs || 0), 'sender finalized event should include finalizedInMs').toBeGreaterThan(0);
-
     let outboundAfterPayment = outboundBeforePayment;
     await timedStep('payment.send_to_ui_delta', async () => {
       await expect.poll(async () => {

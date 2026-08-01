@@ -156,6 +156,14 @@ test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', 
   expect(panel).not.toContain('/api/gossip/profile');
   expect(panel).toContain('refreshPaymentRuntimeGossip');
   expect(panel).toContain('sendRuntimeDebugEvent');
+  expect(panel).toContain('flashPaymentSubmitted(Math.round(performance.now() - t0))');
+  expect(panel).toContain('flashPaymentSubmitted(0)');
+  expect(panel).toContain('Payment submission pending');
+  expect(panel).toContain('Payment submitted.');
+  expect(panel).toContain('<span>Submitted');
+  expect(panel).not.toContain('Payment confirmed.');
+  expect(panel).not.toContain('Payment complete');
+  expect(panel).not.toContain('<span>Paid');
   expect(panel).not.toContain('buildNetworkAdjacency(env');
   expect(accountWorkspace).toContain('export let paymentView: PaymentPanelView');
   expect(accountWorkspace).toContain('{paymentView}');

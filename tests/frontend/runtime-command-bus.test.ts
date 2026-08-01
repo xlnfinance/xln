@@ -730,7 +730,7 @@ test('payment panel submits RuntimeInput through shared command path', () => {
   expect(paymentSource).toContain('export let submitRuntimeInput');
   expect(paymentSource).toContain('await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] })');
   expect(paymentSource).toContain('pendingPaymentCommandId');
-  expect(paymentSource).toContain('Payment confirmation pending');
+  expect(paymentSource).toContain('Payment submission pending');
   expect(paymentSource).toContain("failure.kind === 'defer'");
   expect(paymentSource).toContain('latestReceipt.receiptId !== priorRuntimeReceiptId');
   expect(paymentSource).not.toContain('submitEntityInputs');
