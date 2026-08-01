@@ -7,6 +7,16 @@ import { safeStringify } from '../protocol/serialization';
 import type { AccountState, SettlementDiff, SettlementOp } from '../types/account';
 import { requireBoundaryRecord } from './schema-primitives';
 import {
+  assertStoredCrossJurisdictionOfferBinding,
+  validateStoredCrossJurisdictionPullBinding,
+  validateStoredCrossJurisdictionRoute,
+} from './account-doc-cross-j-validation';
+import {
+  validateStoredActiveDispute,
+  validateStoredPendingAccountInput,
+  validateStoredPendingForwards,
+} from './account-doc-replica-validation';
+import {
   UINT256_MAX,
   boundedArray,
   boundedMap,
@@ -91,7 +101,8 @@ const validateStateMaps = (state: Record<string, unknown>, code: string): void =
     if (lock['envelopeHash'] !== undefined) bytes(lock['envelopeHash'], 32, `${code}_ENVELOPE`);
     if (lock['secretOffer'] !== undefined) assertExactMultiRecipientCiphertextSchema(lock['secretOffer']);
   }
-  for (const [key, raw] of boundedMap(state['pulls'] ?? new Map(), LIMITS.MAX_ACCOUNT_SWAP_OFFERS, `${code}_PULLS`)) {
+  const pulls = boundedMap(state['pulls'] ?? new Map(), LIMITS.MAX_ACCOUNT_SWAP_OFFERS, `${code}_PULLS`);
+  for (const [key, raw] of pulls) {
     const pull = shape(raw, ['pullId', 'tokenId', 'amount', 'revealedUntilTimestamp', 'fullHash', 'partialRoot', 'createdHeight', 'createdTimestamp'], ['claimedRatio', 'claimedAmount', 'crossJurisdiction'], `${code}_PULL`);
     if (text(pull['pullId'], `${code}_PULL_ID`) !== key || String(key).includes(':')) throw new Error(`${code}_PULL_KEY`);
     token(pull['tokenId'], `${code}_PULL_TOKEN`);
@@ -103,6 +114,7 @@ const validateStateMaps = (state: Record<string, unknown>, code: string): void =
     uint(pull['createdTimestamp'], `${code}_PULL_TIME`);
     if (pull['claimedRatio'] !== undefined) uint(pull['claimedRatio'], `${code}_PULL_RATIO`, UINT16_MAX);
     if (pull['claimedAmount'] !== undefined) uint256(pull['claimedAmount'], `${code}_PULL_CLAIMED`);
+    if (pull['crossJurisdiction'] !== undefined) validateStoredCrossJurisdictionPullBinding(pull['crossJurisdiction'], `${code}_PULL_CROSS_J`);
   }
   for (const [key, raw] of boundedMap(state['swapOffers'], LIMITS.MAX_ACCOUNT_SWAP_OFFERS, `${code}_OFFERS`)) {
     const offer = shape(raw, ['offerId', 'giveTokenId', 'giveAmount', 'wantTokenId', 'wantAmount', 'makerIsLeft', 'createdHeight'], ['priceTicks', 'timeInForce', 'quantizedGive', 'quantizedWant', 'crossJurisdiction'], `${code}_OFFER`);
@@ -111,10 +123,15 @@ const validateStateMaps = (state: Record<string, unknown>, code: string): void =
     integer(offer['giveAmount'], 1n, FINANCIAL.MAX_PAYMENT_AMOUNT, `${code}_GIVE`);
     integer(offer['wantAmount'], 1n, FINANCIAL.MAX_PAYMENT_AMOUNT, `${code}_WANT`);
     flag(offer['makerIsLeft'], `${code}_MAKER`); uint(offer['createdHeight'], `${code}_OFFER_HEIGHT`);
-    if (offer['priceTicks'] !== undefined) uint256(offer['priceTicks'], `${code}_PRICE`);
-    if (offer['timeInForce'] !== undefined && ![0, 1, 2].includes(Number(offer['timeInForce']))) throw new Error(`${code}_TIF`);
-    if (offer['quantizedGive'] !== undefined) uint256(offer['quantizedGive'], `${code}_QUANT_GIVE`);
-    if (offer['quantizedWant'] !== undefined) uint256(offer['quantizedWant'], `${code}_QUANT_WANT`);
+    if (offer['priceTicks'] !== undefined) integer(offer['priceTicks'], 1n, UINT256_MAX, `${code}_PRICE`);
+    if (offer['timeInForce'] !== undefined) uint(offer['timeInForce'], `${code}_TIF`, 2);
+    if ((offer['quantizedGive'] === undefined) !== (offer['quantizedWant'] === undefined)) throw new Error(`${code}_QUANT_PAIR`);
+    if (offer['quantizedGive'] !== undefined && integer(offer['quantizedGive'], 1n, FINANCIAL.MAX_PAYMENT_AMOUNT, `${code}_QUANT_GIVE`) !== offer['giveAmount']) throw new Error(`${code}_QUANT_GIVE_MISMATCH`);
+    if (offer['quantizedWant'] !== undefined && integer(offer['quantizedWant'], 1n, FINANCIAL.MAX_PAYMENT_AMOUNT, `${code}_QUANT_WANT`) !== offer['wantAmount']) throw new Error(`${code}_QUANT_WANT_MISMATCH`);
+    if (offer['crossJurisdiction'] !== undefined) {
+      const route = validateStoredCrossJurisdictionRoute(offer['crossJurisdiction'], `${code}_OFFER_CROSS_J`);
+      assertStoredCrossJurisdictionOfferBinding(route, offer, pulls, `${code}_OFFER_CROSS_J`);
+    }
   }
   const deltaCount = (state['deltas'] as Map<unknown, unknown>).size;
   for (const [key, raw] of boundedMap(state['subcontracts'] ?? new Map(), 32, `${code}_SUBCONTRACTS`)) {
@@ -208,8 +225,9 @@ const validateReplicaEnvelope = (account: Record<string, unknown>, code: string)
   for (const [key, raw] of boundedMap(rebalance['policy'], LIMITS.MAX_ACCOUNT_TOKEN_ROWS, `${code}_SHADOW_POLICY`)) {
     token(key, `${code}_SHADOW_POLICY_KEY`);
     const policy = shape(raw, ['r2cRequestSoftLimit', 'hardLimit', 'maxAcceptableFee'], ['setByLeft'], `${code}_SHADOW_POLICY_ROW`);
-    uint256(policy['r2cRequestSoftLimit'], `${code}_SHADOW_SOFT`);
-    uint256(policy['hardLimit'], `${code}_SHADOW_HARD`);
+    const softLimit = uint256(policy['r2cRequestSoftLimit'], `${code}_SHADOW_SOFT`);
+    const hardLimit = uint256(policy['hardLimit'], `${code}_SHADOW_HARD`);
+    if (hardLimit < softLimit) throw new Error(`${code}_SHADOW_LIMIT_ORDER`);
     uint256(policy['maxAcceptableFee'], `${code}_SHADOW_MAX_FEE`);
     if (policy['setByLeft'] !== undefined) flag(policy['setByLeft'], `${code}_SHADOW_POLICY_SIDE`);
   }
@@ -226,6 +244,9 @@ const validateReplicaEnvelope = (account: Record<string, unknown>, code: string)
     token(request['tokenId'], `${code}_SHADOW_REQUEST_TOKEN`); uint256(request['targetAmount'], `${code}_SHADOW_REQUEST_AMOUNT`);
   }
   const currentHeight = uint(account['currentHeight'], `${code}_CURRENT_HEIGHT`);
+  validateStoredPendingForwards(account, from, to, `${code}_FORWARDS`);
+  validateStoredActiveDispute(account, uint(requireBoundaryRecord(account['state'], `${code}_STATE`)['jNonce'], `${code}_STATE_J_NONCE`), `${code}_ACTIVE_DISPUTE`);
+  validateStoredPendingAccountInput(account, `${code}_PENDING_INPUT`);
   uint(account['rollbackCount'], `${code}_ROLLBACKS`);
   const current = validateFrame(account['currentFrame'], `${code}_CURRENT_FRAME`);
   if (current.height !== currentHeight) throw new Error(`${code}_CURRENT_FRAME_HEIGHT`);
@@ -234,11 +255,6 @@ const validateReplicaEnvelope = (account: Record<string, unknown>, code: string)
     if (pending.height !== currentHeight + 1) throw new Error(`${code}_PENDING_HEIGHT`);
     const previous = currentHeight === 0 ? 'genesis' : current.stateHash;
     if (pending.prevFrameHash !== previous) throw new Error(`${code}_PENDING_LINK`);
-    const input = requireBoundaryRecord(account['pendingAccountInput'], `${code}_PENDING_INPUT`);
-    const proposal = requireBoundaryRecord(input['proposal'], `${code}_PENDING_PROPOSAL`);
-    const proposed = requireBoundaryRecord(proposal['frame'], `${code}_PENDING_PROPOSAL_FRAME`);
-    boundedArray(proposed['deltas'], LIMITS.MAX_ACCOUNT_TOKEN_ROWS, `${code}_PENDING_PROPOSAL_DELTAS`)
-      .forEach((delta, index) => validateDelta(delta, `${code}_PENDING_PROPOSAL_DELTA_${index}`));
   }
 };
 

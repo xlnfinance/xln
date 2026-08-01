@@ -71,7 +71,7 @@ export const validateDelta = (value: unknown, code: string): Delta => {
   return delta;
 };
 
-const canonicalFrameHash = (frame: AccountFrame): string => computeCanonicalMerkleRoot('account.frame', [
+export const computeStorageAccountFrameHash = (frame: AccountFrame): string => computeCanonicalMerkleRoot('account.frame', [
   ['transition', {
     height: frame.height, timestamp: frame.timestamp, jHeight: frame.jHeight,
     prevFrameHash: frame.prevFrameHash, byLeft: frame.byLeft,
@@ -102,7 +102,7 @@ export const validateFrame = (value: unknown, code: string): AccountFrame => {
   assertAccountFrameDeltaIntegrity(decoded, code);
   if (height === 0) {
     if (frame['stateHash'] !== '') throw new Error(`${code}_GENESIS_HASH`);
-  } else if (bytes(frame['stateHash'], 32, `${code}_HASH`) !== canonicalFrameHash(decoded)) {
+  } else if (bytes(frame['stateHash'], 32, `${code}_HASH`) !== computeStorageAccountFrameHash(decoded)) {
     throw new Error(`${code}_HASH_MISMATCH`);
   }
   return decoded;

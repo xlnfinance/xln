@@ -4,6 +4,10 @@ import { createFrameHash } from '../account/consensus/frame';
 import { computeAccountStateRoot } from '../account/state-root';
 import { clearFinalizedSettlementWorkspace } from '../account/tx/handlers/settle-transition';
 import {
+  buildCrossJurisdictionPullBinding,
+  buildPreparedCrossJurisdictionRoute,
+} from '../extensions/cross-j';
+import {
   assertStorageAccountDocBinding,
   validateStorageAccountDocValue,
   validateStorageDiffRecordValue,
@@ -11,13 +15,62 @@ import {
 import { hydrateAccountDocFromStorage } from '../storage/projections';
 import { safeStringify } from '../protocol/serialization';
 import type { StorageAccountDoc } from '../storage/types';
+import { computeStorageAccountFrameHash } from '../storage/account-doc-validation-primitives';
 import { makeStorageAccountFixture } from './helpers/account-storage-integrity';
+import { jref, makeJurisdiction } from './helpers/cross-j';
 
 const digest = (byte: string): string => `0x${byte.repeat(32)}`;
 const object = (value: unknown): Record<string, unknown> => value as Record<string, unknown>;
 
 type ValidationContext = { doc: StorageAccountDoc; owner: string; counterparty: string };
 type Mutation = readonly [string, (value: ValidationContext) => void | Promise<void>];
+
+const installOffer = (doc: StorageAccountDoc, overrides: Record<string, unknown> = {}): void => {
+  doc.state.swapOffers.set('storage-offer', {
+    offerId: 'storage-offer', giveTokenId: 1, giveAmount: 4n,
+    wantTokenId: 2, wantAmount: 3n, makerIsLeft: true, createdHeight: 1,
+    priceTicks: 2n, quantizedGive: 4n, quantizedWant: 3n,
+    ...overrides,
+  });
+};
+
+const installPendingProposal = async (value: ValidationContext): Promise<void> => {
+  const pending = {
+    ...value.doc.currentFrame, height: 2, timestamp: 1_001,
+    prevFrameHash: value.doc.currentFrame.stateHash, stateHash: '', byLeft: true,
+  };
+  pending.stateHash = await createFrameHash(pending);
+  value.doc.pendingFrame = pending;
+  value.doc.pendingAccountInput = {
+    kind: 'frame', fromEntityId: value.owner, toEntityId: value.counterparty,
+    domain: value.doc.state.domain, proposal: { frame: structuredClone(pending) },
+  };
+};
+
+const installCrossJurisdictionOffer = (value: ValidationContext): Record<string, unknown> => {
+  const source = makeJurisdiction('storage-source', 1, '31', '32');
+  const target = makeJurisdiction('storage-target', 8_453, '41', '42');
+  const prepared = buildPreparedCrossJurisdictionRoute({
+    orderId: 'storage-cross-j', makerEntityId: value.owner, hubEntityId: value.counterparty,
+    source: { jurisdiction: jref(source), entityId: value.owner, counterpartyEntityId: value.counterparty, tokenId: 1, amount: 4n },
+    target: { jurisdiction: jref(target), entityId: digest('33'), counterpartyEntityId: digest('44'), tokenId: 2, amount: 3n },
+    priceTicks: 2n, status: 'intent', createdAt: 1_000, updatedAt: 1_000, expiresAt: 61_000,
+  }, { runtimeSeed: 'storage-cross-j-fixture', sourceDisputeDelayMs: 10_000, now: 1_000 });
+  const route = { ...prepared, status: 'resting' as const, updatedAt: 1_001 };
+  const sourcePull = route.sourcePull!;
+  value.doc.state.pulls = new Map([[sourcePull.pullId, {
+    pullId: sourcePull.pullId, tokenId: sourcePull.tokenId, amount: sourcePull.signedAmount,
+    revealedUntilTimestamp: sourcePull.revealedUntilTimestamp, fullHash: sourcePull.fullHash,
+    partialRoot: sourcePull.partialRoot, createdHeight: 1, createdTimestamp: 1_000,
+    crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+  }]]);
+  value.doc.state.swapOffers.set(route.orderId, {
+    offerId: route.orderId, giveTokenId: 1, giveAmount: 4n, wantTokenId: 2,
+    wantAmount: 3n, makerIsLeft: true, createdHeight: 1, priceTicks: 2n,
+    quantizedGive: 4n, quantizedWant: 3n, crossJurisdiction: route,
+  });
+  return object(route);
+};
 
 const mutations: Mutation[] = [
   ['third-party proof owner', ({ doc }) => { doc.proofHeader.fromEntity = digest('91'); }],
@@ -44,6 +97,42 @@ const mutations: Mutation[] = [
   ['malformed account state root', ({ doc }) => { doc.currentFrame.accountStateRoot = '0x1234'; }],
   ['non-canonical workspace hash', ({ doc }) => { object(doc.state.settlementWorkspace)['memo'] = 'tampered'; }],
   ['zero workspace revision', ({ doc }) => { object(doc.state.settlementWorkspace)['revision'] = 0; }],
+  ['negative pending forward amount', value => { value.doc.pendingForwards = [{ tokenId: 1, amount: -1n, route: [value.owner, digest('33')] }]; }],
+  ['pending forward without a next hop', value => { value.doc.pendingForwards = [{ tokenId: 1, amount: 1n, route: [value.owner] }]; }],
+  ['pending forward ghost field', value => { value.doc.pendingForwards = [{ tokenId: 1, amount: 1n, route: [value.owner, digest('33')], ghost: true } as never]; }],
+  ['local dispute with an on-chain timeout', ({ doc }) => {
+    doc.status = 'disputed'; doc.activeDispute = {
+      startedByLeft: true, initialProofbodyHash: digest('a1'), initialNonce: 1,
+      disputeTimeout: 1, jNonce: 0, starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x', observedOnChain: false,
+    };
+  }],
+  ['active dispute ghost field', ({ doc }) => {
+    doc.status = 'disputed'; doc.activeDispute = {
+      startedByLeft: true, initialProofbodyHash: digest('a1'), initialNonce: 1,
+      disputeTimeout: 0, jNonce: 0, starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x', ghost: true,
+    } as never;
+  }],
+  ['string time-in-force', ({ doc }) => { installOffer(doc, { timeInForce: '1' }); }],
+  ['zero price ticks', ({ doc }) => { installOffer(doc, { priceTicks: 0n }); }],
+  ['zero quantized amount', ({ doc }) => { installOffer(doc, { quantizedGive: 0n }); }],
+  ['shadow hard limit below soft limit', ({ doc }) => {
+    doc.shadow.rebalance.policy.set(1, { r2cRequestSoftLimit: 2n, hardLimit: 1n, maxAcceptableFee: 0n });
+  }],
+  ['pending input ghost field', async value => {
+    await installPendingProposal(value); object(value.doc.pendingAccountInput)['ghost'] = true;
+  }],
+  ['cross-j route ghost field', value => { installCrossJurisdictionOffer(value)['ghost'] = true; }],
+  ['cross-j source leg ghost field', value => {
+    object(installCrossJurisdictionOffer(value)['source'])['ghost'] = true;
+  }],
+  ['cross-j pull binding ghost field', value => {
+    const route = installCrossJurisdictionOffer(value);
+    const pull = value.doc.state.pulls!.get(String(object(route['sourcePull'])['pullId']))!;
+    object(pull.crossJurisdiction)['ghost'] = true;
+  }],
+  ['cross-j route hash mismatch', value => { installCrossJurisdictionOffer(value)['routeHash'] = digest('ff'); }],
 ];
 
 const validate = (value: ValidationContext): StorageAccountDoc =>
@@ -57,6 +146,28 @@ describe('persisted AccountReplica semantic boundary', () => {
     clearFinalizedSettlementWorkspace(restored);
     expect(restored.state.settlementWorkspace).toBeUndefined();
     expect(restored.state.deltas.get(1)?.leftHold).toBe(0n);
+  });
+
+  test('accepts exact forward, dispute, pending-input, and cross-j persisted shapes', async () => {
+    const forward = await makeStorageAccountFixture();
+    forward.doc.pendingForwards = [{ tokenId: 1, amount: 1n, route: [forward.owner, digest('33')] }];
+    expect(validate(forward)).toBe(forward.doc);
+
+    const dispute = await makeStorageAccountFixture();
+    dispute.doc.status = 'disputed'; dispute.doc.activeDispute = {
+      startedByLeft: true, initialProofbodyHash: digest('a1'), initialNonce: 1,
+      disputeTimeout: 0, jNonce: 0, starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x', observedOnChain: false, finalizeQueued: false,
+    };
+    expect(validate(dispute)).toBe(dispute.doc);
+
+    const pending = await makeStorageAccountFixture();
+    await installPendingProposal(pending);
+    expect(validate(pending)).toBe(pending.doc);
+
+    const crossJurisdiction = await makeStorageAccountFixture();
+    installCrossJurisdictionOffer(crossJurisdiction);
+    expect(validate(crossJurisdiction)).toBe(crossJurisdiction.doc);
   });
 
   for (const [name, mutate] of mutations) {
@@ -124,10 +235,16 @@ describe('persisted AccountReplica semantic boundary', () => {
     expect(validate(fixture)).toBe(fixture.doc);
   });
 
-  test('accepts a self-consistent frame rewrite for signed recovery verification', async () => {
+  test('accepts a storage-self-consistent frame root without claiming signature authority', async () => {
     const fixture = await makeStorageAccountFixture();
     fixture.doc.currentFrame.accountStateRoot = digest('94');
     fixture.doc.currentFrame.stateHash = await createFrameHash(fixture.doc.currentFrame);
     expect(validate(fixture)).toBe(fixture.doc);
+  });
+
+  test('storage frame hashing stays equivalent to the canonical Account helper', async () => {
+    const fixture = await makeStorageAccountFixture();
+    expect(computeStorageAccountFrameHash(fixture.doc.currentFrame))
+      .toBe(await createFrameHash(fixture.doc.currentFrame));
   });
 });
