@@ -41,6 +41,7 @@ import {
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveRuntimeBundle, serveStatic } from '../api/server/static-assets';
+import { enforceFaucetPolicy } from '../api/server/faucet-policy';
 import { handleWatchtowerProxy } from '../api/server/watchtower-proxy';
 import {
   createAssistantProxyFromEnv,
@@ -2725,6 +2726,9 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers });
     }
+
+    const faucetPolicyResponse = await enforceFaucetPolicy(request, operatorAuthorized, process.env, headers);
+    if (faucetPolicyResponse) return faucetPolicyResponse;
 
     const directClientIp = resolveAssistantDirectClientIp(serverRef, request);
     const assistantClientId = resolveAssistantRateClientId(request, directClientIp);

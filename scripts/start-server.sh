@@ -25,6 +25,10 @@ export INTERNAL_RELAY_URL=${INTERNAL_RELAY_URL:-ws://127.0.0.1:${API_PORT}/relay
 export PUBLIC_RELAY_URL=${PUBLIC_RELAY_URL:-wss://xln.finance/relay}
 export PUBLIC_WS_BASE_URL=${PUBLIC_WS_BASE_URL:-wss://xln.finance}
 export RELAY_URL=${RELAY_URL:-$INTERNAL_RELAY_URL}
+# The managed xln.finance stack is an explicit public testnet faucet deployment.
+export XLN_PUBLIC_FAUCET=${XLN_PUBLIC_FAUCET:-1}
+export XLN_FAUCET_MAX_AMOUNT=${XLN_FAUCET_MAX_AMOUNT:-100}
+export XLN_FAUCET_MAX_GAS_AMOUNT=${XLN_FAUCET_MAX_GAS_AMOUNT:-0.1}
 XLN_RUNTIME_SEED_FILE=${XLN_RUNTIME_SEED_FILE:-$RDB_ROOT/secrets/main-runtime.seed}
 export XLN_RUNTIME_SEED=${XLN_RUNTIME_SEED:-$(xln_read_or_create_operator_seed "$XLN_RUNTIME_SEED_FILE")}
 XLN_MESH_ROOT_SEED_FILE=${XLN_MESH_ROOT_SEED_FILE:-$RDB_ROOT/secrets/mesh-root.seed}

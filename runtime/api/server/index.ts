@@ -55,6 +55,7 @@ import { buildMarketSnapshotForReplica, type MarketSnapshotPayload } from '../..
 import { createMarketSubscriptionStack } from '../../network/relay/market-subscriptions';
 import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../../network/relay/market-wire';
 import { JSON_HEADERS, getErrorMessage, resolveRequiredAnvilRpc } from './utils';
+import { enforceFaucetPolicy } from './faucet-policy';
 import { ethers } from 'ethers';
 import {
   attachRuntimeAdapterTicker,
@@ -786,6 +787,8 @@ const handleApiAgainstCommittedState = async (
   if (discoveryResponse) return discoveryResponse;
   const debugResponse = await maybeHandleDebugApi(req, pathname, env, headers, operatorAuthorized);
   if (debugResponse) return debugResponse;
+  const faucetPolicyResponse = await enforceFaucetPolicy(req, operatorAuthorized, process.env, headers);
+  if (faucetPolicyResponse) return faucetPolicyResponse;
   const financialResponse = maybeHandleFinancialApi(req, pathname, env, headers);
   if (financialResponse) return financialResponse;
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
