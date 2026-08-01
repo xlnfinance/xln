@@ -2,12 +2,17 @@ import { expect, test } from 'bun:test';
 
 import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/spec';
 import {
+  createPaymentTerminalMonitor,
+  PAYMENT_TERMINAL_EVENT_NAMES,
+} from '../../frontend/src/lib/stores/paymentTerminalMonitor';
+import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,
   encodeRuntimeAdapterMessage,
 } from '../api/runtime-adapter/codec';
 import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
 import { signRuntimeAdapterServerIdentity } from '../api/runtime-adapter/server-identity-signer';
+import type { RuntimeAdapterFrameReceipt, RuntimeAdapterFrameReceiptResponse } from '../api/runtime-adapter/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 
@@ -17,15 +22,51 @@ const decodeTestRuntimeAdapterMessage = <T>(raw: unknown): T =>
     : decodeRuntimeAdapterMessage(raw)) as unknown as T;
 
 const identityEnv = { runtimeSeed: 'seed' } as RuntimeReplica;
+const ENTITY_A = `0x${'aa'.repeat(32)}`;
+const ENTITY_B = `0x${'bb'.repeat(32)}`;
+type TestSocket = {
+  onmessage: ((event: { data: unknown }) => void) | null;
+  onclose: (() => void) | null;
+};
 
-test('remote runtime adapter clears authority before reconnect authentication', async () => {
+const terminalReceipt = (
+  height: number,
+  message: 'HtlcFinalized' | 'HtlcReceived' | 'HtlcFailed',
+  entityIds = [ENTITY_A],
+): RuntimeAdapterFrameReceipt => ({
+  height,
+  timestamp: height,
+  logs: entityIds.map((entityId, id) => ({
+    id, timestamp: height, level: 'info', category: 'payment', message, entityId,
+    data: { entityId },
+  })),
+});
+
+const pushTick = (
+  socket: TestSocket | null,
+  height: number,
+  commandReady = true,
+  commandReadyReason: string | null = null,
+): void => socket?.onmessage?.({ data: encodeRuntimeAdapterMessage({
+  v: 1, op: 'tick', height, commandReady, commandReadyReason,
+}) });
+
+const waitFor = async (predicate: () => boolean): Promise<void> => {
+  for (let attempt = 0; attempt < 1_000; attempt += 1) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 2));
+  }
+  throw new Error('TEST_ASYNC_CONDITION_TIMEOUT');
+};
+
+test('remote adapter refreshes authority and catches up durable payments across reconnect', async () => {
   const previousWebSocket = globalThis.WebSocket;
-  let socket: {
-    onmessage: ((event: { data: unknown }) => void) | null;
-    onclose: (() => void) | null;
-  } | null = null;
+  let socket: TestSocket | null = null;
   let transportSendCount = 0;
   let deferCloseEvent = false;
+  let serverHeight = 10;
+  const serverReceipts = new Map<number, RuntimeAdapterFrameReceipt>();
+  const receiptReadRanges: Array<[number, number]> = [];
 
   class DelayedAuthWebSocket {
     static readonly OPEN = 1;
@@ -47,27 +88,38 @@ test('remote runtime adapter clears authority before reconnect authentication', 
 
     send(raw: unknown): void {
       transportSendCount += 1;
-      const request = decodeTestRuntimeAdapterMessage<{ id: string; op: string; challenge?: string }>(raw);
+      const request = decodeTestRuntimeAdapterMessage<{
+        id: string;
+        op: string;
+        challenge?: string;
+        query?: { fromHeight?: number; toHeight?: number };
+      }>(raw);
+      if (request.op === 'read') {
+        const fromHeight = Number(request.query?.fromHeight);
+        const toHeight = Number(request.query?.toHeight);
+        const receipts = [...serverReceipts.values()]
+          .filter(receipt => receipt.height >= fromHeight && receipt.height <= toHeight);
+        receiptReadRanges.push([fromHeight, toHeight]);
+        this.respond(request.id, { fromHeight, toHeight, returned: receipts.length, receipts });
+        return;
+      }
       if (request.op !== 'auth') return;
       const identity = signRuntimeAdapterServerIdentity(identityEnv, request.challenge || '');
-      setTimeout(() => {
-        this.onmessage?.({
-          data: encodeRuntimeAdapterMessage({
-            v: 1,
-            inReplyTo: request.id,
-            ok: true,
-            payload: {
-              authLevel: 'admin',
-              commandLaneKind: 'capability',
-              currentHeight: 10,
-              nextCommandSequence: 1,
-              commandReady: true,
-              commandReadyReason: null,
-              ...identity,
-            },
-          }),
-        });
+      this.respond(request.id, {
+        authLevel: 'admin',
+        commandLaneKind: 'capability',
+        currentHeight: serverHeight,
+        nextCommandSequence: 1,
+        commandReady: true,
+        commandReadyReason: null,
+        ...identity,
       }, 25);
+    }
+
+    private respond(inReplyTo: string, payload: unknown, delay = 0): void {
+      setTimeout(() => this.onmessage?.({ data: encodeRuntimeAdapterMessage({
+        v: 1, inReplyTo, ok: true, payload,
+      }) }), delay);
     }
 
     close(): void {
@@ -104,15 +156,7 @@ test('remote runtime adapter clears authority before reconnect authentication', 
     expect(adapter.commandReady).toBe(true);
     expect(adapter.commandReadyReason).toBe(null);
 
-    socket?.onmessage?.({
-      data: encodeRuntimeAdapterMessage({
-        v: 1,
-        op: 'tick',
-        height: 2,
-        commandReady: false,
-        commandReadyReason: 'phase=halted',
-      }),
-    });
+    pushTick(socket, 2, false, 'phase=halted');
     expect(adapter.currentHeight).toBe(2);
     expect(adapter.commandReady).toBe(false);
     expect(adapter.commandReadyReason).toBe('phase=halted');
@@ -143,10 +187,7 @@ test('remote runtime adapter clears authority before reconnect authentication', 
     await expect(adapter.revealBrainVaultMnemonic()).rejects.toThrow('fresh admin auth');
     expect(transportSendCount).toBe(sendsBeforeSecretRequests);
 
-    const reconnectDeadline = Date.now() + 2_000;
-    while (socket === firstSocket && Date.now() < reconnectDeadline) {
-      await new Promise(resolve => setTimeout(resolve, 2));
-    }
+    await waitFor(() => socket !== firstSocket);
     expect(socket).not.toBe(firstSocket);
     expect(adapter.status).toBe('connecting');
     expect(adapter.authLevel).toBe(null);
@@ -154,25 +195,68 @@ test('remote runtime adapter clears authority before reconnect authentication', 
     await expect(adapter.revealBrainVaultMnemonic()).rejects.toThrow('fresh admin auth');
     expect(transportSendCount).toBe(sendsWhileReauthPending);
 
-    const reauthDeadline = Date.now() + 1_000;
-    while (adapter.status !== 'connected' && Date.now() < reauthDeadline) {
-      await new Promise(resolve => setTimeout(resolve, 2));
-    }
+    await waitFor(() => adapter.status === 'connected');
     expect(adapter.status).toBe('connected');
     expect(adapter.authLevel).toBe('admin');
-    firstSocket?.onmessage?.({
-      data: encodeRuntimeAdapterMessage({
-        v: 1,
-        op: 'tick',
-        height: 999,
-        commandReady: true,
-        commandReadyReason: null,
-      }),
-    });
+    pushTick(firstSocket, 999);
     firstSocket?.onclose?.();
     expect(adapter.status).toBe('connected');
     expect(adapter.currentHeight).toBe(10);
     expect(adapter.authLevel).toBe('admin');
+
+    const terminalEvents: Array<[number, string]> = [];
+    const createMonitor = () => createPaymentTerminalMonitor({
+      readPage: ({ fromHeight, toHeight, entityId }) =>
+        adapter.read<RuntimeAdapterFrameReceiptResponse>('frame-receipts', {
+          fromHeight,
+          toHeight,
+          limit: 500,
+          entityId,
+          eventNames: [...PAYMENT_TERMINAL_EVENT_NAMES],
+        }).then(page => ({ scannedThroughHeight: page.toHeight, receipts: page.receipts })),
+      onEvent: event => terminalEvents.push([event.height, event.name]),
+      onError: error => { throw error; },
+    });
+    let monitor = createMonitor();
+    const syncMonitor = () => monitor.observe({
+      runtimeId: adapter.runtimeId,
+      entityId: ENTITY_A,
+      height: adapter.currentHeight,
+      connected: adapter.status === 'connected',
+    });
+    const stopMonitorSync = [adapter.onStatus(syncMonitor), adapter.onChange(syncMonitor)];
+    syncMonitor();
+    expect(receiptReadRanges).toHaveLength(0);
+
+    serverReceipts.set(11, terminalReceipt(11, 'HtlcFinalized', [ENTITY_A, ENTITY_B]));
+    serverHeight = 11;
+    pushTick(socket, serverHeight);
+    await waitFor(() => terminalEvents.length === 1);
+    expect(terminalEvents).toEqual([[11, 'HtlcFinalized']]);
+
+    for (const [height, message] of [[12, 'HtlcReceived'], [13, 'HtlcFailed']] as const) {
+      serverReceipts.set(height, terminalReceipt(height, message));
+    }
+    serverHeight = 13;
+    const socketBeforePaymentGap = socket;
+    socketBeforePaymentGap?.onclose?.();
+    await waitFor(() => adapter.status === 'connected' && socket !== socketBeforePaymentGap);
+    await waitFor(() => terminalEvents.length === 3);
+    expect(receiptReadRanges).toEqual([[11, 11], [12, 13]]);
+    expect(terminalEvents.map(([height]) => height)).toEqual([11, 12, 13]);
+
+    monitor.stop();
+    monitor = createMonitor();
+    syncMonitor();
+    expect(receiptReadRanges).toHaveLength(2);
+    serverReceipts.set(14, terminalReceipt(14, 'HtlcFinalized'));
+    serverHeight = 14;
+    pushTick(socket, serverHeight);
+    await waitFor(() => terminalEvents.length === 4);
+    expect(receiptReadRanges).toEqual([[11, 11], [12, 13], [14, 14]]);
+    expect(terminalEvents.at(-1)?.[0]).toBe(14);
+    monitor.stop();
+    stopMonitorSync.forEach(stop => stop());
 
     deferCloseEvent = true;
     socket?.onmessage?.({ data: 'malformed-server-message' });
