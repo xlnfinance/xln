@@ -147,6 +147,13 @@ test.describe('E2E HTLC Payment Flow', () => {
     expect(Number(finalizedEvent.data?.finalizedAtMs || 0), 'sender finalized event should include finalizedAtMs').toBeGreaterThan(0);
     expect(Number(finalizedEvent.data?.elapsedMs || 0), 'sender finalized event should include elapsedMs').toBeGreaterThan(0);
     expect(Number(finalizedEvent.data?.finalizedInMs || 0), 'sender finalized event should include finalizedInMs').toBeGreaterThan(0);
+    const terminalSpotlight = page.locator('.receipt-card');
+    await expect(terminalSpotlight).toBeVisible({ timeout: 10_000 });
+    await expect(terminalSpotlight.locator('.receipt-kicker')).toHaveText('Payment Sent');
+    await expect(terminalSpotlight.locator('.receipt-amount')).toContainText('25');
+    await expect(terminalSpotlight.locator('.receipt-title')).toContainText('Paid');
+    await page.screenshot({ path: 'test-results/e2e-payment-terminal.png', fullPage: true });
+    await terminalSpotlight.getByRole('button', { name: 'Done' }).click();
     let outboundAfterPayment = outboundBeforePayment;
     await timedStep('payment.send_to_ui_delta', async () => {
       await expect.poll(async () => {
@@ -182,6 +189,9 @@ test.describe('E2E HTLC Payment Flow', () => {
       async () => (await getPersistedReceiptCursor(page)).nextHeight - 1,
       { timeout: 60_000 },
     ).toBeGreaterThanOrEqual(persistedHeightBeforeReload);
+    await expect(page.locator('.receipt-card')).toHaveCount(0);
+    await page.waitForTimeout(750);
+    await expect(page.locator('.receipt-card')).toHaveCount(0);
     process.stdout.write(
       `  Reload state verified: persistedHeight>=${persistedHeightBeforeReload}, renderedOut=${outboundAfterPayment}\n`,
     );

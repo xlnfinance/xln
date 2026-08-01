@@ -4,6 +4,7 @@
   import { formatUnits } from 'ethers';
   import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
   import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
+  import type { RuntimeAdapterFrameReceiptResponse } from '@xln/runtime/api/runtime-adapter/types';
   import type { EnvSnapshot } from '@xln/runtime/runtime/types';
   import { toasts } from '$lib/stores/toastStore';
   import { paymentSpotlight } from '$lib/stores/paymentSpotlightStore';
@@ -21,12 +22,20 @@
   import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore';
   import {
     onRuntimeControllerStatus,
+    runtimeAdapter,
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
   import { activeRuntimeId } from '$lib/stores/runtimeStore';
   import { refreshSelectedRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
   import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { isLocalDebugSurfaceAllowed, registerDebugSurface } from '$lib/utils/debugSurface';
+  import {
+    createPaymentTerminalMonitor,
+    PAYMENT_TERMINAL_EVENT_NAMES,
+    type PaymentTerminalEvent,
+    type PaymentTerminalReadRequest,
+    type PaymentTerminalReceiptPage,
+  } from '$lib/stores/paymentTerminalMonitor';
 
   let commandPaletteOpen = false;
   let commandPaletteView: CommandPaletteView = emptyCommandPaletteView();
@@ -78,8 +87,6 @@
   const RUNTIME_VIEW_REFRESH_MIN_INTERVAL_MS = 250;
   const lastSeenFrameLogIdByRuntime = new Map<string, number>();
   const lastToastAtByKey = new Map<string, number>();
-  const PAYMENT_SPOTLIGHT_COOLDOWN_MS = 60000;
-  const lastPaymentSpotlightAtByKey = new Map<string, number>();
   const normalizeRuntimeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
   const runtimeEnvMatchesActiveSelection = (env: RuntimeReplica | null): boolean => {
@@ -172,6 +179,76 @@
     )} ${token.symbol}`;
   };
 
+  const readEmbeddedPaymentReceipts = async (
+    request: PaymentTerminalReadRequest,
+  ): Promise<PaymentTerminalReceiptPage> => {
+    const rawEnv = getEnv();
+    const env = rawEnv ? (unwrapLiveRuntimeEnv(rawEnv) ?? rawEnv) : null;
+    if (!env) throw new Error('PAYMENT_TERMINAL_EMBEDDED_ENV_UNAVAILABLE');
+    if (normalizeRuntimeId(env.runtimeId) !== request.runtimeId) {
+      throw new Error(`PAYMENT_TERMINAL_RUNTIME_MISMATCH:${request.runtimeId}`);
+    }
+    const xln = get(xlnInstance);
+    if (!xln) throw new Error('PAYMENT_TERMINAL_RUNTIME_API_UNAVAILABLE');
+    const journals = await xln.readPersistedFrameJournals(env, {
+      fromHeight: request.fromHeight,
+      toHeight: request.toHeight,
+      limit: 500,
+    });
+    const byHeight = new Map(journals.map((journal) => [journal.height, journal]));
+    const receipts = [];
+    let scannedThroughHeight = request.fromHeight - 1;
+    for (let height = request.fromHeight; height <= request.toHeight; height += 1) {
+      const journal = byHeight.get(height);
+      if (!journal) break;
+      receipts.push({ height, logs: journal.logs ?? [] });
+      scannedThroughHeight = height;
+    }
+    return { scannedThroughHeight, receipts };
+  };
+
+  const readPaymentTerminalReceipts = async (
+    request: PaymentTerminalReadRequest,
+  ): Promise<PaymentTerminalReceiptPage> => {
+    const handle = get(runtimeControllerHandle);
+    const adapter = get(runtimeAdapter);
+    if (!adapter || handle.status !== 'connected') {
+      throw new Error('PAYMENT_TERMINAL_ADAPTER_DISCONNECTED');
+    }
+    if (normalizeRuntimeId(handle.runtimeId) !== request.runtimeId) {
+      throw new Error(`PAYMENT_TERMINAL_ADAPTER_MISMATCH:${request.runtimeId}`);
+    }
+    if (handle.mode === 'embedded') return readEmbeddedPaymentReceipts(request);
+    const response = await adapter.read<RuntimeAdapterFrameReceiptResponse>('frame-receipts', {
+      fromHeight: request.fromHeight,
+      toHeight: request.toHeight,
+      limit: 500,
+      entityId: request.entityId,
+      eventNames: [...PAYMENT_TERMINAL_EVENT_NAMES],
+    });
+    return { scannedThroughHeight: response.toHeight, receipts: response.receipts };
+  };
+
+  const surfacePaymentTerminalEvent = (event: PaymentTerminalEvent): void => {
+    if (event.name === 'HtlcFailed') {
+      const reason = String(event.data['reason'] || event.data['error'] || '').trim();
+      toasts.error(reason ? `Payment failed: ${reason}` : 'Payment failed', 9000);
+      return;
+    }
+    const isSender = event.name === 'HtlcFinalized';
+    const elapsedMsRaw = Number(event.data['finalizedInMs'] ?? event.data['elapsedMs'] ?? 0);
+    const elapsedMs = Number.isFinite(elapsedMsRaw) && elapsedMsRaw > 0
+      ? Math.max(1, Math.floor(elapsedMsRaw))
+      : null;
+    paymentSpotlight.show({
+      kicker: isSender ? 'Payment Sent' : 'Payment Received',
+      title: elapsedMs ? `${isSender ? 'Paid' : 'Received'} in ${elapsedMs}ms` : (isSender ? 'Paid' : 'Received'),
+      amountLine: formatSpotlightAmount(event.data['tokenId'], event.data['amount']),
+      ...(String(event.data['description'] || '').trim() ? { detail: String(event.data['description'] || '').trim() } : {}),
+      duration: 4200,
+    });
+  };
+
   const shouldSurfaceLogAsToast = (entry: RuntimeLogEntry): boolean => {
     const level = String(entry?.level || '').toLowerCase();
     const message = String(entry?.message || '').toLowerCase();
@@ -194,7 +271,6 @@
     if (!env?.frameLogs || !Array.isArray(env.frameLogs)) return;
     const runtimeKey = String(env.runtimeId || 'unknown');
     const lastSeen = lastSeenFrameLogIdByRuntime.get(runtimeKey) ?? -1;
-    const isInitialPass = lastSeen < 0;
     let newLastSeen = lastSeen;
 
     for (const entry of env.frameLogs as RuntimeLogEntry[]) {
@@ -202,27 +278,6 @@
       if (!Number.isFinite(id) || id <= lastSeen) continue;
       if (id > newLastSeen) newLastSeen = id;
       const message = String(entry?.message || '').trim();
-      const entryData = entry?.data || {};
-
-      if (!isInitialPass && (message === 'HtlcReceived' || message === 'HtlcFinalized')) {
-        const hashlock = String(entryData['hashlock'] || id);
-        const dedupeKey = `${runtimeKey}:${message}:${hashlock}`;
-        const now = Date.now();
-        const lastShownAt = lastPaymentSpotlightAtByKey.get(dedupeKey) ?? 0;
-        if (now - lastShownAt >= PAYMENT_SPOTLIGHT_COOLDOWN_MS) {
-          const isSender = message === 'HtlcFinalized';
-          const elapsedMsRaw = Number(entryData['finalizedInMs'] ?? entryData['elapsedMs'] ?? 0);
-          const elapsedMs = Number.isFinite(elapsedMsRaw) && elapsedMsRaw > 0 ? Math.max(1, Math.floor(elapsedMsRaw)) : null;
-          lastPaymentSpotlightAtByKey.set(dedupeKey, now);
-          paymentSpotlight.show({
-            kicker: isSender ? 'Payment Sent' : 'Payment Received',
-            title: elapsedMs ? `${isSender ? 'Paid' : 'Received'} in ${elapsedMs}ms` : (isSender ? 'Paid' : 'Received'),
-            amountLine: formatSpotlightAmount(entryData['tokenId'], entryData['amount']),
-            ...(String(entryData['description'] || '').trim() ? { detail: String(entryData['description'] || '').trim() } : {}),
-            duration: 4200,
-          });
-        }
-      }
 
       if (!shouldSurfaceLogAsToast(entry)) continue;
 
@@ -262,6 +317,9 @@
   let unsubRuntimeViewPalette: (() => void) | null = null;
   let publishedRuntimeKey: string | null = null;
   let unregisterRuntimeStatus: (() => void) | null = null;
+  let paymentTerminalMonitor: ReturnType<typeof createPaymentTerminalMonitor> | null = null;
+  let unsubPaymentTerminalHandle: (() => void) | null = null;
+  let unsubPaymentTerminalView: (() => void) | null = null;
   let runtimeViewRefreshPromise: Promise<unknown> | null = null;
   let runtimeViewRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let runtimeViewRefreshQueued = false;
@@ -272,6 +330,22 @@
     const message = error instanceof Error ? error.message : String(error || 'RuntimeView error');
     errorLog.log('RuntimeView projection failed', 'Runtime View', error);
     toasts.error(`Runtime view failed: ${message}`, 9000);
+  };
+
+  const surfacePaymentTerminalError = (error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error || 'Payment status error');
+    errorLog.log('Durable payment status failed', 'Payment Terminal', error);
+    toasts.error(`Payment status unavailable: ${message}`, 9000);
+  };
+
+  const syncPaymentTerminalObservation = (): void => {
+    const handle = get(runtimeControllerHandle);
+    paymentTerminalMonitor?.observe({
+      runtimeId: handle.runtimeId,
+      entityId: get(runtimeView).activeEntityId,
+      height: handle.height,
+      connected: handle.status === 'connected',
+    });
   };
 
   const refreshCurrentRuntimeView = (immediate = false): Promise<unknown> => {
@@ -321,6 +395,14 @@
     void scenarioId;
     try {
       xlnInstance.set(await getXLN());
+
+      paymentTerminalMonitor = createPaymentTerminalMonitor({
+        readPage: readPaymentTerminalReceipts,
+        onEvent: surfacePaymentTerminalEvent,
+        onError: surfacePaymentTerminalError,
+      });
+      unsubPaymentTerminalHandle = runtimeControllerHandle.subscribe(syncPaymentTerminalObservation);
+      unsubPaymentTerminalView = runtimeView.subscribe(syncPaymentTerminalObservation);
 
       unsubRuntimeHistory = runtimeHistory.subscribe((frames) => {
         if (!publishedRuntimeKey) {
@@ -374,10 +456,12 @@
     unsubRuntimeHistory?.();
     unsubRuntimeViewPalette?.();
     unregisterRuntimeStatus?.();
+    unsubPaymentTerminalHandle?.();
+    unsubPaymentTerminalView?.();
+    paymentTerminalMonitor?.stop();
     if (runtimeViewRefreshTimer) clearTimeout(runtimeViewRefreshTimer);
     lastSeenFrameLogIdByRuntime.clear();
     lastToastAtByKey.clear();
-    lastPaymentSpotlightAtByKey.clear();
   });
 </script>
 
