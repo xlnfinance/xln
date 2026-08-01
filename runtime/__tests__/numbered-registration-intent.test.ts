@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { ethers } from 'ethers';
 
 import { getSignerPrivateKey } from '../account/crypto';
@@ -7,6 +7,7 @@ import {
   buildNumberedRegistrationRequest,
   getNumberedRegistrationRecord,
   prepareNumberedRegistrationIntent,
+  runNumberedRegistrationIntent,
   submitNumberedRegistrationIntent,
 } from '../runtime/registration/numbered-registration-intent';
 import { createJAdapter } from '../jurisdiction/adapter';
@@ -106,7 +107,44 @@ describe('durable numbered registration intent', () => {
         submitted,
       );
       await commitRuntimeInput(restored, { runtimeTxs: completionTxs, entityInputs: [] });
-      expect(getNumberedRegistrationRecord(restored, request.intentId)?.status).toBe('completed');
+      const completed = getNumberedRegistrationRecord(restored, request.intentId);
+      if (!completed || completed.status !== 'completed') {
+        throw new Error('REGISTRATION_INTENT_COMPLETION_MISSING');
+      }
+      expect(restored.state.eReplicas.size).toBe(1);
+
+      const effects = {
+        commit: async (): Promise<void> => {
+          throw new Error('COMPLETED_REGISTRATION_MUST_NOT_COMMIT');
+        },
+        drain: async (): Promise<void> => {
+          throw new Error('COMPLETED_REGISTRATION_MUST_NOT_DRAIN');
+        },
+      };
+      const broadcast = spyOn(adapter.provider, 'broadcastTransaction');
+      const commit = spyOn(effects, 'commit');
+      const drain = spyOn(effects, 'drain');
+      const retried = await runNumberedRegistrationIntent(restored, adapter, request, commit, drain);
+      const replica = [...restored.state.eReplicas.values()][0]!;
+      expect(retried).toEqual([{
+        config: replica.state.config,
+        entityNumber: completed.results[0]!.entityNumber,
+        entityId: completed.results[0]!.entityId,
+      }]);
+      expect([broadcast.mock.calls.length, commit.mock.calls.length, drain.mock.calls.length]).toEqual([0, 0, 0]);
+      expect(await adapter.entityProvider.nextNumber()).toBe(3n);
+      expect(restored.state.eReplicas.size).toBe(1);
+
+      const changed = buildNumberedRegistrationRequest(restored, {
+        intentId: request.intentId,
+        jurisdiction,
+        payerSignerId: request.payerSignerId,
+        entities: [{ name: 'changed', validators: [proposer], threshold: 1n }],
+      });
+      await expect(runNumberedRegistrationIntent(restored, adapter, changed, commit, drain))
+        .rejects.toThrow('NUMBERED_REGISTRATION_INTENT_PAYLOAD_CONFLICT');
+      expect([broadcast.mock.calls.length, commit.mock.calls.length, drain.mock.calls.length]).toEqual([0, 0, 0]);
+      expect(await adapter.entityProvider.nextNumber()).toBe(3n);
       expect(restored.state.eReplicas.size).toBe(1);
     } finally {
       await adapter.close();
