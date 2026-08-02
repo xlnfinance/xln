@@ -11,9 +11,11 @@ describe('processBatch transformer gas floor', () => {
     expect(applyProcessBatchGasFloor(PROCESS_BATCH_GAS_FLOOR - 1n, 1)).toBe(PROCESS_BATCH_GAS_FLOOR);
   });
 
-  test('preserves estimates already above the protocol floor', () => {
+  test('uses the portable limit exactly and rejects an estimate above it', () => {
     expect(applyProcessBatchGasFloor(PROCESS_BATCH_GAS_FLOOR, 1)).toBe(PROCESS_BATCH_GAS_FLOOR);
-    expect(applyProcessBatchGasFloor(24_000_000n, 1)).toBe(24_000_000n);
+    expect(() => applyProcessBatchGasFloor(PROCESS_BATCH_GAS_FLOOR + 1n, 1)).toThrow(
+      'J_TRANSFORMER_FINALIZATION_GAS_LIMIT',
+    );
   });
 
   test('does not over-reserve gas when no finalization executes transformers', () => {
@@ -29,7 +31,7 @@ describe('processBatch transformer gas floor', () => {
     );
   });
 
-  test('one production finalization remains below the 60M block limit', () => {
-    expect(applyProcessBatchGasFloor(1n, 1)).toBeLessThanOrEqual(60_000_000n);
+  test('one production finalization remains below the EIP-7825 transaction cap', () => {
+    expect(applyProcessBatchGasFloor(1n, 1)).toBeLessThan(1n << 24n);
   });
 });

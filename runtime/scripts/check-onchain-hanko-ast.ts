@@ -338,13 +338,14 @@ export const checkOnchainHankoAst = (): void => {
       .map((fn) => `${contractName}.${String(fn.name)}`));
   assertExact(verifyConsumers, [
     'Account.verifyDisputeProofHanko',
-    'Account.processC2R', 'Account._settleDiffs', 'Account._disputeStart',
+    'Account._disputeStart',
   ], 'verifyHankoSignature consumers');
 
   const currentInterfaceVerifyConsumers = (['Account', 'Depository', 'EntityProvider'] as const).flatMap((contractName) =>
     functions(contracts[contractName]!).filter((fn) => calledNames(fn).includes('verifyCurrentHankoSignature'))
       .map((fn) => `${contractName}.${String(fn.name)}`));
   assertExact(currentInterfaceVerifyConsumers, [
+    'Account.processC2R', 'Account._settleDiffs',
     'Depository.processBatch', 'Depository.watchtowerCounterDispute',
   ], 'verifyCurrentHankoSignature consumers');
 

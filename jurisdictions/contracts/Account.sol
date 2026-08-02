@@ -48,14 +48,8 @@ library Account {
   );
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
-  // These signatures intentionally match Depository's public event ABI. The
+  // This signature intentionally matches Depository's public event ABI. The
   // library executes by DELEGATECALL, so logs are emitted from Depository.
-  event TransformerClauseSkipped(
-    bytes32 indexed accountKeyHash,
-    uint256 indexed clauseIndex,
-    address indexed transformer,
-    uint8 reason
-  );
   event TransformerDeltaClamped(
     bytes32 indexed accountKeyHash,
     uint256 indexed clauseIndex,
@@ -76,6 +70,7 @@ library Account {
   error E9(); // HashMismatch
   error E10(); // BatchTooLarge
   error TransformerGasBudgetUnavailable();
+  error TransformerExecutionFailed();
 
   uint256 private constant MAX_SETTLEMENT_DIFFS = 32;
   uint256 private constant MAX_SETTLEMENT_FORGIVENESS_IDS = 32;
@@ -175,13 +170,8 @@ library Account {
     bytes4(keccak256("applyBatch(int256[],uint256[],bytes,bytes,bytes,uint256,uint256)"));
   bytes4 private constant DECODE_TRANSFORMER_ARGUMENT_LIST_SELECTOR =
     bytes4(keccak256("decodeTransformerArgumentListStrict(bytes)"));
-  uint256 private constant TRANSFORMER_CALL_GAS_LIMIT = 4_000_000;
-  uint256 private constant TRANSFORMER_POST_CALL_GAS_RESERVE = 150_000;
-  uint256 private constant TRANSFORMER_MIN_CALL_GAS = 25_000;
-  uint256 private constant TRANSFORMER_PRECALL_GAS_RESERVE = 1_500_000;
+  uint256 private constant TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000;
   uint256 private constant TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT = 500_000;
-  uint256 private constant TRANSFORMER_TOTAL_GAS_LIMIT = 8_000_000;
-  uint256 private constant MAX_TRANSFORMER_CLAUSES = 32;
   uint256 private constant INT256_SIGN_BIT = 1 << 255;
 
   // ========== PURE HELPERS ==========
@@ -417,8 +407,9 @@ library Account {
   /// return the exact left/right transformer evidence to apply.
   /// @dev Kept in the linked library so the Depository remains deployable under
   /// EIP-170. This function executes by DELEGATECALL over Depository storage.
-  /// Signed state (body/hash/nonce) is strict; only transformer evidence is
-  /// optional and is handled fail-soft later by Depository._finalizeAccount.
+  /// Signed state (body/hash/nonce) and transformer execution are strict. Only
+  /// a malformed dynamic argument wrapper decodes to empty evidence; the signed
+  /// transformer then decides whether that evidence is sufficient.
   function prepareDisputeFinalization(
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
@@ -524,36 +515,25 @@ library Account {
     account.disputeStartedByLeft = false;
   }
 
-  /// @notice Isolated optional transformer evaluation for Depository finalization.
-  /// @dev Returns a stable uint8 matching Depository.TransformerSkipReason:
-  /// 0=None, 1=NoCode, 2=InsufficientGas, 3=CallFailed, 4=MalformedReturn.
-  /// The linked-library boundary keeps hostile-call parsing out of Depository's
-  /// EIP-170 budget without changing storage authority or failure semantics.
-  function _tryApplyTransformer(
+  /// @notice Execute one user-signed transformer clause.
+  /// @dev A transformer is the executable meaning of the signed dispute state,
+  /// not optional evidence. Missing code, revert/OOG, or malformed output must
+  /// revert the whole finalization and leave the dispute active. We forward all
+  /// remaining gas except the fixed Depository settlement reserve.
+  function _applyTransformer(
     int[] memory deltas,
     uint[] memory tokenIds,
     TransformerClause memory tc,
     bytes memory leftArguments,
     bytes memory rightArguments,
     uint256 leftArgumentsTimestamp,
-    uint256 rightArgumentsTimestamp,
-    uint256 transformerGasBudget
-  ) private view returns (bool applied, int[] memory newDeltas, uint8 reason) {
-    if (tc.transformerAddress.code.length == 0) return (false, newDeltas, 1);
-    if (transformerGasBudget < TRANSFORMER_MIN_CALL_GAS) return (false, newDeltas, 2);
-    // Caller starvation is not optional transformer failure. Returning a skip
-    // here would let one signed proof settle to different balances at different
-    // transaction gas limits. Revert the whole batch so it can be retried with
-    // the canonical budget; only failure inside the fixed-gas STATICCALL below
-    // remains clause-local and fail-soft.
-    if (gasleft() <= TRANSFORMER_PRECALL_GAS_RESERVE) {
-      revert TransformerGasBudgetUnavailable();
-    }
+    uint256 rightArgumentsTimestamp
+  ) private view returns (int[] memory newDeltas) {
+    if (tc.transformerAddress.code.length == 0) revert TransformerExecutionFailed();
     if (tc.encodedBatch.length + leftArguments.length + rightArguments.length >> 18 != 0) {
-      return (false, newDeltas, 2);
+      revert TransformerExecutionFailed();
     }
 
-    uint256 transformerGasStart = gasleft();
     bytes memory callData = abi.encodeWithSelector(
       APPLY_TRANSFORMER_BATCH_SELECTOR,
       deltas,
@@ -564,16 +544,9 @@ library Account {
       leftArgumentsTimestamp,
       rightArgumentsTimestamp
     );
-    uint256 encodingGasUsed = transformerGasStart - gasleft();
-    if (encodingGasUsed >= transformerGasBudget) return (false, newDeltas, 2);
-    transformerGasBudget -= encodingGasUsed;
-
-    uint256 callGas = transformerGasBudget;
-    if (callGas > TRANSFORMER_CALL_GAS_LIMIT) callGas = TRANSFORMER_CALL_GAS_LIMIT;
-    if (callGas < TRANSFORMER_MIN_CALL_GAS) return (false, newDeltas, 2);
-    if (gasleft() <= callGas + TRANSFORMER_POST_CALL_GAS_RESERVE) {
-      revert TransformerGasBudgetUnavailable();
-    }
+    uint256 remainingGas = gasleft();
+    if (remainingGas <= TRANSFORMER_POST_CALL_GAS_RESERVE) revert TransformerGasBudgetUnavailable();
+    uint256 callGas = remainingGas - TRANSFORMER_POST_CALL_GAS_RESERVE;
 
     bool callOk;
     uint256 returnSize;
@@ -582,10 +555,10 @@ library Account {
       callOk := staticcall(callGas, transformer, add(callData, 0x20), mload(callData), 0, 0)
       returnSize := returndatasize()
     }
-    if (!callOk) return (false, newDeltas, 3);
+    if (!callOk) revert TransformerExecutionFailed();
 
     uint256 expectedReturnSize = 0x40 + deltas.length * 0x20;
-    if (returnSize != expectedReturnSize) return (false, newDeltas, 4);
+    if (returnSize != expectedReturnSize) revert TransformerExecutionFailed();
 
     bytes memory returnData = new bytes(returnSize);
     assembly ("memory-safe") {
@@ -597,7 +570,7 @@ library Account {
       arrayOffset := mload(add(returnData, 0x20))
       arrayLength := mload(add(returnData, 0x40))
     }
-    if (arrayOffset != 0x20 || arrayLength != deltas.length) return (false, newDeltas, 4);
+    if (arrayOffset != 0x20 || arrayLength != deltas.length) revert TransformerExecutionFailed();
 
     newDeltas = new int[](arrayLength);
     for (uint256 i = 0; i < arrayLength; i++) {
@@ -607,7 +580,7 @@ library Account {
       }
       newDeltas[i] = value;
     }
-    return (true, newDeltas, 0);
+    return newDeltas;
   }
 
   function applyTransformers(
@@ -620,68 +593,33 @@ library Account {
     uint256 leftArgumentsTimestamp,
     uint256 rightArgumentsTimestamp
   ) external returns (int[] memory) {
-    if (!exactTransformerInputs) {
-      // A unilateral R2C may move the exact ondelta + signed offdelta outside
-      // int256 without changing the Account nonce. Custom transformers expose
-      // an int256[] ABI, so there is no truthful value we can pass them. Never
-      // substitute a saturated value: custom code could branch on it and turn
-      // the approximation into a financial claim. Transformer clauses are
-      // optional dispute evidence, therefore skip them loudly while Depository
-      // applies the exact wide base delta below.
-      for (uint256 i = 0; i < proofbody.transformers.length; i++) {
-        emit TransformerClauseSkipped(
-          accountKeyHash,
-          i,
-          proofbody.transformers[i].transformerAddress,
-          7
-        );
-      }
-      return deltas;
-    }
+    if (proofbody.transformers.length == 0) return deltas;
+    // The transformer ABI is int256[]. A wide signed-magnitude base delta has
+    // no truthful ABI value; substituting zero or saturation would execute a
+    // different contract than the parties signed.
+    if (!exactTransformerInputs) revert TransformerExecutionFailed();
     bytes[] memory decodedLeft = _decodeTransformerArgumentList(leftArguments);
     bytes[] memory decodedRight = _decodeTransformerArgumentList(rightArguments);
-    uint256 remainingTransformerGas = TRANSFORMER_TOTAL_GAS_LIMIT;
     for (uint256 i = 0; i < proofbody.transformers.length; i++) {
-      if (i >= MAX_TRANSFORMER_CLAUSES || remainingTransformerGas < TRANSFORMER_MIN_CALL_GAS) {
-        emit TransformerClauseSkipped(accountKeyHash, i, address(0), 2);
-        break;
-      }
       TransformerClause memory tc = proofbody.transformers[i];
       if (!_validTransformerAllowances(tc.allowances, deltas.length)) {
-        emit TransformerClauseSkipped(accountKeyHash, i, tc.transformerAddress, 5);
-        continue;
+        revert TransformerExecutionFailed();
       }
 
-      uint256 transformerGasBefore = gasleft();
-      (bool applied, int[] memory newDeltas, uint8 skipReason) = _tryApplyTransformer(
+      int[] memory newDeltas = _applyTransformer(
         deltas,
         proofbody.tokenIds,
         tc,
         i < decodedLeft.length ? decodedLeft[i] : bytes(""),
         i < decodedRight.length ? decodedRight[i] : bytes(""),
         leftArgumentsTimestamp,
-        rightArgumentsTimestamp,
-        remainingTransformerGas
+        rightArgumentsTimestamp
       );
-      uint256 transformerGasUsed = transformerGasBefore - gasleft();
-      remainingTransformerGas = transformerGasUsed >= remainingTransformerGas
-        ? 0
-        : remainingTransformerGas - transformerGasUsed;
-      if (!applied) {
-        emit TransformerClauseSkipped(accountKeyHash, i, tc.transformerAddress, skipReason);
-        continue;
-      }
 
-      bool mutatedUnallowedToken = false;
       for (uint256 j = 0; j < deltas.length; j++) {
         if (newDeltas[j] != deltas[j] && !_hasTransformerAllowance(tc.allowances, j)) {
-          mutatedUnallowedToken = true;
-          break;
+          revert TransformerExecutionFailed();
         }
-      }
-      if (mutatedUnallowedToken) {
-        emit TransformerClauseSkipped(accountKeyHash, i, tc.transformerAddress, 6);
-        continue;
       }
 
       for (uint256 j = 0; j < tc.allowances.length; j++) {
@@ -717,7 +655,7 @@ library Account {
     // Malformed evidence is optional and decodes to an empty list. Insufficient
     // caller gas is different: it must never silently erase otherwise valid
     // evidence and thereby change the settlement result.
-    if (gasleft() <= TRANSFORMER_PRECALL_GAS_RESERVE) {
+    if (gasleft() <= TRANSFORMER_POST_CALL_GAS_RESERVE + TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT) {
       revert TransformerGasBudgetUnavailable();
     }
     (bool ok, bytes memory result) = address(this).staticcall{
@@ -1118,12 +1056,11 @@ library Account {
       params.proofbodyHash,
       params.initialProofbody.watchSeed
     );
-    // Opening a dispute is a fresh on-chain action and therefore requires the
-    // current board. Historical board signatures remain admissible only as
-    // bilateral proof inside prepareDisputeFinalization after a dispute exists;
-    // rotation must revoke an old board's ability to start new proceedings.
+    // The outer processBatch Hanko is current-board-only. This inner Hanko is
+    // historical bilateral evidence held by the counterparty, so the current or
+    // immediate previous board remains provable for the exact seven-day grace.
     (bytes32 recoveredEntity, bool valid) =
-      IEntityProvider(entityProvider).verifyCurrentHankoSignature(params.sig, hash);
+      IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();
 
     if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();

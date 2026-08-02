@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 
 import { decodeDisputeStarterInitialSecrets } from '../entity/tx/j-events-htlc';
 
-describe('optional dispute transformer arguments', () => {
+describe('dynamic dispute transformer arguments', () => {
   test('decodes canonical secret evidence and ignores malformed adversarial bytes', () => {
     const secret = `0x${'42'.repeat(32)}`;
     const transformerArgs = ethers.AbiCoder.defaultAbiCoder().encode(

@@ -447,8 +447,9 @@ contract EntityProvider is ERC1155 {
    * @notice Propose a board replacement through one of the configured authority lanes.
    * @dev A pending proposal can only be replaced by a strictly higher authority:
    *      CONTROL > BOARD > DIVIDEND > FOUNDATION. Board Hankos are deliberately
-   *      current-only; the seven-day previous-board grace applies to account
-   *      finalization, never to creation of a new governance epoch.
+   *      current-only; the seven-day previous-board grace applies only to
+   *      historical bilateral dispute proofs, including start/finalization,
+   *      never to creation of a new governance epoch.
    */
   function proposeBoard(
     bytes32 entityId, 

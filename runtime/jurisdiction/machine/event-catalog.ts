@@ -13,8 +13,8 @@ export const DEPOSITORY_J_EVENTS = {
     'HankoBatchProcessed',
   ],
   telemetry: [
-    'CooperativeClose', 'TokenRegistered', 'TransformerClauseSkipped',
-    'TransformerDeltaClamped', 'WatchtowerCounterDisputeExecuted',
+    'CooperativeClose', 'TokenRegistered', 'TransformerDeltaClamped',
+    'WatchtowerCounterDisputeExecuted',
   ],
 } as const;
 

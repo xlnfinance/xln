@@ -366,7 +366,7 @@ type EntityTxPayload =
         minCooldownMs?: number;
         /** Internal cross-j recovery binding retained until remote book cleanup ACKs. */
         crossJurisdictionRouteId?: string;
-        /** Optional adversarial evidence; malformed values remain soft-fail/no-op in the transformer. */
+        /** Dynamic evidence; a malformed wrapper becomes empty and the signed transformer decides. */
         starterInitialArguments?: string;
         allowUnsafeCrossJTargetDispute?: boolean;
         acceptedCrossJTargetLossAmount?: bigint;

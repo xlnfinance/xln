@@ -52,6 +52,7 @@ contract Depository is ReentrancyGuardLite {
   error E10(); // BatchTooLarge
   error E11(); // UnsupportedToken
   error TransformerGasBudgetUnavailable();
+  error TransformerExecutionFailed();
 
   // Immutable EntityProvider (set in constructor, gas-efficient static calls)
   address public immutable entityProvider;
@@ -88,9 +89,8 @@ contract Depository is ReentrancyGuardLite {
   uint256 private constant MAX_BATCH_COLLATERAL_TO_RESERVE = 64;
   uint256 private constant MAX_BATCH_SETTLEMENTS = 32;
   uint256 private constant MAX_BATCH_DISPUTE_STARTS = 8;
-  // EIP-7825 caps one Ethereum transaction at 2^24 gas. A finalization may
-  // spend the full 8M transformer budget, so one defensive case per batch is
-  // the only canonical shape with a 100% execution reserve.
+  // One dispute per transaction gives its user-signed transformer the entire
+  // conservative 15M EVM budget minus the 2M final settlement reserve.
   uint256 private constant MAX_BATCH_DISPUTE_FINALIZATIONS = 1;
   uint256 private constant MAX_BATCH_EXTERNAL_TO_RESERVE = 64;
   uint256 private constant MAX_BATCH_RESERVE_TO_EXTERNAL = 64;
@@ -108,30 +108,10 @@ contract Depository is ReentrancyGuardLite {
   // larger transfers remain losslessly expressible across sequential nonces.
   uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL = 256;
   // Runtime permits up to 1,000 open swaps in one account proof. The canonical
-  // DeltaTransformer path is regression-tested below this cap; hostile code is
-  // still unable to consume the caller's post-call finalization reserve.
-  // `length >> 18 != 0` below is the bytecode-cheap 256 KiB allocation cap.
-  // A party can otherwise make ABI encoding run out of gas before STATICCALL,
-  // where neither its call gas cap nor try/catch can preserve finalization.
+  // DeltaTransformer path is regression-tested below this cap.
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
-  enum TransformerSkipReason {
-    None,
-    NoCode,
-    InsufficientGas,
-    CallFailed,
-    MalformedReturn,
-    InvalidAllowance,
-    UnallowedMutation,
-    UnrepresentableBaseDelta
-  }
-  event TransformerClauseSkipped(
-    bytes32 indexed accountKeyHash,
-    uint256 indexed clauseIndex,
-    address indexed transformer,
-    TransformerSkipReason reason
-  );
   event TransformerDeltaClamped(
     bytes32 indexed accountKeyHash,
     uint256 indexed clauseIndex,
@@ -1009,22 +989,16 @@ contract Depository is ReentrancyGuardLite {
       if (!representable) exactTransformerInputs = false;
     }
 
-    // Dispute finalization passes transformer arguments directly via calldata.
-    // These arguments are adversarial evidence, not signed account state. If an
-    // entire side wrapper is malformed, treat that side as empty instead of
-    // reverting: otherwise a party could submit garbage left/rightArguments and
-    // DoS the honest side's unrelated swap/pull/payment claim. Signed ProofBody
-    // hashes, tokenIds, and offdelta shape stay strict. A bad
-    // transformer address, encoded batch, or allowance belongs to one optional
-    // clause and is isolated below; letting it revert the whole account would
-    // give either party a permanent dispute-freeze primitive.
+    // Dynamic arguments are adversarial evidence, not signed account state. A
+    // malformed outer wrapper decodes to empty; the user-signed transformer then
+    // decides whether empty evidence proves anything. The transformer itself is
+    // the executable dispute agreement: missing code, revert/OOG, malformed
+    // output, or invalid allowances must revert and leave the dispute active.
 
     bytes32 accountKeyHash = keccak256(acct_key);
 
-    // Transformer code and dispute arguments are adversarial optional logic.
-    // Every clause is isolated: a bad call keeps the pre-clause deltas, emits
-    // forensic evidence, and lets the dispute finish. Signed ProofBody shape,
-    // signatures, hashes, and nonces stay strict above this boundary.
+    // Every signed clause must execute. Skipping one would settle a different
+    // agreement from the ProofBody that both sides signed.
     transformerDeltas = Account.applyTransformers(
       accountKeyHash,
       proofbody,
@@ -1036,9 +1010,8 @@ contract Depository is ReentrancyGuardLite {
       rightArgsTimestamp
     );
 
-    // Transformer output is authoritative only when every input was exact.
-    // Otherwise Account emitted one explicit skip event per optional clause and
-    // the wide signed-magnitude base values above remain authoritative.
+    // A transformer can run only on exact int256 inputs. Account reverts before
+    // this point if the signed clause cannot truthfully receive the base delta.
     if (exactTransformerInputs) {
       negativeDeltaBitmap = 0;
       for (uint256 i = 0; i < tokenCount; i++) {

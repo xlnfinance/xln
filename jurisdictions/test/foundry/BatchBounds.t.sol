@@ -251,7 +251,7 @@ contract BatchBoundsTest is XlnFixture {
   /// @notice A dispute finalization is a *defensive* action: if the honest
   ///         party's finalize cannot be mined, the account stays frozen past the
   ///         timeout. MAX_DISPUTE_PROOF_TOKENS is 128 per proof and each
-  ///         defensive finalization gets its own EIP-7825-bounded transaction.
+  ///         defensive finalization gets its own portable 15M transaction.
   function test_gas_disputeFinalizeWithMaxProofTokens() public {
     uint256 tokenCount = 128;
     bytes32 me = entity[0];
@@ -290,7 +290,7 @@ contract BatchBoundsTest is XlnFixture {
     console.log("disputeFinalize 1x128 ok:", ok);
     console.log("disputeFinalize 1x128 gas:", gasUsed);
     assertTrue(ok, "max-token finalize must succeed");
-    assertLt(gasUsed, BLOCK_BUDGET, "max-token finalization exceeds the block budget");
+    assertLt(gasUsed, LIVENESS_BUDGET, "max-token finalization exceeds the 15M liveness budget");
   }
 
   /// @notice Encoded-batch size cap. 256 KiB of calldata at the EIP-7623 floor

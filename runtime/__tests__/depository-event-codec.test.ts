@@ -18,10 +18,6 @@ const encode = (name: string, values: readonly unknown[]) => {
 describe('Depository watcher event codec', () => {
   test.each([
     {
-      name: 'TransformerClauseSkipped',
-      values: [word('1'), 2n, '0x0000000000000000000000000000000000000003', 3],
-    },
-    {
       name: 'TransformerDeltaClamped',
       values: [word('1'), 2n, '0x0000000000000000000000000000000000000003', 4n, -5n, -4n],
     },

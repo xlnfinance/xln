@@ -782,15 +782,12 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     await processJEvents(env);
     await converge(env, 12);
 
-    const [skippedClauses, clampedDeltas] = await Promise.all([
-      jadapter.depository.queryFilter(jadapter.depository.filters.TransformerClauseSkipped()),
-      jadapter.depository.queryFilter(jadapter.depository.filters.TransformerDeltaClamped()),
-    ]);
+    const clampedDeltas = await jadapter.depository.queryFilter(
+      jadapter.depository.filters.TransformerDeltaClamped(),
+    );
     console.log(`[DISPUTE_DEBUG:transformers] ${safeStringify({
-      skipped: skippedClauses.map((entry) => ({ blockNumber: entry.blockNumber, args: Array.from(entry.args) })),
       clamped: clampedDeltas.map((entry) => ({ blockNumber: entry.blockNumber, args: Array.from(entry.args) })),
     })}`);
-    assert(skippedClauses.length === 0, `Transformer skipped ${skippedClauses.length} clause(s)`, env);
     assert(clampedDeltas.length === 0, `Transformer clamped ${clampedDeltas.length} delta(s)`, env);
 
     for (const tokenId of [USDC, WETH]) {

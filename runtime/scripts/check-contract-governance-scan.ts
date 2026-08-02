@@ -13,6 +13,11 @@ const assertNotIncludes = (text: string, needle: string, path: string): void => 
   if (text.includes(needle)) throw new Error(`${path} contains forbidden text: ${needle}`);
 };
 
+const assertOccurrenceCount = (text: string, needle: string, expected: number, path: string): void => {
+  const actual = text.split(needle).length - 1;
+  if (actual !== expected) throw new Error(`${path} expected ${expected} occurrences of ${needle}, got ${actual}`);
+};
+
 const getFunctionHeader = (source: string, name: string, path: string): string => {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = new RegExp(`^\\s*function\\s+${escaped}\\s*\\([\\s\\S]*?\\)\\s*([^\\{;]*)[\\{;]`, 'm')
@@ -160,6 +165,13 @@ assertIncludes(depository, 'if (params.sig.length == 0) revert E2();', depositor
 assertIncludes(depository, 'if (block.number + lastResortWindowBlocks < account.disputeTimeout) revert E2();', depositoryPath);
 assertIncludes(depository, 'msg.sender,\n          entityId,', depositoryPath);
 assertIncludes(depository, 'if (!valid || recoveredEntity != entityId) revert E4();', depositoryPath);
+
+// Historical board authority exists only for bilateral dispute evidence. Every
+// direct money/governance action must keep using the current-board verifier.
+assertOccurrenceCount(account, '.verifyHankoSignature(', 2, accountPath);
+for (const name of ['verifyDisputeProofHanko', '_disputeStart'] as const) {
+  assertIncludes(getFunctionBody(account, name, accountPath), '.verifyHankoSignature(', `${accountPath}:${name}`);
+}
 
 assertNotIncludes(entityProvider, 'onlyFoundation', entityProviderPath);
 assertIncludes(entityProvider, '_verifyCurrentHankoSignature(hankoData, actionHash)', entityProviderPath);

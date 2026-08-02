@@ -425,10 +425,10 @@ const estimatedArgumentBytes = (value: unknown): number =>
     : 0;
 
 /**
- * Optional transformer arguments are evidence, never dispute authority.
- * Signed ProofBody bytes remain strict elsewhere; a malformed or over-budget
- * argument wrapper is deterministically reduced to empty evidence so it cannot
- * freeze finalization.
+ * Dynamic transformer arguments are evidence, never dispute authority. Signed
+ * ProofBody bytes remain strict elsewhere; a malformed or over-budget wrapper
+ * is deterministically reduced to empty evidence, and the signed transformer
+ * decides whether that evidence is sufficient.
  */
 export function sanitizeOptionalDisputeArgument(
   value: unknown,

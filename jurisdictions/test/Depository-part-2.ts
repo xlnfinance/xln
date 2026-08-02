@@ -52,16 +52,6 @@ const TRANSFORMER_MODE = {
   returnBomb: 7,
 } as const;
 
-const TRANSFORMER_SKIP_REASON = {
-  noCode: 1n,
-  insufficientGas: 2n,
-  callFailed: 3n,
-  malformedReturn: 4n,
-  invalidAllowance: 5n,
-  unallowedMutation: 6n,
-  unrepresentableBaseDelta: 7n,
-} as const;
-
 type TestActor = {
   signer: HardhatEthersSigner;
   entityId: string;

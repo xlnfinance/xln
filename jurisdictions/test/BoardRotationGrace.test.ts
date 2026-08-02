@@ -352,7 +352,7 @@ describe('EntityProvider board rotation grace', function () {
     expect(await depository.entityNonces(entityId)).to.equal(nonce);
   });
 
-  it('rejects previous-board authority for fresh C2R, settlement, and dispute start', async function () {
+  it('rejects previous-board money actions but accepts its signed dispute proof', async function () {
     const {
       provider,
       foundation,
@@ -500,20 +500,14 @@ describe('EntityProvider board rotation grace', function () {
       4n,
     );
     await expect(depository.processBatch(oldStart.encodedBatch, oldStart.hanko, 4n))
-      .to.be.revertedWithCustomError(depository, 'E4');
-    expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
-
-    const currentStart = await signOuterBatch(
-      disputeStart(buildSingleSignerHanko(entityId, startDigest, currentBoardKey)),
-      4n,
-    );
-    await expect(depository.processBatch(currentStart.encodedBatch, currentStart.hanko, 4n))
       .to.emit(depository, 'DisputeStarted');
-    expect((await depository._accounts(accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
+    const openedAccount = await depository._accounts(accountKey);
+    expect(openedAccount.disputeHash).to.not.equal(ethers.ZeroHash);
+    expect(openedAccount.nonce).to.equal(disputeNonce);
+    expect(await depository.entityNonces(initiator)).to.equal(4n);
 
-    // The inverse boundary: a current board starts a second dispute, then the
-    // peer may enforce a newer state that the immediate previous board signed
-    // before rotation. Historical evidence survives; historical authority does not.
+    // The same boundary applies when historical proof finalizes an active
+    // dispute: evidence survives rotation; direct money authority does not.
     const peer = singleSignerLazyEntityId(foundation.address);
     const peerKey = deriveHardhatPrivateKey(0);
     const historicalAccountKey = await depository.accountKey(entityId, peer);

@@ -116,7 +116,7 @@ describe('dispute argument snapshots', () => {
     expect(stored?.proofBodyStruct.tokenIds).toEqual([1n, 2n]);
   });
 
-  test('sanitizes malformed optional transformer arguments with a structured warning', () => {
+  test('reduces malformed dynamic transformer arguments to empty evidence with a warning', () => {
     const result = sanitizeOptionalDisputeArgument('0x1234', 'dispute.test');
 
     expect(result.value).toBe('0x');
@@ -128,7 +128,7 @@ describe('dispute argument snapshots', () => {
     }]);
   });
 
-  test('sanitizes oversized optional transformer arguments instead of blocking dispute', () => {
+  test('reduces oversized dynamic transformer arguments to empty evidence with a warning', () => {
     const oversized = ethers.AbiCoder.defaultAbiCoder().encode(
       ['bytes[]'],
       [[`0x${'ab'.repeat(64 * 1024)}`]],

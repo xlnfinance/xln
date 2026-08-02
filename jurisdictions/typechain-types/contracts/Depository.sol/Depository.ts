@@ -218,7 +218,6 @@ export interface DepositoryInterface extends Interface {
       | "ReserveUpdated"
       | "SecretRevealed"
       | "TokenRegistered"
-      | "TransformerClauseSkipped"
       | "TransformerDeltaClamped"
       | "WatchtowerCounterDisputeExecuted"
   ): EventFragment;
@@ -705,31 +704,6 @@ export namespace TokenRegisteredEvent {
     tokenType: bigint;
     contractAddress: string;
     externalTokenId: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace TransformerClauseSkippedEvent {
-  export type InputTuple = [
-    accountKeyHash: BytesLike,
-    clauseIndex: BigNumberish,
-    transformer: AddressLike,
-    reason: BigNumberish
-  ];
-  export type OutputTuple = [
-    accountKeyHash: string,
-    clauseIndex: bigint,
-    transformer: string,
-    reason: bigint
-  ];
-  export interface OutputObject {
-    accountKeyHash: string;
-    clauseIndex: bigint;
-    transformer: string;
-    reason: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1299,13 +1273,6 @@ export interface Depository extends BaseContract {
     TokenRegisteredEvent.OutputObject
   >;
   getEvent(
-    key: "TransformerClauseSkipped"
-  ): TypedContractEvent<
-    TransformerClauseSkippedEvent.InputTuple,
-    TransformerClauseSkippedEvent.OutputTuple,
-    TransformerClauseSkippedEvent.OutputObject
-  >;
-  getEvent(
     key: "TransformerDeltaClamped"
   ): TypedContractEvent<
     TransformerDeltaClampedEvent.InputTuple,
@@ -1440,17 +1407,6 @@ export interface Depository extends BaseContract {
       TokenRegisteredEvent.InputTuple,
       TokenRegisteredEvent.OutputTuple,
       TokenRegisteredEvent.OutputObject
-    >;
-
-    "TransformerClauseSkipped(bytes32,uint256,address,uint8)": TypedContractEvent<
-      TransformerClauseSkippedEvent.InputTuple,
-      TransformerClauseSkippedEvent.OutputTuple,
-      TransformerClauseSkippedEvent.OutputObject
-    >;
-    TransformerClauseSkipped: TypedContractEvent<
-      TransformerClauseSkippedEvent.InputTuple,
-      TransformerClauseSkippedEvent.OutputTuple,
-      TransformerClauseSkippedEvent.OutputObject
     >;
 
     "TransformerDeltaClamped(bytes32,uint256,address,uint256,int256,int256)": TypedContractEvent<

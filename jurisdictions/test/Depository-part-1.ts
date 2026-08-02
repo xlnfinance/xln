@@ -52,16 +52,6 @@ const TRANSFORMER_MODE = {
   returnBomb: 7,
 } as const;
 
-const TRANSFORMER_SKIP_REASON = {
-  noCode: 1n,
-  insufficientGas: 2n,
-  callFailed: 3n,
-  malformedReturn: 4n,
-  invalidAllowance: 5n,
-  unallowedMutation: 6n,
-  unrepresentableBaseDelta: 7n,
-} as const;
-
 type TestActor = {
   signer: HardhatEthersSigner;
   entityId: string;
@@ -1979,88 +1969,73 @@ describe('Depository', () => {
         ],
       }),
     );
-    try {
-      const startTx = await depository
-        .connect(left.signer)
-        .processBatch(start.encodedBatch, start.hankoData, start.nonce, { gasLimit: 15_000_000n });
-      await startTx.wait();
-    } catch (error) {
-      expect(String(error)).to.contain('E10');
-      return;
-    }
-
-    await mine(Number(await depository.defaultDisputeDelay()));
-    const final = await signDepositoryBatch(
-      depository,
-      left.entityId,
-      left.privateKey,
-      emptyBatch({
-        disputeFinalizations: [
-          {
-            counterentity: right.entityId,
-            initialNonce: disputeNonce,
-            finalNonce: disputeNonce,
-            initialProofbodyHash: oversizedProofbodyHash,
-            finalProofbody: oversizedProofbody,
-            starterArguments: '0x',
-            otherArguments: '0x',
-            sig: '0x',
-            startedByLeft: true,
-            cooperative: false,
-          },
-        ],
-      }),
-    );
     await expect(
       depository
         .connect(left.signer)
-        .processBatch(final.encodedBatch, final.hankoData, final.nonce, { gasLimit: 15_000_000n }),
-    ).to.emit(depository, 'DisputeFinalized');
+        .processBatch(start.encodedBatch, start.hankoData, start.nonce, { gasLimit: 15_000_000n }),
+    ).to.be.revertedWithCustomError(depository, 'E10');
     expect((await depository._accounts(acctKey)).disputeHash).to.equal(ethers.ZeroHash);
   });
 
-  it('closes disputes after reverting, out-of-gas, and no-code transformer clauses', async function () {
-    const { depository } = await loadFixture(deployFixture);
-    const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
-    const harness = await Harness.deploy();
-    await harness.waitForDeployment();
-    const [, , noCodeSigner] = await ethers.getSigners();
-    const tokenId = 101n;
-    const allowance = [{ deltaIndex: 0n, rightAllowance: 100n, leftAllowance: 100n }];
-    const transformers = [
-      {
-        transformerAddress: await harness.getAddress(),
-        encodedBatch: await harness.encode(TRANSFORMER_MODE.revertCall, 0n, 0n, tokenId),
-        allowances: allowance,
-      },
-      {
-        transformerAddress: await harness.getAddress(),
-        encodedBatch: await harness.encode(TRANSFORMER_MODE.exhaustGas, 0n, 0n, tokenId),
-        allowances: allowance,
-      },
-      {
-        transformerAddress: noCodeSigner.address,
-        encodedBatch: '0x',
-        allowances: allowance,
-      },
-    ];
-    const dispute = await buildTimedOutTransformerFinalization(depository, [tokenId], [-100n], transformers);
+  it('keeps the dispute active when any signed transformer cannot execute exactly', async function () {
+    const failureModes = [
+      'no-code',
+      'revert',
+      'out-of-gas',
+      'malformed-batch',
+      'short-return',
+      'wrong-length',
+      'malformed-return',
+      'return-bomb',
+    ] as const;
 
-    const tx = await depository
-      .connect(dispute.left.signer)
-      .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
-        gasLimit: 15_000_000n,
-      });
-    const receipt = await tx.wait();
-    const skips = decodedEvents(receipt, 'TransformerClauseSkipped');
+    for (const failureMode of failureModes) {
+      const { depository: target } = await loadFixture(deployFixture);
+      const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
+      const harness = await Harness.deploy();
+      await harness.waitForDeployment();
+      const [, , noCodeSigner] = await ethers.getSigners();
+      const tokenId = 101n;
+      const mode = {
+        revert: TRANSFORMER_MODE.revertCall,
+        'out-of-gas': TRANSFORMER_MODE.exhaustGas,
+        'short-return': TRANSFORMER_MODE.shortReturn,
+        'wrong-length': TRANSFORMER_MODE.wrongLength,
+        'malformed-return': TRANSFORMER_MODE.malformedReturn,
+        'return-bomb': TRANSFORMER_MODE.returnBomb,
+      }[failureMode as Exclude<typeof failureMode, 'no-code' | 'malformed-batch'>];
+      const transformerAddress = failureMode === 'no-code'
+        ? noCodeSigner.address
+        : await harness.getAddress();
+      const encodedBatch = failureMode === 'no-code'
+        ? '0x'
+        : failureMode === 'malformed-batch'
+          ? '0x1234'
+          : await harness.encode(mode, 0n, 0n, tokenId);
+      const dispute = await buildTimedOutTransformerFinalization(
+        target,
+        [tokenId],
+        [-100n],
+        [{
+          transformerAddress,
+          encodedBatch,
+          allowances: [{ deltaIndex: 0n, rightAllowance: 100n, leftAllowance: 100n }],
+        }],
+      );
 
-    expect(skips).to.have.length(3);
-    expect(skips.map(event => event.reason)).to.deep.equal([
-      TRANSFORMER_SKIP_REASON.callFailed,
-      TRANSFORMER_SKIP_REASON.callFailed,
-      TRANSFORMER_SKIP_REASON.noCode,
-    ]);
-    expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
+      await expect(
+        target
+          .connect(dispute.left.signer)
+          .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
+            gasLimit: 15_000_000n,
+          }),
+        failureMode,
+      ).to.be.revertedWithCustomError(target, 'TransformerExecutionFailed');
+      expect((await target._accounts(dispute.accountKey)).disputeHash, failureMode)
+        .to.not.equal(ethers.ZeroHash);
+      expect(await target._reserves(dispute.left.entityId, tokenId), failureMode).to.equal(0n);
+      expect(await target._reserves(dispute.right.entityId, tokenId), failureMode).to.equal(0n);
+    }
   });
 
   it('reverts caller gas starvation without consuming the active dispute', async function () {
@@ -2070,12 +2045,12 @@ describe('Depository', () => {
     await harness.waitForDeployment();
     const tokenId = 115n;
     const transformerAddress = await harness.getAddress();
-    const encodedBatch = await harness.encode(TRANSFORMER_MODE.exhaustGas, 0n, 0n, tokenId);
-    const transformers = Array.from({ length: 2 }, () => ({
+    const encodedBatch = await harness.encode(TRANSFORMER_MODE.add, 0n, 10n, tokenId);
+    const transformers = [{
       transformerAddress,
       encodedBatch,
-      allowances: [{ deltaIndex: 0n, rightAllowance: 100n, leftAllowance: 100n }],
-    }));
+      allowances: [{ deltaIndex: 0n, rightAllowance: 0n, leftAllowance: 10n }],
+    }];
     const dispute = await buildTimedOutTransformerFinalization(
       depository,
       [tokenId],
@@ -2087,7 +2062,7 @@ describe('Depository', () => {
       depository
         .connect(dispute.left.signer)
         .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
-          gasLimit: 8_000_000n,
+          gasLimit: 2_500_000n,
         }),
     ).to.be.revertedWithCustomError(depository, 'TransformerGasBudgetUnavailable');
     expect((await depository._accounts(dispute.accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
@@ -2096,79 +2071,9 @@ describe('Depository', () => {
       depository
         .connect(dispute.left.signer)
         .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
-          gasLimit: 16_000_000n,
+          gasLimit: 15_000_000n,
         }),
     ).to.emit(depository, 'DisputeFinalized');
-    expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
-  });
-
-  it('bounds aggregate gas across many out-of-gas transformer clauses', async function () {
-    const { depository } = await loadFixture(deployFixture);
-    const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
-    const harness = await Harness.deploy();
-    await harness.waitForDeployment();
-    const tokenId = 112n;
-    const encodedBatch = await harness.encode(TRANSFORMER_MODE.exhaustGas, 0n, 0n, tokenId);
-    const transformerAddress = await harness.getAddress();
-    const transformers = Array.from({ length: 32 }, () => ({
-      transformerAddress,
-      encodedBatch,
-      allowances: [{ deltaIndex: 0n, rightAllowance: 100n, leftAllowance: 100n }],
-    }));
-    const dispute = await buildTimedOutTransformerFinalization(depository, [tokenId], [-100n], transformers);
-
-    const tx = await depository
-      .connect(dispute.left.signer)
-      .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
-        gasLimit: 15_000_000n,
-      });
-    const receipt = await tx.wait();
-    if (!receipt) throw new Error('MISSING_AGGREGATE_GAS_RECEIPT');
-    const skips = decodedEvents(receipt, 'TransformerClauseSkipped');
-
-    expect(skips.length).to.be.lessThanOrEqual(33);
-    const skippedSuffix = skips.at(-1);
-    expect(skippedSuffix?.transformer).to.equal(ethers.ZeroAddress);
-    expect(skippedSuffix?.reason).to.equal(2n);
-    expect(skippedSuffix?.clauseIndex).to.be.lessThan(32n);
-    expect(receipt.gasUsed).to.be.lessThanOrEqual(10_000_000n);
-    expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
-  });
-
-  it('closes disputes after malformed args, short ABI, wrong length, malformed ABI, and a return bomb', async function () {
-    const { depository } = await loadFixture(deployFixture);
-    const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
-    const harness = await Harness.deploy();
-    await harness.waitForDeployment();
-    const transformerAddress = await harness.getAddress();
-    const tokenId = 102n;
-    const allowance = [{ deltaIndex: 0n, rightAllowance: 100n, leftAllowance: 100n }];
-    const encoded = async (mode: number) => harness.encode(mode, 0n, 0n, tokenId);
-    const transformers = [
-      { transformerAddress, encodedBatch: '0x1234', allowances: allowance },
-      { transformerAddress, encodedBatch: await encoded(TRANSFORMER_MODE.shortReturn), allowances: allowance },
-      { transformerAddress, encodedBatch: await encoded(TRANSFORMER_MODE.wrongLength), allowances: allowance },
-      { transformerAddress, encodedBatch: await encoded(TRANSFORMER_MODE.malformedReturn), allowances: allowance },
-      { transformerAddress, encodedBatch: await encoded(TRANSFORMER_MODE.returnBomb), allowances: allowance },
-    ];
-    const dispute = await buildTimedOutTransformerFinalization(depository, [tokenId], [-100n], transformers);
-
-    const tx = await depository
-      .connect(dispute.left.signer)
-      .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
-        gasLimit: 15_000_000n,
-      });
-    const receipt = await tx.wait();
-    const skips = decodedEvents(receipt, 'TransformerClauseSkipped');
-
-    expect(skips).to.have.length(5);
-    expect(skips.map(event => event.reason)).to.deep.equal([
-      TRANSFORMER_SKIP_REASON.callFailed,
-      TRANSFORMER_SKIP_REASON.malformedReturn,
-      TRANSFORMER_SKIP_REASON.malformedReturn,
-      TRANSFORMER_SKIP_REASON.malformedReturn,
-      TRANSFORMER_SKIP_REASON.malformedReturn,
-    ]);
     expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
   });
 
@@ -2225,13 +2130,14 @@ describe('Depository', () => {
     expect(receipt?.gasUsed).to.be.lessThan(15_000_000n);
   });
 
-  it('finalizes a near-limit signed transformer batch within the 15M-gas envelope', async function () {
+  it('executes a near-limit valid signed transformer batch within the 15M envelope', async function () {
     const { depository } = await loadFixture(deployFixture);
     const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
     const harness = await Harness.deploy();
     await harness.waitForDeployment();
     const tokenId = 114n;
-    const nearLimitBatch = `0x${'dd'.repeat(168 * 1024)}`;
+    const prefix = (await harness.encode(TRANSFORMER_MODE.add, 0n, 10n, tokenId)).slice(2);
+    const nearLimitBatch = `0x${prefix}${'00'.repeat(168 * 1024 - prefix.length / 2)}`;
     const dispute = await buildTimedOutTransformerFinalization(
       depository,
       [tokenId],
@@ -2251,12 +2157,11 @@ describe('Depository', () => {
         gasLimit: 15_000_000n,
       });
     const receipt = await tx.wait();
-    expect(decodedEvents(receipt, 'TransformerClauseSkipped')).to.have.length(1);
     expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
     expect(receipt?.gasUsed).to.be.lessThan(15_000_000n);
   });
 
-  it('keeps each transformer clause atomic and continues good-bad-good', async function () {
+  it('reverts the whole signed transformer program when one clause mutates an unallowed token', async function () {
     const { depository } = await loadFixture(deployFixture);
     const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
     const harness = await Harness.deploy();
@@ -2288,60 +2193,52 @@ describe('Depository', () => {
       transformers,
     );
 
-    const tx = await depository
-      .connect(dispute.left.signer)
-      .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
-        gasLimit: 15_000_000n,
-      });
-    const receipt = await tx.wait();
-    const skips = decodedEvents(receipt, 'TransformerClauseSkipped');
-
-    expect(skips).to.have.length(1);
-    expect(skips[0]?.reason).to.equal(TRANSFORMER_SKIP_REASON.unallowedMutation);
-    expect(await depository._reserves(dispute.left.entityId, tokenA)).to.equal(30n);
-    expect(await depository._reserves(dispute.right.entityId, tokenA)).to.equal(70n);
+    await expect(
+      depository
+        .connect(dispute.left.signer)
+        .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
+          gasLimit: 15_000_000n,
+        }),
+    ).to.be.revertedWithCustomError(depository, 'TransformerExecutionFailed');
+    expect((await depository._accounts(dispute.accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
+    expect(await depository._reserves(dispute.left.entityId, tokenA)).to.equal(0n);
+    expect(await depository._reserves(dispute.right.entityId, tokenA)).to.equal(0n);
     expect(await depository._reserves(dispute.left.entityId, tokenB)).to.equal(0n);
-    expect(await depository._reserves(dispute.right.entityId, tokenB)).to.equal(100n);
+    expect(await depository._reserves(dispute.right.entityId, tokenB)).to.equal(0n);
   });
 
-  it('skips out-of-range and duplicate transformer allowances without blocking finalization', async function () {
-    const { depository } = await loadFixture(deployFixture);
-    const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
-    const harness = await Harness.deploy();
-    await harness.waitForDeployment();
-    const tokenId = 111n;
-    const encodedBatch = await harness.encode(TRANSFORMER_MODE.add, 0n, 50n, tokenId);
-    const dispute = await buildTimedOutTransformerFinalization(
-      depository,
-      [tokenId],
-      [-100n],
+  it('rejects out-of-range and duplicate transformer allowances', async function () {
+    const invalidAllowances = [
+      [{ deltaIndex: 1n, rightAllowance: 0n, leftAllowance: 50n }],
       [
-        {
-          transformerAddress: await harness.getAddress(),
-          encodedBatch,
-          allowances: [{ deltaIndex: 1n, rightAllowance: 0n, leftAllowance: 50n }],
-        },
-        {
-          transformerAddress: await harness.getAddress(),
-          encodedBatch,
-          allowances: [
-            { deltaIndex: 0n, rightAllowance: 0n, leftAllowance: 25n },
-            { deltaIndex: 0n, rightAllowance: 0n, leftAllowance: 25n },
-          ],
-        },
+        { deltaIndex: 0n, rightAllowance: 0n, leftAllowance: 25n },
+        { deltaIndex: 0n, rightAllowance: 0n, leftAllowance: 25n },
       ],
-    );
+    ];
+    for (const allowances of invalidAllowances) {
+      const { depository: target } = await loadFixture(deployFixture);
+      const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
+      const harness = await Harness.deploy();
+      await harness.waitForDeployment();
+      const tokenId = 111n;
+      const dispute = await buildTimedOutTransformerFinalization(
+        target,
+        [tokenId],
+        [-100n],
+        [{
+          transformerAddress: await harness.getAddress(),
+          encodedBatch: await harness.encode(TRANSFORMER_MODE.add, 0n, 50n, tokenId),
+          allowances,
+        }],
+      );
 
-    const tx = await depository
-      .connect(dispute.left.signer)
-      .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce);
-    const skips = decodedEvents(await tx.wait(), 'TransformerClauseSkipped');
-
-    expect(skips.map(event => event.reason)).to.deep.equal([
-      TRANSFORMER_SKIP_REASON.invalidAllowance,
-      TRANSFORMER_SKIP_REASON.invalidAllowance,
-    ]);
-    expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
+      await expect(
+        target
+          .connect(dispute.left.signer)
+          .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce),
+      ).to.be.revertedWithCustomError(target, 'TransformerExecutionFailed');
+      expect((await target._accounts(dispute.accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
+    }
   });
 
   it('clamps oversized and int256-min transformer outputs to signed per-token holds', async function () {
@@ -2422,7 +2319,7 @@ describe('Depository', () => {
     expect(await depository.debtOutstanding(dispute.left.entityId, tokenId)).to.equal((1n << 255n) - 1n);
   });
 
-  it('skips optional transformers but settles the exact int256.min base delta', async function () {
+  it('rejects a transformer when its exact base delta cannot fit the signed ABI', async function () {
     const { depository } = await loadFixture(deployFixture);
     const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
     const harness = await Harness.deploy();
@@ -2443,16 +2340,15 @@ describe('Depository', () => {
       { skipFunding: true },
     );
 
-    const tx = await depository
-      .connect(dispute.left.signer)
-      .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
-        gasLimit: 15_000_000n,
-      });
-    const receipt = await tx.wait();
-    const skips = decodedEvents(receipt, 'TransformerClauseSkipped');
-    expect(skips).to.have.length(1);
-    expect(skips[0]?.reason).to.equal(TRANSFORMER_SKIP_REASON.unrepresentableBaseDelta);
-    expect(await depository.debtOutstanding(dispute.left.entityId, tokenId)).to.equal(1n << 255n);
+    await expect(
+      depository
+        .connect(dispute.left.signer)
+        .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
+          gasLimit: 15_000_000n,
+        }),
+    ).to.be.revertedWithCustomError(depository, 'TransformerExecutionFailed');
+    expect((await depository._accounts(dispute.accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
+    expect(await depository.debtOutstanding(dispute.left.entityId, tokenId)).to.equal(0n);
   });
 
   it('executes the runtime maximum swap book inside the bounded transformer call', async function () {
@@ -2500,7 +2396,6 @@ describe('Depository', () => {
         gasLimit: 15_000_000n,
       });
     const receipt = await tx.wait();
-    expect(decodedEvents(receipt, 'TransformerClauseSkipped')).to.have.length(0);
     expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
     expect(receipt?.gasUsed).to.be.lessThan(15_000_000n);
   });

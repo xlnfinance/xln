@@ -24,12 +24,11 @@ import { applyJBlockHeadersIngressTransform } from './watcher';
 import { TRON_CHAIN_IDS } from './chain-ids';
 
 /**
- * `eth_estimateGas` minimizes gas. Transformer execution has an 8M aggregate
- * protocol cap, while caller starvation now reverts instead of changing the
- * financial result. The canonical batch contains at most one finalization;
- * reserve 16M (= 8M execution + 100% headroom), below EIP-7825's 2^24 cap.
+ * A signed transformer is the dispute program, so finalization forwards every
+ * available unit except the contract's 2M settlement reserve. Use one portable
+ * 15M ceiling across EVM jurisdictions, below Ethereum's EIP-7825 2^24 cap.
  */
-export const PROCESS_BATCH_GAS_FLOOR = 16_000_000n;
+export const PROCESS_BATCH_GAS_FLOOR = 15_000_000n;
 
 export const applyProcessBatchGasFloor = (
   estimatedGasLimit: bigint,
@@ -42,9 +41,10 @@ export const applyProcessBatchGasFloor = (
     throw new Error('J_TRANSFORMER_FINALIZATION_BATCH_LIMIT');
   }
   if (transformerFinalizationCount === 0) return estimatedGasLimit;
-  return estimatedGasLimit < PROCESS_BATCH_GAS_FLOOR
-    ? PROCESS_BATCH_GAS_FLOOR
-    : estimatedGasLimit;
+  if (estimatedGasLimit > PROCESS_BATCH_GAS_FLOOR) {
+    throw new Error('J_TRANSFORMER_FINALIZATION_GAS_LIMIT');
+  }
+  return PROCESS_BATCH_GAS_FLOOR;
 };
 
 export const rpcLog = createStructuredLogger('jadapter.rpc');

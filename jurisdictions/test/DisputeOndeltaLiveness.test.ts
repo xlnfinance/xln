@@ -107,7 +107,7 @@ describe('dispute ondelta liveness', function () {
     expect(await depository._reserves(owner.entityId, tokenId)).to.equal(INT256_MAX);
   });
 
-  it('finalizes the exact wide delta after same-nonce unilateral R2C crosses int256.max', async function () {
+  it('keeps the dispute active when a transformer cannot receive the exact wide delta', async function () {
     const { depository, signer0, signer1 } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(actor(signer0, 0), actor(signer1, 1));
     const { tokenId } = await registerFixedErc20(depository, INT256_MAX);
@@ -175,15 +175,14 @@ describe('dispute ondelta liveness', function () {
         startedByLeft: true,
         cooperative: false,
       }],
-    }))).to.emit(depository, 'TransformerClauseSkipped')
-      .withArgs(ethers.keccak256(accountKey), 0n, transformer, 7n);
+    }))).to.be.revertedWithCustomError(depository, 'TransformerExecutionFailed');
 
     const collateral = await depository._collaterals(accountKey, tokenId);
-    expect(collateral.collateral).to.equal(0n);
-    expect(collateral.ondelta).to.equal(0n);
-    expect(await depository._reserves(left.entityId, tokenId)).to.equal(initialCollateral + laterCollateral);
+    expect(collateral.collateral).to.equal(initialCollateral + laterCollateral);
+    expect((await depository._accounts(accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
-    expect(await depository.debtOutstanding(right.entityId, tokenId)).to.equal(signedOffdelta);
+    expect(await depository.debtOutstanding(right.entityId, tokenId)).to.equal(0n);
   });
 
   it('settles int256.min as an exact signed magnitude instead of negation panic', async function () {

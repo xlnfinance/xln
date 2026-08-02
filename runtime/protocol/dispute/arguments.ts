@@ -203,9 +203,9 @@ export function buildDisputeArgumentsFromSnapshot(
   // live rebuild would be a rehydration bug and can pair wrong positional
   // swap/pull arguments with an old proof body.
   //
-  // This fail-fast rule is runtime-local. Once bytes reach Solidity they are
-  // treated as adversarial optional evidence: malformed argument blobs become
-  // empty/no-op so the sender cannot block finalization of unrelated claims.
+  // This fail-fast rule is runtime-local. Once bytes reach Solidity, malformed
+  // dynamic wrappers become empty evidence. The signed transformer still
+  // decides whether empty evidence satisfies the parties' dispute program.
   const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'build');
   const fillRatios = buildPendingSwapFillRatios(account, snapshot);
   const resolves = collectPullCloseEvidence(account);
