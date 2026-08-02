@@ -13,6 +13,31 @@ const TARGET_RUNTIME_ID = '0x1111111111111111111111111111111111111111';
 const SOURCE_RUNTIME_ID = '0x3333333333333333333333333333333333333333';
 const SOURCE_ENTITY_ID = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
+test('concurrent exact profile misses share one relay fetch cohort', async () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  let resolveFetch!: () => void;
+  const fetchGate = new Promise<void>(resolve => { resolveFetch = resolve; });
+  let fetches = 0;
+  let available = false;
+  p2p.profileFetches = new Map();
+  p2p.env = { gossip: { getHubs: () => [{}], getProfiles: () => [] } };
+  p2p.expandRequiredProfileIds = (ids: string[]) => ids;
+  p2p.hasProfileForEntity = () => available;
+  p2p.fetchProfilesWithRetry = async () => {
+    fetches += 1;
+    await fetchGate;
+    available = true;
+    return true;
+  };
+
+  const first = p2p.ensureProfiles([SOURCE_ENTITY_ID]);
+  const second = p2p.ensureProfiles([SOURCE_ENTITY_ID.toUpperCase()]);
+  expect(fetches).toBe(1);
+  resolveFetch();
+  expect(await Promise.all([first, second])).toEqual([true, true]);
+  expect(p2p.profileFetches.size).toBe(0);
+});
+
 const envelopeFor = (input: RoutedEntityInput): RuntimeEntityInputsEnvelope => ({
   sourceRuntimeId: SOURCE_RUNTIME_ID,
   sourceSignature: `0x${'11'.repeat(65)}`,

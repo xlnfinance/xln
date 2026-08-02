@@ -284,6 +284,7 @@ export class RuntimeP2P {
   private encryptionKeyPair: P2PKeyPair;
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingAnnounceEntities = new Set<string>();
+  private profileFetches = new Map<string, Promise<boolean>>();
   private lastHeartbeatAnnounceAt = 0;
   private closing = false;
   private closed = false;
@@ -987,6 +988,19 @@ export class RuntimeP2P {
   async ensureProfiles(entityIds: string[]): Promise<boolean> {
     const requestedEntityIds = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
     if (requestedEntityIds.length === 0) return true;
+    const key = [...requestedEntityIds].sort(compareStableText).join(',');
+    const inFlight = this.profileFetches.get(key);
+    if (inFlight) return inFlight;
+    const fetch = this.ensureProfilesUncoalesced(requestedEntityIds);
+    this.profileFetches.set(key, fetch);
+    try {
+      return await fetch;
+    } finally {
+      if (this.profileFetches.get(key) === fetch) this.profileFetches.delete(key);
+    }
+  }
+
+  private async ensureProfilesUncoalesced(requestedEntityIds: string[]): Promise<boolean> {
     let requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     let missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
 

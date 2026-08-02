@@ -117,6 +117,7 @@ import { selectPredeployedJurisdiction } from './predeployed-jurisdiction';
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { readInheritedChildSecrets } from '../../infra/child-secrets';
 import { createLocalPairingController } from './local-pairing';
+import { createGossipProfileAdmission } from './gossip-profile-admission';
 import { deriveSignerAddressSync } from '../../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
 import { createBrainVaultOwnerController } from './brainvault-owner';
@@ -551,15 +552,30 @@ const maybeHandleRuntimeInfoApi = async (
   return null;
 };
 
-const gossipProfileEntityId = (req: Request): string =>
-  String(new URL(req.url).searchParams.get('entityId') || '').trim().toLowerCase();
+const gossipProfileAdmission = createGossipProfileAdmission();
+
+const gossipProfileEntityId = (req: Request): string => {
+  const entityId = String(new URL(req.url).searchParams.get('entityId') || '').trim().toLowerCase();
+  return /^0x[0-9a-f]{64}$/.test(entityId) ? entityId : '';
+};
 
 const prepareGossipProfileApi = async (
   req: Request,
   env: RuntimeReplica | null,
-): Promise<void> => {
+  clientId: string,
+): Promise<Response | null> => {
   const targetEntityId = gossipProfileEntityId(req);
-  if (!targetEntityId || !env) return;
+  if (!targetEntityId || !env) return null;
+  if (env.gossip?.profiles?.has(targetEntityId)) return null;
+  if (!gossipProfileAdmission.admit(clientId)) {
+    return new Response(safeStringify({ ok: false, error: 'GOSSIP_PROFILE_LOOKUP_RATE_LIMITED' }), {
+      status: 429,
+      headers: {
+        ...JSON_HEADERS,
+        'retry-after': String(gossipProfileAdmission.retryAfterSeconds),
+      },
+    });
+  }
   try {
     await ensureGossipProfiles(env, [targetEntityId]);
   } catch (error) {
@@ -568,6 +584,7 @@ const prepareGossipProfileApi = async (
       error: error instanceof Error ? error.message : String(error),
     });
   }
+  return null;
 };
 
 const handleGossipProfileApi = (
@@ -813,7 +830,8 @@ const handleApi = async (
   if (env && req.method === 'GET' && pathname === '/api/gossip/profile') {
     // Network refresh happens before the committed-State lease. A slow public
     // relay lookup must never delay the Runtime writer/WAL commit path.
-    await prepareGossipProfileApi(req, env);
+    const rejected = await prepareGossipProfileApi(req, env, clientId);
+    if (rejected) return rejected;
   }
   const handle = () => handleApiAgainstCommittedState(
     req,
