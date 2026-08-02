@@ -93,6 +93,9 @@ export const upsertAppointment = async (
   const runtimeId = String(appointment.bundle.runtimeId || '')
     .trim()
     .toLowerCase();
+  if (existing.runtimeId && existing.runtimeId !== runtimeId) {
+    throw new Error(`TOWER_LOOKUP_RUNTIME_ID_MISMATCH:${existing.runtimeId}:${runtimeId}`);
+  }
   const sequence = Math.max(0, ...existing.receipts.map(receipt => receipt.sequence || 0)) + 1;
   const lastResortPayloadDigest = computeTowerLastResortPayloadDigest(appointment.lastResortPayload);
   const candidate = {

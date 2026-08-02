@@ -211,15 +211,50 @@ describe('standalone watchtower service', () => {
     });
     expect(put.ok).toBe(true);
 
+    const unrelatedWallet = Wallet.createRandom();
+    const unrelatedRuntimeId = unrelatedWallet.address.toLowerCase();
+    const signedAt = 123_457;
+    const signature = await unrelatedWallet.signMessage(
+      buildTowerAppointmentOwnerMessage(
+        unrelatedRuntimeId,
+        'blind_backup',
+        encrypted.lookupKey,
+        0,
+        appointment.bundle.bundleHash,
+        appointment.bundle.height,
+        signedAt,
+        undefined,
+      ),
+    );
+    const conflictingPut = await fetch(`${base}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...appointment,
+        bundle: { ...appointment.bundle, runtimeId: unrelatedRuntimeId },
+        ownerProof: { runtimeId: unrelatedRuntimeId, signedAt, signature },
+      }),
+    });
+    expect(conflictingPut.status).toBe(400);
+    const conflictPayload = await conflictingPut.json() as { ok: boolean; error?: string };
+    expect(conflictPayload.ok).toBe(false);
+    expect(conflictPayload.error).toContain('TOWER_LOOKUP_RUNTIME_ID_MISMATCH');
+
     const restore = await fetch(`${base}/api/tower/restore`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ lookupKey: encrypted.lookupKey }),
     });
     expect(restore.ok).toBe(true);
-    const payload = await restore.json() as { ok: boolean; bundle?: { lookupKey: string }; receipt?: { towerSignature?: string } };
+    const payload = await restore.json() as {
+      ok: boolean;
+      bundle?: { lookupKey: string; runtimeId: string };
+      receipt?: { runtimeId: string; towerSignature?: string };
+    };
     expect(payload.ok).toBe(true);
     expect(payload.bundle?.lookupKey).toBe(encrypted.lookupKey);
+    expect(payload.bundle?.runtimeId).toBe(appointment.bundle.runtimeId);
+    expect(payload.receipt?.runtimeId).toBe(appointment.bundle.runtimeId);
     expect(typeof payload.receipt?.towerSignature).toBe('string');
   });
 
