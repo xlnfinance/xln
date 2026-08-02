@@ -43,6 +43,37 @@ type SubmissionContext = {
   writes: RpcWriteMethods;
 };
 
+type ProcessedBatchFailureReconciliation = {
+  receipts: Pick<RpcReceiptReaders, 'hasProcessedBatch'>;
+  entityId: string;
+  batchHash: string;
+  entityNonce: bigint;
+  failure: JSubmitResult;
+};
+
+/**
+ * A provider may lose a mined receipt and make the next static call fail with
+ * an already-consumed nonce. Only the exact canonical event proves success;
+ * any other consumed nonce remains the original failure.
+ */
+export const reconcileProcessedBatchFailure = async (
+  input: ProcessedBatchFailureReconciliation,
+): Promise<JSubmitResult> => {
+  try {
+    return await input.receipts.hasProcessedBatch(
+      input.entityId,
+      input.batchHash,
+      input.entityNonce,
+    )
+      ? { success: true }
+      : input.failure;
+  } catch (error) {
+    // Receipt authority is unavailable, so the outcome is unknown rather than
+    // a proven terminal contradiction. Preserve the reader's failure class.
+    return makeJAdapterFailureResult(error);
+  }
+};
+
 const resolveBatchSubmitter = async (
   context: SubmissionContext,
   signerPrivateKey: Uint8Array | undefined,
@@ -86,6 +117,14 @@ const executeBatchSubmission = async (
     : context.stack.depository;
   const data = plan.jTx.data;
   const entityNonce = BigInt(data.entityNonce);
+  const reconcileFailure = (failure: JSubmitResult): Promise<JSubmitResult> =>
+    reconcileProcessedBatchFailure({
+      receipts: context.receipts,
+      entityId: plan.normalizedEntityId,
+      batchHash: data.batchHash,
+      entityNonce,
+      failure,
+    });
   const disputeDebug = await buildDisputeStartDebug(plan.batch, plan.normalizedEntityId, {
     chainId: context.config.chainId,
     depositoryAddress: await context.stack.getDepositoryAddress(),
@@ -105,7 +144,7 @@ const executeBatchSubmission = async (
       gasLimit,
       disputeStartDebug: disputeDebug,
     });
-    if (preflightFailure) return preflightFailure;
+    if (preflightFailure) return await reconcileFailure(preflightFailure);
     const receipt = await context.sequencer.send(
       submitter ?? context.signer,
       'submitTx:processBatch',
@@ -133,7 +172,7 @@ const executeBatchSubmission = async (
       entityId: plan.normalizedEntityId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return makeJAdapterFailureResult(error);
+    return await reconcileFailure(makeJAdapterFailureResult(error));
   }
 };
 
