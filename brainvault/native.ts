@@ -82,10 +82,14 @@ const requireNotAborted = (signal: AbortSignal | undefined): void => {
 const validateInput = (input: BrainVaultNativeInput): { shardCount: number; factor: number; workers: number } => {
   assertBrainVaultName(input.name);
   assertBrainVaultPassphrase(input.passphrase);
-  if (!Number.isSafeInteger(input.shardInput) || input.shardInput < 1 || input.shardInput > 100_000) {
+  // No upper bound by design: the work factor must be able to track hardware for
+  // decades, so a caller who wants a year-long derivation is allowed to have one.
+  // These checks are type safety (Array(NaN), negative counts), not policy, and
+  // they match cli.ts exactly so both entry points accept the same inputs.
+  if (!Number.isSafeInteger(input.shardInput) || input.shardInput < 1) {
     throw new Error(`BRAINVAULT_SHARD_INPUT_INVALID:${String(input.shardInput)}`);
   }
-  if (!Number.isSafeInteger(input.workers) || input.workers < 1 || input.workers > 256) {
+  if (!Number.isSafeInteger(input.workers) || input.workers < 1) {
     throw new Error(`BRAINVAULT_WORKER_COUNT_INVALID:${String(input.workers)}`);
   }
   const preset = input.shardInput <= 5;
