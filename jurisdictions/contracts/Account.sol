@@ -75,6 +75,7 @@ library Account {
   error E8(); // LengthMismatch
   error E9(); // HashMismatch
   error E10(); // BatchTooLarge
+  error TransformerGasBudgetUnavailable();
 
   uint256 private constant MAX_SETTLEMENT_DIFFS = 32;
   uint256 private constant MAX_SETTLEMENT_FORGIVENESS_IDS = 32;
@@ -539,10 +540,15 @@ library Account {
     uint256 transformerGasBudget
   ) private view returns (bool applied, int[] memory newDeltas, uint8 reason) {
     if (tc.transformerAddress.code.length == 0) return (false, newDeltas, 1);
-    if (
-      transformerGasBudget < TRANSFORMER_MIN_CALL_GAS ||
-      gasleft() <= TRANSFORMER_PRECALL_GAS_RESERVE
-    ) return (false, newDeltas, 2);
+    if (transformerGasBudget < TRANSFORMER_MIN_CALL_GAS) return (false, newDeltas, 2);
+    // Caller starvation is not optional transformer failure. Returning a skip
+    // here would let one signed proof settle to different balances at different
+    // transaction gas limits. Revert the whole batch so it can be retried with
+    // the canonical budget; only failure inside the fixed-gas STATICCALL below
+    // remains clause-local and fail-soft.
+    if (gasleft() <= TRANSFORMER_PRECALL_GAS_RESERVE) {
+      revert TransformerGasBudgetUnavailable();
+    }
     if (tc.encodedBatch.length + leftArguments.length + rightArguments.length >> 18 != 0) {
       return (false, newDeltas, 2);
     }
@@ -562,14 +568,12 @@ library Account {
     if (encodingGasUsed >= transformerGasBudget) return (false, newDeltas, 2);
     transformerGasBudget -= encodingGasUsed;
 
-    uint256 remainingGas = gasleft();
-    if (remainingGas <= TRANSFORMER_POST_CALL_GAS_RESERVE + TRANSFORMER_MIN_CALL_GAS) {
-      return (false, newDeltas, 2);
-    }
-    uint256 callGas = remainingGas - TRANSFORMER_POST_CALL_GAS_RESERVE;
+    uint256 callGas = transformerGasBudget;
     if (callGas > TRANSFORMER_CALL_GAS_LIMIT) callGas = TRANSFORMER_CALL_GAS_LIMIT;
-    if (callGas > transformerGasBudget) callGas = transformerGasBudget;
     if (callGas < TRANSFORMER_MIN_CALL_GAS) return (false, newDeltas, 2);
+    if (gasleft() <= callGas + TRANSFORMER_POST_CALL_GAS_RESERVE) {
+      revert TransformerGasBudgetUnavailable();
+    }
 
     bool callOk;
     uint256 returnSize;
@@ -709,8 +713,12 @@ library Account {
 
   function _decodeTransformerArgumentList(bytes memory encoded) private view returns (bytes[] memory) {
     if (encoded.length == 0) return new bytes[](0);
-    if (encoded.length >> 18 != 0 || gasleft() <= TRANSFORMER_PRECALL_GAS_RESERVE) {
-      return new bytes[](0);
+    if (encoded.length >> 18 != 0) return new bytes[](0);
+    // Malformed evidence is optional and decodes to an empty list. Insufficient
+    // caller gas is different: it must never silently erase otherwise valid
+    // evidence and thereby change the settlement result.
+    if (gasleft() <= TRANSFORMER_PRECALL_GAS_RESERVE) {
+      revert TransformerGasBudgetUnavailable();
     }
     (bool ok, bytes memory result) = address(this).staticcall{
       gas: TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT
@@ -1110,10 +1118,12 @@ library Account {
       params.proofbodyHash,
       params.initialProofbody.watchSeed
     );
-    // Dispute start submits a previously signed account state. Accepting the
-    // immediate previous board during its bounded grace preserves enforceability
-    // across rotation; this path cannot authorize a new cooperative transfer.
-    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
+    // Opening a dispute is a fresh on-chain action and therefore requires the
+    // current board. Historical board signatures remain admissible only as
+    // bilateral proof inside prepareDisputeFinalization after a dispute exists;
+    // rotation must revoke an old board's ability to start new proceedings.
+    (bytes32 recoveredEntity, bool valid) =
+      IEntityProvider(entityProvider).verifyCurrentHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();
 
     if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();

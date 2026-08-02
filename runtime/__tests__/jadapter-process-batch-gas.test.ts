@@ -13,16 +13,17 @@ describe('processBatch transformer gas floor', () => {
 
   test('preserves estimates already above the protocol floor', () => {
     expect(applyProcessBatchGasFloor(PROCESS_BATCH_GAS_FLOOR, 1)).toBe(PROCESS_BATCH_GAS_FLOOR);
-    expect(applyProcessBatchGasFloor(12_000_000n, 1)).toBe(12_000_000n);
+    expect(applyProcessBatchGasFloor(24_000_000n, 1)).toBe(24_000_000n);
   });
 
-  test('does not over-reserve gas for ordinary batches', () => {
+  test('does not over-reserve gas when no finalization executes transformers', () => {
     expect(applyProcessBatchGasFloor(267_000n, 0)).toBe(267_000n);
   });
 
-  test('reserves one transformer budget for every dispute finalization', () => {
-    expect(applyProcessBatchGasFloor(1n, 2)).toBe(18_000_000n);
-    expect(applyProcessBatchGasFloor(20_000_000n, 2)).toBe(20_000_000n);
+  test('rejects multiple transformer finalizations that cannot fit the tx gas cap', () => {
+    expect(() => applyProcessBatchGasFloor(1n, 2)).toThrow(
+      'J_TRANSFORMER_FINALIZATION_BATCH_LIMIT',
+    );
     expect(() => applyProcessBatchGasFloor(1n, -1)).toThrow(
       'J_DISPUTE_FINALIZATION_COUNT_INVALID',
     );

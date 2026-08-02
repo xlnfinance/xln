@@ -101,7 +101,9 @@ export const processRpcSignedBatch = async (
       );
       const gasLimit = applyProcessBatchGasFloor(
         estimatedGas,
-        batch.disputeFinalizations.length,
+        batch.disputeFinalizations.filter(
+          finalization => finalization.finalProofbody.transformers.length > 0,
+        ).length,
       );
       const tx = await depository.processBatch(
         prepared.encodedBatch,

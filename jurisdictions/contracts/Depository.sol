@@ -51,6 +51,7 @@ contract Depository is ReentrancyGuardLite {
   error E9(); // HashMismatch
   error E10(); // BatchTooLarge
   error E11(); // UnsupportedToken
+  error TransformerGasBudgetUnavailable();
 
   // Immutable EntityProvider (set in constructor, gas-efficient static calls)
   address public immutable entityProvider;
@@ -87,7 +88,10 @@ contract Depository is ReentrancyGuardLite {
   uint256 private constant MAX_BATCH_COLLATERAL_TO_RESERVE = 64;
   uint256 private constant MAX_BATCH_SETTLEMENTS = 32;
   uint256 private constant MAX_BATCH_DISPUTE_STARTS = 8;
-  uint256 private constant MAX_BATCH_DISPUTE_FINALIZATIONS = 8;
+  // EIP-7825 caps one Ethereum transaction at 2^24 gas. A finalization may
+  // spend the full 8M transformer budget, so one defensive case per batch is
+  // the only canonical shape with a 100% execution reserve.
+  uint256 private constant MAX_BATCH_DISPUTE_FINALIZATIONS = 1;
   uint256 private constant MAX_BATCH_EXTERNAL_TO_RESERVE = 64;
   uint256 private constant MAX_BATCH_RESERVE_TO_EXTERNAL = 64;
   uint256 private constant MAX_BATCH_SECRET_REVEALS = 32;
@@ -325,8 +329,11 @@ contract Depository is ReentrancyGuardLite {
   }
 
   /// @notice Hash that an entity authorizes for a tower-only delayed counter-dispute.
-  /// @dev The authorization is exact: tower address, account side, counterparty, final nonce,
-  ///      proof-body hash, last-resort window, and appointment sequence are all bound.
+  /// @dev The authorization binds the tower, account, final signed state, window,
+  ///      and appointment sequence. The watchtower is a trusted delegated agent:
+  ///      dynamic `otherArguments` are intentionally not owner-Hanko-bound because
+  ///      secrets, fills, and pull evidence can change until execution. Financial
+  ///      authority remains capped by the signed ProofBody and its allowances.
   function _encodeWatchtowerCounterDisputeHankoPayload(
     address tower,
     bytes32 entityId,
@@ -376,6 +383,8 @@ contract Depository is ReentrancyGuardLite {
   ///      - tower may never start disputes
   ///      - tower may never use unilateral timeout finalize
   ///      - tower may never act before the final last-resort window
+  ///      - dynamic otherArguments are trusted execution evidence, while the
+  ///        signed ProofBody remains the immutable financial authorization
   function watchtowerCounterDispute(
     bytes32 entityId,
     FinalDisputeProof calldata params,

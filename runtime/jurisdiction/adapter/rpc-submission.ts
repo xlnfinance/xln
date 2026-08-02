@@ -135,7 +135,9 @@ const executeBatchSubmission = async (
     );
     const gasLimit = applyProcessBatchGasFloor(
       estimatedGas,
-      plan.batch.disputeFinalizations.length,
+      plan.batch.disputeFinalizations.filter(
+        finalization => finalization.finalProofbody.transformers.length > 0,
+      ).length,
     );
     const preflightFailure = await preflightProcessBatch({
       depository,

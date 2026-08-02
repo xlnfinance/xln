@@ -49,6 +49,24 @@ const emptyProofBody = () => ({
 const proofBodyHash = (body: ReturnType<typeof emptyProofBody>): string =>
   ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode([PROOF_BODY_ABI], [body]));
 
+const disputeProofHash = async (
+  depository: { getAddress(): Promise<string> },
+  accountKey: string,
+  nonce: bigint,
+  bodyHash: string,
+): Promise<string> => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+  ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
+  [
+    DISPUTE_PROOF,
+    (await ethers.provider.getNetwork()).chainId,
+    await depository.getAddress(),
+    accountKey,
+    nonce,
+    bodyHash,
+    WATCH_SEED,
+  ],
+));
+
 const cooperativeUpdateHash = async (
   depository: { getAddress(): Promise<string> },
   accountKey: string,
@@ -334,7 +352,7 @@ describe('EntityProvider board rotation grace', function () {
     expect(await depository.entityNonces(entityId)).to.equal(nonce);
   });
 
-  it('rejects previous-board authority for fresh C2R and settlement while grace is active', async function () {
+  it('rejects previous-board authority for fresh C2R, settlement, and dispute start', async function () {
     const {
       provider,
       foundation,
@@ -363,14 +381,21 @@ describe('EntityProvider board rotation grace', function () {
     const currentBoardKey = deriveHardhatPrivateKey(2);
     const tokenId = 1n;
     const accountKey = await depository.accountKey(initiator, entityId);
-    const signOuterBatch = async (batch: unknown, nonce: bigint) => {
+    const signBatch = async (
+      signerEntity: string,
+      signerKey: string,
+      batch: unknown,
+      nonce: bigint,
+    ) => {
       const encodedBatch = encodeBatch(batch);
       const digest = await computeDepositoryBatchHash(depository, encodedBatch, nonce);
       return {
         encodedBatch,
-        hanko: buildSingleSignerHanko(initiator, digest, initiatorKey),
+        hanko: buildSingleSignerHanko(signerEntity, digest, signerKey),
       };
     };
+    const signOuterBatch = (batch: unknown, nonce: bigint) =>
+      signBatch(initiator, initiatorKey, batch, nonce);
 
     await depository.mintToReserve(initiator, tokenId, 2n);
     const funding = await signOuterBatch(emptyBatch({
@@ -448,6 +473,110 @@ describe('EntityProvider board rotation grace', function () {
     await expect(depository.processBatch(currentSettlement.encodedBatch, currentSettlement.hanko, 3n))
       .to.emit(depository, 'AccountSettled');
     expect((await depository._accounts(accountKey)).nonce).to.equal(2n);
+
+    const initialProofbody = emptyProofBody();
+    const initialProofbodyHash = proofBodyHash(initialProofbody);
+    const disputeNonce = 3n;
+    const startDigest = await disputeProofHash(
+      depository,
+      accountKey,
+      disputeNonce,
+      initialProofbodyHash,
+    );
+    const disputeStart = (sig: string) => emptyBatch({
+      disputeStarts: [{
+        counterentity: entityId,
+        nonce: disputeNonce,
+        proofbodyHash: initialProofbodyHash,
+        initialProofbody,
+        watchSeed: WATCH_SEED,
+        sig,
+        starterInitialArguments: '0x',
+        starterIncrementedArguments: '0x',
+      }],
+    });
+    const oldStart = await signOuterBatch(
+      disputeStart(buildSingleSignerHanko(entityId, startDigest, oldBoardKey)),
+      4n,
+    );
+    await expect(depository.processBatch(oldStart.encodedBatch, oldStart.hanko, 4n))
+      .to.be.revertedWithCustomError(depository, 'E4');
+    expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
+
+    const currentStart = await signOuterBatch(
+      disputeStart(buildSingleSignerHanko(entityId, startDigest, currentBoardKey)),
+      4n,
+    );
+    await expect(depository.processBatch(currentStart.encodedBatch, currentStart.hanko, 4n))
+      .to.emit(depository, 'DisputeStarted');
+    expect((await depository._accounts(accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
+
+    // The inverse boundary: a current board starts a second dispute, then the
+    // peer may enforce a newer state that the immediate previous board signed
+    // before rotation. Historical evidence survives; historical authority does not.
+    const peer = singleSignerLazyEntityId(foundation.address);
+    const peerKey = deriveHardhatPrivateKey(0);
+    const historicalAccountKey = await depository.accountKey(entityId, peer);
+    const historicalStartHash = await disputeProofHash(
+      depository,
+      historicalAccountKey,
+      1n,
+      initialProofbodyHash,
+    );
+    const historicalStart = await signBatch(
+      entityId,
+      currentBoardKey,
+      emptyBatch({
+        disputeStarts: [{
+          counterentity: peer,
+          nonce: 1n,
+          proofbodyHash: initialProofbodyHash,
+          initialProofbody,
+          watchSeed: WATCH_SEED,
+          sig: buildSingleSignerHanko(peer, historicalStartHash, peerKey),
+          starterInitialArguments: '0x',
+          starterIncrementedArguments: '0x',
+        }],
+      }),
+      1n,
+    );
+    await expect(depository.processBatch(
+      historicalStart.encodedBatch,
+      historicalStart.hanko,
+      1n,
+    )).to.emit(depository, 'DisputeStarted');
+
+    const historicalFinalHash = await disputeProofHash(
+      depository,
+      historicalAccountKey,
+      2n,
+      initialProofbodyHash,
+    );
+    const historicalFinal = await signBatch(
+      peer,
+      peerKey,
+      emptyBatch({
+        disputeFinalizations: [{
+          counterentity: entityId,
+          initialNonce: 1n,
+          finalNonce: 2n,
+          initialProofbodyHash,
+          finalProofbody: initialProofbody,
+          starterArguments: '0x',
+          otherArguments: '0x',
+          sig: buildSingleSignerHanko(entityId, historicalFinalHash, oldBoardKey),
+          startedByLeft: BigInt(entityId) < BigInt(peer),
+          cooperative: false,
+        }],
+      }),
+      1n,
+    );
+    await expect(depository.processBatch(
+      historicalFinal.encodedBatch,
+      historicalFinal.hanko,
+      1n,
+    )).to.emit(depository, 'DisputeFinalized');
+    expect((await depository._accounts(historicalAccountKey)).nonce).to.equal(2n);
   });
 
   it('rejects previous-board watchtower authority while accepting the current board', async function () {
@@ -481,18 +610,12 @@ describe('EntityProvider board rotation grace', function () {
     const initialProofbody = emptyProofBody();
     const initialProofbodyHash = proofBodyHash(initialProofbody);
     const chainId = (await ethers.provider.getNetwork()).chainId;
-    const startHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-      [
-        DISPUTE_PROOF,
-        chainId,
-        await depository.getAddress(),
-        accountKey,
-        initialNonce,
-        initialProofbodyHash,
-        WATCH_SEED,
-      ],
-    ));
+    const startHash = await disputeProofHash(
+      depository,
+      accountKey,
+      initialNonce,
+      initialProofbodyHash,
+    );
     const startBatch = encodeBatch(emptyBatch({
       disputeStarts: [{
         counterentity: entityId,

@@ -49,6 +49,10 @@ const addSettlement = (
 );
 
 describe('j-batch contract limits', () => {
+  test('mirrors the one-finalization EIP-7825 transaction bound', () => {
+    expect(J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations).toBe(1);
+  });
+
   test('ABI decode returns plain cloneable canonical data', () => {
     const batch = createEmptyBatch();
     batch.flashloans.push({ tokenId: 1, amount: 2n });

@@ -24,24 +24,27 @@ import { applyJBlockHeadersIngressTransform } from './watcher';
 import { TRON_CHAIN_IDS } from './chain-ids';
 
 /**
- * `eth_estimateGas` minimizes gas, while optional dispute transformers are
- * deliberately allowed to soft-skip when gas is low. A cheap successful no-op
- * is therefore not a safe estimate for processBatch.
+ * `eth_estimateGas` minimizes gas. Transformer execution has an 8M aggregate
+ * protocol cap, while caller starvation now reverts instead of changing the
+ * financial result. The canonical batch contains at most one finalization;
+ * reserve 16M (= 8M execution + 100% headroom), below EIP-7825's 2^24 cap.
  */
-export const PROCESS_BATCH_GAS_FLOOR = 10_000_000n;
-export const PROCESS_BATCH_GAS_PER_ADDITIONAL_FINALIZATION = 8_000_000n;
+export const PROCESS_BATCH_GAS_FLOOR = 16_000_000n;
 
 export const applyProcessBatchGasFloor = (
   estimatedGasLimit: bigint,
-  disputeFinalizationCount: number,
+  transformerFinalizationCount: number,
 ): bigint => {
-  if (!Number.isSafeInteger(disputeFinalizationCount) || disputeFinalizationCount < 0) {
+  if (!Number.isSafeInteger(transformerFinalizationCount) || transformerFinalizationCount < 0) {
     throw new Error('J_DISPUTE_FINALIZATION_COUNT_INVALID');
   }
-  if (disputeFinalizationCount === 0) return estimatedGasLimit;
-  const floor = PROCESS_BATCH_GAS_FLOOR
-    + BigInt(disputeFinalizationCount - 1) * PROCESS_BATCH_GAS_PER_ADDITIONAL_FINALIZATION;
-  return estimatedGasLimit < floor ? floor : estimatedGasLimit;
+  if (transformerFinalizationCount > 1) {
+    throw new Error('J_TRANSFORMER_FINALIZATION_BATCH_LIMIT');
+  }
+  if (transformerFinalizationCount === 0) return estimatedGasLimit;
+  return estimatedGasLimit < PROCESS_BATCH_GAS_FLOOR
+    ? PROCESS_BATCH_GAS_FLOOR
+    : estimatedGasLimit;
 };
 
 export const rpcLog = createStructuredLogger('jadapter.rpc');

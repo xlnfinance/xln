@@ -1453,7 +1453,7 @@ export class BrowserVMProvider {
       createAddressFromPrivateKey(txPrivKey),
       (currentNonce) => createLegacyTx({
         to: this.depositoryAddress!,
-        gasLimit: 10000000n,
+        gasLimit: 16_000_000n,
         gasPrice: 10n,
         data: hexToBytes(callData as `0x${string}`),
         nonce: currentNonce,

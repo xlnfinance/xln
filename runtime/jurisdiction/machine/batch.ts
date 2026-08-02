@@ -185,7 +185,9 @@ export const J_BATCH_CONTRACT_LIMITS = {
   maxSettlementDiffs: 32,
   maxSettlementForgivenessIds: 32,
   maxDisputeStarts: 8,
-  maxDisputeFinalizations: 8,
+  // One transformer-capable finalization plus 100% gas reserve fits the
+  // EIP-7825 2^24 transaction cap; independent disputes use independent txs.
+  maxDisputeFinalizations: 1,
   maxReserveToCollateralPairs: 64,
   maxReserveToCollateralPairsTotal: 256,
   maxSecretReveals: 32,
