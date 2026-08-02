@@ -105,11 +105,12 @@ const stopAnvil = async (managed: ManagedAnvil): Promise<void> => {
 const replicaForAddresses = (
   adapter: JAdapter,
   entityProvider: string,
+  entityProviderDeploymentBlock = adapter.entityProviderDeploymentBlock,
 ): JReplica => ({
   chainId: CHAIN_ID,
   depositoryAddress: adapter.addresses.depository,
   entityProviderAddress: entityProvider,
-  entityProviderDeploymentBlock: adapter.entityProviderDeploymentBlock,
+  entityProviderDeploymentBlock,
   contracts: { ...adapter.addresses, entityProvider },
 }) as JReplica;
 
@@ -130,6 +131,8 @@ test('RPC fromReplica rejects a live EntityProvider not bound to the Depository'
 
     const secondProvider = await deployEntityProvider(deployed.signer);
     const secondProviderAddress = await secondProvider.getAddress();
+    const secondDeployment = await secondProvider.deploymentTransaction()?.wait();
+    if (!secondDeployment) throw new Error('SECOND_ENTITY_PROVIDER_DEPLOYMENT_RECEIPT_MISSING');
     expect(await deployed.provider.getCode(secondProviderAddress)).not.toBe('0x');
     expect((await deployed.depository.entityProvider()).toLowerCase()).toBe(
       deployed.addresses.entityProvider.toLowerCase(),
@@ -139,7 +142,7 @@ test('RPC fromReplica rejects a live EntityProvider not bound to the Depository'
       mode: 'rpc',
       chainId: CHAIN_ID,
       rpcUrl: anvil.rpcUrl,
-      fromReplica: replicaForAddresses(deployed, secondProviderAddress),
+      fromReplica: replicaForAddresses(deployed, secondProviderAddress, secondDeployment.blockNumber),
     }).then(async (adapter) => {
       await adapter.close();
       return 'accepted';
@@ -147,6 +150,37 @@ test('RPC fromReplica rejects a live EntityProvider not bound to the Depository'
 
     expect(result).toBeInstanceOf(Error);
     expect(result instanceof Error ? result.message : '').toContain('J_STACK_ENTITY_PROVIDER_MISMATCH');
+  } finally {
+    await deployed?.close();
+    await stopAnvil(anvil);
+  }
+}, 120_000);
+
+test('RPC fromReplica proves the exact EntityProvider deployment block', async () => {
+  const anvil = await startAnvil();
+  let deployed: JAdapter | null = null;
+  try {
+    deployed = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: anvil.rpcUrl });
+    await deployed.deployStack();
+    const claimedLaterBlock = deployed.entityProviderDeploymentBlock + 1;
+    const result = await createJAdapter({
+      mode: 'rpc',
+      chainId: CHAIN_ID,
+      rpcUrl: anvil.rpcUrl,
+      fromReplica: replicaForAddresses(
+        deployed,
+        deployed.addresses.entityProvider,
+        claimedLaterBlock,
+      ),
+    }).then(async (adapter) => {
+      await adapter.close();
+      return 'accepted';
+    }, (error: unknown) => error);
+
+    expect(result).toBeInstanceOf(Error);
+    expect(result instanceof Error ? result.message : '').toContain(
+      `RPC_ENTITY_PROVIDER_PREDEPLOY_CODE_PRESENT:${claimedLaterBlock - 1}`,
+    );
   } finally {
     await deployed?.close();
     await stopAnvil(anvil);

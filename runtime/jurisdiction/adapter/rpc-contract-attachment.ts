@@ -28,6 +28,32 @@ export const readRpcReplicaAddresses = (config: JAdapterConfig): JAdapterAddress
   };
 };
 
+const assertEntityProviderDeploymentOrigin = async (
+  provider: ethers.JsonRpcProvider,
+  address: string,
+  deploymentBlock: number,
+  currentCode: string,
+): Promise<void> => {
+  // The watcher begins at deploymentBlock - 1. Trusting a configured number
+  // would let an importer skip earlier board-registration history. Prove the
+  // exact state transition on the chain: no code immediately before B, the
+  // same runtime code at B and today. RPCs without historical state must fail
+  // loud; silently starting later is not a safe compatibility option.
+  const [deploymentCode, precedingCode] = await Promise.all([
+    provider.getCode(address, deploymentBlock),
+    provider.getCode(address, deploymentBlock - 1),
+  ]);
+  if (deploymentCode === '0x') {
+    throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_CODE_MISSING:${deploymentBlock}`);
+  }
+  if (precedingCode !== '0x') {
+    throw new Error(`RPC_ENTITY_PROVIDER_PREDEPLOY_CODE_PRESENT:${deploymentBlock - 1}`);
+  }
+  if (deploymentCode.toLowerCase() !== currentCode.toLowerCase()) {
+    throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_CODE_CHANGED:${deploymentBlock}`);
+  }
+};
+
 export const attachRpcReplicaContracts = async (
   config: JAdapterConfig,
   provider: ethers.JsonRpcProvider,
@@ -60,6 +86,12 @@ export const attachRpcReplicaContracts = async (
         `deltaTransformer=${addresses.deltaTransformer} code=${codes[3]}`,
     );
   }
+  await assertEntityProviderDeploymentOrigin(
+    provider,
+    addresses.entityProvider,
+    state.entityProviderDeploymentBlock,
+    codes[2]!,
+  );
   state.account = Account__factory.connect(addresses.account, signer);
   state.depository = Depository__factory.connect(addresses.depository, signer);
   state.entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer);
