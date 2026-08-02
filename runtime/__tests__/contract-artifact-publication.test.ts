@@ -25,4 +25,13 @@ describe('contract artifact publication', () => {
       sync.indexOf("rsync -a --checksum --delete-after --exclude='/index.ts'"),
     );
   });
+
+  test('the local release check rejects generated artifact drift', () => {
+    const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts as Record<string, string>;
+    expect(scripts['check']).toContain('bun run check:contract-artifact-drift');
+    expect(scripts['check:contract-artifact-drift']).toBe(
+      'bun run contracts:sync && git diff --exit-code -- ' +
+      'frontend/static/contracts jurisdictions/typechain-types',
+    );
+  });
 });
