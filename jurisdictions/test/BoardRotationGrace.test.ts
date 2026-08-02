@@ -358,15 +358,15 @@ describe('EntityProvider board rotation grace', function () {
     ));
     const startBatch = encodeBatch(emptyBatch({
       disputeStarts: [{
-        counterentity,
+        counterentity: entityId,
         nonce: initialNonce,
         proofbodyHash: initialProofbodyHash,
         initialProofbody,
         watchSeed: WATCH_SEED,
         sig: buildSingleSignerHanko(
-          counterentity,
+          entityId,
           startHash,
-          deriveHardhatPrivateKey(4),
+          deriveHardhatPrivateKey(2),
         ),
         starterInitialArguments: '0x',
         starterIncrementedArguments: '0x',
@@ -375,7 +375,7 @@ describe('EntityProvider board rotation grace', function () {
     const startBatchHash = await computeDepositoryBatchHash(depository, startBatch, 1n);
     await depository.processBatch(
       startBatch,
-      buildSingleSignerHanko(entityId, startBatchHash, deriveHardhatPrivateKey(2)),
+      buildSingleSignerHanko(counterentity, startBatchHash, deriveHardhatPrivateKey(4)),
       1n,
     );
 
@@ -407,7 +407,7 @@ describe('EntityProvider board rotation grace', function () {
         finalHash,
         deriveHardhatPrivateKey(4),
       ),
-      startedByLeft: BigInt(entityId) < BigInt(counterentity),
+      startedByLeft: BigInt(counterentity) < BigInt(entityId),
       cooperative: false,
     };
     const towerHash = await depository.computeWatchtowerCounterDisputeHash(

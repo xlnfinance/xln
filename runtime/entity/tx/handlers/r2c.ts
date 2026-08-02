@@ -138,6 +138,15 @@ export async function handleR2C(
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 
+  if (amount <= 0n || !Number.isSafeInteger(tokenId) || tokenId <= 0) {
+    addMessage(newState, '❌ Collateral deposit requires a positive amount and registered tokenId');
+    return { newState, outputs };
+  }
+  if (!receivingEntity || receivingEntity === counterpartyId.toLowerCase()) {
+    addMessage(newState, '❌ Collateral deposit requires two distinct non-empty entities');
+    return { newState, outputs };
+  }
+
   // Validate: Do we have enough reserve?
   const reserveIssue = getReserveCandidateIssue(entityState, {
     type: 'reserveToCollateral',

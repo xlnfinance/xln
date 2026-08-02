@@ -29,9 +29,20 @@ import { TRON_CHAIN_IDS } from './chain-ids';
  * is therefore not a safe estimate for processBatch.
  */
 export const PROCESS_BATCH_GAS_FLOOR = 10_000_000n;
+export const PROCESS_BATCH_GAS_PER_ADDITIONAL_FINALIZATION = 8_000_000n;
 
-export const applyProcessBatchGasFloor = (estimatedGasLimit: bigint, hasDisputeFinalization: boolean): bigint =>
-  hasDisputeFinalization && estimatedGasLimit < PROCESS_BATCH_GAS_FLOOR ? PROCESS_BATCH_GAS_FLOOR : estimatedGasLimit;
+export const applyProcessBatchGasFloor = (
+  estimatedGasLimit: bigint,
+  disputeFinalizationCount: number,
+): bigint => {
+  if (!Number.isSafeInteger(disputeFinalizationCount) || disputeFinalizationCount < 0) {
+    throw new Error('J_DISPUTE_FINALIZATION_COUNT_INVALID');
+  }
+  if (disputeFinalizationCount === 0) return estimatedGasLimit;
+  const floor = PROCESS_BATCH_GAS_FLOOR
+    + BigInt(disputeFinalizationCount - 1) * PROCESS_BATCH_GAS_PER_ADDITIONAL_FINALIZATION;
+  return estimatedGasLimit < floor ? floor : estimatedGasLimit;
+};
 
 export const rpcLog = createStructuredLogger('jadapter.rpc');
 

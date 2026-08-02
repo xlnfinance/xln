@@ -133,9 +133,10 @@ const executeBatchSubmission = async (
     const estimatedGas = await context.chainIo.estimateGas(
       () => depository.processBatch.estimateGas(data.encodedBatch, data.hankoSignature, entityNonce),
     );
-    const gasLimit = context.config.mode === 'tron'
-      ? estimatedGas
-      : applyProcessBatchGasFloor(estimatedGas, plan.batch.disputeFinalizations.length > 0);
+    const gasLimit = applyProcessBatchGasFloor(
+      estimatedGas,
+      plan.batch.disputeFinalizations.length,
+    );
     const preflightFailure = await preflightProcessBatch({
       depository,
       encodedBatch: data.encodedBatch,

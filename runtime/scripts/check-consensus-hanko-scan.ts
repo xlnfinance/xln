@@ -265,7 +265,6 @@ assertIncludes(depository, 'if (nonce != entityNonces[entityId] + 1) revert E2()
 assertIncludes(accountContract, 'return HankoEncoding.encodeBatch(', accountContractPath);
 assertIncludes(accountContract, 'return HankoEncoding.encodeCooperativeUpdate(', accountContractPath);
 assertIncludes(accountContract, 'return HankoEncoding.encodeDisputeProof(', accountContractPath);
-assertIncludes(accountContract, 'return HankoEncoding.encodeCooperativeDisputeProof(', accountContractPath);
 assertIncludes(accountContract, 'block.chainid,\n      address(this),', accountContractPath);
 assertIncludes(rpcAdapter, 'const disputeHash = hashDisputeProofHankoPayload(', rpcAdapterPath);
 assertNotMatches(

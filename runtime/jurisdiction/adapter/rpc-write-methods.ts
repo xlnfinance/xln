@@ -99,9 +99,10 @@ export const processRpcSignedBatch = async (
           prepared.nextNonce,
         ),
       );
-      const gasLimit = context.config.mode === 'tron'
-        ? estimatedGas
-        : applyProcessBatchGasFloor(estimatedGas, batch.disputeFinalizations.length > 0);
+      const gasLimit = applyProcessBatchGasFloor(
+        estimatedGas,
+        batch.disputeFinalizations.length,
+      );
       const tx = await depository.processBatch(
         prepared.encodedBatch,
         prepared.hankoData,

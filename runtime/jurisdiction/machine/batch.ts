@@ -243,6 +243,15 @@ export function getJBatchContractLimitIssue(batch: JBatch): string | null {
     return `revealSecrets ${batch.revealSecrets.length}/${J_BATCH_CONTRACT_LIMITS.maxSecretReveals}`;
   }
   for (const [index, op] of batch.reserveToCollateral.entries()) {
+    if (op.tokenId <= 0 || !Number.isSafeInteger(op.tokenId)) {
+      return `reserveToCollateral[${index}].tokenId must be a positive safe integer`;
+    }
+    if (op.pairs.length === 0) {
+      return `reserveToCollateral[${index}].pairs must not be empty`;
+    }
+    if (op.pairs.some((pair) => pair.amount <= 0n)) {
+      return `reserveToCollateral[${index}].pairs amounts must be positive`;
+    }
     if (op.pairs.length > J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs) {
       return `reserveToCollateral[${index}].pairs ${op.pairs.length}/${J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs}`;
     }
@@ -818,6 +827,13 @@ export function batchAddReserveToCollateral(
   tokenId: number,
   amount: bigint
 ): void {
+  if (amount <= 0n) throw new Error('R2C_AMOUNT_MUST_BE_POSITIVE');
+  if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {
+    throw new Error('R2C_TOKEN_ID_INVALID');
+  }
+  if (!entityId || !counterpartyId || entityId === counterpartyId) {
+    throw new Error('R2C_ACCOUNT_PARTIES_INVALID');
+  }
   // Block if batch has pending broadcast
   assertBatchNotPending(jBatchState, 'R2C');
 

@@ -390,8 +390,13 @@ contract Depository is ReentrancyGuardLite {
     if (account.disputeHash == bytes32(0)) revert E5();
     if (params.cooperative) revert E2();
     if (params.sig.length == 0) revert E2();
-    if (lastResortWindowBlocks == 0) revert E2();
+    if (lastResortWindowBlocks == 0 || lastResortWindowBlocks > defaultDisputeDelay) revert E2();
     if (params.finalNonce <= account.nonce) revert E2();
+    // A tower inherits its owner's side, not a free-standing right to close.
+    // Only the non-starter may reveal a newer jointly signed state; otherwise a
+    // starter-appointed tower could replay a stale peer signature immediately.
+    bool ownerIsCounterparty = account.disputeStartedByLeft != (entityId < params.counterentity);
+    if (!ownerIsCounterparty) revert E2();
     if (block.number + lastResortWindowBlocks < account.disputeTimeout) revert E2();
 
     bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
@@ -822,6 +827,7 @@ contract Depository is ReentrancyGuardLite {
   function _reserveToCollateral(bytes32 entity, ReserveToCollateral memory params) internal returns (bool completeSuccess) {
     uint tokenId = params.tokenId;
     bytes32 receivingEntity = params.receivingEntity;
+    if (receivingEntity == bytes32(0) || params.pairs.length == 0) revert E7();
    
     // debts must be paid before any transfers from reserve 
     enforceDebts(entity, tokenId, DEBT_ENFORCEMENT_CHUNK);
@@ -829,6 +835,8 @@ contract Depository is ReentrancyGuardLite {
     uint256 totalAmount = 0;
     for (uint i = 0; i < params.pairs.length; i++) {
       uint256 amount = params.pairs[i].amount;
+      if (amount == 0) revert E1();
+      if (params.pairs[i].entity == bytes32(0) || params.pairs[i].entity == receivingEntity) revert E7();
       if (amount > uint256(type(int256).max)) revert E8();
       totalAmount += amount;
     }

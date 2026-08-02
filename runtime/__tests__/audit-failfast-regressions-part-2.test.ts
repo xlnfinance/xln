@@ -2275,6 +2275,21 @@ describe('audit fail-fast regressions', () => {
       tokenId: 1,
       amount: 10n,
     });
+    batch.disputeStarts.push({
+      counterentity: `0x${'ab'.repeat(32)}`,
+      nonce: 1,
+      proofbodyHash: `0x${'cd'.repeat(32)}`,
+      initialProofbody: {
+        watchSeed: `0x${'12'.repeat(32)}`,
+        offdeltas: [],
+        tokenIds: [],
+        transformers: [],
+      },
+      watchSeed: `0x${'12'.repeat(32)}`,
+      sig: '0x1234',
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+    });
     state.jBatchState = {
       batch,
       jurisdiction,
@@ -2308,7 +2323,12 @@ describe('audit fail-fast regressions', () => {
       expect(jTx.data.entityNonce).toBe(1);
       expect(jTx.data.batchGeneration).toBe(1);
       expect(jTx.data.hankoSignature).toMatch(/^0x/);
+      expect(jTx.data.batch.disputeStarts).toHaveLength(1);
+      expect(jTx.data.batch.reserveToReserve).toEqual([]);
     }
     expect(result.workingReplica.state.jBatchState?.broadcastCount).toBe(1);
+    expect(result.workingReplica.state.jBatchState?.sentBatch?.batch.disputeStarts).toHaveLength(1);
+    expect(result.workingReplica.state.jBatchState?.batch.reserveToReserve).toHaveLength(1);
+    expect(result.workingReplica.state.jBatchState?.batch.disputeStarts).toEqual([]);
   });
 });

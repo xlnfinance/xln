@@ -24,7 +24,6 @@ import {
   selectFinalProof,
   verifyCounterProofIdentity,
   type FinalProofPayload,
-  type FinalProofSelection,
 } from './finalize-proof';
 
 type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
@@ -58,13 +57,12 @@ const isFinalizeTimingAllowed = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
-  selection: FinalProofSelection,
   env: EntityRuntimeContext,
 ): boolean => {
   const activeDispute = account.activeDispute!;
   const callerIsLeft = account.state.leftEntity === state.entityId;
   const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
-  if (selection.shouldUseCounterProof || !callerIsStarter) return true;
+  if (!callerIsStarter) return true;
   const currentJBlock = getEntityCertifiedJurisdictionHeight(state);
   if (currentJBlock >= activeDispute.disputeTimeout) return true;
   addMessage(
@@ -211,7 +209,7 @@ export const handleDisputeFinalize = async (
     finalNonce: finalProof.finalNonce,
     finalNonceSource: selection.finalNonceSource,
   });
-  if (!isFinalizeTimingAllowed(newState, account, counterpartyId, selection, env)) {
+  if (!isFinalizeTimingAllowed(newState, account, counterpartyId, env)) {
     return { newState, outputs };
   }
   queueDisputeFinalize(newState, account, finalProof, registry);

@@ -228,7 +228,6 @@ export const checkOnchainHankoAst = (): void => {
     _encodeBatchHankoPayload: 'encodeBatch',
     _encodeCooperativeUpdateHankoPayload: 'encodeCooperativeUpdate',
     _encodeDisputeProofHankoPayload: 'encodeDisputeProof',
-    _encodeCooperativeDisputeProofHankoPayload: 'encodeCooperativeDisputeProof',
   };
   for (const [name, encodingCall] of Object.entries(localEncoders)) {
     const fn = namedFunction(contracts.Account, name);
@@ -257,7 +256,6 @@ export const checkOnchainHankoAst = (): void => {
     'Account._encodeBatchHankoPayload:encodeBatch',
     'Account._encodeCooperativeUpdateHankoPayload:encodeCooperativeUpdate',
     'Account._encodeDisputeProofHankoPayload:encodeDisputeProof',
-    'Account._encodeCooperativeDisputeProofHankoPayload:encodeCooperativeDisputeProof',
     'Depository._encodeWatchtowerCounterDisputeHankoPayload:encodeWatchtowerCounterDispute',
     'EntityProvider.encodeBoardProposalHankoPayload:encodeBoardProposal',
     'EntityProvider.encodeBoardProposalCancelHankoPayload:encodeBoardProposalCancel',
@@ -340,7 +338,7 @@ export const checkOnchainHankoAst = (): void => {
       .map((fn) => `${contractName}.${String(fn.name)}`));
   assertExact(verifyConsumers, [
     'Account.verifyDisputeProofHanko',
-    'Account.verifyCooperativeProofHanko', 'Account.processC2R', 'Account._settleDiffs', 'Account._disputeStart',
+    'Account.processC2R', 'Account._settleDiffs', 'Account._disputeStart',
   ], 'verifyHankoSignature consumers');
 
   const currentInterfaceVerifyConsumers = (['Account', 'Depository', 'EntityProvider'] as const).flatMap((contractName) =>

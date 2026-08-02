@@ -392,36 +392,6 @@ library Account {
     return keccak256(_encodeDisputeProofHankoPayload(acct_key, nonce, proofbodyHash, watchSeed));
   }
 
-  function _encodeCooperativeDisputeProofHankoPayload(
-    bytes memory acct_key,
-    uint nonce,
-    bytes32 proofbodyHash,
-    bytes32 starterInitialArgumentsHash
-  ) private view returns (bytes memory) {
-    return HankoEncoding.encodeCooperativeDisputeProof(
-      block.chainid,
-      address(this),
-      acct_key,
-      nonce,
-      proofbodyHash,
-      starterInitialArgumentsHash
-    );
-  }
-
-  function _cooperativeDisputeProofHankoHash(
-    bytes memory acct_key,
-    uint nonce,
-    bytes32 proofbodyHash,
-    bytes32 starterInitialArgumentsHash
-  ) private view returns (bytes32) {
-    return keccak256(_encodeCooperativeDisputeProofHankoPayload(
-      acct_key,
-      nonce,
-      proofbodyHash,
-      starterInitialArgumentsHash
-    ));
-  }
-
   // ========== HANKO VERIFICATION ==========
 
   /// @notice Verify dispute proof with hanko (entity-level signature)
@@ -435,26 +405,6 @@ library Account {
     bytes32 expectedEntity
   ) private view returns (bool success) {
     bytes32 hash = _disputeProofHankoHash(acct_key, nonce, proofbodyHash, watchSeed);
-    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
-    return valid && recoveredEntity == expectedEntity;
-  }
-
-  /// @notice Verify cooperative proof with hanko
-  function verifyCooperativeProofHanko(
-    address entityProvider,
-    bytes memory acct_key,
-    uint nonce,
-    bytes32 proofbodyHash,
-    bytes32 starterInitialArgumentsHash,
-    bytes memory hanko,
-    bytes32 expectedEntity
-  ) private view returns (bool success) {
-    bytes32 hash = _cooperativeDisputeProofHankoHash(
-      acct_key,
-      nonce,
-      proofbodyHash,
-      starterInitialArgumentsHash
-    );
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
   }
@@ -488,26 +438,12 @@ library Account {
     uint256 starterArgumentsTimestamp = block.timestamp;
     eventInitialNonce = params.initialNonce;
 
-    if (params.cooperative) {
-      if (account.nonce == 0) revert E5();
-      if (params.initialNonce != account.nonce) revert E2();
-      if (params.finalNonce <= account.nonce) revert E2();
-      if (params.sig.length == 0) revert E4();
-
-      // counterentity supplies the inner Hanko, so the selected starter blob
-      // is that signer's side. entityId independently authorizes the other side
-      // through the outer processBatch Hanko.
-      if (params.startedByLeft != (params.counterentity < entityId)) revert E7();
-      if (!verifyCooperativeProofHanko(
-        entityProvider,
-        acct_key,
-        params.finalNonce,
-        finalProofbodyHash,
-        keccak256(params.starterArguments),
-        params.sig,
-        params.counterentity
-      )) revert E4();
-    } else {
+    // There is one canonical finalization path: an observed dispute followed by
+    // either the non-starter's newer jointly signed state or the committed
+    // initial state under the timeout rules below. A historical pair of ordinary
+    // state signatures is not fresh consent to bypass the challenge window.
+    if (params.cooperative) revert E2();
+    {
       bytes32 storedHash = account.disputeHash;
       if (storedHash == bytes32(0)) revert E5();
       if (params.initialNonce != account.nonce) revert E2();
@@ -525,8 +461,14 @@ library Account {
       );
       if (storedHash != expectedHash) revert E9();
 
+      bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
       bytes32 expectedStarterArgumentsCommitment;
       if (params.sig.length > 0) {
+        // The starter necessarily holds older counterparty signatures. Letting
+        // the starter submit one here would turn any stale N+1 into an immediate
+        // close and deny the counterparty its window to reveal N+2. The outer
+        // batch signature therefore must belong to the non-starter.
+        if (!senderIsCounterparty) revert E2();
         if (params.finalNonce <= account.nonce) revert E2();
         if (params.finalNonce <= params.initialNonce) revert E2();
         if (!verifyDisputeProofHanko(
@@ -541,7 +483,6 @@ library Account {
         expectedStarterArgumentsCommitment = account.starterIncrementedArgumentsCommitment;
       } else {
         if (params.finalNonce != account.nonce) revert E2();
-        bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
         if (!senderIsCounterparty && block.number < account.disputeTimeout) revert E2();
         if (finalProofbodyHash != account.disputeInitialProofbodyHash) revert E9();
         expectedStarterArgumentsCommitment = account.starterInitialArgumentsCommitment;
@@ -562,12 +503,10 @@ library Account {
     rightArguments = params.startedByLeft ? params.otherArguments : params.starterArguments;
     leftArgumentsTimestamp = block.timestamp;
     rightArgumentsTimestamp = block.timestamp;
-    if (!params.cooperative) {
-      if (params.startedByLeft) {
-        leftArgumentsTimestamp = starterArgumentsTimestamp;
-      } else {
-        rightArgumentsTimestamp = starterArgumentsTimestamp;
-      }
+    if (params.startedByLeft) {
+      leftArgumentsTimestamp = starterArgumentsTimestamp;
+    } else {
+      rightArgumentsTimestamp = starterArgumentsTimestamp;
     }
 
     // Publish no partially-cleared dispute state. Any later failure reverts the

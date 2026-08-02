@@ -295,10 +295,10 @@ describe('watchtower rpc last-resort integration', () => {
     const initialProofbody = proofBody(watchSeed, [0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
     const startHash = await disputeProofHash(depository, accountKey, disputeNonce, initialProofbodyHash, watchSeed);
-    const startSig = signEntityHash(counterparty.entityId, startHash, counterparty.privateKey);
+    const startSig = signEntityHash(watched.entityId, startHash, watched.privateKey);
     const disputeStartBatch = createEmptyBatch();
     disputeStartBatch.disputeStarts.push({
-      counterentity: counterparty.entityId,
+      counterentity: watched.entityId,
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
       initialProofbody,
@@ -307,12 +307,17 @@ describe('watchtower rpc last-resort integration', () => {
       starterInitialArguments,
       starterIncrementedArguments,
     });
-    const disputeStartSigned = await signDepositoryBatch(depository, watched.entityId, watched.privateKey, disputeStartBatch);
-    await (await depository.connect(watched.wallet).processBatch(
+    const disputeStartSigned = await signDepositoryBatch(
+      depository,
+      counterparty.entityId,
+      counterparty.privateKey,
+      disputeStartBatch,
+    );
+    await (await depository.connect(counterparty.wallet).processBatch(
       disputeStartSigned.encodedBatch,
       disputeStartSigned.hankoData,
       disputeStartSigned.nonce,
-      { nonce: await nextNonce(watched.wallet) },
+      { nonce: await nextNonce(counterparty.wallet) },
     )).wait();
 
     const finalProofbody = proofBody(watchSeed, [-200n], [tokenId]);
@@ -563,10 +568,10 @@ describe('watchtower rpc last-resort integration', () => {
     const initialProofbody = proofBody(watchSeed, [0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
     const startHash = await disputeProofHash(depository, accountKey, disputeNonce, initialProofbodyHash, watchSeed);
-    const startSig = signEntityHash(counterparty.entityId, startHash, counterparty.privateKey);
+    const startSig = signEntityHash(watched.entityId, startHash, watched.privateKey);
     const disputeStartBatch = createEmptyBatch();
     disputeStartBatch.disputeStarts.push({
-      counterentity: counterparty.entityId,
+      counterentity: watched.entityId,
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
       initialProofbody,
@@ -575,12 +580,17 @@ describe('watchtower rpc last-resort integration', () => {
       starterInitialArguments,
       starterIncrementedArguments,
     });
-    const disputeStartSigned = await signDepositoryBatch(depository, watched.entityId, watched.privateKey, disputeStartBatch);
-    await (await depository.connect(watched.wallet).processBatch(
+    const disputeStartSigned = await signDepositoryBatch(
+      depository,
+      counterparty.entityId,
+      counterparty.privateKey,
+      disputeStartBatch,
+    );
+    await (await depository.connect(counterparty.wallet).processBatch(
       disputeStartSigned.encodedBatch,
       disputeStartSigned.hankoData,
       disputeStartSigned.nonce,
-      { nonce: await nextNonce(watched.wallet) },
+      { nonce: await nextNonce(counterparty.wallet) },
     )).wait();
 
     const towerProofbody = proofBody(watchSeed, [-200n], [tokenId]);
@@ -711,7 +721,7 @@ describe('watchtower rpc last-resort integration', () => {
       starterArguments: starterIncrementedArguments,
       otherArguments: '0x',
       sig: userFinalSig,
-      startedByLeft: true,
+      startedByLeft: false,
       cooperative: false,
     });
     const userFinalizeSigned = await signDepositoryBatch(depository, watched.entityId, watched.privateKey, userFinalizeBatch);
