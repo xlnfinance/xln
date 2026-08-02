@@ -1843,7 +1843,7 @@ describe('audit fail-fast regressions', () => {
     ]);
 
     await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp)).rejects.toThrow(
-      /CROSS_J_PULL_CLOSE_PROPOSAL_FAILED/,
+      /CROSS_J_EXACT_FILL_RATIO_REQUIRED:cross-pull-propose-failfast/,
     );
     expect(account.mempool).toHaveLength(1);
   });

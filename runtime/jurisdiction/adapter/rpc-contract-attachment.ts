@@ -39,10 +39,19 @@ const assertEntityProviderDeploymentOrigin = async (
   // exact state transition on the chain: no code immediately before B, the
   // same runtime code at B and today. RPCs without historical state must fail
   // loud; silently starting later is not a safe compatibility option.
-  const [deploymentCode, precedingCode] = await Promise.all([
-    provider.getCode(address, deploymentBlock),
-    provider.getCode(address, deploymentBlock - 1),
-  ]);
+  let deploymentCode: string;
+  let precedingCode: string;
+  try {
+    [deploymentCode, precedingCode] = await Promise.all([
+      provider.getCode(address, deploymentBlock),
+      provider.getCode(address, deploymentBlock - 1),
+    ]);
+  } catch (error) {
+    throw new Error(
+      `RPC_ENTITY_PROVIDER_DEPLOYMENT_ORIGIN_UNAVAILABLE:${deploymentBlock}`,
+      { cause: error },
+    );
+  }
   if (deploymentCode === '0x') {
     throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_CODE_MISSING:${deploymentBlock}`);
   }
