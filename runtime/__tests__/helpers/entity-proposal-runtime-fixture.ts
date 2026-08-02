@@ -149,8 +149,7 @@ export const installPersistedProposalValidator = async (): Promise<{
     name: jurisdiction.name,
     rpcs: [],
     chainId: jurisdiction.chainId,
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
+    contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,

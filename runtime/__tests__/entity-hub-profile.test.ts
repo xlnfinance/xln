@@ -64,8 +64,7 @@ describe('entity hub profile classification', () => {
       blockDelayMs: 0,
       lastBlockTimestamp: 0,
       position: { x: 0, y: 0, z: 0 },
-      depositoryAddress: TEST_JURISDICTION.depositoryAddress,
-      entityProviderAddress: TEST_JURISDICTION.entityProviderAddress,
+      contracts: { depository: TEST_JURISDICTION.depositoryAddress, entityProvider: TEST_JURISDICTION.entityProviderAddress },
       contracts: {
         account: '0x00000000000000000000000000000000000000a1',
         depository: TEST_JURISDICTION.depositoryAddress,
@@ -151,8 +150,7 @@ describe('entity hub profile classification', () => {
       blockDelayMs: 0,
       lastBlockTimestamp: 0,
       position: { x: 0, y: 0, z: 0 },
-      depositoryAddress: TEST_JURISDICTION.depositoryAddress,
-      entityProviderAddress: TEST_JURISDICTION.entityProviderAddress,
+      contracts: { depository: TEST_JURISDICTION.depositoryAddress, entityProvider: TEST_JURISDICTION.entityProviderAddress },
       contracts: {
         account: '0x00000000000000000000000000000000000000a1',
         depository: TEST_JURISDICTION.depositoryAddress,

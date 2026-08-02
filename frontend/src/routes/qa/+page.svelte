@@ -1642,7 +1642,7 @@
           <div>
             <div class="eyebrow">Maintenance</div>
             <h3>Backfill History Index</h3>
-            <p>One-shot manifest import for legacy runs.</p>
+            <p>One-shot index rebuild from run manifests already on disk.</p>
           </div>
           <label>
             <span>confirm phrase</span>
@@ -1651,7 +1651,7 @@
           <button
             class="mini-action"
             disabled={!historyBackfillReady}
-            title={qaCanPlanRestart ? 'Reads legacy manifests once and records SQLite rows' : 'Admin QA token required'}
+            title={qaCanPlanRestart ? 'Reads run manifests once and records SQLite rows' : 'Admin QA token required'}
             onclick={backfillQaHistory}
             data-testid="qa-history-backfill"
           >
@@ -1815,7 +1815,7 @@
           <article class="summary-card" class:bad={hashChanged}>
             <span>Code Hash</span>
             <strong>{shortHash(selectedRun.code?.codeHash)}</strong>
-            <small>{selectedRun.code?.gitHead ? `head ${shortHash(selectedRun.code.gitHead)}` : 'legacy run'}</small>
+            <small>{selectedRun.code?.gitHead ? `head ${shortHash(selectedRun.code.gitHead)}` : 'head unrecorded'}</small>
           </article>
           <article class="summary-card">
             <span>Peak Load</span>

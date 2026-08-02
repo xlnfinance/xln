@@ -46,8 +46,7 @@ const installStack = (env: RuntimeReplica, depth = 2): void => {
     lastBlockTimestamp: 0,
     position: { x: 0, y: 50, z: 0 },
     chainId: jurisdiction.chainId,
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
+    contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,

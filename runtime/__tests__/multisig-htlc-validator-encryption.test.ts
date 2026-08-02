@@ -139,8 +139,6 @@ const installProcessJurisdictionReplica = (
     PROCESS_JURISDICTION.depositoryAddress,
   );
   replica.chainId = PROCESS_JURISDICTION.chainId;
-  replica.depositoryAddress = PROCESS_JURISDICTION.depositoryAddress;
-  replica.entityProviderAddress = PROCESS_JURISDICTION.entityProviderAddress;
   replica.contracts = {
     account: PROCESS_ACCOUNT,
     depository: PROCESS_JURISDICTION.depositoryAddress,

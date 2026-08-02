@@ -442,8 +442,7 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
       name: '__audit_test__',
       chainId: jurisdiction.chainId,
       rpcs: [],
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
       contracts: {
         depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,
@@ -502,8 +501,8 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeReplica, state: 
   if (!replica) {
     replica = createJReplica(env, jurisdiction.name, jurisdiction.depositoryAddress);
     replica.chainId = jurisdiction.chainId;
-    replica.depositoryAddress = jurisdiction.depositoryAddress;
-    replica.entityProviderAddress = jurisdiction.entityProviderAddress;
+    replica.contracts = { ...replica.contracts, depository: jurisdiction.depositoryAddress };
+    replica.contracts = { ...replica.contracts, entityProvider: jurisdiction.entityProviderAddress };
   }
   replica.watcherConfirmationDepth = 0;
   await installCanonicalRegisteredBoardAuthority(env, jurisdiction, state, boardHash);
@@ -2253,8 +2252,7 @@ describe('audit fail-fast regressions', () => {
       blockDelayMs: 0,
       lastBlockTimestamp: 0,
       position: { x: 0, y: 0, z: 0 },
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
       contracts: {
         account: hex20('3'),
         depository: jurisdiction.depositoryAddress,

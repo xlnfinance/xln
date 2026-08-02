@@ -22,8 +22,7 @@ describe('local runtime owner', () => {
         lastBlockTimestamp: 0,
         position: { x: 0, y: 0, z: 0 },
         chainId: 31_337,
-        depositoryAddress: DEPOSITORY,
-        entityProviderAddress: ENTITY_PROVIDER,
+        contracts: { depository: DEPOSITORY, entityProvider: ENTITY_PROVIDER },
       },
     });
     const second = buildLocalRuntimeOwner({
@@ -39,8 +38,7 @@ describe('local runtime owner', () => {
         lastBlockTimestamp: 0,
         position: { x: 0, y: 0, z: 0 },
         chainId: 31_337,
-        depositoryAddress: DEPOSITORY,
-        entityProviderAddress: ENTITY_PROVIDER,
+        contracts: { depository: DEPOSITORY, entityProvider: ENTITY_PROVIDER },
       },
     });
 

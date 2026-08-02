@@ -72,7 +72,6 @@ async function pushSnapshot(
 
 
 
-// Alias for runtime.ts compatibility
 export async function lockAhb(env: RuntimeReplica): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'HTLC AHB');
   // Register signer keys for real signatures

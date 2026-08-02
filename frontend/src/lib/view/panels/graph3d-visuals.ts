@@ -524,7 +524,6 @@ export function createGraphEntityNode(options: {
     if (options.replica?.position) {
       const jurisdictionName =
         options.replica.position.jurisdiction ||
-        options.replica.position.xlnomy ||
         options.fallbackJurisdiction ||
         'default';
       const jurisdiction = options.resolveJMachinePosition(jurisdictionName);

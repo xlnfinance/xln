@@ -222,7 +222,6 @@ export function getTokenIdsForJurisdiction(
 // Canonical USD reference stables used for quote-side orientation in swap pairs.
 // Prices for volatile/non-reference assets are displayed and quoted as stable per 1 asset.
 export const REFERENCE_STABLE_TOKEN_IDS = new Set<number>([1, 3]); // USDC, USDT
-export const LIQUID_SWAP_TOKEN_IDS = REFERENCE_STABLE_TOKEN_IDS;
 export const DEFAULT_ENTITY_SWAP_PAIR_TOKENS = [1, 2, 3] as const;
 export type EntitySwapPairConfig = {
   baseTokenId: number;

@@ -1,7 +1,8 @@
 const DB_NAME = 'xln-runtime-command-journal-v1';
 const DB_VERSION = 2;
 const INTENT_STORE = 'intents';
-const LEGACY_META_STORE = 'meta';
+// Removed in DB_VERSION 2; the upgrade drops it so no reader can observe it.
+const REMOVED_META_STORE = 'meta';
 let journalDbPromise: Promise<IDBDatabase> | null = null;
 
 export const isBrowserCommandJournal = (): boolean => typeof window !== 'undefined';
@@ -15,8 +16,8 @@ const openJournalDb = (): Promise<IDBDatabase> => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (db.objectStoreNames.contains(LEGACY_META_STORE)) {
-        db.deleteObjectStore(LEGACY_META_STORE);
+      if (db.objectStoreNames.contains(REMOVED_META_STORE)) {
+        db.deleteObjectStore(REMOVED_META_STORE);
       }
       if (!db.objectStoreNames.contains(INTENT_STORE)) {
         db.createObjectStore(INTENT_STORE, { keyPath: 'commandId' });

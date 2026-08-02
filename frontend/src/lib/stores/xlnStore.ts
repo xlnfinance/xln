@@ -161,11 +161,10 @@ export interface FrontendXlnFunctions {
   createDemoDelta: XLNModule['createDemoDelta'];
   getDefaultCreditLimit: XLNModule['getDefaultCreditLimit'];
   safeStringify: XLNModule['safeStringify'];
-  formatTokenAmountEthers: XLNModule['formatTokenAmountEthers'];
   parseTokenAmount: XLNModule['parseTokenAmount'];
   convertTokenPrecision: XLNModule['convertTokenPrecision'];
-  calculatePercentageEthers: XLNModule['calculatePercentageEthers'];
-  formatAssetAmountEthers: XLNModule['formatAssetAmountEthers'];
+  calculatePercentage: XLNModule['calculatePercentage'];
+  formatAssetAmount: XLNModule['formatAssetAmount'];
   BigIntMath: BigIntMathUtils;
   FINANCIAL_CONSTANTS: FinancialConstants;
   getEntity: (entityId: string) => FrontendEntitySummary;
@@ -409,7 +408,7 @@ const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeReplica): void
       const entityId = xln.extractEntityId(replicaKey);
       if (entityId && replica.position && !currentPositions.has(entityId)) {
         const pos = replica.position;
-        const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
+        const jurisdiction = pos.jurisdiction || env.activeJurisdiction || 'default';
         currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
         hasChanges = true;
       }
@@ -1135,7 +1134,7 @@ export async function initializeXLN(): Promise<RuntimeReplica | null> {
       if (entityId && replica.position) {
         const pos = replica.position;
         // Store relative position + jReplica reference (defaults to activeJurisdiction)
-        const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
+        const jurisdiction = pos.jurisdiction || env.activeJurisdiction || 'default';
         initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
       }
     }
@@ -1803,11 +1802,10 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       createDemoDelta: failFn('createDemoDelta'),
       getDefaultCreditLimit: failFn('getDefaultCreditLimit'),
       safeStringify: failFn('safeStringify'),
-      formatTokenAmountEthers: failFn('formatTokenAmountEthers'),
       parseTokenAmount: failFn('parseTokenAmount'),
       convertTokenPrecision: failFn('convertTokenPrecision'),
-      calculatePercentageEthers: failFn('calculatePercentageEthers'),
-      formatAssetAmountEthers: failFn('formatAssetAmountEthers'),
+      calculatePercentage: failFn('calculatePercentage'),
+      formatAssetAmount: failFn('formatAssetAmount'),
       BigIntMath: {} as BigIntMathUtils,
       FINANCIAL_CONSTANTS: {} as FinancialConstants,
       getEntity: failFn('getEntity'),
@@ -1867,11 +1865,10 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     safeStringify: $xlnInstance.safeStringify,
 
     // Financial utilities (ethers.js-based, precision-safe)
-    formatTokenAmountEthers: $xlnInstance.formatTokenAmountEthers,
     parseTokenAmount: $xlnInstance.parseTokenAmount,
     convertTokenPrecision: $xlnInstance.convertTokenPrecision,
-    calculatePercentageEthers: $xlnInstance.calculatePercentageEthers,
-    formatAssetAmountEthers: $xlnInstance.formatAssetAmountEthers,
+    calculatePercentage: $xlnInstance.calculatePercentage,
+    formatAssetAmount: $xlnInstance.formatAssetAmount,
     BigIntMath: $xlnInstance.BigIntMath,
     FINANCIAL_CONSTANTS: $xlnInstance.FINANCIAL_CONSTANTS,
 

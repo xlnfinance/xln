@@ -3,7 +3,6 @@
 import { serializeTaggedJson } from '../protocol/serialization';
 import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
 import {
-  becomeHub,
   DaemonControlClient,
   enableRouting,
   setupCustody,
@@ -158,7 +157,7 @@ const run = async (): Promise<void> => {
       initOrderbook: !hasFlag('--no-orderbook'),
     };
     const result = command === 'become-hub'
-      ? await becomeHub(client, config)
+      ? await enableRouting(client, config)
       : await enableRouting(client, config);
     console.log(serializeTaggedJson({ ok: true, command, result }));
     return;

@@ -615,8 +615,7 @@ describe('storage frame journal retention', () => {
       lastBlockTimestamp: 0,
       rpcs: [jurisdiction.address || `jreplica://${jurisdiction.name}`],
       chainId: jurisdiction.chainId,
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
       position: { x: 0, y: 0, z: 0 },
       contracts: {
         depository: jurisdiction.depositoryAddress,

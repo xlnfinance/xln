@@ -44,8 +44,7 @@ const jReplica = (config: JurisdictionConfig): JReplica => ({
   blockDelayMs: 0,
   lastBlockTimestamp: 0,
   chainId: config.chainId,
-  depositoryAddress: config.depositoryAddress,
-  entityProviderAddress: config.entityProviderAddress,
+  contracts: { depository: config.depositoryAddress, entityProvider: config.entityProviderAddress },
   contracts: {
     depository: config.depositoryAddress,
     entityProvider: config.entityProviderAddress,

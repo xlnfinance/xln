@@ -109,11 +109,6 @@ appState.subscribe(state => saveState(state));
 
 // Operations
 export const appStateOperations = {
-  // Mode toggle
-  toggleMode() {
-    appState.update(s => ({ ...s, mode: s.mode === 'user' ? 'dev' : 'user' }));
-  },
-
   setMode(mode: AppMode) {
     appState.update(s => ({ ...s, mode }));
   },
@@ -172,6 +167,3 @@ export const appStateOperations = {
     return get(appState);
   }
 };
-
-// Backward compat exports (for gradual migration)
-export const toggleMode = appStateOperations.toggleMode;

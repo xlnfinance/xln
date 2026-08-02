@@ -189,8 +189,7 @@ export const installJurisdictions = (env: RuntimeReplica, ...jurisdictions: Juri
       name: jurisdiction.name,
       chainId: jurisdiction.chainId,
       rpcs: [jurisdiction.address],
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
       contracts: {
         depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,

@@ -28,8 +28,8 @@ const transformerAddress = addr('51');
 const installTrustedJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
   const replica = createJReplica(env, jurisdiction.name, jurisdiction.depositoryAddress!);
   replica.chainId = jurisdiction.chainId;
-  replica.depositoryAddress = jurisdiction.depositoryAddress;
-  replica.entityProviderAddress = jurisdiction.entityProviderAddress;
+  replica.contracts = { ...replica.contracts, depository: jurisdiction.depositoryAddress };
+  replica.contracts = { ...replica.contracts, entityProvider: jurisdiction.entityProviderAddress };
   replica.contracts = {
     account: addr('52'),
     depository: jurisdiction.depositoryAddress!,

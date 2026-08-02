@@ -1,0 +1,70 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "runtime/runtime.ts",
+    "runtime/api/public/runtime-public.ts",
+    "runtime/api/public/runtime-module.ts",
+    "runtime/api/server/index.ts",
+    "runtime/scripts/*.ts",
+    "runtime/scenarios/*.ts",
+    "runtime/__tests__/**/*.test.ts",
+    "scripts/**/*.ts",
+    "tools/*.ts",
+    "tests/**/*.spec.ts",
+    "tests/**/*.test.ts",
+    "brainvault/cli.ts",
+    "custody/**/*.ts",
+    "playwright.config.ts",
+    "runtime/orchestrator/hub-node.ts",
+    "runtime/orchestrator/mm-node.ts",
+    "brainvault/worker-browser.ts",
+    "brainvault/worker-native.ts",
+    "brainvault/worker-wasm.ts",
+    "runtime/__tests__/fixtures/*.ts",
+    "runtime/api/server/cli.ts",
+    "runtime/qa/code-fingerprint-cli.ts",
+    "runtime/qa/runtime-state-diff-cli.ts"
+  ],
+  "project": [
+    "runtime/**/*.ts",
+    "scripts/**/*.ts",
+    "tools/**/*.ts",
+    "custody/**/*.ts",
+    "brainvault/**/*.ts"
+  ],
+  "ignore": [
+    "**/generated/**",
+    "jurisdictions/**",
+    "frontend/**",
+    "packages/**",
+    "native/**",
+    "dist/**"
+  ],
+  "ignoreBinaries": [
+    "anvil",
+    "forge",
+    "pm2",
+    "rg",
+    "prettier",
+    "pgrep",
+    "du"
+  ],
+  "ignoreDependencies": [
+    "argon2",
+    "buffer",
+    "crypto-js",
+    "dockview",
+    "@nomicfoundation/hardhat-toolbox",
+    "@types/mocha",
+    "chai-as-promised",
+    "mocha",
+    "solc",
+    "electron",
+    "concurrently",
+    "@typescript/native",
+    "@tsconfig/node20",
+    "@types/minimatch",
+    "three",
+    "svelte"
+  ]
+}

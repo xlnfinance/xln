@@ -418,7 +418,6 @@
     if (!selectedJurisdictionName || !selectedReplica) return;
     const replicaJurisdiction =
       selectedReplica.position?.jurisdiction ||
-      selectedReplica.position?.xlnomy ||
       selectedReplica.state?.config?.jurisdiction?.name ||
       positionsMap?.get?.(selectedEntityId || '')?.jurisdiction;
     if (replicaJurisdiction && replicaJurisdiction !== selectedJurisdictionName) {
@@ -459,7 +458,6 @@
     return String(
       replica?.state?.config?.jurisdiction?.name
         || replica?.position?.jurisdiction
-        || replica?.position?.xlnomy
         || '',
     ).trim();
   }
@@ -500,9 +498,9 @@
   const formationRuntimeProjection = $derived.by((): FormationRuntimeProjection => {
     const jurisdictions = Array.from(currentFrame?.state.jReplicas?.values?.() || []).map((replica) => ({
       name: String(replica?.name || ''),
-      address: String(replica?.depositoryAddress || ''),
-      entityProviderAddress: String(replica?.entityProviderAddress || ''),
-      depositoryAddress: String(replica?.depositoryAddress || ''),
+      address: String(replica?.contracts?.depository || ''),
+      entityProviderAddress: String(replica?.contracts?.entityProvider || ''),
+      depositoryAddress: String(replica?.contracts?.depository || ''),
       ...(typeof replica?.chainId === 'number' ? { chainId: replica.chainId } : {}),
     }));
     const existingEntityIds = new Set<string>();

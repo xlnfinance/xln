@@ -358,9 +358,6 @@ export const isAccountWriteLaneIdle = (account: AccountReplica | null): boolean 
   return true;
 };
 
-/** @deprecated Prefer the explicit committed-state or write-lane predicate. */
-export const isAccountConsensusReady = isAccountWriteLaneIdle;
-
 export const hasPairMutualCredit = (
   env: RuntimeReplica,
   leftEntityId: string,

@@ -73,8 +73,7 @@ describe('checkpoint persistence with pending bilateral state', () => {
     env.activeJurisdiction = jurisdiction.name;
     env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
       name: jurisdiction.name,
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
       chainId: jurisdiction.chainId,
       contracts: {
         depository: jurisdiction.depositoryAddress,

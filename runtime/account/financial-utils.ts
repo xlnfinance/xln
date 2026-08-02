@@ -76,10 +76,6 @@ export function formatAssetAmount(balance: { amount: bigint | null | undefined; 
   return `${formattedAmount} ${balance.symbol}`;
 }
 
-export const formatTokenAmountEthers = formatTokenAmount;
-export const calculatePercentageEthers = calculatePercentage;
-export const formatAssetAmountEthers = formatAssetAmount;
-
 /**
  * Safe BigInt arithmetic operations with overflow protection
  */

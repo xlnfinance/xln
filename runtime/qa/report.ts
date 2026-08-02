@@ -2493,7 +2493,16 @@ const readLastRunStatus = async (resultsDir: string): Promise<'passed' | 'failed
   }
 };
 
-const collectLegacyShard = async (
+/**
+ * Reconstruct one shard's evidence from what the run actually left on disk:
+ * its `e2e-shard-NN.log` and the Playwright `test-results-shard-N` directory.
+ *
+ * This is the primary reader, not a compatibility path - nothing in this repo
+ * writes `manifest.json` into a run directory. A stored manifest only exists
+ * for evidence published through `deploy:qa`, so every locally produced run is
+ * read through here.
+ */
+const collectShardFromArtifacts = async (
   _runId: string,
   runDir: string,
   shard: number,
@@ -2549,7 +2558,8 @@ const collectLegacyShard = async (
   } as QaShardManifest, parseRunIdTimestamp(_runId) ?? 0);
 };
 
-const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRunManifest> => {
+/** Build a run manifest from on-disk artifacts when no stored manifest exists. */
+const buildManifestFromArtifacts = async (runId: string, runDir: string): Promise<QaRunManifest> => {
   const runStat = await stat(runDir);
   const allEntries = await readdir(runDir);
   const targetMetadata = await readTargetsMetadata(runDir);
@@ -2566,7 +2576,7 @@ const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRun
     ]),
   ).sort((a, b) => a - b);
 
-  const shards = await Promise.all(shardIds.map(shard => collectLegacyShard(runId, runDir, shard, targetMetadata)));
+  const shards = await Promise.all(shardIds.map(shard => collectShardFromArtifacts(runId, runDir, shard, targetMetadata)));
   const passedShards = shards.filter(shard => shard.status === 'passed').length;
   const failedShards = shards.filter(shard => shard.status === 'failed').length;
   const totalMs = null;
@@ -2744,7 +2754,7 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
       shards,
     } as QaRunManifest);
   }
-  return await buildLegacyManifest(runId, runDir);
+  return await buildManifestFromArtifacts(runId, runDir);
 };
 
 const readShardTitleFromResults = (runDir: string, shard: number): string | null => {

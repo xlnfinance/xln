@@ -565,14 +565,6 @@ export function registerSignerPublicKey(
 }
 
 /**
- * Register test keys for scenarios.
- * Deprecated: use real runtime seeds and numeric signer IDs instead.
- */
-export async function registerTestKeys(_signerIds: string[]): Promise<void> {
-  throw new Error('registerTestKeys is disabled. Use runtimeSeed + numeric signerIds (1,2,3...)');
-}
-
-/**
  * Clear all registered keys (for testing isolation)
  */
 export function clearSignerKeys(scope: SignerKeyScope): void {

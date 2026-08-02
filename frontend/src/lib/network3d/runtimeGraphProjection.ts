@@ -224,12 +224,12 @@ const jurisdictionName = (value: unknown): string => {
   return text(candidate?.name ?? value);
 };
 const positionOf = (value: unknown): RuntimeGraphPosition | null => {
-  const candidate = value as Partial<RuntimeGraphPosition> & { xlnomy?: string } | null;
+  const candidate = value as Partial<RuntimeGraphPosition> | null;
   const x = Number(candidate?.x);
   const y = Number(candidate?.y);
   const z = Number(candidate?.z);
   if (![x, y, z].every(Number.isFinite)) return null;
-  const jurisdiction = text(candidate?.jurisdiction || candidate?.xlnomy);
+  const jurisdiction = text(candidate?.jurisdiction);
   return { x, y, z, ...(jurisdiction ? { jurisdiction } : {}) };
 };
 
@@ -252,7 +252,7 @@ const nodeFromReplica = (
   const entityId = id(replica.entityId || replica.state?.entityId);
   const stateProfile = replica.state?.profile as { name?: string; isHub?: boolean; metadata?: Record<string, unknown> } | undefined;
   const profilePosition = positionOf(profile?.metadata?.['position']);
-  const jurisdiction = text(replica.position?.jurisdiction || replica.position?.xlnomy)
+  const jurisdiction = text(replica.position?.jurisdiction)
     || jurisdictionName(profile?.metadata?.['jurisdiction']);
   return {
     ...source,

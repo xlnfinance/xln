@@ -19,11 +19,6 @@ export { compareEntityIds, isLeftEntity, normalizeEntityId } from '../protocol/e
  *
  * This lets tooling address an entity under a specific EntityProvider.
  *   - Without this, same boardHash on different EPs would collide
- *
- * Migration path:
- *   1. Keep short hanko for self-entities (single signer, known EP)
- *   2. Use extended hanko for cross-EP operations
- *   3. Hanko version byte (0x00=short, 0x01=extended) for backwards compat
  */
 
 export interface ParsedEntityId {

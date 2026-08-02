@@ -825,7 +825,7 @@ export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] =
 
 export const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
   const excludedDefaultSpecs = new Set<string>([
-    // Legacy shared-page AHB flow. Useful assertions were ported into
+    // Shared-page AHB flow. Its useful assertions were ported into
     // tests/e2e-ahb-isolated.spec.ts; keep this out of the canonical isolated bar.
     'tests/e2e-ahb-payment.spec.ts',
     // Keep the default bar focused on fast isolated product checks.

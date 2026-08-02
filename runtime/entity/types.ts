@@ -614,7 +614,6 @@ export interface EntityReplica {
     y: number;      // Relative Y offset from j-machine center
     z: number;      // Relative Z offset from j-machine center
     jurisdiction?: string; // Which j-machine this entity belongs to (defaults to activeJurisdiction)
-    xlnomy?: string; // DEPRECATED: Use jurisdiction instead
   };
 
   // HANKO WITNESS STORAGE (NOT part of state hash - stored alongside, not inside)

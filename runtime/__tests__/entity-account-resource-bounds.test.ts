@@ -262,8 +262,7 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
     name: 'resource-bounds',
     chainId: jurisdiction.chainId,
     rpcs: [],
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
+    contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
