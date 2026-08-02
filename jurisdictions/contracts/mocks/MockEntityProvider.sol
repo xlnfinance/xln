@@ -11,4 +11,8 @@ contract MockEntityProvider {
   function verifyHankoSignature(bytes calldata, bytes32) external view returns (bytes32, bool) {
     return (entityId, true);
   }
+
+  function verifyCurrentHankoSignature(bytes calldata, bytes32) external view returns (bytes32, bool) {
+    return (entityId, true);
+  }
 }

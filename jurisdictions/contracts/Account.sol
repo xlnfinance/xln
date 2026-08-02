@@ -405,6 +405,9 @@ library Account {
     bytes32 expectedEntity
   ) private view returns (bool success) {
     bytes32 hash = _disputeProofHankoHash(acct_key, nonce, proofbodyHash, watchSeed);
+    // This verifies historical bilateral evidence. Previous-board signatures
+    // must remain valid during the grace window or a board rotation could erase
+    // an already signed account state before either side can enforce it.
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
   }
@@ -836,7 +839,9 @@ library Account {
     // Verify counterparty signature (hash includes signedNonce, not storedNonce)
     bytes32 hash = _cooperativeUpdateHankoHash(acct_key, c2r.nonce, diffs, new uint[](0));
 
-    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(c2r.sig, hash);
+    // C2R authorizes a fresh movement of funds, not historical evidence. A
+    // rotated-out board must never retain spending authority during its grace.
+    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyCurrentHankoSignature(c2r.sig, hash);
     if (!valid || recoveredEntity != c2r.counterparty) {
       return BatchItemResult.InvalidSignature;
     }
@@ -937,7 +942,10 @@ library Account {
       s.forgiveDebtsInTokenIds
     );
 
-    try IEntityProvider(entityProvider).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+    // Cooperative settlement creates a fresh financial state, so only the
+    // counterparty's current board may authorize it. Historical board grace is
+    // reserved for dispute evidence below.
+    try IEntityProvider(entityProvider).verifyCurrentHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
       if (!valid || recoveredEntity != counterparty) {
         return BatchItemResult.InvalidSignature;
       }
@@ -1102,6 +1110,9 @@ library Account {
       params.proofbodyHash,
       params.initialProofbody.watchSeed
     );
+    // Dispute start submits a previously signed account state. Accepting the
+    // immediate previous board during its bounded grace preserves enforceability
+    // across rotation; this path cannot authorize a new cooperative transfer.
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();
 

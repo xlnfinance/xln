@@ -22,8 +22,11 @@ const DEFAULT_ARTICLES = {
 };
 
 const BOARD_GRACE_SECONDS = 7 * 24 * 60 * 60;
+const COOPERATIVE_UPDATE = 0;
 const DISPUTE_PROOF = 1;
 const WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('board-rotation-watch-seed'));
+const SETTLEMENT_DIFFS_ABI =
+  'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
 const PROOF_BODY_ABI =
   'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
@@ -45,6 +48,24 @@ const emptyProofBody = () => ({
 
 const proofBodyHash = (body: ReturnType<typeof emptyProofBody>): string =>
   ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode([PROOF_BODY_ABI], [body]));
+
+const cooperativeUpdateHash = async (
+  depository: { getAddress(): Promise<string> },
+  accountKey: string,
+  nonce: bigint,
+  diffs: unknown[],
+): Promise<string> => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+  ['uint8', 'uint256', 'address', 'bytes', 'uint256', SETTLEMENT_DIFFS_ABI, 'uint256[]'],
+  [
+    COOPERATIVE_UPDATE,
+    (await ethers.provider.getNetwork()).chainId,
+    await depository.getAddress(),
+    accountKey,
+    nonce,
+    diffs,
+    [],
+  ],
+));
 
 describe('EntityProvider board rotation grace', function () {
   async function fixture() {
@@ -311,6 +332,122 @@ describe('EntityProvider board rotation grace', function () {
       .to.emit(depository, 'HankoBatchProcessed')
       .withArgs(entityId, digest, nonce);
     expect(await depository.entityNonces(entityId)).to.equal(nonce);
+  });
+
+  it('rejects previous-board authority for fresh C2R and settlement while grace is active', async function () {
+    const {
+      provider,
+      foundation,
+      outsider,
+      entityId,
+      newBoardHash,
+      proposalSignature,
+    } = await fixture();
+    const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(0));
+    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 1, [support]);
+    await mine(DEFAULT_ARTICLES.controlDelay);
+    await provider.activateBoard(entityId);
+
+    const AccountFactory = await ethers.getContractFactory('Account');
+    const account = await AccountFactory.deploy();
+    await account.waitForDeployment();
+    const DepositoryFactory = await ethers.getContractFactory('Depository', {
+      libraries: { Account: await account.getAddress() },
+    });
+    const depository = await DepositoryFactory.deploy(await provider.getAddress(), 5_760);
+    await depository.waitForDeployment();
+
+    const initiator = singleSignerLazyEntityId(outsider.address);
+    const initiatorKey = deriveHardhatPrivateKey(4);
+    const oldBoardKey = deriveHardhatPrivateKey(1);
+    const currentBoardKey = deriveHardhatPrivateKey(2);
+    const tokenId = 1n;
+    const accountKey = await depository.accountKey(initiator, entityId);
+    const signOuterBatch = async (batch: unknown, nonce: bigint) => {
+      const encodedBatch = encodeBatch(batch);
+      const digest = await computeDepositoryBatchHash(depository, encodedBatch, nonce);
+      return {
+        encodedBatch,
+        hanko: buildSingleSignerHanko(initiator, digest, initiatorKey),
+      };
+    };
+
+    await depository.mintToReserve(initiator, tokenId, 2n);
+    const funding = await signOuterBatch(emptyBatch({
+      reserveToCollateral: [{
+        tokenId,
+        receivingEntity: initiator,
+        pairs: [{ entity: entityId, amount: 2n }],
+      }],
+    }), 1n);
+    await depository.processBatch(funding.encodedBatch, funding.hanko, 1n);
+
+    const initiatorIsLeft = BigInt(initiator) < BigInt(entityId);
+    const c2rDiffs = [{
+      tokenId,
+      leftDiff: initiatorIsLeft ? 1n : 0n,
+      rightDiff: initiatorIsLeft ? 0n : 1n,
+      collateralDiff: -1n,
+      ondeltaDiff: initiatorIsLeft ? -1n : 0n,
+    }];
+    const c2rDigest = await cooperativeUpdateHash(depository, accountKey, 1n, c2rDiffs);
+    const c2r = (sig: string) => emptyBatch({
+      collateralToReserve: [{ counterparty: entityId, tokenId, amount: 1n, nonce: 1n, sig }],
+    });
+    const oldC2r = await signOuterBatch(
+      c2r(buildSingleSignerHanko(entityId, c2rDigest, oldBoardKey)),
+      2n,
+    );
+    await expect(depository.processBatch(oldC2r.encodedBatch, oldC2r.hanko, 2n))
+      .to.be.revertedWithCustomError(depository, 'E4');
+    expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
+
+    const currentC2r = await signOuterBatch(
+      c2r(buildSingleSignerHanko(entityId, c2rDigest, currentBoardKey)),
+      2n,
+    );
+    await expect(depository.processBatch(currentC2r.encodedBatch, currentC2r.hanko, 2n))
+      .to.emit(depository, 'AccountSettled');
+    expect((await depository._accounts(accountKey)).nonce).to.equal(1n);
+
+    const settlementDiffs = [{
+      tokenId,
+      leftDiff: initiatorIsLeft ? -1n : 1n,
+      rightDiff: initiatorIsLeft ? 1n : -1n,
+      collateralDiff: 0n,
+      ondeltaDiff: 0n,
+    }];
+    const settlementDigest = await cooperativeUpdateHash(
+      depository,
+      accountKey,
+      2n,
+      settlementDiffs,
+    );
+    const settlement = (sig: string) => emptyBatch({
+      settlements: [{
+        leftEntity: initiatorIsLeft ? initiator : entityId,
+        rightEntity: initiatorIsLeft ? entityId : initiator,
+        diffs: settlementDiffs,
+        forgiveDebtsInTokenIds: [],
+        sig,
+        nonce: 2n,
+      }],
+    });
+    const oldSettlement = await signOuterBatch(
+      settlement(buildSingleSignerHanko(entityId, settlementDigest, oldBoardKey)),
+      3n,
+    );
+    await expect(depository.processBatch(oldSettlement.encodedBatch, oldSettlement.hanko, 3n))
+      .to.be.revertedWithCustomError(depository, 'E4');
+    expect((await depository._accounts(accountKey)).nonce).to.equal(1n);
+
+    const currentSettlement = await signOuterBatch(
+      settlement(buildSingleSignerHanko(entityId, settlementDigest, currentBoardKey)),
+      3n,
+    );
+    await expect(depository.processBatch(currentSettlement.encodedBatch, currentSettlement.hanko, 3n))
+      .to.emit(depository, 'AccountSettled');
+    expect((await depository._accounts(accountKey)).nonce).to.equal(2n);
   });
 
   it('rejects previous-board watchtower authority while accepting the current board', async function () {
