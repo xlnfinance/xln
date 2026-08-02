@@ -16,7 +16,7 @@ export type RuntimeDbLike = {
   put?: (key: Buffer, value: Buffer, options?: { sync?: boolean }) => Promise<void>;
   batch: () => {
     put: (key: Buffer, value: Buffer) => unknown;
-    del?: (key: Buffer) => unknown;
+    del: (key: Buffer) => unknown;
     write: (options?: { sync?: boolean }) => Promise<void>;
   };
   keys?: (options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }) => AsyncIterable<Buffer | Uint8Array | string>;

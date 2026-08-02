@@ -290,11 +290,11 @@ const applyDiffToLiveDb = async (options: {
   });
   const batch = options.db.batch();
   for (const key of preparedHashes.docDels) {
-    if (typeof batch.del === 'function') batch.del(key);
+    batch.del(key);
   }
   for (const item of preparedHashes.docPuts) batch.put(item.key, item.value);
   for (const key of preparedHashes.merkleDels) {
-    if (typeof batch.del === 'function') batch.del(key);
+    batch.del(key);
   }
   for (const item of preparedHashes.merklePuts) {
     batch.put(item.key, item.value);
@@ -315,7 +315,6 @@ const CURRENT_RECOVERY_PREFIXES = [
 
 const clearCurrentRecoveryState = async (db: RuntimeDbLike): Promise<void> => {
   const fence = db.batch();
-  if (typeof fence.del !== 'function') throw new Error('STORAGE_RECOVERY_DELETE_UNSUPPORTED');
   fence.del(KEY_HEAD);
   await writeBatch(fence);
   for (const prefix of CURRENT_RECOVERY_PREFIXES) {
@@ -387,7 +386,6 @@ const synchronizeConsumptionNodes = async (
   }
   for await (const key of iterateKeys(currentDb, { prefix: keyConsumptionNodePrefix() })) {
     if (reachableKeys.has(key.toString('hex'))) continue;
-    if (typeof batch.del !== 'function') throw new Error('STORAGE_RECOVERY_CONSUMPTION_DELETE_UNSUPPORTED');
     batch.del(key);
     changed = true;
   }
@@ -464,11 +462,9 @@ const readCertifiedBoardNodes = async (
 const deleteCertifiedBoardNodes = async (
   db: RuntimeDbLike,
   hashes: readonly string[],
-  unsupportedCode: string,
 ): Promise<void> => {
   if (hashes.length === 0) return;
   const batch = db.batch();
-  if (typeof batch.del !== 'function') throw new Error(unsupportedCode);
   for (const hash of hashes) batch.del(keyCertifiedBoardNode(hash));
   await writeBatch(batch);
 };
@@ -482,8 +478,8 @@ const pruneUnreachableCertifiedBoardHistoryNodes = async (
   const roots = await collectCertifiedBoardHistoryRoots(env, walDb);
   const reachable = collectReachableCertifiedBoardNodes(stored.nodes, roots);
   const stale = [...stored.nodes.keys()].filter((hash) => !reachable.has(hash)).sort();
-  await deleteCertifiedBoardNodes(walDb, stale, 'STORAGE_HISTORY_CERTIFIED_BOARD_GC_UNSUPPORTED');
-  await deleteCertifiedBoardNodes(currentDb, stale, 'STORAGE_CURRENT_CERTIFIED_BOARD_GC_UNSUPPORTED');
+  await deleteCertifiedBoardNodes(walDb, stale);
+  await deleteCertifiedBoardNodes(currentDb, stale);
   const memoryStore = getCertifiedBoardNodeStore(env);
   for (const hash of stale) memoryStore.delete(hash);
   return stale.reduce((total, hash) => total + (stored.bytes.get(hash) ?? 0), 0);
@@ -533,7 +529,6 @@ const pruneUnreachableConsumptionHistoryNodes = async (
   const stale = Array.from(stored.keys()).filter((hash) => !reachable.has(hash)).sort();
   if (stale.length === 0) return 0;
   const batch = walDb.batch();
-  if (typeof batch.del !== 'function') throw new Error('STORAGE_HISTORY_CONSUMPTION_GC_UNSUPPORTED');
   let prunedBytes = 0;
   for (const hash of stale) {
     batch.del(keyConsumptionNode(hash));
@@ -581,7 +576,6 @@ const synchronizeAccountJClaimNodes = async (
   }
   for await (const key of iterateKeys(currentDb, { prefix: keyAccountJClaimNodePrefix() })) {
     if (reachableKeys.has(key.toString('hex'))) continue;
-    if (typeof batch.del !== 'function') throw new Error('STORAGE_RECOVERY_ACCOUNT_J_CLAIM_DELETE_UNSUPPORTED');
     batch.del(key);
     changed = true;
   }
@@ -638,7 +632,6 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
   const stale = [...stored.keys()].filter((hash) => !reachable.has(hash)).sort();
   if (stale.length === 0) return 0;
   const batch = walDb.batch();
-  if (typeof batch.del !== 'function') throw new Error('STORAGE_HISTORY_ACCOUNT_J_CLAIM_GC_UNSUPPORTED');
   let prunedBytes = 0;
   for (const hash of stale) {
     batch.del(keyAccountJClaimNode(hash));
@@ -1526,13 +1519,7 @@ const buildStorageCommitBatches = (
   certifiedHistoryPuts: HistoryViewPut[],
 ) => {
   const walBatch = prepared.walDb.batch();
-  if (
-    commitments.staleReplicaMetaKeys.length > 0 &&
-    typeof walBatch.del !== 'function'
-  ) {
-    throw new Error('STORAGE_HISTORY_REPLICA_META_DELETE_UNSUPPORTED');
-  }
-  for (const key of commitments.staleReplicaMetaKeys) walBatch.del!(key);
+  for (const key of commitments.staleReplicaMetaKeys) walBatch.del(key);
   for (const entry of pendingNodes.boardEntries) {
     walBatch.put(entry.key, entry.value);
   }
@@ -1558,35 +1545,23 @@ const buildStorageCommitBatches = (
     getSafePendingConsumptionDeletes(options.env);
   const safeAccountJClaimDeletes =
     getSafePendingAccountJClaimDeletes(options.env);
-  if (
-    safeConsumptionDeletes.length > 0 &&
-    typeof currentBatch.del !== 'function'
-  ) {
-    throw new Error('STORAGE_CURRENT_CONSUMPTION_DELETE_UNSUPPORTED');
-  }
-  if (
-    safeAccountJClaimDeletes.length > 0 &&
-    typeof currentBatch.del !== 'function'
-  ) {
-    throw new Error('STORAGE_CURRENT_ACCOUNT_J_CLAIM_DELETE_UNSUPPORTED');
-  }
   for (const [hash, node] of pendingNodes.consumptionNodes) {
     currentBatch.put(keyConsumptionNode(hash), encodeBuffer(node));
   }
   for (const hash of safeConsumptionDeletes) {
-    currentBatch.del!(keyConsumptionNode(hash));
+    currentBatch.del(keyConsumptionNode(hash));
   }
   for (const [hash, node] of pendingNodes.accountJClaimNodes) {
     currentBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
   }
   for (const hash of safeAccountJClaimDeletes) {
-    currentBatch.del!(keyAccountJClaimNode(hash));
+    currentBatch.del(keyAccountJClaimNode(hash));
   }
   const hashes = commitments.preparedHashes;
   if (hashes) {
-    for (const key of hashes.docDels) currentBatch.del?.(key);
+    for (const key of hashes.docDels) currentBatch.del(key);
     for (const item of hashes.docPuts) currentBatch.put(item.key, item.value);
-    for (const key of hashes.merkleDels) currentBatch.del?.(key);
+    for (const key of hashes.merkleDels) currentBatch.del(key);
     for (const item of hashes.merklePuts) {
       currentBatch.put(item.key, item.value);
     }

@@ -216,12 +216,6 @@ export const BLOCKCHAIN = {
   /** Gas limit for processBatch() calls */
   PROCESS_BATCH_GAS_LIMIT: 5_000_000,
 
-  /** Maximum settlements per batch (gas optimization) */
-  MAX_SETTLEMENTS_PER_BATCH: 50,
-
-  /** Maximum reserve-to-reserve transfers per batch */
-  MAX_R2R_PER_BATCH: 100,
-
   /** Block confirmations before trusting J-event */
   CONFIRMATION_BLOCKS: 12, // ~3 minutes on Ethereum
 
