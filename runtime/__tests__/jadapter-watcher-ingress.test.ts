@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AbiCoder } from 'ethers';
+import { AbiCoder, Interface } from 'ethers';
 
 import { deriveSignerAddressSync } from '../account/crypto';
 import {
@@ -34,6 +34,7 @@ import {
   updateWatcherJurisdictionCursor,
 } from '../jurisdiction/adapter/watcher';
 import { findReserveUpdatedEvidence } from '../jurisdiction/machine/event-evidence';
+import { decodeAuthenticatedWatcherEvents } from '../jurisdiction/adapter/rpc-watcher-events';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/machine/event-observation';
 import {
   buildLocalJPrefixAttestation,
@@ -119,6 +120,64 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
   }) as EntityReplica;
 
 describe('JAdapter watcher ingress', () => {
+  test('custom token events do not wedge wallet log projection', async () => {
+    const env = createEmptyEnv('jadapter-custom-token-event');
+    const tokenAddress = `0x${'61'.repeat(20)}`;
+    const recipient = `0x${'72'.repeat(20)}`;
+    const entityId = `0x${'51'.repeat(32)}`;
+    const erc20 = new Interface([
+      'event Transfer(address indexed from, address indexed to, uint256 value)',
+    ]);
+    const transfer = erc20.encodeEventLog(erc20.getEvent('Transfer')!, [
+      `0x${'71'.repeat(20)}`,
+      recipient,
+      25n,
+    ]);
+    const baseLog = {
+      address: tokenAddress,
+      blockNumber: 10,
+      blockHash: `0x${'81'.repeat(32)}`,
+      transactionHash: `0x${'82'.repeat(32)}`,
+    };
+    const input = {
+      env,
+      watcherReplica: makeJReplica('test', 10n, `0x${'62'.repeat(20)}`),
+      depositoryAddress: `0x${'62'.repeat(20)}`,
+      entityProviderAddress: `0x${'63'.repeat(20)}`,
+      tokenByAddress: new Map([[tokenAddress, { tokenId: 3, address: tokenAddress }]]),
+      trackedOwners: new Map([[recipient, [{
+        entityId,
+        watchAfterBlock: 0,
+        balanceAfterBlockByToken: new Map([[tokenAddress, 0]]),
+        allowanceAfterBlockByKey: new Map(),
+      }]]]),
+      observedThroughHeight: 10,
+      observedTipBlockHash: baseLog.blockHash,
+      observedHeadHeight: 10,
+      confirmationDepth: 0,
+      findDisputeFinalizationEvidence: async () => undefined,
+    };
+
+    const decoded = await decodeAuthenticatedWatcherEvents({
+      ...input,
+      logs: [
+        { ...baseLog, topics: [`0x${'99'.repeat(32)}`], data: '0x', index: 0 },
+        { ...baseLog, topics: transfer.topics, data: transfer.data, index: 1 },
+      ],
+    });
+    expect(decoded.events).toEqual([
+      expect.objectContaining({
+        name: 'ExternalWalletDelta',
+        args: expect.objectContaining({ entityId, owner: recipient, balanceDelta: '25' }),
+      }),
+    ]);
+
+    await expect(decodeAuthenticatedWatcherEvents({
+      ...input,
+      logs: [{ ...baseLog, topics: transfer.topics, data: '0x01', index: 2 }],
+    })).rejects.toThrow();
+  });
+
   test('J-event observation diagnostics use structured logging only', () => {
     const source = readFileSync(
       join(process.cwd(), 'runtime/jurisdiction/adapter/event-observation.ts'),
