@@ -27,4 +27,8 @@ describe('processBatch transformer gas floor', () => {
       'J_DISPUTE_FINALIZATION_COUNT_INVALID',
     );
   });
+
+  test('one production finalization remains below the 60M block limit', () => {
+    expect(applyProcessBatchGasFloor(1n, 1)).toBeLessThanOrEqual(60_000_000n);
+  });
 });

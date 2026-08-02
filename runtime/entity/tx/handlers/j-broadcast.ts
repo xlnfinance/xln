@@ -79,10 +79,14 @@ const takeBroadcastBatch = (current: JBatch): {
   const remainder = cloneJBatch(selected);
   const priority = createEmptyBatch();
   priority.disputeStarts = selected.disputeStarts;
-  priority.disputeFinalizations = selected.disputeFinalizations;
+  // A finalization executes adversarial transformer evidence and can consume
+  // roughly 8M gas. Sending the protocol maximum of eight exceeds the 60M
+  // Sepolia/anvil block limit. FIFO one-at-a-time keeps every broadcast valid;
+  // finality below automatically releases the next parked operation.
+  priority.disputeFinalizations = selected.disputeFinalizations.slice(0, 1);
   priority.revealSecrets = selected.revealSecrets;
   remainder.disputeStarts = [];
-  remainder.disputeFinalizations = [];
+  remainder.disputeFinalizations = selected.disputeFinalizations.slice(1);
   remainder.revealSecrets = [];
   return { selected: priority, remainder, disputePriority: true };
 };
@@ -152,7 +156,11 @@ const commitBroadcast = (
     ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
   };
   state.jBatchState!.batch = remainder;
-  delete state.jBatchState!.autoBroadcastDraft;
+  if (remainder.disputeFinalizations.length > 0) {
+    state.jBatchState!.autoBroadcastDraft = true;
+  } else {
+    delete state.jBatchState!.autoBroadcastDraft;
+  }
   state.jBatchState!.broadcastCount = prepared.batchGeneration;
   state.jBatchState!.lastBroadcast = state.timestamp;
   state.jBatchState!.status = 'sent';
