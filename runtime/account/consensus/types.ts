@@ -4,6 +4,7 @@ import type { HankoString } from '../../types/hanko';
 import type { AccountJClaimNodeChanges } from '../../types/account-j-claims';
 import type { AccountDisputeFinalityResult } from '../j-finality';
 import type { AccountTxRejection } from '../tx/apply-types';
+import type { AccountPeerRejection } from '../peer-rejection';
 
 export type AccountConsensusHashToSign = {
   hash: string;
@@ -63,5 +64,5 @@ export type HandleAccountInputResult = AccountConsensusFrameResult & {
       frameHanko: HankoString;
     };
   };
-  rejected?: { reason: string };
+  rejected?: AccountPeerRejection;
 };

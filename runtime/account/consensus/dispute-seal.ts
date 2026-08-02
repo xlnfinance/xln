@@ -9,6 +9,7 @@ import {
   accountInputProposal,
 } from './flush';
 import { getAccountStateDomain } from './helpers';
+import { AccountPeerEvidenceError } from '../peer-rejection';
 
 export type ValidatedCounterpartyDisputeSeal = {
   hanko: string;
@@ -58,7 +59,23 @@ export const validateCounterpartyDisputeSeal = async (
   allowPreviousBoard = true,
 ): Promise<ValidatedCounterpartyDisputeSeal | undefined> => {
   if (!seal) return undefined;
-  if (!seal.hanko) throw new Error(`${context}:DISPUTE_SEAL_HANKO_MISSING`);
+  if (!seal.hanko) {
+    throw new AccountPeerEvidenceError(
+      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
+      `${context}:DISPUTE_SEAL_HANKO_MISSING`,
+    );
+  }
+  if (
+    !/^0x[0-9a-fA-F]{64}$/.test(seal.hash)
+    || !/^0x[0-9a-fA-F]{64}$/.test(seal.proofBodyHash)
+    || !Number.isSafeInteger(seal.proofNonce)
+    || seal.proofNonce < 0
+  ) {
+    throw new AccountPeerEvidenceError(
+      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
+      `${context}:DISPUTE_SEAL_SHAPE_INVALID`,
+    );
+  }
 
   const expectedHash = createDisputeProofHashWithNonce(
     account.state,
@@ -67,20 +84,23 @@ export const validateCounterpartyDisputeSeal = async (
     seal.proofNonce,
   );
   if (String(seal.hash).toLowerCase() !== expectedHash.toLowerCase()) {
-    throw new Error(`${context}:DISPUTE_SEAL_HASH_MISMATCH:${safeStringify({
-      kind: input.kind,
-      currentHeight: account.currentHeight,
-      pendingHeight: account.pendingFrame?.height ?? null,
-      inputHeight: accountInputAck(input)?.height ?? null,
-      newFrameHeight: accountInputProposal(input)?.frame.height ?? null,
-      localNonce: account.proofHeader.nextProofNonce,
-      signedNonce: seal.proofNonce,
-      proofBodyHash: seal.proofBodyHash,
-      expected: expectedHash,
-      received: seal.hash,
-      from: shortId(input.fromEntityId),
-      to: shortId(input.toEntityId),
-    })}`);
+    throw new AccountPeerEvidenceError(
+      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
+      `${context}:DISPUTE_SEAL_HASH_MISMATCH:${safeStringify({
+        kind: input.kind,
+        currentHeight: account.currentHeight,
+        pendingHeight: account.pendingFrame?.height ?? null,
+        inputHeight: accountInputAck(input)?.height ?? null,
+        newFrameHeight: accountInputProposal(input)?.frame.height ?? null,
+        localNonce: account.proofHeader.nextProofNonce,
+        signedNonce: seal.proofNonce,
+        proofBodyHash: seal.proofBodyHash,
+        expected: expectedHash,
+        received: seal.hash,
+        from: shortId(input.fromEntityId),
+        to: shortId(input.toEntityId),
+      })}`,
+    );
   }
 
   const { valid } = await securityContext.verifyHanko(
@@ -94,7 +114,12 @@ export const validateCounterpartyDisputeSeal = async (
         }
       : undefined,
   );
-  if (!valid) throw new Error(`${context}:DISPUTE_SEAL_HANKO_INVALID`);
+  if (!valid) {
+    throw new AccountPeerEvidenceError(
+      'ACCOUNT_PEER_DISPUTE_SEAL_INVALID',
+      `${context}:DISPUTE_SEAL_HANKO_INVALID`,
+    );
+  }
 
   return {
     hanko: seal.hanko,

@@ -12,6 +12,7 @@ import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext }
 import { resolveSameHeightIncomingFrame } from './collision';
 import { buildDuplicateCommittedFrameAck, describeAccountState } from './replay';
 import type { HandleAccountInputResult } from './types';
+import { rejectAccountPeerInput } from '../peer-rejection';
 
 const preflightLog = createStructuredLogger('account.preflight');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
@@ -36,11 +37,11 @@ const verifyIncomingFrameHanko = async (
 ): Promise<HandleAccountInputResult | undefined> => {
   const hankoToVerify = accountInputProposal(input)?.frameHanko;
   if (!hankoToVerify) {
-    return {
-      success: false,
-      error: 'SECURITY: Frame must have hanko signature',
+    return rejectAccountPeerInput(
+      'ACCOUNT_PEER_FRAME_HANKO_INVALID',
+      'SECURITY: Frame must have hanko signature',
       events,
-    };
+    );
   }
 
   preflightLog.debug('hanko.frame.verify', {
@@ -56,11 +57,11 @@ const verifyIncomingFrameHanko = async (
       : undefined,
   );
   if (!valid || !recoveredEntityId) {
-    return {
-      success: false,
-      error: `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`,
+    return rejectAccountPeerInput(
+      'ACCOUNT_PEER_FRAME_HANKO_INVALID',
+      `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`,
       events,
-    };
+    );
   }
   preflightLog.debug('hanko.frame.verified', {
     height: receivedFrame.height,
@@ -107,21 +108,20 @@ const validateIncomingFrameProposer = (
   const proposer = input.fromEntityId.toLowerCase();
   const proposerIsLeft = proposer === account.state.leftEntity.toLowerCase();
   if (!proposerIsLeft && proposer !== account.state.rightEntity.toLowerCase()) {
-    return {
-      success: false,
-      error: `Frame proposer is not an account party: ` + input.fromEntityId.slice(-8),
+    return rejectAccountPeerInput(
+      'ACCOUNT_PEER_FRAME_PROPOSER_INVALID',
+      `Frame proposer is not an account party: ` + input.fromEntityId.slice(-8),
       events,
-    };
+    );
   }
   if (receivedFrame.byLeft === proposerIsLeft) return undefined;
-  return {
-    success: false,
-    error:
-      `Frame proposer side mismatch: expected byLeft=${String(proposerIsLeft)} ` +
+  return rejectAccountPeerInput(
+    'ACCOUNT_PEER_FRAME_PROPOSER_INVALID',
+    `Frame proposer side mismatch: expected byLeft=${String(proposerIsLeft)} ` +
       `for proposer ${input.fromEntityId.slice(-4)}, ` +
       `got ${String(receivedFrame.byLeft)}`,
     events,
-  };
+  );
 };
 
 const validateIncomingFrameChain = (
@@ -134,11 +134,11 @@ const validateIncomingFrameChain = (
 ): HandleAccountInputResult | undefined => {
   const structureError = getAccountFrameBoundsError(receivedFrame, securityContext.entityTimestamp);
   if (structureError) {
-    return {
-      success: false,
-      error: `Invalid frame structure: ${structureError}`,
+    return rejectAccountPeerInput(
+      'ACCOUNT_PEER_FRAME_STRUCTURE_INVALID',
+      `Invalid frame structure: ${structureError}`,
       events,
-    };
+    );
   }
 
   const previousTimestamp = account.currentFrame?.timestamp;
@@ -167,16 +167,15 @@ const validateIncomingFrameChain = (
       expectedPrevFrameHash: expectedPrevHash,
       account: describeAccountState(account),
     });
-    return {
-      success: false,
-      error:
-        `Frame chain broken: prevFrameHash mismatch ` +
+    return rejectAccountPeerInput(
+      'ACCOUNT_PEER_FRAME_CHAIN_INVALID',
+      `Frame chain broken: prevFrameHash mismatch ` +
         `(expected ${expectedPrevHash.slice(0, 16)}..., ` +
         `got ${String(receivedFrame.prevFrameHash).slice(0, 16)}..., ` +
         `current=${account.currentHeight}, ` +
         `pending=${Number(account.pendingFrame?.height ?? 0)})`,
       events,
-    };
+    );
   }
 
   const expectedHeight = account.currentHeight + 1;
@@ -192,11 +191,11 @@ const validateIncomingFrameChain = (
     expectedHeight,
     receivedHeight: receivedFrame.height,
   });
-  return {
-    success: false,
-    error: `Frame sequence mismatch: expected ${expectedHeight}, ` + `got ${receivedFrame.height}`,
+  return rejectAccountPeerInput(
+    'ACCOUNT_PEER_FRAME_CHAIN_INVALID',
+    `Frame sequence mismatch: expected ${expectedHeight}, ` + `got ${receivedFrame.height}`,
     events,
-  };
+  );
 };
 
 const validateIncomingFrameDeadline = (

@@ -3,6 +3,10 @@ import type { AccountInputSecurityContext } from './deadline-policy';
 import { accountInputBoardReseal } from './flush';
 import type { HandleAccountInputResult } from './types';
 import {
+  rejectAccountPeerEvidenceError,
+  rejectAccountPeerInput,
+} from '../peer-rejection';
+import {
   type ValidatedCounterpartyDisputeSeal,
   validateCounterpartyDisputeSeal,
 } from './dispute-seal';
@@ -20,11 +24,8 @@ type ValidatedBoardResealMetadata = {
 const rejectBoardReseal = (
   error: string,
   events: string[],
-): HandleAccountInputResult => ({
-  success: false,
-  error,
-  events,
-});
+): HandleAccountInputResult =>
+  rejectAccountPeerInput('ACCOUNT_PEER_BOARD_RESEAL_INVALID', error, events);
 
 const validateBoardResealMetadata = (
   account: AccountReplica,
@@ -173,7 +174,7 @@ const verifyBoardResealWitnesses = async (
     );
     return verifiedDispute ? { verifiedDispute } : {};
   } catch (error) {
-    return rejectBoardReseal((error as Error).message, events);
+    return rejectAccountPeerEvidenceError(error, events);
   }
 };
 

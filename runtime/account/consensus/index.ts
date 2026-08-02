@@ -13,7 +13,6 @@ import { applyAccountTx } from '../tx/apply';
 import type { AccountTxRejection } from '../tx/apply-types';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { createFrameHash } from './frame';
-import { normalizeAccountWatchSeed } from '../../protocol/account-watch-seed';
 import {
   assertNoUnilateralSettlementMutation,
   buildAccountProofBodyFromJurisdictions,
@@ -68,6 +67,10 @@ import {
 } from './replay';
 import { applySameHeightIncomingFrameRollback, handleUnmatchedAck, resolveAccountAckTarget } from './collision';
 import { preflightIncomingAccountFrame } from './incoming-preflight';
+import {
+  rejectAccountPeerEvidenceError,
+  rejectAccountPeerInput,
+} from '../peer-rejection';
 export { proposeAccountFrame } from './propose';
 export type {
   AccountConsensusFrameResult,
@@ -711,17 +714,6 @@ async function buildAckResponseForIncomingFrame(
   );
 }
 
-const classifyPreflightReturn = (result: HandleAccountInputResult): IncomingFrameResult => {
-  if (result.success || result.disputeRequired) return { kind: 'return', result };
-  return {
-    kind: 'return',
-    result: {
-      ...result,
-      rejected: { reason: result.error ?? 'Incoming account frame rejected' },
-    },
-  };
-};
-
 const classifyIncomingValidationFailure = (
   account: AccountReplica,
   input: AccountInput,
@@ -744,7 +736,10 @@ const classifyIncomingValidationFailure = (
       kind: 'return',
       result: {
         ...result,
-        rejected: { reason: result.error ?? 'Stale settlement seal rejected' },
+        rejected: {
+          code: 'ACCOUNT_PEER_FRAME_STALE_SETTLEMENT_SEAL',
+          reason: result.error ?? 'Stale settlement seal rejected',
+        },
       },
     };
   }
@@ -796,7 +791,7 @@ async function handleIncomingAccountFrame(
     securityContext,
   );
   if (preflight.kind === 'return') {
-    return classifyPreflightReturn(preflight.result);
+    return { kind: 'return', result: preflight.result };
   }
 
   const validationResult = await validateIncomingFrameOnClone(
@@ -905,7 +900,7 @@ const handleAccountAckPhase = async (
   } catch (error) {
     return {
       kind: 'return',
-      result: { success: false, error: (error as Error).message, events },
+      result: rejectAccountPeerEvidenceError(error, events),
     };
   }
   const { ackHeight } = resolveAccountAckTarget(account, input, normalizedInputHeight);
@@ -952,7 +947,7 @@ const handleStandaloneDispute = async (session: AccountInputSession): Promise<Ha
     storeCounterpartyDisputeSeal(account, seal);
     return { success: true, events };
   } catch (error) {
-    return { success: false, error: (error as Error).message, events };
+    return rejectAccountPeerEvidenceError(error, events);
   }
 };
 
@@ -983,7 +978,7 @@ const handleAccountProposalPhase = async (
       securityContext,
     );
   } catch (error) {
-    return { success: false, error: (error as Error).message, events };
+    return rejectAccountPeerEvidenceError(error, events);
   }
   if (input.kind === 'dispute') return handleStandaloneDispute(session);
   const incoming = await handleIncomingAccountFrame(
@@ -1058,7 +1053,10 @@ export async function applyAccountInput(
 ): Promise<HandleAccountInputResult> {
   const envelopeError = getAccountInputEnvelopeError(account.state, input);
   if (envelopeError) {
-    return { success: false, error: envelopeError, events: [] };
+    if (input.kind === 'txs' || input.kind === 'external_finality') {
+      return { success: false, error: envelopeError.reason, events: [] };
+    }
+    return rejectAccountPeerInput(envelopeError.code, envelopeError.reason, []);
   }
   if (input.kind === 'txs') return applyLocalAccountInput(account, input);
   if (input.kind === 'external_finality') {
@@ -1066,15 +1064,13 @@ export async function applyAccountInput(
   }
   const accountJClaimNodeStore = context.jClaimNodeStore;
   const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);
-  if (input.watchSeed !== undefined) {
-    const inputWatchSeed = normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
-    if (account.state.watchSeed.toLowerCase() !== inputWatchSeed) {
-      return { success: false, error: `ACCOUNT_WATCH_SEED_MISMATCH:${input.fromEntityId}`, events: [] };
-    }
-  }
   const heightNormalization = normalizeAccountInputHeight(input);
   if (heightNormalization.error) {
-    return { success: false, error: heightNormalization.error, events: [] };
+    return rejectAccountPeerInput(
+      'ACCOUNT_PEER_HEIGHT_INVALID',
+      heightNormalization.error,
+      [],
+    );
   }
   const { normalizedInputHeight } = heightNormalization;
   if (normalizedInputHeight === undefined) {
@@ -1083,7 +1079,11 @@ export async function applyAccountInput(
   const events: string[] = [];
   const disputeHankoShapeError = getDisputeHankoShapeError(input);
   if (disputeHankoShapeError) {
-    return { success: false, error: disputeHankoShapeError, events };
+    return rejectAccountPeerInput(
+      'ACCOUNT_PEER_HANKO_SHAPE_INVALID',
+      disputeHankoShapeError,
+      events,
+    );
   }
   const boardReseal = await handleBoardReseal(account, input, securityContext);
   if (boardReseal) {

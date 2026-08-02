@@ -27,6 +27,7 @@ import {
   type ValidatedCounterpartyDisputeSeal,
 } from './dispute-seal';
 import type { HandleAccountInputResult } from './types';
+import { rejectAccountPeerInput } from '../peer-rejection';
 
 const ackLog = createStructuredLogger('account.ack');
 
@@ -62,7 +63,10 @@ const verifyPendingAckCertificate = async (
     validatedSeal,
   );
   if (sealError) {
-    return { kind: 'return', result: { success: false, error: sealError, events } };
+    return {
+      kind: 'return',
+      result: rejectAccountPeerInput('ACCOUNT_PEER_ACK_CERTIFICATE_INVALID', sealError, events),
+    };
   }
 
   const pendingFrame = account.pendingFrame!;
@@ -73,17 +77,21 @@ const verifyPendingAckCertificate = async (
   ) {
     return {
       kind: 'return',
-      result: {
-        success: false,
-        error: `ACK frameHash mismatch: got ${String(ack.frameHash)}, expected ${frameHash}`,
+      result: rejectAccountPeerInput(
+        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
+        `ACK frameHash mismatch: got ${String(ack.frameHash)}, expected ${frameHash}`,
         events,
-      },
+      ),
     };
   }
   if (!ack.frameHanko) {
     return {
       kind: 'return',
-      result: { success: false, error: 'Missing ACK hanko', events },
+      result: rejectAccountPeerInput(
+        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
+        'Missing ACK hanko',
+        events,
+      ),
     };
   }
 
@@ -100,7 +108,11 @@ const verifyPendingAckCertificate = async (
   if (!verified.valid) {
     return {
       kind: 'return',
-      result: { success: false, error: 'Invalid ACK hanko signature', events },
+      result: rejectAccountPeerInput(
+        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
+        'Invalid ACK hanko signature',
+        events,
+      ),
     };
   }
   if (
@@ -109,13 +121,12 @@ const verifyPendingAckCertificate = async (
   ) {
     return {
       kind: 'return',
-      result: {
-        success: false,
-        error:
-          `ACK hanko entityId mismatch: got ${verified.entityId?.slice(-4)}, ` +
+      result: rejectAccountPeerInput(
+        'ACCOUNT_PEER_ACK_CERTIFICATE_INVALID',
+        `ACK hanko entityId mismatch: got ${verified.entityId?.slice(-4)}, ` +
           `expected ${expectedEntity.slice(-4)}`,
         events,
-      },
+      ),
     };
   }
   ackLog.debug('hanko.verified', {
