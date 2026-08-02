@@ -1,6 +1,5 @@
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
-import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { addMessage } from '../../../frame-events';
 import { initJBatch } from '../../../../jurisdiction/machine/batch';
@@ -8,16 +7,13 @@ import { freezeAccountForDispute } from '../../../../account/consensus/dispute-p
 import {
   collectDisputeEvidenceReadinessIssues,
   hasQueuedDisputeFinalize,
-  warnDisputeUnlessQuiet,
 } from './shared';
-import { shortId } from '../../../../infra/logger';
 
 type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
 
 export const admitDisputeFinalize = (
   state: EntityState,
   tx: FinalizeTx,
-  env: EntityRuntimeContext,
 ): AccountReplica | null => {
   const counterpartyId = tx.data.counterpartyEntityId;
   state.jBatchState ??= initJBatch();
@@ -59,16 +55,6 @@ export const admitDisputeFinalize = (
       state,
       `ℹ️ disputeFinalize already present in batch lifecycle for ${counterpartyId.slice(-4)}`,
     );
-    return null;
-  }
-  if (tx.data.cooperative === true) {
-    addMessage(
-      state,
-      `❌ disputeFinalize cooperative=true rejected for ${counterpartyId.slice(-4)} (unilateral-only protocol)`,
-    );
-    warnDisputeUnlessQuiet(env, 'finalize.cooperative_rejected', {
-      counterparty: shortId(counterpartyId),
-    });
     return null;
   }
   freezeAccountForDispute(account, true);

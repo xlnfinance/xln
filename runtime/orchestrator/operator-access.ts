@@ -2,6 +2,30 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isLocalOperatorRequest } from '../api/server/health-redaction';
+import { requiresLocalNodeOperator } from '../api/server/node-http-access';
+import { safeStringify } from '../protocol/serialization';
+
+export const ORCHESTRATOR_JSON_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': '*',
+  'Access-Control-Allow-Headers': '*',
+  'Content-Type': 'application/json',
+};
+
+export const operatorPreflightResponse = (
+  request: Request,
+  url: URL,
+  operatorAuthorized: boolean,
+): Response | null => {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { headers: ORCHESTRATOR_JSON_HEADERS });
+  }
+  if (!requiresLocalNodeOperator(url) || operatorAuthorized) return null;
+  return new Response(safeStringify({ error: 'Operator access required' }), {
+    status: 403,
+    headers: ORCHESTRATOR_JSON_HEADERS,
+  });
+};
 
 const readBearer = (request: Request): string => {
   const match = String(request.headers.get('authorization') || '').trim().match(/^Bearer\s+(.+)$/i);

@@ -43,6 +43,7 @@ This vocabulary is a protocol invariant, not a stylistic preference:
 ## SINGLE CANONICAL PRODUCTION PATH
 
 - Production has no legacy behavior, compatibility aliases, fallback readers/writers, or parallel financial formulas.
+- Do not add `v2`/`v3` APIs, version-selected execution branches, or a second implementation of the same product operation. Replace the canonical path atomically and delete the retired path in the same change unless the owner explicitly approves an offline migration window.
 - Obsolete persisted data requires an explicit offline migration or a loud rejection; never infer or silently downgrade.
 - Availability routing such as direct-to-relay failover is one explicit canonical policy, not a compatibility fallback.
 - Every temporary compatibility path is a release blocker and must be removed before merge.

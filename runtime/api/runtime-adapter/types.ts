@@ -3,6 +3,15 @@ import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction'
 import type { RuntimeInput } from '../../runtime/types';
 import type { XlnProtocolVersion } from '../../protocol/version';
 import type { RuntimeIngressReceipt } from '../../runtime/ingress-receipts';
+import type {
+  NumberedRegistrationCommand,
+  NumberedRegistrationCommandResult,
+} from '../../runtime/registration/numbered-registration-driver';
+
+export type {
+  NumberedRegistrationCommand,
+  NumberedRegistrationCommandResult,
+} from '../../runtime/registration/numbered-registration-driver';
 
 export type RuntimeAdapterMode = 'embedded' | 'remote';
 export type RuntimeAdapterStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
@@ -227,6 +236,9 @@ export interface RuntimeAdapter {
   submitCrossJurisdictionIntent(
     route: CrossJurisdictionSwapRoute,
   ): Promise<RuntimeAdapterCrossJurisdictionIntentResult>;
+  registerNumberedEntities(
+    input: NumberedRegistrationCommand,
+  ): Promise<NumberedRegistrationCommandResult>;
   deriveBrainVault(
     input: RuntimeAdapterBrainVaultInput,
     options?: RuntimeAdapterBrainVaultOptions,
@@ -261,6 +273,7 @@ export type RuntimeAdapterRequest =
   | { v: XlnProtocolVersion; id: string; op: 'brainvault-derive'; jobId: string; input: RuntimeAdapterBrainVaultInput }
   | { v: XlnProtocolVersion; id: string; op: 'brainvault-cancel'; jobId: string }
   | { v: XlnProtocolVersion; id: string; op: 'brainvault-reveal' }
+  | { v: XlnProtocolVersion; id: string; op: 'numbered-registration'; input: NumberedRegistrationCommand }
   | { v: XlnProtocolVersion; id: string; op: 'cross-j-intent'; route: CrossJurisdictionSwapRoute };
 
 export type RuntimeAdapterResponse =

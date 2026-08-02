@@ -1,4 +1,3 @@
-import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import { validateDeliverableEntityInput } from '../../runtime/routing-validation';
 import { normalizeRuntimeId } from './runtime-id';
@@ -6,6 +5,8 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
+
+export const MAX_P2P_ENTITY_INPUTS = 256;
 
 const requireFrameCoordinate = (value: unknown, field: string): number => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
@@ -42,15 +43,6 @@ const decodeAtomicPair = (
   return { phase, pairKey };
 };
 
-const decodeCrossJurisdictionIntent = (value: unknown): CrossJurisdictionSwapRoute | undefined => {
-  if (value === undefined) return undefined;
-  requireBoundaryRecord(value, 'P2P_ENTITY_INPUTS_ENVELOPE_CROSS_J_INTENT_INVALID');
-  // The transport only establishes the envelope shape. Runtime admission
-  // canonicalizes and validates every financial field against local state;
-  // duplicating that protocol validator here would create two authorities.
-  return value as CrossJurisdictionSwapRoute;
-};
-
 /**
  * Decode authenticated plaintext before it crosses from transport into the
  * Runtime machine. Encryption proves confidentiality, not schema validity.
@@ -59,21 +51,26 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntity
   const envelope = requireBoundaryRecord(value, 'P2P_ENTITY_INPUTS_ENVELOPE_INVALID');
   requireExactBoundaryKeys(
     envelope,
-    ['sourceRuntimeId', 'sourceRuntimeHeight', 'sourceRuntimeTimestamp', 'entityInputs'],
-    ['atomicCrossJurisdictionPair', 'crossJurisdictionIntent'],
+    ['sourceRuntimeId', 'sourceRuntimeHeight', 'sourceRuntimeTimestamp', 'entityInputs', 'sourceSignature'],
+    ['atomicCrossJurisdictionPair'],
     'P2P_ENTITY_INPUTS_ENVELOPE_FIELDS_INVALID',
   );
   const sourceRuntimeId = normalizeRuntimeId(envelope['sourceRuntimeId']);
   if (!sourceRuntimeId) throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_RUNTIME_INVALID');
+  const sourceSignature = envelope['sourceSignature'];
+  if (typeof sourceSignature !== 'string' || !/^0x[0-9a-f]{130}$/.test(sourceSignature)) {
+    throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_SIGNATURE_INVALID');
+  }
   if (!Array.isArray(envelope['entityInputs'])) {
     throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_INPUTS_INVALID');
   }
-  const entityInputs = envelope['entityInputs'].map(validateDeliverableEntityInput);
-  const crossJurisdictionIntent = decodeCrossJurisdictionIntent(envelope['crossJurisdictionIntent']);
-  if (crossJurisdictionIntent && entityInputs.length > 0) {
-    throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_MIXED_CONTENT');
+  if (envelope['entityInputs'].length > MAX_P2P_ENTITY_INPUTS) {
+    throw new Error(
+      `P2P_ENTITY_INPUTS_ENVELOPE_INPUTS_TOO_MANY:${envelope['entityInputs'].length}:${MAX_P2P_ENTITY_INPUTS}`,
+    );
   }
-  if (!crossJurisdictionIntent && entityInputs.length === 0) {
+  const entityInputs = envelope['entityInputs'].map(validateDeliverableEntityInput);
+  if (entityInputs.length === 0) {
     throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_EMPTY');
   }
   const atomicCrossJurisdictionPair = decodeAtomicPair(
@@ -82,10 +79,10 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntity
   );
   return {
     sourceRuntimeId,
+    sourceSignature,
     sourceRuntimeHeight: requireFrameCoordinate(envelope['sourceRuntimeHeight'], 'HEIGHT'),
     sourceRuntimeTimestamp: requireFrameCoordinate(envelope['sourceRuntimeTimestamp'], 'TIMESTAMP'),
     entityInputs,
     ...(atomicCrossJurisdictionPair ? { atomicCrossJurisdictionPair } : {}),
-    ...(crossJurisdictionIntent ? { crossJurisdictionIntent } : {}),
   };
 };

@@ -46,10 +46,24 @@ export const BRAINVAULT_V1 = Object.freeze({
   ARGON_PARALLELISM: 1,
   SHARD_OUTPUT_BYTES: 32,
   MIN_NAME_LENGTH: 1,
-  MIN_PASSPHRASE_LENGTH: 6,
+  MIN_PASSPHRASE_LENGTH: 1,
   MIN_FACTOR: 1,
   MAX_FACTOR: 9,
 } as const);
+
+/** Exact wallet inputs: whitespace is significant, but an empty string is not a wallet identity. */
+export function assertBrainVaultName(value: unknown): asserts value is string {
+  if (typeof value !== 'string' || value.length < BRAINVAULT_V1.MIN_NAME_LENGTH) {
+    throw new Error('BRAINVAULT_NAME_INVALID');
+  }
+}
+
+/** Password strength is user policy; the protocol only rejects the empty string consistently. */
+export function assertBrainVaultPassphrase(value: unknown): asserts value is string {
+  if (typeof value !== 'string' || value.length < BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH) {
+    throw new Error('BRAINVAULT_PASSPHRASE_INVALID');
+  }
+}
 
 /** Browser worker cache key and runtime handshake for the complete V1 shard KDF. */
 export const BRAINVAULT_V1_SPEC_ID = [
@@ -73,6 +87,7 @@ export async function createShardSalt(
   shardCount: number,
   algId: string = BRAINVAULT_V1.ALG_ID,
 ): Promise<Uint8Array> {
+  assertBrainVaultName(name);
   if (!Number.isSafeInteger(shardCount) || shardCount < 1 || shardCount > 0xffff_ffff) {
     throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${shardCount}`);
   }

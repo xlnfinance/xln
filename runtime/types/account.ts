@@ -253,6 +253,13 @@ export interface AccountState {
  * Entity-owned automation. The parent Entity may commit this wider envelope,
  * but Account-root helpers must accept `AccountState`, never the envelope.
  */
+export interface CrossJurisdictionDisputeRecovery {
+  /** Snapshot-positioned pull IDs that need one terminal source result. */
+  requiredPullIds: string[];
+  /** Missing = pending, `0x` = no source pull, otherwise a verified binary. */
+  resultsByPullId: Record<string, string>;
+}
+
 export interface AccountReplica {
   /** Bilateral state authenticated by AccountFrame.accountStateRoot. */
   state: AccountState;
@@ -349,6 +356,8 @@ export interface AccountReplica {
     reason: string;
     /** Cross-Entity book rows that must confirm removal before disputeStart. */
     pendingOrderbookRemovalIds?: string[];
+    /** Source-first barrier for a target-side cross-j dispute. */
+    crossJurisdictionRecovery?: CrossJurisdictionDisputeRecovery;
     /** Exact start request retained until every asynchronous cleanup ACK commits. */
     startIntent?: {
       crossJurisdictionRouteId?: string;
@@ -372,6 +381,8 @@ export interface AccountReplica {
     observedBlockNumber?: number;     // J block where DisputeStarted was observed
     batchNonce?: number;              // Hanko batch nonce observed with DisputeStarted when available
     finalizeQueued?: boolean;         // Finalize op already queued locally (single-source lifecycle guard)
+    /** Target-user (nonstarter) recovery after a target-hub initiated dispute. */
+    crossJurisdictionRecovery?: CrossJurisdictionDisputeRecovery;
   };
 
   hankoSignature?: string; // Latest generated account proof hanko.
@@ -724,8 +735,8 @@ export type CrossSwapFillAckData = {
   cumulativeSourceAmount?: bigint;
   cumulativeTargetAmount?: bigint;
   cumulativeFillRatio: number;
-  fillNumerator?: bigint;
-  fillDenominator?: bigint;
+  fillNumerator: bigint;
+  fillDenominator: bigint;
   ackKind?: 'fill' | 'cancel';
   executionSourceAmount?: bigint;
   executionTargetAmount?: bigint;

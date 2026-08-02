@@ -493,7 +493,17 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     }), true, 1_000)).success).toBe(true);
-    account.mempool.push({ type: 'direct_payment', data: { tokenId: 1, amount: 1n } });
+    account.mempool.push({
+      type: 'direct_payment',
+      data: {
+        tokenId: 1,
+        amount: 1n,
+        route: [self, counterparty],
+        fromEntityId: self,
+        toEntityId: counterparty,
+        deliveryMode: 'direct',
+      },
+    });
     const workspaceHash = account.state.settlementWorkspace!.workspaceHash;
 
     const approved = await handleSettleApprove(state, {
@@ -599,7 +609,17 @@ describe('atomic settlement Account transition', () => {
     );
     const workspaceHash = leftAccount.state.settlementWorkspace!.workspaceHash;
     expect(leftState.deferredAccountProposals?.get(rightEntity)).toBe(workspaceHash);
-    leftAccount.mempool.push({ type: 'direct_payment', data: { tokenId: 1, amount: 1n } });
+    leftAccount.mempool.push({
+      type: 'direct_payment',
+      data: {
+        tokenId: 1,
+        amount: 1n,
+        route: [leftEntity, rightEntity],
+        fromEntityId: leftEntity,
+        toEntityId: rightEntity,
+        deliveryMode: 'direct',
+      },
+    });
 
     const materialized = await applyEntityFrame(env, leftState, [], 3_000);
     const materializedAccount = materialized.newState.accounts.get(rightEntity)!;
@@ -1494,7 +1514,14 @@ describe('atomic settlement Account transition', () => {
 
     const payment = await applyAccountTx(account, {
       type: 'direct_payment',
-      data: { tokenId: 1, amount: 1n },
+      data: {
+        tokenId: 1,
+        amount: 1n,
+        route: [LEFT, RIGHT],
+        fromEntityId: LEFT,
+        toEntityId: RIGHT,
+        deliveryMode: 'direct',
+      },
     }, true, 2_000);
     expect(payment.success).toBe(false);
     expect(payment.error).toBe('SETTLEMENT_SIGNED_ACCOUNT_FROZEN:direct_payment');

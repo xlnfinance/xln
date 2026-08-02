@@ -33,6 +33,8 @@ import {
   collectCommittedEntityResult,
   recordEntityInputProfile,
 } from './entity-input-output';
+import { cacheCommittedConsumptionNodeChanges } from '../entity/consumption-store';
+import { cacheCommittedAccountJClaimNodeChanges } from '../entity/account-j-claim-node-store';
 
 export const collectCommittedAccountFrames = (
   input: RoutedEntityInput,
@@ -91,6 +93,22 @@ export type StagedEntityInput = {
   replicaKey: string;
   result: AppliedEntityReplicaInput;
   elapsedMs: number;
+};
+
+export const publishStagedEntityNodeChanges = (
+  env: RuntimeReplica,
+  stagedInputs: readonly StagedEntityInput[],
+): void => {
+  for (const { result } of stagedInputs) {
+    if (!isCommittedEntityInput(result.outcome)) {
+      if (result.consumptionNodeChanges || result.accountJClaimNodeChanges) {
+        throw new Error('ENTITY_REJECTED_INPUT_NODE_CHANGES_FORBIDDEN');
+      }
+      continue;
+    }
+    cacheCommittedConsumptionNodeChanges(env, result.consumptionNodeChanges);
+    cacheCommittedAccountJClaimNodeChanges(env, result.accountJClaimNodeChanges);
+  }
 };
 
 export const stageExternalEntityInput = async (
@@ -215,6 +233,7 @@ export const applyExternalEntityInput = async (
     commitEntityFrameCandidateState(staged.result.nextReplica.state);
   }
   collectStagedEntityInput(env, staged, options, context);
+  publishStagedEntityNodeChanges(env, [staged]);
 };
 
 export const discardMalformedRemoteEntityInput = (

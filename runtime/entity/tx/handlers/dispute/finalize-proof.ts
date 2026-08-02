@@ -63,7 +63,10 @@ export const selectFinalProof = (
   const counterBodyRaw = counterHash
     ? account.disputeProofBodiesByHash?.[counterHash]
     : undefined;
+  const callerIsLeft = account.state.leftEntity === state.entityId;
+  const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
   const hasCounterProof =
+    !callerIsStarter &&
     Boolean(counterHanko && counterHanko !== '0x') &&
     counterNonce !== undefined &&
     counterNonce > activeDispute.initialNonce &&

@@ -15,6 +15,7 @@ import {
   buildMarketMakerBootstrapFingerprint,
   buildMarketMakerCrossHealth,
   buildMarketMakerCrossOfferSpecs,
+  deriveMarketMakerCrossExpiryAt,
   getMarketMakerHealth as getRuntimeMarketMakerHealth,
   hasFinalizedMarketMakerCrossOffer,
   readVisibleHubProfiles,
@@ -375,6 +376,20 @@ const buildBootstrapTopology = (): {
       jurisdictionRef: stackRef(31338, '22'),
     },
   ];
+  env.infrastructure.verifiedProfileRoutes = new Map([
+    ...contexts.map(context => [context.entityId.toLowerCase(), {
+      runtimeId: env.runtimeId,
+      runtimeSignerId: context.signerId,
+      runtimeEncPubKey: '',
+      lastUpdated: env.state.timestamp,
+    }] as const),
+    ...visibleHubs.map(hub => [hub.entityId.toLowerCase(), {
+      runtimeId: hubRuntimeId,
+      runtimeSignerId: hub.signerId,
+      runtimeEncPubKey: '',
+      lastUpdated: env.state.timestamp,
+    }] as const),
+  ]);
   env.gossip = {
     getProfiles: () => visibleHubs.map((hub) => ({
       name: hub.name,
@@ -658,7 +673,72 @@ test('runtime market maker health stays red until every byte-budgeted cross mark
   expect(health.cross.routes.flatMap(route => route.pairs).some(pair => !pair.ready)).toBe(true);
 });
 
-test('market maker finalized cross matching tolerates rolling route hash but rejects changed economics', () => {
+test('market maker cross order identity is stable within one expiry generation', () => {
+  const { env, contexts, visibleHubs } = buildBootstrapTopology();
+  const sourceContext = contexts[0]!;
+  const targetContext = contexts[1]!;
+  const sourceHub = visibleHubs[0]!;
+  const targetHub = visibleHubs[1]!;
+  addReplica(env, sourceContext.entityId, sourceContext.signerId);
+  addReplica(env, targetContext.entityId, targetContext.signerId);
+  env.state.timestamp = 10_000;
+  const build = () => buildMarketMakerCrossOfferSpecs(
+    env,
+    sourceContext,
+    targetContext,
+    [sourceHub],
+    [targetHub],
+    [1, 2, 3],
+    [1, 2, 3],
+  );
+  const first = build();
+  const firstExpiry = deriveMarketMakerCrossExpiryAt(env.state.timestamp);
+  env.state.timestamp += 1;
+  const retry = build();
+  expect(retry.map(spec => spec.crossJurisdiction))
+    .toEqual(first.map(spec => spec.crossJurisdiction));
+  expect(retry.map(spec => [spec.offerId, spec.crossJurisdiction?.routeHash]))
+    .toEqual(first.map(spec => [spec.offerId, spec.crossJurisdiction?.routeHash]));
+  expect(first.every(spec => spec.crossJurisdiction?.expiresAt === firstExpiry)).toBe(true);
+  expect(first.every(spec => /^mmx-[0-9a-f]{6}-[0-9a-f]{6}-\d+-\d+-[0-9a-f]{64}-sell-\d+$/.test(spec.offerId)))
+    .toBe(true);
+
+  env.state.timestamp = firstExpiry;
+  const nextGeneration = build();
+  expect(nextGeneration.map(spec => spec.offerId)).not.toEqual(first.map(spec => spec.offerId));
+  expect(nextGeneration.map(spec => spec.crossJurisdiction?.routeHash))
+    .not.toEqual(first.map(spec => spec.crossJurisdiction?.routeHash));
+  const hashesById = new Map<string, Set<string>>();
+  for (const spec of [...first, ...retry, ...nextGeneration]) {
+    const hashes = hashesById.get(spec.offerId) ?? new Set<string>();
+    hashes.add(String(spec.crossJurisdiction?.routeHash || ''));
+    hashesById.set(spec.offerId, hashes);
+  }
+  expect([...hashesById.values()].every(hashes => hashes.size === 1)).toBe(true);
+
+  const revisedSignerId = addr('12');
+  env.infrastructure!.verifiedProfileRoutes!.set(sourceContext.entityId.toLowerCase(), {
+    runtimeId: env.runtimeId,
+    runtimeSignerId: revisedSignerId,
+    runtimeEncPubKey: '',
+    lastUpdated: env.state.timestamp,
+  });
+  const revisedTerms = buildMarketMakerCrossOfferSpecs(
+    env,
+    { ...sourceContext, signerId: revisedSignerId },
+    targetContext,
+    [sourceHub],
+    [targetHub],
+    [1, 2, 3],
+    [1, 2, 3],
+  );
+  expect(revisedTerms).toHaveLength(nextGeneration.length);
+  expect(revisedTerms.map(spec => spec.offerId)).not.toEqual(nextGeneration.map(spec => spec.offerId));
+  expect(revisedTerms.map(spec => spec.crossJurisdiction?.routeHash))
+    .not.toEqual(nextGeneration.map(spec => spec.crossJurisdiction?.routeHash));
+});
+
+test('market maker finalized cross matching requires the exact immutable route hash', () => {
   const { env, contexts, visibleHubs } = buildBootstrapTopology();
   const sourceContext = contexts[0]!;
   const targetContext = contexts[1]!;
@@ -686,11 +766,7 @@ test('market maker finalized cross matching tolerates rolling route hash but rej
     priceTicks: route.priceTicks,
     makerIsLeft: true,
     createdHeight: 1,
-    crossJurisdiction: {
-      ...route,
-      routeHash: `0x${'ab'.repeat(32)}`,
-      expiresAt: Number(route.expiresAt || 0) + 60_000,
-    },
+    crossJurisdiction: route,
   } as any);
 
   expect(hasFinalizedMarketMakerCrossOffer(env, spec)).toBe(true);
@@ -698,10 +774,7 @@ test('market maker finalized cross matching tolerates rolling route hash but rej
     ...account.state.swapOffers.get(spec.offerId),
     crossJurisdiction: {
       ...route,
-      target: {
-        ...route.target,
-        amount: BigInt(route.target.amount) + 1n,
-      },
+      routeHash: `0x${'ab'.repeat(32)}`,
     },
   } as any);
   expect(hasFinalizedMarketMakerCrossOffer(env, spec)).toBe(false);

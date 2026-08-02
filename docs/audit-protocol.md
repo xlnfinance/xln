@@ -40,10 +40,17 @@ combining them into one optimistic percentage hides risk.
    sent to a second audit immediately, not buried and not implemented blindly.
 10. **Release gates consume evidence; they do not invent it.** A release is a
    deterministic query over current proofs, accepted risk, and policy.
-11. **Ideal means unanimous current evidence, not score negotiation.** Each
-    module needs three independent current-fingerprint reviews from at least two
-    model families; every score must be at least 990/1000. A changed dependency
-    invalidates old scores, and an objection is fixed or reproducibly refuted.
+11. **Scores summarize evidence; they never replace it.** A reviewer score is
+    advisory and cannot close a finding or compensate for missing tests. The
+    release gate is zero confirmed P0/P1 plus current required evidence. The
+    stricter ideal gate may demand three reviewers and a 990/1000 floor, but it
+    is a named post-release-quality target, not a reason to negotiate scores.
+12. **One product operation has one production path.** Legacy behavior,
+    compatibility aliases, fallback readers or writers, version-selected
+    `v2`/`v3` execution branches, and parallel financial formulas are release
+    blockers unless the owner explicitly approves a bounded offline migration.
+    An availability policy such as direct-then-relay is one named canonical
+    route, not permission to retain an older protocol path.
 
 ## 2. Canonical hierarchy
 
@@ -268,6 +275,15 @@ Roles are separated:
 Use available concurrency for independent modules, not multiple writers in one
 worktree. The integrator alone resolves overlaps and owns the final candidate.
 
+Canonical staffing for one release epoch:
+
+- exactly one writer owns the mutable integration worktree;
+- zero to three read-only auditors inspect bounded scopes in parallel;
+- auditors work from an immutable SHA whenever a verdict can affect a gate;
+- no auditor commits, rebases, merges, or fixes inside the writer worktree;
+- a new writer starts only after the previous epoch lands in clean `main` or is
+  explicitly abandoned.
+
 Recommended reviewer allocation by task class:
 
 - 70% to the current leader for that class;
@@ -399,7 +415,9 @@ and zero unresolved high-impact candidates.
 The separate ideal gate is stricter than release: every mapped module must have
 100% coverage, 100% derived quality, no open finding of any severity, and a
 current review floor of 990/1000 across at least three reviewers and two model
-families. Scores are never averaged; the minimum current score governs.
+families. Scores are never averaged; the minimum current score governs. This
+ideal gate is pursued only after the named product release gate is already
+green; it cannot keep an MVP in permanent audit churn.
 
 ## 13. Canonical storage model
 
@@ -463,7 +481,38 @@ The protocol is working when a new engineer can answer, from generated data:
 - why the next task is the highest-priority one;
 - what must pass before merge or release.
 
-## 16. Prohibited shortcuts
+## 16. Release epoch and phase handoff
+
+One release epoch has one scope, one writer, and one immutable candidate:
+
+1. Declare the product paths being released and the modules explicitly deferred.
+2. Start one writer worktree from current `main`; preserve unrelated user work
+   in place and integrate it only by content-aware commit or merge.
+3. Run read-only investigations in parallel. Adjudicate P0/P1 twice before
+   editing when the root cause or ownership boundary is uncertain.
+4. Fix in priority order: irreversible money/authority, deterministic replay,
+   persistence/restart, authenticated transport, then user-path correctness.
+5. Prove every fix L1 then L2. Create a candidate commit only when the mutable
+   worktree has no unexplained changes.
+6. Pin two independent auditors to that exact candidate. Any accepted finding
+   creates a new candidate and invalidates only its dependency cone.
+7. On the final unchanged candidate, run browser/F12 evidence and the owning L3
+   gate exactly once, then integrate directly into `main`.
+8. Remove merged temporary worktrees and branches. Preserve an annotated audit
+   or release tag when the snapshot must remain addressable.
+
+The handoff packet contains: final SHA, scope and deferrals, open findings,
+current evidence commands/results, module fingerprints, frozen boundaries,
+operator constraints, and the first three tasks of the next phase. A handoff is
+valid only from clean `main`; a new main agent never inherits an unexplained
+dirty integration worktree.
+
+When a core-to-product phase boundary is declared, the verified core becomes a
+change-controlled dependency. Product/UI work may consume its public API but
+does not refactor core opportunistically. A core change reopens only for a
+reproduced P0/P1, a required product invariant, or explicit owner approval.
+
+## 17. Prohibited shortcuts
 
 - one unexplained “audited %” or “quality %”;
 - severity without a reachable trigger;

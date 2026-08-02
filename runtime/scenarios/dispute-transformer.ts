@@ -761,7 +761,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     })}`);
 
     await process(env, [{ entityId: alice.id, signerId: alice.signer, entityTxs: [{
-      type: 'disputeFinalize', data: { counterpartyEntityId: hub.id, cooperative: false, description: 'mixed-transformer-finalize' },
+      type: 'disputeFinalize', data: { counterpartyEntityId: hub.id, description: 'mixed-transformer-finalize' },
     }] }]);
     const finalization = findReplica(env, alice.id)[1].state.jBatchState?.batch.disputeFinalizations[0];
     if (!finalization) throw new Error('DISPUTE_TRANSFORMER_FINALIZATION_NOT_DRAFTED');

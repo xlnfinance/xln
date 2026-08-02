@@ -30,7 +30,13 @@ import {
   factorForShardCount,
   getShardCount,
 } from './core.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './spec.ts';
+import {
+  assertBrainVaultName,
+  assertBrainVaultPassphrase,
+  BRAINVAULT_V1,
+  BRAINVAULT_V1_SPEC_ID,
+  createShardSalt,
+} from './spec.ts';
 import { hexToBytes } from './encoding.ts';
 
 export type BrainVaultNativeInput = Readonly<{
@@ -74,12 +80,8 @@ const requireNotAborted = (signal: AbortSignal | undefined): void => {
 };
 
 const validateInput = (input: BrainVaultNativeInput): { shardCount: number; factor: number; workers: number } => {
-  if (typeof input.name !== 'string' || input.name.length < BRAINVAULT_V1.MIN_NAME_LENGTH) {
-    throw new Error('BRAINVAULT_NAME_INVALID');
-  }
-  if (typeof input.passphrase !== 'string' || input.passphrase.length < BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH) {
-    throw new Error('BRAINVAULT_PASSPHRASE_INVALID');
-  }
+  assertBrainVaultName(input.name);
+  assertBrainVaultPassphrase(input.passphrase);
   if (!Number.isSafeInteger(input.shardInput) || input.shardInput < 1 || input.shardInput > 100_000) {
     throw new Error(`BRAINVAULT_SHARD_INPUT_INVALID:${String(input.shardInput)}`);
   }
@@ -101,6 +103,8 @@ export const deriveBrainVaultNativeShard = async (
   shardIndex: number,
   shardCount: number,
 ): Promise<Uint8Array> => {
+  assertBrainVaultName(input.name);
+  assertBrainVaultPassphrase(input.passphrase);
   const salt = await createShardSalt(input.name, shardIndex, shardCount);
   const password = new TextEncoder().encode(input.passphrase.normalize('NFKD'));
   try {

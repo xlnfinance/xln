@@ -24,6 +24,8 @@ import type {
   RuntimeAdapterSendOptions,
   RuntimeAdapterStatus,
   RuntimeAdapterPush,
+  NumberedRegistrationCommand,
+  NumberedRegistrationCommandResult,
 } from './types';
 import { RuntimeAdapterError } from './errors';
 import {
@@ -53,9 +55,11 @@ type RuntimeAdapterRequestBody =
   | { op: 'brainvault-derive'; jobId: string; input: RuntimeAdapterBrainVaultInput }
   | { op: 'brainvault-cancel'; jobId: string }
   | { op: 'brainvault-reveal' }
+  | { op: 'numbered-registration'; input: NumberedRegistrationCommand }
   | { op: 'cross-j-intent'; route: CrossJurisdictionSwapRoute };
 
 const BRAINVAULT_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
+const NUMBERED_REGISTRATION_REQUEST_TIMEOUT_MS = 15 * 60 * 1_000;
 
 const nextBackoff = (attempt: number, maxMs: number): number =>
   Math.min(maxMs, Math.max(1_000, 2 ** Math.min(attempt, 5) * 250));
@@ -111,6 +115,34 @@ const parseBrainVaultRecovery = (value: unknown): RuntimeAdapterBrainVaultRecove
     throw new RuntimeAdapterError('E_INTERNAL', 'BrainVault node returned an invalid mnemonic');
   }
   return { mnemonic24: result['mnemonic24'] };
+};
+
+const parseNumberedRegistrationResult = (value: unknown): NumberedRegistrationCommandResult => {
+  const result = recordOrNull(value);
+  if (
+    !result ||
+    typeof result['intentId'] !== 'string' ||
+    typeof result['transactionHash'] !== 'string' ||
+    !Number.isSafeInteger(result['committedHeight']) ||
+    !Array.isArray(result['entities'])
+  ) {
+    throw new RuntimeAdapterError('E_INTERNAL', 'numbered registration returned an invalid result');
+  }
+  for (const entity of result['entities']) {
+    const record = recordOrNull(entity);
+    if (
+      !record ||
+      typeof record['entityId'] !== 'string' ||
+      !Number.isSafeInteger(record['entityNumber']) ||
+      !recordOrNull(record['config']) ||
+      (record['localSignerId'] !== null && typeof record['localSignerId'] !== 'string') ||
+      typeof record['isProposer'] !== 'boolean' ||
+      typeof record['imported'] !== 'boolean'
+    ) {
+      throw new RuntimeAdapterError('E_INTERNAL', 'numbered registration returned an invalid entity');
+    }
+  }
+  return result as NumberedRegistrationCommandResult;
 };
 
 const heightFromPayload = (payload: unknown): number => {
@@ -289,6 +321,17 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       op: 'cross-j-intent',
       route,
     });
+  }
+
+  async registerNumberedEntities(
+    input: NumberedRegistrationCommand,
+  ): Promise<NumberedRegistrationCommandResult> {
+    this.requireFreshAdmin('numbered registration requires fresh admin auth');
+    this.requireCommandReady();
+    return parseNumberedRegistrationResult(await this.request<unknown>(
+      { op: 'numbered-registration', input },
+      NUMBERED_REGISTRATION_REQUEST_TIMEOUT_MS,
+    ));
   }
 
   async deriveBrainVault(

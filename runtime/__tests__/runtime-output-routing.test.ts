@@ -4,18 +4,32 @@ import {
   buildPendingNetworkOutputs,
   buildRouteOutputKey,
   carriesEntityCommitNotification,
-  dispatchEntityOutputs,
+  dispatchEntityOutputs as dispatchEntityOutputsRaw,
   getReliableOutputIdentity,
   mergeRoutedEntityOutput,
   planEntityOutputs,
   rescheduleDeferredOutputs,
-  sendEntityInputWithRouting,
+  sendEntityInputWithRouting as sendEntityInputWithRoutingRaw,
   splitPendingOutputsByRetryWindow,
 } from '../runtime/output-routing';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../protocol/payments/delivery-result';
 import type { DeliverableEntityInput, RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import type { EntityLeaderTimeoutVote } from '../entity/types';
 import { getWallClockMs } from '../infra/time';
+import { deriveSignerAddressSync } from '../account/crypto';
+
+const withRuntimeOwner = (env: RuntimeReplica): RuntimeReplica => {
+  const seed = `runtime-output-routing:${String(env.runtimeId || 'anonymous')}`;
+  env.runtimeSeed = seed;
+  env.runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+  return env;
+};
+
+const dispatchEntityOutputs: typeof dispatchEntityOutputsRaw = (env, outputs, deps) =>
+  dispatchEntityOutputsRaw(withRuntimeOwner(env), outputs, deps);
+
+const sendEntityInputWithRouting: typeof sendEntityInputWithRoutingRaw = (env, input, deps) =>
+  sendEntityInputWithRoutingRaw(withRuntimeOwner(env), input, deps);
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;

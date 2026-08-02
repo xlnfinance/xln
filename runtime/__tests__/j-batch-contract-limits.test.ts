@@ -84,6 +84,36 @@ describe('j-batch contract limits', () => {
     expect(state.batch).toEqual(before);
   });
 
+  test('R2C rejects zero value and malformed restored operations before signing', () => {
+    const state = initJBatch();
+    expect(() => batchAddReserveToCollateral(
+      state,
+      leftEntity,
+      rightEntity,
+      1,
+      0n,
+    )).toThrow('R2C_AMOUNT_MUST_BE_POSITIVE');
+    expect(state.batch.reserveToCollateral).toEqual([]);
+
+    const zeroAmount = createEmptyBatch();
+    zeroAmount.reserveToCollateral.push({
+      tokenId: 1,
+      receivingEntity: leftEntity,
+      pairs: [{ entity: rightEntity, amount: 0n }],
+    });
+    expect(getJBatchContractLimitIssue(zeroAmount))
+      .toBe('reserveToCollateral[0].pairs amounts must be positive');
+
+    const emptyPairs = createEmptyBatch();
+    emptyPairs.reserveToCollateral.push({
+      tokenId: 1,
+      receivingEntity: leftEntity,
+      pairs: [],
+    });
+    expect(getJBatchContractLimitIssue(emptyPairs))
+      .toBe('reserveToCollateral[0].pairs must not be empty');
+  });
+
   test('mirrors Depository MAX_BATCH_SECRET_REVEALS before submission', () => {
     expect(J_BATCH_CONTRACT_LIMITS.maxSecretReveals).toBe(32);
     const batch = createEmptyBatch();

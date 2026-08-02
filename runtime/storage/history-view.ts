@@ -6,19 +6,13 @@ import { cloneIsolatedEntityTxs } from '../entity/input-clone';
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec';
 import { deleteKeyRange, iterateKeys, readRawOrNull } from './level';
 import {
-  HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME,
-  HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME,
   HISTORY_VIEW_RUNTIME_ACTIVITY,
   KEY_HISTORY_VIEW_HEAD,
   STORAGE_SCHEMA_VERSION,
   encodeHeight,
   keyHistoryViewAccountFrame,
-  keyHistoryViewAccountFrameByRuntime,
-  keyHistoryViewAccountFrameByRuntimePrefix,
   keyHistoryViewAccountFramePrefix,
   keyHistoryViewEntityFrame,
-  keyHistoryViewEntityFrameByRuntime,
-  keyHistoryViewEntityFrameByRuntimePrefix,
   keyHistoryViewEntityFramePrefix,
   keyHistoryViewRuntimeActivity,
   normalizeEntityId,
@@ -88,6 +82,51 @@ export type StoredRuntimeActivityRecord = StoredRuntimeActivityValue & {
   height: number;
 };
 
+export const buildCertifiedFramePuts = (options: {
+  height: number;
+  timestamp: number;
+  historyRecords?: RuntimeHistoryRecord[];
+}): HistoryViewPut[] => {
+  const puts: HistoryViewPut[] = [];
+  for (const record of options.historyRecords ?? []) {
+    if (record.kind === 'entityFrame') {
+      const entityId = normalizeEntityId(record.entityId);
+      const entityHeight = record.entityHeight;
+      if (!entityId) throw new Error('CERTIFIED_ENTITY_FRAME_ENTITY_ID_INVALID');
+      if (!Number.isSafeInteger(entityHeight) || entityHeight <= 0) {
+        throw new Error(`CERTIFIED_ENTITY_FRAME_HEIGHT_INVALID:${String(entityHeight)}`);
+      }
+      const stored: StoredEntityFrameValue = {
+        link: structuredClone(record.link),
+        runtimeHeight: record.runtimeHeight ?? options.height,
+        timestamp: record.timestamp ?? options.timestamp,
+      };
+      validateStoredEntityFrameValue(stored, entityHeight);
+      puts.push({ key: keyHistoryViewEntityFrame(entityId, entityHeight), value: encodeBuffer(stored) });
+      continue;
+    }
+    const entityId = normalizeEntityId(record.entityId);
+    const counterpartyId = normalizeEntityId(record.counterpartyId);
+    const accountHeight = record.accountHeight;
+    if (!entityId || !counterpartyId) throw new Error('CERTIFIED_ACCOUNT_FRAME_ENTITY_ID_INVALID');
+    if (!Number.isSafeInteger(accountHeight) || accountHeight <= 0) {
+      throw new Error(`CERTIFIED_ACCOUNT_FRAME_HEIGHT_INVALID:${String(accountHeight)}`);
+    }
+    const stored: StoredAccountFrameValue = {
+      source: record.source,
+      frame: structuredClone(record.frame),
+      runtimeHeight: record.runtimeHeight ?? options.height,
+      timestamp: record.timestamp ?? options.timestamp,
+    };
+    validateStoredAccountFrameValue(stored, accountHeight);
+    puts.push({
+      key: keyHistoryViewAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
+      value: encodeBuffer(stored),
+    });
+  }
+  return puts;
+};
+
 export const buildHistoryViewPuts = (options: {
   height: number;
   timestamp: number;
@@ -96,7 +135,6 @@ export const buildHistoryViewPuts = (options: {
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
-  historyRecords?: RuntimeHistoryRecord[];
 }): HistoryViewPut[] => {
   const puts: HistoryViewPut[] = [];
   const runtimeInput: StoredRuntimeActivityValue['runtimeInput'] = {
@@ -118,55 +156,6 @@ export const buildHistoryViewPuts = (options: {
   };
   validateStoredRuntimeActivityValue(runtimeActivity, options.height);
   puts.push({ key: keyHistoryViewRuntimeActivity(options.height), value: encodeBuffer(runtimeActivity) });
-
-  for (const record of options.historyRecords ?? []) {
-    if (record.kind === 'entityFrame') {
-      const entityId = normalizeEntityId(record.entityId);
-      const entityHeight = record.entityHeight;
-      if (!entityId) throw new Error('HISTORY_VIEW_ENTITY_FRAME_ENTITY_ID_INVALID');
-      if (!Number.isSafeInteger(entityHeight) || entityHeight <= 0) {
-        throw new Error(`HISTORY_VIEW_ENTITY_FRAME_HEIGHT_INVALID:${String(entityHeight)}`);
-      }
-      const recordHeight = record.runtimeHeight ?? options.height;
-      const recordTimestamp = record.timestamp ?? options.timestamp;
-      const stored: StoredEntityFrameValue = {
-        link: structuredClone(record.link),
-        runtimeHeight: recordHeight,
-        timestamp: recordTimestamp,
-      };
-      validateStoredEntityFrameValue(stored, entityHeight);
-      puts.push({ key: keyHistoryViewEntityFrame(entityId, entityHeight), value: encodeBuffer(stored) });
-      puts.push({
-        key: keyHistoryViewEntityFrameByRuntime(recordHeight, entityId, entityHeight),
-        value: Buffer.alloc(0),
-      });
-      continue;
-    }
-    const entityId = normalizeEntityId(record.entityId);
-    const counterpartyId = normalizeEntityId(record.counterpartyId);
-    const accountHeight = record.accountHeight;
-    if (!entityId || !counterpartyId) throw new Error('HISTORY_VIEW_ACCOUNT_FRAME_ENTITY_ID_INVALID');
-    if (!Number.isSafeInteger(accountHeight) || accountHeight <= 0) {
-      throw new Error(`HISTORY_VIEW_ACCOUNT_FRAME_HEIGHT_INVALID:${String(accountHeight)}`);
-    }
-    const recordHeight = record.runtimeHeight ?? options.height;
-    const recordTimestamp = record.timestamp ?? options.timestamp;
-    const stored: StoredAccountFrameValue = {
-      source: record.source,
-      frame: structuredClone(record.frame),
-      runtimeHeight: recordHeight,
-      timestamp: recordTimestamp,
-    };
-    validateStoredAccountFrameValue(stored, accountHeight);
-    puts.push({
-      key: keyHistoryViewAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
-      value: encodeBuffer(stored),
-    });
-    puts.push({
-      key: keyHistoryViewAccountFrameByRuntime(recordHeight, entityId, counterpartyId, Math.floor(accountHeight)),
-      value: Buffer.alloc(0),
-    });
-  }
 
   return puts;
 };
@@ -285,7 +274,6 @@ export const reconcileHistoryViews = async (options: {
       touchedEntities: frame.touchedEntities,
       touchedAccounts: frame.touchedAccounts,
       touchedBookEntities: frame.touchedBookEntities,
-      historyRecords: frame.historyRecords,
     });
     const plan = await prepareHistoryViewCommit({
       db: options.viewDb,
@@ -328,35 +316,6 @@ const pruneHistoryViewBeforeRuntimeHeight = async (
   );
   removedBytes += runtimeActivityPruned.removedBytes;
   removedKeys += runtimeActivityPruned.removedKeys;
-
-  // Runtime retention owns only Runtime activity and its reverse indexes.
-  // Certified Entity/Account frame bodies are independent replica histories:
-  // deleting them because the hosting Runtime compacted would couple child
-  // recovery to an unrelated parent epoch. Their eventual pruning requires a
-  // replica checkpoint and an explicit local archival policy.
-  const accountRuntimeIndexesPruned = await deleteKeyRange(
-    db,
-    {
-    gte: keyHistoryViewAccountFrameByRuntimePrefix(),
-    lt: Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
-    },
-    () => true,
-    onPruneBatch,
-  );
-  removedBytes += accountRuntimeIndexesPruned.removedBytes;
-  removedKeys += accountRuntimeIndexesPruned.removedKeys;
-
-  const entityRuntimeIndexesPruned = await deleteKeyRange(
-    db,
-    {
-      gte: keyHistoryViewEntityFrameByRuntimePrefix(),
-      lt: Buffer.concat([Buffer.from([HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
-    },
-    () => true,
-    onPruneBatch,
-  );
-  removedBytes += entityRuntimeIndexesPruned.removedBytes;
-  removedKeys += entityRuntimeIndexesPruned.removedKeys;
 
   return { removedBytes, removedKeys };
 };

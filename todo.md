@@ -6,6 +6,33 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
+## 0. Current release handoff — 2026-08-02
+
+- Candidate branch: `ai/public-release-hardening`; last fully committed SHA
+  before final test-only cleanup: `2e96033e0`. Known P0: 0. Fixed in this
+  cycle: Cross-J durable dual authorization, Account storage admission,
+  transport replay/channel binding, watchtower owner pin, current-board-only
+  fresh C2R/settlement, FIFO one-per-broadcast dispute finalization,
+  jurisdiction deployment-origin proof, legacy path removal, and generated
+  contract-artifact drift enforcement.
+- Evidence already green: Solidity 148/148; targeted Runtime/Entity/Account/
+  Cross-J/network/storage/watchtower 194/194 (2,102 assertions); BrainVault
+  26/26 (100,156 assertions); frozen core unchanged. The combined `bun run
+  check` reached the final frontend build; preserve its final output as the
+  immutable-candidate gate.
+- Before merge: update the pruned-history import regression to expect a loud
+  archive-RPC rejection, retain the exact Cross-J validation error regression,
+  decide the one remaining contract policy below, rerun affected L1 plus one
+  final `bun run check`, obtain independent 0/0 P0/P1 verdicts on the resulting
+  SHA, then fast-forward `main` without overwriting its matching dependency WIP.
+- Owner decision required: a previous board can currently submit a new dispute
+  during its seven-day grace and choose a near-maximum nonce. Requiring the
+  current board for dispute start revokes that attack but means historical
+  evidence must be submitted during the board-change delay; already-active
+  disputes remain enforceable with previous-board evidence. Recommended release
+  policy: current-board-only dispute start, historical verifier only for
+  finalizing an already-active dispute.
+
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 
 - [ ] Pass one final independent read-only audit on an immutable release

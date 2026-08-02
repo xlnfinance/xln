@@ -4,6 +4,7 @@ import { createFrameHash } from '../account/consensus/frame';
 import { computeAccountStateRoot } from '../account/state-root';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { deriveDelta } from '../account/utils';
+import { validateDelta } from '../account/delta-validation';
 import { FINANCIAL, LIMITS, TOKENS } from '../config/constants';
 import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
@@ -381,7 +382,10 @@ describe('persisted AccountReplica semantic boundary', () => {
     const cleanDelta = clean.doc.state.deltas.get(1)!;
     const baseline = deriveDelta(cleanDelta, true).outCapacity;
     cleanDelta.leftHold = -1n;
-    expect(deriveDelta(cleanDelta, true).outCapacity).toBe(baseline + 1n);
+    expect(() => deriveDelta(cleanDelta, true))
+      .toThrow('leftHold must be non-negative');
+    expect(() => validateDelta(cleanDelta, 'replica-meta restore'))
+      .toThrow('leftHold must be non-negative');
     expect(() => admit(clean)).toThrow('STORAGE_ACCOUNT_DOC_INVALID_STATE_DELTA_leftHold');
 
     const admitted = admit(await makeFixture());

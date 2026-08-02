@@ -4,6 +4,43 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_CHUNK_TOKEN_LIMIT = 180_000;
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
+
+function discoverSourceFiles(baseDir, { excludeDirectories = [], excludeFiles = [] } = {}) {
+  const excludedDirectories = new Set(excludeDirectories);
+  const excludedFiles = new Set(excludeFiles);
+  const discovered = [];
+
+  function visit(relativeDir = '') {
+    const absoluteDir = path.join(baseDir, relativeDir);
+    const entries = fs.readdirSync(absoluteDir, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of entries) {
+      const relativePath = path.join(relativeDir, entry.name);
+      if (entry.isDirectory()) {
+        if (!excludedDirectories.has(entry.name)) visit(relativePath);
+        continue;
+      }
+      if (!entry.isFile() || excludedFiles.has(entry.name)) continue;
+      discovered.push(relativePath.split(path.sep).join('/'));
+    }
+  }
+
+  visit();
+  return discovered;
+}
+
+// Complete production source sets are discovered rather than hand-maintained.
+// This is deliberate: a new Runtime, Entity, Account, WAL, networking,
+// orchestrator, adapter, or contract file must enter llms.txt automatically.
+const PRODUCTION_RUNTIME_FILES = discoverSourceFiles(path.join(PROJECT_ROOT, 'runtime'), {
+  excludeDirectories: ['__tests__', 'qa', 'scenarios', 'scripts'],
+}).filter((file) => file.endsWith('.ts'));
+const PRODUCTION_CONTRACT_FILES = discoverSourceFiles(path.join(PROJECT_ROOT, 'jurisdictions/contracts'), {
+  excludeDirectories: ['mocks'],
+  excludeFiles: ['console.sol'],
+}).filter((file) => file.endsWith('.sol') && !file.endsWith('Mock.sol'));
 
 function resolveGitDir(projectRoot) {
   const dotGit = path.join(projectRoot, '.git');
@@ -216,6 +253,18 @@ const CORE_FILES = {
     'src/lib/view/utils/panelBridge.ts',    // Panel-to-panel messaging
     'src/lib/network3d/networkMachine.ts',  // 3D graph scene orchestration
   ]
+};
+
+const COMPLETE_CORE_FILES = {
+  ...CORE_FILES,
+  contracts: PRODUCTION_CONTRACT_FILES,
+  runtime: PRODUCTION_RUNTIME_FILES,
+  root: ['AGENTS.md'],
+  docs: uniqueFiles([
+    ...CORE_FILES.docs,
+    'audit-protocol.md',
+    'mainnet-acceptance-gate.md',
+  ]),
 };
 
 // Focused cross-jurisdiction swap pack:
@@ -490,6 +539,18 @@ const RUNTIME_FILES = {
   frontend: [],
 };
 
+const COMPLETE_RUNTIME_FILES = {
+  ...RUNTIME_FILES,
+  contracts: PRODUCTION_CONTRACT_FILES,
+  runtime: PRODUCTION_RUNTIME_FILES,
+  root: ['AGENTS.md'],
+  docs: uniqueFiles([
+    ...RUNTIME_FILES.docs,
+    'audit-protocol.md',
+    'mainnet-acceptance-gate.md',
+  ]),
+};
+
 const ORDERBOOK_FILES = {
   contracts: [],
   runtime: [
@@ -761,6 +822,8 @@ ${config.description}
 
 ## Included Files
 
+${overviewFileRows('Repository Invariants', fileGroups.root || [], fileSizes, '', '')}
+
 ${overviewFileRows('Contracts', fileGroups.contracts, fileSizes, 'contracts/', 'jurisdictions/contracts/')}
 
 ${overviewFileRows('Runtime', fileGroups.runtime, fileSizes, 'runtime/', 'runtime/')}
@@ -780,6 +843,11 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir
   // Count lines for each file
   const fileSizes = {};
   const projectRoot = path.resolve(docsDir, '..');
+
+  (fileGroups.root || []).forEach(file => {
+    const content = readFileContent(projectRoot, file);
+    if (content) fileSizes[file] = countLines(content);
+  });
 
   fileGroups.contracts.forEach(file => {
     const content = readFileContent(contractsDir, file);
@@ -1310,6 +1378,15 @@ function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
   // Skip runtime/docs/frontend if --sol flag is present
   if (!solOnly) {
     addFiles({
+      files: fileGroups.root || [],
+      baseDir: projectRoot,
+      statPrefix: '',
+      outputPrefix: '',
+      fileStats,
+      allFiles,
+    });
+
+    addFiles({
       files: fileGroups.runtime,
       baseDir: runtimeDir,
       statPrefix: 'runtime/',
@@ -1490,21 +1567,21 @@ const PROFILE_CONFIGS = {
   default: {
     flag: '--default',
     outputFilename: 'llms.txt',
-    fileGroups: CORE_FILES,
+    fileGroups: COMPLETE_CORE_FILES,
     includeFrontend: false,
     solOnly: false,
   },
   frontend: {
     flag: '--frontend',
     outputFilename: 'llms_frontend.txt',
-    fileGroups: CORE_FILES,
+    fileGroups: COMPLETE_CORE_FILES,
     includeFrontend: true,
     solOnly: false,
   },
   sol: {
     flag: '--sol',
     outputFilename: 'llms_sol.txt',
-    fileGroups: CORE_FILES,
+    fileGroups: COMPLETE_CORE_FILES,
     includeFrontend: false,
     solOnly: true,
   },
@@ -1518,7 +1595,7 @@ const PROFILE_CONFIGS = {
   runtime: {
     flag: '--runtime',
     outputFilename: 'llms_runtime.txt',
-    fileGroups: RUNTIME_FILES,
+    fileGroups: COMPLETE_RUNTIME_FILES,
     includeFrontend: false,
     solOnly: false,
   },

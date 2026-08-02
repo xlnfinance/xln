@@ -17,12 +17,13 @@ import { isUsableContractAddress } from '../../../../jurisdiction/machine/contra
 import { shortId } from '../../../../infra/logger';
 import { disputeLog, warnDisputeUnlessQuiet } from './shared';
 import { admitDisputeFinalize } from './finalize-admission';
+import { scheduleHook } from '../../../scheduler';
+import { refreshCrossJurisdictionTargetRecovery } from '../../j-events-htlc';
 import {
   buildFinalProofPayload,
   selectFinalProof,
   verifyCounterProofIdentity,
   type FinalProofPayload,
-  type FinalProofSelection,
 } from './finalize-proof';
 
 type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
@@ -56,13 +57,12 @@ const isFinalizeTimingAllowed = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
-  selection: FinalProofSelection,
   env: EntityRuntimeContext,
 ): boolean => {
   const activeDispute = account.activeDispute!;
   const callerIsLeft = account.state.leftEntity === state.entityId;
   const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
-  if (selection.shouldUseCounterProof || !callerIsStarter) return true;
+  if (!callerIsStarter) return true;
   const currentJBlock = getEntityCertifiedJurisdictionHeight(state);
   if (currentJBlock >= activeDispute.disputeTimeout) return true;
   addMessage(
@@ -109,6 +109,49 @@ const queueDisputeFinalize = (
   account.activeDispute!.finalizeQueued = true;
 };
 
+const selectedCrossJurisdictionRecoveryIsReady = (
+  state: EntityState,
+  account: AccountReplica,
+  counterpartyId: string,
+  finalProofbodyHash: string,
+  outputs: EntityInput[],
+): boolean => {
+  const active = account.activeDispute!;
+  const current = active.crossJurisdictionRecovery;
+  if (!current) return true;
+  const plan = refreshCrossJurisdictionTargetRecovery(
+    state,
+    account,
+    counterpartyId,
+    [finalProofbodyHash],
+    current,
+    outputs,
+  );
+  if (!plan) {
+    delete active.crossJurisdictionRecovery;
+    return true;
+  }
+  active.crossJurisdictionRecovery = plan.recovery;
+  const missing = plan.recovery.requiredPullIds.filter(
+    (pullId) => !Object.hasOwn(plan.recovery.resultsByPullId, pullId),
+  );
+  if (missing.length === 0) return true;
+  if (state.crontabState) {
+    scheduleHook(state.crontabState, {
+      id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
+      triggerAt: Number(state.timestamp ?? 0) + 1000,
+      type: 'dispute_deadline',
+      data: { accountId: counterpartyId },
+    });
+  }
+  addMessage(
+    state,
+    `⏳ disputeFinalize waiting for ${missing.length} cross-j source result(s) ` +
+      `required by the selected proof`,
+  );
+  return false;
+};
+
 export const handleDisputeFinalize = async (
   entityState: EntityState,
   entityTx: FinalizeTx,
@@ -121,9 +164,8 @@ export const handleDisputeFinalize = async (
   disputeLog.debug('finalize.begin', {
     entity: shortId(entityState.entityId),
     counterparty: shortId(counterpartyId),
-    cooperativeRequested: entityTx.data.cooperative === true,
   });
-  const account = admitDisputeFinalize(newState, entityTx, env);
+  const account = admitDisputeFinalize(newState, entityTx);
   if (!account) return { newState, outputs };
   const selection = selectFinalProof(
     entityState,
@@ -133,6 +175,15 @@ export const handleDisputeFinalize = async (
     env,
   );
   if (!selection) return { newState, outputs };
+  if (!selectedCrossJurisdictionRecoveryIsReady(
+    newState,
+    account,
+    counterpartyId,
+    selection.finalProofbodyHash,
+    outputs,
+  )) {
+    return { newState, outputs };
+  }
   verifyCounterProofIdentity(entityState, account, counterpartyId, selection);
   const finalProof = buildFinalProofPayload(
     newState,
@@ -157,7 +208,7 @@ export const handleDisputeFinalize = async (
     finalNonce: finalProof.finalNonce,
     finalNonceSource: selection.finalNonceSource,
   });
-  if (!isFinalizeTimingAllowed(newState, account, counterpartyId, selection, env)) {
+  if (!isFinalizeTimingAllowed(newState, account, counterpartyId, env)) {
     return { newState, outputs };
   }
   queueDisputeFinalize(newState, account, finalProof, registry);

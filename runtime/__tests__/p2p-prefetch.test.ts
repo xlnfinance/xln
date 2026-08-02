@@ -1,17 +1,122 @@
 import { expect, test } from 'bun:test';
 
-import type { RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
+import type {
+  ReliableDeliveryReceipt,
+  RoutedEntityInput,
+  RuntimeEntityInputsEnvelope,
+} from '../runtime/types';
 import { RuntimeP2P } from '../network/p2p/p2p';
+import { createEmptyEnv } from '../runtime';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
 
 const TARGET_RUNTIME_ID = '0x1111111111111111111111111111111111111111';
 const SOURCE_RUNTIME_ID = '0x3333333333333333333333333333333333333333';
 const SOURCE_ENTITY_ID = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
+test('concurrent exact profile misses share one relay fetch cohort', async () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  let resolveFetch!: () => void;
+  const fetchGate = new Promise<void>(resolve => { resolveFetch = resolve; });
+  let fetches = 0;
+  let available = false;
+  p2p.profileFetches = new Map();
+  p2p.env = { gossip: { getHubs: () => [{}], getProfiles: () => [] } };
+  p2p.expandRequiredProfileIds = (ids: string[]) => ids;
+  p2p.hasProfileForEntity = () => available;
+  p2p.fetchProfilesWithRetry = async () => {
+    fetches += 1;
+    await fetchGate;
+    available = true;
+    return true;
+  };
+
+  const first = p2p.ensureProfiles([SOURCE_ENTITY_ID]);
+  const second = p2p.ensureProfiles([SOURCE_ENTITY_ID.toUpperCase()]);
+  expect(fetches).toBe(1);
+  resolveFetch();
+  expect(await Promise.all([first, second])).toEqual([true, true]);
+  expect(p2p.profileFetches.size).toBe(0);
+});
+
 const envelopeFor = (input: RoutedEntityInput): RuntimeEntityInputsEnvelope => ({
   sourceRuntimeId: SOURCE_RUNTIME_ID,
+  sourceSignature: `0x${'11'.repeat(65)}`,
   sourceRuntimeHeight: 7,
   sourceRuntimeTimestamp: 7000,
   entityInputs: [{ ...input, runtimeId: TARGET_RUNTIME_ID }],
+});
+
+test('inbound forged envelope is rejected before profile prefetch', async () => {
+  const source = createEmptyEnv('p2p-prefetch-auth-source');
+  const target = createEmptyEnv('p2p-prefetch-auth-target');
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  let profileFetches = 0;
+  let admitted = 0;
+  p2p.env = target;
+  p2p.closing = false;
+  p2p.closed = false;
+  p2p.ensureProfilesForInput = async () => {
+    profileFetches += 1;
+    return true;
+  };
+  p2p.onEntityInputs = () => {
+    admitted += 1;
+  };
+  const envelope = signRuntimeEntityInputsEnvelope(source, target.runtimeId!, {
+    sourceRuntimeId: source.runtimeId!,
+    sourceRuntimeHeight: 1,
+    sourceRuntimeTimestamp: 1,
+    entityInputs: [{
+      entityId: SOURCE_ENTITY_ID,
+      signerId: source.runtimeId!,
+      runtimeId: target.runtimeId!,
+      entityTxs: [],
+    }],
+  });
+
+  await expect((p2p as any).acceptInboundEntityInputs(
+    'relay',
+    source.runtimeId,
+    { ...envelope, sourceRuntimeTimestamp: 2 },
+    2,
+  )).rejects.toThrow('INBOUND_ENTITY_INPUTS_SOURCE_SIGNATURE_INVALID');
+  expect(profileFetches).toBe(0);
+  expect(admitted).toBe(0);
+});
+
+test('inbound entity batch resolves one deduplicated profile cohort', async () => {
+  const source = createEmptyEnv('p2p-prefetch-cohort-source');
+  const target = createEmptyEnv('p2p-prefetch-cohort-target');
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const requiredBatches: string[][] = [];
+  let admitted = 0;
+  p2p.env = target;
+  p2p.closing = false;
+  p2p.closed = false;
+  p2p.ensureProfiles = async (entityIds: string[]) => {
+    requiredBatches.push(entityIds);
+    return true;
+  };
+  p2p.onEntityInputs = () => {
+    admitted += 1;
+  };
+  const entityInput: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: source.runtimeId!,
+    runtimeId: target.runtimeId!,
+    entityTxs: [],
+  };
+  const envelope = signRuntimeEntityInputsEnvelope(source, target.runtimeId!, {
+    sourceRuntimeId: source.runtimeId!,
+    sourceRuntimeHeight: 1,
+    sourceRuntimeTimestamp: 1,
+    entityInputs: Array.from({ length: 256 }, () => ({ ...entityInput })),
+  });
+
+  await (p2p as any).acceptInboundEntityInputs('relay', source.runtimeId, envelope, 1);
+
+  expect(requiredBatches).toEqual([[SOURCE_ENTITY_ID]]);
+  expect(admitted).toBe(1);
 });
 
 test('enqueueEntityInputsDelivery starts profile prefetch before transport resolution', () => {
@@ -24,7 +129,6 @@ test('enqueueEntityInputsDelivery starts profile prefetch before transport resol
     warn: () => undefined,
   };
   p2p.sendDebugEvent = () => false;
-  p2p.ensureRelayConnectionsForEntity = () => undefined;
   p2p.prefetchProfilesForInput = () => {
     prefetched = true;
   };
@@ -64,7 +168,6 @@ test('enqueueEntityInputsDelivery reports typed delivery result when no transpor
     debugEvents.push(payload);
     return true;
   };
-  p2p.ensureRelayConnectionsForEntity = () => undefined;
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.resolveTransportClient = () => ({ client: null, transport: 'relay' });
   p2p.clients = [];
@@ -113,7 +216,6 @@ test('enqueueEntityInputsDelivery reports typed delivery result when transport s
     debugEvents.push(payload);
     return true;
   };
-  p2p.ensureRelayConnectionsForEntity = () => undefined;
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
   p2p.clients = [relayClient];
@@ -171,7 +273,6 @@ test('enqueueEntityInputsDelivery refreshes gossip from typed no-pubkey delivery
   p2p.refreshGossip = () => {
     refreshes += 1;
   };
-  p2p.ensureRelayConnectionsForEntity = () => undefined;
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
   p2p.clients = [relayClient];
@@ -227,7 +328,6 @@ test('enqueueEntityInputsDelivery uses official relay when advertised hub direct
     debugEvents.push(payload);
     return true;
   };
-  p2p.ensureRelayConnectionsForEntity = () => undefined;
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
   p2p.ensureDirectClientForRuntime = () => undefined;
@@ -278,7 +378,6 @@ test('enqueueEntityInputsDelivery returns typed success with transport', () => {
     warn: () => undefined,
   };
   p2p.sendDebugEvent = () => true;
-  p2p.ensureRelayConnectionsForEntity = () => undefined;
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
   p2p.clients = [relayClient];
@@ -304,7 +403,7 @@ test('enqueueEntityInputsDelivery returns typed success with transport', () => {
   expect(sent[0]?.timestamp).toBe(2345);
 });
 
-test('enqueueEntityInputsDelivery relays an intent-only cross-j envelope', () => {
+test('enqueueEntityInputsDelivery rejects an empty envelope before transport', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const sent: RuntimeEntityInputsEnvelope[] = [];
   const relayClient = {
@@ -328,14 +427,11 @@ test('enqueueEntityInputsDelivery relays an intent-only cross-j envelope', () =>
     sourceRuntimeHeight: 8,
     sourceRuntimeTimestamp: 8000,
     entityInputs: [],
-    crossJurisdictionIntent: { orderId: 'intent-only' },
   } as unknown as RuntimeEntityInputsEnvelope;
 
-  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelope)).toMatchObject({
-    outcome: 'delivered',
-    transport: 'relay',
-  });
-  expect(sent).toEqual([envelope]);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelope))
+    .toThrow('entity_inputs envelope is empty');
+  expect(sent).toEqual([]);
 });
 
 test('enqueueEntityInputsDelivery prefers open direct transport over relay', () => {
@@ -363,7 +459,6 @@ test('enqueueEntityInputsDelivery prefers open direct transport over relay', () 
     warn: () => undefined,
   };
   p2p.sendDebugEvent = () => true;
-  p2p.ensureRelayConnectionsForEntity = () => undefined;
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
   p2p.ensureDirectClientForRuntime = () => undefined;
@@ -389,7 +484,116 @@ test('enqueueEntityInputsDelivery prefers open direct transport over relay', () 
   expect(relaySent).toHaveLength(0);
 });
 
-test('enqueueEntityInputsDelivery uses relay when direct transport is not authoritative for entity inputs', () => {
+test('enqueueEntityInputsDelivery uses relay when direct accepts zero bytes', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  let directAttempts = 0;
+  let relayAttempts = 0;
+  const directClient = {
+    isOpen: () => true,
+    sendEntityInputsRaw: () => {
+      directAttempts += 1;
+      return false;
+    },
+  };
+  const relayClient = {
+    isOpen: () => true,
+    sendEntityInputsRaw: () => {
+      relayAttempts += 1;
+      return true;
+    },
+  };
+  p2p.env = { warn: () => undefined };
+  p2p.sendDebugEvent = () => true;
+  p2p.prefetchProfilesForInput = () => undefined;
+  p2p.resolveTransportClient = () => ({ client: directClient, transport: 'direct' });
+  p2p.clients = [relayClient];
+  p2p.directClients = new Map();
+  p2p.directClientUrls = new Map();
+  p2p.directClientErrors = new Map();
+
+  const input: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: '0x2222222222222222222222222222222222222222',
+    entityTxs: [],
+  };
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toMatchObject({
+    outcome: 'delivered',
+    transport: 'relay',
+  });
+  expect({ directAttempts, relayAttempts }).toEqual({ directAttempts: 1, relayAttempts: 1 });
+});
+
+test('enqueueEntityInputsDelivery uses relay after a direct pre-send encryption error', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  let relayAttempts = 0;
+  const directClient = {
+    isOpen: () => true,
+    sendEntityInputsRaw: () => {
+      throw new Error('P2P_NO_PUBKEY: direct profile is stale');
+    },
+  };
+  const relayClient = {
+    isOpen: () => true,
+    sendEntityInputsRaw: () => {
+      relayAttempts += 1;
+      return true;
+    },
+  };
+  p2p.env = { warn: () => undefined };
+  p2p.sendDebugEvent = () => true;
+  p2p.refreshGossip = () => undefined;
+  p2p.prefetchProfilesForInput = () => undefined;
+  p2p.resolveTransportClient = () => ({ client: directClient, transport: 'direct' });
+  p2p.clients = [relayClient];
+  p2p.directClients = new Map();
+  p2p.directClientUrls = new Map();
+  p2p.directClientErrors = new Map();
+
+  const input: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: '0x2222222222222222222222222222222222222222',
+    entityTxs: [],
+  };
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toMatchObject({
+    outcome: 'delivered',
+    transport: 'relay',
+  });
+  expect(relayAttempts).toBe(1);
+});
+
+test('enqueueReliableReceiptDelivery uses relay only after direct accepts zero bytes', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  let directAttempts = 0;
+  let relayAttempts = 0;
+  const directClient = {
+    isOpen: () => true,
+    sendReliableReceiptRaw: () => {
+      directAttempts += 1;
+      return false;
+    },
+  };
+  const relayClient = {
+    isOpen: () => true,
+    sendReliableReceiptRaw: () => {
+      relayAttempts += 1;
+      return true;
+    },
+  };
+  p2p.resolveTransportClient = () => ({ client: directClient, transport: 'direct' });
+  p2p.clients = [relayClient];
+  p2p.directClients = new Map();
+
+  expect(p2p.enqueueReliableReceiptDelivery(
+    TARGET_RUNTIME_ID,
+    {} as ReliableDeliveryReceipt,
+  )).toMatchObject({
+    outcome: 'delivered',
+    transport: 'relay',
+  });
+  expect({ directAttempts, relayAttempts }).toEqual({ directAttempts: 1, relayAttempts: 1 });
+});
+
+test('enqueueEntityInputsDelivery uses relay while the known direct socket is unavailable', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const relaySent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
   const directSent: unknown[] = [];
@@ -402,8 +606,8 @@ test('enqueueEntityInputsDelivery uses relay when direct transport is not author
     },
   };
   const directClient = {
-    isOpen: () => true,
-    isConnecting: () => false,
+    isOpen: () => false,
+    isConnecting: () => true,
     sendEntityInputsRaw: () => {
       directSent.push(true);
       return true;
@@ -413,9 +617,7 @@ test('enqueueEntityInputsDelivery uses relay when direct transport is not author
   p2p.env = {
     warn: () => undefined,
   };
-  p2p.preferRelayForEntityInput = true;
   p2p.sendDebugEvent = () => true;
-  p2p.ensureRelayConnectionsForEntity = () => undefined;
   p2p.prefetchProfilesForInput = () => undefined;
   p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
   p2p.ensureDirectClientForRuntime = () => undefined;

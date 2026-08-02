@@ -4,6 +4,7 @@ import {
   normalizeMarketMakerHealthPayload,
   type RawMarketMakerHealthPayload,
 } from './market-maker-health-payload';
+import { parseRuntimeSecurityIncidentTelemetry } from './runtime-security-telemetry';
 
 type FetchJson = <T>(url: string, timeoutMs?: number) => Promise<T | null>;
 
@@ -55,16 +56,25 @@ export const createMarketMakerChildPoller = ({
     proc: ChildProcess,
   ): void => {
     if (!isCurrentProc(proc)) return;
-    child.lastHealth = health;
+    const sanitizedHealth: MarketMakerHealthPayload = {
+      ...health,
+      ...(health.runtime ? {
+        runtime: {
+          ...health.runtime,
+          securityIncidents: parseRuntimeSecurityIncidentTelemetry(health.runtime.securityIncidents),
+        },
+      } : {}),
+    };
+    child.lastHealth = sanitizedHealth;
     const nextInfo: MarketMakerInfoPayload = { ...(child.lastInfo || {}) };
-    if (health.name !== undefined) nextInfo.name = health.name;
-    if (health.entityId !== undefined && health.entityId !== null) nextInfo.entityId = health.entityId;
-    if (health.runtimeId !== undefined && health.runtimeId !== null) nextInfo.runtimeId = health.runtimeId;
-    if (health.apiUrl !== undefined) nextInfo.apiUrl = health.apiUrl;
-    if (health.relayUrl !== undefined) nextInfo.relayUrl = health.relayUrl;
-    if (health.directWsUrl !== undefined) nextInfo.directWsUrl = health.directWsUrl;
-    if (health.startupPhase !== undefined) {
-      nextInfo.startupPhase = health.startupPhase;
+    if (sanitizedHealth.name !== undefined) nextInfo.name = sanitizedHealth.name;
+    if (sanitizedHealth.entityId !== undefined && sanitizedHealth.entityId !== null) nextInfo.entityId = sanitizedHealth.entityId;
+    if (sanitizedHealth.runtimeId !== undefined && sanitizedHealth.runtimeId !== null) nextInfo.runtimeId = sanitizedHealth.runtimeId;
+    if (sanitizedHealth.apiUrl !== undefined) nextInfo.apiUrl = sanitizedHealth.apiUrl;
+    if (sanitizedHealth.relayUrl !== undefined) nextInfo.relayUrl = sanitizedHealth.relayUrl;
+    if (sanitizedHealth.directWsUrl !== undefined) nextInfo.directWsUrl = sanitizedHealth.directWsUrl;
+    if (sanitizedHealth.startupPhase !== undefined) {
+      nextInfo.startupPhase = sanitizedHealth.startupPhase;
     }
     child.lastInfo = nextInfo;
     refreshStartupPhase();

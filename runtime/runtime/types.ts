@@ -1,6 +1,5 @@
 import type { Level } from 'level';
 import type { RuntimeP2P } from '../network/p2p/p2p';
-import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type {
   AccountHistoryRecord,
   RuntimeOverlayRecord,
@@ -152,10 +151,47 @@ export type PendingJurisdictionImport = {
   request: JurisdictionImportRequest;
 };
 
+export type NumberedRegistrationDefinition = Readonly<{
+  name: string;
+  validators: ReadonlyArray<string | Readonly<{ name: string; weight: number | bigint }>>;
+  threshold: bigint;
+  localSignerId: string | null;
+  profileName?: string;
+  position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
+}>;
+
+export type NumberedRegistrationCommandEntity = Readonly<
+  Omit<NumberedRegistrationDefinition, 'validators'> & {
+    validators: ReadonlyArray<Readonly<{ name: string; weight: number }>>;
+  }
+>;
+
+export type NumberedRegistrationCommand = Readonly<{
+  jurisdictionRef: string;
+  payerSignerId: string;
+  entities: readonly NumberedRegistrationCommandEntity[];
+}>;
+
+export type NumberedRegistrationCommandResult = Readonly<{
+  intentId: string;
+  transactionHash: string;
+  committedHeight: number;
+  entities: ReadonlyArray<Readonly<{
+    config: ConsensusConfig;
+    entityNumber: number;
+    entityId: string;
+    localSignerId: string | null;
+    isProposer: boolean;
+    imported: boolean;
+  }>>;
+}>;
+
 export type NumberedRegistrationEntityPlan = {
   name: string;
   boardHash: string;
   config: ConsensusConfig;
+  /** Local replica owner, or null when this Runtime only pays to register another board. */
+  localSignerId: string | null;
   profileName?: string;
   position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
 };
@@ -388,8 +424,8 @@ export interface RoutedEntityInput extends EntityInput {
   };
 }
 
-/** One authenticated transport unit emitted by one committed source R-frame. */
-export interface RuntimeEntityInputsEnvelope {
+/** Fields signed by the source Runtime for one committed outbound R-frame. */
+export interface UnsignedRuntimeEntityInputsEnvelope {
   sourceRuntimeId: string;
   sourceRuntimeHeight: number;
   sourceRuntimeTimestamp: number;
@@ -398,8 +434,17 @@ export interface RuntimeEntityInputsEnvelope {
     phase: 'proposal' | 'ack';
     pairKey: string;
   };
-  /** Unsigned best-effort M1. It authorizes no funds and only asks the Hub to propose both Account legs. */
-  crossJurisdictionIntent?: CrossJurisdictionSwapRoute;
+}
+
+/**
+ * Transport-independent source authentication for Runtime-to-Runtime input.
+ *
+ * Relay hop authentication only proves who spoke to the relay. The encrypted
+ * plaintext therefore carries its own signature, bound to the exact target,
+ * so direct, relayed and process-local delivery enforce one canonical rule.
+ */
+export interface RuntimeEntityInputsEnvelope extends UnsignedRuntimeEntityInputsEnvelope {
+  sourceSignature: string;
 }
 
 /**
@@ -482,6 +527,10 @@ export interface RuntimeInfrastructure {
   maxEntityInputsPerFrame?: number;
   maxEntityTxsPerFrame?: number;
   processingPromise?: Promise<void> | null;
+  /** Writer-preference gate: queued financial frames cannot be starved by new API readers. */
+  queuedFrameWriters?: number;
+  frameWritersDrained?: Promise<void> | null;
+  resolveFrameWritersDrained?: (() => void) | null;
   /** Infra-only read/write barrier; never part of deterministic Runtime State. */
   activeCommittedReaders?: number;
   committedReadersDrained?: Promise<void> | null;
@@ -629,6 +678,11 @@ export interface RuntimeInfrastructure {
   pendingJurisdictionImports?: Map<string, PendingJurisdictionImport>;
   /** Caller-idempotent registration batches; completed records are O(actual batches). */
   numberedRegistrationIntents?: Map<string, NumberedRegistrationRecord>;
+  /** Process-local serialized command lane; its lifetime is exactly this RuntimeReplica. */
+  numberedRegistrationDriver?: {
+    inFlight: Map<string, Promise<NumberedRegistrationCommandResult>>;
+    resumeRun: Promise<void> | null;
+  };
   runtimeAdapterCommandFrontiers?: Map<
     string,
     import('./command-frontier').RuntimeAdapterCommandFrontier

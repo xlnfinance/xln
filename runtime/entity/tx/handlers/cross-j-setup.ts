@@ -8,7 +8,10 @@ import {
   committedCrossJSourceDisputeDelayMs,
   validatePreparedCrossJurisdictionRoute,
 } from '../../../extensions/cross-j/prepared-route';
-import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
+import {
+  buildCertifiedEntityOutput,
+  pushCrossJurisdictionEntityOutput,
+} from '../cross-j-outputs';
 import {
   canonicalizeCrossJurisdictionRouteForKnownEntities,
   isCrossJurisdictionRouteParticipant,
@@ -55,6 +58,47 @@ const materializedIntentBytes = (
   intent.status = existing.status;
   intent.updatedAt = existing.updatedAt;
   return exactRouteBytes(intent);
+};
+
+const authorizeCrossJurisdictionIntent = (
+  env: EntityRuntimeContext,
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  outputs: EntityInput[],
+  role: 'source' | 'target',
+): CrossJSetupResult => {
+  if (route.status !== 'intent' || route.sourcePull || route.targetPull) {
+    throw new Error(`CROSS_J_USER_AUTH_INTENT_INVALID:${route.orderId}`);
+  }
+  if (isCrossJurisdictionRouteExpired(route, deterministicEntityTimestamp(state, env))) {
+    throw new Error(`CROSS_J_USER_AUTH_EXPIRED:${route.orderId}`);
+  }
+  if (role === 'source') committedCrossJSourceDisputeDelayMs(state, route);
+  const sourceHubSignerId = normalizeEntityRef(route.sourceHubSignerId || '');
+  if (role === 'source' && !sourceHubSignerId) {
+    throw new Error(`CROSS_J_SOURCE_HUB_SIGNER_MISSING:${route.orderId}`);
+  }
+  state.crossJurisdictionAuthorizations ||= new Map();
+  const existing = state.crossJurisdictionAuthorizations.get(route.orderId);
+  if (existing) {
+    if (exactRouteBytes(existing) !== exactRouteBytes(route)) {
+      throw new Error(`CROSS_J_USER_AUTH_CONFLICT:${route.orderId}`);
+    }
+    return { newState: state, outputs };
+  }
+  state.crossJurisdictionAuthorizations.set(
+    route.orderId,
+    cloneCrossJurisdictionRoute(route),
+  );
+  if (role === 'source') {
+    outputs.push(buildCertifiedEntityOutput(
+      route.source.counterpartyEntityId,
+      sourceHubSignerId,
+      [{ type: 'prepareCrossJurisdictionSwap', data: { route: cloneCrossJurisdictionRoute(route) } }],
+    ));
+  }
+  addMessage(state, `🌉 Cross-j swap ${route.orderId} authorized by ${role} user`);
+  return { newState: state, outputs };
 };
 
 const prepareRawCrossJurisdictionIntent = (
@@ -156,7 +200,11 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
     addMessage(newState, `❌ Cross-j prepare invalid route: ${error instanceof Error ? error.message : String(error)}`);
     return { newState, outputs };
   }
-  if (normalizeEntityRef(newState.entityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
+  const localEntityId = normalizeEntityRef(newState.entityId);
+  const sourceUserId = normalizeEntityRef(route.source.entityId);
+  const targetUserId = normalizeEntityRef(route.target.counterpartyEntityId);
+  const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
+  if (localEntityId !== sourceUserId && localEntityId !== targetUserId && localEntityId !== sourceHubId) {
     addMessage(newState, `❌ Cross-j prepare ${route.orderId} wrong source hub`);
     return { newState, outputs };
   }
@@ -169,6 +217,16 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
   const hasTargetPull = route.targetPull !== undefined;
   if (hasSourcePull !== hasTargetPull) {
     throw new Error(`CROSS_J_PREPARED_PAYLOAD_PARTIAL:${route.orderId}`);
+  }
+  if (localEntityId === sourceUserId || localEntityId === targetUserId) {
+    if (hasSourcePull) throw new Error(`CROSS_J_USER_AUTH_PREPARED_FORBIDDEN:${route.orderId}`);
+    return authorizeCrossJurisdictionIntent(
+      env,
+      newState,
+      route,
+      outputs,
+      localEntityId === sourceUserId ? 'source' : 'target',
+    );
   }
   return hasSourcePull
     ? prepareMaterializedCrossJurisdictionRoute(newState, route, outputs)
@@ -316,6 +374,10 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
   const sourceHubEntityId = normalizeEntityRef(route.source.counterpartyEntityId);
   const targetHubEntityId = normalizeEntityRef(route.target.entityId);
   if (localEntityId === sourceHubEntityId) {
+    validatePreparedCrossJurisdictionRoute(newState, {
+      ...cloneCrossJurisdictionRoute(route),
+      status: 'target_prepared',
+    });
     return { newState, outputs: [], accountTxs: buildSourceRegistrationTxs(newState, route) };
   }
   if (localEntityId === targetHubEntityId) {

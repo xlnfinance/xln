@@ -15,6 +15,7 @@ import {
   handleTowerRestore,
   handleWatchtowerActions,
   handleWatchtowerSweep,
+  resolveAppointmentBodyLimit,
 } from './http';
 import { runWatchtowerSweep } from './action';
 import { runDisputeWatchSweep } from './dispute-watch';
@@ -459,6 +460,9 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
   const server = Bun.serve({
     hostname: bindHost,
     port: options.port,
+    // Bun enforces this before route code runs. Match the appointment envelope
+    // limit so a valid configured recovery bundle is never rejected upstream.
+    maxRequestBodySize: resolveAppointmentBodyLimit(store),
     fetch: request => handleWatchtowerRequest(context, request),
   });
 

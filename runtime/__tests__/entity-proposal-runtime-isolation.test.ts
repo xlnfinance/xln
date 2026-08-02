@@ -15,6 +15,7 @@ import {
   processRuntime,
   readPersistedFrameJournal,
 } from '../runtime';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
 import {
   buildAuthenticatedInvalidProposal,
   cleanupPersistedProposalFixtures,
@@ -63,7 +64,7 @@ describe('Entity proposal Runtime isolation', () => {
     const { env, signerId } = await installPersistedProposalValidator();
     expect(env.state.height).toBe(1);
     const frame = buildAuthenticatedInvalidProposal(env, signerId);
-    const { inboundResults, remoteRuntimeId } = await deliverEncryptedProposal(env, frame);
+    const { inboundResults, remoteRuntimeId, remoteEnv } = await deliverEncryptedProposal(env, frame);
     expect(inboundResults).toEqual([expect.objectContaining({ kind: 'queued' })]);
 
     const consumptionBefore = getConsumptionNodeStore(env).size;
@@ -88,7 +89,7 @@ describe('Entity proposal Runtime isolation', () => {
       voterId,
       signature: signAccountFrame(env, voterId, hashEntityLeaderVoteBody(voteBody)),
     };
-    expect(handleInboundP2PEntityInputs(env, remoteRuntimeId, {
+    expect(handleInboundP2PEntityInputs(env, remoteRuntimeId, signRuntimeEntityInputsEnvelope(remoteEnv, env.runtimeId!, {
       sourceRuntimeId: remoteRuntimeId,
       sourceRuntimeHeight: 2,
       sourceRuntimeTimestamp: 2_000,
@@ -98,7 +99,7 @@ describe('Entity proposal Runtime isolation', () => {
         runtimeId: env.runtimeId!,
         leaderTimeoutVote: vote,
       }],
-    }).kind).toBe('queued');
+    })).kind).toBe('queued');
     await processRuntime(env, []);
     expect(env.state.height).toBe(2);
     const durableFrame = await readPersistedFrameJournal(env, 2);

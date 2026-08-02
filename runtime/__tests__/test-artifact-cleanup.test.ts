@@ -662,7 +662,10 @@ describe('test artifact cleanup', () => {
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/rpc-settlement-parity.ts');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/p2p-relay.ts');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=bootstrap-soundcheck -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=all');
-    expect(rootPackage).toContain('"check": "bun run check:src && bun run check:frontend-file-size && bun run check:frontend"');
+    expect(rootPackage).toContain(
+      '"check": "bun run check:brainvault && bun run check:contract-artifact-drift && ' +
+      'bun run check:src && bun run check:frontend-file-size && bun run check:frontend"',
+    );
     expect(rootPackage).not.toContain('run-with-test-cleanup.ts --reason=check');
     expect(rootPackage).not.toContain('test-artifact-cleanup.ts --reason=check &&');
     for (const scriptName of [

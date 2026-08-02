@@ -246,12 +246,8 @@ for (const [path, markers] of [
     "return 'dropped'",
   ]],
   ['runtime/network/relay/store.ts', [
-    'disposition = classifyWebSocketSendResult(sendResult);',
-    "if (disposition === 'dropped')",
-    'commitPendingQueueState(store, toKey, pending.slice(index), removedBytes);',
     'export const classifyRelayDeliveryEvent',
     'deliveryFailure({',
-    'deliverPendingMessages',
   ]],
   ['runtime/network/relay/router.ts', [
     'const sendRelayDelivery = (',
@@ -312,9 +308,6 @@ for (const [path, markers] of [
   ['runtime/__tests__/relay-store.test.ts', [
     'websocket send result classifier covers the complete server/client matrix',
     'relay delivery events expose typed retry and fatal semantics',
-    'relay pending delivery retains current and later messages when send reports zero bytes',
-    'relay pending delivery fails loud and retains an invalid first send',
-    'relay pending delivery commits an accepted prefix before invalid send failure',
   ]],
   ['runtime/__tests__/relay-direct.test.ts', [
     'direct relay diagnostics stay machine-readable',

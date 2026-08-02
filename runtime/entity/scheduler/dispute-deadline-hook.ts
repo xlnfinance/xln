@@ -45,6 +45,19 @@ export const processDisputeDeadlineHook = (
     });
     return;
   }
+  const recovery = account.activeDispute.crossJurisdictionRecovery;
+  const missingRecoveryResults = (recovery?.requiredPullIds ?? []).filter(
+    (pullId) => !Object.hasOwn(recovery?.resultsByPullId ?? {}, pullId),
+  ).length;
+  if (missingRecoveryResults > 0) {
+    retryDisputeDeadline(replica, hook, 1000);
+    crontabLog.debug('dispute.wait_cross_j_source_finality', {
+      account: shortId(accountId),
+      missing: missingRecoveryResults,
+      retryMs: 1000,
+    });
+    return;
+  }
   if (weAreStarter && (!timeoutBlock || currentJBlock < timeoutBlock)) {
     retryDisputeDeadline(replica, hook, 1000);
     crontabLog.debug('dispute.retry_until_timeout', {

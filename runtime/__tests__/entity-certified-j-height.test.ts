@@ -118,6 +118,32 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
       .toBe(computeCanonicalEntityConsensusStateHash(leading.newState));
   });
 
+  test('starter cannot use a stored peer signature to bypass the certified timeout', async () => {
+    const state = baseState();
+    installDispute(state, 120);
+    const account = state.accounts.get(counterpartyId)!;
+    const initialHash = account.activeDispute!.initialProofbodyHash;
+    account.counterpartyDisputeProofBodyHash = initialHash;
+    account.counterpartyDisputeProofNonce = 2;
+    account.counterpartyDisputeProofHanko = '0x1234';
+    state.lastFinalizedJHeight = 120;
+
+    const finalized = await handleDisputeFinalize(
+      state,
+      {
+        type: 'disputeFinalize',
+        data: { counterpartyEntityId: counterpartyId },
+      },
+      envAt(120, 5),
+    );
+    const proof = finalized.newState.jBatchState?.batch.disputeFinalizations[0];
+
+    expect(proof?.finalNonce).toBe(1);
+    expect(proof?.finalProofbody).toEqual(account.disputeProofBodiesByHash?.[initialHash]);
+    expect(proof?.sig).toBe('0x');
+    expect(proof?.initialProofbodyHash).toBe(initialHash);
+  });
+
   test('scheduled dispute wake is independent of validator-local scan height', async () => {
     const state = baseState();
     installDispute(state, 120);

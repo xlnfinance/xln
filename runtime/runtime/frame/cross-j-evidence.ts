@@ -73,22 +73,20 @@ export const summarizeAtomicCrossJAccountInput = (
 
 export const recordRejectedAtomicCrossJInputs = (
   env: RuntimeReplica,
-  inputs: readonly RoutedEntityInput[],
-  inputIndexes: Iterable<number>,
   code:
     | 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH'
     | 'CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED'
     | 'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED',
   summary: string,
 ): void => {
-  for (const inputIndex of inputIndexes) {
-    recordRuntimeSecurityIncident(env, {
-      domain: 'cross-j',
-      code,
-      source: 'remote-ingress',
-      severity: 'warning',
-      summary,
-      entityId: inputs[inputIndex]!.entityId,
-    });
-  }
+  // A malformed cohort is one incident. Per-leg incidents let one admitted
+  // envelope amplify into thousands of durable records and log lines.
+  recordRuntimeSecurityIncident(env, {
+    domain: 'cross-j',
+    code,
+    source: 'remote-ingress',
+    severity: 'warning',
+    summary,
+    entityId: '',
+  });
 };

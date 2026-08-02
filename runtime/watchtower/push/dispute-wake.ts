@@ -34,7 +34,7 @@ export const selectWakeTargets = (
 };
 
 export const disputeWakeCollapseKey = (event: DisputeWakeEvent): string =>
-  `dispute:${event.chainId}:${String(event.depositoryAddress).toLowerCase()}:${String(event.counterentity).toLowerCase()}:${event.nonce}`;
+  `dispute:${event.chainId}:${String(event.depositoryAddress).toLowerCase()}:${String(event.sender).toLowerCase()}:${String(event.counterentity).toLowerCase()}:${event.nonce}`;
 
 export const buildDisputeWakeNotification = (target: DisputeWakeTarget): PushNotificationV1 => {
   const shortStarter = target.event.sender.slice(-6);

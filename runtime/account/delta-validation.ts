@@ -4,11 +4,24 @@ import {
   TypeSafetyViolationError,
   validateObject,
 } from '../protocol/validation-primitives';
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/integer-ranges';
+import { TOKENS } from '../config/constants';
+import { MAX_CREDIT_LIMIT } from './tx/handlers/set-credit-limit';
 
 const BIGINT_FIELDS = [
   'collateral',
   'ondelta',
   'offdelta',
+  'leftCreditLimit',
+  'rightCreditLimit',
+  'leftAllowance',
+  'rightAllowance',
+  'leftHold',
+  'rightHold',
+] as const;
+
+const UNSIGNED_FIELDS = [
+  'collateral',
   'leftCreditLimit',
   'rightCreditLimit',
   'leftAllowance',
@@ -28,9 +41,10 @@ export const validateDelta = (
   if (
     typeof tokenId !== 'number' ||
     !Number.isInteger(tokenId) ||
-    tokenId < 0
+    tokenId < 0 ||
+    tokenId > TOKENS.MAX_TOKEN_ID
   ) {
-    errors.push(`tokenId must be non-negative integer, got: ${String(tokenId)}`);
+    errors.push(`tokenId must be integer in [0, ${TOKENS.MAX_TOKEN_ID}], got: ${String(tokenId)}`);
   }
   for (const field of BIGINT_FIELDS) {
     const fieldValue = value[field];
@@ -51,6 +65,21 @@ export const validateDelta = (
     errors.push(
       `${field} must be BigInt, got: ${typeof fieldValue} (${fieldValue})`,
     );
+  }
+  for (const field of UNSIGNED_FIELDS) {
+    const fieldValue = value[field];
+    if (typeof fieldValue === 'bigint' && fieldValue < 0n) {
+      errors.push(`${field} must be non-negative, got: ${fieldValue}`);
+    } else if (typeof fieldValue === 'bigint') {
+      const maximum = field.endsWith('CreditLimit') ? MAX_CREDIT_LIMIT : UINT256_MAX;
+      if (fieldValue > maximum) errors.push(`${field} exceeds maximum ${maximum}, got: ${fieldValue}`);
+    }
+  }
+  for (const field of ['ondelta', 'offdelta'] as const) {
+    const fieldValue = value[field];
+    if (typeof fieldValue === 'bigint' && (fieldValue < INT256_MIN || fieldValue > INT256_MAX)) {
+      errors.push(`${field} must fit int256, got: ${fieldValue}`);
+    }
   }
   if (errors.length > 0) {
     throw new Error(
@@ -86,9 +115,9 @@ export const validateAccountDeltas = (
   if (deltas instanceof Map) {
     assertAccountDeltaCapacity(deltas.size, source);
     for (const [tokenId, delta] of deltas.entries()) {
-      if (!Number.isInteger(tokenId) || tokenId < 0) {
+      if (!Number.isSafeInteger(tokenId) || tokenId < 0 || tokenId > TOKENS.MAX_TOKEN_ID) {
         throw new TypeSafetyViolationError(
-          `ACCOUNT_DELTAS_INVALID_TOKEN_ID: ${source}.Map key must be a non-negative integer`,
+          `ACCOUNT_DELTAS_INVALID_TOKEN_ID: ${source}.Map key must be in [0, ${TOKENS.MAX_TOKEN_ID}]`,
           tokenId,
         );
       }
@@ -106,6 +135,12 @@ export const validateAccountDeltas = (
       );
     }
     const tokenId = Number(tokenIdText);
+    if (!Number.isSafeInteger(tokenId) || tokenId > TOKENS.MAX_TOKEN_ID) {
+      throw new TypeSafetyViolationError(
+        `ACCOUNT_DELTAS_INVALID_TOKEN_ID: ${source}.Object key must be in [0, ${TOKENS.MAX_TOKEN_ID}]`,
+        tokenIdText,
+      );
+    }
     result.set(tokenId, validateDelta(delta, `${source}.Object[${tokenId}]`));
   }
   return result;

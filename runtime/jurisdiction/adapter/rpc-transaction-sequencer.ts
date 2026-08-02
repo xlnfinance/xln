@@ -14,6 +14,7 @@ export type RpcTransactionSequencer = {
   runFor<T>(signer: Signer, work: () => Promise<T>): Promise<T>;
   run<T>(work: () => Promise<T>): Promise<T>;
   resetFor(signer: Signer): Promise<void>;
+  poisonFor(signer: Signer, cause: unknown): Promise<void>;
   reset(): Promise<void>;
   allocateFor(signer: Signer): Promise<number>;
   allocate(): Promise<number>;
@@ -22,6 +23,13 @@ export type RpcTransactionSequencer = {
     label: string,
     submit: (nonce: number, feeOverrides: FeeOverrides) => Promise<unknown>,
   ): Promise<RpcReceipt>;
+};
+
+export type SignerNonceSequencer = Pick<
+  RpcTransactionSequencer,
+  'runFor' | 'resetFor' | 'allocateFor'
+> & {
+  poisonFor(signer: Signer, cause: unknown): Promise<void>;
 };
 
 const resetSignerNonceCache = (signer: Signer): void => {
@@ -48,8 +56,48 @@ const resetSignerNonceCache = (signer: Signer): void => {
  * mempool and one writer.
  */
 export const createRpcTransactionSequencer = (config: TransactionSequencerConfig): RpcTransactionSequencer => {
+  const nonceSequencer = createSignerNonceSequencer(config.provider, config.usesEvmNonce);
+
+  const send = async (
+    signer: Signer,
+    label: string,
+    submit: (nonce: number, feeOverrides: FeeOverrides) => Promise<unknown>,
+  ): Promise<RpcReceipt> => {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        if (attempt > 1) {
+          await nonceSequencer.resetFor(signer);
+          console.warn(`⚠️ [JAdapter:rpc] retrying ${label} after nonce sync ` + `(attempt ${attempt}/2)`);
+        }
+        const nonce = await nonceSequencer.allocateFor(signer);
+        const feeOverrides = await config.buildFeeOverrides();
+        console.log(`🔐 [JAdapter:rpc] ${label} nonce=${nonce}`);
+        return await config.waitForReceipt(await submit(nonce, feeOverrides), label);
+      } catch (error) {
+        if (attempt < 2 && isNonceSyncError(error)) continue;
+        await nonceSequencer.resetFor(signer);
+        throw error;
+      }
+    }
+    throw new Error(`${label} failed after nonce retry`);
+  };
+
+  return {
+    ...nonceSequencer,
+    run: work => nonceSequencer.runFor(config.primarySigner, work),
+    reset: () => nonceSequencer.resetFor(config.primarySigner),
+    allocate: () => nonceSequencer.allocateFor(config.primarySigner),
+    send,
+  };
+};
+
+export const createSignerNonceSequencer = (
+  provider: Provider,
+  usesEvmNonce: boolean,
+): SignerNonceSequencer => {
   const queues = new Map<string, Promise<unknown>>();
   const nextNonces = new Map<string, number>();
+  const poisoned = new Map<string, string>();
   const signerKey = async (signer: Signer): Promise<string> => (await signer.getAddress()).toLowerCase();
 
   const runFor = async <T>(signer: Signer, work: () => Promise<T>): Promise<T> => {
@@ -57,8 +105,12 @@ export const createRpcTransactionSequencer = (config: TransactionSequencerConfig
     const previous = queues.get(key) ?? Promise.resolve();
     // The previous caller already receives its rejection. The queue must still
     // advance so one failed RPC transaction cannot deadlock this EOA forever.
-    const next = previous.catch(() => undefined).then(work);
-    const tail = next.finally(() => {
+    const next = previous.catch(() => undefined).then(async () => {
+      const poison = poisoned.get(key);
+      if (poison) throw new Error(`SIGNER_NONCE_SEQUENCER_POISONED:${key}:${poison}`);
+      return work();
+    });
+    const tail = next.then(() => undefined, () => undefined).finally(() => {
       if (queues.get(key) === tail) queues.delete(key);
     });
     queues.set(key, tail);
@@ -71,12 +123,14 @@ export const createRpcTransactionSequencer = (config: TransactionSequencerConfig
   };
 
   const allocateFor = async (signer: Signer): Promise<number> => {
-    if (!config.usesEvmNonce) return 0;
+    if (!usesEvmNonce) return 0;
     const key = await signerKey(signer);
+    const poison = poisoned.get(key);
+    if (poison) throw new Error(`SIGNER_NONCE_SEQUENCER_POISONED:${key}:${poison}`);
     const address = await signer.getAddress();
     const chainNonce = Math.max(
-      await config.provider.getTransactionCount(address, 'latest'),
-      await config.provider.getTransactionCount(address, 'pending'),
+      await provider.getTransactionCount(address, 'latest'),
+      await provider.getTransactionCount(address, 'pending'),
     );
     const cachedNonce = nextNonces.get(key);
     const nonce = cachedNonce === undefined || chainNonce > cachedNonce ? chainNonce : cachedNonce;
@@ -84,37 +138,15 @@ export const createRpcTransactionSequencer = (config: TransactionSequencerConfig
     return nonce;
   };
 
-  const send = async (
-    signer: Signer,
-    label: string,
-    submit: (nonce: number, feeOverrides: FeeOverrides) => Promise<unknown>,
-  ): Promise<RpcReceipt> => {
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        if (attempt > 1) {
-          await resetFor(signer);
-          console.warn(`⚠️ [JAdapter:rpc] retrying ${label} after nonce sync ` + `(attempt ${attempt}/2)`);
-        }
-        const nonce = await allocateFor(signer);
-        const feeOverrides = await config.buildFeeOverrides();
-        console.log(`🔐 [JAdapter:rpc] ${label} nonce=${nonce}`);
-        return await config.waitForReceipt(await submit(nonce, feeOverrides), label);
-      } catch (error) {
-        if (attempt < 2 && isNonceSyncError(error)) continue;
-        await resetFor(signer);
-        throw error;
-      }
-    }
-    throw new Error(`${label} failed after nonce retry`);
-  };
-
   return {
     runFor,
-    run: work => runFor(config.primarySigner, work),
     resetFor,
-    reset: () => resetFor(config.primarySigner),
     allocateFor,
-    allocate: () => allocateFor(config.primarySigner),
-    send,
+    async poisonFor(signer, cause) {
+      poisoned.set(
+        await signerKey(signer),
+        cause instanceof Error ? cause.message : String(cause),
+      );
+    },
   };
 };

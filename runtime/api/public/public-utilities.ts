@@ -3,17 +3,9 @@ export {
   detectEntityType,
   encodeBoard,
   generateLazyEntityId,
-  generateNamedEntityId,
   generateNumberedEntityId,
   hashBoard,
-  isEntityRegistered,
-  requestNamedEntity,
-  resolveEntityIdentifier,
 } from '../../entity/factory';
-export {
-  createNumberedEntitiesBatch,
-  createNumberedEntity,
-} from '../../runtime/registration/numbered-registration';
 export {
   debugFundReserves,
   getEntityInfoFromChain,

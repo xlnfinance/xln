@@ -20,13 +20,23 @@ import type {
 } from "../../common";
 
 export interface MockEntityProviderInterface extends Interface {
-  getFunction(nameOrSignature: "verifyHankoSignature"): FunctionFragment;
+  getFunction(
+    nameOrSignature: "verifyCurrentHankoSignature" | "verifyHankoSignature"
+  ): FunctionFragment;
 
+  encodeFunctionData(
+    functionFragment: "verifyCurrentHankoSignature",
+    values: [BytesLike, BytesLike]
+  ): string;
   encodeFunctionData(
     functionFragment: "verifyHankoSignature",
     values: [BytesLike, BytesLike]
   ): string;
 
+  decodeFunctionResult(
+    functionFragment: "verifyCurrentHankoSignature",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "verifyHankoSignature",
     data: BytesLike
@@ -76,6 +86,12 @@ export interface MockEntityProvider extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  verifyCurrentHankoSignature: TypedContractMethod<
+    [arg0: BytesLike, arg1: BytesLike],
+    [[string, boolean]],
+    "view"
+  >;
+
   verifyHankoSignature: TypedContractMethod<
     [arg0: BytesLike, arg1: BytesLike],
     [[string, boolean]],
@@ -86,6 +102,13 @@ export interface MockEntityProvider extends BaseContract {
     key: string | FunctionFragment
   ): T;
 
+  getFunction(
+    nameOrSignature: "verifyCurrentHankoSignature"
+  ): TypedContractMethod<
+    [arg0: BytesLike, arg1: BytesLike],
+    [[string, boolean]],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "verifyHankoSignature"
   ): TypedContractMethod<

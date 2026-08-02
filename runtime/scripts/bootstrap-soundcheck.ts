@@ -2,7 +2,6 @@
 
 import { spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createConnection } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 
 type Mode = 'fresh' | 'template' | 'clone' | 'hydrate' | 'all';
@@ -58,11 +57,6 @@ const parseMode = (): Mode => {
   throw new Error(`BOOTSTRAP_SOUNDCHECK_UNKNOWN_MODE:${raw}`);
 };
 
-const positiveInteger = (value: string | null, fallback: number): number => {
-  const parsed = Number(value ?? '');
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-};
-
 const isHash64 = (value: unknown): value is string =>
   typeof value === 'string' && /^(?:0x)?[a-f0-9]{64}$/i.test(value);
 
@@ -77,47 +71,6 @@ const templateDir = resolve(
   process.env['XLN_BOOTSTRAP_TEMPLATE_DIR'] ||
   join(repoRoot, '.logs', 'bootstrap-template', 'current'),
 );
-const defaultPortBase = mode === 'clone' ? 19800 : mode === 'hydrate' ? 19900 : 19700;
-const portBase = positiveInteger(
-  argValue('port-base') || process.env['XLN_BOOTSTRAP_SOUNDCHECK_PORT_BASE'] || null,
-  defaultPortBase,
-);
-const explicitPortBase = Boolean(argValue('port-base') || process.env['XLN_BOOTSTRAP_SOUNDCHECK_PORT_BASE']);
-const localProdSmokePortOffsets = [0, 1, 4, 7, 8, 10, 11, 12, 13];
-
-const isPortOpen = async (port: number): Promise<boolean> => {
-  return await new Promise<boolean>((resolvePort) => {
-    const socket = createConnection({ host: '127.0.0.1', port });
-    socket.setTimeout(500);
-    socket.once('connect', () => {
-      socket.destroy();
-      resolvePort(true);
-    });
-    socket.once('timeout', () => {
-      socket.destroy();
-      resolvePort(false);
-    });
-    socket.once('error', () => resolvePort(false));
-  });
-};
-
-const isPortBlockFree = async (candidateBase: number): Promise<boolean> => {
-  for (const offset of localProdSmokePortOffsets) {
-    if (await isPortOpen(candidateBase + offset)) return false;
-  }
-  return true;
-};
-
-const findPortBaseForIndex = async (index: number): Promise<number> => {
-  const requested = portBase + index * 100;
-  if (await isPortBlockFree(requested)) return requested;
-  if (explicitPortBase) throw new Error(`BOOTSTRAP_SOUNDCHECK_PORT_BLOCK_BUSY:${requested}`);
-  for (let candidate = requested + 300; candidate <= 59000; candidate += 100) {
-    if (await isPortBlockFree(candidate)) return candidate;
-  }
-  throw new Error(`BOOTSTRAP_SOUNDCHECK_NO_FREE_PORT_BLOCK:${requested}`);
-};
-
 const requireMetrics = (metrics: BootstrapMetrics, label: string): void => {
   if (!isHash64(metrics.bootstrapHash)) throw new Error(`BOOTSTRAP_SOUNDCHECK_${label}_BOOTSTRAP_HASH_INVALID`);
   if (!isHash64(metrics.runtimeStateHash)) throw new Error(`BOOTSTRAP_SOUNDCHECK_${label}_RUNTIME_HASH_INVALID`);
@@ -129,14 +82,12 @@ const requireMetrics = (metrics: BootstrapMetrics, label: string): void => {
 
 const runSmoke = async (
   label: Exclude<Mode, 'all'>,
-  index: number,
   extraEnv: Record<string, string>,
 ): Promise<SoundcheckResult> => {
   const runDir = label === 'template' ? templateDir : join(outDir, label);
   const metricsPath = join(runDir, 'bootstrap-metrics.json');
   const eventsJsonl = join(runDir, 'bootstrap-events.jsonl');
-  const runPortBase = await findPortBaseForIndex(index);
-  console.log(`[bootstrap-soundcheck] mode=${label} portBase=${runPortBase} dir=${runDir}`);
+  console.log(`[bootstrap-soundcheck] mode=${label} dir=${runDir}`);
   if (label === 'template' && existsSync(runDir)) rmSync(runDir, { recursive: true, force: true });
   mkdirSync(runDir, { recursive: true });
   await new Promise<void>((resolveRun, rejectRun) => {
@@ -144,7 +95,6 @@ const runSmoke = async (
       cwd: repoRoot,
       env: {
         ...process.env,
-        XLN_LOCAL_PROD_SMOKE_PORT_BASE: String(runPortBase),
         XLN_LOCAL_PROD_SMOKE_DIR: runDir,
         XLN_LOCAL_PROD_SMOKE_METRICS_JSON: metricsPath,
         XLN_LOCAL_PROD_SMOKE_EVENTS_JSONL: eventsJsonl,
@@ -232,22 +182,21 @@ if (existsSync(outDir) && mode === 'all') rmSync(outDir, { recursive: true, forc
 mkdirSync(outDir, { recursive: true });
 
 const results: SoundcheckResult[] = [];
-let index = 0;
 let freshResult: SoundcheckResult | null = null;
 if (mode === 'fresh' || mode === 'all') {
-  freshResult = await runSmoke('fresh', index++, {});
+  freshResult = await runSmoke('fresh', {});
   results.push(freshResult);
 }
 if (mode === 'all') {
   if (!freshResult) throw new Error('BOOTSTRAP_SOUNDCHECK_FRESH_RESULT_MISSING');
   results.push(installTemplateFromResult(freshResult));
 } else if (mode === 'template') {
-  results.push(await runSmoke('template', index++, {}));
+  results.push(await runSmoke('template', {}));
 }
 if (mode === 'clone' || mode === 'all') {
   requireTemplate();
   const templateHashes = expectedTemplateHashes();
-  const clone = await runSmoke('clone', index++, {
+  const clone = await runSmoke('clone', {
     XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR: templateDir,
   });
   if (templateHashes && clone.bootstrapHash !== templateHashes.bootstrapHash) {
@@ -263,7 +212,7 @@ if (mode === 'clone' || mode === 'all') {
 if (mode === 'hydrate' || mode === 'all') {
   requireTemplate();
   const templateHashes = expectedTemplateHashes();
-  const hydrate = await runSmoke('hydrate', index++, {
+  const hydrate = await runSmoke('hydrate', {
     XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR: templateDir,
   });
   if (templateHashes && hydrate.bootstrapHash !== templateHashes.bootstrapHash) {

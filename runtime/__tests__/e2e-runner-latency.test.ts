@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
 
 import {
-  freeE2EPorts,
+  assertLocalTestPortsFree,
   parseE2EChildPerfOutput,
-  parseE2EListeningPortOutput,
-  readE2EListeningPortPids,
+  parseLocalTestListeningPortOutput,
+  readLocalTestListeningPortPids,
   readE2EChildrenPerf,
   runE2ECommand,
   waitForE2EServerHealthy,
@@ -88,26 +88,26 @@ test('batched child performance reader observes multiple live processes', () => 
 });
 
 test('listener parser maps one batched lsof response by port', () => {
-  expect(parseE2EListeningPortOutput(
+  expect(parseLocalTestListeningPortOutput(
     'p42\nf9\nPTCP\nn127.0.0.1:21001\nf10\nPTCP\nn*:21002\np17\nf8\nPTCP\nn[::1]:21001\n',
   )).toEqual(new Map([
     [21001, [17, 42]],
     [21002, [42]],
   ]));
-  expect(() => parseE2EListeningPortOutput('n*:21001\n')).toThrow('E2E_LSOF_OUTPUT_INVALID');
+  expect(() => parseLocalTestListeningPortOutput('n*:21001\n')).toThrow('LOCAL_TEST_LSOF_OUTPUT_INVALID');
 });
 
 test('batched listener reader finds two live ports in one snapshot', () => {
   const first = Bun.serve({ port: 0, fetch: () => new Response('ok') });
   const second = Bun.serve({ port: 0, fetch: () => new Response('ok') });
   servers.push(first, second);
-  expect(readE2EListeningPortPids([first.port, second.port])).toEqual(new Map([
+  expect(readLocalTestListeningPortPids([first.port, second.port])).toEqual(new Map([
     [first.port, [process.pid]],
     [second.port, [process.pid]],
   ]));
 });
 
-test('batched port cleanup refuses to signal a foreign listener', async () => {
+test('port preflight refuses to signal a foreign listener', async () => {
   const reservation = Bun.serve({ port: 0, fetch: () => new Response('reserved') });
   const port = reservation.port;
   reservation.stop(true);
@@ -126,7 +126,7 @@ test('batched port cleanup refuses to signal a foreign listener', async () => {
     }
     expect((await fetch(`http://127.0.0.1:${port}`)).status).toBe(200);
 
-    await expect(freeE2EPorts([port])).rejects.toThrow('E2E_PORT_OWNERSHIP_CONFLICT');
+    expect(() => assertLocalTestPortsFree([port])).toThrow('LOCAL_TEST_PORT_BUSY');
     expect((await fetch(`http://127.0.0.1:${port}`)).status).toBe(200);
   } finally {
     child.kill('SIGKILL');

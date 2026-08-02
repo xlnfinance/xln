@@ -45,4 +45,34 @@ describe('runtime RPC proxy timeouts', () => {
       await server.stop(true);
     }
   }, 2_000);
+
+  test('never exposes path-embedded RPC credentials in responses or debug telemetry', async () => {
+    const keys = ['RPC_UPSTREAM_URL', 'BLOCK_LOCAL_RPC_PROXY'] as const;
+    const previous = new Map(keys.map(key => [key, process.env[key]] as const));
+    const secret = 'sentinel-provider-key';
+    const relayStore = createRelayStore('rpc-redaction');
+    try {
+      process.env['RPC_UPSTREAM_URL'] = `http://127.0.0.1:8545/v3/${secret}?token=${secret}`;
+      process.env['BLOCK_LOCAL_RPC_PROXY'] = 'true';
+      const response = await handleRuntimeRpcProxy({
+        req: new Request('http://127.0.0.1/rpc', { method: 'POST', body: '{}' }),
+        pathname: '/rpc',
+        env: null,
+        relayStore,
+        headers: { 'content-type': 'application/json' },
+        operatorAuthorized: false,
+      });
+      const encoded = `${await response.text()}\n${JSON.stringify(relayStore.debugEvents)}`;
+      expect(response.status).toBe(503);
+      expect(encoded).not.toContain(secret);
+      expect(encoded).not.toContain('/v3/');
+      expect(encoded).toContain('http://127.0.0.1:8545');
+    } finally {
+      for (const key of keys) {
+        const value = previous.get(key);
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
 });

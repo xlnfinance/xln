@@ -34,7 +34,7 @@ describe('WebSocket trusted decode boundary', () => {
   test('pins every canonical envelope variant to an independent golden hash', () => {
     const variants = {
       hello: { type: 'hello', from: 'a', fromEncryptionPubKey: 'k', timestamp: 1 },
-      hello_challenge: { type: 'hello_challenge', challenge: 'c' },
+      hello_challenge: { type: 'hello_challenge', challenge: 'c', audience: 'xln-runtime:test' },
       hello_ack: { type: 'hello_ack', to: 'a' },
       entity_inputs: { type: 'entity_inputs', from: 'a', to: 'b', payload: 'cipher', encrypted: true },
       entity_input_receipt: { type: 'entity_input_receipt', from: 'a', to: 'b', payload: { body: {}, signature: 's' } },
@@ -53,7 +53,7 @@ describe('WebSocket trusted decode boundary', () => {
     } satisfies Record<string, RuntimeWsMessage>;
     const expected = {
       hello: '0x423cfb7fbf1b9cf067bd5d3f89afbeb3c6f19c03e8f9410bae38b3d43e2529cb',
-      hello_challenge: '0x3f7788d14487e6b59f9441b65d8bc9dba8266eb9f910cbb0fff3b243138db87a',
+      hello_challenge: '0xc10b5010baae570e9d9b22524042a6611c572ef98203a454a05186e69b058b74',
       hello_ack: '0x01c85fe2130cce80700f27ad3a4b9c5ce3f03c044b0502b7903d0d21558ee2ad',
       entity_inputs: '0x449d22e5c7ccfcdc8c4d93b1437c45b608fa6e88deba3d45f22d0d39fafb3702',
       entity_input_receipt: '0x32e7f1648fdd73e30679ce2aa7e2932dae420c073268b7cfbf27b75307cf1c12',

@@ -886,7 +886,6 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
       type: 'disputeFinalize',
       data: {
         counterpartyEntityId: alice.id,
-        cooperative: false,
         description: 'Finalize swap dispute',
       },
     }],

@@ -19,7 +19,6 @@ import {
 import {
   clearDebugTimeline,
   createRelayStore,
-  clearPendingMessages,
   normalizeRuntimeKey,
   pushDebugEvent,
   removeClient,
@@ -28,7 +27,7 @@ import {
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../network/relay/router';
 import { closeRelayClientsForReset } from '../network/relay/reset';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsMaxMessageBytes, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
 import { type MarketSnapshotPayload } from '../network/relay/market-snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market-subscriptions';
@@ -39,7 +38,7 @@ import {
 } from '../network/relay/market-wire';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
-import { serveRuntimeBundle, serveStatic } from '../api/server/static-assets';
+import { serveStaticApp } from '../api/server/static-assets';
 import { enforceFaucetPolicy } from '../api/server/faucet-policy';
 import { handleWatchtowerProxy } from '../api/server/watchtower-proxy';
 import {
@@ -50,7 +49,12 @@ import {
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health-redaction';
 import { resolveRequestClientIp } from '../api/server/relay-direct';
-import { isOperatorRequest, loadOrCreateOperatorToken } from './operator-access';
+import {
+  isOperatorRequest,
+  loadOrCreateOperatorToken,
+  operatorPreflightResponse,
+  ORCHESTRATOR_JSON_HEADERS,
+} from './operator-access';
 import {
   resolveOrchestratorSocketType,
   type AggregatedHealth,
@@ -148,6 +152,7 @@ import {
   normalizeMarketMakerHealthPayload,
 } from './market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
+import { createManagedRuntimeSecurityTelemetrySync } from './runtime-security-telemetry';
 import { createBootstrapTimelineTools } from './bootstrap-timeline';
 import { createProcessHealthBuilder } from './process-health';
 import {
@@ -161,6 +166,7 @@ import {
   type HubBaselineProgressState,
 } from './hub-baseline-progress';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
+import { requiresLocalNodeOperator } from '../api/server/node-http-access';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
 import {
   attachManagedChildFatalIpc,
@@ -240,12 +246,13 @@ const relayAudiences = new Set([
 const resolveRelayUpgradeData = (
   request: Request,
   url: URL,
+  peerAddress: string | null,
 ): OrchestratorWebSocket['data'] | null => {
   const type = resolveOrchestratorSocketType(url.searchParams.get('protocol'));
   const audience = canonicalizeRuntimeWsAudience(request.url);
   // Host is caller-controlled; it selects only among operator-configured URLs.
   if (type === 'relay' && !relayAudiences.has(audience)) return null;
-  return { type, audience, clientIp: resolveRequestClientIp(request) };
+  return { type, audience, clientIp: resolveRequestClientIp(request, peerAddress) };
 };
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
@@ -273,6 +280,7 @@ const relayStore: RelayStore = createRelayStore('mesh-relay', {
   debugIdAllocator: () => debugIncidentJournal.allocateDebugId(),
   incidentSink: incident => debugIncidentJournal.record(incident),
 });
+const syncManagedRuntimeSecurityTelemetry = createManagedRuntimeSecurityTelemetrySync(relayStore);
 registerStructuredLogSink((entry) => {
   if (entry.level !== 'error') return;
   pushDebugEvent(relayStore, {
@@ -665,7 +673,6 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
 
 const clearRelayState = (): void => {
   closeRelayClientsForReset(relayStore);
-  clearPendingMessages(relayStore);
   relayStore.gossipProfiles.clear();
   relayStore.runtimeEncryptionKeys.clear();
   relayStore.activeHubEntityIds = [];
@@ -872,7 +879,9 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
   }
   if (rawHealth) {
     try {
-      child.lastHealth = validateHubHealthPayload(rawHealth);
+      const nextHealth = validateHubHealthPayload(rawHealth);
+      syncManagedRuntimeSecurityTelemetry(child.name, nextHealth);
+      child.lastHealth = nextHealth;
       observeManagedRuntimeHalt(child, child.lastHealth);
     } catch (error) {
       recordFetchFailure(healthUrl, 'payload', serializeError(error));
@@ -916,6 +925,7 @@ const marketMakerPoller = createMarketMakerChildPoller({
 const pollMarketMakerHealth = async (): Promise<void> => {
   await marketMakerPoller.pollHealth();
   if (marketMakerChild.lastHealth) {
+    syncManagedRuntimeSecurityTelemetry(marketMakerChild.name, marketMakerChild.lastHealth);
     observeManagedRuntimeHalt(marketMakerChild, marketMakerChild.lastHealth);
   }
 };
@@ -2524,6 +2534,12 @@ const handleRuntimeImportRequest = async (
   ) {
     return null;
   }
+  if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
+    return new Response(
+      safeStringify({ error: 'Operator access required' }),
+      { status: 403, headers },
+    );
+  }
   await getStorageHealth();
   await refreshChildHealthForResponse();
   const readiness = resolveRuntimeImportReadiness(
@@ -2597,6 +2613,7 @@ const handleRuntimeImportRequest = async (
 const handleResetRequest = async (
   request: Request,
   pathname: string,
+  operatorAuthorized: boolean,
   headers: Record<string, string>,
 ): Promise<Response | null> => {
   if (pathname !== '/api/reset' || request.method !== 'POST') return null;
@@ -2606,6 +2623,7 @@ const handleResetRequest = async (
       .catch(() => null) as OrchestratorResetBody | null;
     assertOrchestratorResetAllowed(request, body, {
       resetAllowed: args.resetAllowed,
+      operatorAuthorized,
       bindHost: args.host,
       resetToken: args.resetToken,
     });
@@ -2698,29 +2716,12 @@ const handleMetadataRequest = (
 
 const httpDrain = createHttpDrainTracker();
 const FRONTEND_STATIC_DIR = './frontend/build';
-const handleStaticRequest = async (
-  request: Request,
-  pathname: string,
-): Promise<Response | null> => {
-  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
-  if (pathname === '/runtime.js') {
-    const runtimeBundle = await serveRuntimeBundle();
-    if (runtimeBundle) return runtimeBundle;
-  }
-  if (pathname === '/') {
-    const index = await serveStatic('/index.html', FRONTEND_STATIC_DIR);
-    if (index) return index;
-  }
-  return (
-    (await serveStatic(pathname, FRONTEND_STATIC_DIR)) ??
-    (await serveStatic('/index.html', FRONTEND_STATIC_DIR))
-  );
-};
 
 const server = Bun.serve<OrchestratorWebSocket['data']>({
   hostname: args.host,
   port: args.port,
   idleTimeout: 120,
+  maxRequestBodySize: 1024 * 1024,
   async fetch(request, serverRef) {
     const releaseHttp = httpDrain.begin();
     try {
@@ -2731,16 +2732,9 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       resolveSocketPeerAddress(serverRef, request),
       orchestratorOperatorToken,
     );
-    const headers = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': '*',
-      'Access-Control-Allow-Headers': '*',
-      'Content-Type': 'application/json',
-    };
-
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers });
-    }
+    const headers = ORCHESTRATOR_JSON_HEADERS;
+    const preflightResponse = operatorPreflightResponse(request, url, operatorAuthorized);
+    if (preflightResponse) return preflightResponse;
 
     const faucetPolicyResponse = await enforceFaucetPolicy(request, operatorAuthorized, process.env, headers);
     if (faucetPolicyResponse) return faucetPolicyResponse;
@@ -2751,7 +2745,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     if (assistantResponse) return assistantResponse;
 
     if (request.headers.get('upgrade') === 'websocket' && pathname === '/relay') {
-      const socketData = resolveRelayUpgradeData(request, url);
+      const socketData = resolveRelayUpgradeData(request, url, resolveSocketPeerAddress(serverRef, request));
       if (!socketData) {
         return new Response('WebSocket audience not configured', { status: 400 });
       }
@@ -2840,6 +2834,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     const resetResponse = await handleResetRequest(
       request,
       pathname,
+      operatorAuthorized,
       headers,
     );
     if (resetResponse) return resetResponse;
@@ -2858,7 +2853,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       return await proxyAnyHubRequest(request, `${pathname}${url.search}`);
     }
 
-    const staticResponse = await handleStaticRequest(request, pathname);
+    const staticResponse = await serveStaticApp(request, pathname, FRONTEND_STATIC_DIR);
     if (staticResponse) return staticResponse;
 
     return new Response(safeStringify({
@@ -2872,6 +2867,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     }
   },
   websocket: {
+    maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
     open(ws) {
       const relayWs = ws;
       if (relayWs.data.type === 'relay') relayHelloChallenges.issue(relayWs, relayWs.data.audience);

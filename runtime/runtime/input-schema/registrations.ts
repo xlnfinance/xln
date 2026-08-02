@@ -112,10 +112,18 @@ export const validateNumberedRecord = (value: unknown, code: string): void => {
     }
     for (const [index, raw] of requireArray(request['entities'], `${code}_REQUEST_ENTITIES`).entries()) {
       const entity = requireBoundaryRecord(raw, `${code}_REQUEST_ENTITY_${index}`);
-      requireExactBoundaryKeys(entity, ['name', 'boardHash', 'config'], ['profileName', 'position'], `${code}_REQUEST_ENTITY_${index}_FIELDS`);
+      requireExactBoundaryKeys(
+        entity,
+        ['name', 'boardHash', 'config', 'localSignerId'],
+        ['profileName', 'position'],
+        `${code}_REQUEST_ENTITY_${index}_FIELDS`,
+      );
       requireString(entity['name'], `${code}_REQUEST_ENTITY_${index}_NAME`);
       requireString(entity['boardHash'], `${code}_REQUEST_ENTITY_${index}_BOARD`);
       validateConsensusConfig(entity['config'], `${code}_REQUEST_ENTITY_${index}_CONFIG`);
+      if (entity['localSignerId'] !== null) {
+        requireString(entity['localSignerId'], `${code}_REQUEST_ENTITY_${index}_LOCAL_SIGNER`);
+      }
       if (entity['profileName'] !== undefined) requireString(entity['profileName'], `${code}_REQUEST_ENTITY_${index}_PROFILE`);
       if (entity['position'] !== undefined) validateEntityPosition(entity['position'], `${code}_REQUEST_ENTITY_${index}_POSITION`);
     }

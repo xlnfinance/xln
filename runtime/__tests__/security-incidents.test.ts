@@ -25,7 +25,10 @@ const incident = {
 describe('runtime security incidents', () => {
   test('deduplicates, resolves, and reopens one deterministic cross-j incident', () => {
     const env = createEmptyEnv('security-incident-lifecycle');
-    env.error = () => undefined;
+    let activeLogCount = 0;
+    env.error = () => {
+      activeLogCount += 1;
+    };
     env.state.timestamp = 100;
 
     recordRuntimeSecurityIncident(env, incident);
@@ -40,6 +43,7 @@ describe('runtime security incidents', () => {
       lastSeenAt: 110,
       occurrences: 2,
     });
+    expect(activeLogCount).toBe(1);
 
     env.state.timestamp = 120;
     resolveRuntimeSecurityIncident(env, incident);
@@ -58,6 +62,7 @@ describe('runtime security incidents', () => {
       occurrences: 3,
     });
     expect(env.infrastructure?.securityIncidents?.get(id)?.resolvedAt).toBeUndefined();
+    expect(activeLogCount).toBe(2);
   });
 
   test('bounds incident memory and aggregates overflow without throwing', () => {
@@ -79,7 +84,7 @@ describe('runtime security incidents', () => {
     });
   });
 
-  test('validates and restores the durable incident map', () => {
+  test('keeps rejected-input telemetry outside the durable Runtime machine', () => {
     const env = createEmptyEnv('security-incident-durable-source');
     env.error = () => undefined;
     env.state.timestamp = 500;
@@ -87,13 +92,9 @@ describe('runtime security incidents', () => {
 
     const snapshot = buildDurableRuntimeMachineSnapshot(env);
     expect(() => validateDurableRuntimeMachineSnapshot(snapshot, 'SECURITY_TEST')).not.toThrow();
+    expect(JSON.stringify(snapshot)).not.toContain('securityIncidents');
     const restored = createEmptyEnv('security-incident-durable-target');
     restoreDurableRuntimeSnapshot(restored, snapshot);
-
-    expect([...restored.infrastructure!.securityIncidents!.values()]).toContainEqual(expect.objectContaining({
-      code: incident.code,
-      status: 'active',
-      firstSeenAt: 500,
-    }));
+    expect(restored.infrastructure?.securityIncidents).toBeUndefined();
   });
 });

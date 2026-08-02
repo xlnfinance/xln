@@ -25,6 +25,7 @@ import {
   isBatchEmpty, batchOpCount, cloneJBatch, encodeJBatch,
   computeBatchHankoHash, createEmptyBatch,
   assertJBatchWithinContractLimits,
+  type JBatch,
 } from '../../../jurisdiction/machine/batch';
 import {
   getJurisdictionConfigName,
@@ -64,8 +65,35 @@ type PreparedBroadcast = {
   opCount: number;
 };
 
+const takeBroadcastBatch = (current: JBatch): {
+  selected: JBatch;
+  remainder: JBatch;
+  disputePriority: boolean;
+} => {
+  const selected = cloneJBatch(current);
+  const disputePriority =
+    selected.disputeStarts.length > 0 || selected.disputeFinalizations.length > 0;
+  if (!disputePriority) {
+    return { selected, remainder: createEmptyBatch(), disputePriority: false };
+  }
+  const remainder = cloneJBatch(selected);
+  const priority = createEmptyBatch();
+  priority.disputeStarts = selected.disputeStarts;
+  // A finalization executes adversarial transformer evidence and can consume
+  // roughly 8M gas. Sending the protocol maximum of eight exceeds the 60M
+  // Sepolia/anvil block limit. FIFO one-at-a-time keeps every broadcast valid;
+  // finality below automatically releases the next parked operation.
+  priority.disputeFinalizations = selected.disputeFinalizations.slice(0, 1);
+  priority.revealSecrets = selected.revealSecrets;
+  remainder.disputeStarts = [];
+  remainder.disputeFinalizations = selected.disputeFinalizations.slice(1);
+  remainder.revealSecrets = [];
+  return { selected: priority, remainder, disputePriority: true };
+};
+
 const prepareBroadcast = (
   state: EntityState,
+  batch: JBatch,
   entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
   entityId: string,
   jurisdiction: ReturnType<typeof requireRuntimeJurisdictionConfigByName>,
@@ -75,17 +103,17 @@ const prepareBroadcast = (
   requireUsableContractAddress('entity_provider', jurisdiction.entityProviderAddress);
   const chainId = BigInt(jurisdiction.chainId ?? 0);
   const nextNonce = BigInt(state.jBatchState!.entityNonce ?? 0) + 1n;
-  assertJBatchWithinContractLimits(state.jBatchState!.batch, 'j_broadcast');
-  const encodedBatch = encodeJBatch(state.jBatchState!.batch);
+  assertJBatchWithinContractLimits(batch, 'j_broadcast');
+  const encodedBatch = encodeJBatch(batch);
   const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
-  const batchSize = batchOpCount(state.jBatchState!.batch);
-  const opCount = batchOpCount(state.jBatchState!.batch);
+  const batchSize = batchOpCount(batch);
+  const opCount = batchSize;
   const batchGeneration = state.jBatchState!.broadcastCount + 1;
   const jTx: JTx = {
     type: 'batch',
     entityId,
     data: {
-      batch: cloneJBatch(state.jBatchState!.batch),
+      batch: cloneJBatch(batch),
       batchHash,
       encodedBatch,
       entityNonce: requireBoundaryUint(nextNonce, 'J_BROADCAST_ENTITY_NONCE_INVALID'),
@@ -111,10 +139,11 @@ const commitBroadcast = (
   state: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
   prepared: PreparedBroadcast,
+  selected: JBatch,
+  remainder: JBatch,
 ): void => {
-  const batch = cloneJBatch(state.jBatchState!.batch);
   state.jBatchState!.sentBatch = {
-    batch,
+    batch: cloneJBatch(selected),
     batchHash: prepared.batchHash,
     encodedBatch: prepared.encodedBatch,
     entityNonce: requireBoundaryUint(
@@ -126,8 +155,12 @@ const commitBroadcast = (
     submitAttempts: 0,
     ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
   };
-  state.jBatchState!.batch = createEmptyBatch();
-  delete state.jBatchState!.autoBroadcastDraft;
+  state.jBatchState!.batch = remainder;
+  if (remainder.disputeFinalizations.length > 0) {
+    state.jBatchState!.autoBroadcastDraft = true;
+  } else {
+    delete state.jBatchState!.autoBroadcastDraft;
+  }
   state.jBatchState!.broadcastCount = prepared.batchGeneration;
   state.jBatchState!.lastBroadcast = state.timestamp;
   state.jBatchState!.status = 'sent';
@@ -181,14 +214,27 @@ export async function handleJBroadcast(
     return { newState, outputs, jOutputs };
   }
 
-  const prepared = prepareBroadcast(newState, entityTx, entityState.entityId, jurisdiction, signerId);
+  const { selected, remainder, disputePriority } = takeBroadcastBatch(
+    newState.jBatchState.batch,
+  );
+  const prepared = prepareBroadcast(
+    newState,
+    selected,
+    entityTx,
+    entityState.entityId,
+    jurisdiction,
+    signerId,
+  );
   jOutputs.push({ jurisdictionName: jurisdiction.name, jTxs: [prepared.jTx] });
-  commitBroadcast(newState, entityTx, prepared);
+  commitBroadcast(newState, entityTx, prepared, selected, remainder);
   // IMPORTANT: do not advance entityNonce optimistically here.
   // If network submission fails, optimistic increment causes permanent nonce desync.
   // entityNonce is advanced only when HankoBatchProcessed is observed.
 
   addMessage(newState, `📤 Batch (${prepared.opCount} ops) → hashesToSign [nonce=${prepared.nextNonce}]`);
+  if (disputePriority) {
+    addMessage(newState, '⚖️ Dispute operations broadcast before ordinary queued operations');
+  }
 
   // ── Return hashesToSign for entity consensus ──
   const hashesToSign: Array<{ hash: string; type: HashType; context: string }> = [{

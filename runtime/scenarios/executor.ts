@@ -29,8 +29,6 @@ import { safeStringify } from '../protocol/serialization.js';
 import { commitRuntimeInput, processJEvents, waitScenario } from './helpers';
 
 let payRandomCounter = 0;
-type ImportReplicaData = Extract<RuntimeTx, { type: 'importReplica' }>['data'];
-
 const scenarioBoardSigner = (env: RuntimeReplica, alias: string): string => {
   const signer = getSignerAddress(env, alias)?.toLowerCase();
   if (!signer) throw new Error(`SCENARIO_BOARD_SIGNER_UNAVAILABLE:${alias}`);
@@ -76,13 +74,16 @@ const registerScenarioEntities = async (
     intentId: scenarioRegistrationIntentId(context, actionIndex, kind),
     jurisdiction,
     payerSignerId,
-    entities: definitions,
+    entities: definitions.map(definition => ({
+      ...definition,
+      localSignerId: definition.localSignerId,
+    })),
   });
   const results = await runNumberedRegistrationIntent(
     env,
     jadapter,
     request,
-    runtimeTxs => commitRuntimeInput(env, { runtimeTxs, entityInputs: [] }).then(() => undefined),
+    runtimeTxs => commitRuntimeInput(env, { runtimeTxs, entityInputs: [] }).then(() => 'accepted' as const),
     () => processJEvents(env),
   );
   for (const result of results) {
@@ -309,13 +310,17 @@ async function handleImport(
     actionIndex,
     'import',
     jurisdiction,
-    entitiesToRegister.map(scenarioId => ({
-      name: `Entity-${scenarioId}`,
-      profileName: `Entity-${scenarioId}`,
-      validators: [scenarioBoardSigner(env, scenarioId)],
-      threshold: 1n,
-      ...(position ? { position } : {}),
-    })),
+    entitiesToRegister.map(scenarioId => {
+      const localSignerId = scenarioBoardSigner(env, scenarioId);
+      return {
+        name: `Entity-${scenarioId}`,
+        profileName: `Entity-${scenarioId}`,
+        validators: [localSignerId],
+        threshold: 1n,
+        localSignerId,
+        ...(position ? { position } : {}),
+      };
+    }),
   );
 
   for (let i = 0; i < results.length; i++) {
@@ -340,7 +345,7 @@ async function handleGrid(
   params: ActionParam[],
   context: ScenarioExecutionContext,
   env: RuntimeReplica,
-  _actionIndex: number,
+  actionIndex: number,
 ): Promise<void> {
   const positional = getPositionalParams(params);
   const named = namedParamsToObject(params);
@@ -368,7 +373,6 @@ async function handleGrid(
 
   const jurisdiction = resolveRuntimeJurisdictionConfig(env);
   if (!jurisdiction) throw new Error('SCENARIO_NUMBERED_REGISTRATION_JURISDICTION_MISSING');
-  const { payerSignerId } = await resolveScenarioNumberedRegistrationContext(env, jurisdiction);
 
   // Helper to compute entity ID from grid coordinates
   const gridId = (x: number, y: number, z: number) => `${x}_${y}_${z}`;
@@ -434,14 +438,21 @@ async function handleGrid(
   console.log(`  ➕ Creating ${entities.length} new entities (shell growth)`);
 
 
-  // Batch create all entities
-  const { createNumberedEntitiesBatch } = await import(
-    '../runtime/registration/numbered-registration.js'
+  const results = await registerScenarioEntities(
+    env,
+    context,
+    actionIndex,
+    'grid',
+    jurisdiction,
+    entities.map(entity => ({
+      ...entity,
+      localSignerId: entity.validators[0]!,
+      profileName: entity.name,
+      ...(positions.get(entity.name.replace('Grid-', ''))
+        ? { position: positions.get(entity.name.replace('Grid-', ''))! }
+        : {}),
+    })),
   );
-  const results = await createNumberedEntitiesBatch(entities, jurisdiction, env, payerSignerId);
-
-  // Store mappings and build runtimeTxs with positions
-  const runtimeTxs: RuntimeTx[] = [];
 
   results.forEach((result, i) => {
     const entityDef = entities[i];
@@ -450,30 +461,7 @@ async function handleGrid(
     context.entityMapping.set(gridCoord, result.entityId);
 
     const pos = positions.get(gridCoord);
-
-    // Include position in runtimeTx for replica state
-    const txData: ImportReplicaData = {
-      config: result.config,
-      isProposer: true,
-      profileName: entityDef.name,
-    };
-    if (pos) {
-      txData.position = pos;
-      console.log(`📍 GRID-POS-B: RuntimeTx for ${result.entityId.slice(0,10)} has position:`, pos);
-    }
-
-    runtimeTxs.push({
-      type: 'importReplica' as const,
-      entityId: result.entityId,
-      signerId: entityDef.validators[0]!,
-      data: txData,
-    });
-  });
-
-  // Import into runtime state
-  await commitRuntimeInput(env, {
-    runtimeTxs,
-    entityInputs: [],
+    if (pos) console.log(`📍 GRID-POS-B: RuntimeTx for ${result.entityId.slice(0,10)} has position:`, pos);
   });
 
   console.log(`  ✅ Created ${results.length} entities in grid formation`);

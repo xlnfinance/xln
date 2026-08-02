@@ -123,4 +123,24 @@ describe('watchtower same-origin proxy', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test('rejects oversized upstream responses', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('oversized', {
+      headers: { 'content-length': String(9 * 1024 * 1024) },
+    })) as typeof fetch;
+
+    try {
+      const response = await handleWatchtowerProxy(new Request(
+        'https://localhost:8080/api/watchtower-proxy?' +
+          'target=http%3A%2F%2F127.0.0.1%3A9100&path=%2Fapi%2Ftower%2Fhealthz',
+      ));
+      const payload = await response.json() as { details?: string };
+
+      expect(response.status).toBe(503);
+      expect(payload.details).toContain('RPC_PROXY_RESPONSE_TOO_LARGE');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

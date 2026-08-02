@@ -13,7 +13,12 @@ import { readInheritedChildSecrets, resolveChildSecret } from '../runtime/infra/
 import { startParentLivenessWatch } from '../runtime/infra/parent-watch';
 import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
 import { CustodyStore, type ActivityRecord, type SessionRecord, type WithdrawalRecord } from './store';
+import {
+  createSessionCreationLimiter,
+  resolveCustodySessionClientId,
+} from './session-admission';
 import { bindCustodyWithdrawalInitiation } from './withdrawal-journal';
+import { rejectUnsafeCustodyMutation } from './http-security';
 
 const inheritedSecrets = readInheritedChildSecrets();
 
@@ -36,6 +41,12 @@ const CUSTODY_ENTITY_ID = String(process.env['CUSTODY_ENTITY_ID'] || '').trim().
 const CUSTODY_SIGNER_ID = String(process.env['CUSTODY_SIGNER_ID'] || '').trim().toLowerCase();
 const CUSTODY_DB_PATH = process.env['CUSTODY_DB_PATH'] || './db-tmp/custody.sqlite';
 const SESSION_COOKIE = 'custody_session';
+const admitSessionCreation = createSessionCreationLimiter({
+  windowMs: 60_000,
+  perClientLimit: 12,
+  globalLimit: 600,
+  maxTrackedClients: 4_096,
+});
 const JOURNAL_CURSOR_KEY = 'journal_cursor';
 const JOURNAL_ACTIVE_SYNC_MS = 1000;
 const JOURNAL_IDLE_SYNC_MS = 1000;
@@ -113,7 +124,8 @@ const parseCookies = (raw: string | null): Record<string, string> => {
 };
 
 const makeSessionCookie = (token: string): string => {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`;
+  const secure = new URL(WALLET_URL).protocol === 'https:' ? '; Secure' : '';
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}`;
 };
 
 const compactUuid = (raw: string, limit?: number): string => {
@@ -129,10 +141,31 @@ const compactUuid = (raw: string, limit?: number): string => {
 const createUserId = (): string => `usr_${compactUuid(crypto.randomUUID(), 20)}`;
 const createSessionToken = (): string => compactUuid(crypto.randomUUID());
 
+type SessionResolution =
+  | { ok: true; session: SessionRecord; setCookie?: string }
+  | { ok: false; status: 429 | 503; code: string };
+
+const createFreshSession = (clientId: string): SessionResolution => {
+  if (!admitSessionCreation(clientId)) {
+    return { ok: false, status: 429, code: 'CUSTODY_SESSION_RATE_LIMITED' };
+  }
+  const token = createSessionToken();
+  try {
+    const session = store.createSession(token, createUserId());
+    return { ok: true, session, setCookie: makeSessionCookie(token) };
+  } catch (error) {
+    if (error instanceof Error && error.message === 'CUSTODY_SESSION_CAPACITY_REACHED') {
+      return { ok: false, status: 503, code: error.message };
+    }
+    throw error;
+  }
+};
+
 const ensureSession = (
   req: Request,
+  clientId: string,
   options: { touch?: boolean } = {},
-): { session: SessionRecord; setCookie?: string } => {
+): SessionResolution => {
   const cookies = parseCookies(req.headers.get('cookie'));
   const existingToken = cookies[SESSION_COOKIE];
   if (existingToken) {
@@ -140,13 +173,10 @@ const ensureSession = (
       ? store.touchSession(existingToken)
       : store.getSessionByToken(existingToken);
     if (existing) {
-      return { session: existing };
+      return { ok: true, session: existing };
     }
   }
-
-  const token = createSessionToken();
-  const session = store.createSession(token, createUserId());
-  return { session, setCookie: makeSessionCookie(token) };
+  return createFreshSession(clientId);
 };
 
 const json = (body: unknown, init?: ResponseInit, setCookie?: string): Response => {
@@ -324,12 +354,24 @@ const creditDepositFromLog = (height: number, log: DaemonFrameLog): void => {
   const tokenId = Number(data['tokenId'] || 0);
   const amountMinor = BigInt(getLogString(data['amount']) || '0');
   const hashlock = getLogString(data['hashlock']);
-  const fromEntityId = getLogString(data['inboundEntity']) || getLogString(data['fromEntity']);
+  const lockId = getLogString(data['lockId']);
+  const fromEntityId = (
+    getLogString(data['inboundEntity']) || getLogString(data['fromEntity'])
+  ).toLowerCase();
   const startedAtMs = Number(data['startedAtMs'] || 0);
-  if (tokenId <= 0 || amountMinor <= 0n || !hashlock) return;
+  if (
+    !Number.isSafeInteger(height) || height <= 0 ||
+    !Number.isSafeInteger(log.id) || log.id < 0 ||
+    !Number.isSafeInteger(log.timestamp) || log.timestamp <= 0 ||
+    tokenId <= 0 || amountMinor <= 0n || !hashlock || !lockId || !fromEntityId
+  ) {
+    throw new Error(`CUSTODY_DEPOSIT_EVENT_INVALID:height=${height}:log=${log.id}`);
+  }
 
   store.creditDeposit({
-    eventKey: `deposit:${hashlock.toLowerCase()}`,
+    // Frame height + log id is the exact committed event identity. Hashlocks
+    // may be intentionally reused by distinct valid payments.
+    eventKey: `deposit:${height}:${log.id}`,
     userId: userId && store.userExists(userId) ? userId : null,
     tokenId,
     amountMinor,
@@ -337,7 +379,7 @@ const creditDepositFromLog = (height: number, log: DaemonFrameLog): void => {
     fromEntityId,
     hashlock,
     frameHeight: height,
-    createdAt: log.timestamp || Date.now(),
+    createdAt: log.timestamp,
     startedAtMs: Number.isFinite(startedAtMs) && startedAtMs > 0 ? startedAtMs : null,
   });
 };
@@ -561,6 +603,7 @@ void syncJournal();
 const server = Bun.serve({
   hostname: HOST,
   port: PORT,
+  maxRequestBodySize: 1024 * 1024,
   ...(tlsFiles
     ? {
         tls: {
@@ -569,9 +612,11 @@ const server = Bun.serve({
         },
       }
     : {}),
-  async fetch(req) {
+  async fetch(req, bunServer) {
     const url = new URL(req.url);
     const pathname = url.pathname;
+    const directAddress = bunServer.requestIP(req)?.address ?? '';
+    const clientId = resolveCustodySessionClientId(req, directAddress);
 
     if (pathname === '/') {
       return html(Bun.file(new URL('./index.html', staticDir)));
@@ -619,18 +664,20 @@ const server = Bun.serve({
     }
 
     if (pathname === '/api/me') {
-      const { session, setCookie } = ensureSession(req, { touch: false });
+      const resolved = ensureSession(req, clientId, { touch: false });
+      if (!resolved.ok) return json({ ok: false, error: resolved.code }, { status: resolved.status });
+      const { session, setCookie } = resolved;
       return json(buildDashboardPayload(session), undefined, setCookie);
     }
 
-    if (pathname === '/api/reset-session' && req.method === 'POST') {
-      const token = createSessionToken();
-      const session = store.createSession(token, createUserId());
-      return json({ ok: true, dashboard: buildDashboardPayload(session) }, undefined, makeSessionCookie(token));
-    }
-
     if (pathname === '/api/withdraw' && req.method === 'POST') {
-      const { session, setCookie } = ensureSession(req, { touch: true });
+      const unsafeMutation = rejectUnsafeCustodyMutation(req, directAddress);
+      if (unsafeMutation) {
+        return json({ ok: false, error: unsafeMutation.code }, { status: unsafeMutation.status });
+      }
+      const resolved = ensureSession(req, clientId, { touch: true });
+      if (!resolved.ok) return json({ ok: false, error: resolved.code }, { status: resolved.status });
+      const { session, setCookie } = resolved;
       try {
         const body = await req.json() as {
           targetEntityId?: string;

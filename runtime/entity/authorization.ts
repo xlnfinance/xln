@@ -82,7 +82,10 @@ const individualTxTypes = new Set<EntityTx['type']>([
   'vote',
 ]);
 
-const crossEntityCertifiedTxTypes = new Set<EntityTx['type']>(['accountInput']);
+const crossEntityCertifiedTxTypes = new Set<EntityTx['type']>([
+  'accountInput',
+  'prepareCrossJurisdictionSwap',
+]);
 
 export const isEntityProtocolTx = (tx: EntityTx): boolean => protocolTxTypes.has(tx.type);
 
@@ -476,7 +479,9 @@ export const assertCertifiedOutputSemanticAuthority = (
       assertSemanticTarget(tx.type, target, tx.data.toEntityId);
       return;
     case 'prepareCrossJurisdictionSwap':
-      throw new Error('RUNTIME_OUTPUT_CROSS_J_INTENT_MUST_USE_ACCOUNT');
+      assertSemanticSource(tx.type, source, [tx.data.route.source.entityId]);
+      assertSemanticTarget(tx.type, target, tx.data.route.source.counterpartyEntityId);
+      return;
     case 'registerCrossJurisdictionSwap': {
       const route = tx.data.route;
       assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);

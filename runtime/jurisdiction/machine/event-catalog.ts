@@ -10,7 +10,7 @@ export const DEPOSITORY_J_EVENTS = {
     'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
     'DisputeStarted', 'DisputeFinalized',
     'DebtCreated', 'DebtEnforced', 'DebtForgiven',
-    'HankoBatchProcessed', 'BatchOperationSkipped',
+    'HankoBatchProcessed',
   ],
   telemetry: [
     'CooperativeClose', 'TokenRegistered', 'TransformerClauseSkipped',

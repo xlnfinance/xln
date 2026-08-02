@@ -89,7 +89,6 @@ let pendingDepositIntentKey = '';
 let pendingDepositInvoiceId = '';
 let lastDashboardFingerprint = '';
 let copyInvoiceResetTimer = null;
-let resettingSession = false;
 const WALLET_WINDOW_NAME = 'xln-wallet';
 const ACTIVE_RELOAD_MS = 1000;
 const IDLE_RELOAD_MS = 5000;
@@ -532,10 +531,7 @@ const render = () => {
     <div class="meta-footer">
       <div class="meta-cell">
         <div class="meta-label">Session</div>
-        <div class="meta-row">
-          <div class="meta-value">${escapeHtml(state.session.userId)}</div>
-          <button class="meta-reset-btn" type="button" data-reset-session ${resettingSession ? 'disabled' : ''}>Reset</button>
-        </div>
+        <div class="meta-value">${escapeHtml(state.session.userId)}</div>
       </div>
       <div class="meta-cell">
         <div class="meta-label">Custody entity</div>
@@ -643,12 +639,6 @@ const render = () => {
 
   restoreActiveField(activeField);
 
-  const resetSessionButton = document.querySelector('[data-reset-session]');
-  if (resetSessionButton instanceof HTMLButtonElement) {
-    resetSessionButton.addEventListener('click', () => {
-      void handleResetSession();
-    });
-  }
 };
 
 const dashboardFingerprint = (payload) => JSON.stringify({
@@ -706,38 +696,6 @@ const reload = async () => {
     throw new Error(`Failed to refresh dashboard (${response.status})`);
   }
   return applyDashboardState(await response.json());
-};
-
-const handleResetSession = async () => {
-  resettingSession = true;
-  render();
-  try {
-    const response = await fetch('/api/reset-session', {
-      method: 'POST',
-      credentials: 'same-origin',
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to reset session (${response.status})`);
-    }
-    const payload = await response.json();
-    if (payload?.dashboard) {
-      selectedTokenId = payload.dashboard.tokens[0]?.tokenId || 1;
-      depositTokenId = payload.dashboard.tokens[0]?.tokenId || 1;
-      withdrawAmount = '';
-      withdrawTargetEntityId = '';
-      withdrawMessage = '';
-      withdrawError = '';
-      syncDepositTargets(depositTokenId, depositAmount || '10', payload.dashboard, { forceInvoiceRefresh: true });
-      applyDashboardState(payload.dashboard, true);
-    } else {
-      await load();
-    }
-  } catch (error) {
-    console.error('[custody] reset session failed', error);
-  } finally {
-    resettingSession = false;
-    render();
-  }
 };
 
 async function handleDepositSubmit(event) {

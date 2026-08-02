@@ -19,6 +19,8 @@ import {
   applyEntityInputToReplica,
   type AppliedEntityReplicaInput,
 } from './entity-input-replica';
+import { cacheCommittedConsumptionNodeChanges } from '../entity/consumption-store';
+import { cacheCommittedAccountJClaimNodeChanges } from '../entity/account-j-claim-node-store';
 import {
   applyStorageChanges,
   publishEntityCandidateEffects,
@@ -272,5 +274,7 @@ export const drainImmediateCrossJurisdictionOutputs = async (
       { localEventRound: round },
     );
     collectCommittedEntityResult(env, replicaKey, result, context);
+    cacheCommittedConsumptionNodeChanges(env, result.consumptionNodeChanges);
+    cacheCommittedAccountJClaimNodeChanges(env, result.accountJClaimNodeChanges);
   }
 };

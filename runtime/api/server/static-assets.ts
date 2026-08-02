@@ -55,3 +55,22 @@ export const serveRuntimeBundle = async (): Promise<Response | null> => {
   }
   return null;
 };
+
+export const serveStaticApp = async (
+  request: Request,
+  pathname: string,
+  staticDir: string,
+): Promise<Response | null> => {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  if (pathname === '/runtime.js') {
+    const runtimeBundle = await serveRuntimeBundle();
+    if (runtimeBundle) return runtimeBundle;
+    return Response.json(
+      { error: 'RUNTIME_BUNDLE_MISSING' },
+      { status: 503, headers: { 'cache-control': 'no-store, must-revalidate' } },
+    );
+  }
+  const staticPath = pathname === '/' ? '/index.html' : pathname;
+  return (await serveStatic(staticPath, staticDir)) ??
+    (staticPath === '/index.html' ? null : await serveStatic('/index.html', staticDir));
+};

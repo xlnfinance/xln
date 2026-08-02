@@ -349,7 +349,6 @@ describe('storage crash recovery', () => {
       touchedEntities: [entityId],
       touchedAccounts: [],
       touchedBookEntities: [],
-      historyRecords: [],
     });
     const plan = await prepareHistoryViewCommit({ db: historyDb, height: 7, puts, config });
     const batch = historyDb.batch();

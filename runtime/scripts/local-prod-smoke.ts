@@ -22,6 +22,12 @@ import {
   trackCausalProgress,
   type CausalProgressState,
 } from './bootstrap-progress';
+import {
+  acquireLocalTestPortLease,
+  assertLocalTestPortsFree,
+  buildInheritedLocalTestLeaseEnv,
+  stripLocalTestLeaseEnv,
+} from './local-test-port-lease';
 
 type ManagedProcess = {
   name: string;
@@ -137,10 +143,14 @@ type BootstrapMetrics = {
 };
 
 const repoRoot = process.cwd();
-const portBase = Number(process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] || '19300');
-if (!Number.isInteger(portBase) || portBase < 10_000 || portBase > 60_000) {
-  throw new Error(`Invalid XLN_LOCAL_PROD_SMOKE_PORT_BASE: ${String(portBase)}`);
+if (process.env['XLN_LOCAL_PROD_SMOKE_PORT_BASE'] !== undefined) {
+  throw new Error('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
 }
+const localTestLease = await acquireLocalTestPortLease({
+  requiredOffsets: [0, 1, 4, 7, 8, 10, 11, 12, 13],
+});
+const inheritedProcessEnv = stripLocalTestLeaseEnv(process.env);
+const portBase = localTestLease.basePort;
 
 const rpcPort = portBase;
 const rpc2Port = portBase + 1;
@@ -314,7 +324,7 @@ const startManaged = (name: string, command: string, args: string[], env: Record
     cwd: repoRoot,
     detached: true,
     env: {
-      ...process.env,
+      ...inheritedProcessEnv,
       ...env,
     },
     stdio: ['ignore', out, out],
@@ -972,7 +982,7 @@ const main = async (): Promise<void> => {
   await waitForRpc(rpc2Port, '0x7a6a', 'Tron');
 
   startManaged('server', 'scripts/start-server.sh', [], {
-    XLN_PORT_BASE: String(portBase),
+    ...buildInheritedLocalTestLeaseEnv(localTestLease, repoRoot),
     XLN_SERVER_PORT: String(apiPort),
     XLN_RDB_ROOT: workDir,
     XLN_DB_PATH: join(workDir, 'prod-main'),
@@ -1116,7 +1126,12 @@ try {
   emitDebugEvent('fatal', { stage: 'local-prod-smoke', error: normalizeError(error) });
   throw error;
 } finally {
-  await stopManaged();
-  process.off('SIGINT', handleSigint);
-  process.off('SIGTERM', handleSigterm);
+  try {
+    await stopManaged();
+    assertLocalTestPortsFree(localTestLease.ports);
+  } finally {
+    localTestLease.release();
+    process.off('SIGINT', handleSigint);
+    process.off('SIGTERM', handleSigterm);
+  }
 }

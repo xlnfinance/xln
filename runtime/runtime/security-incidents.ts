@@ -1,5 +1,10 @@
 import type { RuntimeReplica } from './types';
-import type { RuntimeSecurityIncident, RuntimeSecurityIncidentIdentity } from '../protocol/security-incident';
+import { keccak256, toUtf8Bytes } from 'ethers';
+import type {
+  RuntimeSecurityIncident,
+  RuntimeSecurityIncidentIdentity,
+  RuntimeSecurityIncidentTelemetry,
+} from '../protocol/security-incident';
 
 export const MAX_RUNTIME_SECURITY_INCIDENTS = 256;
 const OVERFLOW_INCIDENT_ID = 'cross-j:incident-capacity';
@@ -22,6 +27,24 @@ const getIncidentMap = (env: RuntimeReplica): Map<string, RuntimeSecurityInciden
   const infrastructure = env.infrastructure ?? (env.infrastructure = {});
   return infrastructure.securityIncidents ?? (infrastructure.securityIncidents = new Map());
 };
+
+/** Operator-only health projection; never forwards summaries, identities or rejected input evidence. */
+export const readRuntimeSecurityIncidentTelemetry = (
+  env: RuntimeReplica,
+): RuntimeSecurityIncidentTelemetry[] =>
+  [...getIncidentMap(env).values()]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map(incident => ({
+      id: keccak256(toUtf8Bytes(`xln-runtime-security-telemetry-v1\0${incident.id}`)).toLowerCase(),
+      code: incident.code,
+      source: incident.source,
+      severity: incident.severity,
+      status: incident.status,
+      firstSeenAt: incident.firstSeenAt,
+      lastSeenAt: incident.lastSeenAt,
+      ...(incident.resolvedAt === undefined ? {} : { resolvedAt: incident.resolvedAt }),
+      occurrences: incident.occurrences,
+    }));
 
 const incidentTimestamp = (env: RuntimeReplica): number => {
   const timestamp = Number(env.state.timestamp);
@@ -61,6 +84,7 @@ export const recordRuntimeSecurityIncident = (
   const id = buildRuntimeSecurityIncidentId(identity);
   const now = incidentTimestamp(env);
   const existing = incidents.get(id);
+  let shouldEmit = !existing || existing.status === 'resolved';
   let incident: RuntimeSecurityIncident;
   if (existing) {
     incident = {
@@ -72,6 +96,8 @@ export const recordRuntimeSecurityIncident = (
     delete incident.resolvedAt;
     incidents.set(id, incident);
   } else if (incidents.size >= MAX_RUNTIME_SECURITY_INCIDENTS - 1) {
+    const overflow = incidents.get(OVERFLOW_INCIDENT_ID);
+    shouldEmit = !overflow || overflow.status === 'resolved';
     incident = recordCapacityIncident(env, incidents);
   } else {
     incident = {
@@ -84,12 +110,14 @@ export const recordRuntimeSecurityIncident = (
     };
     incidents.set(id, incident);
   }
-  env.error?.('system', 'SECURITY_INCIDENT_ACTIVE', {
-    incidentId: incident.id,
-    code: incident.code,
-    severity: incident.severity,
-    summary: incident.summary,
-  }, identity.entityId || env.runtimeId);
+  if (shouldEmit) {
+    env.error?.('system', 'SECURITY_INCIDENT_ACTIVE', {
+      incidentId: incident.id,
+      code: incident.code,
+      severity: incident.severity,
+      summary: incident.summary,
+    }, identity.entityId || env.runtimeId);
+  }
   return incident;
 };
 

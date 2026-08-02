@@ -5,6 +5,7 @@ import {
   readRawOrNull,
 } from './level';
 import {
+  buildCertifiedFramePuts,
   buildHistoryViewPuts,
   pruneHistoryViewRetention,
   readHistoryViewHead,
@@ -41,6 +42,8 @@ import {
 } from './read';
 import {
   KEY_HEAD,
+  HISTORY_VIEW_ACCOUNT_FRAME,
+  HISTORY_VIEW_ENTITY_FRAME,
   KEY_DIFF,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_FIELD,
@@ -68,6 +71,8 @@ import {
   keyAccountJClaimNode,
   keyAccountJClaimNodePrefix,
   parseLiveAccountKey,
+  parseHistoryViewAccountFrameKey,
+  parseHistoryViewEntityFrameKey,
   keySnapshotReplicaMetaPrefix,
 } from './keys';
 import { readAccountStorageLayout } from './account-layout';
@@ -81,6 +86,7 @@ import {
 import { createStructuredLogger } from '../infra/logger';
 import { cumulativeMarksToDurations } from '../infra/perf-profile';
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
+import type { FrameLogEntry } from '../types/logging';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
 import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
@@ -127,8 +133,15 @@ import {
   validateStorageDiffRecordValue,
   validateStorageEntityCoreDocValue,
 } from './authoritative-schema';
+import {
+  validateStoredAccountFrameValue,
+  validateStoredEntityFrameValue,
+} from './history-view-schema';
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
+import { buffersEqual } from '../protocol/serialization';
 import type {
   PerfDeps,
+  HistoryViewPut,
   RuntimeDbLike,
   StorageDiffRecord,
   StorageDoc,
@@ -278,11 +291,11 @@ const applyDiffToLiveDb = async (options: {
   });
   const batch = options.db.batch();
   for (const key of preparedHashes.docDels) {
-    if (typeof batch.del === 'function') batch.del(key);
+    batch.del(key);
   }
   for (const item of preparedHashes.docPuts) batch.put(item.key, item.value);
   for (const key of preparedHashes.merkleDels) {
-    if (typeof batch.del === 'function') batch.del(key);
+    batch.del(key);
   }
   for (const item of preparedHashes.merklePuts) {
     batch.put(item.key, item.value);
@@ -303,7 +316,6 @@ const CURRENT_RECOVERY_PREFIXES = [
 
 const clearCurrentRecoveryState = async (db: RuntimeDbLike): Promise<void> => {
   const fence = db.batch();
-  if (typeof fence.del !== 'function') throw new Error('STORAGE_RECOVERY_DELETE_UNSUPPORTED');
   fence.del(KEY_HEAD);
   await writeBatch(fence);
   for (const prefix of CURRENT_RECOVERY_PREFIXES) {
@@ -375,7 +387,6 @@ const synchronizeConsumptionNodes = async (
   }
   for await (const key of iterateKeys(currentDb, { prefix: keyConsumptionNodePrefix() })) {
     if (reachableKeys.has(key.toString('hex'))) continue;
-    if (typeof batch.del !== 'function') throw new Error('STORAGE_RECOVERY_CONSUMPTION_DELETE_UNSUPPORTED');
     batch.del(key);
     changed = true;
   }
@@ -452,11 +463,9 @@ const readCertifiedBoardNodes = async (
 const deleteCertifiedBoardNodes = async (
   db: RuntimeDbLike,
   hashes: readonly string[],
-  unsupportedCode: string,
 ): Promise<void> => {
   if (hashes.length === 0) return;
   const batch = db.batch();
-  if (typeof batch.del !== 'function') throw new Error(unsupportedCode);
   for (const hash of hashes) batch.del(keyCertifiedBoardNode(hash));
   await writeBatch(batch);
 };
@@ -470,8 +479,8 @@ const pruneUnreachableCertifiedBoardHistoryNodes = async (
   const roots = await collectCertifiedBoardHistoryRoots(env, walDb);
   const reachable = collectReachableCertifiedBoardNodes(stored.nodes, roots);
   const stale = [...stored.nodes.keys()].filter((hash) => !reachable.has(hash)).sort();
-  await deleteCertifiedBoardNodes(walDb, stale, 'STORAGE_HISTORY_CERTIFIED_BOARD_GC_UNSUPPORTED');
-  await deleteCertifiedBoardNodes(currentDb, stale, 'STORAGE_CURRENT_CERTIFIED_BOARD_GC_UNSUPPORTED');
+  await deleteCertifiedBoardNodes(walDb, stale);
+  await deleteCertifiedBoardNodes(currentDb, stale);
   const memoryStore = getCertifiedBoardNodeStore(env);
   for (const hash of stale) memoryStore.delete(hash);
   return stale.reduce((total, hash) => total + (stored.bytes.get(hash) ?? 0), 0);
@@ -521,7 +530,6 @@ const pruneUnreachableConsumptionHistoryNodes = async (
   const stale = Array.from(stored.keys()).filter((hash) => !reachable.has(hash)).sort();
   if (stale.length === 0) return 0;
   const batch = walDb.batch();
-  if (typeof batch.del !== 'function') throw new Error('STORAGE_HISTORY_CONSUMPTION_GC_UNSUPPORTED');
   let prunedBytes = 0;
   for (const hash of stale) {
     batch.del(keyConsumptionNode(hash));
@@ -569,7 +577,6 @@ const synchronizeAccountJClaimNodes = async (
   }
   for await (const key of iterateKeys(currentDb, { prefix: keyAccountJClaimNodePrefix() })) {
     if (reachableKeys.has(key.toString('hex'))) continue;
-    if (typeof batch.del !== 'function') throw new Error('STORAGE_RECOVERY_ACCOUNT_J_CLAIM_DELETE_UNSUPPORTED');
     batch.del(key);
     changed = true;
   }
@@ -626,7 +633,6 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
   const stale = [...stored.keys()].filter((hash) => !reachable.has(hash)).sort();
   if (stale.length === 0) return 0;
   const batch = walDb.batch();
-  if (typeof batch.del !== 'function') throw new Error('STORAGE_HISTORY_ACCOUNT_J_CLAIM_GC_UNSUPPORTED');
   let prunedBytes = 0;
   for (const hash of stale) {
     batch.del(keyAccountJClaimNode(hash));
@@ -1305,27 +1311,22 @@ type PreparedStorageCommitments = Awaited<
   ReturnType<typeof prepareStorageStateCommitments>
 >;
 
-const buildStorageFrameRecordPlan = (
+type StorageFrameTouchSummary = {
+  frameLogs: FrameLogEntry[];
+  touchedEntities: string[];
+  touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
+  touchedBookEntities: string[];
+};
+
+const summarizeStorageFrameTouches = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
-  commitments: PreparedStorageCommitments,
-  pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
-  prevFrameHash: string,
-) => {
-  const {
-    head,
-    diff,
-    appliedRuntimeInput,
-    shouldMaterialize,
-    overlayRecords,
-    frameTouched,
-    checkpointedLineagePlan,
-  } = prepared;
-  const frameLogs = Array.isArray(options.env.frameLogs)
+): StorageFrameTouchSummary => ({
+  frameLogs: Array.isArray(options.env.frameLogs)
     ? options.env.frameLogs.map(entry => ({ ...entry }))
-    : [];
-  const touchedEntities = [...frameTouched.touchedEntities.values()].sort();
-  const touchedAccounts = [...frameTouched.touchedAccounts.values()]
+    : [],
+  touchedEntities: [...prepared.frameTouched.touchedEntities.values()].sort(),
+  touchedAccounts: [...prepared.frameTouched.touchedAccounts.values()]
     .filter(
       (ref): ref is Extract<StorageDocRef, { family: 'account' }> =>
         ref.family === 'account',
@@ -1333,9 +1334,24 @@ const buildStorageFrameRecordPlan = (
     .map(ref => ({
       entityId: ref.entityId,
       counterpartyId: ref.counterpartyId,
-    }));
-  const touchedBookEntities =
-    [...frameTouched.touchedBookEntities.values()].sort();
+    })),
+  touchedBookEntities:
+    [...prepared.frameTouched.touchedBookEntities.values()].sort(),
+});
+
+const buildStorageRuntimeFrame = (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  commitments: PreparedStorageCommitments,
+  prevFrameHash: string,
+  touches: StorageFrameTouchSummary,
+): RuntimeFrame => {
+  const {
+    appliedRuntimeInput,
+    shouldMaterialize,
+    overlayRecords,
+    checkpointedLineagePlan,
+  } = prepared;
   const durablePendingInput =
     buildDurableRuntimeMempool(
       options.pendingRuntimeInput ?? options.env.runtimeMempool,
@@ -1349,7 +1365,7 @@ const buildStorageFrameRecordPlan = (
     options.env,
     options.currentFrameOutputs ?? [],
   );
-  const frameBase: RuntimeFrame = {
+  return {
     height: options.env.state.height,
     timestamp: options.env.state.timestamp,
     prevFrameHash,
@@ -1382,7 +1398,7 @@ const buildStorageFrameRecordPlan = (
     historyRecords: (options.historyRecords ?? []).map(record =>
       structuredClone(record),
     ),
-    activityLogs: frameLogs.map(log => structuredClone(log)),
+    activityLogs: touches.frameLogs.map(log => structuredClone(log)),
     ...(hasPendingInput ? { pendingRuntimeInput: durablePendingInput } : {}),
     ...(commitments.runtimeMachine
       ? { runtimeMachine: commitments.runtimeMachine }
@@ -1398,10 +1414,27 @@ const buildStorageFrameRecordPlan = (
     ...(shouldMaterialize && overlayRecords.length > 0
       ? { overlayRecords: overlayRecords.map(record => ({ ...record })) }
       : {}),
-    touchedEntities,
-    touchedAccounts,
-    touchedBookEntities,
+    touchedEntities: touches.touchedEntities,
+    touchedAccounts: touches.touchedAccounts,
+    touchedBookEntities: touches.touchedBookEntities,
   };
+};
+
+const buildStorageFrameRecordPlan = (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  commitments: PreparedStorageCommitments,
+  pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
+  prevFrameHash: string,
+) => {
+  const touches = summarizeStorageFrameTouches(options, prepared);
+  const frameBase = buildStorageRuntimeFrame(
+    options,
+    prepared,
+    commitments,
+    prevFrameHash,
+    touches,
+  );
   const frameRecord = {
     ...frameBase,
     frameHash: computeStorageFrameHash(frameBase),
@@ -1409,7 +1442,7 @@ const buildStorageFrameRecordPlan = (
   const frameKey = keyFrame(options.env.state.height);
   const diffKey = keyDiff(options.env.state.height);
   const frameBuffer = encodeBuffer(frameRecord);
-  const diffBuffer = encodeBuffer(diff);
+  const diffBuffer = encodeBuffer(prepared.diff);
   const nodeBytes =
     pendingNodes.boardHistoryBytes +
     pendingNodes.consumptionHistoryBytes +
@@ -1425,21 +1458,25 @@ const buildStorageFrameRecordPlan = (
     diffKey,
     frameBuffer,
     diffBuffer,
-    frameLogs,
-    touchedEntities,
-    touchedAccounts,
-    touchedBookEntities,
+    frameLogs: touches.frameLogs,
+    touchedEntities: touches.touchedEntities,
+    touchedAccounts: touches.touchedAccounts,
+    touchedBookEntities: touches.touchedBookEntities,
+    certifiedHistoryPuts: buildCertifiedFramePuts({
+      height: options.env.state.height,
+      timestamp: options.env.state.timestamp,
+      historyRecords: options.historyRecords ?? [],
+    }),
     historyViewPuts: buildHistoryViewPuts({
       height: options.env.state.height,
       timestamp: options.env.state.timestamp,
-      runtimeInput: appliedRuntimeInput,
-      logs: frameLogs,
-      touchedEntities,
-      touchedAccounts,
-      touchedBookEntities,
-      historyRecords: options.historyRecords ?? [],
+      runtimeInput: prepared.appliedRuntimeInput,
+      logs: touches.frameLogs,
+      touchedEntities: touches.touchedEntities,
+      touchedAccounts: touches.touchedAccounts,
+      touchedBookEntities: touches.touchedBookEntities,
     }),
-    highSignalEvents: frameLogs
+    highSignalEvents: touches.frameLogs
       .map(entry => typeof entry?.message === 'string' ? entry.message : '')
       .filter(message => [
         'HtlcReceived',
@@ -1448,12 +1485,58 @@ const buildStorageFrameRecordPlan = (
         'JEventReceived',
         'JBatchQueued',
       ].includes(message)),
-    projectedReplayBytes: head.retainedHistoryBytes + frameBytes,
-    projectedEpochReplayBytes: head.epochReplayBytes + frameBytes,
+    projectedReplayBytes: prepared.head.retainedHistoryBytes + frameBytes,
+    projectedEpochReplayBytes: prepared.head.epochReplayBytes + frameBytes,
   };
 };
 
 type RuntimeFramePlan = ReturnType<typeof buildStorageFrameRecordPlan>;
+
+const certifiedFrameValuesMatch = (
+  key: Buffer,
+  existing: Buffer,
+  candidate: Buffer,
+): boolean => {
+  if (buffersEqual(existing, candidate)) return true;
+  if (key[0] === HISTORY_VIEW_ACCOUNT_FRAME) {
+    const { accountHeight } = parseHistoryViewAccountFrameKey(key);
+    const left = decodeValidatedBuffer(existing, value =>
+      validateStoredAccountFrameValue(value, accountHeight));
+    const right = decodeValidatedBuffer(candidate, value =>
+      validateStoredAccountFrameValue(value, accountHeight));
+    return encodeCanonicalConsensusValue(left.frame) === encodeCanonicalConsensusValue(right.frame);
+  }
+  if (key[0] === HISTORY_VIEW_ENTITY_FRAME) {
+    const { entityHeight } = parseHistoryViewEntityFrameKey(key);
+    const left = decodeValidatedBuffer(existing, value =>
+      validateStoredEntityFrameValue(value, entityHeight));
+    const right = decodeValidatedBuffer(candidate, value =>
+      validateStoredEntityFrameValue(value, entityHeight));
+    return encodeCanonicalConsensusValue(left.link) === encodeCanonicalConsensusValue(right.link);
+  }
+  throw new Error(`STORAGE_CERTIFIED_FRAME_KEY_INVALID:${key.toString('hex')}`);
+};
+
+const prepareCertifiedHistoryPuts = async (
+  walDb: RuntimeDbLike,
+  planned: HistoryViewPut[],
+): Promise<HistoryViewPut[]> => {
+  const accepted: HistoryViewPut[] = [];
+  const seen = new Map<string, Buffer>();
+  for (const put of planned) {
+    const keyHex = put.key.toString('hex');
+    const existing = seen.get(keyHex) ?? await readRawOrNull(walDb, put.key);
+    if (existing) {
+      if (!certifiedFrameValuesMatch(put.key, existing, put.value)) {
+        throw new Error(`STORAGE_CERTIFIED_FRAME_CONFLICT:${keyHex}`);
+      }
+      continue;
+    }
+    seen.set(keyHex, put.value);
+    accepted.push(put);
+  }
+  return accepted;
+};
 
 const buildStorageCommitBatches = (
   options: StorageFrameSaveOptions,
@@ -1461,15 +1544,10 @@ const buildStorageCommitBatches = (
   commitments: PreparedStorageCommitments,
   pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
   frame: RuntimeFramePlan,
+  certifiedHistoryPuts: HistoryViewPut[],
 ) => {
   const walBatch = prepared.walDb.batch();
-  if (
-    commitments.staleReplicaMetaKeys.length > 0 &&
-    typeof walBatch.del !== 'function'
-  ) {
-    throw new Error('STORAGE_HISTORY_REPLICA_META_DELETE_UNSUPPORTED');
-  }
-  for (const key of commitments.staleReplicaMetaKeys) walBatch.del!(key);
+  for (const key of commitments.staleReplicaMetaKeys) walBatch.del(key);
   for (const entry of pendingNodes.boardEntries) {
     walBatch.put(entry.key, entry.value);
   }
@@ -1481,6 +1559,7 @@ const buildStorageCommitBatches = (
   }
   walBatch.put(frame.frameKey, frame.frameBuffer);
   walBatch.put(frame.diffKey, frame.diffBuffer);
+  for (const put of certifiedHistoryPuts) walBatch.put(put.key, put.value);
   for (const entry of commitments.replicaMetaEntries) {
     // Recovery metadata shares the authoritative batch with frame, diff, HEAD.
     walBatch.put(entry.key, entry.value);
@@ -1494,35 +1573,23 @@ const buildStorageCommitBatches = (
     getSafePendingConsumptionDeletes(options.env);
   const safeAccountJClaimDeletes =
     getSafePendingAccountJClaimDeletes(options.env);
-  if (
-    safeConsumptionDeletes.length > 0 &&
-    typeof currentBatch.del !== 'function'
-  ) {
-    throw new Error('STORAGE_CURRENT_CONSUMPTION_DELETE_UNSUPPORTED');
-  }
-  if (
-    safeAccountJClaimDeletes.length > 0 &&
-    typeof currentBatch.del !== 'function'
-  ) {
-    throw new Error('STORAGE_CURRENT_ACCOUNT_J_CLAIM_DELETE_UNSUPPORTED');
-  }
   for (const [hash, node] of pendingNodes.consumptionNodes) {
     currentBatch.put(keyConsumptionNode(hash), encodeBuffer(node));
   }
   for (const hash of safeConsumptionDeletes) {
-    currentBatch.del!(keyConsumptionNode(hash));
+    currentBatch.del(keyConsumptionNode(hash));
   }
   for (const [hash, node] of pendingNodes.accountJClaimNodes) {
     currentBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
   }
   for (const hash of safeAccountJClaimDeletes) {
-    currentBatch.del!(keyAccountJClaimNode(hash));
+    currentBatch.del(keyAccountJClaimNode(hash));
   }
   const hashes = commitments.preparedHashes;
   if (hashes) {
-    for (const key of hashes.docDels) currentBatch.del?.(key);
+    for (const key of hashes.docDels) currentBatch.del(key);
     for (const item of hashes.docPuts) currentBatch.put(item.key, item.value);
-    for (const key of hashes.merkleDels) currentBatch.del?.(key);
+    for (const key of hashes.merkleDels) currentBatch.del(key);
     for (const item of hashes.merklePuts) {
       currentBatch.put(item.key, item.value);
     }
@@ -1832,12 +1899,18 @@ export const saveRuntimeFrameToStorage = async (
   );
   options.onPersistenceProgress?.('frame-encoded');
   checkpointPrepare('frameEncode');
+  const certifiedHistoryPuts = await prepareCertifiedHistoryPuts(
+    walDb,
+    framePlan.certifiedHistoryPuts,
+  );
+  checkpointPrepare('certifiedHistory');
   const batches = buildStorageCommitBatches(
     options,
     prepared,
     commitments,
     pendingNodes,
     framePlan,
+    certifiedHistoryPuts,
   );
   checkpointPrepare('batchPlan');
   const committed = await commitStorageFrame(

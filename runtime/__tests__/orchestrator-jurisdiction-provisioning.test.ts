@@ -292,7 +292,7 @@ test('orchestrator provisions exact primary contracts before RPC import', async 
   }
 }, 120_000);
 
-test('fresh RPC import uses provisioned deployment metadata after Anvil history is pruned', async () => {
+test('fresh RPC import rejects a pruned endpoint that cannot prove deployment origin', async () => {
   const port = await reservePort();
   const root = await mkdtemp(join(tmpdir(), 'xln-pruned-rpc-import-'));
   const rpcUrl = `http://127.0.0.1:${port}`;
@@ -303,8 +303,6 @@ test('fresh RPC import uses provisioned deployment metadata after Anvil history 
     rpc2Url: '',
     rpcUrls: { 1: rpcUrl },
   };
-  let importedAdapter: JAdapter | null = null;
-
   try {
     await waitForRpc(rpcUrl);
     await writeFile(jurisdictionsPath, `${JSON.stringify({
@@ -353,14 +351,12 @@ test('fresh RPC import uses provisioned deployment metadata after Anvil history 
       }],
       entityInputs: [],
     });
-    await processRuntime(env);
-    await processRuntime(env);
-    const imported = env.state.jReplicas.get('Primary');
-    importedAdapter = getLiveJAdapter(env, 'Primary') ?? null;
-    expect(imported?.blockNumber).toBe(BigInt(deploymentBlock - 1));
-    expect(importedAdapter?.entityProviderDeploymentBlock).toBe(deploymentBlock);
+    await expect(processRuntime(env)).rejects.toThrow(
+      `RPC_ENTITY_PROVIDER_DEPLOYMENT_ORIGIN_UNAVAILABLE:${deploymentBlock}`,
+    );
+    expect(env.state.jReplicas.has('Primary')).toBe(false);
+    expect(getLiveJAdapter(env, 'Primary')).toBeUndefined();
   } finally {
-    await importedAdapter?.close();
     await stopProcess(child, 3_000);
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }

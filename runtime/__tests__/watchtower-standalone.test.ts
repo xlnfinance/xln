@@ -211,19 +211,54 @@ describe('standalone watchtower service', () => {
     });
     expect(put.ok).toBe(true);
 
+    const unrelatedWallet = Wallet.createRandom();
+    const unrelatedRuntimeId = unrelatedWallet.address.toLowerCase();
+    const signedAt = 123_457;
+    const signature = await unrelatedWallet.signMessage(
+      buildTowerAppointmentOwnerMessage(
+        unrelatedRuntimeId,
+        'blind_backup',
+        encrypted.lookupKey,
+        0,
+        appointment.bundle.bundleHash,
+        appointment.bundle.height,
+        signedAt,
+        undefined,
+      ),
+    );
+    const conflictingPut = await fetch(`${base}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...appointment,
+        bundle: { ...appointment.bundle, runtimeId: unrelatedRuntimeId },
+        ownerProof: { runtimeId: unrelatedRuntimeId, signedAt, signature },
+      }),
+    });
+    expect(conflictingPut.status).toBe(400);
+    const conflictPayload = await conflictingPut.json() as { ok: boolean; error?: string };
+    expect(conflictPayload.ok).toBe(false);
+    expect(conflictPayload.error).toContain('TOWER_LOOKUP_RUNTIME_ID_MISMATCH');
+
     const restore = await fetch(`${base}/api/tower/restore`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ lookupKey: encrypted.lookupKey }),
     });
     expect(restore.ok).toBe(true);
-    const payload = await restore.json() as { ok: boolean; bundle?: { lookupKey: string }; receipt?: { towerSignature?: string } };
+    const payload = await restore.json() as {
+      ok: boolean;
+      bundle?: { lookupKey: string; runtimeId: string };
+      receipt?: { runtimeId: string; towerSignature?: string };
+    };
     expect(payload.ok).toBe(true);
     expect(payload.bundle?.lookupKey).toBe(encrypted.lookupKey);
+    expect(payload.bundle?.runtimeId).toBe(appointment.bundle.runtimeId);
+    expect(payload.receipt?.runtimeId).toBe(appointment.bundle.runtimeId);
     expect(typeof payload.receipt?.towerSignature).toBe('string');
   });
 
-  test('accepts an appointment body larger than 128 KiB when it fits the configured quota', async () => {
+  test('accepts an appointment body larger than 1 MiB when it fits the configured quota', async () => {
     const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-large-body-${Date.now()}`);
     rmSync(tempRoot, { recursive: true, force: true });
     mkdirSync(tempRoot, { recursive: true });
@@ -233,13 +268,13 @@ describe('standalone watchtower service', () => {
       port: 0,
       towerId: 'tower-large-body-test',
       dbPath: join(tempRoot, 'tower.level'),
-      maxStoredBytesPerLookupKey: 512 * 1024,
+      maxStoredBytesPerLookupKey: 3 * 1024 * 1024,
     });
     servers.push(server);
     const { appointment } = await createRuntimeAppointment();
-    appointment.bundle.ciphertext = `0x${'ab'.repeat(80 * 1024)}`;
+    appointment.bundle.ciphertext = `0x${'ab'.repeat(640 * 1024)}`;
     const body = JSON.stringify(appointment);
-    expect(Buffer.byteLength(body, 'utf8')).toBeGreaterThan(128 * 1024);
+    expect(Buffer.byteLength(body, 'utf8')).toBeGreaterThan(1024 * 1024);
 
     const response = await fetch(`http://127.0.0.1:${server.server.port}/api/tower/appointment`, {
       method: 'PUT',
@@ -428,9 +463,9 @@ describe('standalone watchtower service', () => {
       body: JSON.stringify({ payload: 'x'.repeat(129 * 1024) }),
     });
     expect(response.status).toBe(413);
-    const payload = await response.json() as { ok: boolean; error?: string };
-    expect(payload.ok).toBe(false);
-    expect(String(payload.error || '')).toContain('TOWER_BODY_TOO_LARGE');
+    // Bun rejects at the global transport boundary before allocating/parsing
+    // route JSON. The route-level parser separately covers capped error bodies.
+    expect(await response.text()).toBe('');
   });
 
   test('keeps the write-only recovery complaint sink disabled by default', async () => {

@@ -31,6 +31,9 @@ export const spawnDaemon = ({ instanceId, version, runtimeSeed, authSeed, contro
       XLN_RADAPTER_AUTH_SEED: authSeed,
       XLN_RADAPTER_REQUIRE_AUTH_SEED: '1',
       XLN_RUNTIME_SEED: runtimeSeed,
+      // The packaged single-user daemon is an explicit local simulation. A
+      // production node must instead opt into its configured RPC adapter.
+      XLN_LOCAL_SIMULATION: 'true',
       XLN_SKIP_SERVER_BOOTSTRAP: '1',
     },
   });

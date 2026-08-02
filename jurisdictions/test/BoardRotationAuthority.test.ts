@@ -1,4 +1,4 @@
-import { mine } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
+import { mine, time } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
 
@@ -495,6 +495,7 @@ describe('EntityProvider board-rotation authority', function () {
 
     await propose(fx, BOARD, singleSignerLazyEntityId(fx.signers[1].address), boardBSigner);
     await mine(ARTICLES.controlDelay);
+    await time.increaseTo((await fx.provider.entities(ENTITY_ID)).previousBoardValidUntil);
     await fx.provider.activateBoard(ENTITY_ID);
     expect(await fx.provider.boardEpochs(ENTITY_ID)).to.equal(2n);
     expect(await fx.provider.entityActionNonces(ENTITY_ID)).to.equal(0n);

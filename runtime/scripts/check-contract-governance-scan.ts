@@ -186,7 +186,11 @@ for (const [name, requiredText] of [
 ] as const) {
   assertIncludes(entityProvider, requiredText, `${entityProviderPath}:${name}`);
 }
-assertIncludes(entityProvider, 'require(block.number >= entities[entityId].activateAtBlock, "Delay period not met");', entityProviderPath);
+assertIncludes(
+  getFunctionBody(entityProvider, 'activateBoard', entityProviderPath),
+  'require(block.number >= entity.activateAtBlock, "Delay period not met");',
+  `${entityProviderPath}:activateBoard`,
+);
 assertIncludes(hankoVerifier, 'if (signatureCount == 0 || hanko.claims.length == 0)', hankoVerifierPath);
 assertIncludes(hankoVerifier, 'if (signer == address(0)) return new address[](0);', hankoVerifierPath);
 assertIncludes(hankoVerifier, 'if (nestedIndex >= claimIndex) revert InvalidHankoClaimOrder();', hankoVerifierPath);

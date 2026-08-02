@@ -41,6 +41,7 @@ import {
   type ValidatorEncryptionAnnouncement,
 } from '../../entity/profile-encryption';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
+import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input-envelope-auth';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
@@ -89,13 +90,10 @@ export const reportDirectClientError = (
 export type P2PConfig = {
   relayUrls?: string[];
   wsUrl?: string | null;
-  allowDirectClients?: boolean;
-  preferRelayForEntityInput?: boolean;
   seedRuntimeIds?: string[];
   runtimeId?: string;
   signerId?: string;
   advertiseEntityIds?: string[];
-  isHub?: boolean;
   gossipPollMs?: number;
 };
 
@@ -105,11 +103,8 @@ type RuntimeP2POptions = {
   signerId?: string;
   relayUrls?: string[];
   wsUrl?: string | null;
-  allowDirectClients?: boolean;
-  preferRelayForEntityInput?: boolean;
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
-  isHub?: boolean;
   gossipPollMs?: number;
   onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => void;
   onReliableReceipt?: (from: string, receipt: ReliableDeliveryReceipt) => void;
@@ -262,8 +257,6 @@ export class RuntimeP2P {
   private signerId: string;
   private relayUrls: string[];
   private wsUrl: string | null;
-  private allowDirectClients: boolean;
-  private preferRelayForEntityInput: boolean;
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private gossipPollMs: number;
@@ -291,6 +284,7 @@ export class RuntimeP2P {
   private encryptionKeyPair: P2PKeyPair;
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingAnnounceEntities = new Set<string>();
+  private profileFetches = new Map<string, Promise<boolean>>();
   private lastHeartbeatAnnounceAt = 0;
   private closing = false;
   private closed = false;
@@ -304,8 +298,6 @@ export class RuntimeP2P {
     this.signerId = options.signerId || '1';
     this.relayUrls = uniqueTransportValues(options.relayUrls || [DEFAULT_RELAY_URL]);
     this.wsUrl = normalizeOptionalWsUrl(options.wsUrl);
-    this.allowDirectClients = options.allowDirectClients !== false;
-    this.preferRelayForEntityInput = options.preferRelayForEntityInput === true;
     this.seedRuntimeIds = uniqueTransportValues(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
@@ -336,13 +328,6 @@ export class RuntimeP2P {
   }
 
   updateConfig(config: P2PConfig) {
-    if (config.allowDirectClients !== undefined && this.allowDirectClients !== (config.allowDirectClients !== false)) {
-      this.allowDirectClients = config.allowDirectClients !== false;
-      if (!this.allowDirectClients) this.closeDirectClients();
-    }
-    if (config.preferRelayForEntityInput !== undefined) {
-      this.preferRelayForEntityInput = config.preferRelayForEntityInput === true;
-    }
     if (config.seedRuntimeIds) {
       this.seedRuntimeIds = uniqueTransportValues(config.seedRuntimeIds);
     }
@@ -403,7 +388,6 @@ export class RuntimeP2P {
           if (this.closing || this.closed) return;
           this.requestSeedGossip('full');
           this.announceLocalProfiles();
-          this.syncDirectPeerConnections();
         },
         onEntityInputs: async (from, envelope, timestamp) => {
           await this.acceptInboundEntityInputs('relay', from, envelope, timestamp);
@@ -666,11 +650,10 @@ export class RuntimeP2P {
         'entity_inputs envelope is malformed',
         { targetRuntimeId },
       );
-      const hasIntent = envelope.crossJurisdictionIntent !== undefined;
       failfastAssert(
-        hasIntent ? envelope.entityInputs.length === 0 : envelope.entityInputs.length > 0,
+        envelope.entityInputs.length > 0,
         'P2P_ENTITY_INPUTS_INVALID',
-        hasIntent ? 'cross-j intent envelope contains entity inputs' : 'entity_inputs envelope is empty',
+        'entity_inputs envelope is empty',
         { targetRuntimeId },
       );
     } catch (error) {
@@ -686,7 +669,6 @@ export class RuntimeP2P {
     }
 
     for (const input of envelope.entityInputs) {
-      this.ensureRelayConnectionsForEntity(input.entityId);
       this.prefetchProfilesForInput(input);
     }
 
@@ -694,11 +676,20 @@ export class RuntimeP2P {
     failfastAssert(!!normalizedTargetRuntimeId, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId must be signer EOA', {
       targetRuntimeId,
     });
-    const { client, transport } = this.resolveTransportClient(normalizedTargetRuntimeId);
+    const primary = this.resolveTransportClient(normalizedTargetRuntimeId);
+    const attempts = this.resolveTransportAttempts(primary);
+    let transport = primary.transport;
     let delivery: EntityInputDeliveryResult | null = null;
-    if (client && client.isOpen()) {
+    for (const [attemptIndex, attempt] of attempts.entries()) {
+      transport = attempt.transport;
       try {
-        delivery = this.deliverEntityInputs(client, normalizedTargetRuntimeId, envelope, ingressTimestamp, transport);
+        delivery = this.deliverEntityInputs(
+          attempt.client,
+          normalizedTargetRuntimeId,
+          envelope,
+          ingressTimestamp,
+          transport,
+        );
         if (isDeliveryDelivered(delivery)) return delivery;
         this.env.warn('network', 'P2P_SEND_FAILED', {
           targetRuntimeId: normalizedTargetRuntimeId,
@@ -720,6 +711,14 @@ export class RuntimeP2P {
         });
         if (p2pShouldRefreshGossip(delivery)) {
           this.refreshGossip();
+        }
+        if (transport === 'direct' && attemptIndex + 1 < attempts.length) {
+          this.env.warn('network', 'P2P_DIRECT_PRE_SEND_FAILED', {
+            targetRuntimeId: normalizedTargetRuntimeId,
+            transport,
+            delivery,
+          });
+          continue;
         }
         throw new Error(
           `P2P_ENTITY_INPUTS_SEND_THROW: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
@@ -755,8 +754,9 @@ export class RuntimeP2P {
       'Reliable receipt targetRuntimeId must be signer EOA',
       { targetRuntimeId },
     );
-    const { client, transport } = this.resolveTransportClient(normalizedTargetRuntimeId);
-    if (!client || !client.isOpen()) {
+    const primary = this.resolveTransportClient(normalizedTargetRuntimeId);
+    const attempts = this.resolveTransportAttempts(primary);
+    if (attempts.length === 0) {
       return p2pDeliveryResult(
         deliveryFailure({
           category: 'TransientRace',
@@ -764,24 +764,33 @@ export class RuntimeP2P {
           message: 'No open transport for reliable application receipt',
           terminal: false,
         }),
-        transport,
+        primary.transport,
       );
     }
-    try {
-      return client.sendReliableReceiptRaw(normalizedTargetRuntimeId, receipt)
-        ? p2pDeliveryResult(deliveryAccepted('P2P_RELIABLE_RECEIPT_HANDED_TO_TRANSPORT'), transport)
-        : p2pSendFalseDelivery(transport);
-    } catch (error) {
-      return p2pDeliveryResult(
-        deliveryFailure({
-          category: 'TransientRace',
-          code: 'P2P_RELIABLE_RECEIPT_SEND_THROW',
-          message: error instanceof Error ? error.message : String(error),
-          terminal: false,
-        }),
-        transport,
-      );
+    let delivery = p2pSendFalseDelivery(primary.transport);
+    for (const [attemptIndex, attempt] of attempts.entries()) {
+      try {
+        if (attempt.client.sendReliableReceiptRaw(normalizedTargetRuntimeId, receipt)) {
+          return p2pDeliveryResult(
+            deliveryAccepted('P2P_RELIABLE_RECEIPT_HANDED_TO_TRANSPORT'),
+            attempt.transport,
+          );
+        }
+        delivery = p2pSendFalseDelivery(attempt.transport);
+      } catch (error) {
+        delivery = p2pDeliveryResult(
+          deliveryFailure({
+            category: 'TransientRace',
+            code: 'P2P_RELIABLE_RECEIPT_SEND_THROW',
+            message: error instanceof Error ? error.message : String(error),
+            terminal: false,
+          }),
+          attempt.transport,
+        );
+        if (attempt.transport !== 'direct' || attemptIndex + 1 >= attempts.length) return delivery;
+      }
     }
+    return delivery;
   }
 
   requestGossip(runtimeId: string) {
@@ -847,12 +856,6 @@ export class RuntimeP2P {
     client: RuntimeWsClient | null;
     transport: 'direct' | 'relay';
   } {
-    if (this.preferRelayForEntityInput) {
-      return {
-        client: this.getActiveClient(),
-        transport: 'relay',
-      };
-    }
     const hasDirectEndpoint = this.hasDirectPeerEndpoint(runtimeId);
     if (hasDirectEndpoint) {
       this.ensureDirectClientForRuntime(runtimeId);
@@ -870,6 +873,22 @@ export class RuntimeP2P {
     };
   }
 
+  private resolveTransportAttempts(
+    primary: { client: RuntimeWsClient | null; transport: 'direct' | 'relay' },
+  ): Array<{
+    client: RuntimeWsClient;
+    transport: 'direct' | 'relay';
+  }> {
+    const attempts = primary.client?.isOpen()
+      ? [primary as { client: RuntimeWsClient; transport: 'direct' | 'relay' }]
+      : [];
+    if (primary.transport === 'direct') {
+      const relay = this.getActiveClient();
+      if (relay?.isOpen()) attempts.push({ client: relay, transport: 'relay' });
+    }
+    return attempts;
+  }
+
   private requestSeedGossip(mode: GossipRefreshMode = 'incremental') {
     const client = this.getActiveClient();
     if (!client) return;
@@ -880,12 +899,6 @@ export class RuntimeP2P {
       ...(updatedSince > 0 ? { updatedSince } : {}),
     };
     client.sendGossipRequest(this.runtimeId, request);
-  }
-
-  private ensureRelayConnectionsForEntity(entityId: string): void {
-    // Single-relay mode: never auto-discover/switch relays from gossip profiles.
-    // This prevents split-brain routing where different entities publish different relay hints.
-    void entityId;
   }
 
   private collectProfileEntityIdsForInput(input: RoutedEntityInput): string[] {
@@ -932,8 +945,12 @@ export class RuntimeP2P {
     timestamp: number | undefined,
   ): Promise<void> {
     if (this.closing || this.closed) return;
+    assertRuntimeEntityInputsEnvelopeSource(this.env, from, envelope);
     const profileStartedAt = Date.now();
-    const profileResults = await Promise.all(envelope.entityInputs.map(input => this.ensureProfilesForInput(input)));
+    const requiredProfileIds = uniqueTransportValues(
+      envelope.entityInputs.flatMap(input => this.collectProfileEntityIdsForInput(input)),
+    ).filter(Boolean);
+    const profilesResolved = await this.ensureProfiles(requiredProfileIds);
     if (this.closing || this.closed) return;
     if (isRuntimePerfProfileEnabled('XLN_P2P_INGRESS_PROFILE')) {
       p2pLog.info('ingress.entity_inputs', {
@@ -941,7 +958,7 @@ export class RuntimeP2P {
         sourceRuntimeId: from,
         sourceRuntimeHeight: envelope.sourceRuntimeHeight,
         inputCount: envelope.entityInputs.length,
-        profileResolved: profileResults.every(Boolean),
+        profileResolved: profilesResolved,
         profileWaitMs: Date.now() - profileStartedAt,
       });
     }
@@ -970,12 +987,22 @@ export class RuntimeP2P {
   async ensureProfiles(entityIds: string[]): Promise<boolean> {
     const requestedEntityIds = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
     if (requestedEntityIds.length === 0) return true;
+    const key = [...requestedEntityIds].sort(compareStableText).join(',');
+    const inFlight = this.profileFetches.get(key);
+    if (inFlight) return inFlight;
+    const fetch = this.ensureProfilesUncoalesced(requestedEntityIds);
+    this.profileFetches.set(key, fetch);
+    try {
+      return await fetch;
+    } finally {
+      if (this.profileFetches.get(key) === fetch) this.profileFetches.delete(key);
+    }
+  }
+
+  private async ensureProfilesUncoalesced(requestedEntityIds: string[]): Promise<boolean> {
     let requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     let missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
 
-    for (const entityId of missingEntityIds) {
-      this.ensureRelayConnectionsForEntity(entityId);
-    }
     if (missingEntityIds.length > 0) {
       await this.fetchProfilesWithRetry(missingEntityIds);
     }
@@ -1286,6 +1313,12 @@ export class RuntimeP2P {
     const encryptionAnnouncements = Array.isArray(response?.encryptionAnnouncements)
       ? response.encryptionAnnouncements
       : [];
+    if (
+      profiles.length > DEFAULT_GOSSIP_BATCH_LIMIT ||
+      encryptionAnnouncements.length > DEFAULT_GOSSIP_BATCH_LIMIT
+    ) {
+      throw new Error('P2P_GOSSIP_RESPONSE_BATCH_TOO_LARGE');
+    }
     this.applyIncomingEncryptionAnnouncements(from, encryptionAnnouncements);
     this.applyIncomingProfiles(from, profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
@@ -1298,6 +1331,12 @@ export class RuntimeP2P {
     const encryptionAnnouncements = Array.isArray(response?.encryptionAnnouncements)
       ? response.encryptionAnnouncements
       : [];
+    if (
+      profiles.length > DEFAULT_GOSSIP_BATCH_LIMIT ||
+      encryptionAnnouncements.length > DEFAULT_GOSSIP_BATCH_LIMIT
+    ) {
+      throw new Error('P2P_GOSSIP_ANNOUNCE_BATCH_TOO_LARGE');
+    }
     this.applyIncomingEncryptionAnnouncements(from, encryptionAnnouncements);
     this.applyIncomingProfiles(from, profiles).catch(err => {
       this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
@@ -1466,9 +1505,6 @@ export class RuntimeP2P {
       acceptedProfiles.push(sanitized);
     }
     if (this.closing || this.closed) return;
-    if (accepted > 0) {
-      this.syncDirectPeerConnections();
-    }
     this.onGossipProfiles(from, acceptedProfiles);
   }
 
@@ -1515,7 +1551,6 @@ export class RuntimeP2P {
   }
 
   private getDirectPeerEndpoint(runtimeId: string): string | null {
-    if (!this.allowDirectClients) return null;
     const normalizedTargetRuntimeId = normalizeRuntimeId(runtimeId);
     if (!normalizedTargetRuntimeId || normalizedTargetRuntimeId === this.runtimeId) return null;
     const profiles = this.env.gossip?.getProfiles?.() || [];
@@ -1648,27 +1683,4 @@ export class RuntimeP2P {
     });
   }
 
-  private syncDirectPeerConnections(): void {
-    if (this.closing || this.closed) return;
-    if (!this.allowDirectClients) {
-      this.closeDirectClients();
-      return;
-    }
-    const desired = new Map<string, string>();
-    const profiles = this.env.gossip?.getProfiles?.() || [];
-    for (const profile of profiles) {
-      const runtimeId = normalizeRuntimeId(profile.runtimeId || '');
-      if (!runtimeId || runtimeId === this.runtimeId) continue;
-      const endpoint = this.getDirectPeerEndpoint(runtimeId);
-      if (!endpoint) continue;
-      desired.set(runtimeId, endpoint);
-      this.ensureDirectClientForRuntime(runtimeId);
-    }
-    for (const runtimeId of Array.from(this.directClients.keys())) {
-      if (desired.has(runtimeId)) continue;
-      this.directClients.get(runtimeId)?.close();
-      this.directClients.delete(runtimeId);
-      this.directClientUrls.delete(runtimeId);
-    }
-  }
 }

@@ -74,6 +74,7 @@ const queueDisputeStart = (
     }
   }
   account.status = 'disputed';
+  const crossJurisdictionRecovery = account.disputePrepare?.crossJurisdictionRecovery;
   delete account.disputePrepare;
   freezeAccountForDispute(account, false);
   account.activeDispute ??= {
@@ -91,7 +92,11 @@ const queueDisputeStart = (
     starterIncrementedArguments: evidence.starterIncrementedArguments,
     observedOnChain: false,
     finalizeQueued: false,
+    ...(crossJurisdictionRecovery ? { crossJurisdictionRecovery } : {}),
   };
+  if (crossJurisdictionRecovery && !account.activeDispute.crossJurisdictionRecovery) {
+    account.activeDispute.crossJurisdictionRecovery = crossJurisdictionRecovery;
+  }
 };
 
 export const handleDisputeStart = async (

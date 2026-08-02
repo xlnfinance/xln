@@ -25,7 +25,21 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 
-const DEFAULT_MAX_WS_MESSAGE_BYTES = 16 * 1024 * 1024;
+export const DEFAULT_MAX_WS_MESSAGE_BYTES = 1024 * 1024;
+const WS_STRING_FIELD_MAX_BYTES: Readonly<Record<string, number>> = {
+  id: 128,
+  from: 128,
+  fromEncryptionPubKey: 256,
+  to: 128,
+  entityId: 128,
+  challenge: 128,
+  audience: 512,
+  inReplyTo: 128,
+  nonce: 128,
+  signature: 256,
+  error: 4 * 1024,
+};
+const utf8Encoder = new TextEncoder();
 
 export type RuntimeWsMessageType =
   | 'hello'
@@ -90,8 +104,16 @@ const requireStringFields = (
   fields: readonly string[],
 ): void => {
   for (const field of fields) {
-    if (message[field] !== undefined && typeof message[field] !== 'string') {
+    const value = message[field];
+    if (value !== undefined && typeof value !== 'string') {
       throw new Error(`WS_MESSAGE_FIELD_TYPE_INVALID:field=${field}`);
+    }
+    const maxBytes = WS_STRING_FIELD_MAX_BYTES[field];
+    if (typeof value === 'string' && maxBytes !== undefined) {
+      const bytes = utf8Encoder.encode(value).byteLength;
+      if (bytes > maxBytes) {
+        throw new Error(`WS_MESSAGE_FIELD_TOO_LONG:field=${field}:bytes=${bytes}:max=${maxBytes}`);
+      }
     }
   }
 };
@@ -227,7 +249,7 @@ const wsMessageByteLength = (raw: string | Buffer | Uint8Array | ArrayBuffer): n
   return raw.byteLength;
 };
 
-const wsMaxMessageBytes = (): number => {
+export const resolveRuntimeWsMaxMessageBytes = (): number => {
   const configured = typeof process === 'undefined' ? undefined : process.env['XLN_WS_MAX_MESSAGE_BYTES'];
   const parsed = Number(configured);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_WS_MESSAGE_BYTES;
@@ -261,7 +283,7 @@ export const deserializeWsMessage = (
   raw: string | Buffer | Uint8Array | ArrayBuffer,
 ): RuntimeWsMessage => {
   const byteLength = wsMessageByteLength(raw);
-  const maxBytes = wsMaxMessageBytes();
+  const maxBytes = resolveRuntimeWsMaxMessageBytes();
   if (byteLength > maxBytes) throw new Error(`WS_MESSAGE_TOO_LARGE:bytes=${byteLength}:max=${maxBytes}`);
   if (typeof raw === 'string') throw new Error('WS_WIRE_BINARY_REQUIRED');
   const bytes = raw instanceof ArrayBuffer

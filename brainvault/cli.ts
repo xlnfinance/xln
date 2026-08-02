@@ -25,6 +25,7 @@ import {
   factorForShardCount, formatDuration, hexToBytes, bytesToHex,
   BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, deriveSitePassword,
 } from './core.ts';
+import { assertBrainVaultName, assertBrainVaultPassphrase } from './spec.ts';
 
 const args = process.argv.slice(2);
 const showHelp = args.includes('--help') || args.includes('-h');
@@ -138,6 +139,9 @@ async function derive(name: string, passphrase: string, shardInput: number, work
     addressCount = 5,
     shardMultiplier = 1,
   } = options;
+
+  assertBrainVaultName(name);
+  assertBrainVaultPassphrase(passphrase);
 
   if (!Number.isSafeInteger(shardInput) || shardInput < 1) {
     throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${shardInput}`);
@@ -367,7 +371,7 @@ async function interactive() {
     }
   }
 
-  if (!name || !pass || pass.length < 6) {
+  if (!name || !pass) {
     console.log('Error: Invalid input');
     rl.close();
     return;

@@ -27,24 +27,23 @@ import type { EntityReplica, EntityState } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/machine/input';
 import { applyRuntimeAdapterCommandMarker } from './command-frontier';
-import { assertRuntimeAdapterCommandTxAuthorized } from './command-frontier-auth';
 import {
   applyRetryJSubmitRuntimeTx,
-  assertJSubmitRuntimeTxAuthorized,
 } from './j-submit-state';
 import { applyRecordJSubmitResultRuntimeTx } from './j-submit-result';
 import {
   applyRetryEntityProviderActionRuntimeTx,
 } from './entity-provider-action-submit-state';
-import { assertEntityProviderActionRuntimeTxAuthorized } from './entity-provider-action-submit-auth';
 import { applyRecordEntityProviderActionResultRuntimeTx } from './entity-provider-action-submit-result';
 import { DEBUG } from '../infra/debug-flags';
 import { createStructuredLogger } from '../infra/logger';
+import { encodeBoard, hashBoard } from '../entity/factory';
+import { isNumberedEntity, toEntityId } from '../protocol/identity';
+import { getCertifiedBoardStackKey } from '../jurisdiction/machine/board-registry';
 import { cloneEntityState } from '../entity/state-clone';
 import { buildRuntimeCheckpointLineagePlan } from '../storage/entity-lineage';
 import {
   assertCertifiedRegistrationEvidence,
-  assertJAuthorityRuntimeTxAuthorized,
   computeRegistrationEvidenceClaimHash,
   freezeCertifiedRegistrationEvidence,
   registrationEvidenceKey,
@@ -52,13 +51,13 @@ import {
 import {
   applyCompleteImportJurisdiction,
   applyImportJurisdictionIntent,
-  assertJImportResultRuntimeTxAuthorized,
 } from './jurisdiction-import';
 import { applyWatcherJurisdictionCursor } from '../jurisdiction/adapter/watcher-cursor';
 import {
   applyNumberedRegistrationIntent,
   applyNumberedRegistrationResolution,
 } from './registration/numbered-registration-intent';
+import { assertRuntimeTxCapabilitiesAuthorized } from './internal-tx-auth';
 
 const runtimeTxLog = createStructuredLogger('runtime.tx');
 
@@ -78,11 +77,7 @@ export const applyRuntimeTx = async (
   runtimeTx: RuntimeTx,
   deps: RuntimeTxHandlerDeps = {},
 ): Promise<JInput[]> => {
-  assertJSubmitRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
-  assertJAuthorityRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
-  assertJImportResultRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
-  assertEntityProviderActionRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
-  assertRuntimeAdapterCommandTxAuthorized(runtimeTx, deps.isReplay === true);
+  assertRuntimeTxCapabilitiesAuthorized(runtimeTx, deps.isReplay === true);
   if (runtimeTx.type === 'recordRuntimeAdapterCommand') {
     applyRuntimeAdapterCommandMarker(env, runtimeTx.data);
     return [];
@@ -463,6 +458,33 @@ const assertCreatedReplicaJHeight = (
   }
 };
 
+const assertNumberedReplicaImportAuthority = (
+  env: RuntimeReplica,
+  entityId: string,
+  signerId: string,
+  config: EntityState['config'],
+  isProposer: boolean,
+): void => {
+  if (!isNumberedEntity(toEntityId(entityId))) return;
+  const jurisdiction = config.jurisdiction;
+  if (!jurisdiction) throw new Error(`NUMBERED_REPLICA_JURISDICTION_MISSING:${entityId}`);
+  const evidence = env.infrastructure?.certifiedRegistrationEvidence?.get(
+    registrationEvidenceKey(getCertifiedBoardStackKey(jurisdiction), entityId),
+  );
+  if (!evidence) throw new Error(`NUMBERED_REPLICA_REGISTRATION_EVIDENCE_MISSING:${entityId}`);
+  const boardHash = hashBoard(encodeBoard(config, env)).toLowerCase();
+  if (evidence.boardHash.toLowerCase() !== boardHash) {
+    throw new Error(`NUMBERED_REPLICA_REGISTRATION_BOARD_MISMATCH:${entityId}`);
+  }
+  const boardIndex = config.validators.findIndex(
+    validator => validator.toLowerCase() === signerId,
+  );
+  if (boardIndex < 0) throw new Error(`NUMBERED_REPLICA_SIGNER_NOT_ON_BOARD:${signerId}`);
+  if (isProposer !== (boardIndex === 0)) {
+    throw new Error(`NUMBERED_REPLICA_PROPOSER_FLAG_INVALID:${entityId}:${signerId}`);
+  }
+};
+
 const importReplicaRuntimeTx = (env: RuntimeReplica, runtimeTx: ImportReplicaRuntimeTx): string => {
   const identity = normalizeReplicaImportIdentity(runtimeTx);
   if (DEBUG) {
@@ -478,6 +500,13 @@ const importReplicaRuntimeTx = (env: RuntimeReplica, runtimeTx: ImportReplicaRun
     identity.signerId,
   );
   const config = requireBoundEntityConfig(env, identity.entityId, runtimeTx.data.config);
+  assertNumberedReplicaImportAuthority(
+    env,
+    identity.entityId,
+    identity.signerId,
+    config,
+    runtimeTx.data.isProposer,
+  );
   const siblings = Array.from(env.state.eReplicas.values()).filter(replica =>
     String(replica.entityId || replica.state.entityId).toLowerCase() === identity.entityId);
   const hasCheckpoint = entityHasCertifiedCheckpoint(siblings);

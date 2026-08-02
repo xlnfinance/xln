@@ -78,11 +78,26 @@ const buildPendingSwapFillRatios = (
 };
 
 const collectPullCloseEvidence = (account: AccountReplica): Map<string, string> => {
-  const resolves = new Map<string, string>();
+  if (
+    account.disputePrepare?.crossJurisdictionRecovery &&
+    account.activeDispute?.crossJurisdictionRecovery
+  ) {
+    throw new Error('DISPUTE_PULL_EVIDENCE_PHASE_CONFLICT');
+  }
+  const certifiedResults =
+    account.disputePrepare?.crossJurisdictionRecovery?.resultsByPullId ??
+    account.activeDispute?.crossJurisdictionRecovery?.resultsByPullId ??
+    {};
+  const resolves = new Map<string, string>(Object.entries(certifiedResults));
   for (const tx of [...(account.pendingFrame?.accountTxs ?? []), ...(account.mempool ?? [])]) {
     if (tx.type !== 'cross_pull_close') continue;
+    // Source-final recovery is independently verified and Entity-root
+    // committed. Older retained mempool evidence cannot erase it.
+    if (Object.hasOwn(certifiedResults, tx.data.pullId)) continue;
     if (resolves.has(tx.data.pullId)) {
-      resolves.set(tx.data.pullId, '0x');
+      if (resolves.get(tx.data.pullId)?.toLowerCase() !== String(tx.data.binary || '0x').toLowerCase()) {
+        resolves.set(tx.data.pullId, '0x');
+      }
       continue;
     }
     resolves.set(tx.data.pullId, typeof tx.data.binary === 'string' ? tx.data.binary : '0x');

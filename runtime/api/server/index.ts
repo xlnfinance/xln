@@ -27,6 +27,7 @@ import {
   closeInfraDb,
 } from '../../runtime.ts';
 import { registerEnvChangeCallback } from '../../runtime/loop-environment';
+import { ensurePendingNumberedRegistrationsResumed } from '../../runtime/registration/numbered-registration-driver';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../../protocol/serialization';
 import type { RuntimeReplica, RuntimeEntityInputsEnvelope } from '../../runtime/types';
@@ -35,7 +36,7 @@ import { maybeHandleQaRequest } from '../../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../jurisdiction/adapter';
 import type { JAdapterConfig } from '../../jurisdiction/adapter/types';
 import { createMarketMakerServerState, resetMarketMakerServerState } from './market-maker-health';
-import { serveRuntimeBundle, serveStatic } from './static-assets';
+import { serveStaticApp } from './static-assets';
 import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth } from './auth';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from './health-redaction';
 import { listLocalControlEntities } from './control-entities';
@@ -45,7 +46,14 @@ import { createRelayStore, pushDebugEvent, removeClient } from '../../network/re
 import { openRelayIncidentJournal } from '../../network/relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../../network/relay/debug-http';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../../network/relay/router';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsRelayAudience, serializeWsMessage, type RuntimeWsMessage } from '../../network/p2p/ws-protocol';
+import {
+  canonicalizeRuntimeWsAudience,
+  deserializeWsMessage,
+  resolveRuntimeWsMaxMessageBytes,
+  resolveRuntimeWsRelayAudience,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from '../../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../../network/p2p/hello-challenge';
 import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
@@ -72,7 +80,11 @@ import {
   type RelaySocket,
 } from './relay-direct';
 import { createServerRpcMessageHandler } from './rpc-ws';
-import { dispatchRuntimeRpcAfterStartup } from './rpc-startup-gate';
+import {
+  isRuntimeTransportReady,
+  runtimeTransportStartupResponse,
+  type RuntimeTransportBootPhase,
+} from './rpc-startup-gate';
 import {
   buildRuntimeJurisdictionsJson,
   readCanonicalJurisdictionsJson,
@@ -90,6 +102,7 @@ import { handleOffchainFaucet } from './offchain-faucet';
 import { handleReserveFaucet } from './reserve-faucet';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './health-api';
 import { handleRuntimeRpcProxy } from './rpc-proxy';
+import { requiresLocalNodeOperator } from './node-http-access';
 import { handleP2PControl } from './p2p-control';
 import { handleRuntimeInputControl, handleRuntimeInputStatus } from './runtime-input-control';
 import { handleSignerRegistration } from './signer-control';
@@ -104,6 +117,7 @@ import { selectPredeployedJurisdiction } from './predeployed-jurisdiction';
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { readInheritedChildSecrets } from '../../infra/child-secrets';
 import { createLocalPairingController } from './local-pairing';
+import { createGossipProfileAdmission } from './gossip-profile-admission';
 import { deriveSignerAddressSync } from '../../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
 import { createBrainVaultOwnerController } from './brainvault-owner';
@@ -114,8 +128,6 @@ import type { Server } from 'bun';
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
 let serverEnv: RuntimeReplica | null = null;
-let serverStartupBarrier: Promise<void> = Promise.resolve();
-let resolveServerStartupBarrier: (() => void) | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
 const HEALTH_CACHE_TTL_MS = 10_000;
 let cachedHealthResponse: RuntimeHealthCacheEntry | null = null;
@@ -166,9 +178,6 @@ const withStartupStepTimeout = async <T>(
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 };
-
-const isServerBootInProgress = (): boolean =>
-  serverBootPhase === 'starting' || serverBootPhase === 'runtime' || serverBootPhase === 'bootstrap';
 
 const oneShotLogs = new Map<string, number>();
 const ONE_SHOT_TTL_MS = 60_000;
@@ -302,8 +311,7 @@ registerStructuredLogSink(entry => {
     },
   });
 });
-type ServerBootPhase = 'starting' | 'runtime' | 'bootstrap' | 'ready' | 'failed';
-let serverBootPhase: ServerBootPhase = 'starting';
+let serverBootPhase: RuntimeTransportBootPhase = 'starting';
 let serverBootError: string | null = null;
 let serverBootStartedAt = 0;
 let serverBootCompletedAt: number | null = null;
@@ -541,45 +549,52 @@ const maybeHandleRuntimeInfoApi = async (
       { headers },
     );
   }
-  if (pathname === '/api/clients') {
-    return new Response(
-      safeStringify({
-        count: relayStore.clients.size,
-        clients: Array.from(relayStore.clients.keys()),
-      }),
-      { headers },
-    );
-  }
   return null;
 };
 
-const handleGossipProfileApi = async (
+const gossipProfileAdmission = createGossipProfileAdmission();
+
+const gossipProfileEntityId = (req: Request): string => {
+  const entityId = String(new URL(req.url).searchParams.get('entityId') || '').trim().toLowerCase();
+  return /^0x[0-9a-f]{64}$/.test(entityId) ? entityId : '';
+};
+
+const prepareGossipProfileApi = async (
   req: Request,
   env: RuntimeReplica | null,
-  headers: typeof JSON_HEADERS,
-): Promise<Response> => {
-  const url = new URL(req.url);
-  const targetEntityId = String(url.searchParams.get('entityId') || '')
-    .trim()
-    .toLowerCase();
-  if (!targetEntityId) {
-    return new Response(safeStringify({ ok: false, error: 'entityId is required' }), { status: 400, headers });
-  }
-  try {
-    await env?.infrastructure?.p2p?.syncProfiles?.();
-  } catch (error) {
-    serverLog.warn('gossip.profile_sync_failed', {
-      targetEntityId,
-      error: error instanceof Error ? error.message : String(error),
+  clientId: string,
+): Promise<Response | null> => {
+  const targetEntityId = gossipProfileEntityId(req);
+  if (!targetEntityId || !env) return null;
+  if (env.gossip?.profiles?.has(targetEntityId)) return null;
+  if (!gossipProfileAdmission.admit(clientId)) {
+    return new Response(safeStringify({ ok: false, error: 'GOSSIP_PROFILE_LOOKUP_RATE_LIMITED' }), {
+      status: 429,
+      headers: {
+        ...JSON_HEADERS,
+        'retry-after': String(gossipProfileAdmission.retryAfterSeconds),
+      },
     });
   }
   try {
-    if (env) await ensureGossipProfiles(env, [targetEntityId]);
+    await ensureGossipProfiles(env, [targetEntityId]);
   } catch (error) {
     serverLog.warn('gossip.profile_ensure_failed', {
       targetEntityId,
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+  return null;
+};
+
+const handleGossipProfileApi = (
+  req: Request,
+  env: RuntimeReplica | null,
+  headers: typeof JSON_HEADERS,
+): Response => {
+  const targetEntityId = gossipProfileEntityId(req);
+  if (!targetEntityId) {
+    return new Response(safeStringify({ ok: false, error: 'entityId is required' }), { status: 400, headers });
   }
   const bundle = buildKnownProfileBundle({ env, relayStore, entityId: targetEntityId });
   return new Response(
@@ -617,7 +632,7 @@ const maybeHandleDiscoveryApi = (
   pathname: string,
   env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
-): Promise<Response> | null => {
+): Promise<Response> | Response | null => {
   if (pathname === '/api/gossip/profile') {
     return handleGossipProfileApi(req, env, headers);
   }
@@ -646,7 +661,13 @@ const maybeHandleDebugApi = async (
   if (pathname === '/api/debug/activity' && env) {
     return handleRuntimeActivityRequest(env, new URL(req.url), headers);
   }
-  const debugDumpsResponse = await maybeHandleDebugDumpsRequest({ req, pathname, relayStore, headers });
+  const debugDumpsResponse = await maybeHandleDebugDumpsRequest({
+    req,
+    pathname,
+    relayStore,
+    headers,
+    operatorAuthorized,
+  });
   if (debugDumpsResponse) return debugDumpsResponse;
   if (pathname === '/api/debug/entities') {
     const url = new URL(req.url);
@@ -773,12 +794,17 @@ const handleApiAgainstCommittedState = async (
 ): Promise<Response> => {
   const headers = JSON_HEADERS;
   if (req.method === 'OPTIONS') return new Response(null, { headers });
+  if (requiresLocalNodeOperator(new URL(req.url)) && !operatorAuthorized) {
+    return new Response(safeStringify({ error: 'Operator access required' }), {
+      status: 403,
+      headers,
+    });
+  }
   const assistantResponse = await assistantProxy.handle(req, pathname, clientId);
   if (assistantResponse) return assistantResponse;
   const controlResponse = await maybeHandleControlApi(req, pathname, env, headers);
   if (controlResponse) return controlResponse;
-  // /rpc is the canonical JSON-RPC path; /api/rpc remains a transport alias.
-  if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
+  if (pathname === '/rpc' && req.method === 'POST') {
     return handleRuntimeRpcProxy({ req, pathname, env, relayStore, headers, operatorAuthorized });
   }
   const runtimeInfoResponse = await maybeHandleRuntimeInfoApi(req, pathname, env, headers, operatorAuthorized);
@@ -794,13 +820,19 @@ const handleApiAgainstCommittedState = async (
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
 };
 
-const handleApi = (
+const handleApi = async (
   req: Request,
   pathname: string,
   env: RuntimeReplica | null,
   clientId: string,
   operatorAuthorized: boolean,
 ): Promise<Response> => {
+  if (env && req.method === 'GET' && pathname === '/api/gossip/profile') {
+    // Network refresh happens before the committed-State lease. A slow public
+    // relay lookup must never delay the Runtime writer/WAL commit path.
+    const rejected = await prepareGossipProfileApi(req, env, clientId);
+    if (rejected) return rejected;
+  }
   const handle = () => handleApiAgainstCommittedState(
     req,
     pathname,
@@ -835,14 +867,17 @@ const handleHttpRequest = async (
 
   if (req.headers.get('upgrade') === 'websocket') {
     const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
+    const startupResponse = wsType ? runtimeTransportStartupResponse(serverBootPhase) : null;
+    if (startupResponse) return startupResponse;
     const requestAudience = canonicalizeRuntimeWsAudience(req.url);
     const relayAudience = wsType === 'relay'
       ? resolveRuntimeWsRelayAudience(req.url, session.internalRelayAudience, session.publicRelayAudience)
       : null;
     const audience = relayAudience ?? requestAudience;
+    const peerAddress = resolveSocketPeerAddress(server, req);
     // Never mint an authentication audience from an arbitrary Host header.
     if (wsType && (wsType === 'rpc' || !!relayAudience)
-      && server.upgrade(req, { data: { type: wsType, clientIp: resolveRequestClientIp(req), audience } })) {
+      && server.upgrade(req, { data: { type: wsType, clientIp: resolveRequestClientIp(req, peerAddress), audience } })) {
       return undefined;
     }
     return new Response('WebSocket upgrade failed', { status: 400 });
@@ -871,18 +906,8 @@ const handleHttpRequest = async (
   }
 
   if (options.staticDir) {
-    if (pathname === '/runtime.js') {
-      const runtimeBundle = await serveRuntimeBundle();
-      if (runtimeBundle) return runtimeBundle;
-    }
-    if (pathname === '/') {
-      const index = await serveStatic('/index.html', options.staticDir);
-      if (index) return index;
-    }
-    const file = await serveStatic(pathname, options.staticDir);
-    if (file) return file;
-    const fallback = await serveStatic('/index.html', options.staticDir);
-    if (fallback) return fallback;
+    const staticResponse = await serveStaticApp(req, pathname, options.staticDir);
+    if (staticResponse) return staticResponse;
   }
 
   return new Response('Not found', { status: 404 });
@@ -922,6 +947,15 @@ const handleWebSocketMessage = (
   ws: RelaySocket,
   message: string | Uint8Array | ArrayBuffer,
 ): void => {
+  // The listener binds before WAL/bootstrap recovery so health remains
+  // observable. Transport work is never queued across that boundary: each
+  // decoded message could otherwise retain attacker-controlled memory until
+  // startup completes. The upgrade path rejects these sockets too; this guard
+  // closes the race between an accepted upgrade and its first message.
+  if (!isRuntimeTransportReady(serverBootPhase)) {
+    ws.close(1013, 'Runtime transport not ready');
+    return;
+  }
   const messageText = (): string =>
     typeof message === 'string'
       ? message
@@ -935,12 +969,8 @@ const handleWebSocketMessage = (
       // work while WAL/J/bootstrap recovery is still in progress. Holding every
       // RPC message behind the boot barrier also ensures a socket opened early
       // gets its ticker attached to the final Runtime replica.
-      void dispatchRuntimeRpcAfterStartup(
-        serverStartupBarrier,
-        () => serverBootPhase === 'ready' ? session.env : null,
-        env => attachRuntimeAdapterTicker(env, registerEnvChangeCallback),
-        env => handleRpcMessage(ws, request, env),
-      )
+      if (session.env) attachRuntimeAdapterTicker(session.env, registerEnvChangeCallback);
+      void handleRpcMessage(ws, request, session.env)
         .catch(error => {
           const reason = getErrorMessage(error);
           serverLog.error('ws.rpc_handler_error', { reason, op: request.op });
@@ -980,10 +1010,6 @@ const handleWebSocketMessage = (
     }
     if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
 
-    if (!session.routerConfig && isServerBootInProgress()) {
-      void serverStartupBarrier.then(() => routeRelaySocketMessage(session, ws, peerMessage));
-      return;
-    }
     routeRelaySocketMessage(session, ws, peerMessage);
   } catch (error) {
     const byteLength = wsType === 'rpc' ? runtimeAdapterMessageByteLength(message) : messageText().length;
@@ -1033,8 +1059,10 @@ const createHttpServer = (options: XlnServerOptions, session: ServerSession) =>
   Bun.serve<RelaySocketData>({
     port: options.port,
     hostname: options.host ?? '127.0.0.1',
+    maxRequestBodySize: 1024 * 1024,
     fetch: (req, server) => handleHttpRequest(options, session, req, server),
     websocket: {
+      maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
       open(ws: RelaySocket) {
         serverLog.info('ws.open', { type: ws.data.type });
         if (ws.data.type === 'rpc' && session.env) {
@@ -1197,11 +1225,19 @@ const assertPredeployedStackCode = async (
 };
 
 const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void> => {
-  // Initialize J-adapter (anvil for testnet, browserVM for local)
   const useAnvil = process.env['USE_ANVIL'] === 'true';
+  const useLocalSimulation = process.env['XLN_LOCAL_SIMULATION'] === 'true';
+  if (useAnvil === useLocalSimulation) {
+    throw new Error(useAnvil
+      ? 'JADAPTER_MODE_CONFLICT:USE_ANVIL_and_XLN_LOCAL_SIMULATION'
+      : 'JADAPTER_MODE_REQUIRED:set_USE_ANVIL_or_XLN_LOCAL_SIMULATION');
+  }
   const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
 
-  serverLog.info('jadapter.mode', { useAnvil, anvilRpc: useAnvil ? anvilRpc : null });
+  serverLog.info('jadapter.mode', {
+    mode: useAnvil ? 'rpc' : 'local-simulation',
+    anvilRpc: useAnvil ? anvilRpc : null,
+  });
 
   if (useAnvil) {
     serverLog.info('anvil.connect.start', { rpc: anvilRpc });
@@ -1303,7 +1339,7 @@ const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void>
       blockTimeMs: 300,
     });
     if (!env.activeJurisdiction) env.activeJurisdiction = jurisdictionName;
-  } else {
+  } else if (useLocalSimulation) {
     globalJAdapter = await initializeBrowserVmJurisdiction(env);
   }
 };
@@ -1332,9 +1368,6 @@ const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
   serverBootCompletedAt = null;
   serverBootPhase = 'starting';
   serverBootError = null;
-  serverStartupBarrier = new Promise<void>(resolve => {
-    resolveServerStartupBarrier = resolve;
-  });
   const session: ServerSession = {
     env: null,
     routerConfig: null,
@@ -1375,6 +1408,30 @@ const closeFailedServerStartup = async (
     throw new AggregateError([original, ...cleanupErrors], 'SERVER_STARTUP_FAILED_WITH_CLEANUP_ERRORS');
   }
   throw original;
+};
+
+const configureServerRelayRouter = (
+  env: RuntimeReplica,
+  bound: BoundServerSession,
+): void => {
+  const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
+  bound.session.routerConfig = {
+    store: relayStore,
+    localRuntimeId: String(env.runtimeId),
+    localDeliver,
+    send: (ws, data) => ws.send(data),
+    consumeHelloChallenge: (ws, challenge) => bound.session.relayHelloChallenges.consume(ws, challenge),
+    onGossipStore: profile => {
+      try {
+        env.gossip?.announce?.(profile);
+      } catch (error) {
+        serverLog.warn('gossip.profile_announce_failed', {
+          entityId: profile.entityId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  };
 };
 
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
@@ -1458,29 +1515,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       }
     }
 
+    await ensurePendingNumberedRegistrationsResumed(env);
+
     // J-event watching belongs to the unified runtime loop. The server should
     // wire jReplicas only; startRuntimeLoop() owns startJurisdictionWatchers().
 
-    // Wire relay-router + local delivery as soon as env exists.
     // Relay WS can receive early hello/gossip traffic during bootstrap.
-    const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
-    bound.session.routerConfig = {
-      store: relayStore,
-      localRuntimeId: String(env.runtimeId),
-      localDeliver,
-      send: (ws, data) => ws.send(data),
-      consumeHelloChallenge: (ws, challenge) => bound.session.relayHelloChallenges.consume(ws, challenge),
-      onGossipStore: profile => {
-        try {
-          runtimeEnv.gossip?.announce?.(profile);
-        } catch (error) {
-          serverLog.warn('gossip.profile_announce_failed', {
-            entityId: profile.entityId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
-    };
+    configureServerRelayRouter(env, bound);
 
     serverBootPhase = 'bootstrap';
     let hubEntityIds: string[];
@@ -1503,7 +1544,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     startP2P(env, {
       relayUrls: [bound.internalRelayUrl],
       ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
-      isHub: hubEntityIds.length > 0,
       gossipPollMs: 250,
     });
     serverBootPhase = 'ready';
@@ -1515,8 +1555,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverLog.error('startup.failed_after_bind', { error: getErrorMessage(error) });
     return closeFailedServerStartup(error, env, bound);
   } finally {
-    resolveServerStartupBarrier?.();
-    resolveServerStartupBarrier = null;
   }
 
   serverLog.info('ready', {

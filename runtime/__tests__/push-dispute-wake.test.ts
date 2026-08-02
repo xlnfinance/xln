@@ -19,12 +19,44 @@ import {
   selectWakeTargets,
 } from '../watchtower/push/dispute-wake';
 import { runDisputeWatchSweep, type DisputeWatchStore } from '../watchtower/dispute-watch';
+import { ConsolePushSender, WebhookPushSender } from '../watchtower/push/sender';
 import type { PushNotificationV1, PushSender, StoredPushRegistration } from '../watchtower/push/types';
 
 const DEPOSITORY = '0x000000000000000000000000000000000000dead';
 const CHAIN_ID = 31337;
 
 const entityId = (n: number): string => zeroPadValue(`0x${n.toString(16).padStart(2, '0')}`, 32).toLowerCase();
+
+test('console push transport never claims delivery', async () => {
+  const result = await new ConsolePushSender().send({
+    version: 1,
+    platform: 'web',
+    token: 'not-delivered',
+    title: 'Dispute started',
+    body: 'Open the wallet',
+    collapseKey: 'dispute:test',
+    data: { kind: 'dispute_wake', url: 'xln://wallet' },
+  });
+  expect(result).toEqual({ ok: false, error: 'PUSH_DELIVERY_NOT_CONFIGURED' });
+});
+
+test('webhook push transport aborts a hung delivery', async () => {
+  const sender = new WebhookPushSender(
+    'https://push.invalid/send',
+    undefined,
+    (() => new Promise<Response>(() => {})) as typeof fetch,
+    5,
+  );
+  const result = await sender.send({
+    platform: 'web',
+    token: 'never-delivered',
+    title: 'Dispute started',
+    body: 'Open the wallet',
+    collapseKey: 'dispute:test',
+    data: { kind: 'dispute_wake', url: 'xln://wallet' },
+  });
+  expect(result).toEqual({ ok: false, error: 'PUSH_WEBHOOK_TIMEOUT:5' });
+});
 
 const makeRegistration = (over: Partial<StoredPushRegistration> = {}): StoredPushRegistration => ({
   runtimeId: ZeroAddress.toLowerCase(),
@@ -63,6 +95,18 @@ describe('selectWakeTargets', () => {
     expect(selectWakeTargets({ ...base, chainId: 999 }, [reg]).length).toBe(0);
     expect(selectWakeTargets({ ...base, depositoryAddress: ZeroAddress }, [reg]).length).toBe(0);
     expect(selectWakeTargets({ ...base, sender: entityId(2) }, [reg]).length).toBe(0); // victim == starter
+  });
+
+  test('does not collapse two starters that dispute the same victim and nonce', () => {
+    const base = {
+      chainId: CHAIN_ID,
+      depositoryAddress: DEPOSITORY,
+      counterentity: entityId(3),
+      nonce: 7,
+      blockNumber: 100,
+    };
+    expect(disputeWakeCollapseKey({ ...base, sender: entityId(1) }))
+      .not.toBe(disputeWakeCollapseKey({ ...base, sender: entityId(2) }));
   });
 });
 
@@ -283,14 +327,14 @@ describe('runDisputeWatchSweep', () => {
     const { store } = buildFakeStore();
     const providerFactory = makeProvider([log]);
 
-    const first = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000 });
+    const first = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000, confirmations: 0 });
     expect(first.notificationsSent).toBe(1);
     expect(sent[0]!.token).toBe('victim');
     expect(sent[0]!.collapseKey).toBe(disputeWakeCollapseKey({
       chainId: CHAIN_ID, depositoryAddress: DEPOSITORY, sender: entityId(1), counterentity: entityId(2), nonce: 5, blockNumber: 150,
     }));
 
-    const second = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000 });
+    const second = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000, confirmations: 0 });
     expect(second.notificationsSent + second.notificationsSkipped).toBeGreaterThanOrEqual(0);
     expect(sent.length).toBe(1); // deduped — no second wake
 
@@ -314,14 +358,97 @@ describe('runDisputeWatchSweep', () => {
     const { store, cursors } = buildFakeStore();
     const providerFactory = makeProvider([log]);
 
-    const first = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000 });
+    const first = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000, confirmations: 0 });
     expect(first.errors).toBe(1);
     expect(cursors.size).toBe(0);
 
     fail = false;
-    const second = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000 });
+    const second = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000, confirmations: 0 });
     expect(second.notificationsSent).toBe(1);
     expect(cursors.get(`${CHAIN_ID}:${DEPOSITORY}`)).toBe(200);
+  });
+
+  test('fails loud instead of skipping an expired backfill range', async () => {
+    const { store, cursors } = buildFakeStore();
+    cursors.set(`${CHAIN_ID}:${DEPOSITORY}`, 1);
+    let reads = 0;
+    const result = await runDisputeWatchSweep(store, {
+      kind: 'unused',
+      send: async () => ({ ok: true }),
+    }, {
+      maxBlockRange: 100,
+      maxBackfillBlocks: 100,
+      providerFactory: () => ({
+        getBlockNumber: async () => 200,
+        getLogs: async () => { reads += 1; return []; },
+      }),
+    });
+    expect(result.errors).toBe(1);
+    expect(reads).toBe(0);
+    expect(cursors.get(`${CHAIN_ID}:${DEPOSITORY}`)).toBe(1);
+  });
+
+  test('fails loud on a malformed matching event and does not advance its cursor', async () => {
+    const { Interface } = await import('ethers');
+    const iface = new Interface([
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
+    ]);
+    const { store, cursors } = buildFakeStore();
+    const result = await runDisputeWatchSweep(store, {
+      kind: 'unused',
+      send: async () => ({ ok: true }),
+    }, {
+      confirmations: 0,
+      providerFactory: () => ({
+        getBlockNumber: async () => 200,
+        getLogs: async () => [{
+          topics: [iface.getEvent('DisputeStarted')!.topicHash],
+          data: '0x1234',
+          blockNumber: 150,
+        }],
+      }),
+    });
+    expect(result.errors).toBe(1);
+    expect(cursors.size).toBe(0);
+  });
+
+  test('times out a log RPC read and leaves the cursor unchanged', async () => {
+    const { store, cursors } = buildFakeStore();
+    const result = await runDisputeWatchSweep(store, {
+      kind: 'unused',
+      send: async () => ({ ok: true }),
+    }, {
+      rpcTimeoutMs: 5,
+      confirmations: 0,
+      providerFactory: () => ({
+        getBlockNumber: async () => 200,
+        getLogs: () => new Promise<never>(() => {}),
+      }),
+    });
+    expect(result.errors).toBe(1);
+    expect(cursors.size).toBe(0);
+  });
+
+  test('scans and persists only through the confirmation-safe head', async () => {
+    const { store, cursors } = buildFakeStore();
+    const ranges: Array<{ fromBlock: number; toBlock: number }> = [];
+    const result = await runDisputeWatchSweep(store, {
+      kind: 'unused',
+      send: async () => ({ ok: true }),
+    }, {
+      confirmations: 12,
+      maxBlockRange: 1000,
+      providerFactory: () => ({
+        getBlockNumber: async () => 200,
+        getLogs: async filter => {
+          ranges.push({ fromBlock: filter.fromBlock, toBlock: filter.toBlock });
+          return [];
+        },
+      }),
+    });
+    expect(result.errors).toBe(0);
+    expect(ranges.at(-1)?.toBlock).toBe(188);
+    expect(cursors.get(`${CHAIN_ID}:${DEPOSITORY}`)).toBe(188);
   });
 });
 

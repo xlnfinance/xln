@@ -20,6 +20,8 @@ import {
 import { createStructuredLogger } from '../../infra/logger';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
 import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import { decodeRuntimeEntityInputsEnvelope } from '../p2p/entity-input-envelope';
+import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input-envelope-auth';
 
 const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
@@ -108,7 +110,10 @@ export const createLocalDeliveryHandler = (
       throw new Error('P2P_UNENCRYPTED: local entity_inputs must be encrypted');
     }
     const activeKeyPair = getServerKeyPair();
-    const envelope = decryptJSON<RuntimeEntityInputsEnvelope>(payload, activeKeyPair.privateKey);
+    const envelope = decodeRuntimeEntityInputsEnvelope(
+      decryptJSON<RuntimeEntityInputsEnvelope>(payload, activeKeyPair.privateKey),
+    );
+    assertRuntimeEntityInputsEnvelopeSource(env, from, envelope);
     relayLog(`[RELAY] → decrypted entity_inputs: inputs=${envelope.entityInputs?.length ?? 0}`);
 
     await withRuntimeCommittedRead(env, () => {

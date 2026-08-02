@@ -62,13 +62,33 @@ const toBigInt = (value: string | bigint | number): bigint => {
 
 const now = (): number => Date.now();
 
+export const DEFAULT_MAX_CUSTODY_SESSIONS = 100_000;
+export const DEFAULT_EMPTY_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+
+type CustodyStoreOptions = {
+  maxSessions?: number;
+  emptySessionTtlMs?: number;
+};
+
 export class CustodyStore {
   private readonly db: Database;
+  private readonly maxSessions: number;
+  private readonly emptySessionTtlMs: number;
 
-  constructor(dbPath: string) {
+  constructor(dbPath: string, options: CustodyStoreOptions = {}) {
+    this.maxSessions = options.maxSessions ?? DEFAULT_MAX_CUSTODY_SESSIONS;
+    this.emptySessionTtlMs = options.emptySessionTtlMs ?? DEFAULT_EMPTY_SESSION_TTL_MS;
+    if (!Number.isSafeInteger(this.maxSessions) || this.maxSessions < 1) {
+      throw new Error('CUSTODY_SESSION_CAPACITY_INVALID');
+    }
+    if (!Number.isSafeInteger(this.emptySessionTtlMs) || this.emptySessionTtlMs < 0) {
+      throw new Error('CUSTODY_EMPTY_SESSION_TTL_INVALID');
+    }
     this.db = new Database(dbPath, { create: true, strict: true });
     this.db.exec('PRAGMA journal_mode = WAL;');
-    this.db.exec('PRAGMA synchronous = NORMAL;');
+    // Custody acknowledges money-state writes only after SQLite has requested
+    // durable WAL sync; NORMAL can lose an acknowledged transaction on power loss.
+    this.db.exec('PRAGMA synchronous = FULL;');
     this.initSchema();
   }
 
@@ -183,9 +203,28 @@ export class CustodyStore {
 
   createSession(token: string, userId: string): SessionRecord {
     const createdAt = now();
-    this.db
-      .query('INSERT INTO sessions (token, user_id, created_at, last_seen_at) VALUES (?1, ?2, ?3, ?3)')
-      .run(token, userId, createdAt);
+    const countSessions = this.db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM sessions');
+    const pruneEmptySessions = this.db.query(`
+      DELETE FROM sessions
+      WHERE last_seen_at < ?1
+        AND NOT EXISTS (SELECT 1 FROM balances WHERE balances.user_id = sessions.user_id)
+        AND NOT EXISTS (SELECT 1 FROM deposits WHERE deposits.user_id = sessions.user_id)
+        AND NOT EXISTS (SELECT 1 FROM withdrawals WHERE withdrawals.user_id = sessions.user_id)
+    `);
+    const insertSession = this.db.query(
+      'INSERT INTO sessions (token, user_id, created_at, last_seen_at) VALUES (?1, ?2, ?3, ?3)',
+    );
+    this.db.transaction(() => {
+      let sessionCount = countSessions.get()?.count ?? 0;
+      if (sessionCount >= this.maxSessions) {
+        pruneEmptySessions.run(createdAt - this.emptySessionTtlMs);
+        sessionCount = countSessions.get()?.count ?? 0;
+      }
+      if (sessionCount >= this.maxSessions) {
+        throw new Error('CUSTODY_SESSION_CAPACITY_REACHED');
+      }
+      insertSession.run(token, userId, createdAt);
+    })();
     return { token, userId, createdAt, lastSeenAt: createdAt };
   }
 
@@ -259,7 +298,35 @@ export class CustodyStore {
         input.startedAtMs ?? null,
       );
       const inserted = Number(result.changes) > 0;
-      if (!inserted) return { inserted: false, credited: false };
+      if (!inserted) {
+        const existing = this.db.query<{
+          user_id: string | null;
+          token_id: number;
+          amount_minor: string;
+          description: string;
+          from_entity_id: string;
+          hashlock: string;
+          frame_height: number;
+          created_at: number;
+          started_at_ms: number | null;
+        }, [string]>(`
+          SELECT user_id, token_id, amount_minor, description, from_entity_id,
+                 hashlock, frame_height, created_at, started_at_ms
+          FROM deposits WHERE event_key = ?1
+        `).get(input.eventKey);
+        const exactReplay = existing !== null &&
+          existing.user_id === input.userId &&
+          existing.token_id === input.tokenId &&
+          existing.amount_minor === input.amountMinor.toString() &&
+          existing.description === input.description &&
+          existing.from_entity_id === input.fromEntityId &&
+          existing.hashlock === input.hashlock &&
+          existing.frame_height === input.frameHeight &&
+          existing.created_at === input.createdAt &&
+          existing.started_at_ms === (input.startedAtMs ?? null);
+        if (!exactReplay) throw new Error(`CUSTODY_DEPOSIT_EVENT_CONFLICT:${input.eventKey}`);
+        return { inserted: false, credited: false };
+      }
       if (input.userId && this.userExists(input.userId)) {
         const current = this.getBalanceAmount(input.userId, input.tokenId);
         this.setBalanceAmount(input.userId, input.tokenId, current + input.amountMinor, input.createdAt);

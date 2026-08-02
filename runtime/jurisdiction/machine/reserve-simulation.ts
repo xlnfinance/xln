@@ -12,7 +12,7 @@ export interface DraftBatchReserveIssue {
   tokenId: number;
   opType: DraftBatchReserveOpType;
   opIndex: number;
-  failureMode: 'skipped' | 'batchRevert';
+  failureMode: 'batchRevert';
   requiredAmount: bigint;
   availableAfterDebt: bigint;
   debtClaimPaid: bigint;
@@ -75,7 +75,7 @@ function sweepOutgoingDebt(
   };
 }
 
-function pushSkipIssue(
+function pushRevertIssue(
   issues: DraftBatchReserveIssue[],
   sweep: DebtSweep,
   tokenId: number,
@@ -87,13 +87,13 @@ function pushSkipIssue(
     tokenId,
     opType,
     opIndex,
-    failureMode: 'skipped',
+    failureMode: 'batchRevert',
     requiredAmount: amount,
     ...sweep,
   });
 }
 
-function spendBestEffort(
+function spendOrRecordRevert(
   state: DraftBatchReserveSimulation,
   tokenId: number,
   amount: bigint,
@@ -102,7 +102,7 @@ function spendBestEffort(
 ): boolean {
   const sweep = sweepOutgoingDebt(state.reservesByToken, state.outgoingDebtByToken, tokenId);
   if (sweep.availableAfterDebt < amount) {
-    pushSkipIssue(state.issues, sweep, tokenId, opType, opIndex, amount);
+    pushRevertIssue(state.issues, sweep, tokenId, opType, opIndex, amount);
     return false;
   }
   writeAmount(state.reservesByToken, tokenId, sweep.availableAfterDebt - amount);
@@ -125,7 +125,7 @@ function applySettlement(
     const available = spendableReserve(state.reservesByToken, state.outgoingDebtByToken, diff.tokenId);
     if (available >= -ownDiff) continue;
     const sweep = debtSweeps.get(diff.tokenId);
-    pushSkipIssue(state.issues, {
+    pushRevertIssue(state.issues, {
       availableAfterDebt: available,
       debtClaimPaid: sweep?.debtClaimPaid ?? 0n,
       remainingDebtAfterSweep: readAmount(state.outgoingDebtByToken, diff.tokenId),
@@ -203,7 +203,7 @@ export function simulateDraftBatchReserveAvailability(
     if (target === entityId) addAmount(state.reservesByToken, op.internalTokenId, op.amount);
   }
   for (const [index, op] of batch.reserveToReserve.entries()) {
-    if (!spendBestEffort(state, op.tokenId, op.amount, 'reserveToReserve', index)) continue;
+    if (!spendOrRecordRevert(state, op.tokenId, op.amount, 'reserveToReserve', index)) continue;
     if (normalizeEntityId(op.receivingEntity) === entityId) addAmount(state.reservesByToken, op.tokenId, op.amount);
   }
   for (const op of batch.collateralToReserve) addAmount(state.reservesByToken, op.tokenId, op.amount);
@@ -228,12 +228,13 @@ export function simulateDraftBatchReserveAvailability(
   }
   for (const [index, op] of batch.reserveToCollateral.entries()) {
     const amount = op.pairs.reduce((sum, pair) => sum + pair.amount, 0n);
-    spendBestEffort(state, op.tokenId, amount, 'reserveToCollateral', index);
+    spendOrRecordRevert(state, op.tokenId, amount, 'reserveToCollateral', index);
   }
   for (const [index, op] of batch.reserveToExternalToken.entries()) {
-    spendBestEffort(state, op.tokenId, op.amount, 'reserveToExternalToken', index);
+    spendOrRecordRevert(state, op.tokenId, op.amount, 'reserveToExternalToken', index);
   }
-  if (!finalizeFlashloans(state, startingReserves, flashloansByToken)) {
+  finalizeFlashloans(state, startingReserves, flashloansByToken);
+  if (state.issues.length > 0) {
     state.reservesByToken = startingReserves;
     state.outgoingDebtByToken = startingDebts;
   }

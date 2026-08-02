@@ -90,8 +90,6 @@ export const KEY_HISTORY_VIEW_HEAD = Buffer.from([0x00]);
 export const HISTORY_VIEW_ACCOUNT_FRAME = 0x01;
 export const HISTORY_VIEW_RUNTIME_ACTIVITY = 0x02;
 export const HISTORY_VIEW_ENTITY_FRAME = 0x03;
-export const HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME = 0x04;
-export const HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME = 0x05;
 export const ZERO_FRAME_HASH = `0x${'00'.repeat(32)}`;
 
 export const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
@@ -235,19 +233,6 @@ export const keyHistoryViewAccountFrame = (
   accountHeight: number,
 ): Buffer => Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId), encodeHeight(accountHeight)]);
 
-export const keyHistoryViewAccountFrameByRuntime = (
-  runtimeHeight: number,
-  entityId: string,
-  counterpartyId: string,
-  accountHeight: number,
-): Buffer => Buffer.concat([
-  Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME]),
-  encodeHeight(runtimeHeight),
-  hexBytes(entityId),
-  hexBytes(counterpartyId),
-  encodeHeight(accountHeight),
-]);
-
 export const keyHistoryViewRuntimeActivity = (height: number): Buffer =>
   Buffer.concat([Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]), encodeHeight(height)]);
 
@@ -269,58 +254,10 @@ export const parseHistoryViewEntityFrameKey = (key: Buffer): { entityId: string;
   };
 };
 
-export const keyHistoryViewEntityFrameByRuntime = (
-  runtimeHeight: number,
-  entityId: string,
-  entityHeight: number,
-): Buffer => Buffer.concat([
-  Buffer.from([HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME]),
-  encodeHeight(runtimeHeight),
-  hexBytes(entityId),
-  encodeHeight(entityHeight),
-]);
-
-export const keyHistoryViewEntityFrameByRuntimePrefix = (): Buffer =>
-  Buffer.from([HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME]);
-
-export const parseHistoryViewEntityFrameRuntimeIndexKey = (key: Buffer): {
-  runtimeHeight: number;
-  entityId: string;
-  entityHeight: number;
-} => {
-  if (key.length !== 49 || key[0] !== HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME) {
-    throw new Error(`STORAGE_HISTORY_VIEW_ENTITY_RUNTIME_KEY_INVALID:${key.toString('hex')}`);
-  }
-  return {
-    runtimeHeight: decodeHeight(key, 1),
-    entityId: decodeEntityId(key.subarray(9, 41)),
-    entityHeight: decodeHeight(key, 41),
-  };
-};
-
 export const keyHistoryViewAccountFramePrefix = (entityId?: string, counterpartyId?: string): Buffer => {
   if (entityId && counterpartyId) return Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId)]);
   if (entityId) return Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]), hexBytes(entityId)]);
   return Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]);
-};
-
-export const keyHistoryViewAccountFrameByRuntimePrefix = (): Buffer => Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME]);
-
-export const parseHistoryViewAccountFrameRuntimeIndexKey = (key: Buffer): {
-  runtimeHeight: number;
-  entityId: string;
-  counterpartyId: string;
-  accountHeight: number;
-} => {
-  if (key.length !== 81 || key[0] !== HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME) {
-    throw new Error(`STORAGE_HISTORY_VIEW_ACCOUNT_RUNTIME_KEY_INVALID:${key.toString('hex')}`);
-  }
-  return {
-    runtimeHeight: decodeHeight(key, 1),
-    entityId: decodeEntityId(key.subarray(9, 41)),
-    counterpartyId: decodeEntityId(key.subarray(41, 73)),
-    accountHeight: decodeHeight(key, 73),
-  };
 };
 
 export const parseHistoryViewAccountFrameKey = (key: Buffer): {

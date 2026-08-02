@@ -17,7 +17,6 @@ import { isRetryableIngressBackpressure } from './ingress-backpressure';
 import { verifyRuntimeWsFrameAuth } from './hello-auth';
 
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
-const DEFAULT_WS_AUTH_SKEW_MS = 5 * 60 * 1000;
 const wsLog = createStructuredLogger('runtime.wsClient');
 
 // Separate interfaces for browser and Node.js WebSocket implementations
@@ -139,17 +138,6 @@ export type RuntimeWsClientOptions = {
 };
 
 const isBrowser = typeof window !== 'undefined' && typeof WebSocket !== 'undefined';
-let wsTimestampCounter = 0;
-
-const nextTimestamp = () => {
-  const now = Date.now();
-  if (now <= wsTimestampCounter) {
-    wsTimestampCounter += 1;
-    return wsTimestampCounter;
-  }
-  wsTimestampCounter = now;
-  return wsTimestampCounter;
-};
 
 const createWs = async (
   url: string,
@@ -206,6 +194,8 @@ export class RuntimeWsClient {
   private helloNonce: string | null = null;
   private directPeerEncryptionPubKey: string | null = null;
   private lastInboundAuthTimestamp = 0;
+  private outboundAuthTimestamp = 0;
+  private messageTimestamp = 0;
   private readonly maxReconnectAttempts: number;
   private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
 
@@ -241,6 +231,7 @@ export class RuntimeWsClient {
     this.helloNonce = null;
     this.directPeerEncryptionPubKey = null;
     this.lastInboundAuthTimestamp = 0;
+    this.outboundAuthTimestamp = 0;
     this.suppressNextClose = false;
     const generation = ++this.lifecycleGeneration;
     const attempt = this.connectForGeneration(generation);
@@ -461,6 +452,11 @@ export class RuntimeWsClient {
     return true;
   }
 
+  private nextMessageTimestamp(): number {
+    this.messageTimestamp = Math.max(Date.now(), this.messageTimestamp + 1);
+    return this.messageTimestamp;
+  }
+
   private sendHello(challengeMessage?: RuntimeWsMessage): boolean {
     if (this.helloSent) return true;
     const encryptionKeyPair = this.options.encryptionKeyPair;
@@ -485,7 +481,7 @@ export class RuntimeWsClient {
           `WS_HELLO_AUDIENCE_MISMATCH:expected=${expectedAudience}:received=${challengeMessage.audience}`,
         );
       }
-      const timestamp = nextTimestamp();
+      const timestamp = Date.now();
       const encryptionPubKey = pubKeyToHex(encryptionKeyPair.publicKey);
       const nonce = challengeMessage.challenge;
       const signature = signDigest(
@@ -573,7 +569,6 @@ export class RuntimeWsClient {
               directPeerRuntimeId,
               msg,
               msg.auth,
-              DEFAULT_WS_AUTH_SKEW_MS,
               this.helloAudience!,
               this.helloNonce!,
               0,
@@ -619,7 +614,6 @@ export class RuntimeWsClient {
           directPeerRuntimeId,
           msg,
           msg.auth,
-          DEFAULT_WS_AUTH_SKEW_MS,
           this.helloAudience!,
           this.helloNonce!,
           this.lastInboundAuthTimestamp,
@@ -798,7 +792,9 @@ export class RuntimeWsClient {
       fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
       to,
       timestamp:
-        typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp) ? ingressTimestamp : nextTimestamp(),
+        typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp)
+          ? ingressTimestamp
+          : this.nextMessageTimestamp(),
       payload,
       encrypted: true,
       ...(envelope.entityInputs.length === 1 && envelope.entityInputs[0]
@@ -814,7 +810,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: nextTimestamp(),
+      timestamp: this.nextMessageTimestamp(),
       payload: receipt,
     });
   }
@@ -825,7 +821,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: nextTimestamp(),
+      timestamp: this.nextMessageTimestamp(),
       payload,
     });
   }
@@ -836,7 +832,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: nextTimestamp(),
+      timestamp: this.nextMessageTimestamp(),
       payload,
     });
   }
@@ -847,7 +843,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: nextTimestamp(),
+      timestamp: this.nextMessageTimestamp(),
       payload,
     });
   }
@@ -858,7 +854,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to: this.options.runtimeId, // To relay (self)
-      timestamp: nextTimestamp(),
+      timestamp: this.nextMessageTimestamp(),
       payload,
     });
   }
@@ -878,7 +874,7 @@ export class RuntimeWsClient {
       id,
       from: this.options.runtimeId,
       to,
-      timestamp: nextTimestamp(),
+      timestamp: this.nextMessageTimestamp(),
       payload: { lookupKey: key },
     });
   }
@@ -926,7 +922,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: nextTimestamp(),
+      timestamp: this.nextMessageTimestamp(),
       ...(inReplyTo ? { inReplyTo } : {}),
       ...(error ? { error } : { payload }),
     });
@@ -937,7 +933,7 @@ export class RuntimeWsClient {
       type: 'debug_event',
       id: makeMessageId(),
       from: this.options.runtimeId,
-      timestamp: nextTimestamp(),
+      timestamp: this.nextMessageTimestamp(),
       payload,
     });
   }
@@ -987,7 +983,7 @@ export class RuntimeWsClient {
           'WS_SEND_SESSION_AUTH_MISSING',
           'Authenticated WS frame requires a completed bound hello',
         );
-        const authTimestamp = nextTimestamp();
+        const authTimestamp = ++this.outboundAuthTimestamp;
         outboundMsg.auth = {
           nonce: this.helloNonce!,
           timestamp: authTimestamp,
@@ -1000,11 +996,8 @@ export class RuntimeWsClient {
       }
     } catch (error) {
       this.options.onError?.(error as Error);
-      this.sendDebugEvent({
-        level: 'error',
-        code: 'WS_SEND_FAILFAST',
-        failfast: asFailFastPayload(error),
-      });
+      // Never report a send failure through this same transport: the debug
+      // frame must satisfy the same failed preconditions and would recurse.
       return false;
     }
     const payload = serializeWsMessage(outboundMsg);

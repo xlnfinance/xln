@@ -7,8 +7,12 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
+  getPersistedLatestHeight,
+  getRuntimeWalDb,
   processRuntime,
+  readPersistedAccountFrameHistory,
   readPersistedEntityFrameHistory,
+  saveEnvToDB,
 } from '../runtime';
 import {
   deriveSignerAddressSync,
@@ -16,6 +20,9 @@ import {
   registerSignerKey,
 } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
+import { recordAccountFrameHistory } from '../runtime/env-events';
+import { closeHistoryViewDb } from '../storage/runtime-dbs';
+import { pruneHistoryBeforeHeight } from '../storage/lifecycle';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
@@ -27,7 +34,7 @@ afterEach(async () => {
     await closeInfraDb(env);
     const root = process.env['XLN_DB_PATH'] || 'db-tmp/runtime';
     const namespace = String(env.dbNamespace || env.runtimeId || '').toLowerCase();
-    for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-infra']) {
+    for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-history-views', '-infra']) {
       rmSync(join(root, `${namespace}${suffix}`), { recursive: true, force: true });
     }
   }
@@ -115,4 +122,69 @@ test('live Entity memory keeps only the post-checkpoint tail while LevelDB keeps
   const persisted = await readPersistedEntityFrameHistory(env, entityId, 10);
   expect(persisted.map(link => link.frame.height)).toEqual([1, 2]);
   expect(persisted.every(link => link.frame.collectedSigs instanceof Map)).toBeTrue();
+  await closeHistoryViewDb(env);
+  const root = process.env['XLN_DB_PATH'] || 'db-tmp/runtime';
+  rmSync(join(root, `${env.runtimeId}-history-views`), { recursive: true, force: true });
+  const afterViewDeletion = await readPersistedEntityFrameHistory(env, entityId, 10);
+  expect(afterViewDeletion).toEqual(persisted);
+});
+
+test('certified history fork aborts before authoritative HEAD advances', async () => {
+  const seed = `certified-history-conflict-${Date.now()} alpha beta gamma`;
+  const env = createEmptyEnv(seed);
+  created.push(env);
+  env.runtimeId = deriveSignerAddressSync(seed, 'runtime').toLowerCase();
+  env.dbNamespace = env.runtimeId;
+  env.quietRuntimeLogs = true;
+  env.scenarioMode = true;
+  const entityId = `0x${'31'.repeat(32)}`;
+  const counterpartyId = `0x${'42'.repeat(32)}`;
+  const zeroHash = `0x${'00'.repeat(32)}`;
+  const frame = {
+    height: 1,
+    timestamp: 100,
+    jHeight: 0,
+    accountTxs: [],
+    prevFrameHash: 'genesis',
+    accountStateRoot: zeroHash,
+    stateHash: zeroHash,
+    byLeft: true,
+    deltas: [],
+  };
+
+  env.state.height = 1;
+  env.state.timestamp = 100;
+  recordAccountFrameHistory(env, {
+    entityId,
+    counterpartyId,
+    accountHeight: 1,
+    source: 'peerCommit',
+    frame,
+  });
+  await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+  expect(await getPersistedLatestHeight(env)).toBe(1);
+
+  env.state.height = 2;
+  env.state.timestamp = 200;
+  recordAccountFrameHistory(env, {
+    entityId,
+    counterpartyId,
+    accountHeight: 1,
+    source: 'ackCommit',
+    frame: { ...frame, stateHash: `0x${'ff'.repeat(32)}` },
+  });
+  await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []))
+    .rejects.toThrow('STORAGE_CERTIFIED_FRAME_CONFLICT');
+  expect(await getPersistedLatestHeight(env)).toBe(1);
+
+  await pruneHistoryBeforeHeight(getRuntimeWalDb(env), 1);
+  await closeHistoryViewDb(env);
+  const root = process.env['XLN_DB_PATH'] || 'db-tmp/runtime';
+  rmSync(join(root, `${env.runtimeId}-history-views`), { recursive: true, force: true });
+  expect(await readPersistedAccountFrameHistory(
+    env,
+    entityId,
+    counterpartyId,
+    10,
+  )).toEqual([frame]);
 });

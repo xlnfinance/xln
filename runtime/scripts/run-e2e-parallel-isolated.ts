@@ -7,7 +7,6 @@
  * Usage:
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=3
- *   bun runtime/scripts/run-e2e-parallel-isolated.ts --base-port=20000
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --all
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --video=on --trace=on-first-retry --max-failures=1
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --all --start-at=18 --preserve-artifacts
@@ -67,6 +66,12 @@ import {
   type E2ERunnerLock,
 } from './e2e-runner-lock';
 import {
+  acquireLocalTestPortLease,
+  assertLocalTestPortsFree,
+  LOCAL_TEST_PORT_POOL_VERSION,
+  LOCAL_TEST_STACK_BASES,
+} from './local-test-port-lease';
+import {
   buildIsolatedE2ERerunCommand,
   parseJsonStrict,
   readPlaywrightFailureReport,
@@ -91,7 +96,6 @@ export {
 } from './e2e-run-report';
 import {
   assertE2ECodeFingerprintStable,
-  assertE2EShardPortsIsolated,
   computeCodeFingerprint,
   computeRepositorySourceDriftProbe,
   createAsyncLimiter,
@@ -124,10 +128,17 @@ export type {
   E2EShardPaths,
   E2EShardPorts,
 } from './e2e-isolated-runtime';
+export {
+  acquireLocalTestPortLease,
+  assertLocalTestPortsFree,
+  LOCAL_TEST_PORT_POOL_VERSION,
+  LOCAL_TEST_STACK_BASES,
+  parseLocalTestListeningPortOutput,
+  readLocalTestListeningPortPids,
+} from './local-test-port-lease';
 
 export type CliArgs = {
   shards: number;
-  basePort: number;
   stackTimeoutMs: number;
   testTimeoutMs: number;
   phaseWarnMs: number;
@@ -245,6 +256,7 @@ export const isE2EGlobalFailFastAbortSignal = (signal?: AbortSignal): boolean =>
 
 export type RunResult = {
   shard: number;
+  portBase: number;
   status: E2EShardRunStatus;
   resultClass: E2EShardRunClass;
   durationMs: number;
@@ -340,7 +352,9 @@ const parseArgs = (): CliArgs => {
   const hasFlag = (name: string): boolean => args.includes(`--${name}`);
 
   const shardsRaw = Number(getFlag('shards') || String(defaultShards));
-  const basePortRaw = Number(getFlag('base-port') || '20000');
+  if (args.some(arg => arg === '--base-port' || arg.startsWith('--base-port='))) {
+    throw new Error('E2E_BASE_PORT_OVERRIDE_FORBIDDEN');
+  }
   const defaultStackTimeoutMs = Math.min(420000, 180000 + Math.max(0, shardsRaw - 8) * 15000);
   const stackTimeoutRaw = Number(getFlag('stack-timeout-ms') || String(defaultStackTimeoutMs));
   const testTimeoutRaw = Number(
@@ -376,7 +390,6 @@ const parseArgs = (): CliArgs => {
 
   return {
     shards: Number.isFinite(shardsRaw) && shardsRaw > 0 ? Math.floor(shardsRaw) : 2,
-    basePort: Number.isFinite(basePortRaw) && basePortRaw > 0 ? Math.floor(basePortRaw) : 20000,
     stackTimeoutMs: Number.isFinite(stackTimeoutRaw) && stackTimeoutRaw > 0 ? Math.floor(stackTimeoutRaw) : 180000,
     testTimeoutMs:
       Number.isFinite(testTimeoutRaw) && testTimeoutRaw > 0
@@ -426,7 +439,7 @@ export const ISOLATED_E2E_RUNNER_USAGE = [
   '',
   'Isolation:',
   '  --shards=<count>              Isolated stack count',
-  '  --base-port=<port>            First isolated port (default 20000)',
+  '  Ports are leased automatically from machine-wide isolated slots.',
   '  --workers-per-shard=<count>   Playwright workers per stack',
   '  --strict-browser-health       Fail on unapproved browser/runtime incidents',
 ].join('\n');
@@ -875,204 +888,8 @@ const attachPlaywrightMetadata = (
   });
 };
 
-const stopShardRuntimePorts = async (
-  apiPort: number,
-  log: ReturnType<typeof createWriteStream>,
-): Promise<void> => {
-  await freeE2EPorts([apiPort, apiPort + 10, apiPort + 11, apiPort + 12, apiPort + 13], log);
-};
-
-export const parseE2EListeningPortOutput = (output: string): Map<number, number[]> => {
-  const pidsByPort = new Map<number, Set<number>>();
-  let currentPid: number | null = null;
-  for (const field of output.split(/\r?\n/).map(value => value.trim()).filter(Boolean)) {
-    if (field.startsWith('p')) {
-      const pid = Number(field.slice(1));
-      if (!Number.isSafeInteger(pid) || pid <= 0) {
-        throw new Error(`E2E_LSOF_OUTPUT_INVALID:${field.slice(0, 200)}`);
-      }
-      currentPid = pid;
-      continue;
-    }
-    if (!field.startsWith('n')) continue;
-    const portMatch = field.match(/:(\d+)$/);
-    if (currentPid === null || !portMatch) {
-      throw new Error(`E2E_LSOF_OUTPUT_INVALID:${field.slice(0, 200)}`);
-    }
-    const port = Number(portMatch[1]);
-    if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) {
-      throw new Error(`E2E_LSOF_OUTPUT_INVALID:${field.slice(0, 200)}`);
-    }
-    const pids = pidsByPort.get(port) ?? new Set<number>();
-    pids.add(currentPid);
-    pidsByPort.set(port, pids);
-  }
-  return new Map(Array.from(pidsByPort.entries())
-    .sort(([left], [right]) => left - right)
-    .map(([port, pids]) => [port, Array.from(pids).sort((left, right) => left - right)]));
-};
-
-export const readE2EListeningPortPids = (ports: readonly number[]): Map<number, number[]> => {
-  const normalizedPorts = Array.from(new Set(ports))
-    .filter(port => Number.isSafeInteger(port) && port > 0 && port <= 65_535)
-    .sort((left, right) => left - right);
-  if (normalizedPorts.length === 0) return new Map();
-  const res = spawnSync('lsof', [
-    '-nP',
-    '-a',
-    '-sTCP:LISTEN',
-    '-FnP',
-    ...normalizedPorts.map(port => `-iTCP:${port}`),
-  ], {
-    stdio: ['ignore', 'pipe', 'ignore'],
-    encoding: 'utf8',
-    timeout: 2_000,
-    killSignal: 'SIGKILL',
-  });
-  const output = String(res.stdout || '').trim();
-  if (!output && res.status === 1 && !res.error) return new Map();
-  if (res.error || res.status !== 0) {
-    throw new Error(
-      `E2E_PORT_SCAN_FAILED:ports=${normalizedPorts.join(',')}:status=${String(res.status)}:` +
-      `${res.error?.message || 'unknown'}`,
-    );
-  }
-  const requested = new Set(normalizedPorts);
-  return new Map(Array.from(parseE2EListeningPortOutput(output).entries())
-    .filter(([port]) => requested.has(port)));
-};
-
-export const isIsolatedE2EProcessCommand = (command: string): boolean => {
-  const normalized = command.replaceAll('\\', '/');
-  return normalized.includes('/.logs/e2e-parallel/') || normalized.includes('--mode xln-e2e-');
-};
-
-const signalOwnedE2EPid = (pid: number, signal: NodeJS.Signals, port: number): void => {
-  try {
-    process.kill(pid, signal);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
-    throw new Error(`E2E_PORT_SIGNAL_FAILED:port=${port}:pid=${pid}:signal=${signal}`, { cause: error });
-  }
-};
-
-const assertE2EPortOwners = (pidsByPort: ReadonlyMap<number, readonly number[]>): Map<number, number[]> => {
-  const commandsByPid = new Map(readProcessTable().map(({ pid, command }) => [pid, command]));
-  const active = new Map<number, number[]>();
-  for (const [port, pids] of pidsByPort) {
-    const externalPids = pids.filter(pid => pid !== process.pid);
-    if (externalPids.length > 0) active.set(port, externalPids);
-  }
-  const foreign = Array.from(active.entries()).flatMap(([port, pids]) =>
-    pids.filter(pid => !isIsolatedE2EProcessCommand(commandsByPid.get(pid) || ''))
-      .map(pid => `${port}:${pid}`));
-  if (foreign.length > 0) {
-    throw new Error(
-      `E2E_PORT_OWNERSHIP_CONFLICT:portPids=${foreign.join(',')}:` +
-      'refusing to kill a process not owned by an isolated E2E run',
-    );
-  }
-  return active;
-};
-
-const signalE2EPortOwners = (
-  pidsByPort: ReadonlyMap<number, readonly number[]>,
-  signal: NodeJS.Signals,
-  log?: ReturnType<typeof createWriteStream>,
-): void => {
-  const firstPortByPid = new Map<number, number>();
-  for (const [port, pids] of pidsByPort) {
-    if (pids.length > 0) log?.write(`[preflight] port ${port} busy by pids=${pids.join(',')} -> ${signal}\n`);
-    for (const pid of pids) if (!firstPortByPid.has(pid)) firstPortByPid.set(pid, port);
-  }
-  for (const [pid, port] of firstPortByPid) signalOwnedE2EPid(pid, signal, port);
-};
-
-export const freeE2EPorts = async (
-  ports: readonly number[],
-  log?: ReturnType<typeof createWriteStream>,
-): Promise<void> => {
-  const normalizedPorts = Array.from(new Set(ports)).sort((left, right) => left - right);
-  const first = assertE2EPortOwners(readE2EListeningPortPids(normalizedPorts));
-  if (first.size === 0) return;
-  signalE2EPortOwners(first, 'SIGTERM', log);
-  await scheduler.wait(300);
-
-  const second = assertE2EPortOwners(readE2EListeningPortPids(normalizedPorts));
-  if (second.size > 0) {
-    signalE2EPortOwners(second, 'SIGKILL', log);
-    await scheduler.wait(150);
-  }
-
-  const remain = assertE2EPortOwners(readE2EListeningPortPids(normalizedPorts));
-  if (remain.size > 0) {
-    const details = Array.from(remain.entries()).map(([port, pids]) => `${port}:${pids.join(',')}`);
-    throw new Error(`E2E_PORTS_STILL_IN_USE_AFTER_CLEANUP:${details.join(';')}`);
-  }
-};
-
-type ProcessTableEntry = { pid: number; command: string };
-
-const readProcessTable = (): ProcessTableEntry[] => {
-  const res = spawnSync('ps', ['-axo', 'pid=,command='], {
-    cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'ignore'],
-    encoding: 'utf8',
-  });
-  return String(res.stdout || '')
-    .split(/\r?\n/)
-    .map((line): ProcessTableEntry | null => {
-      const match = line.match(/^\s*(\d+)\s+(.+)$/);
-      if (!match) return null;
-      const pid = Number.parseInt(match[1]!, 10);
-      if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return null;
-      return { pid, command: match[2]!.trim() };
-    })
-    .filter((row): row is ProcessTableEntry => row !== null);
-};
-
-const killPids = async (pids: number[], label: string): Promise<void> => {
-  const unique = Array.from(new Set(pids)).filter(pid => pid > 0 && pid !== process.pid);
-  if (unique.length === 0) return;
-  console.warn(`[preflight] killing stale ${label}: ${unique.join(',')}`);
-  for (const pid of unique) {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch (error) {
-      console.warn(`[preflight] SIGTERM failed pid=${pid}`, error);
-    }
-  }
-  await scheduler.wait(1_000);
-  for (const pid of unique) {
-    if (!isE2ERunnerProcessAlive(pid)) continue;
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch (error) {
-      console.warn(`[preflight] SIGKILL failed pid=${pid}`, error);
-    }
-  }
-  await scheduler.wait(250);
-};
-
-const reapStaleIsolatedE2EProcesses = async (currentLogsDir: string): Promise<void> => {
-  const marker = `${resolve(process.cwd(), '.logs', 'e2e-parallel')}/`;
-  const currentMarker = `${currentLogsDir}/`;
-  const stalePids = readProcessTable()
-    .filter(
-      ({ command }) =>
-        (command.includes(marker) || command.includes('--mode xln-e2e-')) &&
-        !command.includes(currentMarker),
-    )
-    .filter(
-      ({ command }) =>
-        command.includes('runtime/orchestrator/orchestrator.ts') ||
-        command.includes('runtime/orchestrator/hub-node.ts') ||
-        command.includes('runtime/orchestrator/mm-node.ts') ||
-        command.includes(' --state ') ||
-        command.includes('--mode xln-e2e-'),
-    )
-    .map(({ pid }) => pid);
-  await killPids(stalePids, 'isolated e2e process(es)');
+const assertShardRuntimePortsReleased = (apiPort: number): void => {
+  assertLocalTestPortsFree([apiPort, apiPort + 10, apiPort + 11, apiPort + 12, apiPort + 13]);
 };
 
 const fetchWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs = 2_000): Promise<Response> => {
@@ -1871,6 +1688,7 @@ const runShard = async (
   logsDir: string,
   buildArtifacts: E2EBuildArtifacts,
   resetLimiter: AsyncLimiter,
+  portBase: number,
   signal?: AbortSignal,
 ): Promise<RunResult> => {
   const shard = task.shard;
@@ -1896,7 +1714,7 @@ const runShard = async (
   signal?.addEventListener('abort', forwardOuterAbort, { once: true });
   if (signal?.aborted) shardAbortController.abort();
   let stopFatalMonitor: (() => void) | null = null;
-  const shardPorts = deriveE2EShardPorts(args.basePort, shard);
+  const shardPorts = deriveE2EShardPorts(portBase, 0);
   const rpcPort = shardPorts.rpc;
   const rpc2Port = shardPorts.rpc2;
   const apiPort = shardPorts.api;
@@ -1947,11 +1765,12 @@ const runShard = async (
   ]);
   let perfStopped = false;
   let completedResult: RunResult | null = null;
-  const finishResult = (result: Omit<RunResult, 'perf'>): RunResult => {
+  const finishResult = (result: Omit<RunResult, 'perf' | 'portBase'>): RunResult => {
     const perf = perfStopped ? emptyPerfSummary() : perfMonitor.stop();
     perfStopped = true;
     completedResult = {
       ...result,
+      portBase,
       diagnostics: [...diagnostics],
       failureCapsule,
       failureCapsulePath,
@@ -2014,8 +1833,8 @@ const runShard = async (
     log.write(`shard=${shard}/${totalShards}\nrpc=${rpcUrl}\nrpc2=${rpc2Url}\napi=${apiUrl}\nweb=${webUrl}\ndb=${dbPath}\n\n`);
     throwIfAborted();
 
-    // Hard preflight: kill stale processes that kept shard ports occupied
-    // from previous crashed/aborted runs.
+    // A leased slot must be empty. Never signal a listener owned by another
+    // checkout or test run; a busy port is evidence of a lifecycle defect.
     // Layout:
     // - rpc: anvil
     // - rpc2: secondary anvil for cross-j local simulation
@@ -2023,7 +1842,7 @@ const runShard = async (
     // - web: vite preview
     // - extra reserved ports kept for any local child APIs the server may spawn
     const preflightStart = Date.now();
-    await freeE2EPorts([
+    assertLocalTestPortsFree([
       rpcPort,
       rpc2Port,
       apiPort,
@@ -2032,7 +1851,7 @@ const runShard = async (
       apiPort + 11,
       apiPort + 12,
       apiPort + 13,
-    ], log);
+    ]);
     markPhase('preflight', preflightStart);
     throwIfAborted();
 
@@ -2426,7 +2245,7 @@ const runShard = async (
       { label: 'vite', proc: vite },
       { label: 'api', proc: api, termTimeoutMs: 35_000 },
     ]);
-    await stopShardRuntimePorts(apiPort, log);
+    assertShardRuntimePortsReleased(apiPort);
     await scheduler.wait(250);
     await flushLog(log, '[runner] api stopped; scanning runtime fatal markers\n');
     const postTeardownFatalLines = findRuntimeFatalLogLines(logPath);
@@ -2517,7 +2336,7 @@ const runShard = async (
         { label: 'anvil2', proc: anvil2 },
       ]);
     });
-    await attemptCleanup('api-ports', async () => stopShardRuntimePorts(apiPort, log));
+    await attemptCleanup('api-ports', async () => assertShardRuntimePortsReleased(apiPort));
     try {
       rmSync(anvilTmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
       rmSync(anvil2TmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
@@ -2584,7 +2403,7 @@ async function main(): Promise<void> {
   console.log('E2E Parallel Runner (isolated stack per shard)');
   console.log('='.repeat(72));
   console.log(`Shards   : ${args.shards}`);
-  console.log(`BasePort : ${args.basePort}`);
+  console.log(`Port pool: ${LOCAL_TEST_PORT_POOL_VERSION} (${LOCAL_TEST_STACK_BASES.length} machine-wide stacks)`);
   console.log(`Workers/shard: ${args.workersPerShard}`);
   console.log(`MM concurrency: ${args.maxMmConcurrency}`);
   console.log(`Reset concurrency: ${args.maxResetConcurrency}`);
@@ -2612,7 +2431,6 @@ async function main(): Promise<void> {
 
     try {
       await assertRunnerPreflight();
-      await reapStaleIsolatedE2EProcesses(logsDir);
     } catch (error) {
       console.error(`❌ runner preflight failed: ${String(error instanceof Error ? error.message : error)}`);
       process.exit(1);
@@ -2667,7 +2485,6 @@ async function main(): Promise<void> {
       tags: entry.tags ?? [],
       testCategory: entry.testCategory ?? (() => { throw new Error(`QA_TEST_CATEGORY_MISSING:${entry.target}:${entry.title ?? ''}`); })(),
     }));
-    assertE2EShardPortsIsolated(args.basePort, totalTargetCount);
     writeFileSync(
       join(logsDir, 'targets.json'),
       JSON.stringify(
@@ -2693,7 +2510,7 @@ async function main(): Promise<void> {
       `(starting at ${args.startAt})`,
     );
 
-    const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length));
+    const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length, LOCAL_TEST_STACK_BASES.length));
     console.log(`Build    : ${buildArtifacts.cacheRoot}`);
     const resetLimiter = createAsyncLimiter(Math.max(1, Math.min(args.maxResetConcurrency, maxConcurrency)));
     const results: Array<RunResult | undefined> = new Array(tasks.length);
@@ -2728,14 +2545,25 @@ async function main(): Promise<void> {
         const claim = await claimTask();
         if (!claim) break;
         try {
-          const result = await runShard(
-            claim.task,
-            args,
-            logsDir,
-            buildArtifacts,
-            resetLimiter,
-            abortController.signal,
-          );
+          const portLease = await acquireLocalTestPortLease({
+            timeoutMs: args.stackTimeoutMs,
+            signal: abortController.signal,
+          });
+          let result: RunResult;
+          try {
+            result = await runShard(
+              claim.task,
+              args,
+              logsDir,
+              buildArtifacts,
+              resetLimiter,
+              portLease.basePort,
+              abortController.signal,
+            );
+            assertLocalTestPortsFree(portLease.ports);
+          } finally {
+            portLease.release();
+          }
           try {
             codeDriftGuard.assertStable();
           } catch (error) {

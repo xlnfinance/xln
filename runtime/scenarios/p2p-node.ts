@@ -735,7 +735,6 @@ const run = async () => {
     relayUrls: [relayUrl],
     seedRuntimeIds: seedRuntimeId ? [seedRuntimeId] : [],
     advertiseEntityIds: [entityId],
-    isHub,
   });
 
   if (!p2p) {

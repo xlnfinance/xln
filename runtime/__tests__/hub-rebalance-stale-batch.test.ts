@@ -48,7 +48,6 @@ const makeHubState = (frozenTimestamp: number, lastSubmittedAt: number): EntityS
     swapTakerFeeBps: 0,
     disputeAutoFinalizeMode: 'auto',
     minCollateralThreshold: 0n,
-    minFeeBps: 1n,
     rebalanceLiquidityFeeBps: 1n,
     rebalanceTimeoutMs: 600_000,
   },

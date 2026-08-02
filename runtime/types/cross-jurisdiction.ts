@@ -49,8 +49,8 @@ export interface CrossJurisdictionPendingFill {
   cumulativeFillRatio: number;
   cumulativeSourceAmount: bigint;
   cumulativeTargetAmount: bigint;
-  fillNumerator?: bigint;
-  fillDenominator?: bigint;
+  fillNumerator: bigint;
+  fillDenominator: bigint;
   routeHash: string;
   updatedAt: number;
   firstSeenAt: number;

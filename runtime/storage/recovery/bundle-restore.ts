@@ -4,6 +4,7 @@ import type { CheckpointRestoreOptions } from './checkpoint';
 import type { PersistedFrameJournal } from '../types';
 import { assertRuntimeRecoveryBundleAuthenticity } from './bundle';
 import type { RuntimeRecoveryBundleV1 } from './types';
+import { authorizeRestoredRuntimeInput } from '../wal/snapshot';
 
 export interface RuntimeBundleRestoreOptions extends CheckpointRestoreOptions {
   targetHeight?: number;
@@ -95,6 +96,7 @@ export const restoreRuntimeFromBundles = async (
   );
   const candidate = selectRecoveryCandidate(validated, options.targetHeight);
   const env = await deps.restoreCheckpoint(candidate.snapshot.checkpoint!, options);
+  env.runtimeMempool = authorizeRestoredRuntimeInput(env.runtimeMempool);
   await replayCandidateTail(deps, env, candidate, Boolean(options.readOnly));
   if (env.state.height !== candidate.height) {
     const mismatch = new Error(

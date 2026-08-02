@@ -21,8 +21,6 @@ import {
   DEFAULT_GOSSIP_SYNC_LIMIT,
   registerClient,
   removeClient,
-  deliverPendingMessages,
-  enqueueMessage,
   cacheEncryptionKey,
   isRelaySocketOpen,
   classifyRelayDeliveryEvent,
@@ -39,11 +37,17 @@ import { safeStringify } from '../../protocol/serialization';
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
 const SOCKET_AUTH_BINDING = Symbol.for('xln.relay.socketAuthBinding');
+const SOCKET_GOSSIP_BUDGET = Symbol.for('xln.relay.socketGossipBudget');
 type RememberedRelaySocket = object & { [SOCKET_RUNTIME_ID]?: string };
 type DuplicateClosingRelaySocket = object & { [SOCKET_DUPLICATE_CLOSING]?: boolean };
 type AuthenticatedRelaySocket = object & {
   [SOCKET_AUTH_BINDING]?: HelloChallengeBinding & { encryptionPubKey: string; lastAuthTimestamp: number };
 };
+type GossipBudgetRelaySocket = object & {
+  [SOCKET_GOSSIP_BUDGET]?: { windowStartedAt: number; profileCount: number };
+};
+const GOSSIP_BUDGET_WINDOW_MS = 60_000;
+const GOSSIP_PROFILES_PER_WINDOW = 10_000;
 const NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS = [
   'invalid tag',
   'P2P_DECRYPT_ERROR',
@@ -96,6 +100,7 @@ export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
   delete (ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID];
   delete (ws as AuthenticatedRelaySocket)[SOCKET_AUTH_BINDING];
+  delete (ws as GossipBudgetRelaySocket)[SOCKET_GOSSIP_BUDGET];
 };
 
 const markDuplicateClosingSocket = (ws: unknown): void => {
@@ -136,6 +141,34 @@ const closeSupersededRuntimeSocket = (ws: RelaySocketLike): void => {
   }
 };
 
+const closeInvalidRelaySession = (
+  store: RelayStore,
+  ws: RelaySocketLike,
+  reason = 'relay-session-auth-invalid',
+): void => {
+  removeClient(store, ws);
+  forgetRelaySocketRuntimeId(ws);
+  try {
+    ws.close?.(4003, reason);
+  } catch (error) {
+    relayRouterLog.warn('invalid_session_socket.close_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
+const consumeGossipBudget = (ws: RelaySocketLike, profileCount: number, now = Date.now()): boolean => {
+  const socket = ws as GossipBudgetRelaySocket;
+  const previous = socket[SOCKET_GOSSIP_BUDGET];
+  const budget = !previous || now - previous.windowStartedAt >= GOSSIP_BUDGET_WINDOW_MS
+    ? { windowStartedAt: now, profileCount: 0 }
+    : previous;
+  if (budget.profileCount + profileCount > GOSSIP_PROFILES_PER_WINDOW) return false;
+  budget.profileCount += profileCount;
+  socket[SOCKET_GOSSIP_BUDGET] = budget;
+  return true;
+};
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -155,32 +188,6 @@ export type RelayRouterConfig = {
 };
 
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
-
-const flushPendingToSocket = <Socket>(
-  store: RelayStore,
-  runtimeId: string,
-  ws: Socket,
-  send: (ws: Socket, data: Uint8Array) => RelaySendResult,
-): number => {
-  const result = deliverPendingMessages(store, runtimeId, (pendingMsg) =>
-    send(ws, serializeWsMessage(pendingMsg as RuntimeWsMessage)),
-  );
-  if (result.failure) {
-    pushDebugEvent(store, {
-      event: 'delivery',
-      to: runtimeId,
-      status: 'send-failed',
-      reason: result.failure.reason,
-      queueSize: result.retained,
-      details: {
-        delivered: result.delivered,
-        expired: result.expired,
-        retained: result.retained,
-      },
-    });
-  }
-  return result.delivered;
-};
 
 const relayDeliveryMetadata = (status: string, reason?: string) =>
   classifyRelayDeliveryEvent({ status, ...(reason ? { reason } : {}) }) ?? undefined;
@@ -288,7 +295,7 @@ const handleHello = (context: RelayRouteContext): boolean => {
   rememberSocketAuthBinding(ws, {
     ...binding!,
     encryptionPubKey: fromEncryptionPubKey!,
-    lastAuthTimestamp: context.msg.auth!.timestamp,
+    lastAuthTimestamp: 0,
   });
   const existingClient = store.clients.get(fromKey);
   if (existingClient && existingClient.ws !== ws) {
@@ -330,7 +337,6 @@ const handleHello = (context: RelayRouteContext): boolean => {
     details: { traceId },
   });
   send(ws, serializeWsMessage({ type: 'hello_ack', to: fromKey }));
-  flushPendingToSocket(store, fromKey, ws, send);
   return true;
 };
 
@@ -451,6 +457,19 @@ const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean
   }
   const value = payload && typeof payload === 'object' ? payload as { profiles?: unknown } : {};
   const announced = (Array.isArray(value.profiles) ? value.profiles : []) as Profile[];
+  if (
+    announced.length > DEFAULT_GOSSIP_SYNC_LIMIT ||
+    !consumeGossipBudget(ws, announced.length)
+  ) {
+    pushDebugEvent(config.store, {
+      event: 'error', from, msgType: type, status: 'rejected',
+      reason: 'GOSSIP_ANNOUNCE_RATE_LIMITED',
+      details: { announced: announced.length, maxBatch: DEFAULT_GOSSIP_SYNC_LIMIT, traceId },
+    });
+    config.send(ws, serializeWsMessage({ type: 'error', error: 'GOSSIP_ANNOUNCE_RATE_LIMITED' }));
+    closeInvalidRelaySession(config.store, ws, 'relay-gossip-rate-limited');
+    return true;
+  }
   const stored = await storeAnnouncedProfiles(context, announced);
   const broadcastTargets = broadcastGossipProfiles(context, stored.profiles);
   pushDebugEvent(config.store, {
@@ -487,7 +506,7 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       msgType: type,
       details: {
         returnedProfiles: profiles.length,
-        ids: request.ids ?? [],
+        idCount: Array.isArray(request.ids) ? request.ids.length : 0,
         set: request.set ?? 'default',
         updatedSince: request.updatedSince ?? null,
         limit: request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT,
@@ -511,7 +530,10 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       from,
       to,
       msgType: type,
-      details: { traceId, payload },
+      details: {
+        traceId,
+        payloadBytes: new TextEncoder().encode(safeStringify(payload)).byteLength,
+      },
     });
     return true;
   }
@@ -532,7 +554,7 @@ const isRoutableRelayType = (type: string): boolean =>
  * Recipient-key encryption proves confidentiality, not sender identity. If a
  * socket could route before signed hello, it could claim a victim runtime in
  * both `from` and the encrypted envelope; Runtime admission intentionally
- * trusts authenticated transport provenance for unsigned cross-j intents.
+ * forwards opaque ciphertext; Runtime verifies the signed plaintext envelope.
  */
 const rejectUnauthenticatedRoutableMessage = (context: RelayRouteContext): boolean => {
   const { config, ws, type, from, to, id, fromKey, rememberedRuntimeId, traceId } = context;
@@ -718,20 +740,24 @@ const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolea
   const local = await deliverToLocalRuntime(context, isLocalTarget);
   if (local !== 'unavailable') return true;
   if (rejectUnavailableReliableMessage(context)) return true;
-  // Only gossip responses are durable offline relay traffic. Financial and
-  // recovery messages must fail now so senders never assume unseen progress.
-  const queueSize = enqueueMessage(config.store, toKey, msg);
-  relayLog(`[RELAY] → queued (no client, queue=${queueSize})`);
+  const code = 'GOSSIP_TARGET_NOT_CONNECTED';
+  relayLog(`[RELAY] → rejected ${type} (target not connected)`);
   pushDebugEvent(config.store, {
     event: 'delivery',
     from,
     to,
     msgType: type,
     encrypted: msg.encrypted === true,
-    status: 'queued',
-    queueSize,
+    status: 'rejected',
+    reason: code,
     details: routeDeliveryDetails(context),
   });
+  config.send(ws, serializeWsMessage({
+    type: 'error',
+    error: code,
+    ...(context.id ? { inReplyTo: context.id } : {}),
+    ...(to ? { to } : {}),
+  }));
   return true;
 };
 
@@ -762,6 +788,7 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
       details: { traceId, rememberedRuntimeId },
     });
     send(ws, serializeWsMessage({ type: 'error', error: 'Relay socket runtime mismatch' }));
+    closeInvalidRelaySession(store, ws);
     return false;
   }
   if (type !== 'hello') {
@@ -775,7 +802,6 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
             rememberedRuntimeId,
             msg,
             msg.auth,
-            config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
             authBinding.audience,
             authBinding.challenge,
             authBinding.lastAuthTimestamp,
@@ -786,6 +812,7 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
         reason: 'RELAY_SESSION_AUTH_INVALID', details: { traceId, authError: verifiedError },
       });
       send(ws, serializeWsMessage({ type: 'error', error: verifiedError }));
+      closeInvalidRelaySession(store, ws);
       return false;
     }
     authBinding!.lastAuthTimestamp = msg.auth!.timestamp;
@@ -794,14 +821,13 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
     const existing = store.clients.get(rememberedRuntimeId);
     if (!existing || existing.ws !== ws) {
       const registered = registerClient(store, rememberedRuntimeId, ws);
-      const flushedPending = registered ? flushPendingToSocket(store, rememberedRuntimeId, ws, send) : 0;
       pushDebugEvent(store, {
         event: 'ws_rebind',
         runtimeId: rememberedRuntimeId,
         from,
         msgType: type,
         status: registered ? 'reconnected' : 'rejected',
-        details: { traceId: typeof id === 'string' ? id : null, flushedPending },
+        details: { traceId: typeof id === 'string' ? id : null },
       });
     } else {
       existing.lastSeen = nextWsTimestamp(store);

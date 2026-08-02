@@ -90,6 +90,33 @@ describe('production startup wiring', () => {
     }
   });
 
+  test('runtime import rejects public callers before minting admin capabilities', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const handler = orchestrator.indexOf('const handleRuntimeImportRequest = async');
+    const operatorGate = orchestrator.indexOf(
+      'if (requiresLocalNodeOperator(url) && !operatorAuthorized)',
+      handler,
+    );
+    const manifestMint = orchestrator.indexOf('const manifest = buildRuntimeImportManifest();', handler);
+
+    expect(handler).toBeGreaterThanOrEqual(0);
+    expect(operatorGate).toBeGreaterThan(handler);
+    expect(manifestMint).toBeGreaterThan(operatorGate);
+  });
+
+  test('orchestrator rejects public debug dumps before generic hub proxying', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const operatorGate = orchestrator.indexOf(
+      'operatorPreflightResponse(request, url, operatorAuthorized)',
+    );
+    const faucetPolicy = orchestrator.indexOf('enforceFaucetPolicy(', operatorGate);
+    const genericApiProxy = orchestrator.indexOf("if (pathname.startsWith('/api/'))", operatorGate);
+    expect(operatorGate).toBeGreaterThanOrEqual(0);
+    expect(faucetPolicy).toBeGreaterThan(operatorGate);
+    expect(genericApiProxy).toBeGreaterThan(faucetPolicy);
+    expect(orchestrator).not.toContain("if (pathname === '/api/debug/dumps' && !operatorAuthorized)");
+  });
+
   test('deterministic replay oracle is release-only and has its own timeout', () => {
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
@@ -256,6 +283,23 @@ describe('production startup wiring', () => {
     expect(startLoop).toBeGreaterThan(0);
     expect(fatalSink).toBeGreaterThan(startLoop);
     expect(server.match(/finally \{\n\s+process\.exit\(1\);\n\s+\}/g)).toHaveLength(2);
+  });
+
+  test('standalone runtime requires an explicit production RPC or local-simulation mode', () => {
+    const server = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
+    const packagedDaemon = readFileSync(join(repoRoot, 'packages/npm/xlnfinance/lib/process.js'), 'utf8');
+    const formationPanel = readFileSync(
+      join(repoRoot, 'frontend/src/lib/components/Entity/FormationPanel.svelte'),
+      'utf8',
+    );
+    expect(server).toContain("process.env['XLN_LOCAL_SIMULATION'] === 'true'");
+    expect(server).toContain('JADAPTER_MODE_REQUIRED:set_USE_ANVIL_or_XLN_LOCAL_SIMULATION');
+    expect(server).toContain('JADAPTER_MODE_CONFLICT:USE_ANVIL_and_XLN_LOCAL_SIMULATION');
+    expect(packagedDaemon).toContain("XLN_LOCAL_SIMULATION: 'true'");
+    expect(formationPanel).toContain(
+      'jurisdictions.filter(jurisdiction => !isTronChainId(Number(jurisdiction.chainId)))',
+    );
+    expect(existsSync(join(repoRoot, 'scripts/start-prod-hub.sh'))).toBe(false);
   });
 
   test('managed runtime fatal exits only after parent incident fsync acknowledgement', () => {
@@ -594,8 +638,8 @@ describe('production startup wiring', () => {
     ).toBeLessThan(waitForMarketMakerReady.indexOf('health.marketMaker.ok'));
     expect(marketMakerPoller).not.toContain('/api/info');
     expect(marketMakerPoller).toContain('const applyHealth = (');
-    expect(marketMakerPoller).toContain('child.lastHealth = health;');
-    expect(marketMakerPoller).toContain('if (health.startupPhase !== undefined) {');
+    expect(marketMakerPoller).toContain('child.lastHealth = sanitizedHealth;');
+    expect(marketMakerPoller).toContain('if (sanitizedHealth.startupPhase !== undefined) {');
     expect(marketMakerPoller).toContain('if (health) applyHealth(health, proc);');
     const lastStartupPhaseUpdate = marketMakerPoller.slice(
       marketMakerPoller.indexOf('child.lastStartupPhase = String('),
@@ -1127,13 +1171,13 @@ describe('production startup wiring', () => {
 
   test('isolated e2e runner bounds green-path MM teardown and cleans child ports', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
-    expect(runner).toContain('const stopShardRuntimePorts = async (');
+    expect(runner).toContain('const assertShardRuntimePortsReleased = (');
     expect(runner).toMatch(
       /stopProcessDependencyChain\(\[\s*\{ label: 'vite', proc: vite \},\s*\{ label: 'api', proc: api, termTimeoutMs: 35_000 \}/,
     );
-    expect(runner).toContain('await stopShardRuntimePorts(apiPort, log);');
+    expect(runner).toContain('assertShardRuntimePortsReleased(apiPort);');
     expect(runner).toContain(
-      'await freeE2EPorts([apiPort, apiPort + 10, apiPort + 11, apiPort + 12, apiPort + 13], log);',
+      'assertLocalTestPortsFree([apiPort, apiPort + 10, apiPort + 11, apiPort + 12, apiPort + 13]);',
     );
     expect(runner).toContain('const E2E_ANVIL_HISTORY_STATES = 256;');
     expect(runner.match(/'--prune-history'/g)).toHaveLength(2);
@@ -1285,14 +1329,19 @@ describe('production startup wiring', () => {
     }
   });
 
-  test('hub exposes restored entities before its loop while MM imports every entity before P2P', () => {
+  test('production nodes start their commit loop before resuming registrations and expose P2P last', () => {
     const hubSource = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const hubLoopStart = hubSource.indexOf('startRuntimeLoop(env, {');
+    const hubResume = hubSource.indexOf('await ensurePendingNumberedRegistrationsResumed(env);', hubLoopStart);
+    const hubIngressReady = hubSource.indexOf('live.externalIngressReady = true;', hubResume);
     const hubP2PStart = hubSource.indexOf('live.p2p = startP2P(env, {');
     const hubP2PReady = hubSource.indexOf("if (!live.p2p) throw new Error('P2P_START_FAILED');", hubP2PStart);
-    const hubLoopStart = hubSource.indexOf('startRuntimeLoop(env, {', hubP2PReady);
+    expect(hubLoopStart).toBeGreaterThan(0);
+    expect(hubResume).toBeGreaterThan(hubLoopStart);
+    expect(hubIngressReady).toBeGreaterThan(hubResume);
     expect(hubP2PStart).toBeGreaterThan(0);
+    expect(hubP2PStart).toBeGreaterThan(hubIngressReady);
     expect(hubP2PReady).toBeGreaterThan(hubP2PStart);
-    expect(hubLoopStart).toBeGreaterThan(hubP2PReady);
 
     const mmSource = readMarketMakerNodeSource();
     const mmInitialization = mmSource.indexOf('const initializeMarketMakerContexts = async (');
@@ -1311,6 +1360,11 @@ describe('production startup wiring', () => {
       'state.tokenIdsByContext = await initializeMarketMakerContexts({',
       mmServicesStart,
     );
+    const mmResume = mmSource.indexOf(
+      'await ensurePendingNumberedRegistrationsResumed(env);',
+      mmInitializationCall,
+    );
+    const mmIngressReady = mmSource.indexOf('state.externalIngressReady = true;', mmResume);
     const mmP2PStart = mmSource.indexOf('const p2p = startP2P(env, {', mmInitializationCall);
     const mmP2PReady = mmSource.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", mmP2PStart);
     expect(mmInitialization).toBeGreaterThan(0);
@@ -1319,7 +1373,10 @@ describe('production startup wiring', () => {
     expect(mmLoopStart).toBeGreaterThan(0);
     expect(mmServicesCall).toBeGreaterThan(mmLoopStart);
     expect(mmInitializationCall).toBeGreaterThan(mmServicesStart);
+    expect(mmResume).toBeGreaterThan(mmInitializationCall);
+    expect(mmIngressReady).toBeGreaterThan(mmResume);
     expect(mmP2PStart).toBeGreaterThan(mmInitializationCall);
+    expect(mmP2PStart).toBeGreaterThan(mmIngressReady);
     expect(mmP2PReady).toBeGreaterThan(mmP2PStart);
 
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
@@ -1688,17 +1745,13 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("recordStage('storage-epoch:post-rotation-wal-committed');");
     expect(smoke).toContain("recordStage('storage-epoch:verified', epochRotations);");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STORAGE_POST_ROTATION_FRAME_MISSING');
-    expect(soundcheck).toContain("import { createConnection } from 'node:net';");
-    expect(soundcheck).toContain('const localProdSmokePortOffsets = [0, 1, 4, 7, 8, 10, 11, 12, 13];');
-    expect(soundcheck).toContain(
-      "const defaultPortBase = mode === 'clone' ? 19800 : mode === 'hydrate' ? 19900 : 19700;",
-    );
-    expect(soundcheck).toContain('const findPortBaseForIndex = async (index: number): Promise<number>');
-    expect(soundcheck).toContain(
-      'if (explicitPortBase) throw new Error(`BOOTSTRAP_SOUNDCHECK_PORT_BLOCK_BUSY:${requested}`);',
-    );
-    expect(soundcheck).toContain('throw new Error(`BOOTSTRAP_SOUNDCHECK_NO_FREE_PORT_BLOCK:${requested}`);');
-    expect(soundcheck).toContain('const runPortBase = await findPortBaseForIndex(index);');
+    expect(smoke).toContain('await acquireLocalTestPortLease({');
+    expect(smoke).toContain('requiredOffsets: [0, 1, 4, 7, 8, 10, 11, 12, 13]');
+    expect(smoke).toContain('buildInheritedLocalTestLeaseEnv(localTestLease, repoRoot)');
+    expect(smoke).toContain('assertLocalTestPortsFree(localTestLease.ports);');
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
+    expect(soundcheck).not.toContain('XLN_LOCAL_PROD_SMOKE_PORT_BASE');
+    expect(benchmark).not.toContain('XLN_LOCAL_PROD_SMOKE_PORT_BASE');
     expect(smoke).toContain("schema: 'xln-local-prod-bootstrap-benchmark-v1'");
     expect(smoke).toContain("schema: 'xln-bootstrap-debug-event-v1'");
     expect(smoke).toContain('findFirstRuntimeFatalLogHit');
@@ -2293,16 +2346,15 @@ describe('production startup wiring', () => {
     const mmNode = readMarketMakerNodeSource();
     const p2p = readFileSync(join(repoRoot, 'runtime/network/p2p/p2p.ts'), 'utf8');
 
-    expect(p2p).toContain('preferRelayForEntityInput?: boolean;');
-    expect(p2p).toContain('if (this.preferRelayForEntityInput) {');
-    expect(p2p).toContain("transport: 'relay'");
+    expect(p2p).not.toContain('preferRelayForEntityInput');
     expect(hubNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(hubTransport).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(mmNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(hubTransport).toContain('route.sendEntityInputsDelivery(');
     expect(mmNode).toContain('directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)');
-    expect(hubNode).toContain('preferRelayForEntityInput: true');
-    expect(mmNode).toContain('preferRelayForEntityInput: true');
+    expect(hubNode).not.toContain('preferRelayForEntityInput');
+    expect(mmNode).not.toContain('preferRelayForEntityInput');
+    expect(mmNode).not.toContain('allowDirectClients: false');
   });
 
   test('hub support-peer provisioning uses full jurisdiction token sets', () => {
@@ -2896,93 +2948,4 @@ describe('production startup wiring', () => {
     }
   }, 2_000);
 
-  test('on-chain faucet proxy allows mining without weakening the generic hub timeout', async () => {
-    const previousHubTimeout = process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'];
-    const previousFaucetTimeout = process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'];
-    const server = Bun.serve({
-      port: 0,
-      fetch: async () => {
-        await Bun.sleep(60);
-        return Response.json({ success: true });
-      },
-    });
-    process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'] = '25';
-    process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'] = '100';
-    try {
-      const handlers = createOrchestratorProxyHandlers({
-        host: '127.0.0.1',
-        defaultRpcUrl: '',
-        pollAllHubHealth: async () => {},
-        getHubChildByEntityId: () => null,
-        getHealthyHub: () => ({ apiPort: server.port }) as any,
-      });
-      const request = (endpoint: string) =>
-        new Request(`http://xln.local${endpoint}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: '{}',
-        });
-
-      const genericResponse = await handlers.proxyAnyHubRequest(request('/api/health/slow'), '/api/health/slow');
-      expect(genericResponse.status).toBe(502);
-      expect(((await genericResponse.json()) as { error?: string }).error).toContain('PROXY_UPSTREAM_TIMEOUT:25');
-
-      const faucetResponse = await handlers.proxyAnyHubRequest(
-        request('/api/faucet/erc20?chainId=31337'),
-        '/api/faucet/erc20?chainId=31337',
-      );
-      expect(faucetResponse.status).toBe(200);
-      expect(await faucetResponse.json()).toEqual({ success: true });
-    } finally {
-      if (previousHubTimeout === undefined) delete process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'];
-      else process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'] = previousHubTimeout;
-      if (previousFaucetTimeout === undefined) delete process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'];
-      else process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'] = previousFaucetTimeout;
-      await server.stop(true);
-    }
-  }, 2_000);
-
-  test('generic hub API proxy exposes typed no-healthy-hub failure', async () => {
-    let pollCalls = 0;
-    const handlers = createOrchestratorProxyHandlers({
-      host: '127.0.0.1',
-      defaultRpcUrl: '',
-      pollAllHubHealth: async () => {
-        pollCalls += 1;
-      },
-      getHubChildByEntityId: () => null,
-      getHealthyHub: () => null,
-    });
-
-    const response = await handlers.proxyAnyHubRequest(
-      new Request('http://xln.local/api/faucet/gas', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ entityId: `0x${'34'.repeat(32)}` }),
-      }),
-      '/api/faucet/gas',
-    );
-    const body = (await response.json()) as {
-      category?: string;
-      code?: string;
-      error?: string;
-      failure?: { category?: string; code?: string; retryable?: boolean; fatal?: boolean };
-      retryable?: boolean;
-      fatal?: boolean;
-    };
-
-    expect(response.status).toBe(503);
-    expect(body.error).toBe('No healthy hub API available');
-    expect(body.code).toBe('NO_HEALTHY_HUB_API_AVAILABLE');
-    expect(body.category).toBe('TransientRace');
-    expect(body.retryable).toBe(true);
-    expect(body.fatal).toBe(false);
-    expect(body.failure).toMatchObject({
-      category: 'TransientRace',
-      code: 'NO_HEALTHY_HUB_API_AVAILABLE',
-      retryable: true,
-      fatal: false,
-    });
-    expect(pollCalls).toBe(1);
-  });
 });

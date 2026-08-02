@@ -13,6 +13,20 @@ export const assertEntityAccountCountWithinLimit = (
   );
 };
 
+/** One capacity formula; local commands throw it, authenticated peer input rejects it. */
+export const getEntityAccountInsertionCapacityError = (
+  accounts: ReadonlyMap<string, unknown>,
+  accountId: string,
+  context: string,
+): string | undefined => {
+  const target = normalizedAccountId(accountId);
+  if (accounts.has(target) || accounts.size < LIMITS.MAX_ACCOUNTS_PER_ENTITY) return undefined;
+  return (
+    `ENTITY_ACCOUNT_LIMIT_EXCEEDED: context=${context} account=${target || 'invalid'} ` +
+    `accounts=${accounts.size} limit=${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`
+  );
+};
+
 /**
  * Returns false for an existing canonical key so replacement/idempotent replay
  * does not consume another slot. A genuinely new account must reserve capacity
@@ -25,11 +39,7 @@ export const assertEntityAccountInsertionCapacity = (
 ): boolean => {
   const target = normalizedAccountId(accountId);
   if (accounts.has(target)) return false;
-  if (accounts.size >= LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-    throw new Error(
-      `ENTITY_ACCOUNT_LIMIT_EXCEEDED: context=${context} account=${target || 'invalid'} ` +
-        `accounts=${accounts.size} limit=${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-    );
-  }
+  const error = getEntityAccountInsertionCapacityError(accounts, accountId, context);
+  if (error) throw new Error(error);
   return true;
 };

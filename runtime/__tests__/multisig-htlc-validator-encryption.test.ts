@@ -1396,6 +1396,7 @@ describe('multisig HTLC validator encryption', () => {
         tokenId: 1,
         amount: 25n,
         route: [SENDER_ID, ENTITY_ID],
+        deliveryMode: 'async',
       },
     }, secret);
     const firstPrepared = await prepareHtlcPaymentEntityTx(env, state, raw);
@@ -1478,6 +1479,7 @@ describe('multisig HTLC validator encryption', () => {
         tokenId: 1,
         amount: 25n,
         route: [SENDER_ID, ENTITY_ID],
+        deliveryMode: 'async',
       },
     });
     expect(prepared.data).not.toHaveProperty('secret');
@@ -1490,6 +1492,7 @@ describe('multisig HTLC validator encryption', () => {
         tokenId: 1,
         amount: 25n,
         route: [SENDER_ID, ENTITY_ID],
+        deliveryMode: 'async',
         hashlock: `0x${'12'.repeat(32)}`,
       },
     })).rejects.toThrow('HTLC_PAYMENT_HASHLOCK_WITHOUT_SECRET');
@@ -1521,6 +1524,7 @@ describe('multisig HTLC validator encryption', () => {
         tokenId: 1,
         amount: 1_001n,
         route: [SENDER_ID, ENTITY_ID],
+        deliveryMode: 'async',
       },
     }, `0x${'bc'.repeat(32)}`));
     env.gossip = undefined;
@@ -1566,7 +1570,13 @@ describe('multisig HTLC validator encryption', () => {
     } as unknown as RuntimeReplica;
     const prepared = await prepareHtlcPaymentEntityTx(env, admittedState, withDeterministicHtlcTestSecret({
       type: 'htlcPayment',
-      data: { targetEntityId: ENTITY_ID, tokenId: 1, amount: 1_001n, route: [SENDER_ID, ENTITY_ID] },
+      data: {
+        targetEntityId: ENTITY_ID,
+        tokenId: 1,
+        amount: 1_001n,
+        route: [SENDER_ID, ENTITY_ID],
+        deliveryMode: 'async',
+      },
     }, `0x${'be'.repeat(32)}`));
     env.gossip = undefined;
 
@@ -1622,6 +1632,7 @@ describe('multisig HTLC validator encryption', () => {
         tokenId: 1,
         amount: 25n,
         route: [SENDER_ID, ENTITY_ID],
+        deliveryMode: 'async',
         description: 'custody-withdrawal:test',
       },
     }, `0x${'bd'.repeat(32)}`));
@@ -1729,6 +1740,7 @@ describe('multisig HTLC validator encryption', () => {
         tokenId: 1,
         amount: 25n,
         route: [sourceEntityId, destination.entityId],
+        deliveryMode: 'async',
         description: 'process ingress replay',
       },
     }, rawSecret);
@@ -1759,6 +1771,7 @@ describe('multisig HTLC validator encryption', () => {
         tokenId: 1,
         amount: 24n,
         route: [sourceEntityId, destination.entityId],
+        deliveryMode: 'async',
         description: 'wallet intent without preimage',
       },
     };
@@ -1783,6 +1796,7 @@ describe('multisig HTLC validator encryption', () => {
         tokenId: 1,
         amount: 1_001n,
         route: [sourceEntityId, destination.entityId],
+        deliveryMode: 'async',
         description: 'rejected payment truth',
       },
     };
@@ -2096,6 +2110,7 @@ describe('multisig HTLC validator encryption', () => {
         tokenId: 1,
         amount: 25n,
         route: [SENDER_ID, hub.entityId, destination.entityId],
+        deliveryMode: 'async',
         description: 'certified multi-hop',
         startedAtMs: state.timestamp,
       },
@@ -2108,14 +2123,16 @@ describe('multisig HTLC validator encryption', () => {
       ...admissionEnv,
       gossip: undefined,
       state: {
-  jReplicas: new Map([['j', { blockNumber: 41 }]]),
+        ...admissionEnv.state,
+        jReplicas: new Map([['j', { blockNumber: 41 }]]),
       },
     } as unknown as RuntimeReplica;
     const validatorEnvB = {
       ...admissionEnv,
       gossip: undefined,
       state: {
-  jReplicas: new Map([['j', { blockNumber: 999 }]]),
+        ...admissionEnv.state,
+        jReplicas: new Map([['j', { blockNumber: 999 }]]),
       },
     } as unknown as RuntimeReplica;
     const [validatedA, validatedB] = await Promise.all([

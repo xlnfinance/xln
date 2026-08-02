@@ -24,8 +24,15 @@ export const maybeHandleDebugDumpsRequest = async (input: {
   pathname: string;
   relayStore: RelayStore;
   headers: HeadersInit;
+  operatorAuthorized: boolean;
 }): Promise<Response | null> => {
   if (input.pathname !== '/api/debug/dumps') return null;
+  if (!input.operatorAuthorized) {
+    return new Response(
+      safeStringify({ ok: false, error: 'OPERATOR_AUTH_REQUIRED' }),
+      { status: 403, headers: input.headers },
+    );
+  }
 
   if (input.req.method === 'GET') {
     await ensureDebugDumpDir();

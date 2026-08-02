@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import {
   assertE2ECodeFingerprintStable,
   assertE2EShardPortsIsolated,
+  acquireLocalTestPortLease,
   batchPlaywrightTargetsByFile,
   computeE2EBuildInputHash,
   computeE2EBuildArtifactHash,
@@ -15,7 +16,7 @@ import {
   deriveE2EBuildArtifacts,
   deriveE2EShardPaths,
   deriveE2EShardPorts,
-  isIsolatedE2EProcessCommand,
+  LOCAL_TEST_STACK_BASES,
   parsePlaywrightFilesFlag,
 } from '../scripts/run-e2e-parallel-isolated';
 
@@ -68,6 +69,26 @@ describe('isolated E2E runner resources', () => {
     });
     expect(() => assertE2EShardPortsIsolated(8_545, 1)).toThrow('E2E_DEV_PORT_OVERLAP');
     expect(() => assertE2EShardPortsIsolated(8_060, 2)).toThrow('E2E_DEV_PORT_OVERLAP');
+    expect(() => assertE2EShardPortsIsolated(8_090, 1)).toThrow('E2E_DEV_PORT_OVERLAP');
+  });
+
+  test('leases machine-wide stack lanes without colliding across worktrees', async () => {
+    const slotBases = [50_000, 50_020];
+    const first = await acquireLocalTestPortLease({ slotBases, timeoutMs: 0 });
+    const second = await acquireLocalTestPortLease({ slotBases, timeoutMs: 0 });
+    try {
+      expect(first.basePort).toBe(50_000);
+      expect(second.basePort).toBe(50_020);
+      await expect(acquireLocalTestPortLease({ slotBases, timeoutMs: 0 }))
+        .rejects.toThrow('LOCAL_TEST_PORT_SLOTS_EXHAUSTED');
+      expect(LOCAL_TEST_STACK_BASES).toHaveLength(7);
+    } finally {
+      first.release();
+      second.release();
+    }
+    const reused = await acquireLocalTestPortLease({ slotBases, timeoutMs: 0 });
+    expect(reused.basePort).toBe(50_000);
+    reused.release();
   });
 
   test('places runtime, jurisdiction, logs, and artifacts below one shard root', () => {
@@ -85,13 +106,15 @@ describe('isolated E2E runner resources', () => {
     expect(paths.resultsDir.endsWith('/shard-3/artifacts/playwright')).toBe(true);
   });
 
-  test('only stale processes carrying an isolated-run marker are eligible for cleanup', () => {
-    expect(isIsolatedE2EProcessCommand(
-      'anvil --state /repo/.logs/e2e-parallel/run/shard-0/jdb/anvil-state.json',
-    )).toBe(true);
-    expect(isIsolatedE2EProcessCommand('node vite.js preview --mode xln-e2e-run-0 --port 20004')).toBe(true);
-    expect(isIsolatedE2EProcessCommand('bun runtime/orchestrator/orchestrator.ts --db-root ./db/dev/mesh')).toBe(false);
-    expect(isIsolatedE2EProcessCommand('vite dev --port 8080')).toBe(false);
+  test('runner never reaps processes by command-line substring', () => {
+    const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
+    expect(runner).not.toContain('reapStaleIsolatedE2EProcesses');
+    expect(runner).not.toContain('isIsolatedE2EProcessCommand');
+    expect(runner).not.toContain('process.kill(pid');
+    expect(runner).not.toContain("'  --base-port");
+    expect(runner).toContain('E2E_BASE_PORT_OVERRIDE_FORBIDDEN');
+    expect(runner).toContain('acquireLocalTestPortLease({');
+    expect(runner).toContain('deriveE2EShardPorts(portBase, 0)');
   });
 
   test('runner build and browser helpers have no fallback to shared dev resources', () => {

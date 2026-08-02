@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { rmSync } from 'node:fs';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { x25519 } from '@noble/curves/ed25519.js';
@@ -138,7 +139,7 @@ import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
 import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
 
-import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity/tx/j-events-htlc';
+import { queueCrossJurisdictionSalvageFromFinalizedArguments } from '../entity/tx/j-events-htlc';
 
 import {
   canonicalDisputeFinalizationEvidenceHash,
@@ -187,6 +188,12 @@ import { discardRejectedEntityInput } from '../runtime/frame/input-discard';
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 
 import { applyStorageChanges } from '../runtime/env-events';
+import {
+  resolveDbPath,
+  resolveHistoryViewDbPath,
+  resolveRuntimeWalDbPath,
+  resolveStorageDbPath,
+} from '../storage/runtime-dbs';
 
 import { submitRuntimeJOutbox } from '../runtime/j-submit';
 
@@ -1067,6 +1074,18 @@ describe('audit fail-fast regressions', () => {
   test('remote Entity handler failures are dropped but the same local failure is fatal', async () => {
     const makeRuntime = (seed: string) => {
       const env = createEmptyEnv(seed);
+      const storageBase = resolveDbPath(env);
+      for (const path of [
+        storageBase,
+        `${storageBase}-events`,
+        `${storageBase}-storage-next`,
+        `${storageBase}-storage-rotation.json`,
+        resolveDbPath(env, 'infra'),
+        resolveStorageDbPath(env, 'current'),
+        resolveStorageDbPath(env, 'previous'),
+        resolveRuntimeWalDbPath(env),
+        resolveHistoryViewDbPath(env),
+      ]) rmSync(path, { recursive: true, force: true });
       env.scenarioMode = false;
       env.quietRuntimeLogs = true;
       const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -1221,7 +1240,7 @@ describe('audit fail-fast regressions', () => {
         .failureKind,
     ).toBe('local-bug');
 
-    const invariant = makeRuntime('remote-invariant-failure-fatal');
+    const invariant = makeRuntime('remote-business-rejection-discard');
     const authorizedInvariantTxs = await buildQuorumAuthorizedFrameTxs(invariant.env, invariant.state, [
       {
         type: 'directPayment',
@@ -1242,11 +1261,12 @@ describe('audit fail-fast regressions', () => {
           entityTxs: authorizedInvariantTxs,
         },
       ]),
-    ).rejects.toThrow('DIRECT_PAYMENT_ROUTE_REQUIRED');
+    ).resolves.toBe(invariant.env);
+    expect(invariant.env.infrastructure?.halted).not.toBe(true);
     const invariantRetryTypes = (invariant.env.runtimeMempool?.entityInputs ?? [])
       .flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []);
-    expect(invariantRetryTypes).toContain('entityCommand');
-    expect(invariantRetryTypes).toContain('certifyProfile');
+    expect(invariantRetryTypes).not.toContain('entityCommand');
+    expect(invariantRetryTypes).not.toContain('certifyProfile');
   });
 
   test('local signer resolution prefers an available local signer over stale config validator fallback', () => {
@@ -1513,6 +1533,16 @@ describe('audit fail-fast regressions', () => {
         now: env.state.timestamp,
       },
     );
+    route.fillSeq = 1;
+    route.cumulativeFillRatio = 0x1234;
+    route.claimedRatio = 0x1234;
+    route.fillNumerator = 0x1234n;
+    route.fillDenominator = 65_535n;
+    route.filledSourceAmount = (BigInt(route.source.amount) * 0x1234n) / 65_535n;
+    route.filledTargetAmount = (BigInt(route.target.amount) * 0x1234n) / 65_535n;
+    route.sourceClaimed = route.filledSourceAmount;
+    route.targetClaimed = route.filledTargetAmount;
+    route.status = 'partially_filled';
     sourceState.crossJurisdictionSwaps.set(route.orderId, route);
 
     const binary = buildCrossJurisdictionPullReveal(
@@ -1529,11 +1559,12 @@ describe('audit fail-fast regressions', () => {
     const outputs: EntityInput[] = [];
 
     expect(
-      queueCrossJurisdictionSalvageFromArgumentList(
+      queueCrossJurisdictionSalvageFromFinalizedArguments(
         sourceState,
         outputs,
         sourceHub,
-        [starterInitialArguments],
+        { leftArguments: starterInitialArguments, rightArguments: '0x' },
+        { leftPullIds: [route.sourcePull!.pullId], rightPullIds: [] },
         123,
       ),
     ).toBe(true);
@@ -1551,11 +1582,12 @@ describe('audit fail-fast regressions', () => {
       const peerObserver = makeEntityState(sourceHub);
       const peerOutputs: EntityInput[] = [];
       expect(
-        queueCrossJurisdictionSalvageFromArgumentList(
+        queueCrossJurisdictionSalvageFromFinalizedArguments(
           peerObserver,
           peerOutputs,
           sourceUser,
-          [starterInitialArguments],
+          { leftArguments: starterInitialArguments, rightArguments: '0x' },
+          { leftPullIds: [route.sourcePull!.pullId], rightPullIds: [] },
           123,
         ),
       ).toBe(false);
@@ -1951,7 +1983,7 @@ describe('audit fail-fast regressions', () => {
     ).rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:proposeCancelSwap');
   });
 
-  test('direct payment fails loud for invalid route topology', async () => {
+  test('direct payment rejects invalid route topology without an invariant halt', async () => {
     const env = createEmptyEnv('direct-payment-invalid-route');
     env.quietRuntimeLogs = true;
     const source = `0x${'64'.repeat(32)}`;
@@ -1971,8 +2003,13 @@ describe('audit fail-fast regressions', () => {
       ]),
     ).toThrow('DIRECT_PAYMENT_ROUTE_REQUIRED');
 
-    await expect(
-      applyEntityTx(env, state, {
+    const expectRejected = async (tx: EntityTx, code: string): Promise<void> => {
+      const result = await applyEntityTx(env, state, tx);
+      expect(result.newState).toBe(state);
+      expect(result.skippedError).toContain(code);
+    };
+
+    await expectRejected({
         type: 'directPayment',
         data: {
           targetEntityId: target,
@@ -1980,11 +2017,9 @@ describe('audit fail-fast regressions', () => {
           amount: 100n,
           route: [],
         },
-      } as any),
-    ).rejects.toThrow('DIRECT_PAYMENT_ROUTE_REQUIRED');
+      } as any, 'DIRECT_PAYMENT_ROUTE_REQUIRED');
 
-    await expect(
-      applyEntityTx(env, state, {
+    await expectRejected({
         type: 'directPayment',
         data: {
           targetEntityId: target,
@@ -1992,11 +2027,9 @@ describe('audit fail-fast regressions', () => {
           amount: 100n,
           route: [wrongStart, target],
         },
-      } as any),
-    ).rejects.toThrow('DIRECT_PAYMENT_ROUTE_START_INVALID');
+      } as any, 'DIRECT_PAYMENT_ROUTE_START_INVALID');
 
-    await expect(
-      applyEntityTx(env, state, {
+    await expectRejected({
         type: 'directPayment',
         data: {
           targetEntityId: target,
@@ -2004,18 +2037,14 @@ describe('audit fail-fast regressions', () => {
           amount: 100n,
           route: [source, wrongEnd],
         },
-      } as any),
-    ).rejects.toThrow('DIRECT_PAYMENT_ROUTE_END_INVALID');
+      } as any, 'DIRECT_PAYMENT_ROUTE_END_INVALID');
 
-    await expect(
-      applyEntityTx(env, state, {
+    await expectRejected({
         type: 'directPayment',
         data: { targetEntityId: target, tokenId: 1, amount: 100n, route: [source, target] },
-      } as any),
-    ).rejects.toThrow('DIRECT_PAYMENT_DELIVERY_MODE_INVALID');
+      } as any, 'DIRECT_PAYMENT_DELIVERY_MODE_INVALID');
 
-    await expect(
-      applyEntityTx(env, state, {
+    await expectRejected({
         type: 'directPayment',
         data: {
           targetEntityId: target,
@@ -2025,8 +2054,7 @@ describe('audit fail-fast regressions', () => {
           deliveryMode: 'trusted',
           trustedGatewayEntityId: missingNextHop,
         },
-      } as any),
-    ).rejects.toThrow('DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING');
+      } as any, 'DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING');
   });
 
   test('entity frame aborts instead of partially committing after a skipped tx', async () => {

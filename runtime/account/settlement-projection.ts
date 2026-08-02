@@ -3,10 +3,7 @@ import type { AccountReplica, Delta, SettlementDiff } from '../types/account';
 import { createDefaultDelta } from './delta';
 import { invalidateAccountMapCommitment } from './map-commitment';
 import { getDefaultCreditLimit } from './utils';
-
-const UINT256_MAX = (1n << 256n) - 1n;
-const INT256_MIN = -(1n << 255n);
-const INT256_MAX = (1n << 255n) - 1n;
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/integer-ranges';
 
 const createSettlementDelta = (tokenId: number): Delta => {
   const creditLimit = getDefaultCreditLimit(tokenId);

@@ -41,6 +41,7 @@ import type {
   RunResult,
   RunTask,
 } from './run-e2e-parallel-isolated';
+import { LOCAL_TEST_PORT_POOL_VERSION } from './local-test-port-lease';
 
 type JsonRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is JsonRecord => typeof value === 'object' && value !== null;
@@ -57,7 +58,7 @@ export const buildE2EGateConfig = (args: CliArgs, tasks: readonly RunTask[]): Re
   manifestVersion: QA_RUN_MANIFEST_VERSION,
   args: {
     shards: args.shards,
-    basePort: args.basePort,
+    portPool: LOCAL_TEST_PORT_POOL_VERSION,
     stackTimeoutMs: args.stackTimeoutMs,
     testTimeoutMs: args.testTimeoutMs,
     phaseWarnMs: args.phaseWarnMs,
@@ -329,6 +330,7 @@ export const writeRunManifest = (
         candidateId: candidate.candidateId,
         gateConfigHash: candidate.gateConfigHash,
         shard: result.shard,
+        portBase: result.portBase,
         status,
         resultClass: result.resultClass,
         durationMs: result.durationMs,
@@ -390,7 +392,7 @@ export const writeRunManifest = (
     failureClasses: summarizeQaFailureClasses(shards),
     args: {
       shards: args.shards,
-      basePort: args.basePort,
+      portPool: LOCAL_TEST_PORT_POOL_VERSION,
       workersPerShard: args.workersPerShard,
       maxFailures: args.maxFailures,
       phaseWarnMs: args.phaseWarnMs,

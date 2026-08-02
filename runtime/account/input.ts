@@ -1,4 +1,11 @@
 import type { AccountExternalFinalityInput, AccountInput, AccountState, AccountTx } from '../types/account';
+import type { AccountPeerRejectionCode } from './peer-rejection';
+import { isAccountWatchSeed } from '../protocol/account-watch-seed';
+
+export type AccountInputEnvelopeError = Readonly<{
+  code: AccountPeerRejectionCode;
+  reason: string;
+}>;
 
 /**
  * Build the local-only Account input committed by the owning Entity frame.
@@ -82,13 +89,16 @@ export const createAccountDisputeStartedInput = (
 export const getAccountInputEnvelopeError = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed'>,
   input: AccountInput,
-): string | undefined => {
+): AccountInputEnvelopeError | undefined => {
   if (
     !input.domain ||
     !Number.isSafeInteger(input.domain.chainId) ||
     typeof input.domain.depositoryAddress !== 'string'
   ) {
-    return `ACCOUNT_INPUT_DOMAIN_INVALID:${input.fromEntityId}`;
+    return {
+      code: 'ACCOUNT_PEER_DOMAIN_INVALID',
+      reason: `ACCOUNT_INPUT_DOMAIN_INVALID:${input.fromEntityId}`,
+    };
   }
   const left = account.leftEntity.toLowerCase();
   const right = account.rightEntity.toLowerCase();
@@ -98,23 +108,41 @@ export const getAccountInputEnvelopeError = (
     from === to ||
     !((from === left && to === right) || (from === right && to === left))
   ) {
-    return `ACCOUNT_INPUT_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`;
+    return {
+      code: 'ACCOUNT_PEER_PARTY_MISMATCH',
+      reason: `ACCOUNT_INPUT_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`,
+    };
   }
   if (
     input.domain.chainId !== account.domain.chainId ||
     input.domain.depositoryAddress.toLowerCase() !==
       account.domain.depositoryAddress.toLowerCase()
   ) {
-    return `ACCOUNT_INPUT_DOMAIN_MISMATCH:${input.fromEntityId}`;
+    return {
+      code: 'ACCOUNT_PEER_DOMAIN_MISMATCH',
+      reason: `ACCOUNT_INPUT_DOMAIN_MISMATCH:${input.fromEntityId}`,
+    };
   }
   if (input.kind === 'txs' && input.watchSeed === undefined) {
-    return `ACCOUNT_LOCAL_INPUT_WATCH_SEED_MISSING:${input.fromEntityId}`;
+    return {
+      code: 'ACCOUNT_PEER_WATCH_SEED_INVALID',
+      reason: `ACCOUNT_LOCAL_INPUT_WATCH_SEED_MISSING:${input.fromEntityId}`,
+    };
+  }
+  if (input.watchSeed !== undefined && !isAccountWatchSeed(input.watchSeed)) {
+    return {
+      code: 'ACCOUNT_PEER_WATCH_SEED_INVALID',
+      reason: `ACCOUNT_INPUT:ACCOUNT_WATCH_SEED_INVALID:${input.fromEntityId}`,
+    };
   }
   if (
     input.watchSeed !== undefined &&
     input.watchSeed.toLowerCase() !== account.watchSeed.toLowerCase()
   ) {
-    return `ACCOUNT_WATCH_SEED_MISMATCH:${input.fromEntityId}`;
+    return {
+      code: 'ACCOUNT_PEER_WATCH_SEED_MISMATCH',
+      reason: `ACCOUNT_WATCH_SEED_MISMATCH:${input.fromEntityId}`,
+    };
   }
   return undefined;
 };

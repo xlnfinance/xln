@@ -41,6 +41,7 @@ import type {
   RuntimeEntityInputsEnvelope,
   RuntimeReplica,
 } from '../../runtime/types';
+import { signRuntimeEntityInputsEnvelope } from '../../runtime/entity-input-envelope-auth';
 import { createEntityProposalFixture } from './entity-proposal-fixture';
 import { createTestJReplica } from './j-replica';
 
@@ -236,7 +237,11 @@ export const buildAuthenticatedInvalidProposal = (
 export const deliverEncryptedProposal = async (
   env: RuntimeReplica,
   frame: EntityFrame,
-): Promise<{ inboundResults: unknown[]; remoteRuntimeId: string }> => {
+): Promise<{
+  inboundResults: unknown[];
+  remoteRuntimeId: string;
+  remoteEnv: RuntimeReplica;
+}> => {
   const remoteSeed = `${durableProposalRuntimeSeed}:remote`;
   const remoteRuntimeId = deriveSignerAddressSync(remoteSeed, '1').toLowerCase();
   const inboundResults: unknown[] = [];
@@ -260,7 +265,8 @@ export const deliverEncryptedProposal = async (
     serializeWsMessage(hello),
   );
   if (socket.sent.at(-1)?.type !== 'hello_ack') throw new Error('TEST_DIRECT_HELLO_ACK_MISSING');
-  const envelope: RuntimeEntityInputsEnvelope = {
+  const remoteEnv = createEmptyEnv(remoteSeed);
+  const envelope: RuntimeEntityInputsEnvelope = signRuntimeEntityInputsEnvelope(remoteEnv, env.runtimeId!, {
     sourceRuntimeId: remoteRuntimeId,
     sourceRuntimeHeight: 1,
     sourceRuntimeTimestamp: 1_000,
@@ -270,7 +276,7 @@ export const deliverEncryptedProposal = async (
       runtimeId: env.runtimeId!,
       proposedFrame: frame,
     }],
-  };
+  });
   const message: RuntimeWsMessage = {
     type: 'entity_inputs',
     id: 'byzantine-proposal',
@@ -294,7 +300,7 @@ export const deliverEncryptedProposal = async (
       ),
     },
   }));
-  return { inboundResults, remoteRuntimeId };
+  return { inboundResults, remoteRuntimeId, remoteEnv };
 };
 
 export const restartPersistedProposalValidator = async (

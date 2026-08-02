@@ -71,10 +71,6 @@ export type RestoredStorageBaseOptions = {
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
 };
 
-const requireAtomicDelete = (batch: ReturnType<RuntimeDbLike['batch']>, label: string): void => {
-  if (typeof batch.del !== 'function') throw new Error(`${label}_DELETE_UNSUPPORTED`);
-};
-
 const snapshotKeyForDoc = (height: number, doc: StorageDoc): Buffer => {
   const prefix =
     doc.family === 'entity' ? KEY_SNAPSHOT_ENTITY : doc.family === 'account' ? KEY_SNAPSHOT_ACCOUNT : KEY_SNAPSHOT_BOOK;
@@ -90,8 +86,7 @@ const invalidateCurrentCache = async (
 ): Promise<void> => {
   if (typeof db.keys !== 'function') throw new Error('RECOVERY_IMPORT_CURRENT_KEYS_UNSUPPORTED');
   const fence = db.batch();
-  requireAtomicDelete(fence, 'RECOVERY_IMPORT_CURRENT_FENCE');
-  fence.del!(KEY_HEAD);
+  fence.del(KEY_HEAD);
   await writeBatch(fence);
   await onBoundary?.('after-restore-current-fence');
   await deleteKeyRange(
@@ -113,7 +108,7 @@ const queueCurrentBody = (
   accountJClaimNodes: readonly { key: Buffer; value: Buffer }[],
 ): void => {
   void docs;
-  for (const key of prepared.docDels) batch.del?.(key);
+  for (const key of prepared.docDels) batch.del(key);
   for (const item of prepared.docPuts) batch.put(item.key, item.value);
   for (const item of prepared.merklePuts) batch.put(item.key, item.value);
   for (const item of certifiedBoardNodes) batch.put(item.key, item.value);
@@ -207,8 +202,7 @@ const queueHistoryReplacement = async (
 ): Promise<ReturnType<RuntimeDbLike['batch']>> => {
   if (typeof db.keys !== 'function') throw new Error('RECOVERY_IMPORT_HISTORY_KEYS_UNSUPPORTED');
   const batch = db.batch();
-  requireAtomicDelete(batch, 'RECOVERY_IMPORT_HISTORY');
-  for await (const key of iterateKeys(db, {})) batch.del!(key);
+  for await (const key of iterateKeys(db, {})) batch.del(key);
   for (const item of entries) batch.put(item.key, item.value);
   return batch;
 };

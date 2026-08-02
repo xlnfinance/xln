@@ -156,6 +156,15 @@ test('Entity validation and storage hydration reject an unbounded generic output
   })).toThrow('STORAGE_CERTIFIED_OUTPUT_RELATIONSHIP_LIMIT_EXCEEDED');
 });
 
+test('storage hydration rejects an orderbook projection without its exact hub policy', () => {
+  const core = {
+    ...projectEntityCoreDoc(makeState()),
+    orderbookReferrals: new Map(),
+  };
+  expect(() => hydrateEntityStateFromStorage({ core, accounts: new Map(), books: new Map() }))
+    .toThrow(`STORAGE_ORDERBOOK_HUBPROFILE_MISSING:${entityId}`);
+});
+
 test('account capacity uses the canonical counterparty key directly', () => {
   const accounts = new Map<string, unknown>();
   for (let index = 0; index < LIMITS.MAX_ACCOUNTS_PER_ENTITY; index += 1) {
@@ -198,7 +207,7 @@ test('local account opening rejects capacity overflow before cloning or insertio
   expect(state.accounts.has(counterpartyId)).toBe(false);
 });
 
-test('inbound mirrored-account insertion rejects capacity overflow before state mutation', async () => {
+test('inbound peer capacity overflow is a deterministic no-op', async () => {
   const state = makeState();
   fillAccounts(state, LIMITS.MAX_ACCOUNTS_PER_ENTITY);
   const env = createEmptyEnv('inbound-account-capacity');
@@ -211,11 +220,30 @@ test('inbound mirrored-account insertion rejects capacity overflow before state 
     state: { ...makeState(), entityId: counterpartyId },
   } as EntityReplica);
 
-  await expect(applyAccountInputToEntity(state, {
+  await applyAccountInputToEntity(state, {
+    kind: 'frame',
     fromEntityId: counterpartyId,
     toEntityId: entityId,
+    domain: {
+      chainId: jurisdiction.chainId,
+      depositoryAddress: jurisdiction.depositoryAddress,
+    },
     watchSeed,
-  }, env, createAccountConsensusContext(env))).rejects.toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
+    proposal: {
+      frame: {
+        height: 1,
+        timestamp: state.timestamp,
+        jHeight: 0,
+        accountTxs: [],
+        prevFrameHash: 'genesis',
+        accountStateRoot: `0x${'66'.repeat(32)}`,
+        stateHash: `0x${'77'.repeat(32)}`,
+        byLeft: false,
+        deltas: [],
+      },
+      frameHanko: `0x${'88'.repeat(65)}`,
+    },
+  }, env, createAccountConsensusContext(env));
   expect(state.accounts.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
   expect(state.accounts.has(counterpartyId)).toBe(false);
 });

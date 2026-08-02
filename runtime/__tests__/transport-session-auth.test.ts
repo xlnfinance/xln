@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 
 import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import { createDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
+import { verifyHelloAuth } from '../network/p2p/hello-auth';
 import { RuntimeWsClient } from '../network/p2p/ws-client';
 import {
   canonicalizeRuntimeWsAudience,
@@ -118,6 +119,55 @@ afterEach(() => {
 });
 
 describe('bound websocket session authority', () => {
+  test('invalid authentication attempts cannot advance verifier time', () => {
+    const fixedNow = Date.now() + 10_000;
+    const nowSpy = spyOn(Date, 'now').mockReturnValue(fixedNow);
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        expect(verifyHelloAuth(
+          CLIENT_RUNTIME_ID,
+          CLIENT_KEY,
+          { nonce: `invalid-${attempt}`, timestamp: fixedNow, signature: '0x00' },
+          1,
+          'relay:test',
+        )).toContain('signature invalid');
+      }
+      const nonce = 'honest-after-invalid-burst';
+      const audience = 'relay:test';
+      const signature = signDigest(
+        CLIENT_SEED,
+        '1',
+        hashHelloMessage(CLIENT_RUNTIME_ID, CLIENT_KEY, fixedNow, nonce, audience),
+      );
+      expect(verifyHelloAuth(
+        CLIENT_RUNTIME_ID,
+        CLIENT_KEY,
+        { nonce, timestamp: fixedNow, signature },
+        1,
+        audience,
+      )).toBeNull();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  test('send validation failure reports once without recursive debug transport', () => {
+    const errors: string[] = [];
+    const socket = makeSocket();
+    const client = new RuntimeWsClient({
+      url: 'ws://unused.invalid',
+      runtimeId: CLIENT_RUNTIME_ID,
+      helloAudience: 'relay:test',
+      encryptionKeyPair: deriveEncryptionKeyPair(CLIENT_SEED),
+      onError: error => errors.push(error.message),
+    });
+    (client as unknown as { ws: FakeSocket['ws'] }).ws = socket.ws;
+
+    expect(client.sendDebugEvent({ code: 'test' })).toBe(false);
+    expect(errors).toEqual(['Authenticated WS frame requires a completed bound hello']);
+    expect(socket.sent).toHaveLength(0);
+  });
+
   test('client refuses a challenge forwarded from another endpoint', async () => {
     const received: RuntimeWsMessage[] = [];
     const errors: string[] = [];

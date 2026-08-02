@@ -521,7 +521,7 @@ for (const [path, markers] of [
     'runtime/api/public/external-wallet-api.ts',
     ["createStructuredLogger('server.external_wallet')", 'faucet.erc20.failed', 'snapshot.failed', 'faucet.gas.failed'],
   ],
-  ['runtime/entity/tx/invariant-errors.ts', ["'DIRECT_PAYMENT_',", "'SWAP_REQUEST_',"]],
+  ['runtime/entity/tx/invariant-errors.ts', ["'SWAP_REQUEST_',"]],
   [
     'runtime/entity/tx/handlers/direct-payment.ts',
     ["createStructuredLogger('entity.payment')", 'DIRECT_PAYMENT_${code}:${detail}', "'NEXT_HOP_ACCOUNT_MISSING'"],
@@ -533,10 +533,6 @@ for (const [path, markers] of [
   ['runtime/entity/tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity/tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity/factory.ts', ["createStructuredLogger('entity.factory')", 'lazy.create']],
-  [
-    'runtime/runtime/registration/numbered-registration.ts',
-    ["createStructuredLogger('runtime.numbered-registration')", 'register_failed'],
-  ],
   ['runtime/entity/consensus/entity-log.ts', ["createStructuredLogger('entity')"]],
   ['runtime/entity/consensus/frame-application.ts', ['frame.profile', 'frame.apply']],
   [
@@ -887,11 +883,11 @@ for (const [path, markers] of [
   [
     'runtime/__tests__/audit-failfast-regressions.test.ts',
     [
-      'direct payment fails loud for invalid route topology',
+      'direct payment rejects invalid route topology without an invariant halt',
       'DIRECT_PAYMENT_ROUTE_START_INVALID',
       'DIRECT_PAYMENT_ROUTE_END_INVALID',
       'DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING',
-      'remote-invariant-failure-fatal',
+      'remote-business-rejection-discard',
       'remote-storage-failure-fatal',
       'remote-local-bug-fatal',
       "expect(storage.failureKind).toBe('storage')",
@@ -906,7 +902,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
   [
     'runtime/__tests__/entity-factory-logging.test.ts',
-    ['entity creation owners use structured logging without direct console output', 'entity.factory'],
+    ['lazy entity creation uses structured logging without direct console output', 'entity.factory'],
   ],
   [
     'runtime/__tests__/entity-consensus-logging.test.ts',

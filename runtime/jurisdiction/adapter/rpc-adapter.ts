@@ -19,6 +19,7 @@ import { createRpcWatcherController } from './rpc-watcher-controller';
 import { createTxFinalizationEvidenceReader } from './rpc-watcher-inputs';
 import { createRpcWriteMethods } from './rpc-write-methods';
 import { asRpcTxResponse } from './rpc-boundary';
+import { prepareDurableEvmTransaction } from './evm-durable-transaction';
 
 export async function createRpcAdapter(
   config: JAdapterConfig,
@@ -116,6 +117,19 @@ export async function createRpcAdapter(
     get deltaTransformer() { return stack.deltaTransformer; },
     get addresses() { return stack.addresses; },
     get entityProviderDeploymentBlock() { return stack.entityProviderDeploymentBlock; },
+    async prepareDurableTransaction(signerPrivateKey, request, accept) {
+      if (config.mode === 'tron') {
+        throw new Error('NUMBERED_REGISTRATION_DURABLE_SIGNING_UNSUPPORTED:tron');
+      }
+      const activeSigner = await chainIo.signerForPrivateKey(ethers.hexlify(signerPrivateKey));
+      return prepareDurableEvmTransaction({
+        signer: activeSigner,
+        request,
+        accept,
+        sequencer,
+        buildOverrides: chainIo.buildFeeOverrides,
+      });
+    },
     deployStack: stack.deploy,
     ...lifecycle,
     ...reads,

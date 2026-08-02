@@ -23,6 +23,7 @@ import {
   splitRoutedOutputByDeliveryLane,
   type ReliableOutputIdentity,
 } from './identity';
+import { signRuntimeEntityInputsEnvelope } from '../entity-input-envelope-auth';
 import {
   buildPendingNetworkOutputs,
   buildRoutingDeliveryResult,
@@ -95,6 +96,7 @@ const outputEnvelopeGroupKey = (output: DeliverableEntityInput): string => {
 
 const buildRuntimeEntityInputsEnvelope = (
   env: RuntimeReplica,
+  targetRuntimeId: string,
   outputs: readonly DeliverableEntityInput[],
 ): RuntimeEntityInputsEnvelope => {
   if (outputs.length === 0) throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_EMPTY');
@@ -135,13 +137,13 @@ const buildRuntimeEntityInputsEnvelope = (
     } = output;
     return validateDeliverableEntityInput(input);
   });
-  return {
+  return signRuntimeEntityInputsEnvelope(env, targetRuntimeId, {
     sourceRuntimeId,
     sourceRuntimeHeight: envelopeFrame.height,
     sourceRuntimeTimestamp: envelopeFrame.timestamp,
     entityInputs,
     ...(atomicCrossJurisdictionPair ? { atomicCrossJurisdictionPair } : {}),
-  };
+  });
 };
 
 const awaitsDurableEntityCertificate = (
@@ -462,7 +464,7 @@ export const dispatchEntityOutputs = (
       deferredOutputs,
     );
     if (sendable.length === 0) continue;
-    const envelope = buildRuntimeEntityInputsEnvelope(env, sendable);
+    const envelope = buildRuntimeEntityInputsEnvelope(env, group.targetRuntimeId, sendable);
     if (group.atomic || sendable.some(isCrossJAdmissionSourceProposal)) {
       routeLog.info('crossj.admission_envelope_dispatch', {
         atomic: group.atomic,

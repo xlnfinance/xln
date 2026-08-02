@@ -79,7 +79,10 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
   private _network: ethers.Network;
 
   constructor(browserVM: unknown) {
-    super();
+    // BrowserVM mutates synchronously. Ethers' default 250 ms provider cache
+    // can therefore return a pre-transaction nonce and make a durable retry
+    // rebroadcast an already-consumed nonce.
+    super(undefined, { cacheTimeout: -1 });
     this.browserVM = browserVM as BrowserVmEthersProviderTarget;
     const chainId = requireBrowserVmChainId(this.browserVM);
     this._network = new ethers.Network('browservm', chainId);

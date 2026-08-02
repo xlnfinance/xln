@@ -18,7 +18,6 @@ declare global {
   var _entityCounter: number | undefined;
 }
 
-let namedRequestCounter = 0;
 const factoryLog = createStructuredLogger('entity.factory');
 
 // Entity encoding utilities
@@ -132,6 +131,12 @@ export const encodeBoard = (config: ConsensusConfig, env?: BoardSignerContext): 
   });
   if (config.threshold <= 0n) throw new Error(`Board threshold must be positive: ${config.threshold}`);
   const threshold = toUint16(config.threshold, 'threshold');
+  const totalVotingPower = votingPowers.reduce((total, power) => total + BigInt(power), 0n);
+  if (config.threshold > totalVotingPower) {
+    throw new Error(
+      `Board threshold exceeds total voting power: ${config.threshold.toString()} > ${totalVotingPower.toString()}`,
+    );
+  }
 
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   return abiCoder.encode(
@@ -160,12 +165,6 @@ export const generateLazyEntityId = (
 export const generateNumberedEntityId = (entityNumber: number): string => {
   // Convert number to bytes32 (left-padded with zeros)
   return `0x${entityNumber.toString(16).padStart(64, '0')}`;
-};
-
-export const generateNamedEntityId = (name: string): string => {
-  // For named entities: entityId resolved via name lookup on-chain
-  // This is just for client-side preview
-  return hashBoard(name);
 };
 
 export const detectEntityType = (entityId: string): EntityType => {
@@ -278,93 +277,4 @@ export const createLazyEntity = (
   if (DEBUG) factoryLog.debug('lazy.created', { name, entity: shortId(entityId, 8), executionTimeMs });
 
   return { config, executionTimeMs };
-};
-
-// 3. NAMED ENTITIES (Premium - admin assignment required)
-export const requestNamedEntity = async (
-  name: string,
-  entityNumber: number,
-  jurisdiction: JurisdictionConfig,
-): Promise<string> => {
-  if (!jurisdiction) {
-    throw new Error('Jurisdiction required for named entity');
-  }
-
-  if (DEBUG) {
-    factoryLog.debug('named.request', {
-      name,
-      entityNumber,
-      jurisdiction: jurisdiction.name,
-    });
-  }
-
-  // Simulate admin assignment request (deterministic)
-  const requestId = `req_${namedRequestCounter++}`;
-
-  if (DEBUG) factoryLog.debug('named.request_submitted', { name, entityNumber, requestId });
-
-  return requestId;
-};
-
-// Entity resolution (client-side)
-export const resolveEntityIdentifier = async (identifier: string): Promise<{ entityId: string; type: EntityType }> => {
-  // Handle different input formats
-  if (identifier.startsWith('#')) {
-    // #42 -> numbered entity
-    const number = parseInt(identifier.slice(1));
-    return {
-      entityId: generateNumberedEntityId(number),
-      type: 'numbered',
-    };
-  } else if (/^\d+$/.test(identifier)) {
-    // 42 -> numbered entity
-    const number = parseInt(identifier);
-    return {
-      entityId: generateNumberedEntityId(number),
-      type: 'numbered',
-    };
-  } else if (identifier.startsWith('0x')) {
-    // 0x123... -> direct entity ID
-    return {
-      entityId: identifier,
-      type: detectEntityType(identifier),
-    };
-  } else {
-    // "coinbase" -> named entity (requires on-chain lookup)
-    // For demo, simulate lookup
-    if (DEBUG) factoryLog.debug('named.lookup', { identifier });
-
-    // Simulate on-chain name resolution
-    const simulatedNumber = identifier === 'coinbase' ? 42 : 0;
-    if (simulatedNumber > 0) {
-      return {
-        entityId: generateNumberedEntityId(simulatedNumber),
-        type: 'named',
-      };
-    } else {
-      throw new Error(`Named entity "${identifier}" not found`);
-    }
-  }
-};
-
-export const isEntityRegistered = async (entityId: string): Promise<boolean> => {
-  const type = detectEntityType(entityId);
-
-  // Lazy entities are never "registered" - they exist by definition
-  if (type === 'lazy') {
-    return false;
-  }
-
-  // Numbered and named entities require on-chain verification
-  // For demo, assume they exist if they're small numbers
-  if (!/^[0-9]+$/.test(entityId)) {
-    return false; // Non-numeric IDs are not registered
-  }
-
-  try {
-    const num = BigInt(entityId);
-    return num > 0n && num < 1000000n;
-  } catch {
-    return false;
-  }
 };

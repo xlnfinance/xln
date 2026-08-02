@@ -3,6 +3,8 @@ import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { createDirectRuntimeWsRoute as createProductionDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
 import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../network/p2p/hello-auth';
+import { XLN_PROTOCOL_VERSION } from '../protocol/version';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 
@@ -132,6 +134,76 @@ const makeFakeWs = () => {
   return { ws, sent, closed };
 };
 
+const signSessionFrame = (
+  seed: string,
+  runtimeId: string,
+  audience: string,
+  nonce: string,
+  timestamp: number,
+): { message: RuntimeWsMessage; auth: NonNullable<RuntimeWsMessage['auth']> } => {
+  const message: RuntimeWsMessage = {
+    type: 'ping',
+    id: `frame-${timestamp}`,
+    from: runtimeId,
+    fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(seed).publicKey),
+  };
+  return {
+    message,
+    auth: {
+      nonce,
+      timestamp,
+      signature: signDigest(seed, '1', hashRuntimeWsFrame(message, audience, nonce, timestamp)),
+    },
+  };
+};
+
+describe('websocket session replay fence', () => {
+  test('keeps wall-clock freshness on hello only', () => {
+    const seed = 'stale-hello-peer';
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(seed).publicKey);
+    const audience = 'xln-relay:test';
+    const nonce = 'stale-hello-challenge';
+    const timestamp = Date.now() - 5 * 60 * 1000 - 1;
+    const signature = signDigest(
+      seed,
+      '1',
+      hashHelloMessage(runtimeId, encryptionPubKey, timestamp, nonce, audience),
+    );
+
+    expect(verifyHelloAuth(runtimeId, encryptionPubKey, { nonce, timestamp, signature }, 5 * 60 * 1000, audience))
+      .toContain('Hello timestamp skew too large');
+  });
+
+  test('accepts a far-future signed session counter once and rejects its replay', () => {
+    const seed = 'future-session-peer';
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const audience = 'xln-relay:test';
+    const nonce = 'future-session-challenge';
+    const timestamp = Date.now() + 24 * 60 * 60 * 1000;
+    const { message, auth } = signSessionFrame(seed, runtimeId, audience, nonce, timestamp);
+
+    expect(verifyRuntimeWsFrameAuth(runtimeId, message, auth, audience, nonce, 0)).toBeNull();
+    expect(verifyRuntimeWsFrameAuth(runtimeId, message, auth, audience, nonce, timestamp))
+      .toBe('Session frame replay or reordering');
+  });
+
+  test('keeps signed counters isolated between sessions', () => {
+    const seed = 'isolated-session-peer';
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const audience = 'xln-relay:test';
+    const flooded = signSessionFrame(seed, runtimeId, audience, 'session-a', 1_000_000);
+    const fresh = signSessionFrame(seed, runtimeId, audience, 'session-b', 1);
+
+    expect(verifyRuntimeWsFrameAuth(runtimeId, flooded.message, flooded.auth, audience, 'session-a', 999_999))
+      .toBeNull();
+    expect(verifyRuntimeWsFrameAuth(runtimeId, fresh.message, fresh.auth, audience, 'session-b', 0))
+      .toBeNull();
+    expect(verifyRuntimeWsFrameAuth(runtimeId, fresh.message, fresh.auth, audience, 'session-a', 0))
+      .toBe('Missing or invalid session frame auth');
+  });
+});
+
 describe('direct runtime websocket route', () => {
   test('marks a successful websocket upgrade handled so HTTP dispatch cannot fall through', () => {
     const route = createProductionDirectRuntimeWsRoute({
@@ -214,15 +286,42 @@ describe('direct runtime websocket route', () => {
     expect(() => deserializeWsMessage(serializeWsMessageForDebug(message))).toThrow('WS_WIRE_BINARY_REQUIRED');
   });
 
+  test('rejects oversized UTF-8 routing metadata before relay telemetry', () => {
+    const oversizedFrom = 'é'.repeat(65);
+    const encoded = encodeBinaryPayload({
+      v: XLN_PROTOCOL_VERSION,
+      type: 'ping',
+      from: oversizedFrom,
+    });
+
+    expect(() => deserializeWsMessage(encoded)).toThrow(
+      'WS_MESSAGE_FIELD_TOO_LONG:field=from:bytes=130:max=128',
+    );
+    expect(() => serializeWsMessage({
+      type: 'error',
+      error: 'x'.repeat(4 * 1024 + 1),
+    })).toThrow('WS_MESSAGE_FIELD_TOO_LONG:field=error');
+    expect(() => serializeWsMessage({
+      type: 'hello',
+      from: '0x1234',
+      fromEncryptionPubKey: '0xabcd',
+      timestamp: 1,
+      auth: { nonce: 'n', signature: 's'.repeat(257), timestamp: 1 },
+    })).toThrow('WS_MESSAGE_FIELD_TOO_LONG:field=signature:bytes=257:max=256');
+  });
+
   test('accepts a peer debug event without creating a second protocol error', async () => {
     const serverSeed = 'direct-debug-server';
     const clientSeed = 'direct-debug-client';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
     const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const received: unknown[] = [];
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      onEntityInputs: () => {},
+      onEntityInputs: (_from, envelope) => {
+        received.push(envelope);
+      },
     });
     const { ws, sent } = makeFakeWs();
     route.websocket.open(ws);
@@ -276,6 +375,7 @@ describe('direct runtime websocket route', () => {
     };
     const outboundEnvelope: RuntimeEntityInputsEnvelope = {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 7,
       sourceRuntimeTimestamp: 123,
       entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
@@ -307,6 +407,7 @@ describe('direct runtime websocket route', () => {
     };
     const inboundEnvelope: RuntimeEntityInputsEnvelope = {
       sourceRuntimeId: clientRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 9,
       sourceRuntimeTimestamp: 456,
       entityInputs: [inboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
@@ -419,6 +520,7 @@ describe('direct runtime websocket route', () => {
       encrypted: false,
       payload: {
         sourceRuntimeId: clientRuntimeId,
+        sourceSignature: `0x${'11'.repeat(65)}`,
         sourceRuntimeHeight: 9,
         sourceRuntimeTimestamp: 456,
         entityInputs: [{
@@ -464,6 +566,7 @@ describe('direct runtime websocket route', () => {
       encrypted: true,
       payload: encryptJSON({
         sourceRuntimeId: clientRuntimeId,
+        sourceSignature: `0x${'11'.repeat(65)}`,
         sourceRuntimeHeight: -1,
         sourceRuntimeTimestamp: 456,
         entityInputs: [],
@@ -590,15 +693,18 @@ describe('direct runtime websocket route', () => {
     expect(route.getSessionState()).toEqual([]);
   });
 
-  test('rejects duplicate runtime hello without displacing the live socket', async () => {
+  test('a fresh authenticated hello atomically replaces a stale direct socket', async () => {
     const serverSeed = 'direct-route-server-duplicate';
     const clientSeed = 'direct-route-client-duplicate';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
     const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const received: unknown[] = [];
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      onEntityInputs: () => {},
+      onEntityInputs: (_from, envelope) => {
+        received.push(envelope);
+      },
     });
 
     const first = makeFakeWs();
@@ -609,10 +715,10 @@ describe('direct runtime websocket route', () => {
     await route.websocket.message(first.ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
     await route.websocket.message(second.ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
 
-    expect(first.ws.readyState).toBe(1);
-    expect(second.ws.readyState).toBe(3);
-    expect(second.closed.at(-1)).toEqual({ code: 4009, reason: 'duplicate-runtime' });
-    expect(second.sent).toEqual([]);
+    expect(first.ws.readyState).toBe(3);
+    expect(second.ws.readyState).toBe(1);
+    expect(first.closed.at(-1)).toEqual({ code: 4009, reason: 'session-replaced' });
+    expect(second.sent.at(-1)?.type).toBe('hello_ack');
     expect(route.getSessionState()).toEqual([
       expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
     ]);
@@ -625,6 +731,7 @@ describe('direct runtime websocket route', () => {
     };
     expect(route.sendEntityInputsDelivery(clientRuntimeId, {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 1,
       sourceRuntimeTimestamp: 1,
       entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
@@ -632,8 +739,12 @@ describe('direct runtime websocket route', () => {
       outcome: 'delivered',
       code: 'ROUTE_DIRECT_DELIVERED',
     });
-    expect(first.sent.at(-1)?.type).toBe('entity_inputs');
-    expect(second.sent).toEqual([]);
+    expect(second.sent.at(-1)?.type).toBe('entity_inputs');
+    const firstSentCount = first.sent.length;
+    first.ws.readyState = 1;
+    await route.websocket.message(first.ws, 'late-frame-from-replaced-socket');
+    expect(first.sent).toHaveLength(firstSentCount);
+    expect(received).toEqual([]);
   });
 
   test('reports typed miss delivery when target direct socket is absent', () => {
@@ -654,6 +765,7 @@ describe('direct runtime websocket route', () => {
 
     expect(route.sendEntityInputsDelivery(targetRuntimeId, {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 1,
       sourceRuntimeTimestamp: 1,
       entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
@@ -681,6 +793,7 @@ describe('direct runtime websocket route', () => {
     await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
     const envelope: RuntimeEntityInputsEnvelope = {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 1,
       sourceRuntimeTimestamp: 1,
       entityInputs: [{
@@ -746,6 +859,7 @@ describe('direct runtime websocket route', () => {
 
     const delivery = route.sendEntityInputsDelivery(clientRuntimeId, {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 1,
       sourceRuntimeTimestamp: 1,
       entityInputs: [{

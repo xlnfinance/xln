@@ -7,6 +7,8 @@ ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/lib/port-layout.sh"
 source "$ROOT_DIR/scripts/dev/process-owner.sh"
+assert_dev_launcher_capability "$ROOT_DIR"
+unset XLN_DEV_LAUNCHER_PORT XLN_DEV_LAUNCHER_TOKEN
 CANONICAL_J_PATH="$ROOT_DIR/jurisdictions/jurisdictions.json"
 DEV_DATA_ROOT="$ROOT_DIR/db/dev"
 DEV_RDB_ROOT="$DEV_DATA_ROOT/rdb"
@@ -22,40 +24,11 @@ CUSTODY_PORT="$(xln_custody_port)"
 CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 WATCHTOWER_PORT="$(xln_watchtower_port)"
 
-assert_port_clear() {
-  local port="$1"
-  local attempts=50
-  local pids=""
-  while [ "$attempts" -gt 0 ]; do
-    pids="$(lsof -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
-    if [ -z "$pids" ]; then
-      return 0
-    fi
-    sleep 0.1
-    attempts=$((attempts - 1))
-  done
-  echo "DEV_PORT_BUSY_UNOWNED:port=${port} pids=$(echo "$pids" | paste -sd, -) ownerFile=$([[ -f "$DEV_OWNER_FILE" ]] && printf present || printf missing)" >&2
-  local pid
-  while IFS= read -r pid; do
-    [[ -n "$pid" ]] && describe_dev_port_listener "$port" "$pid" "$DEV_PID_DIR"
-  done <<< "$pids"
-  return 1
-}
-
 stop_owned_dev_processes "$DEV_OWNER_FILE" "$DEV_PID_DIR" "$ROOT_DIR"
-
-assert_port_clear "$RPC_PORT"
-assert_port_clear "$RPC2_PORT"
-assert_port_clear "$WEB_PORT"
-assert_port_clear "$WEB_HTTP_PORT"
-assert_port_clear "$API_PORT"
-assert_port_clear "$CUSTODY_PORT"
-assert_port_clear "$CUSTODY_DAEMON_PORT"
-assert_port_clear "$WATCHTOWER_PORT"
-assert_port_clear "$((API_PORT + 10))"
-assert_port_clear "$((API_PORT + 11))"
-assert_port_clear "$((API_PORT + 12))"
-assert_port_clear "$((API_PORT + 13))"
+assert_dev_ports_clear "$DEV_PID_DIR" "$DEV_OWNER_FILE" \
+  "$RPC_PORT" "$RPC2_PORT" "$WEB_PORT" "$WEB_HTTP_PORT" "$API_PORT" \
+  "$CUSTODY_PORT" "$CUSTODY_DAEMON_PORT" "$WATCHTOWER_PORT" \
+  "$((API_PORT + 10))" "$((API_PORT + 11))" "$((API_PORT + 12))" "$((API_PORT + 13))"
 
 echo "[dev:clean] removing only the canonical dev shard"
 rm -rf "$DEV_DATA_ROOT"

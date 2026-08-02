@@ -11,6 +11,7 @@ import type { ApplyEntityTxOptions } from '../apply';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
 import { cumulativeMarksToPhases } from '../../../infra/perf-profile';
 import { getPerfMs } from '../../../infra/time';
+import { AccountPeerEvidenceError } from '../../../account/peer-rejection';
 import { resolveInboundAccount } from './account/inbound-account';
 import { rejectFrozenAccountInput } from './account/frozen-input';
 import type { CommittedAccountEffects } from './account/committed-input';
@@ -22,6 +23,7 @@ import {
   buildAccountHandlerResult,
   type AccountHandlerResult,
 } from './account/result';
+import { addMessage } from '../../frame-events';
 
 export {
   canProcessFrozenAccountInput,
@@ -98,12 +100,25 @@ const applyAccountInputPhases = async (
   // Entity-frame isolation already cloned state. Every phase mutates this
   // candidate and records effects; none may publish transport or storage.
   const effects = createCommittedAccountEffects();
-  const { account, counterpartyId, createdAccount } = resolveInboundAccount(
-    state,
-    input,
-    Boolean(incomingAck),
-    Boolean(incomingProposal),
-  );
+  let resolution: ReturnType<typeof resolveInboundAccount>;
+  try {
+    resolution = resolveInboundAccount(
+      state,
+      input,
+      Boolean(incomingAck),
+      Boolean(incomingProposal),
+    );
+  } catch (error) {
+    if (!(error instanceof AccountPeerEvidenceError)) throw error;
+    accountHandlerLog.warn('input.rejected', {
+      code: error.code,
+      from: shortId(input.fromEntityId),
+      error: error.message,
+    });
+    addMessage(state, `⚠️ Rejected account input: ${error.message}`);
+    return buildAccountHandlerResult(state, effects);
+  }
+  const { account, counterpartyId, createdAccount } = resolution;
   checkpointProfile('accountResolve');
   if (rejectFrozenAccountInput(state, account, input, counterpartyId)) {
     return buildAccountHandlerResult(state, effects);

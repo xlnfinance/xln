@@ -145,7 +145,6 @@ const buildRuntimeP2POptions = (
   if (config.relayUrls !== undefined) options.relayUrls = config.relayUrls;
   const wsUrl = (config as P2PConfig & { wsUrl?: string | null }).wsUrl;
   if (wsUrl !== undefined) options.wsUrl = wsUrl;
-  if (config.allowDirectClients !== undefined) options.allowDirectClients = config.allowDirectClients;
   if (config.seedRuntimeIds !== undefined) options.seedRuntimeIds = config.seedRuntimeIds;
   if (config.advertiseEntityIds !== undefined) options.advertiseEntityIds = config.advertiseEntityIds;
   if (config.gossipPollMs !== undefined) options.gossipPollMs = config.gossipPollMs;

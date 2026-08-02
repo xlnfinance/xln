@@ -711,27 +711,6 @@ pre.activity-sub {
   color: var(--ink);
 }
 
-.meta-reset-btn {
-  flex: 0 0 auto;
-  border: 1px solid rgba(17, 24, 39, 0.12);
-  background: #f6f9fc;
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.meta-reset-btn:hover:not(:disabled) {
-  background: #edf1f7;
-}
-
-.meta-reset-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
 /* ── Integration docs ── */
 
 .integration-section {

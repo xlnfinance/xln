@@ -16,6 +16,8 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
       'runtime/scripts/dev-radapter-keys.ts',
       '--web-port',
       '8084',
+      '--manager-origin',
+      'http://localhost:8085',
       '--api-port',
       '8082',
       '--out',
@@ -31,12 +33,14 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     });
     expect(keys.status, keys.stderr).toBe(0);
 
-    const banner = spawnSync('bun', [
+    const bannerArgs = [
       'runtime/scripts/print-dev-links.ts',
       '--web-port',
       '8084',
       '--web-http-port',
       '8085',
+      '--web-scheme',
+      'http',
       '--api-port',
       '8082',
       '--rpc-port',
@@ -45,30 +49,32 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
       '8546',
       '--custody-port',
       '8087',
+      '--custody-scheme',
+      'http',
       '--custody-daemon-port',
       '8088',
       '--watchtower-port',
       '9100',
       '--keys',
       keysPath,
-    ], {
+    ];
+    const banner = spawnSync('bun', bannerArgs, {
       cwd: repoRoot,
       encoding: 'utf8',
       stdio: 'pipe',
     });
 
     expect(banner.status, banner.stderr).toBe(0);
-    expect(banner.stdout).toContain('XLN DEV CONTROL PANEL');
-    expect(banner.stdout).toContain('Open any subsystem from here');
-    expect(banner.stdout).toContain('service status/log lines stream below');
+    expect(banner.stdout).toContain('xln dev control panel');
+    expect(banner.stdout).toContain('Wait for DEV_READY');
     expect(banner.stdout).toContain('wallet');
-    expect(banner.stdout).toContain('https://localhost:8084/app');
-    expect(banner.stdout).toContain('wallet browser QA');
     expect(banner.stdout).toContain('http://localhost:8085/app');
+    expect(banner.stdout).not.toContain('https://localhost:8084/app');
+    expect(banner.stdout).not.toContain('wallet browser QA');
     expect(banner.stdout).toContain('health admin');
-    expect(banner.stdout).toContain('https://localhost:8084/health');
+    expect(banner.stdout).toContain('http://localhost:8085/health');
     expect(banner.stdout).toContain('qa cockpit');
-    expect(banner.stdout).toContain('https://localhost:8084/qa');
+    expect(banner.stdout).toContain('http://localhost:8085/qa');
     expect(banner.stdout).toContain('remote admin import');
     expect(banner.stdout).toContain('suggested runtimes');
     expect(banner.stdout).toContain('http://127.0.0.1:8082/api/runtime-import?access=admin');
@@ -80,12 +86,14 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).not.toContain('[open read import]');
     expect(banner.stdout).toContain('runtime import key file:');
     expect(banner.stdout).toContain('http://127.0.0.1:8082/api/health');
-    expect(banner.stdout).toContain('https://localhost:8087');
+    expect(banner.stdout).toContain('http://localhost:8087');
     expect(banner.stdout).toContain('http://127.0.0.1:9100/api/tower/healthz');
     expect(banner.stdout).toContain('suggested runtimes endpoint lists fresh H/MM/Custody import tokens for the app runtime list.');
     expect(banner.stdout).toContain('expected remote runtimes: H1, H2, H3, MM, Custody');
     expect(banner.stdout).toContain('status/logs below:');
     expect(banner.stdout).toContain('VITE_HTTP');
+    expect(banner.stdout).toContain('READY');
+    expect(banner.stdout).toContain('local tls: disabled');
     expect(banner.stdout).not.toContain('radapter manager QA');
     expect(banner.stdout).not.toContain('radapter inspector');
     expect(banner.stdout).not.toContain('radapter manager');
@@ -93,6 +101,20 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).not.toContain('key=paste');
     expect(banner.stdout).not.toContain('Open these URLs');
     expect(banner.stdout).not.toContain('?runtimeList=');
+
+    const tlsArgs = [...bannerArgs];
+    tlsArgs[tlsArgs.indexOf('--web-scheme') + 1] = 'https';
+    tlsArgs[tlsArgs.indexOf('--custody-scheme') + 1] = 'https';
+    const tlsBanner = spawnSync('bun', tlsArgs, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    expect(tlsBanner.status, tlsBanner.stderr).toBe(0);
+    expect(tlsBanner.stdout).toContain('wallet tls');
+    expect(tlsBanner.stdout).toContain('https://localhost:8084/app');
+    expect(tlsBanner.stdout).toContain('https://localhost:8087');
+    expect(tlsBanner.stdout).toContain('local tls: enabled');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -111,16 +133,21 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(runDev).not.toContain('USE_ANVIL=true RUNTIME_VERBOSE_LOGS=');
   expect(runDev).not.toContain('exec concurrently');
   expect(runDev).toContain('bun --no-orphans "$CONCURRENTLY_JS"');
-  expect(runDev).toContain('--kill-timeout 5000');
+  expect(runDev).toContain('--kill-timeout "$DEV_OUTER_KILL_TIMEOUT_MS"');
   expect(runDev).toContain('trap cleanup_dev_stack EXIT');
   expect(runDev).toContain('concurrently_status=$?');
   expect(runDev).toContain('exit "$concurrently_status"');
   expect(devChild).toContain('runtime/orchestrator/orchestrator.ts');
   expect(devChild).toContain('DEV_CHILD_ROLE_UNKNOWN');
   expect(devChild).toContain('set -euo pipefail');
-  expect(devChild).toContain('VITE_DEV_SERVER_START port=${port}');
+  expect(devChild).toContain('VITE_STARTING port=${port}');
+  expect(devChild).toContain('"$REPO_ROOT/frontend/node_modules/.bin/vite" dev "$@"');
+  expect(devChild).not.toMatch(/\n\s+vite dev "\$@"/);
   expect(devChild).toContain('XLN_AUTO_PROVISION_EXTERNAL_FAUCET="${XLN_AUTO_PROVISION_EXTERNAL_FAUCET:-1}"');
+  expect(devChild).toContain('XLN_REQUIRE_DIRECT_BASELINE=1');
   expect(devChild).toContain('./scripts/dev/watch-runtime-build.sh');
+  expect(devChild).toContain('"${DEV_CHILD_COMMAND} ready"');
+  expect(devChild).toContain('scripts/dev/wait-dev-ready.ts');
   expect(runDev).not.toContain('bun build runtime/runtime.ts');
   expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');
   expect(devChild).toContain('XLN_LOG_LEVEL="$MESH_LOG_LEVEL"');

@@ -2,6 +2,7 @@ export const ORCHESTRATOR_RESET_CONFIRMATION = 'RESET_MESH_STATE';
 
 export type OrchestratorResetGuardConfig = {
   resetAllowed: boolean;
+  operatorAuthorized: boolean;
   bindHost: string;
   resetToken?: string;
 };
@@ -58,6 +59,9 @@ export const assertOrchestratorResetAllowed = (
   body: OrchestratorResetBody | null,
   config: OrchestratorResetGuardConfig,
 ): void => {
+  if (!config.operatorAuthorized) {
+    throw new OrchestratorResetRejectedError('RESET_OPERATOR_AUTH_REQUIRED', 403);
+  }
   if (!config.resetAllowed) {
     throw new OrchestratorResetRejectedError('RESET_DISABLED', 403);
   }

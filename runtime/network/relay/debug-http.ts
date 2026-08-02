@@ -78,6 +78,9 @@ const handleEvents = (input: RelayDebugHttpInput): Response => {
 };
 
 const handleMark = async (input: RelayDebugHttpInput): Promise<Response> => {
+  if (!input.operatorAuthorized) {
+    return json(input, { ok: false, error: 'OPERATOR_AUTH_REQUIRED' }, 403);
+  }
   const body = await input.request.json().catch(() => null) as Record<string, unknown> | null;
   const label = optionalString(body?.['label']);
   if (!label) return json(input, { ok: false, error: 'DEBUG_MARK_LABEL_REQUIRED' }, 400);

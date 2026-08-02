@@ -6,6 +6,7 @@ import { discardStagedAccountCommitmentCache } from '../map-commitment';
 import { accountInputAck, accountInputProposal } from './flush';
 import { prependUniqueMempoolTxs } from './helpers';
 import type { HandleAccountInputResult } from './types';
+import { rejectAccountPeerInput } from '../peer-rejection';
 
 const collisionLog = createStructuredLogger('account.collision');
 
@@ -89,15 +90,14 @@ export const handleUnmatchedAck = (
         ...(committedFrames.length > 0 && { committedFrames }),
       };
     }
-    return {
-      success: false,
-      error:
-        `Unmatched ACK with pending frame: ` +
+    return rejectAccountPeerInput(
+      'ACCOUNT_PEER_ACK_UNMATCHED',
+      `Unmatched ACK with pending frame: ` +
         `inputHeight=${String(normalizedInputHeight ?? 'none')} ` +
         `pending=${pending} ` +
         `newFrame=${String(proposal?.frame.height ?? 'none')}`,
       events,
-    };
+    );
   }
 
   if (proposal) return undefined;
@@ -134,11 +134,11 @@ export const handleUnmatchedAck = (
       ...(committedFrames.length > 0 && { committedFrames }),
     };
   }
-  return {
-    success: false,
-    error: `Unmatched ACK: height=${String(normalizedInputHeight ?? 'none')} ` + `pending=${String(pending)}`,
+  return rejectAccountPeerInput(
+    'ACCOUNT_PEER_ACK_UNMATCHED',
+    `Unmatched ACK: height=${String(normalizedInputHeight ?? 'none')} ` + `pending=${String(pending)}`,
     events,
-  };
+  );
 };
 
 export const resolveSameHeightIncomingFrame = (

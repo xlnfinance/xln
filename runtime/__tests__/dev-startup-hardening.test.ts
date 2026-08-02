@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { acquireDevSingleton, runDevCommands, type DevSingletonLease } from '../../scripts/dev/run-dev';
 
 const repoRoot = resolve(import.meta.dir, '../..');
 const tempRoots: string[] = [];
+
+const capabilityEnv = (lease: DevSingletonLease): NodeJS.ProcessEnv => ({
+  XLN_DEV_LAUNCHER_PORT: String(lease.port),
+  XLN_DEV_LAUNCHER_TOKEN: lease.capability,
+});
 
 afterEach(() => {
   for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -137,13 +143,191 @@ test('dev cleanup reaps only owner-recorded processes and only deletes the dev s
 
 test('ordinary dev startup atomically resets ephemeral Anvil and Runtime state', () => {
   const setup = readFileSync(join(repoRoot, 'scripts/dev/prepare-start.sh'), 'utf8');
-  const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
-  expect(packageJson).toContain('"dev:setup": "./scripts/dev/prepare-start.sh"');
+  const launcher = readFileSync(join(repoRoot, 'scripts/dev/run-dev.ts'), 'utf8');
+  const scripts = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')).scripts as Record<string, string>;
+  expect(scripts['dev']).toBe('bun scripts/dev/run-dev.ts');
+  expect(scripts['dev:debug']).toBe('bun scripts/dev/run-dev.ts --mode=debug');
+  expect(scripts['dev:trace']).toBe('bun scripts/dev/run-dev.ts --mode=trace');
+  expect(scripts['dev:verbose']).toBe('bun scripts/dev/run-dev.ts --mode=verbose');
+  expect(scripts['dev:setup']).toBeUndefined();
+  expect(scripts['dev:no-relay']).toBeUndefined();
+  expect(scripts['dev:anvil2']).toBeUndefined();
+  expect(launcher.indexOf('const lease = acquireDevSingleton()')).toBeLessThan(launcher.indexOf('runDevCommands(commands'));
+  expect(launcher).toContain('DEV_LAUNCHER_SHUTDOWN_TIMEOUT_MS = 90_000');
+  expect(launcher).toContain('stopProcessGroup({');
+  expect(scripts['clean-slate']).toBe('bun scripts/dev/run-dev.ts --clean');
   expect(setup).toContain('stop_owned_dev_processes');
   expect(setup).toContain('resetting ephemeral local JDB/RDB');
   expect(setup).toContain('rm -rf -- "$DEV_RDB_ROOT" "$DEV_JDB_ROOT"');
   expect(setup).not.toContain('rm -rf -- "$DEV_DATA_ROOT"');
   expect(setup).not.toContain('db-tmp');
+  const dependencyCheck = setup.indexOf('DEV_DEPENDENCIES_MISSING:frontend');
+  const ownedStop = setup.indexOf('stop_owned_dev_processes');
+  const portPreflight = setup.indexOf('assert_dev_ports_clear');
+  const contractSync = setup.indexOf('sync-contract-artifacts.sh');
+  const stateReset = setup.indexOf('rm -rf -- "$DEV_RDB_ROOT" "$DEV_JDB_ROOT"');
+  expect(dependencyCheck).toBeGreaterThanOrEqual(0);
+  expect(portPreflight).toBeGreaterThanOrEqual(0);
+  expect(dependencyCheck).toBeLessThan(ownedStop);
+  expect(portPreflight).toBeGreaterThan(ownedStop);
+  expect(portPreflight).toBeLessThan(contractSync);
+  expect(portPreflight).toBeLessThan(stateReset);
+});
+
+test('ordinary dev uses a kernel-held machine-wide singleton', () => {
+  const first = acquireDevSingleton(0);
+  try {
+    expect(() => acquireDevSingleton(first.port)).toThrow(`DEV_ALREADY_RUNNING:127.0.0.1:${first.port}`);
+  } finally {
+    first.release();
+  }
+  const replacement = acquireDevSingleton(first.port);
+  replacement.release();
+});
+
+test('dev shell capability is exact and direct shell entrypoints fail before mutation', async () => {
+  const root = join(mkdtempSync(join(tmpdir(), 'xln-dev-capability-')), 'not-created');
+  tempRoots.push(resolve(root, '..'));
+  const direct = await run('bash', ['scripts/dev/prepare-start.sh'], {
+    env: { XLN_DEV_DATA_ROOT: root },
+  });
+  expect(direct.code).not.toBe(0);
+  expect(direct.stderr).toContain('DEV_LAUNCHER_CAPABILITY_MISSING');
+  expect(existsSync(root)).toBeFalse();
+
+  const lease = acquireDevSingleton(0);
+  try {
+    const accepted = await run('bun', ['scripts/dev/verify-launcher-capability.ts'], {
+      env: capabilityEnv(lease),
+    });
+    expect(accepted.code).toBe(0);
+    const rejected = await run('bun', ['scripts/dev/verify-launcher-capability.ts'], {
+      env: {
+        XLN_DEV_LAUNCHER_PORT: String(lease.port),
+        XLN_DEV_LAUNCHER_TOKEN: '0'.repeat(64),
+      },
+    });
+    expect(rejected.code).not.toBe(0);
+    expect(rejected.stderr).toContain('DEV_LAUNCHER_CAPABILITY_REJECTED');
+  } finally {
+    lease.release();
+  }
+});
+
+test('dev launcher reaps a TERM-ignoring grandchild after its shell exits', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-dev-process-group-'));
+  tempRoots.push(root);
+  const fixture = join(root, 'listener.ts');
+  const ready = join(root, 'ready');
+  const probe = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
+  const port = probe.port;
+  probe.stop(true);
+  writeFileSync(fixture, [
+    "import { writeFileSync } from 'node:fs';",
+    "process.on('SIGTERM', () => {});",
+    "Bun.serve({ hostname: '127.0.0.1', port: Number(process.argv[2]), fetch: () => new Response('orphan') });",
+    "writeFileSync(process.argv[3]!, String(process.pid));",
+    "await new Promise(() => {});",
+  ].join('\n'));
+  const command = `bun ${JSON.stringify(fixture)} ${port} ${JSON.stringify(ready)} & while [ ! -f ${JSON.stringify(ready)} ]; do sleep 0.01; done`;
+  const startedAt = performance.now();
+  expect(await runDevCommands([['bash', '-c', command]], process.env, {
+    cwd: repoRoot,
+    termTimeoutMs: 100,
+    killTimeoutMs: 2_000,
+  })).toBe(0);
+  expect(performance.now() - startedAt).toBeLessThan(3_000);
+  expect(existsSync(ready)).toBeTrue();
+  await expect(fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(200) })).rejects.toThrow();
+});
+
+test('ordinary dev forbids test-style port overrides before preparation', async () => {
+  const result = await run('bun', ['scripts/dev/run-dev.ts'], {
+    env: { XLN_PORT_BASE: '28000' },
+  });
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain('DEV_PORT_OVERRIDE_FORBIDDEN:XLN_PORT_BASE');
+  expect(result.stdout).not.toContain('resetting ephemeral local JDB/RDB');
+});
+
+test('canonical dev data root supports a clean checkout without a db parent', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-clean-checkout-'));
+  tempRoots.push(root);
+  const requested = join(root, 'db', 'dev');
+  const result = await run('bash', [
+    '-c',
+    'source scripts/dev/process-owner.sh; canonical_dev_data_root "$1"',
+    'canonical-root-test',
+    requested,
+  ]);
+  expect(result.code).toBe(0);
+  expect(result.stdout).toBe(join(realpathSync(root), 'db', 'dev'));
+  expect(existsSync(join(root, 'db'))).toBeFalse();
+});
+
+test('dev startup reports a foreign listener and never kills it', async () => {
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: () => new Response('foreign-listener-alive'),
+  });
+  const root = mkdtempSync(join(tmpdir(), 'xln-dev-port-preflight-'));
+  tempRoots.push(root);
+  const pidDir = join(root, 'pids');
+  const ownerFile = join(root, 'owner');
+  mkdirSync(pidDir, { recursive: true });
+  try {
+    const result = await run('bash', [
+      '-c',
+      'source scripts/dev/process-owner.sh; assert_dev_ports_clear "$1" "$2" "$3"',
+      'port-preflight-test',
+      pidDir,
+      ownerFile,
+      String(server.port),
+    ]);
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain(`DEV_PORT_BUSY_UNOWNED:port=${server.port}`);
+    expect(result.stderr).toContain(`DEV_PORT_BUSY_PROCESS:port=${server.port}`);
+    expect(await (await fetch(`http://127.0.0.1:${server.port}`)).text())
+      .toBe('foreign-listener-alive');
+  } finally {
+    server.stop(true);
+  }
+});
+
+test('full dev preparation preserves state when a required port belongs to another process', async () => {
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: () => new Response('foreign-listener-alive'),
+  });
+  const root = mkdtempSync(join(tmpdir(), 'xln-dev-prepare-preflight-'));
+  tempRoots.push(root);
+  const rdbSentinel = join(root, 'rdb', 'sentinel');
+  const jdbSentinel = join(root, 'jdb', 'sentinel');
+  mkdirSync(join(root, 'rdb'), { recursive: true });
+  mkdirSync(join(root, 'jdb'), { recursive: true });
+  writeFileSync(rdbSentinel, 'keep-rdb', 'utf8');
+  writeFileSync(jdbSentinel, 'keep-jdb', 'utf8');
+  const lease = acquireDevSingleton(0);
+  try {
+    const result = await run('bash', ['scripts/dev/prepare-start.sh'], {
+      env: {
+        ...capabilityEnv(lease),
+        XLN_DEV_DATA_ROOT: root,
+        XLN_PORT_BASE: String(server.port),
+      },
+    });
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain(`DEV_PORT_BUSY_UNOWNED:port=${server.port}`);
+    expect(readFileSync(rdbSentinel, 'utf8')).toBe('keep-rdb');
+    expect(readFileSync(jdbSentinel, 'utf8')).toBe('keep-jdb');
+    expect(await (await fetch(`http://127.0.0.1:${server.port}`)).text())
+      .toBe('foreign-listener-alive');
+  } finally {
+    lease.release();
+    server.stop(true);
+  }
 });
 
 test('dev ownership rejects a stale PID file that points at a foreign process', async () => {
@@ -338,9 +522,35 @@ test('each dev Anvil writes state and temp files inside its configured JDB root'
 test('dev exports the storage roots consumed by mesh, watcher and health monitoring', () => {
   const runner = readFileSync(join(repoRoot, 'scripts/dev/run-dev.sh'), 'utf8');
   const child = readFileSync(join(repoRoot, 'scripts/dev/run-dev-child.sh'), 'utf8');
-  expect(runner).toContain('XLN_RDB_ROOT="${XLN_RDB_ROOT:-$DEV_DATA_ROOT/rdb}"');
-  expect(runner).toContain('XLN_JDB_ROOT="${XLN_JDB_ROOT:-$DEV_DATA_ROOT/jdb}"');
-  expect(runner).toContain('XLN_STORAGE_HISTORY_PATH="${XLN_STORAGE_HISTORY_PATH:-$XLN_RDB_ROOT/storage-health-history.json}"');
+  expect(runner).toContain('assert_no_dev_storage_path_overrides');
+  expect(runner).toContain('canonical_dev_data_root');
+  expect(runner).toContain('XLN_RDB_ROOT="$DEV_DATA_ROOT/rdb"');
+  expect(runner).toContain('XLN_JDB_ROOT="$DEV_DATA_ROOT/jdb"');
+  expect(runner).toContain('XLN_STORAGE_HISTORY_PATH="$XLN_RDB_ROOT/storage-health-history.json"');
+  expect(runner).toContain('ANVIL_TMPDIR="$XLN_JDB_ROOT/tmp/anvil"');
+  expect(runner).toContain('XLN_JURISDICTIONS_PATH="$XLN_RDB_ROOT/jurisdictions.json"');
   expect(child).toContain('--db-root "$XLN_RDB_ROOT/mesh"');
   expect(child).toContain('--db "$XLN_RDB_ROOT/watchtower"');
+  expect(runner).toContain('DEV_OUTER_KILL_TIMEOUT_MS=$((DEV_SHUTDOWN_TIMEOUT_MS + 10000))');
+  expect(child).toContain('DEV_INNER_KILL_TIMEOUT_MS=$((DEV_CHILD_TERM_TIMEOUT_MS + 5000))');
+});
+
+test('dev rejects independent storage roots before stopping or resetting anything', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-dev-storage-override-'));
+  tempRoots.push(root);
+  const lease = acquireDevSingleton(0);
+  try {
+    const result = await run('bash', ['scripts/dev/prepare-start.sh'], {
+      env: {
+        ...capabilityEnv(lease),
+        XLN_DEV_DATA_ROOT: root,
+        XLN_RDB_ROOT: join(root, 'other-rdb'),
+      },
+    });
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain('DEV_STORAGE_OVERRIDE_FORBIDDEN:XLN_RDB_ROOT');
+    expect(existsSync(join(root, 'rdb'))).toBeFalse();
+  } finally {
+    lease.release();
+  }
 });

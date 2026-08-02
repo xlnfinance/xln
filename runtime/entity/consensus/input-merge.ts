@@ -257,6 +257,29 @@ const mergePrecommitBundles = (
   return merged;
 };
 
+const isExactAtomicTransactionReplay = (
+  existing: EntityConsensusInput,
+  incoming: EntityConsensusInput,
+): boolean => {
+  const existingAtomic = existing.atomicCrossJurisdictionPair;
+  const incomingAtomic = incoming.atomicCrossJurisdictionPair;
+  if (!existingAtomic || !incomingAtomic) return false;
+  if (
+    existingAtomic.phase !== incomingAtomic.phase ||
+    existingAtomic.pairKey !== incomingAtomic.pairKey
+  ) return false;
+  // The merge key already binds Entity, signer and source Runtime frame. Keep
+  // the provenance checks explicit here: only a canonical-identical retry from the
+  // same authenticated Runtime may collapse. Any changed transaction bytes or
+  // sender still flow into strict atomic admission and fail on ambiguity.
+  return String(existing.from || '').trim().toLowerCase() ===
+      String(incoming.from || '').trim().toLowerCase() &&
+    String(existing.runtimeId || '').trim().toLowerCase() ===
+      String(incoming.runtimeId || '').trim().toLowerCase() &&
+    safeStringify(existing.sourceRuntimeFrame) === safeStringify(incoming.sourceRuntimeFrame) &&
+    safeStringify(existing.entityTxs ?? []) === safeStringify(incoming.entityTxs ?? []);
+};
+
 const sortMergedEntityInputs = (
   inputs: EntityConsensusInput[],
   hasVerifiedCommit: EntityCommitPriorityPredicate,
@@ -344,9 +367,11 @@ export const mergeEntityInputs = (
       }
 
       if (input.entityTxs) {
-        existing.entityTxs = [...(existing.entityTxs || []), ...input.entityTxs];
-        if (existing.entityTxs) {
-          existing.entityTxs = mergeJEventTxs(existing.entityTxs);
+        if (!isExactAtomicTransactionReplay(existing, input)) {
+          existing.entityTxs = [...(existing.entityTxs || []), ...input.entityTxs];
+          if (existing.entityTxs) {
+            existing.entityTxs = mergeJEventTxs(existing.entityTxs);
+          }
         }
       }
 

@@ -107,13 +107,13 @@ const readRuntimeActivityJournal = async (
   }
 };
 
-type HistoryViewReadDeps = Pick<
+type CertifiedHistoryReadDeps = Pick<
   PersistenceQueryDeps,
-  'tryOpenHistoryViewDb' | 'getHistoryViewDb'
+  'tryOpenRuntimeWalDb' | 'getRuntimeWalDb'
 >;
 
 export const readAccountFrameHistory = async (
-  deps: HistoryViewReadDeps,
+  deps: CertifiedHistoryReadDeps,
   env: RuntimeReplica,
   entityId: string,
   counterpartyId: string,
@@ -121,8 +121,8 @@ export const readAccountFrameHistory = async (
   opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
 ): Promise<AccountFrame[]> => {
   await requireStorageDbOpen(
-    () => deps.tryOpenHistoryViewDb(env),
-    'history-view:account-frames',
+    () => deps.tryOpenRuntimeWalDb(env),
+    'runtime-wal:certified-account-frames',
   );
   const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
     ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
@@ -131,7 +131,7 @@ export const readAccountFrameHistory = async (
     ? Math.max(0, Math.floor(Number(opts?.maxAccountHeight)))
     : Number.POSITIVE_INFINITY;
   const records = await readHistoryViewAccountFrames(
-    deps.getHistoryViewDb(env),
+    deps.getRuntimeWalDb(env),
     entityId,
     counterpartyId,
     {
@@ -173,8 +173,8 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
   ): Promise<CertifiedEntityFrameLink[]> => {
     await requireStorageDbOpen(
-      () => deps.tryOpenHistoryViewDb(env),
-      'history-view:entity-frames',
+      () => deps.tryOpenRuntimeWalDb(env),
+      'runtime-wal:certified-entity-frames',
     );
     const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
       ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
@@ -182,7 +182,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     const maxEntityHeight = Number.isFinite(Number(opts?.maxEntityHeight))
       ? Math.max(0, Math.floor(Number(opts?.maxEntityHeight)))
       : Number.POSITIVE_INFINITY;
-    const records = await readHistoryViewEntityFrames(deps.getHistoryViewDb(env), entityId, {
+    const records = await readHistoryViewEntityFrames(deps.getRuntimeWalDb(env), entityId, {
       limit: Math.max(1, Math.min(1000, Math.floor(Number(limit || 50)))),
       ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
       ...(Number.isSafeInteger(maxEntityHeight) ? { maxEntityHeight } : {}),

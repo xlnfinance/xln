@@ -56,6 +56,10 @@ const erc20Interface = new ethers.Interface([
   'event Transfer(address indexed from, address indexed to, uint256 value)',
   'event Approval(address indexed owner, address indexed spender, uint256 value)',
 ]);
+const TRACKED_ERC20_EVENT_TOPICS = new Set([
+  ethers.id('Transfer(address,address,uint256)').toLowerCase(),
+  ethers.id('Approval(address,address,uint256)').toLowerCase(),
+]);
 
 const requireErc20Amount = (value: unknown, eventName: string): bigint => {
   if (typeof value !== 'bigint' || value < 0n) {
@@ -189,6 +193,12 @@ const decodeWatcherLog = async (
 ): Promise<void> => {
   const kind = classifyWatcherLog(log, input);
   if (kind === 'erc20') {
+    // Token contracts may emit arbitrary custom events. Receipt authentication
+    // proves the log is canonical, not that every log at a watched address is
+    // part of the wallet projection. Skip unknown signatures; keep malformed
+    // Transfer/Approval payloads fail-loud because those mutate wallet state.
+    const topic0 = String(log.topics[0] ?? '').toLowerCase();
+    if (!TRACKED_ERC20_EVENT_TOPICS.has(topic0)) return;
     const parsed = erc20Interface.parseLog({
       topics: [...log.topics],
       data: log.data,

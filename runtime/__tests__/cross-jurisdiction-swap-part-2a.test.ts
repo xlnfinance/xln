@@ -429,6 +429,11 @@ describe('cross-jurisdiction hashledger swap', () => {
       filledSourceAmount: 999n,
       filledTargetAmount: 0n,
     };
+    const forgedOpeningBinding = {
+      ...buildCrossJurisdictionPullBinding(route, 'source'),
+      filledSourceAmount: 999n,
+      filledTargetAmount: 0n,
+    };
     const openingAccount = makeAccount(sourceHub, sourceUser);
     const opening = await applyAccountTx(openingAccount, {
       type: 'cross_pull_lock',
@@ -439,7 +444,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
         fullHash: route.sourcePull!.fullHash,
         partialRoot: route.sourcePull!.partialRoot,
-        crossJurisdiction: buildCrossJurisdictionPullBinding(forgedOpeningRoute, 'source'),
+        crossJurisdiction: forgedOpeningBinding,
         crossJurisdictionRoute: forgedOpeningRoute,
       },
     }, route.sourcePull!.signedAmount > 0n, 2_000, 1);
@@ -460,6 +465,12 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'route-hash-test',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
+      bookOwnerEntityId: sourceHub,
+      sourceSignerId: addr('66'),
+      sourceHubSignerId: addr('67'),
+      targetHubSignerId: addr('68'),
+      targetSignerId: signer,
+      bookHubSignerId: addr('67'),
       source: {
         jurisdiction: jref(eth),
         entityId: sourceUser,
@@ -486,6 +497,18 @@ describe('cross-jurisdiction hashledger swap', () => {
       target: { ...baseRoute.target, amount: 91n },
     });
     expect(changedTerms.routeHash).not.toBe(baseRoute.routeHash);
+    for (const changedSigner of [
+      { sourceSignerId: addr('70') },
+      { sourceHubSignerId: addr('71') },
+      { targetHubSignerId: addr('72') },
+      { targetSignerId: addr('73') },
+      { bookHubSignerId: addr('74') },
+    ]) {
+      expect(withCanonicalCrossJurisdictionRouteHash({
+        ...baseRouteWithoutHash,
+        ...changedSigner,
+      }).routeHash).not.toBe(baseRoute.routeHash);
+    }
 
     const existingState = makeState(targetUser, signer, base, targetHub);
     existingState.crossJurisdictionSwaps?.set(baseRoute.orderId, { ...baseRoute, status: 'settled' });
@@ -835,6 +858,8 @@ describe('cross-jurisdiction hashledger swap', () => {
           cumulativeSourceAmount: 500n,
           cumulativeTargetAmount: 450n,
           cumulativeFillRatio: 32_768,
+          fillNumerator: 1n,
+          fillDenominator: 2n,
           executionSourceAmount: 500n,
           executionTargetAmount: 450n,
           cancelRemainder: false,
@@ -1180,14 +1205,14 @@ describe('cross-jurisdiction hashledger swap', () => {
     const filledRoute = {
       ...route,
       fillSeq: 1,
-      cumulativeFillRatio: 0,
+      cumulativeFillRatio: 16_384,
       fillNumerator: 1n,
       fillDenominator: 4n,
       filledSourceAmount: 10_000_000_000_000_000n,
       filledTargetAmount: 25_000_000_000_000_000_000n,
       sourceClaimed: 10_000_000_000_000_000n,
       targetClaimed: 25_000_000_000_000_000_000n,
-      claimedRatio: 0,
+      claimedRatio: 16_384,
     };
 
     const claimed = withCrossJurisdictionClaimProgress(filledRoute, 16_384, 3_000);
@@ -1233,7 +1258,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(closed.updatedAt).toBe(3_000);
   });
 
-  test('cross-j orderbook remaining and cancel ack use exact ratio fields before uint16 fallback', () => {
+  test('cross-j orderbook remaining and cancel ack use one exact-derived ratio', () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
     const route = buildPreparedCrossJurisdictionRoute(
@@ -1266,6 +1291,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const ratioOnlyExactRoute = {
       ...route,
       fillSeq: 1,
+      cumulativeFillRatio: 16_384,
       fillNumerator: 1n,
       fillDenominator: 4n,
     };
@@ -1285,7 +1311,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           incrementalTargetAmount: 25_000_000_000_000_000_000n,
           cumulativeSourceAmount: 10_000_000_000_000_000n,
           cumulativeTargetAmount: 25_000_000_000_000_000_000n,
-          cumulativeFillRatio: 0,
+          cumulativeFillRatio: 16_384,
           fillNumerator: 1n,
           fillDenominator: 4n,
           ackKind: 'fill',
@@ -1326,7 +1352,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect((40_000_000_000_000_000n * 16_384n) / 65_535n).not.toBe(remaining.filledSourceAmount);
   });
 
-  test('cross-j next fill validates against exact previous ratio fields before uint16 fallback', async () => {
+  test('cross-j next fill validates against exact previous ratio fields', async () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
     const sourceUser = entity('8d');
@@ -1364,7 +1390,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const ratioOnlyExactRoute = {
       ...route,
       fillSeq: 1,
-      cumulativeFillRatio: 0,
+      cumulativeFillRatio: 16_384,
       fillNumerator: 1n,
       fillDenominator: 4n,
     };
@@ -1393,7 +1419,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           incrementalTargetAmount: 25_000_000_000_000_000_000n,
           cumulativeSourceAmount: 20_000_000_000_000_000n,
           cumulativeTargetAmount: 50_000_000_000_000_000_000n,
-          cumulativeFillRatio: 0,
+          cumulativeFillRatio: 32_768,
           fillNumerator: 1n,
           fillDenominator: 2n,
           executionSourceAmount: 10_000_000_000_000_000n,

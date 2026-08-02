@@ -1,4 +1,7 @@
+import { fetchRpcProxyText } from './rpc-proxy-safety';
+
 const ALLOWED_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
+const WATCHTOWER_PROXY_TIMEOUT_MS = 5_000;
 
 const allowedLocalPorts = (): ReadonlySet<string> => new Set(
   String(process.env['XLN_WATCHTOWER_PROXY_PORTS'] || process.env['XLN_WATCHTOWER_PORT'] || '9100')
@@ -48,7 +51,7 @@ export const handleWatchtowerProxy = async (req: Request): Promise<Response> => 
 
     const upstreamUrl = resolveLocalTowerUrl(target, path);
     const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.text();
-    const upstream = await fetch(upstreamUrl, {
+    const { response: upstream, text: payload } = await fetchRpcProxyText(upstreamUrl.toString(), {
       method: req.method,
       headers: {
         accept: req.headers.get('accept') || 'application/json',
@@ -57,8 +60,7 @@ export const handleWatchtowerProxy = async (req: Request): Promise<Response> => 
           : {}),
       },
       ...(body !== undefined ? { body } : {}),
-    });
-    const payload = await upstream.text();
+    }, WATCHTOWER_PROXY_TIMEOUT_MS, 'WATCHTOWER_PROXY_TIMEOUT');
     return new Response(payload, {
       status: upstream.status,
       headers: {

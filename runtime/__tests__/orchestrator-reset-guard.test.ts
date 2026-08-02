@@ -33,7 +33,7 @@ describe('orchestrator reset guardrails', () => {
       () => assertOrchestratorResetAllowed(
         makeRequest(),
         { confirm: ORCHESTRATOR_RESET_CONFIRMATION },
-        { resetAllowed: false, bindHost: '127.0.0.1' },
+        { resetAllowed: false, operatorAuthorized: true, bindHost: '127.0.0.1' },
       ),
       'RESET_DISABLED',
       403,
@@ -45,7 +45,7 @@ describe('orchestrator reset guardrails', () => {
       () => assertOrchestratorResetAllowed(
         makeRequest(),
         {},
-        { resetAllowed: true, bindHost: '127.0.0.1' },
+        { resetAllowed: true, operatorAuthorized: true, bindHost: '127.0.0.1' },
       ),
       'RESET_CONFIRMATION_REQUIRED',
       428,
@@ -56,8 +56,20 @@ describe('orchestrator reset guardrails', () => {
     expect(() => assertOrchestratorResetAllowed(
       makeRequest(),
       { confirm: ORCHESTRATOR_RESET_CONFIRMATION },
-      { resetAllowed: true, bindHost: '127.0.0.1' },
+      { resetAllowed: true, operatorAuthorized: true, bindHost: '127.0.0.1' },
     )).not.toThrow();
+  });
+
+  test('requires operator authority even when reset is enabled on loopback', () => {
+    expectRejected(
+      () => assertOrchestratorResetAllowed(
+        makeRequest(),
+        { confirm: ORCHESTRATOR_RESET_CONFIRMATION },
+        { resetAllowed: true, operatorAuthorized: false, bindHost: '127.0.0.1' },
+      ),
+      'RESET_OPERATOR_AUTH_REQUIRED',
+      403,
+    );
   });
 
   test('rejects public bind reset unless a token is configured and supplied', () => {
@@ -65,7 +77,7 @@ describe('orchestrator reset guardrails', () => {
       () => assertOrchestratorResetAllowed(
         makeRequest(),
         { confirm: ORCHESTRATOR_RESET_CONFIRMATION },
-        { resetAllowed: true, bindHost: '0.0.0.0' },
+        { resetAllowed: true, operatorAuthorized: true, bindHost: '0.0.0.0' },
       ),
       'RESET_TOKEN_REQUIRED_FOR_PUBLIC_BIND',
       403,
@@ -77,7 +89,7 @@ describe('orchestrator reset guardrails', () => {
       () => assertOrchestratorResetAllowed(
         makeRequest({ 'X-XLN-Reset-Token': 'wrong' }),
         { confirm: ORCHESTRATOR_RESET_CONFIRMATION },
-        { resetAllowed: true, bindHost: '127.0.0.1', resetToken: 'secret' },
+        { resetAllowed: true, operatorAuthorized: true, bindHost: '127.0.0.1', resetToken: 'secret' },
       ),
       'RESET_TOKEN_INVALID',
       401,
@@ -86,7 +98,7 @@ describe('orchestrator reset guardrails', () => {
     expect(() => assertOrchestratorResetAllowed(
       makeRequest({ Authorization: 'Bearer secret' }),
       { confirm: ORCHESTRATOR_RESET_CONFIRMATION },
-      { resetAllowed: true, bindHost: '0.0.0.0', resetToken: 'secret' },
+      { resetAllowed: true, operatorAuthorized: true, bindHost: '0.0.0.0', resetToken: 'secret' },
     )).not.toThrow();
   });
 });

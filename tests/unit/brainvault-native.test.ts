@@ -76,6 +76,21 @@ test('native node backend honors cancellation before allocating Argon memory', a
   }, { signal: abort.signal })).rejects.toThrow('BRAINVAULT_DERIVATION_ABORTED');
 });
 
+test('native derivation rejects empty names and passphrases without imposing a length policy', async () => {
+  await expect(deriveBrainVaultNative({
+    name: '',
+    passphrase: 'a',
+    shardInput: 1,
+    workers: 1,
+  })).rejects.toThrow('BRAINVAULT_NAME_INVALID');
+  await expect(deriveBrainVaultNative({
+    name: 'a',
+    passphrase: '',
+    shardInput: 1,
+    workers: 1,
+  })).rejects.toThrow('BRAINVAULT_PASSPHRASE_INVALID');
+});
+
 test('radapter accepts exact BrainVault messages and rejects secret-bearing drift', () => {
   expect(validateRuntimeAdapterWireMessage({
     v: 1,
@@ -118,6 +133,20 @@ test('radapter accepts exact BrainVault messages and rejects secret-bearing drif
       privateKey: 'forbidden',
     },
   })).toThrow('RADAPTER_REQUEST_BRAINVAULT_INPUT_FIELDS_INVALID');
+
+  expect(() => validateRuntimeAdapterWireMessage({
+    v: 1,
+    id: 'derive-empty-passphrase',
+    op: 'brainvault-derive',
+    jobId: 'brainvault-3',
+    input: {
+      specId: BRAINVAULT_V1_SPEC_ID,
+      name: 'alice',
+      passphrase: '',
+      shardInput: 1,
+      workers: 1,
+    },
+  })).toThrow('RADAPTER_REQUEST_BRAINVAULT_PASSPHRASE_INVALID');
 });
 
 const makeOwnerEnv = (): RuntimeReplica => ({

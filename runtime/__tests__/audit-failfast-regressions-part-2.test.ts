@@ -138,7 +138,7 @@ import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
 import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
 
-import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity/tx/j-events-htlc';
+import { queueCrossJurisdictionSalvageFromFinalizedArguments } from '../entity/tx/j-events-htlc';
 
 import {
   canonicalDisputeFinalizationEvidenceHash,
@@ -1843,7 +1843,7 @@ describe('audit fail-fast regressions', () => {
     ]);
 
     await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp)).rejects.toThrow(
-      /CROSS_J_PULL_CLOSE_PROPOSAL_FAILED/,
+      /CROSS_J_EXACT_FILL_RATIO_REQUIRED:cross-pull-propose-failfast/,
     );
     expect(account.mempool).toHaveLength(1);
   });
@@ -2275,6 +2275,48 @@ describe('audit fail-fast regressions', () => {
       tokenId: 1,
       amount: 10n,
     });
+    batch.disputeStarts.push({
+      counterentity: `0x${'ab'.repeat(32)}`,
+      nonce: 1,
+      proofbodyHash: `0x${'cd'.repeat(32)}`,
+      initialProofbody: {
+        watchSeed: `0x${'12'.repeat(32)}`,
+        offdeltas: [],
+        tokenIds: [],
+        transformers: [],
+      },
+      watchSeed: `0x${'12'.repeat(32)}`,
+      sig: '0x1234',
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+    });
+    const finalizationCounterparties = Array.from(
+      { length: 8 },
+      (_, index) => `0x${(index + 16).toString(16).padStart(2, '0').repeat(32)}`,
+    );
+    for (const [index, counterentity] of finalizationCounterparties.entries()) {
+      batch.disputeFinalizations.push({
+        counterentity,
+        initialNonce: index + 1,
+        finalNonce: index + 2,
+        initialProofbodyHash: `0x${(index + 32).toString(16).padStart(2, '0').repeat(32)}`,
+        finalProofbody: {
+          watchSeed: `0x${(index + 48).toString(16).padStart(2, '0').repeat(32)}`,
+          offdeltas: [],
+          tokenIds: [],
+          transformers: [],
+        },
+        starterArguments: '0x',
+        otherArguments: '0x',
+        sig: '0x1234',
+        startedByLeft: true,
+        cooperative: false,
+      });
+    }
+    batch.revealSecrets.push(
+      { transformer: hex20('5'), secret: `0x${'55'.repeat(32)}` },
+      { transformer: hex20('6'), secret: `0x${'66'.repeat(32)}` },
+    );
     state.jBatchState = {
       batch,
       jurisdiction,
@@ -2308,7 +2350,22 @@ describe('audit fail-fast regressions', () => {
       expect(jTx.data.entityNonce).toBe(1);
       expect(jTx.data.batchGeneration).toBe(1);
       expect(jTx.data.hankoSignature).toMatch(/^0x/);
+      expect(jTx.data.batch.disputeStarts).toHaveLength(1);
+      expect(jTx.data.batch.disputeFinalizations.map(({ counterentity }) => counterentity))
+        .toEqual(finalizationCounterparties.slice(0, 1));
+      expect(jTx.data.batch.revealSecrets).toHaveLength(2);
+      expect(jTx.data.batch.reserveToReserve).toEqual([]);
     }
     expect(result.workingReplica.state.jBatchState?.broadcastCount).toBe(1);
+    expect(result.workingReplica.state.jBatchState?.sentBatch?.batch.disputeStarts).toHaveLength(1);
+    expect(result.workingReplica.state.jBatchState?.sentBatch?.batch.disputeFinalizations)
+      .toHaveLength(1);
+    expect(result.workingReplica.state.jBatchState?.batch.reserveToReserve).toHaveLength(1);
+    expect(result.workingReplica.state.jBatchState?.batch.disputeStarts).toEqual([]);
+    expect(result.workingReplica.state.jBatchState?.batch.disputeFinalizations.map(
+      ({ counterentity }) => counterentity,
+    )).toEqual(finalizationCounterparties.slice(1));
+    expect(result.workingReplica.state.jBatchState?.batch.revealSecrets).toEqual([]);
+    expect(result.workingReplica.state.jBatchState?.autoBroadcastDraft).toBe(true);
   });
 });

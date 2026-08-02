@@ -165,6 +165,44 @@ test('invalid DisputeStarted finality leaves Account byte-identical', async () =
   expect(account).toEqual(before);
 });
 
+test('DisputeStarted atomically moves cross-j recovery into the active phase', async () => {
+  const leftEntity = `0x${'11'.repeat(32)}`;
+  const rightEntity = `0x${'22'.repeat(32)}`;
+  const account = makeAccount(leftEntity, rightEntity);
+  const recovery = {
+    requiredPullIds: ['pull-1', 'pull-2'],
+    resultsByPullId: { 'pull-1': '0x1234' },
+  };
+  account.status = 'dispute_preparing';
+  account.disputePrepare = {
+    startedAt: 10,
+    readyAfter: 20,
+    reason: 'cross-j-recovery',
+    crossJurisdictionRecovery: recovery,
+  };
+  const input = createAccountDisputeStartedInput(account.state, rightEntity, {
+    kind: 'dispute_started',
+    starterEntityId: leftEntity,
+    initialProofbodyHash: `0x${'55'.repeat(32)}`,
+    initialNonce: 7,
+    disputeTimeout: 120,
+    jNonce: 9,
+    starterInitialArguments: '0x',
+    starterIncrementedArguments: '0x',
+    observedBlockNumber: 100,
+  });
+
+  const result = await applyAccountInput(
+    createAccountConsensusContext(createEmptyEnv('account-dispute-started-cross-j-phase')),
+    account,
+    input,
+  );
+
+  expect(result.success).toBe(true);
+  expect(account.disputePrepare).toBeUndefined();
+  expect(account.activeDispute?.crossJurisdictionRecovery).toEqual(recovery);
+});
+
 test('Entity J-event routing never writes Account dispute fields directly', async () => {
   const source = await Bun.file(
     new URL('../entity/tx/j-events.ts', import.meta.url),

@@ -25,22 +25,12 @@ test('createLazyEntity is silent when runtime DEBUG is disabled', () => {
   expect(messages).toEqual([]);
 });
 
-test('entity creation owners use structured logging without direct console output', () => {
+test('lazy entity creation uses structured logging without direct console output', () => {
   const factorySource = readFileSync(join(process.cwd(), 'runtime/entity/factory.ts'), 'utf8');
-  const registrationSource = readFileSync(
-    join(process.cwd(), 'runtime/runtime/registration/numbered-registration.ts'),
-    'utf8',
-  );
 
   expect(factorySource).toContain("const factoryLog = createStructuredLogger('entity.factory');");
   expect(factorySource).toContain("factoryLog.debug('lazy.create'");
   expect(factorySource).not.toContain('console.');
-  expect(registrationSource).toContain(
-    "const registrationLog = createStructuredLogger('runtime.numbered-registration');",
-  );
-  expect(registrationSource).toContain("registrationLog.debug('create'");
-  expect(registrationSource).toContain("registrationLog.error('register_failed'");
-  expect(registrationSource).not.toContain('console.');
 });
 
 test('lazy entity identity preserves governance and leader order', () => {
@@ -105,4 +95,14 @@ test('board encoding resolves share keys case-insensitively without defaulting v
     validators: [lower],
     shares: {},
   })).toThrow('Board voting power missing');
+});
+
+test('board encoding rejects an unreachable quorum before registration', () => {
+  const proposer = '0x1111111111111111111111111111111111111111';
+  expect(() => encodeBoard({
+    mode: 'proposer-based',
+    threshold: 2n,
+    validators: [proposer],
+    shares: { [proposer]: 1n },
+  })).toThrow('Board threshold exceeds total voting power: 2 > 1');
 });

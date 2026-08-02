@@ -57,6 +57,35 @@ describe('runtime committed read barrier', () => {
     releaseWriter();
   });
 
+  test('a queued writer blocks later readers until its frame is released', async () => {
+    const env = createEmptyEnv('queued writer has reader priority');
+    const releaseFirstReader = await acquireRuntimeCommittedRead(env);
+    let writerEntered = false;
+    const writer = acquireRuntimeFrameWriter(env.infrastructure!).then(release => {
+      writerEntered = true;
+      return release;
+    });
+    await Promise.resolve();
+
+    let secondReaderEntered = false;
+    const secondReader = acquireRuntimeCommittedRead(env).then(release => {
+      secondReaderEntered = true;
+      return release;
+    });
+    await Promise.resolve();
+    expect(secondReaderEntered).toBeFalse();
+
+    releaseFirstReader();
+    const releaseWriter = await writer;
+    expect(writerEntered).toBeTrue();
+    expect(secondReaderEntered).toBeFalse();
+
+    releaseWriter();
+    const releaseSecondReader = await secondReader;
+    expect(secondReaderEntered).toBeTrue();
+    releaseSecondReader();
+  });
+
   test('reader waits for the active writer and then sees committed state', async () => {
     const env = createEmptyEnv('writer blocks read barrier');
     const releaseWriter = await acquireRuntimeFrameWriter(env.infrastructure!);

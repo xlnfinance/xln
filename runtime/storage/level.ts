@@ -123,7 +123,7 @@ export const deleteKeys = async (
     for (const key of keys.slice(offset, offset + STORAGE_BATCH_CHUNK_SIZE)) {
       const value = await readRawOrNull(db, key);
       if (value) removedBytes += key.byteLength + value.byteLength;
-      if (typeof batch.del === 'function') batch.del(key);
+      batch.del(key);
     }
     await writeBatch(batch);
     await onBatchCommitted?.();
@@ -154,7 +154,7 @@ export const deleteKeyRange = async (
     if (!(await shouldDelete(key))) continue;
     const value = await readRawOrNull(db, key);
     if (value) removedBytes += key.byteLength + value.byteLength;
-    if (typeof batch.del === 'function') batch.del(key);
+    batch.del(key);
     removedKeys += 1;
     batchCount += 1;
     if (batchCount >= STORAGE_BATCH_CHUNK_SIZE) await flush();

@@ -1,12 +1,10 @@
 import { signAccountFrame } from '../../account/crypto';
-import { cacheCommittedAccountJClaimNodeChanges } from '../account-j-claim-node-store';
 import { signEntityHashes } from '../../hanko/signing';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { assertFrameJPrefix } from '../../jurisdiction/machine/j-prefix-consensus';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import type { EntityFrame } from '../types';
 import { getPerfMs } from '../../infra/time';
-import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
 import { commitEntityFrameCandidateState } from '../state-clone';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import { createEntityFrameHashFromStateRoot } from './frame';
@@ -271,8 +269,8 @@ const installSingleSignerFrame = async (
     execution.hankos,
     true,
   );
-  cacheCommittedConsumptionNodeChanges(env, execution.consumptionNodeChanges);
-  cacheCommittedAccountJClaimNodeChanges(env, execution.accountJClaimNodeChanges);
+  context.consumptionNodeChanges = execution.consumptionNodeChanges;
+  context.accountJClaimNodeChanges = execution.accountJClaimNodeChanges;
   const priorState = workingReplica.state;
   emitCommittedPendingFrameWarnings(priorState, committedState);
   if (context.promoteCandidateState) {

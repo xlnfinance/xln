@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { AccountFrame } from '../types/account';
-import { buildHistoryViewPuts, readHistoryViewAccountFrames, readHistoryViewRuntimeActivity } from '../storage/history-view';
+import {
+  buildCertifiedFramePuts,
+  buildHistoryViewPuts,
+  readHistoryViewAccountFrames,
+  readHistoryViewRuntimeActivity,
+} from '../storage/history-view';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { HISTORY_VIEW_ACCOUNT_FRAME, HISTORY_VIEW_RUNTIME_ACTIVITY } from '../storage/keys';
 import type { RuntimeDbLike } from '../storage/types';
@@ -59,14 +64,9 @@ describe('history-view compact values', () => {
         byLeft: true,
         deltas: [],
       };
-      const accountPut = buildHistoryViewPuts({
+      const accountPut = buildCertifiedFramePuts({
         height: accountHeight,
         timestamp: frame.timestamp,
-        runtimeInput: { runtimeTxs: [], entityInputs: [] },
-        logs: [],
-        touchedEntities: [entityId],
-        touchedAccounts: [{ entityId, counterpartyId }],
-        touchedBookEntities: [],
         historyRecords: [{
           kind: 'accountFrame',
           entityId,
@@ -112,14 +112,9 @@ describe('history-view compact values', () => {
       deltas: [],
     };
 
-    const puts = buildHistoryViewPuts({
+    const puts = buildCertifiedFramePuts({
       height: 8,
       timestamp: 456,
-      runtimeInput: { runtimeTxs: [], entityInputs: [] },
-      logs: [],
-      touchedEntities: [entityId],
-      touchedAccounts: [{ entityId, counterpartyId }],
-      touchedBookEntities: [],
       historyRecords: [{
         kind: 'accountFrame',
         entityId,
@@ -164,14 +159,9 @@ describe('history-view compact values', () => {
       byLeft: true,
       deltas: [],
     };
-    const puts = buildHistoryViewPuts({
+    const puts = buildCertifiedFramePuts({
       height: 8,
       timestamp: 456,
-      runtimeInput: { runtimeTxs: [], entityInputs: [] },
-      logs: [],
-      touchedEntities: [entityId],
-      touchedAccounts: [{ entityId, counterpartyId }],
-      touchedBookEntities: [],
       historyRecords: [{
         kind: 'accountFrame',
         entityId,
@@ -204,7 +194,6 @@ describe('history-view compact values', () => {
       touchedEntities: [entityId],
       touchedAccounts: [{ entityId, counterpartyId }],
       touchedBookEntities: [entityId],
-      historyRecords: [],
     });
 
     const activityPut = puts.find((put) => put.key[0] === HISTORY_VIEW_RUNTIME_ACTIVITY);

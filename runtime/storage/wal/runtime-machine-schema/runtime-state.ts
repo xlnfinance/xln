@@ -101,39 +101,11 @@ const assertAccountFrameRecord = (value: unknown, code: string): void => {
   if (record['timestamp'] !== undefined) requireBoundaryInteger(record['timestamp'], `${code}_TIMESTAMP`);
 };
 
-const validateSecurityIncident = (value: unknown, code: string): void => {
-  const incident = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(incident, [
-    'id', 'domain', 'code', 'source', 'severity', 'status', 'summary', 'entityId',
-    'firstSeenAt', 'lastSeenAt', 'occurrences',
-  ], ['accountId', 'offerId', 'routeHash', 'resolvedAt'], `${code}_FIELDS`);
-  for (const field of ['id', 'code', 'summary', 'entityId']) {
-    requireString(incident[field], `${code}_${field.toUpperCase()}`);
-  }
-  for (const field of ['accountId', 'offerId', 'routeHash']) {
-    if (incident[field] !== undefined) requireString(incident[field], `${code}_${field.toUpperCase()}`);
-  }
-  if (incident['domain'] !== 'cross-j') throw new Error(`${code}_DOMAIN`);
-  if (incident['source'] !== 'local-consensus' && incident['source'] !== 'remote-ingress') {
-    throw new Error(`${code}_SOURCE`);
-  }
-  if (incident['severity'] !== 'warning' && incident['severity'] !== 'critical') {
-    throw new Error(`${code}_SEVERITY`);
-  }
-  if (incident['status'] !== 'active' && incident['status'] !== 'resolved') {
-    throw new Error(`${code}_STATUS`);
-  }
-  requireBoundaryInteger(incident['firstSeenAt'], `${code}_FIRST_SEEN`);
-  requireBoundaryInteger(incident['lastSeenAt'], `${code}_LAST_SEEN`);
-  requireBoundaryInteger(incident['occurrences'], `${code}_OCCURRENCES`, 1);
-  if (incident['resolvedAt'] !== undefined) requireBoundaryInteger(incident['resolvedAt'], `${code}_RESOLVED_AT`);
-};
-
 export const validateDurableRuntimeState = (value: unknown, code: string): void => {
   const state = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(state, [], [
     'maxEntityInputsPerFrame', 'maxEntityTxsPerFrame',
-    'pendingAuditEvents', 'securityIncidents', 'pendingHistoryRecords', 'deferredNetworkMeta',
+    'pendingAuditEvents', 'pendingHistoryRecords', 'deferredNetworkMeta',
     'reliableIngressReceiptLedger', 'reliableIngressTerminalWatermarks',
     'receivedReliableReceiptLedger', 'receivedReliableTerminalWatermarks',
     'pendingReliableIngress', 'reliableIngressCommitting',
@@ -150,16 +122,6 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
       requireString(key, `${code}_PENDING_AUDIT_EVENT_KEY`);
       requireBoundaryRecord(event, `${code}_PENDING_AUDIT_EVENT`);
       validateStorageSafeValue(event, `${code}_PENDING_AUDIT_EVENT`);
-    }
-  }
-  if (state['securityIncidents'] !== undefined) {
-    const incidents = requireMap(state['securityIncidents'], `${code}_SECURITY_INCIDENTS`);
-    if (incidents.size > 256) throw new Error(`${code}_SECURITY_INCIDENTS_CAPACITY`);
-    for (const [rawId, incident] of incidents) {
-      const id = requireString(rawId, `${code}_SECURITY_INCIDENT_ID`);
-      validateSecurityIncident(incident, `${code}_SECURITY_INCIDENT_${id}`);
-      const stored = requireBoundaryRecord(incident, `${code}_SECURITY_INCIDENT_${id}`);
-      if (stored['id'] !== id) throw new Error(`${code}_SECURITY_INCIDENT_KEY_MISMATCH`);
     }
   }
   if (state['pendingHistoryRecords'] !== undefined) requireArray(state['pendingHistoryRecords'], `${code}_HISTORY_VIEW`).forEach((entry, index) => assertAccountFrameRecord(entry, `${code}_HISTORY_VIEW_${index}`));

@@ -72,6 +72,7 @@ test('salt is deterministic', async () => {
 });
 
 test('salt rejects values that cannot be encoded exactly', async () => {
+  await expect(createShardSalt('', 0, 1)).rejects.toThrow('BRAINVAULT_NAME_INVALID');
   await expect(createShardSalt('alice', -1, 1)).rejects.toThrow('BRAINVAULT_SHARD_INDEX_INVALID:-1');
   await expect(createShardSalt('alice', 1, 1)).rejects.toThrow('BRAINVAULT_SHARD_INDEX_INVALID:1');
   await expect(createShardSalt('alice', 0, 0x1_0000_0000)).rejects.toThrow('BRAINVAULT_SHARD_COUNT_INVALID:4294967296');
@@ -85,10 +86,13 @@ test('factor mapping is integer-only and preserves the V1 formula', () => {
   expect(() => factorForShardCount(1.5)).toThrow('BRAINVAULT_SHARD_COUNT_INVALID');
   expect(() => getShardCount(Number.NaN)).toThrow('Factor must be 1-9');
   expect(() => getShardCount(1.5)).toThrow('Factor must be 1-9');
+  expect(validateInputs('a', 'a', 1).valid).toBe(true);
   expect(validateInputs('a', 'aaaaaa', Number.NaN).valid).toBe(false);
 });
 
 test('wallet boundaries fail loudly on malformed bytes', async () => {
+  const salt = await createShardSalt('alice', 0, 1);
+  await expect(deriveShard('', salt)).rejects.toThrow('BRAINVAULT_PASSPHRASE_INVALID');
   expect(() => hexToBytes('zz')).toThrow('BRAINVAULT_HEX_INVALID');
   expect(() => hexToBytes('abc')).toThrow('BRAINVAULT_HEX_INVALID');
   expect(() => hexToBytes('0xff')).toThrow('BRAINVAULT_HEX_INVALID');
@@ -187,6 +191,24 @@ test('CLI produces same results as library', async () => {
 
   expect(json.ethAddr24).toBe(v.expect.ethAddr);
   expect(json.mnemonic24).toBe(v.expect.mnemonic24);
+
+  const emptyName = Bun.spawnSync({
+    cmd: ['bun', 'cli.ts', '', 'secret123456', '1', '--w=1'],
+    cwd: import.meta.dir,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
+  expect(emptyName.exitCode).toBe(1);
+  expect(emptyName.stderr.toString()).toContain('BRAINVAULT_NAME_INVALID');
+
+  const emptyPassphrase = Bun.spawnSync({
+    cmd: ['bun', 'cli.ts', 'alice', '', '1', '--w=1'],
+    cwd: import.meta.dir,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
+  expect(emptyPassphrase.exitCode).toBe(1);
+  expect(emptyPassphrase.stderr.toString()).toContain('BRAINVAULT_PASSPHRASE_INVALID');
 });
 
 console.log('✅ All deterministic tests passed');

@@ -850,7 +850,6 @@ async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeou
                 ensureProfiles?: (ids: string[]) => Promise<boolean>;
                 getDirectPeerState?: () => Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }>;
                 ensureDirectClientForRuntime?: (runtimeId: string) => void;
-                syncDirectPeerConnections?: () => void;
               };
             };
           };
@@ -891,7 +890,6 @@ async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeou
         })();
         if (directAllowed) {
           try { p2p.ensureDirectClientForRuntime?.(runtimeId); } catch {}
-          try { p2p.syncDirectPeerConnections?.(); } catch {}
           const directPeers = typeof p2p.getDirectPeerState === 'function'
             ? p2p.getDirectPeerState()
             : [];
@@ -907,22 +905,15 @@ async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeou
           };
         }
 
-        const relayClients = await fetch('/api/clients', { cache: 'no-store' })
-          .then((response) => response.ok ? response.json() : null)
-          .catch(() => null) as { clients?: string[] } | null;
-        const relayTargetConnected = Array.isArray(relayClients?.clients)
-          && relayClients.clients.some((clientRuntimeId) => String(clientRuntimeId || '').toLowerCase() === runtimeId);
         return {
-          ok: relayConnected && relayTargetConnected,
-          reason: relayConnected
-            ? relayTargetConnected ? 'relay-target-open' : 'relay-target-not-open'
-            : 'relay-not-open',
+          // Recipient presence is deliberately private. The actual payment or
+          // profile exchange proves delivery; readiness only proves our relay.
+          ok: relayConnected,
+          reason: relayConnected ? 'relay-open' : 'relay-not-open',
           runtimeId,
           directEndpoint,
           directAllowed,
           relayConnected,
-          relayTargetConnected,
-          relayClients: relayClients?.clients || [],
           directPeers: typeof p2p.getDirectPeerState === 'function' ? p2p.getDirectPeerState() : [],
         };
       }, hubId).then((status) => {

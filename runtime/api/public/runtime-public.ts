@@ -34,6 +34,8 @@ export type {
   RuntimeAdapterReadQuery,
   RuntimeAdapterAuthLevel,
   RuntimeAdapterStatus,
+  NumberedRegistrationCommand,
+  NumberedRegistrationCommandResult,
 } from '../runtime-adapter';
 export type {
   EntityId,

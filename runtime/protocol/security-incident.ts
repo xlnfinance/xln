@@ -20,3 +20,17 @@ export type RuntimeSecurityIncidentIdentity = Pick<
   RuntimeSecurityIncident,
   'domain' | 'code' | 'source' | 'severity' | 'summary' | 'entityId'
 > & Pick<RuntimeSecurityIncident, 'accountId' | 'offerId' | 'routeHash'>;
+
+/** Strict child-health projection. Routing identities and raw evidence stay local. */
+export type RuntimeSecurityIncidentTelemetry = Pick<
+  RuntimeSecurityIncident,
+  | 'id'
+  | 'code'
+  | 'source'
+  | 'severity'
+  | 'status'
+  | 'firstSeenAt'
+  | 'lastSeenAt'
+  | 'resolvedAt'
+  | 'occurrences'
+>;
