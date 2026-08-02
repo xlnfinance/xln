@@ -23,6 +23,27 @@ const hasQueuedOrderLifecycleTx = (account: EntityAccountState, offerId: string)
   return (account.mempool ?? []).some(isLifecycleTx) || (account.pendingFrame?.accountTxs ?? []).some(isLifecycleTx);
 };
 
+/**
+ * Committed offers are written by a single canonical producer that always sets
+ * price and quantized amounts together, and rewrites all of them on
+ * requantization. A missing or non-positive field therefore means corrupt or
+ * pre-canonical Account state. Recovering it from the candidate would let the
+ * Entity projection define the price it is supposed to be checked against, so
+ * reject loudly instead.
+ */
+const requireCommittedOfferAmount = (
+  value: bigint | undefined,
+  field: string,
+  offer: NormalizedOrderbookOffer,
+): bigint => {
+  if (typeof value !== 'bigint' || value <= 0n) {
+    throw new Error(
+      `ORDERBOOK_ORDER_COMMITTED_INCOMPLETE: account=${offer.accountId} offer=${offer.offerId} field=${field}`,
+    );
+  }
+  return value;
+};
+
 const requireCommittedSwapOffer = (
   state: EntityState,
   offer: NormalizedOrderbookOffer,
@@ -35,12 +56,33 @@ const requireCommittedSwapOffer = (
   if (hasQueuedOrderLifecycleTx(account, offer.offerId)) {
     throw new Error(`ORDERBOOK_ORDER_NOT_READY: account=${offer.accountId} offer=${offer.offerId}`);
   }
-  const committedPriceTicks = committedOffer.priceTicks ?? offer.priceTicks;
+  const committedPriceTicks = requireCommittedOfferAmount(committedOffer.priceTicks, 'priceTicks', offer);
+  const committedGive = requireCommittedOfferAmount(committedOffer.quantizedGive, 'quantizedGive', offer);
+  const committedWant = requireCommittedOfferAmount(committedOffer.quantizedWant, 'quantizedWant', offer);
+  // The producer keeps the quantized amounts equal to the live amounts; a split
+  // between them means the offer was mutated outside the canonical transition.
+  if (committedGive !== committedOffer.giveAmount || committedWant !== committedOffer.wantAmount) {
+    throw new Error(
+      `ORDERBOOK_ORDER_COMMITTED_QUANTIZATION_DRIFT: account=${offer.accountId} offer=${offer.offerId} ` +
+        `give=${committedOffer.giveAmount.toString()}/${committedGive.toString()} ` +
+        `want=${committedOffer.wantAmount.toString()}/${committedWant.toString()}`,
+    );
+  }
+  // The book candidate carries the already-quantized amounts as its live
+  // amounts. When it also restates them, both must agree before comparison.
+  if (
+    (offer.quantizedGive !== undefined && offer.quantizedGive !== offer.giveAmount) ||
+    (offer.quantizedWant !== undefined && offer.quantizedWant !== offer.wantAmount)
+  ) {
+    throw new Error(
+      `ORDERBOOK_ORDER_CANDIDATE_QUANTIZATION_DRIFT: account=${offer.accountId} offer=${offer.offerId}`,
+    );
+  }
   if (
     committedOffer.giveTokenId !== offer.giveTokenId ||
     committedOffer.wantTokenId !== offer.wantTokenId ||
-    (committedOffer.quantizedGive ?? committedOffer.giveAmount) !== (offer.quantizedGive ?? offer.giveAmount) ||
-    (committedOffer.quantizedWant ?? committedOffer.wantAmount) !== (offer.quantizedWant ?? offer.wantAmount) ||
+    committedGive !== offer.giveAmount ||
+    committedWant !== offer.wantAmount ||
     committedPriceTicks !== offer.priceTicks ||
     committedOffer.makerIsLeft !== offer.makerIsLeft ||
     Boolean(committedOffer.crossJurisdiction) !== Boolean(offer.crossJurisdiction)
@@ -59,7 +101,7 @@ const assertSameJurisdictionOrderHoldCommitted = (
     throw new Error(`ORDERBOOK_ORDER_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId}`);
   }
   const delta = account.state.deltas?.get(committedOffer.giveTokenId);
-  const requiredHold = committedOffer.quantizedGive ?? committedOffer.giveAmount;
+  const requiredHold = requireCommittedOfferAmount(committedOffer.quantizedGive, 'quantizedGive', offer);
   const committedHold = committedOffer.makerIsLeft ? (delta?.leftHold ?? 0n) : (delta?.rightHold ?? 0n);
   if (requiredHold <= 0n || committedHold < requiredHold) {
     throw new Error(

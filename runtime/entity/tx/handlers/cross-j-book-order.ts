@@ -118,7 +118,7 @@ const buildCommittedCrossJurisdictionOfferEvent = (
     giveAmount: remaining.sourceRemaining,
     wantTokenId: offer.wantTokenId,
     wantAmount: remaining.targetRemaining,
-    ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
+    priceTicks: offer.priceTicks,
     ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
     crossJurisdiction: cloneCrossJurisdictionRoute(route),
   };

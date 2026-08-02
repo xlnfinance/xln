@@ -1,7 +1,6 @@
-import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
-import { getSwapLotScale } from '../../../orderbook';
 import {
   CROSS_J_MAX_FILL_RATIO,
+  isCrossJurisdictionFillTerminal,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionFillProgress,
 } from '../../../extensions/cross-j';
@@ -29,23 +28,6 @@ type FillOutcome = {
   terminal: boolean;
 };
 
-const isDustClose = (
-  route: CrossJurisdictionSwapRoute,
-  sourceTotal: bigint,
-  targetTotal: bigint,
-  remainingSource: bigint,
-  remainingTarget: bigint,
-): boolean => {
-  if (remainingSource <= 0n || remainingTarget <= 0n) return true;
-  const sourceLot = getSwapLotScale(route.source.tokenId);
-  const targetLot = getSwapLotScale(route.target.tokenId);
-  return (
-    sourceTotal >= sourceLot &&
-    targetTotal >= targetLot &&
-    (remainingSource < sourceLot || remainingTarget < targetLot)
-  );
-};
-
 const applyRouteFill = (
   prepared: PreparedCrossSwapFillAck,
   fill: CrossFillProgress,
@@ -64,19 +46,13 @@ const applyRouteFill = (
   const targetTotal = BigInt(route.target.amount);
   const remainingSource = sourceTotal - fill.cumulativeSourceAmount;
   const remainingTarget = targetTotal - fill.cumulativeTargetAmount;
-  const shouldClose =
-    fill.nextRatio >= CROSS_J_MAX_FILL_RATIO ||
-    fill.cumulativeSourceAmount >= sourceTotal ||
-    fill.cumulativeTargetAmount >= targetTotal ||
-    Boolean(tx.data.cancelRemainder);
-  const dustClose = !shouldClose && isDustClose(
-    route,
-    sourceTotal,
-    targetTotal,
-    remainingSource,
-    remainingTarget,
-  );
-  const terminal = shouldClose || dustClose;
+  const { terminal, dustClose } = isCrossJurisdictionFillTerminal(route, {
+    nextRatio: fill.nextRatio,
+    cumulativeSourceAmount: fill.cumulativeSourceAmount,
+    cumulativeTargetAmount: fill.cumulativeTargetAmount,
+    ...(tx.data.cancelRemainder !== undefined ? { cancelRemainder: tx.data.cancelRemainder } : {}),
+  });
+  const shouldClose = terminal && !dustClose;
   if (terminal) {
     transitionCrossJurisdictionRouteStatus(route, 'clear_requested', timestamp);
     route.clearingPolicy =
@@ -131,9 +107,7 @@ const recordCrossFillHistory = (
       giveAmount: outcome.sourceTotal,
       wantTokenId: offer.wantTokenId,
       wantAmount: outcome.targetTotal,
-      ...(offer.priceTicks !== undefined
-        ? { priceTicks: offer.priceTicks }
-        : {}),
+      priceTicks: offer.priceTicks,
       createdHeight: offer.createdHeight,
     },
   );
@@ -166,8 +140,9 @@ const retainCrossOfferRemainder = (
   offer.wantAmount = outcome.remainingTarget;
   offer.quantizedGive = outcome.remainingSource;
   offer.quantizedWant = outcome.remainingTarget;
-  const priceTicks = route.priceTicks ?? offer.priceTicks;
-  if (priceTicks !== undefined) offer.priceTicks = priceTicks;
+  // The route price is the cross-j index when the clearing side republished it;
+  // otherwise the committed offer keeps the price it was admitted at.
+  if (route.priceTicks !== undefined) offer.priceTicks = route.priceTicks;
   events.push(
     `🌉 Cross-j offer ${tx.data.offerId.slice(0, 8)} filled to ` +
     `${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}, ` +
@@ -186,7 +161,7 @@ const retainCrossOfferRemainder = (
       giveAmount: offer.giveAmount,
       wantTokenId: offer.wantTokenId,
       wantAmount: offer.wantAmount,
-      ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
+      priceTicks: offer.priceTicks,
       ...(offer.timeInForce !== undefined
         ? { timeInForce: offer.timeInForce }
         : {}),

@@ -162,7 +162,7 @@ export interface CrossJurisdictionSwapRoute {
   targetCloseProof?: CrossJurisdictionCloseProof;
   priceTicks?: bigint;
   fillSeq?: number;
-  cumulativeFillRatio?: number; // Coarse 0-65535 compatibility/dispute ratio.
+  cumulativeFillRatio?: number; // Coarse 0-65535 ratio; this is the on-chain uint16 dispute form.
   fillNumerator?: bigint;
   fillDenominator?: bigint;
   filledSourceAmount?: bigint;

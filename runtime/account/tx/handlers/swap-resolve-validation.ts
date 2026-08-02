@@ -20,7 +20,7 @@ type CanonicalOffer = {
   want: bigint;
   quantizedGive: bigint;
   quantizedWant: bigint;
-  priceTicks?: bigint;
+  priceTicks: bigint;
 };
 
 type ExecutionFill = {
@@ -52,13 +52,23 @@ const resolveCanonicalOffer = (
       'Cross-jurisdiction offers must use cross_swap_fill_ack/requestCrossJurisdictionClear',
     );
   }
+  // `commitSwapOffer` and every requantization write price and quantized
+  // amounts together. Reconstructing a missing one here would let the resolving
+  // counterparty pick the price its own claim is checked against.
+  if (
+    typeof offer.priceTicks !== 'bigint' ||
+    typeof offer.quantizedGive !== 'bigint' ||
+    typeof offer.quantizedWant !== 'bigint'
+  ) {
+    return failure(events, `Committed offer ${tx.data.offerId} is missing canonical price or quantized amounts`);
+  }
   const canonical: CanonicalOffer = {
     offer,
     give: offer.giveAmount,
     want: offer.wantAmount,
-    quantizedGive: offer.quantizedGive ?? offer.giveAmount,
-    quantizedWant: offer.quantizedWant ?? offer.wantAmount,
-    ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
+    quantizedGive: offer.quantizedGive,
+    quantizedWant: offer.quantizedWant,
+    priceTicks: offer.priceTicks,
   };
   const data = tx.data;
   const restingMismatch =
@@ -68,9 +78,7 @@ const resolveCanonicalOffer = (
       data.restingQuantizedGive !== canonical.quantizedGive) ||
     (data.restingQuantizedWant !== undefined &&
       data.restingQuantizedWant !== canonical.quantizedWant) ||
-    (data.restingPriceTicks !== undefined &&
-      canonical.priceTicks !== undefined &&
-      data.restingPriceTicks !== canonical.priceTicks);
+    (data.restingPriceTicks !== undefined && data.restingPriceTicks !== canonical.priceTicks);
   if (restingMismatch) return failure(events, 'Resting swap terms mismatch live offer');
   if (canonical.give <= 0n || canonical.want <= 0n) {
     return failure(events, 'Canonical resting offer amounts must be positive');
@@ -285,9 +293,7 @@ export const validateSwapResolve = (
     canonicalWantAmount: canonical.want,
     canonicalQuantizedGive: canonical.quantizedGive,
     canonicalQuantizedWant: canonical.quantizedWant,
-    ...(canonical.priceTicks !== undefined
-      ? { canonicalPriceTicks: canonical.priceTicks }
-      : {}),
+    canonicalPriceTicks: canonical.priceTicks,
     effectiveCancelRemainder: tx.data.cancelRemainder || tx.data.fillRatio === 0,
     filledGive: fill.filledGive,
     filledWant: fill.filledWant,

@@ -80,7 +80,7 @@ const buildCommittedSwapOfferEvent = (
     giveAmount: offer.giveAmount,
     wantTokenId: offer.wantTokenId,
     wantAmount: offer.wantAmount,
-    ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
+    priceTicks: offer.priceTicks,
     ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
     ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
   };

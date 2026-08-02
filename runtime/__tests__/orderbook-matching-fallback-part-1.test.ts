@@ -1212,23 +1212,24 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(baseDelta.offdelta).toBe(-(makerBaseQty - makerBaseQty / 10_000n));
   });
 
-  test('recomputes canonical priceTicks for partial fills when legacy offer price is missing', async () => {
+  test('requantizes a partial fill at the committed price', async () => {
     const lot = SWAP_LOT_SCALE;
     const accountMachine = makeAccountMachine({
-      offerId: 'maker-legacy-no-price',
+      offerId: 'maker-partial',
       makerIsLeft: true,
       giveTokenId: 2,
       giveAmount: 2n * lot,
       wantTokenId: 5,
       wantAmount: (2000n * lot) / 10_000n,
       createdHeight: 1,
+      priceTicks: 1000n,
       quantizedGive: 2n * lot,
       quantizedWant: (2000n * lot) / 10_000n,
     } satisfies SwapOffer);
     const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
       type: 'swap_resolve',
       data: {
-        offerId: 'maker-legacy-no-price',
+        offerId: 'maker-partial',
         fillRatio: 32768,
         cancelRemainder: false,
         executionGiveAmount: lot,
@@ -1239,13 +1240,82 @@ describe('orderbook matching fallback execution mapping', () => {
     const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
     expect(resolveResult.success).toBe(true);
 
-    const remaining = accountMachine.state.swapOffers.get('maker-legacy-no-price');
+    const remaining = accountMachine.state.swapOffers.get('maker-partial');
     expect(remaining).toBeDefined();
     expect(remaining!.priceTicks).toBe(1000n);
     expect(remaining!.giveAmount).toBe(lot);
     expect(remaining!.wantAmount).toBe((1000n * lot) / 10_000n);
     expect(remaining!.quantizedGive).toBe(lot);
     expect(remaining!.quantizedWant).toBe((1000n * lot) / 10_000n);
+  });
+
+  test.each([
+    ['priceTicks', { priceTicks: undefined }],
+    ['quantizedGive', { quantizedGive: undefined }],
+    ['quantizedWant', { quantizedWant: undefined }],
+  ])(
+    'rejects swap_resolve against a committed offer missing %s instead of reconstructing it',
+    async (_field, override) => {
+      const lot = SWAP_LOT_SCALE;
+      const accountMachine = makeAccountMachine({
+        offerId: 'maker-incomplete',
+        makerIsLeft: true,
+        giveTokenId: 2,
+        giveAmount: 2n * lot,
+        wantTokenId: 5,
+        wantAmount: (2000n * lot) / 10_000n,
+        createdHeight: 1,
+        priceTicks: 1000n,
+        quantizedGive: 2n * lot,
+        quantizedWant: (2000n * lot) / 10_000n,
+        ...override,
+      } as SwapOffer);
+      const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+        type: 'swap_resolve',
+        data: {
+          offerId: 'maker-incomplete',
+          fillRatio: 32768,
+          cancelRemainder: false,
+          executionGiveAmount: lot,
+          executionWantAmount: (1000n * lot) / 10_000n,
+        },
+      };
+
+      const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
+      expect(resolveResult.success).toBe(false);
+      expect(resolveResult.error).toContain('missing canonical price or quantized amounts');
+    },
+  );
+
+  test('rejects a resolve whose claimed resting price differs from the committed price', async () => {
+    const lot = SWAP_LOT_SCALE;
+    const accountMachine = makeAccountMachine({
+      offerId: 'maker-price-claim',
+      makerIsLeft: true,
+      giveTokenId: 2,
+      giveAmount: 2n * lot,
+      wantTokenId: 5,
+      wantAmount: (2000n * lot) / 10_000n,
+      createdHeight: 1,
+      priceTicks: 1000n,
+      quantizedGive: 2n * lot,
+      quantizedWant: (2000n * lot) / 10_000n,
+    } satisfies SwapOffer);
+    const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+      type: 'swap_resolve',
+      data: {
+        offerId: 'maker-price-claim',
+        fillRatio: 32768,
+        cancelRemainder: false,
+        executionGiveAmount: lot,
+        executionWantAmount: (1000n * lot) / 10_000n,
+        restingPriceTicks: 900n,
+      },
+    };
+
+    const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
+    expect(resolveResult.success).toBe(false);
+    expect(resolveResult.error).toContain('Resting swap terms mismatch live offer');
   });
 
   test('auto-cancels prices outside the 30% anchor band instead of resting them', () => {

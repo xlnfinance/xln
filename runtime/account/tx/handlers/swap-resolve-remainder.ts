@@ -1,9 +1,6 @@
 import type { AccountState } from '../../../types/account';
 import { MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
-import {
-  computeSwapPriceTicks,
-  requantizeRemainingSwapAtPrice,
-} from '../../../orderbook/types';
+import { requantizeRemainingSwapAtPrice } from '../../../orderbook/types';
 import { releaseHold } from '../hold-utils';
 import type {
   AppliedSwapResolve,
@@ -84,12 +81,7 @@ export const applySwapResolveRemainder = (
   }
 
   const remainingGive = resolve.canonicalQuantizedGive - resolve.filledGive;
-  const priceTicks = resolve.canonicalPriceTicks ?? computeSwapPriceTicks(
-    resolve.offer.giveTokenId,
-    resolve.offer.wantTokenId,
-    resolve.canonicalQuantizedGive,
-    resolve.canonicalQuantizedWant,
-  );
+  const priceTicks = resolve.canonicalPriceTicks;
   const requantized = requantizeRemainingSwapAtPrice(
     resolve.offer.giveTokenId,
     resolve.offer.wantTokenId,

@@ -85,7 +85,7 @@ export function recordSwapOfferLifecycle(
     wantTokenId: offer.wantTokenId,
     wantAmount: offer.wantAmount,
     originalWantAmount: offer.wantAmount,
-    ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
+    priceTicks: offer.priceTicks,
     createdHeight: offer.createdHeight,
     ...(offer.crossJurisdiction ? { crossJurisdiction: cloneCrossJurisdictionRoute(offer.crossJurisdiction) } : {}),
     cancelRequested: false,

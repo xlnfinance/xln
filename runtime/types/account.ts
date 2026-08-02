@@ -70,21 +70,26 @@ export interface PullCommitment {
   createdTimestamp: number;
 }
 
-// Swap offer (limit order) in bilateral account
+// Swap offer (limit order) committed into bilateral Account state.
+//
+// Every field below is written by the single canonical producer
+// (`commitSwapOffer`) and rewritten together on requantization. There is no
+// committed offer that legitimately lacks a price or quantized amounts, so
+// consumers must never reconstruct them from a candidate.
 export interface SwapOffer {
   offerId: string;              // UUID for this offer
   giveTokenId: number;          // Token maker is giving
   giveAmount: bigint;           // Original amount (partial fills reduce this)
   wantTokenId: number;          // Token maker wants in return
   wantAmount: bigint;           // Corresponding want amount (maintains ratio)
-  priceTicks?: bigint;          // Canonical limit price used for requantization after partial fills
+  priceTicks: bigint;           // Canonical limit price used for requantization after partial fills
   timeInForce?: 0 | 1 | 2;      // 0 = GTC, 1 = IOC, 2 = FOK
   makerIsLeft: boolean;         // Who created this offer (canonical direction)
   createdHeight: number;        // AccountFrame height when created
-  // Quantized amounts for orderbook consistency (set by hub when adding to book)
+  // Quantized amounts for orderbook consistency.
   // These ensure fill ratios computed from lots match settlement amounts exactly
-  quantizedGive?: bigint;       // giveAmount rounded to LOT_SCALE multiple
-  quantizedWant?: bigint;       // wantAmount scaled proportionally
+  quantizedGive: bigint;        // giveAmount rounded to LOT_SCALE multiple
+  quantizedWant: bigint;        // wantAmount scaled proportionally
   crossJurisdiction?: CrossJurisdictionSwapRoute;
 }
 
@@ -936,7 +941,8 @@ export type AccountTx =
         wantTokenId: number;
         wantAmount: bigint;       // at this ratio
         // Explicit limit price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
-        // Kept optional for backwards compatibility with older scenarios.
+        // Optional because an order may express only give/want amounts; the
+        // Account transition then derives the canonical tick before committing.
         priceTicks?: bigint;
         timeInForce?: 0 | 1 | 2;  // 0 = GTC, 1 = IOC, 2 = FOK
         crossJurisdiction?: CrossJurisdictionSwapRoute;
@@ -953,7 +959,7 @@ export type AccountTx =
       type: 'swap_resolve';
       data: {
         offerId: string;
-        fillRatio: number;        // Coarse 0-65535 compatibility/dispute ratio.
+        fillRatio: number;        // Coarse 0-65535 ratio; this is the on-chain uint16 dispute form.
         fillNumerator?: bigint;   // Exact fill ratio numerator.
         fillDenominator?: bigint; // Exact fill ratio denominator.
         cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
