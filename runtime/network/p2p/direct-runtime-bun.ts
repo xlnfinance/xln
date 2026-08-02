@@ -13,6 +13,7 @@ import {
   directRuntimeWsAudience,
   hashRuntimeWsFrame,
   makeMessageId,
+  resolveRuntimeWsMaxMessageBytes,
   serializeWsMessage,
   type RuntimeWsMessage,
 } from './ws-protocol';
@@ -183,13 +184,15 @@ const rememberRuntimeSession = (
 ): boolean => {
   const existing = context.sessionsByRuntime.get(runtimeId);
   if (existing && existing.ws !== session.ws) {
-    if (isSocketOpen(existing.ws)) return false;
-    context.sessions.delete(existing.ws);
+    existing.duplicateClosing = true;
   }
   session.runtimeId = runtimeId;
   session.handshakeDone = true;
   session.lastSeen = Date.now();
   context.sessionsByRuntime.set(runtimeId, session);
+  if (existing && existing.ws !== session.ws) {
+    existing.ws.close(4009, 'session-replaced');
+  }
   return true;
 };
 
@@ -589,6 +592,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
         : { handled: true, response: new Response('WebSocket upgrade failed', { status: 400 }) };
     },
     websocket: {
+      maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
       open(ws: DirectWebSocket): void {
         ensureSession(context, ws);
         context.helloChallenges.issue(ws, directRuntimeWsAudience(context.serverRuntimeId));

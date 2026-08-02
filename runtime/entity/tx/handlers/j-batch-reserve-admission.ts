@@ -79,5 +79,5 @@ export function getReserveCandidateIssue(
   const candidateIssue = simulation.issues.find((issue) =>
     issue.opType === candidate.type && issue.opIndex === operationIndex
   );
-  return candidateIssue ?? simulation.issues.find((issue) => issue.failureMode === 'batchRevert') ?? null;
+  return candidateIssue ?? simulation.issues[0] ?? null;
 }

@@ -8,6 +8,7 @@ import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/machine/reg
 import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction-import';
 import { markRestoredEntityProviderActionRuntimeTxs } from '../../runtime/entity-provider-action-submit-auth';
 import { markRestoredNumberedRegistrationTxs } from '../../runtime/registration/numbered-registration-auth';
+import { markRestoredRuntimeAdapterCommandTxs } from '../../runtime/command-frontier-auth';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
@@ -28,6 +29,7 @@ import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
 } from '../../runtime/input-clone';
+import { assertRuntimeInputCapabilitiesAuthorized } from '../../runtime/internal-tx-auth';
 
 export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
   markRestoredJSubmitRuntimeTxs(runtimeInput.runtimeTxs);
@@ -35,6 +37,7 @@ export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): Runti
   markRestoredJImportResultRuntimeTxs(runtimeInput.runtimeTxs);
   markRestoredEntityProviderActionRuntimeTxs(runtimeInput.runtimeTxs);
   markRestoredNumberedRegistrationTxs(runtimeInput.runtimeTxs);
+  markRestoredRuntimeAdapterCommandTxs(runtimeInput.runtimeTxs);
   return runtimeInput;
 };
 
@@ -171,7 +174,7 @@ const buildDurableJReplicaSnapshot = (jr: JReplica): JReplica => ({
  * into unauthenticated bytes after reload, and could also replay an obsolete
  * wake. Persist only the non-derived work; recovery regenerates due wakes.
  */
-export const buildDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
+const cloneDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
   const cloned = cloneIsolatedRuntimeInput(runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
   const { jInputs, reliableReceipts, queuedAt, timestamp, ...requiredInput } = cloned;
   const entityInputs = cloned.entityInputs.flatMap(input => {
@@ -203,6 +206,12 @@ export const buildDurableRuntimeMempool = (runtimeInput?: RuntimeInput): Runtime
   };
 };
 
+export const buildDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
+  const source = runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
+  assertRuntimeInputCapabilitiesAuthorized(source);
+  return cloneDurableRuntimeMempool(source);
+};
+
 const cloneRuntimeInput = (runtimeInput?: RuntimeInput): RuntimeInput =>
   cloneIsolatedRuntimeInput(runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
 
@@ -218,7 +227,6 @@ const hasDurableEntries = (value: unknown): boolean => {
 const DURABLE_RUNTIME_STATE_KEYS = [
   'maxEntityInputsPerFrame',
   'maxEntityTxsPerFrame',
-  'securityIncidents',
   'pendingHistoryRecords',
   'deferredNetworkMeta',
   'reliableIngressReceiptLedger',
@@ -247,7 +255,6 @@ const buildDurableRuntimeStateSnapshot = (
   const durable = {
     ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
-    ...(hasDurableEntries(state.securityIncidents) ? { securityIncidents: structuredClone(state.securityIncidents) } : {}),
     ...(!options?.excludePersistedHistoryRecords && hasDurableEntries(state.pendingHistoryRecords)
       ? { pendingHistoryRecords: structuredClone(state.pendingHistoryRecords) }
       : {}),
@@ -453,10 +460,7 @@ export const restoreDurableRuntimeSnapshot = (
   }
   const runtimeInput = snapshot['runtimeInput'];
   if (runtimeInput && typeof runtimeInput === 'object') {
-    const restoredInput = authorizeRestoredRuntimeInput(
-      buildDurableRuntimeMempool(runtimeInput as RuntimeInput),
-    );
-    env.runtimeMempool = restoredInput;
+    env.runtimeMempool = cloneDurableRuntimeMempool(runtimeInput as RuntimeInput);
   }
   if (snapshot['runtimeConfig'] && typeof snapshot['runtimeConfig'] === 'object') {
     env.runtimeConfig = structuredClone(snapshot['runtimeConfig']) as RuntimeReplica['runtimeConfig'];

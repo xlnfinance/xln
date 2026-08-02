@@ -6,9 +6,14 @@ import { deserializeWsMessage } from '../network/p2p/ws-protocol';
 import { cacheEncryptionKey, createRelayStore, registerClient } from '../network/relay/store';
 import {
   hasConnectedEncryptedRelayClient,
+  resolveRequestClientIp,
   sendEntityInputDirectViaRelaySocketDelivery,
 } from '../api/server/relay-direct';
 import type { DeliverableEntityInput, RuntimeReplica, RuntimeEntityInputsEnvelope } from '../runtime/types';
+import { createEmptyEnv } from '../runtime';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
+import { assertRuntimeEntityInputsEnvelopeSource } from '../runtime/entity-input-envelope-auth';
+import { decodeRuntimeEntityInputsEnvelope } from '../network/p2p/entity-input-envelope';
 
 type SentMessage = {
   type?: string;
@@ -39,7 +44,33 @@ const makeSocket = (options: { readyState?: number; sendResult?: boolean | numbe
   };
 };
 
+const signedEnvelope = (
+  sourceSeed: string,
+  targetRuntimeId: string,
+  sourceRuntimeHeight: number,
+  sourceRuntimeTimestamp: number,
+  entityInputs: DeliverableEntityInput[],
+): RuntimeEntityInputsEnvelope => {
+  const source = createEmptyEnv(sourceSeed);
+  return signRuntimeEntityInputsEnvelope(source, targetRuntimeId, {
+    sourceRuntimeId: source.runtimeId!,
+    sourceRuntimeHeight,
+    sourceRuntimeTimestamp,
+    entityInputs,
+  });
+};
+
 describe('relay direct entity delivery', () => {
+  test('trusts proxy client headers only from a loopback peer', () => {
+    const request = new Request('http://xln.local/relay', {
+      headers: { 'x-forwarded-for': '203.0.113.7' },
+    });
+
+    expect(resolveRequestClientIp(request, '198.51.100.9')).toBe('198.51.100.9');
+    expect(resolveRequestClientIp(request, '::ffff:127.0.0.1')).toBe('203.0.113.7');
+    expect(resolveRequestClientIp(request, null)).toBe('unknown');
+  });
+
   test('direct relay diagnostics stay machine-readable', () => {
     const source = readFileSync(new URL('../api/server/relay-direct.ts', import.meta.url), 'utf8');
 
@@ -80,12 +111,7 @@ describe('relay direct entity delivery', () => {
         },
       }],
     };
-    const envelope: RuntimeEntityInputsEnvelope = {
-      sourceRuntimeId,
-      sourceRuntimeHeight: 7,
-      sourceRuntimeTimestamp: 12345,
-      entityInputs: [input],
-    };
+    const envelope = signedEnvelope(sourceSeed, targetRuntimeId, 7, 12345, [input]);
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
@@ -119,6 +145,12 @@ describe('relay direct entity delivery', () => {
     });
     const decrypted = decryptJSON<RuntimeEntityInputsEnvelope>(String(packet.payload || ''), targetKeys.privateKey);
     expect(decrypted).toEqual(envelope);
+    const recipient = createEmptyEnv(targetSeed);
+    expect(assertRuntimeEntityInputsEnvelopeSource(
+      recipient,
+      String(packet.from || ''),
+      decodeRuntimeEntityInputsEnvelope(decrypted),
+    )).toEqual({ sourceRuntimeId, localRuntimeId: targetRuntimeId });
     expect(store.debugEvents.at(-1)).toMatchObject({
       event: 'delivery',
       from: sourceRuntimeId,
@@ -161,12 +193,7 @@ describe('relay direct entity delivery', () => {
       signerId: targetRuntimeId,
       entityTxs: [],
     };
-    const envelope: RuntimeEntityInputsEnvelope = {
-      sourceRuntimeId,
-      sourceRuntimeHeight: 8,
-      sourceRuntimeTimestamp: 23456,
-      entityInputs: [input],
-    };
+    const envelope = signedEnvelope(sourceSeed, targetRuntimeId, 8, 23456, [input]);
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
@@ -221,12 +248,7 @@ describe('relay direct entity delivery', () => {
       signerId: targetRuntimeId,
       entityTxs: [],
     };
-    const envelope: RuntimeEntityInputsEnvelope = {
-      sourceRuntimeId,
-      sourceRuntimeHeight: 9,
-      sourceRuntimeTimestamp: 34567,
-      entityInputs: [input],
-    };
+    const envelope = signedEnvelope(sourceSeed, targetRuntimeId, 9, 34567, [input]);
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
@@ -280,17 +302,12 @@ describe('relay direct entity delivery', () => {
       pubKeyToHex(deriveEncryptionKeyPair(targetSeed).publicKey),
     );
     expect(registerClient(store, targetRuntimeId, targetSocket.ws)).toBe(true);
-    const envelope: RuntimeEntityInputsEnvelope = {
-      sourceRuntimeId,
-      sourceRuntimeHeight: 10,
-      sourceRuntimeTimestamp: 45678,
-      entityInputs: [{
+    const envelope = signedEnvelope(sourceSeed, targetRuntimeId, 10, 45678, [{
         runtimeId: targetRuntimeId,
         entityId: `0x${'bd'.repeat(32)}`,
         signerId: targetRuntimeId,
         entityTxs: [],
-      }],
-    };
+      }]);
 
     expect(() => sendEntityInputDirectViaRelaySocketDelivery(
       store,
@@ -325,12 +342,7 @@ describe('relay direct entity delivery', () => {
       signerId: targetRuntimeId,
       entityTxs: [],
     };
-    const envelope: RuntimeEntityInputsEnvelope = {
-      sourceRuntimeId,
-      sourceRuntimeHeight: 10,
-      sourceRuntimeTimestamp: 45678,
-      entityInputs: [input],
-    };
+    const envelope = signedEnvelope(sourceSeed, targetRuntimeId, 10, 45678, [input]);
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
@@ -390,12 +402,7 @@ describe('relay direct entity delivery', () => {
       signerId: targetRuntimeId,
       entityTxs: [],
     };
-    const envelope: RuntimeEntityInputsEnvelope = {
-      sourceRuntimeId,
-      sourceRuntimeHeight: 11,
-      sourceRuntimeTimestamp: 1,
-      entityInputs: [input],
-    };
+    const envelope = signedEnvelope(sourceSeed, targetRuntimeId, 11, 1, [input]);
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
@@ -452,12 +459,7 @@ describe('relay direct entity delivery', () => {
       signerId: targetRuntimeId,
       entityTxs: [],
     };
-    const envelope: RuntimeEntityInputsEnvelope = {
-      sourceRuntimeId,
-      sourceRuntimeHeight: 12,
-      sourceRuntimeTimestamp: 1,
-      entityInputs: [input],
-    };
+    const envelope = signedEnvelope('relay-direct-missing-source', targetRuntimeId, 12, 1, [input]);
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,

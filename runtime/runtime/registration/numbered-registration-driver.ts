@@ -1,7 +1,7 @@
 import { requireRuntimeJurisdictionConfigByName } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { registrationEvidenceKey } from '../../jurisdiction/machine/registration-evidence';
 import { enqueueRuntimeInput } from '../input-queue';
-import { registerEnvChangeCallback } from '../loop-environment';
+import { registerEnvChangeCallback, registerRuntimeFrameCommitCallback } from '../loop-environment';
 import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import type {
   NumberedRegistrationCommand,
@@ -28,6 +28,13 @@ export type {
 
 const WAIT_TIMEOUT_MS = 15 * 60 * 1_000;
 const WAIT_POLL_MS = 250;
+
+export const assertNumberedRegistrationDriverActive = (
+  env: RuntimeReplica,
+  code: string,
+): void => {
+  if (env.infrastructure?.halted) throw new Error(`${code}_RUNTIME_HALTED`);
+};
 
 const driverFor = (env: RuntimeReplica) => {
   const infrastructure = ensureRuntimeInfrastructure(env);
@@ -58,8 +65,10 @@ const waitFor = async (
 ): Promise<void> => {
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
   while (!predicate()) {
+    assertNumberedRegistrationDriverActive(env, code);
     if (Date.now() >= deadline) throw new Error(`${code}_TIMEOUT`);
     if (poll) await poll();
+    assertNumberedRegistrationDriverActive(env, code);
     if (!predicate()) await waitForCommitOrPoll(env, WAIT_POLL_MS);
   }
 };
@@ -70,15 +79,29 @@ const commitRuntimeTxs = async (
   runtimeTxs: RuntimeTx[],
 ): Promise<JPreparedTransactionAcceptance> => {
   const resolves = runtimeTxs.some(tx => tx.type === 'resolveNumberedRegistrationIntent');
-  enqueueRuntimeInput(env, { runtimeTxs, entityInputs: [] });
-  await waitFor(
-    env,
-    resolves ? 'NUMBERED_REGISTRATION_RESOLUTION_COMMIT' : 'NUMBERED_REGISTRATION_INTENT_COMMIT',
-    () => {
-      const record = getNumberedRegistrationRecord(env, intentId);
-      return resolves ? Boolean(record && record.status !== 'pending') : Boolean(record);
-    },
-  );
+  const expectedType = resolves
+    ? 'resolveNumberedRegistrationIntent'
+    : 'recordNumberedRegistrationIntent';
+  let committed = false;
+  const commitCode = resolves
+    ? 'NUMBERED_REGISTRATION_RESOLUTION_COMMIT'
+    : 'NUMBERED_REGISTRATION_INTENT_COMMIT';
+  const unsubscribe = registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
+    if (runtimeInput.runtimeTxs.some(tx => tx.type === expectedType &&
+      (tx.type === 'recordNumberedRegistrationIntent'
+        ? tx.data.request.intentId
+        : tx.data.intentId) === intentId)) committed = true;
+  });
+  try {
+    enqueueRuntimeInput(env, { runtimeTxs, entityInputs: [] });
+    await waitFor(env, commitCode, () => committed);
+  } finally {
+    unsubscribe();
+  }
+  const record = getNumberedRegistrationRecord(env, intentId);
+  if (resolves ? !record || record.status === 'pending' : !record) {
+    throw new Error('NUMBERED_REGISTRATION_COMMIT_CALLBACK_STATE_MISMATCH');
+  }
   return 'accepted';
 };
 
@@ -175,7 +198,19 @@ export const resumePendingNumberedRegistrations = async (env: RuntimeReplica): P
   const pending = [...(env.infrastructure?.numberedRegistrationIntents?.values() ?? [])]
     .filter(record => record.status === 'pending')
     .sort((left, right) => left.transactionNonce - right.transactionNonce);
-  for (const record of pending) await enqueueRequest(env, record.request);
+  for (const record of pending) {
+    try {
+      await enqueueRequest(env, record.request);
+    } catch (error) {
+      const resolved = getNumberedRegistrationRecord(env, record.request.intentId);
+      if (resolved?.status !== 'quarantined') throw error;
+      env.warn('system', 'NUMBERED_REGISTRATION_RESUME_QUARANTINED', {
+        intentId: record.request.intentId,
+        transactionHash: record.transactionHash,
+        reason: resolved.reason,
+      });
+    }
+  }
 };
 
 /** Call after signer prewarm, J-adapter attach, watcher start, and Runtime-loop start. */
@@ -183,6 +218,9 @@ export const ensurePendingNumberedRegistrationsResumed = (env: RuntimeReplica): 
   const driver = driverFor(env);
   if (driver.resumeRun) return driver.resumeRun;
   const run = resumePendingNumberedRegistrations(env);
-  driver.resumeRun = run;
-  return run;
+  const tracked = run.finally(() => {
+    if (driver.resumeRun === tracked) driver.resumeRun = null;
+  });
+  driver.resumeRun = tracked;
+  return tracked;
 };

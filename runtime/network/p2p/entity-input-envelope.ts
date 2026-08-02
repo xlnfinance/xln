@@ -7,6 +7,8 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 
+export const MAX_P2P_ENTITY_INPUTS = 256;
+
 const requireFrameCoordinate = (value: unknown, field: string): number => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`P2P_ENTITY_INPUTS_ENVELOPE_${field}_INVALID`);
@@ -59,14 +61,23 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntity
   const envelope = requireBoundaryRecord(value, 'P2P_ENTITY_INPUTS_ENVELOPE_INVALID');
   requireExactBoundaryKeys(
     envelope,
-    ['sourceRuntimeId', 'sourceRuntimeHeight', 'sourceRuntimeTimestamp', 'entityInputs'],
+    ['sourceRuntimeId', 'sourceRuntimeHeight', 'sourceRuntimeTimestamp', 'entityInputs', 'sourceSignature'],
     ['atomicCrossJurisdictionPair', 'crossJurisdictionIntent'],
     'P2P_ENTITY_INPUTS_ENVELOPE_FIELDS_INVALID',
   );
   const sourceRuntimeId = normalizeRuntimeId(envelope['sourceRuntimeId']);
   if (!sourceRuntimeId) throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_RUNTIME_INVALID');
+  const sourceSignature = envelope['sourceSignature'];
+  if (typeof sourceSignature !== 'string' || !/^0x[0-9a-f]{130}$/.test(sourceSignature)) {
+    throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_SIGNATURE_INVALID');
+  }
   if (!Array.isArray(envelope['entityInputs'])) {
     throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_INPUTS_INVALID');
+  }
+  if (envelope['entityInputs'].length > MAX_P2P_ENTITY_INPUTS) {
+    throw new Error(
+      `P2P_ENTITY_INPUTS_ENVELOPE_INPUTS_TOO_MANY:${envelope['entityInputs'].length}:${MAX_P2P_ENTITY_INPUTS}`,
+    );
   }
   const entityInputs = envelope['entityInputs'].map(validateDeliverableEntityInput);
   const crossJurisdictionIntent = decodeCrossJurisdictionIntent(envelope['crossJurisdictionIntent']);
@@ -82,6 +93,7 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntity
   );
   return {
     sourceRuntimeId,
+    sourceSignature,
     sourceRuntimeHeight: requireFrameCoordinate(envelope['sourceRuntimeHeight'], 'HEIGHT'),
     sourceRuntimeTimestamp: requireFrameCoordinate(envelope['sourceRuntimeTimestamp'], 'TIMESTAMP'),
     entityInputs,

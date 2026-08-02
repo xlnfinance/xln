@@ -191,7 +191,7 @@ describe('j-batch draft reserve availability', () => {
     expect(simulation.reservesByToken.get(1) ?? 0n).toBe(0n);
   });
 
-  test('pre-enforces settlement debts and skips only the now-insolvent settlement', () => {
+  test('pre-enforces settlement debts and rolls back the now-insolvent batch', () => {
     const entityId = `0x${'12'.repeat(32)}`;
     const counterparty = `0x${'34'.repeat(32)}`;
     const batch = createEmptyBatch();
@@ -242,16 +242,16 @@ describe('j-batch draft reserve availability', () => {
       tokenId: 1,
       opType: 'settlement',
       opIndex: 1,
-      failureMode: 'skipped',
+      failureMode: 'batchRevert',
       requiredAmount: 100n,
       availableAfterDebt: 50n,
       remainingDebtAfterSweep: 50n,
     });
-    expect(simulation.reservesByToken.get(1)).toBe(100n);
+    expect(simulation.reservesByToken.get(1) ?? 0n).toBe(0n);
     expect(simulation.outgoingDebtByToken.get(1)).toBe(50n);
   });
 
-  test('continues after a skipped reserve operation', () => {
+  test('rolls back every reserve operation after one underfunded item', () => {
     const entityId = `0x${'78'.repeat(32)}`;
     const batch = createEmptyBatch();
     batch.reserveToReserve.push(
@@ -270,10 +270,10 @@ describe('j-batch draft reserve availability', () => {
     expect(simulation.issues[0]).toMatchObject({
       opType: 'reserveToReserve',
       opIndex: 0,
-      failureMode: 'skipped',
+      failureMode: 'batchRevert',
     });
     expect(simulation.reservesByToken.get(1)).toBe(5n);
-    expect(simulation.reservesByToken.get(2)).toBe(6n);
+    expect(simulation.reservesByToken.get(2)).toBe(10n);
   });
 
   test('marks unreturned flashloan as a whole-batch revert', () => {

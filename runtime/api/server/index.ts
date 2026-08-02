@@ -46,7 +46,14 @@ import { createRelayStore, pushDebugEvent, removeClient } from '../../network/re
 import { openRelayIncidentJournal } from '../../network/relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../../network/relay/debug-http';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../../network/relay/router';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsRelayAudience, serializeWsMessage, type RuntimeWsMessage } from '../../network/p2p/ws-protocol';
+import {
+  canonicalizeRuntimeWsAudience,
+  deserializeWsMessage,
+  resolveRuntimeWsMaxMessageBytes,
+  resolveRuntimeWsRelayAudience,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from '../../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../../network/p2p/hello-challenge';
 import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
@@ -73,7 +80,11 @@ import {
   type RelaySocket,
 } from './relay-direct';
 import { createServerRpcMessageHandler } from './rpc-ws';
-import { dispatchRuntimeRpcAfterStartup } from './rpc-startup-gate';
+import {
+  isRuntimeTransportReady,
+  runtimeTransportStartupResponse,
+  type RuntimeTransportBootPhase,
+} from './rpc-startup-gate';
 import {
   buildRuntimeJurisdictionsJson,
   readCanonicalJurisdictionsJson,
@@ -116,8 +127,6 @@ import type { Server } from 'bun';
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
 let serverEnv: RuntimeReplica | null = null;
-let serverStartupBarrier: Promise<void> = Promise.resolve();
-let resolveServerStartupBarrier: (() => void) | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
 const HEALTH_CACHE_TTL_MS = 10_000;
 let cachedHealthResponse: RuntimeHealthCacheEntry | null = null;
@@ -168,9 +177,6 @@ const withStartupStepTimeout = async <T>(
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 };
-
-const isServerBootInProgress = (): boolean =>
-  serverBootPhase === 'starting' || serverBootPhase === 'runtime' || serverBootPhase === 'bootstrap';
 
 const oneShotLogs = new Map<string, number>();
 const ONE_SHOT_TTL_MS = 60_000;
@@ -304,8 +310,7 @@ registerStructuredLogSink(entry => {
     },
   });
 });
-type ServerBootPhase = 'starting' | 'runtime' | 'bootstrap' | 'ready' | 'failed';
-let serverBootPhase: ServerBootPhase = 'starting';
+let serverBootPhase: RuntimeTransportBootPhase = 'starting';
 let serverBootError: string | null = null;
 let serverBootStartedAt = 0;
 let serverBootCompletedAt: number | null = null;
@@ -543,45 +548,36 @@ const maybeHandleRuntimeInfoApi = async (
       { headers },
     );
   }
-  if (pathname === '/api/clients') {
-    return new Response(
-      safeStringify({
-        count: relayStore.clients.size,
-        clients: Array.from(relayStore.clients.keys()),
-      }),
-      { headers },
-    );
-  }
   return null;
 };
 
-const handleGossipProfileApi = async (
+const gossipProfileEntityId = (req: Request): string =>
+  String(new URL(req.url).searchParams.get('entityId') || '').trim().toLowerCase();
+
+const prepareGossipProfileApi = async (
   req: Request,
   env: RuntimeReplica | null,
-  headers: typeof JSON_HEADERS,
-): Promise<Response> => {
-  const url = new URL(req.url);
-  const targetEntityId = String(url.searchParams.get('entityId') || '')
-    .trim()
-    .toLowerCase();
-  if (!targetEntityId) {
-    return new Response(safeStringify({ ok: false, error: 'entityId is required' }), { status: 400, headers });
-  }
+): Promise<void> => {
+  const targetEntityId = gossipProfileEntityId(req);
+  if (!targetEntityId || !env) return;
   try {
-    await env?.infrastructure?.p2p?.syncProfiles?.();
-  } catch (error) {
-    serverLog.warn('gossip.profile_sync_failed', {
-      targetEntityId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  try {
-    if (env) await ensureGossipProfiles(env, [targetEntityId]);
+    await ensureGossipProfiles(env, [targetEntityId]);
   } catch (error) {
     serverLog.warn('gossip.profile_ensure_failed', {
       targetEntityId,
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+};
+
+const handleGossipProfileApi = (
+  req: Request,
+  env: RuntimeReplica | null,
+  headers: typeof JSON_HEADERS,
+): Response => {
+  const targetEntityId = gossipProfileEntityId(req);
+  if (!targetEntityId) {
+    return new Response(safeStringify({ ok: false, error: 'entityId is required' }), { status: 400, headers });
   }
   const bundle = buildKnownProfileBundle({ env, relayStore, entityId: targetEntityId });
   return new Response(
@@ -619,7 +615,7 @@ const maybeHandleDiscoveryApi = (
   pathname: string,
   env: RuntimeReplica | null,
   headers: typeof JSON_HEADERS,
-): Promise<Response> | null => {
+): Promise<Response> | Response | null => {
   if (pathname === '/api/gossip/profile') {
     return handleGossipProfileApi(req, env, headers);
   }
@@ -807,13 +803,18 @@ const handleApiAgainstCommittedState = async (
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
 };
 
-const handleApi = (
+const handleApi = async (
   req: Request,
   pathname: string,
   env: RuntimeReplica | null,
   clientId: string,
   operatorAuthorized: boolean,
 ): Promise<Response> => {
+  if (env && req.method === 'GET' && pathname === '/api/gossip/profile') {
+    // Network refresh happens before the committed-State lease. A slow public
+    // relay lookup must never delay the Runtime writer/WAL commit path.
+    await prepareGossipProfileApi(req, env);
+  }
   const handle = () => handleApiAgainstCommittedState(
     req,
     pathname,
@@ -848,14 +849,17 @@ const handleHttpRequest = async (
 
   if (req.headers.get('upgrade') === 'websocket') {
     const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
+    const startupResponse = wsType ? runtimeTransportStartupResponse(serverBootPhase) : null;
+    if (startupResponse) return startupResponse;
     const requestAudience = canonicalizeRuntimeWsAudience(req.url);
     const relayAudience = wsType === 'relay'
       ? resolveRuntimeWsRelayAudience(req.url, session.internalRelayAudience, session.publicRelayAudience)
       : null;
     const audience = relayAudience ?? requestAudience;
+    const peerAddress = resolveSocketPeerAddress(server, req);
     // Never mint an authentication audience from an arbitrary Host header.
     if (wsType && (wsType === 'rpc' || !!relayAudience)
-      && server.upgrade(req, { data: { type: wsType, clientIp: resolveRequestClientIp(req), audience } })) {
+      && server.upgrade(req, { data: { type: wsType, clientIp: resolveRequestClientIp(req, peerAddress), audience } })) {
       return undefined;
     }
     return new Response('WebSocket upgrade failed', { status: 400 });
@@ -925,6 +929,15 @@ const handleWebSocketMessage = (
   ws: RelaySocket,
   message: string | Uint8Array | ArrayBuffer,
 ): void => {
+  // The listener binds before WAL/bootstrap recovery so health remains
+  // observable. Transport work is never queued across that boundary: each
+  // decoded message could otherwise retain attacker-controlled memory until
+  // startup completes. The upgrade path rejects these sockets too; this guard
+  // closes the race between an accepted upgrade and its first message.
+  if (!isRuntimeTransportReady(serverBootPhase)) {
+    ws.close(1013, 'Runtime transport not ready');
+    return;
+  }
   const messageText = (): string =>
     typeof message === 'string'
       ? message
@@ -938,12 +951,8 @@ const handleWebSocketMessage = (
       // work while WAL/J/bootstrap recovery is still in progress. Holding every
       // RPC message behind the boot barrier also ensures a socket opened early
       // gets its ticker attached to the final Runtime replica.
-      void dispatchRuntimeRpcAfterStartup(
-        serverStartupBarrier,
-        () => serverBootPhase === 'ready' ? session.env : null,
-        env => attachRuntimeAdapterTicker(env, registerEnvChangeCallback),
-        env => handleRpcMessage(ws, request, env),
-      )
+      if (session.env) attachRuntimeAdapterTicker(session.env, registerEnvChangeCallback);
+      void handleRpcMessage(ws, request, session.env)
         .catch(error => {
           const reason = getErrorMessage(error);
           serverLog.error('ws.rpc_handler_error', { reason, op: request.op });
@@ -983,10 +992,6 @@ const handleWebSocketMessage = (
     }
     if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
 
-    if (!session.routerConfig && isServerBootInProgress()) {
-      void serverStartupBarrier.then(() => routeRelaySocketMessage(session, ws, peerMessage));
-      return;
-    }
     routeRelaySocketMessage(session, ws, peerMessage);
   } catch (error) {
     const byteLength = wsType === 'rpc' ? runtimeAdapterMessageByteLength(message) : messageText().length;
@@ -1036,8 +1041,10 @@ const createHttpServer = (options: XlnServerOptions, session: ServerSession) =>
   Bun.serve<RelaySocketData>({
     port: options.port,
     hostname: options.host ?? '127.0.0.1',
+    maxRequestBodySize: 1024 * 1024,
     fetch: (req, server) => handleHttpRequest(options, session, req, server),
     websocket: {
+      maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
       open(ws: RelaySocket) {
         serverLog.info('ws.open', { type: ws.data.type });
         if (ws.data.type === 'rpc' && session.env) {
@@ -1343,9 +1350,6 @@ const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
   serverBootCompletedAt = null;
   serverBootPhase = 'starting';
   serverBootError = null;
-  serverStartupBarrier = new Promise<void>(resolve => {
-    resolveServerStartupBarrier = resolve;
-  });
   const session: ServerSession = {
     env: null,
     routerConfig: null,
@@ -1522,7 +1526,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     startP2P(env, {
       relayUrls: [bound.internalRelayUrl],
       ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
-      isHub: hubEntityIds.length > 0,
       gossipPollMs: 250,
     });
     serverBootPhase = 'ready';
@@ -1534,8 +1537,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverLog.error('startup.failed_after_bind', { error: getErrorMessage(error) });
     return closeFailedServerStartup(error, env, bound);
   } finally {
-    resolveServerStartupBarrier?.();
-    resolveServerStartupBarrier = null;
   }
 
   serverLog.info('ready', {

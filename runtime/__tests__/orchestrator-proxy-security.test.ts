@@ -2,6 +2,76 @@ import { describe, expect, test } from 'bun:test';
 import { createOrchestratorProxyHandlers } from '../orchestrator/proxy';
 
 describe('orchestrator proxy security', () => {
+  test('marks every generic public child request as proxied', async () => {
+    let forwarded = '';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input, init) => {
+      forwarded = new Headers(init?.headers).get('forwarded') || '';
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const handlers = createOrchestratorProxyHandlers({
+        host: '127.0.0.1',
+        defaultRpcUrl: '',
+        pollAllHubHealth: async () => {},
+        getHubChildByEntityId: () => null,
+        getHealthyHub: () => ({ apiPort: 19001 }) as any,
+      });
+      const response = await handlers.proxyAnyHubRequest(
+        new Request('http://xln.local/api/future-public-route'),
+        '/api/future-public-route',
+      );
+
+      expect(response.status).toBe(200);
+      expect(forwarded).toBe('for=_xln_public_proxy');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('public hub proxies reject oversized bodies before upstream allocation', async () => {
+    let upstreamCalls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      upstreamCalls += 1;
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const handlers = createOrchestratorProxyHandlers({
+        host: '127.0.0.1',
+        defaultRpcUrl: '',
+        pollAllHubHealth: async () => {},
+        getHubChildByEntityId: () => ({ apiPort: 19001 }) as any,
+        getHealthyHub: () => ({ apiPort: 19001 }) as any,
+      });
+      const oversized = (path: string) => new Request(`http://xln.local${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(1024 * 1024 + 1),
+        },
+        body: '{}',
+      });
+
+      const explicit = await handlers.proxyHubApi(
+        oversized('/api/faucet/offchain'),
+        '/api/faucet/offchain',
+      );
+      const generic = await handlers.proxyAnyHubRequest(
+        oversized('/api/faucet/gas'),
+        '/api/faucet/gas',
+      );
+
+      expect(explicit.status).toBe(413);
+      expect(generic.status).toBe(413);
+      expect(await explicit.text()).toContain('HUB_FAUCET_PROXY_BODY_TOO_LARGE');
+      expect(await generic.text()).toContain('HUB_API_PROXY_BODY_TOO_LARGE');
+      expect(upstreamCalls).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('public rpc failures never expose credential-bearing upstream URLs', async () => {
     const apiKey = 'sentinel-rpc-api-key';
     const upstream = `https://rpc.invalid/${apiKey}?token=${apiKey}`;

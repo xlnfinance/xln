@@ -84,6 +84,7 @@ export const recordRuntimeSecurityIncident = (
   const id = buildRuntimeSecurityIncidentId(identity);
   const now = incidentTimestamp(env);
   const existing = incidents.get(id);
+  let shouldEmit = !existing || existing.status === 'resolved';
   let incident: RuntimeSecurityIncident;
   if (existing) {
     incident = {
@@ -95,6 +96,8 @@ export const recordRuntimeSecurityIncident = (
     delete incident.resolvedAt;
     incidents.set(id, incident);
   } else if (incidents.size >= MAX_RUNTIME_SECURITY_INCIDENTS - 1) {
+    const overflow = incidents.get(OVERFLOW_INCIDENT_ID);
+    shouldEmit = !overflow || overflow.status === 'resolved';
     incident = recordCapacityIncident(env, incidents);
   } else {
     incident = {
@@ -107,12 +110,14 @@ export const recordRuntimeSecurityIncident = (
     };
     incidents.set(id, incident);
   }
-  env.error?.('system', 'SECURITY_INCIDENT_ACTIVE', {
-    incidentId: incident.id,
-    code: incident.code,
-    severity: incident.severity,
-    summary: incident.summary,
-  }, identity.entityId || env.runtimeId);
+  if (shouldEmit) {
+    env.error?.('system', 'SECURITY_INCIDENT_ACTIVE', {
+      incidentId: incident.id,
+      code: incident.code,
+      severity: incident.severity,
+      summary: incident.summary,
+    }, identity.entityId || env.runtimeId);
+  }
   return incident;
 };
 

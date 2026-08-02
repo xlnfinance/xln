@@ -4,7 +4,14 @@
 
 import { createRelayStore, removeClient, type RelayStore } from './store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './router';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../p2p/ws-protocol';
+import {
+  canonicalizeRuntimeWsAudience,
+  deserializeWsMessage,
+  makeMessageId,
+  resolveRuntimeWsMaxMessageBytes,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from '../p2p/ws-protocol';
 import { normalizeRuntimeId } from '../p2p/runtime-id';
 import { createStructuredLogger } from '../../infra/logger';
 import { createHelloChallengeRegistry } from '../p2p/hello-challenge';
@@ -50,6 +57,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
   const server = Bun.serve<undefined>({
     hostname: options.host || '0.0.0.0',
     port: options.port,
+    maxRequestBodySize: 1024 * 1024,
     fetch(request) {
       if (request.headers.get('upgrade') !== 'websocket') {
         return new Response('XLN relay websocket endpoint', { status: 200 });
@@ -58,6 +66,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
       return new Response('WebSocket upgrade failed', { status: 400 });
     },
     websocket: {
+      maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
       open(ws) {
         store.wsCounter += 1;
         helloChallenges.issue(ws, relayAudience);

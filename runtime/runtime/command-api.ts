@@ -18,6 +18,7 @@ import {
 import { assertRuntimeCommandReady } from './lifecycle';
 import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import { assertCrossJLocalOwnerCohort, requireCrossJRuntimeTopology } from './cross-j-topology';
+import { signRuntimeEntityInputsEnvelope } from './entity-input-envelope-auth';
 
 type RuntimeCommandDependencies = Pick<
   ReturnType<typeof createRuntimeLoopApi>,
@@ -65,13 +66,13 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
     }
     const targetRuntimeId = topology.hubRuntimeId;
 
-    const envelope: RuntimeEntityInputsEnvelope = {
+    const envelope: RuntimeEntityInputsEnvelope = signRuntimeEntityInputsEnvelope(env, targetRuntimeId, {
       sourceRuntimeId,
       sourceRuntimeHeight: Math.max(0, Math.floor(Number(env.state.height || 0))),
       sourceRuntimeTimestamp: Math.max(0, Math.floor(Number(env.state.timestamp || 0))),
       entityInputs: [],
       crossJurisdictionIntent: structuredClone(canonicalRoute),
-    };
+    });
     const direct = ensureRuntimeInfrastructure(env).directEntityInputsDispatch;
     let delivery = direct
       ? requireDeliveryResult(

@@ -1000,11 +1000,8 @@ export class RuntimeWsClient {
       }
     } catch (error) {
       this.options.onError?.(error as Error);
-      this.sendDebugEvent({
-        level: 'error',
-        code: 'WS_SEND_FAILFAST',
-        failfast: asFailFastPayload(error),
-      });
+      // Never report a send failure through this same transport: the debug
+      // frame must satisfy the same failed preconditions and would recurse.
       return false;
     }
     const payload = serializeWsMessage(outboundMsg);

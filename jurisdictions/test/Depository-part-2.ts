@@ -734,17 +734,14 @@ describe('Depository', () => {
     });
     const blocked = await signDepositoryBatch(depository, left.entityId, left.privateKey, blockedBatch);
     await expect(depository.connect(left.signer).processBatch(blocked.encodedBatch, blocked.hankoData, blocked.nonce))
-      .to.emit(depository, 'BatchOperationSkipped')
-      .withArgs(left.entityId, blocked.batchHash, blocked.nonce, 0n, 0n, 0n)
-      .and.to.emit(depository, 'HankoBatchProcessed')
-      .withArgs(left.entityId, blocked.batchHash, blocked.nonce);
+      .to.be.revertedWithCustomError(depository, 'E3');
 
-    expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
-    expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
     expect(await depository._reserves(recipient, tokenId)).to.equal(0n);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(100n);
-    expect(await depository._reserves(left.entityId, independentTokenId)).to.equal(0n);
-    expect(await depository._reserves(recipient, independentTokenId)).to.equal(7n);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
+    expect(await depository._reserves(left.entityId, independentTokenId)).to.equal(7n);
+    expect(await depository._reserves(recipient, independentTokenId)).to.equal(0n);
 
     const incomingSettlementNonce = 3n;
     const incomingSettlementDiffs = [
@@ -807,20 +804,17 @@ describe('Depository', () => {
         .connect(left.signer)
         .processBatch(blockedSettlement.encodedBatch, blockedSettlement.hankoData, blockedSettlement.nonce),
     )
-      .to.emit(depository, 'BatchOperationSkipped')
-      .withArgs(left.entityId, blockedSettlement.batchHash, blockedSettlement.nonce, 2n, 1n, 0n)
-      .and.to.emit(depository, 'HankoBatchProcessed')
-      .withArgs(left.entityId, blockedSettlement.batchHash, blockedSettlement.nonce);
+      .to.be.revertedWithCustomError(depository, 'E3');
 
-    expect((await depository._accounts(acctKey)).nonce).to.equal(incomingSettlementNonce);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(finalNonce);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(100n);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
 
     await depository.enforceDebts(left.entityId, tokenId, 32);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(0n);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(100n);
 
     await depository.mintToReserve(left.entityId, tokenId, 150n);
     const spendableTransferBatch = emptyBatch({
@@ -836,8 +830,8 @@ describe('Depository', () => {
       .connect(left.signer)
       .processBatch(spendableTransfer.encodedBatch, spendableTransfer.hankoData, spendableTransfer.nonce);
 
-    expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
-    expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(300n);
     expect(await depository._reserves(recipient, tokenId)).to.equal(50n);
     expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(0n);
     expect(await depository._activeDebtsByToken(left.entityId, tokenId)).to.equal(0n);

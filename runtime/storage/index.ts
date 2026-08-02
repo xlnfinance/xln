@@ -5,6 +5,7 @@ import {
   readRawOrNull,
 } from './level';
 import {
+  buildCertifiedFramePuts,
   buildHistoryViewPuts,
   pruneHistoryViewRetention,
   readHistoryViewHead,
@@ -41,6 +42,8 @@ import {
 } from './read';
 import {
   KEY_HEAD,
+  HISTORY_VIEW_ACCOUNT_FRAME,
+  HISTORY_VIEW_ENTITY_FRAME,
   KEY_DIFF,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_ACCOUNT_FIELD,
@@ -68,6 +71,8 @@ import {
   keyAccountJClaimNode,
   keyAccountJClaimNodePrefix,
   parseLiveAccountKey,
+  parseHistoryViewAccountFrameKey,
+  parseHistoryViewEntityFrameKey,
   keySnapshotReplicaMetaPrefix,
 } from './keys';
 import { readAccountStorageLayout } from './account-layout';
@@ -127,8 +132,15 @@ import {
   validateStorageDiffRecordValue,
   validateStorageEntityCoreDocValue,
 } from './authoritative-schema';
+import {
+  validateStoredAccountFrameValue,
+  validateStoredEntityFrameValue,
+} from './history-view-schema';
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
+import { buffersEqual } from '../protocol/serialization';
 import type {
   PerfDeps,
+  HistoryViewPut,
   RuntimeDbLike,
   StorageDiffRecord,
   StorageDoc,
@@ -1429,6 +1441,11 @@ const buildStorageFrameRecordPlan = (
     touchedEntities,
     touchedAccounts,
     touchedBookEntities,
+    certifiedHistoryPuts: buildCertifiedFramePuts({
+      height: options.env.state.height,
+      timestamp: options.env.state.timestamp,
+      historyRecords: options.historyRecords ?? [],
+    }),
     historyViewPuts: buildHistoryViewPuts({
       height: options.env.state.height,
       timestamp: options.env.state.timestamp,
@@ -1437,7 +1454,6 @@ const buildStorageFrameRecordPlan = (
       touchedEntities,
       touchedAccounts,
       touchedBookEntities,
-      historyRecords: options.historyRecords ?? [],
     }),
     highSignalEvents: frameLogs
       .map(entry => typeof entry?.message === 'string' ? entry.message : '')
@@ -1455,12 +1471,59 @@ const buildStorageFrameRecordPlan = (
 
 type RuntimeFramePlan = ReturnType<typeof buildStorageFrameRecordPlan>;
 
+const certifiedFrameValuesMatch = (
+  key: Buffer,
+  existing: Buffer,
+  candidate: Buffer,
+): boolean => {
+  if (buffersEqual(existing, candidate)) return true;
+  if (key[0] === HISTORY_VIEW_ACCOUNT_FRAME) {
+    const { accountHeight } = parseHistoryViewAccountFrameKey(key);
+    const left = decodeValidatedBuffer(existing, value =>
+      validateStoredAccountFrameValue(value, accountHeight));
+    const right = decodeValidatedBuffer(candidate, value =>
+      validateStoredAccountFrameValue(value, accountHeight));
+    return encodeCanonicalConsensusValue(left.frame) === encodeCanonicalConsensusValue(right.frame);
+  }
+  if (key[0] === HISTORY_VIEW_ENTITY_FRAME) {
+    const { entityHeight } = parseHistoryViewEntityFrameKey(key);
+    const left = decodeValidatedBuffer(existing, value =>
+      validateStoredEntityFrameValue(value, entityHeight));
+    const right = decodeValidatedBuffer(candidate, value =>
+      validateStoredEntityFrameValue(value, entityHeight));
+    return encodeCanonicalConsensusValue(left.link) === encodeCanonicalConsensusValue(right.link);
+  }
+  throw new Error(`STORAGE_CERTIFIED_FRAME_KEY_INVALID:${key.toString('hex')}`);
+};
+
+const prepareCertifiedHistoryPuts = async (
+  walDb: RuntimeDbLike,
+  planned: HistoryViewPut[],
+): Promise<HistoryViewPut[]> => {
+  const accepted: HistoryViewPut[] = [];
+  const seen = new Map<string, Buffer>();
+  for (const put of planned) {
+    const keyHex = put.key.toString('hex');
+    const existing = seen.get(keyHex) ?? await readRawOrNull(walDb, put.key);
+    if (existing) {
+      if (!certifiedFrameValuesMatch(put.key, existing, put.value)) {
+        throw new Error(`STORAGE_CERTIFIED_FRAME_CONFLICT:${keyHex}`);
+      }
+      continue;
+    }
+    seen.set(keyHex, put.value);
+    accepted.push(put);
+  }
+  return accepted;
+};
+
 const buildStorageCommitBatches = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
   commitments: PreparedStorageCommitments,
   pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
   frame: RuntimeFramePlan,
+  certifiedHistoryPuts: HistoryViewPut[],
 ) => {
   const walBatch = prepared.walDb.batch();
   if (
@@ -1481,6 +1544,7 @@ const buildStorageCommitBatches = (
   }
   walBatch.put(frame.frameKey, frame.frameBuffer);
   walBatch.put(frame.diffKey, frame.diffBuffer);
+  for (const put of certifiedHistoryPuts) walBatch.put(put.key, put.value);
   for (const entry of commitments.replicaMetaEntries) {
     // Recovery metadata shares the authoritative batch with frame, diff, HEAD.
     walBatch.put(entry.key, entry.value);
@@ -1832,12 +1896,18 @@ export const saveRuntimeFrameToStorage = async (
   );
   options.onPersistenceProgress?.('frame-encoded');
   checkpointPrepare('frameEncode');
+  const certifiedHistoryPuts = await prepareCertifiedHistoryPuts(
+    walDb,
+    framePlan.certifiedHistoryPuts,
+  );
+  checkpointPrepare('certifiedHistory');
   const batches = buildStorageCommitBatches(
     options,
     prepared,
     commitments,
     pendingNodes,
     framePlan,
+    certifiedHistoryPuts,
   );
   checkpointPrepare('batchPlan');
   const committed = await commitStorageFrame(

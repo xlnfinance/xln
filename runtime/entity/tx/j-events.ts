@@ -1,6 +1,7 @@
 import type { EntityCandidateEffect, EntityInput, EntityState, HashToSign } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { AccountReplica } from '../../types/account';
+import type { DisputeArgumentSnapshot } from '../../protocol/dispute/argument-snapshot';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
@@ -26,14 +27,12 @@ import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
   applyKnownHtlcSecret,
   decodeDisputeStarterInitialSecrets,
-  queueCrossJurisdictionSalvageFromArgumentList,
-  queueCrossJurisdictionSalvageFromDispute,
-  queueCrossJurisdictionSourceDisputeFromTargetDispute,
+  planCrossJurisdictionTargetRecovery,
+  queueCrossJurisdictionSalvageFromFinalizedArguments,
 } from './j-events-htlc';
 import { mergeJEventClaimOps } from './j-events-account';
 import type { JEventApplyResult, JEventAccountTx } from './j-events-types';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
-import { applyBatchOperationSkippedEvent } from './j-events-batch-skip';
 import {
   applyEntityProviderActionCancelled,
   applyEntityProviderActionExecuted,
@@ -564,19 +563,22 @@ const applyStartedDisputeFollowups = (
       'DisputeStarted',
     );
   }
-  queueCrossJurisdictionSalvageFromDispute(
-    newState,
-    outputs,
-    counterpartyId,
-    starterInitialArguments,
-    blockNumber,
-  );
-  queueCrossJurisdictionSourceDisputeFromTargetDispute(
-    newState,
-    outputs,
-    counterpartyId,
-    starterInitialArguments,
-  );
+  if (!weAreStarter) {
+    const account = newState.accounts.get(counterpartyId);
+    const active = account?.activeDispute;
+    if (!account || !active) {
+      throw new Error(`CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING:${counterpartyId}`);
+    }
+    const plan = planCrossJurisdictionTargetRecovery(
+      newState,
+      account,
+      counterpartyId,
+      [active.initialProofbodyHash],
+      active.crossJurisdictionRecovery?.resultsByPullId ?? {},
+      outputs,
+    );
+    if (plan) active.crossJurisdictionRecovery = plan.recovery;
+  }
 
   addMessage(
     newState,
@@ -673,6 +675,7 @@ const retireFinalizedDisputeState = (
   senderStr: string,
   entityIdNorm: string,
   evidence: DisputeFinalizationEvidence[],
+  finalSnapshot: DisputeArgumentSnapshot | undefined,
 ): void => {
   const { newState, blockNumber, outputs } = context;
   const weAreFinalizer = senderStr === entityIdNorm;
@@ -698,16 +701,13 @@ const retireFinalizedDisputeState = (
       `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`,
     );
   }
-  const argumentBlobs = evidence.flatMap((item) => [
-    item.leftArguments,
-    item.rightArguments,
-  ]);
-  if (argumentBlobs.length > 0) {
-    queueCrossJurisdictionSalvageFromArgumentList(
+  if (finalSnapshot) {
+    queueCrossJurisdictionSalvageFromFinalizedArguments(
       newState,
       outputs,
       counterpartyId,
-      argumentBlobs,
+      evidence[0],
+      finalSnapshot.plan,
       blockNumber,
     );
   }
@@ -745,6 +745,7 @@ async function applyDisputeFinalizedJEvent(
     data.finalProofbodyHash,
     counterpartyId,
   );
+  const finalSnapshot = account.disputeArgumentSnapshotsByHash?.[finalizedProof.finalProofbodyHash];
   const resolved = resolveFinalizationEvidence(
     account,
     data,
@@ -797,6 +798,7 @@ async function applyDisputeFinalizedJEvent(
     senderStr,
     entityIdNorm,
     resolved.evidence,
+    finalSnapshot,
   );
 }
 
@@ -865,9 +867,6 @@ async function applyFinalizedJEvent(
       break;
     case 'DisputeFinalized':
       await applyDisputeFinalizedJEvent(context, disputeFinalizationEvidence);
-      break;
-    case 'BatchOperationSkipped':
-      applyBatchOperationSkippedEvent(newState, event);
       break;
     case 'HankoBatchProcessed':
       await applyHankoBatchProcessedEvent({

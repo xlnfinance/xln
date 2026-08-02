@@ -24,7 +24,7 @@ const DEFAULT_MAX_JSON_BODY_BYTES = 128 * 1024;
 const SMALL_MAX_JSON_BODY_BYTES = 8 * 1024;
 const APPOINTMENT_ENVELOPE_MAX_BYTES = 64 * 1024;
 
-const resolveAppointmentBodyLimit = (store: WatchtowerStore): number =>
+export const resolveAppointmentBodyLimit = (store: Pick<WatchtowerStore, 'maxStoredBytesPerLookupKey'>): number =>
   Math.max(
     DEFAULT_MAX_JSON_BODY_BYTES,
     store.maxStoredBytesPerLookupKey + APPOINTMENT_ENVELOPE_MAX_BYTES,

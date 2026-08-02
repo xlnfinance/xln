@@ -4,7 +4,6 @@ import {
   decodeFields,
   defineEventNormalizer,
   isActionKind,
-  isBatchOperationType,
   isPositiveUint256,
   normalizeAddress,
   normalizeBigNumberish,
@@ -139,27 +138,6 @@ const hankoBatchProcessed = defineEventNormalizer('HankoBatchProcessed', data =>
   return decoded && decoded.nonce >= 1 ? decoded : null;
 });
 
-const batchOperationSkipped = defineEventNormalizer('BatchOperationSkipped', data => {
-  const decoded = decodeFields(data, {
-    entityId: normalizeBytes32,
-    batchHash: normalizeBytes32,
-    nonce: normalizeInt,
-    operationIndex: normalizeInt,
-  });
-  const operationType = normalizeInt(data['operationType']);
-  const reason = normalizeInt(data['reason']);
-  if (
-    !decoded ||
-    decoded.nonce < 1 ||
-    decoded.operationIndex < 0 ||
-    !isBatchOperationType(operationType) ||
-    reason !== 0
-  ) {
-    return null;
-  }
-  return { ...decoded, operationType, reason };
-});
-
 const actionExecuted = defineEventNormalizer('EntityProviderActionExecuted', data => {
   const decoded = decodeFields(data, {
     entityId: normalizeBytes32,
@@ -207,7 +185,6 @@ export const EVENT_NORMALIZERS: Readonly<
   DebtEnforced: debtEnforced,
   DebtForgiven: debtForgiven,
   HankoBatchProcessed: hankoBatchProcessed,
-  BatchOperationSkipped: batchOperationSkipped,
   EntityProviderActionExecuted: actionExecuted,
   EntityProviderActionCancelled: actionCancelled,
 };

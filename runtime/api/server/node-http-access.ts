@@ -1,7 +1,10 @@
 const PRIVATE_EXACT_PATHS = new Set([
   '/api/info',
   '/api/account/status',
+  '/api/credit/request',
+  '/api/hub/account-status',
   '/api/health/full',
+  '/api/reset',
   '/api/runtime-import',
 ]);
 

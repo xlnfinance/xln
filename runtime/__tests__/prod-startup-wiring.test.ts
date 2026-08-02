@@ -2346,16 +2346,15 @@ describe('production startup wiring', () => {
     const mmNode = readMarketMakerNodeSource();
     const p2p = readFileSync(join(repoRoot, 'runtime/network/p2p/p2p.ts'), 'utf8');
 
-    expect(p2p).toContain('preferRelayForEntityInput?: boolean;');
-    expect(p2p).toContain('if (this.preferRelayForEntityInput) {');
-    expect(p2p).toContain("transport: 'relay'");
+    expect(p2p).not.toContain('preferRelayForEntityInput');
     expect(hubNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(hubTransport).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(mmNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(hubTransport).toContain('route.sendEntityInputsDelivery(');
     expect(mmNode).toContain('directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)');
-    expect(hubNode).toContain('preferRelayForEntityInput: true');
-    expect(mmNode).toContain('preferRelayForEntityInput: true');
+    expect(hubNode).not.toContain('preferRelayForEntityInput');
+    expect(mmNode).not.toContain('preferRelayForEntityInput');
+    expect(mmNode).not.toContain('allowDirectClients: false');
   });
 
   test('hub support-peer provisioning uses full jurisdiction token sets', () => {

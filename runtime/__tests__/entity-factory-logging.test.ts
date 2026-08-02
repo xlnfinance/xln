@@ -96,3 +96,13 @@ test('board encoding resolves share keys case-insensitively without defaulting v
     shares: {},
   })).toThrow('Board voting power missing');
 });
+
+test('board encoding rejects an unreachable quorum before registration', () => {
+  const proposer = '0x1111111111111111111111111111111111111111';
+  expect(() => encodeBoard({
+    mode: 'proposer-based',
+    threshold: 2n,
+    validators: [proposer],
+    shares: { [proposer]: 1n },
+  })).toThrow('Board threshold exceeds total voting power: 2 > 1');
+});

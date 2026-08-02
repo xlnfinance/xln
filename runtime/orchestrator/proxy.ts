@@ -35,6 +35,8 @@ const MAX_RPC_PROXY_INDEX = 8;
 const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
 const DEFAULT_HUB_API_PROXY_TIMEOUT_MS = 5_000;
 const DEFAULT_HUB_FAUCET_PROXY_TIMEOUT_MS = 30_000;
+const MAX_PUBLIC_HUB_PROXY_BODY_BYTES = 1024 * 1024;
+const PUBLIC_HUB_PROXY_MARKER = { forwarded: 'for=_xln_public_proxy' } as const;
 const LONG_RUNNING_HUB_ENDPOINTS = new Set([
   '/api/faucet/erc20',
   '/api/faucet/gas',
@@ -203,11 +205,20 @@ const proxyHubApi = async (
     let bodyText = '';
     let bodyJson: { hubEntityId?: string } | null = null;
     try {
-      bodyText = await request.text();
+      bodyText = await readCappedRequestText(
+        request,
+        MAX_PUBLIC_HUB_PROXY_BODY_BYTES,
+        'HUB_FAUCET_PROXY',
+      );
       bodyJson = bodyText ? JSON.parse(bodyText) as { hubEntityId?: string } : {};
     } catch (error) {
-      return new Response(safeStringify({ success: false, error: `Invalid JSON: ${serializeError(error)}` }), {
-        status: 400,
+      const bodyError = error instanceof RequestBodyError ? error : null;
+      return new Response(safeStringify({
+        success: false,
+        error: bodyError?.message ?? `Invalid JSON: ${serializeError(error)}`,
+        ...(bodyError ? { code: bodyError.code } : {}),
+      }), {
+        status: bodyError?.status ?? 400,
         headers: proxyHeaders(),
       });
     }
@@ -239,6 +250,7 @@ const proxyHubApi = async (
         method: 'POST',
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
+          ...PUBLIC_HUB_PROXY_MARKER,
         },
         body: bodyText,
       }, timeoutMs);
@@ -341,6 +353,7 @@ const proxyEntityHubApi = async (
         method: 'POST',
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
+          ...PUBLIC_HUB_PROXY_MARKER,
         },
         body: bodyText,
       }, timeoutMs);
@@ -402,6 +415,7 @@ const proxyAnyHubGet = async (
         method: 'GET',
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
+          ...PUBLIC_HUB_PROXY_MARKER,
         },
       }, readHubApiProxyTimeoutMs(endpointWithQuery));
       return new Response(text, {
@@ -442,7 +456,22 @@ const proxyAnyHubRequest = async (
 
     let bodyText = '';
     if (request.method !== 'GET' && request.method !== 'HEAD') {
-      bodyText = await request.text();
+      try {
+        bodyText = await readCappedRequestText(
+          request,
+          MAX_PUBLIC_HUB_PROXY_BODY_BYTES,
+          'HUB_API_PROXY',
+        );
+      } catch (error) {
+        const bodyError = error instanceof RequestBodyError ? error : null;
+        return new Response(safeStringify(proxyFailureBody({
+          code: bodyError?.code ?? 'HUB_API_PROXY_BODY_INVALID',
+          error: bodyError?.message ?? 'Hub API proxy request body is invalid',
+        })), {
+          status: bodyError?.status ?? 400,
+          headers: CORS_JSON_HEADERS,
+        });
+      }
     }
 
     try {
@@ -450,6 +479,7 @@ const proxyAnyHubRequest = async (
         method: request.method,
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
+          ...PUBLIC_HUB_PROXY_MARKER,
         },
         ...(bodyText.length > 0 ? { body: bodyText } : {}),
       }, readHubApiProxyTimeoutMs(endpointWithQuery));

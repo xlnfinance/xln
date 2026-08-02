@@ -139,7 +139,7 @@ import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
 import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
 
-import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity/tx/j-events-htlc';
+import { queueCrossJurisdictionSalvageFromFinalizedArguments } from '../entity/tx/j-events-htlc';
 
 import {
   canonicalDisputeFinalizationEvidenceHash,
@@ -1533,6 +1533,16 @@ describe('audit fail-fast regressions', () => {
         now: env.state.timestamp,
       },
     );
+    route.fillSeq = 1;
+    route.cumulativeFillRatio = 0x1234;
+    route.claimedRatio = 0x1234;
+    route.fillNumerator = 0x1234n;
+    route.fillDenominator = 65_535n;
+    route.filledSourceAmount = (BigInt(route.source.amount) * 0x1234n) / 65_535n;
+    route.filledTargetAmount = (BigInt(route.target.amount) * 0x1234n) / 65_535n;
+    route.sourceClaimed = route.filledSourceAmount;
+    route.targetClaimed = route.filledTargetAmount;
+    route.status = 'partially_filled';
     sourceState.crossJurisdictionSwaps.set(route.orderId, route);
 
     const binary = buildCrossJurisdictionPullReveal(
@@ -1549,11 +1559,12 @@ describe('audit fail-fast regressions', () => {
     const outputs: EntityInput[] = [];
 
     expect(
-      queueCrossJurisdictionSalvageFromArgumentList(
+      queueCrossJurisdictionSalvageFromFinalizedArguments(
         sourceState,
         outputs,
         sourceHub,
-        [starterInitialArguments],
+        { leftArguments: starterInitialArguments, rightArguments: '0x' },
+        { leftPullIds: [route.sourcePull!.pullId], rightPullIds: [] },
         123,
       ),
     ).toBe(true);
@@ -1571,11 +1582,12 @@ describe('audit fail-fast regressions', () => {
       const peerObserver = makeEntityState(sourceHub);
       const peerOutputs: EntityInput[] = [];
       expect(
-        queueCrossJurisdictionSalvageFromArgumentList(
+        queueCrossJurisdictionSalvageFromFinalizedArguments(
           peerObserver,
           peerOutputs,
           sourceUser,
-          [starterInitialArguments],
+          { leftArguments: starterInitialArguments, rightArguments: '0x' },
+          { leftPullIds: [route.sourcePull!.pullId], rightPullIds: [] },
           123,
         ),
       ).toBe(false);

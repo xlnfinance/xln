@@ -25,11 +25,20 @@ export type RelayDirectOneShotLog = (
   fields?: Record<string, unknown>,
 ) => void;
 
-export const resolveRequestClientIp = (request: Request): string => {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  const realIp = request.headers.get('x-real-ip')?.trim();
-  const cfIp = request.headers.get('cf-connecting-ip')?.trim();
-  return forwarded || realIp || cfIp || 'direct';
+const normalizePeerIp = (value: string | null | undefined): string => {
+  const peer = String(value || '').trim().toLowerCase();
+  return peer.startsWith('::ffff:') ? peer.slice('::ffff:'.length) : peer;
+};
+
+export const resolveRequestClientIp = (request: Request, peerAddress?: string | null): string => {
+  const peer = normalizePeerIp(peerAddress);
+  if (peer === '127.0.0.1' || peer === '::1') {
+    const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+    const realIp = request.headers.get('x-real-ip')?.trim();
+    const cfIp = request.headers.get('cf-connecting-ip')?.trim();
+    return forwarded || realIp || cfIp || peer;
+  }
+  return peer || 'unknown';
 };
 
 export const getRelayClientIp = (ws: RelaySocket): string => String(ws.data?.clientIp || 'unknown');

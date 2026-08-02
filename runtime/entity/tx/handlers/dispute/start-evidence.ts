@@ -34,6 +34,49 @@ export type StartEvidence = {
   starterIncrementedArguments: string;
 };
 
+export const resolveStoredDisputeStartNonce = (
+  account: AccountReplica,
+  proofBodyHash: string,
+): { signedNonce: number; nonceSource: string } => {
+  let signedNonce = account.disputeProofNoncesByHash?.[proofBodyHash]
+    ?? account.proofHeader.nextProofNonce;
+  let nonceSource = account.disputeProofNoncesByHash?.[proofBodyHash] !== undefined
+    ? 'hashMap'
+    : 'proofHeader';
+  if (
+    account.counterpartyDisputeProofNonce !== undefined &&
+    account.counterpartyDisputeProofNonce > signedNonce
+  ) {
+    signedNonce = account.counterpartyDisputeProofNonce;
+    nonceSource = 'counterpartySig(fresher)';
+  } else if (
+    account.disputeProofNoncesByHash?.[proofBodyHash] === undefined &&
+    account.counterpartyDisputeProofNonce !== undefined
+  ) {
+    signedNonce = account.counterpartyDisputeProofNonce;
+    nonceSource = 'counterpartySig';
+  }
+  return { signedNonce, nonceSource };
+};
+
+export const selectIncrementedDisputeSnapshots = (
+  account: AccountReplica,
+  starterSide: DisputeArgumentSide,
+  signedNonce: number,
+  counterpartyId: string,
+) => {
+  const candidates = Object.values(account.disputeArgumentSnapshotsByHash ?? {})
+    .filter((snapshot) => snapshot.side === starterSide && snapshot.nonce > signedNonce)
+    .sort((left, right) => left.nonce - right.nonce);
+  if (candidates.length > 1) {
+    throw new Error(
+      `DISPUTE_START_IMPOSSIBLE_MULTIPLE_INCREMENTED_SNAPSHOTS:${counterpartyId}:` +
+      candidates.map((snapshot) => `${snapshot.nonce}:${snapshot.proofbodyHash}`).join(','),
+    );
+  }
+  return candidates;
+};
+
 export const loadStartProof = (
   sourceState: EntityState,
   state: EntityState,
@@ -96,23 +139,7 @@ export const resolveStartNonce = (
   counterpartyId: string,
   proofBodyHash: string,
 ): Pick<StartEvidence, 'signedNonce' | 'nonceSource' | 'jNonce'> | null => {
-  let signedNonce = account.proofHeader.nextProofNonce;
-  let nonceSource = 'proofHeader';
-  const mappedNonce = account.disputeProofNoncesByHash?.[proofBodyHash];
-  if (mappedNonce !== undefined) {
-    signedNonce = mappedNonce;
-    nonceSource = 'hashMap';
-  } else if (account.counterpartyDisputeProofNonce !== undefined) {
-    signedNonce = account.counterpartyDisputeProofNonce;
-    nonceSource = 'counterpartySig';
-  }
-  if (
-    account.counterpartyDisputeProofNonce !== undefined &&
-    account.counterpartyDisputeProofNonce > signedNonce
-  ) {
-    signedNonce = account.counterpartyDisputeProofNonce;
-    nonceSource = 'counterpartySig(fresher)';
-  }
+  const { signedNonce, nonceSource } = resolveStoredDisputeStartNonce(account, proofBodyHash);
   if (signedNonce <= 0) {
     addMessage(state, `❌ Invalid dispute signedNonce=${signedNonce} — must be > 0`);
     disputeLog.error('start.signed_nonce_invalid', {
@@ -168,15 +195,12 @@ export const buildStarterArguments = (
       : starterIsLeft
         ? initial.leftArguments
         : initial.rightArguments;
-  const candidates = Object.values(account.disputeArgumentSnapshotsByHash ?? {})
-    .filter(snapshot => snapshot.side === starterSide && snapshot.nonce > signedNonce)
-    .sort((left, right) => left.nonce - right.nonce);
-  if (candidates.length > 1) {
-    throw new Error(
-      `DISPUTE_START_IMPOSSIBLE_MULTIPLE_INCREMENTED_SNAPSHOTS:${counterpartyId}:` +
-      candidates.map(snapshot => `${snapshot.nonce}:${snapshot.proofbodyHash}`).join(','),
-    );
-  }
+  const candidates = selectIncrementedDisputeSnapshots(
+    account,
+    starterSide,
+    signedNonce,
+    counterpartyId,
+  );
   const warnings = [...initial.warnings];
   let rawIncremented = '0x';
   if (candidates.length === 1) {

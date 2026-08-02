@@ -1,11 +1,9 @@
-import { cacheCommittedAccountJClaimNodeChanges } from '../account-j-claim-node-store';
 import { buildQuorumHanko } from '../../hanko/signing';
 import { logError, shortHash, shortId } from '../../infra/logger';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import type { EntityState, EntityFrame, EntityCandidate } from '../types';
 import type { HankoString } from '../../types/hanko';
 import { commitEntityFrameCandidateState } from '../state-clone';
-import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import {
   verifyHashPrecommitSignatures,
@@ -187,11 +185,8 @@ const installCommittedState = (
     previousState,
     committedState,
   );
-  cacheCommittedConsumptionNodeChanges(env, execution.consumptionNodeChanges);
-  cacheCommittedAccountJClaimNodeChanges(
-    env,
-    execution.accountJClaimNodeChanges,
-  );
+  context.consumptionNodeChanges = execution.consumptionNodeChanges;
+  context.accountJClaimNodeChanges = execution.accountJClaimNodeChanges;
   emitCommittedPendingFrameWarnings(previousState, committedState);
   if (context.promoteCandidateState) {
     commitEntityFrameCandidateState(committedState);

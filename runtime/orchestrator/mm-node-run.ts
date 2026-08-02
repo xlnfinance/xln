@@ -940,6 +940,7 @@ const createMarketMakerWebSocketHandler = (
   directRuntimeWs: ReturnType<typeof createDirectRuntimeWsRoute>,
   handleRuntimeAdapterMessage: (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer) => void,
 ) => ({
+  maxPayloadLength: directRuntimeWs.websocket.maxPayloadLength,
   open(ws: MarketMakerServerSocket) {
     if (ws.data?.type === 'rpc') {
       attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
@@ -2129,6 +2130,7 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
     idleTimeout: 120,
+    maxRequestBodySize: 1024 * 1024,
     fetch: createMarketMakerHttpHandler({
       env,
       httpDrain,
@@ -2181,8 +2183,6 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
-    allowDirectClients: false,
-    preferRelayForEntityInput: true,
     advertiseEntityIds: state.contexts.map(item => item.entityId),
     gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
   });

@@ -46,6 +46,7 @@ import type { AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica } from '../entity/types';
 import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../runtime/types';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 
@@ -171,6 +172,8 @@ import { LIMITS } from '../config/constants';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 
 import { assertRuntimeOutputAuthorization } from '../entity/authorization';
+import { getConsumptionNodeStore } from '../entity/consumption-store';
+import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
 
 import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
 
@@ -501,6 +504,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         status: 'partially_filled' as const,
         fillSeq: 1,
         cumulativeFillRatio: 32_768,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
         filledSourceAmount: 50n,
         filledTargetAmount: 45n,
       };
@@ -1394,13 +1399,13 @@ describe('cross-jurisdiction hashledger swap', () => {
       validateInboundP2PEntityInputsEnvelope(
         userEnv,
         hubEnv.runtimeId!,
-        {
+        signRuntimeEntityInputsEnvelope(createEmptyEnv(`${seed}-hub`), userEnv.runtimeId!, {
           sourceRuntimeId: hubEnv.runtimeId!,
           sourceRuntimeHeight: hubFrame.height,
           sourceRuntimeTimestamp: hubFrame.timestamp,
           atomicCrossJurisdictionPair: { phase: 'proposal', pairKey: structuralPair.pairKey },
           entityInputs: reversedProposals.map(({ from: _from, sourceRuntimeFrame: _frame, ...input }) => input),
-        },
+        }),
         makeLocalCrossJRoutingDeps(),
       ),
     ).toHaveLength(2);
@@ -1527,10 +1532,19 @@ describe('cross-jurisdiction hashledger swap', () => {
         },
       },
     ];
+    const snapshotRuntimeCas = () => ({
+      consumption: [...getConsumptionNodeStore(userEnv).keys()].sort(),
+      pendingConsumption: [...(userEnv.infrastructure?.pendingConsumptionNodes?.keys() ?? [])].sort(),
+      pendingConsumptionDeletes: [...(userEnv.infrastructure?.pendingConsumptionNodeDeletes ?? [])].sort(),
+      claims: [...getAccountJClaimNodeStore(userEnv).keys()].sort(),
+      pendingClaims: [...(userEnv.infrastructure?.pendingAccountJClaimNodes?.keys() ?? [])].sort(),
+      pendingClaimDeletes: [...(userEnv.infrastructure?.pendingAccountJClaimNodeDeletes ?? [])].sort(),
+    });
     let reducerRejectedProposalPairs = 0;
     for (const corruption of corruptions) {
       const corrupted = cloneIsolatedRoutedEntityInputs(proposals);
       corruption.mutate(corrupted);
+      const casBefore = snapshotRuntimeCas();
       const replicasBefore = [...userEnv.state.eReplicas.entries()].map(
         ([key, replica]) => [key, cloneEntityReplica(replica)] as const,
       );
@@ -1557,6 +1571,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         reducerRejectedProposalPairs += 1;
       }
       expect([...userEnv.state.eReplicas.entries()], corruption.name).toEqual(replicasBefore);
+      expect(snapshotRuntimeCas(), corruption.name).toEqual(casBefore);
       const incidentsAfter = [...(userEnv.infrastructure?.securityIncidents?.values() ?? [])].reduce(
         (sum, incident) => sum + incident.occurrences,
         0,
@@ -2129,6 +2144,20 @@ describe('cross-jurisdiction hashledger swap', () => {
     const result = await submitCrossJurisdictionSwap(env, submitParams);
     await submitCrossJurisdictionSwap(env, submitParams);
     expect(hubEnv.runtimeMempool?.entityInputs).toHaveLength(1);
+    const attackerEnv = createEmptyEnv('cross-submit-relay-attacker');
+    const attackerEnvelope = signRuntimeEntityInputsEnvelope(attackerEnv, hubEnv.runtimeId!, {
+      sourceRuntimeId: attackerEnv.runtimeId!,
+      sourceRuntimeHeight: env.state.height,
+      sourceRuntimeTimestamp: env.state.timestamp,
+      entityInputs: [],
+      crossJurisdictionIntent: structuredClone(result.route),
+    });
+    expect(() => handleInboundP2PEntityInputs(hubEnv, env.runtimeId!, {
+      ...attackerEnvelope,
+      // A relay could forge this outer/header identity before envelope auth.
+      sourceRuntimeId: env.runtimeId!,
+    })).toThrow('INBOUND_ENTITY_INPUTS_SOURCE_SIGNATURE_INVALID');
+    expect(hubEnv.runtimeMempool?.entityInputs).toHaveLength(1);
     registerVerifiedOwnerRoute(env, targetHub, targetHubSigner, addr('fe'));
     await expect(submitCrossJurisdictionIntent(env, result.route))
       .rejects.toThrow('OWNER_RUNTIME_MISMATCH');
@@ -2319,6 +2348,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillSeq: 1,
       cumulativeFillRatio: 65_535,
       claimedRatio: 65_535,
+      fillNumerator: 1n,
+      fillDenominator: 1n,
       filledSourceAmount: BigInt(preparedRoute.source.amount),
       filledTargetAmount: BigInt(preparedRoute.target.amount),
       sourceClaimed: BigInt(preparedRoute.source.amount),
@@ -2453,7 +2484,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(readEntityFrameEventMessages(result.newState).at(-1)).not.toContain('no pending fill');
   });
 
-  test('committed exact-only terminal fill ack routes clear without book progress fallback', () => {
+  test('committed terminal fill ack routes clear from its exact-derived ratio', () => {
     const seed = 'cross-exact-only-terminal-fill-followup-seed';
     const env = createEmptyEnv(seed);
     env.state.timestamp = 10_000;
@@ -2503,7 +2534,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         incrementalTargetAmount: 900n,
         cumulativeSourceAmount: 1_000n,
         cumulativeTargetAmount: 900n,
-        cumulativeFillRatio: 0,
+        cumulativeFillRatio: 65_535,
         fillNumerator: 1n,
         fillDenominator: 1n,
         executionSourceAmount: 1_000n,

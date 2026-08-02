@@ -27,17 +27,13 @@ import type { EntityReplica, EntityState } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/machine/input';
 import { applyRuntimeAdapterCommandMarker } from './command-frontier';
-import { assertRuntimeAdapterCommandTxAuthorized } from './command-frontier-auth';
-import { assertNumberedRegistrationTxAuthorized } from './registration/numbered-registration-auth';
 import {
   applyRetryJSubmitRuntimeTx,
-  assertJSubmitRuntimeTxAuthorized,
 } from './j-submit-state';
 import { applyRecordJSubmitResultRuntimeTx } from './j-submit-result';
 import {
   applyRetryEntityProviderActionRuntimeTx,
 } from './entity-provider-action-submit-state';
-import { assertEntityProviderActionRuntimeTxAuthorized } from './entity-provider-action-submit-auth';
 import { applyRecordEntityProviderActionResultRuntimeTx } from './entity-provider-action-submit-result';
 import { DEBUG } from '../infra/debug-flags';
 import { createStructuredLogger } from '../infra/logger';
@@ -48,7 +44,6 @@ import { cloneEntityState } from '../entity/state-clone';
 import { buildRuntimeCheckpointLineagePlan } from '../storage/entity-lineage';
 import {
   assertCertifiedRegistrationEvidence,
-  assertJAuthorityRuntimeTxAuthorized,
   computeRegistrationEvidenceClaimHash,
   freezeCertifiedRegistrationEvidence,
   registrationEvidenceKey,
@@ -56,13 +51,13 @@ import {
 import {
   applyCompleteImportJurisdiction,
   applyImportJurisdictionIntent,
-  assertJImportResultRuntimeTxAuthorized,
 } from './jurisdiction-import';
 import { applyWatcherJurisdictionCursor } from '../jurisdiction/adapter/watcher-cursor';
 import {
   applyNumberedRegistrationIntent,
   applyNumberedRegistrationResolution,
 } from './registration/numbered-registration-intent';
+import { assertRuntimeTxCapabilitiesAuthorized } from './internal-tx-auth';
 
 const runtimeTxLog = createStructuredLogger('runtime.tx');
 
@@ -82,12 +77,7 @@ export const applyRuntimeTx = async (
   runtimeTx: RuntimeTx,
   deps: RuntimeTxHandlerDeps = {},
 ): Promise<JInput[]> => {
-  assertJSubmitRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
-  assertJAuthorityRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
-  assertJImportResultRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
-  assertEntityProviderActionRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
-  assertRuntimeAdapterCommandTxAuthorized(runtimeTx, deps.isReplay === true);
-  assertNumberedRegistrationTxAuthorized(runtimeTx, deps.isReplay === true);
+  assertRuntimeTxCapabilitiesAuthorized(runtimeTx, deps.isReplay === true);
   if (runtimeTx.type === 'recordRuntimeAdapterCommand') {
     applyRuntimeAdapterCommandMarker(env, runtimeTx.data);
     return [];

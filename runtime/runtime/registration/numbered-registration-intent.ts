@@ -37,7 +37,70 @@ export { buildNumberedRegistrationRequest } from './numbered-registration-codec'
 
 export type RegistrationSubmission =
   | { kind: 'receipt'; receipt: TransactionReceipt; registrations: NumberedEntityRegistration[] }
-  | { kind: 'nonce-conflict'; reason: string };
+  | { kind: 'nonce-conflict'; reason: string }
+  | { kind: 'mined-failure'; reason: string };
+
+const REGISTRATION_FINALITY_WAIT_TIMEOUT_MS = 15 * 60 * 1_000;
+
+const waitForMinedRegistrationReceipt = async (
+  adapter: JAdapter,
+  transactionHash: string,
+): Promise<TransactionReceipt> => {
+  const receipt = await adapter.provider.waitForTransaction(
+    transactionHash,
+    1,
+    REGISTRATION_FINALITY_WAIT_TIMEOUT_MS,
+  );
+  if (!receipt) throw new Error('NUMBERED_REGISTRATION_RECEIPT_WAIT_TIMEOUT');
+  return receipt;
+};
+
+const registrationFinalityDepth = (adapter: JAdapter): number => {
+  const depth = adapter.getFinalityDepth?.() ?? 0;
+  if (!Number.isSafeInteger(depth) || depth < 0) {
+    throw new Error(`NUMBERED_REGISTRATION_FINALITY_DEPTH_INVALID:${String(depth)}`);
+  }
+  return depth;
+};
+
+const waitForCanonicalRegistrationReceipt = async (
+  adapter: JAdapter,
+  receipt: TransactionReceipt,
+): Promise<TransactionReceipt> => {
+  const finalityDepth = registrationFinalityDepth(adapter);
+  if (finalityDepth === 0) return receipt;
+  // Ethers counts the inclusion block as confirmation #1, whereas watcher
+  // finality is head - inclusion >= depth. Waiting for depth + 1 therefore
+  // applies exactly the same canonical-chain policy to success and revert.
+  const canonical = await adapter.provider.waitForTransaction(
+    receipt.hash,
+    finalityDepth + 1,
+    REGISTRATION_FINALITY_WAIT_TIMEOUT_MS,
+  );
+  if (!canonical) throw new Error('NUMBERED_REGISTRATION_RECEIPT_FINALITY_TIMEOUT');
+  if (canonical.hash.toLowerCase() !== receipt.hash.toLowerCase()) {
+    throw new Error('NUMBERED_REGISTRATION_FINAL_RECEIPT_HASH_MISMATCH');
+  }
+  return canonical;
+};
+
+const readFinalizedPayerNonce = async (
+  adapter: JAdapter,
+  payer: string,
+): Promise<number> => {
+  const finalityDepth = registrationFinalityDepth(adapter);
+  if (finalityDepth === 0) {
+    return await adapter.provider.getTransactionCount(payer, 'latest');
+  }
+  const head = await adapter.provider.getBlockNumber();
+  if (!Number.isSafeInteger(head) || head < finalityDepth) {
+    throw new Error(`NUMBERED_REGISTRATION_FINALITY_HEAD_INVALID:${String(head)}:${finalityDepth}`);
+  }
+  // A pending replacement can raise the pending nonce and later disappear.
+  // Only a canonical block at the watcher's finality depth can prove that the
+  // durable intent's nonce was consumed by another transaction.
+  return await adapter.provider.getTransactionCount(payer, head - finalityDepth);
+};
 
 export const getNumberedRegistrationRecord = (
   env: RuntimeReplica,
@@ -130,23 +193,35 @@ export const submitNumberedRegistrationIntent = async (
   let receipt = await adapter.provider.getTransactionReceipt(pending.transactionHash);
   if (!receipt) {
     const existingTransaction = await adapter.provider.getTransaction(pending.transactionHash);
-    if (existingTransaction) receipt = await existingTransaction.wait();
+    if (existingTransaction) {
+      receipt = await waitForMinedRegistrationReceipt(adapter, pending.transactionHash);
+    }
   }
   if (!receipt) {
-    const chainNonce = Math.max(
-      await adapter.provider.getTransactionCount(pending.request.payerSignerId, 'latest'),
-      await adapter.provider.getTransactionCount(pending.request.payerSignerId, 'pending'),
+    const chainNonce = await readFinalizedPayerNonce(
+      adapter,
+      pending.request.payerSignerId,
     );
     if (chainNonce > pending.transactionNonce) {
       return { kind: 'nonce-conflict', reason: `payer_nonce_consumed:expected=${pending.transactionNonce}:actual=${chainNonce}` };
     }
     const response = await adapter.provider.broadcastTransaction(pending.rawTransaction);
     if (response.hash.toLowerCase() !== tx.hash!.toLowerCase()) throw new Error('NUMBERED_REGISTRATION_BROADCAST_HASH_MISMATCH');
-    receipt = await response.wait();
+    receipt = await waitForMinedRegistrationReceipt(adapter, response.hash);
   }
   if (!receipt) throw new Error('NUMBERED_REGISTRATION_RECEIPT_MISSING');
-  if (receipt.hash.toLowerCase() !== pending.transactionHash || receipt.status !== 1) {
-    throw new Error('NUMBERED_REGISTRATION_RECEIPT_INVALID');
+  if (receipt.hash.toLowerCase() !== pending.transactionHash) {
+    throw new Error('NUMBERED_REGISTRATION_RECEIPT_HASH_MISMATCH');
+  }
+  receipt = await waitForCanonicalRegistrationReceipt(adapter, receipt);
+  if (receipt.status === 0) {
+    return {
+      kind: 'mined-failure',
+      reason: `mined_revert:status=0:blockNumber=${receipt.blockNumber}:blockHash=${receipt.blockHash.toLowerCase()}`,
+    };
+  }
+  if (receipt.status !== 1) {
+    throw new Error(`NUMBERED_REGISTRATION_RECEIPT_STATUS_INVALID:${String(receipt.status)}`);
   }
   return {
     kind: 'receipt',
@@ -157,6 +232,24 @@ export const submitNumberedRegistrationIntent = async (
       pending.request.entities.map(entity => entity.boardHash),
     ),
   };
+};
+
+const quarantineNumberedRegistrationIntent = async (
+  pending: PendingNumberedRegistration,
+  reason: string,
+  commit: (runtimeTxs: RuntimeTx[]) => Promise<JPreparedTransactionAcceptance>,
+): Promise<void> => {
+  const acceptance = await commit([markLocalNumberedRegistrationTx({
+    type: 'resolveNumberedRegistrationIntent',
+    data: {
+      kind: 'quarantined',
+      intentId: pending.request.intentId,
+      requestHash: pending.requestHash,
+      transactionHash: pending.transactionHash,
+      reason,
+    },
+  })]);
+  if (acceptance !== 'accepted') throw new Error('NUMBERED_REGISTRATION_QUARANTINE_COMMIT_REJECTED');
 };
 
 const completedResolution = (
@@ -325,19 +418,12 @@ export const runNumberedRegistrationIntent = async (
   if (record.status === 'completed') return completedResults(env, request, record);
   if (record.status === 'quarantined') throw new Error(`NUMBERED_REGISTRATION_INTENT_QUARANTINED:${record.reason}`);
   const submission = await submitNumberedRegistrationIntent(adapter, record);
-  if (submission.kind === 'nonce-conflict') {
-    const acceptance = await commit([markLocalNumberedRegistrationTx({
-      type: 'resolveNumberedRegistrationIntent',
-      data: {
-        kind: 'quarantined',
-        intentId: record.request.intentId,
-        requestHash: record.requestHash,
-        transactionHash: record.transactionHash,
-        reason: submission.reason,
-      },
-    })]);
-    if (acceptance !== 'accepted') throw new Error('NUMBERED_REGISTRATION_QUARANTINE_COMMIT_REJECTED');
-    throw new Error(`NUMBERED_REGISTRATION_PAYER_NONCE_CONFLICT:${submission.reason}`);
+  if (submission.kind !== 'receipt') {
+    await quarantineNumberedRegistrationIntent(record, submission.reason, commit);
+    const code = submission.kind === 'nonce-conflict'
+      ? 'NUMBERED_REGISTRATION_PAYER_NONCE_CONFLICT'
+      : 'NUMBERED_REGISTRATION_MINED_REVERT';
+    throw new Error(`${code}:${submission.reason}`);
   }
   await drainEvidence(submission);
   const completionAcceptance = await commit(buildNumberedRegistrationCompletionRuntimeTxs(env, record, submission));

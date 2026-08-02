@@ -1,5 +1,6 @@
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
+import { keccak256, toUtf8Bytes } from 'ethers';
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import type { RuntimeEntityInputApplyResult } from '../entity-inputs';
 import {
@@ -12,6 +13,7 @@ import {
 } from './cross-j-evidence';
 
 const runtimeLog = createStructuredLogger('runtime');
+const MAX_CROSS_J_LOG_SAMPLES = 8;
 
 type CrossJSelection = ReturnType<typeof selectMatchedCrossJAccountInputPairs>;
 type CrossJPair = CrossJSelection['pairs'][number];
@@ -169,7 +171,7 @@ export const admitAtomicCrossJAccountInputs = (
     runtimeLog.info('crossj.atomic_pair_admission', {
       inputCount: coalescedInputs.length,
       pairCount: initial.pairs.length,
-      pairs: initial.pairs.map(pair => ({
+      pairs: initial.pairs.slice(0, MAX_CROSS_J_LOG_SAMPLES).map(pair => ({
         sourceInputIndex: pair.sourceInputIndex,
         targetInputIndex: pair.targetInputIndex,
         sourceHeight: pair.sourceAccountFrame.height,
@@ -184,13 +186,18 @@ export const admitAtomicCrossJAccountInputs = (
     if (isReplay) throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_INVALID');
     env.warn('network', 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH', {
       received: coalescedInputs.length,
-      rejectedInputIndexes,
-      inputSummary: safeStringify(coalescedInputs.map(summarizeAtomicCrossJAccountInput)),
+      rejectedCount: rejectedInputIndexes.length,
+      rejectedSamples: rejectedInputIndexes
+        .slice(0, MAX_CROSS_J_LOG_SAMPLES)
+        .map(inputIndex => ({
+          inputIndex,
+          evidenceHash: keccak256(toUtf8Bytes(safeStringify(
+            summarizeAtomicCrossJAccountInput(coalescedInputs[inputIndex]!, inputIndex),
+          ))),
+        })),
     });
     recordRejectedAtomicCrossJInputs(
       env,
-      coalescedInputs,
-      rejectedInputIndexes,
       'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH',
       'A cross-j Account leg arrived without its exact atomic sibling leg and was ignored',
     );

@@ -109,20 +109,25 @@ import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../or
 
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../protocol/dispute/proof-builder';
 
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../protocol/dispute/arguments';
+import {
+  buildDisputeArgumentsFromSnapshot,
+  captureDisputeArgumentSnapshot,
+  storeDisputeArgumentSnapshot,
+} from '../protocol/dispute/arguments';
 
 import { signEntityHashes } from '../hanko/signing';
 
 import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output-certification';
 
 import {
-  queueCrossJurisdictionSalvageFromDispute,
-  queueCrossJurisdictionSourceDisputeFromTargetDispute,
+  planCrossJurisdictionTargetRecovery,
+  queueCrossJurisdictionSalvageFromFinalizedArguments,
 } from '../entity/tx/j-events-htlc';
 
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 
 import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching-cross';
+import { buildFinalProofPayload } from '../entity/tx/handlers/dispute/finalize-proof';
 
 import {
   createRuntimeOutputRoutingDeps,
@@ -163,6 +168,7 @@ import {
 import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
+import { canonicalDisputeFinalizationEvidenceHash } from '../jurisdiction/machine/event-observation';
 
 import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
 
@@ -207,6 +213,14 @@ const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
 });
 
 describe('cross-jurisdiction hashledger swap', () => {
+  const applyExactTestFill = (route: CrossJurisdictionSwapRoute, ratio: number): void => {
+    route.cumulativeFillRatio = ratio;
+    route.fillNumerator = BigInt(ratio);
+    route.fillDenominator = 65_535n;
+    route.filledSourceAmount = (BigInt(route.source.amount) * BigInt(ratio)) / 65_535n;
+    route.filledTargetAmount = (BigInt(route.target.amount) * BigInt(ratio)) / 65_535n;
+  };
+
   const makeTargetDisputeRouteSelectionFixture = (scenario: string) => {
     const env = createEmptyEnv(scenario);
     env.scenarioMode = true;
@@ -230,19 +244,24 @@ describe('cross-jurisdiction hashledger swap', () => {
         status?: 'resting' | 'settled' | 'cancelled' | 'expired' | 'failed';
         targetHub?: string;
         withoutTargetPull?: boolean;
+        sourceUser?: string;
+        sourceHub?: string;
+        sourceSigner?: string;
       } = {},
     ) => {
+      const routeSourceUser = options.sourceUser ?? sourceUser;
+      const routeSourceHub = options.sourceHub ?? sourceHub;
       const route = {
         ...buildPreparedCrossJurisdictionRoute(
           {
             orderId,
-            makerEntityId: sourceUser,
-            hubEntityId: sourceHub,
-            sourceSignerId: sourceSigner,
+            makerEntityId: routeSourceUser,
+            hubEntityId: routeSourceHub,
+            sourceSignerId: options.sourceSigner ?? sourceSigner,
             source: {
               jurisdiction: jref(sourceJ),
-              entityId: sourceUser,
-              counterpartyEntityId: sourceHub,
+              entityId: routeSourceUser,
+              counterpartyEntityId: routeSourceHub,
               tokenId: 1,
               amount: 100n,
             },
@@ -260,11 +279,54 @@ describe('cross-jurisdiction hashledger swap', () => {
           { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
         ),
         status: options.status ?? 'resting',
+        ...(options.status === undefined || options.status === 'resting'
+          ? {
+              cumulativeFillRatio: 0x1234,
+              fillNumerator: 0x1234n,
+              fillDenominator: 65_535n,
+              filledSourceAmount: (100n * 0x1234n) / 65_535n,
+              filledTargetAmount: (90n * 0x1234n) / 65_535n,
+            }
+          : {}),
       };
       if (options.withoutTargetPull) delete route.targetPull;
       return route;
     };
-    return { env, state, sourceUser, sourceHub, targetHub, sourceSigner, buildRoute };
+    const plan = (
+      outputs: EntityInput[],
+      suppliedResults: Readonly<Record<string, string>> = {},
+    ) => {
+      const account = state.accounts.get(targetHub)!;
+      account.state.pulls = new Map();
+      for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
+        if (!route.targetPull || route.target.entityId !== targetHub) continue;
+        account.state.pulls.set(route.targetPull.pullId, {
+          pullId: route.targetPull.pullId,
+          tokenId: route.targetPull.tokenId,
+          amount: route.targetPull.signedAmount,
+          revealedUntilTimestamp: route.targetPull.revealedUntilTimestamp,
+          fullHash: route.targetPull.fullHash,
+          partialRoot: route.targetPull.partialRoot,
+          crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
+          createdHeight: 1,
+          createdTimestamp: state.timestamp,
+        });
+      }
+      const proof = buildAccountProofBody(account, addr('99'));
+      storeDisputeArgumentSnapshot(
+        account,
+        captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+      );
+      return planCrossJurisdictionTargetRecovery(
+        state,
+        account,
+        targetHub,
+        [proof.proofBodyHash],
+        suppliedResults,
+        outputs,
+      );
+    };
+    return { env, state, sourceUser, sourceHub, targetHub, sourceSigner, buildRoute, plan };
   };
 
   const makeBidirectionalSalvageRuntimeFixture = (scenario: string) => {
@@ -308,6 +370,12 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: scenario, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
+    const fillRatio = 0x1234;
+    route.cumulativeFillRatio = fillRatio;
+    route.fillNumerator = BigInt(fillRatio);
+    route.fillDenominator = 65_535n;
+    route.filledSourceAmount = (BigInt(route.source.amount) * BigInt(fillRatio)) / 65_535n;
+    route.filledTargetAmount = (BigInt(route.target.amount) * BigInt(fillRatio)) / 65_535n;
     sourceState.crossJurisdictionSwaps?.set(route.orderId, cloneCrossJurisdictionRoute(route));
     targetState.crossJurisdictionSwaps?.set(route.orderId, cloneCrossJurisdictionRoute(route));
     alternateTargetState.crossJurisdictionSwaps?.set(route.orderId, cloneCrossJurisdictionRoute(route));
@@ -315,31 +383,91 @@ describe('cross-jurisdiction hashledger swap', () => {
     addReplica(env, sourceState, sourceSigner);
     addReplica(env, targetState, targetSigner);
     addReplica(env, alternateTargetState, alternateTargetSigner);
-    const fillRatio = 0x1234;
     const binary = buildCrossJurisdictionPullReveal(
       route,
       fillRatio,
       deriveCrossJurisdictionPrivateSeed(scenario, route),
     ).binary;
+    const sourceAccount = sourceState.accounts.get(sourceHub)!;
+    sourceAccount.state.pulls ??= new Map();
+    sourceAccount.state.pulls.set(route.sourcePull!.pullId, {
+      pullId: route.sourcePull!.pullId,
+      tokenId: route.sourcePull!.tokenId,
+      amount: route.sourcePull!.signedAmount,
+      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+      fullHash: route.sourcePull!.fullHash,
+      partialRoot: route.sourcePull!.partialRoot,
+      crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+      createdHeight: 1,
+      createdTimestamp: env.state.timestamp,
+    });
+    const finalizedProof = buildAccountProofBody(sourceAccount, addr('99'));
+    sourceAccount.disputeProofBodiesByHash = {
+      [finalizedProof.proofBodyHash]: finalizedProof.proofBodyStruct,
+    };
+    storeDisputeArgumentSnapshot(
+      sourceAccount,
+      captureDisputeArgumentSnapshot(
+        sourceAccount,
+        finalizedProof.proofBodyHash,
+        1,
+        finalizedProof.proofBodyStruct,
+      ),
+    );
+    const targetAccount = targetState.accounts.get(targetHub)!;
+    targetAccount.state.pulls ??= new Map();
+    targetAccount.state.pulls.set(route.targetPull!.pullId, {
+      pullId: route.targetPull!.pullId,
+      tokenId: route.targetPull!.tokenId,
+      amount: route.targetPull!.signedAmount,
+      revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
+      fullHash: route.targetPull!.fullHash,
+      partialRoot: route.targetPull!.partialRoot,
+      crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
+      createdHeight: 1,
+      createdTimestamp: env.state.timestamp,
+    });
+    const targetProof = buildAccountProofBody(targetAccount, addr('99'));
+    targetAccount.counterpartyDisputeProofBodyHash = targetProof.proofBodyHash;
+    targetAccount.disputeProofBodiesByHash = {
+      [targetProof.proofBodyHash]: targetProof.proofBodyStruct,
+    };
+    targetAccount.disputeProofNoncesByHash = { [targetProof.proofBodyHash]: 1 };
+    storeDisputeArgumentSnapshot(
+      targetAccount,
+      captureDisputeArgumentSnapshot(
+        targetAccount,
+        targetProof.proofBodyHash,
+        1,
+        targetProof.proofBodyStruct,
+      ),
+    );
     const buildSourceDisputeRange = () => {
       const crossPullArgs = ethers.AbiCoder.defaultAbiCoder().encode(
         ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
         [{ fillRatios: [], secrets: [], pulls: [binary] }],
       );
-      const proofbodyHash = buildAccountProofBody(sourceState.accounts.get(sourceHub)!, '').proofBodyHash;
       const event: JurisdictionEvent = {
-        type: 'DisputeStarted',
+        type: 'DisputeFinalized',
         data: {
           sender: sourceHub,
           counterentity: sourceUser,
-          nonce: '1',
-          proofbodyHash,
-          starterInitialArguments: ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[crossPullArgs]]),
-          starterIncrementedArguments: '0x',
-          disputeTimeout: 100,
-          watchSeed: sourceState.accounts.get(sourceHub)!.state.watchSeed,
+          initialNonce: '1',
+          initialProofbodyHash: finalizedProof.proofBodyHash,
+          finalProofbodyHash: finalizedProof.proofBodyHash,
         },
       };
+      const disputeFinalizationEvidence = [{
+        sender: sourceHub,
+        counterentity: sourceUser,
+        initialNonce: '1',
+        initialProofbodyHash: finalizedProof.proofBodyHash,
+        finalProofbodyHash: finalizedProof.proofBodyHash,
+        leftArguments: ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[crossPullArgs]]),
+        rightArguments: '0x',
+        starterInitialArguments: '0x',
+        starterIncrementedArguments: '0x',
+      }];
       const range = buildJEventRangeData(sourceState, {
         from: sourceSigner,
         event,
@@ -347,6 +475,9 @@ describe('cross-jurisdiction hashledger swap', () => {
         blockNumber: 1,
         blockHash: secret('8b'),
         transactionHash: secret('8c'),
+        disputeFinalizationEvidence,
+        disputeFinalizationEvidenceHash:
+          canonicalDisputeFinalizationEvidenceHash(disputeFinalizationEvidence),
       }, env);
       env.state.eReplicas.get(`${sourceUser}:${sourceSigner}`)!.jHistory = recordValidatorJHistory(undefined, {
         jurisdictionRef: range.jurisdictionRef,
@@ -761,6 +892,8 @@ describe('cross-jurisdiction hashledger swap', () => {
           cumulativeSourceAmount: 500n,
           cumulativeTargetAmount: 451n,
           cumulativeFillRatio: 32_768,
+          fillNumerator: 1n,
+          fillDenominator: 2n,
           pairId: route.venueId || '',
         },
       }),
@@ -820,6 +953,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         cumulativeSourceAmount: 500n,
         cumulativeTargetAmount: 450n,
         cumulativeFillRatio: 32_768,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
         pairId: route.venueId || '',
       },
     });
@@ -875,6 +1010,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ),
       status: 'partially_filled' as const,
       fillSeq: 1,
+      cumulativeFillRatio: 32_768,
       fillNumerator: 1n,
       fillDenominator: 2n,
       filledSourceAmount: 500n,
@@ -895,7 +1031,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         incrementalTargetAmount: 450n,
         cumulativeSourceAmount: 500n,
         cumulativeTargetAmount: 450n,
-        cumulativeFillRatio: 0,
+        cumulativeFillRatio: 32_768,
         fillNumerator: 1n,
         fillDenominator: 2n,
         pairId: route.venueId || '',
@@ -917,7 +1053,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           incrementalTargetAmount: 451n,
           cumulativeSourceAmount: 500n,
           cumulativeTargetAmount: 451n,
-          cumulativeFillRatio: 0,
+          cumulativeFillRatio: 32_768,
           fillNumerator: 1n,
           fillDenominator: 2n,
           pairId: route.venueId || '',
@@ -938,6 +1074,8 @@ describe('cross-jurisdiction hashledger swap', () => {
           cumulativeSourceAmount: 750n,
           cumulativeTargetAmount: 675n,
           cumulativeFillRatio: 49_152,
+          fillNumerator: 3n,
+          fillDenominator: 4n,
           pairId: route.venueId || '',
         },
       }),
@@ -1009,6 +1147,8 @@ describe('cross-jurisdiction hashledger swap', () => {
           cumulativeSourceAmount: 1_000n,
           cumulativeTargetAmount: 900n,
           cumulativeFillRatio: 65_535,
+          fillNumerator: 1n,
+          fillDenominator: 1n,
           pairId: route.venueId || '',
         },
       });
@@ -1118,6 +1258,8 @@ describe('cross-jurisdiction hashledger swap', () => {
             cumulativeSourceAmount: 1_000n,
             cumulativeTargetAmount: 900n,
             cumulativeFillRatio: 65_535,
+            fillNumerator: 1n,
+            fillDenominator: 1n,
             pairId: route.venueId || '',
           },
         },
@@ -1646,7 +1788,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(data.secret).toBe(revealedSecret);
   });
 
-  test('DisputeStarted with cross-pull args queues target sibling salvage', async () => {
+  test('source DisputeFinalized queues one atomic target result and source mirror', async () => {
     const {
       env, sourceUser, targetUser, sourceSigner, targetSigner,
       alternateTargetSigner, route, fillRatio, binary, buildSourceDisputeRange,
@@ -1674,10 +1816,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { routeId: route.orderId, binary, fillRatio },
     });
     expect(sourceMirror).toEqual(targetSalvage);
-    expect(result.entityOutbox).toHaveLength(1);
-    expect(result.entityOutbox[0]?.entityId).toBe(targetUser);
-    expect(result.entityOutbox[0]?.signerId).toBe(targetSigner);
-    expect(getEffectiveEntityInputTxs(result.entityOutbox[0]!)).toMatchObject([{ type: 'prepareDispute' }]);
+    expect(result.entityOutbox).toEqual([]);
     expect(result.jOutbox).toEqual([]);
     const committedSource = env.state.eReplicas.get(`${sourceUser}:${sourceSigner}`)!.state;
     const committedTarget = env.state.eReplicas.get(`${targetUser}:${targetSigner}`)!.state;
@@ -1687,6 +1826,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(targetRoute?.status).toBe('clearing');
     expect(sourceRoute?.pendingClearRequestedAt).toBe(targetRoute?.pendingClearRequestedAt);
     expect(committedTarget.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
+    expect(committedTarget.accounts.get(route.target.entityId)?.disputePrepare
+      ?.crossJurisdictionRecovery?.resultsByPullId).toEqual({
+        [route.targetPull!.pullId]: binary,
+      });
     expect(env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state).toEqual(alternateBefore);
 
     const replay = makeBidirectionalSalvageRuntimeFixture('cross-dispute-salvage');
@@ -1880,6 +2023,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
+    applyExactTestFill(route, 0x2345);
     state.crossJurisdictionSwaps?.set(route.orderId, route);
 
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
@@ -1892,12 +2036,32 @@ describe('cross-jurisdiction hashledger swap', () => {
       ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
       [{ fillRatios: [], secrets: [], pulls: [binary] }],
     );
-    const leftArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
+    const pullArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
     const sourceAccount = state.accounts.get(sourceHub)!;
-    const finalizedProof = buildAccountProofBody(sourceAccount, '');
+    sourceAccount.state.pulls ??= new Map();
+    sourceAccount.state.pulls.set(route.sourcePull!.pullId, {
+      pullId: route.sourcePull!.pullId,
+      tokenId: route.sourcePull!.tokenId,
+      amount: route.sourcePull!.signedAmount,
+      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+      fullHash: route.sourcePull!.fullHash,
+      partialRoot: route.sourcePull!.partialRoot,
+      crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+      createdHeight: 1,
+      createdTimestamp: env.state.timestamp,
+    });
+    const finalizedProof = buildAccountProofBody(sourceAccount, addr('99'));
     sourceAccount.disputeProofBodiesByHash = {
       [finalizedProof.proofBodyHash]: finalizedProof.proofBodyStruct,
     };
+    const finalizedSnapshot = captureDisputeArgumentSnapshot(
+      sourceAccount,
+      finalizedProof.proofBodyHash,
+      1,
+      finalizedProof.proofBodyStruct,
+    );
+    storeDisputeArgumentSnapshot(sourceAccount, finalizedSnapshot);
+    const pullIsLeft = finalizedSnapshot.plan.leftPullIds.includes(route.sourcePull!.pullId);
     const finalizedEvent: JurisdictionEvent = {
       type: 'DisputeFinalized',
       data: {
@@ -1915,8 +2079,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         initialNonce: '1',
         initialProofbodyHash: finalizedProof.proofBodyHash,
         finalProofbodyHash: finalizedProof.proofBodyHash,
-        leftArguments,
-        rightArguments: '0x',
+        leftArguments: pullIsLeft ? pullArguments : '0x',
+        rightArguments: pullIsLeft ? '0x' : pullArguments,
         starterInitialArguments: '0x',
         starterIncrementedArguments: '0x',
       },
@@ -1992,6 +2156,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
+    route.cumulativeFillRatio = 0x1234;
     state.crossJurisdictionSwaps?.set(route.orderId, route);
 
     const binary = buildCrossJurisdictionPullReveal(
@@ -2057,7 +2222,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     ).rejects.toThrow('J_RANGE_EVIDENCE_HASH_MISMATCH');
   });
 
-  test('source dispute matches every pull binary to its exact active Cross-J route', () => {
+  test('source dispute preserves Solidity pull slots instead of rematching binaries', () => {
     const env = createEmptyEnv('cross-salvage-route-binary-match');
     env.state.timestamp = 39_000;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
@@ -2097,6 +2262,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       });
     const first = buildRoute('cross-salvage-a', '34', '61');
     const second = buildRoute('cross-salvage-b', '35', '62');
+    applyExactTestFill(first, 0x1234);
+    applyExactTestFill(second, 0x4321);
     state.crossJurisdictionSwaps?.set(first.orderId, first);
     state.crossJurisdictionSwaps?.set(second.orderId, second);
     const firstReveal = buildCrossJurisdictionPullReveal(
@@ -2117,19 +2284,23 @@ describe('cross-jurisdiction hashledger swap', () => {
     const starterArgs = abi.encode(['bytes[]'], [[pullArgs]]);
     const outputs: EntityInput[] = [];
 
-    expect(queueCrossJurisdictionSalvageFromDispute(
+    expect(queueCrossJurisdictionSalvageFromFinalizedArguments(
       state,
       outputs,
       sourceHub,
-      starterArgs,
+      { leftArguments: starterArgs, rightArguments: '0x' },
+      {
+        leftPullIds: [first.sourcePull!.pullId, second.sourcePull!.pullId],
+        rightPullIds: [],
+      },
       12,
     )).toBe(true);
     expect(outputs.map(output => ({
       routeId: (output.entityTxs?.[0]?.data as { routeId?: string }).routeId,
       binary: (output.entityTxs?.[0]?.data as { binary?: string }).binary,
     }))).toEqual([
-      { routeId: first.orderId, binary: firstReveal.binary },
-      { routeId: second.orderId, binary: secondReveal.binary },
+      { routeId: first.orderId, binary: '0x' },
+      { routeId: second.orderId, binary: '0x' },
     ]);
   });
 
@@ -2174,6 +2345,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
+    applyExactTestFill(route, 0x1234);
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const targetAccount = state.accounts.get(targetHub)!;
     targetAccount.state.pulls ??= new Map();
@@ -2234,7 +2406,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(result.outputs).toHaveLength(2);
     const sourceMirror = result.outputs?.[0];
-    const selfPrepare = result.outputs?.[1];
+    const targetBroadcast = result.outputs?.[1];
     expect(sourceMirror?.entityId).toBe(sourceUser);
     expect(sourceMirror?.signerId).toBe(sourceSigner);
     expect(sourceMirror?.localRuntimeProtocol).toBe('cross-j');
@@ -2249,11 +2421,11 @@ describe('cross-jurisdiction hashledger swap', () => {
         observedAt: 10,
       },
     }]);
-    expect(selfPrepare?.entityId).toBe(targetUser);
-    expect(selfPrepare?.entityTxs).toHaveLength(1);
-    expect(selfPrepare?.entityTxs?.[0]?.type).toBe('prepareDispute');
-    expect((selfPrepare?.entityTxs?.[0]?.data as any).counterpartyEntityId).toBe(targetHub);
-    const starterInitialArguments = (selfPrepare?.entityTxs?.[0]?.data as any).starterInitialArguments;
+    expect(targetBroadcast?.entityId).toBe(targetUser);
+    expect(targetBroadcast?.entityTxs?.map(tx => tx.type)).toEqual(['j_broadcast']);
+    const draftDisputeStarts = result.newState.jBatchState?.batch.disputeStarts ?? [];
+    expect(draftDisputeStarts).toHaveLength(1);
+    const starterInitialArguments = draftDisputeStarts[0]!.starterInitialArguments;
     expect(typeof starterInitialArguments).toBe('string');
     expect(starterInitialArguments).toMatch(/^0x[0-9a-f]+$/i);
     const abi = ethers.AbiCoder.defaultAbiCoder();
@@ -2283,24 +2455,78 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(claimedSourceResult.newState.crossJurisdictionSwaps?.get(route.orderId)?.pendingClearRequestedAt)
       .toBe(claimedSourceState.timestamp);
 
-    let chainedState = state;
-    const nestedOutputs: EntityInput[] = [];
-    for (const entityTx of selfPrepare?.entityTxs ?? []) {
-      const applied = await applyEntityTx(env, chainedState, entityTx);
-      chainedState = applied.newState;
-      nestedOutputs.push(...(applied.outputs ?? []));
-      for (const op of applied.accountTxs ?? []) {
-        const account = chainedState.accounts.get(op.accountId);
-        expect(account, `mempool op account ${op.accountId.slice(-4)} must exist`).toBeDefined();
-        account?.mempool.push(op.tx);
-      }
-    }
-    expect(nestedOutputs.flatMap(output => output.entityTxs).map(tx => tx.type)).toEqual(['j_broadcast']);
-    const draftDisputeStarts = chainedState.jBatchState?.batch.disputeStarts ?? [];
-    const sentDisputeStarts = chainedState.jBatchState?.sentBatch?.batch.disputeStarts ?? [];
-    expect([...draftDisputeStarts, ...sentDisputeStarts]).toHaveLength(1);
-    expect(readEntityFrameEventMessages(chainedState)
+    expect(readEntityFrameEventMessages(result.newState)
       .some(message => message.includes('blocked until evidence is stable'))).toBe(false);
+
+    const starterState = cloneEntityState(state);
+    const starterAccount = starterState.accounts.get(targetHub)!;
+    starterAccount.status = 'disputed';
+    starterAccount.activeDispute = {
+      startedByLeft: starterAccount.state.leftEntity === targetUser,
+      initialProofbodyHash: targetProof.proofBodyHash,
+      initialNonce: 1,
+      disputeTimeout: 100,
+      jNonce: 0,
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+      observedOnChain: true,
+      observedBlockNumber: 1,
+      finalizeQueued: false,
+      crossJurisdictionRecovery: {
+        requiredPullIds: [route.targetPull!.pullId],
+        resultsByPullId: {},
+      },
+    };
+    await expect(applyEntityTx(env, starterState, {
+      type: 'crossJurisdictionSalvage',
+      data: {
+        routeId: route.orderId,
+        binary,
+        fillRatio: 0x1234,
+        sourceEntityId: sourceUser,
+        sourceCounterpartyEntityId: sourceHub,
+        observedAt: 10,
+      },
+    })).rejects.toThrow(`CROSS_J_SALVAGE_STARTER_EVIDENCE_LATE:${route.orderId}`);
+
+    const nonstarterState = cloneEntityState(starterState);
+    const nonstarterAccount = nonstarterState.accounts.get(targetHub)!;
+    nonstarterAccount.activeDispute!.startedByLeft =
+      nonstarterAccount.state.leftEntity !== targetUser;
+    const recovered = await applyEntityTx(env, nonstarterState, {
+      type: 'crossJurisdictionSalvage',
+      data: {
+        routeId: route.orderId,
+        binary,
+        fillRatio: 0x1234,
+        sourceEntityId: sourceUser,
+        sourceCounterpartyEntityId: sourceHub,
+        observedAt: 11,
+      },
+    });
+    expect(recovered.outputs).toHaveLength(1);
+    const recoveredAccount = recovered.newState.accounts.get(targetHub)!;
+    const payload = buildFinalProofPayload(
+      recovered.newState,
+      recoveredAccount,
+      targetHub,
+      {
+        finalNonce: 1,
+        finalNonceSource: 'test',
+        finalizeSig: '0x',
+        finalProofbody: targetProof.proofBodyStruct,
+        finalProofbodyHash: targetProof.proofBodyHash,
+        shouldUseCounterProof: false,
+        callerSide: recoveredAccount.state.leftEntity === targetUser ? 'left' : 'right',
+      },
+      env,
+    );
+    const [otherWrapped] = abi.decode(['bytes[]'], payload.otherArguments) as unknown as [string[]];
+    const [otherDecoded] = abi.decode(
+      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      otherWrapped[0]!,
+    ) as unknown as [{ pulls: string[] }];
+    expect(Array.from(otherDecoded.pulls)).toContain(binary);
   });
 
   test('crossJurisdictionSalvage ignores forged target pull binary', async () => {
@@ -2371,14 +2597,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     fixture.state.crossJurisdictionSwaps?.set(active.orderId, active);
     const outputs: EntityInput[] = [];
 
-    expect(
-      queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.state,
-        outputs,
-        fixture.targetHub,
-        '0x',
-      ),
-    ).toBe(true);
+    expect(fixture.plan(outputs)).not.toBeNull();
     expect(outputs).toHaveLength(1);
     expect(outputs[0]?.entityId).toBe(fixture.sourceUser);
     expect(outputs[0]?.signerId).toBe(fixture.sourceSigner);
@@ -2400,14 +2619,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     }
     const outputs: EntityInput[] = [];
 
-    expect(
-      queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.state,
-        outputs,
-        fixture.targetHub,
-        '0x',
-      ),
-    ).toBe(false);
+    expect(fixture.plan(outputs)).toBeNull();
     expect(outputs).toEqual([]);
   });
 
@@ -2417,18 +2629,50 @@ describe('cross-jurisdiction hashledger swap', () => {
     fixture.state.crossJurisdictionSwaps?.set(route.orderId, route);
     const outputs: EntityInput[] = [];
 
-    expect(
-      queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.state,
-        outputs,
-        fixture.targetHub,
-        '0x',
-      ),
-    ).toBe(false);
+    expect(fixture.plan(outputs)).toBeNull();
     expect(outputs).toEqual([]);
   });
 
-  test('target dispute fails closed and records sorted route ids when active routes are ambiguous', () => {
+  test('target dispute requires only committed-fill routes present in the selected snapshot', () => {
+    const fixture = makeTargetDisputeRouteSelectionFixture('cross-target-dispute-selected-snapshot');
+    const selected = fixture.buildRoute('a-selected');
+    const later = fixture.buildRoute('z-later');
+    fixture.state.crossJurisdictionSwaps?.set(selected.orderId, selected);
+    const account = fixture.state.accounts.get(fixture.targetHub)!;
+    account.state.pulls = new Map([[selected.targetPull!.pullId, {
+      pullId: selected.targetPull!.pullId,
+      tokenId: selected.targetPull!.tokenId,
+      amount: selected.targetPull!.signedAmount,
+      revealedUntilTimestamp: selected.targetPull!.revealedUntilTimestamp,
+      fullHash: selected.targetPull!.fullHash,
+      partialRoot: selected.targetPull!.partialRoot,
+      crossJurisdiction: buildCrossJurisdictionPullBinding(selected, 'target'),
+      createdHeight: 1,
+      createdTimestamp: fixture.state.timestamp,
+    }]]);
+    const proof = buildAccountProofBody(account, addr('99'));
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+    );
+    fixture.state.crossJurisdictionSwaps?.set(later.orderId, later);
+    const outputs: EntityInput[] = [];
+
+    const plan = planCrossJurisdictionTargetRecovery(
+      fixture.state,
+      account,
+      fixture.targetHub,
+      [proof.proofBodyHash],
+      {},
+      outputs,
+    );
+    expect(plan?.recovery.requiredPullIds).toEqual([selected.targetPull!.pullId]);
+    expect(outputs).toHaveLength(1);
+    expect((outputs[0]?.entityTxs?.[0]?.data as { crossJurisdictionRouteId?: string })
+      .crossJurisdictionRouteId).toBe(selected.orderId);
+  });
+
+  test('target dispute groups concurrent routes on one source Account into one canonical dispute', () => {
     const fixture = makeTargetDisputeRouteSelectionFixture('cross-target-dispute-ambiguous');
     const later = fixture.buildRoute('z-active');
     const earlier = fixture.buildRoute('a-active');
@@ -2436,19 +2680,92 @@ describe('cross-jurisdiction hashledger swap', () => {
     fixture.state.crossJurisdictionSwaps?.set(earlier.orderId, earlier);
     const outputs: EntityInput[] = [];
 
-    expect(
-      queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.state,
-        outputs,
-        fixture.targetHub,
-        '0x',
-      ),
-    ).toBe(false);
+    expect(fixture.plan(outputs)).not.toBeNull();
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]).toMatchObject({
+      entityId: fixture.sourceUser,
+      signerId: fixture.sourceSigner,
+      entityTxs: [{
+        type: 'prepareDispute',
+        data: {
+          counterpartyEntityId: fixture.sourceHub,
+          crossJurisdictionRouteId: 'a-active',
+        },
+      }],
+    });
+  });
+
+  test('target dispute emits distinct source Accounts in canonical lane order', () => {
+    const fixture = makeTargetDisputeRouteSelectionFixture('cross-target-dispute-groups');
+    const otherUser = entity('61');
+    const otherHub = entity('62');
+    const otherSigner = addr('83');
+    fixture.state.crossJurisdictionSwaps?.set('z-default', fixture.buildRoute('z-default'));
+    fixture.state.crossJurisdictionSwaps?.set('a-other', fixture.buildRoute('a-other', {
+      sourceUser: otherUser,
+      sourceHub: otherHub,
+      sourceSigner: otherSigner,
+    }));
+    const outputs: EntityInput[] = [];
+
+    expect(fixture.plan(outputs)).not.toBeNull();
+    expect(outputs.map(output => [output.entityId, output.signerId])).toEqual([
+      [fixture.sourceUser, fixture.sourceSigner],
+      [otherUser, otherSigner],
+    ]);
+  });
+
+  test('target dispute validates every source lane before emitting any output', () => {
+    const fixture = makeTargetDisputeRouteSelectionFixture('cross-target-dispute-atomic-validation');
+    fixture.state.crossJurisdictionSwaps?.set('a-valid', fixture.buildRoute('a-valid'));
+    const invalid = fixture.buildRoute('z-invalid', { sourceUser: entity('61'), sourceHub: entity('62') });
+    delete invalid.sourceSignerId;
+    fixture.state.crossJurisdictionSwaps?.set(invalid.orderId, invalid);
+    const outputs: EntityInput[] = [];
+
+    expect(() => fixture.plan(outputs))
+      .toThrow('CROSS_J_SOURCE_DISPUTE_LANE_MISSING:z-invalid');
     expect(outputs).toEqual([]);
-    expect(readEntityFrameEventMessages(fixture.state).at(-1)).toBe(
-      `⚠️ Cross-j target dispute route ambiguous for ${fixture.targetHub.slice(-4)}: ` +
-        'a-active,z-active; no source dispute queued',
-    );
+  });
+
+  test('target dispute rejects conflicting signers for one source Account atomically', () => {
+    const fixture = makeTargetDisputeRouteSelectionFixture('cross-target-dispute-signer-conflict');
+    fixture.state.crossJurisdictionSwaps?.set('a-first', fixture.buildRoute('a-first'));
+    fixture.state.crossJurisdictionSwaps?.set('z-conflict', fixture.buildRoute('z-conflict', {
+      sourceSigner: addr('84'),
+    }));
+    const outputs: EntityInput[] = [];
+
+    expect(() => fixture.plan(outputs))
+      .toThrow('CROSS_J_SOURCE_DISPUTE_SIGNER_CONFLICT:z-conflict');
+    expect(outputs).toEqual([]);
+  });
+
+  test('target dispute still protects an uncovered Account when another Account supplied pull evidence', () => {
+    const fixture = makeTargetDisputeRouteSelectionFixture('cross-target-dispute-partial-coverage');
+    const covered = fixture.buildRoute('a-covered');
+    const uncovered = fixture.buildRoute('z-uncovered', {
+      sourceUser: entity('61'),
+      sourceHub: entity('62'),
+      sourceSigner: addr('83'),
+    });
+    fixture.state.crossJurisdictionSwaps?.set(covered.orderId, covered);
+    fixture.state.crossJurisdictionSwaps?.set(uncovered.orderId, uncovered);
+    const coveredBinary = buildCrossJurisdictionPullReveal(
+      covered,
+      0x1234,
+      deriveCrossJurisdictionPrivateSeed('test-seed', covered),
+    ).binary;
+    const outputs: EntityInput[] = [];
+
+    expect(fixture.plan(outputs, {
+      [covered.targetPull!.pullId]: coveredBinary,
+    })).not.toBeNull();
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]).toMatchObject({
+      entityId: uncovered.source.entityId,
+      signerId: uncovered.sourceSignerId,
+    });
   });
 
   test('target dispute ignores a route bound to another target hub', () => {
@@ -2457,14 +2774,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     fixture.state.crossJurisdictionSwaps?.set(route.orderId, route);
     const outputs: EntityInput[] = [];
 
-    expect(
-      queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.state,
-        outputs,
-        fixture.targetHub,
-        '0x',
-      ),
-    ).toBe(false);
+    expect(fixture.plan(outputs)).toBeNull();
     expect(outputs).toEqual([]);
   });
 
@@ -2512,7 +2822,36 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
+    applyExactTestFill(route, 0x1234);
     targetState.crossJurisdictionSwaps?.set(route.orderId, { ...route });
+
+    const targetAccount = targetState.accounts.get(targetHub)!;
+    targetAccount.state.pulls ??= new Map();
+    targetAccount.state.pulls.set(route.targetPull!.pullId, {
+      pullId: route.targetPull!.pullId,
+      tokenId: route.targetPull!.tokenId,
+      amount: route.targetPull!.signedAmount,
+      revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
+      fullHash: route.targetPull!.fullHash,
+      partialRoot: route.targetPull!.partialRoot,
+      crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
+      createdHeight: 1,
+      createdTimestamp: env.state.timestamp,
+    });
+    const targetProof = buildAccountProofBody(targetAccount, addr('99'));
+    targetAccount.disputeProofBodiesByHash = {
+      [targetProof.proofBodyHash]: targetProof.proofBodyStruct,
+    };
+    targetAccount.disputeProofNoncesByHash = { [targetProof.proofBodyHash]: 1 };
+    storeDisputeArgumentSnapshot(
+      targetAccount,
+      captureDisputeArgumentSnapshot(
+        targetAccount,
+        targetProof.proofBodyHash,
+        1,
+        targetProof.proofBodyStruct,
+      ),
+    );
 
     const disputeStartedEvent: JurisdictionEvent = {
       type: 'DisputeStarted',
@@ -2520,7 +2859,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         sender: targetHub,
         counterentity: targetUser,
         nonce: '1',
-        proofbodyHash: secret('9a'),
+        proofbodyHash: targetProof.proofBodyHash,
         starterInitialArguments: '0x',
         starterIncrementedArguments: '0x',
         disputeTimeout: 100,

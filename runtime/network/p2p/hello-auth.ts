@@ -2,18 +2,6 @@ import * as secp256k1 from '@noble/secp256k1';
 import { keccak256 } from 'ethers';
 import { hashHelloMessage, hashRuntimeWsFrame, type RuntimeWsAuth, type RuntimeWsMessage } from './ws-protocol';
 
-let authClock = 0;
-
-const now = (): number => {
-  const ts = Date.now();
-  if (ts <= authClock) {
-    authClock += 1;
-    return authClock;
-  }
-  authClock = ts;
-  return authClock;
-};
-
 export const recoverHelloAddress = (digestHex: string, signatureHex: string): string => {
   const sig = signatureHex.replace('0x', '');
   if (sig.length < 130) {
@@ -38,7 +26,9 @@ export const verifyHelloAuth = (
   if (!auth?.nonce || !auth.signature || !auth.timestamp) {
     return 'Missing auth fields';
   }
-  const nowTs = now();
+  // Verification must be observational. A process-global monotonic verifier
+  // clock lets a burst of invalid frames advance time and reject honest peers.
+  const nowTs = Date.now();
   if (Math.abs(nowTs - auth.timestamp) > maxSkewMs) {
     return `Hello timestamp skew too large (${nowTs - auth.timestamp}ms)`;
   }
@@ -67,7 +57,7 @@ export const verifyRuntimeWsFrameAuth = (
   if (!auth?.signature || auth.nonce !== nonce || !Number.isSafeInteger(auth.timestamp)) {
     return 'Missing or invalid session frame auth';
   }
-  const nowTs = now();
+  const nowTs = Date.now();
   if (Math.abs(nowTs - auth.timestamp) > maxSkewMs) {
     return `Frame timestamp skew too large (${nowTs - auth.timestamp}ms)`;
   }

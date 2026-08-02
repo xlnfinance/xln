@@ -30,6 +30,7 @@ export const selectProfileBatch = (
   request: GossipProfileBatchRequest = {},
   defaultLimit: number = DEFAULT_GOSSIP_BATCH_LIMIT,
 ): Profile[] => {
+  const maxBatchSize = Math.max(1, Math.floor(defaultLimit));
   const explicitMatches = new Map<string, Profile>();
   const setMatches = new Map<string, Profile>();
   const ids = Array.isArray(request.ids)
@@ -39,18 +40,21 @@ export const selectProfileBatch = (
             .map(normalizeEntityId)
             .filter((entityId) => entityId.length > 0),
         ),
-      )
+      ).slice(0, maxBatchSize)
     : [];
   const set = request.set ?? (ids.length === 0 ? 'default' : undefined);
   const updatedSince = typeof request.updatedSince === 'number' && Number.isFinite(request.updatedSince)
     ? request.updatedSince
     : null;
   const boundedLimit = typeof request.limit === 'number' && Number.isFinite(request.limit)
-    ? Math.max(1, Math.floor(request.limit))
-    : defaultLimit;
+    ? Math.min(maxBatchSize, Math.max(1, Math.floor(request.limit)))
+    : maxBatchSize;
 
+  const profilesByEntityId = new Map(
+    profiles.map(profile => [normalizeEntityId(profile.entityId), profile] as const),
+  );
   for (const entityId of ids) {
-    const profile = profiles.find((candidate) => normalizeEntityId(candidate.entityId) === entityId);
+    const profile = profilesByEntityId.get(entityId);
     if (profile) {
       explicitMatches.set(entityId, profile);
     }
@@ -76,5 +80,7 @@ export const selectProfileBatch = (
     setMatches.set(normalizedEntityId, profile);
   }
 
-  return Array.from(new Map<string, Profile>([...setMatches, ...explicitMatches]).values()).sort(sortProfilesForBatch);
+  return Array.from(new Map<string, Profile>([...setMatches, ...explicitMatches]).values())
+    .sort(sortProfilesForBatch)
+    .slice(0, maxBatchSize);
 };

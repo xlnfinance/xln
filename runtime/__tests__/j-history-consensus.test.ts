@@ -12,7 +12,11 @@ import {
   canonicalJurisdictionEventsHash,
 } from '../jurisdiction/machine/event-observation';
 import { compareCanonicalJurisdictionEvents } from '../jurisdiction/machine/event-normalization';
-import { createEntityFrameHash } from '../entity/consensus/frame';
+import {
+  createEntityFrameHash,
+  createEntityFrameHashFromStateRoot,
+} from '../entity/consensus/frame';
+import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import { applyEntityInput } from '../entity/consensus/index';
 import { applyJEvent } from '../entity/tx/j-events';
 import { createEmptyEnv } from '../runtime';
@@ -510,24 +514,40 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       isProposer: false,
       jHistory: localHistory,
     };
+    const proposalHeight = validatorState.height + 1;
+    const stateRoot = `0x${'00'.repeat(32)}`;
+    const authorityRoot = `0x${'00'.repeat(32)}`;
+    const frameHash = createEntityFrameHashFromStateRoot(
+      previousFrameHash,
+      proposalHeight,
+      validatorState.timestamp,
+      [tx],
+      [],
+      validatorState.entityId,
+      stateRoot,
+      authorityRoot,
+    );
     const result = await applyEntityInput(env, replica, {
       entityId: validatorState.entityId,
       signerId: validatorId,
       proposedFrame: {
-        height: validatorState.height + 1,
+        height: proposalHeight,
         parentFrameHash: previousFrameHash,
-        stateRoot: `0x${'00'.repeat(32)}`,
-        authorityRoot: `0x${'00'.repeat(32)}`,
+        stateRoot,
+        authorityRoot,
         timestamp: validatorState.timestamp,
         txs: [tx],
         events: [],
-        hash: `0x${'11'.repeat(32)}`,
+        hash: frameHash,
         leader: { proposerSignerId: activeLeaderId, view: 0 },
-        hashesToSign: [{
-          hash: `0x${'11'.repeat(32)}`,
-          type: 'entityFrame',
-          context: `entity-frame:${validatorState.height + 1}`,
-        }],
+        hashesToSign: buildEntityHashesToSign(
+          validatorState.entityId,
+          proposalHeight,
+          frameHash,
+        ),
+        collectedSigs: new Map([[activeLeaderId, [
+          signAccountFrame(env, activeLeaderId, frameHash),
+        ]]]),
       },
     });
 
@@ -1142,7 +1162,12 @@ describe('J validator-local history and Entity-finalized ranges', () => {
   });
 
   test('propagates certified-history corruption instead of classifying it as a proposer mismatch', async () => {
+    const env = createEmptyEnv('j-certified-corruption-fatal');
+    const activeLeaderId = deriveSignerAddressSync(env.runtimeSeed!, 'corruption-proposer').toLowerCase();
+    registerSignerKey(env, activeLeaderId, deriveSignerKeySync(env.runtimeSeed!, 'corruption-proposer'));
     const entityState = state();
+    entityState.config.validators = [activeLeaderId, validatorId];
+    entityState.config.shares = { [activeLeaderId]: 1n, [validatorId]: 1n };
     const finalizedEvent = eventBlock(7, '7');
     entityState.lastFinalizedJHeight = 10;
     entityState.jBlockChain = [{
@@ -1152,7 +1177,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       eventsHash: finalizedEvent.eventsHash,
       events: structuredClone(finalizedEvent.events),
       finalizedAt: entityState.timestamp,
-      proposerSignerId: leaderId,
+      proposerSignerId: activeLeaderId,
       proposerSignature: '0xsig',
     }];
     entityState.jHistoryFinality = {
@@ -1161,7 +1186,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       finalizedThroughHeight: 10,
       tipBlockHash: blockHash(10),
       eventHistoryRoot: '0xinvalid',
-      proposerSignerId: leaderId,
+      proposerSignerId: activeLeaderId,
       proposerSignature: '0xsig',
       entityHeight: entityState.height,
     };
@@ -1173,39 +1198,50 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       mempool: [],
       isProposer: false,
     };
+    const tx = {
+      type: 'j_event' as const,
+      data: {
+        from: activeLeaderId,
+        jurisdictionRef,
+        baseHeight: 10,
+        scannedThroughHeight: 11,
+        tipBlockHash: blockHash(11),
+        eventHistoryRoot: `0x${'aa'.repeat(32)}`,
+        rangeHash: canonicalJEventRangeHash(jurisdictionRef, []),
+        blocks: [],
+        signature: '0xsig',
+        observedAt: 11,
+      },
+    };
+    const proposalHeight = entityState.height + 1;
+    const stateRoot = `0x${'00'.repeat(32)}`;
+    const authorityRoot = `0x${'00'.repeat(32)}`;
+    const frameHash = createEntityFrameHashFromStateRoot(
+      previousFrameHash,
+      proposalHeight,
+      entityState.timestamp,
+      [tx],
+      [],
+      entityState.entityId,
+      stateRoot,
+      authorityRoot,
+    );
 
-    await expect(applyEntityInput(createEmptyEnv('j-certified-corruption-fatal'), replica, {
+    await expect(applyEntityInput(env, replica, {
       entityId,
       signerId: validatorId,
       proposedFrame: {
-        height: entityState.height + 1,
+        height: proposalHeight,
         parentFrameHash: previousFrameHash,
-        stateRoot: `0x${'00'.repeat(32)}`,
-        authorityRoot: `0x${'00'.repeat(32)}`,
+        stateRoot,
+        authorityRoot,
         timestamp: entityState.timestamp,
-        txs: [{
-          type: 'j_event',
-          data: {
-            from: leaderId,
-            jurisdictionRef,
-            baseHeight: 10,
-            scannedThroughHeight: 11,
-            tipBlockHash: blockHash(11),
-            eventHistoryRoot: `0x${'aa'.repeat(32)}`,
-            rangeHash: canonicalJEventRangeHash(jurisdictionRef, []),
-            blocks: [],
-            signature: '0xsig',
-            observedAt: 11,
-          },
-        }],
+        txs: [tx],
         events: [],
-        hash: `0x${'11'.repeat(32)}`,
-        leader: { proposerSignerId: leaderId, view: 0 },
-        hashesToSign: [{
-          hash: `0x${'11'.repeat(32)}`,
-          type: 'entityFrame',
-          context: `entity-frame:${entityState.height + 1}`,
-        }],
+        hash: frameHash,
+        leader: { proposerSignerId: activeLeaderId, view: 0 },
+        hashesToSign: buildEntityHashesToSign(entityState.entityId, proposalHeight, frameHash),
+        collectedSigs: new Map([[activeLeaderId, [signAccountFrame(env, activeLeaderId, frameHash)]]]),
       },
     })).rejects.toThrow('J_HISTORY_FINALITY_ROOT_CORRUPTION');
     expect(replica.lockedFrame).toBeUndefined();

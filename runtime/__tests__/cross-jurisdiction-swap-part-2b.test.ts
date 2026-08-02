@@ -342,7 +342,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           incrementalTargetAmount: cumulativeTarget + 1n,
           cumulativeSourceAmount: cumulativeSource,
           cumulativeTargetAmount: cumulativeTarget + 1n,
-          cumulativeFillRatio: 0,
+          cumulativeFillRatio: 132,
           fillNumerator,
           fillDenominator,
           executionSourceAmount: cumulativeSource,
@@ -370,7 +370,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           incrementalTargetAmount: cumulativeTarget,
           cumulativeSourceAmount: cumulativeSource,
           cumulativeTargetAmount: cumulativeTarget,
-          cumulativeFillRatio: 0,
+          cumulativeFillRatio: 132,
           fillNumerator,
           fillDenominator,
           executionSourceAmount: cumulativeSource,
@@ -438,6 +438,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...route,
       status: 'partially_filled' as const,
       fillSeq: 1,
+      cumulativeFillRatio: fillRatio,
       fillNumerator: BigInt(fillRatio),
       fillDenominator: 65_535n,
       filledSourceAmount: cumulativeSource,
@@ -485,7 +486,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           incrementalTargetAmount: cumulativeTarget,
           cumulativeSourceAmount: cumulativeSource,
           cumulativeTargetAmount: cumulativeTarget,
-          cumulativeFillRatio: 0,
+          cumulativeFillRatio: fillRatio,
           fillNumerator: BigInt(fillRatio),
           fillDenominator: 65_535n,
           executionSourceAmount: cumulativeSource,
@@ -559,6 +560,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillSeq: 1,
       cumulativeFillRatio: 32_768,
       claimedRatio: 32_768,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
       filledSourceAmount: 500n,
       filledTargetAmount: 450n,
       sourceClaimed: 500n,
@@ -755,6 +758,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillSeq: 1,
       cumulativeFillRatio: highRatio,
       claimedRatio: highRatio,
+      fillNumerator: BigInt(highRatio),
+      fillDenominator: 65_535n,
       filledSourceAmount: (BigInt(prepared.source.amount) * BigInt(highRatio)) / 65_535n,
       filledTargetAmount: (BigInt(prepared.target.amount) * BigInt(highRatio)) / 65_535n,
       sourceClaimed: (BigInt(prepared.source.amount) * BigInt(highRatio)) / 65_535n,
@@ -765,6 +770,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...highRoute,
       cumulativeFillRatio: lowRatio,
       claimedRatio: lowRatio,
+      fillNumerator: BigInt(lowRatio),
+      fillDenominator: 65_535n,
       filledSourceAmount: (BigInt(prepared.source.amount) * BigInt(lowRatio)) / 65_535n,
       filledTargetAmount: (BigInt(prepared.target.amount) * BigInt(lowRatio)) / 65_535n,
       sourceClaimed: (BigInt(prepared.source.amount) * BigInt(lowRatio)) / 65_535n,
@@ -880,6 +887,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'source_claimed' as const,
       cumulativeFillRatio: fillRatio,
       claimedRatio: fillRatio,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
       filledSourceAmount: 500n,
       filledTargetAmount: 450n,
       sourceClaimed: 500n,
@@ -984,6 +993,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'clearing',
       cumulativeFillRatio: fillRatio,
       claimedRatio: fillRatio,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
       filledSourceAmount: 500n,
       filledTargetAmount: 450n,
       sourceClaimed: 500n,
@@ -1036,6 +1047,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     const binding = committedAccount.state.pulls!.get(sourcePull.pullId)!.crossJurisdiction!;
     binding.status = 'clearing';
     binding.cumulativeFillRatio = fillRatio;
+    binding.fillNumerator = 1n;
+    binding.fillDenominator = 2n;
+    binding.filledSourceAmount = 500n;
+    binding.filledTargetAmount = 450n;
     const committedRoot = computeAccountStateRoot(committedAccount.state);
     const forgedAmountResult = await applyAccountTx(
       committedAccount,
@@ -1145,6 +1160,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillSeq: 1,
       cumulativeFillRatio: 32_768,
       claimedRatio: 32_768,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
       filledSourceAmount: 500n,
       filledTargetAmount: 450n,
       sourceClaimed: 500n,
@@ -1222,6 +1239,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillSeq: 1,
       cumulativeFillRatio: 32_768,
       claimedRatio: 32_768,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
       filledSourceAmount: 500n,
       filledTargetAmount: 450n,
       sourceClaimed: 500n,

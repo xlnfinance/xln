@@ -425,8 +425,8 @@ export interface RoutedEntityInput extends EntityInput {
   };
 }
 
-/** One authenticated transport unit emitted by one committed source R-frame. */
-export interface RuntimeEntityInputsEnvelope {
+/** Fields signed by the source Runtime for one committed outbound R-frame. */
+export interface UnsignedRuntimeEntityInputsEnvelope {
   sourceRuntimeId: string;
   sourceRuntimeHeight: number;
   sourceRuntimeTimestamp: number;
@@ -435,8 +435,19 @@ export interface RuntimeEntityInputsEnvelope {
     phase: 'proposal' | 'ack';
     pairKey: string;
   };
-  /** Unsigned best-effort M1. It authorizes no funds and only asks the Hub to propose both Account legs. */
+  /** Best-effort M1: source-authenticated, but it grants no Account authority or funds. */
   crossJurisdictionIntent?: CrossJurisdictionSwapRoute;
+}
+
+/**
+ * Transport-independent source authentication for Runtime-to-Runtime input.
+ *
+ * Relay hop authentication only proves who spoke to the relay. The encrypted
+ * plaintext therefore carries its own signature, bound to the exact target,
+ * so direct, relayed and process-local delivery enforce one canonical rule.
+ */
+export interface RuntimeEntityInputsEnvelope extends UnsignedRuntimeEntityInputsEnvelope {
+  sourceSignature: string;
 }
 
 /**
@@ -519,6 +530,10 @@ export interface RuntimeInfrastructure {
   maxEntityInputsPerFrame?: number;
   maxEntityTxsPerFrame?: number;
   processingPromise?: Promise<void> | null;
+  /** Writer-preference gate: queued financial frames cannot be starved by new API readers. */
+  queuedFrameWriters?: number;
+  frameWritersDrained?: Promise<void> | null;
+  resolveFrameWritersDrained?: (() => void) | null;
   /** Infra-only read/write barrier; never part of deterministic Runtime State. */
   activeCommittedReaders?: number;
   committedReadersDrained?: Promise<void> | null;

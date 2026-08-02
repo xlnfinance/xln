@@ -507,7 +507,7 @@ describe('Depository', () => {
     expect(reserveTo).to.equal(250n);
   });
 
-  it('skips an underfunded R2C item atomically and finalizes the batch', async function () {
+  it('reverts an underfunded R2C batch without consuming its nonce', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [, , user2] = await ethers.getSigners();
     const actor = lazyActor(user0, 0);
@@ -531,11 +531,9 @@ describe('Depository', () => {
     const signed = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, batch);
 
     await expect(depository.connect(actor.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce))
-      .to.emit(depository, 'BatchOperationSkipped')
-      .withArgs(actor.entityId, signed.batchHash, signed.nonce, 3n, 0n, 0n)
-      .and.to.emit(depository, 'HankoBatchProcessed')
-      .withArgs(actor.entityId, signed.batchHash, signed.nonce);
+      .to.be.revertedWithCustomError(depository, 'E3');
 
+    expect(await depository.entityNonces(actor.entityId)).to.equal(0n);
     expect(await depository._reserves(actor.entityId, tokenId)).to.equal(10n);
     expect(
       (await depository._collaterals(await depository.accountKey(actor.entityId, firstCounterparty), tokenId))
@@ -547,7 +545,7 @@ describe('Depository', () => {
     ).to.equal(0n);
   });
 
-  it('skips underfunded C2R and R2E items but keeps signature failures fatal', async function () {
+  it('reverts underfunded C2R/R2E batches and keeps signature failures fatal', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = await registerFixedSupplyErc20(depository, 1_000_000n);
@@ -588,12 +586,7 @@ describe('Depository', () => {
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
 
     await expect(depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce))
-      .to.emit(depository, 'BatchOperationSkipped')
-      .withArgs(left.entityId, signed.batchHash, signed.nonce, 1n, 0n, 0n)
-      .and.to.emit(depository, 'BatchOperationSkipped')
-      .withArgs(left.entityId, signed.batchHash, signed.nonce, 4n, 0n, 0n)
-      .and.to.emit(depository, 'HankoBatchProcessed')
-      .withArgs(left.entityId, signed.batchHash, signed.nonce);
+      .to.be.revertedWithCustomError(depository, 'E3');
 
     expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
@@ -613,7 +606,7 @@ describe('Depository', () => {
     await expect(
       depository.connect(left.signer).processBatch(invalid.encodedBatch, invalid.hankoData, invalid.nonce),
     ).to.be.revertedWithCustomError(depository, 'E4');
-    expect(await depository.entityNonces(left.entityId)).to.equal(signed.nonce);
+    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
   });
 
   it('rejects permissionless token-id allocation from the production batch path', async function () {

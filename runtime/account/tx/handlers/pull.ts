@@ -6,7 +6,6 @@ import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionPullBinding,
   getCrossJurisdictionCommittedProofRatio,
-  hasCrossJurisdictionCommittedFill,
   hashCrossJurisdictionCloseBinary,
   projectCrossJurisdictionQuantizedClaim,
   withCanonicalCrossJurisdictionRouteHash,
@@ -140,7 +139,6 @@ const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockT
   if (
     route.status !== 'resting' ||
     binding.status !== 'resting' ||
-    hasCrossJurisdictionCommittedFill(route) ||
     route.sourceCloseProof !== undefined ||
     route.targetCloseProof !== undefined ||
     route.fillSeq !== undefined ||

@@ -42,6 +42,7 @@ import { decodeRoutedEntityInput } from './routing-validation';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeInput } from './types';
 import { clearRuntimeGossip } from './loop-gossip';
+import { assertRuntimeInputCapabilitiesAuthorized } from './internal-tx-auth';
 import {
   deriveRuntimeId,
   getLocalSignerIdsForEntity,
@@ -173,6 +174,7 @@ const validateRuntimeInputAdmission = (
   validateRuntimeInputShapeAndLimits(env, runtimeInput, message => {
     throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: ${message}`);
   });
+  assertRuntimeInputCapabilitiesAuthorized(runtimeInput);
   const pendingOutputs = env.pendingNetworkOutputs?.length ?? 0;
   if (
     pendingOutputs >= MAX_PENDING_NETWORK_OUTPUTS &&

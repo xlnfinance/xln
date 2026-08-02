@@ -5,6 +5,7 @@ import {
 } from './consensus/dispute-policy';
 import { invalidateAccountMapCommitment } from './map-commitment';
 import { clearFinalizedSettlementWorkspace } from './tx/handlers/settle-transition';
+import { safeStringify } from '../protocol/serialization';
 
 export type AccountDisputeFinalityResult = {
   hadActiveDispute: boolean;
@@ -56,6 +57,16 @@ export const applyAccountDisputeStarted = (
     account.state.leftEntity,
     account.state.rightEntity,
   );
+  const preparingRecovery = account.disputePrepare?.crossJurisdictionRecovery;
+  const activeRecovery = account.activeDispute?.crossJurisdictionRecovery;
+  if (
+    preparingRecovery &&
+    activeRecovery &&
+    safeStringify(preparingRecovery) !== safeStringify(activeRecovery)
+  ) {
+    throw new Error('ACCOUNT_DISPUTE_CROSS_J_RECOVERY_CONFLICT');
+  }
+  const crossJurisdictionRecovery = activeRecovery ?? preparingRecovery;
   account.status = 'disputed';
   freezeAccountForDispute(account, true);
   account.activeDispute = {
@@ -72,7 +83,9 @@ export const applyAccountDisputeStarted = (
       ? { batchNonce: finality.batchNonce }
       : {}),
     finalizeQueued: false,
+    ...(crossJurisdictionRecovery ? { crossJurisdictionRecovery } : {}),
   };
+  delete account.disputePrepare;
   account.state.jNonce = Math.max(account.state.jNonce, finality.jNonce);
 };
 

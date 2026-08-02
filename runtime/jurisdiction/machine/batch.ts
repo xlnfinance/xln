@@ -124,19 +124,6 @@ export interface JBatch {
 /** Batch lifecycle: current accumulates, sentBatch tracks one in-flight submission */
 export type JBatchStatus = 'empty' | 'accumulating' | 'sent' | 'failed';
 
-export type BatchOperationType =
-  | 'reserveToReserve'
-  | 'collateralToReserve'
-  | 'settlement'
-  | 'reserveToCollateral'
-  | 'reserveToExternalToken';
-
-export interface BatchOperationSkip {
-  operationType: BatchOperationType;
-  operationIndex: number;
-  reason: 'insufficientBalance';
-}
-
 /** In-flight batch snapshot (authoritative until HankoBatchProcessed arrives). */
 export interface SentJBatch {
   batch: JBatch;
@@ -146,7 +133,6 @@ export interface SentJBatch {
   firstSubmittedAt: number;
   lastSubmittedAt: number;
   submitAttempts: number;
-  skippedOperations?: BatchOperationSkip[];
   feeOverrides?: Extract<import('../../types/jurisdiction-runtime').JTx, { type: 'batch' }>['data']['feeOverrides'];
   txHash?: string;
   lastFailure?: {
@@ -310,7 +296,6 @@ export interface CompletedBatch {
   jBlockNumber?: number; // Finalized J-block that emitted HankoBatchProcessed
   batch?: JBatch; // Optional full batch snapshot for rich UI history
   operations?: BatchOpBreakdown; // Optional per-op breakdown for UI history
-  skippedOperations?: BatchOperationSkip[];
   source?: 'self-batch' | 'counterparty-event';
   eventType?: 'DisputeStarted' | 'DisputeFinalized';
   note?: string;

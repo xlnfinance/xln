@@ -246,12 +246,8 @@ for (const [path, markers] of [
     "return 'dropped'",
   ]],
   ['runtime/network/relay/store.ts', [
-    'disposition = classifyWebSocketSendResult(sendResult);',
-    "if (disposition === 'dropped')",
-    'commitPendingQueueState(store, toKey, pending.slice(index), removedBytes);',
     'export const classifyRelayDeliveryEvent',
     'deliveryFailure({',
-    'deliverPendingMessages',
   ]],
   ['runtime/network/relay/router.ts', [
     'const sendRelayDelivery = (',

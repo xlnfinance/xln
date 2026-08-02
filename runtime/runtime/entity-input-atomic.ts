@@ -19,6 +19,7 @@ import {
   applyExternalEntityInput,
   collectCommittedAccountFrames,
   collectStagedEntityInput,
+  publishStagedEntityNodeChanges,
   stageExternalEntityInput,
   type StagedEntityInput,
 } from './entity-input-staging';
@@ -210,4 +211,5 @@ export const applyAtomicEntityInputPair = async (
   for (const entry of staged) {
     collectStagedEntityInput(env, entry, options, context);
   }
+  publishStagedEntityNodeChanges(env, staged);
 };

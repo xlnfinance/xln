@@ -3,12 +3,8 @@ export {
   detectEntityType,
   encodeBoard,
   generateLazyEntityId,
-  generateNamedEntityId,
   generateNumberedEntityId,
   hashBoard,
-  isEntityRegistered,
-  requestNamedEntity,
-  resolveEntityIdentifier,
 } from '../../entity/factory';
 export {
   debugFundReserves,

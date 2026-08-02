@@ -19,6 +19,8 @@ import {
   handleInboundP2PEntityInput,
   handleInboundReliableReceipt,
   processRuntime,
+  registerRuntimeFrameCommitCallback,
+  validateRuntimeInputAdmission,
 } from '../runtime';
 import {
   createReliableDeliveryReceipt,
@@ -28,10 +30,13 @@ import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { KEY_HEAD } from '../storage/keys';
 import { readStorageHead } from '../storage';
 import {
+  authorizeRestoredRuntimeInput,
   buildCanonicalEntityReplicaSnapshot,
+  buildDurableRuntimeMempool,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
+import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 import type { AccountInput } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../runtime/types';
@@ -691,6 +696,39 @@ describe('runtime frame atomicity', () => {
     expect(Object.getOwnPropertySymbols(persisted!.runtimeInput.runtimeTxs[0]!)).toHaveLength(0);
   });
 
+  test('durable pending input cannot launder an external tx into a local capability', async () => {
+    const env = createEmptyEnv(`runtime capability persistence ${TEST_RUN_ID}`);
+    transitionRuntimeLifecycle(env.infrastructure!, 'running');
+    const cursorTx: RuntimeTx = {
+      type: 'advanceJWatcherCursor',
+      data: {
+        depositoryAddress: jurisdiction.depositoryAddress!,
+        chainId: jurisdiction.chainId,
+        blockNumber: 1,
+      },
+    };
+    const hostile = { runtimeTxs: [cursorTx], entityInputs: [] };
+
+    expect(() => validateRuntimeInputAdmission(env, hostile))
+      .toThrow('J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
+    expect(() => buildDurableRuntimeMempool(hostile))
+      .toThrow('J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
+
+    const durable = buildDurableRuntimeMempool({
+      runtimeTxs: [markLocalJAuthorityRuntimeTx(cursorTx)],
+      entityInputs: [],
+    });
+    expect(Object.getOwnPropertySymbols(durable.runtimeTxs[0]!)).toHaveLength(0);
+    expect(() => buildDurableRuntimeMempool(durable))
+      .toThrow('J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
+    const untrustedRestore = createEmptyEnv(`runtime untrusted capability ${TEST_RUN_ID}`);
+    untrustedRestore.scenarioMode = true;
+    restoreDurableRuntimeSnapshot(untrustedRestore, { runtimeInput: durable });
+    await expect(applyRuntimeInput(untrustedRestore, untrustedRestore.runtimeMempool!))
+      .rejects.toThrow('J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED');
+    expect(() => buildDurableRuntimeMempool(authorizeRestoredRuntimeInput(durable))).not.toThrow();
+  });
+
   test('the single Runtime mempool remains lossless beyond former ingress thresholds', () => {
     const env = createEmptyEnv(`runtime ingress load ${TEST_RUN_ID}`);
     env.quietRuntimeLogs = true;
@@ -921,6 +959,10 @@ describe('runtime frame atomicity', () => {
     if (!baselineReplica) throw new Error('TEST_BASELINE_REPLICA_MISSING');
     const heightBefore = env.state.height;
     const timestampBefore = env.state.timestamp;
+    const committedInputs: RuntimeInput[] = [];
+    const stopObservingCommits = registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
+      committedInputs.push(runtimeInput);
+    });
 
     await corruptCurrentHeadAhead(env);
 
@@ -949,8 +991,10 @@ describe('runtime frame atomicity', () => {
       expect(env.runtimeMempool?.queuedAt).toBe(timestampBefore);
       const walHead = await readStorageHead(getRuntimeWalDb(env));
       expect(walHead?.latestHeight).toBe(heightBefore);
+      expect(committedInputs).toEqual([]);
       await expect(processRuntime(env)).rejects.toThrow('RUNTIME_PROCESS_HALTED');
     } finally {
+      stopObservingCommits();
       await closeTestEnv(env);
     }
   });

@@ -139,7 +139,7 @@ import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
 import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
 
-import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity/tx/j-events-htlc';
+import { queueCrossJurisdictionSalvageFromFinalizedArguments } from '../entity/tx/j-events-htlc';
 
 import {
   canonicalDisputeFinalizationEvidenceHash,

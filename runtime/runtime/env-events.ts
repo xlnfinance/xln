@@ -273,13 +273,12 @@ export const recordAccountFrameHistory = (
       candidate.kind === 'accountFrame' &&
       candidate.entityId === entityId &&
       candidate.counterpartyId === counterpartyId &&
-      candidate.accountHeight === Math.floor(accountHeight) &&
-      candidate.source === record.source,
+      candidate.accountHeight === Math.floor(accountHeight),
   );
   if (existing) {
     if (encodeCanonicalConsensusValue(existing.frame) !== encodeCanonicalConsensusValue(record.frame)) {
       throw new Error(
-        `HISTORY_VIEW_ACCOUNT_FRAME_FORK:entity=${entityId}:counterparty=${counterpartyId}:height=${accountHeight}`,
+        `CERTIFIED_ACCOUNT_FRAME_FORK:entity=${entityId}:counterparty=${counterpartyId}:height=${accountHeight}`,
       );
     }
     return;

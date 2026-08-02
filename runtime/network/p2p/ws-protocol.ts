@@ -25,7 +25,7 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 
-const DEFAULT_MAX_WS_MESSAGE_BYTES = 16 * 1024 * 1024;
+export const DEFAULT_MAX_WS_MESSAGE_BYTES = 1024 * 1024;
 const WS_STRING_FIELD_MAX_BYTES: Readonly<Record<string, number>> = {
   id: 128,
   from: 128,
@@ -249,7 +249,7 @@ const wsMessageByteLength = (raw: string | Buffer | Uint8Array | ArrayBuffer): n
   return raw.byteLength;
 };
 
-const wsMaxMessageBytes = (): number => {
+export const resolveRuntimeWsMaxMessageBytes = (): number => {
   const configured = typeof process === 'undefined' ? undefined : process.env['XLN_WS_MAX_MESSAGE_BYTES'];
   const parsed = Number(configured);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_WS_MESSAGE_BYTES;
@@ -283,7 +283,7 @@ export const deserializeWsMessage = (
   raw: string | Buffer | Uint8Array | ArrayBuffer,
 ): RuntimeWsMessage => {
   const byteLength = wsMessageByteLength(raw);
-  const maxBytes = wsMaxMessageBytes();
+  const maxBytes = resolveRuntimeWsMaxMessageBytes();
   if (byteLength > maxBytes) throw new Error(`WS_MESSAGE_TOO_LARGE:bytes=${byteLength}:max=${maxBytes}`);
   if (typeof raw === 'string') throw new Error('WS_WIRE_BINARY_REQUIRED');
   const bytes = raw instanceof ArrayBuffer

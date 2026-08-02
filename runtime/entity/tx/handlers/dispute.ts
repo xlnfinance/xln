@@ -6,7 +6,12 @@
  * J-batch mutations can be audited independently.
  */
 
-import type { AccountReplica, RuntimeOverlayRecord, SwapOffer } from '../../../types/account';
+import type {
+  AccountReplica,
+  CrossJurisdictionDisputeRecovery,
+  RuntimeOverlayRecord,
+  SwapOffer,
+} from '../../../types/account';
 import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
@@ -19,6 +24,11 @@ import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/order
 import { crossJurisdictionRouteSignerHint } from '../cross-j-outputs';
 import { collectDisputeEvidenceReadinessIssues } from './dispute/shared';
 import { handleDisputeStart } from './dispute/start';
+import { planCrossJurisdictionTargetRecovery } from '../j-events-htlc';
+import {
+  resolveStoredDisputeStartNonce,
+  selectIncrementedDisputeSnapshots,
+} from './dispute/start-evidence';
 
 export { canonicalizeProofBodyStruct } from './dispute/shared';
 export { handleDisputeFinalize } from './dispute/finalize';
@@ -124,6 +134,7 @@ const markAccountDisputePreparing = (
   minCooldownMs: number,
   pendingOrderbookRemovalIds: readonly string[],
   startIntent: NonNullable<AccountReplica['disputePrepare']>['startIntent'],
+  crossJurisdictionRecovery: CrossJurisdictionDisputeRecovery | null,
 ): void => {
   const startedAt = Number(state.timestamp ?? 0);
   account.status = 'dispute_preparing';
@@ -134,6 +145,7 @@ const markAccountDisputePreparing = (
     ...(pendingOrderbookRemovalIds.length > 0
       ? { pendingOrderbookRemovalIds: [...pendingOrderbookRemovalIds].sort() }
       : {}),
+    ...(crossJurisdictionRecovery ? { crossJurisdictionRecovery } : {}),
     ...(startIntent ? { startIntent } : {}),
   };
   // Optional resolution evidence may still arrive, but ordinary bilateral
@@ -143,21 +155,43 @@ const markAccountDisputePreparing = (
 
 const buildDisputeStartIntent = (
   tx: Extract<EntityTx, { type: 'prepareDispute' }>,
-): NonNullable<AccountReplica['disputePrepare']>['startIntent'] => ({
-  description: tx.data.description ?? 'prepare-dispute',
-  ...(tx.data.crossJurisdictionRouteId !== undefined
-    ? { crossJurisdictionRouteId: tx.data.crossJurisdictionRouteId }
-    : {}),
-  ...(tx.data.starterInitialArguments !== undefined
-    ? { starterInitialArguments: tx.data.starterInitialArguments }
-    : {}),
-  ...(tx.data.allowUnsafeCrossJTargetDispute === true
-    ? { allowUnsafeCrossJTargetDispute: true }
-    : {}),
-  ...(tx.data.acceptedCrossJTargetLossAmount !== undefined
-    ? { acceptedCrossJTargetLossAmount: tx.data.acceptedCrossJTargetLossAmount }
-    : {}),
-});
+  recovery: CrossJurisdictionDisputeRecovery | null,
+  representativeRouteId?: string,
+): NonNullable<AccountReplica['disputePrepare']>['startIntent'] => {
+  const crossJurisdictionRouteId =
+    tx.data.crossJurisdictionRouteId ?? representativeRouteId;
+  return {
+    description: tx.data.description ?? 'prepare-dispute',
+    ...(crossJurisdictionRouteId !== undefined ? { crossJurisdictionRouteId } : {}),
+    ...(tx.data.starterInitialArguments !== undefined && !recovery
+      ? { starterInitialArguments: tx.data.starterInitialArguments }
+      : {}),
+    ...(tx.data.allowUnsafeCrossJTargetDispute === true
+      ? { allowUnsafeCrossJTargetDispute: true }
+      : {}),
+    ...(tx.data.acceptedCrossJTargetLossAmount !== undefined
+      ? { acceptedCrossJTargetLossAmount: tx.data.acceptedCrossJTargetLossAmount }
+      : {}),
+  };
+};
+
+const targetStartSnapshotHashes = (
+  state: EntityState,
+  account: AccountReplica,
+  counterpartyEntityId: string,
+): string[] => {
+  const initialHash = account.counterpartyDisputeProofBodyHash ?? '';
+  if (!initialHash) return [];
+  const starterSide = account.state.leftEntity === state.entityId ? 'left' : 'right';
+  const { signedNonce } = resolveStoredDisputeStartNonce(account, initialHash);
+  const incremented = selectIncrementedDisputeSnapshots(
+    account,
+    starterSide,
+    signedNonce,
+    counterpartyEntityId,
+  );
+  return [initialHash, ...incremented.map((snapshot) => snapshot.proofbodyHash)];
+};
 
 export const draftPreparedDisputeStartIfReady = async (
   entityState: EntityState,
@@ -203,12 +237,57 @@ export const draftPreparedDisputeStartIfReady = async (
   );
 };
 
+const finishDisputePreparation = async (
+  state: EntityState,
+  account: AccountReplica,
+  counterpartyEntityId: string,
+  recovery: CrossJurisdictionDisputeRecovery | null,
+  outputs: EntityInput[],
+  env: EntityRuntimeContext,
+  storageChanges: RuntimeOverlayRecord[],
+): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
+  const issues = collectDisputeEvidenceReadinessIssues(
+    account,
+    Number(state.timestamp ?? 0),
+  );
+  addMessage(
+    state,
+    issues.length > 0
+      ? `⏳ Dispute prepared vs ${counterpartyEntityId.slice(-4)}; ` +
+        `waiting for stable evidence: ${issues.join('; ')}`
+      : `⏳ Dispute prepared vs ${counterpartyEntityId.slice(-4)}; ` +
+        'evidence currently stable, queue disputeStart when ready',
+  );
+  if (issues.length > 0) return { newState: state, outputs };
+  if (recovery?.requiredPullIds.every(
+    (pullId) => recovery.resultsByPullId[pullId] === '0x',
+  )) {
+    account.status = 'active';
+    delete account.disputePrepare;
+    freezeAccountForDispute(account, false);
+    addMessage(state, '🌉 Cross-j source finality required no target dispute');
+    return { newState: state, outputs };
+  }
+  const drafted = await draftPreparedDisputeStartIfReady(
+    state,
+    counterpartyEntityId,
+    env,
+    storageChanges,
+    true,
+  );
+  return {
+    newState: drafted.newState,
+    outputs: [...outputs, ...drafted.outputs],
+  };
+};
+
 export const handlePrepareDispute = async (
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'prepareDispute' }>,
   env: EntityRuntimeContext,
   storageChanges: RuntimeOverlayRecord[] = [],
   mutableFrameState = false,
+  suppliedCrossJurisdictionResults: Readonly<Record<string, string>> = {},
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   const counterpartyEntityId = entityTx.data.counterpartyEntityId;
   const description = entityTx.data.description ?? 'prepare-dispute';
@@ -250,6 +329,15 @@ export const handlePrepareDispute = async (
     );
     return { newState, outputs };
   }
+  const recoveryPlan = planCrossJurisdictionTargetRecovery(
+    newState,
+    account,
+    counterpartyEntityId,
+    targetStartSnapshotHashes(newState, account, counterpartyEntityId),
+    suppliedCrossJurisdictionResults,
+    outputs,
+  );
+  const recovery = recoveryPlan?.recovery ?? null;
   const removal = removeDisputedAccountOrdersFromBook(
     newState,
     outputs,
@@ -263,30 +351,16 @@ export const handlePrepareDispute = async (
     description,
     entityTx.data.minCooldownMs ?? 0,
     removal.remoteOrderIds,
-    buildDisputeStartIntent(entityTx),
+    buildDisputeStartIntent(entityTx, recovery, recoveryPlan?.representativeRouteId),
+    recovery,
   );
-  const issues = collectDisputeEvidenceReadinessIssues(
+  return finishDisputePreparation(
+    newState,
     account,
-    Number(newState.timestamp ?? 0),
-  );
-  addMessage(
-    newState,
-    issues.length > 0
-      ? `⏳ Dispute prepared vs ${counterpartyEntityId.slice(-4)}; ` +
-        `waiting for stable evidence: ${issues.join('; ')}`
-      : `⏳ Dispute prepared vs ${counterpartyEntityId.slice(-4)}; ` +
-        'evidence currently stable, queue disputeStart when ready',
-  );
-  if (issues.length > 0) return { newState, outputs };
-  const drafted = await draftPreparedDisputeStartIfReady(
-    newState,
     counterpartyEntityId,
+    recovery,
+    outputs,
     env,
     storageChanges,
-    true,
   );
-  return {
-    newState: drafted.newState,
-    outputs: [...outputs, ...drafted.outputs],
-  };
 };

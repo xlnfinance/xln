@@ -84,14 +84,14 @@ requireCondition(CROSS_J_MAX_FILL_RATIO === UINT16_MAX, 'cross-j fill ratio must
 const quarterProofRatio = exactFillRatioToUint16({ numerator: 1n, denominator: 4n });
 requireCondition(quarterProofRatio === 16_384, `unexpected quarter proof ratio ${quarterProofRatio}`);
 
-const exactOnlyRoute = makeRoute({
-  cumulativeFillRatio: 0,
-  claimedRatio: 0,
+const exactRoute = makeRoute({
+  cumulativeFillRatio: quarterProofRatio,
+  claimedRatio: quarterProofRatio,
   fillNumerator: 1n,
   fillDenominator: 4n,
 });
-const committed = getCrossJurisdictionCommittedFillAmounts(exactOnlyRoute);
-requireCondition(committed.fillRatio === quarterProofRatio, 'exact-only route must project proof ratio');
+const committed = getCrossJurisdictionCommittedFillAmounts(exactRoute);
+requireCondition(committed.fillRatio === quarterProofRatio, 'exact route must project one proof ratio');
 requireCondition(committed.filledSourceAmount === 10_000_000_000_000_000n, 'source economics must stay exact');
 requireCondition(committed.filledTargetAmount === 25_000_000_000_000_000_000n, 'target economics must stay exact');
 requireCondition(
@@ -101,7 +101,7 @@ requireCondition(
 
 const progress = validateCrossJurisdictionFillProgress(makeRoute(), {
   fillSeq: 1,
-  cumulativeFillRatio: 0,
+  cumulativeFillRatio: quarterProofRatio,
   fillNumerator: 1n,
   fillDenominator: 4n,
   cumulativeSourceAmount: 10_000_000_000_000_000n,
@@ -114,16 +114,16 @@ requireCondition(progress.value.nextRatio === quarterProofRatio, 'fill progress 
 requireCondition(progress.value.incrementalSourceAmount === 10_000_000_000_000_000n, 'fill progress source increment drifted');
 requireCondition(progress.value.incrementalTargetAmount === 25_000_000_000_000_000_000n, 'fill progress target increment drifted');
 
-const claimed = withCrossJurisdictionClaimProgress(exactOnlyRoute, quarterProofRatio, 2_000);
+const claimed = withCrossJurisdictionClaimProgress(exactRoute, quarterProofRatio, 2_000);
 requireCondition(claimed.sourceClaimed === committed.filledSourceAmount, 'claim progress must reuse exact source amount');
 requireCondition(claimed.targetClaimed === committed.filledTargetAmount, 'claim progress must reuse exact target amount');
 
 const pendingAck = buildCrossJurisdictionPendingFillFromAck({
   type: 'cross_swap_fill_ack',
   data: {
-    offerId: exactOnlyRoute.orderId,
+    offerId: exactRoute.orderId,
     fillSeq: 1,
-    cumulativeFillRatio: 0,
+    cumulativeFillRatio: quarterProofRatio,
     fillNumerator: 1n,
     fillDenominator: 4n,
     incrementalSourceAmount: 10_000_000_000_000_000n,
@@ -163,6 +163,31 @@ requireCondition(
   `unexpected invalid exact fill progress error: ${invalidProgress.error}`,
 );
 
+assertThrows(
+  () => getCrossJurisdictionCommittedProofRatio({
+    orderId: 'coarse-only',
+    cumulativeFillRatio: 1,
+  }),
+  'CROSS_J_EXACT_FILL_RATIO_REQUIRED:coarse-only',
+);
+assertThrows(
+  () => getCrossJurisdictionCommittedProofRatio({
+    orderId: 'coarse-exact-divergence',
+    cumulativeFillRatio: quarterProofRatio - 1,
+    fillNumerator: 1n,
+    fillDenominator: 4n,
+  }),
+  'CROSS_J_COARSE_EXACT_RATIO_MISMATCH:coarse-exact-divergence',
+);
+const missingExactProgress = validateCrossJurisdictionFillProgress(makeRoute(), {
+  fillSeq: 1,
+  cumulativeFillRatio: quarterProofRatio,
+});
+requireCondition(
+  !missingExactProgress.ok && missingExactProgress.error === 'CROSS_J_EXACT_FILL_RATIO_REQUIRED:canonical-fill-scan',
+  `coarse-only fill must fail loud: ${missingExactProgress.ok ? 'accepted' : missingExactProgress.error}`,
+);
+
 for (const [path, markers] of [
   ['runtime/entity/consensus/cross-j-fill-ack.ts', [
     'export const MAX_PENDING_CROSS_J_FILL_ACKS = 1024;',
@@ -199,7 +224,6 @@ for (const [path, markers] of [
   ]],
   ['runtime/entity/tx/handlers/cross-j-salvage.ts', [
     'getCrossJurisdictionCommittedProofRatio',
-    'CROSS_J_MAX_FILL_RATIO',
   ]],
   ['runtime/__tests__/audit-failfast-regressions-part-6.test.ts', [
     'MAX_PENDING_CROSS_J_FILL_ACKS',

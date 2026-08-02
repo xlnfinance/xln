@@ -85,8 +85,8 @@ const buildFillAckData = (
       cumulativeSourceAmount: data.cumulativeSourceAmount,
       cumulativeTargetAmount: data.cumulativeTargetAmount,
       cumulativeFillRatio: data.cumulativeFillRatio,
-      ...(data.fillNumerator !== undefined ? { fillNumerator: data.fillNumerator } : {}),
-      ...(data.fillDenominator !== undefined ? { fillDenominator: data.fillDenominator } : {}),
+      fillNumerator: data.fillNumerator,
+      fillDenominator: data.fillDenominator,
       ackKind: 'cancel',
       executionSourceAmount: 0n,
       executionTargetAmount: 0n,
@@ -106,8 +106,8 @@ const buildFillAckData = (
     cumulativeSourceAmount: fill.cumulativeSourceAmount,
     cumulativeTargetAmount: fill.cumulativeTargetAmount,
     cumulativeFillRatio: fill.nextRatio,
-    ...(fill.fillNumerator !== undefined ? { fillNumerator: fill.fillNumerator } : {}),
-    ...(fill.fillDenominator !== undefined ? { fillDenominator: fill.fillDenominator } : {}),
+    fillNumerator: fill.fillNumerator,
+    fillDenominator: fill.fillDenominator,
     ackKind: 'fill',
     executionSourceAmount: (data.priceImprovementAmount ?? 0n) > 0n
       ? fill.incrementalSourceAmount - (data.priceImprovementAmount ?? 0n)

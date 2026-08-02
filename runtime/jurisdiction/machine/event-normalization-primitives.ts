@@ -109,11 +109,6 @@ export const isPositiveUint256 = (value: string | null): value is string =>
 export const isActionKind = (value: number | null): value is 0 | 1 =>
   value === 0 || value === 1;
 
-export const isBatchOperationType = (
-  value: number | null,
-): value is 0 | 1 | 2 | 3 | 4 =>
-  value === 0 || value === 1 || value === 2 || value === 3 || value === 4;
-
 export const normalizeString = (value: unknown): string | null =>
   typeof value === 'string' ? value : null;
 

@@ -36,8 +36,8 @@ export const buildCrossJurisdictionFillNoticeTx = (
       cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
       cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
       cumulativeFillRatio,
-      ...(tx.data.fillNumerator !== undefined ? { fillNumerator: tx.data.fillNumerator } : {}),
-      ...(tx.data.fillDenominator !== undefined ? { fillDenominator: tx.data.fillDenominator } : {}),
+      fillNumerator: tx.data.fillNumerator,
+      fillDenominator: tx.data.fillDenominator,
       ...(tx.data.priceImprovementMode ? { priceImprovementMode: tx.data.priceImprovementMode } : {}),
       ...(tx.data.priceImprovementAmount !== undefined
         ? { priceImprovementAmount: tx.data.priceImprovementAmount }
@@ -123,8 +123,8 @@ export const buildCrossJurisdictionPendingFillFromAck = (
     cumulativeFillRatio,
     cumulativeSourceAmount,
     cumulativeTargetAmount,
-    ...(tx.data.fillNumerator !== undefined ? { fillNumerator: tx.data.fillNumerator } : {}),
-    ...(tx.data.fillDenominator !== undefined ? { fillDenominator: tx.data.fillDenominator } : {}),
+    fillNumerator: tx.data.fillNumerator,
+    fillDenominator: tx.data.fillDenominator,
     routeHash: String(tx.data.routeHash || ''),
     updatedAt: Number(updatedAt || 0),
     firstSeenAt: Number(updatedAt || 0),

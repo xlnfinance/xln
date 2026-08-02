@@ -661,6 +661,7 @@ describe('storage frame journal retention', () => {
       'replicaCommitment',
       'replicaHistoryScan',
       'frameEncode',
+      'certifiedHistory',
       'batchPlan',
       'remainder',
     ]);

@@ -25,10 +25,7 @@ import {
   type GossipProfileBatchRequest,
 } from '../p2p/profile-batch';
 import { redactTelemetryValue } from '../../infra/telemetry-redaction';
-import {
-  classifyWebSocketSendResult,
-  type WebSocketSendResult,
-} from '../websocket-send-result';
+import type { WebSocketSendResult } from '../websocket-send-result';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,9 +89,6 @@ export type RelayDeliveryResult = DeliveryResult;
 export type RelayStore = {
   serverId: string;
   clients: Map<string, RelayClient>;
-  pendingMessages: Map<string, PendingRelayMessage[]>;
-  pendingMessageBytes: number;
-  pendingLimits: RelayPendingLimits;
   maxGossipProfiles: number;
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
   runtimeEncryptionKeys: Map<string, string>;
@@ -113,10 +107,6 @@ const MAX_DEBUG_EVENTS = 5000;
 export const MAX_DEBUG_EVENT_BYTES = 64 * 1024;
 export const MAX_DEBUG_TIMELINE_BYTES = 8 * 1024 * 1024;
 const MAX_DEBUG_INCIDENTS = 1000;
-const MAX_PENDING_PER_CLIENT = 200;
-const MAX_PENDING_TARGETS = 10_000;
-const MAX_PENDING_TOTAL_BYTES = 256 * 1024 * 1024;
-const MAX_PENDING_MESSAGE_AGE_MS = 5 * 60 * 1000;
 const MAX_GOSSIP_PROFILES = 50_000;
 export const DEFAULT_GOSSIP_SYNC_LIMIT = DEFAULT_GOSSIP_BATCH_LIMIT;
 
@@ -146,35 +136,12 @@ const DELIVERY_FATAL_REASON_PARTS = [
   'invalid tag',
 ];
 
-type RelayPendingLimits = {
-  maxPerTarget: number;
-  maxTargets: number;
-  maxTotalBytes: number;
-  maxAgeMs: number;
-};
-
-type PendingRelayMessage = {
-  msg: unknown;
-  bytes: number;
-  enqueuedAt: number;
-};
-
 export type RelayStoreOptions = {
-  pendingLimits?: Partial<RelayPendingLimits>;
   maxGossipProfiles?: number;
   initialDebugId?: number;
   initialIncidents?: Iterable<RelayDebugIncident>;
   debugIdAllocator?: () => number;
   incidentSink?: (incident: RelayDebugIncident) => void;
-};
-
-export type RelayPendingDeliveryResult = {
-  delivered: number;
-  expired: number;
-  retained: number;
-  failure?: {
-    reason: string;
-  };
 };
 
 // ---------------------------------------------------------------------------
@@ -191,14 +158,6 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
   return {
     serverId,
     clients: new Map(),
-    pendingMessages: new Map(),
-    pendingMessageBytes: 0,
-    pendingLimits: {
-      maxPerTarget: options.pendingLimits?.maxPerTarget ?? MAX_PENDING_PER_CLIENT,
-      maxTargets: options.pendingLimits?.maxTargets ?? MAX_PENDING_TARGETS,
-      maxTotalBytes: options.pendingLimits?.maxTotalBytes ?? MAX_PENDING_TOTAL_BYTES,
-      maxAgeMs: options.pendingLimits?.maxAgeMs ?? MAX_PENDING_MESSAGE_AGE_MS,
-    },
     maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
     gossipProfiles: new Map(),
     runtimeEncryptionKeys: new Map(),
@@ -596,141 +555,4 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
   }
 
   return null;
-};
-
-// ---------------------------------------------------------------------------
-// Pending message queue
-// ---------------------------------------------------------------------------
-
-const estimatePendingMessageBytes = (msg: unknown): number => {
-  // Queue limits are a security boundary. Falling back to String(msg) would
-  // measure a circular object as the tiny string "[object Object]" and permit
-  // it to bypass maxTotalBytes. Canonical serialization must succeed before a
-  // message can consume durable queue capacity.
-  return Buffer.byteLength(safeStringify(msg));
-};
-
-export const enqueueMessage = (store: RelayStore, toKey: string, msg: unknown): number => {
-  if (!store.pendingMessages.has(toKey) && store.pendingMessages.size >= store.pendingLimits.maxTargets) {
-    pushDebugEvent(store, {
-      event: 'pending_drop',
-      to: toKey,
-      status: 'dropped',
-      reason: 'PENDING_TARGET_CAP_EXCEEDED',
-      queueSize: store.pendingMessages.size,
-      size: store.pendingMessageBytes,
-    });
-    return 0;
-  }
-  const bytes = estimatePendingMessageBytes(msg);
-  if (bytes > store.pendingLimits.maxTotalBytes || store.pendingMessageBytes + bytes > store.pendingLimits.maxTotalBytes) {
-    pushDebugEvent(store, {
-      event: 'pending_drop',
-      to: toKey,
-      status: 'dropped',
-      reason: bytes > store.pendingLimits.maxTotalBytes ? 'PENDING_MESSAGE_TOO_LARGE' : 'PENDING_TOTAL_BYTES_EXCEEDED',
-      size: bytes,
-    });
-    return store.pendingMessages.get(toKey)?.length ?? 0;
-  }
-  const queue = store.pendingMessages.get(toKey) || [];
-  queue.push({ msg, bytes, enqueuedAt: Date.now() });
-  store.pendingMessageBytes += bytes;
-  while (queue.length > store.pendingLimits.maxPerTarget) {
-    const dropped = queue.shift();
-    if (dropped) {
-      store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - dropped.bytes);
-    }
-  }
-  store.pendingMessages.set(toKey, queue);
-  return queue.length;
-};
-
-const commitPendingQueueState = (
-  store: RelayStore,
-  toKey: string,
-  retained: PendingRelayMessage[],
-  removedBytes: number,
-): void => {
-  if (retained.length > 0) {
-    store.pendingMessages.set(toKey, retained);
-  } else {
-    store.pendingMessages.delete(toKey);
-  }
-  store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - removedBytes);
-};
-
-export const deliverPendingMessages = (
-  store: RelayStore,
-  toKey: string,
-  deliver: (msg: unknown) => RelaySendResult,
-): RelayPendingDeliveryResult => {
-  const pending = store.pendingMessages.get(toKey) || [];
-  if (pending.length === 0) {
-    return { delivered: 0, expired: 0, retained: 0 };
-  }
-  const now = Date.now();
-  const retained: PendingRelayMessage[] = [];
-  let delivered = 0;
-  let expired = 0;
-  let removedBytes = 0;
-  let failure: RelayPendingDeliveryResult['failure'];
-
-  for (let index = 0; index < pending.length; index += 1) {
-    const item = pending[index]!;
-    if (failure) {
-      retained.push(item);
-      continue;
-    }
-    if (now - item.enqueuedAt > store.pendingLimits.maxAgeMs) {
-      expired++;
-      removedBytes += item.bytes;
-      pushDebugEvent(store, {
-        event: 'pending_drop',
-        to: toKey,
-        status: 'dropped',
-        reason: 'PENDING_MESSAGE_EXPIRED',
-        size: item.bytes,
-      });
-      continue;
-    }
-    let sendResult: RelaySendResult;
-    try {
-      sendResult = deliver(item.msg);
-    } catch (error) {
-      failure = { reason: error instanceof Error ? error.message : String(error) };
-      retained.push(item);
-      continue;
-    }
-    let disposition: ReturnType<typeof classifyWebSocketSendResult>;
-    try {
-      disposition = classifyWebSocketSendResult(sendResult);
-    } catch (error) {
-      // Accepted/expired prefix items are no longer retryable. Persist their
-      // removal before surfacing adapter drift, while retaining the ambiguous
-      // current send and every untouched suffix item.
-      commitPendingQueueState(store, toKey, pending.slice(index), removedBytes);
-      throw error;
-    }
-    if (disposition === 'dropped') {
-      failure = { reason: 'RELAY_PENDING_SEND_FAILED' };
-      retained.push(item);
-      continue;
-    }
-    delivered++;
-    removedBytes += item.bytes;
-  }
-
-  commitPendingQueueState(store, toKey, retained, removedBytes);
-  return {
-    delivered,
-    expired,
-    retained: retained.length,
-    ...(failure ? { failure } : {}),
-  };
-};
-
-export const clearPendingMessages = (store: RelayStore): void => {
-  store.pendingMessages.clear();
-  store.pendingMessageBytes = 0;
 };

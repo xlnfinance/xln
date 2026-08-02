@@ -1,4 +1,11 @@
-import type { EntityInput, EntityOutput, EntityCandidateEffect, EntityReplica, EntityState } from '../types';
+import type {
+  EntityCandidate,
+  EntityCandidateEffect,
+  EntityInput,
+  EntityOutput,
+  EntityReplica,
+  EntityState,
+} from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { JInput } from '../../jurisdiction/machine/input';
 import type { RuntimeOverlayRecord } from '../../types/account';
@@ -35,6 +42,8 @@ export type ApplyEntityInputResult = {
   workingReplica: EntityReplica;
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
+  consumptionNodeChanges?: EntityCandidate['consumptionNodeChanges'];
+  accountJClaimNodeChanges?: EntityCandidate['accountJClaimNodeChanges'];
   canonicalAppliedInput?: EntityInput;
 };
 
@@ -46,6 +55,8 @@ export type ApplyEntityInputContext = {
   jOutbox: JInput[];
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
+  consumptionNodeChanges?: EntityCandidate['consumptionNodeChanges'];
+  accountJClaimNodeChanges?: EntityCandidate['accountJClaimNodeChanges'];
   frameHash: string;
   /** False while Runtime stages one touched-only Entity candidate. */
   promoteCandidateState: boolean;
@@ -62,6 +73,12 @@ export const commitEntityConsensusInput = (
   workingReplica: context.workingReplica,
   candidateEffects: context.candidateEffects,
   storageChanges: context.storageChanges,
+  ...(context.consumptionNodeChanges
+    ? { consumptionNodeChanges: context.consumptionNodeChanges }
+    : {}),
+  ...(context.accountJClaimNodeChanges
+    ? { accountJClaimNodeChanges: context.accountJClaimNodeChanges }
+    : {}),
   ...(context.canonicalAppliedInput
     ? { canonicalAppliedInput: context.canonicalAppliedInput }
     : {}),

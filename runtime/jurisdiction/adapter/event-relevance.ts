@@ -57,7 +57,6 @@ export const isEventRelevantToEntity = (
     case 'ExternalWalletSnapshot':
     case 'ExternalWalletDelta':
     case 'HankoBatchProcessed':
-    case 'BatchOperationSkipped':
     case 'EntityProviderActionExecuted':
     case 'EntityProviderActionCancelled':
       return normalizedId(args['entityId']) === normalizedEntity;

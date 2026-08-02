@@ -1,4 +1,3 @@
-import { ethers } from 'ethers';
 import {
   getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionPullExpired,
@@ -9,11 +8,17 @@ import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
+import type { AccountReplica, RuntimeOverlayRecord } from '../../../types/account';
 import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { normalizeEntityRef } from '../account-key';
 import { buildCrossJurisdictionEntityOutput } from '../cross-j-outputs';
+import { freezeAccountForDispute } from '../../../account/consensus/dispute-policy';
+import {
+  draftPreparedDisputeStartIfReady,
+  handlePrepareDispute,
+} from './dispute';
 
 type CrossJurisdictionSalvageTx = Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>;
 
@@ -35,15 +40,6 @@ const rejectSourceSalvageMirror = (
   }
 };
 
-const buildCrossJurisdictionStarterPullArguments = (binary: string): string => {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const args = abiCoder.encode(
-    ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
-    [{ fillRatios: [], secrets: [], pulls: [binary] }],
-  );
-  return abiCoder.encode(['bytes[]'], [[args]]);
-};
-
 const verifySalvageFillRatio = (
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
@@ -51,6 +47,11 @@ const verifySalvageFillRatio = (
   binary: string,
   claimedFillRatio: number,
 ): number | null => {
+  if (binary === '0x') {
+    if (claimedFillRatio === 0) return 0;
+    addMessage(state, `❌ Cross-j salvage ${routeId} empty-result ratio mismatch`);
+    return null;
+  }
   let verifiedFillRatio: number;
   try {
     verifiedFillRatio = verifyHashLadderBinary({
@@ -103,19 +104,127 @@ const resolveSalvageAccount = (
   return { accountEntityId, role };
 };
 
-export const handleCrossJurisdictionSalvageEntityTx = (
+const recordDisputeRecoveryResult = (
+  account: AccountReplica,
+  localEntityId: string,
+  route: CrossJurisdictionSwapRoute,
+  binary: string,
+): 'preparing' | 'active' | 'none' => {
+  const preparing = account.disputePrepare?.crossJurisdictionRecovery;
+  const active = account.activeDispute;
+  if (!preparing && !active) return 'none';
+  if (preparing && active) throw new Error('CROSS_J_SALVAGE_RECOVERY_PHASE_CONFLICT');
+  if (active) {
+    const localIsLeft = account.state.leftEntity === localEntityId;
+    if (localIsLeft === active.startedByLeft) {
+      throw new Error(`CROSS_J_SALVAGE_STARTER_EVIDENCE_LATE:${route.orderId}`);
+    }
+  }
+  const recovery = preparing ?? active?.crossJurisdictionRecovery;
+  if (!recovery) throw new Error(`CROSS_J_SALVAGE_RECOVERY_MISSING:${route.orderId}`);
+  const pullId = route.targetPull!.pullId;
+  if (!recovery.requiredPullIds.includes(pullId)) {
+    throw new Error(`CROSS_J_SALVAGE_DISPUTE_PULL_UNBOUND:${route.orderId}:${pullId}`);
+  }
+  const normalized = binary.toLowerCase();
+  const previous = recovery.resultsByPullId[pullId];
+  if (previous !== undefined) {
+    if (previous.toLowerCase() === normalized) return preparing ? 'preparing' : 'active';
+    throw new Error(`CROSS_J_SALVAGE_DISPUTE_PULL_CONFLICT:${pullId}`);
+  }
+  recovery.resultsByPullId = { ...recovery.resultsByPullId, [pullId]: normalized };
+  return preparing ? 'preparing' : 'active';
+};
+
+const recoveryIsComplete = (account: AccountReplica): boolean => {
+  const recovery = account.disputePrepare?.crossJurisdictionRecovery;
+  return Boolean(recovery && recovery.requiredPullIds.every(
+    (pullId) => Object.hasOwn(recovery.resultsByPullId, pullId),
+  ));
+};
+
+const recoveryHasClaim = (account: AccountReplica): boolean => {
+  const recovery = account.disputePrepare?.crossJurisdictionRecovery;
+  return Boolean(recovery?.requiredPullIds.some(
+    (pullId) => recovery.resultsByPullId[pullId] !== '0x',
+  ));
+};
+
+const applyTargetSalvageResult = async (
+  env: EntityRuntimeContext,
+  state: EntityState,
+  tx: CrossJurisdictionSalvageTx,
+  route: CrossJurisdictionSwapRoute,
+  accountEntityId: string,
+  outputs: EntityInput[],
+  storageChanges: RuntimeOverlayRecord[],
+): Promise<CrossJurisdictionSalvageResult> => {
+  // The source mirror is Runtime-private and is drained before any outbox is
+  // published. A missing sibling therefore aborts this entire Runtime input
+  // before WAL; target evidence can never commit alone.
+  outputs.push(buildCrossJurisdictionEntityOutput(
+    route.source.entityId,
+    route.sourceSignerId,
+    [tx],
+  ));
+
+  const account = state.accounts.get(accountEntityId)!;
+  const phase = recordDisputeRecoveryResult(account, state.entityId, route, tx.data.binary);
+  if (phase === 'active') {
+    addMessage(state, `🌉 Cross-j source-final result recorded for active target dispute ${route.orderId}`);
+    return { newState: state, outputs };
+  }
+  if (phase === 'none') {
+    if (tx.data.binary === '0x') return { newState: state, outputs };
+    const prepared = await handlePrepareDispute(
+      state,
+      {
+        type: 'prepareDispute',
+        data: {
+          counterpartyEntityId: accountEntityId,
+          description: `Cross-j source-final recovery ${route.orderId}`,
+          crossJurisdictionRouteId: route.orderId,
+        },
+      },
+      env,
+      storageChanges,
+      true,
+      { [route.targetPull!.pullId]: tx.data.binary },
+    );
+    return { newState: prepared.newState, outputs: [...outputs, ...prepared.outputs] };
+  }
+  if (!recoveryIsComplete(account)) return { newState: state, outputs };
+  if (!recoveryHasClaim(account)) {
+    account.status = 'active';
+    delete account.disputePrepare;
+    freezeAccountForDispute(account, false);
+    addMessage(state, '🌉 Cross-j source finality required no target dispute');
+    return { newState: state, outputs };
+  }
+  const drafted = await draftPreparedDisputeStartIfReady(
+    state,
+    accountEntityId,
+    env,
+    storageChanges,
+    true,
+  );
+  return { newState: drafted.newState, outputs: [...outputs, ...drafted.outputs] };
+};
+
+export const handleCrossJurisdictionSalvageEntityTx = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: CrossJurisdictionSalvageTx,
+  storageChanges: RuntimeOverlayRecord[] = [],
   mutableFrameState = false,
-): CrossJurisdictionSalvageResult => {
+): Promise<CrossJurisdictionSalvageResult> => {
   const { routeId, binary, fillRatio } = entityTx.data;
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const claimedFillRatio = Math.floor(Number(fillRatio) || 0);
-  if (!binary || binary === '0x' || claimedFillRatio <= 0) {
-    rejectSourceSalvageMirror(newState, entityTx, 'EMPTY_PULL');
-    addMessage(newState, `🌉 Cross-j salvage ignored for ${routeId}: empty pull args`);
+  if (!binary || claimedFillRatio < 0) {
+    rejectSourceSalvageMirror(newState, entityTx, 'INVALID_RESULT');
+    addMessage(newState, `🌉 Cross-j salvage ignored for ${routeId}: invalid result`);
     return { newState, outputs };
   }
 
@@ -138,12 +247,19 @@ export const handleCrossJurisdictionSalvageEntityTx = (
     return { newState, outputs };
   }
   const preserveSourceClaim = route.status === 'source_claimed';
-  if (!preserveSourceClaim && !isCrossJurisdictionRouteTransitionAllowed(route.status, 'clearing')) {
+  if (
+    verifiedFillRatio > 0 &&
+    !preserveSourceClaim &&
+    !isCrossJurisdictionRouteTransitionAllowed(route.status, 'clearing')
+  ) {
     rejectSourceSalvageMirror(newState, entityTx, `STATUS_${route.status}`);
     addMessage(newState, `❌ Cross-j salvage ${routeId} blocked: route ${route.status}->clearing`);
     return { newState, outputs };
   }
-  if (isCrossJurisdictionPullExpired(route, 'target', deterministicEntityTimestamp(newState, env))) {
+  if (
+    verifiedFillRatio > 0 &&
+    isCrossJurisdictionPullExpired(route, 'target', deterministicEntityTimestamp(newState, env))
+  ) {
     rejectSourceSalvageMirror(newState, entityTx, 'TARGET_PULL_EXPIRED');
     addMessage(newState, `❌ Cross-j salvage ${routeId} target pull expired`);
     return { newState, outputs };
@@ -157,43 +273,24 @@ export const handleCrossJurisdictionSalvageEntityTx = (
   const { accountEntityId, role } = resolved;
 
   const requestedAt = deterministicEntityTimestamp(newState, env);
-  if (!preserveSourceClaim) transitionCrossJurisdictionRouteStatus(route, 'clearing', requestedAt);
-  route.pendingClearRequestedAt = requestedAt;
-  newState.crossJurisdictionSwaps ||= new Map();
-  newState.crossJurisdictionSwaps.set(route.orderId, route);
+  if (verifiedFillRatio > 0) {
+    if (!preserveSourceClaim) transitionCrossJurisdictionRouteStatus(route, 'clearing', requestedAt);
+    route.pendingClearRequestedAt = requestedAt;
+    newState.crossJurisdictionSwaps ||= new Map();
+    newState.crossJurisdictionSwaps.set(route.orderId, route);
+  }
 
   if (role === 'source') {
-    addMessage(newState, `🌉 Cross-j salvage mirror committed for ${routeId}`);
+    addMessage(newState, `🌉 Cross-j source-final result mirrored for ${routeId}`);
     return { newState, outputs };
   }
-
-  // The mirror is Runtime-private and is drained before `entityOutbox` is
-  // published. If the source sibling cannot commit the same transition, the
-  // whole Runtime input aborts before WAL and the self prepare output below
-  // never escapes. Do not move prepareDispute ahead of this mirror.
-  outputs.push(buildCrossJurisdictionEntityOutput(
-    route.source.entityId,
-    route.sourceSignerId,
-    [entityTx],
-  ));
-
-  const firstValidator = entityState.config.validators[0];
-  if (!firstValidator) {
-    throw new Error(`CROSS_J_SALVAGE_SIGNER_MISSING: entity=${newState.entityId} route=${routeId}`);
-  }
-  outputs.push({
-    entityId: newState.entityId,
-    signerId: firstValidator,
-    entityTxs: [{
-      type: 'prepareDispute',
-      data: {
-        counterpartyEntityId: accountEntityId,
-        description: `Cross-j salvage prepare ${routeId} fill=${verifiedFillRatio}`,
-        crossJurisdictionRouteId: routeId,
-        starterInitialArguments: buildCrossJurisdictionStarterPullArguments(binary),
-      },
-    }],
-  });
-  addMessage(newState, `🌉 Cross-j salvage queued for ${routeId}: target dispute vs ${accountEntityId.slice(-4)}`);
-  return { newState, outputs };
+  return applyTargetSalvageResult(
+    env,
+    newState,
+    entityTx,
+    route,
+    accountEntityId,
+    outputs,
+    storageChanges,
+  );
 };

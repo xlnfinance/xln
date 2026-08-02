@@ -12,6 +12,48 @@ afterEach(async () => {
 });
 
 describe('custody withdrawal retry journal', () => {
+  test('credits distinct events that reuse a hashlock and rejects identity conflicts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'xln-custody-deposit-identity-'));
+    roots.push(root);
+    const store = new CustodyStore(join(root, 'custody.sqlite'));
+    const userId = 'deposit-user';
+    const hashlock = `0x${'09'.repeat(32)}`;
+    const base = {
+      userId,
+      tokenId: 1,
+      amountMinor: 10n,
+      description: 'deposit',
+      fromEntityId: `0x${'10'.repeat(32)}`,
+      hashlock,
+      frameHeight: 7,
+      createdAt: 100,
+    };
+    store.createSession('deposit-session', userId);
+
+    expect(store.creditDeposit({ ...base, eventKey: 'deposit:7:1' })).toEqual({
+      inserted: true,
+      credited: true,
+    });
+    expect(store.creditDeposit({ ...base, eventKey: 'deposit:7:1' })).toEqual({
+      inserted: false,
+      credited: false,
+    });
+    expect(store.creditDeposit({
+      ...base,
+      eventKey: 'deposit:8:1',
+      frameHeight: 8,
+      createdAt: 200,
+    })).toEqual({ inserted: true, credited: true });
+    expect(store.getBalanceAmount(userId, 1)).toBe(20n);
+    expect(() => store.creditDeposit({
+      ...base,
+      eventKey: 'deposit:7:1',
+      amountMinor: 11n,
+    })).toThrow('CUSTODY_DEPOSIT_EVENT_CONFLICT:deposit:7:1');
+    expect(store.getBalanceAmount(userId, 1)).toBe(20n);
+    store.close();
+  });
+
   test('binds initiation before a same-page terminal event and accepts the exact submit replay', async () => {
     const root = await mkdtemp(join(tmpdir(), 'xln-custody-initiation-race-'));
     roots.push(root);

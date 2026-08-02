@@ -2600,6 +2600,7 @@ const startHubHttpSurface = (
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
     idleTimeout: 120,
+    maxRequestBodySize: 1024 * 1024,
     async fetch(request, serverRef) {
       const releaseHttp = httpDrain.begin();
       try {
@@ -2621,6 +2622,7 @@ const startHubHttpSurface = (
       }
     },
     websocket: {
+      maxPayloadLength: directRuntimeWs.websocket.maxPayloadLength,
       open(ws: HubServerSocket) {
         if (ws.data?.type === 'rpc') {
           attachRuntimeAdapterTicker(live.env, registerEnvChangeCallback);
@@ -2898,9 +2900,7 @@ const run = async (): Promise<void> => {
   live.p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
-    preferRelayForEntityInput: true,
     advertiseEntityIds: live.hubBootstraps.map((entry) => entry.entityId),
-    isHub: true,
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
   });
   if (!live.p2p) throw new Error('P2P_START_FAILED');

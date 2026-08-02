@@ -15,6 +15,13 @@ afterEach(() => {
 });
 
 describe('operator access', () => {
+  test('does not expose authenticated Runtime presence as a public API', () => {
+    const server = readFileSync(join(process.cwd(), 'runtime/api/server/index.ts'), 'utf8');
+    const e2eReadiness = readFileSync(join(process.cwd(), 'tests/utils/e2e-connect.ts'), 'utf8');
+    expect(server).not.toContain("pathname === '/api/clients'");
+    expect(e2eReadiness).not.toContain("fetch('/api/clients'");
+  });
+
   test('persists generated capabilities with owner-only permissions', () => {
     const directory = mkdtempSync(join(tmpdir(), 'xln-operator-token-'));
     temporaryDirectories.push(directory);
@@ -91,6 +98,7 @@ describe('operator access', () => {
       '/api/debug/relay',
       '/api/debug/events',
       '/api/debug/incidents',
+      '/api/credit/request',
       '/api/runtime-import',
       '/api/control/p2p/stop',
     ]) {

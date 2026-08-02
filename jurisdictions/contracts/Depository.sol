@@ -289,14 +289,6 @@ contract Depository is ReentrancyGuardLite {
   bytes32 public constant WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR =
     keccak256("XLN_WATCHTOWER_COUNTER_DISPUTE_V1");
 
-  event BatchOperationSkipped(
-    bytes32 indexed entityId,
-    bytes32 indexed batchHash,
-    uint256 indexed nonce,
-    BatchOperationType operationType,
-    uint256 operationIndex,
-    BatchSkipReason reason
-  );
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed batchHash, uint256 nonce);
   event WatchtowerCounterDisputeExecuted(
     address indexed tower,
@@ -327,8 +319,8 @@ contract Depository is ReentrancyGuardLite {
     if (!hankoValid || entityId == bytes32(0)) revert E4();
     if (nonce != entityNonces[entityId] + 1) revert E2();
     entityNonces[entityId] = nonce;
-    completeSuccess = _processBatch(entityId, batch, batchHash, nonce);
-    if (!completeSuccess) revert E4();
+    _processBatch(entityId, batch);
+    completeSuccess = true;
     emit HankoBatchProcessed(entityId, batchHash, nonce);
   }
 
@@ -479,12 +471,7 @@ contract Depository is ReentrancyGuardLite {
     if (reserveToCollateralPairs > MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL) revert E10();
   }
 
-  function _processBatch(
-    bytes32 entityId,
-    Batch memory batch,
-    bytes32 batchHash,
-    uint256 nonce
-  ) private returns (bool completeSuccess) {
+  function _processBatch(bytes32 entityId, Batch memory batch) private {
     // SECURITY FIX: Aggregate flashloans by tokenId (prevent duplicate tokenId exploit)
     uint256[] memory flashloanTokenIds = new uint256[](batch.flashloans.length);
     uint256[] memory flashloanStarting = new uint256[](batch.flashloans.length);
@@ -521,8 +508,6 @@ contract Depository is ReentrancyGuardLite {
     // the order is important: first go methods that increase entity's balance
     // then methods that deduct from it
 
-    completeSuccess = true;
-
     // Process external token deposits (increases reserves).
     // params.entity == 0 means "credit batch initiator"; otherwise the
     // signer explicitly authorises depositing into another entity reserve.
@@ -536,9 +521,7 @@ contract Depository is ReentrancyGuardLite {
 
     // Process reserveToReserve transfers (the core functionality we need)
     for (uint i = 0; i < batch.reserveToReserve.length; i++) {
-      if (!_reserveToReserve(entityId, batch.reserveToReserve[i])) {
-        _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.ReserveToReserve, i);
-      }
+      if (!_reserveToReserve(entityId, batch.reserveToReserve[i])) revert E3();
     }
 
     // C2R shortcut: direct processing (no Settlement[] allocation)
@@ -547,9 +530,7 @@ contract Depository is ReentrancyGuardLite {
       BatchItemResult c2rResult =
         Account.processC2R(_reserves, _accounts, _collaterals, entityId, batch.collateralToReserve[i], entityProvider);
       if (c2rResult == BatchItemResult.InvalidSignature) revert E4();
-      if (c2rResult == BatchItemResult.InsufficientBalance) {
-        _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.CollateralToReserve, i);
-      }
+      if (c2rResult == BatchItemResult.InsufficientBalance) revert E3();
     }
 
     // Delegate settlement diffs to Account library, handle debt forgiveness in Depository
@@ -567,10 +548,7 @@ contract Depository is ReentrancyGuardLite {
       // Handle debt forgiveness (not in Account due to stack limits)
       for (uint i = 0; i < batch.settlements.length; i++) {
         if (settlementResults[i] == BatchItemResult.InvalidSignature) revert E4();
-        if (settlementResults[i] == BatchItemResult.InsufficientBalance) {
-          _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.Settlement, i);
-          continue;
-        }
+        if (settlementResults[i] == BatchItemResult.InsufficientBalance) revert E3();
         Settlement memory s = batch.settlements[i];
         for (uint j = 0; j < s.forgiveDebtsInTokenIds.length; j++) {
           uint tokenId = s.forgiveDebtsInTokenIds[j];
@@ -582,7 +560,7 @@ contract Depository is ReentrancyGuardLite {
 
     if (batch.disputeStarts.length > 0) {
       if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
-        completeSuccess = false;
+        revert E4();
       }
     }
 
@@ -600,17 +578,13 @@ contract Depository is ReentrancyGuardLite {
     }
 
     for (uint i = 0; i < batch.reserveToCollateral.length; i++) {
-      if(!(_reserveToCollateral(entityId, batch.reserveToCollateral[i]))){
-        _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.ReserveToCollateral, i);
-      }
+      if (!_reserveToCollateral(entityId, batch.reserveToCollateral[i])) revert E3();
     }
 
     // Process external token withdrawals (decreases reserves)
     // Security: batch initiator can only withdraw from their own reserves
     for (uint i = 0; i < batch.reserveToExternalToken.length; i++) {
-      if (!_reserveToExternalToken(entityId, batch.reserveToExternalToken[i])) {
-        _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.ReserveToExternalToken, i);
-      }
+      if (!_reserveToExternalToken(entityId, batch.reserveToExternalToken[i])) revert E3();
     }
 
     // SECURITY FIX: Check aggregated flashloan return + burn
@@ -628,25 +602,6 @@ contract Depository is ReentrancyGuardLite {
       if (_reserves[entityId][tid] < flashloanStarting[j]) revert E3(); // Reserve decreased
     }
 
-    return completeSuccess;
-
-  }
-
-  function _emitInsufficientBalanceSkip(
-    bytes32 entityId,
-    bytes32 batchHash,
-    uint256 nonce,
-    BatchOperationType operationType,
-    uint256 operationIndex
-  ) private {
-    emit BatchOperationSkipped(
-      entityId,
-      batchHash,
-      nonce,
-      operationType,
-      operationIndex,
-      BatchSkipReason.InsufficientBalance
-    );
   }
 
   // MessageType enum is in Types.sol

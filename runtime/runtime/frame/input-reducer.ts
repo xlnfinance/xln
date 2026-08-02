@@ -157,13 +157,15 @@ const logAtomicCrossJCommit = (
   if (prepared.pairs.length === 0) return;
   runtimeLog.info('crossj.atomic_pair_commit', {
     pairCount: prepared.pairs.length,
-    outcomes: batch.inputOutcomes.map(({ outcome }, inputIndex) => ({
+    outcomeCount: batch.inputOutcomes.length,
+    outcomes: batch.inputOutcomes.slice(0, 8).map(({ outcome }, inputIndex) => ({
       inputIndex,
       entityId: prepared.inputs[inputIndex]?.entityId ?? 'missing',
       kind: outcome.kind,
     })),
+    outputCount: batch.entityOutbox.length,
     outputSummary: safeStringify(
-      batch.entityOutbox.map((output, outputIndex) => ({
+      batch.entityOutbox.slice(0, 8).map((output, outputIndex) => ({
         outputIndex,
         ...summarizeAtomicCrossJAccountInput(output, outputIndex),
       })),
@@ -209,17 +211,25 @@ const applyRuntimeEntityBatch = async (
   const rejectedIndexes = new Set(
     batch.rejectedAtomicPairs.flatMap(rejection => rejection.inputIndexes),
   );
+  type AtomicRejection = (typeof batch.rejectedAtomicPairs)[number];
+  const rejectionGroups = new Map<AtomicRejection['code'], AtomicRejection[]>();
   for (const rejection of batch.rejectedAtomicPairs) {
-    env.warn('network', rejection.code, {
-      rejectedInputIndexes: rejection.inputIndexes,
-      detail: rejection.detail,
+    const group = rejectionGroups.get(rejection.code) ?? [];
+    group.push(rejection);
+    rejectionGroups.set(rejection.code, group);
+  }
+  for (const [code, rejections] of rejectionGroups) {
+    const inputIndexes = rejections.flatMap(rejection => rejection.inputIndexes);
+    env.warn('network', code, {
+      rejectedPairCount: rejections.length,
+      rejectedInputCount: inputIndexes.length,
+      rejectedInputIndexes: inputIndexes.slice(0, 8),
+      detail: rejections[0]?.detail ?? code,
     });
     recordRejectedAtomicCrossJInputs(
       env,
-      prepared.inputs,
-      rejection.inputIndexes,
-      rejection.code,
-      rejection.detail,
+      code,
+      rejections[0]?.detail ?? code,
     );
   }
   const accepted = {

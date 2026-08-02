@@ -1999,6 +1999,8 @@ describe('orderbook matching fallback execution mapping', () => {
       fillSeq: 1,
       cumulativeFillRatio: 16_384,
       claimedRatio: 16_384,
+      fillNumerator: 1n,
+      fillDenominator: 4n,
       filledSourceAmount,
       filledTargetAmount,
       sourceClaimed: filledSourceAmount,
@@ -2193,7 +2195,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(result.bookUpdates.find(update => update.pairId === pairId)).toBeUndefined();
   });
 
-  test('fails fast when cross-j trade cannot produce a monotonic fill ack', () => {
+  test('fails fast when prior cross-j progress lacks an exact ratio', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 1_000_000n * lot;
     const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, ORDERBOOK_PRICE_SCALE);
@@ -2328,7 +2330,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     expect(() => processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any)).toThrow(
-      'ORDERBOOK_CROSS_J_FILL_ACK_MISSING',
+      'CROSS_J_EXACT_FILL_RATIO_REQUIRED',
     );
     expect(getBookOrder(book, makerOrderId)?.qtyLots).toBe(makerQtyLots);
   });

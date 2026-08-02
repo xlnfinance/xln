@@ -12,6 +12,10 @@ import {
   runNumberedRegistrationIntent,
   submitNumberedRegistrationIntent,
 } from '../runtime/registration/numbered-registration-intent';
+import {
+  assertNumberedRegistrationDriverActive,
+  ensurePendingNumberedRegistrationsResumed,
+} from '../runtime/registration/numbered-registration-driver';
 import { markLocalNumberedRegistrationTx } from '../runtime/registration/numbered-registration-auth';
 import { createJAdapter } from '../jurisdiction/adapter';
 import { closeInfraDb, closeRuntimeDb, createEmptyEnv, loadEnvFromDB } from '../runtime';
@@ -54,6 +58,177 @@ const attach = (
 };
 
 describe('durable numbered registration intent', () => {
+  test('all registration waits fail immediately after the Runtime halts', () => {
+    const env = createEmptyEnv('numbered-registration:halted-wait');
+    env.infrastructure ??= {};
+    env.infrastructure.halted = true;
+
+    expect(() => assertNumberedRegistrationDriverActive(env, 'NUMBERED_REGISTRATION_EVIDENCE'))
+      .toThrow('NUMBERED_REGISTRATION_EVIDENCE_RUNTIME_HALTED');
+  });
+
+  test('startup resume deduplicates only concurrent scans and permits a later rescan', async () => {
+    const env = createEmptyEnv('numbered-registration:resume-lifecycle');
+    const first = ensurePendingNumberedRegistrationsResumed(env);
+    const concurrent = ensurePendingNumberedRegistrationsResumed(env);
+
+    expect(concurrent).toBe(first);
+    await first;
+    expect(env.infrastructure?.numberedRegistrationDriver?.resumeRun).toBeNull();
+
+    const later = ensurePendingNumberedRegistrationsResumed(env);
+    expect(later).not.toBe(first);
+    await later;
+  });
+
+  test('a mined revert is durably quarantined and never rebroadcast', async () => {
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31_338 });
+    try {
+      const env = createEmptyEnv('numbered-registration:mined-revert');
+      setScenarioStorageEnabled(env, false);
+      env.scenarioMode = true;
+      env.quietRuntimeLogs = true;
+      if (!env.runtimeId || !adapter.fundSignerWallet) throw new Error('REGISTRATION_INTENT_TEST_SETUP_INVALID');
+      const jurisdiction: JurisdictionConfig = {
+        name: 'RegistrationMinedRevert',
+        address: 'browservm://registration-mined-revert',
+        chainId: adapter.chainId,
+        depositoryAddress: adapter.addresses.depository,
+        entityProviderAddress: adapter.addresses.entityProvider,
+      };
+      attach(env, adapter, jurisdiction);
+      adapter.startWatching(env);
+      await adapter.fundSignerWallet(env.runtimeId);
+      const request = buildNumberedRegistrationRequest(env, {
+        intentId: ethers.id('numbered-registration:mined-revert'),
+        jurisdiction,
+        payerSignerId: env.runtimeId,
+        entities: [{ name: 'reverted', validators: [env.runtimeId], threshold: 1n, localSignerId: null }],
+      });
+      const pending = await prepareNumberedRegistrationIntent(env, adapter, request, async prepared => {
+        await commitRuntimeInput(env, {
+          runtimeTxs: [markLocalNumberedRegistrationTx({ type: 'recordNumberedRegistrationIntent', data: prepared })],
+          entityInputs: [],
+        });
+        return 'accepted';
+      });
+      const blockHash = `0x${'ab'.repeat(32)}`;
+      const receipt = spyOn(adapter.provider, 'getTransactionReceipt').mockImplementation(async () => ({
+        hash: pending.transactionHash,
+        status: 0,
+        blockNumber: 44,
+        blockHash,
+      }) as never);
+      const finalityDepth = spyOn(adapter, 'getFinalityDepth').mockReturnValue(2);
+      const waitForFinality = spyOn(adapter.provider, 'waitForTransaction').mockResolvedValue({
+        hash: pending.transactionHash,
+        status: 0,
+        blockNumber: 44,
+        blockHash,
+      } as never);
+      const broadcast = spyOn(adapter.provider, 'broadcastTransaction');
+      let drained = false;
+
+      await expect(runNumberedRegistrationIntent(
+        env,
+        adapter,
+        request,
+        async runtimeTxs => {
+          await commitRuntimeInput(env, { runtimeTxs, entityInputs: [] });
+          return 'accepted';
+        },
+        async () => {
+          drained = true;
+        },
+      )).rejects.toThrow('NUMBERED_REGISTRATION_MINED_REVERT');
+      expect(getNumberedRegistrationRecord(env, request.intentId)).toMatchObject({
+        status: 'quarantined',
+        reason: `mined_revert:status=0:blockNumber=44:blockHash=${blockHash}`,
+      });
+      expect([broadcast.mock.calls.length, drained]).toEqual([0, false]);
+      expect(waitForFinality.mock.calls).toEqual([[
+        pending.transactionHash,
+        3,
+        15 * 60 * 1_000,
+      ]]);
+      receipt.mockRestore();
+      waitForFinality.mockRestore();
+      finalityDepth.mockRestore();
+    } finally {
+      await adapter.close();
+    }
+  }, 30_000);
+
+  test('an unfinalized pending nonce never quarantines a durable intent', async () => {
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31_338 });
+    try {
+      const env = createEmptyEnv('numbered-registration:pending-replacement');
+      if (!env.runtimeId || !adapter.fundSignerWallet) throw new Error('REGISTRATION_INTENT_TEST_SETUP_INVALID');
+      const jurisdiction: JurisdictionConfig = {
+        name: 'RegistrationPendingReplacement',
+        address: 'browservm://registration-pending-replacement',
+        chainId: adapter.chainId,
+        depositoryAddress: adapter.addresses.depository,
+        entityProviderAddress: adapter.addresses.entityProvider,
+      };
+      attach(env, adapter, jurisdiction);
+      adapter.startWatching(env);
+      await adapter.fundSignerWallet(env.runtimeId);
+      const request = buildNumberedRegistrationRequest(env, {
+        intentId: ethers.id('numbered-registration:pending-replacement'),
+        jurisdiction,
+        payerSignerId: env.runtimeId,
+        entities: [{ name: 'pending', validators: [env.runtimeId], threshold: 1n, localSignerId: null }],
+      });
+      const pending = await prepareNumberedRegistrationIntent(env, adapter, request, async prepared => {
+        env.infrastructure ??= {};
+        env.infrastructure.numberedRegistrationIntents = new Map([[request.intentId, prepared]]);
+        return 'accepted';
+      });
+      const receipt = spyOn(adapter.provider, 'getTransactionReceipt').mockResolvedValue(null);
+      const transaction = spyOn(adapter.provider, 'getTransaction').mockResolvedValue(null);
+      const waitForTransaction = spyOn(adapter.provider, 'waitForTransaction').mockResolvedValue(null);
+      transaction.mockResolvedValueOnce({ hash: pending.transactionHash } as never);
+      const broadcastBeforeTimeout = spyOn(adapter.provider, 'broadcastTransaction');
+      await expect(submitNumberedRegistrationIntent(adapter, pending))
+        .rejects.toThrow('NUMBERED_REGISTRATION_RECEIPT_WAIT_TIMEOUT');
+      expect(waitForTransaction.mock.calls).toEqual([[
+        pending.transactionHash,
+        1,
+        15 * 60 * 1_000,
+      ]]);
+      expect(broadcastBeforeTimeout.mock.calls).toHaveLength(0);
+      broadcastBeforeTimeout.mockRestore();
+      waitForTransaction.mockRestore();
+      const finalityDepth = spyOn(adapter, 'getFinalityDepth').mockReturnValue(2);
+      const blockNumber = spyOn(adapter.provider, 'getBlockNumber').mockResolvedValue(100);
+      const transactionCount = spyOn(adapter.provider, 'getTransactionCount').mockImplementation(
+        async (_address, blockTag) => blockTag === 'pending'
+          ? pending.transactionNonce + 1
+          : pending.transactionNonce,
+      );
+      const broadcast = spyOn(adapter.provider, 'broadcastTransaction').mockRejectedValue(
+        new Error('replacement transaction underpriced'),
+      );
+
+      await expect(submitNumberedRegistrationIntent(adapter, pending))
+        .rejects.toThrow('replacement transaction underpriced');
+      expect(transactionCount.mock.calls).toEqual([[request.payerSignerId, 98]]);
+      expect(broadcast.mock.calls).toHaveLength(1);
+      expect(getNumberedRegistrationRecord(env, request.intentId)?.status).toBe('pending');
+
+      receipt.mockRestore();
+      transaction.mockRestore();
+      finalityDepth.mockRestore();
+      blockNumber.mockRestore();
+      transactionCount.mockRestore();
+      broadcast.mockRestore();
+    } finally {
+      if (adapter.isWatching()) await adapter.stopWatchingAndWait();
+      await adapter.close();
+    }
+  }, 30_000);
+
   test('cold WAL replay validates a pending signed intent before live adapter rehydration', async () => {
     const seed = `numbered-registration:cold-wal-replay:${process.pid}`;
     const env = createEmptyEnv(seed);

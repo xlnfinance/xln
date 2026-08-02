@@ -149,7 +149,6 @@ exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
   --rpc-url "$ANVIL_RPC" \
   --rpc2-url "$ANVIL_RPC2" \
   --db-root "$XLN_MESH_DB_ROOT" \
-  --allow-reset \
   --mm \
   --custody \
   --custody-port "$XLN_MESH_CUSTODY_PORT" \

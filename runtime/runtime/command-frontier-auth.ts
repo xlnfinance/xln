@@ -21,6 +21,12 @@ export const copyLocalRuntimeAdapterCommandAuthorization = (
   ) markLocalRuntimeAdapterCommandTx(target);
 };
 
+export const markRestoredRuntimeAdapterCommandTxs = (runtimeTxs: RuntimeTx[]): void => {
+  for (const tx of runtimeTxs) {
+    if (tx.type === 'recordRuntimeAdapterCommand') markLocalRuntimeAdapterCommandTx(tx);
+  }
+};
+
 export const assertRuntimeAdapterCommandTxAuthorized = (
   tx: RuntimeTx,
   replay: boolean,

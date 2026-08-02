@@ -18,6 +18,7 @@ import {
 } from '../extensions/cross-j';
 import { recordRuntimeSecurityIncident } from './security-incidents';
 import { assertInboundCrossJRuntimeTopology } from './cross-j-topology';
+import { assertRuntimeEntityInputsEnvelopeSource } from './entity-input-envelope-auth';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
@@ -1165,11 +1166,7 @@ const validateEntityInputsEnvelopeHeader = (
   atomicPair: AtomicCrossJPair | undefined;
   rawIntent: CrossJIntent | undefined;
 } => {
-  const sourceRuntimeId = normalizeRuntimeId(envelope?.sourceRuntimeId);
-  const transportSource = normalizeRuntimeId(from);
-  if (!sourceRuntimeId || sourceRuntimeId !== transportSource) {
-    throw new Error('INBOUND_ENTITY_INPUTS_SOURCE_RUNTIME_MISMATCH');
-  }
+  const authenticated = assertRuntimeEntityInputsEnvelopeSource(env, from, envelope);
   if (
     !Number.isSafeInteger(envelope.sourceRuntimeHeight) || envelope.sourceRuntimeHeight < 0 ||
     !Number.isSafeInteger(envelope.sourceRuntimeTimestamp) || envelope.sourceRuntimeTimestamp < 0
@@ -1194,8 +1191,8 @@ const validateEntityInputsEnvelopeHeader = (
     throw new Error('INBOUND_ENTITY_INPUTS_EMPTY');
   }
   return {
-    transportSource,
-    localRuntimeId: normalizeRuntimeId(env.runtimeId),
+    transportSource: authenticated.sourceRuntimeId,
+    localRuntimeId: authenticated.localRuntimeId,
     atomicPair,
     rawIntent,
   };
@@ -1278,7 +1275,7 @@ const appendCrossJurisdictionIntentInput = (
       code: 'CROSS_J_INTENT_ORDER_ID_CONFLICT',
       source: 'remote-ingress',
       severity: 'warning',
-      summary: 'A repeated unsigned cross-j intent reused an orderId with different immutable terms',
+      summary: 'A repeated source-authenticated cross-j intent reused an orderId with different immutable terms',
       entityId: sourceHubEntityId,
       routeHash: route.routeHash || '',
     });
@@ -1362,14 +1359,14 @@ export const routeInboundP2PEntityInputs = (
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeEntityRoutingDeps,
-  ingressTimestamp?: number,
+  _ingressTimestamp?: number,
   options: RuntimeInboundEntityInputOptions = {},
 ): RuntimeInboundEntityInputsResult => {
   // Validate the complete envelope before appending any bytes. Reliable
   // registration is deferred to the isolated Runtime frame for atomic rollback.
   const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps, options);
   if (inputs.length > 0) {
-    deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp, options);
+    deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, envelope.sourceRuntimeTimestamp, options);
     env.info('network', 'INBOUND_ENTITY_INPUTS', {
       fromRuntimeId: from,
       sourceRuntimeHeight: envelope.sourceRuntimeHeight,

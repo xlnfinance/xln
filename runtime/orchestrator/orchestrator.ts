@@ -19,7 +19,6 @@ import {
 import {
   clearDebugTimeline,
   createRelayStore,
-  clearPendingMessages,
   normalizeRuntimeKey,
   pushDebugEvent,
   removeClient,
@@ -28,7 +27,7 @@ import {
 import { openRelayIncidentJournal } from '../network/relay/incident-journal';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../network/relay/router';
 import { closeRelayClientsForReset } from '../network/relay/reset';
-import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsMaxMessageBytes, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
 import { type MarketSnapshotPayload } from '../network/relay/market-snapshot';
 import { createMarketSubscriptionStack } from '../network/relay/market-subscriptions';
@@ -247,12 +246,13 @@ const relayAudiences = new Set([
 const resolveRelayUpgradeData = (
   request: Request,
   url: URL,
+  peerAddress: string | null,
 ): OrchestratorWebSocket['data'] | null => {
   const type = resolveOrchestratorSocketType(url.searchParams.get('protocol'));
   const audience = canonicalizeRuntimeWsAudience(request.url);
   // Host is caller-controlled; it selects only among operator-configured URLs.
   if (type === 'relay' && !relayAudiences.has(audience)) return null;
-  return { type, audience, clientIp: resolveRequestClientIp(request) };
+  return { type, audience, clientIp: resolveRequestClientIp(request, peerAddress) };
 };
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
@@ -673,7 +673,6 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
 
 const clearRelayState = (): void => {
   closeRelayClientsForReset(relayStore);
-  clearPendingMessages(relayStore);
   relayStore.gossipProfiles.clear();
   relayStore.runtimeEncryptionKeys.clear();
   relayStore.activeHubEntityIds = [];
@@ -2614,6 +2613,7 @@ const handleRuntimeImportRequest = async (
 const handleResetRequest = async (
   request: Request,
   pathname: string,
+  operatorAuthorized: boolean,
   headers: Record<string, string>,
 ): Promise<Response | null> => {
   if (pathname !== '/api/reset' || request.method !== 'POST') return null;
@@ -2623,6 +2623,7 @@ const handleResetRequest = async (
       .catch(() => null) as OrchestratorResetBody | null;
     assertOrchestratorResetAllowed(request, body, {
       resetAllowed: args.resetAllowed,
+      operatorAuthorized,
       bindHost: args.host,
       resetToken: args.resetToken,
     });
@@ -2720,6 +2721,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
   hostname: args.host,
   port: args.port,
   idleTimeout: 120,
+  maxRequestBodySize: 1024 * 1024,
   async fetch(request, serverRef) {
     const releaseHttp = httpDrain.begin();
     try {
@@ -2743,7 +2745,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     if (assistantResponse) return assistantResponse;
 
     if (request.headers.get('upgrade') === 'websocket' && pathname === '/relay') {
-      const socketData = resolveRelayUpgradeData(request, url);
+      const socketData = resolveRelayUpgradeData(request, url, resolveSocketPeerAddress(serverRef, request));
       if (!socketData) {
         return new Response('WebSocket audience not configured', { status: 400 });
       }
@@ -2832,6 +2834,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     const resetResponse = await handleResetRequest(
       request,
       pathname,
+      operatorAuthorized,
       headers,
     );
     if (resetResponse) return resetResponse;
@@ -2864,6 +2867,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
     }
   },
   websocket: {
+    maxPayloadLength: resolveRuntimeWsMaxMessageBytes(),
     open(ws) {
       const relayWs = ws;
       if (relayWs.data.type === 'relay') relayHelloChallenges.issue(relayWs, relayWs.data.audience);

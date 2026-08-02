@@ -7,9 +7,7 @@ import { Level } from 'level';
 import { pruneHistoryViewRetention } from '../storage/history-view';
 import {
   keyHistoryViewAccountFrame,
-  keyHistoryViewAccountFrameByRuntime,
   keyHistoryViewEntityFrame,
-  keyHistoryViewEntityFrameByRuntime,
   keyHistoryViewRuntimeActivity,
   STORAGE_SCHEMA_VERSION,
 } from '../storage/keys';
@@ -116,14 +114,10 @@ describe('independent frame history retention', () => {
     });
     const accountFrameKey = keyHistoryViewAccountFrame(entityId, counterpartyId, 1);
     const entityFrameKey = keyHistoryViewEntityFrame(entityId, 1);
-    const accountRuntimeIndex = keyHistoryViewAccountFrameByRuntime(1, entityId, counterpartyId, 1);
-    const entityRuntimeIndex = keyHistoryViewEntityFrameByRuntime(1, entityId, 1);
     await db.batch()
       .put(keyHistoryViewRuntimeActivity(1), Buffer.from('runtime-activity'))
       .put(accountFrameKey, Buffer.from('account-frame'))
       .put(entityFrameKey, Buffer.from('entity-frame'))
-      .put(accountRuntimeIndex, Buffer.alloc(0))
-      .put(entityRuntimeIndex, Buffer.alloc(0))
       .write();
 
     await pruneHistoryViewRetention({
@@ -141,8 +135,6 @@ describe('independent frame history retention', () => {
     });
 
     expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(1))).toBeNull();
-    expect(await readRawOrNull(db, accountRuntimeIndex)).toBeNull();
-    expect(await readRawOrNull(db, entityRuntimeIndex)).toBeNull();
     expect(await readRawOrNull(db, accountFrameKey)).toEqual(Buffer.from('account-frame'));
     expect(await readRawOrNull(db, entityFrameKey)).toEqual(Buffer.from('entity-frame'));
     await db.close();

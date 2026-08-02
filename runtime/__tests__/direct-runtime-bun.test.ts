@@ -244,10 +244,13 @@ describe('direct runtime websocket route', () => {
     const clientSeed = 'direct-debug-client';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
     const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const received: unknown[] = [];
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      onEntityInputs: () => {},
+      onEntityInputs: (_from, envelope) => {
+        received.push(envelope);
+      },
     });
     const { ws, sent } = makeFakeWs();
     route.websocket.open(ws);
@@ -301,6 +304,7 @@ describe('direct runtime websocket route', () => {
     };
     const outboundEnvelope: RuntimeEntityInputsEnvelope = {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 7,
       sourceRuntimeTimestamp: 123,
       entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
@@ -332,6 +336,7 @@ describe('direct runtime websocket route', () => {
     };
     const inboundEnvelope: RuntimeEntityInputsEnvelope = {
       sourceRuntimeId: clientRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 9,
       sourceRuntimeTimestamp: 456,
       entityInputs: [inboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
@@ -444,6 +449,7 @@ describe('direct runtime websocket route', () => {
       encrypted: false,
       payload: {
         sourceRuntimeId: clientRuntimeId,
+        sourceSignature: `0x${'11'.repeat(65)}`,
         sourceRuntimeHeight: 9,
         sourceRuntimeTimestamp: 456,
         entityInputs: [{
@@ -489,6 +495,7 @@ describe('direct runtime websocket route', () => {
       encrypted: true,
       payload: encryptJSON({
         sourceRuntimeId: clientRuntimeId,
+        sourceSignature: `0x${'11'.repeat(65)}`,
         sourceRuntimeHeight: -1,
         sourceRuntimeTimestamp: 456,
         entityInputs: [],
@@ -615,15 +622,18 @@ describe('direct runtime websocket route', () => {
     expect(route.getSessionState()).toEqual([]);
   });
 
-  test('rejects duplicate runtime hello without displacing the live socket', async () => {
+  test('a fresh authenticated hello atomically replaces a stale direct socket', async () => {
     const serverSeed = 'direct-route-server-duplicate';
     const clientSeed = 'direct-route-client-duplicate';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
     const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const received: unknown[] = [];
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      onEntityInputs: () => {},
+      onEntityInputs: (_from, envelope) => {
+        received.push(envelope);
+      },
     });
 
     const first = makeFakeWs();
@@ -634,10 +644,10 @@ describe('direct runtime websocket route', () => {
     await route.websocket.message(first.ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
     await route.websocket.message(second.ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
 
-    expect(first.ws.readyState).toBe(1);
-    expect(second.ws.readyState).toBe(3);
-    expect(second.closed.at(-1)).toEqual({ code: 4009, reason: 'duplicate-runtime' });
-    expect(second.sent).toEqual([]);
+    expect(first.ws.readyState).toBe(3);
+    expect(second.ws.readyState).toBe(1);
+    expect(first.closed.at(-1)).toEqual({ code: 4009, reason: 'session-replaced' });
+    expect(second.sent.at(-1)?.type).toBe('hello_ack');
     expect(route.getSessionState()).toEqual([
       expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
     ]);
@@ -650,6 +660,7 @@ describe('direct runtime websocket route', () => {
     };
     expect(route.sendEntityInputsDelivery(clientRuntimeId, {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 1,
       sourceRuntimeTimestamp: 1,
       entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
@@ -657,8 +668,12 @@ describe('direct runtime websocket route', () => {
       outcome: 'delivered',
       code: 'ROUTE_DIRECT_DELIVERED',
     });
-    expect(first.sent.at(-1)?.type).toBe('entity_inputs');
-    expect(second.sent).toEqual([]);
+    expect(second.sent.at(-1)?.type).toBe('entity_inputs');
+    const firstSentCount = first.sent.length;
+    first.ws.readyState = 1;
+    await route.websocket.message(first.ws, 'late-frame-from-replaced-socket');
+    expect(first.sent).toHaveLength(firstSentCount);
+    expect(received).toEqual([]);
   });
 
   test('reports typed miss delivery when target direct socket is absent', () => {
@@ -679,6 +694,7 @@ describe('direct runtime websocket route', () => {
 
     expect(route.sendEntityInputsDelivery(targetRuntimeId, {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 1,
       sourceRuntimeTimestamp: 1,
       entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
@@ -706,6 +722,7 @@ describe('direct runtime websocket route', () => {
     await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
     const envelope: RuntimeEntityInputsEnvelope = {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 1,
       sourceRuntimeTimestamp: 1,
       entityInputs: [{
@@ -771,6 +788,7 @@ describe('direct runtime websocket route', () => {
 
     const delivery = route.sendEntityInputsDelivery(clientRuntimeId, {
       sourceRuntimeId: serverRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
       sourceRuntimeHeight: 1,
       sourceRuntimeTimestamp: 1,
       entityInputs: [{

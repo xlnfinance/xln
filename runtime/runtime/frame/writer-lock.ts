@@ -20,6 +20,29 @@ const waitForCommittedReaders = async (
   }
 };
 
+const queueFrameWriter = (state: RuntimeLifecycleState): void => {
+  if (!state.frameWritersDrained) {
+    let resolve!: () => void;
+    state.frameWritersDrained = new Promise<void>(done => {
+      resolve = done;
+    });
+    state.resolveFrameWritersDrained = resolve;
+  }
+  state.queuedFrameWriters = (state.queuedFrameWriters ?? 0) + 1;
+};
+
+const resolveFrameWriterGateIfIdle = (state: RuntimeLifecycleState): void => {
+  if ((state.queuedFrameWriters ?? 0) > 0 || state.processingPromise) return;
+  state.resolveFrameWritersDrained?.();
+  state.frameWritersDrained = null;
+  state.resolveFrameWritersDrained = null;
+};
+
+const finishFrameWriterQueueEntry = (state: RuntimeLifecycleState): void => {
+  state.queuedFrameWriters = Math.max(0, (state.queuedFrameWriters ?? 1) - 1);
+  resolveFrameWriterGateIfIdle(state);
+};
+
 /**
  * Hold a stable committed view across asynchronous API/storage reads.
  *
@@ -33,7 +56,9 @@ export const acquireRuntimeCommittedRead = async (
   // The barrier belongs to the live Runtime replica. A detached fallback
   // object would let a writer miss an already-active reader on a fresh Runtime.
   const state = ensureRuntimeInfrastructure(env);
-  while (state.processingPromise) await state.processingPromise;
+  while (state.frameWritersDrained || state.processingPromise) {
+    await (state.frameWritersDrained ?? state.processingPromise!);
+  }
   if (state.stateMutationInFlight) {
     throw new Error('RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED');
   }
@@ -87,23 +112,37 @@ export const withRuntimeCommittedRead = async <T>(
 export const acquireRuntimeFrameWriter = async (
   state: RuntimeLifecycleState,
 ): Promise<() => void> => {
-  for (;;) {
-    assertRuntimeWriterAcceptingIngress(state);
-    while (state.processingPromise) await state.processingPromise;
-    if ((state.activeCommittedReaders ?? 0) === 0) break;
-    await waitForCommittedReaders(state);
-    // Several writers may have awaited the same reader drain. Loop back so
-    // only the first installs processingPromise; every other writer queues
-    // behind it instead of overwriting its ownership token.
-  }
-  assertRuntimeWriterAcceptingIngress(state);
-
-  let unlock!: () => void;
-  state.processingPromise = new Promise<void>(resolve => {
-    unlock = resolve;
-  });
-  return () => {
-    state.processingPromise = null;
-    unlock();
+  queueFrameWriter(state);
+  let queueEntryFinished = false;
+  const finishQueueEntry = (): void => {
+    if (queueEntryFinished) return;
+    queueEntryFinished = true;
+    finishFrameWriterQueueEntry(state);
   };
+  try {
+    for (;;) {
+      assertRuntimeWriterAcceptingIngress(state);
+      while (state.processingPromise) await state.processingPromise;
+      if ((state.activeCommittedReaders ?? 0) === 0) break;
+      await waitForCommittedReaders(state);
+      // Several writers may have awaited the same reader drain. Loop back so
+      // only the first installs processingPromise; every other writer queues
+      // behind it instead of overwriting its ownership token.
+    }
+    assertRuntimeWriterAcceptingIngress(state);
+
+    let unlock!: () => void;
+    state.processingPromise = new Promise<void>(resolve => {
+      unlock = resolve;
+    });
+    finishQueueEntry();
+    return () => {
+      state.processingPromise = null;
+      unlock();
+      resolveFrameWriterGateIfIdle(state);
+    };
+  } catch (error) {
+    finishQueueEntry();
+    throw error;
+  }
 };

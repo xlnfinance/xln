@@ -5,8 +5,6 @@ import {
   classifyRelayDeliveryEvent,
   clearDebugTimeline,
   createRelayStore,
-  deliverPendingMessages,
-  enqueueMessage,
   pushDebugEvent,
   setDebugIncidentState,
   storeVerifiedGossipProfile,
@@ -18,20 +16,6 @@ import {
   certifySingleSignerProfileFixture,
   deriveSingleSignerFixtureEntityId,
 } from './helpers/cryptographic-profile';
-
-const asRecords = (items: unknown[]): Array<Record<string, unknown>> => items as Array<Record<string, unknown>>;
-
-const drainPendingMessages = (
-  store: ReturnType<typeof createRelayStore>,
-  runtimeId: string,
-): unknown[] => {
-  const delivered: unknown[] = [];
-  deliverPendingMessages(store, runtimeId, message => {
-    delivered.push(message);
-    return true;
-  });
-  return delivered;
-};
 
 test('websocket send result classifier covers the complete server/client matrix', () => {
   const matrix = [
@@ -143,114 +127,6 @@ const makeProfile = (suffix: string, updatedAt = 1): Profile => {
   });
   return certifySingleSignerProfileFixture(profile, signingSeed);
 };
-
-test('relay pending queue enforces total bytes and target caps', () => {
-  const store = createRelayStore('relay-test', {
-    pendingLimits: {
-      maxPerTarget: 2,
-      maxTargets: 2,
-      maxTotalBytes: 90,
-    },
-  });
-
-  expect(enqueueMessage(store, 'runtime-a', { n: 1, payload: 'aaaaa' })).toBe(1);
-  expect(enqueueMessage(store, 'runtime-a', { n: 2, payload: 'bbbbb' })).toBe(2);
-  expect(enqueueMessage(store, 'runtime-a', { n: 3, payload: 'ccccc' })).toBe(2);
-  expect(asRecords(drainPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2, 3]);
-  expect(store.pendingMessageBytes).toBe(0);
-
-  enqueueMessage(store, 'runtime-a', { payload: 'x'.repeat(20) });
-  enqueueMessage(store, 'runtime-b', { payload: 'y'.repeat(20) });
-  expect(enqueueMessage(store, 'runtime-c', { payload: 'z'.repeat(20) })).toBe(0);
-  expect(store.pendingMessages.has('runtime-a')).toBe(true);
-  expect(store.pendingMessages.has('runtime-b')).toBe(true);
-  expect(store.pendingMessages.has('runtime-c')).toBe(false);
-
-  expect(enqueueMessage(store, 'runtime-a', { payload: 'too-large-for-cap'.repeat(10) })).toBe(1);
-  expect(store.debugEvents.some(event => event.reason === 'PENDING_MESSAGE_TOO_LARGE')).toBe(true);
-});
-
-test('relay pending queue rejects payloads that cannot be measured canonically', () => {
-  const store = createRelayStore('relay-test');
-  const unreadable = new Proxy({}, {
-    ownKeys: () => {
-      throw new Error('PAYLOAD_KEYS_UNREADABLE');
-    },
-  });
-
-  expect(() => enqueueMessage(store, 'runtime-a', unreadable)).toThrow('SAFE_STRINGIFY_FAILED');
-  expect(store.pendingMessages.size).toBe(0);
-  expect(store.pendingMessageBytes).toBe(0);
-});
-
-test('relay pending delivery retains current and later messages when send reports zero bytes', () => {
-  const store = createRelayStore('relay-test');
-  const delivered: unknown[] = [];
-
-  enqueueMessage(store, 'runtime-a', { n: 1 });
-  enqueueMessage(store, 'runtime-a', { n: 2 });
-  enqueueMessage(store, 'runtime-a', { n: 3 });
-
-  const failed = deliverPendingMessages(store, 'runtime-a', (msg) => {
-    const record = msg as { n?: number };
-    if (record.n === 2) return 0;
-    delivered.push(msg);
-    return true;
-  });
-
-  expect(failed).toMatchObject({
-    delivered: 1,
-    expired: 0,
-    retained: 2,
-    failure: {
-      reason: 'RELAY_PENDING_SEND_FAILED',
-    },
-  });
-  expect(asRecords(delivered).map(msg => msg['n'])).toEqual([1]);
-  expect(asRecords(drainPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2, 3]);
-  expect(store.pendingMessageBytes).toBe(0);
-});
-
-test('relay pending delivery removes an item accepted into Bun backpressure', () => {
-  const store = createRelayStore('relay-test');
-  enqueueMessage(store, 'runtime-a', { n: 1 });
-
-  expect(deliverPendingMessages(store, 'runtime-a', () => -1)).toEqual({
-    delivered: 1,
-    expired: 0,
-    retained: 0,
-  });
-  expect(store.pendingMessages.has('runtime-a')).toBe(false);
-  expect(store.pendingMessageBytes).toBe(0);
-});
-
-test('relay pending delivery fails loud and retains an invalid first send', () => {
-  const store = createRelayStore('relay-test');
-  enqueueMessage(store, 'runtime-a', { n: 1 });
-  const pendingBytes = store.pendingMessageBytes;
-
-  expect(() => deliverPendingMessages(store, 'runtime-a', () => Number.POSITIVE_INFINITY)).toThrow(
-    'WEBSOCKET_SEND_RESULT_INVALID',
-  );
-  expect(store.pendingMessages.get('runtime-a')).toHaveLength(1);
-  expect(store.pendingMessageBytes).toBe(pendingBytes);
-});
-
-test('relay pending delivery commits an accepted prefix before invalid send failure', () => {
-  const store = createRelayStore('relay-test');
-  enqueueMessage(store, 'runtime-a', { n: 1 });
-  const acceptedBytes = store.pendingMessageBytes;
-  enqueueMessage(store, 'runtime-a', { n: 2 });
-  const initialBytes = store.pendingMessageBytes;
-
-  expect(() => deliverPendingMessages(store, 'runtime-a', (msg) => {
-    return (msg as { n: number }).n === 1 ? true : Number.POSITIVE_INFINITY;
-  })).toThrow('WEBSOCKET_SEND_RESULT_INVALID');
-  expect(store.pendingMessages.get('runtime-a')).toHaveLength(1);
-  expect(store.pendingMessageBytes).toBe(initialBytes - acceptedBytes);
-  expect(asRecords(drainPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2]);
-  expect(store.pendingMessageBytes).toBe(0);
-});
 
 test('relay delivery events expose typed retry and fatal semantics', () => {
   expect(classifyRelayDeliveryEvent({ status: 'delivered' })).toMatchObject({
