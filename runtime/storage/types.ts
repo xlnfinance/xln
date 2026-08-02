@@ -115,6 +115,7 @@ export type StorageEntityCoreDoc = {
   lockBook: Map<string, LockBookEntry>;
   swapTradingPairs?: EntitySwapPair[];
   crossJurisdictionSwaps?: EntityState['crossJurisdictionSwaps'];
+  crossJurisdictionAuthorizations?: EntityState['crossJurisdictionAuthorizations'];
   pendingCrossJurisdictionFillAcks?: EntityState['pendingCrossJurisdictionFillAcks'];
   crossJurisdictionBookAdmissions?: EntityState['crossJurisdictionBookAdmissions'];
   hubRebalanceConfig?: HubRebalanceConfig;

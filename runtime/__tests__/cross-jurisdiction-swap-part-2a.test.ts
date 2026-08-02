@@ -465,6 +465,12 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'route-hash-test',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
+      bookOwnerEntityId: sourceHub,
+      sourceSignerId: addr('66'),
+      sourceHubSignerId: addr('67'),
+      targetHubSignerId: addr('68'),
+      targetSignerId: signer,
+      bookHubSignerId: addr('67'),
       source: {
         jurisdiction: jref(eth),
         entityId: sourceUser,
@@ -491,6 +497,18 @@ describe('cross-jurisdiction hashledger swap', () => {
       target: { ...baseRoute.target, amount: 91n },
     });
     expect(changedTerms.routeHash).not.toBe(baseRoute.routeHash);
+    for (const changedSigner of [
+      { sourceSignerId: addr('70') },
+      { sourceHubSignerId: addr('71') },
+      { targetHubSignerId: addr('72') },
+      { targetSignerId: addr('73') },
+      { bookHubSignerId: addr('74') },
+    ]) {
+      expect(withCanonicalCrossJurisdictionRouteHash({
+        ...baseRouteWithoutHash,
+        ...changedSigner,
+      }).routeHash).not.toBe(baseRoute.routeHash);
+    }
 
     const existingState = makeState(targetUser, signer, base, targetHub);
     existingState.crossJurisdictionSwaps?.set(baseRoute.orderId, { ...baseRoute, status: 'settled' });

@@ -302,6 +302,9 @@ export interface EntityState {
   // Cross-jurisdiction swap routes are duplicated into sibling entities so
   // target-side dispute salvage does not depend on relay/profile gossip.
   crossJurisdictionSwaps?: Map<string, CrossJurisdictionSwapRoute>;
+  // Exact one-shot user authorization. Both user sibling Entities record the
+  // same immutable intent before either prepared Account leg is admissible.
+  crossJurisdictionAuthorizations?: Map<string, CrossJurisdictionSwapRoute>;
   // Fill notices can outrun the local account frame that materializes the
   // source-side offer. Keep the ack durably in entity state until the account
   // offer is visible instead of throwing every runtime loop.

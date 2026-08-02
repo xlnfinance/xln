@@ -16,7 +16,12 @@ const setup = () => {
     sourceRuntimeId: source.runtimeId,
     sourceRuntimeHeight: 7,
     sourceRuntimeTimestamp: 1_234,
-    entityInputs: [],
+    entityInputs: [{
+      entityId: `0x${'11'.repeat(32)}`,
+      signerId: `0x${'22'.repeat(20)}`,
+      runtimeId: target.runtimeId,
+      entityTxs: [],
+    }],
   };
   return { source, target, body };
 };
@@ -69,22 +74,29 @@ describe('Runtime entity-input envelope source authentication', () => {
 
   test('rejects nested cross-j amount and price mutation', () => {
     const { source, target, body } = setup();
+    const route = {
+      orderId: 'signed-cross-j-intent',
+      source: { amount: 100n },
+      target: { amount: 90n },
+      priceTicks: 900_000n,
+    };
     const envelope = signRuntimeEntityInputsEnvelope(source, target.runtimeId!, {
       ...body,
-      crossJurisdictionIntent: {
-        orderId: 'signed-cross-j-intent',
-        sourceAmount: 100n,
-        targetAmount: 90n,
-        limitPrice: 900_000n,
-      } as never,
+      entityInputs: [{
+        ...body.entityInputs[0]!,
+        entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } } as never],
+      }],
     });
-    for (const crossJurisdictionIntent of [
-      { ...envelope.crossJurisdictionIntent!, sourceAmount: 101n },
-      { ...envelope.crossJurisdictionIntent!, limitPrice: 900_001n },
+    for (const mutatedRoute of [
+      { ...route, source: { amount: 101n } },
+      { ...route, priceTicks: 900_001n },
     ]) {
       expect(() => assertRuntimeEntityInputsEnvelopeSource(target, source.runtimeId!, {
         ...envelope,
-        crossJurisdictionIntent,
+        entityInputs: [{
+          ...envelope.entityInputs[0]!,
+          entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route: mutatedRoute } } as never],
+        }],
       })).toThrow('INBOUND_ENTITY_INPUTS_SOURCE_SIGNATURE_INVALID');
     }
   });

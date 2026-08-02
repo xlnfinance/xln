@@ -1,4 +1,3 @@
-import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { RuntimeEntityInputsEnvelope } from '../../runtime/types';
 import { validateDeliverableEntityInput } from '../../runtime/routing-validation';
 import { normalizeRuntimeId } from './runtime-id';
@@ -44,15 +43,6 @@ const decodeAtomicPair = (
   return { phase, pairKey };
 };
 
-const decodeCrossJurisdictionIntent = (value: unknown): CrossJurisdictionSwapRoute | undefined => {
-  if (value === undefined) return undefined;
-  requireBoundaryRecord(value, 'P2P_ENTITY_INPUTS_ENVELOPE_CROSS_J_INTENT_INVALID');
-  // The transport only establishes the envelope shape. Runtime admission
-  // canonicalizes and validates every financial field against local state;
-  // duplicating that protocol validator here would create two authorities.
-  return value as CrossJurisdictionSwapRoute;
-};
-
 /**
  * Decode authenticated plaintext before it crosses from transport into the
  * Runtime machine. Encryption proves confidentiality, not schema validity.
@@ -62,7 +52,7 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntity
   requireExactBoundaryKeys(
     envelope,
     ['sourceRuntimeId', 'sourceRuntimeHeight', 'sourceRuntimeTimestamp', 'entityInputs', 'sourceSignature'],
-    ['atomicCrossJurisdictionPair', 'crossJurisdictionIntent'],
+    ['atomicCrossJurisdictionPair'],
     'P2P_ENTITY_INPUTS_ENVELOPE_FIELDS_INVALID',
   );
   const sourceRuntimeId = normalizeRuntimeId(envelope['sourceRuntimeId']);
@@ -80,11 +70,7 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntity
     );
   }
   const entityInputs = envelope['entityInputs'].map(validateDeliverableEntityInput);
-  const crossJurisdictionIntent = decodeCrossJurisdictionIntent(envelope['crossJurisdictionIntent']);
-  if (crossJurisdictionIntent && entityInputs.length > 0) {
-    throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_MIXED_CONTENT');
-  }
-  if (!crossJurisdictionIntent && entityInputs.length === 0) {
+  if (entityInputs.length === 0) {
     throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_EMPTY');
   }
   const atomicCrossJurisdictionPair = decodeAtomicPair(
@@ -98,6 +84,5 @@ export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntity
     sourceRuntimeTimestamp: requireFrameCoordinate(envelope['sourceRuntimeTimestamp'], 'TIMESTAMP'),
     entityInputs,
     ...(atomicCrossJurisdictionPair ? { atomicCrossJurisdictionPair } : {}),
-    ...(crossJurisdictionIntent ? { crossJurisdictionIntent } : {}),
   };
 };

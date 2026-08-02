@@ -1,7 +1,6 @@
 import { assertCrossJurisdictionSwapTargetReadyInEnv } from './swap-target-readiness';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
-import { isDeliveryDelivered, requireDeliveryResult } from '../protocol/payments/delivery-result';
 import {
   getRuntimeEntityDisplayInfo,
   resolveRuntimeEntityName,
@@ -9,20 +8,18 @@ import {
 } from '../routing/name-resolution';
 import type { createRuntimeLoopApi } from './loop';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeReplica, RuntimeEntityInputsEnvelope } from './types';
+import type { RuntimeReplica } from './types';
 import {
   buildCrossJurisdictionSwapSubmission,
   type CrossJurisdictionSwapSubmitParams,
   type CrossJurisdictionSwapSubmitResult,
 } from './jurisdiction-api';
 import { assertRuntimeCommandReady } from './lifecycle';
-import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import { assertCrossJLocalOwnerCohort, requireCrossJRuntimeTopology } from './cross-j-topology';
-import { signRuntimeEntityInputsEnvelope } from './entity-input-envelope-auth';
 
 type RuntimeCommandDependencies = Pick<
   ReturnType<typeof createRuntimeLoopApi>,
-  'getP2P' | 'getRuntimeOutputRoutingDeps'
+  'enqueueRuntimeInputs' | 'getRuntimeOutputRoutingDeps'
 >;
 
 export const searchEntityNames = (query: string, limit?: number) =>
@@ -34,10 +31,7 @@ export const resolveEntityName = (entityId: string) =>
 export const getEntityDisplayInfoFromProfile = (entityId: string) =>
   getRuntimeEntityDisplayInfo(null, entityId);
 
-/**
- * Commands cross the Runtime transport boundary but never mutate Runtime
- * state directly. The recipient's normal ingress/WAL path owns all effects.
- */
+/** Commands enter the owning Runtime through its normal ingress/WAL path. */
 export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies) => {
   const submitCrossJurisdictionIntent = async (
     env: RuntimeReplica,
@@ -62,43 +56,29 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
       ),
     );
     if (topology.userRuntimeId !== sourceRuntimeId) {
-      throw new Error(`CROSS_J_RUNTIME_TOPOLOGY_INVALID:${canonicalRoute.orderId}:SOURCE_RUNTIME_MISMATCH`);
+      throw new Error(`CROSS_J_RUNTIME_TOPOLOGY_INVALID:${canonicalRoute.orderId}:USER_RUNTIME_MISMATCH`);
     }
-    const targetRuntimeId = topology.hubRuntimeId;
-
-    const envelope: RuntimeEntityInputsEnvelope = signRuntimeEntityInputsEnvelope(env, targetRuntimeId, {
-      sourceRuntimeId,
-      sourceRuntimeHeight: Math.max(0, Math.floor(Number(env.state.height || 0))),
-      sourceRuntimeTimestamp: Math.max(0, Math.floor(Number(env.state.timestamp || 0))),
-      entityInputs: [],
-      crossJurisdictionIntent: structuredClone(canonicalRoute),
-    });
-    const direct = ensureRuntimeInfrastructure(env).directEntityInputsDispatch;
-    let delivery = direct
-      ? requireDeliveryResult(
-          direct(targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp),
-          'CROSS_J_INTENT_DIRECT_DELIVERY_INVALID',
-        )
-      : null;
-    if (!delivery || !isDeliveryDelivered(delivery)) {
-      const p2p = dependencies.getP2P(env);
-      if (p2p) {
-        delivery = requireDeliveryResult(
-          p2p.enqueueEntityInputsDelivery(
-            targetRuntimeId,
-            envelope,
-            envelope.sourceRuntimeTimestamp,
-          ),
-          'CROSS_J_INTENT_P2P_DELIVERY_INVALID',
-        );
-      }
+    const sourceSignerId = String(canonicalRoute.sourceSignerId || '').trim().toLowerCase();
+    const targetSignerId = String(canonicalRoute.targetSignerId || '').trim().toLowerCase();
+    if (!sourceSignerId || !targetSignerId) {
+      throw new Error(`CROSS_J_USER_SIGNERS_MISSING:${canonicalRoute.orderId}`);
     }
-    if (!delivery) throw new Error('CROSS_J_INTENT_NOT_DELIVERED:NO_TRANSPORT');
-    if (!isDeliveryDelivered(delivery)) {
-      // M1 is intentionally best-effort. The caller may retry the same
-      // orderId after reconnect; no hidden outbox is created here.
-      throw new Error(`CROSS_J_INTENT_NOT_DELIVERED:${delivery.code}`);
-    }
+    // One RuntimeInput is the durable owner command for both user siblings.
+    // The target authorization is intentionally ordered first: the source
+    // authorization may emit the certified source-user -> source-hub command,
+    // but no money can pass the later Account boundary without both records.
+    dependencies.enqueueRuntimeInputs(env, [
+      {
+        entityId: canonicalRoute.target.counterpartyEntityId,
+        signerId: targetSignerId,
+        entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route: structuredClone(canonicalRoute) } }],
+      },
+      {
+        entityId: canonicalRoute.source.entityId,
+        signerId: sourceSignerId,
+        entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route: structuredClone(canonicalRoute) } }],
+      },
+    ], undefined, undefined, env.state.timestamp);
     return { route: canonicalRoute };
   };
 

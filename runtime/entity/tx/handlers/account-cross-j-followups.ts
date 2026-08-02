@@ -407,6 +407,22 @@ const queueBookAdmissionOnCommittedPull = (
     if (!committedPullMatchesRoute(accountTx, route, role.leg)) {
       throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH: route=${route.orderId} leg=${role.leg} pull=${accountTx.data.pullId}`);
     }
+    const userLeg =
+      currentEntityId === normalizeEntityRef(route.source.entityId) ||
+      currentEntityId === normalizeEntityRef(route.target.counterpartyEntityId);
+    if (userLeg) {
+      const authorization = newState.crossJurisdictionAuthorizations?.get(route.orderId);
+      if (
+        !authorization ||
+        normalizeEntityRef(authorization.routeHash || '') !== normalizeEntityRef(route.routeHash || '')
+      ) {
+        throw new Error(`CROSS_J_COMMITTED_PULL_AUTH_MISSING:${route.orderId}:${currentEntityId}`);
+      }
+      // This mutates only the staged Entity candidate. Runtime publishes both
+      // user sibling candidates together, so neither one-shot authorization is
+      // consumed unless both Account frames have committed successfully.
+      newState.crossJurisdictionAuthorizations!.delete(route.orderId);
+    }
     const admissionRoute = cloneCrossJurisdictionRoute(route);
     transitionCrossJurisdictionRouteStatus(
       admissionRoute,

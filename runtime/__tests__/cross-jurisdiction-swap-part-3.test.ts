@@ -1453,6 +1453,12 @@ describe('cross-jurisdiction hashledger swap', () => {
           orderId: 'cross-sweep-expired',
           makerEntityId: sourceUser,
           hubEntityId: sourceHub,
+          bookOwnerEntityId: sourceHub,
+          sourceSignerId: addr('b1'),
+          sourceHubSignerId: state.config.validators[0]!,
+          targetHubSignerId: addr('b3'),
+          targetSignerId: addr('b5'),
+          bookHubSignerId: state.config.validators[0]!,
           source: {
             jurisdiction: jref(eth),
             entityId: sourceUser,
@@ -1475,8 +1481,6 @@ describe('cross-jurisdiction hashledger swap', () => {
         { runtimeSeed: 'cross-sweep-expired', sourceDisputeDelayMs: 5_000, now: 1_000 },
       ),
       status: 'resting' as const,
-      sourceHubSignerId: state.config.validators[0]!,
-      targetHubSignerId: addr('b3'),
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const account = state.accounts.get(sourceUser)!;
@@ -1564,6 +1568,12 @@ describe('cross-jurisdiction hashledger swap', () => {
           orderId: 'cross-sweep-filled-expired',
           makerEntityId: sourceUser,
           hubEntityId: sourceHub,
+          bookOwnerEntityId: sourceHub,
+          sourceSignerId: addr('c1'),
+          sourceHubSignerId: state.config.validators[0]!,
+          targetHubSignerId: addr('c3'),
+          targetSignerId: addr('c5'),
+          bookHubSignerId: state.config.validators[0]!,
           source: {
             jurisdiction: jref(eth),
             entityId: sourceUser,
@@ -1586,8 +1596,6 @@ describe('cross-jurisdiction hashledger swap', () => {
         { runtimeSeed: 'cross-sweep-filled-expired-clear', sourceDisputeDelayMs: 5_000, now: 1_000 },
       ),
       status: 'partially_filled' as const,
-      sourceHubSignerId: state.config.validators[0]!,
-      targetHubSignerId: addr('c3'),
       fillSeq: 1,
       fillNumerator: 1n,
       fillDenominator: 2n,
@@ -2724,7 +2732,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const outputs: EntityInput[] = [];
 
     expect(() => fixture.plan(outputs))
-      .toThrow('CROSS_J_SOURCE_DISPUTE_LANE_MISSING:z-invalid');
+      .toThrow('CROSS_J_ROUTE_HASH_MISMATCH:z-invalid');
     expect(outputs).toEqual([]);
   });
 

@@ -403,7 +403,7 @@ test('enqueueEntityInputsDelivery returns typed success with transport', () => {
   expect(sent[0]?.timestamp).toBe(2345);
 });
 
-test('enqueueEntityInputsDelivery relays an intent-only cross-j envelope', () => {
+test('enqueueEntityInputsDelivery rejects an empty envelope before transport', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const sent: RuntimeEntityInputsEnvelope[] = [];
   const relayClient = {
@@ -427,14 +427,11 @@ test('enqueueEntityInputsDelivery relays an intent-only cross-j envelope', () =>
     sourceRuntimeHeight: 8,
     sourceRuntimeTimestamp: 8000,
     entityInputs: [],
-    crossJurisdictionIntent: { orderId: 'intent-only' },
   } as unknown as RuntimeEntityInputsEnvelope;
 
-  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelope)).toMatchObject({
-    outcome: 'delivered',
-    transport: 'relay',
-  });
-  expect(sent).toEqual([envelope]);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelope))
+    .toThrow('entity_inputs envelope is empty');
+  expect(sent).toEqual([]);
 });
 
 test('enqueueEntityInputsDelivery prefers open direct transport over relay', () => {

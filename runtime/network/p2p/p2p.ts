@@ -650,11 +650,10 @@ export class RuntimeP2P {
         'entity_inputs envelope is malformed',
         { targetRuntimeId },
       );
-      const hasIntent = envelope.crossJurisdictionIntent !== undefined;
       failfastAssert(
-        hasIntent ? envelope.entityInputs.length === 0 : envelope.entityInputs.length > 0,
+        envelope.entityInputs.length > 0,
         'P2P_ENTITY_INPUTS_INVALID',
-        hasIntent ? 'cross-j intent envelope contains entity inputs' : 'entity_inputs envelope is empty',
+        'entity_inputs envelope is empty',
         { targetRuntimeId },
       );
     } catch (error) {

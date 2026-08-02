@@ -45,7 +45,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica } from '../entity/types';
-import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../runtime/types';
+import type { RoutedEntityInput } from '../runtime/types';
 import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
@@ -144,7 +144,6 @@ import {
 } from '../runtime/output-routing';
 import { groupAtomicCrossJAdmissionOutputs } from '../runtime/delivery/pending';
 
-import { deliveryAccepted, deliveryDeferred } from '../protocol/payments/delivery-result';
 
 import {
   addReplica,
@@ -615,8 +614,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     const exactRetry = await applyEntityTx(proposerEnv, proposerRaw.newState, rawTx);
     expect(exactRetry.outputs).toHaveLength(0);
     expect(exactRetry.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)).toEqual(baseRoute);
-    const conflictingIntent = cloneCrossJurisdictionRoute(baseRoute);
-    conflictingIntent.targetSignerId = addr('99');
+    const conflictingIntent = withCanonicalCrossJurisdictionRouteHash({
+      ...cloneCrossJurisdictionRoute(baseRoute),
+      routeHash: undefined,
+      targetSignerId: addr('99'),
+    });
     await expect(
       applyEntityTx(proposerEnv, proposerRaw.newState, {
         type: 'prepareCrossJurisdictionSwap',
@@ -1203,6 +1205,21 @@ describe('cross-jurisdiction hashledger swap', () => {
       runtimeId: userEnv.runtimeId,
       sourceRuntimeFrame: hubFrame,
     }));
+    expect(selectMatchedCrossJAccountInputPairs(userEnv, proposals).pairs).toEqual([]);
+    const liveSourceUserState = userEnv.state.eReplicas.get(
+      `${sourceUser}:${sourceUserSigner}`,
+    )!.state;
+    const liveTargetUserState = userEnv.state.eReplicas.get(
+      `${targetUser}:${targetUserSigner}`,
+    )!.state;
+    liveSourceUserState.crossJurisdictionAuthorizations = new Map([
+      [intent.orderId, cloneCrossJurisdictionRoute(intent)],
+    ]);
+    expect(selectMatchedCrossJAccountInputPairs(userEnv, proposals).pairs).toEqual([]);
+    liveTargetUserState.crossJurisdictionAuthorizations = new Map([
+      [intent.orderId, cloneCrossJurisdictionRoute(intent)],
+    ]);
+    expect(selectMatchedCrossJAccountInputPairs(userEnv, proposals).pairs).toHaveLength(1);
     const intentB = withCanonicalCrossJurisdictionRouteHash({
       ...intent,
       routeHash: undefined,
@@ -1249,6 +1266,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       runtimeId: userEnv.runtimeId,
       sourceRuntimeFrame: { height: 43, timestamp: hubEnv.state.timestamp },
     }));
+    liveSourceUserState.crossJurisdictionAuthorizations.set(
+      intentB.orderId,
+      cloneCrossJurisdictionRoute(intentB),
+    );
+    liveTargetUserState.crossJurisdictionAuthorizations.set(
+      intentB.orderId,
+      cloneCrossJurisdictionRoute(intentB),
+    );
     expect(proposalsB.map(output => output.entityId).sort()).toEqual([sourceUser, targetUser].sort());
     const dedupedProposals = buildPendingNetworkOutputs([
       { ...proposals[0]!, sourceRuntimeFrame: { height: 41, timestamp: hubEnv.state.timestamp - 1 } },
@@ -1352,8 +1377,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     installJurisdictions(concurrentUserEnv, sourceJ, targetJ);
     expect(registerTestSigner(concurrentUserEnv, seed, 'source-user')).toBe(sourceUserSigner);
     expect(registerTestSigner(concurrentUserEnv, seed, 'target-user')).toBe(targetUserSigner);
-    addReplica(concurrentUserEnv, cloneEntityState(sourceUserState), sourceUserSigner);
-    addReplica(concurrentUserEnv, cloneEntityState(targetUserState), targetUserSigner);
+    addReplica(concurrentUserEnv, cloneEntityState(liveSourceUserState), sourceUserSigner);
+    addReplica(concurrentUserEnv, cloneEntityState(liveTargetUserState), targetUserSigner);
     collectLocalProfileEncryptionAnnouncements(concurrentUserEnv, new Set([sourceUser, targetUser]));
     concurrentUserEnv.gossip = userEnv.gossip;
 
@@ -1389,6 +1414,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       .get(`${sourceUser}:${sourceUserSigner}`)!.state;
     const concurrentTargetState = concurrentUserEnv.state.eReplicas
       .get(`${targetUser}:${targetUserSigner}`)!.state;
+    expect(concurrentSourceState.crossJurisdictionAuthorizations?.size).toBe(0);
+    expect(concurrentTargetState.crossJurisdictionAuthorizations?.size).toBe(0);
     expect([sourceHub, sourceHubB].map(id => concurrentSourceState.accounts.get(id)!.currentFrame.height))
       .toEqual([1, 1]);
     expect([targetHub, targetHubB].map(id => concurrentTargetState.accounts.get(id)!.currentFrame.height))
@@ -1475,6 +1502,18 @@ describe('cross-jurisdiction hashledger swap', () => {
         name: 'target entity',
         mutate: inputs => {
           targetPull(inputs).data.crossJurisdictionRoute!.target.counterpartyEntityId = entity('ee');
+        },
+      },
+      {
+        name: 'source Account payer',
+        mutate: inputs => {
+          const sourceInput = inputs.find(input => input.entityId === sourceUser);
+          const accountInput = sourceInput && getEffectiveEntityInputTxs(sourceInput)
+            .find(tx => tx.type === 'accountInput');
+          if (!accountInput || accountInput.type !== 'accountInput') {
+            throw new Error('TEST_CROSS_J_SOURCE_ACCOUNT_INPUT_MISSING');
+          }
+          accountInput.data.fromEntityId = entity('ed');
         },
       },
       {
@@ -1650,6 +1689,10 @@ describe('cross-jurisdiction hashledger swap', () => {
         ),
     ).toBe(true);
     expect(userAckPass.localCrossJurisdictionEventTrace).toEqual([]);
+    expect(userEnv.state.eReplicas.get(`${sourceUser}:${sourceUserSigner}`)?.state
+      .crossJurisdictionAuthorizations?.has(intent.orderId)).toBe(false);
+    expect(userEnv.state.eReplicas.get(`${targetUser}:${targetUserSigner}`)?.state
+      .crossJurisdictionAuthorizations?.has(intent.orderId)).toBe(false);
 
     const accountFramesBeforeExactRetry = [...userEnv.state.eReplicas.entries()].map(
       ([entityKey, replica]) => [
@@ -2109,22 +2152,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     registerVerifiedOwnerRoute(env, targetHub, targetHubSigner, hubEnv.runtimeId!);
     registerVerifiedOwnerRoute(hubEnv, sourceUser, sourceUserSigner, env.runtimeId!);
     registerVerifiedOwnerRoute(hubEnv, targetUser, targetUserSigner, env.runtimeId!);
-    let directAttempts = 0;
-    let relayAttempts = 0;
-    env.infrastructure!.directEntityInputsDispatch = targetRuntimeId => {
-      expect(targetRuntimeId).toBe(hubEnv.runtimeId);
-      directAttempts += 1;
-      return deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' });
-    };
-    env.infrastructure!.p2p = {
-      enqueueEntityInputsDelivery: (targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope) => {
-        expect(targetRuntimeId).toBe(hubEnv.runtimeId);
-        relayAttempts += 1;
-        handleInboundP2PEntityInputs(hubEnv, env.runtimeId!, envelope);
-        return deliveryAccepted('TEST_UNSIGNED_CROSS_J_INTENT_RELAYED');
-      },
-    } as any;
-
     const submitParams = {
       orderId: 'cross-test-1',
       sourceUserEntityId: sourceUser,
@@ -2143,55 +2170,88 @@ describe('cross-jurisdiction hashledger swap', () => {
     } as const;
     const result = await submitCrossJurisdictionSwap(env, submitParams);
     await submitCrossJurisdictionSwap(env, submitParams);
-    expect(hubEnv.runtimeMempool?.entityInputs).toHaveLength(1);
+    expect(hubEnv.runtimeMempool?.entityInputs).toEqual([]);
+    expect(env.runtimeMempool?.entityInputs).toHaveLength(4);
     const attackerEnv = createEmptyEnv('cross-submit-relay-attacker');
     const attackerEnvelope = signRuntimeEntityInputsEnvelope(attackerEnv, hubEnv.runtimeId!, {
       sourceRuntimeId: attackerEnv.runtimeId!,
       sourceRuntimeHeight: env.state.height,
       sourceRuntimeTimestamp: env.state.timestamp,
-      entityInputs: [],
-      crossJurisdictionIntent: structuredClone(result.route),
+      entityInputs: [{
+        entityId: sourceHub,
+        signerId: sourceHubSigner,
+        runtimeId: hubEnv.runtimeId!,
+        entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route: structuredClone(result.route) } }],
+      }],
     });
     expect(() => handleInboundP2PEntityInputs(hubEnv, env.runtimeId!, {
       ...attackerEnvelope,
       // A relay could forge this outer/header identity before envelope auth.
       sourceRuntimeId: env.runtimeId!,
     })).toThrow('INBOUND_ENTITY_INPUTS_SOURCE_SIGNATURE_INVALID');
-    expect(hubEnv.runtimeMempool?.entityInputs).toHaveLength(1);
+    expect(hubEnv.runtimeMempool?.entityInputs).toEqual([]);
     registerVerifiedOwnerRoute(env, targetHub, targetHubSigner, addr('fe'));
     await expect(submitCrossJurisdictionIntent(env, result.route))
       .rejects.toThrow('OWNER_RUNTIME_MISMATCH');
-    expect(directAttempts).toBe(2);
-    expect(relayAttempts).toBe(2);
     registerVerifiedOwnerRoute(env, targetHub, targetHubSigner, hubEnv.runtimeId!);
     await expect(submitCrossJurisdictionSwap(env, {
       ...submitParams,
       targetHubSignerId: addr('fd'),
     })).rejects.toThrow('CROSS_SWAP_OWNER_SIGNER_NON_CANONICAL');
-    await expect(
-      submitCrossJurisdictionSwap(env, {
-        ...submitParams,
-        targetAmount: 91n,
-      }),
-    ).rejects.toThrow('INBOUND_CROSS_J_INTENT_ORDER_ID_CONFLICT');
-    expect(directAttempts).toBe(3);
-    expect(relayAttempts).toBe(3);
-    expect([...hubEnv.infrastructure!.securityIncidents!.values()].map(incident => incident.code)).toContain(
-      'CROSS_J_INTENT_ORDER_ID_CONFLICT',
+    const queuedUserAuthorizations = structuredClone(env.runtimeMempool!.entityInputs);
+    env.runtimeMempool!.entityInputs = [];
+    const targetAuthorization = await applyEntityTx(
+      env,
+      env.state.eReplicas.get(`${targetUser}:${targetUserSigner}`)!.state,
+      queuedUserAuthorizations[0]!.entityTxs![0]!,
     );
-    const targetReceivingAccount = targetUserState.accounts.get(targetHub)!;
+    const sourceAuthorization = await applyEntityTx(
+      env,
+      env.state.eReplicas.get(`${sourceUser}:${sourceUserSigner}`)!.state,
+      queuedUserAuthorizations[1]!.entityTxs![0]!,
+    );
+    const targetRetry = await applyEntityTx(
+      env,
+      targetAuthorization.newState,
+      queuedUserAuthorizations[2]!.entityTxs![0]!,
+    );
+    const sourceRetry = await applyEntityTx(
+      env,
+      sourceAuthorization.newState,
+      queuedUserAuthorizations[3]!.entityTxs![0]!,
+    );
+    expect(targetRetry.outputs).toEqual([]);
+    expect(sourceRetry.outputs).toEqual([]);
+    env.state.eReplicas.get(`${targetUser}:${targetUserSigner}`)!.state = targetRetry.newState;
+    env.state.eReplicas.get(`${sourceUser}:${sourceUserSigner}`)!.state = sourceRetry.newState;
+    expect(sourceAuthorization.outputs).toHaveLength(1);
+    expect(sourceAuthorization.outputs[0]?.entityId).toBe(sourceHub);
+    expect(sourceRetry.newState.crossJurisdictionAuthorizations?.has(result.route.orderId)).toBe(true);
+    expect(targetRetry.newState.crossJurisdictionAuthorizations?.has(result.route.orderId)).toBe(true);
+
+    await submitCrossJurisdictionSwap(env, {
+      ...submitParams,
+      targetAmount: 91n,
+    });
+    const conflictingUserAuthorizations = structuredClone(env.runtimeMempool!.entityInputs);
+    env.runtimeMempool!.entityInputs = [];
+    await expect(applyEntityTx(
+      env,
+      targetRetry.newState,
+      conflictingUserAuthorizations[0]!.entityTxs![0]!,
+    )).rejects.toThrow('CROSS_J_USER_AUTH_CONFLICT');
+    const targetReceivingAccount = env.state.eReplicas
+      .get(`${targetUser}:${targetUserSigner}`)!.state.accounts.get(targetHub)!;
     const targetReceivingDelta = targetReceivingAccount.state.deltas.get(1)!;
     const previousLeftCredit = targetReceivingDelta.leftCreditLimit;
     const previousRightCredit = targetReceivingDelta.rightCreditLimit;
     targetReceivingDelta.leftCreditLimit = 0n;
     targetReceivingDelta.rightCreditLimit = 0n;
     await expect(submitCrossJurisdictionIntent(env, result.route)).rejects.toThrow('CROSS_J_TARGET_INBOUND_NOT_READY');
-    expect(directAttempts).toBe(3);
-    expect(relayAttempts).toBe(3);
     targetReceivingDelta.leftCreditLimit = previousLeftCredit;
     targetReceivingDelta.rightCreditLimit = previousRightCredit;
 
-    const queued = hubEnv.runtimeMempool?.entityInputs ?? [];
+    const queued = sourceAuthorization.outputs;
     expect(result.hashlock).toBeUndefined();
     expect(result.secret).toBeUndefined();
     expect(result.route.routeHash).toMatch(/^0x[0-9a-f]{64}$/);
@@ -2201,11 +2261,15 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(queued[0]?.entityId).toBe(sourceHub);
     expect(queued[0]?.from).toBeUndefined();
     expect(queued[0]?.sourceRuntimeFrame).toBeUndefined();
-    expect(queued[0]?.entityTxs?.[0]?.type).toBe('prepareCrossJurisdictionSwap');
+    expect(getEffectiveEntityInputTxs(queued[0]!)?.[0]?.type).toBe('prepareCrossJurisdictionSwap');
     expect(env.runtimeMempool?.entityInputs).toEqual([]);
 
     sourceHubState.timestamp = hubEnv.state.timestamp;
-    const requested = await applyEntityTx(hubEnv, sourceHubState, queued[0]!.entityTxs![0]!);
+    const sourceHubPrepare = getEffectiveEntityInputTxs(queued[0]!)[0];
+    if (sourceHubPrepare?.type !== 'prepareCrossJurisdictionSwap') {
+      throw new Error('TEST_CROSS_J_CERTIFIED_PREPARE_MISSING');
+    }
+    const requested = await applyEntityTx(hubEnv, sourceHubState, sourceHubPrepare);
     expect(requested.outputs).toEqual([{ entityId: sourceHub, signerId: sourceHubSigner, entityTxs: [] }]);
     expect(requested.accountTxs).toBeUndefined();
     const sourceHubReplica = {
@@ -2426,6 +2490,12 @@ describe('cross-jurisdiction hashledger swap', () => {
         orderId: 'cross-clear-exact-only-pending',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
+        bookOwnerEntityId: sourceHub,
+        sourceSignerId: addr('ad'),
+        sourceHubSignerId: sourceHubSigner,
+        targetHubSignerId: targetHubSigner,
+        targetSignerId: addr('ae'),
+        bookHubSignerId: sourceHubSigner,
         source: {
           jurisdiction: jref(eth),
           entityId: sourceUser,
@@ -2450,8 +2520,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const route = {
       ...prepared,
       status: 'partially_filled' as const,
-      sourceHubSignerId: sourceHubSigner,
-      targetHubSignerId: targetHubSigner,
       fillSeq: 1,
       fillNumerator: 1n,
       fillDenominator: 2n,
@@ -2604,6 +2672,10 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...route,
       __debugOnly: secret('b6'),
     } as any);
+    state.crossJurisdictionAuthorizations = new Map([[
+      route.orderId,
+      { ...route, status: 'intent', sourcePull: undefined, targetPull: undefined, __debugOnly: secret('bb') } as any,
+    ]]);
     const account = state.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
@@ -2657,11 +2729,15 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const clonedRoute = cloneEntityState(state).crossJurisdictionSwaps?.get(route.orderId) as any;
     const projectedRoute = projectEntityCoreDoc(state).crossJurisdictionSwaps?.get(route.orderId) as any;
+    const clonedAuthorization = cloneEntityState(state).crossJurisdictionAuthorizations?.get(route.orderId) as any;
+    const projectedAuthorization = projectEntityCoreDoc(state).crossJurisdictionAuthorizations?.get(route.orderId) as any;
     const clonedAccount = cloneEntityState(state).accounts.get(sourceUser)! as any;
     const projectedAccount = projectAccountDoc(account) as any;
     expect('__debugOnly' in cloneCrossJurisdictionRoute({ ...route, __debugOnly: secret('ba') } as any)).toBe(false);
     expect(clonedRoute.__debugOnly).toBeUndefined();
     expect(projectedRoute.__debugOnly).toBeUndefined();
+    expect(clonedAuthorization.__debugOnly).toBeUndefined();
+    expect(projectedAuthorization.__debugOnly).toBeUndefined();
     expect(clonedRoute.source).toEqual(route.source);
     expect(clonedRoute.target).toEqual(route.target);
     expect(projectedRoute.source).toEqual(route.source);

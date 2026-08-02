@@ -48,61 +48,12 @@ export const mergeCrossJurisdictionRoute = (
   ...cloneCrossJurisdictionRoute(next),
 });
 
-const sameCrossJurisdictionIntentTerms = (
-  existing: CrossJurisdictionSwapRoute,
-  next: CrossJurisdictionSwapRoute,
-): boolean => {
-  const toBigInt = (value: unknown): bigint => {
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number') {
-      if (!Number.isFinite(value) || !Number.isInteger(value)) throw new Error('non-integer bigint term');
-      return BigInt(value);
-    }
-    if (typeof value === 'string') return BigInt(value);
-    throw new Error('unsupported bigint term');
-  };
-  const sameBigInt = (left: unknown, right: unknown): boolean => {
-    try {
-      return toBigInt(left) === toBigInt(right);
-    } catch {
-      return false;
-    }
-  };
-  return (
-    String(existing.orderId || '') === String(next.orderId || '') &&
-    normalizeEntityRef(existing.makerEntityId) === normalizeEntityRef(next.makerEntityId) &&
-    normalizeEntityRef(existing.source.entityId) === normalizeEntityRef(next.source.entityId) &&
-    normalizeEntityRef(existing.source.counterpartyEntityId) === normalizeEntityRef(next.source.counterpartyEntityId) &&
-    normalizeEntityRef(existing.target.entityId) === normalizeEntityRef(next.target.entityId) &&
-    normalizeEntityRef(existing.target.counterpartyEntityId) === normalizeEntityRef(next.target.counterpartyEntityId) &&
-    Number(existing.source.tokenId) === Number(next.source.tokenId) &&
-    Number(existing.target.tokenId) === Number(next.target.tokenId) &&
-    sameBigInt(existing.source.amount, next.source.amount) &&
-    sameBigInt(existing.target.amount, next.target.amount) &&
-    sameBigInt(existing.priceTicks ?? 0n, next.priceTicks ?? 0n) &&
-    Number(existing.expiresAt ?? 0) === Number(next.expiresAt ?? 0) &&
-    String(existing.riskMode || '') === String(next.riskMode || '') &&
-    String(existing.priceImprovementMode || '') === String(next.priceImprovementMode || '')
-  );
-};
-
 export const validateCrossJurisdictionRouteTransition = (
   existing: CrossJurisdictionSwapRoute | undefined,
   next: CrossJurisdictionSwapRoute,
 ): string | null => {
   if (!existing) return null;
   if (existing.routeHash && next.routeHash && existing.routeHash.toLowerCase() !== next.routeHash.toLowerCase()) {
-    const preparedIntentCommit =
-      existing.status === 'intent' &&
-      Boolean(next.sourcePull && next.targetPull) &&
-      (
-        next.status === 'target_locked' ||
-        next.status === 'resting' ||
-        next.status === 'target_prepared' ||
-        next.status === 'source_committed'
-      ) &&
-      sameCrossJurisdictionIntentTerms(existing, next);
-    if (preparedIntentCommit) return null;
     return 'route hash mismatch';
   }
   if (isCrossJurisdictionTerminalStatus(existing.status)) {

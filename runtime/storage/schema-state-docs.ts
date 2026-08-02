@@ -37,6 +37,7 @@ const ENTITY_OPTIONAL = [
   'profileEncryptionManifest', 'consumptionAccumulator', 'certifiedOutputSequences',
   'outDebtsByToken', 'inDebtsByToken', 'swapTradingPairs',
   'crossJurisdictionSwaps', 'pendingCrossJurisdictionFillAcks',
+  'crossJurisdictionAuthorizations',
   'crossJurisdictionBookAdmissions', 'hubRebalanceConfig', 'orderbookHubProfile',
   'orderbookReferrals', 'lending',
 ] as const;

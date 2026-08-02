@@ -395,7 +395,7 @@ export const clearDB = async (env?: RuntimeReplica): Promise<void> => {
 };
 
 const runtimeCommandApi = createRuntimeCommandApi({
-  getP2P,
+  enqueueRuntimeInputs,
   getRuntimeOutputRoutingDeps,
 });
 

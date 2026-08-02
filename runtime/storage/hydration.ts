@@ -125,6 +125,7 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withProp('orderbookExt', orderbookExt),
     ...withProp('swapTradingPairs', core.swapTradingPairs),
     ...withProp('crossJurisdictionSwaps', publicCrossJurisdictionSwaps(core.crossJurisdictionSwaps)),
+    ...withProp('crossJurisdictionAuthorizations', publicCrossJurisdictionSwaps(core.crossJurisdictionAuthorizations)),
     ...withProp('pendingCrossJurisdictionFillAcks', publicPendingCrossJurisdictionFillAcks(core.pendingCrossJurisdictionFillAcks)),
     ...withProp('crossJurisdictionBookAdmissions', publicCrossJurisdictionBookAdmissions(core.crossJurisdictionBookAdmissions)),
     ...withProp('hubRebalanceConfig', core.hubRebalanceConfig),

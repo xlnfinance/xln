@@ -1,6 +1,5 @@
 import type { Level } from 'level';
 import type { RuntimeP2P } from '../network/p2p/p2p';
-import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type {
   AccountHistoryRecord,
   RuntimeOverlayRecord,
@@ -435,8 +434,6 @@ export interface UnsignedRuntimeEntityInputsEnvelope {
     phase: 'proposal' | 'ack';
     pairKey: string;
   };
-  /** Best-effort M1: source-authenticated, but it grants no Account authority or funds. */
-  crossJurisdictionIntent?: CrossJurisdictionSwapRoute;
 }
 
 /**

@@ -62,6 +62,7 @@ export const ENTITY_STATE_ROOT_FIELDS = [
   'lockBook',
   'swapTradingPairs',
   'crossJurisdictionSwaps',
+  'crossJurisdictionAuthorizations',
   'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionBookAdmissions',
   'hubRebalanceConfig',

@@ -76,6 +76,7 @@ export const projectEntityCoreDoc = (
   ...withProp('inDebtsByToken', state.inDebtsByToken),
   ...withProp('swapTradingPairs', state.swapTradingPairs),
   ...withProp('crossJurisdictionSwaps', publicCrossJurisdictionSwaps(state.crossJurisdictionSwaps)),
+  ...withProp('crossJurisdictionAuthorizations', publicCrossJurisdictionSwaps(state.crossJurisdictionAuthorizations)),
   ...withProp('pendingCrossJurisdictionFillAcks', publicPendingCrossJurisdictionFillAcks(state.pendingCrossJurisdictionFillAcks)),
   ...withProp('crossJurisdictionBookAdmissions', publicCrossJurisdictionBookAdmissions(state.crossJurisdictionBookAdmissions)),
   ...withProp('hubRebalanceConfig', state.hubRebalanceConfig),

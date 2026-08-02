@@ -83,6 +83,14 @@ const cloneCrossJurisdictionState = (
       ]),
     );
   }
+  if (source.crossJurisdictionAuthorizations) {
+    target.crossJurisdictionAuthorizations = new Map(
+      Array.from(source.crossJurisdictionAuthorizations.entries()).map(([id, route]) => [
+        id,
+        cloneCrossJurisdictionRoute(route),
+      ]),
+    );
+  }
   if (source.pendingCrossJurisdictionFillAcks) {
     target.pendingCrossJurisdictionFillAcks = new Map(
       Array.from(source.pendingCrossJurisdictionFillAcks.entries()).map(
@@ -156,6 +164,7 @@ const cloneEntityStateWithPolicy = (
   delete cloneSource.jBatchState;
   delete cloneSource.lending;
   delete cloneSource.crossJurisdictionSwaps;
+  delete cloneSource.crossJurisdictionAuthorizations;
   delete cloneSource.pendingCrossJurisdictionFillAcks;
   delete cloneSource.crossJurisdictionBookAdmissions;
   const cloned = structuredCloneOrThrow(

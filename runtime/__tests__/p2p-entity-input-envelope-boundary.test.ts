@@ -15,7 +15,6 @@ test('P2P entity-input envelope rejects unknown outer fields', () => {
     sourceRuntimeHeight: 1,
     sourceRuntimeTimestamp: 2,
     entityInputs: [],
-    crossJurisdictionIntent: {},
     unexpected: true,
   })).toThrow(
     'P2P_ENTITY_INPUTS_ENVELOPE_FIELDS_INVALID:missing=none:extra=unexpected',
