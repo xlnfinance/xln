@@ -22,6 +22,19 @@ describe('persisted EntityTx decoder', () => {
       { type: 'accountInput', data: { kind: 'frame' } },
       'WAL_ACCOUNT_INPUT',
     )).toThrow('WAL_ACCOUNT_INPUT_DATA_FROM_ENTITY_ID');
+
+    expect(() => validateEntityTx(
+      {
+        type: 'accountInput',
+        data: {
+          kind: 'unknown',
+          fromEntityId: counterpartyId,
+          toEntityId: entityId,
+          domain: { chainId: 31_337, depositoryAddress: `0x${'55'.repeat(20)}` },
+        },
+      },
+      'WAL_ACCOUNT_INPUT_KIND',
+    )).toThrow('WAL_ACCOUNT_INPUT_KIND_DATA_KIND_INVALID:unknown');
   });
 
   test('rejects extra fields, wrong primitives, and invalid literal unions', () => {

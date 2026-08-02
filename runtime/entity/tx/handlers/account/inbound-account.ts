@@ -21,7 +21,7 @@ import {
 } from '../../../../account/peer-rejection';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { addMessage } from '../../../frame-events';
-import { assertEntityAccountInsertionCapacity } from '../../../account-capacity';
+import { getEntityAccountInsertionCapacityError } from '../../../account-capacity';
 import { isLeftEntity } from '../../../id';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
@@ -216,11 +216,7 @@ export const resolveInboundAccount = (
     if (envelopeError) return rejectPeerInput(envelopeError.code, envelopeError.reason);
     return { account: existing, counterpartyId, createdAccount: false };
   }
-  assertEntityAccountInsertionCapacity(
-    state.accounts,
-    counterpartyId,
-    `accountInput:${state.entityId}`,
-  );
+  assertUnknownAccountGenesis(state, input, counterpartyId, hasAck, hasProposal);
   const domain = resolveInboundAccountDomain(state, input, counterpartyId);
   if (!isAccountWatchSeed(input.watchSeed)) {
     return rejectPeerInput(
@@ -229,8 +225,14 @@ export const resolveInboundAccount = (
     );
   }
   const watchSeed = input.watchSeed.toLowerCase();
-
-  assertUnknownAccountGenesis(state, input, counterpartyId, hasAck, hasProposal);
+  const capacityError = getEntityAccountInsertionCapacityError(
+    state.accounts,
+    counterpartyId,
+    `accountInput:${state.entityId}`,
+  );
+  if (capacityError) {
+    return rejectPeerInput('ACCOUNT_PEER_CAPACITY_EXCEEDED', capacityError);
+  }
   accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
   const account = createInboundAccountState(state, counterpartyId, domain, watchSeed);
   accountHandlerLog.debug('machine.candidate_created', { counterparty: shortId(counterpartyId) });

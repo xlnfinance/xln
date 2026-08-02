@@ -14,6 +14,7 @@ import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command-codec';
 import { createDisputeProofHashWithNonce } from '../protocol/dispute/proof-builder';
+import { LIMITS } from '../config/constants';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -320,4 +321,93 @@ test('authenticated Runtime Account poison is consumed and the next honest Entit
   expect(target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`)?.state.height).toBe(
     heightAfterPoison + 1,
   );
+});
+
+test('full Account capacity consumes unknown peer genesis and Runtime continues', async () => {
+  const fixture = createEntityProposalFixture('account-peer-full-capacity', 1n);
+  const target = fixture.createValidator('1');
+  target.replica.state.config.jurisdiction = {
+    name: 'account-peer-full-capacity',
+    address: 'http://localhost:8545',
+    chainId: domain.chainId,
+    depositoryAddress: domain.depositoryAddress,
+    entityProviderAddress: `0x${'55'.repeat(20)}`,
+  };
+  const unknownPeer = `0x${'ee'.repeat(32)}`;
+  target.replica.state.accounts.clear();
+  for (let index = 1; index <= LIMITS.MAX_ACCOUNTS_PER_ENTITY; index += 1) {
+    const peer = `0x${index.toString(16).padStart(64, '0')}`;
+    target.replica.state.accounts.set(peer, createAccount(fixture.entityId, peer));
+  }
+  target.env.runtimeId = `0x${'88'.repeat(20)}`;
+  target.env.infrastructure ??= {};
+  target.env.infrastructure.entityRuntimeHints = new Map();
+  target.env.state.eReplicas.set(`${fixture.entityId}:${target.signerId}`, target.replica);
+  const poison: Extract<AccountInput, { kind: 'frame' }> = {
+    kind: 'frame',
+    fromEntityId: unknownPeer,
+    toEntityId: fixture.entityId,
+    domain: { ...domain },
+    watchSeed: `0x${'dd'.repeat(32)}`,
+    proposal: {
+      frame: {
+        height: 1,
+        timestamp: 1,
+        jHeight: 0,
+        accountTxs: [],
+        prevFrameHash: 'genesis',
+        accountStateRoot: `0x${'aa'.repeat(32)}`,
+        deltas: [],
+        stateHash: `0x${'bb'.repeat(32)}`,
+        byLeft: unknownPeer < fixture.entityId,
+      },
+      frameHanko: `0x${'cc'.repeat(65)}`,
+    },
+  };
+  const routingDeps = {
+    ensureRuntimeInfrastructure: () => target.env.infrastructure!,
+    enqueueRuntimeInputs: () => {},
+    extractEntityId: (replicaKey: string) => replicaKey.split(':')[0] ?? '',
+    hasLocalSignerForEntity: () => true,
+    hasLocalSignerForEntitySigner: () => true,
+    resolveSoleLocalSignerForEntity: () => target.signerId,
+    getP2P: () => null,
+  };
+
+  const poisoned = await applyMergedEntityInputs(
+    target.env,
+    [
+      {
+        from: `0x${'99'.repeat(20)}`,
+        sourceRuntimeFrame: { height: 1, timestamp: 1 },
+        entityId: fixture.entityId,
+        signerId: target.signerId,
+        entityTxs: [{ type: 'accountInput', data: poison }],
+      },
+    ],
+    [],
+    { isReplay: false, routingDeps },
+  );
+  expect(poisoned.inputOutcomes[0]?.outcome.kind).toBe('committed');
+  const afterPoison = target.env.state.eReplicas.get(`${fixture.entityId}:${target.signerId}`);
+  expect(afterPoison?.state.accounts.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
+  expect(afterPoison?.state.accounts.has(unknownPeer)).toBe(false);
+  if (!afterPoison) throw new Error('TEST_COMMITTED_ENTITY_REPLICA_MISSING');
+  const command = buildSignedEntityCommand(target.env, afterPoison.state, target.signerId, [
+    { type: 'chat', data: { from: target.signerId, message: 'capacity-poison-consumed' } },
+  ]);
+  const honest = await applyMergedEntityInputs(
+    target.env,
+    [
+      {
+        entityId: fixture.entityId,
+        signerId: target.signerId,
+        entityTxs: [signedEntityCommandTx(command)],
+      },
+    ],
+    [],
+    { isReplay: false, routingDeps },
+  );
+  expect(honest.inputOutcomes[0]?.outcome.kind).toBe('committed');
+  expect(honest.inputOutcomes[0]?.entityFrameCommitted).toBe(true);
 });
