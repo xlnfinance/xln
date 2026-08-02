@@ -118,6 +118,21 @@ const collectRebalanceFee = (
   return true;
 };
 
+const getR2CAdmissionIssue = (
+  receivingEntity: string,
+  counterpartyId: string,
+  tokenId: number,
+  amount: bigint,
+): string | null => {
+  if (amount <= 0n || !Number.isSafeInteger(tokenId) || tokenId <= 0) {
+    return '❌ Collateral deposit requires a positive amount and registered tokenId';
+  }
+  if (!receivingEntity || receivingEntity === counterpartyId.toLowerCase()) {
+    return '❌ Collateral deposit requires two distinct non-empty entities';
+  }
+  return null;
+};
+
 export async function handleR2C(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'r2c' }>,
@@ -138,12 +153,9 @@ export async function handleR2C(
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 
-  if (amount <= 0n || !Number.isSafeInteger(tokenId) || tokenId <= 0) {
-    addMessage(newState, '❌ Collateral deposit requires a positive amount and registered tokenId');
-    return { newState, outputs };
-  }
-  if (!receivingEntity || receivingEntity === counterpartyId.toLowerCase()) {
-    addMessage(newState, '❌ Collateral deposit requires two distinct non-empty entities');
+  const admissionIssue = getR2CAdmissionIssue(receivingEntity, counterpartyId, tokenId, amount);
+  if (admissionIssue) {
+    addMessage(newState, admissionIssue);
     return { newState, outputs };
   }
 

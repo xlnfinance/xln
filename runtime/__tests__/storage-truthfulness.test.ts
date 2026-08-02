@@ -24,17 +24,17 @@ test('authoritative Entity reads fail when storage cannot be opened', async () =
   })).rejects.toThrow('STORAGE_DB_UNAVAILABLE:entity-state');
 });
 
-test('Account history fails when its materialized view is unavailable', async () => {
+test('Account history fails when its authoritative Runtime WAL is unavailable', async () => {
   const env = createEmptyEnv('storage-truthfulness-account-history');
   await expect(readAccountFrameHistory(
     {
-      tryOpenHistoryViewDb: async () => false,
-      getHistoryViewDb: () => {
+      tryOpenRuntimeWalDb: async () => false,
+      getRuntimeWalDb: () => {
         throw new Error('TEST_DB_HANDLE_MUST_NOT_BE_READ');
       },
     },
     env,
     `0x${'22'.repeat(32)}`,
     `0x${'33'.repeat(32)}`,
-  )).rejects.toThrow('STORAGE_DB_UNAVAILABLE:history-view:account-frames');
+  )).rejects.toThrow('STORAGE_DB_UNAVAILABLE:runtime-wal:certified-account-frames');
 });

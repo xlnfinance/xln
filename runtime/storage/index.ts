@@ -86,6 +86,7 @@ import {
 import { createStructuredLogger } from '../infra/logger';
 import { cumulativeMarksToDurations } from '../infra/perf-profile';
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
+import type { FrameLogEntry } from '../types/logging';
 import type { EntityState } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
 import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
@@ -1310,27 +1311,22 @@ type PreparedStorageCommitments = Awaited<
   ReturnType<typeof prepareStorageStateCommitments>
 >;
 
-const buildStorageFrameRecordPlan = (
+type StorageFrameTouchSummary = {
+  frameLogs: FrameLogEntry[];
+  touchedEntities: string[];
+  touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
+  touchedBookEntities: string[];
+};
+
+const summarizeStorageFrameTouches = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
-  commitments: PreparedStorageCommitments,
-  pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
-  prevFrameHash: string,
-) => {
-  const {
-    head,
-    diff,
-    appliedRuntimeInput,
-    shouldMaterialize,
-    overlayRecords,
-    frameTouched,
-    checkpointedLineagePlan,
-  } = prepared;
-  const frameLogs = Array.isArray(options.env.frameLogs)
+): StorageFrameTouchSummary => ({
+  frameLogs: Array.isArray(options.env.frameLogs)
     ? options.env.frameLogs.map(entry => ({ ...entry }))
-    : [];
-  const touchedEntities = [...frameTouched.touchedEntities.values()].sort();
-  const touchedAccounts = [...frameTouched.touchedAccounts.values()]
+    : [],
+  touchedEntities: [...prepared.frameTouched.touchedEntities.values()].sort(),
+  touchedAccounts: [...prepared.frameTouched.touchedAccounts.values()]
     .filter(
       (ref): ref is Extract<StorageDocRef, { family: 'account' }> =>
         ref.family === 'account',
@@ -1338,9 +1334,24 @@ const buildStorageFrameRecordPlan = (
     .map(ref => ({
       entityId: ref.entityId,
       counterpartyId: ref.counterpartyId,
-    }));
-  const touchedBookEntities =
-    [...frameTouched.touchedBookEntities.values()].sort();
+    })),
+  touchedBookEntities:
+    [...prepared.frameTouched.touchedBookEntities.values()].sort(),
+});
+
+const buildStorageRuntimeFrame = (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  commitments: PreparedStorageCommitments,
+  prevFrameHash: string,
+  touches: StorageFrameTouchSummary,
+): RuntimeFrame => {
+  const {
+    appliedRuntimeInput,
+    shouldMaterialize,
+    overlayRecords,
+    checkpointedLineagePlan,
+  } = prepared;
   const durablePendingInput =
     buildDurableRuntimeMempool(
       options.pendingRuntimeInput ?? options.env.runtimeMempool,
@@ -1354,7 +1365,7 @@ const buildStorageFrameRecordPlan = (
     options.env,
     options.currentFrameOutputs ?? [],
   );
-  const frameBase: RuntimeFrame = {
+  return {
     height: options.env.state.height,
     timestamp: options.env.state.timestamp,
     prevFrameHash,
@@ -1387,7 +1398,7 @@ const buildStorageFrameRecordPlan = (
     historyRecords: (options.historyRecords ?? []).map(record =>
       structuredClone(record),
     ),
-    activityLogs: frameLogs.map(log => structuredClone(log)),
+    activityLogs: touches.frameLogs.map(log => structuredClone(log)),
     ...(hasPendingInput ? { pendingRuntimeInput: durablePendingInput } : {}),
     ...(commitments.runtimeMachine
       ? { runtimeMachine: commitments.runtimeMachine }
@@ -1403,10 +1414,27 @@ const buildStorageFrameRecordPlan = (
     ...(shouldMaterialize && overlayRecords.length > 0
       ? { overlayRecords: overlayRecords.map(record => ({ ...record })) }
       : {}),
-    touchedEntities,
-    touchedAccounts,
-    touchedBookEntities,
+    touchedEntities: touches.touchedEntities,
+    touchedAccounts: touches.touchedAccounts,
+    touchedBookEntities: touches.touchedBookEntities,
   };
+};
+
+const buildStorageFrameRecordPlan = (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  commitments: PreparedStorageCommitments,
+  pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
+  prevFrameHash: string,
+) => {
+  const touches = summarizeStorageFrameTouches(options, prepared);
+  const frameBase = buildStorageRuntimeFrame(
+    options,
+    prepared,
+    commitments,
+    prevFrameHash,
+    touches,
+  );
   const frameRecord = {
     ...frameBase,
     frameHash: computeStorageFrameHash(frameBase),
@@ -1414,7 +1442,7 @@ const buildStorageFrameRecordPlan = (
   const frameKey = keyFrame(options.env.state.height);
   const diffKey = keyDiff(options.env.state.height);
   const frameBuffer = encodeBuffer(frameRecord);
-  const diffBuffer = encodeBuffer(diff);
+  const diffBuffer = encodeBuffer(prepared.diff);
   const nodeBytes =
     pendingNodes.boardHistoryBytes +
     pendingNodes.consumptionHistoryBytes +
@@ -1430,10 +1458,10 @@ const buildStorageFrameRecordPlan = (
     diffKey,
     frameBuffer,
     diffBuffer,
-    frameLogs,
-    touchedEntities,
-    touchedAccounts,
-    touchedBookEntities,
+    frameLogs: touches.frameLogs,
+    touchedEntities: touches.touchedEntities,
+    touchedAccounts: touches.touchedAccounts,
+    touchedBookEntities: touches.touchedBookEntities,
     certifiedHistoryPuts: buildCertifiedFramePuts({
       height: options.env.state.height,
       timestamp: options.env.state.timestamp,
@@ -1442,13 +1470,13 @@ const buildStorageFrameRecordPlan = (
     historyViewPuts: buildHistoryViewPuts({
       height: options.env.state.height,
       timestamp: options.env.state.timestamp,
-      runtimeInput: appliedRuntimeInput,
-      logs: frameLogs,
-      touchedEntities,
-      touchedAccounts,
-      touchedBookEntities,
+      runtimeInput: prepared.appliedRuntimeInput,
+      logs: touches.frameLogs,
+      touchedEntities: touches.touchedEntities,
+      touchedAccounts: touches.touchedAccounts,
+      touchedBookEntities: touches.touchedBookEntities,
     }),
-    highSignalEvents: frameLogs
+    highSignalEvents: touches.frameLogs
       .map(entry => typeof entry?.message === 'string' ? entry.message : '')
       .filter(message => [
         'HtlcReceived',
@@ -1457,8 +1485,8 @@ const buildStorageFrameRecordPlan = (
         'JEventReceived',
         'JBatchQueued',
       ].includes(message)),
-    projectedReplayBytes: head.retainedHistoryBytes + frameBytes,
-    projectedEpochReplayBytes: head.epochReplayBytes + frameBytes,
+    projectedReplayBytes: prepared.head.retainedHistoryBytes + frameBytes,
+    projectedEpochReplayBytes: prepared.head.epochReplayBytes + frameBytes,
   };
 };
 
