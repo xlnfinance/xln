@@ -1052,6 +1052,81 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(closed?.resolves[0]?.executionWantAmount).toBe(900n);
   });
 
+  /**
+   * The Account transition closes the offer on a sub-lot remainder even when
+   * the taker did not set cancelRemainder. If the Entity derived terminality
+   * from the tx flags alone it would only record book progress, leaving the
+   * source offer deleted while its pulls stayed bound until expiry.
+   */
+  test('committed cross-j dust fill requests the clear even without cancelRemainder', () => {
+    const env = createEmptyEnv('cross-fill-ack-dust-clear');
+    env.state.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const lot = SWAP_LOT_SCALE;
+    const sourceUser = entity('91');
+    const sourceHub = entity('92');
+    const targetHub = entity('93');
+    const targetUser = entity('94');
+    const state = makeState(sourceHub, addr('92'), eth, sourceUser);
+    const route = buildPreparedCrossJurisdictionRoute(
+      {
+        orderId: 'cross-entity-dust-clear',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        source: {
+          jurisdiction: jref(eth),
+          entityId: sourceUser,
+          counterpartyEntityId: sourceHub,
+          tokenId: 2,
+          amount: 2n * lot,
+        },
+        target: {
+          jurisdiction: jref(base),
+          entityId: targetHub,
+          counterpartyEntityId: targetUser,
+          tokenId: 1,
+          amount: 2n * lot,
+        },
+        priceImprovementMode: 'source_savings',
+        status: 'resting',
+        createdAt: 1_000,
+        updatedAt: 1_000,
+        expiresAt: 61_000,
+      },
+      { runtimeSeed: 'cross-entity-dust-seed', sourceDisputeDelayMs: 5_000, now: 1_000 },
+    );
+    state.crossJurisdictionSwaps = new Map([[route.orderId, { ...route, status: 'resting' }]]);
+
+    // Leaves lot-1 on each leg: below one lot, so it can never match again.
+    const cumulative = lot + 1n;
+    const outputs: EntityInput[] = [];
+    applyCommittedCrossJurisdictionAccountTxFollowup(env, state, sourceUser, {
+      type: 'cross_swap_fill_ack',
+      data: {
+        offerId: route.orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: cumulative,
+        incrementalTargetAmount: cumulative,
+        cumulativeSourceAmount: cumulative,
+        cumulativeTargetAmount: cumulative,
+        cumulativeFillRatio: 32_768,
+        fillNumerator: cumulative,
+        fillDenominator: 2n * lot,
+        executionSourceAmount: cumulative,
+        executionTargetAmount: cumulative,
+        priceImprovementMode: 'source_savings',
+        cancelRemainder: false,
+        pairId: 'cross:ethereum:2/base:1',
+      },
+    }, outputs);
+
+    const mirrored = state.crossJurisdictionSwaps.get(route.orderId);
+    expect(mirrored?.status).toBe('clear_requested');
+    expect(mirrored?.clearingPolicy).toBe('cancel_and_clear');
+  });
+
   test('committed cross-j fill ack fails closed when source route mirror is missing', () => {
     const env = createEmptyEnv('cross-fill-ack-missing-route');
     env.state.timestamp = 10_000;

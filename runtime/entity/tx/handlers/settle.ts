@@ -490,6 +490,22 @@ const prepareSettlementExecution = (
 
 type PreparedSettlementExecution = ReturnType<typeof prepareSettlementExecution>;
 
+/**
+ * Board authority for a settlement Hanko.
+ *
+ * `freshMovement` mirrors `Account.sol:894` (cooperative settlement) and
+ * `Account.sol:790` (C2R): a cooperative settlement creates new financial
+ * state, so only the counterparty's *current* board may authorize it. Accepting
+ * a rotated-out board off-chain would commit a bilateral state that
+ * `verifyCurrentHankoSignature` then rejects on-chain, leaving the off-chain
+ * channel ahead of settled truth.
+ *
+ * `historicalEvidence` is the post-settlement dispute proof. That is evidence
+ * about a state the previous board legitimately signed, and `Account.sol:1063`
+ * accepts it for the full grace window, so the runtime must too.
+ */
+type SettlementHankoAuthority = 'freshMovement' | 'historicalEvidence';
+
 const verifySettlementHanko = async (
   env: EntityRuntimeContext,
   entityState: EntityState,
@@ -497,18 +513,23 @@ const verifySettlementHanko = async (
   hash: string,
   entityId: string,
   context: string,
+  authority: SettlementHankoAuthority,
 ): Promise<void> => {
   const boardHash = resolveObserverCertifiedBoardHash(
     entityState,
     getCertifiedBoardNodeStore(env),
     entityId,
   );
+  const allowPreviousBoard = authority === 'historicalEvidence';
   const verified = await verifyHankoForHash(
     hanko as import('../../../types/hanko').HankoString,
     hash,
     entityId,
     env,
-    boardHash ? { registeredBoardHash: boardHash } : undefined,
+    {
+      ...(boardHash ? { registeredBoardHash: boardHash } : {}),
+      allowPreviousBoard,
+    },
   );
   if (!verified.valid || verified.entityId?.toLowerCase() !== entityId.toLowerCase()) {
     throw new Error(`${context}_HANKO_INVALID`);
@@ -530,6 +551,7 @@ const verifySettlementExecutionHankos = async (
     prepared.expectedSettlementHash,
     counterpartyEntityId,
     'SETTLEMENT_NONEXECUTOR',
+    'freshMovement',
   );
   await verifySettlementHanko(
     env,
@@ -538,6 +560,7 @@ const verifySettlementExecutionHankos = async (
     prepared.expectedPostProof.disputeHash,
     account.state.leftEntity,
     'POST_SETTLEMENT_LEFT',
+    'historicalEvidence',
   );
   await verifySettlementHanko(
     env,
@@ -546,6 +569,7 @@ const verifySettlementExecutionHankos = async (
     prepared.expectedPostProof.disputeHash,
     account.state.rightEntity,
     'POST_SETTLEMENT_RIGHT',
+    'historicalEvidence',
   );
 };
 

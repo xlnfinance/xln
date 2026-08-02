@@ -13,6 +13,7 @@ import {
   deriveCanonicalCrossJurisdictionVenueId,
 } from './market';
 import { exactFillRatioToUint16 } from '../../orderbook/swap-execution';
+import { getSwapLotScale } from '../../orderbook';
 
 export {
   deriveCanonicalCrossJurisdictionBookOwner,
@@ -253,6 +254,65 @@ const committedFillAmountsHaveProgress = (
 
 export const hasCrossJurisdictionCommittedFill = (route: CrossJurisdictionSwapRoute): boolean =>
   committedFillAmountsHaveProgress(getCrossJurisdictionCommittedFillAmounts(route));
+
+/**
+ * A remainder below one lot on either leg can never be matched again, so the
+ * route is terminal even though the ratio is short of CROSS_J_MAX_FILL_RATIO
+ * and the taker did not ask to cancel.
+ *
+ * Both layers must agree: the Account transition closes the offer on this
+ * predicate, and the Entity must therefore treat the same fill as terminal and
+ * request the clear. If only one side sees the dust close, the source offer is
+ * deleted while its pulls stay bound until expiry.
+ */
+export const isCrossJurisdictionDustRemainder = (
+  route: CrossJurisdictionSwapRoute,
+  sourceTotal: bigint,
+  targetTotal: bigint,
+  remainingSource: bigint,
+  remainingTarget: bigint,
+): boolean => {
+  if (remainingSource <= 0n || remainingTarget <= 0n) return true;
+  const sourceLot = getSwapLotScale(route.source.tokenId);
+  const targetLot = getSwapLotScale(route.target.tokenId);
+  return (
+    sourceTotal >= sourceLot &&
+    targetTotal >= targetLot &&
+    (remainingSource < sourceLot || remainingTarget < targetLot)
+  );
+};
+
+/** Terminal test for a committed cross-j fill ACK, shared by Account and Entity. */
+export const isCrossJurisdictionFillTerminal = (
+  route: CrossJurisdictionSwapRoute,
+  input: {
+    nextRatio: number;
+    // The wire ACK may omit the cumulative amounts; the route's committed fill
+    // is then the canonical evidence for how much has actually cleared.
+    cumulativeSourceAmount?: bigint | undefined;
+    cumulativeTargetAmount?: bigint | undefined;
+    cancelRemainder?: boolean | undefined;
+  },
+): { terminal: boolean; dustClose: boolean } => {
+  const committed = getCrossJurisdictionCommittedFillAmounts(route);
+  const cumulativeSource = input.cumulativeSourceAmount ?? committed.filledSourceAmount;
+  const cumulativeTarget = input.cumulativeTargetAmount ?? committed.filledTargetAmount;
+  const sourceTotal = BigInt(route.source.amount);
+  const targetTotal = BigInt(route.target.amount);
+  const shouldClose =
+    input.nextRatio >= CROSS_J_MAX_FILL_RATIO ||
+    cumulativeSource >= sourceTotal ||
+    cumulativeTarget >= targetTotal ||
+    Boolean(input.cancelRemainder);
+  const dustClose = !shouldClose && isCrossJurisdictionDustRemainder(
+    route,
+    sourceTotal,
+    targetTotal,
+    sourceTotal - cumulativeSource,
+    targetTotal - cumulativeTarget,
+  );
+  return { terminal: shouldClose || dustClose, dustClose };
+};
 
 const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
   if (denominator <= 0n) throw new Error(`CROSS_J_CEIL_DIV_DENOMINATOR_INVALID:${denominator.toString()}`);

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { applyAccountTx } from '../account/tx/apply';
 import { createAccountJClaimSession } from '../account/j-claim-session';
@@ -176,8 +178,7 @@ const installProofStack = (env: RuntimeReplica, state: EntityState): void => {
   env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
     chainId: jurisdiction.chainId,
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
+    contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
@@ -1965,5 +1966,43 @@ describe('atomic settlement Account transition', () => {
 
     expect(account.state.settlementWorkspace?.postSettlementDisputeProof?.leftHanko).toBeUndefined();
     expect(clone.state.settlementWorkspace?.postSettlementDisputeProof?.leftHanko).toBe('0x1234');
+  });
+  /**
+   * Wiring guard, not a behavioural one: it asserts the two settlement Hanko
+   * call sites pass opposite board authority, matching the jurisdiction.
+   * Cooperative settlement moves fresh funds and is current-board-only on-chain
+   * (Account.sol:894 / Account.sol:790 use verifyCurrentHankoSignature); the
+   * post-settlement dispute proof is historical evidence and Account.sol:1063
+   * grants it the full previous-board grace. Accepting a rotated-out board on
+   * the money path would advance the bilateral state off-chain on a signature
+   * the jurisdiction rejects.
+   */
+  test('settlement seal is current-board-only while its dispute proof keeps board grace', () => {
+    const repoRoot = join(import.meta.dir, '..', '..');
+    const accountSeal = readFileSync(
+      join(repoRoot, 'runtime/account/tx/handlers/settle-transition.ts'),
+      'utf8',
+    );
+    const entitySeal = readFileSync(
+      join(repoRoot, 'runtime/entity/tx/handlers/settle.ts'),
+      'utf8',
+    );
+
+    const postProofCall = accountSeal.indexOf('prepared.expectedDisputeHash');
+    const settlementCall = accountSeal.indexOf('prepared.expectedSettlementHash');
+    expect(postProofCall).toBeGreaterThanOrEqual(0);
+    expect(settlementCall).toBeGreaterThan(postProofCall);
+    expect(accountSeal.slice(postProofCall, settlementCall)).toContain('allowPreviousBoard: true');
+    expect(accountSeal.slice(settlementCall)).toContain('allowPreviousBoard: false');
+
+    // The Entity helper is shared by both, so the split lives in its argument.
+    expect(entitySeal).toContain("allowPreviousBoard = authority === 'historicalEvidence'");
+    const nonExecutor = entitySeal.indexOf("'SETTLEMENT_NONEXECUTOR',");
+    const postLeft = entitySeal.indexOf("'POST_SETTLEMENT_LEFT',");
+    const postRight = entitySeal.indexOf("'POST_SETTLEMENT_RIGHT',");
+    expect(nonExecutor).toBeGreaterThanOrEqual(0);
+    expect(entitySeal.slice(nonExecutor, nonExecutor + 80)).toContain("'freshMovement'");
+    expect(entitySeal.slice(postLeft, postLeft + 80)).toContain("'historicalEvidence'");
+    expect(entitySeal.slice(postRight, postRight + 80)).toContain("'historicalEvidence'");
   });
 });

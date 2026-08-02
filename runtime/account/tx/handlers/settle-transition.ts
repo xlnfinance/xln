@@ -380,11 +380,16 @@ const verifySettlementSealHankos = async (
     transition.postProof.hanko,
     'POST_SETTLEMENT_PROOF_HANKO_MISSING',
   );
+  // Post-settlement proof is evidence about a state the previous board
+  // legitimately signed; `Account.sol:1063` accepts it for the full grace.
   const verifiedPost = await context.verifyHanko(
     postHanko,
     prepared.expectedDisputeHash,
     sourceEntity,
-    sealBoardHash ? { registeredBoardHash: sealBoardHash } : undefined,
+    {
+      ...(sealBoardHash ? { registeredBoardHash: sealBoardHash } : {}),
+      allowPreviousBoard: true,
+    },
   );
   if (!verifiedPost.valid || verifiedPost.entityId?.toLowerCase() !== sourceEntity.toLowerCase()) {
     throw new Error('POST_SETTLEMENT_PROOF_HANKO_INVALID');
@@ -401,11 +406,18 @@ const verifySettlementSealHankos = async (
       transition.settlementHanko,
       'SETTLEMENT_NONEXECUTOR_HANKO_MISSING',
     );
+    // Cooperative settlement creates fresh financial state. `Account.sol:894`
+    // verifies it with `verifyCurrentHankoSignature`, so a rotated-out board
+    // must not seal it here either - otherwise the bilateral state advances
+    // off-chain on a signature the jurisdiction will reject.
     const verifiedSettlement = await context.verifyHanko(
       settlementHanko,
       prepared.expectedSettlementHash,
       sourceEntity,
-      sealBoardHash ? { registeredBoardHash: sealBoardHash } : undefined,
+      {
+        ...(sealBoardHash ? { registeredBoardHash: sealBoardHash } : {}),
+        allowPreviousBoard: false,
+      },
     );
     if (!verifiedSettlement.valid || verifiedSettlement.entityId?.toLowerCase() !== sourceEntity.toLowerCase()) {
       throw new Error('SETTLEMENT_NONEXECUTOR_HANKO_INVALID');
