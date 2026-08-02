@@ -39,6 +39,7 @@ contract EntityProvider is ERC1155 {
   error InsufficientShareSupport();
   error InvalidFoundationAuthorization();
   error InvalidFoundationActionNonce();
+  error BoardGracePeriodActive();
 
   enum EntityProviderActionKind { ENTITY_TRANSFER, RELEASE_CONTROL_SHARES }
 
@@ -484,12 +485,14 @@ contract EntityProvider is ERC1155 {
    * @param entityId The entity ID
    */
   function activateBoard(bytes32 entityId) external {
-    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
-    require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
-    require(block.number >= entities[entityId].activateAtBlock, "Delay period not met");
-    bytes32 proposedBoardHash = entities[entityId].proposedBoardHash;
-    
     Entity storage entity = entities[entityId];
+    require(entity.currentBoardHash != bytes32(0), "Entity doesn't exist");
+    require(entity.proposedBoardHash != bytes32(0), "No proposed board");
+    require(block.number >= entity.activateAtBlock, "Delay period not met");
+    // Only one historical board can verify dispute evidence. Replacing it
+    // early would revoke the exact seven-day proof window promised below.
+    if (block.timestamp < entity.previousBoardValidUntil) revert BoardGracePeriodActive();
+    bytes32 proposedBoardHash = entity.proposedBoardHash;
     bytes32 previousBoardHash = entity.currentBoardHash;
     uint256 previousBoardValidUntil = block.timestamp + BOARD_GRACE_PERIOD;
     entity.previousBoardHash = previousBoardHash;

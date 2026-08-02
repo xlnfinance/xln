@@ -115,7 +115,10 @@ import { signEntityHashes } from '../hanko/signing';
 
 import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output-certification';
 
-import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../entity/tx/j-events-htlc';
+import {
+  queueCrossJurisdictionSalvageFromDispute,
+  queueCrossJurisdictionSourceDisputeFromTargetDispute,
+} from '../entity/tx/j-events-htlc';
 
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 
@@ -2052,6 +2055,82 @@ describe('cross-jurisdiction hashledger swap', () => {
         data: unsignedEvidenceRange,
       }),
     ).rejects.toThrow('J_RANGE_EVIDENCE_HASH_MISMATCH');
+  });
+
+  test('source dispute matches every pull binary to its exact active Cross-J route', () => {
+    const env = createEmptyEnv('cross-salvage-route-binary-match');
+    env.state.timestamp = 39_000;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('31');
+    const sourceHub = entity('32');
+    const sourceSigner = addr('60');
+    const state = makeState(sourceUser, sourceSigner, eth, sourceHub);
+    const buildRoute = (orderId: string, targetByte: string, targetSignerByte: string) =>
+      buildPreparedCrossJurisdictionRoute({
+        orderId,
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        sourceSignerId: sourceSigner,
+        targetSignerId: addr(targetSignerByte),
+        source: {
+          jurisdiction: jref(eth),
+          entityId: sourceUser,
+          counterpartyEntityId: sourceHub,
+          tokenId: 1,
+          amount: 100n,
+        },
+        target: {
+          jurisdiction: jref(base),
+          entityId: entity('33'),
+          counterpartyEntityId: entity(targetByte),
+          tokenId: 1,
+          amount: 90n,
+        },
+        status: 'resting' as const,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
+      }, {
+        runtimeSeed: `route-seed-${orderId}`,
+        sourceDisputeDelayMs: 5_000,
+        now: env.state.timestamp,
+      });
+    const first = buildRoute('cross-salvage-a', '34', '61');
+    const second = buildRoute('cross-salvage-b', '35', '62');
+    state.crossJurisdictionSwaps?.set(first.orderId, first);
+    state.crossJurisdictionSwaps?.set(second.orderId, second);
+    const firstReveal = buildCrossJurisdictionPullReveal(
+      first,
+      0x1234,
+      deriveCrossJurisdictionPrivateSeed(`route-seed-${first.orderId}`, first),
+    );
+    const secondReveal = buildCrossJurisdictionPullReveal(
+      second,
+      0x4321,
+      deriveCrossJurisdictionPrivateSeed(`route-seed-${second.orderId}`, second),
+    );
+    const abi = ethers.AbiCoder.defaultAbiCoder();
+    const pullArgs = abi.encode(
+      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      [{ fillRatios: [], secrets: [], pulls: [secondReveal.binary, firstReveal.binary] }],
+    );
+    const starterArgs = abi.encode(['bytes[]'], [[pullArgs]]);
+    const outputs: EntityInput[] = [];
+
+    expect(queueCrossJurisdictionSalvageFromDispute(
+      state,
+      outputs,
+      sourceHub,
+      starterArgs,
+      12,
+    )).toBe(true);
+    expect(outputs.map(output => ({
+      routeId: (output.entityTxs?.[0]?.data as { routeId?: string }).routeId,
+      binary: (output.entityTxs?.[0]?.data as { binary?: string }).binary,
+    }))).toEqual([
+      { routeId: first.orderId, binary: firstReveal.binary },
+      { routeId: second.orderId, binary: secondReveal.binary },
+    ]);
   });
 
   test('crossJurisdictionSalvage lets prepareDispute safely schedule the target broadcast', async () => {

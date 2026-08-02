@@ -1,19 +1,21 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
+import { EntityProvider__factory } from '../../../jurisdictions/typechain-types';
 
-import type { JAdapter } from '../../jurisdiction/adapter/types';
 import { getCertifiedBoardStackKey } from '../../jurisdiction/machine/board-registry';
 
-import type { RuntimeReplica, NumberedRegistrationRequest, PendingNumberedRegistration } from '../types';
-import { createLazyEntity, encodeBoard, hashBoard, type BoardMemberInput } from '../../entity/factory';
+import type {
+  NumberedRegistrationDefinition,
+  NumberedRegistrationRequest,
+  PendingNumberedRegistration,
+  RuntimeReplica,
+} from '../types';
+import { createLazyEntity, encodeBoard, hashBoard } from '../../entity/factory';
 
-export type NumberedRegistrationDefinition = Readonly<{
-  name: string;
-  validators: readonly BoardMemberInput[];
-  threshold: bigint;
-  profileName?: string;
-  position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
-}>;
+export type { NumberedRegistrationDefinition } from '../types';
+
+const entityProviderInterface = EntityProvider__factory.createInterface();
+export const MAX_NUMBERED_REGISTRATION_ENTITIES = 128;
 
 export const numberedRegistrationBytes32 = (value: string, label: string): string => {
   const normalized = String(value || '').toLowerCase();
@@ -41,18 +43,47 @@ export const computeNumberedRegistrationRequestHash = (request: NumberedRegistra
     )
     .toLowerCase();
 
-export const encodeNumberedRegistrationCalldata = (adapter: JAdapter, request: NumberedRegistrationRequest): string =>
-  adapter.entityProvider.interface
+const computeNumberedRegistrationIntentId = (
+  request: Omit<NumberedRegistrationRequest, 'intentId'>,
+): string => ethers
+  .keccak256(
+    ethers.toUtf8Bytes(
+      encodeCanonicalConsensusValue({
+        domain: 'xln.numbered-registration.intent-id.v1',
+        request,
+      }),
+    ),
+  )
+  .toLowerCase();
+
+export const encodeNumberedRegistrationCalldata = (request: NumberedRegistrationRequest): string =>
+  entityProviderInterface
     .encodeFunctionData('registerNumberedEntitiesBatch', [request.entities.map(entity => entity.boardHash)])
     .toLowerCase();
 
 export const assertNumberedRegistrationRequest = (env: RuntimeReplica, request: NumberedRegistrationRequest): void => {
   if (request.version !== 1) throw new Error('NUMBERED_REGISTRATION_INTENT_VERSION_INVALID');
-  numberedRegistrationBytes32(request.intentId, 'INTENT_ID');
-  numberedRegistrationBytes32(request.stackKey, 'STACK_KEY');
+  if (request.intentId !== numberedRegistrationBytes32(request.intentId, 'INTENT_ID')) {
+    throw new Error('NUMBERED_REGISTRATION_INTENT_ID_NON_CANONICAL');
+  }
+  if (request.stackKey !== numberedRegistrationBytes32(request.stackKey, 'STACK_KEY')) {
+    throw new Error('NUMBERED_REGISTRATION_STACK_KEY_NON_CANONICAL');
+  }
   address(request.payerSignerId, 'PAYER');
   address(request.entityProviderAddress, 'ENTITY_PROVIDER');
+  const committedStack = [...env.state.jReplicas.values()].some(replica => {
+    if (!replica.chainId || !replica.depositoryAddress || !replica.entityProviderAddress) return false;
+    return getCertifiedBoardStackKey({
+      chainId: replica.chainId,
+      depositoryAddress: replica.depositoryAddress,
+      entityProviderAddress: replica.entityProviderAddress,
+    }) === request.stackKey;
+  });
+  if (!committedStack) throw new Error('NUMBERED_REGISTRATION_COMMITTED_STACK_MISSING');
   if (request.entities.length === 0) throw new Error('NUMBERED_REGISTRATION_INTENT_EMPTY');
+  if (request.entities.length > MAX_NUMBERED_REGISTRATION_ENTITIES) {
+    throw new Error(`NUMBERED_REGISTRATION_ENTITY_LIMIT_EXCEEDED:${request.entities.length}`);
+  }
   for (const [index, entity] of request.entities.entries()) {
     if (!entity.name || entity.name.length > 256) throw new Error(`NUMBERED_REGISTRATION_NAME_INVALID:${index}`);
     if (!entity.config.jurisdiction) throw new Error(`NUMBERED_REGISTRATION_STACK_MISSING:${index}`);
@@ -69,13 +100,19 @@ export const assertNumberedRegistrationRequest = (env: RuntimeReplica, request: 
     if (hashBoard(encodeBoard(entity.config, env)).toLowerCase() !== expectedBoard) {
       throw new Error(`NUMBERED_REGISTRATION_BOARD_HASH_MISMATCH:${index}`);
     }
+    if (entity.localSignerId !== null) {
+      const localSignerId = address(entity.localSignerId, 'LOCAL_SIGNER');
+      if (!entity.config.validators.some(validator => validator.toLowerCase() === localSignerId)) {
+        throw new Error(`NUMBERED_REGISTRATION_LOCAL_SIGNER_NOT_ON_BOARD:${index}`);
+      }
+    }
     if (entity.position && ![entity.position.x, entity.position.y, entity.position.z].every(Number.isFinite)) {
       throw new Error(`NUMBERED_REGISTRATION_POSITION_INVALID:${index}`);
     }
   }
 };
 
-export const parseNumberedRegistrationIntentTransaction = (adapter: JAdapter, pending: PendingNumberedRegistration) => {
+export const parseNumberedRegistrationIntentTransaction = (pending: PendingNumberedRegistration) => {
   if (!/^0x[0-9a-f]+$/i.test(pending.rawTransaction) || pending.rawTransaction.length > 524_290) {
     throw new Error('NUMBERED_REGISTRATION_RAW_TX_INVALID');
   }
@@ -90,7 +127,7 @@ export const parseNumberedRegistrationIntentTransaction = (adapter: JAdapter, pe
   if (tx.chainId !== BigInt(chainId) || tx.to?.toLowerCase() !== pending.request.entityProviderAddress) {
     throw new Error('NUMBERED_REGISTRATION_TX_DOMAIN_MISMATCH');
   }
-  if (tx.value !== 0n || tx.data.toLowerCase() !== encodeNumberedRegistrationCalldata(adapter, pending.request)) {
+  if (tx.value !== 0n || tx.data.toLowerCase() !== encodeNumberedRegistrationCalldata(pending.request)) {
     throw new Error('NUMBERED_REGISTRATION_TX_CALLDATA_MISMATCH');
   }
   if (!Number.isSafeInteger(tx.nonce) || tx.nonce < 0 || tx.nonce !== pending.transactionNonce) {
@@ -102,15 +139,15 @@ export const parseNumberedRegistrationIntentTransaction = (adapter: JAdapter, pe
 export const buildNumberedRegistrationRequest = (
   env: RuntimeReplica,
   input: {
-    intentId: string;
+    /** Tests/scenarios may name an intent; production derives it from the exact command. */
+    intentId?: string;
     jurisdiction: NonNullable<NumberedRegistrationRequest['entities'][number]['config']['jurisdiction']>;
     payerSignerId: string;
     entities: readonly NumberedRegistrationDefinition[];
   },
 ): NumberedRegistrationRequest => {
-  const request: NumberedRegistrationRequest = {
+  const requestWithoutIntent: Omit<NumberedRegistrationRequest, 'intentId'> = {
     version: 1,
-    intentId: numberedRegistrationBytes32(input.intentId, 'INTENT_ID'),
     stackKey: getCertifiedBoardStackKey(input.jurisdiction),
     payerSignerId: address(input.payerSignerId, 'PAYER'),
     entityProviderAddress: address(input.jurisdiction.entityProviderAddress, 'ENTITY_PROVIDER'),
@@ -120,10 +157,19 @@ export const buildNumberedRegistrationRequest = (
         name: entity.name,
         boardHash: hashBoard(encodeBoard(config, env)).toLowerCase(),
         config,
+        localSignerId: entity.localSignerId === null
+          ? null
+          : address(entity.localSignerId, 'LOCAL_SIGNER'),
         ...(entity.profileName ? { profileName: entity.profileName } : {}),
         ...(entity.position ? { position: structuredClone(entity.position) } : {}),
       };
     }),
+  };
+  const request: NumberedRegistrationRequest = {
+    ...requestWithoutIntent,
+    intentId: input.intentId === undefined
+      ? computeNumberedRegistrationIntentId(requestWithoutIntent)
+      : numberedRegistrationBytes32(input.intentId, 'INTENT_ID'),
   };
   assertNumberedRegistrationRequest(env, request);
   return request;

@@ -1,5 +1,10 @@
 #!/bin/bash
 
+assert_dev_launcher_capability() {
+  local repo_root="$1"
+  bun "$repo_root/scripts/dev/verify-launcher-capability.ts"
+}
+
 read_dev_process_start_identity() {
   local pid="$1"
   local identity
@@ -24,8 +29,54 @@ dev_process_start_identity() {
 
 dev_role_allowed() {
   case "$1" in
-    anvil|anvil2|stack|mesh|watchtower|runtime|vite|vite-http) return 0 ;;
+    anvil|anvil2|stack|mesh|watchtower|runtime|vite|vite-http|ready) return 0 ;;
     *) return 1 ;;
+  esac
+}
+
+assert_no_dev_storage_path_overrides() {
+  local name
+  for name in XLN_RDB_ROOT XLN_JDB_ROOT XLN_STORAGE_HISTORY_PATH ANVIL_TMPDIR XLN_JURISDICTIONS_PATH; do
+    if [[ -n "${!name:-}" ]]; then
+      echo "DEV_STORAGE_OVERRIDE_FORBIDDEN:${name}; use XLN_DEV_DATA_ROOT" >&2
+      return 1
+    fi
+  done
+}
+
+canonical_dev_data_root() {
+  local requested="$1" canonical cursor parent leaf
+  if [[ -e "$requested" ]]; then
+    canonical="$(cd "$requested" 2>/dev/null && pwd -P)" || {
+      echo "DEV_DATA_ROOT_INVALID:${requested}" >&2
+      return 1
+    }
+  else
+    cursor="$requested"
+    local missing_parts=()
+    while [[ ! -e "$cursor" ]]; do
+      leaf="$(basename "$cursor")"
+      [[ -n "$leaf" && "$leaf" != "." && "$leaf" != ".." && "$leaf" != *$'\t'* && "$leaf" != *$'\n'* ]] || {
+        echo "DEV_DATA_ROOT_INVALID:${requested}" >&2
+        return 1
+      }
+      missing_parts=("$leaf" "${missing_parts[@]}")
+      parent="$(dirname "$cursor")"
+      [[ "$parent" != "$cursor" ]] || {
+        echo "DEV_DATA_ROOT_INVALID:${requested}" >&2
+        return 1
+      }
+      cursor="$parent"
+    done
+    canonical="$(cd "$cursor" 2>/dev/null && pwd -P)" || {
+      echo "DEV_DATA_ROOT_INVALID:${requested}" >&2
+      return 1
+    }
+    for leaf in "${missing_parts[@]}"; do canonical="$canonical/$leaf"; done
+  fi
+  case "$canonical" in
+    /*/*/*) printf '%s' "$canonical" ;;
+    *) echo "DEV_DATA_ROOT_UNSAFE:${canonical}" >&2; return 1 ;;
   esac
 }
 
@@ -137,8 +188,14 @@ signal_owned_dev_record() {
 stop_owned_dev_process_batch() {
   local records=("$@")
   local record pid process_start repo_root role attempts
+  local graceful_ms="${XLN_DEV_SHUTDOWN_TIMEOUT_MS:-65000}"
+  if [[ ! "$graceful_ms" =~ ^[1-9][0-9]*$ ]]; then
+    echo "DEV_SHUTDOWN_TIMEOUT_INVALID:${graceful_ms}" >&2
+    return 1
+  fi
+  local timeout_ms=$((graceful_ms + 15000))
   for record in "${records[@]}"; do signal_owned_dev_record TERM "$record" || return 1; done
-  attempts=50
+  attempts=$(( (timeout_ms + 99) / 100 ))
   while [[ "$attempts" -gt 0 ]]; do
     local remaining=()
     for record in "${records[@]}"; do
@@ -239,4 +296,23 @@ describe_dev_port_listener() {
     fi
   done
   echo "DEV_PORT_BUSY_PROCESS:port=${port} pid=${pid} ppid=${ppid:-unavailable} pgid=${pgid:-unavailable} start=${process_start} cwd=${cwd:-unavailable} ownership=${ownership} command=${command:-unavailable}" >&2
+}
+
+assert_dev_ports_clear() {
+  local pid_dir="$1" owner_file="$2"
+  shift 2
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "DEV_PORT_PREFLIGHT_TOOL_MISSING:lsof" >&2
+    return 1
+  fi
+  local port pids pid
+  for port in "$@"; do
+    pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    [[ -z "$pids" ]] && continue
+    echo "DEV_PORT_BUSY_UNOWNED:port=${port} pids=$(echo "$pids" | paste -sd, -) ownerFile=$([[ -f "$owner_file" ]] && printf present || printf missing)" >&2
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && describe_dev_port_listener "$port" "$pid" "$pid_dir"
+    done <<< "$pids"
+    return 1
+  done
 }

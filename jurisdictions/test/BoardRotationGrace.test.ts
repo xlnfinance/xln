@@ -171,6 +171,62 @@ describe('EntityProvider board rotation grace', function () {
     expect(await provider.verifyHankoSignature(newNestedHanko, digest)).to.deep.equal([parentId, true]);
   });
 
+  it('cannot evict the previous board before its exact grace boundary', async function () {
+    const {
+      provider,
+      foundation,
+      oldSigner,
+      newSigner,
+      outsider,
+      entityId,
+      oldBoardHash,
+      newBoardHash,
+      proposalSignature,
+    } = await fixture();
+    const firstSupport = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(0));
+    await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 1, [firstSupport]);
+    await mine(DEFAULT_ARTICLES.controlDelay);
+    const firstActivation = await (await provider.activateBoard(entityId)).wait();
+    const firstActivationBlock = await ethers.provider.getBlock(firstActivation!.blockNumber);
+    const firstValidUntil = BigInt(firstActivationBlock!.timestamp + BOARD_GRACE_SECONDS);
+
+    const thirdBoardHash = singleSignerLazyEntityId(outsider.address);
+    const nonce = await provider.boardActionNonces(entityId) + 1n;
+    const proposalDigest = await provider.computeBoardProposalHash(entityId, thirdBoardHash, 0, nonce);
+    const currentBoardHanko = buildSingleSignerHanko(
+      entityId,
+      proposalDigest,
+      deriveHardhatPrivateKey(2),
+    );
+    await provider.proposeBoard(entityId, thirdBoardHash, 0, [currentBoardHanko]);
+    await mine(DEFAULT_ARTICLES.controlDelay);
+
+    const proofDigest = ethers.keccak256(ethers.toUtf8Bytes('board-grace-overlap-regression'));
+    const oldHanko = buildSingleSignerHanko(entityId, proofDigest, deriveHardhatPrivateKey(1));
+    const currentHanko = buildSingleSignerHanko(entityId, proofDigest, deriveHardhatPrivateKey(2));
+    await time.setNextBlockTimestamp(Number(firstValidUntil) - 1);
+    await expect(provider.activateBoard(entityId)).to.be.revertedWithCustomError(
+      provider,
+      'BoardGracePeriodActive',
+    );
+    const unchanged = await provider.entities(entityId);
+    expect(unchanged.currentBoardHash).to.equal(newBoardHash);
+    expect(unchanged.previousBoardHash).to.equal(oldBoardHash);
+    expect(unchanged.proposedBoardHash).to.equal(thirdBoardHash);
+    expect(await provider.boardEpochs(entityId)).to.equal(1n);
+    expect(await provider.verifyHankoSignature(oldHanko, proofDigest)).to.deep.equal([entityId, true]);
+
+    await time.setNextBlockTimestamp(Number(firstValidUntil));
+    await expect(provider.activateBoard(entityId)).to.emit(provider, 'BoardActivated');
+    const rotated = await provider.entities(entityId);
+    expect(rotated.currentBoardHash).to.equal(thirdBoardHash);
+    expect(rotated.previousBoardHash).to.equal(newBoardHash);
+    expect(await provider.boardEpochs(entityId)).to.equal(2n);
+    expect(await provider.verifyHankoSignature(oldHanko, proofDigest)).to.deep.equal([ethers.ZeroHash, false]);
+    expect(await provider.verifyHankoSignature(currentHanko, proofDigest)).to.deep.equal([entityId, true]);
+    expect(oldSigner.address).not.to.equal(newSigner.address);
+  });
+
   it('applies current-only rotation authority to every registered claim in a recursive Hanko', async function () {
     const { provider, foundation, outsider, entityId, newBoardHash, proposalSignature } = await fixture();
     const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(0));

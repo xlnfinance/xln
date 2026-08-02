@@ -1085,7 +1085,9 @@ const parseMarketMakerSameOfferId = (
 const parseMarketMakerCrossOfferId = (
   offerId: string,
 ): { sourceTokenId: number; targetTokenId: number; side: 'sell'; level: number } => {
-  const match = String(offerId || '').match(/^mmx-[^-]+-[^-]+-(\d+)-(\d+)-sell-(\d+)$/);
+  const match = String(offerId || '').match(
+    /^mmx-[0-9a-f]{6}-[0-9a-f]{6}-(\d+)-(\d+)-[0-9a-f]{64}-sell-(\d+)$/,
+  );
   if (!match) throw new Error(`MARKET_MAKER_BOOTSTRAP_FINGERPRINT_UNPARSEABLE_CROSS_OFFER:${offerId}`);
   return {
     sourceTokenId: Number(match[1]),

@@ -5,6 +5,8 @@ import {
 } from '../../protocol/boundary-validation';
 import { decodeRuntimeInput } from '../../runtime/input-schema';
 import { validateStorageSafeValue } from '../../protocol/boundary-primitives';
+import { MAX_NUMBERED_REGISTRATION_ENTITIES } from '../../runtime/registration/numbered-registration-codec';
+import { LIMITS } from '../../config/constants';
 import type {
   RuntimeAdapterErrorCode,
   RuntimeAdapterErrorPayload,
@@ -141,6 +143,64 @@ const validateReadQuery = (value: unknown): RuntimeAdapterReadQuery => {
   return query;
 };
 
+const validateNumberedRegistrationInput = (value: unknown): void => {
+  const input = requireBoundaryRecord(value, 'RADAPTER_NUMBERED_REGISTRATION_INPUT_INVALID');
+  requireExactBoundaryKeys(
+    input,
+    ['jurisdictionRef', 'payerSignerId', 'entities'],
+    [],
+    'RADAPTER_NUMBERED_REGISTRATION_INPUT_FIELDS_INVALID',
+  );
+  requireBoundedSecretString(input['jurisdictionRef'], 512, 'RADAPTER_NUMBERED_REGISTRATION_JURISDICTION_INVALID');
+  requireBoundedSecretString(input['payerSignerId'], 128, 'RADAPTER_NUMBERED_REGISTRATION_PAYER_INVALID');
+  if (
+    !Array.isArray(input['entities']) ||
+    input['entities'].length === 0 ||
+    input['entities'].length > MAX_NUMBERED_REGISTRATION_ENTITIES
+  ) {
+    throw new Error('RADAPTER_NUMBERED_REGISTRATION_ENTITIES_INVALID');
+  }
+  input['entities'].forEach((rawEntity, entityIndex) => {
+    const code = `RADAPTER_NUMBERED_REGISTRATION_ENTITY_INVALID:index=${entityIndex}`;
+    const entity = requireBoundaryRecord(rawEntity, code);
+    requireExactBoundaryKeys(
+      entity,
+      ['name', 'validators', 'threshold', 'localSignerId'],
+      ['profileName', 'position'],
+      code,
+    );
+    requireBoundedSecretString(entity['name'], 256, code);
+    if (typeof entity['threshold'] !== 'bigint' || entity['threshold'] <= 0n) throw new Error(code);
+    if (entity['localSignerId'] !== null) {
+      requireBoundedSecretString(entity['localSignerId'], 128, code);
+    }
+    if (entity['profileName'] !== undefined) requireBoundedSecretString(entity['profileName'], 256, code);
+    if (
+      !Array.isArray(entity['validators']) ||
+      entity['validators'].length === 0 ||
+      entity['validators'].length > LIMITS.MAX_VALIDATORS
+    ) {
+      throw new Error(code);
+    }
+    entity['validators'].forEach((rawValidator, validatorIndex) => {
+      const validator = requireBoundaryRecord(rawValidator, `${code}:validator=${validatorIndex}`);
+      requireExactBoundaryKeys(validator, ['name', 'weight'], [], code);
+      requireBoundedSecretString(validator['name'], 128, code);
+      const weight = requireBoundaryInteger(validator['weight'], code, 1);
+      if (weight > 0xffff) throw new Error(code);
+    });
+    if (entity['position'] !== undefined) {
+      const position = requireBoundaryRecord(entity['position'], code);
+      requireExactBoundaryKeys(position, ['x', 'y', 'z'], ['jurisdiction', 'xlnomy'], code);
+      for (const axis of ['x', 'y', 'z'] as const) {
+        if (typeof position[axis] !== 'number' || !Number.isFinite(position[axis])) throw new Error(code);
+      }
+      if (position['jurisdiction'] !== undefined) requireBoundedSecretString(position['jurisdiction'], 256, code);
+      if (position['xlnomy'] !== undefined) requireBoundedSecretString(position['xlnomy'], 256, code);
+    }
+  });
+};
+
 function assertRequest(
   message: Record<string, unknown>,
 ): asserts message is Record<string, unknown> & RuntimeAdapterRequest {
@@ -224,6 +284,15 @@ function assertRequest(
         [],
         'RADAPTER_REQUEST_BRAINVAULT_REVEAL_FIELDS_INVALID',
       );
+      break;
+    case 'numbered-registration':
+      requireExactBoundaryKeys(
+        message,
+        ['v', 'id', 'op', 'input'],
+        [],
+        'RADAPTER_REQUEST_NUMBERED_REGISTRATION_FIELDS_INVALID',
+      );
+      validateNumberedRegistrationInput(message['input']);
       break;
     case 'cross-j-intent':
       requireExactBoundaryKeys(

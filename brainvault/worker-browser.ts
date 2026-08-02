@@ -49,7 +49,6 @@ self.onmessage = async function(e: MessageEvent) {
 
       case 'derive_shard': {
         const { name, passphrase, shardIndex, shardCount, shardMemoryKb, algId } = data;
-        if (!name || !passphrase) throw new Error('Missing name or passphrase');
         const memorySizeKb = typeof shardMemoryKb === 'number' ? shardMemoryKb : BRAINVAULT_V1.SHARD_MEMORY_KB;
         const effectiveAlgId = typeof algId === 'string' && algId.length > 0 ? algId : BRAINVAULT_V1.ALG_ID;
 

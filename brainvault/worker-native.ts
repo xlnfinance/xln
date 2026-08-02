@@ -8,12 +8,20 @@ import { parentPort } from 'worker_threads';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
 import { bytesToHex } from './encoding.ts';
 import { deriveBrainVaultNativeShard } from './native.ts';
-import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './spec.ts';
+import {
+  assertBrainVaultName,
+  assertBrainVaultPassphrase,
+  BRAINVAULT_V1,
+  BRAINVAULT_V1_SPEC_ID,
+  createShardSalt,
+} from './spec.ts';
 
 parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCount, shardMemoryKb, algId }) => {
   if (specId !== BRAINVAULT_V1_SPEC_ID) {
     throw new Error(`BRAINVAULT_WORKER_SPEC_MISMATCH:${String(specId)}:${BRAINVAULT_V1_SPEC_ID}`);
   }
+  assertBrainVaultName(name);
+  assertBrainVaultPassphrase(passphrase);
   const memoryKb = shardMemoryKb ?? BRAINVAULT_V1.SHARD_MEMORY_KB;
   const effectiveAlgId = algId ?? BRAINVAULT_V1.ALG_ID;
   const standard = memoryKb === BRAINVAULT_V1.SHARD_MEMORY_KB && effectiveAlgId === BRAINVAULT_V1.ALG_ID;

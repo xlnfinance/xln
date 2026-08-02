@@ -2,6 +2,7 @@
 
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { keccak256, toUtf8Bytes } from 'ethers';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import {
   buildDefaultEntitySwapPairs,
@@ -1292,6 +1293,56 @@ const requireMarketMakerQuoteTimestamp = (env: RuntimeReplica): number => {
   return timestamp;
 };
 
+export const deriveMarketMakerCrossExpiryAt = (timestamp: number): number => {
+  const now = Math.floor(Number(timestamp));
+  const generationMs = Math.floor(Number(MARKET_MAKER_CROSS_EXPIRY_MS));
+  if (!Number.isSafeInteger(now) || now <= 0 || !Number.isSafeInteger(generationMs) || generationMs <= 0) {
+    throw new Error(`MARKET_MAKER_CROSS_EXPIRY_GENERATION_INVALID:${String(timestamp)}`);
+  }
+  // One deadline generation gives transport retries stable timestamps. Any
+  // changed economic term receives a different fingerprinted order identity.
+  const expiresAt = (Math.floor(now / generationMs) + 1) * generationMs;
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) {
+    throw new Error(`MARKET_MAKER_CROSS_EXPIRY_INVALID:${String(expiresAt)}`);
+  }
+  return expiresAt;
+};
+
+const buildMarketMakerCrossRouteBase = (
+  sourceContext: MarketMakerEntityContext,
+  targetContext: MarketMakerEntityContext,
+  sourceHub: HubProfile,
+  targetHub: HubProfile,
+  sourceJurisdictionRef: string,
+  targetJurisdictionRef: string,
+  createdAt: number,
+  expiresAt: number,
+) => {
+  const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
+    sourceJurisdictionRef,
+    sourceHub.entityId,
+    targetJurisdictionRef,
+    targetHub.entityId,
+  );
+  const bookHubSignerId = normalizeEntityRef(bookOwnerEntityId) === normalizeEntityRef(sourceHub.entityId)
+    ? sourceHub.signerId
+    : targetHub.signerId;
+  return {
+    makerEntityId: sourceContext.entityId,
+    hubEntityId: sourceHub.entityId,
+    bookOwnerEntityId,
+    sourceSignerId: sourceContext.signerId,
+    ...(sourceHub.signerId ? { sourceHubSignerId: sourceHub.signerId } : {}),
+    ...(targetHub.signerId ? { targetHubSignerId: targetHub.signerId } : {}),
+    targetSignerId: targetContext.signerId,
+    ...(bookHubSignerId ? { bookHubSignerId } : {}),
+    status: 'intent' as const,
+    createdAt,
+    updatedAt: createdAt,
+    expiresAt,
+  };
+};
+
 export const buildMarketMakerCrossOfferSpecs = (
   env: RuntimeReplica,
   sourceContext: MarketMakerEntityContext,
@@ -1309,12 +1360,24 @@ export const buildMarketMakerCrossOfferSpecs = (
   const crossPairs = buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds);
   const targetByBaseName = new Map(targetHubs.map(hub => [hubRoleName(hub), hub] as const));
   const now = requireMarketMakerQuoteTimestamp(env);
+  const expiresAt = deriveMarketMakerCrossExpiryAt(now);
+  const generationStartedAt = expiresAt - Math.floor(MARKET_MAKER_CROSS_EXPIRY_MS);
 
   for (const sourceHub of sourceHubs) {
     const targetHub = targetByBaseName.get(hubRoleName(sourceHub));
     if (!targetHub || sameJurisdiction(sourceHub, targetHub)) continue;
     const sourceHubSuffix = sourceHub.entityId.slice(-6).toLowerCase();
     const targetHubSuffix = targetHub.entityId.slice(-6).toLowerCase();
+    const routeBase = buildMarketMakerCrossRouteBase(
+      sourceContext,
+      targetContext,
+      sourceHub,
+      targetHub,
+      sourceJurisdictionRef,
+      targetJurisdictionRef,
+      generationStartedAt,
+      expiresAt,
+    );
 
     const hubSpecStart = specs.length;
     for (const pair of crossPairs) {
@@ -1361,31 +1424,6 @@ export const buildMarketMakerCrossOfferSpecs = (
           priceTicks,
         );
         const levelId = level + 1;
-        const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-          sourceJurisdictionRef,
-          sourceHub.entityId,
-          targetJurisdictionRef,
-          targetHub.entityId,
-        );
-        const bookHubSignerId =
-          normalizeEntityRef(bookOwnerEntityId) === normalizeEntityRef(sourceHub.entityId)
-            ? sourceHub.signerId
-            : targetHub.signerId;
-        const routeBase = {
-          makerEntityId: sourceContext.entityId,
-          hubEntityId: sourceHub.entityId,
-          bookOwnerEntityId,
-          sourceSignerId: sourceContext.signerId,
-          ...(sourceHub.signerId ? { sourceHubSignerId: sourceHub.signerId } : {}),
-          ...(targetHub.signerId ? { targetHubSignerId: targetHub.signerId } : {}),
-          targetSignerId: targetContext.signerId,
-          ...(bookHubSignerId ? { bookHubSignerId } : {}),
-          status: 'intent' as const,
-          createdAt: now,
-          updatedAt: now,
-          expiresAt: now + MARKET_MAKER_CROSS_EXPIRY_MS,
-        };
-
         const amounts = fitCrossAmountsToOrderbook(
           sourceJurisdictionRef,
           pair.sourceTokenId,
@@ -1399,10 +1437,10 @@ export const buildMarketMakerCrossOfferSpecs = (
           const quoteAmount = market.sourceIsBase ? amounts.targetAmount : amounts.sourceAmount;
           if (quoteAmount < minimumTradeAmount(oriented.quoteTokenId)) continue;
           if (!isWithinPairBand(canonicalMidTicks, amounts.priceTicks)) continue;
-          const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.sourceTokenId}-${pair.targetTokenId}-sell-${levelId}`;
-          const route = canonicalizeLocalCrossJurisdictionRoute(env, {
+          const offerSlotId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.sourceTokenId}-${pair.targetTokenId}-sell-${levelId}`;
+          const draftRoute = canonicalizeLocalCrossJurisdictionRoute(env, {
             ...routeBase,
-            orderId: offerId,
+            orderId: offerSlotId,
             priceTicks: amounts.priceTicks,
             source: {
               jurisdiction: sourceJurisdictionRef,
@@ -1419,7 +1457,18 @@ export const buildMarketMakerCrossOfferSpecs = (
               amount: amounts.targetAmount,
             },
           });
-          if (!route) continue;
+          if (!draftRoute) continue;
+          if (!draftRoute.routeHash) throw new Error(`MARKET_MAKER_CROSS_FINGERPRINT_MISSING:${offerSlotId}`);
+          const termsFingerprint = keccak256(toUtf8Bytes(safeStringify(draftRoute))).slice(2).toLowerCase();
+          const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.sourceTokenId}-${pair.targetTokenId}-${termsFingerprint}-sell-${levelId}`;
+          // Topology ownership was already proven for the draft above. Changing
+          // only the order identity cannot change either owner Runtime; hash the
+          // final immutable identity directly instead of resolving topology twice.
+          const { routeHash: _draftRouteHash, ...draftTerms } = draftRoute;
+          const route = withCanonicalCrossJurisdictionRouteHash({
+            ...draftTerms,
+            orderId: offerId,
+          });
           specs.push({
             offerId,
             pairId: market.venueId,
@@ -1794,27 +1843,9 @@ const isMatchingCrossOfferRoute = (
   expected: CrossJurisdictionSwapRoute,
 ): boolean => {
   if (!candidate) return false;
-  const candidatePriceTicks = candidate.priceTicks === undefined ? null : BigInt(candidate.priceTicks);
-  const expectedPriceTicks = expected.priceTicks === undefined ? null : BigInt(expected.priceTicks);
-  // routeHash includes the runtime expiry window; regenerated MM specs can roll
-  // that window forward. Readiness binds to route identity and economics here.
   return (
     String(candidate.orderId || '') === String(expected.orderId || '') &&
-    normalizeEntityRef(candidate.makerEntityId) === normalizeEntityRef(expected.makerEntityId) &&
-    normalizeEntityRef(candidate.hubEntityId) === normalizeEntityRef(expected.hubEntityId) &&
-    normalizeEntityRef(candidate.bookOwnerEntityId || '') === normalizeEntityRef(expected.bookOwnerEntityId || '') &&
-    String(candidate.venueId || '') === String(expected.venueId || '') &&
-    normalizeEntityRef(candidate.source.entityId) === normalizeEntityRef(expected.source.entityId) &&
-    normalizeEntityRef(candidate.source.counterpartyEntityId) ===
-      normalizeEntityRef(expected.source.counterpartyEntityId) &&
-    normalizeEntityRef(candidate.target.entityId) === normalizeEntityRef(expected.target.entityId) &&
-    normalizeEntityRef(candidate.target.counterpartyEntityId) ===
-      normalizeEntityRef(expected.target.counterpartyEntityId) &&
-    Number(candidate.source.tokenId) === Number(expected.source.tokenId) &&
-    Number(candidate.target.tokenId) === Number(expected.target.tokenId) &&
-    BigInt(candidate.source.amount) === BigInt(expected.source.amount) &&
-    BigInt(candidate.target.amount) === BigInt(expected.target.amount) &&
-    candidatePriceTicks === expectedPriceTicks
+    String(candidate.routeHash || '').toLowerCase() === String(expected.routeHash || '').toLowerCase()
   );
 };
 

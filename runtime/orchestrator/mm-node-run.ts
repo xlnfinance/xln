@@ -38,9 +38,11 @@ import {
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
 import { registerEnvChangeCallback } from '../runtime/loop-environment';
+import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered-registration-driver';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../api/server/health-redaction';
 import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
+import { readRuntimeSecurityIncidentTelemetry } from '../runtime/security-incidents';
 import { requiresLocalNodeOperator } from '../api/server/node-http-access';
 import { handleRuntimeInputStatus } from '../api/server/runtime-input-control';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
@@ -607,6 +609,7 @@ const buildMarketMakerHealthResponseJson = (input: MarketMakerHealthProjection):
       halted: runtimeHalted,
       lifecyclePhase: input.env.infrastructure?.lifecyclePhase ?? null,
       fatalDebugPayload: input.env.infrastructure?.fatalDebugPayload ?? null,
+      securityIncidents: readRuntimeSecurityIncidentTelemetry(input.env),
     },
     p2p: {
       directPeers: getP2PState(input.env).directPeers || [],
@@ -2168,6 +2171,7 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
   state.phase = 'j-catchup';
   startJurisdictionWatchers(env);
   const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
+  await ensurePendingNumberedRegistrationsResumed(env);
   state.externalIngressReady = true;
   nodeLog.info('startup.j_catchup_ready', {
     jurisdictions: watcherDrain.length,

@@ -487,7 +487,7 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       msgType: type,
       details: {
         returnedProfiles: profiles.length,
-        ids: request.ids ?? [],
+        idCount: Array.isArray(request.ids) ? request.ids.length : 0,
         set: request.set ?? 'default',
         updatedSince: request.updatedSince ?? null,
         limit: request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT,
@@ -511,7 +511,10 @@ const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
       from,
       to,
       msgType: type,
-      details: { traceId, payload },
+      details: {
+        traceId,
+        payloadBytes: new TextEncoder().encode(safeStringify(payload)).byteLength,
+      },
     });
     return true;
   }

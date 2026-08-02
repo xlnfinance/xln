@@ -2,6 +2,7 @@
 export {
   buildMarketMakerCrossOfferSpecs,
   buildMarketMakerOfferSpecs,
+  deriveMarketMakerCrossExpiryAt,
   fitCrossAmountsToOrderbook,
   hasFinalizedMarketMakerCrossOffer,
   readVisibleHubProfiles,

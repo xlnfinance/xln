@@ -1,5 +1,5 @@
 import type { RequestHandler } from './$types';
-import { findForbiddenRpcProxyMethod, isLocalProxyRequest } from '../rpc-proxy-safety';
+import { fetchRpcProxyText, isLocalProxyRequest, readRpcProxyRequest, RpcProxyError } from '../rpc-proxy-safety';
 
 const DEFAULT_LOCAL_RPC2_URL = 'http://localhost:8546';
 const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
@@ -7,27 +7,6 @@ const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
 const readRpcProxyTimeoutMs = (): number => {
   const value = Number(process.env['XLN_RPC_PROXY_TIMEOUT_MS'] || '');
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_RPC_PROXY_TIMEOUT_MS;
-};
-
-const fetchTextWithTimeout = async (
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-): Promise<{ response: Response; text: string }> => {
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    const text = await response.text();
-    return { response, text };
-  } catch (error) {
-    if ((error as Error)?.name === 'AbortError') {
-      throw new Error(`RPC_PROXY_TIMEOUT:${timeoutMs}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutHandle);
-  }
 };
 
 function resolveLocalRpc2UrlFromRequest(requestUrl: string): string {
@@ -54,18 +33,17 @@ const getRpc2Url = (requestUrl: string, clientAddress?: string): string => {
 
 export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   try {
-    const body = await request.text();
-    const forbidden = findForbiddenRpcProxyMethod(body);
-    if (forbidden) {
+    const { bodyText, forbiddenMethod } = await readRpcProxyRequest(request);
+    if (forbiddenMethod) {
       return new Response(
-        JSON.stringify({ error: 'RPC2 proxy method is not allowed', method: forbidden }),
-        { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers: { 'Content-Type': 'application/json' } },
+        JSON.stringify({ error: 'RPC2 proxy method is not allowed', method: forbiddenMethod }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
       );
     }
-    const { response: upstream, text: data } = await fetchTextWithTimeout(getRpc2Url(request.url, getClientAddress()), {
+    const { response: upstream, text: data } = await fetchRpcProxyText(getRpc2Url(request.url, getClientAddress()), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body,
+      body: bodyText,
     }, readRpcProxyTimeoutMs());
     return new Response(data, {
       status: upstream.status,
@@ -80,7 +58,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
         error: 'RPC2 request failed',
         details: error instanceof Error ? error.message : String(error),
       }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } },
+      { status: error instanceof RpcProxyError ? error.status : 503, headers: { 'Content-Type': 'application/json' } },
     );
   }
 };

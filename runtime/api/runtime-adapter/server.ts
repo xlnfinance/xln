@@ -61,6 +61,10 @@ import { verifyRuntimeAdapterOwnerBinding } from './owner-binding';
 import { encodeBinaryPayload } from '../../storage/binary-codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
 import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import {
+  ensurePendingNumberedRegistrationsResumed,
+  registerNumberedEntities,
+} from '../../runtime/registration/numbered-registration-driver';
 
 export type RuntimeAdapterSocket = {
   send: (message: string | Uint8Array) => unknown;
@@ -770,6 +774,23 @@ const handleRuntimeAdapterCrossJIntent = async (
   sendOk(ws, msg.id, { delivered: true }, diagnostic());
 };
 
+const handleRuntimeAdapterNumberedRegistration = async (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'numbered-registration'>,
+  env: RuntimeReplica,
+  state: AdapterClientState,
+  deps: RuntimeAdapterServerDeps,
+  diagnostic: RuntimeAdapterDiagnostic,
+): Promise<void> => {
+  requireAuth(state, 'admin');
+  requireBucket(state.sendBucket, 'send');
+  requireMutatingRuntimeAdapterReady(env, deps);
+  // Do not hold a committed-read lease here: the driver waits for two future
+  // WAL commits and would otherwise deadlock the Runtime writer it needs.
+  await ensurePendingNumberedRegistrationsResumed(env);
+  sendOk(ws, msg.id, await registerNumberedEntities(env, msg.input), diagnostic());
+};
+
 const handleRuntimeAdapterControl = async (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'control'>,
@@ -1164,6 +1185,11 @@ export const handleRuntimeAdapterMessage = async (
         deps,
         diagnostic,
       );
+      return true;
+    }
+
+    if (msg.op === 'numbered-registration') {
+      await handleRuntimeAdapterNumberedRegistration(ws, msg, env, state, deps, diagnostic);
       return true;
     }
 

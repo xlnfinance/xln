@@ -8,6 +8,7 @@ import { MAX_CREDIT_LIMIT } from '../account/tx/handlers/set-credit-limit';
 import { validateEntityState } from '../entity/state-validation';
 import { FINANCIAL, LIMITS, TOKENS, UINT16_MAX } from '../config/constants';
 import { normalizeAccountWatchSeed } from '../protocol/account-watch-seed';
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/integer-ranges';
 import type { AccountFrame, AccountState, Delta } from '../types/account';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
 import { normalizeEntityId } from './keys';
@@ -68,9 +69,6 @@ const ACCOUNT_STATE_OPTIONAL = [
   'pulls', 'subcontracts', 'lendingIntents', 'settlementWorkspace',
   'rebalanceFeePolicies',
 ] as const;
-const UINT256_MAX = (1n << 256n) - 1n;
-const INT256_MIN = -(1n << 255n);
-const INT256_MAX = (1n << 255n) - 1n;
 const DELTA_FIELDS = [
   'tokenId', 'collateral', 'ondelta', 'offdelta', 'leftCreditLimit', 'rightCreditLimit', 'leftAllowance',
   'rightAllowance', 'leftHold', 'rightHold',

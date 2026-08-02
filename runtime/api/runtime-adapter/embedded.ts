@@ -10,6 +10,8 @@ import type {
 	  RuntimeAdapterBrainVaultResult,
 	  RuntimeAdapterControlAction,
 	  RuntimeAdapterCrossJurisdictionIntentResult,
+	  NumberedRegistrationCommand,
+	  NumberedRegistrationCommandResult,
 	  RuntimeAdapterReadQuery,
 	  RuntimeAdapterSendResult,
 	  RuntimeAdapterStatus,
@@ -20,6 +22,10 @@ import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../../run
 import { ensureRuntimeInfrastructure } from '../../runtime/runtime-infrastructure';
 import type { RuntimePublishedNotice } from '../../runtime/loop-environment';
 import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
+import {
+  ensurePendingNumberedRegistrationsResumed,
+  registerNumberedEntities,
+} from '../../runtime/registration/numbered-registration-driver';
 
 export type EmbeddedRuntimeAdapterDeps = {
   getEnv: () => RuntimeReplica | null;
@@ -148,6 +154,16 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
     this.requireCommandReady(env);
     return await this.deps.submitCrossJurisdictionIntent(env, route);
+  }
+
+  async registerNumberedEntities(
+    input: NumberedRegistrationCommand,
+  ): Promise<NumberedRegistrationCommandResult> {
+    const env = this.resolveEnv();
+    if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
+    this.requireCommandReady(env);
+    await ensurePendingNumberedRegistrationsResumed(env);
+    return registerNumberedEntities(env, input);
   }
 
   deriveBrainVault(

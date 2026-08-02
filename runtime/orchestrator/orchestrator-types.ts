@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 import type { ServerWebSocket } from 'bun';
 import type { RuntimeFailureSignal } from '../protocol/failure-taxonomy';
+import type { RuntimeSecurityIncidentTelemetry } from '../protocol/security-incident';
 import type { ManagedChild, ManagedIdentity } from './custody-bootstrap';
 import type { StorageHealth } from '../infra/storage-monitor';
 
@@ -138,6 +139,7 @@ export type HubHealthPayload = {
     halted?: boolean;
     lifecyclePhase?: string;
     fatalDebugPayload?: unknown;
+    securityIncidents?: RuntimeSecurityIncidentTelemetry[];
   };
   quiescence?: RuntimeQuiescenceHealth;
   p2p?: {
@@ -300,6 +302,7 @@ export type MarketMakerHealthPayload = {
     halted?: boolean;
     lifecyclePhase?: string;
     fatalDebugPayload?: unknown;
+    securityIncidents?: RuntimeSecurityIncidentTelemetry[];
   };
   p2p?: {
     directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;

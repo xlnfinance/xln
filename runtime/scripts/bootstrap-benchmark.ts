@@ -50,7 +50,6 @@ const timestampForPath = (): string =>
   new Date().toISOString().replace(/[:.]/g, '-');
 
 const runs = positiveInteger(argValue('runs') ?? process.env['XLN_BOOTSTRAP_BENCH_RUNS'], 2);
-const portBase = positiveInteger(argValue('port-base') ?? process.env['XLN_BOOTSTRAP_BENCH_PORT_BASE'], 19600);
 const outDir = argValue('out-dir') ??
   process.env['XLN_BOOTSTRAP_BENCH_DIR'] ??
   join(repoRoot, '.logs', 'bootstrap-benchmark', timestampForPath());
@@ -75,14 +74,12 @@ const runSmoke = async (index: number): Promise<BootstrapMetrics> => {
   const run = index + 1;
   const runDir = join(outDir, `run-${String(run).padStart(2, '0')}`);
   const metricsPath = join(runDir, 'bootstrap-metrics.json');
-  const runPortBase = portBase + index * 100;
-  console.log(`[bootstrap-benchmark] run=${run}/${runs} portBase=${runPortBase} dir=${runDir}`);
+  console.log(`[bootstrap-benchmark] run=${run}/${runs} dir=${runDir}`);
   await new Promise<void>((resolve, reject) => {
     const proc = spawn('bun', ['runtime/scripts/local-prod-smoke.ts'], {
       cwd: repoRoot,
       env: {
         ...process.env,
-        XLN_LOCAL_PROD_SMOKE_PORT_BASE: String(runPortBase),
         XLN_LOCAL_PROD_SMOKE_DIR: runDir,
         XLN_LOCAL_PROD_SMOKE_METRICS_JSON: metricsPath,
       },

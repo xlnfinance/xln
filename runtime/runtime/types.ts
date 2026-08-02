@@ -152,10 +152,47 @@ export type PendingJurisdictionImport = {
   request: JurisdictionImportRequest;
 };
 
+export type NumberedRegistrationDefinition = Readonly<{
+  name: string;
+  validators: ReadonlyArray<string | Readonly<{ name: string; weight: number | bigint }>>;
+  threshold: bigint;
+  localSignerId: string | null;
+  profileName?: string;
+  position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
+}>;
+
+export type NumberedRegistrationCommandEntity = Readonly<
+  Omit<NumberedRegistrationDefinition, 'validators'> & {
+    validators: ReadonlyArray<Readonly<{ name: string; weight: number }>>;
+  }
+>;
+
+export type NumberedRegistrationCommand = Readonly<{
+  jurisdictionRef: string;
+  payerSignerId: string;
+  entities: readonly NumberedRegistrationCommandEntity[];
+}>;
+
+export type NumberedRegistrationCommandResult = Readonly<{
+  intentId: string;
+  transactionHash: string;
+  committedHeight: number;
+  entities: ReadonlyArray<Readonly<{
+    config: ConsensusConfig;
+    entityNumber: number;
+    entityId: string;
+    localSignerId: string | null;
+    isProposer: boolean;
+    imported: boolean;
+  }>>;
+}>;
+
 export type NumberedRegistrationEntityPlan = {
   name: string;
   boardHash: string;
   config: ConsensusConfig;
+  /** Local replica owner, or null when this Runtime only pays to register another board. */
+  localSignerId: string | null;
   profileName?: string;
   position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
 };
@@ -629,6 +666,11 @@ export interface RuntimeInfrastructure {
   pendingJurisdictionImports?: Map<string, PendingJurisdictionImport>;
   /** Caller-idempotent registration batches; completed records are O(actual batches). */
   numberedRegistrationIntents?: Map<string, NumberedRegistrationRecord>;
+  /** Process-local serialized command lane; its lifetime is exactly this RuntimeReplica. */
+  numberedRegistrationDriver?: {
+    inFlight: Map<string, Promise<NumberedRegistrationCommandResult>>;
+    resumeRun: Promise<void> | null;
+  };
   runtimeAdapterCommandFrontiers?: Map<
     string,
     import('./command-frontier').RuntimeAdapterCommandFrontier

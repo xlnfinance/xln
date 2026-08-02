@@ -17,6 +17,64 @@ type CrossJSelection = ReturnType<typeof selectMatchedCrossJAccountInputPairs>;
 type CrossJPair = CrossJSelection['pairs'][number];
 type EntityInputOutcomes = RuntimeEntityInputApplyResult['inputOutcomes'];
 
+type AtomicProposalRetryCohort = Readonly<{
+  indexes: readonly [number, number];
+  frameHeight: number;
+  frameTimestamp: number;
+}>;
+
+const compareAtomicProposalRetryCohorts = (
+  left: AtomicProposalRetryCohort,
+  right: AtomicProposalRetryCohort,
+): number =>
+  left.frameHeight - right.frameHeight ||
+  left.frameTimestamp - right.frameTimestamp;
+
+/**
+ * Transport may retry one already-signed proposal cohort in a later Runtime
+ * envelope. Deduplicate only the complete pair: choosing legs independently
+ * could synthesize a cohort that no sender ever authenticated. Account-frame
+ * Full routed leg bytes, including Account evidence, must match. Only the outer
+ * source Runtime frame may advance during a transport retry; changed evidence
+ * remains ambiguous and is rejected by strict Account verification.
+ */
+const coalesceExactAtomicProposalRetries = (
+  inputs: readonly RoutedEntityInput[],
+): RoutedEntityInput[] => {
+  const winners = new Map<string, AtomicProposalRetryCohort>();
+  const dropped = new Set<number>();
+  for (const pair of selectPotentialCrossJAccountInputPairs(inputs)) {
+    const indexes = [pair.sourceInputIndex, pair.targetInputIndex] as const;
+    const legs = indexes.map(index => inputs[index]!);
+    const markers = legs.map(leg => leg.atomicCrossJurisdictionPair);
+    if (!markers.every(marker =>
+      marker?.phase === 'proposal' && marker.pairKey === pair.pairKey)) continue;
+    const frame = legs[0]!.sourceRuntimeFrame;
+    if (!frame) continue;
+    const semanticKey = safeStringify(legs.map(leg => {
+      const { sourceRuntimeFrame: _retryEnvelope, ...exactLeg } = leg;
+      return safeStringify(exactLeg);
+    }).sort());
+    const candidate: AtomicProposalRetryCohort = {
+      indexes,
+      frameHeight: frame.height,
+      frameTimestamp: frame.timestamp,
+    };
+    const winner = winners.get(semanticKey);
+    if (!winner) {
+      winners.set(semanticKey, candidate);
+      continue;
+    }
+    if (compareAtomicProposalRetryCohorts(candidate, winner) > 0) {
+      winner.indexes.forEach(index => dropped.add(index));
+      winners.set(semanticKey, candidate);
+    } else {
+      candidate.indexes.forEach(index => dropped.add(index));
+    }
+  }
+  return inputs.filter((_input, index) => !dropped.has(index));
+};
+
 export const selectPotentialAtomicCrossJInputIndexes = (
   inputs: readonly RoutedEntityInput[],
 ): Set<number> =>
@@ -105,10 +163,11 @@ export const admitAtomicCrossJAccountInputs = (
   inputs: readonly RoutedEntityInput[],
   isReplay: boolean,
 ): { inputs: RoutedEntityInput[]; pairs: CrossJSelection['pairs'] } => {
-  const initial = selectMatchedCrossJAccountInputPairs(env, inputs);
+  const coalescedInputs = coalesceExactAtomicProposalRetries(inputs);
+  const initial = selectMatchedCrossJAccountInputPairs(env, coalescedInputs);
   if (initial.pairs.length > 0) {
     runtimeLog.info('crossj.atomic_pair_admission', {
-      inputCount: inputs.length,
+      inputCount: coalescedInputs.length,
       pairCount: initial.pairs.length,
       pairs: initial.pairs.map(pair => ({
         sourceInputIndex: pair.sourceInputIndex,
@@ -124,13 +183,13 @@ export const admitAtomicCrossJAccountInputs = (
     )];
     if (isReplay) throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_INVALID');
     env.warn('network', 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH', {
-      received: inputs.length,
+      received: coalescedInputs.length,
       rejectedInputIndexes,
-      inputSummary: safeStringify(inputs.map(summarizeAtomicCrossJAccountInput)),
+      inputSummary: safeStringify(coalescedInputs.map(summarizeAtomicCrossJAccountInput)),
     });
     recordRejectedAtomicCrossJInputs(
       env,
-      inputs,
+      coalescedInputs,
       rejectedInputIndexes,
       'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH',
       'A cross-j Account leg arrived without its exact atomic sibling leg and was ignored',

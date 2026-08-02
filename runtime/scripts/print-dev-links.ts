@@ -11,11 +11,13 @@ type DevRadapterKeys = {
 
 type Args = {
   webPort: number;
-  webHttpPort: number | null;
+  webHttpPort: number;
+  webScheme: 'http' | 'https';
   apiPort: number;
   rpcPort: number;
   rpc2Port: number;
   custodyPort: number;
+  custodyScheme: 'http' | 'https';
   custodyDaemonPort: number;
   watchtowerPort: number;
   keysPath: string;
@@ -47,14 +49,17 @@ const numberFlag = (name: string): number => {
   return value;
 };
 
-const optionalNumberFlag = (name: string): number | null => {
-  if (!flags.has(name)) return null;
-  return numberFlag(name);
-};
-
 const stringFlag = (name: string): string => {
   const value = flags.get(name)?.trim();
   if (!value) throw new Error(`DEV_LINKS_ARG_INVALID:${name}`);
+  return value;
+};
+
+const schemeFlag = (name: string): 'http' | 'https' => {
+  const value = stringFlag(name);
+  if (value !== 'http' && value !== 'https') {
+    throw new Error(`DEV_LINKS_ARG_INVALID:${name}`);
+  }
   return value;
 };
 
@@ -73,31 +78,29 @@ const readKeys = (path: string): DevRadapterKeys => {
 
 const args: Args = {
   webPort: numberFlag('--web-port'),
-  webHttpPort: optionalNumberFlag('--web-http-port'),
+  webHttpPort: numberFlag('--web-http-port'),
+  webScheme: schemeFlag('--web-scheme'),
   apiPort: numberFlag('--api-port'),
   rpcPort: numberFlag('--rpc-port'),
   rpc2Port: numberFlag('--rpc2-port'),
   custodyPort: numberFlag('--custody-port'),
+  custodyScheme: schemeFlag('--custody-scheme'),
   custodyDaemonPort: numberFlag('--custody-daemon-port'),
   watchtowerPort: numberFlag('--watchtower-port'),
   keysPath: stringFlag('--keys'),
 };
 
 const keys = readKeys(args.keysPath);
-const web = `https://localhost:${args.webPort}`;
-const webHttp = args.webHttpPort ? `http://localhost:${args.webHttpPort}` : null;
+const web = `http://localhost:${args.webHttpPort}`;
+const webTls = args.webScheme === 'https' ? `https://localhost:${args.webPort}` : null;
 const api = `http://127.0.0.1:${args.apiPort}`;
-const custody = `https://localhost:${args.custodyPort}`;
+const custody = `${args.custodyScheme}://localhost:${args.custodyPort}`;
 const custodyDaemon = `http://127.0.0.1:${args.custodyDaemonPort}`;
 const watchtower = `http://127.0.0.1:${args.watchtowerPort}`;
 
-const browserRows: LinkRow[] = webHttp ? [
-  { label: 'wallet browser QA', url: `${webHttp}/app` },
-] : [];
-
 const rows: LinkRow[] = [
   { label: 'wallet', url: `${web}/app` },
-  ...browserRows,
+  ...(webTls ? [{ label: 'wallet tls', url: `${webTls}/app` }] : []),
   { label: 'remote admin import', url: keys.adminImportUrl! },
   { label: 'suggested runtimes', url: `${api}/api/runtime-import?access=admin` },
   { label: 'health admin', url: `${web}/health` },
@@ -117,8 +120,8 @@ const expectedRemoteRuntimes = ['H1', 'H2', 'H3', 'MM', 'Custody'].join(', ');
 
 console.log('');
 console.log(line);
-console.log('XLN DEV CONTROL PANEL');
-console.log('Open any subsystem from here; service status/log lines stream below this block.');
+console.log('xln dev control panel');
+console.log('Services are starting. Wait for DEV_READY before opening links.');
 console.log(line);
 for (const row of rows) {
   console.log(`${row.label.padEnd(labelWidth)}  ${row.url}`);
@@ -127,6 +130,7 @@ console.log('-'.repeat(88));
 console.log(`runtime import key file: ${resolve(args.keysPath)}`);
 console.log('suggested runtimes endpoint lists fresh H/MM/Custody import tokens for the app runtime list.');
 console.log(`expected remote runtimes: ${expectedRemoteRuntimes}`);
-console.log('status/logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP');
+console.log(`local tls: ${webTls ? `enabled at ${webTls}` : 'disabled; localhost HTTP remains a secure browser context'}`);
+console.log('status/logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP, READY');
 console.log(line);
 console.log('');

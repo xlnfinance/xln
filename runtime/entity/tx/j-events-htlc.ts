@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityInput, EntityState } from '../types';
 import { addMessage } from '../frame-events';
-import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
+import { decodeHashLadderBinary, verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j/index';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
 import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
@@ -83,10 +83,10 @@ function decodeDisputeCrossPullBinaries(starterInitialArgumentsRaw: unknown): Ar
   return binaries;
 }
 
-function findCrossJurisdictionRouteForSourceDispute(
+function findCrossJurisdictionRoutesForSourceDispute(
   state: EntityState,
   counterpartyId: string,
-): CrossJurisdictionSwapRoute | null {
+): CrossJurisdictionSwapRoute[] {
   const self = String(state.entityId || '').toLowerCase();
   const counterparty = String(counterpartyId || '').toLowerCase();
   const candidates = Array.from(state.crossJurisdictionSwaps?.values() ?? [])
@@ -96,9 +96,43 @@ function findCrossJurisdictionRouteForSourceDispute(
       Boolean(route.targetPull) &&
       !isCrossJurisdictionTerminalStatus(route.status),
     )
-    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
-  return candidates[0] ?? null;
+    .sort((left, right) => String(left.orderId).localeCompare(String(right.orderId)));
+  return candidates;
 }
+
+const matchSourceDisputePulls = (
+  routes: readonly CrossJurisdictionSwapRoute[],
+  pullBinaries: readonly { fillRatio: number; binary: string }[],
+): Array<{ route: CrossJurisdictionSwapRoute; fillRatio: number; binary: string }> => {
+  const matchesByRoute = new Map<string, Array<{ fillRatio: number; binary: string }>>();
+  for (const item of pullBinaries) {
+    const matchingRoutes = routes.filter(route => {
+      try {
+        return verifyHashLadderBinary({
+          fullHash: route.targetPull!.fullHash,
+          partialRoot: route.targetPull!.partialRoot,
+        }, item.binary).fillRatio === item.fillRatio;
+      } catch {
+        return false;
+      }
+    });
+    // Reusing one commitment across routes makes the dispute evidence
+    // ambiguous. Never guess which route owns that binary.
+    if (matchingRoutes.length !== 1) continue;
+    const route = matchingRoutes[0]!;
+    const matches = matchesByRoute.get(route.orderId) ?? [];
+    matches.push(item);
+    matchesByRoute.set(route.orderId, matches);
+  }
+  return routes.flatMap(route => {
+    const matches = matchesByRoute.get(route.orderId);
+    if (!matches?.length) return [];
+    const best = matches.reduce((current, item) =>
+      item.fillRatio > current.fillRatio ? item : current,
+    );
+    return [{ route, ...best }];
+  });
+};
 
 function findCrossJurisdictionRoutesForTargetDispute(
   state: EntityState,
@@ -160,26 +194,28 @@ export function queueCrossJurisdictionSalvageFromArgumentList(
   }
   if (pullBinaries.length === 0) return false;
 
-  const route = findCrossJurisdictionRouteForSourceDispute(state, counterpartyId);
+  const routes = findCrossJurisdictionRoutesForSourceDispute(state, counterpartyId);
   // Both bilateral peers observe the same dispute arguments, but only the
   // source route owner can forward a pull reveal to the target sibling.
   // Absence here means "not this observer", not missing durable state.
-  if (!route) return false;
+  if (routes.length === 0) return false;
 
-  const best = pullBinaries.reduce((acc, item) => item.fillRatio > acc.fillRatio ? item : acc, pullBinaries[0]!);
-  pushCrossJurisdictionEntityOutput(outputs, route.target.counterpartyEntityId, [{
+  const matched = matchSourceDisputePulls(routes, pullBinaries);
+  for (const { route, binary, fillRatio } of matched) {
+    pushCrossJurisdictionEntityOutput(outputs, route.target.counterpartyEntityId, [{
       type: 'crossJurisdictionSalvage',
       data: {
         routeId: route.orderId,
-        binary: best.binary,
-        fillRatio: best.fillRatio,
+        binary,
+        fillRatio,
         sourceEntityId: route.source.entityId,
         sourceCounterpartyEntityId: route.source.counterpartyEntityId,
         observedAt: blockNumber,
       },
     }], route.targetSignerId);
-  addMessage(state, `🌉 Cross-j pull args observed for ${route.orderId}; target salvage queued`);
-  return true;
+    addMessage(state, `🌉 Cross-j pull args observed for ${route.orderId}; target salvage queued`);
+  }
+  return matched.length > 0;
 }
 
 export function queueCrossJurisdictionSourceDisputeFromTargetDispute(

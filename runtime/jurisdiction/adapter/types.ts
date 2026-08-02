@@ -100,6 +100,14 @@ export interface JReserveMint {
 
 export type SnapshotId = string;
 
+export type JPreparedTransaction = Readonly<{
+  rawTransaction: string;
+  transactionHash: string;
+  transactionNonce: number;
+}>;
+
+export type JPreparedTransactionAcceptance = 'accepted' | 'rejected';
+
 export interface JAdapter {
   readonly mode: JAdapterMode;
   readonly chainId: number;
@@ -147,6 +155,15 @@ export interface JAdapter {
   isEntityRegistered(entityId: string): Promise<boolean>;
   getTokenRegistry(): Promise<JTokenInfo[]>;
   readWalletSnapshot(request: JWalletSnapshotRequest): Promise<JWalletSnapshot>;
+  /**
+   * Reserve one EOA nonce through signing and the caller's durable acceptance.
+   * Release the EOA queue before broadcast, mining, and evidence ingestion.
+   */
+  prepareDurableTransaction(
+    signerPrivateKey: Uint8Array,
+    request: Readonly<{ to: string; data: string; value: bigint }>,
+    accept: (prepared: JPreparedTransaction) => Promise<JPreparedTransactionAcceptance>,
+  ): Promise<JPreparedTransaction>;
   getErc20Balance(tokenAddress: string, owner: string): Promise<bigint>;
   getErc20Balances(tokenAddresses: string[], owner: string): Promise<bigint[]>;
   getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint>;

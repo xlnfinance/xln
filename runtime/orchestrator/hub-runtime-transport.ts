@@ -163,6 +163,11 @@ export const createHubRadapterMessageHandler = (
           if (!isBrainVaultReady()) throw new Error('BRAINVAULT_OWNER_STARTUP_PENDING');
           return brainVaultOwner.deriveAndInstall(targetEnv, input, options);
         },
+        // Intentional recovery boundary: a trusted node owner may explicitly
+        // reveal its own mnemonic over an authenticated admin capability.
+        // Ordinary derive is public-only, and /api/runtime-import must never
+        // mint that capability for an untrusted caller. Removing this hook
+        // would destroy node-owner recovery rather than improve isolation.
         revealBrainVaultMnemonic: async () => {
           if (!isBrainVaultReady()) throw new Error('BRAINVAULT_OWNER_STARTUP_PENDING');
           return brainVaultOwner.revealMnemonic();

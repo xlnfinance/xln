@@ -192,6 +192,37 @@ describe('relay-router gossip fanout', () => {
     expect(event?.size).toBeGreaterThan(0);
   });
 
+  test('bounds pre-auth metadata and records authenticated debug payload size only', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const ws: FakeWs = { label: 'bounded-debug' };
+    const sent: RuntimeWsMessage[] = [];
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (_ws: FakeWs, raw: Uint8Array) => sent.push(deserializeWsMessage(raw)),
+    };
+
+    await expect(productionRelayRoute(config, ws, {
+      type: 'ping',
+      from: 'x'.repeat(128),
+    })).resolves.toBeUndefined();
+    await relayRoute(config, ws, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, ws, {
+      type: 'debug_event',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      payload: { message: 'p'.repeat(1024 * 1024) },
+    });
+
+    const debugEvent = store.debugEvents.find(event => event.event === 'debug_event');
+    expect(debugEvent?.details).toMatchObject({
+      payloadBytes: expect.any(Number),
+    });
+    expect(debugEvent?.details).not.toHaveProperty('payload');
+    expect(store.debugEvents.every(event => event.reason !== 'DEBUG_EVENT_TOO_LARGE')).toBe(true);
+  });
+
   test('broadcasts fresh gossip updates to other connected clients', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();

@@ -46,8 +46,7 @@ if (!FORCE_HTTP && !hasCerts) {
 }
 
 if (!FORCE_HTTP && !hasCerts) {
-	console.warn('⚠️  HTTPS certs not found. Run: ./generate-certs.sh');
-	console.warn('   (Optional - only needed for local HTTPS development)');
+	console.warn('VITE_TLS_DISABLED: local certs missing; HTTP fallback active (run frontend/generate-certs.sh to enable TLS)');
 }
 
 const DEV_HOST = '0.0.0.0';

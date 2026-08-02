@@ -12,7 +12,11 @@ import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
  * Allocation must be known before children start, while drift checks must
  * remain usable after a shard is already running.
  */
-const DEV_RESERVED_PORTS = new Set([8080, 8081, 8082, 8087, 8088, 8545, 8546, 9100]);
+const DEV_RESERVED_PORTS = new Set([
+  8080, 8081, 8082, 8087, 8088,
+  8092, 8093, 8094, 8095,
+  8545, 8546, 9100, 17_999,
+]);
 
 export type E2EShardPorts = {
   rpc: number;

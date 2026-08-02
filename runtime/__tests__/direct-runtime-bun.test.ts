@@ -3,6 +3,7 @@ import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { createDirectRuntimeWsRoute as createProductionDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
 import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { XLN_PROTOCOL_VERSION } from '../protocol/version';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 
@@ -212,6 +213,30 @@ describe('direct runtime websocket route', () => {
     expect(deserializeWsMessage(binary)).toEqual(message);
     expect(serializeWsMessageForDebug(message)).toContain('debug_event');
     expect(() => deserializeWsMessage(serializeWsMessageForDebug(message))).toThrow('WS_WIRE_BINARY_REQUIRED');
+  });
+
+  test('rejects oversized UTF-8 routing metadata before relay telemetry', () => {
+    const oversizedFrom = 'é'.repeat(65);
+    const encoded = encodeBinaryPayload({
+      v: XLN_PROTOCOL_VERSION,
+      type: 'ping',
+      from: oversizedFrom,
+    });
+
+    expect(() => deserializeWsMessage(encoded)).toThrow(
+      'WS_MESSAGE_FIELD_TOO_LONG:field=from:bytes=130:max=128',
+    );
+    expect(() => serializeWsMessage({
+      type: 'error',
+      error: 'x'.repeat(4 * 1024 + 1),
+    })).toThrow('WS_MESSAGE_FIELD_TOO_LONG:field=error');
+    expect(() => serializeWsMessage({
+      type: 'hello',
+      from: '0x1234',
+      fromEncryptionPubKey: '0xabcd',
+      timestamp: 1,
+      auth: { nonce: 'n', signature: 's'.repeat(257), timestamp: 1 },
+    })).toThrow('WS_MESSAGE_FIELD_TOO_LONG:field=signature:bytes=257:max=256');
   });
 
   test('accepts a peer debug event without creating a second protocol error', async () => {

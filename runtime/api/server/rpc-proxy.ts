@@ -1,9 +1,8 @@
 import type { RuntimeReplica } from '../../runtime/types';
 import { isLoopbackUrl } from '../../network/p2p/loopback-url';
-import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
+import { fetchRpcProxyText, readRpcProxyRequest, RpcProxyError } from './rpc-proxy-safety';
 import { pushDebugEvent, type RelayStore } from '../../network/relay/store';
 import { safeStringify } from '../../protocol/serialization';
-import { getErrorMessage } from './utils';
 
 const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
 
@@ -21,25 +20,21 @@ const readRpcProxyTimeoutMs = (): number => {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_RPC_PROXY_TIMEOUT_MS;
 };
 
-const fetchTextWithTimeout = async (
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-): Promise<{ response: Response; text: string }> => {
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+const rpcEndpointLabel = (value: string): string => {
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    const text = await response.text();
-    return { response, text };
-  } catch (error) {
-    if ((error as Error)?.name === 'AbortError') {
-      throw new Error(`RPC_PROXY_TIMEOUT:${timeoutMs}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutHandle);
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return 'invalid-rpc-endpoint';
   }
+};
+
+const publicRpcError = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const timeout = message.match(/RPC_PROXY_TIMEOUT:\d+/)?.[0];
+  if (timeout) return timeout;
+  if (error instanceof RpcProxyError) return error.code;
+  return 'RPC upstream request failed';
 };
 
 export const handleRuntimeRpcProxy = async ({
@@ -69,29 +64,25 @@ export const handleRuntimeRpcProxy = async ({
     pushDebugEvent(relayStore, {
       event: 'error',
       reason: 'RPC_PROXY_LOCAL_BLOCKED',
-      details: { upstream, path: pathname },
+      details: { endpoint: rpcEndpointLabel(upstream), path: pathname },
     });
     return new Response(
-      JSON.stringify({
-        error: 'Local RPC upstream is blocked in this environment',
-        upstream,
-      }),
+      safeStringify({ error: 'Local RPC upstream is blocked in this environment' }),
       { status: 503, headers },
     );
   }
 
   try {
-    const bodyText = await req.text();
+    const { bodyText, forbiddenMethod } = await readRpcProxyRequest(req);
     if (!(process.env['XLN_ALLOW_UNSAFE_RPC_PROXY'] === '1' || (!isProduction && operatorAuthorized))) {
-      const forbidden = findForbiddenRpcProxyMethod(bodyText);
-      if (forbidden) {
+      if (forbiddenMethod) {
         return new Response(
-          safeStringify({ error: 'RPC proxy method is not allowed', method: forbidden }),
-          { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers },
+          safeStringify({ error: 'RPC proxy method is not allowed', method: forbiddenMethod }),
+          { status: 403, headers },
         );
       }
     }
-    const { response: rpcRes, text: respBody } = await fetchTextWithTimeout(upstream, {
+    const { response: rpcRes, text: respBody } = await fetchRpcProxyText(upstream, {
       method: 'POST',
       headers: {
         'content-type': req.headers.get('content-type') || 'application/json',
@@ -106,11 +97,15 @@ export const handleRuntimeRpcProxy = async ({
       },
     });
   } catch (error: unknown) {
+    const safeError = publicRpcError(error);
     pushDebugEvent(relayStore, {
       event: 'error',
       reason: 'RPC_PROXY_FETCH_FAILED',
-      details: { upstream, path: pathname, error: getErrorMessage(error, String(error)) },
+      details: { endpoint: rpcEndpointLabel(upstream), path: pathname, error: safeError },
     });
-    return new Response(safeStringify({ error: getErrorMessage(error, 'RPC proxy failed') }), { status: 502, headers });
+    return new Response(safeStringify({
+      error: safeError,
+      ...(error instanceof RpcProxyError ? { code: error.code } : {}),
+    }), { status: error instanceof RpcProxyError ? error.status : 502, headers });
   }
 };

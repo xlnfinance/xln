@@ -8,7 +8,7 @@
  * EVM details.
  */
 
-import type { Provider, Signer } from 'ethers';
+import { ethers, type Provider, type Signer } from 'ethers';
 import {
   Account__factory,
   Depository__factory,
@@ -32,6 +32,8 @@ import {
 } from './browservm-submit';
 import { createBrowserVmStateMethods } from './browservm-state-methods';
 import { createBrowserVmIoMethods } from './browservm-io';
+import { createSignerNonceSequencer } from './rpc-transaction-sequencer';
+import { prepareDurableEvmTransaction } from './evm-durable-transaction';
 
 export async function createBrowserVMAdapter(
   config: JAdapterConfig,
@@ -94,6 +96,7 @@ export async function createBrowserVMAdapter(
     verifyStackBinding,
   );
   const ioMethods = createBrowserVmIoMethods(browserVM);
+  const nonceSequencer = createSignerNonceSequencer(provider, true);
 
   const adapter: JAdapter = {
     mode: 'browservm',
@@ -106,6 +109,18 @@ export async function createBrowserVMAdapter(
     deltaTransformer,
     addresses,
     get entityProviderDeploymentBlock() { return browserVM.getEntityProviderDeploymentBlock(); },
+    async prepareDurableTransaction(signerPrivateKey, request, accept) {
+      const activeSigner = new ethers.Wallet(ethers.hexlify(signerPrivateKey), provider);
+      return prepareDurableEvmTransaction({
+        signer: activeSigner,
+        request,
+        accept,
+        sequencer: nonceSequencer,
+        // BrowserVM's in-process block has this fixed ceiling. A generous
+        // limit avoids read-call gas estimation for a state-changing write.
+        buildOverrides: async () => ({ gasLimit: 30_000_000n }),
+      });
+    },
     ...stateMethods,
     ...ioMethods,
 

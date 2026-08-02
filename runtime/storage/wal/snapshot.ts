@@ -7,6 +7,7 @@ import { markRestoredJSubmitRuntimeTxs } from '../../runtime/j-submit-state';
 import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/machine/registration-evidence';
 import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction-import';
 import { markRestoredEntityProviderActionRuntimeTxs } from '../../runtime/entity-provider-action-submit-auth';
+import { markRestoredNumberedRegistrationTxs } from '../../runtime/registration/numbered-registration-auth';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
@@ -33,6 +34,7 @@ export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): Runti
   markRestoredJAuthorityRuntimeTxs(runtimeInput.runtimeTxs);
   markRestoredJImportResultRuntimeTxs(runtimeInput.runtimeTxs);
   markRestoredEntityProviderActionRuntimeTxs(runtimeInput.runtimeTxs);
+  markRestoredNumberedRegistrationTxs(runtimeInput.runtimeTxs);
   return runtimeInput;
 };
 

@@ -99,6 +99,8 @@ export type RelayStore = {
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
   runtimeEncryptionKeys: Map<string, string>;
   debugEvents: RelayDebugEvent[];
+  debugEventByteLengths: number[];
+  debugEventBytes: number;
   debugIncidents: Map<string, RelayDebugIncident>;
   debugId: number;
   debugIdAllocator?: (() => number) | undefined;
@@ -108,6 +110,8 @@ export type RelayStore = {
 };
 
 const MAX_DEBUG_EVENTS = 5000;
+export const MAX_DEBUG_EVENT_BYTES = 64 * 1024;
+export const MAX_DEBUG_TIMELINE_BYTES = 8 * 1024 * 1024;
 const MAX_DEBUG_INCIDENTS = 1000;
 const MAX_PENDING_PER_CLIENT = 200;
 const MAX_PENDING_TARGETS = 10_000;
@@ -199,6 +203,8 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     gossipProfiles: new Map(),
     runtimeEncryptionKeys: new Map(),
     debugEvents: [],
+    debugEventByteLengths: [],
+    debugEventBytes: 0,
     debugIncidents,
     debugId,
     ...(options.debugIdAllocator ? { debugIdAllocator: options.debugIdAllocator } : {}),
@@ -409,20 +415,40 @@ export const pushDebugEvent = (
   if (!Number.isSafeInteger(nextDebugId) || nextDebugId <= store.debugId) {
     throw new Error(`DEBUG_EVENT_ID_INVALID:current=${store.debugId}:next=${String(nextDebugId)}`);
   }
-  store.debugId = nextDebugId;
   const redactedEvent = redactTelemetryValue(event) as Omit<RelayDebugEvent, 'id' | 'ts'>;
   const delivery = redactedEvent.delivery ??
     (redactedEvent.event === 'delivery' ? classifyRelayDeliveryEvent(redactedEvent) ?? undefined : undefined);
   const storedEvent: RelayDebugEvent = {
-    id: store.debugId,
+    id: nextDebugId,
     ts: Date.now(),
     ...redactedEvent,
     ...(delivery ? { delivery } : {}),
   };
+  const eventBytes = new TextEncoder().encode(safeStringify(storedEvent)).byteLength;
+  if (eventBytes > MAX_DEBUG_EVENT_BYTES) {
+    throw new Error(`DEBUG_EVENT_TOO_LARGE:bytes=${eventBytes}:max=${MAX_DEBUG_EVENT_BYTES}`);
+  }
+  store.debugId = nextDebugId;
   store.debugEvents.push(storedEvent);
+  store.debugEventByteLengths.push(eventBytes);
+  store.debugEventBytes += eventBytes;
   const incident = updateDebugIncident(store, storedEvent);
-  if (store.debugEvents.length > MAX_DEBUG_EVENTS) {
-    store.debugEvents.shift();
+  while (
+    store.debugEvents.length > MAX_DEBUG_EVENTS ||
+    store.debugEventBytes > MAX_DEBUG_TIMELINE_BYTES
+  ) {
+    const removedEvent = store.debugEvents.shift();
+    const removedBytes = store.debugEventByteLengths.shift();
+    if (!removedEvent || removedBytes === undefined) {
+      throw new Error('DEBUG_EVENT_TIMELINE_ACCOUNTING_DIVERGED');
+    }
+    store.debugEventBytes -= removedBytes;
+  }
+  if (
+    store.debugEvents.length !== store.debugEventByteLengths.length ||
+    store.debugEventBytes < 0
+  ) {
+    throw new Error('DEBUG_EVENT_TIMELINE_ACCOUNTING_INVALID');
   }
   return incident;
 };
@@ -449,6 +475,8 @@ export const setDebugIncidentState = (
  */
 export const clearDebugTimeline = (store: RelayStore): void => {
   store.debugEvents.length = 0;
+  store.debugEventByteLengths.length = 0;
+  store.debugEventBytes = 0;
 };
 
 // ---------------------------------------------------------------------------

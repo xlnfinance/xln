@@ -4,6 +4,7 @@ import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/ma
 import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
 import { copyDeterministicHtlcTestSecretCapability } from '../../protocol/htlc/test-secret-capability';
 import { copyLocalRuntimeAdapterCommandAuthorization } from '../command-frontier-auth';
+import { copyLocalNumberedRegistrationAuthorization } from '../registration/numbered-registration-auth';
 import { buildCanonicalRuntimeStateSnapshot } from '../../storage/wal/snapshot';
 import { encodeBuffer } from '../../storage/codec';
 import { copyLocalEntityProviderActionRuntimeTxAuthorization } from '../entity-provider-action-submit-auth';
@@ -21,6 +22,7 @@ export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
     copyLocalJImportResultRuntimeTxAuthorization(source, target);
     copyLocalEntityProviderActionRuntimeTxAuthorization(source, target);
     copyLocalRuntimeAdapterCommandAuthorization(source, target);
+    copyLocalNumberedRegistrationAuthorization(source, target);
   });
   input.entityInputs.forEach((source, inputIndex) => {
     const target = cloned.entityInputs[inputIndex];

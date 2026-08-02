@@ -10,11 +10,24 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/lib/start-common.sh"
 source "$REPO_ROOT/scripts/lib/port-layout.sh"
+xln_configure_start_policy "$REPO_ROOT"
 
 RPC_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
 RPC2_PORT="${ANVIL2_PORT:-$(xln_rpc2_port)}"
 API_PORT="${XLN_SERVER_PORT:-$(xln_web_port)}"
 RDB_ROOT="${XLN_RDB_ROOT:-$REPO_ROOT/db}"
+export XLN_MESH_API_PORT_BASE=${XLN_MESH_API_PORT_BASE:-18090}
+export XLN_MESH_PUBLIC_PORT_BASE=${XLN_MESH_PUBLIC_PORT_BASE:-8090}
+export XLN_MESH_CUSTODY_PORT=${XLN_MESH_CUSTODY_PORT:-$(xln_custody_port)}
+export XLN_MESH_CUSTODY_DAEMON_PORT=${XLN_MESH_CUSTODY_DAEMON_PORT:-$(xln_custody_daemon_port)}
+
+if [[ "$XLN_START_ASSERT_ONLY_ACTIVE" -eq 1 ]]; then
+  xln_assert_ports_available start-server \
+    "$API_PORT" "$XLN_MESH_CUSTODY_PORT" "$XLN_MESH_CUSTODY_DAEMON_PORT" \
+    "$XLN_MESH_API_PORT_BASE" "$((XLN_MESH_API_PORT_BASE + 1))" \
+    "$((XLN_MESH_API_PORT_BASE + 2))" "$((XLN_MESH_API_PORT_BASE + 3))"
+  export XLN_SKIP_STALE_REAP=1
+fi
 
 export USE_ANVIL=true
 export ANVIL_RPC="http://127.0.0.1:${RPC_PORT}"
@@ -53,10 +66,6 @@ elif [ -f "$XLN_MESH_RESET_CLAIM" ]; then
 else
   echo "[start-server] MESH_STATE_PRESERVED db=$XLN_MESH_DB_ROOT"
 fi
-export XLN_MESH_API_PORT_BASE=${XLN_MESH_API_PORT_BASE:-18090}
-export XLN_MESH_PUBLIC_PORT_BASE=${XLN_MESH_PUBLIC_PORT_BASE:-8090}
-export XLN_MESH_CUSTODY_PORT=${XLN_MESH_CUSTODY_PORT:-$(xln_custody_port)}
-export XLN_MESH_CUSTODY_DAEMON_PORT=${XLN_MESH_CUSTODY_DAEMON_PORT:-$(xln_custody_daemon_port)}
 # Public radapter URL for the custody daemon (nginx custody.xln.finance/rpc -> 127.0.0.1:8088),
 # so custody shows up + connects in the wallet's "Connect to live runtime" dropdown.
 export XLN_CUSTODY_PUBLIC_RPC_URL=${XLN_CUSTODY_PUBLIC_RPC_URL:-wss://custody.xln.finance/rpc}
@@ -118,12 +127,17 @@ if [ "${available_kb:-0}" -lt "$required_kb" ]; then
   exit 1
 fi
 
-xln_kill_by_pattern "scripts/start-custody.sh" start-server
-xln_kill_by_pattern "runtime/scripts/start-custody-prod.ts" start-server
-xln_kill_by_pattern "runtime/api/server/index.ts --port ${XLN_MESH_CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${XLN_MESH_CUSTODY_DAEMON_PORT}" start-server
-xln_kill_by_port "$XLN_MESH_CUSTODY_PORT" start-server
-xln_kill_by_port "$XLN_MESH_CUSTODY_DAEMON_PORT" start-server
-xln_kill_by_port "$API_PORT" start-server
+if [[ "$XLN_START_ASSERT_ONLY_ACTIVE" -ne 1 ]]; then
+  xln_kill_by_pattern "scripts/start-custody.sh" start-server
+  xln_kill_by_pattern "runtime/scripts/start-custody-prod.ts" start-server
+  xln_kill_by_pattern "runtime/api/server/index.ts --port ${XLN_MESH_CUSTODY_DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${XLN_MESH_CUSTODY_DAEMON_PORT}" start-server
+  xln_kill_by_port "$XLN_MESH_CUSTODY_PORT" start-server
+  xln_kill_by_port "$XLN_MESH_CUSTODY_DAEMON_PORT" start-server
+  xln_kill_by_port "$API_PORT" start-server
+fi
+
+unset XLN_LOCAL_TEST_LEASE_MODE XLN_LOCAL_TEST_LEASE_POOL XLN_LOCAL_TEST_LEASE_BASE
+unset XLN_LOCAL_TEST_LEASE_GUARD XLN_LOCAL_TEST_LEASE_OWNER_PID XLN_LOCAL_TEST_LEASE_REPO_ROOT
 
 exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
   --host 127.0.0.1 \

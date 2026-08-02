@@ -39,7 +39,7 @@ import {
 } from '../network/relay/market-wire';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
-import { serveRuntimeBundle, serveStatic } from '../api/server/static-assets';
+import { serveStaticApp } from '../api/server/static-assets';
 import { enforceFaucetPolicy } from '../api/server/faucet-policy';
 import { handleWatchtowerProxy } from '../api/server/watchtower-proxy';
 import {
@@ -50,7 +50,12 @@ import {
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { publicAggregatedHealth, resolveSocketPeerAddress } from '../api/server/health-redaction';
 import { resolveRequestClientIp } from '../api/server/relay-direct';
-import { isOperatorRequest, loadOrCreateOperatorToken } from './operator-access';
+import {
+  isOperatorRequest,
+  loadOrCreateOperatorToken,
+  operatorPreflightResponse,
+  ORCHESTRATOR_JSON_HEADERS,
+} from './operator-access';
 import {
   resolveOrchestratorSocketType,
   type AggregatedHealth,
@@ -148,6 +153,7 @@ import {
   normalizeMarketMakerHealthPayload,
 } from './market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
+import { createManagedRuntimeSecurityTelemetrySync } from './runtime-security-telemetry';
 import { createBootstrapTimelineTools } from './bootstrap-timeline';
 import { createProcessHealthBuilder } from './process-health';
 import {
@@ -274,6 +280,7 @@ const relayStore: RelayStore = createRelayStore('mesh-relay', {
   debugIdAllocator: () => debugIncidentJournal.allocateDebugId(),
   incidentSink: incident => debugIncidentJournal.record(incident),
 });
+const syncManagedRuntimeSecurityTelemetry = createManagedRuntimeSecurityTelemetrySync(relayStore);
 registerStructuredLogSink((entry) => {
   if (entry.level !== 'error') return;
   pushDebugEvent(relayStore, {
@@ -873,7 +880,9 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
   }
   if (rawHealth) {
     try {
-      child.lastHealth = validateHubHealthPayload(rawHealth);
+      const nextHealth = validateHubHealthPayload(rawHealth);
+      syncManagedRuntimeSecurityTelemetry(child.name, nextHealth);
+      child.lastHealth = nextHealth;
       observeManagedRuntimeHalt(child, child.lastHealth);
     } catch (error) {
       recordFetchFailure(healthUrl, 'payload', serializeError(error));
@@ -917,6 +926,7 @@ const marketMakerPoller = createMarketMakerChildPoller({
 const pollMarketMakerHealth = async (): Promise<void> => {
   await marketMakerPoller.pollHealth();
   if (marketMakerChild.lastHealth) {
+    syncManagedRuntimeSecurityTelemetry(marketMakerChild.name, marketMakerChild.lastHealth);
     observeManagedRuntimeHalt(marketMakerChild, marketMakerChild.lastHealth);
   }
 };
@@ -2705,24 +2715,6 @@ const handleMetadataRequest = (
 
 const httpDrain = createHttpDrainTracker();
 const FRONTEND_STATIC_DIR = './frontend/build';
-const handleStaticRequest = async (
-  request: Request,
-  pathname: string,
-): Promise<Response | null> => {
-  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
-  if (pathname === '/runtime.js') {
-    const runtimeBundle = await serveRuntimeBundle();
-    if (runtimeBundle) return runtimeBundle;
-  }
-  if (pathname === '/') {
-    const index = await serveStatic('/index.html', FRONTEND_STATIC_DIR);
-    if (index) return index;
-  }
-  return (
-    (await serveStatic(pathname, FRONTEND_STATIC_DIR)) ??
-    (await serveStatic('/index.html', FRONTEND_STATIC_DIR))
-  );
-};
 
 const server = Bun.serve<OrchestratorWebSocket['data']>({
   hostname: args.host,
@@ -2738,16 +2730,9 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       resolveSocketPeerAddress(serverRef, request),
       orchestratorOperatorToken,
     );
-    const headers = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': '*',
-      'Access-Control-Allow-Headers': '*',
-      'Content-Type': 'application/json',
-    };
-
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers });
-    }
+    const headers = ORCHESTRATOR_JSON_HEADERS;
+    const preflightResponse = operatorPreflightResponse(request, url, operatorAuthorized);
+    if (preflightResponse) return preflightResponse;
 
     const faucetPolicyResponse = await enforceFaucetPolicy(request, operatorAuthorized, process.env, headers);
     if (faucetPolicyResponse) return faucetPolicyResponse;
@@ -2865,7 +2850,7 @@ const server = Bun.serve<OrchestratorWebSocket['data']>({
       return await proxyAnyHubRequest(request, `${pathname}${url.search}`);
     }
 
-    const staticResponse = await handleStaticRequest(request, pathname);
+    const staticResponse = await serveStaticApp(request, pathname, FRONTEND_STATIC_DIR);
     if (staticResponse) return staticResponse;
 
     return new Response(safeStringify({

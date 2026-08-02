@@ -14,7 +14,7 @@
  */
 
 import { argon2id } from 'hash-wasm';
-import { BRAINVAULT_V1 } from './spec.ts';
+import { assertBrainVaultPassphrase, BRAINVAULT_V1 } from './spec.ts';
 
 export interface BrainvaultKdfParams {
   algId?: string;
@@ -46,6 +46,7 @@ export async function deriveShardWithParams(
   shardSalt: Uint8Array,
   params: BrainvaultKdfParams = {},
 ): Promise<Uint8Array> {
+  assertBrainVaultPassphrase(passphrase);
   const kdf = resolveKdfParams(params);
   // TextEncoder defines malformed UTF-16 replacement identically for browser,
   // Bun Wasm and the native bridge; passing a JS string directly would delegate

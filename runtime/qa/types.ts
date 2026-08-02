@@ -241,6 +241,7 @@ export type QaShardManifest = {
   candidateId?: string;
   gateConfigHash?: string;
   shard: number;
+  portBase?: number | null;
   status: 'passed' | 'failed' | 'cancelled' | 'unknown';
   resultClass?: 'passed' | 'playwright' | 'runtime-fatal' | 'startup' | 'runner' | 'cancelled';
   durationMs: number | null;

@@ -4,6 +4,8 @@ import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAc
 import { canonicalAccountTxForFrameHash } from '../account/consensus/frame';
 import type { AccountFrame, Delta } from '../types/account';
 import { decodeAccountFrame } from '../account/frame-validation';
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/integer-ranges';
+import { TOKENS } from '../config/constants';
 
 const delta = (tokenId: number, offdelta: bigint): Delta => ({
   tokenId,
@@ -51,6 +53,23 @@ test('AccountFrame validation rejects malformed delta entries', () => {
   const broken = frame([delta(1, 5n)]);
   (broken.deltas[0] as unknown as { tokenId: string }).tokenId = '1';
   expect(() => decodeAccountFrame(broken)).toThrow('Delta validation failed');
+});
+
+test('AccountFrame validation rejects every out-of-domain financial delta', () => {
+  const invalid = [
+    { field: 'tokenId', value: TOKENS.MAX_TOKEN_ID + 1 },
+    { field: 'collateral', value: -1n },
+    { field: 'collateral', value: UINT256_MAX + 1n },
+    { field: 'leftAllowance', value: -1n },
+    { field: 'rightHold', value: -1n },
+    { field: 'ondelta', value: INT256_MIN - 1n },
+    { field: 'offdelta', value: INT256_MAX + 1n },
+  ] as const;
+  for (const { field, value } of invalid) {
+    const broken = frame([delta(1, 5n)]);
+    (broken.deltas[0] as unknown as Record<string, unknown>)[field] = value;
+    expect(() => decodeAccountFrame(broken, `invalid-${field}`)).toThrow();
+  }
 });
 
 test('Account frame hashing rejects a malformed J-claim height', () => {

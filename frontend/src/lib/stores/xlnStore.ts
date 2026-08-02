@@ -88,6 +88,8 @@ import type {
   RuntimeAdapterStatus,
   RuntimeAdapterEntitySummary,
   RuntimeAdapterViewFrame,
+  NumberedRegistrationCommand,
+  NumberedRegistrationCommandResult,
   EntityDisplayInfo,
   SignerDisplayInfo,
   BigIntMathUtils,
@@ -1638,29 +1640,19 @@ const resolveActiveRuntimeCommandEnv = async (xln: XLNModule): Promise<RuntimeRe
  * boundary. Formation UI supplies intent plus the unlocked vault identity; it
  * must never reach into an embedded RuntimeReplica to choose registration authority.
  */
-export const createActiveNumberedEntity = async (
-  name: Parameters<XLNModule['createNumberedEntity']>[0],
-  validators: Parameters<XLNModule['createNumberedEntity']>[1],
-  threshold: Parameters<XLNModule['createNumberedEntity']>[2],
-  jurisdiction: Parameters<XLNModule['createNumberedEntity']>[3],
-  registrationSignerId: Parameters<XLNModule['createNumberedEntity']>[5],
+export const registerActiveNumberedEntities = async (
+  input: NumberedRegistrationCommand,
   expectedRuntimeId: string,
-): ReturnType<XLNModule['createNumberedEntity']> => {
-  const xln = await getXLN();
-  const runtimeEnv = await resolveActiveRuntimeCommandEnv(xln);
+): Promise<NumberedRegistrationCommandResult> => {
+  const adapter = getRuntimeControllerAdapter();
+  if (!adapter) throw new Error('NUMBERED_ENTITY_RUNTIME_ADAPTER_MISSING');
   const expected = String(expectedRuntimeId || '').trim().toLowerCase();
-  const actual = String(runtimeEnv.runtimeId || '').trim().toLowerCase();
+  const actual = String(adapter.runtimeId || '').trim().toLowerCase();
   if (!expected || !actual || expected !== actual) {
     throw new Error(`NUMBERED_ENTITY_RUNTIME_VAULT_MISMATCH:vault=${expected || '<missing>'}:runtime=${actual || '<missing>'}`);
   }
-  return xln.createNumberedEntity(
-    name,
-    validators,
-    threshold,
-    jurisdiction,
-    runtimeEnv,
-    registrationSignerId,
-  );
+  await adapter.ensureOwnerCommandLane();
+  return adapter.registerNumberedEntities(input);
 };
 
 export async function submitActiveRuntimeInput(

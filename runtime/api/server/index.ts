@@ -27,6 +27,7 @@ import {
   closeInfraDb,
 } from '../../runtime.ts';
 import { registerEnvChangeCallback } from '../../runtime/loop-environment';
+import { ensurePendingNumberedRegistrationsResumed } from '../../runtime/registration/numbered-registration-driver';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../../protocol/serialization';
 import type { RuntimeReplica, RuntimeEntityInputsEnvelope } from '../../runtime/types';
@@ -35,7 +36,7 @@ import { maybeHandleQaRequest } from '../../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../../jurisdiction/adapter';
 import type { JAdapterConfig } from '../../jurisdiction/adapter/types';
 import { createMarketMakerServerState, resetMarketMakerServerState } from './market-maker-health';
-import { serveRuntimeBundle, serveStatic } from './static-assets';
+import { serveStaticApp } from './static-assets';
 import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth } from './auth';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from './health-redaction';
 import { listLocalControlEntities } from './control-entities';
@@ -90,6 +91,7 @@ import { handleOffchainFaucet } from './offchain-faucet';
 import { handleReserveFaucet } from './reserve-faucet';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './health-api';
 import { handleRuntimeRpcProxy } from './rpc-proxy';
+import { requiresLocalNodeOperator } from './node-http-access';
 import { handleP2PControl } from './p2p-control';
 import { handleRuntimeInputControl, handleRuntimeInputStatus } from './runtime-input-control';
 import { handleSignerRegistration } from './signer-control';
@@ -646,7 +648,13 @@ const maybeHandleDebugApi = async (
   if (pathname === '/api/debug/activity' && env) {
     return handleRuntimeActivityRequest(env, new URL(req.url), headers);
   }
-  const debugDumpsResponse = await maybeHandleDebugDumpsRequest({ req, pathname, relayStore, headers });
+  const debugDumpsResponse = await maybeHandleDebugDumpsRequest({
+    req,
+    pathname,
+    relayStore,
+    headers,
+    operatorAuthorized,
+  });
   if (debugDumpsResponse) return debugDumpsResponse;
   if (pathname === '/api/debug/entities') {
     const url = new URL(req.url);
@@ -773,12 +781,17 @@ const handleApiAgainstCommittedState = async (
 ): Promise<Response> => {
   const headers = JSON_HEADERS;
   if (req.method === 'OPTIONS') return new Response(null, { headers });
+  if (requiresLocalNodeOperator(new URL(req.url)) && !operatorAuthorized) {
+    return new Response(safeStringify({ error: 'Operator access required' }), {
+      status: 403,
+      headers,
+    });
+  }
   const assistantResponse = await assistantProxy.handle(req, pathname, clientId);
   if (assistantResponse) return assistantResponse;
   const controlResponse = await maybeHandleControlApi(req, pathname, env, headers);
   if (controlResponse) return controlResponse;
-  // /rpc is the canonical JSON-RPC path; /api/rpc remains a transport alias.
-  if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
+  if (pathname === '/rpc' && req.method === 'POST') {
     return handleRuntimeRpcProxy({ req, pathname, env, relayStore, headers, operatorAuthorized });
   }
   const runtimeInfoResponse = await maybeHandleRuntimeInfoApi(req, pathname, env, headers, operatorAuthorized);
@@ -871,18 +884,8 @@ const handleHttpRequest = async (
   }
 
   if (options.staticDir) {
-    if (pathname === '/runtime.js') {
-      const runtimeBundle = await serveRuntimeBundle();
-      if (runtimeBundle) return runtimeBundle;
-    }
-    if (pathname === '/') {
-      const index = await serveStatic('/index.html', options.staticDir);
-      if (index) return index;
-    }
-    const file = await serveStatic(pathname, options.staticDir);
-    if (file) return file;
-    const fallback = await serveStatic('/index.html', options.staticDir);
-    if (fallback) return fallback;
+    const staticResponse = await serveStaticApp(req, pathname, options.staticDir);
+    if (staticResponse) return staticResponse;
   }
 
   return new Response('Not found', { status: 404 });
@@ -1197,11 +1200,19 @@ const assertPredeployedStackCode = async (
 };
 
 const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void> => {
-  // Initialize J-adapter (anvil for testnet, browserVM for local)
   const useAnvil = process.env['USE_ANVIL'] === 'true';
+  const useLocalSimulation = process.env['XLN_LOCAL_SIMULATION'] === 'true';
+  if (useAnvil === useLocalSimulation) {
+    throw new Error(useAnvil
+      ? 'JADAPTER_MODE_CONFLICT:USE_ANVIL_and_XLN_LOCAL_SIMULATION'
+      : 'JADAPTER_MODE_REQUIRED:set_USE_ANVIL_or_XLN_LOCAL_SIMULATION');
+  }
   const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
 
-  serverLog.info('jadapter.mode', { useAnvil, anvilRpc: useAnvil ? anvilRpc : null });
+  serverLog.info('jadapter.mode', {
+    mode: useAnvil ? 'rpc' : 'local-simulation',
+    anvilRpc: useAnvil ? anvilRpc : null,
+  });
 
   if (useAnvil) {
     serverLog.info('anvil.connect.start', { rpc: anvilRpc });
@@ -1303,7 +1314,7 @@ const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void>
       blockTimeMs: 300,
     });
     if (!env.activeJurisdiction) env.activeJurisdiction = jurisdictionName;
-  } else {
+  } else if (useLocalSimulation) {
     globalJAdapter = await initializeBrowserVmJurisdiction(env);
   }
 };
@@ -1375,6 +1386,30 @@ const closeFailedServerStartup = async (
     throw new AggregateError([original, ...cleanupErrors], 'SERVER_STARTUP_FAILED_WITH_CLEANUP_ERRORS');
   }
   throw original;
+};
+
+const configureServerRelayRouter = (
+  env: RuntimeReplica,
+  bound: BoundServerSession,
+): void => {
+  const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
+  bound.session.routerConfig = {
+    store: relayStore,
+    localRuntimeId: String(env.runtimeId),
+    localDeliver,
+    send: (ws, data) => ws.send(data),
+    consumeHelloChallenge: (ws, challenge) => bound.session.relayHelloChallenges.consume(ws, challenge),
+    onGossipStore: profile => {
+      try {
+        env.gossip?.announce?.(profile);
+      } catch (error) {
+        serverLog.warn('gossip.profile_announce_failed', {
+          entityId: profile.entityId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  };
 };
 
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
@@ -1458,29 +1493,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       }
     }
 
+    await ensurePendingNumberedRegistrationsResumed(env);
+
     // J-event watching belongs to the unified runtime loop. The server should
     // wire jReplicas only; startRuntimeLoop() owns startJurisdictionWatchers().
 
-    // Wire relay-router + local delivery as soon as env exists.
     // Relay WS can receive early hello/gossip traffic during bootstrap.
-    const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
-    bound.session.routerConfig = {
-      store: relayStore,
-      localRuntimeId: String(env.runtimeId),
-      localDeliver,
-      send: (ws, data) => ws.send(data),
-      consumeHelloChallenge: (ws, challenge) => bound.session.relayHelloChallenges.consume(ws, challenge),
-      onGossipStore: profile => {
-        try {
-          runtimeEnv.gossip?.announce?.(profile);
-        } catch (error) {
-          serverLog.warn('gossip.profile_announce_failed', {
-            entityId: profile.entityId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
-    };
+    configureServerRelayRouter(env, bound);
 
     serverBootPhase = 'bootstrap';
     let hubEntityIds: string[];

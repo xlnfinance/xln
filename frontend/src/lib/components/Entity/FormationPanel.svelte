@@ -6,8 +6,8 @@
 -->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { ConsensusConfig } from '@xln/runtime/api/public/runtime-module';
-  import { createActiveNumberedEntity, getXLN, submitRuntimeInput } from '../../stores/xlnStore';
+  import { isTronChainId, type ConsensusConfig } from '@xln/runtime/api/public/runtime-module';
+  import { getXLN, registerActiveNumberedEntities, submitRuntimeInput } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { activeRuntime, vaultOperations } from '../../stores/vaultStore';
   import { tabOperations } from '../../stores/tabStore';
@@ -43,10 +43,13 @@
   let importJson = '';
 
   $: jurisdictions = runtimeProjection.jurisdictions;
+  $: selectableJurisdictions = entityType === 'numbered'
+    ? jurisdictions.filter(jurisdiction => !isTronChainId(Number(jurisdiction.chainId)))
+    : jurisdictions;
 
-  // Auto-select first jurisdiction
-  $: if (jurisdictions.length > 0 && !selectedJurisdiction) {
-    selectedJurisdiction = jurisdictions[0]?.name || '';
+  // Keep the selection inside the capabilities of the chosen entity type.
+  $: if (!selectableJurisdictions.some(jurisdiction => jurisdiction.name === selectedJurisdiction)) {
+    selectedJurisdiction = selectableJurisdictions[0]?.name || '';
   }
 
   // My signer address
@@ -151,13 +154,14 @@
       }
 
       // Get jurisdiction config
-      const jurisdictionReplica = jurisdictions.find(j => j.name === selectedJurisdiction);
+      const jurisdictionReplica = selectableJurisdictions.find(j => j.name === selectedJurisdiction);
       if (!jurisdictionReplica) {
         throw new Error('Selected jurisdiction not found');
       }
 
       let entityId: string;
       let config: ConsensusConfig;
+      let numberedImported = false;
 
       if (entityType === 'lazy') {
         // Lazy entity - ID is hash of quorum
@@ -177,16 +181,28 @@
           throw new Error('NUMBERED_ENTITY_ACTIVE_WALLET_SIGNER_REQUIRED');
         }
         const vaultRuntimeId = String(vault?.id || '').trim().toLowerCase();
-        const creation = await createActiveNumberedEntity(
-          entityName,
-          boardMembers,
-          thresholdBigInt,
-          jurisdictionReplica,
-          registrationSignerId,
+        const localSignerId = boardMembers.some(
+          member => member.name.toLowerCase() === registrationSignerId,
+        ) ? registrationSignerId : null;
+        const registration = await registerActiveNumberedEntities(
+          {
+            jurisdictionRef: selectedJurisdiction,
+            payerSignerId: registrationSignerId,
+            entities: [{
+              name: entityName,
+              validators: boardMembers,
+              threshold: thresholdBigInt,
+              localSignerId,
+              profileName: entityName,
+            }],
+          },
           vaultRuntimeId,
         );
+        const creation = registration.entities[0];
+        if (!creation) throw new Error('NUMBERED_ENTITY_REGISTRATION_RESULT_MISSING');
         config = creation.config;
         entityId = creation.entityId;
+        numberedImported = creation.imported;
       } else {
         // Named entity - requires admin approval
         throw new Error('Named entities require admin approval (not yet implemented)');
@@ -196,7 +212,7 @@
       const localBoardIndex = config.validators.findIndex(
         (member) => member.toLowerCase() === localSignerId,
       );
-      if (localBoardIndex >= 0) {
+      if (entityType === 'lazy' && localBoardIndex >= 0) {
         await submitRuntimeInput({
           runtimeTxs: [{
             type: 'importReplica',
@@ -210,6 +226,9 @@
           }],
           entityInputs: [],
         });
+        tabOperations.addTab(entityId, localSignerId, selectedJurisdiction);
+        success = `Entity created: ${formatShortId(entityId)}`;
+      } else if (entityType === 'numbered' && numberedImported) {
         tabOperations.addTab(entityId, localSignerId, selectedJurisdiction);
         success = `Entity created: ${formatShortId(entityId)}`;
       } else {
@@ -347,11 +366,15 @@
 
   <div class="field">
     <div class="field-label">Jurisdiction</div>
-    {#if jurisdictions.length === 0}
-      <div class="empty-hint">No jurisdictions available. Add one first.</div>
+    {#if selectableJurisdictions.length === 0}
+      <div class="empty-hint">
+        {entityType === 'numbered'
+          ? 'Numbered registration is not available on the connected jurisdictions.'
+          : 'No jurisdictions available. Add one first.'}
+      </div>
     {:else}
       <div class="jurisdiction-list">
-        {#each jurisdictions as j}
+        {#each selectableJurisdictions as j}
           <button
             class="jurisdiction-option"
             class:active={selectedJurisdiction === j.name}

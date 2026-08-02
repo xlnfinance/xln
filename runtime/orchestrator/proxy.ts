@@ -7,6 +7,7 @@ import {
   RequestBodyError,
 } from '../api/public/external-wallet/http';
 import type { HubChild } from './orchestrator-types';
+import { fetchRpcProxyText, readRpcProxyRequest, RpcProxyError } from '../api/server/rpc-proxy-safety';
 
 type ProxyHubEndpoint =
   | '/api/faucet/offchain';
@@ -30,28 +31,6 @@ const CORS_JSON_HEADERS = {
   'Content-Type': 'application/json',
 };
 
-const FORBIDDEN_RPC_PROXY_METHODS = new Set([
-  'eth_accounts',
-  'eth_coinbase',
-  'eth_sendTransaction',
-  'eth_sign',
-  'eth_signTransaction',
-  'eth_submitHashrate',
-  'eth_submitWork',
-]);
-
-const FORBIDDEN_RPC_PROXY_PREFIXES = [
-  'admin_',
-  'anvil_',
-  'debug_',
-  'evm_',
-  'hardhat_',
-  'miner_',
-  'personal_',
-  'txpool_',
-  'wallet_',
-];
-
 const MAX_RPC_PROXY_INDEX = 8;
 const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
 const DEFAULT_HUB_API_PROXY_TIMEOUT_MS = 5_000;
@@ -62,6 +41,14 @@ const LONG_RUNNING_HUB_ENDPOINTS = new Set([
 ]);
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const publicRpcProxyError = (error: unknown): string => {
+  const message = serializeError(error);
+  const timeout = message.match(/PROXY_UPSTREAM_TIMEOUT:\d+/)?.[0];
+  if (timeout) return timeout;
+  if (error instanceof RpcProxyError) return error.code;
+  return 'RPC upstream request failed';
+};
 
 const proxyFailureBody = (input: {
   code: string;
@@ -138,35 +125,11 @@ const fetchTextWithTimeout = async (
 };
 
 export const resolveRpcProxyIndex = (pathname: string): number | null => {
-  const match = String(pathname || '').match(/^\/(?:api\/)?rpc([2-8])?$/);
+  const match = String(pathname || '').match(/^\/rpc([2-8])?$/);
   if (!match) return null;
   if (!match[1]) return 1;
   const index = Number(match[1]);
   return Number.isInteger(index) && index >= 2 && index <= MAX_RPC_PROXY_INDEX ? index : null;
-};
-
-const findForbiddenRpcProxyMethod = (bodyText: string): string | null => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
-    return 'invalid-json';
-  }
-
-  const calls = Array.isArray(parsed) ? parsed : [parsed];
-  if (calls.length === 0) return 'empty-batch';
-
-  for (const call of calls) {
-    if (!call || typeof call !== 'object' || typeof (call as { method?: unknown }).method !== 'string') {
-      return 'invalid-json-rpc';
-    }
-    const method = (call as { method: string }).method;
-    if (FORBIDDEN_RPC_PROXY_METHODS.has(method) || FORBIDDEN_RPC_PROXY_PREFIXES.some(prefix => method.startsWith(prefix))) {
-      return method;
-    }
-  }
-
-  return null;
 };
 
 const proxyRpc = async (
@@ -185,24 +148,23 @@ const proxyRpc = async (
       );
     }
     try {
-      const bodyText = await request.text();
+      const { bodyText, forbiddenMethod } = await readRpcProxyRequest(request);
       if (!operatorAuthorized) {
-        const forbidden = findForbiddenRpcProxyMethod(bodyText);
-        if (forbidden) {
+        if (forbiddenMethod) {
           return new Response(
-            JSON.stringify({ error: 'RPC proxy method is not allowed', method: forbidden }),
-            { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers: CORS_JSON_HEADERS },
+            JSON.stringify({ error: 'RPC proxy method is not allowed', method: forbiddenMethod }),
+            { status: 403, headers: CORS_JSON_HEADERS },
           );
         }
       }
       const timeoutMs = readPositiveIntegerEnv('XLN_RPC_PROXY_TIMEOUT_MS', DEFAULT_RPC_PROXY_TIMEOUT_MS);
-      const { response, text } = await fetchTextWithTimeout(upstreamRpcUrl, {
+      const { response, text } = await fetchRpcProxyText(upstreamRpcUrl, {
         method: 'POST',
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
         },
         body: bodyText,
-      }, timeoutMs);
+      }, timeoutMs, 'PROXY_UPSTREAM_TIMEOUT');
       return new Response(text, {
         status: response.status,
         headers: {
@@ -214,10 +176,11 @@ const proxyRpc = async (
       return new Response(
         safeStringify(proxyFailureBody({
           code: 'RPC_PROXY_UPSTREAM_FAILED',
-          error: serializeError(error),
-          extra: { upstream: upstreamRpcUrl },
+          // This route is public. Fetch errors may embed credential-bearing RPC
+          // URLs, so the response exposes only a stable failure class.
+          error: publicRpcProxyError(error),
         })),
-        { status: 502, headers: CORS_JSON_HEADERS },
+        { status: error instanceof RpcProxyError ? error.status : 502, headers: CORS_JSON_HEADERS },
       );
     }
 };

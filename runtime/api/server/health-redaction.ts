@@ -60,13 +60,29 @@ const hasProxyForwardingHeaders = (request: Request): boolean =>
   ['forwarded', 'x-forwarded-for', 'x-real-ip', 'cf-connecting-ip']
     .some((name) => Boolean(String(request.headers.get(name) || '').trim()));
 
+const isLoopbackBrowserOrigin = (request: Request): boolean => {
+  const origin = String(request.headers.get('origin') || '').trim();
+  if (!origin) return true;
+  try {
+    const url = new URL(origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+      && (url.hostname === 'localhost' || isLoopbackPeerAddress(normalizePeerAddress(url.hostname)));
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Local operator authority is bound to Bun's socket peer, never HTTP headers.
  * Any forwarding header means the request crossed a proxy and therefore needs
  * an explicit bearer capability even when the proxy itself is on loopback.
+ * Browser requests must also originate on loopback: otherwise any public site
+ * could use permissive API CORS to turn its visitor's local node into a deputy.
  */
 export const isLocalOperatorRequest = (request: Request, peerAddress?: string | null): boolean =>
-  isLoopbackPeerAddress(normalizePeerAddress(peerAddress)) && !hasProxyForwardingHeaders(request);
+  isLoopbackPeerAddress(normalizePeerAddress(peerAddress))
+  && !hasProxyForwardingHeaders(request)
+  && isLoopbackBrowserOrigin(request);
 
 export const resolveSocketPeerAddress = (server: unknown, request: Request): string | null => {
   const requestIp = (server as { requestIP?: (value: Request) => { address?: string } | null }).requestIP;

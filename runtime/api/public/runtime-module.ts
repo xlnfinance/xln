@@ -91,12 +91,15 @@ export type { RuntimeEntityInputRoutingResult } from '../../runtime/output-routi
 export type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
-	  RuntimeAdapterConfig,
-	  RuntimeAdapterReadQuery,
-	  RuntimeAdapterSendResult,
-	  RuntimeAdapterStatus,
-	} from '../runtime-adapter';
+  RuntimeAdapterConfig,
+  RuntimeAdapterReadQuery,
+  RuntimeAdapterSendResult,
+  RuntimeAdapterStatus,
+  NumberedRegistrationCommand,
+  NumberedRegistrationCommandResult,
+} from '../runtime-adapter';
 export { getBestBid, getBestAsk, getBookSideLevels } from '../../orderbook';
+export { isTronChainId } from '../../jurisdiction/adapter/chain-ids';
 export {
   buildMppChallengeHeader,
   buildMppCredentialHeader,

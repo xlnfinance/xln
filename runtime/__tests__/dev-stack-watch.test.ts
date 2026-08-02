@@ -20,14 +20,15 @@ test('dev stack starts the mesh once and never reloads durable runtimes from sou
 test('no dev child process reloads itself on source changes', () => {
   const watchingProcesses = script
     .split('\n')
-    .filter(line => line.includes('--watch') && !line.includes('watch-runtime-build.sh'));
+    .filter(line => /(^|\s)--watch(\s|$)/.test(line) && !line.includes('watch-runtime-build.sh'));
   expect(watchingProcesses).toEqual([]);
 });
 
 test('dev cleanup only reaps canonical dev ports and db paths', () => {
   expect(cleanSlate).toContain('RPC2_PORT="$(xln_rpc2_port)"');
   expect(cleanSlate).toContain('stop_owned_dev_processes "$DEV_OWNER_FILE" "$DEV_PID_DIR" "$ROOT_DIR"');
-  expect(cleanSlate).toContain('assert_port_clear "$RPC2_PORT"');
+  expect(cleanSlate).toContain('assert_dev_ports_clear "$DEV_PID_DIR" "$DEV_OWNER_FILE"');
+  expect(cleanSlate).toContain('"$RPC_PORT" "$RPC2_PORT"');
   expect(cleanSlate).toContain('rm -rf "$DEV_DATA_ROOT"');
   expect(cleanSlate).not.toContain('kill_by_port');
   expect(cleanSlate).not.toContain('pkill');

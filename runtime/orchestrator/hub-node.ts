@@ -77,6 +77,7 @@ import { handleReserveFaucet } from '../api/server/reserve-faucet';
 import { handleOffchainFaucet } from '../api/server/offchain-faucet';
 import { enforceFaucetPolicy } from '../api/server/faucet-policy';
 import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
+import { readRuntimeSecurityIncidentTelemetry } from '../runtime/security-incidents';
 import { handleRuntimeInputStatus } from '../api/server/runtime-input-control';
 import {
   getActiveJAdapter,
@@ -95,6 +96,7 @@ import {
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
 import { registerEnvChangeCallback } from '../runtime/loop-environment';
+import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered-registration-driver';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
@@ -272,6 +274,7 @@ type LocalHealthResponse = {
     halted: boolean;
     lifecyclePhase: string | null;
     fatalDebugPayload: unknown;
+    securityIncidents: ReturnType<typeof readRuntimeSecurityIncidentTelemetry>;
   };
   quiescence: ReturnType<typeof summarizeRuntimeQuiescence>;
   p2p?: {
@@ -1827,6 +1830,7 @@ const buildLocalHealth = (
       halted: runtimeHalted,
       lifecyclePhase: env.infrastructure?.lifecyclePhase ?? null,
       fatalDebugPayload: env.infrastructure?.fatalDebugPayload ?? null,
+      securityIncidents: readRuntimeSecurityIncidentTelemetry(env),
     },
     quiescence: summarizeRuntimeQuiescence(env),
     p2p: {
@@ -2870,6 +2874,20 @@ const run = async (): Promise<void> => {
 
   startJurisdictionWatchers(env);
   const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
+
+  startRuntimeLoop(env, {
+    tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
+    maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
+    maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+    onFatal: async payload => {
+      await reportManagedChildFatal({
+        runtimeId: String(env.runtimeId || ''),
+        ...payload,
+      });
+    },
+  });
+  await restoreHubBrainVaultOwner(live, brainVaultOwner);
+  await ensurePendingNumberedRegistrationsResumed(env);
   live.externalIngressReady = true;
   nodeLog.info('startup.j_catchup_ready', {
     jurisdictions: watcherDrain.length,
@@ -2886,18 +2904,6 @@ const run = async (): Promise<void> => {
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
   });
   if (!live.p2p) throw new Error('P2P_START_FAILED');
-  startRuntimeLoop(env, {
-    tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
-    maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
-    maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
-    onFatal: async payload => {
-      await reportManagedChildFatal({
-        runtimeId: String(env.runtimeId || ''),
-        ...payload,
-      });
-    },
-  });
-  await restoreHubBrainVaultOwner(live, brainVaultOwner);
   finishTiming('p2p_connect', p2pConnectStartedAt);
 
   meshController.start(jurisdiction, tokenCatalog, httpSurface.externalWalletApi);

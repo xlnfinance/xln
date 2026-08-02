@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test';
 import {
+  MAX_DEBUG_EVENT_BYTES,
+  MAX_DEBUG_TIMELINE_BYTES,
   classifyRelayDeliveryEvent,
+  clearDebugTimeline,
   createRelayStore,
   deliverPendingMessages,
   enqueueMessage,
@@ -86,6 +89,37 @@ test('relay incidents group repeated root errors and reopen after a new occurren
     state: 'unread',
     count: 3,
   });
+});
+
+test('debug timeline enforces per-event and aggregate byte limits', () => {
+  const store = createRelayStore('relay-test');
+  expect(() => pushDebugEvent(store, {
+    event: 'debug_event',
+    details: { blob: 'x'.repeat(MAX_DEBUG_EVENT_BYTES) },
+  })).toThrow('DEBUG_EVENT_TOO_LARGE');
+  expect(store).toMatchObject({ debugId: 0, debugEventBytes: 0 });
+  expect(store.debugEvents).toHaveLength(0);
+  expect(store.debugEventByteLengths).toHaveLength(0);
+  expect(store.debugIncidents.size).toBe(0);
+
+  for (let index = 0; index < 150; index += 1) {
+    pushDebugEvent(store, {
+      event: 'debug_event',
+      reason: `BOUNDED_${index}`,
+      details: { blob: 'y'.repeat(60 * 1024) },
+    });
+  }
+  expect(store.debugEventBytes).toBeLessThanOrEqual(MAX_DEBUG_TIMELINE_BYTES);
+  expect(store.debugEvents.length).toBeLessThan(150);
+  expect(store.debugEvents.length).toBe(store.debugEventByteLengths.length);
+  expect(store.debugEvents.at(-1)?.reason).toBe('BOUNDED_149');
+
+  const lastId = store.debugId;
+  clearDebugTimeline(store);
+  expect(store.debugEvents).toHaveLength(0);
+  expect(store.debugEventByteLengths).toHaveLength(0);
+  expect(store.debugEventBytes).toBe(0);
+  expect(store.debugId).toBe(lastId);
 });
 
 test('transient delivery failures do not become unresolved incidents', () => {

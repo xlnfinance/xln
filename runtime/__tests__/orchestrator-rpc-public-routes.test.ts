@@ -7,10 +7,10 @@ import { resolveRpcProxyIndex } from '../orchestrator/proxy';
 describe('orchestrator public RPC routes', () => {
   test('accepts exact public RPC proxy paths for rpc through rpc8', () => {
     expect(resolveRpcProxyIndex('/rpc')).toBe(1);
-    expect(resolveRpcProxyIndex('/api/rpc')).toBe(1);
+    expect(resolveRpcProxyIndex('/api/rpc')).toBeNull();
     for (let index = 2; index <= 8; index += 1) {
       expect(resolveRpcProxyIndex(`/rpc${index}`)).toBe(index);
-      expect(resolveRpcProxyIndex(`/api/rpc${index}`)).toBe(index);
+      expect(resolveRpcProxyIndex(`/api/rpc${index}`)).toBeNull();
     }
     expect(resolveRpcProxyIndex('/rpc1')).toBeNull();
     expect(resolveRpcProxyIndex('/rpc9')).toBeNull();
