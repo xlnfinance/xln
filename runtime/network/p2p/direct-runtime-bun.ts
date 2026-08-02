@@ -59,6 +59,7 @@ type DirectWsSession = {
   authAudience: string | null;
   authNonce: string | null;
   lastAuthTimestamp: number;
+  outboundAuthTimestamp: number;
   lastSeen: number;
 };
 
@@ -73,13 +74,6 @@ type DirectRuntimeWsContext = {
 };
 
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
-let directWsTimestampCounter = 0;
-
-const nextTimestamp = (): number => {
-  const now = Date.now();
-  directWsTimestampCounter = now <= directWsTimestampCounter ? directWsTimestampCounter + 1 : now;
-  return directWsTimestampCounter;
-};
 
 const isSocketOpen = (ws: DirectWebSocket | null | undefined): boolean => {
   if (!ws) return false;
@@ -103,7 +97,7 @@ const signSessionFrame = (
   msg: RuntimeWsMessage,
 ): RuntimeWsMessage => {
   if (!session.authAudience || !session.authNonce) throw new Error('DIRECT_SESSION_AUTH_BINDING_MISSING');
-  const timestamp = nextTimestamp();
+  const timestamp = ++session.outboundAuthTimestamp;
   const unsigned = {
     ...msg,
     from: msg.from || context.serverRuntimeId,
@@ -161,6 +155,7 @@ const ensureSession = (context: DirectRuntimeWsContext, ws: DirectWebSocket): Di
     authAudience: null,
     authNonce: null,
     lastAuthTimestamp: 0,
+    outboundAuthTimestamp: 0,
     lastSeen: Date.now(),
   };
   context.sessions.set(ws, created);
@@ -208,7 +203,7 @@ const sendRecoveryBundleResponse = (
   from: context.serverRuntimeId,
   fromEncryptionPubKey: pubKeyToHex(context.keyPair.publicKey),
   to: toRuntimeId,
-  timestamp: nextTimestamp(),
+  timestamp: Date.now(),
   ...(requestId ? { inReplyTo: requestId } : {}),
   ...body,
 });
@@ -271,7 +266,7 @@ const sendEntityInputsDelivery = (
       to: target.targetKey,
       timestamp: typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp)
         ? ingressTimestamp
-        : nextTimestamp(),
+        : Date.now(),
       payload: encryptJSON(envelope, hexToPubKey(peerKey)),
       encrypted: true,
       ...(envelope.entityInputs.length === 1 && envelope.entityInputs[0]
@@ -309,7 +304,7 @@ const sendReliableReceiptDelivery = (
     id: makeMessageId(),
     from: context.serverRuntimeId,
     to: target.targetKey,
-    timestamp: nextTimestamp(),
+    timestamp: Date.now(),
     payload: receipt,
   }));
   if (!attempt.sent) forgetSession(context, target.session.ws);
@@ -367,7 +362,8 @@ const handleHandshake = (
   }
   session.authAudience = binding!.audience;
   session.authNonce = binding!.challenge;
-  session.lastAuthTimestamp = msg.auth!.timestamp;
+  session.lastAuthTimestamp = 0;
+  session.outboundAuthTimestamp = 0;
   session.peerEncryptionPubKey = peerKey;
   if (!rememberRuntimeSession(context, session, normalizedFrom)) {
     session.duplicateClosing = true;
@@ -521,7 +517,6 @@ const handleDirectMessage = async (
         sessionRuntimeId(session),
         msg,
         msg.auth,
-        context.options.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
         session.authAudience || '',
         session.authNonce || '',
         session.lastAuthTimestamp,

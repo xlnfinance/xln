@@ -49,17 +49,12 @@ export const verifyRuntimeWsFrameAuth = (
   runtimeId: string,
   message: RuntimeWsMessage,
   auth: RuntimeWsAuth | undefined,
-  maxSkewMs: number,
   audience: string,
   nonce: string,
   lastTimestamp: number,
 ): string | null => {
   if (!auth?.signature || auth.nonce !== nonce || !Number.isSafeInteger(auth.timestamp)) {
     return 'Missing or invalid session frame auth';
-  }
-  const nowTs = Date.now();
-  if (Math.abs(nowTs - auth.timestamp) > maxSkewMs) {
-    return `Frame timestamp skew too large (${nowTs - auth.timestamp}ms)`;
   }
   let recovered: string;
   try {
@@ -71,7 +66,9 @@ export const verifyRuntimeWsFrameAuth = (
     return `Frame signature invalid: ${(error as Error).message}`;
   }
   if (recovered !== runtimeId.toLowerCase()) return 'Frame signature does not match session runtimeId';
-  // WebSocket delivery is ordered, so a signed timestamp is also the smallest
-  // session-bound replay fence: accepting equality would replay the exact frame.
+  // Hello freshness prevents old sessions. After that, the single-use nonce,
+  // ordered socket and signed per-session counter are sufficient: consulting
+  // wall time here lets clock jumps or a busy peer reject an otherwise valid
+  // authenticated session. Equality would replay the exact frame.
   return auth.timestamp > lastTimestamp ? null : 'Session frame replay or reordering';
 };

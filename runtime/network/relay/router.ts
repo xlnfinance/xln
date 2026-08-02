@@ -295,7 +295,7 @@ const handleHello = (context: RelayRouteContext): boolean => {
   rememberSocketAuthBinding(ws, {
     ...binding!,
     encryptionPubKey: fromEncryptionPubKey!,
-    lastAuthTimestamp: context.msg.auth!.timestamp,
+    lastAuthTimestamp: 0,
   });
   const existingClient = store.clients.get(fromKey);
   if (existingClient && existingClient.ws !== ws) {
@@ -802,7 +802,6 @@ const prepareRelaySession = (context: RelayRouteContext): boolean => {
             rememberedRuntimeId,
             msg,
             msg.auth,
-            config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
             authBinding.audience,
             authBinding.challenge,
             authBinding.lastAuthTimestamp,

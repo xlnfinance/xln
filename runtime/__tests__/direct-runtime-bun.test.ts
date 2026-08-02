@@ -3,6 +3,7 @@ import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { createDirectRuntimeWsRoute as createProductionDirectRuntimeWsRoute } from '../network/p2p/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
 import { hashHelloMessage, hashRuntimeWsFrame, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
+import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from '../network/p2p/hello-auth';
 import { XLN_PROTOCOL_VERSION } from '../protocol/version';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
@@ -132,6 +133,76 @@ const makeFakeWs = () => {
   };
   return { ws, sent, closed };
 };
+
+const signSessionFrame = (
+  seed: string,
+  runtimeId: string,
+  audience: string,
+  nonce: string,
+  timestamp: number,
+): { message: RuntimeWsMessage; auth: NonNullable<RuntimeWsMessage['auth']> } => {
+  const message: RuntimeWsMessage = {
+    type: 'ping',
+    id: `frame-${timestamp}`,
+    from: runtimeId,
+    fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(seed).publicKey),
+  };
+  return {
+    message,
+    auth: {
+      nonce,
+      timestamp,
+      signature: signDigest(seed, '1', hashRuntimeWsFrame(message, audience, nonce, timestamp)),
+    },
+  };
+};
+
+describe('websocket session replay fence', () => {
+  test('keeps wall-clock freshness on hello only', () => {
+    const seed = 'stale-hello-peer';
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(seed).publicKey);
+    const audience = 'xln-relay:test';
+    const nonce = 'stale-hello-challenge';
+    const timestamp = Date.now() - 5 * 60 * 1000 - 1;
+    const signature = signDigest(
+      seed,
+      '1',
+      hashHelloMessage(runtimeId, encryptionPubKey, timestamp, nonce, audience),
+    );
+
+    expect(verifyHelloAuth(runtimeId, encryptionPubKey, { nonce, timestamp, signature }, 5 * 60 * 1000, audience))
+      .toContain('Hello timestamp skew too large');
+  });
+
+  test('accepts a far-future signed session counter once and rejects its replay', () => {
+    const seed = 'future-session-peer';
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const audience = 'xln-relay:test';
+    const nonce = 'future-session-challenge';
+    const timestamp = Date.now() + 24 * 60 * 60 * 1000;
+    const { message, auth } = signSessionFrame(seed, runtimeId, audience, nonce, timestamp);
+
+    expect(verifyRuntimeWsFrameAuth(runtimeId, message, auth, audience, nonce, 0)).toBeNull();
+    expect(verifyRuntimeWsFrameAuth(runtimeId, message, auth, audience, nonce, timestamp))
+      .toBe('Session frame replay or reordering');
+  });
+
+  test('keeps signed counters isolated between sessions', () => {
+    const seed = 'isolated-session-peer';
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const audience = 'xln-relay:test';
+    const flooded = signSessionFrame(seed, runtimeId, audience, 'session-a', 1_000_000);
+    const fresh = signSessionFrame(seed, runtimeId, audience, 'session-b', 1);
+
+    expect(verifyRuntimeWsFrameAuth(runtimeId, flooded.message, flooded.auth, audience, 'session-a', 999_999))
+      .toBeNull();
+    expect(verifyRuntimeWsFrameAuth(runtimeId, fresh.message, fresh.auth, audience, 'session-b', 0))
+      .toBeNull();
+    expect(verifyRuntimeWsFrameAuth(runtimeId, fresh.message, fresh.auth, audience, 'session-a', 0))
+      .toBe('Missing or invalid session frame auth');
+  });
+});
 
 describe('direct runtime websocket route', () => {
   test('marks a successful websocket upgrade handled so HTTP dispatch cannot fall through', () => {

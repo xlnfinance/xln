@@ -11,6 +11,8 @@
 
 import type { PushNotificationV1, PushSendResult, PushSender } from './types';
 
+const DEFAULT_WEBHOOK_TIMEOUT_MS = 5_000;
+
 export class ConsolePushSender implements PushSender {
   readonly kind = 'console';
 
@@ -30,24 +32,39 @@ export class WebhookPushSender implements PushSender {
     private readonly endpoint: string,
     private readonly authToken?: string,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly timeoutMs: number = DEFAULT_WEBHOOK_TIMEOUT_MS,
   ) {
     if (!/^https?:\/\//i.test(endpoint)) throw new Error('PUSH_WEBHOOK_ENDPOINT_INVALID');
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('PUSH_WEBHOOK_TIMEOUT_INVALID');
   }
 
   async send(notification: PushNotificationV1): Promise<PushSendResult> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const response = await this.fetchImpl(this.endpoint, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(this.authToken ? { authorization: `Bearer ${this.authToken}` } : {}),
-        },
-        body: JSON.stringify(notification),
-      });
+      const response = await Promise.race([
+        this.fetchImpl(this.endpoint, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(this.authToken ? { authorization: `Bearer ${this.authToken}` } : {}),
+          },
+          body: JSON.stringify(notification),
+          signal: controller.signal,
+        }),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error(`PUSH_WEBHOOK_TIMEOUT:${this.timeoutMs}`));
+          }, this.timeoutMs);
+        }),
+      ]);
       if (!response.ok) return { ok: false, error: `PUSH_WEBHOOK_HTTP_${response.status}` };
       return { ok: true };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 }

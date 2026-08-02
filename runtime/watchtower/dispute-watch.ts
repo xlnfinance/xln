@@ -24,6 +24,9 @@ const DISPUTE_STARTED_TOPIC = DISPUTE_INTERFACE.getEvent('DisputeStarted')!.topi
 
 const DEFAULT_MAX_BLOCK_RANGE = 5_000;
 const DEFAULT_MAX_BACKFILL_BLOCKS = 50_000;
+const DEFAULT_CONFIRMATIONS = 12;
+const DEFAULT_RPC_TIMEOUT_MS = 10_000;
+const DEFAULT_MAX_LOGS_PER_CHUNK = 10_000;
 const disputeWatchLog = createStructuredLogger('watchtower.dispute_watch');
 
 const uint256ToSafeNumber = (value: unknown, label: string): number => {
@@ -60,6 +63,9 @@ export type DisputeWatchOptions = {
   allowedRpcUrls?: string[];
   maxBlockRange?: number;
   maxBackfillBlocks?: number;
+  confirmations?: number;
+  rpcTimeoutMs?: number;
+  maxLogsPerChunk?: number;
   providerFactory?: (rpcUrl: string, chainId: number) => WatchProvider;
   now?: () => number;
 };
@@ -77,6 +83,8 @@ const parseDisputeStarted = (
   chainId: number,
   depositoryAddress: string,
 ): DisputeWakeEvent | null => {
+  const topic0 = String(log.topics?.[0] || '').toLowerCase();
+  if (topic0 !== DISPUTE_STARTED_TOPIC.toLowerCase()) return null;
   try {
     const parsed = DISPUTE_INTERFACE.parseLog({ topics: [...(log.topics || [])], data: String(log.data || '0x') });
     if (!parsed || parsed.name !== 'DisputeStarted') return null;
@@ -90,10 +98,22 @@ const parseDisputeStarted = (
       ...(log.transactionHash ? { txHash: String(log.transactionHash) } : {}),
     };
   } catch (error) {
-    // Production watchers ignore unrelated/malformed external logs. Tests and
-    // development throw so a decoder or ABI drift can never hide until release.
-    if (process.env['NODE_ENV'] === 'production') return null;
-    throw error;
+    const location = `${chainId}:${depositoryAddress.toLowerCase()}:${Number(log.blockNumber || 0)}`;
+    throw new Error(`WATCHTOWER_DISPUTE_MATCHING_LOG_INVALID:${location}:${formatError(error)}`, { cause: error });
+  }
+};
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}_TIMEOUT:${timeoutMs}`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 };
 
@@ -105,6 +125,9 @@ export const runDisputeWatchSweep = async (
   const now = options?.now || (() => Date.now());
   const maxBlockRange = Math.max(100, Math.floor(Number(options?.maxBlockRange ?? DEFAULT_MAX_BLOCK_RANGE)));
   const maxBackfill = Math.max(maxBlockRange, Math.floor(Number(options?.maxBackfillBlocks ?? DEFAULT_MAX_BACKFILL_BLOCKS)));
+  const confirmations = Math.max(0, Math.floor(Number(options?.confirmations ?? DEFAULT_CONFIRMATIONS)));
+  const rpcTimeoutMs = Math.max(1, Math.floor(Number(options?.rpcTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS)));
+  const maxLogsPerChunk = Math.max(1, Math.floor(Number(options?.maxLogsPerChunk ?? DEFAULT_MAX_LOGS_PER_CHUNK)));
   const customProviderFactory = options?.providerFactory;
   const providerFactory = customProviderFactory
     || ((rpcUrl: string) => createXlnJsonRpcProvider(rpcUrl));
@@ -124,10 +147,15 @@ export const runDisputeWatchSweep = async (
       const registrations = await store.listRegistrationsForTarget(target.chainId, target.depositoryAddress);
       if (registrations.length === 0) continue;
 
-      const head = Math.max(0, Math.floor(Number(await provider.getBlockNumber())));
+      const head = Math.max(0, Math.floor(Number(await withTimeout(
+        provider.getBlockNumber(),
+        rpcTimeoutMs,
+        'WATCHTOWER_DISPUTE_HEAD',
+      ))));
+      const safeHead = Math.max(0, head - confirmations);
       const storedCursor = await store.getCursor(target.chainId, target.depositoryAddress);
-      const requestedFrom = storedCursor !== null ? storedCursor + 1 : head - maxBlockRange;
-      const retainedFrom = Math.max(0, head - maxBackfill);
+      const requestedFrom = storedCursor !== null ? storedCursor + 1 : safeHead - maxBlockRange;
+      const retainedFrom = Math.max(0, safeHead - maxBackfill);
       if (storedCursor !== null && requestedFrom < retainedFrom) {
         throw new Error(
           `WATCHTOWER_DISPUTE_BACKFILL_LIMIT_EXCEEDED:` +
@@ -135,17 +163,21 @@ export const runDisputeWatchSweep = async (
         );
       }
       const flooredFrom = Math.max(0, requestedFrom, retainedFrom);
+      if (flooredFrom > safeHead) continue;
 
       let cursor = flooredFrom - 1;
-      for (let start = flooredFrom; start <= head; start += maxBlockRange) {
-        const end = Math.min(head, start + maxBlockRange - 1);
+      for (let start = flooredFrom; start <= safeHead; start += maxBlockRange) {
+        const end = Math.min(safeHead, start + maxBlockRange - 1);
         let chunkDeliveryFailed = false;
-        const logs = await provider.getLogs({
-          fromBlock: start,
-          toBlock: end,
-          address: target.depositoryAddress,
-          topics: [DISPUTE_STARTED_TOPIC],
-        });
+        const logs = await withTimeout(provider.getLogs({
+            fromBlock: start,
+            toBlock: end,
+            address: target.depositoryAddress,
+            topics: [DISPUTE_STARTED_TOPIC],
+          }), rpcTimeoutMs, 'WATCHTOWER_DISPUTE_LOGS');
+        if (logs.length > maxLogsPerChunk) {
+          throw new Error(`WATCHTOWER_DISPUTE_LOG_LIMIT:${logs.length}:${maxLogsPerChunk}`);
+        }
         for (const log of logs) {
           const event = parseDisputeStarted(log, target.chainId, target.depositoryAddress);
           if (!event) continue;
