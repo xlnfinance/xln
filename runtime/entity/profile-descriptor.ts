@@ -113,7 +113,7 @@ export const buildEntityProfileDescriptor = (
             ...(hubConfig.rebalanceBaseFee !== undefined
               ? { rebalanceBaseFee: String(hubConfig.rebalanceBaseFee) }
               : {}),
-            rebalanceLiquidityFeeBps: String(hubConfig.rebalanceLiquidityFeeBps ?? hubConfig.minFeeBps ?? 1n),
+            rebalanceLiquidityFeeBps: String(hubConfig.rebalanceLiquidityFeeBps),
             rebalanceGasFee: String(hubConfig.rebalanceGasFee ?? 0n),
             rebalanceTimeoutMs: hubConfig.rebalanceTimeoutMs ?? 10 * 60 * 1000,
           }

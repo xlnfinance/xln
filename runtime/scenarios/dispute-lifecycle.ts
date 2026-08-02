@@ -263,7 +263,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       env,
     );
 
-    // Finalize must not enqueue before timeout (unilateral-only path).
+    // Finalize must not enqueue before timeout.
     const finalizeBatchCountBefore = Number(findReplica(env, alice.id)[1].state.jBatchState?.batch?.disputeFinalizations?.length || 0);
     await process(env, [{
       entityId: alice.id,
@@ -272,27 +272,6 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
         type: 'disputeFinalize',
         data: {
           counterpartyEntityId: hub.id,
-          cooperative: true,
-          description: 'must-reject-cooperative',
-        },
-      }],
-    }]);
-    await process(env);
-    const finalizeBatchAfterCoop = Number(findReplica(env, alice.id)[1].state.jBatchState?.batch?.disputeFinalizations?.length || 0);
-    assert(
-      finalizeBatchAfterCoop === finalizeBatchCountBefore,
-      `cooperative disputeFinalize must not enqueue before timeout (${finalizeBatchCountBefore} -> ${finalizeBatchAfterCoop})`,
-      env,
-    );
-
-    await process(env, [{
-      entityId: alice.id,
-      signerId: alice.signer,
-      entityTxs: [{
-        type: 'disputeFinalize',
-        data: {
-          counterpartyEntityId: hub.id,
-          cooperative: false,
           description: 'must-reject-early-timeout',
         },
       }],

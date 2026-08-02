@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import { ENTITY_TX_TYPES } from '../entity/tx/catalog';
 import { validateEntityTx } from '../entity/tx-validation';
 import { decodeAccountTx } from '../account/tx-validation';
+import { validateStorageEntityCoreDocValue } from '../storage/schema-state-docs';
+import { projectEntityCoreDoc } from '../storage/projections';
+import { createEntityProposalFixture } from './helpers/entity-proposal-fixture';
 
 const repoRoot = process.cwd();
 const removedEntityTxs = [
@@ -61,6 +64,28 @@ test('retired Entity and Account pull discriminants fail at their canonical deco
     expect(() => decodeAccountTx({ type, data: {} }, 'CANONICAL_PULL'))
       .toThrow(`CANONICAL_PULL_TYPE_UNKNOWN:${type}`);
   }
+});
+
+test('retired dispute cooperative and hub min-fee fields fail their exact boundaries', () => {
+  expect(() => validateEntityTx({
+    type: 'disputeFinalize',
+    data: { counterpartyEntityId: 'hub', cooperative: true },
+  }, 'CANONICAL_FINALIZE')).toThrow('CANONICAL_FINALIZE_DATA_FIELDS');
+  expect(() => validateEntityTx({
+    type: 'setHubConfig',
+    data: { minFeeBps: 1n },
+  }, 'CANONICAL_HUB_CONFIG')).toThrow('CANONICAL_HUB_CONFIG_DATA_FIELDS');
+
+  const core = projectEntityCoreDoc(
+    createEntityProposalFixture('canonical-hub-config-storage').createState(),
+  );
+  core.hubRebalanceConfig = {
+    matchingStrategy: 'amount', policyVersion: 1, routingFeePPM: 1, baseFee: 0n,
+    rebalanceLiquidityFeeBps: 1n, minFeeBps: 1n,
+  } as never;
+  expect(() => validateStorageEntityCoreDocValue(core)).toThrow(
+    'STORAGE_ENTITY_DOC_INVALID_HUB_REBALANCE_CONFIG_FIELDS',
+  );
 });
 
 test('each payment operation retains one explicit canonical transaction path', () => {

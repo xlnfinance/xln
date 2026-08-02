@@ -327,7 +327,7 @@ const buildFaucetRuntimeInput = (
         ? Number(policy?.policyVersion)
         : 1,
     baseFee: getDefaultRebalanceBaseFeeForToken(request.tokenId),
-    liquidityFeeBps: policy?.rebalanceLiquidityFeeBps ?? policy?.minFeeBps ?? 1n,
+    liquidityFeeBps: policy?.rebalanceLiquidityFeeBps ?? 1n,
     gasFee: 0n,
   });
   const entityTxs: EntityTx[] = [{

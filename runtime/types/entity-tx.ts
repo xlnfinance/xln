@@ -516,7 +516,6 @@ type EntityTxPayload =
       type: 'disputeFinalize';
       data: {
         counterpartyEntityId: string;
-        cooperative?: boolean;  // Unsupported compatibility flag. Finalize is unilateral timeout or signed counter-proof.
         useOnchainRegistry?: boolean; // Optional HTLC reveal via on-chain registry
         description?: string;
       };
@@ -684,7 +683,6 @@ type EntityTxPayload =
         disputeAutoFinalizeMode?: 'auto' | 'ignore';
         minCollateralThreshold?: bigint;    // Reserved for future policy gates
         c2rWithdrawSoftLimit?: bigint;              // Hub-owned collateral keep-buffer before C→R pullback
-        minFeeBps?: bigint;                 // Legacy fallback min-fee bps gate (if policy triplet missing)
         rebalanceBaseFee?: bigint;          // Fixed rebalance fee component
         rebalanceLiquidityFeeBps?: bigint;  // Rebalance liquidity fee in bps (volume-based)
         rebalanceGasFee?: bigint;           // Flat gas recovery component

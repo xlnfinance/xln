@@ -39,7 +39,7 @@ export const buildHubRebalancePolicyTx = (
     tokenId,
     policyVersion: config.policyVersion,
     baseFee: getDefaultRebalanceBaseFeeForToken(tokenId),
-    liquidityFeeBps: config.rebalanceLiquidityFeeBps ?? config.minFeeBps ?? 1n,
+    liquidityFeeBps: config.rebalanceLiquidityFeeBps,
     gasFee: 0n,
   },
 });
@@ -84,7 +84,7 @@ const buildHubConfig = (
   }
   const feePolicyChanged =
     !previous ||
-    (previous.rebalanceLiquidityFeeBps ?? previous.minFeeBps ?? 1n) !== liquidityFeeBps;
+    previous.rebalanceLiquidityFeeBps !== liquidityFeeBps;
   const hubName = typeof data.hubName === 'string' && data.hubName.trim()
     ? data.hubName.trim()
     : previous?.hubName;
@@ -102,7 +102,6 @@ const buildHubConfig = (
       ),
       disputeAutoFinalizeMode: data.disputeAutoFinalizeMode ?? 'auto',
       minCollateralThreshold: data.minCollateralThreshold ?? 0n,
-      minFeeBps: data.minFeeBps ?? 1n,
       rebalanceLiquidityFeeBps: liquidityFeeBps,
       rebalanceTimeoutMs: data.rebalanceTimeoutMs ?? 10 * 60 * 1000,
     },

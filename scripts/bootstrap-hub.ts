@@ -38,7 +38,6 @@ export type HubConfig = {
   disputeAutoFinalizeMode?: 'auto' | 'ignore';
   minCollateralThreshold?: bigint;
   c2rWithdrawSoftLimit?: bigint;
-  minFeeBps?: bigint;
   rebalanceBaseFee?: bigint;
   rebalanceLiquidityFeeBps?: bigint;
   rebalanceGasFee?: bigint;
@@ -191,7 +190,6 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
           disputeAutoFinalizeMode: hubConfig.disputeAutoFinalizeMode ?? 'auto',
           ...(hubConfig.minCollateralThreshold !== undefined ? { minCollateralThreshold: hubConfig.minCollateralThreshold } : {}),
           ...(hubConfig.c2rWithdrawSoftLimit !== undefined ? { c2rWithdrawSoftLimit: hubConfig.c2rWithdrawSoftLimit } : {}),
-          ...(hubConfig.minFeeBps !== undefined ? { minFeeBps: hubConfig.minFeeBps } : {}),
           ...(hubConfig.rebalanceBaseFee !== undefined ? { rebalanceBaseFee: hubConfig.rebalanceBaseFee } : {}),
           ...(hubConfig.rebalanceLiquidityFeeBps !== undefined ? { rebalanceLiquidityFeeBps: hubConfig.rebalanceLiquidityFeeBps } : {}),
           ...(hubConfig.rebalanceGasFee !== undefined ? { rebalanceGasFee: hubConfig.rebalanceGasFee } : {}),

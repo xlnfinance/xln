@@ -164,9 +164,8 @@ export const handleDisputeFinalize = async (
   disputeLog.debug('finalize.begin', {
     entity: shortId(entityState.entityId),
     counterparty: shortId(counterpartyId),
-    cooperativeRequested: entityTx.data.cooperative === true,
   });
-  const account = admitDisputeFinalize(newState, entityTx, env);
+  const account = admitDisputeFinalize(newState, entityTx);
   if (!account) return { newState, outputs };
   const selection = selectFinalProof(
     entityState,

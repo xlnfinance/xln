@@ -42,6 +42,41 @@ const ENTITY_OPTIONAL = [
   'orderbookReferrals', 'lending',
 ] as const;
 
+const HUB_REBALANCE_CONFIG_REQUIRED = [
+  'matchingStrategy', 'policyVersion', 'routingFeePPM', 'baseFee', 'rebalanceLiquidityFeeBps',
+] as const;
+const HUB_REBALANCE_CONFIG_OPTIONAL = [
+  'hubName', 'swapTakerFeeBps', 'disputeAutoFinalizeMode', 'minCollateralThreshold',
+  'c2rWithdrawSoftLimit', 'rebalanceBaseFee', 'rebalanceGasFee', 'rebalanceTimeoutMs',
+] as const;
+
+const validateStorageHubRebalanceConfig = (value: unknown, code: string): void => {
+  if (value === undefined) return;
+  const config = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(
+    config,
+    HUB_REBALANCE_CONFIG_REQUIRED,
+    HUB_REBALANCE_CONFIG_OPTIONAL,
+    `${code}_FIELDS`,
+  );
+  if (!['amount', 'time', 'fee'].includes(String(config['matchingStrategy']))) {
+    throw new Error(`${code}_MATCHING_STRATEGY`);
+  }
+  requireBoundaryInteger(config['policyVersion'], `${code}_POLICY_VERSION`, 1);
+  requireBoundaryInteger(config['routingFeePPM'], `${code}_ROUTING_FEE_PPM`);
+  requireStorageBigInt(config['baseFee'], `${code}_BASE_FEE`);
+  requireStorageBigInt(config['rebalanceLiquidityFeeBps'], `${code}_LIQUIDITY_FEE_BPS`, 0n, 10_000n);
+  if (config['hubName'] !== undefined) requireStorageString(config['hubName'], `${code}_HUB_NAME`);
+  if (config['swapTakerFeeBps'] !== undefined) requireBoundaryInteger(config['swapTakerFeeBps'], `${code}_SWAP_TAKER_FEE_BPS`);
+  if (config['disputeAutoFinalizeMode'] !== undefined && config['disputeAutoFinalizeMode'] !== 'auto' && config['disputeAutoFinalizeMode'] !== 'ignore') {
+    throw new Error(`${code}_DISPUTE_AUTO_FINALIZE_MODE`);
+  }
+  for (const field of ['minCollateralThreshold', 'c2rWithdrawSoftLimit', 'rebalanceBaseFee', 'rebalanceGasFee']) {
+    if (config[field] !== undefined) requireStorageBigInt(config[field], `${code}_${field}`);
+  }
+  if (config['rebalanceTimeoutMs'] !== undefined) requireBoundaryInteger(config['rebalanceTimeoutMs'], `${code}_REBALANCE_TIMEOUT_MS`);
+};
+
 const ACCOUNT_REPLICA_REQUIRED = [
   'state', 'status', 'mempool', 'currentFrame', 'currentHeight',
   'pendingSignatures', 'rollbackCount', 'proofHeader', 'proofBody',
@@ -199,6 +234,7 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
   requireStorageMap(doc['htlcRoutes'], `${code}_HTLC_ROUTES`);
   requireStorageBigInt(doc['htlcFeesEarned'], `${code}_HTLC_FEES`);
   requireStorageMap(doc['lockBook'], `${code}_LOCK_BOOK`);
+  validateStorageHubRebalanceConfig(doc['hubRebalanceConfig'], `${code}_HUB_REBALANCE_CONFIG`);
   validateDeferredAccountProposals(doc['deferredAccountProposals'], code);
   validateSettlementContinuations(doc['settlementContinuations'], code);
   const {

@@ -46,7 +46,7 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
   },
   disputeFinalize: {
     required: { counterpartyEntityId: 'string' },
-    optional: { cooperative: 'boolean', useOnchainRegistry: 'boolean', description: 'string' },
+    optional: { useOnchainRegistry: 'boolean', description: 'string' },
   },
   processHtlcTimeouts: { optional: { expiredLocks: 'array' } },
 } as const satisfies Readonly<Record<string, EntityTxDataSchema>>;

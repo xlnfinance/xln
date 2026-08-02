@@ -9,9 +9,8 @@ export interface HubRebalanceConfig {
   disputeAutoFinalizeMode?: 'auto' | 'ignore';
   minCollateralThreshold?: bigint;
   c2rWithdrawSoftLimit?: bigint;
-  minFeeBps?: bigint;
   rebalanceBaseFee?: bigint;
-  rebalanceLiquidityFeeBps?: bigint;
+  rebalanceLiquidityFeeBps: bigint;
   rebalanceGasFee?: bigint;
   rebalanceTimeoutMs?: number;
 }

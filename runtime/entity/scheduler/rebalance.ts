@@ -97,7 +97,7 @@ const createRebalanceRun = (
     // time would freeze age while the pending batch blocks Entity frames.
     submitClockNow: env.state.timestamp,
     strategy: normalizeRebalanceMatchingStrategy(config.matchingStrategy),
-    liquidityFeeBps: config.rebalanceLiquidityFeeBps ?? config.minFeeBps ?? 1n,
+    liquidityFeeBps: config.rebalanceLiquidityFeeBps,
     policyVersion:
       Number.isFinite(config.policyVersion) && config.policyVersion > 0
         ? config.policyVersion

@@ -70,7 +70,7 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
       hubName: 'string', matchingStrategy: 'string', policyVersion: 'integer',
       routingFeePPM: 'integer', baseFee: 'bigint', swapTakerFeeBps: 'integer',
       disputeAutoFinalizeMode: 'string', minCollateralThreshold: 'bigint',
-      c2rWithdrawSoftLimit: 'bigint', minFeeBps: 'bigint', rebalanceBaseFee: 'bigint',
+      c2rWithdrawSoftLimit: 'bigint', rebalanceBaseFee: 'bigint',
       rebalanceLiquidityFeeBps: 'bigint', rebalanceGasFee: 'bigint',
       rebalanceTimeoutMs: 'integer',
     },
