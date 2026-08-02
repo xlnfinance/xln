@@ -15,7 +15,7 @@ import { eventCarriers } from './rpc-boundary';
 import type { RpcChainIo } from './rpc-chain-io';
 import type { RpcContractStack } from './rpc-contract-stack';
 import {
-  applyProcessBatchGasFloor,
+  resolveProcessBatchGasLimit,
   rpcLog,
 } from './rpc-public';
 import { submitDebtEnforcement, submitMint } from './rpc-submit-basic';
@@ -133,11 +133,10 @@ const executeBatchSubmission = async (
     const estimatedGas = await context.chainIo.estimateGas(
       () => depository.processBatch.estimateGas(data.encodedBatch, data.hankoSignature, entityNonce),
     );
-    const gasLimit = applyProcessBatchGasFloor(
+    const gasLimit = resolveProcessBatchGasLimit(
       estimatedGas,
-      plan.batch.disputeFinalizations.filter(
-        finalization => finalization.finalProofbody.transformers.length > 0,
-      ).length,
+      plan.batch,
+      context.config.mode,
     );
     const preflightFailure = await preflightProcessBatch({
       depository,

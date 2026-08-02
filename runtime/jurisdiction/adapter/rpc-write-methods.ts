@@ -6,8 +6,7 @@ import { decodeJBatch, type JBatch } from '../machine/batch';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
 import { DEV_CHAIN_IDS } from './chain-ids';
 import {
-  PROCESS_BATCH_GAS_FLOOR,
-  applyProcessBatchGasFloor,
+  resolveProcessBatchGasLimit,
 } from './rpc-public';
 import {
   eventCarriers,
@@ -43,7 +42,7 @@ const sendTypedTx = async (
   method: unknown,
   args: unknown[],
   options: {
-    minimumGasLimit?: bigint;
+    resolveGasLimit?: (estimatedGasLimit: bigint) => bigint;
     txNonce: number | null;
     resetSignerNonce: boolean;
   },
@@ -52,9 +51,7 @@ const sendTypedTx = async (
   const estimated = await context.chainIo.estimateGas(
     () => txMethod.estimateGas(...args),
   );
-  const gasLimit = options.minimumGasLimit !== undefined && estimated < options.minimumGasLimit
-    ? options.minimumGasLimit
-    : estimated;
+  const gasLimit = options.resolveGasLimit?.(estimated) ?? estimated;
   if (options.resetSignerNonce) await context.sequencer.reset();
   const feeOverrides = await context.chainIo.buildFeeOverrides();
   const overrides: TxOverrides = options.txNonce === null
@@ -99,12 +96,7 @@ export const processRpcSignedBatch = async (
           prepared.nextNonce,
         ),
       );
-      const gasLimit = applyProcessBatchGasFloor(
-        estimatedGas,
-        batch.disputeFinalizations.filter(
-          finalization => finalization.finalProofbody.transformers.length > 0,
-        ).length,
-      );
+      const gasLimit = resolveProcessBatchGasLimit(estimatedGas, batch, context.config.mode);
       const tx = await depository.processBatch(
         prepared.encodedBatch,
         prepared.hankoData,
@@ -142,9 +134,8 @@ const createCoreWriteMethods = (context: RpcWriteContext): Pick<RpcWriteMethods,
           context.stack.depository.processBatch,
           [encodedBatch, hankoData, nonce],
           {
-            ...(context.config.mode === 'tron' || batch.disputeFinalizations.length === 0
-              ? {}
-              : { minimumGasLimit: PROCESS_BATCH_GAS_FLOOR }),
+            resolveGasLimit: estimatedGasLimit =>
+              resolveProcessBatchGasLimit(estimatedGasLimit, batch, context.config.mode),
             txNonce: await context.sequencer.allocate(),
             resetSignerNonce: true,
           },

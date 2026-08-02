@@ -4,8 +4,7 @@
  *
  * Features:
  *   - Deploy contracts (anvil) or connect to existing (mainnet/testnet)
- *   - Snapshot/revert if RPC supports evm_snapshot (anvil)
- *   - Falls back gracefully on unsupported features
+ *   - Snapshot/revert only when the configured dev RPC explicitly supports it
  *
  * @license AGPL-3.0
  */
@@ -16,35 +15,39 @@ import { Depository__factory } from '../../../jurisdictions/typechain-types/inde
 
 import { BLOCKCHAIN } from '../../config/constants';
 import { createStructuredLogger } from '../../infra/logger';
-import { decodeJBatch } from '../machine/batch';
+import { decodeJBatch, type JBatch } from '../machine/batch';
 import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
 import { type AuthenticatedReceiptRange, type ReceiptReadProfile } from './receipt-root';
 import { type RpcBatchResponse } from './rpc-utils';
 import { applyJBlockHeadersIngressTransform } from './watcher';
 import { TRON_CHAIN_IDS } from './chain-ids';
+import type { JAdapterMode } from './types';
 
 /**
  * A signed transformer is the dispute program, so finalization forwards every
  * available unit except the contract's 2M settlement reserve. Use one portable
  * 15M ceiling across EVM jurisdictions, below Ethereum's EIP-7825 2^24 cap.
  */
-export const PROCESS_BATCH_GAS_FLOOR = 15_000_000n;
+export const PROCESS_BATCH_TRANSFORMER_GAS_LIMIT = 15_000_000n;
 
-export const applyProcessBatchGasFloor = (
+export const resolveProcessBatchGasLimit = (
   estimatedGasLimit: bigint,
-  transformerFinalizationCount: number,
+  batch: JBatch,
+  mode: JAdapterMode,
 ): bigint => {
-  if (!Number.isSafeInteger(transformerFinalizationCount) || transformerFinalizationCount < 0) {
-    throw new Error('J_DISPUTE_FINALIZATION_COUNT_INVALID');
-  }
+  const transformerFinalizationCount = mode === 'tron'
+    ? 0
+    : batch.disputeFinalizations.filter(
+      finalization => finalization.finalProofbody.transformers.length > 0,
+    ).length;
   if (transformerFinalizationCount > 1) {
     throw new Error('J_TRANSFORMER_FINALIZATION_BATCH_LIMIT');
   }
   if (transformerFinalizationCount === 0) return estimatedGasLimit;
-  if (estimatedGasLimit > PROCESS_BATCH_GAS_FLOOR) {
+  if (estimatedGasLimit > PROCESS_BATCH_TRANSFORMER_GAS_LIMIT) {
     throw new Error('J_TRANSFORMER_FINALIZATION_GAS_LIMIT');
   }
-  return PROCESS_BATCH_GAS_FLOOR;
+  return PROCESS_BATCH_TRANSFORMER_GAS_LIMIT;
 };
 
 export const rpcLog = createStructuredLogger('jadapter.rpc');
