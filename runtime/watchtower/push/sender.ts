@@ -3,7 +3,7 @@
  *
  * The watchtower process stays free of heavy provider SDKs. Two working
  * transports ship here:
- *   - ConsolePushSender: logs the wake (dev / smoke / no-op default).
+ *   - ConsolePushSender: logs an explicitly undelivered wake for dev/smoke.
  *   - WebhookPushSender: POSTs the notification JSON to an operator-configured
  *     endpoint that fans out to APNs / FCM. This keeps APNs/FCM credentials and
  *     native libraries out of the tower; the webhook is the integration seam.
@@ -19,7 +19,7 @@ export class ConsolePushSender implements PushSender {
       `[PUSH] (console) platform=${notification.platform} collapse=${notification.collapseKey} ` +
         `title="${notification.title}" token=${notification.token.slice(0, 12)}…`,
     );
-    return { ok: true };
+    return { ok: false, error: 'PUSH_DELIVERY_NOT_CONFIGURED' };
   }
 }
 

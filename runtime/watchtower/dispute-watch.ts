@@ -127,7 +127,14 @@ export const runDisputeWatchSweep = async (
       const head = Math.max(0, Math.floor(Number(await provider.getBlockNumber())));
       const storedCursor = await store.getCursor(target.chainId, target.depositoryAddress);
       const requestedFrom = storedCursor !== null ? storedCursor + 1 : head - maxBlockRange;
-      const flooredFrom = Math.max(0, requestedFrom, head - maxBackfill);
+      const retainedFrom = Math.max(0, head - maxBackfill);
+      if (storedCursor !== null && requestedFrom < retainedFrom) {
+        throw new Error(
+          `WATCHTOWER_DISPUTE_BACKFILL_LIMIT_EXCEEDED:` +
+          `${target.chainId}:${target.depositoryAddress}:${requestedFrom}:${retainedFrom}`,
+        );
+      }
+      const flooredFrom = Math.max(0, requestedFrom, retainedFrom);
 
       let cursor = flooredFrom - 1;
       for (let start = flooredFrom; start <= head; start += maxBlockRange) {

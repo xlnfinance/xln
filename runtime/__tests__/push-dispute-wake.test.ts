@@ -19,12 +19,26 @@ import {
   selectWakeTargets,
 } from '../watchtower/push/dispute-wake';
 import { runDisputeWatchSweep, type DisputeWatchStore } from '../watchtower/dispute-watch';
+import { ConsolePushSender } from '../watchtower/push/sender';
 import type { PushNotificationV1, PushSender, StoredPushRegistration } from '../watchtower/push/types';
 
 const DEPOSITORY = '0x000000000000000000000000000000000000dead';
 const CHAIN_ID = 31337;
 
 const entityId = (n: number): string => zeroPadValue(`0x${n.toString(16).padStart(2, '0')}`, 32).toLowerCase();
+
+test('console push transport never claims delivery', async () => {
+  const result = await new ConsolePushSender().send({
+    version: 1,
+    platform: 'web',
+    token: 'not-delivered',
+    title: 'Dispute started',
+    body: 'Open the wallet',
+    collapseKey: 'dispute:test',
+    data: { kind: 'dispute_wake', url: 'xln://wallet' },
+  });
+  expect(result).toEqual({ ok: false, error: 'PUSH_DELIVERY_NOT_CONFIGURED' });
+});
 
 const makeRegistration = (over: Partial<StoredPushRegistration> = {}): StoredPushRegistration => ({
   runtimeId: ZeroAddress.toLowerCase(),
@@ -322,6 +336,26 @@ describe('runDisputeWatchSweep', () => {
     const second = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000 });
     expect(second.notificationsSent).toBe(1);
     expect(cursors.get(`${CHAIN_ID}:${DEPOSITORY}`)).toBe(200);
+  });
+
+  test('fails loud instead of skipping an expired backfill range', async () => {
+    const { store, cursors } = buildFakeStore();
+    cursors.set(`${CHAIN_ID}:${DEPOSITORY}`, 1);
+    let reads = 0;
+    const result = await runDisputeWatchSweep(store, {
+      kind: 'unused',
+      send: async () => ({ ok: true }),
+    }, {
+      maxBlockRange: 100,
+      maxBackfillBlocks: 100,
+      providerFactory: () => ({
+        getBlockNumber: async () => 200,
+        getLogs: async () => { reads += 1; return []; },
+      }),
+    });
+    expect(result.errors).toBe(1);
+    expect(reads).toBe(0);
+    expect(cursors.get(`${CHAIN_ID}:${DEPOSITORY}`)).toBe(1);
   });
 });
 
