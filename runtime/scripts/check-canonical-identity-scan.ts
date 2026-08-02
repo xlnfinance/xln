@@ -56,12 +56,12 @@ const env = {
       ['collision', {
         name: canonicalRef,
         chainId: 31338,
-        depositoryAddress: address('22'),
+        contracts: { depository: address('22') },
       } as JReplica],
       ['canonical', {
         name: 'Canonical',
         chainId: 31337,
-        depositoryAddress: address('11'),
+        contracts: { depository: address('11') },
       } as JReplica],
     ]),
   },

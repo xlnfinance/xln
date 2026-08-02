@@ -24,7 +24,7 @@ getEntityOutCapacity,
 getEntityReplicaById,
 hasCommittedAccountState,
 hasPairMutualCredit,
-isAccountConsensusReady
+isAccountWriteLaneIdle
 } from './mesh-common';
 import {
 buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes
@@ -552,7 +552,7 @@ const selectEligibleCrossOfferSpecs = (
       if (hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) return false;
       const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);
       if (!targetAccount || String(targetAccount.status || 'active') !== 'active') return false;
-      if (!isAccountConsensusReady(targetAccount)) return false;
+      if (!isAccountWriteLaneIdle(targetAccount)) return false;
       return (
         !hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId) &&
         !getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId) &&
@@ -623,7 +623,7 @@ const maintainBootstrapCrossQuotes = async (
     if (remainingNewOffers <= 0 || remainingSourceHubGroups <= 0) break;
     const sourceHubEntityId = sourceHub.entityId;
     const account = getAccountReplica(env, sourceContext.entityId, sourceHubEntityId);
-    if (!account || String(account.status || 'active') !== 'active' || !isAccountConsensusReady(account)) continue;
+    if (!account || String(account.status || 'active') !== 'active' || !isAccountWriteLaneIdle(account)) continue;
     const sourceHubSpecs = buildMarketMakerCrossOfferSpecs(
       env,
       sourceContext,
@@ -646,7 +646,7 @@ const maintainBootstrapCrossQuotes = async (
       if (!route) continue;
       const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);
       if (!targetAccount || String(targetAccount.status || 'active') !== 'active') continue;
-      if (!isAccountConsensusReady(targetAccount)) continue;
+      if (!isAccountWriteLaneIdle(targetAccount)) continue;
       desiredOffersSeen += 1;
       const targetHubEntityId = normalizeEntityRef(route.target.entityId);
       const targetSpecs = specsByTargetHub.get(targetHubEntityId) ?? [];
@@ -748,7 +748,7 @@ const maintainSteadyCrossQuotes = async (
     await yieldMarketMakerApi();
     if (!shouldContinue()) return false;
     const account = getAccountReplica(env, sourceContext.entityId, sourceHubEntityId);
-    if (!account || String(account.status || 'active') !== 'active' || !isAccountConsensusReady(account)) continue;
+    if (!account || String(account.status || 'active') !== 'active' || !isAccountWriteLaneIdle(account)) continue;
     const existingOfferIds = collectOfferIdsForAccount(account);
     const allowedNewOffers = Math.min(
       Math.max(1, Math.floor(maxOffersPerAccount)),
@@ -947,7 +947,7 @@ export const getMarketMakerHealth = (
     const account = getAccountReplica(env, mmEntityId, hubEntityId);
     return {
       hubEntityId,
-      accountReady: isAccountConsensusReady(account),
+      accountReady: isAccountWriteLaneIdle(account),
       status: account ? String(account.status || 'active') : null,
       currentHeight: account ? Number(account.currentHeight ?? 0) : null,
       mempoolLength: Number(account?.mempool?.length || 0),

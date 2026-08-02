@@ -37,8 +37,6 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>, name = 'Tow
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,

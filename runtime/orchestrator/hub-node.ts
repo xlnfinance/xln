@@ -824,10 +824,8 @@ const assertHubJAdapterBinding = (
   }
   const bindings = [
     ['account', replica.contracts?.account, jadapter.addresses.account],
-    ['depository', replica.depositoryAddress, jadapter.addresses.depository],
-    ['depository_contract', replica.contracts?.depository, jadapter.addresses.depository],
-    ['entity_provider', replica.entityProviderAddress, jadapter.addresses.entityProvider],
-    ['entity_provider_contract', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
+    ['depository', replica.contracts?.depository, jadapter.addresses.depository],
+    ['entity_provider', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
     ['delta_transformer', replica.contracts?.deltaTransformer, jadapter.addresses.deltaTransformer],
   ] as const;
   for (const [contract, expected, actual] of bindings) {
@@ -866,9 +864,9 @@ const buildRuntimeJurisdictionsPayload = (env: RuntimeReplica): string | null =>
 
   const account = String(replica.contracts?.account || '').trim();
   const depository =
-    String(replica.depositoryAddress || replica.contracts?.depository || '').trim();
+    String(replica.contracts?.depository || '').trim();
   const entityProvider =
-    String(replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
+    String(replica.contracts?.entityProvider || '').trim();
   const deltaTransformer = String(replica.contracts?.deltaTransformer || '').trim();
   if (!account || !depository || !entityProvider || !deltaTransformer) return null;
 
@@ -1008,16 +1006,10 @@ const getImportedJurisdictionContracts = (
 ): ImportedJurisdictionContracts => {
   const replica = env.state.jReplicas?.get(jurisdictionName);
   const depositoryAddress = String(
-    replica?.depositoryAddress ||
-      replica?.contracts?.depository ||
-      fallback?.depository ||
-      '',
+    replica?.contracts?.depository || fallback?.depository || '',
   ).trim();
   const entityProviderAddress = String(
-    replica?.entityProviderAddress ||
-      replica?.contracts?.entityProvider ||
-      fallback?.entityProvider ||
-      '',
+    replica?.contracts?.entityProvider || fallback?.entityProvider || '',
   ).trim();
   const chainId = Number(replica?.chainId);
   return {

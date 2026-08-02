@@ -71,8 +71,6 @@ const readJReplicaEntries = (value: unknown): Array<[string, JReplica]> =>
     const blockTimeMs = readNumber(replica.blockTimeMs);
     const defaultDisputeDelayBlocks = readNumber(replica.defaultDisputeDelayBlocks);
     const chainId = readNumber(replica.chainId);
-    const depositoryAddress = readString(replica.depositoryAddress);
-    const entityProviderAddress = readString(replica.entityProviderAddress);
     const depositoryContract = readString(contracts['depository']);
     const entityProviderContract = readString(contracts['entityProvider']);
     return [
@@ -92,8 +90,6 @@ const readJReplicaEntries = (value: unknown): Array<[string, JReplica]> =>
         ...(Array.isArray(replica.rpcs) ? { rpcs: replica.rpcs.filter((rpc): rpc is string => typeof rpc === 'string') } : {}),
         ...(chainId !== undefined ? { chainId } : {}),
         position: readPosition(replica.position),
-        ...(depositoryAddress ? { depositoryAddress } : {}),
-        ...(entityProviderAddress ? { entityProviderAddress } : {}),
         ...(Object.keys(contracts).length > 0
           ? {
               contracts: {
@@ -243,8 +239,6 @@ async function main() {
     blockDelayMs: 0,
     lastBlockTimestamp: env.state.timestamp,
     position: { x: 0, y: 0, z: 0 },
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
     chainId: jurisdiction.chainId,
     contracts: {
       depository: jurisdiction.depositoryAddress,

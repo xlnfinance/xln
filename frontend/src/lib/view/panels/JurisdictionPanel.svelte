@@ -863,16 +863,16 @@
             <span class="info-label">Block Delay</span>
             <span class="info-value">{selectedJurisdictionData?.blockDelayMs || 300}ms</span>
           </div>
-          {#if selectedJurisdictionData?.depositoryAddress || selectedJurisdictionData?.contracts?.depository}
+          {#if selectedJurisdictionData?.contracts?.depository}
             <div class="info-row">
               <span class="info-label">Depository</span>
-              <span class="info-value mono">{selectedJurisdictionData.depositoryAddress || selectedJurisdictionData.contracts?.depository}</span>
+              <span class="info-value mono">{selectedJurisdictionData.contracts.depository}</span>
             </div>
           {/if}
-          {#if selectedJurisdictionData?.entityProviderAddress || selectedJurisdictionData?.contracts?.entityProvider}
+          {#if selectedJurisdictionData?.contracts?.entityProvider}
             <div class="info-row">
               <span class="info-label">EntityProvider</span>
-              <span class="info-value mono">{selectedJurisdictionData.entityProviderAddress || selectedJurisdictionData.contracts?.entityProvider}</span>
+              <span class="info-value mono">{selectedJurisdictionData.contracts.entityProvider}</span>
             </div>
           {/if}
           <div class="info-row mempool-section">
@@ -1450,7 +1450,7 @@
     color: #ffd700;
   }
 
-  /* Legacy mempool-section (keep for overview tab inline mempool) */
+  /* Inline mempool section rendered by the overview tab. */
   .info-row.mempool-section {
     flex-direction: column;
     align-items: flex-start;

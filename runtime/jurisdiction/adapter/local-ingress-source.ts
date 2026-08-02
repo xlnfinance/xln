@@ -32,10 +32,10 @@ const requireAddress = (value: unknown, field: string, context: string): string 
 };
 
 const replicaDepository = (replica: JReplica): unknown =>
-  replica.depositoryAddress ?? replica.contracts?.depository;
+  replica.contracts?.depository;
 
 const replicaEntityProvider = (replica: JReplica): unknown =>
-  replica.entityProviderAddress ?? replica.contracts?.entityProvider;
+  replica.contracts?.entityProvider;
 
 /**
  * Binds manual event ingress to an object reference already owned by this RuntimeReplica.

@@ -97,7 +97,5 @@ export const readJurisdictionDeployment = (path: string): ParityDeployment => {
 
 export const toReplicaConnection = (deployment: ParityDeployment): JAdapterReplicaConnection => ({
   contracts: { ...deployment.contracts },
-  depositoryAddress: deployment.contracts.depository,
-  entityProviderAddress: deployment.contracts.entityProvider,
   entityProviderDeploymentBlock: deployment.entityProviderDeploymentBlock,
 });

@@ -38,16 +38,14 @@
     rpcs: selected.rpcs,
     position: selected.position,
     contracts: selected.contracts,
-    depositoryAddress: selected.depositoryAddress,
-    entityProviderAddress: selected.entityProviderAddress,
     reserves: selected.reserves,
     collaterals: selected.collaterals,
   }, 2) : '';
 
   const contractAddresses = (machine: Machine): Array<{ name: string; address: string }> => {
     const entries = [
-      ['Depository', machine.depositoryAddress || machine.contracts?.depository],
-      ['EntityProvider', machine.entityProviderAddress || machine.contracts?.entityProvider],
+      ['Depository', machine.contracts?.depository],
+      ['EntityProvider', machine.contracts?.entityProvider],
       ['Account', machine.contracts?.account],
       ['DeltaTransformer', machine.contracts?.deltaTransformer],
     ] as const;

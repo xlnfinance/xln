@@ -458,7 +458,6 @@ export const enableRouting = async (
   return identity;
 };
 
-export const becomeHub = enableRouting;
 
 const configureManagedEntityP2P = async (
   client: DaemonControlClient,

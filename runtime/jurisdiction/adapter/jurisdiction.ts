@@ -6,8 +6,6 @@ import type { JAdapter, JAdapterConfig, JAdapterReplicaConnection } from './type
 const buildFromReplica = (jurisdiction: JurisdictionConfig): JAdapterReplicaConnection =>
   ({
     ...(jurisdiction.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,

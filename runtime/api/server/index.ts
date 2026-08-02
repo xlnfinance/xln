@@ -1108,8 +1108,6 @@ const registerServerJurisdiction = async (
     ...(registration.blockTimeMs === undefined ? {} : { blockTimeMs: registration.blockTimeMs }),
     lastBlockTimestamp: env.state.timestamp,
     position: { x: 0, y: 50, z: 0 },
-    depositoryAddress: adapter.addresses.depository,
-    entityProviderAddress: adapter.addresses.entityProvider,
     entityProviderDeploymentBlock: adapter.entityProviderDeploymentBlock,
     watcherConfirmationDepth: requireWatcherConfirmationDepth(adapter),
     contracts: adapter.addresses,
@@ -1163,8 +1161,6 @@ const loadPredeployedReplica = async (
     if (!predeployedConfig) throw new Error('PREDEPLOYED_JURISDICTION_CONFIG_MISSING');
     const contracts = predeployedConfig.contracts;
     const fromReplica = {
-      depositoryAddress: String(contracts['depository']),
-      entityProviderAddress: String(contracts['entityProvider']),
       contracts: {
         account: String(contracts['account'] || ''),
         depository: String(contracts['depository']),
@@ -1206,8 +1202,8 @@ const assertPredeployedStackCode = async (
   anvilRpc: string,
   fromReplica: JAdapterConfig['fromReplica'] | undefined,
 ): Promise<void> => {
-  const depositoryAddress = fromReplica?.depositoryAddress;
-  const entityProviderAddress = fromReplica?.entityProviderAddress;
+  const depositoryAddress = fromReplica?.contracts?.depository;
+  const entityProviderAddress = fromReplica?.contracts?.entityProvider;
   if (!depositoryAddress || !entityProviderAddress) return;
 
   serverLog.info('anvil.predeployed.precheck.start');

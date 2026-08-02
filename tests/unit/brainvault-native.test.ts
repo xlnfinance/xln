@@ -161,8 +161,10 @@ const makeOwnerEnv = (): RuntimeReplica => ({
       chainId: 31337,
       blockTimeMs: 1_000,
       rpcs: ['http://localhost:8545'],
-      depositoryAddress: '0x0000000000000000000000000000000000000002',
-      entityProviderAddress: '0x0000000000000000000000000000000000000003',
+      contracts: {
+        depository: '0x0000000000000000000000000000000000000002',
+        entityProvider: '0x0000000000000000000000000000000000000003',
+      },
     }]]),
     eReplicas: new Map(),
   },

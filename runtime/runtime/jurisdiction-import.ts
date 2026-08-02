@@ -184,8 +184,8 @@ const assertReplicaMatchesRequest = (
   }
   const requestedContracts = request.contracts;
   if (!requestedContracts) return;
-  const depository = replica.depositoryAddress ?? replica.contracts?.depository;
-  const entityProvider = replica.entityProviderAddress ?? replica.contracts?.entityProvider;
+  const depository = replica.contracts?.depository;
+  const entityProvider = replica.contracts?.entityProvider;
   const account = replica.contracts?.account;
   const deltaTransformer = replica.contracts?.deltaTransformer;
   const existingContracts = normalizeContracts({
@@ -337,7 +337,7 @@ const assertWatcherIdentityAvailable = (
 ): void => {
   for (const [name, replica] of env.state.jReplicas.entries()) {
     if (Number(replica.chainId) !== result.chainId) continue;
-    const rawDepository = replica.depositoryAddress ?? replica.contracts?.depository;
+    const rawDepository = replica.contracts?.depository;
     if (!rawDepository) continue;
     const depository = normalizeAddress(rawDepository, 'EXISTING_DEPOSITORY');
     if (depository !== result.contracts.depository) continue;
@@ -376,8 +376,6 @@ export const applyCompleteImportJurisdiction = (
       ...(result.blockTimeMs ? { blockTimeMs: result.blockTimeMs } : {}),
       lastBlockTimestamp: env.state.timestamp,
       position: { x: 0, y: 50, z: 0 },
-      depositoryAddress: result.contracts.depository,
-      entityProviderAddress: result.contracts.entityProvider,
       entityProviderDeploymentBlock: result.entityProviderDeploymentBlock,
       contracts: structuredClone(result.contracts),
       rpcs: [...result.rpcs],
@@ -465,8 +463,6 @@ const buildJurisdictionImportAdapterConfig = (
     blockDelayMs: 300,
     lastBlockTimestamp: 0,
     position: { x: 0, y: 50, z: 0 },
-    depositoryAddress: contracts.depository,
-    entityProviderAddress: contracts.entityProvider,
     contracts,
     rpcs: request.rpcs,
     chainId: request.chainId,

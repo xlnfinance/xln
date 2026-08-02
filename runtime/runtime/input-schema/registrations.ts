@@ -46,11 +46,9 @@ export const validateConsensusConfig = (value: unknown, code: string): void => {
 
 export const validateEntityPosition = (value: unknown, code: string): void => {
   const position = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(position, ['x', 'y', 'z'], ['jurisdiction', 'xlnomy'], `${code}_FIELDS`);
+  requireExactBoundaryKeys(position, ['x', 'y', 'z'], ['jurisdiction'], `${code}_FIELDS`);
   for (const axis of ['x', 'y', 'z']) requireFiniteNumber(position[axis], `${code}_${axis.toUpperCase()}`);
-  for (const field of ['jurisdiction', 'xlnomy']) {
-    if (position[field] !== undefined) requireString(position[field], `${code}_${field.toUpperCase()}`);
-  }
+  if (position['jurisdiction'] !== undefined) requireString(position['jurisdiction'], `${code}_JURISDICTION`);
 };
 
 export const validateJurisdictionImportRequest = (value: unknown, code: string): void => {

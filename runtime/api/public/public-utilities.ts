@@ -35,12 +35,11 @@ export {
 export { listOpenSwapOffers } from '../../orderbook/open-swap-offers';
 export {
   BigIntMath,
-  calculatePercentageEthers,
+  calculatePercentage,
   convertTokenPrecision,
   FINANCIAL_CONSTANTS,
-  formatAssetAmountEthers,
+  formatAssetAmount,
   formatTokenAmount,
-  formatTokenAmountEthers,
   parseTokenAmount,
 } from '../../account/financial-utils';
 export { calculateSolvency, verifySolvency } from '../../runtime/solvency';

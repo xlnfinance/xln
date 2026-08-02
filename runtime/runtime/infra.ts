@@ -85,8 +85,8 @@ const assertJAdapterMatchesReplica = async (
 ): Promise<void> => {
   const expectedAddresses = {
     account: String(jReplica.contracts?.account || '').trim().toLowerCase(),
-    depository: String(jReplica.depositoryAddress || jReplica.contracts?.depository || '').trim().toLowerCase(),
-    entityProvider: String(jReplica.entityProviderAddress || jReplica.contracts?.entityProvider || '').trim().toLowerCase(),
+    depository: String(jReplica.contracts?.depository || '').trim().toLowerCase(),
+    entityProvider: String(jReplica.contracts?.entityProvider || '').trim().toLowerCase(),
     deltaTransformer: String(jReplica.contracts?.deltaTransformer || '').trim().toLowerCase(),
   };
   for (const [contractName, expected] of Object.entries(expectedAddresses)) {

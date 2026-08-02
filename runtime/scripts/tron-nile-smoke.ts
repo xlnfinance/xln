@@ -57,8 +57,6 @@ const adapter = await createJAdapter({
   ...(!privateKey ? { watchOnly: true } : {}),
   fromReplica: {
     contracts,
-    depositoryAddress: contracts['depository'],
-    entityProviderAddress: contracts['entityProvider'],
     entityProviderDeploymentBlock: deploymentBlock,
   },
 });

@@ -25,12 +25,11 @@ export const redactTokenBearingUrlForLog = (urlText: string): string => {
   return url.toString();
 };
 
-export const redactRuntimeImportWalletUrl = redactTokenBearingUrlForLog;
 
 export const buildRuntimeImportLogLine = (input: RuntimeImportLogInput): string => {
   if (input.exposeUrl) return input.importUrl;
   const labels = input.manifest.entries.map(entry => sanitizeLogValue(entry.label)).join(',');
-  const walletUrl = redactRuntimeImportWalletUrl(input.importUrl);
+  const walletUrl = redactTokenBearingUrlForLog(input.importUrl);
   return [
     'RUNTIME_IMPORT_READY',
     `count=${input.manifest.entries.length}`,

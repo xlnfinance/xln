@@ -53,7 +53,6 @@ export {
   getCachedSignerPrivateKey,
   registerSignerKey,
   registerSignerPublicKey,
-  registerTestKeys,
   clearSignerKeys,
   signAccountFrame,
   verifyAccountSignature,

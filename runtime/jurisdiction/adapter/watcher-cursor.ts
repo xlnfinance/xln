@@ -61,7 +61,7 @@ export const updateWatcherJurisdictionCursor = (
   if (current >= BigInt(blockNumber)) return;
 
   const depository = String(
-    replica.depositoryAddress || replica.contracts?.depository || '',
+    replica.contracts?.depository || '',
   ).trim().toLowerCase();
   if (!depository) throw new Error('J_WATCHER_DEPOSITORY_MISSING:cursor-update');
   const replicaChainId = watcherChainIdOf(replica);

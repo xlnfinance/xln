@@ -85,8 +85,8 @@ export const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: st
     ? {
         name: replica.name ?? null,
         chainId: replica.chainId ?? null,
-        depositoryAddress: replica.depositoryAddress ?? null,
-        entityProviderAddress: replica.entityProviderAddress ?? null,
+        depositoryAddress: replica.contracts?.depository ?? null,
+        entityProviderAddress: replica.contracts?.entityProvider ?? null,
         contracts: replica.contracts ?? null,
         rpcs: replica.rpcs ?? null,
         hasAdapter: hasConnectedJurisdictionAdapter(env, replica.name),

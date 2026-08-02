@@ -36,11 +36,11 @@ export const buildLocalRuntimeOwner = (input: {
     throw new Error('LOCAL_RUNTIME_OWNER_BLOCK_TIME_INVALID');
   }
   const depositoryAddress = requireAddress(
-    input.jurisdiction.depositoryAddress ?? input.jurisdiction.contracts?.depository,
+    input.jurisdiction.contracts?.depository,
     'LOCAL_RUNTIME_OWNER_DEPOSITORY_INVALID',
   );
   const entityProviderAddress = requireAddress(
-    input.jurisdiction.entityProviderAddress ?? input.jurisdiction.contracts?.entityProvider,
+    input.jurisdiction.contracts?.entityProvider,
     'LOCAL_RUNTIME_OWNER_ENTITY_PROVIDER_INVALID',
   );
   const config: ConsensusConfig = {

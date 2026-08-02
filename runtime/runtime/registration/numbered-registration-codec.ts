@@ -72,11 +72,13 @@ export const assertNumberedRegistrationRequest = (env: RuntimeReplica, request: 
   address(request.payerSignerId, 'PAYER');
   address(request.entityProviderAddress, 'ENTITY_PROVIDER');
   const committedStack = [...env.state.jReplicas.values()].some(replica => {
-    if (!replica.chainId || !replica.depositoryAddress || !replica.entityProviderAddress) return false;
+    const depositoryAddress = replica.contracts?.depository;
+    const entityProviderAddress = replica.contracts?.entityProvider;
+    if (!replica.chainId || !depositoryAddress || !entityProviderAddress) return false;
     return getCertifiedBoardStackKey({
       chainId: replica.chainId,
-      depositoryAddress: replica.depositoryAddress,
-      entityProviderAddress: replica.entityProviderAddress,
+      depositoryAddress,
+      entityProviderAddress,
     }) === request.stackKey;
   });
   if (!committedStack) throw new Error('NUMBERED_REGISTRATION_COMMITTED_STACK_MISSING');

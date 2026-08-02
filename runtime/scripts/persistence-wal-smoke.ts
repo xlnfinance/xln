@@ -69,8 +69,6 @@ async function main() {
     mempool: [],
     blockDelayMs: 0,
     lastBlockTimestamp: 0,
-    depositoryAddress,
-    entityProviderAddress,
     chainId,
     position: { x: 0, y: 0, z: 0 },
     contracts,

@@ -145,8 +145,8 @@ export const computeRegistrationEvidenceClaimHash = (evidence: CertifiedRegistra
 
 const jReplicaStackKey = (replica: JReplica): string | null => {
   const chainId = replica.chainId;
-  const depositoryAddress = replica.depositoryAddress ?? replica.contracts?.depository;
-  const entityProviderAddress = replica.entityProviderAddress ?? replica.contracts?.entityProvider;
+  const depositoryAddress = replica.contracts?.depository;
+  const entityProviderAddress = replica.contracts?.entityProvider;
   if (!chainId || !depositoryAddress || !entityProviderAddress) return null;
   return getCertifiedBoardStackKey({ chainId, depositoryAddress, entityProviderAddress });
 };
@@ -220,7 +220,7 @@ const assertExactLocalStack = (env: RuntimeReplica, evidence: CertifiedRegistrat
     throw new Error(`J_AUTHORITY_STACK_LOCAL_MATCH_INVALID:${evidence.stackKey}:${matches.length}`);
   }
   const replica = matches[0]!;
-  const entityProvider = replica.entityProviderAddress ?? replica.contracts?.entityProvider;
+  const entityProvider = replica.contracts?.entityProvider;
   if (address(entityProvider, 'LOCAL_ENTITY_PROVIDER') !== evidence.emitter) {
     throw new Error(`J_AUTHORITY_EMITTER_STACK_MISMATCH:${evidence.emitter}:${String(entityProvider)}`);
   }

@@ -71,7 +71,7 @@ import {
   hasQueuedExtendCredit,
   hasQueuedOpenAccount,
   HUB_REQUIRED_TOKEN_COUNT,
-  isAccountConsensusReady,
+  isAccountWriteLaneIdle,
   isCanonicalAccountOpener,
   settleRuntimeFor,
   sleep,
@@ -737,10 +737,8 @@ const assertMarketMakerJAdapterBinding = (
   }
   const bindings = [
     ['account', replica.contracts?.account, jadapter.addresses.account],
-    ['depository', replica.depositoryAddress, jadapter.addresses.depository],
-    ['depository_contract', replica.contracts?.depository, jadapter.addresses.depository],
-    ['entity_provider', replica.entityProviderAddress, jadapter.addresses.entityProvider],
-    ['entity_provider_contract', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
+    ['depository', replica.contracts?.depository, jadapter.addresses.depository],
+    ['entity_provider', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
     ['delta_transformer', replica.contracts?.deltaTransformer, jadapter.addresses.deltaTransformer],
   ] as const;
   for (const [contract, expected, actual] of bindings) {
@@ -1781,7 +1779,7 @@ export const maintainMarketMakerQuotes = async (
     const account = getAccountReplica(env, mmEntityId, hubEntityId);
     if (!account) continue;
     if (String(account.status || 'active') !== 'active') continue;
-    if (!isAccountConsensusReady(account)) continue;
+    if (!isAccountWriteLaneIdle(account)) continue;
 
     const existingOfferIds = collectOfferIdsForAccount(account);
     for (const offerId of collectQueuedSwapOfferIds(env, mmEntityId, hubEntityId)) {

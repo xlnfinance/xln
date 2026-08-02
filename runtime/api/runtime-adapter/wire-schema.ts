@@ -191,12 +191,11 @@ const validateNumberedRegistrationInput = (value: unknown): void => {
     });
     if (entity['position'] !== undefined) {
       const position = requireBoundaryRecord(entity['position'], code);
-      requireExactBoundaryKeys(position, ['x', 'y', 'z'], ['jurisdiction', 'xlnomy'], code);
+      requireExactBoundaryKeys(position, ['x', 'y', 'z'], ['jurisdiction'], code);
       for (const axis of ['x', 'y', 'z'] as const) {
         if (typeof position[axis] !== 'number' || !Number.isFinite(position[axis])) throw new Error(code);
       }
       if (position['jurisdiction'] !== undefined) requireBoundedSecretString(position['jurisdiction'], 256, code);
-      if (position['xlnomy'] !== undefined) requireBoundedSecretString(position['xlnomy'], 256, code);
     }
   });
 };

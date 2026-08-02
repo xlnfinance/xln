@@ -36,7 +36,7 @@ export type RuntimeHistoryTraceCollector = {
  * Explicit test/scenario trace. Production RuntimeReplica history stays bounded; callers
  * that need a complete determinism oracle own this separate lifetime instead.
  *
- * Also the recording primitive behind browser demos — see `startRuntimeFrameTrace`, which
+ * Also the recording primitive behind browser demos, which
  * is the same collector named for that second, non-test caller.
  */
 export const startRuntimeHistoryTraceForTesting = (env: RuntimeReplica): RuntimeHistoryTraceCollector => {
@@ -67,5 +67,4 @@ export const recordRuntimeHistoryTraceForTesting = (
  * browser demo recorder. Runtime memory stays bounded either way — the collector owns the
  * frames and `stop()` releases them.
  */
-export const startRuntimeFrameTrace = startRuntimeHistoryTraceForTesting;
 export type RuntimeFrameTrace = RuntimeHistoryTraceCollector;

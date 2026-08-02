@@ -689,7 +689,7 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
         name,
         blockNumber: String(replica.blockNumber ?? ''),
         chainId: Number(replica.chainId ?? 0),
-        depositoryAddress: replica.depositoryAddress ?? null,
+        depositoryAddress: replica.contracts?.depository ?? null,
       })),
       replicas,
     };

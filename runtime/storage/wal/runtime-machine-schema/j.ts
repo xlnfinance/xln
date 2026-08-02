@@ -172,8 +172,7 @@ function assertJReplica(
     'lastBlockTimestamp', 'position',
   ], [
     'blockTimeMs', 'blockReady', 'defaultDisputeDelayBlocks', 'watcherConfirmationDepth',
-    'rpcs', 'chainId', 'depositoryAddress', 'entityProviderAddress',
-    'entityProviderDeploymentBlock', 'contracts',
+    'rpcs', 'chainId', 'entityProviderDeploymentBlock', 'contracts',
   ], `${code}_FIELDS`);
   const name = requireString(replica['name'], `${code}_NAME`);
   if (name !== expectedName) throw new Error(`${code}_NAME_KEY_MISMATCH`);
@@ -202,11 +201,6 @@ function assertJReplica(
   ] as const) {
     if (replica[field] !== undefined) {
       requireBoundaryInteger(replica[field], `${code}_${field.toUpperCase()}`);
-    }
-  }
-  for (const field of ['depositoryAddress', 'entityProviderAddress'] as const) {
-    if (replica[field] !== undefined) {
-      requireString(replica[field], `${code}_${field.toUpperCase()}`);
     }
   }
   if (replica['rpcs'] !== undefined) requireStringArray(replica['rpcs'], `${code}_RPCS`);
