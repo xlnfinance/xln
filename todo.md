@@ -8,32 +8,48 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 0. Current release handoff — 2026-08-02
 
-- Candidate branch: `ai/public-release-hardening`; last fully committed SHA
-  before final test-only cleanup: `2e96033e0`. Known P0: 0. Fixed in this
-  cycle: Cross-J durable dual authorization, Account storage admission,
-  transport replay/channel binding, watchtower owner pin, current-board-only
-  fresh C2R/settlement, FIFO one-per-broadcast dispute finalization,
-  jurisdiction deployment-origin proof, legacy path removal, and generated
-  contract-artifact drift enforcement.
-- Evidence already green: Solidity 148/148; targeted Runtime/Entity/Account/
-  Cross-J/network/storage/watchtower 194/194 (2,102 assertions); BrainVault
-  26/26 (100,156 assertions); frozen core unchanged. The combined `bun run
-  check` reached the final frontend build; preserve its final output as the
-  immutable-candidate gate.
-- Before merge: update the pruned-history import regression to expect a loud
-  archive-RPC rejection, retain the exact Cross-J validation error regression,
-  decide the one remaining contract policy below, rerun affected L1 plus one
-  final `bun run check`, obtain independent 0/0 P0/P1 verdicts on the resulting
-  SHA, then fast-forward `main` without overwriting its matching dependency WIP.
-- Owner decision made (2026-08-02): keep the seven-day previous-board grace on
-  dispute start. Requiring the current board would revoke the retired-quorum
-  attack, but it also lets any entity repudiate every obligation it ever signed
-  by rotating its board - for a hub, that is its whole user base at once, free
-  and unilateral. That attack is broader and cheaper than the one it prevents,
-  and seven days is a well-understood revocation horizon. The trade-off, its
-  exact damage bound (reserves then debt via Depository._settleShortfall) and
-  the counterparty's remedy are recorded in Account.sol at the dispute-start
-  verifier; do not re-open without replacing the repudiation defence.
+- Candidate branch: `ai/pre-mainnet-canonical-hardening`. Known P0: 0.
+- Closed this cycle: fail-open swap-offer admission and resolve validation
+  (committed price and quantized amounts are now required and rejected loudly
+  rather than reconstructed from the claim); cooperative settlement and C2R
+  seals bound to the current board, matching the jurisdiction; cross-j dust
+  fills now request the clear on both layers; `replica.contracts` made the only
+  persisted jurisdiction stack, with old records loudly rejected at the WAL
+  boundary; pre-mainnet legacy surface deleted.
+- Gates added to `check:src`: `check:no-legacy`, `check:no-vacuous-validation`
+  (the two shapes that make a check against committed state unable to fail),
+  `check:dead-code` (knip, enforcing zero unused files/dependencies/undeclared
+  imports/duplicate exports), and `check:contract-invariants` — the Foundry
+  conservation suite existed but no script ran it, so `forge` appeared nowhere
+  in `package.json`.
+- Evidence green: `bun run check` EXIT 0; Solidity invariants 15/15; frontend
+  0 errors; runtime unit suite shows no regression against the pre-change
+  baseline; frozen core unchanged.
+- Owner decision recorded below: the seven-day previous-board grace stays.
+
+### Open before release
+
+- [ ] The local E2E bar is not green, and was already red on a clean `main`
+  before this cycle. Two blockers were removed - `lsof` exits 1 whenever any
+  lane port is free, which made `LOCAL_TEST_PORT_SCAN_FAILED` unconditional on
+  a partially occupied machine; and mesh bootstrap waited forever for a direct
+  hub-to-hub link while the baseline gate it feeds treats direct links as
+  optional. A third is fixed: adjacent same-Entity inputs sharing one cross-j
+  `pairKey` were paired without the distinctness check the router applies,
+  failing the Runtime frame with `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION`.
+  The mesh now forms and the market maker reaches ready, but full bootstrap
+  still exceeds its readiness budget. Owner requirement: all tests green.
+- [ ] `runtime/runtime/solvency.ts` computes `reserves - collateral == 0`,
+  which is not the conservation law the jurisdiction enforces
+  (`invariant_valueConservation`: reserves + collateral equals minted plus
+  external backing). It cannot see minted supply or backing, so it reports a
+  healthy stack as insolvent. It gates nothing today; decide whether to source
+  the on-chain totals or drop the verdict.
+- [ ] knip reports ~337 unused exports and ~264 unused exported types, only two
+  of them on the public API surface. Deliberately outside the gate: most are
+  exported solely for tests, and deleting them blind removes coverage rather
+  than complexity. Separate test-only exports from genuinely unreachable ones
+  before removing anything; `check:dead-code:report` lists them.
 
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 

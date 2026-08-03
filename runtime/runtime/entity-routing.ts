@@ -53,7 +53,7 @@ export type RuntimeInboundEntityInputValidation =
   | { kind: 'accepted' }
   | { kind: 'ignored' };
 
-const normalizeEntityKey = (value: string): string => String(value || '').toLowerCase();
+export const normalizeEntityKey = (value: string): string => String(value || '').toLowerCase();
 const RUNTIME_HINT_TTL_MS = 60_000;
 
 type CrossJAdmissionCandidate = {
