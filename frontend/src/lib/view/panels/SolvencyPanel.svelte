@@ -50,8 +50,12 @@
               <div class="metric-value pending">{formatRawAmount(asset.pendingCollateral)}</div>
             </div>
           </div>
-          {#if !asset.isValid}
+          {#if asset.isValid === false && asset.delta !== null}
             <div class="delta-warning">Raw-unit delta: {formatRawAmount(asset.delta)}</div>
+          {:else if asset.isValid === null}
+            <div class="delta-unchecked">
+              Not verified: needs the Depository total for this token
+            </div>
           {/if}
         </section>
       {/each}
@@ -67,6 +71,7 @@
 </div>
 
 <style>
+  .delta-unchecked { color: var(--text-tertiary, #888); font-size: 0.85em; }
   .solvency-panel { padding: var(--space-4); height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-4); }
   .hero-status { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--glass-highlight); border-radius: var(--radius-md); border: 1px solid rgba(255, 69, 58, 0.4); }
   .hero-status.valid { border-color: rgba(48, 209, 88, 0.3); }

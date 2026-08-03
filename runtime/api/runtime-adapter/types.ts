@@ -137,10 +137,15 @@ export type RuntimeAdapterSolvencySummary = {
     reserves: bigint;
     confirmedCollateral: bigint;
     pendingCollateral: bigint;
-    delta: bigint;
-    isValid: boolean;
+    /** reserves + collateral: the side of the conservation law a Runtime owns. */
+    internalValue: bigint;
+    /** Authoritative Depository total, when the caller supplied one. */
+    expectedInternalValue: bigint | null;
+    delta: bigint | null;
+    /** null means not checked - never "checked and fine". */
+    isValid: boolean | null;
   }>;
-  isValid: boolean;
+  isValid: boolean | null;
 };
 
 export type RuntimeAdapterTimelineFrame = {

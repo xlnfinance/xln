@@ -481,11 +481,16 @@ test('runtime adapter solvency-summary returns per-stack asset conservation', as
         reserves: 100n,
         confirmedCollateral: 100n,
         pendingCollateral: 50n,
-        delta: 0n,
-        isValid: true,
+        // reserves + collateral is what a Runtime owns; the Depository total it
+        // must equal is not knowable from an off-chain read, so this endpoint
+        // reports the quantity and withholds a verdict rather than inventing one.
+        internalValue: 200n,
+        expectedInternalValue: null,
+        delta: null,
+        isValid: null,
       },
     ],
-    isValid: true,
+    isValid: null,
   });
   expect(summary).not.toHaveProperty('eReplicas');
   expect(summary).not.toHaveProperty('accounts');
