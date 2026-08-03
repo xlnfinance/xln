@@ -93,7 +93,6 @@ test('account input without frame or settlement action fails fast', async () => 
     runtimeId: env.runtimeId,
     entityId,
     counterpartyId,
-    timestamp: env.state.timestamp,
   });
   const previousScopes = process.env['XLN_LOG_SCOPES'];
   process.env['XLN_LOG_SCOPES'] = 'none';

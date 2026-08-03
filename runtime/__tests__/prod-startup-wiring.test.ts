@@ -2325,7 +2325,10 @@ describe('production startup wiring', () => {
     expect(ensureConnectivity).toContain(
       'const deriveMarketMakerAccountWatchSeed = (counterpartyId: string): string =>',
     );
-    expect(ensureConnectivity).toContain('timestamp: 0,');
+    // The seed used to assert a literal `timestamp: 0` here, standing in for
+    // "derived deterministically, never from wall-clock". deriveAccountWatchSeed
+    // no longer accepts a timestamp at all, so the type enforces it.
+    expect(ensureConnectivity).toContain('counterpartyId,');
     expect(ensureConnectivity).toContain(
       'const [openTokenId = 1, ...extraCreditTokenIds] = normalizePositiveTokenIds(tokenIds);',
     );

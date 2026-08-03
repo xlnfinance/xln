@@ -47,6 +47,11 @@ const FORBIDDEN = [
   // An optional field justified by the age of the data it reads is a
   // compatibility reader wearing a comment.
   /older (?:data|scenario|record|run|client)/i,
+  // "Kept for caller compatibility" hid a required parameter that the function
+  // deliberately never used, so the signature lied about what the value binds.
+  // Anything kept *for* compatibility is kept for no live reason.
+  /(?:kept|retained|preserved) for [a-z ]*compat/i,
+  /for (?:caller|callsite|call-site|consumer|client) compat/i,
 ] as const;
 
 const ALLOWLIST: readonly Allowance[] = [

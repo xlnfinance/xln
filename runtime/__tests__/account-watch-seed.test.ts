@@ -6,20 +6,21 @@ const ENTITY_B = `0x${'22'.repeat(32)}`;
 const ENTITY_C = `0x${'33'.repeat(32)}`;
 
 describe('account watch seed derivation', () => {
-  test('is stable across retry and recovery timestamps for the same runtime pair', () => {
+  // The type now carries this: with no time-varying input in the signature, a
+  // re-derivation after retry, restart or recovery cannot differ. The test
+  // remains as the executable statement of why that matters.
+  test('is reproducible from identity alone, so recovery re-derives the same seed', () => {
     const first = deriveAccountWatchSeed({
       runtimeSeed: 'runtime-seed-a',
       runtimeId: '0xruntime',
       entityId: ENTITY_A,
       counterpartyId: ENTITY_B,
-      timestamp: 1,
     });
     const retriedAfterRestore = deriveAccountWatchSeed({
       runtimeSeed: 'runtime-seed-a',
       runtimeId: '0xruntime',
       entityId: ENTITY_A,
       counterpartyId: ENTITY_B,
-      timestamp: 999_999,
     });
 
     expect(retriedAfterRestore).toBe(first);
@@ -31,7 +32,6 @@ describe('account watch seed derivation', () => {
       runtimeId: '0xruntime-a',
       entityId: ENTITY_A,
       counterpartyId: ENTITY_B,
-      timestamp: 0,
     });
 
     expect(deriveAccountWatchSeed({
@@ -39,21 +39,18 @@ describe('account watch seed derivation', () => {
       runtimeId: '0xruntime-a',
       entityId: ENTITY_A,
       counterpartyId: ENTITY_B,
-      timestamp: 0,
     })).not.toBe(base);
     expect(deriveAccountWatchSeed({
       runtimeSeed: 'runtime-seed-a',
       runtimeId: '0xruntime-b',
       entityId: ENTITY_A,
       counterpartyId: ENTITY_B,
-      timestamp: 0,
     })).not.toBe(base);
     expect(deriveAccountWatchSeed({
       runtimeSeed: 'runtime-seed-a',
       runtimeId: '0xruntime-a',
       entityId: ENTITY_A,
       counterpartyId: ENTITY_C,
-      timestamp: 0,
     })).not.toBe(base);
   });
 });

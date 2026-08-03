@@ -431,7 +431,6 @@ const paymentAccount = (sourceEntityId: string, targetEntityId: string): Account
         runtimeSeed: 'multisig-htlc-process-account',
         entityId: sourceEntityId,
         counterpartyId: targetEntityId,
-        timestamp: 900,
       }),
       disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
       jNonce: 0,

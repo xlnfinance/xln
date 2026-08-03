@@ -647,7 +647,6 @@ async function main() {
           runtimeId,
           entityId: hub.entityId,
           counterpartyId: user.entityId,
-          timestamp: env.state.timestamp,
         }),
       );
     }

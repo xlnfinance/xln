@@ -1632,7 +1632,6 @@ export const ensureMarketMakerHubConnectivity = async (
       runtimeId: env.runtimeId ?? null,
       entityId: mmEntityId,
       counterpartyId,
-      timestamp: 0,
     });
   const pushLocalConnectivityTx = (
     entityId: string,

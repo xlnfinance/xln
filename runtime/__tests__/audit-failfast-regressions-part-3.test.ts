@@ -358,7 +358,6 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
         runtimeSeed: 'audit-failfast-test-helper',
         entityId: leftEntity,
         counterpartyId: rightEntity,
-        timestamp: 0,
       }),
       deltas: new Map(),
       locks: new Map(),
