@@ -1,4 +1,8 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
+import {
+  createRuntimeCommandLifecycle,
+  transitionRuntimeCommandLifecycle,
+} from '../../../packages/runtime-client/runtime-command-transitions';
 import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteExternalStore';
 import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
@@ -165,14 +169,34 @@ export const submitRuntimeCommand = async <T>(
 ): Promise<{ receipt: CommandReceipt; result: T }> => {
   const durableRemoteIntent = options.mode === 'remote' && options.remoteJournalMode !== 'one-shot';
   let receipt = await createRuntimeCommandReceipt(options);
+  let lifecycle = createRuntimeCommandLifecycle({
+    commandId: receipt.commandId,
+    durable: durableRemoteIntent,
+  });
+  if (durableRemoteIntent) {
+    lifecycle = transitionRuntimeCommandLifecycle(lifecycle, {
+      type: 'journaled',
+      commandId: receipt.commandId,
+    });
+  }
   options.beforeExecute?.();
+  lifecycle = transitionRuntimeCommandLifecycle(lifecycle, {
+    type: 'submitted',
+    commandId: receipt.commandId,
+  });
   publishReceipt(receipt);
 
   const progress: RuntimeCommandProgress = {
     accepted: async (height, upstream) => {
+      const acceptedAtHeight = normalizeHeight(height);
+      lifecycle = transitionRuntimeCommandLifecycle(lifecycle, {
+        type: 'acknowledged',
+        commandId: receipt.commandId,
+        height: acceptedAtHeight,
+      });
       receipt = updateReceipt(receipt, {
         status: 'accepted',
-        acceptedAtHeight: normalizeHeight(height) ?? receipt.acceptedAtHeight,
+        acceptedAtHeight: acceptedAtHeight ?? receipt.acceptedAtHeight,
         upstreamReceiptId: upstream?.receiptId ?? receipt.upstreamReceiptId,
         statusUrl: upstream?.statusUrl ?? receipt.statusUrl,
       });
@@ -182,17 +206,29 @@ export const submitRuntimeCommand = async <T>(
     },
     committed: async (height) => {
       if (receipt.mode === 'remote') return;
+      const committedAtHeight = normalizeHeight(height);
+      lifecycle = transitionRuntimeCommandLifecycle(lifecycle, {
+        type: 'committed',
+        commandId: receipt.commandId,
+        height: committedAtHeight,
+      });
       receipt = updateReceipt(receipt, {
         status: 'committed',
-        acceptedAtHeight: receipt.acceptedAtHeight ?? normalizeHeight(height),
-        committedAtHeight: normalizeHeight(height) ?? receipt.committedAtHeight ?? receipt.acceptedAtHeight,
+        acceptedAtHeight: receipt.acceptedAtHeight ?? committedAtHeight,
+        committedAtHeight: committedAtHeight ?? receipt.committedAtHeight ?? receipt.acceptedAtHeight,
       });
     },
     observed: async (height) => {
+      const committedAtHeight = normalizeHeight(height);
+      lifecycle = transitionRuntimeCommandLifecycle(lifecycle, {
+        type: 'committed',
+        commandId: receipt.commandId,
+        height: committedAtHeight,
+      });
       receipt = updateReceipt(receipt, {
         status: receipt.mode === 'remote' ? 'observed' : 'committed',
-        acceptedAtHeight: receipt.acceptedAtHeight ?? normalizeHeight(height),
-        committedAtHeight: normalizeHeight(height) ?? receipt.committedAtHeight ?? receipt.acceptedAtHeight,
+        acceptedAtHeight: receipt.acceptedAtHeight ?? committedAtHeight,
+        committedAtHeight: committedAtHeight ?? receipt.committedAtHeight ?? receipt.acceptedAtHeight,
       });
     },
   };
@@ -205,6 +241,11 @@ export const submitRuntimeCommand = async <T>(
     return { receipt, result };
   } catch (error) {
     const failure = classifyRuntimeFailure(error);
+    lifecycle = transitionRuntimeCommandLifecycle(lifecycle, {
+      type: 'failed',
+      commandId: receipt.commandId,
+      retryable: options.remoteJournalMode === 'one-shot' ? false : failure.retryable,
+    });
     receipt = updateReceipt(receipt, {
       status: 'error',
       error: failure.message,

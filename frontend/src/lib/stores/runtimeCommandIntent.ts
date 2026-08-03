@@ -4,6 +4,7 @@ import {
   MAX_STATUS_URL_BYTES,
   MAX_UNRESOLVED_REMOTE_INTENTS,
   canonicalRuntimeInput,
+  createRemoteRuntimeCommandIntent,
   createRuntimeCommandId,
   normalizeBoundedText,
   normalizeRuntimeCommandId,
@@ -24,12 +25,21 @@ import {
 } from './runtimeCommandJournalStorage';
 
 export type RuntimeCommandIntentOptions = { commandId?: string; commandSequence?: number };
+export type RuntimeCommandIntentEnvironment = Readonly<{
+  now: () => number;
+  createCommandId: () => string;
+}>;
 export type { RemoteRuntimeCommandIntent, RemoteRuntimeCommandIntentStatus } from './runtimeCommandIntentCodec';
 export { createRuntimeCommandId, normalizeRuntimeCommandId } from './runtimeCommandIntentCodec';
 
 const JOURNAL_MUTATION_LOCK = 'xln-runtime-command-journal-mutation-v1';
 let memoryIntents = new Map<string, RemoteRuntimeCommandIntent>();
 let journalMutationTail: Promise<void> = Promise.resolve();
+
+const browserRuntimeCommandIntentEnvironment: RuntimeCommandIntentEnvironment = Object.freeze({
+  now: () => Date.now(),
+  createCommandId: createRuntimeCommandId,
+});
 
 const cloneIntent = (intent: RemoteRuntimeCommandIntent): RemoteRuntimeCommandIntent => structuredClone(intent);
 
@@ -95,7 +105,7 @@ export const resolveRemoteRuntimeCommandIntent = async (options: {
   commandId?: string;
   commandSequence?: number;
   nextCommandSequence?: number | null;
-}): Promise<RemoteRuntimeCommandIntent> => serializeJournalMutation(async () => {
+}, environment: RuntimeCommandIntentEnvironment = browserRuntimeCommandIntentEnvironment): Promise<RemoteRuntimeCommandIntent> => serializeJournalMutation(async () => {
   const runtimeId = normalizeRuntimeId(options.runtimeId);
   const serverFingerprint = normalizeRuntimeServerFingerprint(options.serverFingerprint);
   const canonical = canonicalRuntimeInput(options.input);
@@ -137,10 +147,14 @@ export const resolveRemoteRuntimeCommandIntent = async (options: {
     serverNext,
     ...unresolved.map(candidate => normalizeRuntimeCommandSequence(candidate.commandSequence) + 1),
   );
-  const intent: RemoteRuntimeCommandIntent = {
-    commandId: createRuntimeCommandId(), commandSequence, runtimeId, serverFingerprint, inputHash: canonical.hash,
-    input: canonical.input, status: 'pending', createdAt: Date.now(), upstreamReceiptId: null, statusUrl: null,
-  };
+  const intent = createRemoteRuntimeCommandIntent({
+    commandId: environment.createCommandId(),
+    commandSequence,
+    runtimeId,
+    serverFingerprint,
+    input: canonical.input,
+    createdAt: environment.now(),
+  });
   if (!isBrowserCommandJournal()) memoryIntents.set(intent.commandId, cloneIntent(intent));
   else {
     try {

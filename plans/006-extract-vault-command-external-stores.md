@@ -138,13 +138,22 @@ Run once on the unchanged checkpoint candidate.
 
 ## Done criteria
 
-- [ ] Vault, recovery, command, and journal state have one framework-neutral canonical implementation.
-- [ ] Persistence identifiers/formats and command ordering semantics are unchanged and executable as tests.
-- [ ] Reload/crash/duplicate-submission cases are proven with real integration paths.
-- [ ] React and Svelte adapters are side-effect-free interface translations over the same instances.
-- [ ] No secret leakage, swallowed error, financial formula, runtime protocol, or frozen-core change exists.
-- [ ] `bun run check` passes; checkpoint only with `wip:`.
-- [ ] `git status --short` is reviewed and the Plan 006 index row is updated.
+- [x] Vault, recovery, command, and journal state have one framework-neutral canonical implementation.
+- [x] Persistence identifiers/formats and command ordering semantics are unchanged and executable as tests.
+- [x] Reload/crash/duplicate-submission cases are proven with real integration paths.
+- [x] React and Svelte adapters are side-effect-free interface translations over the same instances.
+- [x] No secret leakage, swallowed error, financial formula, runtime protocol, or frozen-core change exists.
+- [x] `bun run check` passes; checkpoint only with `wip:`.
+- [x] `git status --short` is reviewed and the Plan 006 index row is updated.
+
+## Execution evidence
+
+- L1: 13 tests / 46 assertions pass for exact vault persistence, immutable lock/unlock, command transitions, real AES-GCM journal round-trip/tamper rejection, and framework/secret boundaries.
+- Compatibility: 88 existing vault, command-bus, persistence, and runtime hot-swap tests pass with 2,902 assertions; combined Plan 006 evidence is 101 tests / 2,948 assertions.
+- Ownership: `vaultStore.ts` has one external-store binding, a readonly Svelte facade, and the existing React `useSyncExternalStore` adapter; lifecycle reducers contain no framework, clock, randomness, storage, or network access.
+- Focused browser: the isolated create → lock → unlock → reload scenario passes its real Playwright assertions in 6.4 seconds and attaches only a sanitized vault snapshot.
+- Strict browser note: the required default recovery and payment commands both stop before Vite/Playwright because the unrelated H1/H2/H3 mesh reset remains at height 0 (`HUB_BASELINE_STALLED`). The focused `--prewait-health=http` run reaches and passes Playwright, but the aggregate health wrapper reports the expected no-mesh faucet 404 plus relay audience warnings; no vault assertion fails.
+- L3: `bun run check` passes with frozen core unchanged, the 3,000-line file invariant restored, 0 Svelte diagnostics, React TypeScript clean, and legacy/site/docs production builds green.
 
 ## Stop conditions
 

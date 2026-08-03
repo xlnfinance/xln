@@ -11,7 +11,6 @@ import type {
   XLNModule,
 } from '@xln/runtime/api/public/runtime-module';
 import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath } from 'ethers';
-import { get } from 'svelte/store';
 import {
   redactVaultRuntimeForPersistence,
   type ProtectedVaultSecrets,

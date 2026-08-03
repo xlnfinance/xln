@@ -824,7 +824,7 @@ test('local runtime creation marks the target before bootstrap and switches cont
   const createSource = source.slice(createStart, deleteStart);
   const earlyPendingSelect = createSource.indexOf('runtimeOperations.setActiveRuntimeId(runtimeId)');
   const firstRuntimeInput = createSource.indexOf('await enqueueAndAwait(');
-  const persistedState = createSource.indexOf('runtimesState.update(state => ({');
+  const persistedState = createSource.indexOf('runtimesStateBinding.controller.update(state => ({');
   const controllerSelect = createSource.indexOf('await runtimeOperations.selectRuntime(runtimeId)');
   expect(earlyPendingSelect).toBeGreaterThan(0);
   expect(firstRuntimeInput).toBeGreaterThan(earlyPendingSelect);

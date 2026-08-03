@@ -69,6 +69,32 @@ export const createRuntimeCommandId = (): string => {
   return normalizeRuntimeCommandId(`runtime-command:${globalThis.crypto.randomUUID()}`);
 };
 
+export const createRemoteRuntimeCommandIntent = (options: {
+  commandId: string;
+  commandSequence: number;
+  runtimeId: string;
+  serverFingerprint: string;
+  input: RuntimeInput;
+  createdAt: number;
+}): RemoteRuntimeCommandIntent => {
+  if (!Number.isSafeInteger(options.createdAt) || options.createdAt < 0) {
+    throw new Error(`RUNTIME_COMMAND_INTENT_CREATED_AT_INVALID:${String(options.createdAt)}`);
+  }
+  const canonical = canonicalRuntimeInput(options.input);
+  return Object.freeze({
+    commandId: normalizeRuntimeCommandId(options.commandId),
+    commandSequence: normalizeRuntimeCommandSequence(options.commandSequence),
+    runtimeId: normalizeRuntimeId(options.runtimeId),
+    serverFingerprint: normalizeRuntimeServerFingerprint(options.serverFingerprint),
+    inputHash: canonical.hash,
+    input: canonical.input,
+    status: 'pending',
+    createdAt: options.createdAt,
+    upstreamReceiptId: null,
+    statusUrl: null,
+  });
+};
+
 export const canonicalRuntimeInput = (
   input: RuntimeInput,
 ): { encoded: string; input: RuntimeInput; hash: string } => {

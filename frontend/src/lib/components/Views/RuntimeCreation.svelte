@@ -14,8 +14,8 @@
     DEFAULT_VAULT_UNLOCK_DURATION_MS,
     type RuntimeRecoveryCandidate,
     type RuntimeRecoveryDiscoveryFailure,
+    type VaultUnlockDurationMs,
   } from '$lib/stores/vaultStore';
-  import type { VaultUnlockDurationMs } from '$lib/security/vaultProtection';
   import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { writeRuntimeRecoveryDiscoveryStatus } from '$lib/utils/recoveryDiscoveryStatus';

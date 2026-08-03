@@ -380,8 +380,8 @@ test('remote command journal persists protected replayable intents outside local
 
   expect(journalSource).not.toContain('localStorage');
   expect(indexedDbSource).toContain('indexedDB');
-  expect(indexedDbSource).toContain('const DB_VERSION = 2');
-  expect(indexedDbSource).toContain("const LEGACY_META_STORE = 'meta'");
+  expect(indexedDbSource).toContain('const DB_VERSION = RUNTIME_COMMAND_JOURNAL_DATABASE.version');
+  expect(indexedDbSource).toContain('const [LEGACY_META_STORE] = RUNTIME_COMMAND_JOURNAL_DATABASE.retiredStores');
   expect(indexedDbSource).toContain('db.deleteObjectStore(LEGACY_META_STORE)');
   expect(storageSource).toContain('AES-GCM');
   expect(storageSource).toContain('safeParse');
@@ -720,7 +720,7 @@ test('credit and collateral configure forms submit RuntimeInput through shared c
   expect(accountWorkspaceSource).toContain('{submitRuntimeInput}');
   expect(collateralSource).toContain('resolveProjectedCounterpartyPolicy');
   expect(collateralSource).toContain('rebalanceFeePolicies');
-  expect(resolverSource).toContain('compact.rebalanceFeePolicies = doc.rebalanceFeePolicies');
+  expect(resolverSource).toContain('compact.state.rebalanceFeePolicies = doc.state.rebalanceFeePolicies');
 });
 
 test('payment panel submits RuntimeInput through shared command path', () => {

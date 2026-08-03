@@ -1,4 +1,15 @@
-import { derived, get, writable } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import {
+  lockVaultRuntime,
+  protectVaultRuntime,
+  replaceVaultRuntime,
+  unlockVaultRuntime,
+} from '../../../packages/runtime-client/vault-lifecycle';
+import {
+  deriveSvelteStore as derived,
+  getSvelteStoreValue as get,
+  toSvelteReadable,
+} from './adapters/svelteExternalStore';
 
 import { Wallet } from 'ethers';
 
@@ -60,9 +71,7 @@ import { VAULT_STORAGE_KEY } from '../contracts/browserPersistence';
 
 import {
   deleteVaultDeviceKey,
-  protectVaultSecrets,
   sameVaultProtectionLease,
-  unprotectVaultSecrets,
   type ProtectedVaultSecrets,
   type VaultUnlockDurationMs,
 } from '../security/vaultProtection';
@@ -153,6 +162,11 @@ import {
   runtimeInputWorkSummary,
   runtimeQuiesceWorkSummary,
 } from './vault-lifecycle-helpers';
+import {
+  createVaultLockScheduler,
+  protectRuntimeForDevice,
+  restoreRuntimeFromDevice,
+} from './vaultLifecycleController';
 export { buildDelayedLastResortAppointmentsForTower } from './vault-watchtower';
 
 export type {
@@ -172,6 +186,8 @@ export type {
   RuntimesState,
   Signer,
 } from './vault-recovery';
+
+export type { VaultUnlockDurationMs } from '../security/vaultProtection';
 
 export {
   buildRuntimeRecoveryConfigForMode,
@@ -229,16 +245,25 @@ export async function restoreRuntimeEnvFromRecoveryCandidate(
 
 export const DEFAULT_VAULT_UNLOCK_DURATION_MS: VaultUnlockDurationMs = 600_000;
 
-const vaultLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const vaultLockScheduler = createVaultLockScheduler({
+  now: () => Date.now(),
+  schedule: (task, delayMs) => setTimeout(task, delayMs),
+  cancel: timer => clearTimeout(timer),
+});
 
 const BROWSER_GOSSIP_POLL_MS = 250;
 
 const loggedLiveJAdapterReimports = new Set<string>();
 
-// Main store
-export const runtimesState = writable<RuntimesState>(defaultState);
+// Main store. The framework-neutral bindings are the sole writers; Svelte and
+// React consume the same readonly snapshots through their respective adapters.
+const runtimesStateBinding = createExternalStore<RuntimesState>(defaultState);
+const vaultStorageLoadedBinding = createExternalStore(false);
 
-export const vaultStorageLoaded = writable(false);
+export const runtimesStateExternalStore = runtimesStateBinding.store;
+export const vaultStorageLoadedExternalStore = vaultStorageLoadedBinding.store;
+export const runtimesState = toSvelteReadable(runtimesStateBinding.store);
+export const vaultStorageLoaded = toSvelteReadable(vaultStorageLoadedBinding.store);
 
 // Derived stores
 export const activeRuntime = derived(runtimesState, $state => {
@@ -316,76 +341,24 @@ const readPersistedVaultProtection = (runtimeId: string): ProtectedVaultSecrets 
 const scheduleVaultLock = (runtime: Runtime): void => {
   const runtimeId = normalizeRuntimeId(runtime.id);
   if (!runtimeId) return;
-  const previous = vaultLockTimers.get(runtimeId);
-  if (previous) clearTimeout(previous);
-  vaultLockTimers.delete(runtimeId);
   const expectedProtection = runtime.protectedSecrets;
   const unlockUntil = expectedProtection?.unlockUntil;
-  if (unlockUntil === null || unlockUntil === undefined) return;
-  const delay = Math.max(0, unlockUntil - Date.now());
-  vaultLockTimers.set(
+  vaultLockScheduler.schedule(
     runtimeId,
-    setTimeout(() => {
-      vaultLockTimers.delete(runtimeId);
+    unlockUntil ?? null,
+    () => {
       void vaultOperations.lockRuntime(runtimeId, expectedProtection).catch(error => {
         errorLog.log('Timed wallet lock failed', 'Runtime Security', { runtimeId, error });
       });
-    }, delay),
-  );
-};
-
-const protectRuntimeForDevice = async (
-  runtime: Runtime,
-  durationMs: VaultUnlockDurationMs,
-  persist: () => void,
-): Promise<void> => {
-  if (!runtime.seed) throw new Error(`RUNTIME_LOCKED:${runtime.id}`);
-  const previousProtection = runtime.protectedSecrets;
-  const nextProtection = await protectVaultSecrets(
-    runtime.id,
-    {
-      seed: runtime.seed,
-      ...(runtime.mnemonic12 ? { mnemonic12: runtime.mnemonic12 } : {}),
     },
-    durationMs,
   );
-  runtime.protectedSecrets = nextProtection;
-  delete runtime.devicePassphrase;
-  try {
-    persist();
-  } catch (error) {
-    if (previousProtection) runtime.protectedSecrets = previousProtection;
-    else delete runtime.protectedSecrets;
-    await deleteVaultDeviceKey(runtime.id, nextProtection);
-    throw error;
-  }
-  if (previousProtection && !sameVaultProtectionLease(previousProtection, nextProtection)) {
-    try {
-      await deleteVaultDeviceKey(runtime.id, previousProtection);
-    } catch (error) {
-      errorLog.log('Previous wallet key cleanup failed', 'Runtime Security', { runtimeId: runtime.id, error });
-    }
-  }
-  scheduleVaultLock(runtime);
 };
 
-const restoreRuntimeFromDevice = async (runtime: Runtime): Promise<boolean> => {
-  if (runtime.seed) return true;
-  if (!runtime.protectedSecrets) return false;
-  const secrets = await unprotectVaultSecrets(runtime.id, runtime.protectedSecrets);
-  if (!secrets) return false;
-  runtime.seed = secrets.seed;
-  if (secrets.mnemonic12) runtime.mnemonic12 = secrets.mnemonic12;
-  try {
-    await installVaultRuntimeCommandJournalKeys(runtime.id, runtime.seed);
-  } catch (error) {
-    runtime.seed = '';
-    delete runtime.mnemonic12;
-    throw error;
-  }
-  scheduleVaultLock(runtime);
-  return true;
-};
+const vaultLifecycleEffects = Object.freeze({
+  scheduleLock: scheduleVaultLock,
+  reportCleanupError: (runtimeId: string, error: unknown) =>
+    errorLog.log('Previous wallet key cleanup failed', 'Runtime Security', { runtimeId, error }),
+});
 
 const updateRuntimeRecoveryMetadata = (
   runtimeId: string,
@@ -394,7 +367,7 @@ const updateRuntimeRecoveryMetadata = (
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   if (!normalizedRuntimeId) return null;
   let updatedRuntime: Runtime | null = null;
-  runtimesState.update(state => {
+  runtimesStateBinding.controller.update(state => {
     const runtime = state.runtimes[normalizedRuntimeId];
     if (!runtime) return state;
     const nextRecovery = update(runtime.recovery || {});
@@ -1081,7 +1054,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     if (!signerMetadataChanged) return;
     const currentState = get(runtimesState);
     if (!findRuntimeByIdCaseInsensitive(currentState.runtimes, runtime.id)?.runtime) return;
-    runtimesState.update(state => ({
+    runtimesStateBinding.controller.update(state => ({
       ...state,
       runtimes: {
         ...state.runtimes,
@@ -1729,7 +1702,7 @@ export const vaultOperations = {
     if (!normalizedRuntimeId) throw new Error('No active runtime selected');
 
     let updatedRuntime: Runtime | null = null;
-    runtimesState.update(state => {
+    runtimesStateBinding.controller.update(state => {
       const runtime = state.runtimes[normalizedRuntimeId];
       if (!runtime) throw new Error(`Runtime not found: ${normalizedRuntimeId}`);
       updatedRuntime = {
@@ -1782,7 +1755,7 @@ export const vaultOperations = {
     const restoredEnv = restored.env;
     const updatedRuntime = { ...runtime };
 
-    runtimesState.update(state => ({
+    runtimesStateBinding.controller.update(state => ({
       ...state,
       runtimes: {
         ...state.runtimes,
@@ -1874,7 +1847,7 @@ export const vaultOperations = {
           };
         }
         const normalizedActiveId = normalizeRuntimeId(parsed?.activeRuntimeId || '');
-        runtimesState.set({
+        runtimesStateBinding.controller.set({
           runtimes: normalizedRuntimes,
           activeRuntimeId:
             normalizedActiveId && normalizedRuntimes[normalizedActiveId]
@@ -1882,12 +1855,12 @@ export const vaultOperations = {
               : Object.keys(normalizedRuntimes)[0] || null,
         });
       }
-      vaultStorageLoaded.set(true);
+      vaultStorageLoadedBinding.controller.set(true);
     } catch (error) {
       errorLog.log('Failed to load runtimes; clearing corrupted storage', 'Runtime Storage', error);
       localStorage.removeItem(VAULT_STORAGE_KEY);
-      runtimesState.set(defaultState);
-      vaultStorageLoaded.set(true);
+      runtimesStateBinding.controller.set(defaultState);
+      vaultStorageLoadedBinding.controller.set(true);
     }
   },
 
@@ -1965,7 +1938,7 @@ export const vaultOperations = {
     const requiresOnboarding =
       typeof options.requiresOnboarding === 'boolean' ? options.requiresOnboarding : loginType !== 'demo';
 
-    const runtime: Runtime = {
+    let runtime: Runtime = {
       id,
       label,
       seed,
@@ -2269,13 +2242,16 @@ export const vaultOperations = {
         }
       }
       await installVaultRuntimeCommandJournalKeys(runtime.id, runtime.seed);
-      await protectRuntimeForDevice(runtime, options.unlockDurationMs ?? DEFAULT_VAULT_UNLOCK_DURATION_MS, () => {
-        runtimesState.update(state => ({
-          ...state,
-          runtimes: { ...state.runtimes, [id]: runtime },
-          activeRuntimeId: id,
-        }));
-        persistVaultStateOrThrow();
+      runtime = await protectRuntimeForDevice({
+        runtime, durationMs: options.unlockDurationMs ?? DEFAULT_VAULT_UNLOCK_DURATION_MS, ...vaultLifecycleEffects,
+        persist: protectedRuntime => {
+          runtimesStateBinding.controller.update(state => ({
+            ...state,
+            runtimes: { ...state.runtimes, [id]: protectedRuntime },
+            activeRuntimeId: id,
+          }));
+          persistVaultStateOrThrow();
+        },
       });
       markPerf('persist_runtime_state');
 
@@ -2326,7 +2302,7 @@ export const vaultOperations = {
           error: cleanupError,
         });
       }
-      runtimesState.update(state => {
+      runtimesStateBinding.controller.update(state => {
         const nextRuntimes = { ...state.runtimes };
         delete nextRuntimes[id];
         return {
@@ -2366,13 +2342,26 @@ export const vaultOperations = {
     if (normalizeRuntimeId(deriveAddress(seed, 0)) !== normalizedRuntimeId) {
       throw new Error('RUNTIME_UNLOCK_SEED_MISMATCH');
     }
-    const previousSeed = resolved.runtime.seed;
-    resolved.runtime.seed = seed;
+    const previousRuntime = resolved.runtime;
+    const previousSeed = previousRuntime.seed;
+    const unlockedRuntime = unlockVaultRuntime(previousRuntime, { seed });
     try {
       await installVaultRuntimeCommandJournalKeys(normalizedRuntimeId, seed);
-      await protectRuntimeForDevice(resolved.runtime, durationMs, persistVaultStateOrThrow);
+      await protectRuntimeForDevice({
+        runtime: unlockedRuntime, durationMs, ...vaultLifecycleEffects,
+        persist: protectedRuntime => {
+          runtimesStateBinding.controller.update(state => ({
+            ...state,
+            runtimes: replaceVaultRuntime(state.runtimes, resolved.key, protectedRuntime),
+          }));
+          persistVaultStateOrThrow();
+        },
+      });
     } catch (error) {
-      resolved.runtime.seed = previousSeed;
+      runtimesStateBinding.controller.update(state => ({
+        ...state,
+        runtimes: replaceVaultRuntime(state.runtimes, resolved.key, previousRuntime),
+      }));
       if (previousSeed) {
         try {
           await installVaultRuntimeCommandJournalKeys(normalizedRuntimeId, previousSeed);
@@ -2403,8 +2392,12 @@ export const vaultOperations = {
     const persistedProtection = readPersistedVaultProtection(normalizedRuntimeId);
     if (expectedProtection && !sameVaultProtectionLease(expectedProtection, persistedProtection)) {
       if (persistedProtection) {
-        runtime.protectedSecrets = persistedProtection;
-        scheduleVaultLock(runtime);
+        const refreshedRuntime = protectVaultRuntime(runtime, persistedProtection);
+        runtimesStateBinding.controller.update(state => ({
+          ...state,
+          runtimes: replaceVaultRuntime(state.runtimes, normalizedRuntimeId, refreshedRuntime),
+        }));
+        scheduleVaultLock(refreshedRuntime);
       }
       return;
     }
@@ -2412,10 +2405,7 @@ export const vaultOperations = {
     // retry authority before any asynchronous storage/runtime cleanup begins.
     lockRuntimeCommandJournal(normalizedRuntimeId);
     const protectionToDelete = persistedProtection || runtime.protectedSecrets;
-    if (persistedProtection) runtime.protectedSecrets = persistedProtection;
-    const timer = vaultLockTimers.get(normalizedRuntimeId);
-    if (timer) clearTimeout(timer);
-    vaultLockTimers.delete(normalizedRuntimeId);
+    vaultLockScheduler.cancel(normalizedRuntimeId);
     const runtimeEntry = get(runtimes).get(normalizedRuntimeId);
     const runtimeEnv = runtimeEntry?.env ? (unwrapLiveRuntimeEnv(runtimeEntry.env) ?? runtimeEntry.env) : null;
     let lockError: unknown;
@@ -2443,9 +2433,21 @@ export const vaultOperations = {
       const signerKeyScopeSeed = runtime.seed;
       if (signerKeyScopeSeed) xln.clearSignerKeys(signerKeyScopeSeed);
       if (runtimeEnv) runtimeEnv.runtimeSeed = undefined;
-      runtime.seed = '';
-      delete runtime.mnemonic12;
-      delete runtime.devicePassphrase;
+      runtimesStateBinding.controller.update(state => {
+        const latestRuntime = state.runtimes[normalizedRuntimeId];
+        if (!latestRuntime) return state;
+        const protectedRuntime = persistedProtection
+          ? protectVaultRuntime(latestRuntime, persistedProtection)
+          : latestRuntime;
+        return {
+          ...state,
+          runtimes: replaceVaultRuntime(
+            state.runtimes,
+            normalizedRuntimeId,
+            lockVaultRuntime(protectedRuntime),
+          ),
+        };
+      });
       persistVaultStateOrThrow();
       if (normalizeRuntimeId(get(activeRuntimeId) || '') === normalizedRuntimeId) {
         setXlnEnvironment(null);
@@ -2472,7 +2474,7 @@ export const vaultOperations = {
     const resolvedRuntimeId = normalizeRuntimeId(resolved.key);
     if (!resolvedRuntimeId) throw new Error('Invalid resolved runtimeId');
 
-    runtimesState.update(state => ({
+    runtimesStateBinding.controller.update(state => ({
       ...state,
       activeRuntimeId: resolvedRuntimeId,
     }));
@@ -2611,7 +2613,7 @@ export const vaultOperations = {
 
       // Publish the signer only after every prerequisite succeeded. Persisting it
       // earlier leaves a vault entry whose key/entity setup failed halfway.
-      runtimesState.update(state => {
+      runtimesStateBinding.controller.update(state => {
         const latestRuntime = state.runtimes[runtime.id];
         if (!latestRuntime) {
           throw new Error(`SIGNER_RUNTIME_DISAPPEARED:${runtime.id}`);
@@ -2661,7 +2663,7 @@ export const vaultOperations = {
     const runtime = current.runtimes[current.activeRuntimeId];
     if (!runtime || index >= runtime.signers.length) return;
 
-    runtimesState.update(state => ({
+    runtimesStateBinding.controller.update(state => ({
       ...state,
       runtimes: {
         ...state.runtimes,
@@ -2683,7 +2685,7 @@ export const vaultOperations = {
     const runtime = current.runtimes[current.activeRuntimeId];
     if (!runtime || index >= runtime.signers.length) return;
 
-    runtimesState.update(state => ({
+    runtimesStateBinding.controller.update(state => ({
       ...state,
       runtimes: {
         ...state.runtimes,
@@ -2705,7 +2707,7 @@ export const vaultOperations = {
     const runtime = current.runtimes[current.activeRuntimeId];
     if (!runtime || signerIndex >= runtime.signers.length) return;
 
-    runtimesState.update(state => ({
+    runtimesStateBinding.controller.update(state => ({
       ...state,
       runtimes: {
         ...state.runtimes,
@@ -2725,7 +2727,7 @@ export const vaultOperations = {
     await cleanupRuntimeEnv(normalizedRuntimeId);
 
     let nextActiveId: string | null = null;
-    runtimesState.update(state => {
+    runtimesStateBinding.controller.update(state => {
       const { [normalizedRuntimeId]: removed, ...remaining } = state.runtimes;
       const remainingIds = Object.keys(remaining);
       nextActiveId = state.activeRuntimeId === normalizedRuntimeId ? remainingIds[0] || null : state.activeRuntimeId;
@@ -2791,19 +2793,39 @@ export const vaultOperations = {
       this.loadFromStorage();
       const loaded = get(runtimesState);
       let migratedPlaintext = false;
-      for (const runtime of Object.values(loaded.runtimes)) {
+      for (const storedRuntime of Object.values(loaded.runtimes)) {
+        let runtime = storedRuntime;
         if (runtime.seed) {
           if (!runtime.protectedSecrets) {
-            await protectRuntimeForDevice(runtime, DEFAULT_VAULT_UNLOCK_DURATION_MS, persistVaultStateOrThrow);
+            runtime = await protectRuntimeForDevice({
+              runtime, durationMs: DEFAULT_VAULT_UNLOCK_DURATION_MS, ...vaultLifecycleEffects,
+              persist: protectedRuntime => {
+                runtimesStateBinding.controller.update(state => ({
+                  ...state,
+                  runtimes: replaceVaultRuntime(state.runtimes, runtime.id, protectedRuntime),
+                }));
+                persistVaultStateOrThrow();
+              },
+            });
             migratedPlaintext = true;
           } else {
+            runtime = protectVaultRuntime(runtime, runtime.protectedSecrets);
+            runtimesStateBinding.controller.update(state => ({
+              ...state,
+              runtimes: replaceVaultRuntime(state.runtimes, runtime.id, runtime),
+            }));
             scheduleVaultLock(runtime);
           }
           await installVaultRuntimeCommandJournalKeys(runtime.id, runtime.seed);
-          delete runtime.devicePassphrase;
           continue;
         }
-        await restoreRuntimeFromDevice(runtime);
+        const restoredRuntime = await restoreRuntimeFromDevice({ runtime, scheduleLock: scheduleVaultLock });
+        if (restoredRuntime) {
+          runtimesStateBinding.controller.update(state => ({
+            ...state,
+            runtimes: replaceVaultRuntime(state.runtimes, runtime.id, restoredRuntime),
+          }));
+        }
       }
       if (migratedPlaintext) this.saveToStorage();
       const current = get(runtimesState);
@@ -2883,8 +2905,8 @@ export const vaultOperations = {
     const runtimeIds = Array.from(get(runtimes).keys());
     await Promise.all(runtimeIds.map(id => cleanupRuntimeEnv(id)));
 
-    runtimesState.set(defaultState);
-    vaultStorageLoaded.set(true);
+    runtimesStateBinding.controller.set(defaultState);
+    vaultStorageLoadedBinding.controller.set(true);
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(VAULT_STORAGE_KEY);
     }
