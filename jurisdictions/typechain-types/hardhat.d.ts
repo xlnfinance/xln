@@ -146,10 +146,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.HashLadder__factory>;
     getContractFactory(
-      name: "IDeltaTransformer",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IDeltaTransformer__factory>;
-    getContractFactory(
       name: "IDepository",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IDepository__factory>;
@@ -360,11 +356,6 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.HashLadder>;
     getContractAt(
-      name: "IDeltaTransformer",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IDeltaTransformer>;
-    getContractAt(
       name: "IDepository",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -552,10 +543,6 @@ declare module "hardhat/types/runtime" {
       name: "HashLadder",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadder>;
-    deployContract(
-      name: "IDeltaTransformer",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IDeltaTransformer>;
     deployContract(
       name: "IDepository",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -766,11 +753,6 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadder>;
-    deployContract(
-      name: "IDeltaTransformer",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IDeltaTransformer>;
     deployContract(
       name: "IDepository",
       args: any[],

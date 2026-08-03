@@ -47,7 +47,6 @@ library Account {
     uint256 disputeTimeout
   );
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
-  event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
   // This signature intentionally matches Depository's public event ABI. The
   // library executes by DELEGATECALL, so logs are emitted from Depository.
   event TransformerDeltaClamped(
@@ -175,10 +174,6 @@ library Account {
   uint256 private constant INT256_SIGN_BIT = 1 << 255;
 
   // ========== PURE HELPERS ==========
-
-  function accountKey(bytes32 e1, bytes32 e2) external pure returns (bytes memory) {
-    return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
-  }
 
   function _accountKey(bytes32 e1, bytes32 e2) internal pure returns (bytes memory) {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);

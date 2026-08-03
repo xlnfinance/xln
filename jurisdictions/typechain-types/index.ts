@@ -68,8 +68,6 @@ export type { HankoVerifier } from "./contracts/HankoVerifier";
 export { HankoVerifier__factory } from "./factories/contracts/HankoVerifier__factory";
 export type { HashLadder } from "./contracts/HashLadder";
 export { HashLadder__factory } from "./factories/contracts/HashLadder__factory";
-export type { IDeltaTransformer } from "./contracts/IDeltaTransformer";
-export { IDeltaTransformer__factory } from "./factories/contracts/IDeltaTransformer__factory";
 export type { IDepository } from "./contracts/IDepository";
 export { IDepository__factory } from "./factories/contracts/IDepository__factory";
 export type { IEntityProvider } from "./contracts/IEntityProvider";
