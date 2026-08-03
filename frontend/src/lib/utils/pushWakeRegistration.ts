@@ -11,6 +11,7 @@ import type {
   PushUnregisterRequestV1,
 } from '@xln/runtime/watchtower/push/types';
 import { requestNativePaymentWakeNotifications } from '$lib/native/capacitor';
+import { PUSH_WAKE_SERVICE_WORKER } from '../contracts/browserPersistence';
 
 export type PushWakeDeviceToken = {
   token: string;
@@ -456,7 +457,9 @@ const requestWebPushToken = async (): Promise<PushWakeDeviceToken | null> => {
   }
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error('PUSH_WEB_PUSH_PERMISSION_DENIED');
-  const registration = await navigator.serviceWorker.register('/push-wake-sw.js');
+  const registration = await navigator.serviceWorker.register(PUSH_WAKE_SERVICE_WORKER.path, {
+    scope: PUSH_WAKE_SERVICE_WORKER.scope,
+  });
   const existing = await registration.pushManager.getSubscription();
   const subscription = existing || await registration.pushManager.subscribe({
     userVisibleOnly: true,

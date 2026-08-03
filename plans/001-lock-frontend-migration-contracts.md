@@ -17,6 +17,10 @@
 - **Depends on:** none
 - **Category:** migration, tests, correctness
 - **Planned at:** commit `5749e283d`, 2026-08-03
+- **Execution:** BLOCKED — both isolated E2E attempts stopped before Playwright
+  (`pw=0`) because the fresh-stack hub baseline stalled for `H1`, `H2`, and
+  `H3`. L1, the full repository gate, and headed static-preview browser QA are
+  green.
 
 ## Executor instructions
 

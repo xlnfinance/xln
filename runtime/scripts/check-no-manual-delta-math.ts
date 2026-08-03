@@ -24,6 +24,7 @@ const SCAN_ROOTS = [
   'tests',
   'runtime/scenarios',
   'frontend/src/lib/components/Entity',
+  'frontend/src/lib/components/Tools',
   'runtime/account/tx/handlers/request-withdrawal.ts',
   'runtime/account/tx/handlers/settle-hold.ts',
 ];
@@ -42,6 +43,8 @@ const ALLOWED_INLINE_MARKER = 'DELTA_MATH_ALLOWED';
 const MANUAL_TOTAL_PATTERNS = [
   /\bondelta\s*\+\s*offdelta\b/,
   /\boffdelta\s*\+\s*ondelta\b/,
+  /\b([A-Za-z_$][\w$]*)\.ondelta\s*\+\s*\1\.offdelta\b/,
+  /\b([A-Za-z_$][\w$]*)\.offdelta\s*\+\s*\1\.ondelta\b/,
 ];
 
 function toRel(abs: string): string {
@@ -74,7 +77,7 @@ async function walk(absPath: string): Promise<string[]> {
   return out;
 }
 
-function findViolations(rel: string, text: string): Violation[] {
+export function findViolations(rel: string, text: string): Violation[] {
   const violations: Violation[] = [];
   const lines = text.split('\n');
   lines.forEach((line, idx) => {
@@ -129,7 +132,9 @@ async function main(): Promise<void> {
   console.log(`✅ deriveDelta guard passed (${scoped.length} files scanned)`);
 }
 
-main().catch((err) => {
-  console.error('❌ check-no-manual-delta-math failed:', err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('❌ check-no-manual-delta-math failed:', err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}

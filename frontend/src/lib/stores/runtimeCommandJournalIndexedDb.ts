@@ -1,7 +1,9 @@
-const DB_NAME = 'xln-runtime-command-journal-v1';
-const DB_VERSION = 2;
-const INTENT_STORE = 'intents';
-const LEGACY_META_STORE = 'meta';
+import { RUNTIME_COMMAND_JOURNAL_DATABASE } from '../contracts/browserPersistence';
+
+const DB_NAME = RUNTIME_COMMAND_JOURNAL_DATABASE.name;
+const DB_VERSION = RUNTIME_COMMAND_JOURNAL_DATABASE.version;
+const [INTENT_STORE] = RUNTIME_COMMAND_JOURNAL_DATABASE.stores;
+const [LEGACY_META_STORE] = RUNTIME_COMMAND_JOURNAL_DATABASE.retiredStores;
 let journalDbPromise: Promise<IDBDatabase> | null = null;
 
 export const isBrowserCommandJournal = (): boolean => typeof window !== 'undefined';

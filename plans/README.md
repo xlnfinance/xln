@@ -17,9 +17,9 @@ The rewrite should proceed only because the owner explicitly wants React. The au
 | Site | `/`, `/install`, `/rcpan`, `/releases`, `/reviews`, `/unicast` | `frontend/build/site` | Public acquisition and release information |
 | Docs | `/docs`, `/docs-catalog/**`, `llms*` | `frontend/build/docs` | Generated documentation catalog and reader |
 | Wallet | `/app`, `/address/**`, `/testnet` | `frontend/build/wallet` | Vault, runtime bridge, payments, PWA, native shells |
-| Ops | `/health`, `/qa`, `/runs`, `/scenarios`, `/ai/**`, `/admin`, `/embed` | `frontend/build/ops` | Developer/operator tooling and runtime-free scenario embeds |
+| Ops | `/health`, `/qa`, `/runs`, `/scenarios`, `/ai/**`, `/embed` | `frontend/build/ops` | Developer/operator tooling and runtime-free scenario embeds |
 
-`/rpc`, `/rpc2`, and `/resetdb` remain runtime/edge endpoints, not React pages. `/radapter` remains an edge-owned, query-rejecting redirect to `/app` unless the owner explicitly retires it; it is not a React surface. All surfaces continue to ship at `xln.finance` path prefixes. Moving the wallet to another origin is specifically rejected because origin-bound vault metadata, runtime journals, PWA scope, and push wake behavior would require an authenticated data migration.
+`/rpc`, `/rpc2`, and `/resetdb` remain runtime/edge endpoints, not React pages. `/admin` remains the existing edge redirect to `/health`; `/radapter` remains the query-rejecting edge redirect to `/app` unless the owner explicitly retires either redirect. All surfaces continue to ship at `xln.finance` path prefixes. Moving the wallet to another origin is specifically rejected because origin-bound vault metadata, runtime journals, PWA scope, and push wake behavior would require an authenticated data migration.
 
 Use one `frontend/package.json` and lockfile initially. Put entry applications under `frontend/apps/{site,docs,wallet,ops}` and shared code under `frontend/packages/{ui,client-core,runtime-client,build-contracts}`. Vite multi-page inputs produce separate artifacts; the default development command must still expose the complete same-origin application on `localhost:8080`.
 
@@ -27,7 +27,7 @@ Use one `frontend/package.json` and lockfile initially. Put entry applications u
 
 | Plan | Outcome | Priority | Effort | Depends on | Status | Merge policy |
 |---|---|---:|---:|---|---|---|
-| [001](001-lock-frontend-migration-contracts.md) | Freeze routes, persistence, visuals, and canonical delta math | P1 | M | — | TODO | May merge independently |
+| [001](001-lock-frontend-migration-contracts.md) | Freeze routes, persistence, visuals, and canonical delta math | P1 | M | — | BLOCKED — isolated E2E hub baseline stalls before Playwright | May merge independently |
 | [002](002-make-frontend-rollout-atomic.md) | Versioned staging, atomic activation, rollback | P1 | L | — | TODO | May merge independently |
 | [003](003-migrate-public-site-to-react-vite.md) | React/Vite build foundation plus the real public site | P1 | L | 001, 002 | TODO | WIP checkpoint only |
 | [004](004-migrate-docs-to-react-vite.md) | Deterministic docs producer and React docs reader | P2 | L | 003 | TODO | WIP checkpoint only |

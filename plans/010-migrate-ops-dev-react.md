@@ -20,7 +20,7 @@
 
 ## Executor instructions
 
-Continue the one `ai/react-frontend-migration` writer worktree. Re-inventory `/health`, `/qa`, `/runs`, `/scenarios`, `/ai`, `/admin`, and embed modes. Keep `/rpc`, `/rpc2`, and `/resetdb` as runtime/edge endpoints. Do not weaken production checks, expose operator controls publicly, or add fake scenario/runtime data.
+Continue the one `ai/react-frontend-migration` writer worktree. Re-inventory `/health`, `/qa`, `/runs`, `/scenarios`, `/ai`, and `/embed`. Keep `/admin` as the existing edge redirect to `/health`, and keep `/rpc`, `/rpc2`, and `/resetdb` as runtime/edge endpoints. Do not weaken production checks, expose operator controls publicly, or add fake scenario/runtime data.
 
 ## Why ops is a separate surface
 
@@ -37,7 +37,7 @@ The operator/developer UI contains the largest visual components—`Graph3DPanel
 
 In scope:
 
-- Complete React migrations for health/QA/runs/scenarios/AI/admin and `/embed`; the current embed is a runtime-free scenario/trail workspace.
+- Complete React migrations for health/QA/runs/scenarios/AI and `/embed`; the current embed is a runtime-free scenario/trail workspace.
 - Dockview workspace/panel lifecycle, graph/3D/architect views, runtime inspection, scenario tooling, and canonical delta visualization if retained.
 - Auth/capability gating already present, lazy loading, worker/asset ownership, accessibility, responsive behavior, screenshots, and performance metrics.
 
@@ -85,7 +85,7 @@ Out of scope:
 
    Verify: real scenario/run data renders; malformed/unavailable data fails visibly; no mock fallback exists.
 
-4. Migrate AI/admin/embed surfaces with their existing capability and environment checks. Validate `postMessage` origin/payload contracts for embeds and keep wallet-required embeds owned by wallet rather than ops.
+4. Migrate AI and `/embed` surfaces with their existing capability and environment checks. Validate `postMessage` origin/payload contracts for embeds. Preserve `/admin` as the edge redirect to `/health`; do not invent a standalone admin page.
 
    Verify: unauthorized/wrong-origin/malformed messages are rejected, while valid same-origin integration works in a focused browser test.
 

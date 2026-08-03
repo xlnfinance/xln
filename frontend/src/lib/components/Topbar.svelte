@@ -1,7 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { locale, LOCALES, type Locale } from '$lib/i18n';
-  import DeltaVisualizer from './Tools/DeltaVisualizer.svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
 
   interface Props {
@@ -15,19 +14,10 @@
 
   // Dropdown states
   let langDropdownOpen = $state(false);
-  let toolsDropdownOpen = $state(false);
-  let showDeltaVisualizer = $state(false);
 
   function selectLocale(loc: Locale) {
     locale.set(loc);
     langDropdownOpen = false;
-  }
-
-  function openTool(tool: string) {
-    toolsDropdownOpen = false;
-    if (tool === 'delta') {
-      showDeltaVisualizer = true;
-    }
   }
 </script>
 
@@ -45,20 +35,6 @@
     <a href="/docs" class="topbar-link" class:active={currentPath === '/docs'}>Docs</a>
     <a href="/rcpan" class="topbar-link optional-link" class:active={currentPath === '/rcpan'}>RCPAN</a>
     <a href="/releases" class="topbar-link optional-link" class:active={currentPath === '/releases'}>Releases</a>
-    <div class="topbar-dropdown tools-dropdown">
-      <Dropdown bind:open={toolsDropdownOpen} minWidth={160} maxWidth={220}>
-        <span slot="trigger" class="topbar-trigger">
-          <span>Tools</span>
-          <span class="topbar-chevron" class:open={toolsDropdownOpen}>▼</span>
-        </span>
-        <div slot="menu" class="topbar-menu">
-          <button class="topbar-menu-item" onclick={() => openTool('delta')}>
-            <span class="tool-icon">⚖️</span>
-            <span class="tool-label">deriveDelta</span>
-          </button>
-        </div>
-      </Dropdown>
-    </div>
     <div class="topbar-dropdown language-dropdown">
       <Dropdown bind:open={langDropdownOpen} minWidth={160} maxWidth={220}>
         <span slot="trigger" class="topbar-trigger">
@@ -81,10 +57,6 @@
     </div>
   </div>
 </nav>
-
-{#if showDeltaVisualizer}
-  <DeltaVisualizer onClose={() => showDeltaVisualizer = false} />
-{/if}
 
 <style>
   .topbar {
@@ -261,15 +233,6 @@
     flex: 1;
   }
 
-  .tool-icon {
-    font-size: 1rem;
-  }
-
-  .tool-label {
-    flex: 1;
-    font-family: 'SF Mono', monospace;
-  }
-
   @media (max-width: 768px) {
     .topbar {
       padding: 0 1rem;
@@ -298,7 +261,6 @@
 
   @media (max-width: 520px) {
     .optional-link,
-    .tools-dropdown,
     .language-dropdown {
       display: none;
     }

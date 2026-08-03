@@ -6,6 +6,7 @@
 	import Toast from '$lib/components/Toast.svelte';
 	import XlnMascot from '$lib/components/XlnMascot/XlnMascot.svelte';
 	import { initializeNativeShell } from '$lib/native/capacitor';
+	import { findFrontendRoute } from '$lib/contracts/frontendSurfaces';
 	import { installRangeSliderProgress } from '$lib/utils/rangeSliderProgress';
 	import '$lib/styles/apple-glass.css';
 	import '$lib/styles/checkbox-controls.css';
@@ -16,8 +17,11 @@
 	onMount(() => {
 		if (!browser) return;
 		const disposeRangeSliderProgress = installRangeSliderProgress();
-		void initializeNativeShell();
-		if (!skipDeployLabel && chromeMode === 'site') {
+		const mountedSurface = findFrontendRoute(window.location.pathname)?.surface;
+		if (mountedSurface === 'wallet') {
+			void initializeNativeShell();
+		}
+		if (!skipDeployLabel && chromeMode === 'site' && mountedSurface === 'ops') {
 			void loadDeployLabel();
 		}
 		return () => {

@@ -1210,8 +1210,12 @@
       bottom: 0;
       z-index: 40;
       width: min(360px, 86vw);
-      height: auto;
+      height: calc(100dvh - 56px);
+      min-height: 0;
+      max-height: calc(100dvh - 56px);
+      box-sizing: border-box;
       border-right: 1px solid rgba(255, 255, 255, 0.08);
+      background: #070a08;
       transform: translateX(-105%);
       transition: transform 180ms ease;
       box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);

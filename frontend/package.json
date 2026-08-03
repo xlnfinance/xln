@@ -17,7 +17,7 @@
 		"check": "bun copy-static-files.js && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error && bun scripts/vite-build-check.ts",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e -- playwright test",
-		"test:landing": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-landing --scope=e2e -- playwright test tests/landing.spec.ts",
+		"test:landing": "cd .. && bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/landing-site.spec.ts",
 		"test:fed": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-fed --scope=e2e -- playwright test tests/fed-chair-demo.spec.ts",
 		"test:ui": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e -- playwright test --ui"
 	},

@@ -56,6 +56,8 @@ import { generateLazyEntityIdPreview } from '../utils/lazyEntityId';
 
 import { parseStorageSchemaMismatch } from '../utils/storageSchemaRecovery';
 
+import { VAULT_STORAGE_KEY } from '../contracts/browserPersistence';
+
 import {
   deleteVaultDeviceKey,
   protectVaultSecrets,
@@ -224,9 +226,6 @@ export async function restoreRuntimeEnvFromRecoveryCandidate(
   await xln.persistRestoredEnvToDB(restoredEnv);
   return { env: restoredEnv, bundle: candidate.tipBundle };
 }
-
-// Storage key
-const VAULT_STORAGE_KEY = 'xln-vaults';
 
 export const DEFAULT_VAULT_UNLOCK_DURATION_MS: VaultUnlockDurationMs = 600_000;
 

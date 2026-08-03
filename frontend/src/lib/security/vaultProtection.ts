@@ -1,3 +1,5 @@
+import { VAULT_KEY_DATABASE } from '../contracts/browserPersistence';
+
 export type VaultUnlockDurationMs = 600_000 | 86_400_000 | null;
 
 export type ProtectedVaultSecrets = {
@@ -20,8 +22,9 @@ export const redactVaultRuntimeForPersistence = <T extends Record<string, unknow
   return metadata;
 };
 
-const DB_NAME = 'xln-vault-keys-v1';
-const STORE_NAME = 'keys';
+const DB_NAME = VAULT_KEY_DATABASE.name;
+const DB_VERSION = VAULT_KEY_DATABASE.version;
+const [STORE_NAME] = VAULT_KEY_DATABASE.stores;
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
   let binary = '';
@@ -38,7 +41,7 @@ const asArrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 
 const openKeyDb = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
-  const request = indexedDB.open(DB_NAME, 1);
+  const request = indexedDB.open(DB_NAME, DB_VERSION);
   request.onupgradeneeded = () => {
     const db = request.result;
     if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
