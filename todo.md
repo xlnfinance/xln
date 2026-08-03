@@ -25,13 +25,15 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   decide the one remaining contract policy below, rerun affected L1 plus one
   final `bun run check`, obtain independent 0/0 P0/P1 verdicts on the resulting
   SHA, then fast-forward `main` without overwriting its matching dependency WIP.
-- Owner decision required: a previous board can currently submit a new dispute
-  during its seven-day grace and choose a near-maximum nonce. Requiring the
-  current board for dispute start revokes that attack but means historical
-  evidence must be submitted during the board-change delay; already-active
-  disputes remain enforceable with previous-board evidence. Recommended release
-  policy: current-board-only dispute start, historical verifier only for
-  finalizing an already-active dispute.
+- Owner decision made (2026-08-02): keep the seven-day previous-board grace on
+  dispute start. Requiring the current board would revoke the retired-quorum
+  attack, but it also lets any entity repudiate every obligation it ever signed
+  by rotating its board - for a hub, that is its whole user base at once, free
+  and unilateral. That attack is broader and cheaper than the one it prevents,
+  and seven days is a well-understood revocation horizon. The trade-off, its
+  exact damage bound (reserves then debt via Depository._settleShortfall) and
+  the counterparty's remedy are recorded in Account.sol at the dispute-start
+  verifier; do not re-open without replacing the repudiation defence.
 
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 
