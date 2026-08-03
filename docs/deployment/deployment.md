@@ -24,7 +24,8 @@ For live health, alerting, and storage incident response, use
 
 ### Public surface
 
-- `https://xln.finance/` and `https://app.xln.finance/` serve the frontend
+- `https://xln.finance/` serves the public site; `/docs`, `/app`, and operator
+  routes are separate static roots from the same active release
 - `https://xln.finance/api/*` proxies to the runtime/orchestrator server
 - `https://xln.finance/ws` upgrades to the runtime WS surface
 - `https://xln.finance/rpc` proxies to local anvil/RPC
@@ -46,9 +47,14 @@ Canonical file location:
 /etc/nginx/sites-enabled/xln
 ```
 
+The HTTPS server includes
+`/etc/nginx/snippets/xln-frontend-release.conf`. That generated file maps the
+stable route contract to `/root/xln/frontend/current/{site,docs,wallet,ops}`.
+Unknown page paths return 404; there is no cross-surface SPA fallback.
+
 Required capabilities:
 
-1. Serve the built frontend over HTTPS.
+1. Serve the atomically selected four-surface frontend release over HTTPS.
 2. Proxy `/api/` to the runtime server.
 3. Proxy `/ws` with WebSocket upgrade headers.
 4. Proxy `/rpc` and `/rpc2`...`/rpc8` to the orchestrator RPC safety filter.
@@ -171,6 +177,10 @@ export USE_ANVIL=true
 - `bun run deploy:prod` always rebuilds the public testnet from a clean Anvil, runtime, mesh, and custody state
 - do not restore hub or market-maker WAL during a normal deploy; those bootstrap identities are recreated deterministically
 - `bun run deploy:prod:fresh` is an explicit alias for the same clean deployment policy
+- frontend uploads must validate `release-manifest.json` before changing
+  `/root/xln/frontend/current`; never extract over a live surface
+- `bun run frontend:release:rollback -- /root/xln/frontend --base-url=https://xln.finance`
+  is the canonical stateless frontend rollback
 
 ## Verification Checklist
 
@@ -180,9 +190,14 @@ After deploy:
 nginx -t
 systemctl reload nginx
 pm2 status
+readlink /root/xln/frontend/current
+readlink /root/xln/frontend/previous
 curl -fsS https://xln.finance/api/health | jq '{coreOk, systemOk, degraded}'
 curl -fsS https://xln.finance/api/metrics | grep -E 'xln_(core_ok|system_ok)'
 curl -I https://xln.finance/c
+for surface in site docs wallet ops; do
+  curl -fsS "https://xln.finance/.well-known/xln-build/${surface}.json"
+done
 ```
 
 If anvil/testnet is part of the environment:

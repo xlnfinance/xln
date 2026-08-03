@@ -1,6 +1,8 @@
 # xln finance desktop
 
-Electron wrapper for the same `frontend/build` artifact used by mobile shells.
+Electron wrapper for the wallet surface declared by the same strict frontend
+release manifest used by mobile and extension shells. The native pipeline
+validates every wallet asset hash before preparing `.native-wallet-build`.
 
 Run from the repo root:
 

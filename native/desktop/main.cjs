@@ -9,7 +9,10 @@ const {
 } = require('./security.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
-const WEB_DIR = path.resolve(process.env.XLN_DESKTOP_WEB_DIR || path.join(ROOT, 'frontend/build'));
+const DEFAULT_WEB_DIR = app.isPackaged
+	? path.join(ROOT, 'frontend/build')
+	: path.join(ROOT, 'frontend/.native-wallet-build');
+const WEB_DIR = path.resolve(process.env.XLN_DESKTOP_WEB_DIR || DEFAULT_WEB_DIR);
 const APP_NAME = 'xln finance';
 
 let mainWindow = null;

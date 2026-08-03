@@ -12,6 +12,52 @@ No unsigned build is presented as trusted. Web delivery always retains the funda
 mutable-server warning. Release gates are L1 tests, targeted browser/native flows,
 screenshots at iPhone/laptop/wide viewports, and `bun run check`.
 
+## Atomic web release
+
+The four web surfaces are one immutable release. A release directory contains
+`site`, `docs`, `wallet`, `ops`, `route-contract.json`, and
+`release-manifest.json`. `current` and `previous` are same-filesystem symlinks;
+activation never copies files over the live tree. Native builders consume only
+the manifest-declared wallet surface.
+
+Build and validate a local release after the normal Runtime and frontend builds:
+
+```bash
+bun run build
+(cd frontend && bun run build)
+RELEASE_ID="$(bun -p 'require("./package.json").version')-$(git rev-parse --short=12 HEAD)"
+bun run frontend:release:build -- --release-root="frontend/releases/$RELEASE_ID"
+bun run frontend:release:validate -- "frontend/releases/$RELEASE_ID"
+```
+
+The production frontend command builds locally, verifies the upload SHA-256 on
+the host, validates a fresh `.staging-*` tree, renames it into `releases/`, and
+switches all four surfaces through one atomic production activator:
+
+```bash
+bun run deploy:prod:frontend
+```
+
+After activation, verify the expected manifest and every surface identity plus
+the minimal URL matrix:
+
+```bash
+bun run frontend:release:health -- \
+  "/root/xln/frontend/releases/$RELEASE_ID" \
+  --base-url=https://xln.finance
+```
+
+Rollback validates `previous`, swaps `current` and `previous`, and repeats the
+same health gate. Retention is explicit: provide exact old release IDs; pruning
+pre-validates every directory and refuses both active pointers.
+
+```bash
+bun run frontend:release:rollback -- \
+  /root/xln/frontend --base-url=https://xln.finance
+bun run frontend:release:prune -- \
+  /root/xln/frontend 0.1.29-aaaaaaaaaaaa 0.1.30-bbbbbbbbbbbb
+```
+
 ## Surfaces
 
 | Surface | Build | Distribution | Update path |

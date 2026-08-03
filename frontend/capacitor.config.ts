@@ -1,9 +1,14 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
+const webDir = process.env['XLN_CAPACITOR_WEB_DIR']?.trim() || 'build';
+if (webDir !== 'build' && webDir !== '.native-wallet-build') {
+	throw new Error(`CAPACITOR_WEB_DIR_INVALID:${webDir}`);
+}
+
 const config: CapacitorConfig = {
 	appId: 'finance.xln.wallet',
 	appName: 'xln finance',
-	webDir: 'build',
+	webDir,
 	bundledWebRuntime: false,
 	server: {
 		hostname: 'localhost',

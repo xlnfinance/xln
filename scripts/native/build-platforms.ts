@@ -4,6 +4,7 @@ import {
 	copyFileSync,
 	cpSync,
 	existsSync,
+	mkdtempSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -11,13 +12,22 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { canonicalJson } from '../deployment/canonical-json';
+import { buildFrontendReleaseAssets } from '../deployment/frontend-release-files';
+import { packageCurrentFrontendRelease } from '../deployment/frontend-release-package';
+import {
+	FRONTEND_RELEASE_MANIFEST_FILE,
+	type FrontendReleaseManifest,
+} from '../deployment/frontend-release-schema';
 
 type Platform = 'ios' | 'android' | 'desktop' | 'extension';
 type ArtifactStatus = 'built' | 'synced' | 'skipped' | 'reused';
 type NativeArtifact = {
-	target: Platform | 'runtime' | 'frontend';
+	target: Platform | 'runtime' | 'frontend' | 'frontend-release';
 	kind: string;
 	status: ArtifactStatus;
 	path?: string;
@@ -30,10 +40,12 @@ type NativeBuildOptions = {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const FRONTEND = path.join(ROOT, 'frontend');
-const BUILD_DIR = path.join(FRONTEND, 'build');
+const UNIFIED_BUILD_DIR = path.join(FRONTEND, 'build');
+const NATIVE_WEB_DIR = path.join(FRONTEND, '.native-wallet-build');
 const NATIVE_DIR = path.join(ROOT, 'native');
 const DIST_DIR = path.join(NATIVE_DIR, 'dist');
 const ARTIFACT_MANIFEST = path.join(DIST_DIR, 'native-artifacts.json');
+const NATIVE_RELEASE_MANIFEST = path.join(DIST_DIR, 'frontend-release-manifest.json');
 const APP_NAME = 'xln finance';
 const DESKTOP_BUNDLE_ID = 'finance.xln.wallet.desktop';
 
@@ -44,7 +56,7 @@ Usage:
   bun scripts/native/build-platforms.ts [mobile|ios|android|desktop|extension|all] [--open] [--smoke] [--no-build] [--package] [--best-effort]
 
 Targets:
-  mobile     Build/sync iOS + Android from frontend/build
+  mobile     Build/sync iOS + Android from the manifest-bound wallet surface
   ios        Build/sync Capacitor iOS
   android    Build/sync Capacitor Android
   desktop    Prepare Electron shell; --open launches it
@@ -52,7 +64,7 @@ Targets:
   all        mobile + desktop + extension
 
 Flags:
-  --no-build     Reuse an existing frontend/build artifact
+  --no-build     Repackage an existing unified build through the release manifest
   --open         Open the native IDE/shell after sync
   --smoke        Launch desktop shell once and exit
   --package      Produce installable debug/dev packages when platform tooling is installed
@@ -144,7 +156,7 @@ function runCapture(command: string, commandArgs: string[], cwd = ROOT): { statu
 	return {
 		status: result.status,
 		output: `${result.stdout || ''}${result.stderr || ''}`.trim(),
-		error: result.error,
+		...(result.error ? { error: result.error } : {}),
 	};
 }
 
@@ -237,25 +249,76 @@ function assertNativeToolingAvailable(targets: Platform[], flags: Set<string>): 
 	);
 }
 
-function ensureFrontendBuild(flags: Set<string>): NativeArtifact[] {
-	if (flags.has('--no-build')) {
-		if (!existsSync(path.join(BUILD_DIR, 'index.html'))) {
-			throw new Error('--no-build was requested, but frontend/build/index.html does not exist');
-		}
-		if (!existsSync(path.join(BUILD_DIR, 'runtime.js'))) {
-			throw new Error('--no-build was requested, but frontend/build/runtime.js does not exist');
-		}
-		return [
-			{ target: 'runtime', kind: 'browser-runtime', status: 'reused', path: path.join(BUILD_DIR, 'runtime.js') },
-			{ target: 'frontend', kind: 'sveltekit-static', status: 'reused', path: BUILD_DIR },
-		];
+const currentSourceCommit = (): string => {
+	const result = runCapture('git', ['rev-parse', 'HEAD']);
+	if (result.status !== 0 || !/^[a-f0-9]{40}$/.test(result.output)) {
+		throw new Error(`NATIVE_FRONTEND_SOURCE_COMMIT_INVALID:${result.output}`);
 	}
-	run('bun', ['run', 'build'], ROOT);
-	run('bun', ['run', 'build'], FRONTEND);
-	return [
-		{ target: 'runtime', kind: 'browser-runtime', status: 'built', path: path.join(BUILD_DIR, 'runtime.js') },
-		{ target: 'frontend', kind: 'sveltekit-static', status: 'built', path: BUILD_DIR },
-	];
+	return result.output;
+};
+
+const assertNativeWalletCopy = (
+	root: string,
+	manifest: FrontendReleaseManifest,
+	target: Platform,
+	exact: boolean,
+): void => {
+	const copied = buildFrontendReleaseAssets(root);
+	const byPath = new Map(copied.map(asset => [asset.path, asset]));
+	manifest.surfaces.wallet.assets.forEach(expected => {
+		const actual = byPath.get(expected.path);
+		if (canonicalJson(actual) !== canonicalJson(expected)) {
+			throw new Error(`NATIVE_FRONTEND_WALLET_ASSET_MISMATCH:${target}:${expected.path}`);
+		}
+	});
+	if (exact && copied.length !== manifest.surfaces.wallet.assets.length) {
+		throw new Error(`NATIVE_FRONTEND_WALLET_EXTRA_ASSET:${target}`);
+	}
+};
+
+const copyManifestBoundWallet = (releaseRoot: string, manifest: FrontendReleaseManifest): void => {
+	rmSync(NATIVE_WEB_DIR, { recursive: true, force: true });
+	cpSync(path.join(releaseRoot, manifest.surfaces.wallet.outputRoot), NATIVE_WEB_DIR, { recursive: true });
+	mkdirSync(DIST_DIR, { recursive: true });
+	copyFileSync(path.join(releaseRoot, FRONTEND_RELEASE_MANIFEST_FILE), NATIVE_RELEASE_MANIFEST);
+	assertNativeWalletCopy(NATIVE_WEB_DIR, manifest, 'desktop', true);
+};
+
+function ensureFrontendBuild(flags: Set<string>): { artifacts: NativeArtifact[]; manifest: FrontendReleaseManifest } {
+	const status: ArtifactStatus = flags.has('--no-build') ? 'reused' : 'built';
+	if (!flags.has('--no-build')) {
+		run('bun', ['run', 'build'], ROOT);
+		run('bun', ['run', 'build'], FRONTEND);
+	}
+	if (!existsSync(path.join(UNIFIED_BUILD_DIR, 'index.html'))) {
+		throw new Error(`NATIVE_FRONTEND_BUILD_MISSING:${path.join(UNIFIED_BUILD_DIR, 'index.html')}`);
+	}
+	if (!existsSync(path.join(UNIFIED_BUILD_DIR, 'runtime.js'))) {
+		throw new Error(`NATIVE_FRONTEND_RUNTIME_MISSING:${path.join(UNIFIED_BUILD_DIR, 'runtime.js')}`);
+	}
+	sanitizeWebBuild(UNIFIED_BUILD_DIR);
+	const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'xln-native-release-'));
+	try {
+		const commit = currentSourceCommit();
+		const releaseRoot = path.join(temporaryRoot, `${packageJsonVersion()}-${commit.slice(0, 12)}`);
+		const manifest = packageCurrentFrontendRelease({
+			buildRoot: UNIFIED_BUILD_DIR,
+			releaseRoot,
+			sourceCommit: commit,
+			productVersion: packageJsonVersion(),
+		});
+		copyManifestBoundWallet(releaseRoot, manifest);
+		return {
+			manifest,
+			artifacts: [
+				{ target: 'runtime', kind: 'browser-runtime', status, path: path.join(NATIVE_WEB_DIR, 'runtime.js') },
+				{ target: 'frontend', kind: 'manifest-wallet', status, path: NATIVE_WEB_DIR },
+				{ target: 'frontend-release', kind: 'release-manifest', status, path: NATIVE_RELEASE_MANIFEST },
+			],
+		};
+	} finally {
+		rmSync(temporaryRoot, { recursive: true, force: true });
+	}
 }
 
 function walkFiles(root: string): string[] {
@@ -269,8 +332,8 @@ function walkFiles(root: string): string[] {
 	return files;
 }
 
-function sanitizeNativeWebBuild(): void {
-	for (const file of walkFiles(BUILD_DIR)) {
+function sanitizeWebBuild(root: string): void {
+	for (const file of walkFiles(root)) {
 		if (path.basename(file) === '.DS_Store') {
 			unlinkSync(file);
 			continue;
@@ -291,19 +354,24 @@ function pruneGeneratedNoise(root: string): void {
 	}
 }
 
-function syncCapacitorPlatform(platform: 'ios' | 'android'): NativeArtifact {
+function syncCapacitorPlatform(
+	platform: 'ios' | 'android',
+	manifest: FrontendReleaseManifest,
+): NativeArtifact {
 	const platformDir = path.join(FRONTEND, platform);
+	const capacitorEnv = { ...process.env, XLN_CAPACITOR_WEB_DIR: '.native-wallet-build' };
+	const publicDir = platform === 'ios'
+		? path.join(FRONTEND, 'ios/App/App/public')
+		: path.join(FRONTEND, 'android/app/src/main/assets/public');
 	if (existsSync(platformDir)) {
-		run('bunx', ['cap', 'sync', platform], FRONTEND);
-		pruneGeneratedNoise(platform === 'ios'
-			? path.join(FRONTEND, 'ios/App/App/public')
-			: path.join(FRONTEND, 'android/app/src/main/assets/public'));
+		run('bunx', ['cap', 'sync', platform], FRONTEND, capacitorEnv);
+		pruneGeneratedNoise(publicDir);
+		assertNativeWalletCopy(publicDir, manifest, platform, false);
 		return { target: platform, kind: 'capacitor-sync', status: 'synced', path: platformDir };
 	}
-	run('bunx', ['cap', 'add', platform], FRONTEND);
-	pruneGeneratedNoise(platform === 'ios'
-		? path.join(FRONTEND, 'ios/App/App/public')
-		: path.join(FRONTEND, 'android/app/src/main/assets/public'));
+	run('bunx', ['cap', 'add', platform], FRONTEND, capacitorEnv);
+	pruneGeneratedNoise(publicDir);
+	assertNativeWalletCopy(publicDir, manifest, platform, false);
 	return { target: platform, kind: 'capacitor-add', status: 'synced', path: platformDir };
 }
 
@@ -376,12 +444,11 @@ function packageCapacitorPlatform(platform: 'ios' | 'android', flags: Set<string
 }
 
 function packageJsonVersion(): string {
-	try {
-		const packageJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version?: unknown };
-		return String(packageJson.version || '1.0.0');
-	} catch {
-		return '1.0.0';
+	const packageJson = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version?: unknown };
+	if (typeof packageJson.version !== 'string' || packageJson.version.length === 0) {
+		throw new Error('NATIVE_PACKAGE_VERSION_MISSING');
 	}
+	return packageJson.version;
 }
 
 function setPlistString(plist: string, key: string, value: string): string {
@@ -427,7 +494,7 @@ function updateDesktopInfoPlist(appPath: string): void {
 	writeFileSync(plistPath, plist);
 }
 
-function packageDesktopApp(): NativeArtifact[] {
+function packageDesktopApp(manifest: FrontendReleaseManifest): NativeArtifact[] {
 	if (process.platform !== 'darwin') {
 		const reason = `desktop app bundle packaging is implemented for macOS; current platform is ${process.platform}`;
 		console.warn(`Skipping desktop package: ${reason}`);
@@ -441,11 +508,11 @@ function packageDesktopApp(): NativeArtifact[] {
 	if (!existsSync(electronApp)) {
 		throw new Error(`Electron bootstrap completed without creating ${electronApp}`);
 	}
-	if (!existsSync(path.join(BUILD_DIR, 'index.html'))) {
-		throw new Error(`Missing ${path.join(BUILD_DIR, 'index.html')}. Build frontend before packaging desktop.`);
+	if (!existsSync(path.join(NATIVE_WEB_DIR, 'index.html'))) {
+		throw new Error(`Missing ${path.join(NATIVE_WEB_DIR, 'index.html')}. Prepare manifest-bound wallet before packaging desktop.`);
 	}
-	if (!existsSync(path.join(BUILD_DIR, 'runtime.js'))) {
-		throw new Error(`Missing ${path.join(BUILD_DIR, 'runtime.js')}. Build runtime before packaging desktop.`);
+	if (!existsSync(path.join(NATIVE_WEB_DIR, 'runtime.js'))) {
+		throw new Error(`Missing ${path.join(NATIVE_WEB_DIR, 'runtime.js')}. Prepare manifest-bound wallet before packaging desktop.`);
 	}
 
 	const platformTag = `mac-${process.arch}`;
@@ -464,10 +531,11 @@ function packageDesktopApp(): NativeArtifact[] {
 		private: true,
 	}, null, 2));
 	cpSync(path.join(NATIVE_DIR, 'desktop'), path.join(resourcesApp, 'native/desktop'), { recursive: true });
-	cpSync(BUILD_DIR, path.join(resourcesApp, 'frontend/build'), {
+	cpSync(NATIVE_WEB_DIR, path.join(resourcesApp, 'frontend/build'), {
 		recursive: true,
 		filter: source => !source.includes(`${path.sep}.DS_Store`),
 	});
+	assertNativeWalletCopy(path.join(resourcesApp, 'frontend/build'), manifest, 'desktop', true);
 	updateDesktopInfoPlist(appPath);
 	pruneGeneratedNoise(appPath);
 	const zipPath = path.join(DIST_DIR, 'desktop', `xln-finance-${packageJsonVersion()}-mac-${process.arch}.zip`);
@@ -487,11 +555,11 @@ function desktopLaunchCommand(artifact: NativeArtifact | null): [string, string[
 	return ['bunx', ['electron', 'native/desktop/main.cjs'], ROOT];
 }
 
-function prepareDesktop(flags: Set<string>): NativeArtifact[] {
+function prepareDesktop(flags: Set<string>, manifest: FrontendReleaseManifest): NativeArtifact[] {
 	const main = path.join(NATIVE_DIR, 'desktop/main.cjs');
 	if (!existsSync(main)) throw new Error(`Missing ${main}`);
 	const artifacts: NativeArtifact[] = [];
-	const packageArtifacts = flags.has('--package') ? packageDesktopApp() : [];
+	const packageArtifacts = flags.has('--package') ? packageDesktopApp(manifest) : [];
 	artifacts.push(...packageArtifacts);
 	console.log('\nDesktop shell ready: native/desktop/main.cjs');
 	if (flags.has('--open') || flags.has('--smoke')) {
@@ -499,6 +567,7 @@ function prepareDesktop(flags: Set<string>): NativeArtifact[] {
 		const [command, commandArgs, cwd] = desktopLaunchCommand(appArtifact);
 		run(command, commandArgs, cwd, {
 			...process.env,
+			XLN_DESKTOP_WEB_DIR: NATIVE_WEB_DIR,
 			...(flags.has('--smoke') ? { XLN_ELECTRON_SMOKE: '1' } : {}),
 		});
 	}
@@ -508,7 +577,7 @@ function prepareDesktop(flags: Set<string>): NativeArtifact[] {
 	return artifacts;
 }
 
-function prepareExtension(flags: Set<string>): NativeArtifact[] {
+function prepareExtension(flags: Set<string>, manifest: FrontendReleaseManifest): NativeArtifact[] {
 	const sourceDir = path.join(NATIVE_DIR, 'extension');
 	const distDir = path.join(sourceDir, 'dist');
 	rmSync(distDir, { recursive: true, force: true });
@@ -518,19 +587,20 @@ function prepareExtension(flags: Set<string>): NativeArtifact[] {
 	copyFileSync(path.join(sourceDir, 'extension-service-worker.js'), path.join(distDir, 'extension-service-worker.js'));
 	copyFileSync(path.join(sourceDir, 'extension-security.js'), path.join(distDir, 'extension-security.js'));
 
-	const iconSource = path.join(BUILD_DIR, 'android-chrome-192x192.png');
+	const iconSource = path.join(NATIVE_WEB_DIR, 'android-chrome-192x192.png');
 	if (existsSync(iconSource)) {
 		copyFileSync(iconSource, path.join(distDir, 'icon-128.png'));
 	}
 
-	cpSync(BUILD_DIR, distDir, {
+	cpSync(NATIVE_WEB_DIR, distDir, {
 		recursive: true,
-		filter: source => source === BUILD_DIR || !source.includes(`${path.sep}.DS_Store`),
+		filter: source => source === NATIVE_WEB_DIR || !source.includes(`${path.sep}.DS_Store`),
 	});
 	copyFileSync(path.join(sourceDir, 'manifest.json'), path.join(distDir, 'manifest.json'));
 	copyFileSync(path.join(sourceDir, 'extension-service-worker.js'), path.join(distDir, 'extension-service-worker.js'));
 	copyFileSync(path.join(sourceDir, 'extension-security.js'), path.join(distDir, 'extension-security.js'));
 	pruneGeneratedNoise(distDir);
+	assertNativeWalletCopy(distDir, manifest, 'extension', false);
 	const artifacts: NativeArtifact[] = [
 		{ target: 'extension', kind: 'chrome-extension-unpacked', status: 'built', path: distDir },
 	];
@@ -545,7 +615,12 @@ function prepareExtension(flags: Set<string>): NativeArtifact[] {
 	return artifacts;
 }
 
-function writeArtifactManifest(targets: Platform[], flags: Set<string>, artifacts: NativeArtifact[]): void {
+function writeArtifactManifest(
+	targets: Platform[],
+	flags: Set<string>,
+	artifacts: NativeArtifact[],
+	frontendRelease: FrontendReleaseManifest,
+): void {
 	mkdirSync(DIST_DIR, { recursive: true });
 	const unavailableTools = requiredNativeToolCommands(targets, flags)
 		.filter(command => !commandAvailable(command))
@@ -555,6 +630,12 @@ function writeArtifactManifest(targets: Platform[], flags: Set<string>, artifact
 		repoRoot: ROOT,
 		targets,
 		flags: [...flags].sort(),
+		frontendRelease: {
+			releaseId: frontendRelease.releaseId,
+			sourceCommit: frontendRelease.sourceCommit,
+			productVersion: frontendRelease.productVersion,
+			walletSha256: frontendRelease.surfaces.wallet.contentSha256,
+		},
 		artifacts,
 		unavailableTools,
 	}, null, 2));
@@ -570,22 +651,22 @@ async function main(): Promise<void> {
 
 	assertNativeToolingAvailable(targets, flags);
 	const artifacts: NativeArtifact[] = [];
-	artifacts.push(...ensureFrontendBuild(flags));
-	sanitizeNativeWebBuild();
+	const frontendBuild = ensureFrontendBuild(flags);
+	artifacts.push(...frontendBuild.artifacts);
 
 	for (const target of targets) {
 		if (target === 'ios' || target === 'android') {
-			artifacts.push(syncCapacitorPlatform(target));
+			artifacts.push(syncCapacitorPlatform(target, frontendBuild.manifest));
 			if (flags.has('--package')) artifacts.push(packageCapacitorPlatform(target, flags));
 			if (flags.has('--open')) run('bunx', ['cap', 'open', target], FRONTEND);
 		} else if (target === 'desktop') {
-			artifacts.push(...prepareDesktop(flags));
+			artifacts.push(...prepareDesktop(flags, frontendBuild.manifest));
 		} else if (target === 'extension') {
-			artifacts.push(...prepareExtension(flags));
+			artifacts.push(...prepareExtension(flags, frontendBuild.manifest));
 		}
 	}
 
-	writeArtifactManifest(targets, flags, artifacts);
+	writeArtifactManifest(targets, flags, artifacts, frontendBuild.manifest);
 	console.log(`\nxln native pipeline complete: ${targets.join(', ')}`);
 }
 

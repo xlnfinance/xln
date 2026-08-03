@@ -91,6 +91,9 @@ FRONTEND_ONLY=0
 PRODUCTION=0
 RESET_PRODUCTION_MESH=0
 PREBUILT_FRONTEND_ARCHIVE=""
+PREBUILT_FRONTEND_RELEASE_DIR=""
+PREBUILT_FRONTEND_RELEASE_ID=""
+PREBUILT_FRONTEND_ARCHIVE_SHA256=""
 pause_production_explorer_backend() {
   command -v docker >/dev/null 2>&1 || return 0
   local container
@@ -104,8 +107,20 @@ pause_production_explorer_backend() {
 }
 
 cleanup_local_deploy_artifacts() {
+  local release_temp_prefix="${TMPDIR:-/tmp}"
+  release_temp_prefix="${release_temp_prefix%/}/xln-frontend-release."
   if [ -n "$PREBUILT_FRONTEND_ARCHIVE" ]; then
     rm -f "$PREBUILT_FRONTEND_ARCHIVE"
+  fi
+  if [ -n "$PREBUILT_FRONTEND_RELEASE_DIR" ]; then
+    case "$PREBUILT_FRONTEND_RELEASE_DIR" in
+      "$release_temp_prefix"*)
+        rm -rf -- "$PREBUILT_FRONTEND_RELEASE_DIR"
+        ;;
+      *)
+        echo "FRONTEND_RELEASE_TEMP_PATH_INVALID:path=$PREBUILT_FRONTEND_RELEASE_DIR" >&2
+        ;;
+    esac
   fi
 }
 
@@ -177,6 +192,11 @@ if [ "$PUSH" = "1" ] && [ -z "$REMOTE_HOST" ]; then
   exit 1
 fi
 
+if [ -n "$REMOTE_HOST" ] && [ "$BUILD_FRONTEND" = "1" ] && [ "$PRODUCTION" != "1" ]; then
+  echo "REMOTE_FRONTEND_ATOMIC_ACTIVATION_REQUIRES_PRODUCTION" >&2
+  exit 1
+fi
+
 ensure_main_branch_for_push() {
   local branch
   branch="$(git rev-parse --abbrev-ref HEAD)"
@@ -209,6 +229,9 @@ ensure_committed_contract_artifacts() {
 
 build_remote_frontend_archive() {
   local deploy_build_number
+  local source_commit
+  local product_version
+  local release_root
   deploy_build_number="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
   echo "[deploy] building production frontend locally: $deploy_build_number"
   bun install --frozen-lockfile
@@ -220,8 +243,19 @@ build_remote_frontend_archive() {
     bun install --frozen-lockfile
     XLN_BUILD_NUMBER="$deploy_build_number" bun run build
   )
-  PREBUILT_FRONTEND_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/xln-frontend-build.XXXXXX.tar.gz")"
-  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build
+  source_commit="$(git rev-parse HEAD)"
+  product_version="$(bun -e 'const value = JSON.parse(await Bun.file("package.json").text()).version; if (typeof value !== "string" || value.length === 0) throw new Error("PRODUCT_VERSION_MISSING"); process.stdout.write(value)')"
+  PREBUILT_FRONTEND_RELEASE_ID="${product_version}-${source_commit:0:12}"
+  PREBUILT_FRONTEND_RELEASE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/xln-frontend-release.XXXXXX")"
+  release_root="$PREBUILT_FRONTEND_RELEASE_DIR/$PREBUILT_FRONTEND_RELEASE_ID"
+  bun scripts/deployment/build-frontend-release.ts \
+    "--build-root=$REPO_ROOT/frontend/build" \
+    "--release-root=$release_root" \
+    "--source-commit=$source_commit" \
+    "--product-version=$product_version"
+  PREBUILT_FRONTEND_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/xln-frontend-release.XXXXXX.tar.gz")"
+  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C "$release_root" -czf "$PREBUILT_FRONTEND_ARCHIVE" .
+  PREBUILT_FRONTEND_ARCHIVE_SHA256="$(shasum -a 256 "$PREBUILT_FRONTEND_ARCHIVE" | awk '{print $1}')"
 }
 
 wait_for_rpc_chain() {
@@ -512,6 +546,14 @@ ensure_production_nginx_site_consistency() {
     return 1
   }
 
+  mkdir -p /etc/nginx/snippets
+  bun scripts/deployment/write-frontend-nginx-config.ts \
+    --frontend-root=/root/xln/frontend \
+    --output=/etc/nginx/snippets/xln-frontend-release.conf
+  bun scripts/deployment/install-frontend-nginx-site.ts \
+    --site="$available" \
+    --include=/etc/nginx/snippets/xln-frontend-release.conf
+
   rm -f "$enabled"
   ln -s "$available" "$enabled"
 
@@ -522,14 +564,7 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text()
-marker = """    location = /app {
-        root /root/xln/frontend/build;
-        try_files /index.html =404;
-        default_type text/html;
-        add_header Content-Security-Policy "frame-ancestors 'self' https://xln.finance https://app.xln.finance https://custody.xln.finance https://localhost:* http://localhost:*" always;
-    }
-
-"""
+marker = "    include /etc/nginx/snippets/xln-frontend-release.conf;\n"
 block = """    location = /resetdb {
         default_type text/plain;
         add_header Cache-Control "no-store, max-age=0" always;
@@ -540,7 +575,7 @@ block = """    location = /resetdb {
 
 """
 if marker in text:
-    text = text.replace(marker, marker + block, 1)
+    text = text.replace(marker, block + marker, 1)
     path.write_text(text)
 PY
   fi
@@ -1141,7 +1176,7 @@ run_local_deploy() {
     )
   else
     echo "[deploy] skipping frontend build (--runtime-only)"
-    if [ "$PRODUCTION" = "1" ] && [ ! -s frontend/build/index.html ]; then
+    if [ "$PRODUCTION" = "1" ] && [ ! -s frontend/current/release-manifest.json ]; then
       echo "PRODUCTION_FRONTEND_ARTIFACT_MISSING: run a frontend deploy before runtime-only" >&2
       exit 1
     fi
@@ -1316,10 +1351,10 @@ if [ -n "$REMOTE_HOST" ]; then
   # later rollouts clean it because production persistence lives in /var/lib/xln.
   remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git reset --hard; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi; git checkout -B main origin/main; git reset --hard origin/main; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi;"
   if [ -n "$remote_frontend_archive" ]; then
-    remote_cmd="$remote_cmd rm -rf frontend/build; tar -xzf '$remote_frontend_archive' -C frontend; rm -f '$remote_frontend_archive';"
+    remote_cmd="$remote_cmd FRONTEND_ROOT=/root/xln/frontend; RELEASES_ROOT=\"\$FRONTEND_ROOT/releases\"; RELEASE_ID='$PREBUILT_FRONTEND_RELEASE_ID'; case \"\$RELEASE_ID\" in *[!A-Za-z0-9._-]*|'') echo 'FRONTEND_RELEASE_ID_INVALID' >&2; exit 1;; esac; mkdir -p \"\$RELEASES_ROOT\" /etc/nginx/snippets; FINAL_RELEASE=\"\$RELEASES_ROOT/\$RELEASE_ID\"; if [ -e \"\$FINAL_RELEASE\" ]; then echo 'FRONTEND_RELEASE_ALREADY_STAGED' >&2; exit 1; fi; STAGED_RELEASE=\"\$RELEASES_ROOT/.staging-\$RELEASE_ID-\$\$\"; mkdir \"\$STAGED_RELEASE\"; ACTUAL_SHA=\"\$(sha256sum '$remote_frontend_archive' | awk '{print \$1}')\"; if [ \"\$ACTUAL_SHA\" != '$PREBUILT_FRONTEND_ARCHIVE_SHA256' ]; then echo 'FRONTEND_RELEASE_ARCHIVE_HASH_MISMATCH' >&2; exit 1; fi; tar -xzf '$remote_frontend_archive' -C \"\$STAGED_RELEASE\"; rm -f '$remote_frontend_archive'; bun scripts/deployment/frontend-release-cli.ts validate \"\$STAGED_RELEASE\"; mv \"\$STAGED_RELEASE\" \"\$FINAL_RELEASE\"; bun scripts/deployment/activate-frontend-release-production.ts --frontend-root=\"\$FRONTEND_ROOT\" --release-id=\"\$RELEASE_ID\" --base-url=https://xln.finance --nginx-site=/etc/nginx/sites-available/xln --nginx-include=/etc/nginx/snippets/xln-frontend-release.conf;"
   fi
   if [ "$FRONTEND_ONLY" = "1" ]; then
-    remote_cmd="$remote_cmd test -s frontend/build/index.html; echo '[deploy] frontend artifact installed without runtime restart';"
+    remote_cmd="$remote_cmd test -s frontend/current/release-manifest.json; echo '[deploy] atomic frontend release activated without runtime restart';"
   else
     remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./scripts/deployment/deploy-platform.sh --runtime-only"
     if [ "$FRESH" = "1" ]; then

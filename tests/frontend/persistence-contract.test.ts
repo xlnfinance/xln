@@ -46,6 +46,7 @@ describe('same-origin browser persistence contract', () => {
     expect(NATIVE_WEB_ENTRY).toEqual({ rootPath: '/', redirectPath: '/app', webDir: 'build' });
     expect(appTemplate).toContain("window.location.pathname === '/'");
     expect(appTemplate).toContain("window.history.replaceState(null, '', '/app')");
-    expect(capacitorConfig).toContain("webDir: 'build'");
+    expect(capacitorConfig).toContain("|| 'build'");
+    expect(capacitorConfig).toContain("webDir !== 'build' && webDir !== '.native-wallet-build'");
   });
 });

@@ -22,6 +22,7 @@ frontend/static/llms.txt
 frontend/static/llms*.txt
 frontend/static/c.txt
 frontend/build/
+frontend/.native-wallet-build/
 frontend/src/lib/generated/version.ts
 .svelte-kit/
 
