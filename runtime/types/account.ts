@@ -297,7 +297,7 @@ export interface AccountReplica {
   rollbackCount: number;
   lastRollbackFrameHash?: string; // Track last rollback to prevent duplicate increments
 
-  // Removed isProposer - use isLeft() function like old_src Channel.ts instead
+  // Removed isProposer - use isLeftEntity() function like old_src Channel.ts instead
 
   // Proof structures for dispute resolution
   proofHeader: {

@@ -1,7 +1,7 @@
 import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import { isLeft } from '../utils';
+import { isLeftEntity } from '../utils';
 import { discardStagedAccountCommitmentCache } from '../map-commitment';
 import { accountInputAck, accountInputProposal } from './flush';
 import { prependUniqueMempoolTxs } from './helpers';
@@ -164,7 +164,7 @@ export const resolveSameHeightIncomingFrame = (
    * improving this invariant. Wall time, retries, HTLC expiry and settlement
    * evidence never participate in collision resolution.
    */
-  const localIsLeft = isLeft(account.proofHeader.fromEntity, account.proofHeader.toEntity);
+  const localIsLeft = isLeftEntity(account.proofHeader.fromEntity, account.proofHeader.toEntity);
   if (HEAVY_LOGS) {
     collisionLog.debug('frame.tiebreaker', {
       from: shortId(account.proofHeader.fromEntity),

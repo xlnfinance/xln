@@ -1,3 +1,4 @@
+import { normalizeSubmitId, truncateSubmitFailureMessage } from './submit-identity';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/machine/input';
@@ -25,17 +26,6 @@ type DurableAttempt =
 
 const LOCAL_J_SUBMIT_RUNTIME_TX = Symbol.for('xln.runtime.j-submit.local');
 
-export const normalizeJSubmitId = (value: unknown): string => String(value || '').trim().toLowerCase();
-
-export const MAX_J_SUBMIT_FAILURE_MESSAGE_CHARS = 4_096;
-
-export const truncateJSubmitFailureMessage = (value: unknown): string => {
-  const message = String(value || 'unknown');
-  if (message.length <= MAX_J_SUBMIT_FAILURE_MESSAGE_CHARS) return message;
-  const suffix = `...[truncated:${message.length}]`;
-  return message.slice(0, MAX_J_SUBMIT_FAILURE_MESSAGE_CHARS - suffix.length) + suffix;
-};
-
 type JSubmitAttemptIdentity = {
   jurisdictionName: string;
   entityId: string;
@@ -56,10 +46,10 @@ export type JSubmitBatchIdentity = Omit<JSubmitAttemptIdentity, 'attemptNumber'>
  * repeats the same on-chain nonce and batch hash.
  */
 export const buildJSubmitAttemptId = (identity: JSubmitAttemptIdentity): string => {
-  const jurisdictionName = normalizeJSubmitId(identity.jurisdictionName);
-  const entityId = normalizeJSubmitId(identity.entityId);
-  const signerId = normalizeJSubmitId(identity.signerId);
-  const batchHash = normalizeJSubmitId(identity.batchHash);
+  const jurisdictionName = normalizeSubmitId(identity.jurisdictionName);
+  const entityId = normalizeSubmitId(identity.entityId);
+  const signerId = normalizeSubmitId(identity.signerId);
+  const batchHash = normalizeSubmitId(identity.batchHash);
   if (!jurisdictionName) throw new Error('J_SUBMIT_ATTEMPT_JURISDICTION_MISSING');
   if (!entityId) throw new Error('J_SUBMIT_ATTEMPT_ENTITY_MISSING');
   if (!signerId) throw new Error('J_SUBMIT_ATTEMPT_SIGNER_MISSING');
@@ -86,12 +76,12 @@ export const buildJSubmitAttemptId = (identity: JSubmitAttemptIdentity): string 
 };
 
 export const findJSubmitReplica = (env: RuntimeReplica, entityId: string, signerId: string): EntityReplica | null => {
-  const entity = normalizeJSubmitId(entityId);
-  const signer = normalizeJSubmitId(signerId);
+  const entity = normalizeSubmitId(entityId);
+  const signer = normalizeSubmitId(signerId);
   for (const replica of env.state.eReplicas.values()) {
     if (
-      normalizeJSubmitId(replica.entityId) === entity &&
-      normalizeJSubmitId(replica.signerId) === signer
+      normalizeSubmitId(replica.entityId) === entity &&
+      normalizeSubmitId(replica.signerId) === signer
     ) return replica;
   }
   return null;
@@ -103,7 +93,7 @@ export const isMatchingJSubmitBatch = (
   entityNonce: number,
 ): boolean => Boolean(
   sent &&
-  normalizeJSubmitId(sent.batchHash) === normalizeJSubmitId(batchHash) &&
+  normalizeSubmitId(sent.batchHash) === normalizeSubmitId(batchHash) &&
   Number(sent.entityNonce) === Number(entityNonce)
 );
 
@@ -130,7 +120,7 @@ const requireCanonicalPendingAttempt = (
   const expected = buildJSubmitAttemptId({
     jurisdictionName,
     entityId: jTx.entityId,
-    signerId: normalizeJSubmitId(jTx.data.signerId),
+    signerId: normalizeSubmitId(jTx.data.signerId),
     entityNonce: Number(jTx.data.entityNonce),
     batchGeneration: batchAttempt.batchGeneration,
     batchHash: String(jTx.data.batchHash || ''),
@@ -173,10 +163,10 @@ const matchesJSubmitBatchIdentity = (
   identity: JSubmitBatchIdentity,
 ): boolean => Boolean(
   jTx.type === 'batch' &&
-  normalizeJSubmitId(jurisdictionName) === normalizeJSubmitId(identity.jurisdictionName) &&
-  normalizeJSubmitId(jTx.entityId) === normalizeJSubmitId(identity.entityId) &&
-  normalizeJSubmitId(jTx.data.signerId) === normalizeJSubmitId(identity.signerId) &&
-  normalizeJSubmitId(jTx.data.batchHash) === normalizeJSubmitId(identity.batchHash) &&
+  normalizeSubmitId(jurisdictionName) === normalizeSubmitId(identity.jurisdictionName) &&
+  normalizeSubmitId(jTx.entityId) === normalizeSubmitId(identity.entityId) &&
+  normalizeSubmitId(jTx.data.signerId) === normalizeSubmitId(identity.signerId) &&
+  normalizeSubmitId(jTx.data.batchHash) === normalizeSubmitId(identity.batchHash) &&
   Number(jTx.data.entityNonce) === Number(identity.entityNonce) &&
   Number(jTx.data.batchGeneration) === Number(identity.batchGeneration)
 );
@@ -365,7 +355,7 @@ export const makeJSubmitResultRuntimeTx = (
   } = {},
 ): RecordJSubmitResultTx => {
   const attempt = jTx.data.runtimeSubmitAttempt;
-  const signerId = normalizeJSubmitId(jTx.data.signerId);
+  const signerId = normalizeSubmitId(jTx.data.signerId);
   if (!attempt) throw new Error('J_SUBMIT_RESULT_ATTEMPT_METADATA_MISSING');
   if (!signerId) throw new Error('J_SUBMIT_RESULT_SIGNER_MISSING');
   const expectedAttemptId = buildJSubmitAttemptId({
@@ -380,11 +370,11 @@ export const makeJSubmitResultRuntimeTx = (
   if (attempt.attemptId !== expectedAttemptId) {
     throw new Error(`J_SUBMIT_RESULT_ATTEMPT_ID_MISMATCH:${attempt.attemptId}:${expectedAttemptId}`);
   }
-  const message = extra.message ? truncateJSubmitFailureMessage(extra.message) : undefined;
+  const message = extra.message ? truncateSubmitFailureMessage(extra.message) : undefined;
   const adapterFailure = extra.adapterFailure
     ? {
         ...structuredClone(extra.adapterFailure),
-        message: truncateJSubmitFailureMessage(extra.adapterFailure.message),
+        message: truncateSubmitFailureMessage(extra.adapterFailure.message),
       }
     : undefined;
   return markLocalJSubmitRuntimeTx({
@@ -422,7 +412,7 @@ export const splitJOutboxForDurableSubmit = (
           requireCanonicalEntityProviderActionAttempt(input.jurisdictionName, jTx);
           durableTxs.push(jTx);
         } else {
-          const signerId = normalizeJSubmitId(jTx.data.signerId);
+          const signerId = normalizeSubmitId(jTx.data.signerId);
           if (!signerId) throw new Error(`ENTITY_PROVIDER_ACTION_SUBMITTER_MISSING:${jTx.entityId}`);
           if (!jTx.data.hankoSignature) {
             throw new Error(`ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${jTx.entityId}`);
@@ -453,7 +443,7 @@ export const splitJOutboxForDurableSubmit = (
       } else if (jTx.data.runtimeSubmitAttempt) {
         durableTxs.push(jTx);
       } else {
-        const signerId = normalizeJSubmitId(jTx.data.signerId);
+        const signerId = normalizeSubmitId(jTx.data.signerId);
         if (!signerId) throw new Error(`J_SUBMIT_INTENT_SIGNER_MISSING:${jTx.entityId}`);
         const batchGeneration = Number(jTx.data.batchGeneration);
         if (!Number.isSafeInteger(batchGeneration) || batchGeneration <= 0) {

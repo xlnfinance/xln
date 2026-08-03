@@ -1,4 +1,4 @@
-import { deriveDelta, isLeft } from '../../../account/utils';
+import { deriveDelta, isLeftEntity } from '../../../account/utils';
 import { HTLC } from '../../../config/constants';
 import { createStructuredLogger } from '../../../infra/logger';
 import {
@@ -111,7 +111,7 @@ const nextHopCapacity = (state: EntityState, nextHop: string, tokenId: number) =
   const account = state.accounts.get(nextHop);
   const delta = account?.state.deltas.get(tokenId);
   if (!delta) return { outCapacity: 0n, inCapacity: 0n };
-  return deriveDelta(delta, isLeft(state.entityId, nextHop));
+  return deriveDelta(delta, isLeftEntity(state.entityId, nextHop));
 };
 
 const applyForwardAdvance = (

@@ -156,7 +156,6 @@ export interface FrontendXlnFunctions {
   prepareSwapOrder: XLNModule['prepareSwapOrder'];
   quantizeSwapOrder: XLNModule['quantizeSwapOrder'];
   requantizeRemainingSwapAtPrice: XLNModule['requantizeRemainingSwapAtPrice'];
-  isLeft: XLNModule['isLeft'];
   createDemoDelta: XLNModule['createDemoDelta'];
   getDefaultCreditLimit: XLNModule['getDefaultCreditLimit'];
   safeStringify: XLNModule['safeStringify'];
@@ -1794,7 +1793,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       prepareSwapOrder: failFn('prepareSwapOrder'),
       quantizeSwapOrder: failFn('quantizeSwapOrder'),
       requantizeRemainingSwapAtPrice: failFn('requantizeRemainingSwapAtPrice'),
-      isLeft: failFn('isLeft'),
       createDemoDelta: failFn('createDemoDelta'),
       getDefaultCreditLimit: failFn('getDefaultCreditLimit'),
       safeStringify: failFn('safeStringify'),
@@ -1852,7 +1850,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     prepareSwapOrder: $xlnInstance.prepareSwapOrder,
     quantizeSwapOrder: $xlnInstance.quantizeSwapOrder,
     requantizeRemainingSwapAtPrice: $xlnInstance.requantizeRemainingSwapAtPrice,
-    isLeft: $xlnInstance.isLeft,
     createDemoDelta: $xlnInstance.createDemoDelta,
     getDefaultCreditLimit: $xlnInstance.getDefaultCreditLimit,
     safeStringify: $xlnInstance.safeStringify,

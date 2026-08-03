@@ -1,7 +1,7 @@
 import type { AccountReplica, AccountTx } from '../../types/account';
 import type { AccountConsensusContext } from './context';
 import { cloneAccountReplica } from '../state-clone';
-import { isLeft } from '../utils';
+import { isLeftEntity } from '../utils';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
@@ -107,7 +107,7 @@ const applyProposalTransaction = async (
   const result = await applyAccountTx(
     machine,
     preparedTx,
-    isLeft(context.account.proofHeader.fromEntity, context.account.proofHeader.toEntity),
+    isLeftEntity(context.account.proofHeader.fromEntity, context.account.proofHeader.toEntity),
     context.frameTimestamp,
     context.frameJHeight,
     true,

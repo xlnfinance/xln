@@ -1,5 +1,5 @@
 import { keccak256 } from 'ethers';
-import { deriveDelta, isLeft } from '../account/utils';
+import { deriveDelta, isLeftEntity } from '../account/utils';
 import type { EntityState } from './types';
 import { compareStableText, serializeTaggedJson } from '../protocol/serialization';
 import type {
@@ -70,7 +70,7 @@ const buildProfileAccounts = (state: EntityState): { accounts: ProfileAccount[];
     let hasInboundCapacity = false;
     const deltas = [...account.state.deltas.entries()].sort(([left], [right]) => compareTokenId(String(left), String(right)));
     for (const [tokenId, delta] of deltas) {
-      const derived = deriveDelta(delta, isLeft(account.proofHeader.fromEntity, account.proofHeader.toEntity));
+      const derived = deriveDelta(delta, isLeftEntity(account.proofHeader.fromEntity, account.proofHeader.toEntity));
       capacities[String(tokenId)] = { inCapacity: derived.inCapacity, outCapacity: derived.outCapacity };
       if (derived.inCapacity > 0n) hasInboundCapacity = true;
     }

@@ -1,3 +1,4 @@
+import { normalizeSubmitId } from './submit-identity';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 import { getLocalSignerPrivateKey } from '../account/crypto';
@@ -34,17 +35,6 @@ export const isEntityProviderActionJTx = (jTx: JTx): jTx is ActionJTx =>
 
 const MAX_UINT256 = (1n << 256n) - 1n;
 
-export const normalizeEntityProviderActionId = (value: unknown): string =>
-  String(value ?? '').trim().toLowerCase();
-
-export const MAX_ENTITY_PROVIDER_ACTION_FAILURE_MESSAGE_CHARS = 4_096;
-
-export const truncateEntityProviderActionFailureMessage = (value: unknown): string => {
-  const message = String(value ?? 'unknown');
-  if (message.length <= MAX_ENTITY_PROVIDER_ACTION_FAILURE_MESSAGE_CHARS) return message;
-  const suffix = `...[truncated:${message.length}]`;
-  return message.slice(0, MAX_ENTITY_PROVIDER_ACTION_FAILURE_MESSAGE_CHARS - suffix.length) + suffix;
-};
 
 export type EntityProviderActionAttemptIdentity = {
   jurisdictionName: string;
@@ -59,10 +49,10 @@ export type EntityProviderActionAttemptIdentity = {
 export const buildEntityProviderActionAttemptId = (
   identity: EntityProviderActionAttemptIdentity,
 ): string => {
-  const jurisdictionName = normalizeEntityProviderActionId(identity.jurisdictionName);
-  const entityId = normalizeEntityProviderActionId(identity.entityId);
-  const signerId = normalizeEntityProviderActionId(identity.signerId);
-  const actionHash = normalizeEntityProviderActionId(identity.actionHash);
+  const jurisdictionName = normalizeSubmitId(identity.jurisdictionName);
+  const entityId = normalizeSubmitId(identity.entityId);
+  const signerId = normalizeSubmitId(identity.signerId);
+  const actionHash = normalizeSubmitId(identity.actionHash);
   if (!jurisdictionName) throw new Error('ENTITY_PROVIDER_ACTION_ATTEMPT_JURISDICTION_MISSING');
   if (!entityId) throw new Error('ENTITY_PROVIDER_ACTION_ATTEMPT_ENTITY_MISSING');
   if (!signerId) throw new Error('ENTITY_PROVIDER_ACTION_ATTEMPT_SIGNER_MISSING');
@@ -106,7 +96,7 @@ export const requireCanonicalEntityProviderActionAttempt = (
     throw new Error(`ENTITY_PROVIDER_ACTION_JTX_KIND_MISMATCH:${jTx.type}:${intent.payload.kind}`);
   }
   if (
-    normalizeEntityProviderActionId(jTx.entityId) !== normalizeEntityProviderActionId(intent.entityId) ||
+    normalizeSubmitId(jTx.entityId) !== normalizeSubmitId(intent.entityId) ||
     intent.actionHash.toLowerCase() !== recomputeEntityProviderActionHash(intent) ||
     attempt.generation !== intent.generation ||
     attempt.attemptedAt < 0 ||
@@ -132,12 +122,12 @@ export const findEntityProviderActionReplica = (
   entityId: string,
   signerId: string,
 ): EntityReplica | null => {
-  const entity = normalizeEntityProviderActionId(entityId);
-  const signer = normalizeEntityProviderActionId(signerId);
+  const entity = normalizeSubmitId(entityId);
+  const signer = normalizeSubmitId(signerId);
   for (const replica of env.state.eReplicas.values()) {
     if (
-      normalizeEntityProviderActionId(replica.entityId) === entity &&
-      normalizeEntityProviderActionId(replica.signerId) === signer
+      normalizeSubmitId(replica.entityId) === entity &&
+      normalizeSubmitId(replica.signerId) === signer
     ) return replica;
   }
   return null;
@@ -149,10 +139,10 @@ export const actionAttemptMatchesIdentity = (
   identity: Omit<EntityProviderActionAttemptIdentity, 'attemptNumber'>,
 ): boolean => Boolean(
   isEntityProviderActionJTx(jTx) &&
-  normalizeEntityProviderActionId(jurisdictionName) === normalizeEntityProviderActionId(identity.jurisdictionName) &&
-  normalizeEntityProviderActionId(jTx.entityId) === normalizeEntityProviderActionId(identity.entityId) &&
-  normalizeEntityProviderActionId(jTx.data.signerId) === normalizeEntityProviderActionId(identity.signerId) &&
-  normalizeEntityProviderActionId(jTx.data.intent.actionHash) === normalizeEntityProviderActionId(identity.actionHash) &&
+  normalizeSubmitId(jurisdictionName) === normalizeSubmitId(identity.jurisdictionName) &&
+  normalizeSubmitId(jTx.entityId) === normalizeSubmitId(identity.entityId) &&
+  normalizeSubmitId(jTx.data.signerId) === normalizeSubmitId(identity.signerId) &&
+  normalizeSubmitId(jTx.data.intent.actionHash) === normalizeSubmitId(identity.actionHash) &&
   jTx.data.intent.actionNonce === identity.actionNonce &&
   jTx.data.intent.generation === identity.generation
 );
@@ -207,7 +197,7 @@ export const getMatchingEntityProviderActionSubmitState = (replica: EntityReplic
   if (
     !pending ||
     !local ||
-    normalizeEntityProviderActionId(local.actionHash) !== normalizeEntityProviderActionId(pending.actionHash) ||
+    normalizeSubmitId(local.actionHash) !== normalizeSubmitId(pending.actionHash) ||
     local.actionNonce !== pending.actionNonce ||
     local.generation !== pending.generation
   ) return null;
@@ -223,8 +213,8 @@ export const applyRetryEntityProviderActionRuntimeTx = (
   if (!isEntityActiveLeader(replica)) throw new Error(`ENTITY_PROVIDER_ACTION_NOT_ACTIVE_LEADER:${tx.data.signerId}`);
   const { pending, jurisdictionName } = requireTrustedPending(env, replica);
   if (
-    normalizeEntityProviderActionId(jurisdictionName) !== normalizeEntityProviderActionId(tx.data.jurisdictionName) ||
-    normalizeEntityProviderActionId(pending.actionHash) !== normalizeEntityProviderActionId(tx.data.actionHash) ||
+    normalizeSubmitId(jurisdictionName) !== normalizeSubmitId(tx.data.jurisdictionName) ||
+    normalizeSubmitId(pending.actionHash) !== normalizeSubmitId(tx.data.actionHash) ||
     pending.actionNonce !== tx.data.actionNonce ||
     pending.generation !== tx.data.generation
   ) throw new Error(`ENTITY_PROVIDER_ACTION_COMMITTED_INTENT_MISMATCH:${tx.data.entityId}`);
@@ -295,6 +285,6 @@ export const applyRetryEntityProviderActionRuntimeTx = (
 };
 
 export const canSubmitEntityProviderActionLocally = (env: RuntimeReplica, signerId: string): boolean => {
-  const signer = normalizeEntityProviderActionId(signerId);
-  return signer === normalizeEntityProviderActionId(env.runtimeId) || Boolean(getLocalSignerPrivateKey(env, signer));
+  const signer = normalizeSubmitId(signerId);
+  return signer === normalizeSubmitId(env.runtimeId) || Boolean(getLocalSignerPrivateKey(env, signer));
 };

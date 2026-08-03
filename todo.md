@@ -51,41 +51,35 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   than complexity. Separate test-only exports from genuinely unreachable ones
   before removing anything; `check:dead-code:report` lists them.
 
-### Model-audit findings parked for owner judgement — 2026-08-03
+### Model-audit findings resolved — 2026-08-03
 
-Four models (Kimi K3, Grok 4.5, Gemini 3.6 Flash, GLM 5.2) audited the core
-read-only for canonicity. Applied findings are committed; these are the ones I
-did not act on alone, each with why. All are Solidity unless noted.
+Four models audited the core read-only. Applied findings are committed. The six
+items previously parked here are now decided; four turned out to be wrong, which
+is why they were parked rather than applied.
 
-- [ ] `HankoCodec.computeXHashForDomain` family (~170 LOC). Reported as a second
-  hash path inside the audit surface. I did not verify that every variant is
-  unreachable, and a wrong deletion here changes what a Hanko commits to.
-  Question: is this family live, or superseded by `onchain-domain.ts`?
-- [ ] `EntityProvider.registerNumberedEntity` (~33 LOC) duplicates one iteration
-  of `registerNumberedEntitiesBatch`. Collapsing is mechanical but changes a
-  public entry point that deployment tooling may call. Question: may the single
-  registration path be removed in favour of a one-element batch?
-- [ ] `EntityProvider` declares 17 Hanko errors it never reverts with (~17 LOC).
-  Likely shared with HankoVerifier by convention. Question: are these part of a
-  published error surface consumers decode against?
-- [ ] `Account._increaseReserve` and `Depository._increaseReserve` /
-  `_decreaseReserve` are thin wrappers (~16 LOC). Removing them is safe only if
-  the indirection is not deliberate for the library/contract split.
-- [ ] `getCanonicalAccountKey` performs a sort whose result is discarded, and
-  `createSettlementHashWithNonce` inlines the account-key derivation (~10 LOC).
-- [ ] `isLeft` in `runtime/account/utils.ts` re-exports `isLeftEntity` under a
-  second name (TypeScript). Collapsing costs five call-site renames. Question:
-  keep the short name at call sites, or one name everywhere?
+Applied:
 
-Rejected, with reason - do not re-report:
+- `isLeft` was a second name for `isLeftEntity`. One name, 31 call sites. The
+  frontend also exposed it through the store with no component reading it.
 
-- `encodeAccountStateValueOracle` is not dead code. It is a deliberate second
-  RLP implementation used by `account-state-root.test.ts` as a differential
-  oracle against the fast path. Deleting it removes the cross-check that proves
-  the optimised encoder is correct.
-- Folding `Account._accountKey` into the external `accountKey` was proposed by
-  one model and is backwards: the external one had no caller and is now
-  deleted, the internal one is live.
+Rejected - do not re-report:
+
+- `HankoCodec.computeXHashForDomain` family is not dead. `check-onchain-hanko-ast.ts`
+  pins its exact function list, requires each to stay `external pure`, and
+  requires each to call `HankoEncoding` exactly once. It is a deliberately
+  published codec surface for off-chain verification parity.
+- `EntityProvider.registerNumberedEntity` is live: four Solidity tests call it.
+- The 17 "unused" Hanko errors in `EntityProvider` are reverted by
+  `HankoVerifier`. EntityProvider declares them so that a caller holding only
+  its ABI can decode a revert that originates in the verifier it delegates to.
+  Deleting them would make those reverts undecodable.
+- `_increaseReserve` / `_decreaseReserve` are not wrappers worth inlining: they
+  have six or more call sites each, so removing them adds code.
+- The entity sort in `getCanonicalAccountKey` (`protocol/dispute/proof-builder.ts`)
+  is load-bearing, not a dead branch. `DisputeHashState` is a local, perspective-
+  dependent view rather than committed Account state, and
+  `proof-builder-dispute-hash` asserts the key is identical "regardless of local
+  left/right orientation". I removed it, the test caught it, and it is restored.
 
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 

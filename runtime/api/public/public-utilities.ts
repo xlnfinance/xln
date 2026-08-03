@@ -22,7 +22,7 @@ export {
   getSwapPairOrientation,
   getTokenIdsForJurisdiction,
   getTokenInfo,
-  isLeft,
+  isLeftEntity,
   isLiquidSwapToken,
 } from '../../account/utils';
 export {

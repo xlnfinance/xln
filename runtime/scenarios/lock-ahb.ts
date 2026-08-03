@@ -21,7 +21,7 @@ import type { JAdapter } from '../jurisdiction/adapter/types';
 import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, processUntilWithoutLocalHtlcAdvance, withholdScenarioLocalHtlcAdvances } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from './boot';
 import { formatRuntime } from '../qa/runtime-ascii';
-import { isLeft } from '../account/utils';
+import { isLeftEntity } from '../account/utils';
 import { ethers } from 'ethers';
 import { createRngFromEnv } from './seeded-rng';
 import { generateLazyEntityId } from '../entity/factory';
@@ -569,7 +569,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     }
     // ✅ ASSERT: ondelta follows contract rule (left-side ondelta only)
     // Depository.reserveToCollateral only updates ondelta when receivingEntity is LEFT.
-    const aliceIsLeftAH9 = isLeft(alice.id, hub.id);
+    const aliceIsLeftAH9 = isLeftEntity(alice.id, hub.id);
     const expectedOndelta9 = aliceIsLeftAH9 ? aliceCollateralAmount : 0n;
     if (aliceDelta9.ondelta !== expectedOndelta9) {
       throw new Error(`ASSERT FAIL Frame 9: Alice-Hub ondelta = ${aliceDelta9.ondelta}, expected ${expectedOndelta9}. R2C ondelta mismatch!`);
@@ -635,7 +635,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const [, bobRep9] = findReplica(env, bob.id);
     const bobHubAccount9 = bobRep9.state.accounts.get(hub.id); // Account keyed by counterparty
     const bobDelta9 = bobHubAccount9?.state.deltas.get(USDC_TOKEN_ID);
-    const counterpartyIsLeft = isLeft(hub.id, bob.id);
+    const counterpartyIsLeft = isLeftEntity(hub.id, bob.id);
     const expectedField = counterpartyIsLeft ? 'leftCreditLimit' : 'rightCreditLimit';
     const actualLimit = bobDelta9 ? bobDelta9[expectedField] : 0n;
     if (!bobDelta9 || actualLimit !== bobCreditAmount) {
@@ -900,7 +900,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const bobHubAcc = bobRep.state.accounts.get(bob.id);
     const bobDelta = bobHubAcc?.state.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
-      const bobIsLeftHB = isLeft(bob.id, hub.id);
+      const bobIsLeftHB = isLeftEntity(bob.id, hub.id);
       const bobDerived = deriveDelta(bobDelta, bobIsLeftHB);
       console.log(`   Bob outCapacity: ${bobDerived.outCapacity} (received $${Number(expectedBobReceived) / 1e18})`);
       if (bobDerived.outCapacity !== expectedBobReceived) {
