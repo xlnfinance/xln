@@ -1,0 +1,33 @@
+{
+	"name": "xln-ui",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"scripts": {
+		"runtime:bundle": "XLN_RUNTIME_BUNDLE_OUT=ui/public/runtime.js bash ../scripts/build-runtime.sh",
+		"dev": "bun run runtime:bundle && vite",
+		"build": "bun run runtime:bundle && vite build",
+		"preview": "vite preview",
+		"check": "tsc --noEmit"
+	},
+	"dependencies": {
+		"ethers": "^6.13.4",
+		"hash-wasm": "^4.12.0",
+		"lucide-react": "^0.544.0",
+		"qrcode": "^1.5.4",
+		"react": "^19.2.8",
+		"react-dom": "^19.2.8",
+		"react-router-dom": "^7.1.1",
+		"zustand": "^5.0.2"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.3.14",
+		"@types/node": "^26.1.2",
+		"@types/qrcode": "^1.5.5",
+		"@types/react": "^19.0.0",
+		"@types/react-dom": "^19.0.0",
+		"@vitejs/plugin-react": "^4.3.4",
+		"typescript": "^5.9.3",
+		"vite": "^7.3.6"
+	}
+}
