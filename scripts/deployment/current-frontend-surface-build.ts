@@ -1,10 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import {
   FRONTEND_ROUTES,
   type FrontendRoute,
 } from '../../frontend/src/lib/contracts/frontendSurfaces';
+import {
+  REACT_CANDIDATE_MANIFEST_FILE,
+  validateReactCandidateManifest,
+} from '../../frontend/packages/build-contracts/react-candidate';
 import { buildFrontendReleaseAssets } from './frontend-release-files';
 import {
   FRONTEND_BUILD_IDENTITY_FILE,
@@ -45,6 +49,20 @@ const allSurfaces = (path: string): SurfaceDestination[] =>
 
 const selectedSurfaces = (path: string, surfaces: readonly FrontendReleaseSurfaceId[]): SurfaceDestination[] =>
   surfaces.map(surface => ({ surface, path }));
+
+export const assertNoBlockedReactCandidateBuild = (buildRoot: string): void => {
+  const manifestPath = join(buildRoot, 'site', REACT_CANDIDATE_MANIFEST_FILE);
+  if (!existsSync(manifestPath)) return;
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
+  } catch (error) {
+    throw new Error(`FRONTEND_REACT_CANDIDATE_MANIFEST_INVALID:${error instanceof Error ? error.message : String(error)}`);
+  }
+  const errors = validateReactCandidateManifest(manifest, currentFrontendEntrypoints().site);
+  if (errors.length > 0) throw new Error(`FRONTEND_REACT_CANDIDATE_MANIFEST_INVALID:${errors.join(',')}`);
+  throw new Error('FRONTEND_REACT_CANDIDATE_ACTIVATION_BLOCKED:site');
+};
 
 const extraAssetDestinations = (path: string): SurfaceDestination[] | null => {
   if (path.startsWith('_app/')) return allSurfaces(path);
@@ -102,6 +120,7 @@ export const assembleCurrentFrontendSurfaces = (
   outputRoot: string,
 ): Readonly<Record<FrontendReleaseSurfaceId, string>> => {
   if (!existsSync(buildRoot)) throw new Error(`FRONTEND_UNIFIED_BUILD_MISSING:${buildRoot}`);
+  assertNoBlockedReactCandidateBuild(buildRoot);
   if (existsSync(outputRoot) && readdirSync(outputRoot).length > 0) {
     throw new Error(`FRONTEND_SURFACE_OUTPUT_NOT_EMPTY:${outputRoot}`);
   }

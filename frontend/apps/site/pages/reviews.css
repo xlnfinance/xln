@@ -1,0 +1,16 @@
+.reviews-page { min-height: calc(100vh - 56px); padding: clamp(48px, 7vw, 100px) 24px; background: #07090b; }
+.reviews-page > header { max-width: 760px; margin: 0 auto 48px; text-align: center; }
+.reviews-page h1 { margin: 8px 0 14px; color: #62e6a6; font-size: clamp(38px, 7vw, 72px); line-height: .96; letter-spacing: -.04em; }
+.reviews-page header > p:last-child { color: #9aa59e; font-size: 18px; }
+.review-prompts { max-width: 1280px; margin: 0 auto 38px; display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }
+.review-prompts button { flex: 1 0 190px; min-height: 56px; padding: 10px 14px; color: #a6afa9; background: transparent; border: 0; border-top: 1px solid #2b332e; text-align: left; cursor: pointer; }
+.review-prompts button span { display: block; margin-bottom: 6px; color: #5b6860; font: 600 11px ui-monospace, monospace; }
+.review-prompts button.active { color: #e9f1ec; border-color: #62e6a6; background: linear-gradient(180deg, rgba(98,230,166,.08), transparent); }
+.review-grid { max-width: 1280px; margin: auto; display: grid; grid-template-columns: repeat(4, 1fr); border-block: 1px solid #26302a; }
+.review-grid article { min-width: 0; padding: 28px; border-right: 1px solid #26302a; }
+.review-grid article:last-child { border: 0; }
+.review-grid h2 { color: #46cfee; font: 600 13px ui-monospace, monospace; }
+.review-grid blockquote { margin: 28px 0 0; color: #c8d0cb; font-size: 18px; line-height: 1.65; }
+.review-disclaimer { max-width: 840px; margin: 42px auto 0; color: #66736b; text-align: center; font-size: 13px; }
+@media (max-width: 900px) { .review-grid { grid-template-columns: 1fr 1fr; } .review-grid article:nth-child(2) { border-right: 0; } .review-grid article { border-bottom: 1px solid #26302a; } }
+@media (max-width: 560px) { .reviews-page { padding-inline: 16px; } .review-prompts { display: grid; grid-template-columns: 1fr; overflow: visible; } .review-prompts button { min-height: 64px; width: 100%; } .review-grid { grid-template-columns: 1fr; } .review-grid article { min-height: 0; border-right: 0; } }

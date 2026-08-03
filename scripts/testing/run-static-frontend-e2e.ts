@@ -3,7 +3,7 @@ import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { preview, type PreviewServer } from 'vite';
-import { parseStaticFrontendSpecs } from './static-frontend-e2e-contract';
+import { parseStaticFrontendSpecs, staticFrontendTarget, type StaticFrontendTarget } from './static-frontend-e2e-contract';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, '..', '..');
@@ -36,14 +36,17 @@ const reserveLoopbackPort = async (): Promise<number> => {
   return address.port;
 };
 
-const startPreview = async (port: number): Promise<PreviewServer> => {
+const startPreview = async (port: number, target: StaticFrontendTarget): Promise<PreviewServer> => {
   const originalCwd = process.cwd();
   const originalForceHttp = process.env['XLN_VITE_FORCE_HTTP'];
+  const originalSurface = process.env['XLN_FRONTEND_SURFACE'];
   process.chdir(FRONTEND_ROOT);
-  process.env['XLN_VITE_FORCE_HTTP'] = '1';
-  try {
-    const server = await preview({
-      preview: { host: '127.0.0.1', port, strictPort: true, open: false },
+    process.env['XLN_VITE_FORCE_HTTP'] = '1';
+    if (target === 'react-site') process.env['XLN_FRONTEND_SURFACE'] = 'site';
+    try {
+      const server = await preview({
+        configFile: target === 'react-site' ? join(FRONTEND_ROOT, 'vite.react.config.ts') : undefined,
+        preview: { host: '127.0.0.1', port, strictPort: true, open: false },
     });
     const address = server.httpServer.address();
     if (address && typeof address !== 'string' && address.port === port) return server;
@@ -53,6 +56,8 @@ const startPreview = async (port: number): Promise<PreviewServer> => {
     process.chdir(originalCwd);
     if (originalForceHttp === undefined) delete process.env['XLN_VITE_FORCE_HTTP'];
     else process.env['XLN_VITE_FORCE_HTTP'] = originalForceHttp;
+    if (originalSurface === undefined) delete process.env['XLN_FRONTEND_SURFACE'];
+    else process.env['XLN_FRONTEND_SURFACE'] = originalSurface;
   }
 };
 
@@ -76,14 +81,15 @@ const runPlaywright = async (baseUrl: string, specs: readonly string[]): Promise
 
 export const main = async (args: readonly string[]): Promise<void> => {
   const specs = parseStaticFrontendSpecs(args);
+  const target = staticFrontendTarget(specs);
   const httpEnv = {
     ...process.env,
     XLN_BUN_EXECUTABLE: process.execPath,
     XLN_VITE_FORCE_HTTP: '1',
   };
-  await run(process.execPath, ['run', 'build'], FRONTEND_ROOT, httpEnv);
+  await run(process.execPath, ['run', target === 'react-site' ? 'build:react:site' : 'build'], FRONTEND_ROOT, httpEnv);
   const port = await reserveLoopbackPort();
-  const server = await startPreview(port);
+  const server = await startPreview(port, target);
   try {
     const baseUrl = `http://127.0.0.1:${port}`;
     await runPlaywright(baseUrl, specs);

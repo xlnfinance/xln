@@ -4,6 +4,7 @@ import {
   isStaticFrontendSpecPath,
   parseStaticFrontendSpecs,
   shouldQueryRuntimeIncidents,
+  staticFrontendTarget,
 } from '../../scripts/testing/static-frontend-e2e-contract';
 
 describe('static frontend E2E contract', () => {
@@ -35,6 +36,13 @@ describe('static frontend E2E contract', () => {
     expect(isStaticFrontendSpecPath('/repo/tests/docs-site.spec.ts')).toBe(true);
     expect(isStaticFrontendSpecPath('tests/landing-site.spec.ts')).toBe(true);
     expect(isStaticFrontendSpecPath('/repo/tests/e2e-payment-smoke.spec.ts')).toBe(false);
+  });
+
+  test('selects one build target and rejects mixed framework runs', () => {
+    expect(staticFrontendTarget(['tests/docs-site.spec.ts'])).toBe('legacy-docs');
+    expect(staticFrontendTarget(['tests/landing-site.spec.ts', 'tests/public-site-react.spec.ts'])).toBe('react-site');
+    expect(() => staticFrontendTarget(['tests/docs-site.spec.ts', 'tests/landing-site.spec.ts']))
+      .toThrow('STATIC_FRONTEND_E2E_MIXED_TARGETS');
   });
 
   test('keeps public surfaces independent from remote font hosts', () => {

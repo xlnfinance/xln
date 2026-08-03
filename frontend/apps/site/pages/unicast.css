@@ -1,0 +1,23 @@
+.unicast-page { min-height: calc(100vh - 56px); padding: clamp(44px, 7vw, 96px) 24px; color: #e8ece9; background: #050708; }
+.unicast-page > header { max-width: 880px; margin: 0 auto 42px; text-align: center; }
+.unicast-page h1 { margin: 8px 0 16px; font-size: clamp(38px, 6vw, 74px); line-height: .96; letter-spacing: -.045em; }
+.unicast-page header > p:last-child { color: #91a098; font-size: 18px; }
+.node-control { width: min(720px, 100%); margin: 0 auto 36px; display: grid; grid-template-columns: auto 1fr 44px; align-items: center; gap: 16px; color: #819087; font: 12px ui-monospace, monospace; }
+.node-control input { accent-color: #62e6a6; }
+.node-control strong { color: #62e6a6; font-size: 16px; }
+.topology-comparison { width: min(1180px, 100%); margin: auto; display: grid; grid-template-columns: 1fr 1fr; border-block: 1px solid #28322c; }
+.topology-comparison article { padding: 26px; }
+.topology-comparison article:first-child { border-right: 1px solid #28322c; }
+.topology-heading { display: flex; justify-content: space-between; gap: 12px; font: 13px ui-monospace, monospace; }
+.topology-heading span { color: #eef3f0; text-transform: uppercase; }
+.topology-heading strong { color: #62e6a6; font-weight: 500; }
+.topology svg { display: block; width: min(100%, 440px); margin: auto; overflow: visible; }
+.topology line { stroke: #29312c; stroke-width: 1; }
+.topology circle { fill: #111714; stroke: #4a5750; }
+.topology.broadcast .active { stroke: #f36b7d; animation: topology-pulse 1.8s infinite alternate; }
+.topology.unicast .active { stroke: #62e6a6; fill: #143828; stroke-width: 3; }
+.topology .origin { fill: #62e6a6; stroke: #a3f7ce; }
+.unicast-conclusion { width: min(900px, 100%); margin: 44px auto 0; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; color: #9da8a1; font-size: 18px; line-height: 1.6; }
+.unicast-conclusion p:last-child { color: #d5e9dd; }
+@keyframes topology-pulse { to { opacity: .25; } }
+@media (max-width: 720px) { .topology-comparison, .unicast-conclusion { grid-template-columns: 1fr; } .topology-comparison article:first-child { border-right: 0; border-bottom: 1px solid #28322c; } }

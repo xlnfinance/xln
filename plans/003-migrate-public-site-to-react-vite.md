@@ -11,6 +11,7 @@
 
 ## Status
 
+- **Execution:** DONE — L1/L2/L3 green
 - **Priority:** P1
 - **Effort:** L
 - **Risk:** HIGH
@@ -69,7 +70,10 @@ Out of scope:
 
 - Wallet, docs reader, and operator pages.
 - Router framework, SSR, Next.js, new content management, or public redesign.
-- Financial logic or imports from runtime state into site code.
+- Runtime state, replica startup, transport, wallet, vault, or native-shell imports
+  into site code. The `/rcpan` and `/releases` pages may consume the existing
+  pure canonical Account/Hanko helpers needed to preserve product behavior;
+  those imports are an exact allowlist enforced by boundary tests.
 
 ## Commands you will need
 
@@ -107,7 +111,7 @@ Out of scope:
 
    Verify: a focused config test asserts exact inputs and output roots for `all` and `site`, and rejects an unknown surface.
 
-3. Create a minimal framework-neutral `build-contracts` package containing route/output types and a `client-core` package for safe browser primitives. Create `ui` only for actual tokens/primitives reused by current migrated pages. Do not move business logic merely to make the tree look clean.
+3. Create a minimal framework-neutral `build-contracts` package containing route/output types and a `client-core` package for safe browser primitives. Create `ui` only for actual tokens/primitives reused by current migrated pages. Do not move business logic merely to make the tree look clean. Public product calculators/verifiers must reuse the existing pure canonical Account/Hanko implementation through an exact allowlist; they must not initialize or import runtime state.
 
    Verify: import-boundary tests prevent site from importing wallet/runtime/native modules and prevent shared packages from importing app-specific modules.
 
@@ -159,13 +163,22 @@ Run once on the unchanged checkpoint candidate. Record build sizes for each site
 
 ## Done criteria
 
-- [ ] Every public route has a complete React implementation with clean-console visual evidence.
-- [ ] The site builds independently to `frontend/build/site` and under the default same-origin dev server.
-- [ ] Site code cannot import wallet, runtime, native, docs, or ops implementation modules.
-- [ ] No SSR/router/state-library scope was introduced.
-- [ ] The React artifact is manifest-valid but remains release-blocked.
-- [ ] `bun run check` passes; checkpoint only with `wip:`.
-- [ ] `git status --short` is reviewed and the Plan 003 index row is updated.
+- [x] Every public route has a complete React implementation with clean-console visual evidence.
+- [x] The site builds independently to `frontend/build/site` and under the default same-origin dev server.
+- [x] Site code cannot import wallet, runtime state/startup, native, docs, or ops implementation modules; the exact pure canonical Account/Hanko helper allowlist is boundary-tested.
+- [x] No SSR/router/state-library scope was introduced.
+- [x] The React artifact is manifest-valid but remains release-blocked.
+- [x] `bun run check` passes; checkpoint only with `wip:`.
+- [x] `git status --short` is reviewed and the Plan 003 index row is updated.
+
+## Execution evidence
+
+- L1: 9 focused Vite-surface/import-boundary tests and 5 static-runner contract tests pass.
+- L2: 18 clean-console screenshots pass across six routes at iPhone, laptop, and wide-desktop viewports; all screenshots were visually inspected.
+- Determinism: two unchanged site builds produced digest `fc0fd847b97b993ade580edf78d65264f7bbf254dba3f8dc4488c63d3d9a0270`.
+- Isolation: the candidate contains no runtime worker, vault, native-shell, push-service-worker, manifest, or contract artifact; activation is rejected with `FRONTEND_REACT_CANDIDATE_ACTIVATION_BLOCKED:site`.
+- Largest entry: isolated Releases verifier chunk 392.99 kB (135.24 kB gzip); shared shell 198.55 kB (62.88 kB gzip).
+- L3: `bun run check` passes with frozen core unchanged and Svelte/React type/build checks green.
 
 ## Stop conditions
 
