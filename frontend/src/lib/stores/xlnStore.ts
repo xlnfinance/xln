@@ -92,7 +92,6 @@ import type {
   NumberedRegistrationCommandResult,
   EntityDisplayInfo,
   SignerDisplayInfo,
-  BigIntMathUtils,
   FinancialConstants,
   SwapBookEntry,
   CrossJurisdictionSwapRoute,
@@ -163,9 +162,6 @@ export interface FrontendXlnFunctions {
   safeStringify: XLNModule['safeStringify'];
   parseTokenAmount: XLNModule['parseTokenAmount'];
   convertTokenPrecision: XLNModule['convertTokenPrecision'];
-  calculatePercentage: XLNModule['calculatePercentage'];
-  formatAssetAmount: XLNModule['formatAssetAmount'];
-  BigIntMath: BigIntMathUtils;
   FINANCIAL_CONSTANTS: FinancialConstants;
   getEntity: (entityId: string) => FrontendEntitySummary;
   getEntityShortId: XLNModule['getEntityShortId'];
@@ -1804,9 +1800,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       safeStringify: failFn('safeStringify'),
       parseTokenAmount: failFn('parseTokenAmount'),
       convertTokenPrecision: failFn('convertTokenPrecision'),
-      calculatePercentage: failFn('calculatePercentage'),
-      formatAssetAmount: failFn('formatAssetAmount'),
-      BigIntMath: {} as BigIntMathUtils,
       FINANCIAL_CONSTANTS: {} as FinancialConstants,
       getEntity: failFn('getEntity'),
       getEntityShortId: failFn('getEntityShortId'),
@@ -1867,9 +1860,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     // Financial utilities (ethers.js-based, precision-safe)
     parseTokenAmount: $xlnInstance.parseTokenAmount,
     convertTokenPrecision: $xlnInstance.convertTokenPrecision,
-    calculatePercentage: $xlnInstance.calculatePercentage,
-    formatAssetAmount: $xlnInstance.formatAssetAmount,
-    BigIntMath: $xlnInstance.BigIntMath,
     FINANCIAL_CONSTANTS: $xlnInstance.FINANCIAL_CONSTANTS,
 
     // Entity utilities - UNIFIED ENTITY ACCESS

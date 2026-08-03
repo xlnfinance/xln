@@ -34,11 +34,8 @@ export {
 } from '../../orderbook';
 export { listOpenSwapOffers } from '../../orderbook/open-swap-offers';
 export {
-  BigIntMath,
-  calculatePercentage,
   convertTokenPrecision,
   FINANCIAL_CONSTANTS,
-  formatAssetAmount,
   formatTokenAmount,
   parseTokenAmount,
 } from '../../account/financial-utils';
@@ -66,8 +63,6 @@ export {
   isValidSignerId,
   MAX_NUMBERED_ENTITY,
   parseReplicaKey,
-  safeExtractEntityId,
-  safeParseReplicaKey,
   toEpAddress,
   toEntityId,
   toJId,

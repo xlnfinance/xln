@@ -1,4 +1,5 @@
 import { isLeftEntity } from '../../id';
+import { isValidEntityId } from '../../../protocol/identity';
 import type { Delta } from '../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
@@ -32,8 +33,6 @@ type OpenAccountResult = {
   accountChanges: string[];
 };
 
-const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
-const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const openAccountLog = createStructuredLogger('account.open');
 
 const assertRequestedRebalancePolicy = (
@@ -168,7 +167,7 @@ export const handleOpenAccountEntityTx = async (
   mutableFrameState = false,
 ): Promise<OpenAccountResult> => {
   const targetEntityId = entityTx.data.targetEntityId;
-  if (!isEntityId32(targetEntityId)) {
+  if (!isValidEntityId(targetEntityId)) {
     throw new Error(
       `INVALID_ENTITY_ID: openAccount targetEntityId must be bytes32 hex, got "${String(targetEntityId)}"`,
     );
