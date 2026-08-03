@@ -180,17 +180,24 @@ export const admitAtomicCrossJAccountInputs = (
     });
   }
   if (initial.rejectedLegs.length > 0) {
-    const rejectedInputIndexes = [...new Set(
-      initial.rejectedLegs.map(leg => leg.inputIndex),
-    )];
+    const reasonByInputIndex = new Map(
+      initial.rejectedLegs.map(leg => [leg.inputIndex, leg.reason]),
+    );
+    const rejectedInputIndexes = [...reasonByInputIndex.keys()];
     if (isReplay) throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_INVALID');
+    const reasonCounts: Record<string, number> = {};
+    for (const reason of reasonByInputIndex.values()) {
+      reasonCounts[reason] = (reasonCounts[reason] ?? 0) + 1;
+    }
     env.warn('network', 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH', {
       received: coalescedInputs.length,
       rejectedCount: rejectedInputIndexes.length,
+      reasonCounts,
       rejectedSamples: rejectedInputIndexes
         .slice(0, MAX_CROSS_J_LOG_SAMPLES)
         .map(inputIndex => ({
           inputIndex,
+          reason: reasonByInputIndex.get(inputIndex),
           evidenceHash: keccak256(toUtf8Bytes(safeStringify(
             summarizeAtomicCrossJAccountInput(coalescedInputs[inputIndex]!, inputIndex),
           ))),
@@ -199,7 +206,15 @@ export const admitAtomicCrossJAccountInputs = (
     recordRejectedAtomicCrossJInputs(
       env,
       'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH',
-      'A cross-j Account leg arrived without its exact atomic sibling leg and was ignored',
+      // The three rejection paths are not interchangeable: an unpaired leg is a
+      // transport or timing problem, an invalid candidate is an admission
+      // problem, and an invalid atomic group is a cohort-construction problem.
+      // Name the observed mix rather than asserting one of them.
+      'Cross-j Account legs were dropped before Account consensus: ' +
+        Object.entries(reasonCounts)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([reason, count]) => `${reason}=${count}`)
+          .join(' '),
     );
   }
   const structurallyRetained = initial.rejectedLegs.length > 0

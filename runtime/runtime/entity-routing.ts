@@ -350,9 +350,25 @@ export type CrossJAccountInputPairSelection = {
   rejectedLegs: CrossJRejectedAccountInput[];
 };
 
+/**
+ * Why one leg was dropped. A leg reaches `rejectedInputIndexes` through three
+ * independent paths and the operator cannot tell them apart from the outside:
+ * `unpaired` means no sibling candidate matched, `candidate-invalid` means the
+ * leg itself failed admission before matching was attempted, and
+ * `atomic-group-invalid` means the leg carried an atomicCrossJurisdictionPair
+ * marker whose declared cohort did not survive. Reporting one assumed cause for
+ * all three sends every investigation to the wrong layer.
+ */
+export type CrossJRejectedAccountInputReason =
+  | 'unpaired'
+  | 'multiple-candidates-per-input'
+  | 'candidate-invalid'
+  | 'atomic-group-invalid';
+
 export type CrossJRejectedAccountInput = {
   inputIndex: number;
   accountInput: AccountInput;
+  reason: CrossJRejectedAccountInputReason;
 };
 
 export type PotentialCrossJAccountInputPair = {
@@ -633,6 +649,7 @@ const groupUncommittedCrossJCandidates = (
   candidates: CrossJAdmissionFrameCandidate[];
   byCohort: Map<string, CrossJAdmissionFrameCandidate[]>;
   invalidIndexes: Set<number>;
+  multiCandidateIndexes: Set<number>;
 } => {
   // A byte-exact Account frame already present in durable state is transport
   // replay. Its missing ACK may be emitted without receiving its sibling again.
@@ -647,13 +664,18 @@ const groupUncommittedCrossJCandidates = (
     byCohort.set(key, group);
     counts.set(candidate.inputIndex, (counts.get(candidate.inputIndex) ?? 0) + 1);
   }
-  const invalidIndexes = new Set([...counts]
+  // One Entity input must carry exactly one cross-j leg: a second leg in the
+  // same input would make the cohort ambiguous. That is a producer-side batching
+  // defect and is nothing like a leg whose own route bindings failed to resolve,
+  // so the two are reported apart.
+  const multiCandidateIndexes = new Set([...counts]
     .filter(([, count]) => count !== 1)
     .map(([inputIndex]) => inputIndex));
+  const invalidIndexes = new Set(multiCandidateIndexes);
   uncommitted
     .filter(candidate => !candidate.valid)
     .forEach(candidate => invalidIndexes.add(candidate.inputIndex));
-  return { candidates: uncommitted, byCohort, invalidIndexes };
+  return { candidates: uncommitted, byCohort, invalidIndexes, multiCandidateIndexes };
 };
 
 const openingPairHasExactUserAuthorizations = (
@@ -878,7 +900,13 @@ export const removeRejectedCrossJAccountInputsByIndex = (
       : input
         ? effectiveAccountInputs(input)
         : [];
-    return accountInputs.map(accountInput => ({ inputIndex, accountInput }));
+    // Callers reach here only after an atomic pair already failed, so the
+    // cohort is the established cause; nothing here re-derives it.
+    return accountInputs.map(accountInput => ({
+      inputIndex,
+      accountInput,
+      reason: 'atomic-group-invalid' as const,
+    }));
   });
   return removeRejectedCrossJAccountInputs(inputs, rejectedLegs).inputs;
 };
@@ -916,12 +944,21 @@ export const selectMatchedCrossJAccountInputPairs = (
     committedCandidateIndexes,
     pairs,
   );
+  const atomicInvalid = new Set(atomicInvalidIndexes);
   const rejectedInputIndexes = [...new Set([
     ...[...allCandidateIndexes]
       .filter(inputIndex => grouped.invalidIndexes.has(inputIndex) || !pairedIndexes.has(inputIndex)),
     ...atomicInvalidIndexes,
   ])].sort((left, right) => left - right);
   const rejected = new Set(rejectedInputIndexes);
+  const rejectionReason = (inputIndex: number): CrossJRejectedAccountInputReason =>
+    grouped.multiCandidateIndexes.has(inputIndex)
+      ? 'multiple-candidates-per-input'
+      : grouped.invalidIndexes.has(inputIndex)
+        ? 'candidate-invalid'
+        : atomicInvalid.has(inputIndex)
+          ? 'atomic-group-invalid'
+          : 'unpaired';
   const rejectedLegs = rejectedInputIndexes.flatMap(inputIndex => {
     const matched = candidates.filter(candidate =>
       candidate.inputIndex === inputIndex);
@@ -931,7 +968,8 @@ export const selectMatchedCrossJAccountInputPairs = (
       : input
         ? effectiveAccountInputs(input)
         : [];
-    return accountInputs.map(accountInput => ({ inputIndex, accountInput }));
+    const reason = rejectionReason(inputIndex);
+    return accountInputs.map(accountInput => ({ inputIndex, accountInput, reason }));
   });
   const retained = removeRejectedCrossJAccountInputs(inputs, rejectedLegs);
   const remappedIndexes = new Map(
