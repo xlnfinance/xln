@@ -51,6 +51,42 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   than complexity. Separate test-only exports from genuinely unreachable ones
   before removing anything; `check:dead-code:report` lists them.
 
+### Model-audit findings parked for owner judgement — 2026-08-03
+
+Four models (Kimi K3, Grok 4.5, Gemini 3.6 Flash, GLM 5.2) audited the core
+read-only for canonicity. Applied findings are committed; these are the ones I
+did not act on alone, each with why. All are Solidity unless noted.
+
+- [ ] `HankoCodec.computeXHashForDomain` family (~170 LOC). Reported as a second
+  hash path inside the audit surface. I did not verify that every variant is
+  unreachable, and a wrong deletion here changes what a Hanko commits to.
+  Question: is this family live, or superseded by `onchain-domain.ts`?
+- [ ] `EntityProvider.registerNumberedEntity` (~33 LOC) duplicates one iteration
+  of `registerNumberedEntitiesBatch`. Collapsing is mechanical but changes a
+  public entry point that deployment tooling may call. Question: may the single
+  registration path be removed in favour of a one-element batch?
+- [ ] `EntityProvider` declares 17 Hanko errors it never reverts with (~17 LOC).
+  Likely shared with HankoVerifier by convention. Question: are these part of a
+  published error surface consumers decode against?
+- [ ] `Account._increaseReserve` and `Depository._increaseReserve` /
+  `_decreaseReserve` are thin wrappers (~16 LOC). Removing them is safe only if
+  the indirection is not deliberate for the library/contract split.
+- [ ] `getCanonicalAccountKey` performs a sort whose result is discarded, and
+  `createSettlementHashWithNonce` inlines the account-key derivation (~10 LOC).
+- [ ] `isLeft` in `runtime/account/utils.ts` re-exports `isLeftEntity` under a
+  second name (TypeScript). Collapsing costs five call-site renames. Question:
+  keep the short name at call sites, or one name everywhere?
+
+Rejected, with reason - do not re-report:
+
+- `encodeAccountStateValueOracle` is not dead code. It is a deliberate second
+  RLP implementation used by `account-state-root.test.ts` as a differential
+  oracle against the fast path. Deleting it removes the cross-check that proves
+  the optimised encoder is correct.
+- Folding `Account._accountKey` into the external `accountKey` was proposed by
+  one model and is backwards: the external one had no caller and is now
+  deleted, the internal one is live.
+
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 
 - [ ] Pass one final independent read-only audit on an immutable release
