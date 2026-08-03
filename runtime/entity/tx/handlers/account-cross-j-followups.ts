@@ -1,3 +1,4 @@
+import { normalizeEntityRef } from '../account-key';
 import type { AccountTx, RuntimeOverlayRecord } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
@@ -37,7 +38,6 @@ import type { SwapOfferEvent } from './account';
 
 const crossJFollowupLog = createStructuredLogger('crossj.followup');
 
-const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
   getCrossJurisdictionCommittedProofRatio(route);

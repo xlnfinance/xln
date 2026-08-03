@@ -1,3 +1,5 @@
+import { normalizeEntityRef } from '../account-key';
+import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
 import {
   cloneCrossJurisdictionRoute,
   compareCrossJurisdictionRouteStatus,
@@ -48,12 +50,9 @@ import {
 } from '../cross-j-outputs';
 import { draftPreparedDisputeStartIfReady } from './dispute';
 
-const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
-  Number(state.timestamp || env.state.timestamp || 0);
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
   prepareEntityTxState(entityState, options?.mutableFrameState);
 
-const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const crossBookQtyLots = (baseTokenId: number, baseAmount: bigint): bigint => {
   if (baseAmount <= 0n) return 0n;
   const lotScale = getSwapLotScale(baseTokenId);

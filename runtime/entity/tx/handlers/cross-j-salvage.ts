@@ -1,3 +1,4 @@
+import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
 import {
   getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionPullExpired,
@@ -27,8 +28,6 @@ type CrossJurisdictionSalvageResult = {
   outputs: EntityInput[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
-  Number(state.timestamp || env.state.timestamp || 0);
 
 const rejectSourceSalvageMirror = (
   state: EntityState,

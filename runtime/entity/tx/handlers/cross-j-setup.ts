@@ -1,3 +1,4 @@
+import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
 import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionRoute,
@@ -39,8 +40,6 @@ type CrossJSetupResult = {
   accountTxs?: AccountTxTarget[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
-  Number(state.timestamp || env.state.timestamp || 0);
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
   prepareEntityTxState(entityState, options?.mutableFrameState);
