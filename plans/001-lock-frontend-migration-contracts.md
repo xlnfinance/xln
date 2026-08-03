@@ -17,10 +17,10 @@
 - **Depends on:** none
 - **Category:** migration, tests, correctness
 - **Planned at:** commit `5749e283d`, 2026-08-03
-- **Execution:** BLOCKED — both isolated E2E attempts stopped before Playwright
-  (`pw=0`) because the fresh-stack hub baseline stalled for `H1`, `H2`, and
-  `H3`. L1, the full repository gate, and headed static-preview browser QA are
-  green.
+- **Execution:** DONE — 14 focused contract cases and all 5 landing/docs
+  Playwright cases pass; the runtime-free suites use the strict static-preview
+  gate, all required screenshots were inspected, and the broad repository gate
+  is green.
 
 ## Executor instructions
 
@@ -62,8 +62,8 @@ Out of scope:
 |---|---|---|
 | Drift | `git diff --stat 5749e283d..HEAD -- frontend/src/routes frontend/src/lib/stores frontend/src/lib/components/site frontend/src/lib/components/Tools frontend/static frontend/package.json tests runtime/scripts/check-no-manual-delta-math.ts` | Exit 0; reviewed before edits |
 | L1 contracts | `bun test tests/frontend/route-surface-contract.test.ts tests/frontend/persistence-contract.test.ts tests/frontend/delta-visualizer.test.ts` | Exit 0; all cases pass |
-| Landing browser | `bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/landing-site.spec.ts` | Exit 0; no browser-health failures |
-| Docs browser | `bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/docs-site.spec.ts` | Exit 0; no browser-health failures |
+| Landing browser | `bun scripts/testing/run-static-frontend-e2e.ts tests/landing-site.spec.ts` | Exit 0; no browser-health failures |
+| Docs browser | `bun scripts/testing/run-static-frontend-e2e.ts tests/docs-site.spec.ts` | Exit 0; no browser-health failures |
 | Broad gate | `bun run check` | Exit 0; no frozen-core violation |
 
 ## Git workflow
@@ -119,9 +119,15 @@ Use the actual filenames created by the implementation; keep each test focused o
 L2 targeted browser:
 
 ```bash
-bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/landing-site.spec.ts
-bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/docs-site.spec.ts
+bun scripts/testing/run-static-frontend-e2e.ts tests/landing-site.spec.ts
+bun scripts/testing/run-static-frontend-e2e.ts tests/docs-site.spec.ts
 ```
+
+These specs are deliberately runtime-free. Their repository-owned runner builds
+the production frontend, serves it from an ephemeral loopback Vite preview, and
+retains strict page, console, request, HTTP, and screenshot checks without
+starting Anvil or resetting the Runtime mesh. Runtime-dependent specs continue
+to use `run-e2e-parallel-isolated.ts` unchanged.
 
 Open browser F12 on `/`, `/docs`, and `/app`; verify no errors and inspect the three viewport screenshots.
 
@@ -135,12 +141,12 @@ Run the broad gate once on the unchanged completion candidate. Show the command 
 
 ## Done criteria
 
-- [ ] Every current route and edge endpoint has exactly one future owner.
-- [ ] Persistent identifiers and same-origin assumptions are executable tests, not prose only.
-- [ ] Landing and docs have clean-console visual coverage at all three required viewport classes.
-- [ ] No public route imports the delta tool, and no manual financial delta formula remains in frontend tooling.
-- [ ] `bun run check` passes with no frozen-core violation.
-- [ ] `git status --short` contains only reviewed in-scope changes, and the Plan 001 index row is updated.
+- [x] Every current route and edge endpoint has exactly one future owner.
+- [x] Persistent identifiers and same-origin assumptions are executable tests, not prose only.
+- [x] Landing and docs have clean-console visual coverage at all three required viewport classes.
+- [x] No public route imports the delta tool, and no manual financial delta formula remains in frontend tooling.
+- [x] `bun run check` passes with no frozen-core violation.
+- [x] `git status --short` contains only reviewed in-scope changes, and the Plan 001 index row is updated.
 
 ## Stop conditions
 

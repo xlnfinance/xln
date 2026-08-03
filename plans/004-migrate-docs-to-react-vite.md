@@ -59,7 +59,7 @@ Out of scope:
 |---|---|---|
 | Drift | `git diff --stat 5749e283d..HEAD -- frontend/copy-static-files.js frontend/src/routes/docs frontend/src/lib/ai frontend/package.json docs tests/docs-site.spec.ts` | Exit 0; catalog drift reviewed |
 | L1 | `bun test tests/frontend/docs-catalog-generator.test.ts tests/frontend/docs-catalog-contract.test.ts tests/frontend/docs-import-boundaries.test.ts` | Exit 0; deterministic/error cases pass |
-| Docs browser | `bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/docs-site.spec.ts` | Exit 0; clean browser health |
+| Docs browser | `bun scripts/testing/run-static-frontend-e2e.ts tests/docs-site.spec.ts` | Exit 0; clean browser health |
 | Broad gate | `bun run check` | Exit 0; no frozen-core violation |
 
 ## Git workflow
@@ -120,7 +120,7 @@ bun test tests/frontend/docs-import-boundaries.test.ts
 L2 targeted browser:
 
 ```bash
-bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/docs-site.spec.ts
+bun scripts/testing/run-static-frontend-e2e.ts tests/docs-site.spec.ts
 ```
 
 Also run the focused wallet-guide/catalog integration spec created or updated by this plan. Inspect F12 console/network and all key-state screenshots.

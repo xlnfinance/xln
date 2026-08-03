@@ -6,7 +6,9 @@ const PLAYWRIGHT_ARTIFACT_CLEANUP_SCRIPT = resolve(__dirname, '../runtime/script
 
 export const runPlaywrightArtifactCleanup = (cwd = PLAYWRIGHT_ARTIFACT_CLEANUP_CWD): void => {
   const inheritedParentLease = process.env['XLN_TEST_ARTIFACT_CLEANUP_DONE'] === '1';
-  const result = spawnSync('bun', [
+  const bunExecutable = String(process.env['XLN_BUN_EXECUTABLE'] || 'bun').trim();
+  if (!bunExecutable) throw new Error('PLAYWRIGHT_BUN_EXECUTABLE_MISSING');
+  const result = spawnSync(bunExecutable, [
     PLAYWRIGHT_ARTIFACT_CLEANUP_SCRIPT,
     ...(inheritedParentLease ? ['--validate-inherited-lease'] : []),
     '--reason',

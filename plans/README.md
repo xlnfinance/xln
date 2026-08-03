@@ -27,7 +27,7 @@ Use one `frontend/package.json` and lockfile initially. Put entry applications u
 
 | Plan | Outcome | Priority | Effort | Depends on | Status | Merge policy |
 |---|---|---:|---:|---|---|---|
-| [001](001-lock-frontend-migration-contracts.md) | Freeze routes, persistence, visuals, and canonical delta math | P1 | M | — | BLOCKED — isolated E2E hub baseline stalls before Playwright | May merge independently |
+| [001](001-lock-frontend-migration-contracts.md) | Freeze routes, persistence, visuals, and canonical delta math | P1 | M | — | DONE — L1/L2/L3 green with strict static browser gate | May merge independently |
 | [002](002-make-frontend-rollout-atomic.md) | Versioned staging, atomic activation, rollback | P1 | L | — | DONE — `e12ad8bc1`; L1/L2/L3 green | May merge independently |
 | [003](003-migrate-public-site-to-react-vite.md) | React/Vite build foundation plus the real public site | P1 | L | 001, 002 | TODO | WIP checkpoint only |
 | [004](004-migrate-docs-to-react-vite.md) | Deterministic docs producer and React docs reader | P2 | L | 003 | TODO | WIP checkpoint only |

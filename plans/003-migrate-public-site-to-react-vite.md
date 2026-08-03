@@ -79,7 +79,7 @@ Out of scope:
 | Install | `cd frontend && bun install` | Exit 0; one React/React DOM version |
 | L1 | `cd frontend && bun test tests/vite-surface-config.test.ts tests/site-import-boundaries.test.ts` | Exit 0; all tests pass |
 | Frontend check | `cd frontend && bun run check` | Exit 0; no TS/build errors |
-| Site browser | `bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/landing-site.spec.ts` | Exit 0; clean browser health |
+| Site browser | `bun scripts/testing/run-static-frontend-e2e.ts tests/landing-site.spec.ts` | Exit 0; clean browser health |
 | Broad gate | `bun run check` | Exit 0; no frozen-core violation |
 
 ## Git workflow
@@ -143,8 +143,8 @@ Use the frontend check for the React TypeScript/build slice first; the root gate
 L2 targeted browser:
 
 ```bash
-bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/landing-site.spec.ts
-bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/install-site.spec.ts
+bun scripts/testing/run-static-frontend-e2e.ts tests/landing-site.spec.ts
+bun scripts/testing/run-static-frontend-e2e.ts tests/install-site.spec.ts
 ```
 
 Add equally focused specs for uncovered public routes. Inspect all key-state screenshots and F12 console/network at iPhone, laptop, and wide desktop viewports.

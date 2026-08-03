@@ -32,6 +32,10 @@ import {
   type E2EDebugIncident,
   type E2EDebugIncidentExpectation,
 } from './utils/e2e-browser-guard.mts';
+import {
+  isStaticFrontendSpecPath,
+  shouldQueryRuntimeIncidents,
+} from '../scripts/testing/static-frontend-e2e-contract';
 
 type BrowserWithPatch = Browser & {
   __xlnQaNewContext?: Browser['newContext'];
@@ -75,8 +79,10 @@ const testId = (testInfo: TestInfo | null): string | null => {
   return [testInfo.project.name, testInfo.file, testInfo.title].filter(Boolean).join(' :: ');
 };
 
-const requiresIncidentGuard = (testInfo: TestInfo): boolean =>
-  testInfo.tags.includes('@functional') || testInfo.tags.includes('@resilience');
+const requiresIncidentGuard = (testInfo: TestInfo): boolean => shouldQueryRuntimeIncidents(
+  testInfo.tags,
+  process.env['PW_STATIC_FRONTEND'] === '1' && isStaticFrontendSpecPath(testInfo.file),
+);
 
 const debugApiBaseUrl = (testInfo: TestInfo): string => {
   const configured = [

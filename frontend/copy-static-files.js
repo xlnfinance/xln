@@ -107,10 +107,12 @@ function ensureDir(pathname) {
 function buildBrainvaultWorker() {
   const source = resolve(REPO_ROOT, 'brainvault/worker-browser.ts');
   const output = fromStatic('brainvault-worker.js');
+  const bunExecutable = String(process.env.XLN_BUN_EXECUTABLE || 'bun').trim();
   if (!existsSync(source)) throw new Error(`BRAINVAULT_WORKER_SOURCE_MISSING:${source}`);
+  if (!bunExecutable) throw new Error('BRAINVAULT_WORKER_BUN_EXECUTABLE_MISSING');
 
   ensureDir(dirname(output));
-  execFileSync('bun', ['build', source, '--outfile', output, '--target=browser', '--minify'], {
+  execFileSync(bunExecutable, ['build', source, '--outfile', output, '--target=browser', '--minify'], {
     cwd: REPO_ROOT,
     stdio: 'pipe',
   });
