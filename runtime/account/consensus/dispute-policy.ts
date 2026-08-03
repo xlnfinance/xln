@@ -32,12 +32,6 @@ export const isDisputeEvidenceAccountTx = (txOrType: AccountTx | string): boolea
   return txOrType.type === 'swap_resolve' || isEvidenceBearingAccountTx(txOrType);
 };
 
-export const isAccountBusinessTx = (txType: string): boolean =>
-  !isAccountControlTx(txType);
-
-export const isArgumentChangingAccountTx = (txType: string): boolean =>
-  isAccountBusinessTx(txType);
-
 export const freezeAccountForDispute = (
   account: AccountReplica,
   retainOptionalEvidence: boolean,

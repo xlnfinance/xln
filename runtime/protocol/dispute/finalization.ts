@@ -7,9 +7,7 @@
  * collateral allocation, reserve payment, and new-debt creation exactly.
  */
 
-const UINT256_MAX = (1n << 256n) - 1n;
-const INT256_MIN = -(1n << 255n);
-const INT256_MAX = (1n << 255n) - 1n;
+import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../integer-ranges';
 
 export type DisputeDirectionAmounts = Readonly<{
   leftToRight: bigint;

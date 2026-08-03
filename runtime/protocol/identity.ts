@@ -146,11 +146,6 @@ export const toEpAddress = (s: string): EntityProviderAddress => {
   return s;
 };
 
-export const toTokenId = (value: number): TokenId => {
-  if (!Number.isInteger(value) || value < 0) throw new Error(`FINTECH-SAFETY: Invalid token id: ${value}`);
-  return value as TokenId;
-};
-
 // =============================================================================
 // REPLICA KEY OPERATIONS - Replace all split(':') patterns
 // =============================================================================

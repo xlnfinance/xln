@@ -94,10 +94,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Account__factory>;
     getContractFactory(
-      name: "Console",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.Console__factory>;
-    getContractFactory(
       name: "DeltaTransformer",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.DeltaTransformer__factory>;
@@ -146,10 +142,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.HashLadder__factory>;
     getContractFactory(
-      name: "IDepository",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IDepository__factory>;
-    getContractFactory(
       name: "IEntityProvider",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IEntityProvider__factory>;
@@ -185,10 +177,6 @@ declare module "hardhat/types/runtime" {
       name: "TransformerLivenessHarness",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.TransformerLivenessHarness__factory>;
-    getContractFactory(
-      name: "Token",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.Token__factory>;
 
     getContractAt(
       name: "IERC1155Errors",
@@ -291,11 +279,6 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.Account>;
     getContractAt(
-      name: "Console",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.Console>;
-    getContractAt(
       name: "DeltaTransformer",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -356,11 +339,6 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.HashLadder>;
     getContractAt(
-      name: "IDepository",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IDepository>;
-    getContractAt(
       name: "IEntityProvider",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -405,11 +383,6 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.TransformerLivenessHarness>;
-    getContractAt(
-      name: "Token",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.Token>;
 
     deployContract(
       name: "IERC1155Errors",
@@ -492,10 +465,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Account>;
     deployContract(
-      name: "Console",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Console>;
-    deployContract(
       name: "DeltaTransformer",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.DeltaTransformer>;
@@ -544,10 +513,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadder>;
     deployContract(
-      name: "IDepository",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IDepository>;
-    deployContract(
       name: "IEntityProvider",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IEntityProvider>;
@@ -583,10 +548,6 @@ declare module "hardhat/types/runtime" {
       name: "TransformerLivenessHarness",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.TransformerLivenessHarness>;
-    deployContract(
-      name: "Token",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Token>;
 
     deployContract(
       name: "IERC1155Errors",
@@ -689,11 +650,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Account>;
     deployContract(
-      name: "Console",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Console>;
-    deployContract(
       name: "DeltaTransformer",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -754,11 +710,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadder>;
     deployContract(
-      name: "IDepository",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IDepository>;
-    deployContract(
       name: "IEntityProvider",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -803,11 +754,6 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.TransformerLivenessHarness>;
-    deployContract(
-      name: "Token",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.Token>;
 
     // default types
     getContractFactory(

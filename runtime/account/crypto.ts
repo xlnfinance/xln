@@ -735,29 +735,3 @@ export function verifyAccountSignature(
   }
 }
 
-/**
- * Validate multiple signatures for account frame
- */
-export function validateAccountSignatures(
-  env: SignerKeyEnv,
-  frameHash: string,
-  signatures: string[],
-  expectedSigners: string[]
-): { valid: boolean; validSigners: string[] } {
-  const validSigners: string[] = [];
-  const remaining = new Set(expectedSigners);
-
-  for (const signature of signatures) {
-    for (const signer of Array.from(remaining)) {
-      const isValid = verifyAccountSignature(env, signer, frameHash, signature);
-      if (isValid) {
-        validSigners.push(signer);
-        remaining.delete(signer);
-        break;
-      }
-    }
-  }
-
-  const allValid = validSigners.length === expectedSigners.length;
-  return { valid: allValid, validSigners };
-}
