@@ -11,6 +11,7 @@
 
 ## Status
 
+- **Execution:** DONE — L1/L2/L3 green
 - **Priority:** P2
 - **Effort:** L
 - **Risk:** MED
@@ -135,13 +136,23 @@ Run once on the unchanged checkpoint candidate.
 
 ## Done criteria
 
-- [ ] Docs generation is an independently callable deterministic producer.
-- [ ] `/docs` is fully implemented in React with stable deep links and validated catalog ingestion.
-- [ ] `/docs-catalog/**` and `llms*` URLs remain compatible for the wallet and release consumers.
-- [ ] Docs output contains no wallet/runtime/native application code.
-- [ ] Artifact is release-manifest valid but remains release-blocked.
-- [ ] `bun run check` passes; record only a `wip:` checkpoint.
-- [ ] `git status --short` is reviewed and the Plan 004 index row is updated.
+- [x] Docs generation is an independently callable deterministic producer.
+- [x] `/docs` is fully implemented in React with stable deep links and validated catalog ingestion.
+- [x] `/docs-catalog/**` and `llms*` URLs remain compatible for the wallet and release consumers.
+- [x] Docs output contains no wallet/runtime/native application code.
+- [x] Artifact is release-manifest valid but remains release-blocked.
+- [x] `bun run check` passes; record only a `wip:` checkpoint.
+- [x] `git status --short` is reviewed and the Plan 004 index row is updated.
+
+## Execution evidence
+
+- L1: 33 focused producer, schema, import-boundary, wallet-guide, Vite candidate, static-runner, and release-boundary tests pass.
+- L2: 5 browser flows pass with clean console/network health, including a real same-origin wallet-guide catalog fetch whose document SHA-256 matches the manifest.
+- Visual QA: 17 screenshots cover index, nested article, filter, code, explicit error, and mobile drawer states at iPhone, laptop, and wide-desktop viewports; every capture was inspected.
+- Determinism: two unchanged complete docs builds produced inventory digest `48123c9b030b08dd7e8f85f1e6e5b98120725615c59f126529ef88ee782b4c34`; the catalog content digest is `e46569f3479ee4fe920acf6e8d44b966602a52a9dbaf63da86eaab8e2bfe6caf`.
+- Artifact: 234 files / 237 MB because all existing `llms*` compatibility outputs are retained; the React reader is 279.33 kB (89.19 kB gzip).
+- Isolation: compiled JS/CSS contains no wallet, Runtime replica, vault, BrainVault, native-shell, or command-journal implementation, and activation is hash-bound then blocked.
+- L3: `bun run check` passes with frozen core unchanged and 0 Svelte/React diagnostics.
 
 ## Stop conditions
 

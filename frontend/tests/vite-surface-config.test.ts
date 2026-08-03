@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { assertNoBlockedReactCandidateBuild } from '../../scripts/deployment/current-frontend-surface-build';
+import { produceDocsCatalog } from '../scripts/docs-catalog-producer.ts';
 import { FRONTEND_ROUTES } from '../src/lib/contracts/frontendSurfaces';
 import {
+  buildReactCandidateManifest,
   buildReactSiteCandidateManifest,
   REACT_CANDIDATE_MANIFEST_FILE,
   validateReactCandidateManifest,
@@ -24,6 +26,7 @@ describe('React Vite surface contract', () => {
   test('maps every public route to an exact MPA entry and isolated output', () => {
     const expectedRoutes = FRONTEND_ROUTES.filter(route => route.surface === 'site' && route.kind === 'page');
     const site = createReactViteSurfaceContract(FRONTEND_ROOT, 'site');
+    const docs = createReactViteSurfaceContract(FRONTEND_ROOT, 'docs');
     const all = createReactViteSurfaceContract(FRONTEND_ROOT, 'all');
 
     expect(site.root).toBe(resolve(FRONTEND_ROOT, 'apps/site/entries'));
@@ -33,15 +36,46 @@ describe('React Vite surface contract', () => {
       route.id,
       resolve(FRONTEND_ROOT, 'apps/site/entries', route.outputEntry!),
     ])));
+    expect(docs.root).toBe(resolve(FRONTEND_ROOT, 'apps/docs/entries'));
+    expect(docs.outDir).toBe(resolve(FRONTEND_ROOT, 'build/docs'));
+    expect(docs.routes.map(route => route.id)).toEqual(['docs-reader']);
+    expect(docs.inputs).toEqual({
+      'docs-reader': resolve(FRONTEND_ROOT, 'apps/docs/entries/index.html'),
+    });
     expect(all.root).toBe(FRONTEND_ROOT);
     expect(all.outDir).toBe(resolve(FRONTEND_ROOT, 'build/react-all'));
-    expect(all.inputs).toEqual(site.inputs);
+    expect(all.inputs).toEqual({ ...site.inputs, ...docs.inputs });
   });
 
   test('rejects unknown selectors instead of falling back to another surface', () => {
     expect(resolveReactFrontendSurface(undefined)).toBe('all');
     expect(resolveReactFrontendSurface('site')).toBe('site');
+    expect(resolveReactFrontendSurface('docs')).toBe('docs');
     expect(() => resolveReactFrontendSurface('wallet')).toThrow('REACT_FRONTEND_SURFACE_UNKNOWN:wallet');
+  });
+
+  test('docs candidate binds activation to the exact catalog hash', () => {
+    const routes = FRONTEND_ROUTES.filter(route => route.surface === 'docs' && route.kind === 'page');
+    const hash = 'a'.repeat(64);
+    const manifest = buildReactCandidateManifest('docs', routes, hash);
+    expect(validateReactCandidateManifest(manifest, ['index.html'], 'docs', hash)).toEqual([]);
+    expect(validateReactCandidateManifest(manifest, ['index.html'], 'docs', 'b'.repeat(64)))
+      .toContain('CANDIDATE_CATALOG_SHA256_MISMATCH');
+  });
+
+  test('release boundary rejects a docs candidate whose catalog hash drifts', () => {
+    const buildRoot = mkdtempSync(join(tmpdir(), 'xln-react-docs-candidate-'));
+    temporaryRoots.push(buildRoot);
+    const sourceRoot = join(buildRoot, 'source');
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(sourceRoot, 'readme.md'), '# xln Documentation\n');
+    const catalog = produceDocsCatalog(sourceRoot, join(buildRoot, 'docs/docs-catalog'));
+    const routes = FRONTEND_ROUTES.filter(route => route.surface === 'docs' && route.kind === 'page');
+    const manifest = buildReactCandidateManifest('docs', routes, 'b'.repeat(64));
+    writeFileSync(join(buildRoot, 'docs', REACT_CANDIDATE_MANIFEST_FILE), `${JSON.stringify(manifest)}\n`);
+    expect(catalog.contentSha256).not.toBe('b'.repeat(64));
+    expect(() => assertNoBlockedReactCandidateBuild(buildRoot))
+      .toThrow('CANDIDATE_CATALOG_SHA256_MISMATCH');
   });
 
   test('emits a valid deterministic candidate manifest that release activation refuses', () => {

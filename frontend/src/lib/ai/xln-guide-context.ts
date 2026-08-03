@@ -1,14 +1,11 @@
 import type { XlnAssistantMessage } from './xln-assistant-client';
+import {
+  docsCatalogUrl,
+  parseDocsCatalogManifest,
+  type DocsCatalogEntry,
+} from '../../../packages/client-core/docs-catalog-contract.js';
 
-type DocsEntry = Readonly<{
-  id: string;
-  path: string;
-  title: string;
-  summary: string;
-  kind: string;
-}>;
-
-type DocsManifest = Readonly<{ items?: readonly DocsEntry[] }>;
+type DocsGuideEntry = Pick<DocsCatalogEntry, 'id' | 'path' | 'title' | 'summary' | 'kind'>;
 
 const STOP_WORDS = new Set([
   'about', 'after', 'again', 'also', 'and', 'are', 'can', 'does', 'for', 'from', 'how', 'into',
@@ -29,9 +26,9 @@ function tokens(value: string): string[] {
 export function rankXlnGuideDocs(
   query: string,
   pathname: string,
-  entries: readonly DocsEntry[],
+  entries: readonly DocsGuideEntry[],
   limit = 2,
-): DocsEntry[] {
+): DocsGuideEntry[] {
   const queryTokens = tokens(query);
   const hints = ROUTE_HINTS[pathname] ?? ROUTE_HINTS['/app']!;
   return entries
@@ -60,10 +57,6 @@ function routeDescription(pathname: string): string {
   return `The user is viewing the xln surface at ${pathname}.`;
 }
 
-function docsUrl(path: string): string {
-  return `/docs-catalog/${path.split('/').map(encodeURIComponent).join('/')}`;
-}
-
 export async function loadXlnGuideGrounding(query: string, pathname: string, signal?: AbortSignal): Promise<string> {
   const manifestResponse = await fetch('/docs-catalog/manifest.json', {
     cache: 'force-cache',
@@ -72,11 +65,11 @@ export async function loadXlnGuideGrounding(query: string, pathname: string, sig
   if (!manifestResponse.ok) {
     throw new Error(`XLN docs manifest is unavailable (${manifestResponse.status}).`);
   }
-  const manifest = await manifestResponse.json() as DocsManifest;
-  const ranked = rankXlnGuideDocs(query, pathname, manifest.items ?? []);
+  const manifest = parseDocsCatalogManifest(await manifestResponse.json());
+  const ranked = rankXlnGuideDocs(query, pathname, manifest.items);
   if (ranked.length === 0) throw new Error('XLN docs catalog has no live guide sources.');
   const documents = await Promise.all(ranked.map(async entry => {
-    const response = await fetch(docsUrl(entry.path), {
+    const response = await fetch(docsCatalogUrl(entry.path), {
       cache: 'force-cache',
       ...(signal ? { signal } : {}),
     });

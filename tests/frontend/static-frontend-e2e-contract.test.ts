@@ -39,7 +39,7 @@ describe('static frontend E2E contract', () => {
   });
 
   test('selects one build target and rejects mixed framework runs', () => {
-    expect(staticFrontendTarget(['tests/docs-site.spec.ts'])).toBe('legacy-docs');
+    expect(staticFrontendTarget(['tests/docs-site.spec.ts'])).toBe('react-docs');
     expect(staticFrontendTarget(['tests/landing-site.spec.ts', 'tests/public-site-react.spec.ts'])).toBe('react-site');
     expect(() => staticFrontendTarget(['tests/docs-site.spec.ts', 'tests/landing-site.spec.ts']))
       .toThrow('STATIC_FRONTEND_E2E_MIXED_TARGETS');

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 
 import { createSiteBuildPlugin } from './apps/site/build/site-build-plugin';
+import { createDocsBuildPlugin } from './apps/docs/build/docs-build-plugin';
 import {
   createReactViteSurfaceContract,
   resolveReactFrontendSurface,
@@ -57,7 +58,12 @@ export default defineConfig(({ command }) => {
     root: contract.root,
     base: '/',
     publicDir: command === 'serve' ? resolve(FRONTEND_ROOT, 'static') : false,
-    plugins: [canonicalRoutePlugin(contract), react(), createSiteBuildPlugin(FRONTEND_ROOT, contract)],
+    plugins: [
+      canonicalRoutePlugin(contract),
+      react(),
+      createSiteBuildPlugin(FRONTEND_ROOT, contract),
+      createDocsBuildPlugin(FRONTEND_ROOT, contract),
+    ],
     resolve: {
       alias: {
         '$lib': resolve(FRONTEND_ROOT, 'src/lib'),

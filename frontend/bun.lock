@@ -19,6 +19,7 @@
         "@scure/bip39": "^2.2.0",
         "@types/three": "^0.180.0",
         "dockview": "^4.13.1",
+        "dompurify": "^3.4.13",
         "hash-wasm": "^4.12.0",
         "jsqr": "^1.4.0",
         "lucide-svelte": "^0.544.0",
@@ -394,6 +395,8 @@
     "dockview": ["dockview@4.13.1", "", { "dependencies": { "dockview-core": "^4.13.1" }, "peerDependencies": { "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-K8xnYt3Rvkx8MYKHaEsb8aFaPyQclKRRkXS9JcpQPZUgqxumTLnSidgdd6uIfzEps6yJsXoZGQGJ9PtcaKyDcQ=="],
 
     "dockview-core": ["dockview-core@4.13.1", "", {}, "sha512-+7vR0ZEoL8CNck6NqDVUMqBT22niwBu5CMMI137dZ3c8NDc7c5Si+3dGEqQgM4lNtHBLAtvypo1C4p21J2wkiQ=="],
+
+    "dompurify": ["dompurify@3.4.13", "", { "optionalDependencies": { "@types/trusted-types": "^2.0.7" } }, "sha512-2vmYIoqjze2d+kakP8S/nS5shfsl587kzwEjcGlTdiksUVgFHnFCsLYDVj/JNqJVOQZGSYBTmuycv0PodwmnMQ=="],
 
     "electron-to-chromium": ["electron-to-chromium@1.5.399", "", {}, "sha512-lEcqhErbHjXRvd41rnWLpzbyU/IXfIYo7QwaFWmxGeLiLyY2TBCdHnWY88vB+p3ubnihRypDm66panXl7TylLA=="],
 

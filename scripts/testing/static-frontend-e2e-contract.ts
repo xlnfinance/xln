@@ -9,10 +9,10 @@ export type StaticFrontendSpec = typeof STATIC_FRONTEND_SPECS[number];
 
 const staticSpecSet = new Set<string>(STATIC_FRONTEND_SPECS);
 
-export type StaticFrontendTarget = 'legacy-docs' | 'react-site';
+export type StaticFrontendTarget = 'react-docs' | 'react-site';
 
 export const staticFrontendTarget = (specs: readonly StaticFrontendSpec[]): StaticFrontendTarget => {
-  const targets = new Set(specs.map(spec => spec === 'tests/docs-site.spec.ts' ? 'legacy-docs' : 'react-site'));
+  const targets = new Set(specs.map(spec => spec === 'tests/docs-site.spec.ts' ? 'react-docs' : 'react-site'));
   if (targets.size !== 1) throw new Error('STATIC_FRONTEND_E2E_MIXED_TARGETS');
   return [...targets][0]!;
 };

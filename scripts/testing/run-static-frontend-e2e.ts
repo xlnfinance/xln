@@ -42,10 +42,10 @@ const startPreview = async (port: number, target: StaticFrontendTarget): Promise
   const originalSurface = process.env['XLN_FRONTEND_SURFACE'];
   process.chdir(FRONTEND_ROOT);
     process.env['XLN_VITE_FORCE_HTTP'] = '1';
-    if (target === 'react-site') process.env['XLN_FRONTEND_SURFACE'] = 'site';
+    process.env['XLN_FRONTEND_SURFACE'] = target === 'react-site' ? 'site' : 'docs';
     try {
       const server = await preview({
-        configFile: target === 'react-site' ? join(FRONTEND_ROOT, 'vite.react.config.ts') : undefined,
+        configFile: join(FRONTEND_ROOT, 'vite.react.config.ts'),
         preview: { host: '127.0.0.1', port, strictPort: true, open: false },
     });
     const address = server.httpServer.address();
@@ -87,7 +87,7 @@ export const main = async (args: readonly string[]): Promise<void> => {
     XLN_BUN_EXECUTABLE: process.execPath,
     XLN_VITE_FORCE_HTTP: '1',
   };
-  await run(process.execPath, ['run', target === 'react-site' ? 'build:react:site' : 'build'], FRONTEND_ROOT, httpEnv);
+  await run(process.execPath, ['run', target === 'react-site' ? 'build:react:site' : 'build:react:docs'], FRONTEND_ROOT, httpEnv);
   const port = await reserveLoopbackPort();
   const server = await startPreview(port, target);
   try {

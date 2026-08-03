@@ -1,4 +1,5 @@
 import { expect, test, devices, type BrowserContext, type Page } from './global-setup.mts';
+import { createHash } from 'node:crypto';
 
 type FailureEntry = {
   url: string;
@@ -64,6 +65,22 @@ async function assertNoDocsFailures(failures: FailureEntry[]): Promise<void> {
 }
 
 test.describe('Docs site', () => {
+  test('wallet guide can fetch a hash-bound catalog document on the shared origin', { tag: '@functional' }, async ({ page }) => {
+    const manifestResponse = await page.request.get('/docs-catalog/manifest.json');
+    expect(manifestResponse.ok()).toBe(true);
+    const manifest = await manifestResponse.json() as Readonly<{
+      schemaVersion: number;
+      items: readonly Readonly<{ id: string; path: string; sha256: string }>[];
+    }>;
+    expect(manifest.schemaVersion).toBe(1);
+    const entry = manifest.items.find(item => item.id === 'core/12_invariant');
+    expect(entry).toBeDefined();
+    const documentResponse = await page.request.get(`/docs-catalog/${entry!.path}`);
+    expect(documentResponse.ok()).toBe(true);
+    const markdown = await documentResponse.text();
+    expect(createHash('sha256').update(markdown).digest('hex')).toBe(entry!.sha256);
+  });
+
   test('main site exposes llms context as static text', { tag: '@functional' }, async ({ page }) => {
     const response = await page.request.get('/llms.txt');
     expect(response?.ok(), '/llms.txt should be served as a real static asset').toBe(true);
@@ -141,7 +158,7 @@ test.describe('Docs site', () => {
   });
 
   test(
-    'keeps a nested document clean on wide, laptop, and iPhone screens',
+    'keeps index, nested, search, code, history, and error states clean on every viewport',
     { tag: '@functional' },
     async ({ browser }, testInfo) => {
       const viewports = [
@@ -158,13 +175,53 @@ test.describe('Docs site', () => {
         const page = await context.newPage();
         const issues = trackBrowserIssues(page);
 
-        await page.goto('/docs?doc=core%2F00_QA', { waitUntil: 'networkidle' });
+        await page.goto('/docs', { waitUntil: 'networkidle' });
         await expect(page.getByRole('heading', { name: 'Full XLN Project Docs' })).toBeVisible();
+        await expect(page.locator('.doc-title')).toHaveText('xln Documentation');
+        await assertNoHorizontalOverflow(page);
+        await page.screenshot({
+          path: testInfo.outputPath(`docs-index-${viewport.name}.png`),
+          fullPage: true,
+          animations: 'disabled',
+        });
+
+        await page.goto('/docs?doc=core%2F00_QA', { waitUntil: 'networkidle' });
         await expect(page.locator('.doc-title')).toHaveText('0.0 Questions & Answers');
         await assertNoHorizontalOverflow(page);
-
         await page.screenshot({
-          path: testInfo.outputPath(`docs-${viewport.name}.png`),
+          path: testInfo.outputPath(`docs-nested-${viewport.name}.png`),
+          fullPage: true,
+          animations: 'disabled',
+        });
+
+        if (viewport.name === 'iphone') await page.getByTestId('docs-nav-toggle').click();
+        const search = page.getByTestId('docs-search');
+        await search.fill('payment');
+        const paymentLink = page.getByTestId('doc-link-implementation-payment-spec');
+        await expect(paymentLink).toBeVisible();
+        await page.screenshot({
+          path: testInfo.outputPath(`docs-search-${viewport.name}.png`),
+          animations: 'disabled',
+        });
+        await paymentLink.click();
+        await expect(page.locator('.doc-title')).toHaveText('Payment and HTLC flow');
+        await expect(page.locator('.markdown-body pre').first()).toBeVisible();
+        await page.goBack();
+        await expect(page.locator('.doc-title')).toHaveText('0.0 Questions & Answers');
+        await page.goForward();
+        await expect(page.locator('.doc-title')).toHaveText('Payment and HTLC flow');
+        await page.locator('.markdown-body pre').first().scrollIntoViewIfNeeded();
+        await assertNoHorizontalOverflow(page);
+        await page.screenshot({
+          path: testInfo.outputPath(`docs-code-${viewport.name}.png`),
+          animations: 'disabled',
+        });
+
+        await page.goto('/docs?doc=missing%2Fdocument', { waitUntil: 'networkidle' });
+        await expect(page.getByTestId('docs-error')).toHaveText('Unknown document: missing/document');
+        await assertNoHorizontalOverflow(page);
+        await page.screenshot({
+          path: testInfo.outputPath(`docs-error-${viewport.name}.png`),
           fullPage: true,
           animations: 'disabled',
         });

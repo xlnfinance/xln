@@ -102,7 +102,7 @@ echo "[contracts-sync] published complete TypeChain generation dependencies-firs
 
 echo "[contracts-sync] copying fresh contract artifacts to frontend/static"
 cd "$ROOT_DIR/frontend"
-"$NODE_BIN" copy-static-files.js
+bun copy-static-files.js
 
 echo "[contracts-sync] verifying compiler immutable metadata parity"
 bun "$ROOT_DIR/runtime/scripts/check-contract-artifact-immutables.ts"

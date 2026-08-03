@@ -7,8 +7,10 @@ import {
 } from '../../frontend/src/lib/contracts/frontendSurfaces';
 import {
   REACT_CANDIDATE_MANIFEST_FILE,
+  type ReactCandidateSurface,
   validateReactCandidateManifest,
 } from '../../frontend/packages/build-contracts/react-candidate';
+import { parseDocsCatalogManifest } from '../../frontend/packages/client-core/docs-catalog-contract.js';
 import { buildFrontendReleaseAssets } from './frontend-release-files';
 import {
   FRONTEND_BUILD_IDENTITY_FILE,
@@ -51,17 +53,28 @@ const selectedSurfaces = (path: string, surfaces: readonly FrontendReleaseSurfac
   surfaces.map(surface => ({ surface, path }));
 
 export const assertNoBlockedReactCandidateBuild = (buildRoot: string): void => {
-  const manifestPath = join(buildRoot, 'site', REACT_CANDIDATE_MANIFEST_FILE);
-  if (!existsSync(manifestPath)) return;
-  let manifest: unknown;
-  try {
-    manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
-  } catch (error) {
-    throw new Error(`FRONTEND_REACT_CANDIDATE_MANIFEST_INVALID:${error instanceof Error ? error.message : String(error)}`);
+  const candidateSurfaces: readonly ReactCandidateSurface[] = ['site', 'docs'];
+  for (const surface of candidateSurfaces) {
+    const manifestPath = join(buildRoot, surface, REACT_CANDIDATE_MANIFEST_FILE);
+    if (!existsSync(manifestPath)) continue;
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
+    } catch (error) {
+      throw new Error(`FRONTEND_REACT_CANDIDATE_MANIFEST_INVALID:${error instanceof Error ? error.message : String(error)}`);
+    }
+    const catalogSha256 = surface === 'docs'
+      ? parseDocsCatalogManifest(readFileSync(join(buildRoot, surface, 'docs-catalog/manifest.json'), 'utf8')).contentSha256
+      : undefined;
+    const errors = validateReactCandidateManifest(
+      manifest,
+      currentFrontendEntrypoints()[surface],
+      surface,
+      catalogSha256,
+    );
+    if (errors.length > 0) throw new Error(`FRONTEND_REACT_CANDIDATE_MANIFEST_INVALID:${errors.join(',')}`);
+    throw new Error(`FRONTEND_REACT_CANDIDATE_ACTIVATION_BLOCKED:${surface}`);
   }
-  const errors = validateReactCandidateManifest(manifest, currentFrontendEntrypoints().site);
-  if (errors.length > 0) throw new Error(`FRONTEND_REACT_CANDIDATE_MANIFEST_INVALID:${errors.join(',')}`);
-  throw new Error('FRONTEND_REACT_CANDIDATE_ACTIVATION_BLOCKED:site');
 };
 
 const extraAssetDestinations = (path: string): SurfaceDestination[] | null => {
