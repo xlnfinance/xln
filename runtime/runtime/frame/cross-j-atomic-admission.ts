@@ -181,7 +181,10 @@ export const admitAtomicCrossJAccountInputs = (
   }
   if (initial.rejectedLegs.length > 0) {
     const reasonByInputIndex = new Map(
-      initial.rejectedLegs.map(leg => [leg.inputIndex, leg.reason]),
+      initial.rejectedLegs.map(leg => [
+        leg.inputIndex,
+        leg.detail.length > 0 ? `${leg.reason}(${[...new Set(leg.detail)].sort().join('+')})` : leg.reason,
+      ]),
     );
     const rejectedInputIndexes = [...reasonByInputIndex.keys()];
     if (isReplay) throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_INVALID');

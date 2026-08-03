@@ -369,6 +369,8 @@ export type CrossJRejectedAccountInput = {
   inputIndex: number;
   accountInput: AccountInput;
   reason: CrossJRejectedAccountInputReason;
+  /** Sub-causes when `reason` is 'candidate-invalid'; empty otherwise. */
+  detail: string[];
 };
 
 export type PotentialCrossJAccountInputPair = {
@@ -402,6 +404,27 @@ type CrossJAdmissionFrameCandidate = {
   targetProgresses: CrossJPullProgressTx[];
   alreadyCommitted: boolean;
   valid: boolean;
+  /**
+   * Which of the validity conditions failed, empty when the candidate is valid.
+   * `valid` alone cannot be acted on: a duplicated route key is a producer bug,
+   * an unresolved sibling binding is a topology or gossip problem, and the two
+   * are fixed in different places.
+   */
+  invalidReasons: string[];
+};
+
+const proposalCandidateInvalidReasons = (
+  routeKeys: readonly string[],
+  sourcePullCount: number,
+  targetPullCount: number,
+  source: unknown,
+  target: unknown,
+): string[] => {
+  const reasons: string[] = [];
+  if (new Set(routeKeys).size !== routeKeys.length) reasons.push('duplicate-route-key');
+  if (sourcePullCount > 0 && source === null) reasons.push('source-sibling-unresolved');
+  if (targetPullCount > 0 && target === null) reasons.push('target-sibling-unresolved');
+  return reasons;
 };
 
 const buildCrossJProposalFrameCandidate = (
@@ -436,6 +459,13 @@ const buildCrossJProposalFrameCandidate = (
     ...sourceFillProgresses.map(tx => crossProgressKey(tx.data)),
     ...targetFillProgresses.map(tx => crossProgressKey(tx.data.fill)),
   ];
+  const invalidReasons = proposalCandidateInvalidReasons(
+    routeKeys,
+    sourcePulls.length,
+    targetPulls.length,
+    source,
+    target,
+  );
   return {
     inputIndex,
     pairKey: exactAdmissionPairKey(input, routeKeys, 'proposal'),
@@ -450,9 +480,8 @@ const buildCrossJProposalFrameCandidate = (
     sourceProgresses: sourceFillProgresses,
     targetProgresses: targetFillProgresses,
     alreadyCommitted: false,
-    valid: new Set(routeKeys).size === routeKeys.length &&
-      (sourcePulls.length === 0 || source !== null) &&
-      (targetPulls.length === 0 || target !== null),
+    valid: invalidReasons.length === 0,
+    invalidReasons,
   };
 };
 
@@ -512,6 +541,7 @@ const buildCrossJAckFrameCandidate = (
     targetProgresses: targetFillProgresses,
     alreadyCommitted: frame === account?.currentFrame,
     valid: new Set(routeKeys).size === routeKeys.length,
+    invalidReasons: new Set(routeKeys).size === routeKeys.length ? [] : ['duplicate-route-key'],
   };
 };
 
@@ -650,6 +680,7 @@ const groupUncommittedCrossJCandidates = (
   byCohort: Map<string, CrossJAdmissionFrameCandidate[]>;
   invalidIndexes: Set<number>;
   multiCandidateIndexes: Set<number>;
+  invalidDetails: Map<number, string[]>;
 } => {
   // A byte-exact Account frame already present in durable state is transport
   // replay. Its missing ACK may be emitted without receiving its sibling again.
@@ -672,10 +703,17 @@ const groupUncommittedCrossJCandidates = (
     .filter(([, count]) => count !== 1)
     .map(([inputIndex]) => inputIndex));
   const invalidIndexes = new Set(multiCandidateIndexes);
+  const invalidDetails = new Map<number, string[]>();
   uncommitted
     .filter(candidate => !candidate.valid)
-    .forEach(candidate => invalidIndexes.add(candidate.inputIndex));
-  return { candidates: uncommitted, byCohort, invalidIndexes, multiCandidateIndexes };
+    .forEach(candidate => {
+      invalidIndexes.add(candidate.inputIndex);
+      invalidDetails.set(candidate.inputIndex, [
+        ...(invalidDetails.get(candidate.inputIndex) ?? []),
+        ...candidate.invalidReasons,
+      ]);
+    });
+  return { candidates: uncommitted, byCohort, invalidIndexes, multiCandidateIndexes, invalidDetails };
 };
 
 const openingPairHasExactUserAuthorizations = (
@@ -906,6 +944,7 @@ export const removeRejectedCrossJAccountInputsByIndex = (
       inputIndex,
       accountInput,
       reason: 'atomic-group-invalid' as const,
+      detail: [],
     }));
   });
   return removeRejectedCrossJAccountInputs(inputs, rejectedLegs).inputs;
@@ -969,7 +1008,8 @@ export const selectMatchedCrossJAccountInputPairs = (
         ? effectiveAccountInputs(input)
         : [];
     const reason = rejectionReason(inputIndex);
-    return accountInputs.map(accountInput => ({ inputIndex, accountInput, reason }));
+    const detail = grouped.invalidDetails.get(inputIndex) ?? [];
+    return accountInputs.map(accountInput => ({ inputIndex, accountInput, reason, detail }));
   });
   const retained = removeRejectedCrossJAccountInputs(inputs, rejectedLegs);
   const remappedIndexes = new Map(
