@@ -1,10 +1,17 @@
-import { writable, get } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteExternalStore';
 import type { Tab } from '$lib/types/ui';
 import { errorLog } from './errorLogStore';
 
-export const tabs = writable<Tab[]>([]);
-export const activeTabId = writable<string | null>(null);
-export const nextTabId = writable<number>(1);
+const tabsBinding = createExternalStore<Tab[]>([]);
+const activeTabIdBinding = createExternalStore<string | null>(null);
+const nextTabIdBinding = createExternalStore<number>(1);
+export const tabsExternalStore = tabsBinding.store;
+export const activeTabIdExternalStore = activeTabIdBinding.store;
+export const nextTabIdExternalStore = nextTabIdBinding.store;
+export const tabs = toSvelteReadable(tabsBinding.store);
+export const activeTabId = toSvelteReadable(activeTabIdBinding.store);
+export const nextTabId = toSvelteReadable(nextTabIdBinding.store);
 
 const STORAGE_KEY = 'xln-entity-tabs';
 
@@ -16,16 +23,16 @@ const tabOperations = {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const tabData = JSON.parse(saved);
-        tabs.set(tabData.tabs || []);
-        activeTabId.set(tabData.activeTabId || null);
-        nextTabId.set(tabData.nextTabId || 1);
+        tabsBinding.controller.set(tabData.tabs || []);
+        activeTabIdBinding.controller.set(tabData.activeTabId || null);
+        nextTabIdBinding.controller.set(tabData.nextTabId || 1);
       }
     } catch (error) {
       errorLog.log('Failed to load tabs; clearing corrupted storage', 'Tabs', error);
       localStorage.removeItem(STORAGE_KEY);
-      tabs.set([]);
-      activeTabId.set(null);
-      nextTabId.set(1);
+      tabsBinding.controller.set([]);
+      activeTabIdBinding.controller.set(null);
+      nextTabIdBinding.controller.set(1);
     }
   },
 
@@ -46,7 +53,7 @@ const tabOperations = {
 
   generateTabId(): string {
     const current = get(nextTabId);
-    nextTabId.set(current + 1);
+    nextTabIdBinding.controller.set(current + 1);
     return `tab-${current}`;
   },
 
@@ -63,7 +70,7 @@ const tabOperations = {
       isActive: false
     };
 
-    tabs.update(currentTabs => [...currentTabs, newTab]);
+    tabsBinding.controller.update(currentTabs => [...currentTabs, newTab]);
     this.setActiveTab(newTab.id);
     this.saveToStorage();
 
@@ -81,7 +88,7 @@ const tabOperations = {
     if (tabIndex === -1) return;
 
     const updatedTabs = currentTabs.filter(t => t.id !== tabId);
-    tabs.set(updatedTabs);
+    tabsBinding.controller.set(updatedTabs);
 
     // If closed tab was active, switch to first remaining tab
     const currentActiveId = get(activeTabId);
@@ -93,14 +100,14 @@ const tabOperations = {
   },
 
   setActiveTab(tabId: string) {
-    tabs.update(currentTabs => 
+    tabsBinding.controller.update(currentTabs =>
       currentTabs.map(tab => ({
         ...tab,
         isActive: tab.id === tabId
       }))
     );
     
-    activeTabId.set(tabId);
+    activeTabIdBinding.controller.set(tabId);
     this.saveToStorage();
   },
 
@@ -111,7 +118,7 @@ const tabOperations = {
   },
 
   updateTab(tabId: string, updates: Partial<Omit<Tab, 'id'>>) {
-    tabs.update(currentTabs => 
+    tabsBinding.controller.update(currentTabs =>
       currentTabs.map(tab => 
         tab.id === tabId ? { ...tab, ...updates } : tab
       )
@@ -128,9 +135,9 @@ const tabOperations = {
   },
 
   clearAllTabs() {
-    tabs.set([]);
-    activeTabId.set(null);
-    nextTabId.set(1);
+    tabsBinding.controller.set([]);
+    activeTabIdBinding.controller.set(null);
+    nextTabIdBinding.controller.set(1);
     this.saveToStorage();
   }
 };

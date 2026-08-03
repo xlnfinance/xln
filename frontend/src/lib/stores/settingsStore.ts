@@ -1,4 +1,5 @@
-import { writable, get } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteExternalStore';
 import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode, AccountSkin, AccountBarStyle, UIStyleSettings } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
 import {
@@ -69,8 +70,9 @@ const defaultSettings: Settings = {
   barAnimRipple: false,
 };
 
-// Settings store
-export const settings = writable<Settings>(defaultSettings);
+const settingsBinding = createExternalStore<Settings>(defaultSettings);
+export const settingsExternalStore = settingsBinding.store;
+export const settings = toSvelteReadable(settingsBinding.store);
 
 // Storage keys
 const SETTINGS_KEY = 'xln-settings';
@@ -115,21 +117,21 @@ const settingsOperations = {
         }
         parsed.balanceRefreshMs = CANONICAL_BALANCE_REFRESH_MS;
         parsed.uiStyle = normalizeUiStyle(parsed.uiStyle);
-        settings.update(current => ({ ...current, ...parsed }));
+        settingsBinding.controller.update(current => ({ ...current, ...parsed }));
       }
       
       // Load component states
       const savedComponentStates = localStorage.getItem(COMPONENT_STATES_KEY);
       if (savedComponentStates) {
         const componentStates = JSON.parse(savedComponentStates);
-        settings.update(current => ({ ...current, componentStates }));
+        settingsBinding.controller.update(current => ({ ...current, componentStates }));
       }
       
     } catch (error) {
       errorLog.log('Failed to load settings; clearing corrupted storage', 'Settings', error);
       localStorage.removeItem(SETTINGS_KEY);
       localStorage.removeItem(COMPONENT_STATES_KEY);
-      settings.set(defaultSettings);
+      settingsBinding.controller.set(defaultSettings);
     }
   },
 
@@ -154,14 +156,14 @@ const settingsOperations = {
 
   // Update theme
   setTheme(theme: ThemeName) {
-    settings.update(current => ({ ...current, theme }));
+    settingsBinding.controller.update(current => ({ ...current, theme }));
     this.saveToStorage();
     applyThemeToDocument(theme);
     applyUiStyleToDocument(get(settings).uiStyle);
   },
 
   setUiStyle(partial: Partial<UIStyleSettings>) {
-    settings.update(current => ({
+    settingsBinding.controller.update(current => ({
       ...current,
       uiStyle: normalizeUiStyle({ ...current.uiStyle, ...partial }),
     }));
@@ -174,19 +176,19 @@ const settingsOperations = {
     const safe: BarColorMode = VALID_BAR_COLOR_MODES.includes(mode as BarColorMode)
       ? (mode as BarColorMode)
       : 'rgy';
-    settings.update(current => ({ ...current, barColorMode: safe }));
+    settingsBinding.controller.update(current => ({ ...current, barColorMode: safe }));
     this.saveToStorage();
   },
 
   setBarLayout(layout: BarLayoutMode) {
     const next: BarLayoutMode = layout === 'sides' ? 'sides' : 'center';
-    settings.update(current => ({ ...current, barLayout: next }));
+    settingsBinding.controller.update(current => ({ ...current, barLayout: next }));
     this.saveToStorage();
   },
 
   // Update dropdown mode
   setDropdownMode(mode: 'signer-first' | 'entity-first') {
-    settings.update(current => ({ ...current, dropdownMode: mode }));
+    settingsBinding.controller.update(current => ({ ...current, dropdownMode: mode }));
     this.saveToStorage();
   },
 
@@ -198,12 +200,12 @@ const settingsOperations = {
 
   // Update runtime frame delay
   setRuntimeDelay(delay: number) {
-    settings.update(current => ({ ...current, runtimeDelay: delay }));
+    settingsBinding.controller.update(current => ({ ...current, runtimeDelay: delay }));
     this.saveToStorage();
   },
 
   setBalanceRefreshMs(_refreshMs: number) {
-    settings.update(current => ({ ...current, balanceRefreshMs: CANONICAL_BALANCE_REFRESH_MS }));
+    settingsBinding.controller.update(current => ({ ...current, balanceRefreshMs: CANONICAL_BALANCE_REFRESH_MS }));
     this.saveToStorage();
   },
 
@@ -212,63 +214,63 @@ const settingsOperations = {
     if (!sameWsEndpoint(relayUrl, canonical)) {
       errorLog.log('RELAY_OVERRIDE_BLOCKED: one-relay mode forced', 'Settings', { canonical, requested: relayUrl });
     }
-    settings.update(current => ({ ...current, relayUrl: canonical }));
+    settingsBinding.controller.update(current => ({ ...current, relayUrl: canonical }));
     this.saveToStorage();
   },
 
   // Update portfolio scale
   setPortfolioScale(scale: number) {
-    settings.update(current => ({ ...current, portfolioScale: scale }));
+    settingsBinding.controller.update(current => ({ ...current, portfolioScale: scale }));
     this.saveToStorage();
   },
 
   // Update compact numbers display
   setCompactNumbers(compact: boolean) {
-    settings.update(current => ({ ...current, compactNumbers: compact }));
+    settingsBinding.controller.update(current => ({ ...current, compactNumbers: compact }));
     this.saveToStorage();
   },
 
   // Update verbose logging
   setVerboseLogging(verbose: boolean) {
-    settings.update(current => ({ ...current, verboseLogging: verbose }));
+    settingsBinding.controller.update(current => ({ ...current, verboseLogging: verbose }));
     this.saveToStorage();
   },
 
   // Update token amount precision (2..18)
   setTokenPrecision(precision: number) {
     const clamped = Math.max(2, Math.min(18, Math.floor(Number(precision) || 2)));
-    settings.update(current => ({ ...current, tokenPrecision: clamped }));
+    settingsBinding.controller.update(current => ({ ...current, tokenPrecision: clamped }));
     this.saveToStorage();
   },
 
   setShowTokenIcons(show: boolean) {
-    settings.update(current => ({ ...current, showTokenIcons: !!show }));
+    settingsBinding.controller.update(current => ({ ...current, showTokenIcons: !!show }));
     this.saveToStorage();
   },
 
   setShowTimeMachine(show: boolean) {
-    settings.update(current => ({ ...current, showTimeMachine: !!show }));
+    settingsBinding.controller.update(current => ({ ...current, showTimeMachine: !!show }));
     this.saveToStorage();
   },
 
   setShowXlnMascot(show: boolean) {
-    settings.update(current => ({ ...current, showXlnMascot: !!show }));
+    settingsBinding.controller.update(current => ({ ...current, showXlnMascot: !!show }));
     this.saveToStorage();
   },
 
   setXlnMascotDock(dock: unknown) {
-    settings.update(current => ({ ...current, xlnMascotDock: normalizeXlnMascotDock(dock) }));
+    settingsBinding.controller.update(current => ({ ...current, xlnMascotDock: normalizeXlnMascotDock(dock) }));
     this.saveToStorage();
   },
 
   setLiteMode(enabled: boolean) {
-    settings.update(current => ({ ...current, liteMode: !!enabled }));
+    settingsBinding.controller.update(current => ({ ...current, liteMode: !!enabled }));
     this.saveToStorage();
   },
 
   setAccountBarUsdPerPx(value: number) {
     const next = clampAccountBarUsdPerPx(value);
-    settings.update(current => ({ ...current, accountBarUsdPerPx: next }));
+    settingsBinding.controller.update(current => ({ ...current, accountBarUsdPerPx: next }));
     this.saveToStorage();
   },
 
@@ -278,25 +280,25 @@ const settingsOperations = {
 
   setAccountDeltaViewMode(mode: AccountDeltaViewMode) {
     const safe: AccountDeltaViewMode = VALID_ACCOUNT_DELTA_VIEW_MODES.includes(mode) ? mode : defaultSettings.accountDeltaViewMode;
-    settings.update(current => ({ ...current, accountDeltaViewMode: safe }));
+    settingsBinding.controller.update(current => ({ ...current, accountDeltaViewMode: safe }));
     this.saveToStorage();
   },
 
   setAccountSkin(skin: AccountSkin) {
     const safe: AccountSkin = skin === 'apple' ? 'apple' : 'classic';
-    settings.update(current => ({ ...current, accountSkin: safe }));
+    settingsBinding.controller.update(current => ({ ...current, accountSkin: safe }));
     this.saveToStorage();
   },
 
   toggleAccountSkin() {
-    settings.update(current => ({ ...current, accountSkin: current.accountSkin === 'apple' ? 'classic' : 'apple' }));
+    settingsBinding.controller.update(current => ({ ...current, accountSkin: current.accountSkin === 'apple' ? 'classic' : 'apple' }));
     this.saveToStorage();
   },
 
   setAccountBarStyle(style: AccountBarStyle) {
     const valid: readonly AccountBarStyle[] = ['hairline', 'pips', 'twin', 'capsule', 'thread'];
     const safe: AccountBarStyle = valid.includes(style) ? style : 'hairline';
-    settings.update(current => ({ ...current, accountBarStyle: safe }));
+    settingsBinding.controller.update(current => ({ ...current, accountBarStyle: safe }));
     this.saveToStorage();
   },
 
@@ -312,7 +314,7 @@ const settingsOperations = {
 
   // Set component state
   setComponentState(componentId: string, isExpanded: boolean) {
-    settings.update(current => ({
+    settingsBinding.controller.update(current => ({
       ...current,
       componentStates: {
         ...current.componentStates,
@@ -330,7 +332,7 @@ const settingsOperations = {
 
   // Reset to defaults
   resetToDefaults() {
-    settings.set(defaultSettings);
+    settingsBinding.controller.set(defaultSettings);
     this.saveToStorage();
     
     // Clear localStorage
@@ -344,7 +346,7 @@ const settingsOperations = {
 
   // Generic partial update + persist
   update(partial: Partial<Settings>) {
-    settings.update(current => ({
+    settingsBinding.controller.update(current => ({
       ...current,
       ...partial,
       ...(partial.uiStyle ? { uiStyle: normalizeUiStyle({ ...current.uiStyle, ...partial.uiStyle }) } : {}),
@@ -362,7 +364,7 @@ const settingsOperations = {
   importUiSettingsJson(raw: string) {
     const parsed = JSON.parse(raw);
     const next = normalizeImportedUiSettings(parsed);
-    settings.update(current => ({
+    settingsBinding.controller.update(current => ({
       ...current,
       ...next,
       uiStyle: normalizeUiStyle(next.uiStyle ?? current.uiStyle),

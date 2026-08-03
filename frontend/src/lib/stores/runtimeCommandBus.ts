@@ -1,4 +1,5 @@
-import { get, writable } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteExternalStore';
 import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {
@@ -80,8 +81,12 @@ type RuntimeCommandSubmitOptions = RuntimeCommandExecutionOptions & {
 const MAX_RECEIPTS = 100;
 let receiptSequence = 0;
 
-export const runtimeCommandReceipts = writable<CommandReceipt[]>([]);
-export const runtimeCommandLatestReceipt = writable<CommandReceipt | null>(null);
+const runtimeCommandReceiptsBinding = createExternalStore<CommandReceipt[]>([]);
+const runtimeCommandLatestReceiptBinding = createExternalStore<CommandReceipt | null>(null);
+export const runtimeCommandReceiptsExternalStore = runtimeCommandReceiptsBinding.store;
+export const runtimeCommandLatestReceiptExternalStore = runtimeCommandLatestReceiptBinding.store;
+export const runtimeCommandReceipts = toSvelteReadable(runtimeCommandReceiptsBinding.store);
+export const runtimeCommandLatestReceipt = toSvelteReadable(runtimeCommandLatestReceiptBinding.store);
 
 export const runtimeCommandRetryOptions = (
   receipt: CommandReceipt,
@@ -138,8 +143,8 @@ export const createRuntimeCommandReceipt = async (options: RuntimeCommandSubmitO
 };
 
 const publishReceipt = (receipt: CommandReceipt): void => {
-  runtimeCommandLatestReceipt.set(receipt);
-  runtimeCommandReceipts.update((receipts) => {
+  runtimeCommandLatestReceiptBinding.controller.set(receipt);
+  runtimeCommandReceiptsBinding.controller.update((receipts) => {
     const next = [receipt, ...receipts.filter((candidate) => candidate.receiptId !== receipt.receiptId)];
     return next.slice(0, MAX_RECEIPTS);
   });
@@ -279,8 +284,8 @@ export const recordRuntimeIngressReceipt = (options: {
 };
 
 export const clearRuntimeCommandReceipts = (): void => {
-  runtimeCommandReceipts.set([]);
-  runtimeCommandLatestReceipt.set(null);
+  runtimeCommandReceiptsBinding.controller.set([]);
+  runtimeCommandLatestReceiptBinding.controller.set(null);
 };
 
 const exposeRuntimeCommandDebugSurface = (): void => {

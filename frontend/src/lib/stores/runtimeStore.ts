@@ -1,4 +1,9 @@
-import { writable, derived, get } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import {
+  deriveSvelteStore as derived,
+  getSvelteStoreValue as get,
+  toSvelteWritable,
+} from './adapters/svelteExternalStore';
 import type { RuntimeReplica, RuntimeAdapterConfig } from '@xln/runtime/api/public/runtime-module';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
@@ -46,7 +51,9 @@ export interface Runtime {
 }
 
 // All runtimes (EOA-keyed for local, URI-keyed for remote)
-export const runtimes = writable<Map<string, Runtime>>(new Map());
+const runtimesBinding = createExternalStore<Map<string, Runtime>>(new Map());
+export const runtimesExternalStore = runtimesBinding.store;
+export const runtimes = toSvelteWritable(runtimesBinding);
 
 const normalizeRuntimeId = (id: string | null | undefined): string =>
   String(id || '').trim().toLowerCase();

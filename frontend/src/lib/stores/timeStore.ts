@@ -1,4 +1,9 @@
-import { writable, derived, get } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import {
+  deriveSvelteStore as derived,
+  getSvelteStoreValue as get,
+  toSvelteReadable,
+} from './adapters/svelteExternalStore';
 import type { TimeState } from '$lib/types/ui';
 import type { EnvSnapshot } from '@xln/runtime/api/public/runtime-module';
 import { history } from './xlnStore';
@@ -12,7 +17,9 @@ const defaultTimeState: TimeState = {
 
 // Session-only developer tool state.
 // /app must always boot in LIVE mode instead of restoring an old historical cursor.
-export const timeState = writable<TimeState>({ ...defaultTimeState });
+const timeStateBinding = createExternalStore<TimeState>({ ...defaultTimeState });
+export const timeStateExternalStore = timeStateBinding.store;
+export const timeState = toSvelteReadable(timeStateBinding.store);
 
 // Derived stores
 export const currentTimeIndex = derived(timeState, $state => $state.currentTimeIndex);
@@ -52,7 +59,7 @@ const timeOperations = {
 
     // Canonical contract: -1 means LIVE/current env; >=0 means historical frame.
     if (maxIndex !== currentState.maxTimeIndex && maxIndex >= 0) {
-      timeState.update(current => ({
+      timeStateBinding.controller.update(current => ({
         ...current,
         maxTimeIndex: maxIndex,
         currentTimeIndex: current.isLive ? -1 : Math.max(0, Math.min(current.currentTimeIndex, maxIndex)),
@@ -71,7 +78,7 @@ const timeOperations = {
       isLive: false
     };
 
-    timeState.set(newState);
+    timeStateBinding.controller.set(newState);
     timeOperations.triggerEntityPanelUpdates();
   },
 
@@ -84,7 +91,7 @@ const timeOperations = {
       maxTimeIndex: maxIndex,
       isLive: true
     };
-    timeState.set(newState);
+    timeStateBinding.controller.set(newState);
     timeOperations.triggerEntityPanelUpdates();
   },
 
@@ -96,7 +103,7 @@ const timeOperations = {
         // Ignore storage failures; live state remains in memory.
       }
     }
-    timeState.set({ ...defaultTimeState, isLive: true });
+    timeStateBinding.controller.set({ ...defaultTimeState, isLive: true });
   },
 
   // Go to history start

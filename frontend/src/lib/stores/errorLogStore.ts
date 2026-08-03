@@ -1,21 +1,28 @@
-import { writable } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import { toSvelteReadable } from './adapters/svelteExternalStore';
 
-interface ErrorLogEntry {
+export interface ErrorLogEntry {
   timestamp: number;
   message: string;
   source: string;
   details?: unknown;
 }
 
-function createErrorLogStore() {
-  const { subscribe, update } = writable<ErrorLogEntry[]>([]);
+export interface ErrorLogClock {
+  now(): number;
+}
+
+export function createErrorLogStore(clock: ErrorLogClock) {
+  const binding = createExternalStore<ErrorLogEntry[]>([]);
+  const readable = toSvelteReadable(binding.store);
 
   return {
-    subscribe,
+    externalStore: binding.store,
+    subscribe: readable.subscribe,
     log(message: string, source: string, details?: unknown) {
-      update(logs => {
+      binding.controller.update(logs => {
         const entry: ErrorLogEntry = {
-          timestamp: Date.now(),
+          timestamp: clock.now(),
           message,
           source,
           details
@@ -26,12 +33,14 @@ function createErrorLogStore() {
       });
     },
     clear() {
-      update(() => []);
+      binding.controller.set([]);
     }
   };
 }
 
-export const errorLog = createErrorLogStore();
+const errorLogStore = createErrorLogStore({ now: () => Date.now() });
+export const errorLogExternalStore = errorLogStore.externalStore;
+export const errorLog = errorLogStore;
 
 function formatDetails(details: unknown): string {
   if (details === undefined) return '';

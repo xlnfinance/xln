@@ -6,40 +6,23 @@
  * Copyright (C) 2025 XLN Finance
  */
 
-import { writable, get } from 'svelte/store';
-import { browser } from '$app/environment';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import {
+  appStateFromPersistence,
+  reduceAppState,
+  type AppMode,
+  type AppState,
+  type NavigationSelection,
+  type ViewMode,
+} from '../../../packages/client-core/app-state';
+import { toSvelteReadable } from './adapters/svelteExternalStore';
 import { errorLog } from './errorLogStore';
 
-export type AppMode = 'user' | 'dev';
-export type ViewMode = 'home' | 'settings' | 'docs' | 'brainvault' | 'panels' | 'graph3d' | 'terminal';
-
-export interface NavigationSelection {
-  runtime: string | null;      // Runtime ID
-  jurisdiction: string | null;  // Jurisdiction name
-  signer: string | null;        // Signer address
-  entity: string | null;        // Entity ID
-  account: string | null;       // Account key (bilateral)
-}
-
-export interface AppState {
-  // Mode toggles (from modeStore)
-  mode: AppMode;
-
-  // Landing page visibility (from uiStore)
-  landingVisible: boolean;
-
-  // View mode (from viewModeStore)
-  viewMode: ViewMode;
-
-  requestedDockPanel: string | null;
-
-  // Hierarchical navigation (from navigationStore)
-  navigation: NavigationSelection;
-}
+export type { AppMode, AppState, NavigationSelection, ViewMode } from '../../../packages/client-core/app-state';
 
 // Safe localStorage helpers (prevent throws in private/quota-restricted contexts)
 function safeGetItem(key: string): string | null {
-  if (!browser) return null;
+  if (typeof localStorage === 'undefined') return null;
   try {
     return localStorage.getItem(key);
   } catch (error) {
@@ -49,7 +32,7 @@ function safeGetItem(key: string): string | null {
 }
 
 function safeSetItem(key: string, value: string): void {
-  if (!browser) return;
+  if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(key, value);
   } catch (error) {
@@ -59,40 +42,11 @@ function safeSetItem(key: string, value: string): void {
 
 // Load persisted state
 function loadState(): AppState {
-  const defaultState: AppState = {
-    mode: 'user',
-    landingVisible: true,
-    viewMode: 'home',
-    requestedDockPanel: null,
-    navigation: {
-      runtime: 'local',
-      jurisdiction: null,
-      signer: null,
-      entity: null,
-      account: null
-    }
-  };
-
-  if (!browser) return defaultState;
+  if (typeof localStorage === 'undefined') return appStateFromPersistence(null, null);
 
   const savedMode = safeGetItem('xln-app-mode');
   const savedViewMode = safeGetItem('xln-view-mode');
-
-  return {
-    mode: (savedMode === 'dev' || savedMode === 'user') ? savedMode : 'user',
-    landingVisible: true,
-    viewMode: (savedViewMode === 'home' || savedViewMode === 'settings' || savedViewMode === 'docs' ||
-               savedViewMode === 'brainvault' || savedViewMode === 'panels' || savedViewMode === 'graph3d' ||
-               savedViewMode === 'terminal') ? savedViewMode : 'home',
-    requestedDockPanel: null,
-    navigation: {
-      runtime: 'local',
-      jurisdiction: null,
-      signer: null,
-      entity: null,
-      account: null
-    }
-  };
+  return appStateFromPersistence(savedMode, savedViewMode);
 }
 
 // Save state to localStorage
@@ -101,8 +55,9 @@ function saveState(state: AppState) {
   safeSetItem('xln-view-mode', state.viewMode);
 }
 
-// Create store
-export const appState = writable<AppState>(loadState());
+const appStateBinding = createExternalStore<AppState>(loadState());
+export const appStateExternalStore = appStateBinding.store;
+export const appState = toSvelteReadable(appStateBinding.store);
 
 // Auto-save on changes
 appState.subscribe(state => saveState(state));
@@ -111,65 +66,42 @@ appState.subscribe(state => saveState(state));
 export const appStateOperations = {
   // Mode toggle
   toggleMode() {
-    appState.update(s => ({ ...s, mode: s.mode === 'user' ? 'dev' : 'user' }));
+    appStateBinding.controller.update(s => reduceAppState(s, { type: 'toggleMode' }));
   },
 
   setMode(mode: AppMode) {
-    appState.update(s => ({ ...s, mode }));
+    appStateBinding.controller.update(s => reduceAppState(s, { type: 'setMode', mode }));
   },
 
   openDockPanel(panelId: string): void {
-    appState.update(s => ({ ...s, mode: 'dev', requestedDockPanel: panelId }));
+    appStateBinding.controller.update(s => reduceAppState(s, { type: 'openDockPanel', panelId }));
   },
 
   clearDockPanelRequest(panelId: string): void {
-    appState.update(s => s.requestedDockPanel === panelId
-      ? { ...s, requestedDockPanel: null }
-      : s);
+    appStateBinding.controller.update(s => reduceAppState(s, { type: 'clearDockPanelRequest', panelId }));
   },
 
   // Landing visibility
   setLandingVisible(visible: boolean) {
-    appState.update(s => ({ ...s, landingVisible: visible }));
+    appStateBinding.controller.update(s => reduceAppState(s, { type: 'setLandingVisible', visible }));
   },
 
   // View mode
   setViewMode(mode: ViewMode) {
-    appState.update(s => ({ ...s, viewMode: mode }));
+    appStateBinding.controller.update(s => reduceAppState(s, { type: 'setViewMode', mode }));
   },
 
   // Navigation
   navigate(level: keyof NavigationSelection, id: string | null) {
-    appState.update(s => {
-      const newNav = { ...s.navigation };
-      newNav[level] = id;
-
-      // Clear downstream selections when changing upstream
-      const hierarchy: (keyof NavigationSelection)[] = ['runtime', 'jurisdiction', 'signer', 'entity', 'account'];
-      const currentIndex = hierarchy.indexOf(level);
-      for (let i = currentIndex + 1; i < hierarchy.length; i++) {
-        newNav[hierarchy[i]!] = null;
-      }
-
-      return { ...s, navigation: newNav };
-    });
+    appStateBinding.controller.update(s => reduceAppState(s, { type: 'navigate', level, id }));
   },
 
   resetNavigation() {
-    appState.update(s => ({
-      ...s,
-      navigation: {
-        runtime: 'local',
-        jurisdiction: null,
-        signer: null,
-        entity: null,
-        account: null
-      }
-    }));
+    appStateBinding.controller.update(s => reduceAppState(s, { type: 'resetNavigation' }));
   },
 
   getState(): AppState {
-    return get(appState);
+    return appStateExternalStore.getSnapshot();
   }
 };
 

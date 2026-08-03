@@ -11,6 +11,7 @@
 
 ## Status
 
+- **Execution:** DONE — L1/focused L2/L3 green
 - **Priority:** P1
 - **Effort:** L
 - **Risk:** HIGH
@@ -35,6 +36,31 @@ At least 29 TypeScript files (11,291 LOC) directly import `svelte/store`, while 
 - `frontend/src/lib/stores/appStateStore.ts` mixes app mode/view/navigation types with Svelte and browser checks.
 - Settings, runtime loader/controller, command bus, tab/time/error/toast stores also embed Svelte subscriptions.
 - Runtime state is live state, not an archive; historical reads belong to dedicated stores and must not be re-created in UI memory.
+
+## Execution inventory at Plan 005 start
+
+The drift check found no semantic edits to the target stores since `5749e283d`.
+Vault/journal persistence-contract drift remains owned by Plan 006. Importer counts
+include production and focused test consumers at checkpoint start.
+
+| Owner | Snapshot / derivation | Mutation and I/O owner | Importers | Error policy |
+|---|---|---|---:|---|
+| `appStateStore` | mode, route view, dock request, hierarchy | pure app reducer; local storage port in controller | 10 | storage failures enter persistent error log |
+| `settingsStore` | immutable `Settings` snapshot | named settings operations; storage/theme DOM effects after transition | 22 | corrupt storage logged and cleared |
+| `tabStore` | tabs, active ID, next ID | named tab operations; `xln-entity-tabs` persistence | 5 | corrupt storage logged, cleared, reset |
+| `timeStore` | live cursor and three derived values | named time operations; history input and UI event effect | 4 | invalid historical selection throws |
+| `toastStore` | ordered toast list | toast controller with injected scheduler | 12 | scheduler failures stay loud |
+| `errorLogStore` | capped diagnostic entries | error controller with injected clock | 42 | listener/controller failures stay loud |
+| `xlnRuntimeLoader` | loaded Runtime module or null | one cached loader promise with URL/import ports | 6 | transport/schema failures reject; promise retry remains available |
+| `runtimeControllerStore` | adapter, config, handle, status, height | one adapter lifecycle controller | 40 | connect/send failures reject without fallback |
+| `runtimeCommandBus` | latest and capped receipt list | named receipt/command operations | 6 | execution/journal failures reject or aggregate |
+| `runtimeStore` | immutable Runtime registry map plus active projections | runtime registry/selection operations; storage and adapter ports | 29 | target mismatch and overwrite refusal throw |
+| `runtimeQueryClient` | immutable query read snapshots and bounded cache | query controller; adapter/height subscriptions | 18 | typed read errors publish explicit error snapshots |
+
+Remaining direct `svelte/store` imports are outside this checkpoint boundary:
+vault/recovery and their direct compatibility consumers move in Plan 006; wallet
+view state moves with Plans 007–009; operator/network-machine state moves in Plan
+010. The boundary test locks the eleven Plan 005 owners above now.
 
 ## Target external-store contract
 
@@ -149,13 +175,23 @@ Run once on the unchanged checkpoint candidate.
 
 ## Done criteria
 
-- [ ] Target stores have one framework-neutral source of truth and pure transitions.
-- [ ] Current Svelte views and React test consumers subscribe to the same instances.
-- [ ] Snapshot, mutation, persistence, initialization, teardown, and error semantics match characterization evidence.
-- [ ] Framework-boundary tests prevent state logic from drifting back into adapters.
-- [ ] No runtime protocol or frozen-core file changed.
-- [ ] `bun run check` passes; checkpoint only with `wip:`.
-- [ ] `git status --short` is reviewed and the Plan 005 index row is updated.
+- [x] Target stores have one framework-neutral source of truth and pure transitions.
+- [x] Current Svelte views and React test consumers subscribe to the same instances.
+- [x] Snapshot, mutation, persistence, initialization, teardown, and error semantics match characterization evidence.
+- [x] Framework-boundary tests prevent state logic from drifting back into adapters.
+- [x] No runtime protocol or frozen-core file changed.
+- [x] `bun run check` passes; checkpoint only with `wip:`.
+- [x] `git status --short` is reviewed and the Plan 005 index row is updated.
+
+## Execution evidence
+
+- L1: 47 tests / 350 assertions pass across the external-store primitive, target-store characterization, runtime query client, and framework-boundary suites.
+- Primitive semantics: stable no-op identity, synchronous notification order, listener removal, loud listener failures, rejected reentrancy, teardown, selectors, and one shared Svelte facade are characterized.
+- State parity: navigation hierarchy/persistence, settings normalization/corruption, tab selection after removal, Runtime registry removal, loader failures, query invalidation, single initialization, and unsubscribe teardown pass against the migrated stores.
+- React: `useSyncExternalStore(store.subscribe, store.getSnapshot)` passes a real Chromium Strict Mode harness with one peak active subscription, no missed update, no no-op render, and zero subscriptions after unmount.
+- Svelte: the existing wallet onboarding entry passes Chromium with explicit schema-valid jurisdiction/runtime-import ports and clean console/page health; its screenshot was inspected with no visible regression.
+- Full mesh note: the broad screenshot file was attempted twice (including the onboarding-only title) but its isolated H1/H2/H3 reset stopped before Playwright with `HUB_BASELINE_STALLED` at height 0. No frontend assertion ran; focused Plan 005 L2 evidence above is green.
+- L3: `bun run check` passes with frozen core unchanged, 0 Svelte diagnostics, React TypeScript clean, and legacy/site/docs production builds green.
 
 ## Stop conditions
 

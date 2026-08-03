@@ -1,4 +1,5 @@
-import { get, writable } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import { getSvelteStoreValue as get, toSvelteWritable } from './adapters/svelteExternalStore';
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -43,11 +44,23 @@ const emptyHandle: RuntimeHandle = {
   commandReadyReason: 'adapter-disconnected',
 };
 
-export const runtimeAdapter = writable<RuntimeAdapter | null>(null);
-export const runtimeControllerHandle = writable<RuntimeHandle>(emptyHandle);
-export const runtimeControllerConfig = writable<RuntimeAdapterConfig | null>(null);
-export const runtimeAdapterStatus = writable<RuntimeAdapterStatus>('disconnected');
-export const runtimeAdapterHeight = writable<number>(0);
+const runtimeAdapterBinding = createExternalStore<RuntimeAdapter | null>(null);
+const runtimeControllerHandleBinding = createExternalStore<RuntimeHandle>(emptyHandle);
+const runtimeControllerConfigBinding = createExternalStore<RuntimeAdapterConfig | null>(null);
+const runtimeAdapterStatusBinding = createExternalStore<RuntimeAdapterStatus>('disconnected');
+const runtimeAdapterHeightBinding = createExternalStore<number>(0);
+
+export const runtimeAdapterExternalStore = runtimeAdapterBinding.store;
+export const runtimeControllerHandleExternalStore = runtimeControllerHandleBinding.store;
+export const runtimeControllerConfigExternalStore = runtimeControllerConfigBinding.store;
+export const runtimeAdapterStatusExternalStore = runtimeAdapterStatusBinding.store;
+export const runtimeAdapterHeightExternalStore = runtimeAdapterHeightBinding.store;
+
+export const runtimeAdapter = toSvelteWritable(runtimeAdapterBinding);
+export const runtimeControllerHandle = toSvelteWritable(runtimeControllerHandleBinding);
+export const runtimeControllerConfig = toSvelteWritable(runtimeControllerConfigBinding);
+export const runtimeAdapterStatus = toSvelteWritable(runtimeAdapterStatusBinding);
+export const runtimeAdapterHeight = toSvelteWritable(runtimeAdapterHeightBinding);
 
 let activeAdapter: RuntimeAdapter | null = null;
 let activeConfig: RuntimeAdapterConfig | null = null;

@@ -1,4 +1,5 @@
-import { get, writable } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteExternalStore';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeAdapter,
@@ -15,7 +16,9 @@ import type { StorageAccountDoc, StorageHead } from '@xln/runtime/storage/types'
 import {
   getRuntimeControllerAdapter,
   runtimeAdapter,
+  runtimeAdapterExternalStore,
   runtimeAdapterHeight,
+  runtimeAdapterHeightExternalStore,
   runtimeControllerHandle,
 } from './runtimeControllerStore';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
@@ -236,31 +239,33 @@ exposeRuntimeAdapterDebugSurface();
 export const createRuntimeQueryStore = <T>(
   reader: (client: RuntimeQueryClient) => Promise<T>,
 ) => {
-  const store = writable<RuntimeReadState<T>>({
+  const binding = createExternalStore<RuntimeReadState<T>>({
     loading: true,
     data: null,
     error: null,
     height: get(runtimeAdapterHeight),
   });
+  const store = toSvelteReadable(binding.store);
   let disposed = false;
   let version = 0;
   const refresh = async (): Promise<void> => {
     const currentVersion = ++version;
-    store.update((state) => ({ ...state, loading: true, error: null }));
+    binding.controller.update((state) => ({ ...state, loading: true, error: null }));
     try {
       const data = await reader(runtimeQueryClient);
       if (disposed || currentVersion !== version) return;
-      store.set({ loading: false, data, error: null, height: get(runtimeAdapterHeight) });
+      binding.controller.set({ loading: false, data, error: null, height: get(runtimeAdapterHeight) });
     } catch (error) {
       if (disposed || currentVersion !== version) return;
-      store.set({ loading: false, data: null, error: errorMessage(error), height: get(runtimeAdapterHeight) });
+      binding.controller.set({ loading: false, data: null, error: errorMessage(error), height: get(runtimeAdapterHeight) });
     }
   };
-  const unsubscribeHeight = runtimeAdapterHeight.subscribe(() => void refresh());
-  const unsubscribeAdapter = runtimeAdapter.subscribe(() => void refresh());
+  const unsubscribeHeight = runtimeAdapterHeightExternalStore.subscribe(() => void refresh());
+  const unsubscribeAdapter = runtimeAdapterExternalStore.subscribe(() => void refresh());
   void refresh();
   return {
     subscribe: store.subscribe,
+    externalStore: binding.store,
     refresh,
     destroy: () => {
       disposed = true;
