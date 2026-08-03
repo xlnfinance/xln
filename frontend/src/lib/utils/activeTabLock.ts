@@ -1,4 +1,5 @@
-import { writable } from 'svelte/store';
+import { createExternalStore } from '../../../packages/client-core/external-store';
+import { toSvelteReadable } from '../stores/adapters/svelteExternalStore';
 
 const ACTIVE_TAB_LOCK_KEY = 'xln-active-tab-lock';
 const ACTIVE_TAB_CHANNEL_NAME = 'xln-active-tab-lock';
@@ -49,11 +50,13 @@ export type ActiveTabLockState = {
   isOwner: boolean;
 };
 
-export const activeTabLock = writable<ActiveTabLockState>({
+const activeTabLockBinding = createExternalStore<ActiveTabLockState>({
   tabId: '',
   ownerTabId: null,
   isOwner: false,
 });
+export const activeTabLockExternalStore = activeTabLockBinding.store;
+export const activeTabLock = toSvelteReadable(activeTabLockBinding.store);
 
 let currentTabId = '';
 let activeChannel: BroadcastChannel | null = null;
@@ -187,7 +190,7 @@ function writeLockRecord(tabId: string, previousOwnerTabId: string | null): Acti
     timestamp: record.timestamp,
     pathname: record.pathname,
   });
-  activeTabLock.set({
+  activeTabLockBinding.controller.set({
     tabId,
     ownerTabId: tabId,
     isOwner: true,
@@ -199,10 +202,10 @@ async function handleExternalOwner(ownerTabId: string): Promise<void> {
   const tabId = getOrCreateTabId();
   if (!ownerTabId) return;
   if (ownerTabId === tabId) {
-    activeTabLock.set({ tabId, ownerTabId, isOwner: true });
+    activeTabLockBinding.controller.set({ tabId, ownerTabId, isOwner: true });
     return;
   }
-  activeTabLock.set({ tabId, ownerTabId, isOwner: false });
+  activeTabLockBinding.controller.set({ tabId, ownerTabId, isOwner: false });
   if (lockLost) return;
   lockLost = true;
   enterInactiveTabStandby();

@@ -2,6 +2,11 @@ import {
   parseRemoteRuntimeImportSourcePayload,
   type RemoteRuntimeImportAccess,
 } from '../../utils/remoteRuntimeImport';
+export {
+  countMnemonicWords,
+  hasSupportedMnemonicWordCount,
+  normalizeMnemonicPhrase,
+} from '../../../../packages/runtime-client/wallet-onboarding';
 
 export type FactorInfo = {
   factor: number;
@@ -105,20 +110,6 @@ const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 export function generateBase58Secret(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => BASE58[byte % BASE58.length]!).join('');
-}
-
-export function normalizeMnemonicPhrase(value: string): string {
-  return String(value || '').trim().split(/\s+/).filter(Boolean).join(' ');
-}
-
-export function countMnemonicWords(value: string): number {
-  const normalized = normalizeMnemonicPhrase(value);
-  return normalized ? normalized.split(' ').length : 0;
-}
-
-export function hasSupportedMnemonicWordCount(value: string): boolean {
-  const wordCount = countMnemonicWords(value);
-  return wordCount === 12 || wordCount === 24;
 }
 
 export function formatUSD(value: number): string {

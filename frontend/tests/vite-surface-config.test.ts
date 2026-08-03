@@ -9,6 +9,7 @@ import { FRONTEND_ROUTES } from '../src/lib/contracts/frontendSurfaces';
 import {
   buildReactCandidateManifest,
   buildReactSiteCandidateManifest,
+  buildReactWalletCandidateManifest,
   REACT_CANDIDATE_MANIFEST_FILE,
   validateReactCandidateManifest,
 } from '../packages/build-contracts/react-candidate';
@@ -27,6 +28,7 @@ describe('React Vite surface contract', () => {
     const expectedRoutes = FRONTEND_ROUTES.filter(route => route.surface === 'site' && route.kind === 'page');
     const site = createReactViteSurfaceContract(FRONTEND_ROOT, 'site');
     const docs = createReactViteSurfaceContract(FRONTEND_ROOT, 'docs');
+    const wallet = createReactViteSurfaceContract(FRONTEND_ROOT, 'wallet');
     const all = createReactViteSurfaceContract(FRONTEND_ROOT, 'all');
 
     expect(site.root).toBe(resolve(FRONTEND_ROOT, 'apps/site/entries'));
@@ -42,16 +44,24 @@ describe('React Vite surface contract', () => {
     expect(docs.inputs).toEqual({
       'docs-reader': resolve(FRONTEND_ROOT, 'apps/docs/entries/index.html'),
     });
+    expect(wallet.root).toBe(resolve(FRONTEND_ROOT, 'apps/wallet/entries'));
+    expect(wallet.outDir).toBe(resolve(FRONTEND_ROOT, 'build/wallet'));
+    expect(wallet.routes.map(route => route.id)).toEqual([
+      'wallet-app',
+      'wallet-address-index',
+      'wallet-address-detail',
+      'wallet-testnet',
+    ]);
     expect(all.root).toBe(FRONTEND_ROOT);
     expect(all.outDir).toBe(resolve(FRONTEND_ROOT, 'build/react-all'));
-    expect(all.inputs).toEqual({ ...site.inputs, ...docs.inputs });
+    expect(all.inputs).toEqual({ ...site.inputs, ...docs.inputs, ...wallet.inputs });
   });
 
   test('rejects unknown selectors instead of falling back to another surface', () => {
     expect(resolveReactFrontendSurface(undefined)).toBe('all');
     expect(resolveReactFrontendSurface('site')).toBe('site');
     expect(resolveReactFrontendSurface('docs')).toBe('docs');
-    expect(() => resolveReactFrontendSurface('wallet')).toThrow('REACT_FRONTEND_SURFACE_UNKNOWN:wallet');
+    expect(resolveReactFrontendSurface('wallet')).toBe('wallet');
   });
 
   test('docs candidate binds activation to the exact catalog hash', () => {
@@ -91,6 +101,14 @@ describe('React Vite surface contract', () => {
     writeFileSync(join(buildRoot, 'site', REACT_CANDIDATE_MANIFEST_FILE), `${JSON.stringify(manifest)}\n`);
     expect(() => assertNoBlockedReactCandidateBuild(buildRoot))
       .toThrow('FRONTEND_REACT_CANDIDATE_ACTIVATION_BLOCKED:site');
+  });
+
+  test('wallet candidate stays blocked with its shared address entry represented deterministically', () => {
+    const routes = FRONTEND_ROUTES.filter(route => route.surface === 'wallet' && route.kind === 'page');
+    const manifest = buildReactWalletCandidateManifest(routes);
+    const expectedEntrypoints = routes.map(route => route.outputEntry!);
+    expect(validateReactCandidateManifest(manifest, expectedEntrypoints, 'wallet')).toEqual([]);
+    expect(manifest).toMatchObject({ surface: 'wallet', activationBlocked: true });
   });
 
   test('rejects malformed candidate manifests before the activation boundary', () => {

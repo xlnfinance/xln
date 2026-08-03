@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#090b0d" />
+    <title>xln — wallet</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="manifest" href="/site.webmanifest" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <dialog id="wallet-error-dialog" class="wallet-error-dialog" aria-labelledby="wallet-error-title">
+      <p id="wallet-error-title">xln wallet stopped</p>
+      <pre id="wallet-error-message"></pre>
+      <button id="wallet-error-reload" type="button">Reload wallet</button>
+    </dialog>
+    <script type="module" src="../../src/main.tsx"></script>
+  </body>
+</html>

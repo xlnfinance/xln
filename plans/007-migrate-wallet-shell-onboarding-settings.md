@@ -17,6 +17,7 @@
 - **Depends on:** `plans/006-extract-vault-command-external-stores.md`
 - **Category:** migration
 - **Planned at:** commit `5749e283d`, 2026-08-03
+- **Execution:** IN PROGRESS — boot, shell, onboarding, build, and candidate browser checkpoint implemented
 
 ## Executor instructions
 
@@ -150,6 +151,14 @@ Run once on the unchanged checkpoint candidate.
 - [ ] Every key state has clean-console, inspected screenshots at all required viewports.
 - [ ] Artifact remains release-blocked; `bun run check` passes; commit only as `wip:`.
 - [ ] `git status --short` is reviewed and the Plan 007 index row is updated.
+
+## Current checkpoint evidence
+
+- Pure boot states and an injected controller now cover browser, Capacitor, Electron, inactive-tab takeover, empty/locked/connecting/ready vaults, failure classification, Strict Mode duplicate starts, and reload disposal fencing.
+- The release-blocked React wallet candidate builds `/app`, `/address/**`, and `/testnet`, owns its native/PWA entry assets, and keeps public site/docs bundles free of native initialization.
+- Real canonical vault commands back create/import/unlock/lock/recovery/runtime selection; React components receive typed commands and a secret-redacted wallet projection instead of storage or protection ports.
+- L1 plus adjacent boundary evidence: 41 tests / 140 assertions pass. Candidate-only Playwright: 2 flows pass in 4.2 seconds with clean console/network health and inspected iPhone, laptop, and wide screenshots.
+- Remaining before Plan 007 `DONE`: real create → reload → unlock/lock/recover integration on the React artifact, ready/locked/recovery viewport evidence, native mobile/desktop smoke, and the unchanged-commit broad gate.
 
 ## Stop conditions
 

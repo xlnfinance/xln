@@ -21,6 +21,7 @@
     "types": ["vite/client", "node"],
     "paths": {
       "$lib/*": ["src/lib/*"],
+      "@xln/brainvault/*": ["../brainvault/*"],
       "@xln/runtime/*": ["../runtime/*"]
     }
   },

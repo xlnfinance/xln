@@ -5,6 +5,7 @@ import { defineConfig, type Plugin } from 'vite';
 
 import { createSiteBuildPlugin } from './apps/site/build/site-build-plugin';
 import { createDocsBuildPlugin } from './apps/docs/build/docs-build-plugin';
+import { createWalletBuildPlugin } from './apps/wallet/build/wallet-build-plugin';
 import {
   createReactViteSurfaceContract,
   resolveReactFrontendSurface,
@@ -28,7 +29,12 @@ const rewriteCanonicalRequest = (
 ): void => {
   const url = new URL(request.url ?? '/', 'http://xln.local');
   const route = url.pathname === '/' ? '/' : url.pathname.replace(/\/$/, '');
-  const match = routes.find(([pathname]) => pathname === route);
+  const pathSegments = route.split('/').filter(Boolean);
+  const match = routes.find(([pathname]) => {
+    const patternSegments = pathname.split('/').filter(Boolean);
+    if (patternSegments.length !== pathSegments.length) return false;
+    return patternSegments.every((segment, index) => segment.startsWith(':') || segment === pathSegments[index]);
+  });
   if (match) request.url = `${match[1]}${url.search}`;
 };
 
@@ -63,10 +69,12 @@ export default defineConfig(({ command }) => {
       react(),
       createSiteBuildPlugin(FRONTEND_ROOT, contract),
       createDocsBuildPlugin(FRONTEND_ROOT, contract),
+      createWalletBuildPlugin(FRONTEND_ROOT, contract),
     ],
     resolve: {
       alias: {
         '$lib': resolve(FRONTEND_ROOT, 'src/lib'),
+        '@xln/brainvault': resolve(FRONTEND_ROOT, '../brainvault'),
         '@xln/runtime': resolve(FRONTEND_ROOT, '../runtime'),
       },
     },
