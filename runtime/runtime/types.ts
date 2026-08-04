@@ -628,13 +628,6 @@ export interface RuntimeInfrastructure {
   receivedReliableReceiptLedger?: Map<string, ReliableDeliveryReceipt>;
   /** Durable sender-side protocol-terminal watermark, keyed by receiver + reliable lane. */
   receivedReliableTerminalWatermarks?: Map<string, ReliableDeliveryReceipt>;
-  /**
-   * Consecutive dispatch passes each reliable lane has been held back waiting
-   * for a prior height's entity certificate. Ephemeral, never snapshotted: it
-   * exists only so an unbounded wait becomes a loud failure instead of a hub
-   * that goes quiet and stays quiet.
-   */
-  reliableLaneCertificateStallPasses?: Map<string, number>;
   /** Ephemeral ingress waiters. These never imply durability and are never snapshotted. */
   pendingReliableIngress?: Map<string, PendingReliableIngress>;
   /** Ephemeral guard: receipt exists in working state but the enclosing frame is not durable yet. */

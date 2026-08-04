@@ -146,16 +146,12 @@ const buildRuntimeEntityInputsEnvelope = (
   });
 };
 
-/**
- * Prior heights on this lane whose proposal the peer receipted but whose
- * certificate it never did. Non-empty means the lane must wait.
- */
-const uncertifiedPriorHeights = (
+const awaitsDurableEntityCertificate = (
   env: RuntimeReplica,
   targetRuntimeId: string,
   identity: ReliableOutputIdentity,
-): number[] => {
-  if (identity.kind !== 'entity-frame') return [];
+): boolean => {
+  if (identity.kind !== 'entity-frame') return false;
   const normalizedTarget = normalizeRuntimeId(targetRuntimeId);
   if (!normalizedTarget) throw new Error('ROUTE_RELIABLE_TARGET_RUNTIME_INVALID');
   const priorReceipts = [
@@ -176,14 +172,8 @@ const uncertifiedPriorHeights = (
       .filter(receipt => receipt.body.identity.evidenceKind === 'entity-certificate')
       .map(receipt => receipt.body.identity.height),
   );
-  return [...proposals].filter(height => !certificates.has(height)).sort((left, right) => left - right);
+  return [...proposals].some(height => !certificates.has(height));
 };
-
-const awaitsDurableEntityCertificate = (
-  env: RuntimeReplica,
-  targetRuntimeId: string,
-  identity: ReliableOutputIdentity,
-): boolean => uncertifiedPriorHeights(env, targetRuntimeId, identity).length > 0;
 
 type OutputEnvelopeGroup = {
   targetRuntimeId: string;
@@ -243,45 +233,6 @@ const assertCompleteOutputGroup = (
   );
 };
 
-/**
- * A lane waiting on a prior height's certificate has no deadline: the wait ends
- * only when the peer's receipt arrives, and nothing guarantees it ever does. A
- * hub in that state stops sending on the lane, backs its Account mempool up
- * behind it, and reports healthy — the failure mode is silence. Count passes so
- * a wedged lane names itself instead.
- *
- * Passes rather than milliseconds: dispatch runs inside the Runtime frame path,
- * where a wall clock would be non-deterministic.
- */
-const MAX_RELIABLE_LANE_CERTIFICATE_STALL_PASSES = 2_000;
-
-const noteCertificateStall = (
-  env: RuntimeReplica,
-  targetRuntimeId: string,
-  identity: ReliableOutputIdentity,
-): void => {
-  const infrastructure = env.infrastructure;
-  if (!infrastructure) return;
-  const stalls = infrastructure.reliableLaneCertificateStallPasses ??= new Map<string, number>();
-  const passes = (stalls.get(identity.laneKey) ?? 0) + 1;
-  stalls.set(identity.laneKey, passes);
-  if (passes < MAX_RELIABLE_LANE_CERTIFICATE_STALL_PASSES) return;
-  throw new Error(
-    'ROUTE_RELIABLE_LANE_CERTIFICATE_STALLED:' + safeStringify({
-      laneKey: identity.laneKey,
-      entityId: identity.entityId,
-      blockedHeight: identity.height,
-      targetRuntimeId,
-      passes,
-      uncertifiedHeights: uncertifiedPriorHeights(env, targetRuntimeId, identity),
-    }),
-  );
-};
-
-const clearCertificateStall = (env: RuntimeReplica, identity: ReliableOutputIdentity | null): void => {
-  if (identity) env.infrastructure?.reliableLaneCertificateStallPasses?.delete(identity.laneKey);
-};
-
 const selectSendableOutputs = (
   env: RuntimeReplica,
   group: OutputEnvelopeGroup,
@@ -303,10 +254,8 @@ const selectSendableOutputs = (
     if (reliable && awaitsDurableEntityCertificate(env, group.targetRuntimeId, reliable)) {
       deferredOutputs.push(output);
       blockedReliableLanes.add(reliable.laneKey);
-      noteCertificateStall(env, group.targetRuntimeId, reliable);
       continue;
     }
-    clearCertificateStall(env, reliable);
     sendable.push(output);
     // Except for Account ACKs, one reliable lane head remains pending until
     // its durable application receipt and therefore fences later entries.
