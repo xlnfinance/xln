@@ -12,12 +12,14 @@ import { WalletAccountDispute } from './WalletAccountDispute';
 import { WalletTestAssetFaucet } from './WalletTestAssetFaucet';
 import { WalletPaymentForm } from '../payments/WalletPaymentForm';
 import { WalletReceiveForm } from '../payments/WalletReceiveForm';
+import { WalletActivityHistory } from '../history/WalletActivityHistory';
+import { WalletSwapWorkspace } from '../swap/WalletSwapWorkspace';
 import {
   walletAccountExternalStore,
   walletAccountStoreController,
 } from './wallet-account-store';
 
-export type WalletAccountSection = 'accounts' | 'pay' | 'receive' | 'move' | 'lending' | 'settlement';
+export type WalletAccountSection = 'accounts' | 'pay' | 'receive' | 'move' | 'lending' | 'settlement' | 'swap' | 'activity';
 
 const shortId = (value: string): string => `${value.slice(0, 10)}…${value.slice(-8)}`;
 
@@ -37,6 +39,8 @@ export const WalletAccountsWorkspace = ({ section }: Readonly<{ section: WalletA
   if (section === 'move') return <div className="wallet-operation-stack"><WalletMoveCredit entity={entity} receipt={receipt} /><WalletExternalMove entity={entity} receipt={receipt} /></div>;
   if (section === 'lending') return <WalletLending entity={entity} receipt={receipt} />;
   if (section === 'settlement') return <WalletSettlement entity={entity} receipt={receipt} />;
+  if (section === 'swap') return <WalletSwapWorkspace entity={entity} directory={state.directory} receipt={receipt} />;
+  if (section === 'activity') return <WalletActivityHistory entity={entity} />;
 
   const selected = entity.accounts.find(account => account.counterpartyId === selectedAccountId) ?? null;
   return (

@@ -3,6 +3,7 @@ import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteE
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeAdapter,
+  RuntimeAdapterAccountPage,
   RuntimeAdapterActivityPage,
   RuntimeAdapterEntitySummary,
   RuntimeAdapterFrameSummary,
@@ -162,6 +163,24 @@ export class RuntimeQueryClient {
       `entity/${encodeURIComponent(owner)}/account/${encodeURIComponent(counterparty)}`,
       query,
     );
+  }
+
+  async readOptionalAccount(
+    entityId: string,
+    counterpartyId: string,
+    query: RuntimeAdapterReadQuery = {},
+  ): Promise<StorageAccountDoc | null> {
+    const owner = String(entityId || '').trim().toLowerCase();
+    const counterparty = String(counterpartyId || '').trim().toLowerCase();
+    if (!owner || !counterparty) throw new Error('RUNTIME_ACCOUNT_PROJECTION_ID_MISSING');
+    const page = await this.cachedRead<RuntimeAdapterAccountPage>(
+      `entity/${encodeURIComponent(owner)}/accounts`,
+      { ...query, accountId: counterparty, accountsLimit: 1 },
+    );
+    if (!Array.isArray(page.items) || page.items.length > 1) {
+      throw new Error(`RUNTIME_ACCOUNT_POINT_PAGE_INVALID:${owner}:${counterparty}`);
+    }
+    return page.items[0] ?? null;
   }
 
   readHistoryFrameBatch(query: RuntimeAdapterReadQuery): Promise<RuntimeAdapterHistoryFrameBatch> {

@@ -2,6 +2,7 @@ import type {
   RuntimeAdapterEntitySummary,
   RuntimeAdapterViewFrame,
 } from '@xln/runtime/api/public/runtime-module';
+import { getJurisdictionStackId } from '@xln/runtime/api/public/runtime-module';
 
 import { createExternalStore } from '../../../../../packages/client-core/external-store';
 import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
@@ -19,10 +20,12 @@ import {
 export type WalletDirectoryEntity = Readonly<{
   entityId: string;
   runtimeId: string;
+  signerId: string | null;
   label: string;
   height: number;
   isHub: boolean;
   jurisdiction: string | null;
+  jurisdictionRef: string | null;
 }>;
 
 export type WalletAccountStoreSnapshot = Readonly<{
@@ -57,10 +60,12 @@ const normalizeEntityId = (value: unknown): string | null => {
 const directoryEntity = (summary: RuntimeAdapterEntitySummary): WalletDirectoryEntity => Object.freeze({
   entityId: String(summary.entityId || '').trim().toLowerCase(),
   runtimeId: String(summary.runtimeId || '').trim().toLowerCase(),
+  signerId: String(summary.signerId || '').trim().toLowerCase() || null,
   label: String(summary.label || summary.entityId || 'Unknown entity').trim(),
   height: Math.max(0, Math.floor(Number(summary.height || 0))),
   isHub: summary.isHub === true,
   jurisdiction: summary.jurisdiction?.name ? String(summary.jurisdiction.name) : null,
+  jurisdictionRef: getJurisdictionStackId(summary.jurisdiction) || null,
 });
 
 const sortDirectory = (summaries: RuntimeAdapterEntitySummary[]): readonly WalletDirectoryEntity[] =>

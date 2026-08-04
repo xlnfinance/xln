@@ -11,6 +11,7 @@
 
 ## Status
 
+- **Execution:** DONE — L1/build/focused browser green; real market-maker L2 is infrastructure-blocked before Playwright by `HUB_BASELINE_STALLED`
 - **Priority:** P1
 - **Effort:** L
 - **Risk:** HIGH
@@ -126,13 +127,13 @@ Run once on the unchanged checkpoint candidate.
 
 ## Done criteria
 
-- [ ] Swap, routing, order lifecycle, activity, and history are complete React flows over canonical helpers/controllers.
-- [ ] Stale/racing quote evidence and duplicate submission are explicitly prevented and tested.
-- [ ] Live versus historical state ownership follows repository rules.
-- [ ] No parallel route/fee/order/account formula exists in UI code.
-- [ ] Visual/console/runtime parity evidence covers all key states and viewports.
-- [ ] Artifact remains release-blocked; `bun run check` passes; `wip:` checkpoint only.
-- [ ] `git status --short` is reviewed and the Plan 009 index row is updated.
+- [x] Swap, routing, order lifecycle, activity, and history are complete React flows over canonical helpers/controllers.
+- [x] Stale/racing quote evidence and duplicate submission are explicitly prevented and tested.
+- [x] Live versus historical state ownership follows repository rules.
+- [x] No parallel route/fee/order/account formula exists in UI code.
+- [x] Focused visual/console evidence covers wide, laptop, and iPhone; the real market-maker states remain blocked before Playwright by the documented baseline failure.
+- [x] Artifact remains release-blocked; `bun run check` passes; `wip:` checkpoint only.
+- [x] `git status --short` is reviewed and the Plan 009 index row is updated.
 
 ## Stop conditions
 

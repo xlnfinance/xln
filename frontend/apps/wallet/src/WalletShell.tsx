@@ -83,8 +83,10 @@ export const WalletShell = (props: WalletShellProps) => {
         <button type="button" aria-current={section === 'move' ? 'page' : undefined} onClick={event => selectSection('move', event.currentTarget)}><span>05</span>Move</button>
         <button type="button" aria-current={section === 'lending' ? 'page' : undefined} onClick={event => selectSection('lending', event.currentTarget)}><span>06</span>Lending</button>
         <button type="button" aria-current={section === 'settlement' ? 'page' : undefined} onClick={event => selectSection('settlement', event.currentTarget)}><span>07</span>Settlement</button>
+        <button type="button" aria-current={section === 'swap' ? 'page' : undefined} onClick={event => selectSection('swap', event.currentTarget)}><span>08</span>Swap</button>
+        <button type="button" aria-current={section === 'activity' ? 'page' : undefined} onClick={event => selectSection('activity', event.currentTarget)}><span>09</span>Activity</button>
         <button type="button" aria-current={section === 'settings' ? 'page' : undefined} onClick={event => selectSection('settings', event.currentTarget)}>
-          <span>08</span>Settings
+          <span>10</span>Settings
         </button>
       </aside>
       <main className="wallet-main">

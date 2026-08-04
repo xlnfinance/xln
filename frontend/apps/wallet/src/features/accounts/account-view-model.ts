@@ -3,6 +3,7 @@ import type {
   DerivedDelta,
   RuntimeAdapterViewFrame,
 } from '@xln/runtime/api/public/runtime-module';
+import { getJurisdictionStackId } from '@xln/runtime/api/public/runtime-module';
 
 import { formatTokenAmount } from '$lib/components/Entity/entity-asset-values';
 import { getCrossJTargetDisputeRiskForProjection } from '$lib/components/Entity/account-dispute-view';
@@ -89,8 +90,10 @@ export type WalletEntityAccountsView = Readonly<{
   signerId: string;
   runtimeId: string;
   jurisdiction: string | null;
+  jurisdictionRef: string | null;
   label: string;
   height: number;
+  timestamp: number;
   reserves: readonly WalletBalanceView[];
   accounts: readonly WalletAccountView[];
   catalog: readonly WalletTokenCatalogView[];
@@ -227,8 +230,10 @@ export const projectWalletAccountFrame = (
     signerId: normalizeEntityId(active.core.signerId || active.summary.signerId),
     runtimeId: normalizeEntityId(active.summary.runtimeId) || '',
     jurisdiction: active.summary.jurisdiction?.name ? String(active.summary.jurisdiction.name) : null,
+    jurisdictionRef: getJurisdictionStackId(active.core.config.jurisdiction) || null,
     label: String(active.summary.label || active.core.profile?.name || entityId),
     height: Math.max(0, Math.floor(Number(frame.height || active.core.height || 0))),
+    timestamp: Math.max(0, Math.floor(Number(active.core.timestamp || 0))),
     reserves: Object.freeze(reserves),
     accounts: Object.freeze(accounts),
     catalog: Object.freeze(catalog),
