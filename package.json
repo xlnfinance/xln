@@ -9,6 +9,8 @@
   "scripts": {
     "xln": "bun cli/xln.ts",
     "test:cli": "bun test cli/__tests__",
+    "test:cli:orchestration": "bun runtime/scripts/run-with-test-cleanup.ts --reason=cli-orchestration -- bun cli/scripts/orchestration-smoke.ts",
+    "test:cli:orchestration:bun": "XLN_CLI_ORCH=1 bun test cli/__tests__/orchestration.integration.test.ts",
     "bv": "bun brainvault/cli.ts",
     "clean-slate": "bun scripts/dev/run-dev.ts --clean",
     "contracts:sync": "./scripts/sync-contract-artifacts.sh",

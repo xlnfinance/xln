@@ -13,6 +13,15 @@ bun cli/xln.ts          # interactive TUI
 bun run xln -- status
 ```
 
+## Orchestration tests
+
+Uses the same stack boot as `local-prod-smoke`:
+`local-test-port-lease` → `scripts/start-anvil.sh` → `scripts/start-anvil2.sh` → `scripts/start-server.sh`.
+
+```bash
+bun run test:cli:orchestration
+```
+
 ## Commands
 
 | Command | Purpose |
