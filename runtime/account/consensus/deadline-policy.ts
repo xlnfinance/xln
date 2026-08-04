@@ -1,4 +1,4 @@
-import { HASHLADDER_MAX_FILL_RATIO } from '../../protocol/htlc/hash-ladder';
+import { HASHLADDER_MAX_FILL_RATIO, decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { hashEncryptedHtlcLayer } from '../../protocol/htlc/onion-layer';
 import type { AccountFrame, AccountState, HtlcLock, PullCommitment } from '../../types/account';
@@ -183,6 +183,41 @@ const inspectPullDeadline = (
     if (isPullRevealExpired(pull.revealedUntilTimestamp, scan.context.entityTimestamp)) {
       return deadlineViolation(
         `CROSS_PULL_CLAIM_AFTER_LOCAL_EXPIRY: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
+      );
+    }
+    scan.pulls.delete(tx.data.pullId);
+    return undefined;
+  }
+  if (tx.type === 'cross_pull_reveal') {
+    const pull = scan.pulls.get(tx.data.pullId);
+    if (!pull) return undefined;
+    let ratio: number | undefined;
+    try {
+      ratio = normalizedFillRatio(decodeHashLadderBinary(tx.data.binary).fillRatio);
+    } catch {
+      // Canonical Account transaction validation owns malformed binary errors.
+    }
+    if (ratio === undefined || ratio <= normalizedFillRatio(pull.claimedRatio)) return undefined;
+    // Same trust rule as close: a claim-bearing frame timestamped after the
+    // LOCAL deadline must not be admitted on peer time alone.
+    if (isPullRevealExpired(pull.revealedUntilTimestamp, scan.context.entityTimestamp)) {
+      return deadlineViolation(
+        `CROSS_PULL_CLAIM_AFTER_LOCAL_EXPIRY: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
+      );
+    }
+    // Keep the speculative scan coherent for later txs in the same frame
+    // (e.g. a terminal close must see the restated baseline).
+    pull.claimedRatio = ratio;
+    return undefined;
+  }
+  if (tx.type === 'cross_pull_expire') {
+    const pull = scan.pulls.get(tx.data.pullId);
+    if (!pull) return undefined;
+    // Mirror of HTLC_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY: the payer must not
+    // exercise its timeout while the LOCAL clock still sees a live window.
+    if (!isPullRevealExpired(pull.revealedUntilTimestamp, scan.context.entityTimestamp)) {
+      return deadlineViolation(
+        `CROSS_PULL_EXPIRE_BEFORE_LOCAL_EXPIRY: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
       );
     }
     scan.pulls.delete(tx.data.pullId);

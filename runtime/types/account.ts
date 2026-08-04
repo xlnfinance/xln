@@ -931,6 +931,34 @@ export type AccountTx =
         fill: CrossSwapFillAckData;
       };
     }
+  | {
+      /**
+       * Non-terminal pay-as-you-go settlement of a live pull.
+       *
+       * The authorized Hub discloses the hash-ladder binary for the currently
+       * committed fill level. The Account moves the committed exact increment
+       * into offdelta, releases the matching part of the payer hold, and
+       * restates `pull.claimedRatio`/`claimedAmount` — so the level becomes the
+       * transformer baseline of every later signed ProofBody. Unlike
+       * `cross_pull_close`, the pull stays open for further fills.
+       */
+      type: 'cross_pull_reveal';
+      data: {
+        pullId: string;
+        binary: string;
+      };
+    }
+  | {
+      /**
+       * Payer-authored housekeeping close of an expired pull: releases the
+       * unclaimed remainder of the hold and deletes the pull. Moves no value —
+       * increments already settled by reveals stay in offdelta.
+       */
+      type: 'cross_pull_expire';
+      data: {
+        pullId: string;
+      };
+    }
   // === SWAP TRANSACTION TYPES ===
   | {
       type: 'swap_offer';
