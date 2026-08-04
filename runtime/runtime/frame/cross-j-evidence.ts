@@ -76,8 +76,10 @@ export const recordRejectedAtomicCrossJInputs = (
   code:
     | 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH'
     | 'CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED'
-    | 'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED',
+    | 'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED'
+    | 'CROSS_J_INCOMPLETE_COHORT_DROPPED',
   summary: string,
+  severity: 'warning' | 'critical' = 'warning',
 ): void => {
   // A malformed cohort is one incident. Per-leg incidents let one admitted
   // envelope amplify into thousands of durable records and log lines.
@@ -85,7 +87,7 @@ export const recordRejectedAtomicCrossJInputs = (
     domain: 'cross-j',
     code,
     source: 'remote-ingress',
-    severity: 'warning',
+    severity,
     summary,
     entityId: '',
   });

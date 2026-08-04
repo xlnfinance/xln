@@ -42,6 +42,7 @@ import {
   type RuntimeOutputRoutingDeps,
 } from './pending';
 import { planEntityOutputs } from './plan';
+import { recordRuntimeSecurityIncident } from '../security-incidents';
 
 const routeLog = createStructuredLogger('network.route');
 
@@ -215,22 +216,45 @@ const buildOutputEnvelopeGroups = (
       compareOutputDelivery(left.outputs[0]!, right.outputs[0]!));
 };
 
-const assertCompleteOutputGroup = (
+/**
+ * An unpaired cross-j Account leg must never be sent alone, and must never
+ * crash the Runtime. The sibling may only be outside this ready batch (retry
+ * window / next adjacent frame); permanently deleting the ready orphan here
+ * used to strand MM bootstrap-cross. Keep the legs deferred, notify once via
+ * security-incident telemetry, and let settled-proposal prune remove legs that
+ * can no longer advance.
+ */
+const deferIncompleteCrossJCohort = (
+  env: RuntimeReplica,
   group: OutputEnvelopeGroup,
   plannedOutputs: PlannedRemoteOutput[],
+  deferredOutputs: RoutedEntityInput[],
 ): void => {
-  if (group.complete) return;
-  throw new Error(
-    'ROUTE_CROSS_J_INCOMPLETE_COHORT_MARKED_READY:' + safeStringify({
-      targetRuntimeId: group.targetRuntimeId,
-      outputs: summarizeAccountEnvelopeOutputs(group.outputs),
-      atomicPairs: group.outputs.map(output => output.atomicCrossJurisdictionPair ?? null),
-      plannedOutputs: plannedOutputs.map(({ output, targetRuntimeId }) => ({
-        targetRuntimeId,
-        ...summarizeAccountEnvelopeOutputs([output])[0],
-      })),
-    }),
-  );
+  const detail = {
+    targetRuntimeId: group.targetRuntimeId,
+    outputs: summarizeAccountEnvelopeOutputs(group.outputs),
+    atomicPairs: group.outputs.map(output => output.atomicCrossJurisdictionPair ?? null),
+    plannedOutputs: plannedOutputs.map(({ output, targetRuntimeId }) => ({
+      targetRuntimeId,
+      ...summarizeAccountEnvelopeOutputs([output])[0],
+    })),
+  };
+  recordRuntimeSecurityIncident(env, {
+    domain: 'cross-j',
+    code: 'CROSS_J_INCOMPLETE_COHORT_DROPPED',
+    source: 'local-consensus',
+    severity: 'critical',
+    summary:
+      'Incomplete cross-j Account cohort was ready for dispatch; legs deferred without send',
+    entityId: '',
+  });
+  // Structured warn keeps the E2E fatal scanner quiet ([ERROR].*CROSS_J_*) while
+  // the security incident above is the canonical operator-visible notify path.
+  env.warn?.('network', 'CROSS_J_INCOMPLETE_COHORT_DROPPED', detail);
+  routeLog.warn('crossj.incomplete_cohort_deferred', detail);
+  for (const output of group.outputs) {
+    deferredOutputs.push(output);
+  }
 };
 
 const selectSendableOutputs = (
@@ -456,7 +480,10 @@ export const dispatchEntityOutputs = (
   const deferredOutputs: RoutedEntityInput[] = [];
   const blockedReliableLanes = new Set<string>();
   for (const group of buildOutputEnvelopeGroups(outputs)) {
-    assertCompleteOutputGroup(group, outputs);
+    if (!group.complete) {
+      deferIncompleteCrossJCohort(env, group, outputs, deferredOutputs);
+      continue;
+    }
     const sendable = selectSendableOutputs(
       env,
       group,

@@ -138,6 +138,11 @@ const recordAtomicPairRejection = (
   }
 };
 
+/**
+ * Both Account legs of a failed atomic cohort are cancelled together. Any other
+ * Entity payload in those inputs is re-applied without the violating
+ * accountInputs — never a one-sided Account settle of the broken pair.
+ */
 const applyRetainedNonAtomicInputs = async (
   env: RuntimeReplica,
   pair: readonly [RoutedEntityInput, RoutedEntityInput],

@@ -24,7 +24,7 @@ import {
 import { reliableReceiptCoversIdentity, senderFrontierKey, senderFrontierKeyForIdentity } from '../reliable-frontier';
 import { selectPotentialCrossJAccountInputPairs } from '../entity-routing';
 import {
-  accountProposalCommittedBySender,
+  accountProposalSettledBySender,
   accountProposalEvidenceRank,
   accountProposalOutputIdentity,
   assertReliableEvidenceCompatible,
@@ -110,6 +110,11 @@ export const summarizeAccountEnvelopeOutputs = (outputs: readonly RoutedEntityIn
           toEntityId: tx.data.toEntityId,
           ackHeight: ack?.height ?? null,
           proposalHeight: proposal?.frame.height ?? null,
+          // Two legs at one Account height are either the same signed proposal
+          // retried on a later Runtime frame or two different proposals racing
+          // that height. Only the state hash tells those apart, and they need
+          // opposite fixes.
+          proposalStateHash: proposal?.frame.stateHash ?? null,
           crossPulls:
             proposal?.frame.accountTxs.flatMap(accountTx =>
               accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction
@@ -808,24 +813,24 @@ export const pruneReceiptedReliableOutputs = (
   outputs: RoutedEntityInput[],
   appliedReceipts: readonly ReliableDeliveryReceipt[] = [],
 ): RoutedEntityInput[] => {
-  // Proposal cohorts intentionally have no transport receipt. Their business
-  // terminal is the ordinary bilateral Account ACK that commits the exact
-  // proposed frame on both Hub sibling Entities. Once both frames are current,
-  // keep no transport retry state: retaining the original proposal envelope
-  // would either leak outbox entries forever or invite a manual duplicate.
-  const uncommittedOutputs = groupAtomicCrossJAdmissionOutputs(outputs).flatMap(unit => {
-    const committedProposalCohort =
-      unit.atomic &&
-      unit.complete &&
-      unit.outputs.every(
-        output => getReliableOutputIdentity(output) === null && accountProposalCommittedBySender(env, output),
-      );
-    if (!committedProposalCohort) return unit.outputs;
-    for (const output of unit.outputs) {
+  // Proposal cohorts intentionally have no transport receipt. Their terminal is
+  // the sender's own Account state: the frame either committed or was rolled
+  // back, and neither can be advanced by resending it.
+  //
+  // This is deliberately per-leg and not gated on a complete cohort. Gating on
+  // `unit.complete` made the cleanup self-disabling: one settled leg left behind
+  // is enough to make its cohort ambiguous, ambiguous cohorts never pair, and an
+  // unpaired unit is never complete - so the entry that caused the ambiguity
+  // could never be collected. Dropping a settled leg is safe on its own because
+  // a settled leg has no successor state to reach.
+  const uncommittedOutputs = groupAtomicCrossJAdmissionOutputs(outputs).flatMap(unit =>
+    unit.outputs.filter(output => {
+      const settled =
+        getReliableOutputIdentity(output) === null && accountProposalSettledBySender(env, output);
+      if (!settled) return true;
       env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
-    }
-    return [];
-  });
+      return false;
+    }));
   const active = env.infrastructure?.receivedReliableReceiptLedger;
   const terminal = env.infrastructure?.receivedReliableTerminalWatermarks;
   if ((!active || active.size === 0) && (!terminal || terminal.size === 0)) {

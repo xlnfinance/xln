@@ -192,10 +192,19 @@ export const admitAtomicCrossJAccountInputs = (
     for (const reason of reasonByInputIndex.values()) {
       reasonCounts[reason] = (reasonCounts[reason] ?? 0) + 1;
     }
+    const cohortBroken = [...reasonByInputIndex.values()].some(reason =>
+      reason === 'unpaired' ||
+      reason.startsWith('unpaired(') ||
+      reason === 'pair-match-failed' ||
+      reason.startsWith('pair-match-failed(') ||
+      reason === 'atomic-group-invalid' ||
+      reason.startsWith('atomic-group-invalid('),
+    );
     env.warn('network', 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH', {
       received: coalescedInputs.length,
       rejectedCount: rejectedInputIndexes.length,
       reasonCounts,
+      cohortBroken,
       rejectedSamples: rejectedInputIndexes
         .slice(0, MAX_CROSS_J_LOG_SAMPLES)
         .map(inputIndex => ({
@@ -209,15 +218,19 @@ export const admitAtomicCrossJAccountInputs = (
     recordRejectedAtomicCrossJInputs(
       env,
       'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH',
-      // The three rejection paths are not interchangeable: an unpaired leg is a
+      // The rejection paths are not interchangeable: an unpaired leg is a
       // transport or timing problem, an invalid candidate is an admission
-      // problem, and an invalid atomic group is a cohort-construction problem.
-      // Name the observed mix rather than asserting one of them.
+      // problem, pair-match-failed means both legs arrived but the cohort did
+      // not match, and an invalid atomic group is a cohort-construction
+      // problem. Name the observed mix rather than asserting one of them.
       'Cross-j Account legs were dropped before Account consensus: ' +
         Object.entries(reasonCounts)
           .sort(([left], [right]) => left.localeCompare(right))
           .map(([reason, count]) => `${reason}=${count}`)
           .join(' '),
+      // Unmatched / half cohorts are protocol bugs: both legs must arrive
+      // symmetrically. Critical telemetry notifies without halting Runtime.
+      cohortBroken ? 'critical' : 'warning',
     );
   }
   const structurallyRetained = initial.rejectedLegs.length > 0

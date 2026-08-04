@@ -5,6 +5,7 @@ import { RuntimeP2P } from '../network/p2p/p2p';
 type FakeRelayClient = {
   isOpen: () => boolean;
   isConnecting: () => boolean;
+  getReconnectState: () => { attempt: number; nextAt: number } | null;
 };
 
 const makeDetachedP2P = (client: FakeRelayClient): RuntimeP2P & Record<string, unknown> => {
@@ -26,6 +27,7 @@ test('RuntimeP2P connect is idempotent while relay client is connecting', () => 
   const p2p = makeDetachedP2P({
     isOpen: () => false,
     isConnecting: () => true,
+    getReconnectState: () => null,
   });
 
   p2p.connect();
@@ -40,11 +42,26 @@ test('RuntimeP2P connect is idempotent while relay client is open', () => {
   const p2p = makeDetachedP2P({
     isOpen: () => true,
     isConnecting: () => false,
+    getReconnectState: () => null,
   });
 
   p2p.connect();
 
   expect(p2p.isConnected()).toBe(true);
+  expect(p2p.closedClients).toBeUndefined();
+  expect(p2p.registeredVisibility).toBe(1);
+  expect(p2p.startedPolling).toBe(1);
+});
+
+test('RuntimeP2P connect preserves a relay client waiting to reconnect', () => {
+  const p2p = makeDetachedP2P({
+    isOpen: () => false,
+    isConnecting: () => false,
+    getReconnectState: () => ({ attempt: 1, nextAt: 1_000 }),
+  });
+
+  p2p.connect();
+
   expect(p2p.closedClients).toBeUndefined();
   expect(p2p.registeredVisibility).toBe(1);
   expect(p2p.startedPolling).toBe(1);

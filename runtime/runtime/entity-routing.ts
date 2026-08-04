@@ -354,15 +354,17 @@ export type CrossJAccountInputPairSelection = {
  * Why one leg was dropped. A leg reaches `rejectedInputIndexes` through three
  * independent paths and the operator cannot tell them apart from the outside:
  * `unpaired` means no sibling candidate matched, `candidate-invalid` means the
- * leg itself failed admission before matching was attempted, and
+ * leg itself failed admission before matching was attempted, `pair-match-failed`
+ * means both legs were individually admissible but the cohort did not match, and
  * `atomic-group-invalid` means the leg carried an atomicCrossJurisdictionPair
  * marker whose declared cohort did not survive. Reporting one assumed cause for
- * all three sends every investigation to the wrong layer.
+ * all four sends every investigation to the wrong layer.
  */
 export type CrossJRejectedAccountInputReason =
   | 'unpaired'
   | 'multiple-candidates-per-input'
   | 'candidate-invalid'
+  | 'pair-match-failed'
   | 'atomic-group-invalid';
 
 export type CrossJRejectedAccountInput = {
@@ -716,95 +718,294 @@ const groupUncommittedCrossJCandidates = (
   return { candidates: uncommitted, byCohort, invalidIndexes, multiCandidateIndexes, invalidDetails };
 };
 
-const openingPairHasExactUserAuthorizations = (
+/**
+ * Returns null when the opening cohort is authorized, otherwise the specific
+ * unmet condition. A bare boolean here is unactionable: an unresolved sibling
+ * replica is a topology problem, a mismatched authorization is a state problem,
+ * and a rejected prepared route is a protocol problem. Swallowing the thrown
+ * validation error into `false` sent every such rejection to the wrong layer.
+ */
+type OpeningPullLock = Extract<AccountTx, { type: 'cross_pull_lock' }>;
+
+const normalizeOpeningHash = (value: string): string => String(value || '').trim().toLowerCase();
+
+/**
+ * INVARIANT: unique hashladder root per orderId — globally, forever in live
+ * Runtime state. Distinct orderIds must never share `partialRoot` or `fullHash`
+ * anywhere (any Entity, any Account, any retained swap/authorization). One
+ * reveal would otherwise close an opposing swap. Same-order source/target legs
+ * intentionally share one ladder (keyed by orderId first).
+ */
+const rememberHashLadderOwner = (
+  byFullHash: Map<string, string>,
+  byPartialRoot: Map<string, string>,
+  orderId: string,
+  fullHash: string,
+  partialRoot: string,
+): string | null => {
+  const conflictFull = byFullHash.get(fullHash);
+  if (conflictFull && conflictFull !== orderId) {
+    return `opening-shared-hash-material:${conflictFull}/${orderId}:fullHash`;
+  }
+  const conflictPartial = byPartialRoot.get(partialRoot);
+  if (conflictPartial && conflictPartial !== orderId) {
+    return `opening-shared-hash-material:${conflictPartial}/${orderId}:partialRoot`;
+  }
+  byFullHash.set(fullHash, orderId);
+  byPartialRoot.set(partialRoot, orderId);
+  return null;
+};
+
+const collectRuntimeHashLadderOwners = (
+  env: RuntimeReplica,
+): { byFullHash: Map<string, string>; byPartialRoot: Map<string, string> } => {
+  const byFullHash = new Map<string, string>();
+  const byPartialRoot = new Map<string, string>();
+  const rememberRoutePulls = (
+    orderId: string,
+    pulls: ReadonlyArray<{ fullHash?: string; partialRoot?: string } | undefined>,
+  ): void => {
+    for (const pull of pulls) {
+      if (!pull) continue;
+      const fullHash = normalizeOpeningHash(pull.fullHash || '');
+      const partialRoot = normalizeOpeningHash(pull.partialRoot || '');
+      if (!fullHash || !partialRoot) continue;
+      rememberHashLadderOwner(byFullHash, byPartialRoot, orderId, fullHash, partialRoot);
+    }
+  };
+  for (const replica of env.state.eReplicas.values()) {
+    for (const account of replica.state.accounts.values()) {
+      for (const pull of account.state.pulls?.values() ?? []) {
+        const orderId = String(pull.crossJurisdiction?.orderId || '').trim();
+        if (!orderId) continue;
+        rememberHashLadderOwner(
+          byFullHash,
+          byPartialRoot,
+          orderId,
+          normalizeOpeningHash(pull.fullHash),
+          normalizeOpeningHash(pull.partialRoot),
+        );
+      }
+    }
+    for (const [orderId, route] of replica.state.crossJurisdictionSwaps?.entries() ?? []) {
+      rememberRoutePulls(String(orderId || '').trim(), [route.sourcePull, route.targetPull]);
+    }
+    for (const [orderId, route] of replica.state.crossJurisdictionAuthorizations?.entries() ?? []) {
+      rememberRoutePulls(String(orderId || '').trim(), [route.sourcePull, route.targetPull]);
+    }
+  }
+  return { byFullHash, byPartialRoot };
+};
+
+const openingSharedHashMaterialFailure = (
+  env: RuntimeReplica,
+  group: readonly CrossJAdmissionFrameCandidate[],
+): string | null => {
+  const byOrder = new Map<string, { fullHash: string; partialRoot: string }>();
+  const { byFullHash, byPartialRoot } = collectRuntimeHashLadderOwners(env);
+  for (const candidate of group) {
+    for (const pull of [...candidate.sourcePulls, ...candidate.targetPulls]) {
+      const orderId = String(pull.data.crossJurisdiction?.orderId || '').trim();
+      if (!orderId) return 'opening-order-id-missing';
+      const fullHash = normalizeOpeningHash(pull.data.fullHash);
+      const partialRoot = normalizeOpeningHash(pull.data.partialRoot);
+      const existing = byOrder.get(orderId);
+      if (existing) {
+        if (existing.fullHash !== fullHash || existing.partialRoot !== partialRoot) {
+          return `opening-intra-order-hash-divergent:${orderId}`;
+        }
+        continue;
+      }
+      const conflict = rememberHashLadderOwner(
+        byFullHash,
+        byPartialRoot,
+        orderId,
+        fullHash,
+        partialRoot,
+      );
+      if (conflict) return conflict;
+      byOrder.set(orderId, { fullHash, partialRoot });
+    }
+  }
+  return null;
+};
+
+const authorizeOpeningSourcePull = (
+  env: RuntimeReplica,
+  sourceCandidate: CrossJAdmissionFrameCandidate,
+  targetCandidate: CrossJAdmissionFrameCandidate,
+  sourceInput: RoutedEntityInput,
+  targetInput: RoutedEntityInput,
+  sourcePull: OpeningPullLock,
+): string | null => {
+  const binding = sourcePull.data.crossJurisdiction;
+  const route = routeForCrossJPull(sourcePull);
+  if (!binding || !route) return 'opening-route-missing';
+  const key = admissionKey(binding.orderId, binding.routeHash);
+  const matchingTargets = targetCandidate.targetPulls.filter(targetPull => {
+    const targetBinding = targetPull.data.crossJurisdiction;
+    return Boolean(targetBinding && admissionKey(targetBinding.orderId, targetBinding.routeHash) === key);
+  });
+  if (matchingTargets.length !== 1) return `opening-target-pull-mismatch:${binding.orderId}`;
+
+  const sourceReplica = findInputReplica(env, sourceInput);
+  const targetReplica = findInputReplica(env, targetInput);
+  if (!sourceReplica || !targetReplica) return 'opening-replica-unresolved';
+
+  const routeHash = normalizeEntityKey(route.routeHash || '');
+  if (!routeHash) return 'opening-route-hash-missing';
+  const sourceAuth = sourceReplica.state.crossJurisdictionAuthorizations?.get(route.orderId);
+  const targetAuth = targetReplica.state.crossJurisdictionAuthorizations?.get(route.orderId);
+  if (!sourceAuth || !targetAuth) return 'opening-authorization-absent';
+  if (sourceAuth.status !== 'intent' || targetAuth.status !== 'intent') {
+    return `opening-authorization-status:${sourceAuth.status}/${targetAuth.status}`;
+  }
+  if (
+    sourceAuth.sourcePull || sourceAuth.targetPull ||
+    targetAuth.sourcePull || targetAuth.targetPull
+  ) return 'opening-authorization-already-pulled';
+  if (
+    normalizeEntityKey(sourceAuth.routeHash || '') !== routeHash ||
+    normalizeEntityKey(targetAuth.routeHash || '') !== routeHash
+  ) return 'opening-authorization-route-hash-mismatch';
+  if (safeStringify(sourceAuth) !== safeStringify(targetAuth)) {
+    return 'opening-authorization-divergent';
+  }
+  if (
+    normalizeEntityKey(sourceInput.entityId) !== normalizeEntityKey(route.source.entityId) ||
+    normalizeEntityKey(sourceInput.signerId) !== normalizeEntityKey(route.sourceSignerId || '') ||
+    normalizeEntityKey(sourceCandidate.accountInput.fromEntityId) !==
+      normalizeEntityKey(route.source.counterpartyEntityId) ||
+    normalizeEntityKey(targetInput.entityId) !== normalizeEntityKey(route.target.counterpartyEntityId) ||
+    normalizeEntityKey(targetInput.signerId) !== normalizeEntityKey(route.targetSignerId || '') ||
+    normalizeEntityKey(targetCandidate.accountInput.fromEntityId) !==
+      normalizeEntityKey(route.target.entityId)
+  ) return 'opening-route-participant-mismatch';
+  try {
+    validatePreparedCrossJurisdictionRoute({
+      ...sourceReplica.state,
+      timestamp: Math.max(sourceReplica.state.timestamp, env.state.timestamp),
+    }, {
+      ...cloneCrossJurisdictionRoute(route),
+      status: 'target_prepared',
+    });
+  } catch (error) {
+    return `opening-prepared-route-rejected:${error instanceof Error ? error.message : String(error)}`;
+  }
+  return null;
+};
+
+/**
+ * Fat frames may mix any number of source and target pulls for distinct swaps.
+ * Authorization is per orderId: each sourcePull on either sibling leg must find
+ * exactly one matching targetPull on the other leg and pass intent checks.
+ * Shape-level "source-only / target-only" was a false gate and rejected valid
+ * MM bootstrap batches (e.g. s8/t45 mirrored with s45/t8).
+ */
+const openingPairAuthorizationFailure = (
   env: RuntimeReplica,
   group: readonly CrossJAdmissionFrameCandidate[],
   inputs: readonly RoutedEntityInput[],
-): boolean => {
-  if (group[0]?.phase !== 'proposal') return true;
+): string | null => {
+  if (group[0]?.phase !== 'proposal') return null;
   const hasOpening = group.some(candidate =>
     candidate.sourcePulls.length > 0 || candidate.targetPulls.length > 0);
-  if (!hasOpening) return true;
-  const source = group.find(candidate =>
-    candidate.sourcePulls.length > 0 && candidate.targetPulls.length === 0);
-  const target = group.find(candidate =>
-    candidate.targetPulls.length > 0 && candidate.sourcePulls.length === 0);
-  if (!source || !target || source.sourcePulls.length !== target.targetPulls.length) return false;
-  const sourceInput = inputs[source.inputIndex];
-  const targetInput = inputs[target.inputIndex];
-  if (!sourceInput || !targetInput) return false;
-  const sourceReplica = findInputReplica(env, sourceInput);
-  const targetReplica = findInputReplica(env, targetInput);
-  if (!sourceReplica || !targetReplica) return false;
+  if (!hasOpening) return null;
+  if (group.length !== 2) return `opening-cohort-size:${group.length}`;
 
-  try {
-    for (const sourcePull of source.sourcePulls) {
-      const route = routeForCrossJPull(sourcePull);
-      if (!route) return false;
-      const routeHash = normalizeEntityKey(route.routeHash || '');
-      const sourceAuth = sourceReplica.state.crossJurisdictionAuthorizations?.get(route.orderId);
-      const targetAuth = targetReplica.state.crossJurisdictionAuthorizations?.get(route.orderId);
-      if (
-        !routeHash ||
-        !sourceAuth ||
-        !targetAuth ||
-        sourceAuth.status !== 'intent' ||
-        targetAuth.status !== 'intent' ||
-        sourceAuth.sourcePull || sourceAuth.targetPull ||
-        targetAuth.sourcePull || targetAuth.targetPull ||
-        normalizeEntityKey(sourceAuth.routeHash || '') !== routeHash ||
-        normalizeEntityKey(targetAuth.routeHash || '') !== routeHash ||
-        safeStringify(sourceAuth) !== safeStringify(targetAuth) ||
-        normalizeEntityKey(sourceInput.entityId) !== normalizeEntityKey(route.source.entityId) ||
-        normalizeEntityKey(sourceInput.signerId) !== normalizeEntityKey(route.sourceSignerId || '') ||
-        normalizeEntityKey(source.accountInput.fromEntityId) !== normalizeEntityKey(route.source.counterpartyEntityId) ||
-        normalizeEntityKey(targetInput.entityId) !== normalizeEntityKey(route.target.counterpartyEntityId) ||
-        normalizeEntityKey(targetInput.signerId) !== normalizeEntityKey(route.targetSignerId || '') ||
-        normalizeEntityKey(target.accountInput.fromEntityId) !== normalizeEntityKey(route.target.entityId)
-      ) return false;
-      validatePreparedCrossJurisdictionRoute({
-        ...sourceReplica.state,
-        timestamp: Math.max(sourceReplica.state.timestamp, env.state.timestamp),
-      }, {
-        ...cloneCrossJurisdictionRoute(route),
-        status: 'target_prepared',
-      });
+  const sharedHashFailure = openingSharedHashMaterialFailure(env, group);
+  if (sharedHashFailure) return sharedHashFailure;
+
+  const left = group[0]!;
+  const right = group[1]!;
+  // Walk both orientations so dual-pull mirrored frames authorize every
+  // sourcePull, not only those that happen to sit on a uni-directional leg.
+  for (const [sourceCandidate, targetCandidate] of [
+    [left, right],
+    [right, left],
+  ] as const) {
+    const sourceInput = inputs[sourceCandidate.inputIndex];
+    const targetInput = inputs[targetCandidate.inputIndex];
+    if (!sourceInput || !targetInput) return 'opening-input-missing';
+    for (const sourcePull of sourceCandidate.sourcePulls) {
+      const failure = authorizeOpeningSourcePull(
+        env,
+        sourceCandidate,
+        targetCandidate,
+        sourceInput,
+        targetInput,
+        sourcePull,
+      );
+      if (failure) return failure;
     }
-    return true;
-  } catch {
-    return false;
   }
+  return null;
 };
 
+const cohortShapeFailure = (
+  group: readonly CrossJAdmissionFrameCandidate[],
+  groupIndexes: ReadonlySet<number>,
+  invalidIndexes: ReadonlySet<number>,
+): string | null => {
+  if (group.length !== 2) return `cohort-size:${group.length}`;
+  if (groupIndexes.size !== 2) return 'cohort-legs-share-one-input';
+  return [...groupIndexes].some(inputIndex => invalidIndexes.has(inputIndex))
+    ? 'cohort-leg-already-invalid'
+    : null;
+};
+
+const pairMatchFailure = (
+  env: RuntimeReplica,
+  group: readonly CrossJAdmissionFrameCandidate[],
+  inputs: readonly RoutedEntityInput[],
+  source: CrossJAdmissionFrameCandidate,
+  target: CrossJAdmissionFrameCandidate,
+): string | null => {
+  const sourceInput = inputs[source.inputIndex]!;
+  const targetInput = inputs[target.inputIndex]!;
+  if (!targetsDistinctSiblingEntities(inputs, source.inputIndex, target.inputIndex)) {
+    return 'legs-target-same-entity';
+  }
+  if (!sameSourceRuntimeFrame(sourceInput, targetInput)) return 'legs-source-frame-differs';
+  if (!admissionFramesMatch(source, target)) return 'legs-frames-do-not-pair';
+  return openingPairAuthorizationFailure(env, group, inputs);
+};
+
+/**
+ * Records why each leg was dropped. This used to fold group-level failures into
+ * the caller's candidate-level `invalidIndexes` with no detail, so a cohort that
+ * failed *matching* was reported as a leg that failed its own admission — a
+ * different layer, a different fix, and no way to tell them apart from a log.
+ */
 const matchCrossJCandidateGroups = (
   env: RuntimeReplica,
   groups: Iterable<CrossJAdmissionFrameCandidate[]>,
   inputs: readonly RoutedEntityInput[],
   invalidIndexes: Set<number>,
+  pairMatchFailures: Map<number, string[]>,
 ): CrossJAccountInputPair[] => {
   const pairs: CrossJAccountInputPair[] = [];
+  const rejectGroup = (groupIndexes: ReadonlySet<number>, reason: string): void => {
+    for (const inputIndex of groupIndexes) {
+      invalidIndexes.add(inputIndex);
+      pairMatchFailures.set(inputIndex, [...(pairMatchFailures.get(inputIndex) ?? []), reason]);
+    }
+  };
   for (const group of groups) {
     const groupIndexes = new Set(group.map(candidate => candidate.inputIndex));
-    if (
-      group.length !== 2 ||
-      groupIndexes.size !== 2 ||
-      [...groupIndexes].some(inputIndex => invalidIndexes.has(inputIndex))
-    ) {
-      groupIndexes.forEach(inputIndex => invalidIndexes.add(inputIndex));
+    const shapeFailure = cohortShapeFailure(group, groupIndexes, invalidIndexes);
+    if (shapeFailure) {
+      rejectGroup(groupIndexes, shapeFailure);
       continue;
     }
     const [source, target] = [...group].sort((left, right) => left.inputIndex - right.inputIndex);
-    const sourceInput = inputs[source!.inputIndex]!;
-    const targetInput = inputs[target!.inputIndex]!;
-    if (
-      !targetsDistinctSiblingEntities(inputs, source!.inputIndex, target!.inputIndex) ||
-      !sameSourceRuntimeFrame(sourceInput, targetInput) ||
-      !admissionFramesMatch(source!, target!) ||
-      !openingPairHasExactUserAuthorizations(env, group, inputs)
-    ) {
-      groupIndexes.forEach(inputIndex => invalidIndexes.add(inputIndex));
+    const matchFailure = pairMatchFailure(env, group, inputs, source!, target!);
+    if (matchFailure) {
+      rejectGroup(groupIndexes, matchFailure);
       continue;
     }
+    const sourceInput = inputs[source!.inputIndex]!;
+    const targetInput = inputs[target!.inputIndex]!;
     pairs.push({
       pairKey: source!.pairKey,
       phase: source!.phase,
@@ -967,11 +1168,13 @@ export const selectMatchedCrossJAccountInputPairs = (
   }
 
   const grouped = groupUncommittedCrossJCandidates(candidates, inputs);
+  const pairMatchFailures = new Map<number, string[]>();
   const pairs = matchCrossJCandidateGroups(
     env,
     grouped.byCohort.values(),
     inputs,
     grouped.invalidIndexes,
+    pairMatchFailures,
   );
   const allCandidateIndexes = new Set(grouped.candidates.map(candidate => candidate.inputIndex));
   const pairedIndexes = new Set(pairs.flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]));
@@ -990,14 +1193,19 @@ export const selectMatchedCrossJAccountInputPairs = (
     ...atomicInvalidIndexes,
   ])].sort((left, right) => left - right);
   const rejected = new Set(rejectedInputIndexes);
+  // Candidate-level invalidity is checked by its own detail map, never by
+  // `invalidIndexes`: pair matching also writes into that set, so testing it
+  // here reported every cohort-matching failure as a bad candidate.
   const rejectionReason = (inputIndex: number): CrossJRejectedAccountInputReason =>
     grouped.multiCandidateIndexes.has(inputIndex)
       ? 'multiple-candidates-per-input'
-      : grouped.invalidIndexes.has(inputIndex)
+      : grouped.invalidDetails.has(inputIndex)
         ? 'candidate-invalid'
-        : atomicInvalid.has(inputIndex)
-          ? 'atomic-group-invalid'
-          : 'unpaired';
+        : pairMatchFailures.has(inputIndex)
+          ? 'pair-match-failed'
+          : atomicInvalid.has(inputIndex)
+            ? 'atomic-group-invalid'
+            : 'unpaired';
   const rejectedLegs = rejectedInputIndexes.flatMap(inputIndex => {
     const matched = candidates.filter(candidate =>
       candidate.inputIndex === inputIndex);
@@ -1008,7 +1216,9 @@ export const selectMatchedCrossJAccountInputPairs = (
         ? effectiveAccountInputs(input)
         : [];
     const reason = rejectionReason(inputIndex);
-    const detail = grouped.invalidDetails.get(inputIndex) ?? [];
+    const detail = reason === 'pair-match-failed'
+      ? pairMatchFailures.get(inputIndex) ?? []
+      : grouped.invalidDetails.get(inputIndex) ?? [];
     return accountInputs.map(accountInput => ({ inputIndex, accountInput, reason, detail }));
   });
   const retained = removeRejectedCrossJAccountInputs(inputs, rejectedLegs);

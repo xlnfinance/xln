@@ -476,6 +476,46 @@ describe('ordered reliable output lanes', () => {
     expect(hasReadyPendingNetworkOutputs(env, deps, env.state.timestamp)).toBe(true);
   });
 
+  test('incomplete cross-j cohort is deferred and reported without crashing dispatch', () => {
+    const env = {
+      runtimeId: runtimeId('90'),
+      scenarioMode: true,
+      state: {
+        height: 1,
+        timestamp: 1_000,
+      },
+      infrastructure: {
+        deferredNetworkMeta: new Map([['stale-key', { nextRetryAt: 2_000 }]]),
+        securityIncidents: new Map(),
+      },
+      warn: () => {},
+      error: () => {},
+    } as unknown as RuntimeReplica;
+    const orphan = crossJProposalOutput('source', { height: 1, timestamp: 1_000 });
+    const delivered: RuntimeEntityInputsEnvelope[] = [];
+    const deferred = dispatchEntityOutputs(
+      env,
+      [{ output: orphan, targetRuntimeId }],
+      routingDeps(() => ({
+        enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+          delivered.push(envelope);
+          return deliveryAccepted('TEST_INCOMPLETE_COHORT_SHOULD_NOT_SEND');
+        },
+      })),
+    );
+    expect(delivered).toHaveLength(0);
+    // Keep the orphan for retry: its sibling may only be outside this ready batch.
+    expect(deferred).toEqual([orphan]);
+    const incidents = [...(env.infrastructure?.securityIncidents?.values() ?? [])];
+    expect(incidents).toEqual([
+      expect.objectContaining({
+        code: 'CROSS_J_INCOMPLETE_COHORT_DROPPED',
+        severity: 'critical',
+        status: 'active',
+      }),
+    ]);
+  });
+
   test('pairs sibling cross-j proposals certified in adjacent Runtime frames into one envelope', () => {
     const sourceProposal = crossJProposalOutput('source', { height: 48, timestamp: 1_000 });
     const targetProposal = crossJProposalOutput('target', { height: 49, timestamp: 1_001 });
