@@ -778,7 +778,7 @@ describe('direct runtime websocket route', () => {
     });
   });
 
-  test('accepts Bun backpressure but forgets a direct socket that reports zero bytes', async () => {
+  test('accepts Bun backpressure and keeps a still-open socket that reports zero bytes', async () => {
     const serverSeed = 'direct-route-server-send-contract';
     const clientSeed = 'direct-route-client-send-contract';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
@@ -827,6 +827,10 @@ describe('direct runtime websocket route', () => {
       expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
     ]);
 
+    // Bun reports 0 both for a truly dead peer and for a transient
+    // backpressure/queue-full drop on an otherwise healthy socket. Since
+    // readyState still reads OPEN here, the session must survive so the
+    // client's next authenticated frame on this same socket is not bounced.
     ws.send = (raw) => {
       sent.push(deserializeWsMessage(raw));
       return 0;
@@ -837,7 +841,115 @@ describe('direct runtime websocket route', () => {
       retryable: true,
       terminal: false,
     });
+    expect(route.getSessionState()).toEqual([
+      expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+    ]);
+
+    // Once the transport itself confirms the socket is gone, a dropped send
+    // still forgets the session as before.
+    ws.readyState = 3;
+    ws.send = (raw) => {
+      sent.push(deserializeWsMessage(raw));
+      return 0;
+    };
+    expect(route.sendEntityInputsDelivery(clientRuntimeId, envelope)).toMatchObject({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_MISS_FALLBACK',
+      retryable: true,
+      terminal: false,
+    });
     expect(route.getSessionState()).toEqual([]);
+  });
+
+  test('a transient zero-byte send does not forget a still-open session', async () => {
+    // Bun's ServerWebSocket.send() returns 0 both when the connection is
+    // truly gone AND when an otherwise-healthy socket hits a transient
+    // backpressure/queue-full condition (github.com/oven-sh/bun#9368).
+    // Forgetting the session unconditionally on `0` orphans a live client:
+    // its very next authenticated frame arrives on the same still-open
+    // socket, finds no session, and gets bounced as "Handshake required"
+    // even though the client never saw a close/error and never re-sent hello.
+    const serverSeed = 'direct-route-server-transient-drop';
+    const clientSeed = 'direct-route-client-transient-drop';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const received: unknown[] = [];
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      onEntityInputs: (_from, envelope) => {
+        received.push(envelope);
+      },
+    });
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    expect(sent.at(-1)?.type).toBe('hello_ack');
+
+    const receipt: ReliableDeliveryReceipt = {
+      body: {
+        version: 1,
+        receiverRuntimeId: clientRuntimeId,
+        identity: {
+          kind: 'entity-frame',
+          entityId: `0x${'51'.repeat(32)}`,
+          signerId: clientRuntimeId,
+          laneKey: 'lane',
+          height: 1,
+          frameHash: `0x${'52'.repeat(32)}`,
+          logicalKey: 'logical',
+        },
+        appliedRuntimeHeight: 1,
+      },
+      signature: `0x${'53'.repeat(65)}`,
+    };
+
+    // The socket stays fully open (readyState untouched); only this one
+    // send reports the ambiguous "dropped" result.
+    ws.send = () => 0;
+    expect(route.sendReliableReceiptDelivery(clientRuntimeId, receipt)).toMatchObject({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_RECEIPT_SEND_FAILED',
+      retryable: true,
+      terminal: false,
+    });
+    expect(ws.readyState).toBe(1);
+    expect(route.getSessionState()).toEqual([
+      expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+    ]);
+
+    // Restore real sending and prove the still-authenticated socket accepts
+    // the client's next entity_inputs frame without re-sending hello.
+    ws.send = (raw: string | Uint8Array) => {
+      const message = deserializeWsMessage(raw);
+      sent.push(message);
+      return true;
+    };
+    const inboundEnvelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId: clientRuntimeId,
+      sourceSignature: `0x${'11'.repeat(65)}`,
+      sourceRuntimeHeight: 2,
+      sourceRuntimeTimestamp: 2,
+      entityInputs: [{
+        entityId: `0x${'22'.repeat(32)}`,
+        runtimeId: serverRuntimeId,
+        signerId: serverRuntimeId,
+        entityTxs: [],
+      } as unknown as RuntimeEntityInputsEnvelope['entityInputs'][number]],
+    };
+    await route.websocket.message(ws, serializeWsMessage({
+      type: 'entity_inputs',
+      id: 'client-after-transient-drop',
+      from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
+      to: serverRuntimeId,
+      timestamp: 2,
+      encrypted: true,
+      payload: encryptJSON(inboundEnvelope, deriveEncryptionKeyPair(serverSeed).publicKey),
+    }));
+
+    expect(sent.at(-1)?.type).not.toBe('error');
+    expect(received).toEqual([inboundEnvelope]);
   });
 
   test('preserves direct socket root errors in a retryable structured delivery result', async () => {

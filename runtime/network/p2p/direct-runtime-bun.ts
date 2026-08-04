@@ -241,6 +241,19 @@ const getDeliverableSession = (
   return { targetKey, session };
 };
 
+// Bun's ServerWebSocket.send() reports 0 ("dropped") both when the peer is
+// truly gone and when an otherwise-healthy socket hits a transient
+// backpressure/queue-full condition while readyState still reads OPEN
+// (github.com/oven-sh/bun#9368). Forgetting the session on every dropped
+// send orphans a live client: its next authenticated frame lands on the
+// same still-open socket, finds no session, and gets bounced as
+// "Handshake required" even though it never saw a close/error and has no
+// reason to re-send hello. Only forget once the transport itself confirms
+// the socket is no longer open; a live socket's failed send is retryable.
+const forgetIfDisconnected = (context: DirectRuntimeWsContext, ws: DirectWebSocket): void => {
+  if (!isSocketOpen(ws)) forgetSession(context, ws);
+};
+
 const sendEntityInputsDelivery = (
   context: DirectRuntimeWsContext,
   targetRuntimeId: string,
@@ -283,7 +296,7 @@ const sendEntityInputsDelivery = (
     });
   }
   const attempt = trySend(target.session.ws, signSessionFrame(context, target.session, msg));
-  if (!attempt.sent) forgetSession(context, target.session.ws);
+  if (!attempt.sent) forgetIfDisconnected(context, target.session.ws);
   return resultFromSendAttempt(attempt, 'ROUTE_DIRECT_DELIVERED', 'ROUTE_DIRECT_SEND_FAILED');
 };
 
@@ -307,7 +320,7 @@ const sendReliableReceiptDelivery = (
     timestamp: Date.now(),
     payload: receipt,
   }));
-  if (!attempt.sent) forgetSession(context, target.session.ws);
+  if (!attempt.sent) forgetIfDisconnected(context, target.session.ws);
   return resultFromSendAttempt(
     attempt,
     'ROUTE_DIRECT_RECEIPT_DELIVERED',
