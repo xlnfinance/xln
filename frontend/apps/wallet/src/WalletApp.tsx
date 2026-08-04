@@ -21,6 +21,7 @@ import { walletViewExternalStore } from './wallet-view-store';
 import { WalletAddressDetail } from './features/routes/WalletAddressDetail';
 import { WalletAddressDirectory } from './features/routes/WalletAddressDirectory';
 import { WalletTestnetPage } from './features/routes/WalletTestnetPage';
+import { parseWalletScenarioPreview } from './wallet-entry';
 
 const LOADING_PHASES = new Set([
   'cold',
@@ -46,7 +47,7 @@ const useOnlineStatus = (): boolean => {
   return online;
 };
 
-export const WalletApp = () => {
+const WalletRuntimeApp = () => {
   const boot = useExternalStore(walletBootController.store);
   const wallet = useExternalStore(walletViewExternalStore);
   const settings = useExternalStore(settingsExternalStore);
@@ -106,4 +107,17 @@ export const WalletApp = () => {
       <WalletNotices />
     </>
   );
+};
+
+export const WalletApp = () => {
+  const scenarioPreview = parseWalletScenarioPreview(window.location.search);
+  return scenarioPreview ? (
+    <main className="wallet-scenario-preview" data-testid="scenario-preview-wallet-banner">
+      <p className="wallet-eyebrow">deterministic preview</p>
+      <h1>Scenario preview</h1>
+      <p>Runtime writes and wallet bootstrap are disabled in this view.</p>
+      <dl><div><dt>scenario</dt><dd>{scenarioPreview.scenarioId}</dd></div><div><dt>frame</dt><dd>{scenarioPreview.frame + 1}</dd></div></dl>
+      <a href="/scenarios">Return to scenarios</a>
+    </main>
+  ) : <WalletRuntimeApp />;
 };

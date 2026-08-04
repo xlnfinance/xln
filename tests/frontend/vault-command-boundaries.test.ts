@@ -13,7 +13,7 @@ test('vault and runtime command reducers are framework-neutral and deterministic
   const commands = read('frontend/packages/runtime-client/runtime-command-transitions.ts');
   const source = `${vault}\n${commands}`;
 
-  expect(source).not.toMatch(/from ['"](?:react|svelte|svelte\/store)['"]/);
+  expect(source).not.toMatch(/from ['"](?:react|store|store\/store)['"]/);
   expect(source).not.toContain('Date.now');
   expect(source).not.toContain('Math.random');
   expect(source).not.toContain('randomUUID');
@@ -21,18 +21,18 @@ test('vault and runtime command reducers are framework-neutral and deterministic
   expect(source).not.toContain('indexedDB');
 });
 
-test('vault state has one external-store owner and only a readonly Svelte adapter', () => {
+test('vault state has one external-store owner and only a readonly store binding', () => {
   const source = read('frontend/src/lib/stores/vaultStore.ts');
   expect(source).toContain('const runtimesStateBinding = createExternalStore<RuntimesState>(defaultState)');
   expect(source).toContain('export const runtimesStateExternalStore = runtimesStateBinding.store');
-  expect(source).toContain('export const runtimesState = toSvelteReadable(runtimesStateBinding.store)');
-  expect(source).not.toContain("from 'svelte/store'");
+  expect(source).toContain('export const runtimesState = toReadableStore(runtimesStateBinding.store)');
+  expect(source).not.toContain("from 'store/store'");
   expect(source).not.toMatch(/export const runtimesState\s*=\s*writable/);
 });
 
 test('view components cannot import vault protection or command journal storage ports', () => {
   const viewFiles = filesUnder('frontend/src')
-    .filter(path => /\.(svelte|tsx|jsx)$/.test(path));
+    .filter(path => /\.(store|tsx|jsx)$/.test(path));
   const violations = viewFiles.filter(path => {
     const source = read(path);
     return source.includes('/security/vaultProtection')

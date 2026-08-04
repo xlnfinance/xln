@@ -18,7 +18,7 @@ describe('playwright global setup cleanup', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-playwright-cleanup-'));
     try {
       writeFile(root, '.logs/e2e-parallel/old-run/log.txt');
-      writeFile(root, 'frontend/.svelte-kit-e2e/old-run/output.txt');
+      writeFile(root, '.logs/e2e-build-cache/old-run/output.txt');
       writeFile(root, 'frontend/build/index.html');
       writeFile(root, 'frontend/playwright-report/index.html');
 
@@ -42,7 +42,7 @@ describe('playwright global setup cleanup', () => {
       expect(result.stdout).toContain('test artifact budget (playwright):');
       expect(result.stdout).not.toContain('removing frontend/build');
       expect(existsSync(join(root, '.logs/e2e-parallel'))).toBe(false);
-      expect(existsSync(join(root, 'frontend/.svelte-kit-e2e'))).toBe(false);
+      expect(existsSync(join(root, '.logs/e2e-build-cache'))).toBe(false);
       expect(readFileSync(join(root, 'frontend/build/index.html'), 'utf8')).toBe('x');
       expect(existsSync(join(root, 'frontend/playwright-report'))).toBe(false);
     } finally {

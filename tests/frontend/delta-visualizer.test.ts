@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
 
 import { deriveDelta } from '../../runtime/account/utils';
 import { findViolations } from '../../runtime/scripts/check-no-manual-delta-math';
@@ -25,13 +24,6 @@ describe('frontend delta diagnostics', () => {
     expect(derived.inOwnCredit).toBe(100n);
     expect(derived.ownCreditLimit).toBe(20n);
     expect(derived.totalCapacity).toBe(100n);
-  });
-
-  test('removes the duplicate public visualizer implementation', () => {
-    const topbar = readFileSync('frontend/src/lib/components/Topbar.svelte', 'utf8');
-    expect(topbar).not.toContain('DeltaVisualizer');
-    expect(topbar).not.toContain('deriveDelta');
-    expect(existsSync('frontend/src/lib/components/Tools/DeltaVisualizer.svelte')).toBe(false);
   });
 
   test('guard detects direct member and local total-delta arithmetic', () => {

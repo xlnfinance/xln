@@ -17,12 +17,13 @@ import { spawnSync } from 'node:child_process';
 
 import { RemoteRuntimeAdapter } from '../../runtime/api/runtime-adapter/remote';
 import { BRAINVAULT_V1_SPEC_ID } from '../../brainvault/spec';
+import { packageFrontendRelease } from '../deployment/frontend-release-package';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const PACKAGE_DIR = join(ROOT, 'packages/npm/xlnfinance');
 const DIST_DIR = join(PACKAGE_DIR, 'dist');
 const APP_DIR = join(PACKAGE_DIR, 'app');
-const FRONTEND_BUILD = join(ROOT, 'frontend/build');
+const FRONTEND_SURFACE_BUILD = join(ROOT, 'frontend/build');
 const skipBuild = process.argv.includes('--skip-build');
 const shouldPack = process.argv.includes('--pack');
 const shouldSmoke = process.argv.includes('--smoke');
@@ -34,6 +35,15 @@ const run = (command: string, args: string[], cwd = ROOT): void => {
 };
 
 const jsonFile = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) as T;
+
+const currentSourceCommit = (): string => {
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' });
+  const commit = String(result.stdout || '').trim();
+  if (result.status !== 0 || !/^[a-f0-9]{40}$/.test(commit)) {
+    throw new Error(`XLNFINANCE_SOURCE_COMMIT_INVALID:${String(result.stderr || '').trim()}`);
+  }
+  return commit;
+};
 
 const walkFiles = (root: string): string[] => readdirSync(root, { withFileTypes: true })
   .flatMap(entry => {
@@ -93,10 +103,21 @@ const buildPackage = (): void => {
     `--outfile=${join(DIST_DIR, 'brainvault-worker-native.js')}`,
   ]);
   assertPortableServerBundle();
-  cpSync(FRONTEND_BUILD, APP_DIR, {
-    recursive: true,
-    filter: source => basename(source) !== '.DS_Store',
-  });
+  const releaseStage = mkdtempSync(join(tmpdir(), 'xlnfinance-frontend-release-'));
+  try {
+    const manifest = packageFrontendRelease({
+      buildRoot: FRONTEND_SURFACE_BUILD,
+      releaseRoot: join(releaseStage, `${version}-${currentSourceCommit().slice(0, 12)}`),
+      sourceCommit: currentSourceCommit(),
+      productVersion: version,
+    });
+    cpSync(join(releaseStage, manifest.releaseId, manifest.surfaces.wallet.outputRoot), APP_DIR, {
+      recursive: true,
+      filter: source => basename(source) !== '.DS_Store',
+    });
+  } finally {
+    rmSync(releaseStage, { recursive: true, force: true });
+  }
 
   const files = [...walkFiles(DIST_DIR), ...walkFiles(APP_DIR)];
   const manifest = {

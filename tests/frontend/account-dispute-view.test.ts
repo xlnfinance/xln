@@ -25,7 +25,7 @@ describe('account dispute view helpers', () => {
     const state = {
       entityId: '0xself',
       accounts: new Map<string, AccountState>([
-        ['0xpeer', { pulls: new Map([['pull-1', {}]]) } as unknown as AccountState],
+        ['0xpeer', { state: { pulls: new Map([['pull-1', {}]]) } } as unknown as AccountState],
       ]),
       crossJurisdictionSwaps: new Map([
         ['ignored-source', {

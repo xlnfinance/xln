@@ -9,7 +9,6 @@ const capture = async (page: Page, testInfo: import('@playwright/test').TestInfo
 };
 
 test.describe('React operator health and QA', () => {
-  test.skip(process.env['PW_REACT_OPS_CANDIDATE'] !== '1', 'requires the release-blocked React ops candidate');
 
   test('renders real health evidence and protected QA cockpit', { tag: '@functional' }, async ({ page }, testInfo) => {
     test.setTimeout(3 * 60_000);

@@ -16,7 +16,7 @@
     "watchtower": "bun runtime/watchtower/standalone-server.ts --port 9100",
     "build": "./scripts/build-runtime.sh",
     "frontend:contract-report": "bun frontend/scripts/frontend-migration-contract-report.ts",
-    "frontend:release:build": "bun scripts/deployment/build-frontend-release.ts",
+    "frontend:release:build": "cd frontend && bun run build && cd .. && bun scripts/deployment/build-frontend-release.ts",
     "frontend:release:validate": "bun scripts/deployment/frontend-release-cli.ts validate",
     "frontend:release:activate": "bun scripts/deployment/frontend-release-cli.ts activate",
     "frontend:release:health": "bun scripts/deployment/frontend-release-cli.ts health",

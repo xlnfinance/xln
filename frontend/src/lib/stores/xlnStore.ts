@@ -1,4 +1,4 @@
-import { writable, derived, get } from 'svelte/store';
+import { writable, derived, get } from '../../../packages/client-core/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeEnv, activeRuntimeId, registerRuntimeAdapterSwitcher, runtimes, runtimeOperations } from './runtimeStore';

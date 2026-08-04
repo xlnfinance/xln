@@ -1,17 +1,13 @@
-import { createReadStream, existsSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { createReadStream, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
 
-import {
-  buildReactOpsCandidateManifest,
-  REACT_CANDIDATE_MANIFEST_FILE,
-} from '../../../packages/build-contracts/react-candidate';
 import type { ReactViteSurfaceContract } from '../../../packages/build-contracts/vite-surfaces';
 
-export const createOpsBuildPlugin = (contract: ReactViteSurfaceContract): Plugin => {
-  const runtimeBundlePath = process.env['XLN_RUNTIME_BUNDLE_PATH'] || resolve(contract.root, '../../static/runtime.js');
+export const createOpsBuildPlugin = (frontendRoot: string, contract: ReactViteSurfaceContract): Plugin => {
+  const runtimeBundlePath = process.env['XLN_RUNTIME_BUNDLE_PATH'] || resolve(frontendRoot, 'static/runtime.js');
   const serveRuntime = (server: Pick<ViteDevServer, 'middlewares'> | Pick<PreviewServer, 'middlewares'>): void => {
-    if (contract.surface !== 'ops') return;
+    if (contract.surface !== 'ops' && contract.surface !== 'all') return;
     server.middlewares.use((request, response, next) => {
       if (String(request.url || '').split('?')[0] !== '/runtime.js') { next(); return; }
       if (!existsSync(runtimeBundlePath)) {
@@ -21,16 +17,9 @@ export const createOpsBuildPlugin = (contract: ReactViteSurfaceContract): Plugin
     });
   };
   return {
-  name: 'xln-react-ops-runtime-and-manifest',
+  name: 'xln-ops-runtime',
   enforce: 'pre',
   configureServer(server) { serveRuntime(server); },
   configurePreviewServer(server) { serveRuntime(server); },
-  closeBundle() {
-    if (contract.surface !== 'ops') return;
-    writeFileSync(
-      join(contract.outDir, REACT_CANDIDATE_MANIFEST_FILE),
-      `${JSON.stringify(buildReactOpsCandidateManifest(contract.routes), null, 2)}\n`,
-    );
-  },
   };
 };

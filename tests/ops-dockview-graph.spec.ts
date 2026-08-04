@@ -5,7 +5,6 @@ const screenshot = async (page: Page, testInfo: import('@playwright/test').TestI
 };
 
 test.describe('React ops scenario workspace', () => {
-  test.skip(process.env['PW_REACT_OPS_CANDIDATE'] !== '1', 'requires the release-blocked React ops candidate');
 
   test('runs real scenario frames and suspends hidden 3D work', { tag: '@functional' }, async ({ page }, testInfo) => {
     test.setTimeout(4 * 60_000); await page.setViewportSize({ width: 1440, height: 900 });

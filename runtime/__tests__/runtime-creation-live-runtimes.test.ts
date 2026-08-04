@@ -1,6 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import {
   BRAINVAULT_SHARD_TIME_MAX_MS,
@@ -96,42 +94,4 @@ describe('runtime creation live runtime discovery', () => {
     expect(formatLiveRuntimeImportStatus(payload, 0)).toContain('Runtime import is not ready.');
   });
 
-  test('RuntimeCreation does not mask reachable runtime-import failures as an empty list', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'frontend/src/lib/components/Views/RuntimeCreation.svelte'),
-      'utf8',
-    );
-
-    expect(source).toContain('formatLiveRuntimeImportStatus(payload, next.length)');
-    expect(source).toContain('const next = parseLiveRuntimeChoices(payload);');
-    expect(source).toContain('data-testid="live-runtime-select"');
-    expect(source).toContain('data-testid="live-runtime-connect"');
-    expect(source).toContain('liveRuntimesLoaded && !liveRuntimesError');
-    expect(source).toContain("url.searchParams.set('access', 'admin')");
-    expect(source).not.toContain("url.searchParams.set('access', 'read')");
-    expect(source).not.toContain("url.searchParams.set('allowPartial', '1')");
-    expect(source).toContain('Auto-discovery suppresses transport failures only');
-    expect(source).not.toContain('swallows errors');
-    expect(source).not.toContain('next.length === 0 && payload.ready === false');
-    expect(source).toContain('detachWorkerHandlers(worker);');
-    expect(source).toContain('worker.onmessage = null;');
-    expect(source).toContain('Timing is telemetry: invalid or extreme samples must never discard valid Argon2 output.');
-  });
-
-  test('keeps demo, remote-runtime, and reset controls behind the Testnet tab', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'frontend/src/lib/components/Views/RuntimeCreation.svelte'),
-      'utf8',
-    );
-    const testnetPanelIndex = source.indexOf('id="wallet-panel-testnet"');
-
-    expect(source).toContain("type InputMode = 'brainvault' | 'mnemonic' | 'testnet';");
-    expect(source).toContain("selectInputMode('testnet')");
-    expect(source).toContain("if (next !== 'testnet' || liveRuntimesLoaded || liveRuntimesLoading) return;");
-    expect(source).toContain('src="/img/logo.png"');
-    expect(testnetPanelIndex).toBeGreaterThan(0);
-    expect(source.indexOf('class="quick-login-section"')).toBeGreaterThan(testnetPanelIndex);
-    expect(source.indexOf('data-testid="live-runtime-section"')).toBeGreaterThan(testnetPanelIndex);
-    expect(source.indexOf('class="testnet-reset-btn"')).toBeGreaterThan(testnetPanelIndex);
-  });
 });

@@ -80,7 +80,7 @@ export const WalletBootError = (props: BootErrorProps) => {
       {schemaMismatch ? (
         <>
           <p>This device has storage schema {schemaMismatch.storedVersion}, while this build requires schema {schemaMismatch.currentVersion}. No incompatible data was applied or deleted.</p>
-          <p>Restore an authenticated encrypted backup. The React candidate never resets local data automatically.</p>
+          <p>Restore an authenticated encrypted backup. The wallet never resets local data automatically.</p>
           <details><summary>Technical details</summary><pre>{props.message}</pre></details>
         </>
       ) : <pre>{props.message}</pre>}

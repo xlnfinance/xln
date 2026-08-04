@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { packageCurrentFrontendRelease } from './frontend-release-package';
+import { packageFrontendRelease } from './frontend-release-package';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -37,7 +37,7 @@ const main = (): void => {
   const version = option(args, 'product-version') ?? productVersion();
   const releaseId = `${version}-${sourceCommit.slice(0, 12)}`;
   const releaseRoot = resolve(option(args, 'release-root') ?? join(ROOT, 'frontend/releases', releaseId));
-  const manifest = packageCurrentFrontendRelease({
+  const manifest = packageFrontendRelease({
     buildRoot: resolve(option(args, 'build-root') ?? join(ROOT, 'frontend/build')),
     releaseRoot,
     sourceCommit,

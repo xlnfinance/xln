@@ -6,7 +6,7 @@ import { SITE_ASSET_DIRECTORIES, SITE_ASSET_FILES } from '../apps/site/build/sit
 
 const FRONTEND_ROOT = resolve(import.meta.dir, '..');
 const SITE_ROOT = resolve(FRONTEND_ROOT, 'apps/site');
-const SHARED_ROOT = resolve(FRONTEND_ROOT, 'packages');
+const BUILD_CONTRACTS_ROOT = resolve(FRONTEND_ROOT, 'packages/build-contracts');
 
 const sourceFiles = (root: string): readonly string[] => readdirSync(root).flatMap(name => {
   const path = join(root, name);
@@ -38,7 +38,7 @@ const ALLOWED_PROTOCOL_IMPORTS = [
 describe('public-site import boundaries', () => {
   test('site entries cannot initialize wallet, runtime, docs, ops, or native implementations', () => {
     const violations = sourceFiles(SITE_ROOT).flatMap(file => importSpecifiers(readFileSync(file, 'utf8'))
-      .filter(specifier => /(?:svelte|capacitor|electron|brainvault|runtimeStore|vault|commandJournal|apps\/(?:wallet|docs|ops)|src\/routes)/i.test(specifier))
+      .filter(specifier => /(?:capacitor|electron|brainvault|runtimeStore|vault|commandJournal|apps\/(?:wallet|docs|ops)|src\/routes)/i.test(specifier))
       .map(specifier => `${relative(FRONTEND_ROOT, file)} -> ${specifier}`));
     expect(violations).toEqual([]);
   });
@@ -51,8 +51,8 @@ describe('public-site import boundaries', () => {
   });
 
   test('shared build contracts stay framework-neutral and app-independent', () => {
-    const violations = sourceFiles(SHARED_ROOT).flatMap(file => importSpecifiers(readFileSync(file, 'utf8'))
-      .filter(specifier => /(?:react|svelte|apps\/|runtime|vault|capacitor)/i.test(specifier))
+    const violations = sourceFiles(BUILD_CONTRACTS_ROOT).flatMap(file => importSpecifiers(readFileSync(file, 'utf8'))
+      .filter(specifier => /(?:react|apps\/|runtime|vault|capacitor)/i.test(specifier))
       .map(specifier => `${relative(FRONTEND_ROOT, file)} -> ${specifier}`));
     expect(violations).toEqual([]);
   });

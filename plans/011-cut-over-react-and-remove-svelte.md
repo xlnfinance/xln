@@ -15,6 +15,7 @@
 - **Priority:** P1
 - **Effort:** L
 - **Risk:** HIGH
+- **Status:** IN PROGRESS — canonical React cutover implemented; final unchanged-candidate browser/native/CI/release gates pending
 - **Depends on:** Plans 001–010
 - **Category:** migration, release engineering
 - **Planned at:** commit `5749e283d`, 2026-08-03

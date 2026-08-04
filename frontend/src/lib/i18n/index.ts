@@ -3,7 +3,7 @@
  * Supports 10 languages for global superapp experience
  */
 
-import { writable, derived, get } from 'svelte/store';
+import { writable, derived, get } from '../../../packages/client-core/store';
 
 // Static imports for all locales (Vite requires static imports for JSON)
 import en from './locales/en.json';
@@ -114,7 +114,7 @@ export function t(key: string, params?: Record<string, string | number>): string
   return text;
 }
 
-// Reactive translation store for Svelte
+// Reactive translation store for frontend consumers.
 export const translations$ = derived(locale, ($locale) => {
   return (key: string, params?: Record<string, string | number>) => t(key, params);
 });

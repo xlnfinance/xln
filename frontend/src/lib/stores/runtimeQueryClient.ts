@@ -1,5 +1,5 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
-import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteExternalStore';
+import { get as get, toReadableStore } from './storeBindings';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeAdapter,
@@ -264,7 +264,7 @@ export const createRuntimeQueryStore = <T>(
     error: null,
     height: get(runtimeAdapterHeight),
   });
-  const store = toSvelteReadable(binding.store);
+  const store = toReadableStore(binding.store);
   let disposed = false;
   let version = 0;
   const refresh = async (): Promise<void> => {

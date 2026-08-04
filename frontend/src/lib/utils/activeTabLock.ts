@@ -1,5 +1,5 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
-import { toSvelteReadable } from '../stores/adapters/svelteExternalStore';
+import { toReadableStore } from '../stores/storeBindings';
 
 const ACTIVE_TAB_LOCK_KEY = 'xln-active-tab-lock';
 const ACTIVE_TAB_CHANNEL_NAME = 'xln-active-tab-lock';
@@ -56,7 +56,7 @@ const activeTabLockBinding = createExternalStore<ActiveTabLockState>({
   isOwner: false,
 });
 export const activeTabLockExternalStore = activeTabLockBinding.store;
-export const activeTabLock = toSvelteReadable(activeTabLockBinding.store);
+export const activeTabLock = toReadableStore(activeTabLockBinding.store);
 
 let currentTabId = '';
 let activeChannel: BroadcastChannel | null = null;

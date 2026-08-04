@@ -3,7 +3,7 @@
   "name": "xln - cross-local network",
   "short_name": "xln",
   "description": "Off-chain settlement with on-chain anchoring",
-  "start_url": "/",
+  "start_url": "/app",
   "scope": "/",
   "display": "standalone",
   "background_color": "#000000",

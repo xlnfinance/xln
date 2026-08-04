@@ -1,10 +1,12 @@
 import { errorLog } from '$lib/stores/errorLogStore';
+import { captureBrowserError } from '$lib/debug/browser-telemetry';
 
 export const walletErrorText = (error: unknown): string => (
   error instanceof Error ? error.message : String(error || 'Unknown wallet error')
 );
 
 export const reportWalletError = (source: string, error: unknown): void => {
+  captureBrowserError('ui_error', error, [source]);
   const message = walletErrorText(error);
   errorLog.log(message, `React Wallet:${source}`, error);
   document.documentElement.setAttribute('data-xln-wallet-error', source);

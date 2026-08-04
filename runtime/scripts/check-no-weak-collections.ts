@@ -21,7 +21,7 @@ const EXCLUDE_PARTS = [
 const WEAK_COLLECTION_PATTERN = new RegExp(`\\b${'Weak'}(?:Map|Set)\\b`);
 
 const toRel = (abs: string): string => path.relative(ROOT, abs).replace(/\\/g, '/');
-const isCodeFile = (rel: string): boolean => /\.(ts|tsx|js|jsx|svelte)$/.test(rel) && !rel.endsWith('.d.ts');
+const isCodeFile = (rel: string): boolean => /\.(ts|tsx|js|jsx)$/.test(rel) && !rel.endsWith('.d.ts');
 const shouldSkip = (rel: string): boolean => EXCLUDE_PARTS.some((part) => rel.includes(part));
 
 async function walk(absPath: string): Promise<string[]> {

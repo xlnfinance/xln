@@ -124,29 +124,6 @@ describe('vault runtime creation lock', () => {
     expect(unregisterAfterStop).toBeGreaterThan(stopRuntime);
   });
 
-  test('page unload synchronously fences external ingress before navigation aborts requests', () => {
-    const store = read('frontend/src/lib/stores/vaultStore.ts');
-    const layout = read('frontend/src/routes/app/+layout.svelte');
-    const operationStart = store.indexOf('beginRuntimePageUnload(): void');
-    const operationEnd = store.indexOf('\n  async suspendAllRuntimeActivity()', operationStart);
-
-    expect(operationStart).toBeGreaterThan(0);
-    expect(operationEnd).toBeGreaterThan(operationStart);
-    const operationSource = store.slice(operationStart, operationEnd);
-    expect(operationSource).toContain('xln.stopJurisdictionWatchers(env);');
-    expect(operationSource).toContain('xln.stopP2P(env);');
-
-    const mountStart = layout.indexOf('onMount(() => {');
-    const mountEnd = layout.indexOf('\n  });', mountStart);
-    const mountSource = layout.slice(mountStart, mountEnd);
-    const pageHideFence = mountSource.indexOf('vaultOperations.beginRuntimePageUnload();');
-    const lockInitialization = mountSource.indexOf('initializeActiveTabLock(');
-
-    expect(pageHideFence).toBeGreaterThan(0);
-    expect(lockInitialization).toBeGreaterThan(pageHideFence);
-    expect(mountSource).toContain("window.addEventListener('pagehide', handlePageHide);");
-    expect(mountSource).toContain("window.removeEventListener('pagehide', handlePageHide);");
-  });
 
   test('runtime restore does not rewrite legacy signer jurisdiction labels', () => {
     const source = read('frontend/src/lib/stores/vaultStore.ts');
@@ -177,13 +154,4 @@ describe('vault runtime creation lock', () => {
     expect(lockSource).toContain('deleteVaultDeviceKey(normalizedRuntimeId, protectionToDelete)');
   });
 
-  test('locked runtimes cannot derive signer keys and render the vault gate', () => {
-    const store = read('frontend/src/lib/stores/vaultStore.ts');
-    const panel = read('frontend/src/lib/view/UserModePanel.svelte');
-
-    expect(store).toContain('if (!runtime?.seed) return null;');
-    expect(store).toContain('if (!runtime?.seed || signerIndex >= runtime.signers.length) return null;');
-    expect(panel).toContain('const activeVaultLocked = $derived(');
-    expect(panel).toContain('(!hasSigner || activeVaultLocked)');
-  });
 });

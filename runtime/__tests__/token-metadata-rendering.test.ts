@@ -94,7 +94,7 @@ describe('rendered token metadata is exact', () => {
   });
 
   test('production render code contains no silent eighteen-decimal fallback', async () => {
-    const glob = new Bun.Glob('frontend/src/lib/**/*.{ts,svelte}');
+    const glob = new Bun.Glob('frontend/{src/lib,apps}/**/*.{ts,tsx}');
     for await (const path of glob.scan({ cwd: process.cwd(), absolute: true })) {
       const source = await Bun.file(path).text();
       expect(source).not.toMatch(/\?\?\s*18\b/);

@@ -152,10 +152,12 @@ describe('network timeline source', () => {
 
   test('a browser scenario run becomes a source: index and captions with no storage', async () => {
     const snapshot = (height: number, entityTxs: unknown[]) => ({
-      height,
-      timestamp: 1_000 + height,
-      eReplicas: new Map(),
-      jReplicas: new Map(),
+      state: {
+        height,
+        timestamp: 1_000 + height,
+        eReplicas: new Map(),
+        jReplicas: new Map(),
+      },
       runtimeOutputs: [],
       description: `Frame ${height}`,
       runtimeInput: {
@@ -185,14 +187,22 @@ describe('network timeline source', () => {
 
   test('a scenario frame is JSON-safe, which is what lets a browser demo be recorded', async () => {
     const source = scenarioNetworkTimelineSource('demo', [{
-      height: 1,
-      timestamp: 1_000,
+      state: {
+        height: 1,
+        timestamp: 1_000,
+        eReplicas: new Map([['0xalice:s', {
+          entityId: '0xALICE',
+          state: {
+            accounts: new Map([['0xhub', {
+              state: { leftEntity: '0xalice', rightEntity: '0xhub' },
+              currentHeight: 4,
+            }]]),
+          },
+        }]]),
+        jReplicas: new Map(),
+      },
       runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] },
       gossip: { profiles: [{ entityId: '0xALICE', name: 'Alice' }] },
-      eReplicas: new Map([['0xalice:s', {
-        entityId: '0xALICE',
-        state: { accounts: new Map([['0xhub', { currentHeight: 4 }]]) },
-      }]]),
     }] as never);
 
     const frame = await source.readGraphFrame(1);
@@ -253,24 +263,31 @@ describe('network timeline source', () => {
 
   test('a scenario frame carries the deltas and reserves the graph renders', async () => {
     const source = scenarioNetworkTimelineSource('demo', [{
-      height: 1,
-      timestamp: 1_000,
+      state: {
+        height: 1,
+        timestamp: 1_000,
+        eReplicas: new Map([['0xalice:s', {
+          entityId: '0xALICE',
+          signerId: 's',
+          state: {
+            profile: { name: 'Alice', isHub: false },
+            reserves: new Map([[1, 7n]]),
+            accounts: new Map([['0xhub', {
+              status: 'open',
+              currentHeight: 3,
+              mempool: [{ type: 'directPayment' }],
+              state: {
+                leftEntity: '0xalice',
+                rightEntity: '0xhub',
+                deltas: new Map([[1, { tokenId: 1, collateral: 100n, offdelta: -5n }]]),
+              },
+              activeDispute: { startedByLeft: true, disputeTimeout: 42, initialNonce: 7 },
+            }]]),
+          },
+        }]]),
+        jReplicas: new Map(),
+      },
       runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] },
-      eReplicas: new Map([['0xalice:s', {
-        entityId: '0xALICE',
-        signerId: 's',
-        state: {
-          profile: { name: 'Alice', isHub: false },
-          reserves: new Map([[1, 7n]]),
-          accounts: new Map([['0xhub', {
-            status: 'open',
-            currentHeight: 3,
-            mempool: [{ type: 'directPayment' }],
-            deltas: new Map([[1, { tokenId: 1, collateral: 100n, offdelta: -5n }]]),
-            activeDispute: { startedByLeft: true, disputeTimeout: 42, initialNonce: 7 },
-          }]]),
-        },
-      }]]),
     }] as never);
 
     const entity = (await source.readGraphFrame(1)).entities[0]!;

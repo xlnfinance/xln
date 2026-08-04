@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { OPS_ROUTE_CONTRACTS, resolveOpsRoute, validateOpsRouteContracts } from '../../frontend/apps/ops/src/ops-route-capabilities';
 import { parseOpsHealth } from '../../frontend/apps/ops/data/ops-health-store';
-import { buildReactOpsCandidateManifest } from '../../frontend/packages/build-contracts/react-candidate';
 import { createReactViteSurfaceContract } from '../../frontend/packages/build-contracts/vite-surfaces';
 import { FRONTEND_ROUTES } from '../../frontend/src/lib/contracts/frontendSurfaces';
 
@@ -17,12 +16,9 @@ test('ops routes have one explicit audience, capability set, and data owner', ()
   expect(() => resolveOpsRoute('/admin')).toThrow('OPS_ROUTE_UNKNOWN:/admin');
 });
 
-test('ops artifact remains blocked and excludes edge-owned endpoints', () => {
+test('ops artifact owns every operator page and excludes edge-owned endpoints', () => {
   const routes = FRONTEND_ROUTES.filter(route => route.surface === 'ops' && route.kind === 'page');
-  const manifest = buildReactOpsCandidateManifest(routes);
-  expect(manifest.activationBlocked).toBe(true);
-  expect(manifest.surface).toBe('ops');
-  expect(manifest.entrypoints).toEqual(['ai/index.html', 'embed/index.html', 'health/index.html', 'qa/index.html', 'runs/index.html', 'scenarios/index.html']);
+  expect(routes.map(route => route.outputEntry).sort()).toEqual(['ai/index.html', 'embed/index.html', 'health/index.html', 'qa/index.html', 'runs/index.html', 'scenarios/index.html']);
   const patterns = routes.map(route => route.pattern);
   for (const edge of ['/admin', '/radapter', '/rpc', '/rpc2', '/resetdb']) expect(patterns).not.toContain(edge);
 });

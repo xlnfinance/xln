@@ -10,14 +10,13 @@ type FileSizeViolation = {
 const ROOT = process.cwd();
 const SOURCE_ROOTS = ['runtime', 'frontend/src', 'tests', 'scripts', 'jurisdictions'];
 const MAX_SOURCE_FILE_LINES = 3000;
-const CODE_FILE_RE = /\.(svelte|ts|tsx|js|cjs|mjs|css|sol|sh)$/;
+const CODE_FILE_RE = /\.(ts|tsx|js|cjs|mjs|css|sol|sh)$/;
 const GENERATED_PATH_PARTS = [
   '/node_modules/',
   '/artifacts/',
   '/cache/',
   '/typechain-types/',
   '/build/',
-  '/.svelte-kit/',
   // Foundry installs third-party Solidity sources here. They are dependencies,
   // not handwritten xln code, and include generated console helpers >10k LOC.
   '/jurisdictions/lib/',

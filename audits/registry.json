@@ -7,12 +7,10 @@
       "jurisdictions/contracts/**/*.sol",
       "brainvault/**/*.ts",
       "custody/**/*.ts",
-      "frontend/src/lib/components/Entity/**/*",
-      "frontend/src/lib/components/PaymentSpotlight.svelte",
-      "frontend/src/lib/components/Views/RuntimeCreation.svelte",
+      "frontend/apps/wallet/src/**/*",
+      "frontend/packages/runtime-client/**/*",
       "frontend/src/lib/stores/paymentTerminalMonitor.ts",
       "frontend/src/lib/stores/paymentSpotlightStore.ts",
-      "frontend/src/lib/view/View.svelte",
       "frontend/src/lib/stores/xlnStore.ts",
       "frontend/src/lib/utils/xlnInvoice.ts"
     ],
@@ -322,11 +320,11 @@
         "runtime/runtime/registration/**/*.ts",
         "runtime/protocol/payments/**/*.ts",
         "runtime/protocol/htlc/**/*.ts",
-        "frontend/src/lib/components/Entity/PaymentPanel.svelte",
-        "frontend/src/lib/components/PaymentSpotlight.svelte",
+        "frontend/apps/wallet/src/features/payments/**/*",
+        "frontend/apps/wallet/src/features/accounts/wallet-financial-actions.ts",
+        "frontend/packages/runtime-client/wallet-payment-input-adapter.ts",
         "frontend/src/lib/stores/paymentSpotlightStore.ts",
         "frontend/src/lib/stores/paymentTerminalMonitor.ts",
-        "frontend/src/lib/view/View.svelte",
         "frontend/src/lib/utils/xlnInvoice.ts"
       ],
       "testGlobs": [
@@ -374,12 +372,10 @@
       "criticality": "high",
       "structuralDebt": 3,
       "sourceGlobs": [
-        "frontend/src/lib/components/Views/RuntimeCreation.svelte",
-        "frontend/src/lib/components/Entity/**/*",
-        "frontend/src/lib/components/PaymentSpotlight.svelte",
+        "frontend/apps/wallet/src/**/*",
+        "frontend/packages/runtime-client/**/*",
         "frontend/src/lib/stores/paymentSpotlightStore.ts",
         "frontend/src/lib/stores/paymentTerminalMonitor.ts",
-        "frontend/src/lib/view/View.svelte",
         "frontend/src/lib/stores/xlnStore.ts",
         "frontend/src/lib/utils/xlnInvoice.ts"
       ],
@@ -968,11 +964,11 @@
         "runtime/runtime/registration/**/*.ts",
         "runtime/protocol/payments/**/*.ts",
         "runtime/protocol/htlc/**/*.ts",
-        "frontend/src/lib/components/Entity/PaymentPanel.svelte",
-        "frontend/src/lib/components/PaymentSpotlight.svelte",
+        "frontend/apps/wallet/src/features/payments/**/*",
+        "frontend/apps/wallet/src/features/accounts/wallet-financial-actions.ts",
+        "frontend/packages/runtime-client/wallet-payment-input-adapter.ts",
         "frontend/src/lib/stores/paymentSpotlightStore.ts",
         "frontend/src/lib/stores/paymentTerminalMonitor.ts",
-        "frontend/src/lib/view/View.svelte",
         "frontend/src/lib/utils/xlnInvoice.ts"
       ],
       "testGlobs": [
@@ -1023,8 +1019,8 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "frontend/src/lib/components/Views/RuntimeCreation.svelte",
-        "frontend/src/lib/components/Entity/**/*",
+        "frontend/apps/wallet/src/**/*",
+        "frontend/packages/runtime-client/**/*",
         "frontend/src/lib/stores/xlnStore.ts"
       ],
       "testGlobs": [
@@ -1045,12 +1041,10 @@
         "independentVerification"
       ],
       "sourceGlobs": [
-        "frontend/src/lib/components/Views/RuntimeCreation.svelte",
-        "frontend/src/lib/components/Entity/**/*",
-        "frontend/src/lib/components/PaymentSpotlight.svelte",
+        "frontend/apps/wallet/src/**/*",
+        "frontend/packages/runtime-client/**/*",
         "frontend/src/lib/stores/paymentSpotlightStore.ts",
         "frontend/src/lib/stores/paymentTerminalMonitor.ts",
-        "frontend/src/lib/view/View.svelte",
         "frontend/src/lib/stores/xlnStore.ts",
         "frontend/src/lib/utils/xlnInvoice.ts"
       ],

@@ -1,9 +1,9 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
 import {
-  deriveSvelteStore as derived,
-  getSvelteStoreValue as get,
-  toSvelteReadable,
-} from './adapters/svelteExternalStore';
+  derived as derived,
+  get as get,
+  toReadableStore,
+} from './storeBindings';
 import type { TimeState } from '$lib/types/ui';
 import type { EnvSnapshot } from '@xln/runtime/api/public/runtime-module';
 import { history } from './xlnStore';
@@ -19,7 +19,7 @@ const defaultTimeState: TimeState = {
 // /app must always boot in LIVE mode instead of restoring an old historical cursor.
 const timeStateBinding = createExternalStore<TimeState>({ ...defaultTimeState });
 export const timeStateExternalStore = timeStateBinding.store;
-export const timeState = toSvelteReadable(timeStateBinding.store);
+export const timeState = toReadableStore(timeStateBinding.store);
 
 // Derived stores
 export const currentTimeIndex = derived(timeState, $state => $state.currentTimeIndex);

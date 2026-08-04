@@ -1,5 +1,5 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
-import { toSvelteReadable } from './adapters/svelteExternalStore';
+import { toReadableStore } from './storeBindings';
 
 export interface Toast {
   id: string;
@@ -14,7 +14,7 @@ export interface ToastScheduler {
 
 export function createToastStore(scheduler: ToastScheduler) {
   const binding = createExternalStore<Toast[]>([]);
-  const readable = toSvelteReadable(binding.store);
+  const readable = toReadableStore(binding.store);
 
   let idCounter = 0;
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { findForbiddenRpcProxyMethod, isLocalProxyRequest } from '../../frontend/src/routes/rpc-proxy-safety';
+import { findForbiddenRpcProxyMethod, isLocalProxyRequest } from '../../runtime/api/server/rpc-proxy-safety';
 
 const ORIGINAL_NODE_ENV = process.env['NODE_ENV'];
 const ORIGINAL_ALLOW_LOCAL_RPC_PROXY = process.env['XLN_ALLOW_LOCAL_RPC_PROXY'];

@@ -44,7 +44,6 @@ export type E2EBuildArtifacts = {
   cacheRoot: string;
   publicDir: string;
   runtimeBundlePath: string;
-  svelteKitOutDir: string;
   frontendBuildDir: string;
 };
 
@@ -157,7 +156,7 @@ export const isE2EBuildInputPath = (file: string): boolean => {
     return !path.startsWith('runtime/__tests__/') && !path.startsWith('runtime/scripts/');
   }
   if (path.startsWith('frontend/')) {
-    return !['frontend/node_modules/', 'frontend/.svelte-kit/', 'frontend/build/', 'frontend/dist/'].some(prefix =>
+    return !['frontend/node_modules/', 'frontend/build/', 'frontend/dist/'].some(prefix =>
       path.startsWith(prefix),
     );
   }

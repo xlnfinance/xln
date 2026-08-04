@@ -34,7 +34,7 @@ test('browser errors enter the shared incident registry without exposing samples
       events: [{
         kind: 'console_error',
         message: 'FAUCET_FAILED',
-        stack: 'Error: FAUCET_FAILED\n at click (SwapPanel.svelte:1)',
+        stack: 'Error: FAUCET_FAILED\n at click (WalletSwapWorkspace.tsx:1)',
         route: '/app',
         sessionId: 'page-1',
       }],

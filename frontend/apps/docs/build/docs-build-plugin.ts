@@ -5,16 +5,11 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { Plugin } from 'vite';
 
 import { parseDocsCatalogManifest } from '../../../packages/client-core/docs-catalog-contract.js';
-import {
-  buildReactCandidateManifest,
-  REACT_CANDIDATE_MANIFEST_FILE,
-} from '../../../packages/build-contracts/react-candidate';
 import type { ReactViteSurfaceContract } from '../../../packages/build-contracts/vite-surfaces';
 
 export const docsStaticAssets = (staticRoot: string): readonly string[] => readdirSync(staticRoot)
@@ -41,17 +36,12 @@ const copyDocsAssets = (staticRoot: string, outputRoot: string): string => {
 };
 
 export const createDocsBuildPlugin = (
-  frontendRoot: string,
+  staticRoot: string,
   contract: ReactViteSurfaceContract,
 ): Plugin => ({
-  name: 'xln-react-docs-assets',
+  name: 'xln-docs-assets',
   closeBundle() {
-    if (contract.surface !== 'docs') return;
-    const catalogSha256 = copyDocsAssets(resolve(frontendRoot, 'static'), contract.outDir);
-    const manifest = buildReactCandidateManifest('docs', contract.routes, catalogSha256);
-    writeFileSync(
-      join(contract.outDir, REACT_CANDIDATE_MANIFEST_FILE),
-      `${JSON.stringify(manifest, null, 2)}\n`,
-    );
+    if (contract.surface !== 'docs' && contract.surface !== 'all') return;
+    copyDocsAssets(staticRoot, contract.outDir);
   },
 });

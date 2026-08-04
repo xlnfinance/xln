@@ -1,75 +1,37 @@
-import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
-import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
-import fs from 'fs';
+import react from '@vitejs/plugin-react';
+import { execSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
-import { execSync } from 'node:child_process';
-import { resolve } from 'node:path';
-import { URL, fileURLToPath } from 'node:url';
+import { dirname, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { defineConfig, type Plugin } from 'vite';
+
+import { createDocsBuildPlugin } from './apps/docs/build/docs-build-plugin';
+import { createOpsBuildPlugin } from './apps/ops/build/ops-build-plugin';
+import { createSiteBuildPlugin } from './apps/site/build/site-build-plugin';
+import { createWalletBuildPlugin } from './apps/wallet/build/wallet-build-plugin';
+import {
+  createReactViteSurfaceContract,
+  resolveReactFrontendSurface,
+  type ReactViteSurfaceContract,
+} from './packages/build-contracts/vite-surfaces';
+import { isResetDbConfirmationValid, RESET_CONFIRM_COOKIE } from './src/lib/utils/resetDbGuard';
 import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle';
 
-/**
- * HTTPS CONFIGURATION (DEV-ONLY)
- *
- * IMPORTANT: This HTTPS config is ONLY for `vite dev` (development server)
- *
- * Production deployment:
- * - `bun run build` generates static files → frontend/build/
- * - nginx serves static files with its OWN HTTPS config
- * - This vite.config.ts is NOT used in production
- *
- * Your nginx deployment is safe - it uses its own certificates!
- */
-
-// Isolated E2E is loopback-only and must not depend on developer certificates.
-// localhost remains a secure browser context over HTTP.
-const FORCE_HTTP = process.env['XLN_VITE_FORCE_HTTP'] === '1';
-
-// Check if HTTPS certs exist (try multiple locations)
-let certPath = './localhost+3.pem';
-let keyPath = './localhost+3-key.pem';
-let hasCerts = !FORCE_HTTP && fs.existsSync(certPath) && fs.existsSync(keyPath);
-
-// Fallback to localhost+2 certs
-if (!FORCE_HTTP && !hasCerts) {
-	certPath = './localhost+2.pem';
-	keyPath = './localhost+2-key.pem';
-	hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
-}
-
-// Fallback to LAN IP certs if localhost certs don't exist
-if (!FORCE_HTTP && !hasCerts) {
-	certPath = '../192.168.1.23+2.pem';
-	keyPath = '../192.168.1.23+2-key.pem';
-	hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
-}
-
-if (!FORCE_HTTP && !hasCerts) {
-	console.warn('VITE_TLS_DISABLED: local certs missing; HTTP fallback active (run frontend/generate-certs.sh to enable TLS)');
-}
-
-const DEV_HOST = '0.0.0.0';
-const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8080');
-const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8080;
+const FRONTEND_ROOT = fileURLToPath(new URL('.', import.meta.url));
+const REPOSITORY_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
 const API_PROXY_AGENT = API_PROXY_TARGET.startsWith('https:')
-	? new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 })
-	: new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 });
-const VITE_CACHE_DIR = process.env['VITE_CACHE_DIR'] || 'node_modules/.vite';
-const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
-const FRONTEND_ROOT = fileURLToPath(new URL('.', import.meta.url));
-const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
-const RUNTIME_BUNDLE_PATH = resolve(
-	FRONTEND_ROOT,
-	process.env['XLN_RUNTIME_BUNDLE_PATH'] || 'static/runtime.js',
-);
+  ? new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 })
+  : new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 });
+
 const BUILD_NUMBER = (() => {
   const explicit = String(process.env['XLN_BUILD_NUMBER'] || '').trim();
   if (explicit) return explicit;
   try {
     return execSync('git rev-list --count HEAD', {
-      cwd: REPO_ROOT,
+      cwd: REPOSITORY_ROOT,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim() || '0';
@@ -77,266 +39,182 @@ const BUILD_NUMBER = (() => {
     return '0';
   }
 })();
-const ENABLE_HMR = (() => {
-  const value = String(process.env['VITE_ENABLE_HMR'] || '').toLowerCase();
-  return value === '1' || value === 'true' || value === 'yes';
-})();
-const hmrConfig = ENABLE_HMR ? {
-	overlay: false,
-	...(hasCerts && {
-		protocol: 'wss',
-		host: 'localhost',
-		port: DEV_PORT,
-		clientPort: DEV_PORT
-	})
-} : false;
 
-const proxyConfig = {
-	'/api': {
-		target: API_PROXY_TARGET,
-		agent: API_PROXY_AGENT,
-		changeOrigin: true,
-		secure: false,
-	},
-	// RPC Proxy - Forward JSON-RPC to runtime server (/rpc endpoint)
-	'/rpc': {
-		target: API_PROXY_TARGET,
-		agent: API_PROXY_AGENT,
-		ws: true,
-		changeOrigin: true,
-		secure: false,
-		configure: configureWsProxyLifecycle,
-	},
-	'/rpc2': {
-		target: API_PROXY_TARGET,
-		agent: API_PROXY_AGENT,
-		ws: true,
-		changeOrigin: true,
-		secure: false,
-		configure: configureWsProxyLifecycle,
-	},
-	// Relay Proxy - Forward WebSocket to relay server for P2P
-	'/relay': {
-		target: API_PROXY_TARGET,
-		agent: API_PROXY_AGENT,
-		ws: true,
-		changeOrigin: true,
-		configure: configureWsProxyLifecycle,
-	},
+const proxy = {
+  '/api': { target: API_PROXY_TARGET, agent: API_PROXY_AGENT, changeOrigin: true, secure: false },
+  '/rpc': {
+    target: API_PROXY_TARGET,
+    agent: API_PROXY_AGENT,
+    changeOrigin: true,
+    secure: false,
+    ws: true,
+    configure: configureWsProxyLifecycle,
+  },
+  '/rpc2': {
+    target: API_PROXY_TARGET,
+    agent: API_PROXY_AGENT,
+    changeOrigin: true,
+    secure: false,
+    ws: true,
+    configure: configureWsProxyLifecycle,
+  },
+  '/relay': {
+    target: API_PROXY_TARGET,
+    agent: API_PROXY_AGENT,
+    changeOrigin: false,
+    ws: true,
+    configure: configureWsProxyLifecycle,
+  },
 };
 
-const PREVIEW_PROXY_PREFIXES = ['/api', '/rpc'];
+const canonicalRoutes = (contract: ReactViteSurfaceContract): readonly (readonly [string, string])[] => (
+  contract.routes.map(route => {
+    const input = contract.inputs[route.id];
+    if (!input) throw new Error(`FRONTEND_ENTRY_MISSING:${route.id}`);
+    const relative = input.slice(contract.root.length).replaceAll('\\', '/').replace(/^\/+/, '');
+    return [route.pattern, `/${relative}`] as const;
+  })
+);
 
-function createPreviewHttpProxyMiddleware(targetBase: string) {
-	const upstream = new URL(targetBase);
-	const transport = upstream.protocol === 'https:' ? https : http;
+const matchesPagePattern = (pattern: string, pathname: string): boolean => {
+  const patternSegments = pattern.split('/').filter(Boolean);
+  const pathSegments = pathname.split('/').filter(Boolean);
+  const optionalTail = patternSegments.at(-1)?.startsWith(':') && patternSegments.at(-1)?.endsWith('?');
+  const minimum = optionalTail ? patternSegments.length - 1 : patternSegments.length;
+  if (pathSegments.length < minimum || pathSegments.length > patternSegments.length) return false;
+  return patternSegments.every((segment, index) => (
+    segment.startsWith(':') ? segment.endsWith('?') || pathSegments[index] !== undefined : segment === pathSegments[index]
+  ));
+};
 
-	return (req: http.IncomingMessage, res: http.ServerResponse, next: (err?: unknown) => void) => {
-		const requestUrl = String(req.url || '');
-		if (!PREVIEW_PROXY_PREFIXES.some((prefix) => requestUrl === prefix || requestUrl.startsWith(`${prefix}/`))) {
-			next();
-			return;
-		}
+const rewriteCanonicalRequest = (
+  request: { url?: string | undefined },
+  routes: readonly (readonly [string, string])[],
+): void => {
+  const url = new URL(request.url ?? '/', 'http://xln.local');
+  const pathname = url.pathname === '/' ? '/' : url.pathname.replace(/\/$/, '');
+  const match = routes.find(([pattern]) => matchesPagePattern(pattern, pathname));
+  if (match) request.url = `${match[1]}${url.search}`;
+};
 
-		const targetUrl = new URL(requestUrl, upstream);
-		const proxyReq = transport.request(targetUrl, {
-			method: req.method,
-			agent: API_PROXY_AGENT,
-			headers: {
-				...req.headers,
-				host: upstream.host,
-			},
-		}, (proxyRes) => {
-			res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
-			proxyRes.pipe(res);
-		});
+const normalizeReturnTo = (candidate: string | null): string => (
+  candidate?.startsWith('/') && !candidate.startsWith('//') ? candidate : '/app'
+);
 
-		proxyReq.on('error', (error) => {
-			if (res.headersSent) {
-				res.end();
-				return;
-			}
-			res.statusCode = 502;
-			res.setHeader('content-type', 'application/json');
-			res.end(JSON.stringify({
-				error: 'PREVIEW_PROXY_FAILED',
-				details: error instanceof Error ? error.message : String(error),
-			}));
-		});
+const resetHtml = (returnTo: string): string => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="1;url=${returnTo.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}"><title>Resetting</title><style>:root{color-scheme:dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0f;color:#f3f3f5;font:500 16px/1.5 -apple-system,BlinkMacSystemFont,sans-serif}p{opacity:.72;letter-spacing:.08em;text-transform:uppercase}</style></head><body><p>Resetting local data…</p><script>setTimeout(()=>location.replace(${JSON.stringify(returnTo)}),250)</script></body></html>`;
 
-		req.pipe(proxyReq);
-	};
-}
+const devHtmlBase = (filename: string): string => {
+  const directory = relative(FRONTEND_ROOT, dirname(filename)).replaceAll('\\', '/');
+  if (!directory || directory.startsWith('../')) throw new Error(`FRONTEND_DEV_ENTRY_OUTSIDE_ROOT:${filename}`);
+  return `/${directory}/`;
+};
 
-function createRuntimeBundleMiddleware() {
-	return (req: http.IncomingMessage, res: http.ServerResponse, next: (err?: unknown) => void) => {
-		const requestPath = String(req.url || '').split('?')[0];
-		if (requestPath !== '/runtime.js') {
-			next();
-			return;
-		}
+const canonicalRoutePlugin = (contract: ReactViteSurfaceContract, devServer: boolean): Plugin => {
+  const routes = canonicalRoutes(contract);
+  const install = (middlewares: { use(handler: (request: http.IncomingMessage, response: http.ServerResponse, next: () => void) => void): void }): void => {
+    middlewares.use((request, response, next) => {
+      const url = new URL(request.url ?? '/', 'http://xln.local');
+      if (url.pathname === '/admin' || url.pathname === '/radapter') {
+        response.statusCode = 308;
+        response.setHeader('location', url.pathname === '/admin' ? '/health' : '/app');
+        response.end();
+        return;
+      }
+      if (url.pathname === '/resetdb') {
+        if (!isResetDbConfirmationValid(url, request.headers.cookie ?? null)) {
+          response.statusCode = 403;
+          response.setHeader('cache-control', 'no-store, max-age=0');
+          response.setHeader('content-type', 'text/plain; charset=utf-8');
+          response.end('RESET_CONFIRMATION_REQUIRED');
+          return;
+        }
+        const returnTo = normalizeReturnTo(url.searchParams.get('returnTo'));
+        response.statusCode = 200;
+        response.setHeader('cache-control', 'no-store, max-age=0');
+        response.setHeader('clear-site-data', '"*"');
+        response.setHeader('content-type', 'text/html; charset=utf-8');
+        response.setHeader('set-cookie', `${RESET_CONFIRM_COOKIE}=; Path=/resetdb; Max-Age=0; SameSite=Strict`);
+        response.end(resetHtml(returnTo));
+        return;
+      }
+      rewriteCanonicalRequest(request, routes);
+      next();
+    });
+  };
+  return {
+    name: 'xln-canonical-routes',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+    ...(devServer ? {
+      transformIndexHtml: (_html, context) => [{
+        tag: 'base',
+        attrs: { href: devHtmlBase(context.filename) },
+        injectTo: 'head-prepend' as const,
+      }],
+    } : {}),
+  };
+};
 
-		if (!fs.existsSync(RUNTIME_BUNDLE_PATH)) {
-			res.statusCode = 503;
-			res.setHeader('content-type', 'application/json');
-			res.end(JSON.stringify({ error: 'RUNTIME_BUNDLE_MISSING' }));
-			return;
-		}
+const localTls = (): false | { cert: Buffer; key: Buffer } => {
+  if (process.env['XLN_VITE_FORCE_HTTP'] === '1') return false;
+  for (const base of ['localhost+3', 'localhost+2', '192.168.1.23+2']) {
+    const cert = resolve(FRONTEND_ROOT, `${base}.pem`);
+    const key = resolve(FRONTEND_ROOT, `${base}-key.pem`);
+    if (existsSync(cert) && existsSync(key)) return { cert: readFileSync(cert), key: readFileSync(key) };
+  }
+  return false;
+};
 
-		res.statusCode = 200;
-		res.setHeader('content-type', 'text/javascript; charset=utf-8');
-		res.setHeader('cache-control', 'no-store, must-revalidate');
-		fs.createReadStream(RUNTIME_BUNDLE_PATH).pipe(res);
-	};
-}
-
-function runtimeBundlePlugin(): Plugin {
-	return {
-		name: 'xln-runtime-bundle',
-		enforce: 'pre',
-		configureServer(server: ViteDevServer) {
-			server.middlewares.use(createRuntimeBundleMiddleware());
-		},
-		configurePreviewServer(server: PreviewServer) {
-			server.middlewares.use(createRuntimeBundleMiddleware());
-		},
-	};
-}
-
-function manualClientChunk(id: string): string | undefined {
-	if (!id.includes('/node_modules/')) return undefined;
-	if (
-		id.includes('/node_modules/svelte/') ||
-		id.includes('/node_modules/svelte-') ||
-		id.includes('/node_modules/@sveltejs/') ||
-		id.includes('/node_modules/esm-env/')
-	) {
-		return 'vendor-svelte';
-	}
-	if (id.includes('/node_modules/three/')) {
-		return 'vendor-three';
-	}
-	if (id.includes('/node_modules/lucide-svelte/')) {
-		return 'vendor-icons';
-	}
-	if (id.includes('/node_modules/@capacitor/')) {
-		return 'vendor-capacitor';
-	}
-	if (id.includes('/node_modules/@ethereumjs/') || id.includes('/node_modules/ethers/')) {
-		return 'vendor-chain';
-	}
-	if (
-		id.includes('/node_modules/@noble/') ||
-		id.includes('/node_modules/@node-rs/argon2/') ||
-		id.includes('/node_modules/argon2/') ||
-		id.includes('/node_modules/bip39/') ||
-		id.includes('/node_modules/crypto-js/') ||
-		id.includes('/node_modules/hash-wasm/')
-	) {
-		return 'vendor-crypto';
-	}
-	if (id.includes('/node_modules/dockview/')) {
-		return 'vendor-dockview';
-	}
-	if (
-		id.includes('/node_modules/jdenticon/') ||
-		id.includes('/node_modules/marked/') ||
-		id.includes('/node_modules/jsqr/') ||
-		id.includes('/node_modules/qrcode/') ||
-		id.includes('/node_modules/msgpackr/')
-	) {
-		return 'vendor-ui-utils';
-	}
-	return 'vendor';
-}
-
-export default defineConfig({
-	plugins: [
-		runtimeBundlePlugin(),
-		sveltekit(),
-		{
-			name: 'xln-preview-http-proxy',
-				configurePreviewServer(server: PreviewServer) {
-					server.middlewares.use(createPreviewHttpProxyMiddleware(API_PROXY_TARGET));
-				},
-		},
-	],
-	cacheDir: VITE_CACHE_DIR,
-	server: {
-		host: DEV_HOST,
-		port: DEV_PORT,
-		strictPort: true,
-		// HTTPS for dev server only (nginx handles production HTTPS)
-		...(hasCerts && {
-			https: {
-				key: fs.readFileSync(keyPath),
-				cert: fs.readFileSync(certPath),
-			}
-		}),
-		// Allow ngrok and other tunnel hosts (for Oculus/mobile access)
-		allowedHosts: ['all'],
-		fs: {
-			// Allow serving files from the parent directory (to access ../dist/)
-			allow: ['..']
-		},
-		// Fast development setup
-		watch: {
-			usePolling: false,  // Use native file watching (faster)
-		},
-		hmr: hmrConfig,
-		// API/Relay proxy
-		proxy: proxyConfig,
-		// Force no-cache headers for static files
-		headers: {
-			'Cache-Control': 'no-cache, no-store, must-revalidate',
-			'Pragma': 'no-cache',
-			'Expires': '0'
-		}
-	},
-	preview: {
-		host: DEV_HOST,
-		port: DEV_PORT,
-		strictPort: true,
-		...(hasCerts && {
-			https: {
-				key: fs.readFileSync(keyPath),
-				cert: fs.readFileSync(certPath),
-			}
-		}),
-		proxy: proxyConfig,
-		headers: {
-			'Cache-Control': 'no-cache, no-store, must-revalidate',
-			'Pragma': 'no-cache',
-			'Expires': '0'
-		}
-	},
-	// Fast builds
-	esbuild: {
-		target: 'es2022'
-	},
-	build: {
-		// The app intentionally ships runtime/3D workspaces. Keep warnings focused
-		// on accidental multi-megabyte chunks after the explicit vendor split above.
-		chunkSizeWarningLimit: 1500,
-		rollupOptions: {
-			output: {
-				manualChunks: manualClientChunk,
-			},
-		},
-	},
-		define: {
-		// Define globals for browser compatibility
-		global: 'globalThis',
-		__BUILD_NUMBER__: JSON.stringify(BUILD_NUMBER),
-		__BUILD_TIME__: JSON.stringify(new Date().toISOString()),
-	},
-	resolve: {
-		alias: {
-			// Runtime files are imported from multiple depths during SSR bundling.
-			// Keep TypeChain resolution anchored to the repo root instead of
-			// relying on fragile relative traversal from the importer path.
-			'../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
-			'../../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
-		}
-	}
+export default defineConfig(({ command }) => {
+  const surface = resolveReactFrontendSurface(process.env['XLN_FRONTEND_SURFACE']);
+  const baseContract = createReactViteSurfaceContract(FRONTEND_ROOT, surface);
+  const contract: ReactViteSurfaceContract = process.env['XLN_FRONTEND_BUILD_DIR']
+    ? { ...baseContract, outDir: resolve(FRONTEND_ROOT, process.env['XLN_FRONTEND_BUILD_DIR']) }
+    : baseContract;
+  const staticRoot = process.env['XLN_FRONTEND_STATIC_DIR']
+    ? resolve(FRONTEND_ROOT, process.env['XLN_FRONTEND_STATIC_DIR'])
+    : resolve(FRONTEND_ROOT, 'static');
+  const port = Number(process.env['VITE_DEV_PORT'] || '8080');
+  const enableHmr = /^(?:1|true|yes)$/i.test(String(process.env['VITE_ENABLE_HMR'] || ''));
+  const httpsOptions = localTls();
+  return {
+    root: contract.root,
+    base: '/',
+    publicDir: command === 'serve' ? staticRoot : false,
+    cacheDir: process.env['VITE_CACHE_DIR'] || `node_modules/.vite-${port}`,
+    plugins: [
+      canonicalRoutePlugin(contract, command === 'serve'),
+      react(),
+      createSiteBuildPlugin(staticRoot, contract),
+      createDocsBuildPlugin(staticRoot, contract),
+      createWalletBuildPlugin(staticRoot, contract),
+      createOpsBuildPlugin(FRONTEND_ROOT, contract),
+    ],
+    define: { global: 'globalThis', __BUILD_NUMBER__: JSON.stringify(BUILD_NUMBER) },
+    resolve: {
+      alias: {
+        '$lib': resolve(FRONTEND_ROOT, 'src/lib'),
+        '@xln/brainvault': resolve(FRONTEND_ROOT, '../brainvault'),
+        '@xln/runtime': resolve(FRONTEND_ROOT, '../runtime'),
+      },
+    },
+    server: {
+      host: '0.0.0.0',
+      port: Number.isFinite(port) && port > 0 ? Math.floor(port) : 8080,
+      strictPort: true,
+      allowedHosts: ['all'],
+      fs: { allow: ['..'] },
+      hmr: enableHmr,
+      ...(httpsOptions ? { https: httpsOptions } : {}),
+      proxy,
+    },
+    preview: { proxy },
+    build: {
+      outDir: contract.outDir,
+      assetsDir: contract.surface === 'all' ? 'assets' : `assets-${contract.surface}`,
+      emptyOutDir: true,
+      sourcemap: true,
+      rollupOptions: { input: contract.inputs },
+    },
+  };
 });

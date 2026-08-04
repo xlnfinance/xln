@@ -139,7 +139,7 @@ for (const stale of [
 const gptContextPath = 'scripts/debug/gpt.cjs';
 const gptContext = readText(gptContextPath);
 for (const marker of [
-  'src/lib/components/Entity/LendingPanel.svelte',
+  'apps/wallet/src/features/accounts/WalletLending.tsx',
   'runtime/__tests__/lending.test.ts',
   'tests/e2e-lending.spec.ts',
   'Multihop execution is intentionally deferred',
@@ -148,7 +148,7 @@ for (const marker of [
 }
 for (const stale of [
   'routed-swap-execution.ts',
-  'RoutedRouteControls.svelte',
+  'RoutedRouteControls.tsx',
   'tests/unit/routed-swap-planner.test.ts',
 ]) {
   assertNotIncludes(gptContext, stale, gptContextPath);

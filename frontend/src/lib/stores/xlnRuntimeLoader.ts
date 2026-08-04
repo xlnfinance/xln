@@ -1,5 +1,5 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
-import { toSvelteWritable } from './adapters/svelteExternalStore';
+import { toWritableStore } from './storeBindings';
 import type { XLNModule } from '@xln/runtime/api/public/runtime-module';
 import { isXLNModuleLoaded } from '@xln/runtime/api/public/runtime-module-guard';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
@@ -32,7 +32,7 @@ export const loadXlnRuntimeModule = async (
 
 const xlnInstanceBinding = createExternalStore<XLNModule | null>(null);
 export const xlnInstanceExternalStore = xlnInstanceBinding.store;
-export const xlnInstance = toSvelteWritable(xlnInstanceBinding);
+export const xlnInstance = toWritableStore(xlnInstanceBinding);
 registerDebugSurface('instance', () => XLN);
 
 export async function getXLN(): Promise<XLNModule> {

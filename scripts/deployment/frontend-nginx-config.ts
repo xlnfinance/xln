@@ -54,12 +54,14 @@ const identityLocations = (frontendRoot: string): string => ['site', 'docs', 'wa
     }`)
   .join('\n\n');
 
-const sharedAssetLocations = (frontendRoot: string): string => `    location ^~ /_app/ {
-        root ${frontendRoot}/current/site;
+const sharedAssetLocations = (frontendRoot: string): string => `${['site', 'docs', 'wallet', 'ops']
+  .map(surface => `    location ^~ /assets-${surface}/ {
+        root ${frontendRoot}/current/${surface};
         try_files $uri =404;
         expires 1y;
         add_header Cache-Control "public, immutable";
-    }
+    }`)
+  .join('\n\n')}
 
     location ~ ^/(?:favicon(?:-[0-9]+x[0-9]+)?\\.png|favicon\\.ico|apple-touch-icon\\.png|android-chrome-[0-9]+x[0-9]+\\.png)$ {
         root ${frontendRoot}/current/site;

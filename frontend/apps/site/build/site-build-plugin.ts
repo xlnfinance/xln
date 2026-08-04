@@ -4,15 +4,10 @@ import {
   createReadStream,
   existsSync,
   mkdirSync,
-  writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import type { Plugin } from 'vite';
 
-import {
-  buildReactSiteCandidateManifest,
-  REACT_CANDIDATE_MANIFEST_FILE,
-} from '../../../packages/build-contracts/react-candidate';
 import type { ReactViteSurfaceContract } from '../../../packages/build-contracts/vite-surfaces';
 
 export const SITE_ASSET_DIRECTORIES = ['bikes', 'img', 'news'] as const;
@@ -49,12 +44,11 @@ const safeStaticPath = (staticRoot: string, pathname: string): string | null => 
 };
 
 export const createSiteBuildPlugin = (
-  frontendRoot: string,
+  staticRoot: string,
   contract: ReactViteSurfaceContract,
 ): Plugin => ({
-  name: 'xln-react-site-assets',
+  name: 'xln-site-assets',
   configurePreviewServer(server) {
-    const staticRoot = resolve(frontendRoot, 'static');
     server.middlewares.use('/docs-catalog', (request, response, next) => {
       const pathname = new URL(request.url ?? '/', 'http://xln.local').pathname;
       const source = safeStaticPath(staticRoot, `/docs-catalog${pathname}`);
@@ -65,12 +59,7 @@ export const createSiteBuildPlugin = (
     });
   },
   closeBundle() {
-    if (contract.surface !== 'site') return;
-    copySiteAssets(resolve(frontendRoot, 'static'), contract.outDir);
-    const manifest = buildReactSiteCandidateManifest(contract.routes);
-    writeFileSync(
-      join(contract.outDir, REACT_CANDIDATE_MANIFEST_FILE),
-      `${JSON.stringify(manifest, null, 2)}\n`,
-    );
+    if (contract.surface !== 'site' && contract.surface !== 'all') return;
+    copySiteAssets(staticRoot, contract.outDir);
   },
 });

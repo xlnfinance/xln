@@ -3,6 +3,7 @@ export const errorText = (error: unknown): string => (
 );
 
 export const reportSiteError = (source: string, error: unknown): void => {
+  captureBrowserError('ui_error', error, [source]);
   const message = errorText(error);
   document.documentElement.setAttribute('data-xln-site-error', source);
   console.error(`[XLN_SITE_FATAL:${source}]`, error);
@@ -22,3 +23,4 @@ export const installGlobalErrorSurface = (): (() => void) => {
     window.removeEventListener('unhandledrejection', onRejection);
   };
 };
+import { captureBrowserError } from '../../../src/lib/debug/browser-telemetry';

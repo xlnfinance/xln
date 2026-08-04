@@ -15,9 +15,9 @@ const imports = (source: string): readonly string[] => [...source.matchAll(
 )].map(match => match[1]!);
 
 describe('React docs import boundaries', () => {
-  test('does not import wallet, runtime, native, ops, Svelte, or route implementations', () => {
+  test('does not import wallet, runtime, native, ops, or retired route implementations', () => {
     const violations = sourceFiles(DOCS_APP).flatMap(file => imports(readFileSync(file, 'utf8'))
-      .filter(specifier => /(?:svelte|capacitor|electron|brainvault|runtime|vault|commandJournal|apps\/(?:wallet|site|ops)|src\/routes)/i.test(specifier))
+      .filter(specifier => /(?:capacitor|electron|brainvault|runtime|vault|commandJournal|apps\/(?:wallet|site|ops)|src\/routes)/i.test(specifier))
       .map(specifier => `${relative(ROOT, file)} -> ${specifier}`));
     expect(violations).toEqual([]);
   });
@@ -32,6 +32,6 @@ describe('React docs import boundaries', () => {
   test('the shared catalog contract remains framework-neutral', () => {
     const source = readFileSync(resolve(ROOT, 'frontend/packages/client-core/docs-catalog-contract.js'), 'utf8');
     expect(imports(source)).toEqual([]);
-    expect(source).not.toMatch(/react|svelte|wallet|runtime/i);
+    expect(source).not.toMatch(/react|wallet|runtime/i);
   });
 });

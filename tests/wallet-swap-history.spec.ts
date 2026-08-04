@@ -100,7 +100,6 @@ const attachCommittedDump = async (page: Page, testInfo: import('@playwright/tes
 };
 
 test.describe('React wallet swap and history', () => {
-  test.skip(process.env['PW_REACT_WALLET_CANDIDATE'] !== '1', 'requires the release-blocked React wallet candidate');
 
   test('shows explicit empty swap and disk-history states without inventing a route', { tag: '@functional' }, async ({ page }, testInfo) => {
     test.setTimeout(3 * 60_000);

@@ -40,9 +40,9 @@ if [[ ! -f "$ROOT_DIR/node_modules/concurrently/dist/bin/concurrently.js" ]]; th
   exit 1
 fi
 if [[ ! -x "$ROOT_DIR/frontend/node_modules/.bin/vite" \
-  || ! -f "$ROOT_DIR/frontend/node_modules/@sveltejs/kit/svelte-kit.js" \
-  || ! -f "$ROOT_DIR/frontend/node_modules/@sveltejs/vite-plugin-svelte/package.json" \
-  || ! -f "$ROOT_DIR/frontend/node_modules/svelte/package.json" ]]; then
+  || ! -f "$ROOT_DIR/frontend/node_modules/react/package.json" \
+  || ! -f "$ROOT_DIR/frontend/node_modules/react-dom/package.json" \
+  || ! -f "$ROOT_DIR/frontend/node_modules/@vitejs/plugin-react/package.json" ]]; then
   echo "DEV_DEPENDENCIES_MISSING:frontend; run: cd frontend && bun install --frozen-lockfile" >&2
   exit 1
 fi

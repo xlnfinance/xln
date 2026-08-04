@@ -148,8 +148,12 @@ const fatalIncidentRoutes = [
     name: 'browser',
     steps: [
       [
-        'frontend/src/hooks.client.ts',
-        ['installBrowserErrorTelemetry();', "captureBrowserError('svelte_error', error);"],
+        'frontend/apps/wallet/src/main.tsx',
+        ['installBrowserErrorTelemetry();', "reportWalletError('react-uncaught', error)"],
+      ],
+      [
+        'frontend/apps/wallet/src/error-surface.ts',
+        ["captureBrowserError('ui_error', error, [source]);"],
       ],
       [
         'frontend/src/lib/debug/browser-telemetry.ts',

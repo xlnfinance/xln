@@ -15,8 +15,6 @@ import { execFileSync } from 'child_process';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
-import { produceDocsCatalog } from './scripts/docs-catalog-producer.ts';
-
 const FRONTEND_DIR = dirname(fileURLToPath(import.meta.url));
 const fromFrontend = (...parts) => resolve(FRONTEND_DIR, ...parts);
 const REPO_ROOT = resolve(FRONTEND_DIR, '..');
@@ -160,7 +158,8 @@ function copyScenarios() {
   console.log('[static] copied scenarios/ -> static/scenarios/');
 }
 
-function copyDocsAndManifest() {
+async function copyDocsAndManifest() {
+  const { produceDocsCatalog } = await import('./scripts/docs-catalog-producer.ts');
   const docsSrc = fromFrontend('../docs');
   const docsDest = fromStatic('docs-catalog');
   const manifest = produceDocsCatalog(docsSrc, docsDest);
@@ -214,7 +213,7 @@ copyContracts(requireAllContractSources);
 if (!contractsOnly) {
   buildBrainvaultWorker();
   copyScenarios();
-  copyDocsAndManifest();
+  await copyDocsAndManifest();
   generateLlmsStaticFiles();
 }
 

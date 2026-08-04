@@ -198,7 +198,7 @@ case "$role" in
     run_vite "$WEB_PORT" --logLevel warn
     ;;
   vite-http)
-    run_vite "$WEB_HTTP_PORT" --config vite.config.http.ts --logLevel warn
+    XLN_VITE_FORCE_HTTP=1 run_vite "$WEB_HTTP_PORT" --logLevel warn
     ;;
   ready)
     run_owned bun scripts/dev/wait-dev-ready.ts \

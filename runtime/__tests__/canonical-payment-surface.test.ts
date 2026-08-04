@@ -99,10 +99,10 @@ test('each payment operation retains one explicit canonical transaction path', (
   expect(ENTITY_TX_TYPES.includes('lendingRepay')).toBe(true);
   expect(ENTITY_TX_TYPES.includes('lendingClosePosition')).toBe(true);
 
-  const paymentPanel = source('frontend/src/lib/components/Entity/PaymentPanel.svelte');
+  const paymentPanel = source('frontend/apps/wallet/src/features/payments/WalletPaymentForm.tsx');
   const paymentAdapter = source('frontend/packages/runtime-client/wallet-payment-input-adapter.ts');
   expect(paymentPanel).toContain('buildWalletPaymentCommand({');
-  expect(paymentPanel).toContain('await submitRuntimeInput(paymentCommand.input)');
+  expect(paymentPanel).toContain('await submitWalletFinancialCommand(key, command.input)');
   expect(paymentAdapter).toContain("const direct = draft.deliveryMode === 'direct' || draft.deliveryMode === 'trusted';");
   expect(paymentAdapter).toContain("type: 'directPayment' as const");
   expect(paymentAdapter).toContain("type: 'htlcPayment' as const");
@@ -123,9 +123,9 @@ test('each payment operation retains one explicit canonical transaction path', (
   expect(source('runtime/entity/tx/handlers/account-admin.ts'))
     .toContain("type: 'set_credit_limit'");
 
-  const lendingPanel = source('frontend/src/lib/components/Entity/LendingPanel.svelte');
+  const lendingPanel = source('frontend/apps/wallet/src/features/accounts/WalletLending.tsx');
   const financialAdapter = source('frontend/packages/runtime-client/wallet-financial-input-adapter.ts');
-  for (const builder of ['buildWalletLendingOfferTx', 'buildWalletLendingBorrowTx', 'buildWalletLendingRepayTx']) {
+  for (const builder of ['buildWalletLendingOfferInput', 'buildWalletLendingBorrowInput', 'buildWalletLendingRepayInput']) {
     expect(lendingPanel).toContain(builder);
   }
   for (const type of ['lendingOffer', 'lendingBorrow', 'lendingRepay']) {
@@ -173,12 +173,13 @@ test('four payment modes stay distinct while retired swap alternatives fail loud
     },
   }, 'CANONICAL_SWAP')).toThrow();
 
-  const paymentPanel = source('frontend/src/lib/components/Entity/PaymentPanel.svelte');
+  const paymentPanel = source('frontend/apps/wallet/src/features/payments/WalletPaymentForm.tsx');
   const paymentAdapter = source('frontend/packages/runtime-client/wallet-payment-input-adapter.ts');
-  for (const mode of ['direct', 'instant', 'async', 'trusted']) {
-    expect(paymentPanel).toContain(`value: '${mode}'`);
+  for (const mode of ['direct', 'instant', 'async']) {
+    expect(paymentPanel).toContain(`value="${mode}"`);
   }
   expect(paymentPanel).toContain('buildWalletPaymentCommand({');
+  expect(paymentAdapter).toContain("draft.deliveryMode === 'trusted'");
   expect(paymentAdapter).toContain("type: 'directPayment' as const");
 });
 

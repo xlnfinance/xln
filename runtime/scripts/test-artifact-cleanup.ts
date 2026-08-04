@@ -37,13 +37,12 @@ let exitCleanupRegistered = false;
 
 const E2E_TEST_ARTIFACT_DIRS = [
   '.logs/e2e-parallel',
-  'frontend/.svelte-kit-e2e',
+  '.logs/e2e-build-cache',
   'frontend/test-results',
   'frontend/playwright-report',
   'tests/test-results',
   'e2e/test-results',
   'debates/test-results',
-  '.svelte-kit-e2e',
   'test-results',
   'playwright-report',
 ];
@@ -62,7 +61,6 @@ const GENERATED_TEST_ARTIFACT_DIRS = [
   '.tmp-tests',
   'db-tmp',
   'build',
-  'frontend/.svelte-kit/output',
   'native/dist',
   'native/extension/dist',
 ];
@@ -87,9 +85,6 @@ const BUDGETED_WORKSPACE_PATHS = [
   'db-tmp',
   'build',
   'frontend/build',
-  'frontend/.svelte-kit',
-  'frontend/.svelte-kit-e2e',
-  '.svelte-kit-e2e',
   'test-results',
   'playwright-report',
   'frontend/test-results',

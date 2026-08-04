@@ -25,6 +25,7 @@ const frame = (owner: string, settlement = false, crossJRisk = false) => ({
       entityId: owner,
       signerId: 'signer',
       height: 19,
+      config: { jurisdiction: { name: 'Testnet', chainId: 31337, depositoryAddress: `0x${'33'.repeat(20)}` } },
       profile: { name: 'Wallet' },
       reserves: new Map([[1, 12_345_678n]]),
       ...(crossJRisk ? {

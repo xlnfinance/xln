@@ -53,12 +53,11 @@ const invariantPath = 'runtime/entity/tx/invariant-errors.ts';
 const invariant = readText(invariantPath);
 assertIncludes(invariant, "'SWAP_REQUEST_',", invariantPath);
 
-const frontendPath = 'frontend/src/lib/components/Entity/SwapPanel.svelte';
+const frontendPath = 'frontend/apps/wallet/src/features/swap/wallet-swap-actions.ts';
 const frontend = readText(frontendPath);
 assertIncludes(frontend, "type: 'proposeCancelSwap'", frontendPath);
-assertIncludes(frontend, 'activeXlnFunctions.planSwapCommand({', frontendPath);
-assertIncludes(frontend, 'await submitRuntimeInput(commandPlan.runtimeInput);', frontendPath);
-assertIncludes(frontend, 'await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent, {', frontendPath);
+assertIncludes(frontend, 'await submitRuntimeInput(plan.runtimeInput);', frontendPath);
+assertIncludes(frontend, 'await submitActiveCrossJurisdictionIntent(plan.crossJurisdictionIntent, {', frontendPath);
 assertNotIncludes(frontend, 'waitForCrossTargetCapacity', frontendPath);
 assertNotIncludes(frontend, 'SWAP_CROSS_TARGET_SETUP_COMMIT_TIMEOUT', frontendPath);
 assertNotIncludes(frontend, "type: 'cancelSwap'", frontendPath);

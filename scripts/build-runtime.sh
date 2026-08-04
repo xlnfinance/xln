@@ -5,11 +5,12 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 OUT="${XLN_RUNTIME_BUNDLE_OUT:-frontend/static/runtime.js}"
+BUN_EXECUTABLE="${XLN_BUN_EXECUTABLE:-bun}"
 
 mkdir -p "$(dirname "$OUT")"
 
 echo "[build-runtime] bundling runtime/api/public/browser.ts -> $OUT"
-bun build runtime/api/public/browser.ts --target=browser --outfile="$OUT" --minify \
+"$BUN_EXECUTABLE" build runtime/api/public/browser.ts --target=browser --outfile="$OUT" --minify \
   --external http --external https --external zlib \
   --external fs --external path --external crypto \
   --external stream --external buffer --external url \

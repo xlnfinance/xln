@@ -351,6 +351,14 @@ label { color: var(--wallet-muted); font-size: .78rem; font-weight: 680; letter-
 .wallet-order-detail dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font: .68rem ui-monospace, monospace; }
 
 @keyframes wallet-progress { from { transform: translateX(-100%); } to { transform: translateX(280%); } }
+.wallet-scenario-preview { min-height: 100vh; display: grid; align-content: center; gap: 1rem; width: min(100% - 2rem, 720px); margin: 0 auto; }
+.wallet-scenario-preview h1 { margin: 0; font-size: clamp(3rem, 9vw, 6.5rem); letter-spacing: -.07em; }
+.wallet-scenario-preview > p:not(.wallet-eyebrow) { max-width: 54ch; color: var(--wallet-muted); }
+.wallet-scenario-preview dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 1rem 0; background: var(--wallet-line); border: 1px solid var(--wallet-line); }
+.wallet-scenario-preview dl div { display: grid; gap: .4rem; padding: 1rem; background: var(--wallet-bg); }
+.wallet-scenario-preview dt { color: var(--wallet-muted); font: .65rem ui-monospace, monospace; text-transform: uppercase; }
+.wallet-scenario-preview dd { margin: 0; font: 1rem ui-monospace, monospace; }
+.wallet-scenario-preview a { width: fit-content; color: var(--wallet-accent); }
 @media (max-width: 760px) {
   .wallet-onboarding, .wallet-unlock { width: min(100% - 2rem, 620px); grid-template-columns: 1fr; gap: 2.5rem; padding: 2.5rem 0; }
   .wallet-unlocked-options { grid-column: 1; }

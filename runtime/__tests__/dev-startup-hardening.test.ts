@@ -454,7 +454,7 @@ test('dev cleanup stops a live wrapper whose full process identity matches', asy
   }
 });
 
-test('HTTPS and HTTP dev servers share canonical SvelteKit output with isolated Vite caches', () => {
+test('HTTPS and HTTP dev servers share canonical Vite output with isolated caches', () => {
   const child = readFileSync(join(repoRoot, 'scripts/dev/run-dev-child.sh'), 'utf8');
   expect(child).toContain('run_vite "$WEB_PORT" --logLevel warn');
   expect(child).toContain('run_vite "$WEB_HTTP_PORT" --config vite.config.http.ts --logLevel warn');

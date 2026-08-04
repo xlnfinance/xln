@@ -2,7 +2,7 @@ type BrowserErrorKind =
   | 'console_error'
   | 'window_error'
   | 'unhandled_rejection'
-  | 'svelte_error';
+  | 'ui_error';
 
 type BrowserErrorEvent = {
   kind: BrowserErrorKind;

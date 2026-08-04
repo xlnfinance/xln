@@ -3,7 +3,7 @@ import {
   createRuntimeCommandLifecycle,
   transitionRuntimeCommandLifecycle,
 } from '../../../packages/runtime-client/runtime-command-transitions';
-import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteExternalStore';
+import { get as get, toReadableStore } from './storeBindings';
 import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {
@@ -89,8 +89,8 @@ const runtimeCommandReceiptsBinding = createExternalStore<CommandReceipt[]>([]);
 const runtimeCommandLatestReceiptBinding = createExternalStore<CommandReceipt | null>(null);
 export const runtimeCommandReceiptsExternalStore = runtimeCommandReceiptsBinding.store;
 export const runtimeCommandLatestReceiptExternalStore = runtimeCommandLatestReceiptBinding.store;
-export const runtimeCommandReceipts = toSvelteReadable(runtimeCommandReceiptsBinding.store);
-export const runtimeCommandLatestReceipt = toSvelteReadable(runtimeCommandLatestReceiptBinding.store);
+export const runtimeCommandReceipts = toReadableStore(runtimeCommandReceiptsBinding.store);
+export const runtimeCommandLatestReceipt = toReadableStore(runtimeCommandLatestReceiptBinding.store);
 
 export const runtimeCommandRetryOptions = (
   receipt: CommandReceipt,

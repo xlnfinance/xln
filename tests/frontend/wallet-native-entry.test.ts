@@ -4,10 +4,10 @@ import { resolve } from 'node:path';
 
 import { normalizeWalletEntryPath } from '../../frontend/apps/wallet/src/wallet-entry';
 import { WALLET_STATIC_ASSETS } from '../../frontend/apps/wallet/build/wallet-build-plugin';
-import { buildReactWalletCandidateManifest } from '../../frontend/packages/build-contracts/react-candidate';
 import { createReactViteSurfaceContract } from '../../frontend/packages/build-contracts/vite-surfaces';
 import { BROWSER_PERSISTENCE_CONTRACT } from '../../frontend/src/lib/contracts/browserPersistence';
 import { FRONTEND_ROUTES } from '../../frontend/src/lib/contracts/frontendSurfaces';
+import { NATIVE_REQUIRED_ASSETS } from '../../scripts/deployment/frontend-release-package';
 import { parseNativeBuildOptions } from '../../scripts/native/build-platforms';
 
 const ROOT = resolve(import.meta.dir, '../..');
@@ -23,27 +23,26 @@ test('native root is owned by the wallet entry while browser root remains public
 test('PWA and push entry assets remain wallet-owned with exact root scopes', () => {
   expect(WALLET_STATIC_ASSETS).toContain('site.webmanifest');
   expect(WALLET_STATIC_ASSETS).toContain('push-wake-sw.js');
-  expect(BROWSER_PERSISTENCE_CONTRACT.pwa).toEqual({ path: '/site.webmanifest', startUrl: '/', scope: '/' });
+  expect(BROWSER_PERSISTENCE_CONTRACT.pwa).toEqual({ path: '/site.webmanifest', startUrl: '/app', scope: '/' });
   expect(BROWSER_PERSISTENCE_CONTRACT.pushWake.defaultOpenPath).toBe('/app');
 });
 
-test('wallet build stays activation-blocked and contains every wallet page entry', () => {
+test('wallet build contains every wallet page entry', () => {
   const routes = FRONTEND_ROUTES.filter(route => route.surface === 'wallet' && route.kind === 'page');
-  const manifest = buildReactWalletCandidateManifest(routes);
   const contract = createReactViteSurfaceContract(resolve(ROOT, 'frontend'), 'wallet');
-  expect(manifest.activationBlocked).toBe(true);
-  expect(manifest.surface).toBe('wallet');
   expect(contract.routes).toEqual(routes);
   for (const input of Object.values(contract.inputs)) expect(readFileSync(input, 'utf8')).toContain('src/main.tsx');
 });
 
-test('native migration smoke selects the blocked React wallet explicitly', () => {
-  const options = parseNativeBuildOptions(['mobile', '--react-wallet-candidate']);
+test('native packaging consumes only the manifest-bound wallet surface', () => {
+  const options = parseNativeBuildOptions(['mobile', '--no-build']);
   expect(options.targets).toEqual(['ios', 'android']);
-  expect(options.flags.has('--react-wallet-candidate')).toBe(true);
+  expect(options.flags.has('--no-build')).toBe(true);
+  expect(() => parseNativeBuildOptions(['mobile', '--unknown-build-mode'])).toThrow('Unknown native flag');
+  expect(NATIVE_REQUIRED_ASSETS).toContain('build-identity.json');
   const pipeline = readFileSync(resolve(ROOT, 'scripts/native/build-platforms.ts'), 'utf8');
-  expect(pipeline).toContain("validateReactCandidateManifest(candidate, expectedEntrypoints, 'wallet')");
-  expect(pipeline).toContain('activationBlocked: true');
+  expect(pipeline).toContain('copyManifestBoundWallet(releaseRoot, manifest)');
+  expect(pipeline).toContain('assertNativeWalletCopy(NATIVE_WEB_DIR, bundle');
 });
 
 test('public React entries do not import wallet native initialization', () => {

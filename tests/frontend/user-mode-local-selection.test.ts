@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { resolveActiveLocalReplica } from '../../frontend/src/lib/view/local-runtime-selection';
 
 type Replica = { entityId: string; signerId: string };
@@ -21,12 +20,4 @@ describe('local runtime Entity selection', () => {
     })).toBe(expected);
   });
 
-  test('UserModePanel wires the exact selector and has no first-replica fallback', () => {
-    const source = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
-    expect(source).toContain('resolveActiveLocalReplica(currentFrame.state.eReplicas, activeSigner)');
-    expect(source).not.toContain('firstReplicaInFrame');
-    expect(source).toContain('setRuntimeViewActiveEntityId(selectedEntityId);');
-    expect(source).toContain('setRuntimeViewActiveEntityId(fallbackEntityId);');
-    expect(source).toContain('setRuntimeViewActiveEntityId(entityId);');
-  });
 });

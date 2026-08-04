@@ -133,58 +133,6 @@ test('payment key coverage requires every validator key in a certified profile',
   expect(hasCertifiedEntityEncryptionManifest(new Map(), [profile] as never, HUB)).toBe(false);
 });
 
-test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', () => {
-  const panel = readFileSync('frontend/src/lib/components/Entity/PaymentPanel.svelte', 'utf8');
-  const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/AccountWorkspaceView.svelte', 'utf8');
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-
-  expect(panel).toContain('export let paymentView: PaymentPanelView');
-  expect(panel).toContain('export let actionRuntimeEnv: RuntimeReplica | null');
-  expect(panel).toContain('export let submitRuntimeInput');
-  expect(panel).toContain('buildWalletPaymentCommand({');
-  expect(panel).toContain('await submitRuntimeInput(paymentCommand.input)');
-  expect(panel).toContain('function resolveProjectedSignerId');
-  expect(panel).toContain('function resolvePaymentSignerId(env: RuntimeReplica | null)');
-  expect(panel).toContain('const resolvedSignerId = resolvePaymentSignerId(currentEnv)');
-  expect(panel).toContain('paymentProjectionReady &&');
-  expect(panel).not.toContain("throw new Error('Environment not ready')");
-  expect(panel).not.toContain('currentEnv &&\n    activeIsLive');
-  expect(panel).not.toContain('submitEntityInputs');
-  expect(panel).not.toContain('export let env');
-  expect(panel).not.toContain('env.state.eReplicas');
-  expect(panel).not.toContain('currentEnv?.gossip?.getProfiles');
-  expect(panel).not.toContain('getXLN');
-  expect(panel).not.toContain('env.gossip');
-  expect(panel).not.toContain('infrastructure?.p2p');
-  expect(panel).not.toContain('ensureGossipProfiles');
-  expect(panel).not.toContain('refreshGossip?.');
-  expect(panel).not.toContain('/api/gossip/profile');
-  expect(panel).toContain('refreshPaymentRuntimeGossip');
-  expect(panel).toContain('sendRuntimeDebugEvent');
-  expect(panel).toContain('flashPaymentSubmitted(Math.round(performance.now() - t0))');
-  expect(panel).toContain('flashPaymentSubmitted(0)');
-  expect(panel).toContain('Payment submission pending');
-  expect(panel).toContain('Payment submitted.');
-  expect(panel).toContain('<span>Submitted');
-  expect(panel).not.toContain('Payment confirmed.');
-  expect(panel).not.toContain('Payment complete');
-  expect(panel).not.toContain('<span>Paid');
-  expect(panel).not.toContain('buildNetworkAdjacency(env');
-  expect(accountWorkspace).toContain('export let paymentView: PaymentPanelView');
-  expect(accountWorkspace).toContain('{paymentView}');
-  expect(accountWorkspace).toContain('{submitRuntimeInput}');
-  expect(tabs).toContain('paymentView = displayProjectionFrame');
-  expect(tabs).toContain('frame: displayProjectionFrame');
-  expect(tabs).toContain('buildPaymentPanelViewFromRuntimeView');
-  expect(tabs).toContain('networkGraph: actionRuntimeEnv?.gossip?.getNetworkGraph?.() ?? null');
-  expect(tabs).toContain('{paymentView}');
-
-  const viewSource = readFileSync('frontend/src/lib/components/Entity/payment-panel-view.ts', 'utf8');
-  expect(viewSource).not.toContain('RuntimeReplica,');
-  expect(viewSource).not.toContain('actionRuntimeEnv');
-  expect(viewSource).not.toContain('gossip?.getNetworkGraph');
-  expect(viewSource).toContain('networkGraph?: PaymentRuntimeGraph | null');
-});
 
 test('payment gossip refresh is owned by runtime store operation', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');

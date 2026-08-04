@@ -63,7 +63,7 @@ export const listPlaywrightTestMetadata = (
   const args = ['playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json'];
   if (options.project) args.push(`--project=${options.project}`);
   args.push(...files);
-  const result = spawnSync('bunx', args, {
+  const result = spawnSync(process.execPath, ['x', ...args], {
     cwd: process.cwd(),
     env: {
       ...process.env,

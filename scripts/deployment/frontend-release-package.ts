@@ -1,13 +1,10 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-
 import { serializeFrontendMigrationContractReport } from '../../frontend/src/lib/contracts/frontendMigrationContract';
-import { assembleCurrentFrontendSurfaces, currentFrontendEntrypoints } from './current-frontend-surface-build';
 import { buildFrontendRelease } from './frontend-release-builder';
-import type { FrontendReleaseManifest } from './frontend-release-schema';
+import { resolveFrontendSurfaceSources, frontendSurfaceEntrypoints } from './frontend-surface-build';
+import { FRONTEND_BUILD_IDENTITY_FILE, type FrontendReleaseManifest } from './frontend-release-schema';
 
-export const CURRENT_NATIVE_REQUIRED_ASSETS = [
-  '_app/version.json',
+export const NATIVE_REQUIRED_ASSETS = [
+  FRONTEND_BUILD_IDENTITY_FILE,
   'brainvault-worker.js',
   'index.html',
   'push-wake-sw.js',
@@ -15,30 +12,21 @@ export const CURRENT_NATIVE_REQUIRED_ASSETS = [
   'site.webmanifest',
 ] as const;
 
-export type CurrentFrontendReleaseInput = Readonly<{
+export type FrontendReleasePackageInput = Readonly<{
   buildRoot: string;
   releaseRoot: string;
   sourceCommit: string;
   productVersion: string;
 }>;
 
-export const packageCurrentFrontendRelease = (
-  input: CurrentFrontendReleaseInput,
-): FrontendReleaseManifest => {
-  mkdirSync(dirname(input.releaseRoot), { recursive: true });
-  const surfaceStage = mkdtempSync(join(dirname(input.releaseRoot), '.surface-inputs-'));
-  try {
-    const surfaceSources = assembleCurrentFrontendSurfaces(input.buildRoot, surfaceStage);
-    return buildFrontendRelease({
-      releaseRoot: input.releaseRoot,
-      sourceCommit: input.sourceCommit,
-      productVersion: input.productVersion,
-      routeContract: serializeFrontendMigrationContractReport(),
-      surfaceSources,
-      entrypoints: currentFrontendEntrypoints(),
-      nativeRequiredAssets: CURRENT_NATIVE_REQUIRED_ASSETS,
-    });
-  } finally {
-    rmSync(surfaceStage, { recursive: true, force: true });
-  }
-};
+export const packageFrontendRelease = (
+  input: FrontendReleasePackageInput,
+): FrontendReleaseManifest => buildFrontendRelease({
+  releaseRoot: input.releaseRoot,
+  sourceCommit: input.sourceCommit,
+  productVersion: input.productVersion,
+  routeContract: serializeFrontendMigrationContractReport(),
+  surfaceSources: resolveFrontendSurfaceSources(input.buildRoot),
+  entrypoints: frontendSurfaceEntrypoints(),
+  nativeRequiredAssets: NATIVE_REQUIRED_ASSETS,
+});

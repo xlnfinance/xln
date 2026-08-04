@@ -111,34 +111,31 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/AccountWorkspaceView.svelte',
+    file: 'frontend/apps/wallet/src/features/accounts/WalletAccountsWorkspace.tsx',
     patterns: [
-      "label: 'Pay'",
-      '<PaymentPanel',
-      '<SwapPanel',
+      "section === 'pay'",
+      '<WalletPaymentForm',
+      '<WalletSwapWorkspace',
     ],
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/SwapPanel.svelte',
+    file: 'frontend/apps/wallet/src/features/swap/WalletSwapWorkspace.tsx',
     patterns: [
-      '<SwapTicket',
-      '{placeSwapOffer}',
-      '<SwapOrderList',
-      '{requestCrossClear}',
-      'submitActiveCrossJurisdictionIntent',
-      'submitRuntimeInput(commandPlan.targetSetupInput)',
-      'submitRuntimeInput(commandPlan.runtimeInput)',
+      '<WalletOrderbook',
+      '<WalletSwapOrders',
+      'data-testid="wallet-swap-submit"',
+      'submitWalletSwapPlan',
     ],
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/SwapTicket.svelte',
+    file: 'frontend/apps/wallet/src/features/swap/wallet-swap-actions.ts',
     patterns: [
-      'data-testid="swap-ticket-from-network"',
-      'data-testid="swap-ticket-to-network"',
-      'data-testid="swap-ticket-submit"',
-      'placeSwapOffer',
+      'submitRuntimeInput(plan.targetSetupInput)',
+      'submitRuntimeInput(plan.runtimeInput)',
+      'submitActiveCrossJurisdictionIntent(plan.crossJurisdictionIntent',
+      "type: 'proposeCancelSwap'",
     ],
   },
   {
@@ -151,19 +148,19 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/SwapOrderList.svelte',
+    file: 'frontend/apps/wallet/src/features/swap/WalletSwapOrders.tsx',
     patterns: [
-      'export let requestCrossClear',
-      'data-testid="cross-swap-clear"',
+      'requestWalletCrossSwapClear',
+      'Clear + cancel remainder',
     ],
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/PaymentPanel.svelte',
+    file: 'frontend/apps/wallet/src/features/payments/WalletPaymentForm.tsx',
     patterns: [
       'data-testid="payment-amount-input"',
       "type: 'htlcPayment'",
-      'Pay now',
+      'Submit payment',
     ],
   },
   {

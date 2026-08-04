@@ -14,6 +14,9 @@ describe('frontend nginx release config', () => {
     expect(config).toContain('root /var/www/xln/frontend/current/docs;');
     expect(config).toContain('root /var/www/xln/frontend/current/wallet;');
     expect(config).toContain('root /var/www/xln/frontend/current/ops;');
+    for (const surface of ['site', 'docs', 'wallet', 'ops']) {
+      expect(config).toContain(`location ^~ /assets-${surface}/ {`);
+    }
   });
 
   test('exposes build identities and rejects a cross-surface fallback', () => {

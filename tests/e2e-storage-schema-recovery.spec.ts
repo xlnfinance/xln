@@ -112,7 +112,6 @@ test.describe('Storage schema recovery', () => {
     page,
   }, testInfo) => {
     test.setTimeout(5 * 60_000);
-    const reactCandidate = process.env['PW_REACT_WALLET_CANDIDATE'] === '1';
     for (const message of [
       /runtime_wal\.open_failed .*STORAGE_SCHEMA_MISMATCH/,
       /load_env_from_db\.failed .*STORAGE_SCHEMA_MISMATCH/,
@@ -164,21 +163,6 @@ test.describe('Storage schema recovery', () => {
       },
       { seed: mnemonic },
     );
-    if (!reactCandidate) {
-      await expect
-        .poll(() =>
-          page.evaluate(() => {
-            const snapshot = window.__xln?.liveRuntimeSnapshot as
-              | { runtimeId?: unknown; dbNamespace?: unknown }
-              | undefined;
-            return {
-              runtimeId: String(snapshot?.runtimeId ?? '').toLowerCase(),
-              dbNamespace: String(snapshot?.dbNamespace ?? '').toLowerCase(),
-            };
-          }),
-        )
-        .toEqual({ runtimeId, dbNamespace: runtimeId });
-    }
 
     expect(issues).toEqual([]);
     // A separate page guarantees a new JS realm and no retained Runtime/Level
@@ -211,11 +195,7 @@ test.describe('Storage schema recovery', () => {
     await expect(errorScreen).toContainText(`requires schema ${STORAGE_SCHEMA_VERSION}`);
     await expect(errorScreen).toContainText('No incompatible data was applied or deleted');
     await expect(recoveryPage.getByTestId('storage-schema-recover')).toBeVisible();
-    if (reactCandidate) {
-      await expect(recoveryPage.getByTestId('storage-schema-reset')).toHaveCount(0);
-    } else {
-      await expect(recoveryPage.getByTestId('storage-schema-reset')).toBeVisible();
-    }
+    await expect(recoveryPage.getByTestId('storage-schema-reset')).toHaveCount(0);
 
     for (const [name, width, height] of [
       ['wide', 1920, 1080],
@@ -232,25 +212,6 @@ test.describe('Storage schema recovery', () => {
       timeout: 30_000,
     });
     expect(await readPersistedStorageSchema(recoveryPage, runtimeId)).toBe(INCOMPATIBLE_STORAGE_SCHEMA_VERSION);
-
-    if (reactCandidate) {
-      expect(issues.filter(issue => issue.type !== 'console')).toEqual([]);
-      expect(
-        issues.filter(issue => issue.type === 'console' && !issue.message.includes('STORAGE_SCHEMA_MISMATCH')),
-      ).toEqual([]);
-      return;
-    }
-
-    recoveryPage.once('dialog', async dialog => dialog.dismiss());
-    await recoveryPage.getByTestId('storage-schema-reset').click();
-    await expect(errorScreen).toBeVisible();
-    expect(await readPersistedStorageSchema(recoveryPage, runtimeId)).toBe(INCOMPATIBLE_STORAGE_SCHEMA_VERSION);
-
-    const resetComplete = recoveryPage.waitForEvent('load').catch(() => undefined);
-    recoveryPage.once('dialog', async dialog => dialog.accept());
-    await recoveryPage.getByTestId('storage-schema-reset').click();
-    await resetComplete;
-    await expect(recoveryPage.getByRole('heading', { name: 'Create xln wallet' })).toBeVisible({ timeout: 30_000 });
 
     expect(issues.filter(issue => issue.type !== 'console')).toEqual([]);
     expect(

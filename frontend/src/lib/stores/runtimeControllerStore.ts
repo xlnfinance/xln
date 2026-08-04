@@ -1,5 +1,5 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
-import { getSvelteStoreValue as get, toSvelteWritable } from './adapters/svelteExternalStore';
+import { get as get, toWritableStore } from './storeBindings';
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -56,11 +56,11 @@ export const runtimeControllerConfigExternalStore = runtimeControllerConfigBindi
 export const runtimeAdapterStatusExternalStore = runtimeAdapterStatusBinding.store;
 export const runtimeAdapterHeightExternalStore = runtimeAdapterHeightBinding.store;
 
-export const runtimeAdapter = toSvelteWritable(runtimeAdapterBinding);
-export const runtimeControllerHandle = toSvelteWritable(runtimeControllerHandleBinding);
-export const runtimeControllerConfig = toSvelteWritable(runtimeControllerConfigBinding);
-export const runtimeAdapterStatus = toSvelteWritable(runtimeAdapterStatusBinding);
-export const runtimeAdapterHeight = toSvelteWritable(runtimeAdapterHeightBinding);
+export const runtimeAdapter = toWritableStore(runtimeAdapterBinding);
+export const runtimeControllerHandle = toWritableStore(runtimeControllerHandleBinding);
+export const runtimeControllerConfig = toWritableStore(runtimeControllerConfigBinding);
+export const runtimeAdapterStatus = toWritableStore(runtimeAdapterStatusBinding);
+export const runtimeAdapterHeight = toWritableStore(runtimeAdapterHeightBinding);
 
 let activeAdapter: RuntimeAdapter | null = null;
 let activeConfig: RuntimeAdapterConfig | null = null;

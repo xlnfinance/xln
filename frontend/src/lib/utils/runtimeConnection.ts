@@ -1,5 +1,5 @@
 import { replaceState } from '$app/navigation';
-import { get } from 'svelte/store';
+import { get } from '../../../packages/client-core/store';
 import type { RuntimeHandle } from '$lib/stores/runtimeControllerStore';
 import {
   getRuntimeControllerAdapter,

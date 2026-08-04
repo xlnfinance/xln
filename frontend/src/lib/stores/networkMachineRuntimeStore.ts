@@ -1,4 +1,4 @@
-import { get, writable } from 'svelte/store';
+import { get, writable } from '../../../packages/client-core/store';
 import type { RuntimeActivityEvent, RuntimeAdapterGraphFrame } from '@xln/runtime/api/public/runtime-module';
 import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '$lib/network3d/networkMachine';
 import {

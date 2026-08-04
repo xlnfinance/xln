@@ -81,25 +81,6 @@ describe('account bar parenting', () => {
     expect(worldScale.x).toBeCloseTo(0.01, 6);
   });
 
-  test('graph content is built into graphWorld, so cleanup and VR transforms apply to it', () => {
-    const panel = readFileSync('frontend/src/lib/view/panels/Graph3DPanel.svelte', 'utf8');
-    const visuals = readFileSync('frontend/src/lib/view/panels/graph3d-visuals.ts', 'utf8');
-    const bars = readFileSync('frontend/src/lib/network3d/AccountBarRenderer.ts', 'utf8');
-
-    // The visual builders take no scene at all — everything lands in graphWorld.
-    for (const source of [visuals, bars]) {
-      expect(source).not.toMatch(/\bscene\.\w+\(/); // no scene.add(...) / scene.remove(...)
-      expect(source).not.toMatch(/\bscene\s*:/); // no `scene:` option or parameter
-    }
-    expect(panel).toContain('function detachFromGraphWorld');
-    expect(panel).toContain('createAccountBarsForConnection');
-
-    // `scene.add` in the panel is only ever the world group, lights and head-locked XR nodes.
-    const sceneAdds = panel.match(/scene\.add\(([^)]*)\)/g) ?? [];
-    for (const call of sceneAdds) {
-      expect(call).toMatch(/graphWorld|Light|controller|mesh/);
-    }
-  });
 
   test('grid honours the configured size and divisions', () => {
     const vertexCount = (grid: THREE.GridHelper) => grid.geometry.getAttribute('position').count;

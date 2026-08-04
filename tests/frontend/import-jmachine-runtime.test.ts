@@ -62,23 +62,3 @@ test('JMachine config normalization does not depend on wall-clock fallback', () 
     blockTimeMs: 2_000,
   }));
 });
-
-test('Settings/UserMode JMachine import uses the shared runtime helper', () => {
-  const settings = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  const userMode = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
-  const addJMachine = readFileSync('frontend/src/lib/components/Jurisdiction/AddJMachine.svelte', 'utf8');
-  const store = readFileSync('frontend/src/lib/stores/jmachineStore.ts', 'utf8');
-  const helper = readFileSync('frontend/src/lib/components/Jurisdiction/import-jmachine-runtime.ts', 'utf8');
-
-  expect(settings).toContain('onImportJMachine(event.detail)');
-  expect(tabs).toContain('await importJMachineViaRuntime(env, detail)');
-  expect(userMode).toContain('await importJMachineViaRuntime(env, event.detail)');
-  expect(userMode).toContain('data-testid="user-mode-jmachine-error"');
-  expect(helper).toContain('J_MACHINE_IMPORT_COMMIT_WAIT_MS = 3_000');
-  expect(helper).toContain('while (!nextEnv.state.jReplicas?.get?.(normalized.name)');
-  expect(helper).toContain('await sleep(J_MACHINE_IMPORT_COMMIT_POLL_MS)');
-  expect(userMode).not.toContain('[ensureSelfEntities] No J-machines');
-  expect(addJMachine).not.toContain('Date.now()');
-  expect(store).not.toContain('Date.now()');
-});

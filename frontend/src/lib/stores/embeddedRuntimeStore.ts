@@ -1,4 +1,4 @@
-import { derived, get, writable } from 'svelte/store';
+import { derived, get, writable } from '../../../packages/client-core/store';
 import type { RuntimeReplica } from '@xln/runtime/api/public/runtime-module';
 import { activeRuntimeId, runtimes } from './runtimeStore';
 import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';

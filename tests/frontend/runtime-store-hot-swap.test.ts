@@ -8,7 +8,7 @@ const collectFrontendSources = (dir: string): string[] => {
     const stat = statSync(path);
     if (stat.isDirectory()) {
       files.push(...collectFrontendSources(path));
-    } else if (/\.(ts|svelte)$/.test(path)) {
+    } else if (/\.(ts|tsx)$/.test(path)) {
       files.push(path);
     }
   }
@@ -30,7 +30,6 @@ test('runtime selector hot-swaps adapters instead of reloading the app', () => {
 test('runtime controller is the single adapter lifecycle owner', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const contextSwitcherSource = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
   const queryClientSource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
 
@@ -61,12 +60,6 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   expect(xlnStoreSource).not.toContain('appRuntimeAdapterMode.set');
   expect(xlnStoreSource).not.toContain('appRuntimeAdapterEndpoint.set');
   expect(controllerSource).not.toContain('runtimeAdapterAuthLevel');
-  expect(contextSwitcherSource).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
-  expect(contextSwitcherSource).toContain('$runtimeControllerHandle.runtimeId');
-  expect(contextSwitcherSource).toContain('$runtimeControllerHandle.permissions');
-  expect(contextSwitcherSource).not.toContain('appRuntimeAdapterMode');
-  expect(contextSwitcherSource).not.toContain('appRuntimeAdapterStatus');
-  expect(contextSwitcherSource).not.toContain('appRuntimeAdapterEndpoint');
   expect(runtimeStoreSource).toContain('export const activeRuntimeId = derived');
   expect(runtimeStoreSource).toContain('[runtimeControllerHandle, runtimes]');
   expect(runtimeStoreSource).toContain('$handle.pendingRuntimeId');
@@ -222,9 +215,6 @@ test('remote projection never materializes fake RuntimeReplica snapshots', () =>
 
 test('remote runtime bulk import validates with bounded parallelism', () => {
   const source = readFileSync('frontend/src/lib/utils/remoteRuntimeImportFlow.ts', 'utf8');
-  const appLayoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
-  expect(existsSync('frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte')).toBe(true);
-  expect(existsSync('frontend/src/routes/radapter/manage/+page.svelte')).toBe(false);
   expect(source).toContain('const REMOTE_RUNTIME_IMPORT_CONCURRENCY = 4');
   expect(source).toContain('export const validateRemoteRuntimeImportEntries = async');
   expect(source).toContain('Array.from({ length: workerCount }');
@@ -233,8 +223,6 @@ test('remote runtime bulk import validates with bounded parallelism', () => {
   expect(source).toContain('failedCount: failed.length');
   expect(source).toContain('checked: RemoteRuntimeImportSummaryCheckedRow[]');
   expect(source).toContain('summarizeFailedRemoteRuntimeEntry');
-  expect(appLayoutSource).toContain('importRemoteRuntimesIntoApp');
-  expect(appLayoutSource).toContain('const result = await importRemoteRuntimeEntries(entries)');
   expect(source).not.toContain('for (const [index, entry] of entries.entries())');
 });
 
@@ -366,88 +354,6 @@ test('remote RuntimeView refresh stays projection-native without fake RuntimeRep
   expect(refreshSource).not.toContain('createEmptyEnv');
 });
 
-test('localhost debug env surfaces expose RuntimeView with matching live runtime infrastructure', () => {
-  const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const embeddedStoreSource = readFileSync('frontend/src/lib/stores/embeddedRuntimeStore.ts', 'utf8');
-  const runtimeLoaderSource = readFileSync('frontend/src/lib/stores/xlnRuntimeLoader.ts', 'utf8');
-  const debugSurfaceSource = readFileSync('frontend/src/lib/utils/debugSurface.ts', 'utf8');
-  const viewSource = readFileSync('frontend/src/lib/view/View.svelte', 'utf8');
-  const appTypes = readFileSync('frontend/src/app.d.ts', 'utf8');
-
-  expect(xlnStoreSource).toContain("import { xlnEnvironment, setXlnEnvironment } from './embeddedRuntimeStore';");
-  expect(xlnStoreSource).not.toContain("registerDebugSurface('env', () => localDebugEnv, { legacyName: '__xln_env' });");
-  expect(embeddedStoreSource).toContain('const viewEnv = createRuntimeViewEnv(runtimeEnv);');
-  expect(embeddedStoreSource).toContain("registerDebugSurface('env', () => localDebugEnv);");
-  expect(embeddedStoreSource).toContain('localDebugEnv = createDetachedRuntimeViewEnv(runtimeEnv);');
-  expect(xlnStoreSource).not.toContain('window.__xln_env =');
-  expect(runtimeLoaderSource).toContain("registerDebugSurface('instance', () => XLN);");
-  expect(runtimeLoaderSource).not.toContain('window.__xln_instance =');
-  expect(debugSurfaceSource).not.toContain('legacyName');
-  expect(appTypes).not.toContain('__xln_env');
-  expect(appTypes).not.toContain('__xln_instance');
-  expect(appTypes).not.toContain('__xlnRuntimeAdapter');
-  expect(viewSource).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
-  expect(viewSource).toContain("errorLog.log('RuntimeView projection failed', 'Runtime View', error)");
-  expect(viewSource).toContain("errorLog.log('Failed to initialize XLN view', 'Runtime View', err)");
-  expect(viewSource).toContain("import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore'");
-  expect(viewSource).toContain('unsubRuntimeEnv = xlnEnvironment.subscribe');
-  expect(viewSource).not.toContain('console.error');
-  expect(viewSource).not.toContain('console.warn');
-  expect(viewSource).not.toContain('console.info');
-  expect(viewSource).not.toContain("import { runtimeViewFrameToEnv } from '$lib/utils/runtimeViewEnv';");
-  expect(viewSource).not.toContain('runtimeViewFrameToEnv(');
-
-  const publishStart = viewSource.indexOf('const publishLocalEnv =');
-  const publishEnd = viewSource.indexOf('const forceLiveCursor =', publishStart);
-  expect(publishStart).toBeGreaterThan(0);
-  expect(publishEnd).toBeGreaterThan(publishStart);
-  const publishSource = viewSource.slice(publishStart, publishEnd);
-  expect(publishSource).toContain('const viewEnv = runtimeEnv ? createRuntimeViewEnv(runtimeEnv) : null;');
-  expect(publishSource).toContain('localEnvStore.set(viewEnv);');
-  expect(publishSource).toContain('buildCommandPaletteView(viewEnv)');
-  expect(publishSource).toContain('buildCommandPaletteViewFromRuntimeView(get(runtimeView).frame)');
-  expect(publishSource).not.toContain('buildCommandPaletteView(runtimeEnv)');
-  expect(publishSource).toContain('const activeEnv = getEnv();');
-  expect(publishSource).toContain('const liveRuntimeEnv = activeEnv ? (unwrapLiveRuntimeEnv(activeEnv) ?? activeEnv) : null;');
-  expect(publishSource).toContain('const selectedRuntimeId = normalizeRuntimeId(get(activeRuntimeId));');
-  expect(publishSource).toContain('const liveRuntimeMatchesSelection = Boolean(!selectedRuntimeId || (liveRuntimeId && liveRuntimeId === selectedRuntimeId));');
-  expect(publishSource).toContain('if (runtimeEnv && !runtimeEnvMatchesActiveSelection(runtimeEnv))');
-  expect(publishSource).toContain('liveRuntimeEnv?.infrastructure?.p2p');
-  expect(publishSource).toContain('liveRuntimeEnv?.infrastructure?.loopActive');
-  expect(publishSource).toContain('if (projectedRuntimeEnv && !projectedRuntimeMatchesSelection) return null;');
-  expect(publishSource).toContain('projectedRuntimeMatchesSelection ? projectedRuntimeEnv : null');
-  expect(viewSource).toContain('liveEnvResolver={resolveLocalDebugEnv}');
-
-  const debugGetterStart = viewSource.indexOf("registerDebugSurface('liveRuntimeSnapshot'");
-  const debugGetterEnd = viewSource.indexOf("registerDebugSurface('publishLiveRuntimeSnapshot'", debugGetterStart);
-  expect(debugGetterStart).toBeGreaterThan(0);
-  expect(debugGetterEnd).toBeGreaterThan(debugGetterStart);
-  const debugGetterSource = viewSource.slice(debugGetterStart, debugGetterEnd);
-  expect(debugGetterSource).toContain('const runtimeEnv = resolveLocalDebugEnv();');
-  expect(debugGetterSource).toContain('return runtimeEnv ? createDetachedRuntimeViewEnv(runtimeEnv) : null;');
-  expect(debugGetterSource).not.toContain('return get(localEnvStore);');
-  expect(viewSource).toContain("registerDebugSurface('publishLiveRuntimeSnapshot', () => publishLocalEnv");
-  expect(viewSource).not.toContain("Object.defineProperty(window, 'runtimeFrameEnv'");
-  expect(viewSource).not.toContain("Object.defineProperty(window, 'isolatedEnv'");
-  expect(viewSource).toContain("import { refreshSelectedRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore'");
-  expect(viewSource).toContain("from '$lib/utils/debugSurface'");
-  expect(viewSource).toContain("registerDebugSurface('view', () => get(runtimeView)");
-  expect(viewSource).not.toContain("legacyName: '__xlnRuntimeView'");
-});
-
-test('view runtime frame stores do not expose legacy isolated names', () => {
-  const viewFiles = collectFrontendSources('frontend/src/lib/view');
-  const legacyPattern = /\bisolated(RuntimeReplica|History|TimeIndex|IsLive|Revision)\b/;
-  for (const file of viewFiles) {
-    const source = readFileSync(file, 'utf8');
-    expect(source.match(legacyPattern)?.[0] ?? '', file).toBe('');
-  }
-  const viewSource = readFileSync('frontend/src/lib/view/View.svelte', 'utf8');
-  expect(viewSource).toContain("registerDebugSurface('liveRuntimeSnapshot'");
-  expect(viewSource).toContain("registerDebugSurface('publishLiveRuntimeSnapshot'");
-  expect(viewSource).not.toContain('window.isolatedEnv');
-  expect(viewSource).not.toContain("Object.defineProperty(window, 'isolatedEnv'");
-});
 
 test('local runtime selection persists embedded mode without deleting saved remote registry', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
@@ -624,20 +530,12 @@ test('embedded env initialization publishes active runtime snapshot before app s
 });
 
 test('app embedded boot restores vault runtimes before default browser runtime initialization', () => {
-  const source = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
-  const helperStart = source.indexOf('function shouldBootRemoteRuntime()');
-  const bootStart = source.indexOf('async function bootApp()');
-  const mountStart = source.indexOf('onMount(() => {', bootStart);
-  expect(helperStart).toBeGreaterThan(0);
-  expect(bootStart).toBeGreaterThan(helperStart);
-  expect(mountStart).toBeGreaterThan(bootStart);
-
-  const bootSource = source.slice(bootStart, mountStart);
-  expect(source.slice(helperStart, bootStart)).toContain("localStorage.getItem('xln-runtime-adapter-mode')");
-  expect(bootSource).toContain('const bootingRemoteRuntime = shouldBootRemoteRuntime();');
-  expect(bootSource).toContain('if (!bootingRemoteRuntime) {');
-  expect(bootSource.indexOf('await vaultOperations.initialize();')).toBeLessThan(bootSource.indexOf('await initializeXLN();'));
-  expect(bootSource).toContain("if (!bootingRemoteRuntime && $runtimeControllerHandle.mode !== 'remote')");
+  const controller = readFileSync('frontend/apps/wallet/src/wallet-controller.ts', 'utf8');
+  const boot = readFileSync('frontend/packages/runtime-client/wallet-boot-controller.ts', 'utf8');
+  expect(controller).toContain("localStorage.getItem('xln-runtime-adapter-mode') === 'remote'");
+  expect(controller).toContain('if (!bootingRemoteRuntime()) await vaultOperations.initialize();');
+  expect(controller).toContain('await initializeXLN();');
+  expect(boot.indexOf('await ports.initializeVault();')).toBeLessThan(boot.indexOf('await ports.initializeRuntime();'));
 });
 
 test('vault bootstrap commands submit explicit runtime env through command bus helper', () => {
@@ -654,27 +552,6 @@ test('vault bootstrap commands submit explicit runtime env through command bus h
   expect(enqueueSource).not.toContain('xln.startRuntimeLoop(runtimeEnv)');
 });
 
-test('app remote runtime prompt activates through hot boot instead of reload', () => {
-  const source = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
-  const acceptStart = source.indexOf('async function acceptRemoteRuntime');
-  const localStart = source.indexOf('async function useLocalBrowserRuntime');
-  const pageChangeStart = source.indexOf("async function changeRemotePage");
-  expect(acceptStart).toBeGreaterThan(0);
-  expect(localStart).toBeGreaterThan(acceptStart);
-  expect(pageChangeStart).toBeGreaterThan(localStart);
-
-  const acceptSlice = source.slice(acceptStart, localStart);
-  const localSlice = source.slice(localStart, pageChangeStart);
-  expect(acceptSlice).toContain('await activateAppAfterRuntimeChoice()');
-  expect(localSlice).toContain('await activateAppAfterRuntimeChoice()');
-  expect(acceptSlice).not.toContain('window.location.reload');
-  expect(localSlice).not.toContain('window.location.reload');
-  expect(source).not.toContain('window.location.reload');
-  expect(source).not.toContain('inactive-tab-reload');
-  expect(source).toContain('async function claimActiveTabLockInPlace');
-  expect(source).toContain('data-testid="inactive-tab-acquire"');
-  expect(source).toContain('releaseActiveTabLock = await initializeActiveTabLock');
-});
 
 test('accepted remote runtime links persist into the shared runtime registry', () => {
   const source = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
@@ -706,45 +583,6 @@ test('direct remote adapter config carries token audience runtime identity', () 
   expect(resolveSource).not.toContain('window.location.search');
 });
 
-test('remote app can page through full hub account and book projections', () => {
-  const layoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
-  const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const runtimeViewSource = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
-
-  expect(layoutSource).toContain("import {");
-  expect(layoutSource).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
-  expect(layoutSource).toContain('runtimeViewPageInfo,');
-  expect(layoutSource).toContain('runtimeViewPageNeedsNavigation,');
-  expect(layoutSource).toContain('setRuntimeViewPage,');
-  expect(layoutSource).toContain('$runtimeControllerHandle.mode');
-  expect(layoutSource).toContain('setRuntimeViewPage');
-  expect(layoutSource).toContain('async function changeRemotePage');
-  expect(layoutSource).toContain('setRuntimeViewPage(kind, pageIndex);');
-  expect(layoutSource).toContain('await refreshCurrentRuntimeProjection();');
-  expect(layoutSource).toContain('data-testid="remote-page-notice"');
-  expect(layoutSource).toContain('runtimeViewPageNeedsNavigation($runtimeViewPageInfo)');
-  expect(layoutSource).toContain("aria-label=\"Previous accounts page\"");
-  expect(layoutSource).toContain("aria-label=\"Next books page\"");
-  expect(layoutSource).not.toContain('>Prev</button>');
-  expect(layoutSource).not.toContain('>Next</button>');
-  expect(layoutSource).toContain('disabled={!$runtimeViewPageInfo.accountsHasMore}');
-  expect(layoutSource).toContain('onclick={() => changeRemotePage(\'accounts\', $runtimeViewPageInfo!.accountsPageIndex + 1)}');
-  expect(layoutSource).toContain('onclick={() => changeRemotePage(\'books\', $runtimeViewPageInfo!.booksPageIndex + 1)}');
-  expect(layoutSource).not.toContain('appRuntimeAdapterMode');
-  expect(layoutSource).not.toContain('appRuntimeAdapterPageInfo');
-  expect(layoutSource).not.toContain('setRuntimeAdapterPage');
-
-  expect(runtimeViewSource).toContain('export const setRuntimeViewPage');
-  expect(xlnStoreSource).not.toContain('export const setRuntimeViewPage');
-  expect(xlnStoreSource).not.toContain('appRuntimeAdapterPageInfo');
-  expect(xlnStoreSource).toContain('accountsPage,');
-  expect(xlnStoreSource).toContain('booksPage,');
-  expect(runtimeViewSource).toContain('accountsPageIndex: number');
-  expect(runtimeViewSource).toContain('accountsPageCount: number');
-  expect(runtimeViewSource).toContain('accountsHasMore: boolean');
-  expect(runtimeViewSource).toContain('export const runtimeViewPageNeedsNavigation');
-  expect(runtimeViewSource).toContain('export const runtimeViewPageInfo');
-});
 
 test('retryable remote adapter refresh errors do not unmount the app shell', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
@@ -872,11 +710,9 @@ test('vault initialization preserves active shared runtime selection', () => {
 });
 
 test('frontend surfaces do not bypass RuntimeController when switching active runtime', () => {
-  const navigationSource = readFileSync('frontend/src/lib/components/Navigation/HierarchicalNav.svelte', 'utf8');
-  expect(navigationSource).toContain('runtimeOperations.selectRuntime(id)');
-  expect(navigationSource).not.toContain('activeRuntimeId.set');
-
-  const bypasses = collectFrontendSources('frontend/src')
+  const shell = readFileSync('frontend/apps/wallet/src/WalletShell.tsx', 'utf8');
+  expect(shell).toContain('props.onSelectRuntime(event.target.value)');
+  const bypasses = ['frontend/src', 'frontend/apps', 'frontend/packages'].flatMap(collectFrontendSources)
     .filter((file) => file !== 'frontend/src/lib/stores/runtimeStore.ts')
     .filter((file) => /\bactiveRuntimeId\.set\(/.test(readFileSync(file, 'utf8')));
 

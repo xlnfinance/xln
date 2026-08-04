@@ -15,7 +15,7 @@ export const RUNTIME_COMMAND_JOURNAL_DATABASE = Object.freeze({
 
 export const WEB_APP_MANIFEST = Object.freeze({
   path: '/site.webmanifest',
-  startUrl: '/',
+  startUrl: '/app',
   scope: '/',
 });
 
@@ -28,7 +28,7 @@ export const PUSH_WAKE_SERVICE_WORKER = Object.freeze({
 export const NATIVE_WEB_ENTRY = Object.freeze({
   rootPath: '/',
   redirectPath: '/app',
-  webDir: 'build',
+  webDir: '.native-wallet-build',
 });
 
 export const BROWSER_PERSISTENCE_CONTRACT = Object.freeze({

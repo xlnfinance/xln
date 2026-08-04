@@ -45,7 +45,7 @@ export const createReactViteSurfaceContract = (
   return {
     surface,
     root: surface === 'all' ? frontendRoot : resolve(frontendRoot, 'apps', surface, 'entries'),
-    outDir: resolve(frontendRoot, 'build', surface === 'all' ? 'react-all' : surface),
+    outDir: resolve(frontendRoot, 'build', surface === 'all' ? '.preview' : surface),
     inputs,
     routes,
   };

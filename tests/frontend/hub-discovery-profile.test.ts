@@ -219,8 +219,7 @@ test('hub open-account command rejects malformed command targets', () => {
 
 test('hub discovery projection exposes same-jurisdiction hubs and account status', () => {
   const account = {
-    leftEntity: SOURCE,
-    rightEntity: HUB,
+    state: { leftEntity: SOURCE, rightEntity: HUB },
     currentFrame: { height: 7 },
     currentHeight: 7,
   };
@@ -397,74 +396,10 @@ test('hub discovery projection exposes same-jurisdiction remote runtime hubs wit
   expect(projection.localHubs[0]?.lastSeen).toBe(123);
 });
 
-test('hub discovery remote hubs are projected from runtime registry outside EntityPanelTabs', () => {
-  const runtimes = [
-    {
-      id: 'radapter:ws://127.0.0.1:8092/rpc',
-      type: 'remote',
-      label: 'H1 Runtime',
-      env: null,
-      wsUrl: 'ws://127.0.0.1:8092/rpc',
-      permissions: 'write',
-      status: 'connected',
-      hubEntities: [
-        {
-          entityId: HUB,
-          label: 'H1',
-          height: 123,
-          jurisdiction: JURISDICTION,
-        },
-      ],
-      lastSynced: 456,
-    },
-    {
-      id: 'radapter:ws://127.0.0.1:8093/rpc',
-      type: 'remote',
-      label: 'Legacy Runtime',
-      env: null,
-      wsUrl: 'ws://127.0.0.1:8093/rpc',
-      permissions: 'read',
-      status: 'connected',
-      hubEntityId: `0x${'66'.repeat(32)}`,
-      hubName: 'Legacy H2',
-      hubJurisdiction: JURISDICTION,
-    },
-    {
-      id: 'local',
-      type: 'local',
-      label: 'Local',
-      env: null,
-      permissions: 'write',
-      status: 'connected',
-    },
-  ];
-
-  const hubs = buildHubDiscoveryRemoteHubsFromRuntimes(runtimes as never);
-  expect(hubs).toHaveLength(2);
-  expect(hubs[0]).toMatchObject({
-    entityId: HUB,
-    name: 'H1',
-    runtimeId: 'radapter:ws://127.0.0.1:8092/rpc',
-    wsUrl: 'ws://127.0.0.1:8092/rpc',
-    height: 123,
-    lastSeen: 456,
-  });
-  expect(hubs[1]).toMatchObject({
-    name: 'Legacy H2',
-    runtimeId: 'radapter:ws://127.0.0.1:8093/rpc',
-    wsUrl: 'ws://127.0.0.1:8093/rpc',
-    height: 0,
-  });
-
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  expect(tabs).toContain('buildHubDiscoveryRemoteHubsFromRuntimes($runtimes.values())');
-  expect(tabs).not.toContain('remoteHubCandidates = Array.from($runtimes.values()).flatMap');
-});
 
 test('hub discovery projection tracks connected fetched hubs without local hub replicas', () => {
   const account = {
-    leftEntity: SOURCE,
-    rightEntity: HUB,
+    state: { leftEntity: SOURCE, rightEntity: HUB },
     currentFrame: { height: 3 },
   };
   const replicas = new Map([
@@ -501,7 +436,7 @@ test('hub discovery projection marks uncommitted account as opening', () => {
         state: {
           entityId: SOURCE,
           config: { jurisdiction: JURISDICTION },
-          accounts: new Map([[HUB, { leftEntity: SOURCE, rightEntity: HUB }]]),
+          accounts: new Map([[HUB, { state: { leftEntity: SOURCE, rightEntity: HUB } }]]),
         },
       },
     ],
@@ -527,79 +462,4 @@ test('hub discovery projection marks uncommitted account as opening', () => {
 
   expect(projection.localHubs[0]?.isConnected).toBe(false);
   expect(projection.localHubs[0]?.isOpening).toBe(true);
-});
-
-test('HubDiscoveryPanel renders a supplied projection instead of scanning eReplicas', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/HubDiscoveryPanel.svelte', 'utf8');
-  const profile = readFileSync('frontend/src/lib/components/Entity/hub-discovery-profile.ts', 'utf8');
-  const accountOpen = readFileSync('frontend/src/lib/components/Entity/AccountOpenPanel.svelte', 'utf8');
-  const accountWorkspace = readFileSync('frontend/src/lib/components/Entity/AccountWorkspaceView.svelte', 'utf8');
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  expect(source).toContain('export let hubDiscoveryProjection');
-  expect(source).toContain('export let canOpenAccounts = true');
-  expect(source).toContain('export let submitRuntimeInput');
-  expect(source).toContain('hubDiscoveryProjection.sourceSignerId');
-  expect(source).toContain('ensureHubOpenAccountProfileReady({');
-  expect(source).toContain("import { runtimeControllerHandle } from '../../stores/runtimeControllerStore'");
-  expect(source).toContain('adapterMode: $runtimeControllerHandle.mode');
-  expect(source).toContain('authLevel: $runtimeControllerHandle.authLevel');
-  expect(source).toContain('hubDiscoveryProjection.localHubs');
-  expect(source).toContain('projectedHubs = mergeHubs(hubDiscoveryProjection.localHubs, hubs)');
-  expect(profile).toContain('profiles?: readonly GossipProfile[]');
-  expect(profile).toContain('remoteHubs?: readonly HubDiscoveryRemoteHub[]');
-  expect(profile).toContain('for (const profile of input.profiles ?? [])');
-  expect(profile).toContain('for (const remoteHub of input.remoteHubs ?? [])');
-  expect(source).toContain('projectedConnection?.isConnected || projectedConnection?.isOpening');
-  expect(source).toContain('buildHubOpenAccountRuntimeInput');
-  expect(source).toContain('await submitRuntimeInput(buildHubOpenAccountRuntimeInput');
-  expect(source).toContain('{:else if entityId && canOpenHubAccount}');
-  expect(source).not.toContain("throw new Error('Environment not ready')");
-  expect(source).not.toContain('const currentEnv = actionRuntimeEnv;\\n      if (!currentEnv)');
-  expect(source).not.toContain('fetch(');
-  expect(source).not.toContain('/api/hubs');
-  expect(source).not.toContain('/api/gossip/profile');
-  expect(source).not.toContain('resolveConfiguredApiBase');
-  expect(source).not.toContain('Date.now');
-  expect(source).not.toContain('setTimeout');
-  expect(source).not.toContain('AbortController');
-  expect(source).not.toContain('enqueueAndProcess');
-  expect(source).not.toContain('Read only');
-  expect(source.includes(['Open Account requires', 'runtime access'].join(' full '))).toBe(false);
-  expect(accountOpen).toContain('export let canOpenAccounts = true');
-  expect(accountOpen).toContain('{#if activeIsLive}');
-  expect(accountOpen).toContain('{actionRuntimeEnv}');
-  expect(accountOpen).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'hub-discovery')");
-  expect(accountOpen).toContain('{#if canOpenAccounts}');
-  expect(accountOpen).toContain('{submitRuntimeInput}');
-  expect(accountWorkspace).toContain('export let canOpenAccounts = true');
-  expect(accountWorkspace).toContain('{canOpenAccounts}');
-  expect(accountWorkspace).toContain('{submitRuntimeInput}');
-  expect(tabs).toContain('canOpenAccounts = canSubmitHubOpenAccount');
-  expect(tabs).toContain('profiles: directoryPanelView.profiles?.length ? directoryPanelView.profiles : panelProfiles');
-  expect(tabs).toMatch(/import \{ runtimes \} from ["']\.\.\/\.\.\/stores\/runtimeStore["']/);
-  expect(tabs).toContain('remoteHubs: remoteHubCandidates');
-  expect(tabs).toContain('if (!canOpenAccounts)');
-  expect(tabs).toContain('buildDirectOpenAccountRuntimeInput');
-  expect(tabs).toMatch(/await submitPanelRuntimeInput\(\s*buildDirectOpenAccountRuntimeInput/);
-  expect(tabs).toContain('{canOpenAccounts}');
-  expect(tabs).toContain('submitRuntimeInput={submitPanelRuntimeInput}');
-  const directOpenStart = tabs.indexOf('async function openAccountWithFullId');
-  const nextFunctionStart = tabs.indexOf('function confirmDisputeAction', directOpenStart);
-  expect(directOpenStart).toBeGreaterThan(0);
-  expect(nextFunctionStart).toBeGreaterThan(directOpenStart);
-  const directOpenSource = tabs.slice(directOpenStart, nextFunctionStart);
-  expect(directOpenSource).not.toContain('enqueueEntityInputs');
-  expect(directOpenSource).not.toContain('buildEntityInput');
-  expect(source).not.toContain('enqueueEntityInputs');
-  expect(source).not.toContain("type: 'openAccount'");
-  expect(source).not.toContain('function collectLocalHubs');
-  expect(source).not.toContain('env?.state.eReplicas');
-  expect(source).not.toContain('getEntityJurisdictionKey(');
-  expect(source).not.toContain('appRuntimeAdapterMode');
-  expect(source).not.toContain('runtimeAdapterAuthLevel');
-  expect(tabs).toMatch(/import \{ runtimeControllerHandle \} from ["']\.\.\/\.\.\/stores\/runtimeControllerStore["']/);
-  expect(tabs).toContain('adapterMode: $runtimeControllerHandle.mode');
-  expect(tabs).toContain('authLevel: $runtimeControllerHandle.authLevel');
-  expect(tabs).not.toContain('appRuntimeAdapterMode');
-  expect(tabs).not.toContain('runtimeAdapterAuthLevel');
 });

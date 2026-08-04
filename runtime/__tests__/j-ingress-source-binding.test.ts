@@ -330,9 +330,9 @@ describe('manual J-event ingress source binding', () => {
   }, 120_000);
 
   test('frontend HTTP responses cannot be promoted into local consensus events', () => {
-    const panelSource = readFileSync(join(
+    const faucetSource = readFileSync(join(
       process.cwd(),
-      'frontend/src/lib/components/Entity/EntityPanelTabs.svelte',
+      'frontend/apps/wallet/src/features/accounts/wallet-test-asset-actions.ts',
     ), 'utf8');
     const walletSource = readFileSync(join(
       process.cwd(),
@@ -342,19 +342,13 @@ describe('manual J-event ingress source binding', () => {
       'const response = await fetch(`${apiBase}/api/external-wallet/snapshot`',
     );
     const snapshotFallbackEnd = walletSource.indexOf('const balanceByToken = new Map(', snapshotFallbackStart);
-    const faucetStart = panelSource.indexOf('async function faucetReserves(');
-    const faucetEnd = panelSource.indexOf('async function faucetOffchain(', faucetStart);
     expect(snapshotFallbackStart).toBeGreaterThan(0);
     expect(snapshotFallbackEnd).toBeGreaterThan(snapshotFallbackStart);
-    expect(faucetStart).toBeGreaterThan(0);
-    expect(faucetEnd).toBeGreaterThan(faucetStart);
     expect(walletSource.slice(snapshotFallbackStart, snapshotFallbackEnd)).not.toContain(
       'applyCanonicalJEventsToActiveEnv',
     );
-    expect(panelSource.slice(faucetStart, faucetEnd)).not.toContain(
-      'applyCanonicalJEventsToActiveEnv(result.events',
-    );
-    expect(panelSource).not.toContain('async function applyCanonicalJEventsToActiveEnv');
+    expect(faucetSource).toContain('export const requestWalletTestAsset = async');
+    expect(faucetSource).not.toContain('applyCanonicalJEventsToActiveEnv');
     expect(walletSource).not.toContain('async function applyCanonicalJEventsToActiveEnv');
   });
 });

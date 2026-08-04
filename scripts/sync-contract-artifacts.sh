@@ -6,6 +6,7 @@ LOCK_DIR="$ROOT_DIR/.tmp/contracts-sync.lock"
 TYPECHAIN_BUILD_DIR=".typechain-types-build-$$"
 TYPECHAIN_BUILD_PATH="$ROOT_DIR/jurisdictions/$TYPECHAIN_BUILD_DIR"
 TYPECHAIN_PUBLISH_PATH="$ROOT_DIR/jurisdictions/typechain-types"
+BUN_EXECUTABLE="${XLN_BUN_EXECUTABLE:-bun}"
 
 acquire_contract_sync_lock() {
   mkdir -p "$ROOT_DIR/.tmp"
@@ -102,9 +103,9 @@ echo "[contracts-sync] published complete TypeChain generation dependencies-firs
 
 echo "[contracts-sync] copying fresh contract artifacts to frontend/static"
 cd "$ROOT_DIR/frontend"
-bun copy-static-files.js
+"$BUN_EXECUTABLE" copy-static-files.js
 
 echo "[contracts-sync] verifying compiler immutable metadata parity"
-bun "$ROOT_DIR/runtime/scripts/check-contract-artifact-immutables.ts"
+"$BUN_EXECUTABLE" "$ROOT_DIR/runtime/scripts/check-contract-artifact-immutables.ts"
 
 echo "[contracts-sync] done"

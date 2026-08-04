@@ -204,7 +204,7 @@ describe('Foundation release Hanko', () => {
     const markdownPath = join(directory, '0.1.7.md');
     try {
       expect(readFileSync(resolve(ROOT, 'docs/releases/0.1.7.md'), 'utf8')).toContain(RELEASE_EDITORIAL_NOTICE);
-      const releasesView = readFileSync(resolve(ROOT, 'frontend/src/lib/components/Releases/ReleasesView.svelte'), 'utf8');
+      const releasesView = readFileSync(resolve(ROOT, 'frontend/apps/site/pages/ReleasesPage.tsx'), 'utf8');
       expect(releasesView).toContain('Foundation code root verified');
       expect(releasesView).not.toContain('Foundation verified');
 

@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable } from '../../../packages/client-core/store';
 
 interface RoutePreview {
   path: string[];

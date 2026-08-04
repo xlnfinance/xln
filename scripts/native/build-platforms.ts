@@ -19,19 +19,14 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../deployment/canonical-json';
 import {
 	buildFrontendReleaseAssets,
-	frontendSurfaceContentSha256,
 } from '../deployment/frontend-release-files';
-import { packageCurrentFrontendRelease } from '../deployment/frontend-release-package';
+import { packageFrontendRelease } from '../deployment/frontend-release-package';
 import {
 	FRONTEND_RELEASE_MANIFEST_FILE,
+	FRONTEND_SURFACE_IDS,
 	type FrontendReleaseAsset,
 	type FrontendReleaseManifest,
 } from '../deployment/frontend-release-schema';
-import {
-	REACT_CANDIDATE_MANIFEST_FILE,
-	validateReactCandidateManifest,
-} from '../../frontend/packages/build-contracts/react-candidate';
-import { FRONTEND_ROUTES } from '../../frontend/src/lib/contracts/frontendSurfaces';
 
 type Platform = 'ios' | 'android' | 'desktop' | 'extension';
 type ArtifactStatus = 'built' | 'synced' | 'skipped' | 'reused';
@@ -52,19 +47,17 @@ type NativeFrontendBundle = Readonly<{
 	productVersion: string;
 	walletSha256: string;
 	walletAssets: readonly FrontendReleaseAsset[];
-	activationBlocked: boolean;
 	manifestPath: string;
 }>;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const FRONTEND = path.join(ROOT, 'frontend');
-const UNIFIED_BUILD_DIR = path.join(FRONTEND, 'build');
+const SURFACE_BUILD_ROOT = path.join(FRONTEND, 'build');
 const NATIVE_WEB_DIR = path.join(FRONTEND, '.native-wallet-build');
 const NATIVE_DIR = path.join(ROOT, 'native');
 const DIST_DIR = path.join(NATIVE_DIR, 'dist');
 const ARTIFACT_MANIFEST = path.join(DIST_DIR, 'native-artifacts.json');
 const NATIVE_RELEASE_MANIFEST = path.join(DIST_DIR, 'frontend-release-manifest.json');
-const NATIVE_REACT_CANDIDATE_MANIFEST = path.join(DIST_DIR, 'frontend-react-candidate-manifest.json');
 const APP_NAME = 'xln finance';
 const DESKTOP_BUNDLE_ID = 'finance.xln.wallet.desktop';
 
@@ -72,7 +65,7 @@ function printHelp(): void {
 	console.log(`XLN native build pipeline
 
 Usage:
-  bun scripts/native/build-platforms.ts [mobile|ios|android|desktop|extension|all] [--open] [--smoke] [--no-build] [--package] [--best-effort] [--react-wallet-candidate]
+  bun scripts/native/build-platforms.ts [mobile|ios|android|desktop|extension|all] [--open] [--smoke] [--no-build] [--package] [--best-effort]
 
 Targets:
   mobile     Build/sync iOS + Android from the manifest-bound wallet surface
@@ -88,8 +81,6 @@ Flags:
   --smoke        Launch desktop shell once and exit
   --package      Produce installable debug/dev packages when platform tooling is installed
   --best-effort  Continue other targets when mobile platform tooling is unavailable
-  --react-wallet-candidate  Package the release-blocked React wallet for migration smoke only
-
 Examples:
   bun run native:mobile
   bun run native:mobile -- --package
@@ -199,7 +190,11 @@ export function expandTargets(input: string[]): Platform[] {
 }
 
 export function parseNativeBuildOptions(argv: string[]): NativeBuildOptions {
+	const allowedFlags = new Set(['--help', '--open', '--smoke', '--no-build', '--package', '--best-effort']);
 	const flags = new Set(argv.filter(arg => arg.startsWith('--')));
+	for (const flag of flags) {
+		if (!allowedFlags.has(flag)) throw new Error(`Unknown native flag: ${flag}`);
+	}
 	const tokens = argv.filter(arg => !arg.startsWith('--'));
 	return {
 		flags,
@@ -302,7 +297,6 @@ const releaseBundle = (manifest: FrontendReleaseManifest): NativeFrontendBundle 
 	productVersion: manifest.productVersion,
 	walletSha256: manifest.surfaces.wallet.contentSha256,
 	walletAssets: manifest.surfaces.wallet.assets,
-	activationBlocked: false,
 	manifestPath: NATIVE_RELEASE_MANIFEST,
 });
 
@@ -314,86 +308,31 @@ const copyManifestBoundWallet = (
 	cpSync(path.join(releaseRoot, manifest.surfaces.wallet.outputRoot), NATIVE_WEB_DIR, { recursive: true });
 	mkdirSync(DIST_DIR, { recursive: true });
 	copyFileSync(path.join(releaseRoot, FRONTEND_RELEASE_MANIFEST_FILE), NATIVE_RELEASE_MANIFEST);
-	rmSync(NATIVE_REACT_CANDIDATE_MANIFEST, { force: true });
 	const bundle = releaseBundle(manifest);
 	assertNativeWalletCopy(NATIVE_WEB_DIR, bundle, 'desktop', true);
 	return bundle;
 };
 
-const copyReactCandidateWallet = (status: ArtifactStatus): {
-	artifacts: NativeArtifact[];
-	bundle: NativeFrontendBundle;
-} => {
-	const candidateRoot = path.join(UNIFIED_BUILD_DIR, 'wallet');
-	const manifestPath = path.join(candidateRoot, REACT_CANDIDATE_MANIFEST_FILE);
-	if (!existsSync(path.join(candidateRoot, 'index.html'))) {
-		throw new Error(`NATIVE_REACT_WALLET_ENTRYPOINT_MISSING:${path.join(candidateRoot, 'index.html')}`);
-	}
-	if (!existsSync(path.join(candidateRoot, 'runtime.js'))) {
-		throw new Error(`NATIVE_REACT_WALLET_RUNTIME_MISSING:${path.join(candidateRoot, 'runtime.js')}`);
-	}
-	if (!existsSync(manifestPath)) throw new Error(`NATIVE_REACT_WALLET_MANIFEST_MISSING:${manifestPath}`);
-	const candidate = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
-	const expectedEntrypoints = FRONTEND_ROUTES
-		.filter(route => route.surface === 'wallet' && route.kind === 'page')
-		.map(route => route.outputEntry)
-		.filter((entry): entry is string => entry !== null);
-	const errors = validateReactCandidateManifest(candidate, expectedEntrypoints, 'wallet');
-	if (errors.length > 0) throw new Error(`NATIVE_REACT_WALLET_MANIFEST_INVALID:${errors.join(',')}`);
-	sanitizeWebBuild(candidateRoot);
-	rmSync(NATIVE_WEB_DIR, { recursive: true, force: true });
-	cpSync(candidateRoot, NATIVE_WEB_DIR, { recursive: true });
-	mkdirSync(DIST_DIR, { recursive: true });
-	copyFileSync(manifestPath, NATIVE_REACT_CANDIDATE_MANIFEST);
-	rmSync(NATIVE_RELEASE_MANIFEST, { force: true });
-	const walletAssets = buildFrontendReleaseAssets(NATIVE_WEB_DIR);
-	const commit = currentSourceCommit();
-	const bundle: NativeFrontendBundle = {
-		releaseId: `react-wallet-candidate-${commit.slice(0, 12)}`,
-		sourceCommit: commit,
-		productVersion: packageJsonVersion(),
-		walletSha256: frontendSurfaceContentSha256(walletAssets),
-		walletAssets,
-		activationBlocked: true,
-		manifestPath: NATIVE_REACT_CANDIDATE_MANIFEST,
-	};
-	assertNativeWalletCopy(NATIVE_WEB_DIR, bundle, 'desktop', true);
-	return {
-		bundle,
-		artifacts: [
-			{ target: 'runtime', kind: 'browser-runtime', status, path: path.join(NATIVE_WEB_DIR, 'runtime.js') },
-			{ target: 'frontend', kind: 'react-wallet-candidate', status, path: NATIVE_WEB_DIR },
-			{ target: 'frontend-release', kind: 'blocked-candidate-manifest', status, path: NATIVE_REACT_CANDIDATE_MANIFEST },
-		],
-	};
-};
-
 function ensureFrontendBuild(flags: Set<string>): { artifacts: NativeArtifact[]; bundle: NativeFrontendBundle } {
 	const status: ArtifactStatus = flags.has('--no-build') ? 'reused' : 'built';
-	if (flags.has('--react-wallet-candidate')) {
-		if (!flags.has('--no-build')) {
-			run('bun', ['run', 'build'], ROOT);
-			run('bun', ['run', 'build:react:wallet'], FRONTEND);
-		}
-		return copyReactCandidateWallet(status);
-	}
 	if (!flags.has('--no-build')) {
 		run('bun', ['run', 'build'], ROOT);
 		run('bun', ['run', 'build'], FRONTEND);
 	}
-	if (!existsSync(path.join(UNIFIED_BUILD_DIR, 'index.html'))) {
-		throw new Error(`NATIVE_FRONTEND_BUILD_MISSING:${path.join(UNIFIED_BUILD_DIR, 'index.html')}`);
+	const walletRoot = path.join(SURFACE_BUILD_ROOT, 'wallet');
+	if (!existsSync(path.join(walletRoot, 'index.html'))) {
+		throw new Error(`NATIVE_FRONTEND_BUILD_MISSING:${path.join(walletRoot, 'index.html')}`);
 	}
-	if (!existsSync(path.join(UNIFIED_BUILD_DIR, 'runtime.js'))) {
-		throw new Error(`NATIVE_FRONTEND_RUNTIME_MISSING:${path.join(UNIFIED_BUILD_DIR, 'runtime.js')}`);
+	if (!existsSync(path.join(walletRoot, 'runtime.js'))) {
+		throw new Error(`NATIVE_FRONTEND_RUNTIME_MISSING:${path.join(walletRoot, 'runtime.js')}`);
 	}
-	sanitizeWebBuild(UNIFIED_BUILD_DIR);
+	FRONTEND_SURFACE_IDS.forEach(surface => sanitizeWebBuild(path.join(SURFACE_BUILD_ROOT, surface)));
 	const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'xln-native-release-'));
 	try {
 		const commit = currentSourceCommit();
 		const releaseRoot = path.join(temporaryRoot, `${packageJsonVersion()}-${commit.slice(0, 12)}`);
-		const manifest = packageCurrentFrontendRelease({
-			buildRoot: UNIFIED_BUILD_DIR,
+		const manifest = packageFrontendRelease({
+			buildRoot: SURFACE_BUILD_ROOT,
 			releaseRoot,
 			sourceCommit: commit,
 			productVersion: packageJsonVersion(),
@@ -726,7 +665,6 @@ function writeArtifactManifest(
 			sourceCommit: frontendBundle.sourceCommit,
 			productVersion: frontendBundle.productVersion,
 			walletSha256: frontendBundle.walletSha256,
-			activationBlocked: frontendBundle.activationBlocked,
 			manifestPath: frontendBundle.manifestPath,
 		},
 		artifacts,

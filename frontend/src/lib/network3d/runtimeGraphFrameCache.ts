@@ -1,4 +1,4 @@
-import { get, writable } from 'svelte/store';
+import { get, writable } from '../../../packages/client-core/store';
 import type { RuntimeAdapterGraphFrame } from '@xln/runtime/api/public/runtime-module';
 import type { Runtime } from '$lib/stores/runtimeStore';
 import {

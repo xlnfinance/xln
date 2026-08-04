@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['external-store-react.pw.ts', 'external-store-svelte-compat.pw.ts'],
+  testMatch: 'external-store-react.pw.ts',
   fullyParallel: false,
   workers: 1,
   reporter: 'list',

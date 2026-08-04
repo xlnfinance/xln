@@ -277,7 +277,7 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
         },
       },
       accounts: new Map([[counterpartyId, {
-        watchSeed: testWatchSeed,
+        state: { watchSeed: testWatchSeed },
         counterpartyDisputeProofNonce: 7,
         counterpartyDisputeProofBodyHash: proofBodyHash,
         counterpartyDisputeProofHanko: '0xcafe',

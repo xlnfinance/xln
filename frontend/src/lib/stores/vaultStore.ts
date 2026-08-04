@@ -6,10 +6,10 @@ import {
   unlockVaultRuntime,
 } from '../../../packages/runtime-client/vault-lifecycle';
 import {
-  deriveSvelteStore as derived,
-  getSvelteStoreValue as get,
-  toSvelteReadable,
-} from './adapters/svelteExternalStore';
+  derived as derived,
+  get as get,
+  toReadableStore,
+} from './storeBindings';
 
 import { Wallet } from 'ethers';
 
@@ -255,15 +255,15 @@ const BROWSER_GOSSIP_POLL_MS = 250;
 
 const loggedLiveJAdapterReimports = new Set<string>();
 
-// Main store. The framework-neutral bindings are the sole writers; Svelte and
+// Main store. The framework-neutral bindings are the sole writers; UI and
 // React consume the same readonly snapshots through their respective adapters.
 const runtimesStateBinding = createExternalStore<RuntimesState>(defaultState);
 const vaultStorageLoadedBinding = createExternalStore(false);
 
 export const runtimesStateExternalStore = runtimesStateBinding.store;
 export const vaultStorageLoadedExternalStore = vaultStorageLoadedBinding.store;
-export const runtimesState = toSvelteReadable(runtimesStateBinding.store);
-export const vaultStorageLoaded = toSvelteReadable(vaultStorageLoadedBinding.store);
+export const runtimesState = toReadableStore(runtimesStateBinding.store);
+export const vaultStorageLoaded = toReadableStore(vaultStorageLoadedBinding.store);
 
 // Derived stores
 export const activeRuntime = derived(runtimesState, $state => {

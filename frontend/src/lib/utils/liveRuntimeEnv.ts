@@ -27,7 +27,7 @@ export function createDetachedRuntimeViewEnv(liveEnv: RuntimeReplica): RuntimeRe
     ...liveEnv,
     // Runtime mutates the H+1 candidate in place for hub-scale performance.
     // A shallow Map copy would still alias every nested Entity/Account and let
-    // an unrelated Svelte render expose candidate balances before WAL commit.
+    // an unrelated UI render expose candidate balances before WAL commit.
     // This UI-only projection is published after commit; cloning it does not
     // add work to headless hubs or to the consensus transition.
     state: structuredClone(liveEnv.state),

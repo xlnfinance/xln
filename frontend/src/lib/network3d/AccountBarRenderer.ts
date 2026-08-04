@@ -222,7 +222,7 @@ function createTokenBars(
   const fromCreditUsed = computeCreditUsedByPeer(fromDerived, fromIsLeft) * barScale;
   const toCreditUsed = computeCreditUsedByPeer(toDerived, !fromIsLeft) * barScale;
 
-  // HYBRID MODEL (matches AccountPreview.svelte semantics):
+  // HYBRID MODEL (matches the canonical account preview semantics):
   // - Unused credit shows on BORROWER's side (who can use it)
   // - Used credit shows on LENDER's side (who extended it)
 

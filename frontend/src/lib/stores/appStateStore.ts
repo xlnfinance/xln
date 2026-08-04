@@ -15,7 +15,7 @@ import {
   type NavigationSelection,
   type ViewMode,
 } from '../../../packages/client-core/app-state';
-import { toSvelteReadable } from './adapters/svelteExternalStore';
+import { toReadableStore } from './storeBindings';
 import { errorLog } from './errorLogStore';
 
 export type { AppMode, AppState, NavigationSelection, ViewMode } from '../../../packages/client-core/app-state';
@@ -57,7 +57,7 @@ function saveState(state: AppState) {
 
 const appStateBinding = createExternalStore<AppState>(loadState());
 export const appStateExternalStore = appStateBinding.store;
-export const appState = toSvelteReadable(appStateBinding.store);
+export const appState = toReadableStore(appStateBinding.store);
 
 // Auto-save on changes
 appState.subscribe(state => saveState(state));

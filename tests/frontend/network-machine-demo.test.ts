@@ -19,15 +19,6 @@ describe('network machine demo playback', () => {
     expect(normalizeDemo({ autoplay: 'yes' as never, speed: 0 })).toEqual({ autoplay: false, speed: 1 });
   });
 
-  test('autoplay is consumed once so a recompile does not restart the demo', () => {
-    const store = readFileSync('frontend/src/lib/stores/networkMachineDemoStore.ts', 'utf8');
-    const timeline = readFileSync('frontend/src/lib/view/core/NetworkMachineTimeline.svelte', 'utf8');
-
-    expect(store).toContain('consumeAutoplay');
-    expect(store).toContain('requested ? { ...current, autoplay: false } : current');
-    expect(timeline).toContain('networkMachineDemo.consumeAutoplay()');
-    expect(timeline).toContain('void selectStep(0).then(() => togglePlayback());');
-  });
 
   test('a recorded scenario is deterministic, self-contained and ephemeral', () => {
     const source = readFileSync('runtime/scenarios/browser-api.ts', 'utf8');
@@ -45,25 +36,4 @@ describe('network machine demo playback', () => {
     expect(source).toContain('trace.stop();');
   });
 
-  test('the embed route drives playback from the URL and surfaces scenario failures', () => {
-    const route = readFileSync('frontend/src/routes/embed/+page.svelte', 'utf8');
-
-    expect(route).toContain("$page.url.searchParams.get('scenario')");
-    expect(route).toContain("$page.url.searchParams.get('autoplay') === '1'");
-    expect(route).toContain('networkMachineRuntimeOperations.loadScenario');
-    // A scenario embed narrates through the Time Machine, so it cannot stay hidden.
-    expect(route).toContain('settingsOperations.setShowTimeMachine(true)');
-    expect(route).toContain('data-testid="embed-scenario-error"');
-  });
-
-  test('a loaded scenario is not replaced by whatever runtimes happen to be connected', () => {
-    const timeline = readFileSync('frontend/src/lib/view/core/NetworkMachineTimeline.svelte', 'utf8');
-    const store = readFileSync('frontend/src/lib/stores/networkMachineRuntimeStore.ts', 'utf8');
-
-    expect(timeline).toContain('if (get(networkMachineRuntime).machine) return;');
-    // One registry of sources: live adapters and recorded scenarios read the same way.
-    expect(store).toContain('const activeSources = new Map<string, NetworkTimelineSource>()');
-    expect(store).toContain('source.readGraphFrame(selected.height)');
-    expect(store).toContain('source.readActivity(selected.height, selected.height)');
-  });
 });

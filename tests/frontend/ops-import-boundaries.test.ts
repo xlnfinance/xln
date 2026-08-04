@@ -6,9 +6,8 @@ const ROOT = resolve(import.meta.dir, '../..'); const OPS = join(ROOT, 'frontend
 const files = (root: string): string[] => readdirSync(root, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(join(root, entry.name)) : [join(root, entry.name)]);
 const sourceFiles = files(OPS).filter(file => /\.(ts|tsx)$/.test(file));
 
-test('ops source contains no Svelte, vault-secret, or edge endpoint ownership', () => {
+test('ops source contains no vault-secret or edge endpoint ownership', () => {
   const source = sourceFiles.map(file => readFileSync(file, 'utf8')).join('\n');
-  expect(source).not.toMatch(/from ['"]svelte|\.svelte['"]/);
   expect(source).not.toContain('vaultStore'); expect(source).not.toContain('ensureProjectionRuntimeConnected');
   for (const path of ['/admin', '/radapter', '/resetdb', '/rpc2']) expect(source).not.toContain(`pattern: '${path}'`);
 });

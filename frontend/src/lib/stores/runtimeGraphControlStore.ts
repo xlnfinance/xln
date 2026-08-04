@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable } from '../../../packages/client-core/store';
 import type { RuntimeGraphCanonicity } from '$lib/network3d/runtimeGraphProjection';
 
 const CANONICITY_KEY = 'xln-graph-canonicity';

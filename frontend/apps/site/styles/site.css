@@ -1,5 +1,5 @@
 @import '../../../src/lib/components/Landing/landing-page.css';
-@import '../../../src/routes/install/install-page.css';
+@import './install-page.css';
 @import '../../../src/lib/components/Rcpan/rcpan-experience.css';
 @import '../../../src/lib/components/Rcpan/rcpan-sales-hero.css';
 @import '../../../src/lib/components/Rcpan/rcpan-system-comparison.css';

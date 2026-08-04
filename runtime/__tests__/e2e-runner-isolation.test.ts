@@ -25,13 +25,15 @@ import {
 const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
   const artifacts = deriveE2EBuildArtifacts(root);
   mkdirSync(join(artifacts.publicDir), { recursive: true });
-  mkdirSync(join(artifacts.svelteKitOutDir, 'output/server'), { recursive: true });
-  mkdirSync(artifacts.frontendBuildDir, { recursive: true });
+  mkdirSync(join(artifacts.frontendBuildDir, 'apps/site/entries'), { recursive: true });
+  mkdirSync(join(artifacts.frontendBuildDir, 'apps/docs/entries'), { recursive: true });
+  mkdirSync(join(artifacts.frontendBuildDir, 'apps/ops/entries/health'), { recursive: true });
   writeFileSync(artifacts.runtimeBundlePath, 'runtime-v1', 'utf8');
-  writeFileSync(join(artifacts.svelteKitOutDir, 'output/server/manifest.js'), 'manifest-v1', 'utf8');
-  writeFileSync(join(artifacts.frontendBuildDir, 'index.html'), '<main>v1</main>', 'utf8');
+  writeFileSync(join(artifacts.frontendBuildDir, 'apps/site/entries/index.html'), '<main>site</main>', 'utf8');
+  writeFileSync(join(artifacts.frontendBuildDir, 'apps/docs/entries/index.html'), '<main>docs</main>', 'utf8');
+  writeFileSync(join(artifacts.frontendBuildDir, 'apps/ops/entries/health/index.html'), '<main>health</main>', 'utf8');
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({
-    version: 1,
+    version: 2,
     buildInputHash: codeHash,
     artifactHash: computeE2EBuildArtifactHash(artifacts),
     createdAt: '2026-07-17T00:00:00.000Z',
@@ -40,17 +42,13 @@ const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
 };
 
 describe('isolated E2E runner resources', () => {
-  test('defers automatic mesh reset for HTTP-ready React candidate tests', () => {
-    expect(shouldDeferInitialReset({ prewaitHealth: 'http', reactSurface: 'wallet' })).toBe(true);
-    expect(shouldDeferInitialReset({ prewaitHealth: 'http', reactSurface: 'ops' })).toBe(true);
-    expect(shouldDeferInitialReset({ prewaitHealth: 'http' })).toBe(false);
-    expect(shouldDeferInitialReset({ prewaitHealth: 'full', reactSurface: 'wallet' })).toBe(false);
+  test('defers automatic mesh reset when the runner provisions or resets the baseline explicitly', () => {
+    expect(shouldDeferInitialReset({ prewaitHealth: 'http' })).toBe(true);
+    expect(shouldDeferInitialReset({ prewaitHealth: 'full' })).toBe(false);
     expect(shouldDeferInitialReset({ prewaitHealth: 'reset' })).toBe(true);
   });
 
-  test('binds React candidate relay challenges to the browser-facing Vite origin', () => {
-    expect(resolveE2EPublicWsBaseUrl({ reactSurface: 'wallet' }, 20_002, 20_004))
-      .toBe('ws://localhost:20004');
+  test('boots managed Runtime peers against the API-owned relay before Vite starts', () => {
     expect(resolveE2EPublicWsBaseUrl({}, 20_002, 20_004)).toBe('ws://127.0.0.1:20002');
   });
 
@@ -58,7 +56,7 @@ describe('isolated E2E runner resources', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-e2e-help-'));
     try {
       const script = resolve('runtime/scripts/run-e2e-parallel-isolated.ts');
-      const result = spawnSync('bun', [script, '--help'], {
+      const result = spawnSync(process.execPath, [script, '--help'], {
         cwd: root,
         encoding: 'utf8',
       });
@@ -139,7 +137,8 @@ describe('isolated E2E runner resources', () => {
     const viteConfig = readFileSync('frontend/vite.config.ts', 'utf8');
 
     expect(runner).toContain('XLN_RUNTIME_BUNDLE_OUT: artifacts.runtimeBundlePath');
-    expect(runner).toContain('XLN_SVELTE_BUILD_DIR: relative(frontendRoot, artifacts.frontendBuildDir)');
+    expect(runner.match(/XLN_BUN_EXECUTABLE: BUN_EXECUTABLE/g)?.length).toBe(3);
+    expect(runner).toContain('XLN_FRONTEND_BUILD_DIR: relative(frontendRoot, buildArtifacts.frontendBuildDir)');
     expect(runner).toContain('XLN_RDB_ROOT: shardPaths.rdbRoot');
     expect(runner).toContain('XLN_JDB_ROOT: shardPaths.jdbRoot');
     expect(runner).toContain('codeFingerprint.buildInputHash,');
@@ -149,7 +148,7 @@ describe('isolated E2E runner resources', () => {
     expect(runner).toContain("XLN_VITE_FORCE_HTTP: '1'");
     expect(runner).toContain("PW_PROFILE: args.pwProject === 'brainvault' ? 'brainvault' : ''");
     expect(runner).toContain('Math.min(args.stackTimeoutMs, 30_000)');
-    expect(viteConfig).toContain("const FORCE_HTTP = process.env['XLN_VITE_FORCE_HTTP'] === '1'");
+    expect(viteConfig).toContain("if (process.env['XLN_VITE_FORCE_HTTP'] === '1') return false;");
     expect(runtimeImport).not.toContain("return 'http://127.0.0.1:8082'");
   });
 
@@ -183,10 +182,11 @@ describe('isolated E2E runner resources', () => {
     ].join('\n');
 
     try {
-      const result = spawnSync('bun', ['-e', probe], {
+      const result = spawnSync(process.execPath, ['-e', probe], {
         cwd: repoRoot,
         env: {
           ...process.env,
+          XLN_BUN_EXECUTABLE: process.execPath,
           XLN_FOUNDRY_HOME: join(root, '.foundry'),
           XLN_MIN_DISK_FREE_BYTES: '1',
           XLN_TEST_ARTIFACT_CLEANUP_DONE: undefined,
@@ -221,11 +221,12 @@ describe('isolated E2E runner resources', () => {
   test('passes the provisioned shard jurisdiction registry into Playwright-owned child runtimes', () => {
     const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
     const playwrightEnv = runner.slice(
-      runner.indexOf("const playwrightResult = await runE2ECommand('bunx'"),
+      runner.indexOf("const playwrightResult = await runE2ECommand(BUN_EXECUTABLE"),
       runner.indexOf("markPhase('playwright'"),
     );
 
     expect(playwrightEnv).toContain("XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json')");
+    expect(playwrightEnv).toContain('XLN_BUN_EXECUTABLE: BUN_EXECUTABLE');
     expect(runner).toContain("XLN_EPHEMERAL_TESTNET: '1'");
   });
 

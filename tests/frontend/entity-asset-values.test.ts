@@ -75,7 +75,7 @@ describe('entity asset value helpers', () => {
 
   test('builds account portfolio totals from derived deltas', () => {
     const accounts = new Map<string, AccountState>([
-      ['0xbb', { deltas: new Map([[1, Symbol('delta')]]) } as unknown as AccountState],
+      ['0xbb', { state: { deltas: new Map([[1, Symbol('delta')]]) } } as unknown as AccountState],
     ]);
     const deriveDelta = (() => ({
       outCapacity: 5_000_000n,

@@ -28,7 +28,6 @@ const assertNoHorizontalOverflow = async (page: Page): Promise<void> => {
 };
 
 test.describe('React wallet shell and onboarding', () => {
-  test.skip(process.env['PW_REACT_WALLET_CANDIDATE'] !== '1', 'requires the release-blocked React wallet candidate');
 
   test('renders a clean first-run wallet at iPhone, laptop, and wide desktop sizes', { tag: '@functional' }, async ({ browser }, testInfo) => {
     const viewports = [

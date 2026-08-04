@@ -81,35 +81,3 @@ test('gossip directory view projects radapter entity summaries without full Runt
     jurisdictionName: 'Tron',
   });
 });
-
-test('GossipPanel consumes GossipDirectoryView instead of owning runtime env', () => {
-  const panel = readFileSync('frontend/src/lib/components/Entity/GossipPanel.svelte', 'utf8');
-  const dockPanel = readFileSync('frontend/src/lib/view/panels/GossipPanel.svelte', 'utf8');
-  const dockRoot = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
-  const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  const settingsProjection = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
-
-  expect(panel).toContain('export let gossipDirectoryView: GossipDirectoryView');
-  expect(panel).not.toContain('xlnEnvironment');
-  expect(panel).not.toContain('getXLN');
-  expect(panel).not.toContain('isCounterpartyBlockedByDispute');
-  expect(panel).not.toContain('eReplicas');
-  expect(panel).not.toContain('jReplicas');
-  expect(panel).not.toContain('gossip.getProfiles');
-  expect(panel).not.toContain('setTimeout');
-  expect(panel).not.toContain('Date.now');
-  expect(dockPanel).toContain('createRuntimeQueryStore');
-  expect(dockPanel).toContain('readViewFrame');
-  expect(dockPanel).toContain('buildGossipDirectoryViewFromRuntimeEntities');
-  expect(dockPanel).not.toContain('export let runtimeFrameEnv');
-  expect(dockPanel).not.toContain('env?.gossip');
-  expect(dockPanel).not.toContain('gossip.getProfiles');
-  expect(dockPanel).not.toContain('eReplicas');
-  expect(dockPanel).not.toContain('jReplicas');
-  expect(dockRoot).toContain("component = mount(GossipPanel");
-  expect(dockRoot).not.toContain('props: { runtimeFrameEnv },');
-  expect(tabs).not.toContain('gossipDirectoryView = buildGossipDirectoryView');
-  expect(tabs).not.toContain('{gossipDirectoryView}');
-  expect(settingsProjection).not.toContain('gossipDirectoryView');
-  expect(settingsProjection).not.toContain('<GossipPanel');
-});

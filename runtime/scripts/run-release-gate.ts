@@ -84,7 +84,7 @@ const SOUNDCHECK_TARGETS = [
 ].join(' ');
 
 const quickSteps: GateStep[] = [
-  { name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 },
+  { name: 'frontend type contract', command: 'cd frontend && bunx tsc -p tsconfig.json --noEmit', timeoutMs: 60_000 },
   { name: 'source checks', command: 'bun run check:src', timeoutMs: 120_000 },
   { name: 'release integrity tests', command: 'bun run test:release-integrity', timeoutMs: 30_000 },
   { name: 'runtime core unit tests', command: `bun test ${RUNTIME_CORE_TESTS}`, timeoutMs: 180_000 },

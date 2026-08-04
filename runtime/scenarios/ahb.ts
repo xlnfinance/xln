@@ -303,7 +303,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // ============================================================================
     console.log('\n💰 FRAME 1: Initial State - Hub Reserve Funding (REAL BrowserVM TX)');
 
-    // NOTE: BrowserVM is reset in View.svelte at runtime creation time
+    // NOTE: BrowserVM is reset by the wallet runtime-creation flow.
     // This ensures fresh state on every page load/HMR
 
     // REAL deposit flow: ERC20 approve + processBatch(externalTokenToReserve)

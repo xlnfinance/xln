@@ -315,37 +315,6 @@ describe('RuntimeGraphProjection', () => {
     expect(merged.nodes[0]?.desynchronized).toBe(true);
   });
 
-  test('Graph3D projection effect explicitly tracks every asynchronous graph source', async () => {
-    const frontendRequire = createRequire(new URL('../../frontend/package.json', import.meta.url));
-    const compilerPath = frontendRequire.resolve('svelte/compiler');
-    const { compile } = await import(pathToFileURL(compilerPath).href) as typeof import('svelte/compiler');
-    const source = readFileSync(
-      new URL('../../frontend/src/lib/view/panels/Graph3DPanel.svelte', import.meta.url),
-      'utf8',
-    );
-    const compiled = compile(source, {
-      generate: 'client',
-      dev: true,
-      filename: 'Graph3DPanel.svelte',
-    }).js.code;
-    const projectionWrite = compiled.indexOf('$.set(graphProjections');
-    const effectStart = compiled.lastIndexOf('$.legacy_pre_effect', projectionWrite);
-    expect(projectionWrite).toBeGreaterThan(effectStart);
-    const dependencyBlock = compiled.slice(effectStart, projectionWrite);
-
-    for (const dependency of [
-      '$runtimes()',
-      '$activeRuntimeId()',
-      '$runtimeControllerHandle()',
-      '$runtimeGraphScope()',
-      '$networkMachineRuntime()',
-      '$runtimeGraphLiveFrameCache()',
-      '$.get(env)',
-    ]) {
-      expect(dependencyBlock).toContain(dependency);
-    }
-    expect(dependencyBlock).not.toContain('$.legacy_pre_effect(() => {}');
-  });
 });
 
 describe('Merged runtime timeline', () => {

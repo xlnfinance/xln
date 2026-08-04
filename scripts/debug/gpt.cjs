@@ -219,10 +219,10 @@ const CORE_FILES = {
   ],
   swapUi: [
     // Included in default llms.txt because swap UX bugs often come from UI/runtime mismatch
-    'src/lib/components/Entity/SwapPanel.svelte', // Direct same-chain/cross-j swap form and manual route recommendations
-    'src/lib/components/Trading/OrderbookPanel.svelte', // Orderbook stream/render/click behavior
+    'apps/wallet/src/features/swap/WalletSwapWorkspace.tsx', // Direct same-chain/cross-j swap form and manual route recommendations
+    'apps/wallet/src/features/swap/WalletOrderbook.tsx', // Orderbook stream/render/click behavior
     'src/lib/components/Entity/routed-swap-planner.ts', // Manual route candidate planner and hop quote estimates
-    'src/lib/components/Entity/LendingPanel.svelte', // Hub lending UI: offer, borrow, repay
+    'apps/wallet/src/features/accounts/WalletLending.tsx', // Hub lending UI: offer, borrow, repay
   ],
   tests: [
     // Behavior contracts: if code and prose disagree, these tests show intended user flow
@@ -244,12 +244,12 @@ const CORE_FILES = {
   ],
   frontend: [
     // Optional UI/UX architecture (use --frontend flag)
-    'src/lib/view/README.md',               // View system overview + layout model
-    'src/lib/view/View.svelte',             // Main View orchestrator (Dockview panels)
-    'src/lib/view/core/TimeMachine.svelte', // Time navigation control
-    'src/lib/view/panels/Graph3DPanel.svelte', // 3D graph visualization
-    'src/lib/view/panels/ArchitectPanel.svelte', // Architect modes + workflows
-    'src/lib/view/panels/JurisdictionPanel.svelte', // On-chain state viewer
+    'README.md',               // View system overview + layout model
+    'apps/ops/src/OpsApp.tsx',             // Main View orchestrator (Dockview panels)
+    'apps/ops/workspace/InspectorPanel.tsx', // Time navigation control
+    'apps/ops/workspace/Graph3DPanel.tsx', // 3D graph visualization
+    'apps/ops/workspace/ArchitectPanel.tsx', // Architect modes + workflows
+    'apps/ops/workspace/InspectorPanel.tsx', // On-chain state viewer
     'src/lib/view/utils/panelBridge.ts',    // Panel-to-panel messaging
     'src/lib/network3d/networkMachine.ts',  // 3D graph scene orchestration
   ]
@@ -403,14 +403,14 @@ const CROSS_FILES = {
     'security/external-audit-brief.md',
   ],
   swapUi: [
-    'src/lib/components/Entity/SwapPanel.svelte',
+    'apps/wallet/src/features/swap/WalletSwapWorkspace.tsx',
     'src/lib/components/Entity/SwapPanel.css',
-    'src/lib/components/Entity/SwapOrderList.svelte',
+    'apps/wallet/src/features/swap/WalletSwapOrders.tsx',
     'src/lib/components/Entity/routed-swap-planner.ts',
     'src/lib/components/Entity/swap-formatting.ts',
     'src/lib/components/Entity/swap-order-history.ts',
     'src/lib/components/Entity/move-routes.ts',
-    'src/lib/components/Trading/OrderbookPanel.svelte',
+    'apps/wallet/src/features/swap/WalletOrderbook.tsx',
     'src/lib/components/Trading/orderbook-relay-url.ts',
     'src/lib/stores/routePreviewStore.ts',
     'src/lib/utils/jurisdictionBadge.ts',
@@ -598,7 +598,7 @@ const ORDERBOOK_FILES = {
     'testnet-flow-coverage.md',
   ],
   swapUi: [
-    'src/lib/components/Trading/OrderbookPanel.svelte',
+    'apps/wallet/src/features/swap/WalletOrderbook.tsx',
     'src/lib/components/Trading/orderbook-relay-url.ts',
   ],
   tests: [
@@ -668,12 +668,12 @@ const SWAP_FILES = {
     'security/dispute-two-arguments-spec.md',
   ],
   swapUi: [
-    'src/lib/components/Entity/SwapPanel.svelte',
-    'src/lib/components/Entity/SwapOrderList.svelte',
+    'apps/wallet/src/features/swap/WalletSwapWorkspace.tsx',
+    'apps/wallet/src/features/swap/WalletSwapOrders.tsx',
     'src/lib/components/Entity/routed-swap-planner.ts',
     'src/lib/components/Entity/swap-formatting.ts',
     'src/lib/components/Entity/swap-order-history.ts',
-    'src/lib/components/Trading/OrderbookPanel.svelte',
+    'apps/wallet/src/features/swap/WalletOrderbook.tsx',
     'src/lib/components/Trading/orderbook-relay-url.ts',
   ],
   tests: uniqueFiles([
@@ -770,7 +770,7 @@ swaps executable and disputable.
    \`account/tx/handlers/swap-resolve.ts\`, then orderbook matching.
 4. Backstop: \`cross-j-salvage.ts\`, \`protocol/dispute/arguments.ts\`,
    \`entity/tx/handlers/dispute.ts\`, watchtower action, and dispute docs.
-5. Product proof: \`SwapPanel.svelte\`, \`OrderbookPanel.svelte\`, and
+5. Product proof: \`WalletSwapWorkspace.tsx\`, \`WalletOrderbook.tsx\`, and
    \`tests/e2e-cross-j-swap.spec.ts\`.
 
 ## Cross-J Flow
@@ -1141,7 +1141,7 @@ same-chain and direct cross-j swaps are the executable surface for this release.
 
 Relevant files:
 - \`frontend/src/lib/components/Entity/routed-swap-planner.ts\`
-- \`frontend/src/lib/components/Entity/SwapPanel.svelte\`
+- \`frontend/apps/wallet/src/features/swap/WalletSwapWorkspace.tsx\`
 - \`tests/e2e-cross-j-swap.spec.ts\`
 
 ### Hub lending
@@ -1156,7 +1156,7 @@ Read these together:
 - \`runtime/types/lending.ts\`
 - \`runtime/entity/tx/handlers/lending.ts\`
 - \`runtime/api/server/lending.ts\`
-- \`frontend/src/lib/components/Entity/LendingPanel.svelte\`
+- \`frontend/apps/wallet/src/features/accounts/WalletLending.tsx\`
 - \`runtime/__tests__/lending.test.ts\`
 - \`tests/e2e-lending.spec.ts\`
 
@@ -1295,10 +1295,10 @@ xln/
     security/external-audit-brief.md    ${fileSizes['docs/security/external-audit-brief.md'] || '?'} lines - External audit brief
 
   frontend swap core/
-    src/lib/components/Entity/SwapPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/SwapPanel.svelte'] || '?'} lines - Swap UI/state machine
-    src/lib/components/Trading/OrderbookPanel.svelte ${fileSizes['frontend/src/lib/components/Trading/OrderbookPanel.svelte'] || '?'} lines - Orderbook stream/render/clicks
+    apps/wallet/src/features/swap/WalletSwapWorkspace.tsx ${fileSizes['frontend/apps/wallet/src/features/swap/WalletSwapWorkspace.tsx'] || '?'} lines - Swap UI/state machine
+    apps/wallet/src/features/swap/WalletOrderbook.tsx ${fileSizes['frontend/apps/wallet/src/features/swap/WalletOrderbook.tsx'] || '?'} lines - Orderbook stream/render/clicks
     src/lib/components/Entity/routed-swap-planner.ts ${fileSizes['frontend/src/lib/components/Entity/routed-swap-planner.ts'] || '?'} lines - Manual route recommendation planner
-    src/lib/components/Entity/LendingPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/LendingPanel.svelte'] || '?'} lines - Lending offer/borrow/repay UI
+    apps/wallet/src/features/accounts/WalletLending.tsx ${fileSizes['frontend/apps/wallet/src/features/accounts/WalletLending.tsx'] || '?'} lines - Lending offer/borrow/repay UI
 
   behavior tests/
     tests/e2e-swap.spec.ts              ${fileSizes['tests/e2e-swap.spec.ts'] || '?'} lines - Same-chain swap UX contract
@@ -1308,12 +1308,12 @@ xln/
 
 ${includeFrontend ? `
   frontend/
-    src/lib/view/README.md              ${fileSizes['frontend/src/lib/view/README.md'] || '?'} lines - View system overview
-    src/lib/view/View.svelte            ${fileSizes['frontend/src/lib/view/View.svelte'] || '?'} lines - Main View orchestrator
-    src/lib/view/core/TimeMachine.svelte ${fileSizes['frontend/src/lib/view/core/TimeMachine.svelte'] || '?'} lines - Time control
-    src/lib/view/panels/Graph3DPanel.svelte ${fileSizes['frontend/src/lib/view/panels/Graph3DPanel.svelte'] || '?'} lines - 3D graph panel
-    src/lib/view/panels/ArchitectPanel.svelte ${fileSizes['frontend/src/lib/view/panels/ArchitectPanel.svelte'] || '?'} lines - Architect workflows
-    src/lib/view/panels/JurisdictionPanel.svelte ${fileSizes['frontend/src/lib/view/panels/JurisdictionPanel.svelte'] || '?'} lines - Jurisdiction viewer
+    README.md              ${fileSizes['frontend/README.md'] || '?'} lines - View system overview
+    apps/ops/src/OpsApp.tsx            ${fileSizes['frontend/apps/ops/src/OpsApp.tsx'] || '?'} lines - Main View orchestrator
+    apps/ops/workspace/InspectorPanel.tsx ${fileSizes['frontend/apps/ops/workspace/InspectorPanel.tsx'] || '?'} lines - Time control
+    apps/ops/workspace/Graph3DPanel.tsx ${fileSizes['frontend/apps/ops/workspace/Graph3DPanel.tsx'] || '?'} lines - 3D graph panel
+    apps/ops/workspace/ArchitectPanel.tsx ${fileSizes['frontend/apps/ops/workspace/ArchitectPanel.tsx'] || '?'} lines - Architect workflows
+    apps/ops/workspace/InspectorPanel.tsx ${fileSizes['frontend/apps/ops/workspace/InspectorPanel.tsx'] || '?'} lines - Jurisdiction viewer
     src/lib/view/utils/panelBridge.ts   ${fileSizes['frontend/src/lib/view/utils/panelBridge.ts'] || '?'} lines - Panel messaging
     src/lib/network3d/networkMachine.ts ${fileSizes['frontend/src/lib/network3d/networkMachine.ts'] || '?'} lines - 3D graph scene orchestration
 ` : ''}

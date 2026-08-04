@@ -18,7 +18,6 @@ import {
   cpSync,
   createWriteStream,
   existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -57,6 +56,7 @@ import {
   seedShardJurisdictions,
   type OrchestratorJurisdictionsConfig,
 } from '../orchestrator/jurisdictions';
+
 import {
   createIncrementalRuntimeFatalLogScanner,
   findRuntimeFatalLogLines,
@@ -143,6 +143,8 @@ export {
   readLocalTestListeningPortPids,
 } from './local-test-port-lease';
 
+const BUN_EXECUTABLE = process.execPath;
+
 export type CliArgs = {
   shards: number;
   stackTimeoutMs: number;
@@ -170,7 +172,6 @@ export type CliArgs = {
   startAt: number;
   preserveArtifacts: boolean;
   prewaitHealth: 'reset' | 'http' | 'full';
-  reactSurface?: 'wallet' | 'ops' | undefined;
 };
 
 export type E2EShardRunStatus = 'passed' | 'failed' | 'cancelled';
@@ -394,10 +395,6 @@ const parseArgs = (): CliArgs => {
     throw new Error(`INVALID_QA_TEST_CATEGORY:${qaCategoryRaw}`);
   }
   const prewaitHealthRaw = String(getFlag('prewait-health') || 'reset').trim().toLowerCase();
-  const reactSurfaceRaw = String(getFlag('react-surface') || '').trim().toLowerCase();
-  if (reactSurfaceRaw && reactSurfaceRaw !== 'wallet' && reactSurfaceRaw !== 'ops') {
-    throw new Error(`INVALID_REACT_E2E_SURFACE:${reactSurfaceRaw}`);
-  }
 
   return {
     shards: Number.isFinite(shardsRaw) && shardsRaw > 0 ? Math.floor(shardsRaw) : 2,
@@ -436,7 +433,6 @@ const parseArgs = (): CliArgs => {
       prewaitHealthRaw === 'http' || prewaitHealthRaw === 'full' || prewaitHealthRaw === 'reset'
         ? prewaitHealthRaw
         : 'reset',
-    reactSurface: reactSurfaceRaw ? reactSurfaceRaw as 'wallet' | 'ops' : undefined,
   };
 };
 
@@ -448,7 +444,6 @@ export const ISOLATED_E2E_RUNNER_USAGE = [
   '  --pw-grep=<pattern>           Exact test-title filter',
   '  --qa-category=<category>      functional | resilience',
   '  --all                         Include every E2E spec',
-  '  --react-surface=<surface>     Serve release-blocked React wallet | ops candidate',
   '',
   'Isolation:',
   '  --shards=<count>              Isolated stack count',
@@ -458,16 +453,16 @@ export const ISOLATED_E2E_RUNNER_USAGE = [
 ].join('\n');
 
 export const shouldDeferInitialReset = (
-  args: Pick<CliArgs, 'prewaitHealth' | 'reactSurface'>,
-): boolean => args.prewaitHealth === 'reset' || Boolean(args.reactSurface && args.prewaitHealth === 'http');
+  args: Pick<CliArgs, 'prewaitHealth'>,
+): boolean => args.prewaitHealth === 'reset' || args.prewaitHealth === 'http';
 
 export const resolveE2EPublicWsBaseUrl = (
-  args: Pick<CliArgs, 'reactSurface'>,
+  _args: object,
   apiPort: number,
-  webPort: number,
-): string => args.reactSurface ? `ws://localhost:${webPort}` : `ws://127.0.0.1:${apiPort}`;
+  _webPort: number,
+): string => `ws://127.0.0.1:${apiPort}`;
 
-const provisionReactCandidateJurisdictions = async (
+const provisionE2EJurisdictions = async (
   config: OrchestratorJurisdictionsConfig,
 ): Promise<void> => {
   seedShardJurisdictions(config);
@@ -659,8 +654,8 @@ const listDynamicPlaywrightTargets = (
     E2E_RESET_BASE_URL: process.env['E2E_RESET_BASE_URL'] || 'http://127.0.0.1:1',
   };
   const res = spawnSync(
-    'bunx',
-    ['playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json', file],
+    BUN_EXECUTABLE,
+    ['x', 'playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json', file],
     {
       cwd: process.cwd(),
       env,
@@ -1355,53 +1350,8 @@ export const runE2ECommand = async (
   };
 };
 
-export const materializeSvelteKitShardOutDir = (sourceOutDir: string, shardOutDir: string): void => {
-  const sourceManifest = join(sourceOutDir, 'output', 'server', 'manifest.js');
-  if (!existsSync(sourceManifest)) {
-    throw new Error(`E2E_SVELTE_KIT_OUTPUT_MISSING:${sourceManifest}`);
-  }
-
-  rmSync(shardOutDir, { recursive: true, force: true });
-  mkdirSync(shardOutDir, { recursive: true });
-
-  for (const entry of readdirSync(sourceOutDir, { withFileTypes: true })) {
-    const sourcePath = join(sourceOutDir, entry.name);
-    const shardPath = join(shardOutDir, entry.name);
-    const linkType = entry.isDirectory() ? 'dir' : 'file';
-    symlinkSync(sourcePath, shardPath, linkType);
-  }
-
-  const shardManifest = join(shardOutDir, 'output', 'server', 'manifest.js');
-  if (!existsSync(shardManifest)) {
-    throw new Error(`E2E_SVELTE_KIT_SHARD_LINK_FAILED:${shardManifest}`);
-  }
-};
-
-const prepareShardSvelteKitOutDir = (
-  sourceOutDir: string,
-  logsDir: string,
-  shard: number,
-  log: ReturnType<typeof createWriteStream>,
-): string => {
-  const frontendRoot = resolve(process.cwd(), 'frontend');
-  const sourceManifest = join(sourceOutDir, 'output', 'server', 'manifest.js');
-  if (!existsSync(sourceManifest)) {
-    throw new Error(`E2E_SVELTE_KIT_OUTPUT_MISSING:${sourceManifest}`);
-  }
-
-  const shardOutDir = join(deriveE2EShardPaths(logsDir, shard).root, 'svelte-kit');
-  materializeSvelteKitShardOutDir(sourceOutDir, shardOutDir);
-
-  const outDirForFrontend = relative(frontendRoot, shardOutDir);
-  const linkedEntries = readdirSync(shardOutDir, { withFileTypes: true })
-    .filter(entry => lstatSync(join(shardOutDir, entry.name)).isSymbolicLink())
-    .length;
-  log.write(`[runner] shard-local SvelteKit output: ${outDirForFrontend} (${linkedEntries} linked entries)\n`);
-  return outDirForFrontend;
-};
-
 const E2E_BUILD_CACHE_ROOT = resolve(process.cwd(), '.logs', 'e2e-build-cache');
-const E2E_BUILD_CACHE_MANIFEST_VERSION = 1;
+const E2E_BUILD_CACHE_MANIFEST_VERSION = 2;
 
 export const deriveE2EBuildArtifacts = (
   cacheRoot = E2E_BUILD_CACHE_ROOT,
@@ -1409,7 +1359,6 @@ export const deriveE2EBuildArtifacts = (
   cacheRoot,
   publicDir: join(cacheRoot, 'public'),
   runtimeBundlePath: join(cacheRoot, 'public', 'runtime.js'),
-  svelteKitOutDir: join(cacheRoot, 'svelte-kit'),
   frontendBuildDir: join(cacheRoot, 'frontend'),
 });
 
@@ -1422,8 +1371,9 @@ type E2EBuildCacheManifest = {
 
 const requiredE2EBuildArtifactPaths = (artifacts: E2EBuildArtifacts): string[] => [
   artifacts.runtimeBundlePath,
-  join(artifacts.svelteKitOutDir, 'output', 'server', 'manifest.js'),
-  join(artifacts.frontendBuildDir, 'index.html'),
+  join(artifacts.frontendBuildDir, 'apps', 'site', 'entries', 'index.html'),
+  join(artifacts.frontendBuildDir, 'apps', 'ops', 'entries', 'health', 'index.html'),
+  join(artifacts.frontendBuildDir, 'apps', 'docs', 'entries', 'index.html'),
 ];
 
 const assertRequiredE2EBuildArtifacts = (artifacts: E2EBuildArtifacts): void => {
@@ -1453,7 +1403,6 @@ export const computeE2EBuildArtifactHash = (artifacts: E2EBuildArtifacts): strin
     }
   };
   hashDirectory('public', artifacts.publicDir);
-  hashDirectory('svelte-kit', artifacts.svelteKitOutDir);
   hashDirectory('frontend', artifacts.frontendBuildDir);
   return hash.digest('hex');
 };
@@ -1535,12 +1484,12 @@ const prepareIsolatedE2EBuild = async (
   cpSync(join(frontendRoot, 'static'), artifacts.publicDir, { recursive: true });
   const buildLogPath = join(logsDir, 'build-runtime.log');
   const buildLog = createWriteStream(buildLogPath, { flags: 'w' });
-  const canonicalSvelteKitOutDir = join(frontendRoot, '.svelte-kit');
   try {
     const staticResult = await runE2ECommand('node', ['copy-static-files.js'], {
       cwd: frontendRoot,
       env: sanitizeChildProcessEnv({
         ...process.env,
+        XLN_BUN_EXECUTABLE: BUN_EXECUTABLE,
         XLN_STATIC_DIR: artifacts.publicDir,
       }),
       log: buildLog,
@@ -1549,6 +1498,7 @@ const prepareIsolatedE2EBuild = async (
     const buildResult = await runE2ECommand('bash', ['-lc', './scripts/build-runtime.sh'], {
       env: sanitizeChildProcessEnv({
         ...process.env,
+        XLN_BUN_EXECUTABLE: BUN_EXECUTABLE,
         XLN_RUNTIME_BUNDLE_OUT: artifacts.runtimeBundlePath,
       }),
       log: buildLog,
@@ -1557,14 +1507,15 @@ const prepareIsolatedE2EBuild = async (
     buildLog.write('\n=== isolated frontend build ===\n');
     const frontendBuildResult = await runE2ECommand(
       'node',
-      [resolve(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js'), 'build'],
+      [resolve(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--config', 'vite.config.ts'],
       {
         cwd: frontendRoot,
         env: sanitizeChildProcessEnv({
           ...process.env,
           XLN_RUNTIME_BUNDLE_PATH: artifacts.runtimeBundlePath,
-          XLN_SVELTE_BUILD_DIR: relative(frontendRoot, artifacts.frontendBuildDir),
-          VITE_PUBLIC_DIR: relative(frontendRoot, artifacts.publicDir),
+          XLN_FRONTEND_SURFACE: 'all',
+          XLN_FRONTEND_BUILD_DIR: relative(frontendRoot, artifacts.frontendBuildDir),
+          XLN_FRONTEND_STATIC_DIR: relative(frontendRoot, artifacts.publicDir),
           VITE_CACHE_DIR: relative(frontendRoot, join(artifacts.cacheRoot, 'vite-cache')),
         }),
         log: buildLog,
@@ -1582,8 +1533,6 @@ const prepareIsolatedE2EBuild = async (
         `frontend=${formatE2ECommandResult(frontendBuildResult)}:log=${buildLogPath}`,
       );
     }
-    rmSync(artifacts.svelteKitOutDir, { recursive: true, force: true });
-    cpSync(canonicalSvelteKitOutDir, artifacts.svelteKitOutDir, { recursive: true });
   } finally {
     buildLog.end();
     await finished(buildLog);
@@ -1598,60 +1547,6 @@ const prepareIsolatedE2EBuild = async (
   };
   writeFileSync(join(artifacts.cacheRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   return artifacts;
-};
-
-const isolatedReactBuildDir = (
-  artifacts: E2EBuildArtifacts,
-  surface: NonNullable<CliArgs['reactSurface']>,
-): string => join(artifacts.cacheRoot, `react-${surface}`);
-
-const prepareIsolatedReactBuild = async (
-  logsDir: string,
-  artifacts: E2EBuildArtifacts,
-  surface: NonNullable<CliArgs['reactSurface']>,
-  skipBuild: boolean,
-): Promise<string> => {
-  const outputDir = isolatedReactBuildDir(artifacts, surface);
-  const entrypoint = surface === 'ops'
-    ? join(outputDir, 'health', 'index.html')
-    : join(outputDir, 'index.html');
-  if (existsSync(entrypoint)) {
-    console.log(`⏩ isolated React ${surface} build cache hit: ${outputDir}`);
-    return outputDir;
-  }
-  if (skipBuild) throw new Error(`E2E_REACT_BUILD_CACHE_MISSING:${entrypoint}`);
-
-  const frontendRoot = resolve(process.cwd(), 'frontend');
-  const buildLogPath = join(logsDir, `build-react-${surface}.log`);
-  const buildLog = createWriteStream(buildLogPath, { flags: 'w' });
-  try {
-    const result = await runE2ECommand(
-      'node',
-      [resolve(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js'), 'build', '--config', 'vite.react.config.ts'],
-      {
-        cwd: frontendRoot,
-        env: {
-          ...process.env,
-          XLN_FRONTEND_SURFACE: surface,
-          XLN_REACT_BUILD_DIR: outputDir,
-          XLN_REACT_STATIC_ROOT: artifacts.publicDir,
-          XLN_RUNTIME_BUNDLE_PATH: artifacts.runtimeBundlePath,
-        },
-        log: buildLog,
-        timeoutMs: 300000,
-      },
-    );
-    if (!e2eCommandSucceeded(result)) {
-      throw new Error(
-        `E2E_REACT_BUILD_FAILED:surface=${surface}:${formatE2ECommandResult(result)}:log=${buildLogPath}`,
-      );
-    }
-  } finally {
-    buildLog.end();
-    await finished(buildLog);
-  }
-  if (!existsSync(entrypoint)) throw new Error(`E2E_REACT_BUILD_ENTRYPOINT_MISSING:${entrypoint}`);
-  return outputDir;
 };
 
 const forensicEndpoints = [
@@ -2000,21 +1895,21 @@ const runShard = async (
     markPhase('anvilBoot', anvilStart);
     throwIfAborted();
 
-    if (args.reactSurface && args.prewaitHealth === 'http') {
+    if (args.prewaitHealth === 'http') {
       const jurisdictionStart = Date.now();
-      await provisionReactCandidateJurisdictions({
+      await provisionE2EJurisdictions({
         shardJurisdictionsPath: join(dbPath, 'jurisdictions.json'),
         rpc2Url,
         rpcUrls: { 1: rpcUrl, 2: rpc2Url },
         ephemeralTestnet: true,
       });
-      log.write(`[timing] reactCandidateJurisdictions=${Date.now() - jurisdictionStart}ms\n`);
+      log.write(`[timing] e2eJurisdictions=${Date.now() - jurisdictionStart}ms\n`);
       throwIfAborted();
     }
 
     const apiStart = Date.now();
     api = spawn(
-      'bun',
+      BUN_EXECUTABLE,
       [
         'runtime/orchestrator/orchestrator.ts',
         '--host',
@@ -2122,12 +2017,6 @@ const runShard = async (
     }
 
     const shardViteCacheDir = join(shardPaths.root, 'vite-cache');
-    const shardSvelteKitOutDir = args.reactSurface
-      ? null
-      : prepareShardSvelteKitOutDir(buildArtifacts.svelteKitOutDir, logsDir, shard, log);
-    const reactBuildDir = args.reactSurface
-      ? isolatedReactBuildDir(buildArtifacts, args.reactSurface)
-      : null;
     const viteStart = Date.now();
     // Spawn Vite directly. `bun run preview` starts an extra child node
     // process, so killing the Bun wrapper can leave `node .../vite preview`
@@ -2137,7 +2026,8 @@ const runShard = async (
       [
         resolve(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js'),
         'preview',
-        ...(args.reactSurface ? ['--config', 'vite.react.config.ts'] : []),
+        '--config',
+        'vite.config.ts',
         '--mode',
         `xln-e2e-${basename(logsDir)}-${shard}`,
         '--host',
@@ -2159,22 +2049,17 @@ const runShard = async (
           VITE_API_PROXY_TARGET: apiUrl,
           XLN_VITE_FORCE_HTTP: '1',
           VITE_CACHE_DIR: shardViteCacheDir,
-          ...(shardSvelteKitOutDir ? { XLN_SVELTE_KIT_OUT_DIR: shardSvelteKitOutDir } : {}),
-          XLN_SVELTE_BUILD_DIR: relative(frontendRoot, buildArtifacts.frontendBuildDir),
+          XLN_FRONTEND_SURFACE: 'all',
+          XLN_FRONTEND_BUILD_DIR: relative(frontendRoot, buildArtifacts.frontendBuildDir),
+          XLN_FRONTEND_STATIC_DIR: relative(frontendRoot, buildArtifacts.publicDir),
           XLN_RUNTIME_BUNDLE_PATH: buildArtifacts.runtimeBundlePath,
-          VITE_PUBLIC_DIR: relative(frontendRoot, buildArtifacts.publicDir),
-          ...(args.reactSurface && reactBuildDir ? {
-            XLN_FRONTEND_SURFACE: args.reactSurface,
-            XLN_REACT_BUILD_DIR: reactBuildDir,
-            XLN_REACT_STATIC_ROOT: buildArtifacts.publicDir,
-          } : {}),
         }),
       },
     );
     vite.stdout.on('data', c => log.write(`[vite] ${c.toString()}`));
     vite.stderr.on('data', c => log.write(`[vite:err] ${c.toString()}`));
     await waitForWebReady(
-      args.reactSurface === 'ops' ? `${webUrl}/health` : webUrl,
+      webUrl,
       Math.min(args.stackTimeoutMs, 30_000),
       shardAbortController.signal,
     );
@@ -2207,9 +2092,10 @@ const runShard = async (
     log.write(`[runner] playwright args: ${JSON.stringify(playwrightArgs)}\n`);
 
     const playwrightStart = Date.now();
-    const playwrightResult = await runE2ECommand('bunx', playwrightArgs, {
+    const playwrightResult = await runE2ECommand(BUN_EXECUTABLE, ['x', ...playwrightArgs], {
       env: {
         ...process.env,
+        XLN_BUN_EXECUTABLE: BUN_EXECUTABLE,
         // Keep isolated CI-style runs headless even if the parent shell has
         // debugging/browser-opening variables set.
         CI: process.env['CI'] || '1',
@@ -2234,8 +2120,6 @@ const runShard = async (
         E2E_ANVIL_RPC2: rpc2Url,
         XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
         E2E_RESET_BASE_URL: apiUrl,
-        ...(args.reactSurface === 'wallet' ? { PW_REACT_WALLET_CANDIDATE: '1' } : {}),
-        ...(args.reactSurface === 'ops' ? { PW_REACT_OPS_CANDIDATE: '1' } : {}),
         E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
         E2E_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
         E2E_BROWSER_EVENTS_PATH: shardBrowserEventsPath(logsDir, shard),
@@ -2524,7 +2408,7 @@ async function main(): Promise<void> {
   console.log(`Max failures : ${args.maxFailures}`);
   console.log(`Phase warn ms: ${args.phaseWarnMs}`);
   console.log(`Prewait health: ${args.prewaitHealth}`);
-  console.log(`Frontend      : ${args.reactSurface ? `React ${args.reactSurface} candidate` : 'canonical'}`);
+  console.log('Frontend      : canonical four-surface Vite build');
   console.log(`Browser health: ${args.strictBrowserHealth ? 'strict' : 'report-only'}`);
   console.log(`QA category  : ${args.qaCategory ?? 'all'}`);
   console.log(`File batching: ${args.batchFiles ? 'yes' : 'no'}`);
@@ -2543,10 +2427,6 @@ async function main(): Promise<void> {
       codeFingerprint.buildInputHash,
       args.skipBuild,
     );
-    if (args.reactSurface) {
-      await prepareIsolatedReactBuild(logsDir, buildArtifacts, args.reactSurface, args.skipBuild);
-    }
-
     try {
       await assertRunnerPreflight();
     } catch (error) {

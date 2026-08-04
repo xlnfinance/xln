@@ -1,38 +1,35 @@
 {
-	"extends": "./.svelte-kit/tsconfig.json",
-	"compilerOptions": {
-		"allowJs": true,
-		"checkJs": true,
-		"esModuleInterop": true,
-		"forceConsistentCasingInFileNames": true,
-		"resolveJsonModule": true,
-		"skipLibCheck": true,
-		"sourceMap": true,
-		"moduleResolution": "bundler",
-		"allowImportingTsExtensions": true,
-		"types": ["svelte", "vite/client", "node", "bun"], // Project declarations cover browser-only libraries; Bun types cover repository tests.
-
-		// STRICTEST RULES FOR FINANCIAL SYSTEM
-		"strict": true,
-		"strictNullChecks": true,
-		"strictFunctionTypes": true,
-		"strictPropertyInitialization": true,
-		"strictBindCallApply": true,
-		"noImplicitAny": true,
-		"noImplicitThis": true,
-		"noImplicitReturns": true,
-		"noUncheckedIndexedAccess": true,
-		"noImplicitOverride": true,
-		"exactOptionalPropertyTypes": true,
-
-		// CATCH ERRORS EARLY
-		"noUnusedLocals": false, // Disabled for /view (WIP)
-		"noUnusedParameters": false, // Disabled for /view (WIP)
-		"noFallthroughCasesInSwitch": true,
-		"noPropertyAccessFromIndexSignature": true,
-
-		// SAFETY
-		"allowUnreachableCode": false,
-		"allowUnusedLabels": false
-	}
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "esModuleInterop": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": ["vite/client", "node", "bun"],
+    "paths": {
+      "$lib/*": ["src/lib/*"],
+      "@xln/brainvault/*": ["../brainvault/*"],
+      "@xln/runtime/*": ["../runtime/*"]
+    }
+  },
+  "include": [
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/**/*.ts",
+    "scripts/**/*.ts",
+    "vite.config.ts"
+  ]
 }

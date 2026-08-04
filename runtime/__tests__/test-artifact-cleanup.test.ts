@@ -83,8 +83,7 @@ describe('test artifact cleanup', () => {
     try {
       writeFile(root, '.logs/e2e-parallel/old-run/log.txt');
       writeFile(root, '.logs/scenarios-parallel/old-run/log.txt');
-      writeFile(root, 'frontend/.svelte-kit-e2e/old-run/output.txt');
-      writeFile(root, 'frontend/.svelte-kit/output/client/app.js');
+      writeFile(root, '.logs/e2e-build-cache/old-run/output.txt');
       writeFile(root, '.logs/bootstrap-soundcheck/probe.log');
       writeFile(root, 'frontend/build/index.html');
       writeFile(root, 'frontend/playwright-report/index.html');
@@ -109,8 +108,7 @@ describe('test artifact cleanup', () => {
       expect(summary.estimatedBudgetedBytes).toBeLessThan(1024 * 1024);
       expect(summary.removed).toContain('.logs/e2e-parallel');
       expect(summary.removed).toContain('.logs/scenarios-parallel');
-      expect(summary.removed).toContain('frontend/.svelte-kit-e2e');
-      expect(summary.removed).toContain('frontend/.svelte-kit/output');
+      expect(summary.removed).toContain('.logs/e2e-build-cache');
       expect(summary.removed).toContain('frontend/build');
       expect(summary.removed).toContain('frontend/playwright-report');
       expect(summary.removed).toContain('native/dist');
@@ -121,8 +119,7 @@ describe('test artifact cleanup', () => {
       expect(summary.removed).toContain('.logs/bench-radapter');
       expect(existsSync(join(root, '.logs/e2e-parallel'))).toBe(false);
       expect(existsSync(join(root, '.logs/scenarios-parallel'))).toBe(false);
-      expect(existsSync(join(root, 'frontend/.svelte-kit-e2e'))).toBe(false);
-      expect(existsSync(join(root, 'frontend/.svelte-kit/output'))).toBe(false);
+      expect(existsSync(join(root, '.logs/e2e-build-cache'))).toBe(false);
       expect(existsSync(join(root, 'frontend/build'))).toBe(false);
       expect(existsSync(join(root, 'frontend/playwright-report'))).toBe(false);
       expect(existsSync(join(root, 'native/dist'))).toBe(false);
@@ -530,7 +527,7 @@ describe('test artifact cleanup', () => {
     const root = makeTempWorkspace();
     try {
       writeFile(root, '.logs/e2e-parallel/old-run/log.txt');
-      writeFile(root, 'frontend/.svelte-kit-e2e/old-run/output.txt');
+      writeFile(root, '.logs/e2e-build-cache/old-run/output.txt');
       writeFile(root, 'frontend/build/index.html');
       writeFile(root, 'native/dist/xln.dmg');
       writeFile(root, '.logs/bootstrap-soundcheck/current/probe.log');
@@ -547,12 +544,12 @@ describe('test artifact cleanup', () => {
 
       expect(summary.skipped).toBe(false);
       expect(summary.removed).toContain('.logs/e2e-parallel');
-      expect(summary.removed).toContain('frontend/.svelte-kit-e2e');
+      expect(summary.removed).toContain('.logs/e2e-build-cache');
       expect(summary.removed).not.toContain('frontend/build');
       expect(summary.removed).not.toContain('.logs/bootstrap-soundcheck');
       expect(summary.removed).not.toContain('native/dist');
       expect(existsSync(join(root, '.logs/e2e-parallel'))).toBe(false);
-      expect(existsSync(join(root, 'frontend/.svelte-kit-e2e'))).toBe(false);
+      expect(existsSync(join(root, '.logs/e2e-build-cache'))).toBe(false);
       expect(existsSync(join(root, 'frontend/build/index.html'))).toBe(true);
       expect(existsSync(join(root, 'native/dist/xln.dmg'))).toBe(true);
       expect(existsSync(join(root, '.logs/bootstrap-soundcheck/current/probe.log'))).toBe(true);

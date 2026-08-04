@@ -362,25 +362,6 @@ test('recovery tower statuses prefer current failures over stale receipts', () =
   });
 });
 
-test('recovery settings panel renders the coverage grid inside existing recovery UI', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
-  expect(source).toContain('buildRuntimeRecoveryCoverage');
-  expect(source).toContain('buildRecoveryTowerStatuses');
-  expect(source).toContain('readRuntimeRecoveryDiscoveryStatus(activeRecoveryRuntimeId)');
-  expect(source).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: activeRecoveryRuntimeId }).length');
-  expect(source).toContain('peerSourceCount: recoveryPeerSourceCount');
-  expect(source).toContain('discovery: recoveryDiscoveryStatus');
-  expect(source).toContain('data-testid="recovery-coverage-grid"');
-  expect(source).toContain('data-testid={`recovery-coverage-${item.id}`}');
-  expect(source).toContain('class="recovery-service-status"');
-});
-
-test('onboarding recovery check renders typed discovery failures', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/OnboardingPanel.svelte', 'utf8');
-  expect(source).toContain('formatRuntimeRecoveryDiscoveryFailure');
-  expect(source).toContain('recoveryDiscoveryFailureLabels');
-  expect(source).toContain('data-testid="runtime-recovery-check-failures"');
-});
 
 test('formatRecoveryBytes keeps recovery coverage labels compact', () => {
   expect(formatRecoveryBytes(0)).toBe('0 B');

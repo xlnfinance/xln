@@ -1,5 +1,5 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
-import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteExternalStore';
+import { get as get, toReadableStore } from './storeBindings';
 import type { Tab } from '$lib/types/ui';
 import { errorLog } from './errorLogStore';
 
@@ -9,9 +9,9 @@ const nextTabIdBinding = createExternalStore<number>(1);
 export const tabsExternalStore = tabsBinding.store;
 export const activeTabIdExternalStore = activeTabIdBinding.store;
 export const nextTabIdExternalStore = nextTabIdBinding.store;
-export const tabs = toSvelteReadable(tabsBinding.store);
-export const activeTabId = toSvelteReadable(activeTabIdBinding.store);
-export const nextTabId = toSvelteReadable(nextTabIdBinding.store);
+export const tabs = toReadableStore(tabsBinding.store);
+export const activeTabId = toReadableStore(activeTabIdBinding.store);
+export const nextTabId = toReadableStore(nextTabIdBinding.store);
 
 const STORAGE_KEY = 'xln-entity-tabs';
 

@@ -71,7 +71,7 @@ test('hierarchical navigation projects runtime state into breadcrumb items', () 
         activeEntity: {
           summary: { entityId: entityA },
           accounts: {
-            items: [{ leftEntity: entityA, rightEntity: accountA }],
+            items: [{ state: { leftEntity: entityA, rightEntity: accountA } }],
             totalItems: 1,
           },
         },
@@ -125,26 +125,4 @@ test('remote runtime navigation does not inherit local vault signer selection', 
 
   expect(view.signerItems).toEqual([]);
   expect(view.entityItems).toEqual([{ id: entityB, label: entityB, count: 0 }]);
-});
-
-test('HierarchicalNav consumes a projected navigation view instead of reading full runtime env', () => {
-  const source = readFileSync('frontend/src/lib/components/Navigation/HierarchicalNav.svelte', 'utf8');
-  const helper = readFileSync('frontend/src/lib/components/Navigation/runtime-navigation-view.ts', 'utf8');
-  expect(source).toContain('buildHierarchicalNavigationView');
-  expect(source).toContain('$runtimeView');
-  expect(source).toContain('navigationView.runtimeItems');
-  expect(source).toContain('runtimeOperations.selectRuntime(id)');
-  expect(source).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
-  expect(source).toContain("errorLog.log('Runtime switch failed', 'Navigation'");
-  expect(source).not.toContain('activeRuntimeId.set');
-  expect(source).not.toContain('console.error');
-  expect(source).not.toContain('console.warn');
-  expect(source).not.toContain('console.info');
-  expect(source).not.toContain('eReplicas');
-  expect(source).not.toContain('jReplicas');
-  expect(source).not.toContain('runtime.env');
-  expect(helper).not.toContain('eReplicas');
-  expect(helper).not.toContain('jReplicas');
-  expect(helper).not.toContain('runtime.env');
-  expect(helper).not.toContain("from '$lib/stores/runtimeStore'");
 });

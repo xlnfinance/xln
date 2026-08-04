@@ -88,7 +88,6 @@ const capture = async (page: Page, testInfo: import('@playwright/test').TestInfo
 };
 
 test.describe('React wallet accounts and payments', () => {
-  test.skip(process.env['PW_REACT_WALLET_CANDIDATE'] !== '1', 'requires the release-blocked React wallet candidate');
 
   test('loads the real active Entity projection and wallet-owned deep routes', { tag: '@functional' }, async ({ page }, testInfo) => {
     test.setTimeout(3 * 60_000);

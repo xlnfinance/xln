@@ -20,10 +20,9 @@ const forbiddenImports = (directory: string, patterns: readonly RegExp[]): strin
 const containsForbiddenImport = (source: string, patterns: readonly RegExp[]): boolean =>
   patterns.some((pattern) => pattern.test(source));
 
-test('framework-neutral packages do not import React or Svelte', () => {
+test('framework-neutral packages do not import React', () => {
   expect(forbiddenImports(resolve(root, 'frontend/packages/client-core'), [
     /from ['"]react['"]/,
-    /from ['"]svelte(?:\/store)?['"]/,
   ])).toEqual([]);
 });
 
@@ -43,20 +42,17 @@ test('target store modules keep framework imports in adapters', () => {
   ];
   const violations = targetStores.filter((file) => containsForbiddenImport(
     readFileSync(resolve(root, 'frontend/src/lib/stores', file), 'utf8'),
-    [/from ['"]react['"]/, /from ['"]svelte(?:\/store)?['"]/],
+    [/from ['"]react['"]/],
   ));
   expect(violations).toEqual([]);
 });
 
-test('React and Svelte adapters cannot import each other', () => {
+test('React and store bindings cannot import each other', () => {
   expect(forbiddenImports(resolve(root, 'frontend/packages/react-adapters'), [
-    /from ['"]svelte(?:\/store)?['"]/,
-    /src\/lib\/stores\/adapters\/svelteExternalStore/,
+    /src\/lib\/stores\/storeBindings/,
   ])).toEqual([]);
-  expect(forbiddenImports(resolve(root, 'frontend/src/lib/stores/adapters'), [
-    /from ['"]react['"]/,
-    /packages\/react-adapters/,
-  ])).toEqual([]);
+  const bindings = readFileSync(resolve(root, 'frontend/src/lib/stores/storeBindings.ts'), 'utf8');
+  expect(containsForbiddenImport(bindings, [/from ['"]react['"]/, /packages\/react-adapters/])).toBe(false);
 });
 
 test('public site and docs cannot import the runtime client or store adapters', () => {
@@ -70,10 +66,6 @@ test('public site and docs cannot import the runtime client or store adapters', 
 });
 
 test('boundary matcher rejects fixture violations', () => {
-  expect(containsForbiddenImport(
-    "import { writable } from 'svelte/store';",
-    [/from ['"]svelte(?:\/store)?['"]/],
-  )).toBe(true);
   expect(containsForbiddenImport(
     "import { useSyncExternalStore } from 'react';",
     [/from ['"]react['"]/],

@@ -175,9 +175,9 @@ test('multi-shard derivation is deterministic', async () => {
 });
 
 test('CLI produces same results as library', async () => {
-  const { execSync } = await import('child_process');
+  const { execFileSync } = await import('child_process');
 
-  const output = execSync('bun cli.ts alice secret123456 1 --w=1', {
+  const output = execFileSync(process.execPath, ['cli.ts', 'alice', 'secret123456', '1', '--w=1'], {
     encoding: 'utf8',
     cwd: import.meta.dir,
   });
@@ -193,7 +193,7 @@ test('CLI produces same results as library', async () => {
   expect(json.mnemonic24).toBe(v.expect.mnemonic24);
 
   const emptyName = Bun.spawnSync({
-    cmd: ['bun', 'cli.ts', '', 'secret123456', '1', '--w=1'],
+    cmd: [process.execPath, 'cli.ts', '', 'secret123456', '1', '--w=1'],
     cwd: import.meta.dir,
     stderr: 'pipe',
     stdout: 'pipe',
@@ -202,7 +202,7 @@ test('CLI produces same results as library', async () => {
   expect(emptyName.stderr.toString()).toContain('BRAINVAULT_NAME_INVALID');
 
   const emptyPassphrase = Bun.spawnSync({
-    cmd: ['bun', 'cli.ts', 'alice', '', '1', '--w=1'],
+    cmd: [process.execPath, 'cli.ts', 'alice', '', '1', '--w=1'],
     cwd: import.meta.dir,
     stderr: 'pipe',
     stdout: 'pipe',

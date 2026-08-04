@@ -288,17 +288,10 @@ describe('production startup wiring', () => {
   test('standalone runtime requires an explicit production RPC or local-simulation mode', () => {
     const server = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
     const packagedDaemon = readFileSync(join(repoRoot, 'packages/npm/xlnfinance/lib/process.js'), 'utf8');
-    const formationPanel = readFileSync(
-      join(repoRoot, 'frontend/src/lib/components/Entity/FormationPanel.svelte'),
-      'utf8',
-    );
     expect(server).toContain("process.env['XLN_LOCAL_SIMULATION'] === 'true'");
     expect(server).toContain('JADAPTER_MODE_REQUIRED:set_USE_ANVIL_or_XLN_LOCAL_SIMULATION');
     expect(server).toContain('JADAPTER_MODE_CONFLICT:USE_ANVIL_and_XLN_LOCAL_SIMULATION');
     expect(packagedDaemon).toContain("XLN_LOCAL_SIMULATION: 'true'");
-    expect(formationPanel).toContain(
-      'jurisdictions.filter(jurisdiction => !isTronChainId(Number(jurisdiction.chainId)))',
-    );
     expect(existsSync(join(repoRoot, 'scripts/start-prod-hub.sh'))).toBe(false);
   });
 
@@ -330,10 +323,10 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('ensure_committed_contract_artifacts');
     expect(deploy).toContain('CONTRACT_ARTIFACTS_NOT_COMMITTED');
     expect(deploy).toContain(
-      'COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build',
+      'COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C "$release_root" -czf "$PREBUILT_FRONTEND_ARCHIVE" .',
     );
     expect(deploy).toContain('scp "$PREBUILT_FRONTEND_ARCHIVE" "$REMOTE_HOST:$remote_frontend_archive"');
-    expect(deploy).toContain("tar -xzf '$remote_frontend_archive' -C frontend");
+    expect(deploy).toContain('tar -xzf \'$remote_frontend_archive\' -C \\"\\$STAGED_RELEASE\\"');
     expect(deploy).toContain(
       'remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./scripts/deployment/deploy-platform.sh --runtime-only"',
     );
@@ -344,22 +337,16 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('PRODUCTION_FRONTEND_ARTIFACT_MISSING');
     expect(deploy).toContain('DEPLOY_PUSH_REQUIRES_REMOTE');
     expect(deploy).not.toContain('remote_cmd="$remote_cmd --frontend"');
-    expect(deploy).toContain('frontend artifact installed without runtime restart');
+    expect(deploy).toContain('atomic frontend release activated without runtime restart');
     expect(packageJson.scripts['deploy:prod:frontend']).toContain('--frontend-only');
   });
 
   test('production public discovery, recovery, and faucet routes are operational by default', () => {
-    const runtimeCreation = readFileSync(
-      join(repoRoot, 'frontend/src/lib/components/Views/RuntimeCreation.svelte'),
-      'utf8',
-    );
     const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
     const deploy = readPlatformDeploy();
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
 
-    expect(runtimeCreation).toContain("url.searchParams.set('access', 'admin')");
-    expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
     expect(xlnStore).toContain("importSource.searchParams.set('access', 'admin')");
     expect(xlnStore).not.toContain("importSource.searchParams.set('allowPartial', '1')");
     expect(deploy).toContain('location /api/recovery/');
@@ -452,13 +439,13 @@ describe('production startup wiring', () => {
 
     expect(generator).toContain("const outputDir = path.resolve(frontendDir, process.env.XLN_STATIC_DIR || 'static');");
     expect(generator).not.toContain("const outputDir = path.join(__dirname, '../../frontend/static/');");
-    expect(runner).toContain('cpSync(canonicalSvelteKitOutDir, artifacts.svelteKitOutDir, { recursive: true });');
+    expect(runner).toContain("XLN_FRONTEND_SURFACE: 'all'");
     const isolatedBuild = extractSourceBlock(
       runner,
       'const prepareIsolatedE2EBuild = async',
       'const forensicEndpoints = [',
     );
-    expect(isolatedBuild).not.toContain('XLN_SVELTE_KIT_OUT_DIR: relative(frontendRoot, artifacts.svelteKitOutDir)');
+    expect(isolatedBuild).toContain('XLN_FRONTEND_BUILD_DIR: relative(frontendRoot, artifacts.frontendBuildDir)');
   });
 
   test('start-server exposes the secondary Tron RPC to the orchestrator and children', () => {
@@ -1481,7 +1468,6 @@ describe('production startup wiring', () => {
     const radapterRemote = ['tests/e2e-radapter-remote-part-1.spec.ts', 'tests/e2e-radapter-remote-part-2.spec.ts']
       .map(file => readFileSync(join(repoRoot, file), 'utf8'))
       .join('\n');
-    const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
     const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/remoteRuntimeImportFlow.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap-timeline-stages.ts'), 'utf8');
@@ -1520,10 +1506,6 @@ describe('production startup wiring', () => {
       'resetState.inProgress = false;\n    pendingResetOptions = null;\n  }\n  await publishRuntimeImportManifest();',
     );
 
-    expect(existsSync(join(repoRoot, 'frontend/src/routes/radapter/manage/+page.svelte'))).toBe(false);
-    expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');
-    expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
-    expect(appLayout).toContain('const result = await importRemoteRuntimeEntries(entries)');
     expect(importFlow).toContain('await Promise.allSettled(workers)');
     expect(importFlow).toContain('writeRemoteRuntimeImportSummary(results, entries.length, importedAt)');
     expect(isolatedRunner).toContain("'--wallet-url',\n        `${webUrl}/app`,\n        '--allow-reset'");
@@ -2082,9 +2064,9 @@ describe('production startup wiring', () => {
       "{ name: 'real WebSocket P2P relay', command: 'bun run test:p2p:relay', timeoutMs: 240_000 }",
     );
     expect(releaseGate).toContain(
-      "{ name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 }",
+      "{ name: 'frontend type contract', command: 'cd frontend && bunx tsc -p tsconfig.json --noEmit', timeoutMs: 60_000 }",
     );
-    expect(releaseGate.indexOf("'frontend generated aliases'")).toBeLessThan(
+    expect(releaseGate.indexOf("'frontend type contract'")).toBeLessThan(
       releaseGate.indexOf("'runtime core unit tests'"),
     );
     expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'fast E2E gate'"));
@@ -2146,7 +2128,7 @@ describe('production startup wiring', () => {
       "globalSetup: '../tests/playwright-global-setup.ts'",
     );
     const playwrightGlobalSetup = readFileSync(join(repoRoot, 'tests/playwright-global-setup.ts'), 'utf8');
-    expect(playwrightGlobalSetup).toContain("spawnSync('bun'");
+    expect(playwrightGlobalSetup).toContain('spawnSync(bunExecutable');
     expect(playwrightGlobalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_SCRIPT');
     expect(playwrightGlobalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_CWD');
     expect(playwrightGlobalSetup).toContain("'playwright'");
@@ -2570,11 +2552,10 @@ describe('production startup wiring', () => {
 
   test('orchestrator exposes the gossip profile bundle endpoint used by payments', () => {
     const debugApi = readFileSync(join(repoRoot, 'runtime/orchestrator/debug-api.ts'), 'utf8');
-    const paymentPanel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/PaymentPanel.svelte'), 'utf8');
+    const paymentForm = readFileSync(join(repoRoot, 'frontend/apps/wallet/src/features/payments/WalletPaymentForm.tsx'), 'utf8');
     const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
 
-    expect(paymentPanel).not.toContain('/api/gossip/profile?entityId=');
-    expect(paymentPanel).toContain('refreshPaymentRuntimeGossip');
+    expect(paymentForm).not.toContain('/api/gossip/profile?entityId=');
     expect(xlnStore).toContain('/api/gossip/profile?entityId=');
     expect(xlnStore).toContain('export async function refreshPaymentRuntimeGossip');
     expect(debugApi).toContain("import { buildKnownProfileBundle } from '../api/server/gossip-profiles';");

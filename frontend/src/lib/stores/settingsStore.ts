@@ -1,5 +1,5 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
-import { getSvelteStoreValue as get, toSvelteReadable } from './adapters/svelteExternalStore';
+import { get as get, toReadableStore } from './storeBindings';
 import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode, AccountSkin, AccountBarStyle, UIStyleSettings } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
 import {
@@ -72,7 +72,7 @@ const defaultSettings: Settings = {
 
 const settingsBinding = createExternalStore<Settings>(defaultSettings);
 export const settingsExternalStore = settingsBinding.store;
-export const settings = toSvelteReadable(settingsBinding.store);
+export const settings = toReadableStore(settingsBinding.store);
 
 // Storage keys
 const SETTINGS_KEY = 'xln-settings';

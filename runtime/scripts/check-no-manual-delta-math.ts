@@ -56,7 +56,7 @@ function shouldSkip(rel: string): boolean {
 }
 
 function isCodeFile(rel: string): boolean {
-  return /\.(ts|tsx|js|jsx|svelte)$/.test(rel) && !rel.endsWith('.d.ts');
+  return /\.(ts|tsx|js|jsx)$/.test(rel) && !rel.endsWith('.d.ts');
 }
 
 async function walk(absPath: string): Promise<string[]> {

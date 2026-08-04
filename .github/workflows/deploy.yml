@@ -32,21 +32,21 @@ jobs:
           cd frontend
           bun install
           
-      - name: Build Svelte static site
+      - name: Build canonical frontend surfaces
         run: |
           cd frontend
           bun run build:static
           
-      - name: Deploy Svelte app
+      - name: Prepare canonical frontend artifact
         run: |
           # Clean dist directory to ensure no conflicts
           rm -rf dist
           mkdir -p dist
-          # Copy ONLY Svelte app build - nothing else
+          # Copy the exact site/docs/wallet/ops build roots.
           cp -r frontend/build/* dist/
           # Verify deployment structure
           ls -la dist/
-          echo "✅ Deploying Svelte app only - no legacy files"
+          echo "Canonical frontend artifact ready"
           
       - name: Setup Pages
         uses: actions/configure-pages@v4

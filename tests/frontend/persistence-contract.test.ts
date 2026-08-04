@@ -31,7 +31,7 @@ describe('same-origin browser persistence contract', () => {
     const worker = read('frontend/static/push-wake-sw.js');
     const registration = read('frontend/src/lib/utils/pushWakeRegistration.ts');
 
-    expect(WEB_APP_MANIFEST).toEqual({ path: '/site.webmanifest', startUrl: '/', scope: '/' });
+    expect(WEB_APP_MANIFEST).toEqual({ path: '/site.webmanifest', startUrl: '/app', scope: '/' });
     expect(manifest['start_url']).toBe(WEB_APP_MANIFEST.startUrl);
     expect(manifest['scope']).toBe(WEB_APP_MANIFEST.scope);
     expect(worker).toContain(`: '${PUSH_WAKE_SERVICE_WORKER.defaultOpenPath}'`);
@@ -40,13 +40,12 @@ describe('same-origin browser persistence contract', () => {
   });
 
   test('preserves the native root redirect and build directory', () => {
-    const appTemplate = read('frontend/src/app.html');
+    const walletEntry = read('frontend/apps/wallet/src/wallet-entry.ts');
     const capacitorConfig = read('frontend/capacitor.config.ts');
 
-    expect(NATIVE_WEB_ENTRY).toEqual({ rootPath: '/', redirectPath: '/app', webDir: 'build' });
-    expect(appTemplate).toContain("window.location.pathname === '/'");
-    expect(appTemplate).toContain("window.history.replaceState(null, '', '/app')");
-    expect(capacitorConfig).toContain("|| 'build'");
-    expect(capacitorConfig).toContain("webDir !== 'build' && webDir !== '.native-wallet-build'");
+    expect(NATIVE_WEB_ENTRY).toEqual({ rootPath: '/', redirectPath: '/app', webDir: '.native-wallet-build' });
+    expect(walletEntry).toContain("if (normalized === '/' && environment !== 'browser') return '/app'");
+    expect(capacitorConfig).toContain("|| '.native-wallet-build'");
+    expect(capacitorConfig).toContain("webDir !== '.native-wallet-build'");
   });
 });

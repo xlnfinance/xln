@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 
 import {
   buildCommandPaletteView,
@@ -60,19 +59,4 @@ test('command palette view builds a remote RuntimeView projection search index',
   expect(findCommandPaletteEntities('runtime', view)).toEqual([
     { id: C.toLowerCase(), name: 'Charlie Runtime', isHub: false },
   ]);
-});
-
-test('CommandPalette consumes CommandPaletteView instead of owning runtime env reads', () => {
-  const palette = readFileSync('frontend/src/lib/components/shared/CommandPalette.svelte', 'utf8');
-  const view = readFileSync('frontend/src/lib/view/View.svelte', 'utf8');
-
-  expect(palette).toContain('export let commandPaletteView: CommandPaletteView');
-  expect(palette).toContain('findCommandPaletteEntities');
-  expect(palette).not.toContain('xlnEnvironment');
-  expect(palette).not.toContain('xlnFunctions');
-  expect(palette).not.toContain('env.state.eReplicas');
-  expect(palette).not.toContain('validatedProfiles');
-  expect(view).toContain('buildCommandPaletteView(viewEnv)');
-  expect(view).toContain('buildCommandPaletteViewFromRuntimeView');
-  expect(view).toContain('{commandPaletteView}');
 });

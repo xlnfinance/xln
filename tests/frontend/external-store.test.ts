@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { createExternalStore, selectExternalStore } from '../../frontend/packages/client-core/external-store';
 import { defaultAppState, reduceAppState } from '../../frontend/packages/client-core/app-state';
 import {
-  getSvelteStoreValue,
-  toSvelteWritable,
-} from '../../frontend/src/lib/stores/adapters/svelteExternalStore';
+  get,
+  toWritableStore,
+} from '../../frontend/src/lib/stores/storeBindings';
 import { createErrorLogStore } from '../../frontend/src/lib/stores/errorLogStore';
 import { createToastStore } from '../../frontend/src/lib/stores/toastStore';
 
@@ -86,18 +86,18 @@ test('selector stores notify only when the selected snapshot changes', () => {
   expect(notifications).toBe(1);
 });
 
-test('Svelte adapter is a facade over the same external snapshot', () => {
+test('store binding is a facade over the same external snapshot', () => {
   const binding = createExternalStore(0);
-  const svelte = toSvelteWritable(binding);
+  const store = toWritableStore(binding);
   const snapshots: number[] = [];
-  const unsubscribe = svelte.subscribe((snapshot) => snapshots.push(snapshot));
+  const unsubscribe = store.subscribe((snapshot) => snapshots.push(snapshot));
 
   binding.controller.set(1);
-  svelte.update((snapshot) => snapshot + 1);
+  store.update((snapshot) => snapshot + 1);
   unsubscribe();
 
   expect(snapshots).toEqual([0, 1, 2]);
-  expect(getSvelteStoreValue(svelte)).toBe(binding.store.getSnapshot());
+  expect(get(store)).toBe(binding.store.getSnapshot());
 });
 
 test('pure app transitions replay identically and preserve no-op identity', () => {

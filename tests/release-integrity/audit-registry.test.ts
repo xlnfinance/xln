@@ -79,11 +79,11 @@ describe('canonical audit registry', () => {
       invariant => invariant.id === 'wallet-frontend.durable-status-truth',
     )!;
     const sources = [
-      'frontend/src/lib/components/Entity/PaymentPanel.svelte',
-      'frontend/src/lib/components/PaymentSpotlight.svelte',
+      'frontend/apps/wallet/src/features/payments/WalletPaymentForm.tsx',
+      'frontend/apps/wallet/src/features/accounts/wallet-financial-actions.ts',
       'frontend/src/lib/stores/paymentSpotlightStore.ts',
       'frontend/src/lib/stores/paymentTerminalMonitor.ts',
-      'frontend/src/lib/view/View.svelte',
+      'frontend/packages/runtime-client/wallet-payment-input-adapter.ts',
       'frontend/src/lib/utils/xlnInvoice.ts',
     ];
     const tests = [

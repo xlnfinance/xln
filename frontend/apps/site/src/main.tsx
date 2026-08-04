@@ -2,6 +2,7 @@ import { lazy, StrictMode, Suspense, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { AppErrorBoundary } from './AppErrorBoundary';
+import { installBrowserErrorTelemetry } from '../../../src/lib/debug/browser-telemetry';
 import { scheduleSiteAnalytics } from './analytics';
 import { installGlobalErrorSurface, reportSiteError } from './error-surface';
 import { PublicShell } from './PublicShell';
@@ -25,6 +26,7 @@ const Page = lazy(loader);
 const container = document.getElementById('root');
 if (!container) throw new Error('REACT_SITE_ROOT_MISSING');
 
+installBrowserErrorTelemetry();
 installGlobalErrorSurface();
 createRoot(container, {
   onCaughtError: error => reportSiteError('react-caught', error),

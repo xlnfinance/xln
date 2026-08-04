@@ -1,5 +1,5 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
-import { toSvelteReadable } from './adapters/svelteExternalStore';
+import { toReadableStore } from './storeBindings';
 
 export interface ErrorLogEntry {
   timestamp: number;
@@ -14,7 +14,7 @@ export interface ErrorLogClock {
 
 export function createErrorLogStore(clock: ErrorLogClock) {
   const binding = createExternalStore<ErrorLogEntry[]>([]);
-  const readable = toSvelteReadable(binding.store);
+  const readable = toReadableStore(binding.store);
 
   return {
     externalStore: binding.store,

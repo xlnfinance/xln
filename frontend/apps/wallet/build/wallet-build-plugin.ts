@@ -2,15 +2,10 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
-  writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
 
-import {
-  buildReactWalletCandidateManifest,
-  REACT_CANDIDATE_MANIFEST_FILE,
-} from '../../../packages/build-contracts/react-candidate';
 import type { ReactViteSurfaceContract } from '../../../packages/build-contracts/vite-surfaces';
 
 export const WALLET_STATIC_ASSETS = [
@@ -39,20 +34,12 @@ const copyWalletAssets = (staticRoot: string, outputRoot: string): void => {
 };
 
 export const createWalletBuildPlugin = (
-  frontendRoot: string,
+  staticRoot: string,
   contract: ReactViteSurfaceContract,
 ): Plugin => ({
-  name: 'xln-react-wallet-assets',
+  name: 'xln-wallet-assets',
   closeBundle() {
-    if (contract.surface !== 'wallet') return;
-    const staticRoot = process.env['XLN_REACT_STATIC_ROOT']
-      ? resolve(process.env['XLN_REACT_STATIC_ROOT'])
-      : resolve(frontendRoot, 'static');
+    if (contract.surface !== 'wallet' && contract.surface !== 'all') return;
     copyWalletAssets(staticRoot, contract.outDir);
-    const manifest = buildReactWalletCandidateManifest(contract.routes);
-    writeFileSync(
-      join(contract.outDir, REACT_CANDIDATE_MANIFEST_FILE),
-      `${JSON.stringify(manifest, null, 2)}\n`,
-    );
   },
 });
