@@ -150,6 +150,65 @@ describe('runtime websocket recovery requests', () => {
     expect(client.isConnecting()).toBe(false);
   });
 
+  test('failed hello send does not unlock non-hello frames before acknowledgement', async () => {
+    const receivedTypes: string[] = [];
+    const errors: string[] = [];
+    let rawServer: ReturnType<typeof Bun.serve> | null = null;
+    rawServer = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request, server) {
+        if (request.headers.get('upgrade') === 'websocket' && server.upgrade(request)) return;
+        return new Response('websocket only', { status: 400 });
+      },
+      websocket: {
+        open(ws) {
+          ws.send(
+            serializeWsMessage({
+              type: 'hello_challenge',
+              challenge: 'runtime-ws-hello-send-fail',
+              audience: `ws://127.0.0.1:${rawServer!.port}/`,
+            }),
+          );
+        },
+        message(_ws, raw) {
+          receivedTypes.push(deserializeWsMessage(raw).type);
+        },
+      },
+    });
+    rawServers.push(rawServer);
+    const client = makeClient({
+      url: `ws://127.0.0.1:${rawServer.port}`,
+      seed: SEED_A,
+      runtimeId: RUNTIME_A,
+      signerId: '1',
+      onError: error => errors.push(error.message),
+    });
+    const clientState = client as unknown as {
+      sendRaw: (msg: { type: string }) => boolean;
+      connecting: boolean;
+      helloSent: boolean;
+      helloNonce: string | null;
+      handleSocketError: (generation: number, error: Error) => void;
+      lifecycleGeneration: number;
+    };
+    const originalSendRaw = clientState.sendRaw.bind(client);
+    clientState.sendRaw = (msg) => {
+      if (msg.type === 'hello') return false;
+      return originalSendRaw(msg);
+    };
+
+    await client.connect();
+    await waitUntil(() => errors.includes('WS_HELLO_SEND_FAILED'), 'hello send failure');
+    expect(clientState.helloSent).toBe(false);
+    expect(clientState.helloNonce).toBeNull();
+
+    clientState.handleSocketError(clientState.lifecycleGeneration, new Error('spurious'));
+    expect(clientState.connecting).toBe(false);
+    expect(client.sendDebugEvent({ code: 'PRE_HELLO' })).toBe(false);
+    expect(receivedTypes).toEqual([]);
+  });
+
   test('requestRecoveryBundles resolves a correlated peer response through relay', async () => {
     const relay = startRelay();
     const url = `ws://127.0.0.1:${relay.server.port}`;
@@ -240,6 +299,7 @@ describe('runtime websocket recovery requests', () => {
     await sender.connect();
     await receiver.connect();
     await waitUntil(() => relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B), 'relay clients');
+    await waitUntil(() => sender.isOpen() && receiver.isOpen(), 'authenticated clients');
 
     expect(
       sender.sendEntityInputsRaw(RUNTIME_B, {

@@ -323,7 +323,10 @@ const handleHandshake = (
 ): boolean => {
   if (session.handshakeDone) return false;
   if (msg.type !== 'hello' || typeof msg.from !== 'string') {
-    send(ws, { type: 'error', error: 'Handshake required: send hello with runtimeId' });
+    send(ws, {
+      type: 'error',
+      error: `Handshake required: send hello with runtimeId (got type=${String(msg.type || 'missing')})`,
+    });
     ws.close();
     return true;
   }
