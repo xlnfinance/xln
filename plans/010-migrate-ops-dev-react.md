@@ -11,6 +11,7 @@
 
 ## Status
 
+- **Execution:** DONE — independent release-blocked ops artifact; L1/build/strict browser evidence green
 - **Priority:** P2
 - **Effort:** L
 - **Risk:** HIGH
@@ -139,13 +140,13 @@ Run once on the unchanged checkpoint candidate.
 
 ## Done criteria
 
-- [ ] All reachable operator/developer routes and panels have complete React implementations or are deleted with reachability proof.
-- [ ] Ops builds separately and its heavy dependencies do not enter public/docs/wallet artifacts.
-- [ ] Dockview/React roots, workers, canvases, listeners, and render loops have explicit leak-free lifecycle.
-- [ ] Endpoint ownership and capability boundaries are unchanged and tested.
-- [ ] No manual financial formula or mock scenario/runtime path exists.
-- [ ] Artifact remains release-blocked; `bun run check` passes; `wip:` checkpoint only.
-- [ ] `git status --short` is reviewed and the Plan 010 index row is updated.
+- [x] All reachable operator/developer routes and panels have complete React implementations or are deleted with reachability proof.
+- [x] Ops builds separately and its heavy dependencies do not enter public/docs/wallet artifacts.
+- [x] Dockview/React roots, workers, canvases, listeners, and render loops have explicit leak-free lifecycle.
+- [x] Endpoint ownership and capability boundaries are unchanged and tested.
+- [x] No manual financial formula or mock scenario/runtime path exists.
+- [x] Artifact remains release-blocked; `bun run check` passes; `wip:` checkpoint only.
+- [x] `git status --short` is reviewed and the Plan 010 index row is updated.
 
 ## Stop conditions
 

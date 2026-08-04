@@ -5,7 +5,7 @@ import {
   type FrontendRoute,
 } from '../../src/lib/contracts/frontendSurfaces';
 
-export const REACT_FRONTEND_SURFACES = ['all', 'site', 'docs', 'wallet'] as const;
+export const REACT_FRONTEND_SURFACES = ['all', 'site', 'docs', 'wallet', 'ops'] as const;
 export type ReactFrontendSurface = typeof REACT_FRONTEND_SURFACES[number];
 
 export type ReactViteSurfaceContract = Readonly<{
@@ -39,7 +39,7 @@ export const createReactViteSurfaceContract = (
   frontendRoot: string,
   surface: ReactFrontendSurface,
 ): ReactViteSurfaceContract => {
-  const selected = surface === 'all' ? ['site', 'docs', 'wallet'] as const : [surface];
+  const selected = surface === 'all' ? ['site', 'docs', 'wallet', 'ops'] as const : [surface];
   const routes = selected.flatMap(appRoutes);
   const inputs = Object.assign({}, ...selected.map(selectedSurface => appInputs(frontendRoot, selectedSurface)));
   return {

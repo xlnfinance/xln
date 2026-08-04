@@ -6,6 +6,7 @@ import { defineConfig, type Plugin } from 'vite';
 import { createSiteBuildPlugin } from './apps/site/build/site-build-plugin';
 import { createDocsBuildPlugin } from './apps/docs/build/docs-build-plugin';
 import { createWalletBuildPlugin } from './apps/wallet/build/wallet-build-plugin';
+import { createOpsBuildPlugin } from './apps/ops/build/ops-build-plugin';
 import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle';
 import {
   createReactViteSurfaceContract,
@@ -99,6 +100,7 @@ export default defineConfig(({ command }) => {
       createSiteBuildPlugin(FRONTEND_ROOT, contract),
       createDocsBuildPlugin(FRONTEND_ROOT, contract),
       createWalletBuildPlugin(FRONTEND_ROOT, contract),
+      createOpsBuildPlugin(contract),
     ],
     resolve: {
       alias: {

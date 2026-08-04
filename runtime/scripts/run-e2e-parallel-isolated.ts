@@ -1612,7 +1612,9 @@ const prepareIsolatedReactBuild = async (
   skipBuild: boolean,
 ): Promise<string> => {
   const outputDir = isolatedReactBuildDir(artifacts, surface);
-  const entrypoint = join(outputDir, 'index.html');
+  const entrypoint = surface === 'ops'
+    ? join(outputDir, 'health', 'index.html')
+    : join(outputDir, 'index.html');
   if (existsSync(entrypoint)) {
     console.log(`⏩ isolated React ${surface} build cache hit: ${outputDir}`);
     return outputDir;
@@ -2171,7 +2173,11 @@ const runShard = async (
     );
     vite.stdout.on('data', c => log.write(`[vite] ${c.toString()}`));
     vite.stderr.on('data', c => log.write(`[vite:err] ${c.toString()}`));
-    await waitForWebReady(webUrl, Math.min(args.stackTimeoutMs, 30_000), shardAbortController.signal);
+    await waitForWebReady(
+      args.reactSurface === 'ops' ? `${webUrl}/health` : webUrl,
+      Math.min(args.stackTimeoutMs, 30_000),
+      shardAbortController.signal,
+    );
     markPhase('viteBoot', viteStart);
     throwIfAborted();
 
@@ -2229,6 +2235,7 @@ const runShard = async (
         XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
         E2E_RESET_BASE_URL: apiUrl,
         ...(args.reactSurface === 'wallet' ? { PW_REACT_WALLET_CANDIDATE: '1' } : {}),
+        ...(args.reactSurface === 'ops' ? { PW_REACT_OPS_CANDIDATE: '1' } : {}),
         E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
         E2E_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
         E2E_BROWSER_EVENTS_PATH: shardBrowserEventsPath(logsDir, shard),

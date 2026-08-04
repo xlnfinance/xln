@@ -2,7 +2,7 @@ import type { FrontendRoute } from '../../src/lib/contracts/frontendSurfaces';
 
 export const REACT_CANDIDATE_MANIFEST_FILE = 'react-candidate.json';
 
-export type ReactCandidateSurface = 'site' | 'docs' | 'wallet';
+export type ReactCandidateSurface = 'site' | 'docs' | 'wallet' | 'ops';
 
 type ReactCandidateBase = Readonly<{
   schemaVersion: 1;
@@ -13,7 +13,8 @@ type ReactCandidateBase = Readonly<{
 export type ReactCandidateManifest =
   | (ReactCandidateBase & Readonly<{ surface: 'site' }>)
   | (ReactCandidateBase & Readonly<{ surface: 'docs'; catalogSha256: string }>)
-  | (ReactCandidateBase & Readonly<{ surface: 'wallet' }>);
+  | (ReactCandidateBase & Readonly<{ surface: 'wallet' }>)
+  | (ReactCandidateBase & Readonly<{ surface: 'ops' }>);
 
 const canonicalEntrypoints = (entries: readonly string[]): readonly string[] =>
   [...new Set(entries)].toSorted((left, right) => left.localeCompare(right));
@@ -47,6 +48,10 @@ export const buildReactSiteCandidateManifest = (
 export const buildReactWalletCandidateManifest = (
   routes: readonly FrontendRoute[],
 ): ReactCandidateManifest => buildReactCandidateManifest('wallet', routes);
+
+export const buildReactOpsCandidateManifest = (
+  routes: readonly FrontendRoute[],
+): ReactCandidateManifest => buildReactCandidateManifest('ops', routes);
 
 export const validateReactCandidateManifest = (
   value: unknown,
