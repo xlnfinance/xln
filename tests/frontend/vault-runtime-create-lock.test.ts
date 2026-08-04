@@ -72,6 +72,17 @@ describe('vault runtime creation lock', () => {
     expect(importJurisdiction).toBeGreaterThan(startLoop);
   });
 
+  test('runtime creation funds by default and permits an explicit unfunded vault flow', () => {
+    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const recoverySource = read('frontend/src/lib/stores/vault-recovery.ts');
+    const functionStart = source.indexOf('async createRuntime(name: string, seed: string');
+    const functionSource = source.slice(functionStart, source.indexOf('\n  // Select runtime', functionStart));
+
+    expect(recoverySource).toContain('fundSigner?: boolean | undefined;');
+    expect(functionSource).toContain('if (options.fundSigner !== false) {');
+    expect(functionSource).toContain('await fundSignerWalletViaFaucet(signerAddress);');
+  });
+
   test('runtime suspension closes ingress and drains accepted work before persistence quiesce', () => {
     const source = read('frontend/src/lib/stores/vaultStore.ts');
     const functionStart = source.indexOf('async function suspendRuntimeEnvActivity(');

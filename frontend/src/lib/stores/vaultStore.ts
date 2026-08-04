@@ -2171,7 +2171,9 @@ export const vaultOperations = {
         // Store entityId in signer
         runtime.signers[0]!.entityId = entityId;
         runtime.signers[0]!.jurisdiction = primaryJurisdictionName;
-        await fundSignerWalletViaFaucet(signerAddress);
+        if (options.fundSigner !== false) {
+          await fundSignerWalletViaFaucet(signerAddress);
+        }
 
         for (const secondary of secondaryJurisdictionImports) {
           const jReplicaSecondary = findJReplicaByName(newEnv, secondary.name);

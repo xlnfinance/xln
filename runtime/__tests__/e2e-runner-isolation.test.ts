@@ -18,6 +18,8 @@ import {
   deriveE2EShardPorts,
   LOCAL_TEST_STACK_BASES,
   parsePlaywrightFilesFlag,
+  resolveE2EPublicWsBaseUrl,
+  shouldDeferInitialReset,
 } from '../scripts/run-e2e-parallel-isolated';
 
 const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
@@ -38,6 +40,20 @@ const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
 };
 
 describe('isolated E2E runner resources', () => {
+  test('defers automatic mesh reset for HTTP-ready React candidate tests', () => {
+    expect(shouldDeferInitialReset({ prewaitHealth: 'http', reactSurface: 'wallet' })).toBe(true);
+    expect(shouldDeferInitialReset({ prewaitHealth: 'http', reactSurface: 'ops' })).toBe(true);
+    expect(shouldDeferInitialReset({ prewaitHealth: 'http' })).toBe(false);
+    expect(shouldDeferInitialReset({ prewaitHealth: 'full', reactSurface: 'wallet' })).toBe(false);
+    expect(shouldDeferInitialReset({ prewaitHealth: 'reset' })).toBe(true);
+  });
+
+  test('binds React candidate relay challenges to the browser-facing Vite origin', () => {
+    expect(resolveE2EPublicWsBaseUrl({ reactSurface: 'wallet' }, 20_002, 20_004))
+      .toBe('ws://localhost:20004');
+    expect(resolveE2EPublicWsBaseUrl({}, 20_002, 20_004)).toBe('ws://127.0.0.1:20002');
+  });
+
   test('--help prints usage without acquiring a lease or starting a stack', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-e2e-help-'));
     try {

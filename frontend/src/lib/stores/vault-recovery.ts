@@ -106,6 +106,7 @@ export type CreateRuntimeOptions = {
   skipRecoveryRestore?: boolean | undefined;
   recoveryCandidate?: RuntimeRecoveryCandidate | undefined;
   unlockDurationMs?: VaultUnlockDurationMs | undefined;
+  fundSigner?: boolean | undefined;
 };
 
 export type RecoveryTowerSetupMode = 'official' | 'backup_only' | 'local_only';

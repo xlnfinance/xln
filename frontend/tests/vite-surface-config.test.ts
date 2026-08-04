@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -24,6 +24,17 @@ const temporaryRoots: string[] = [];
 afterEach(() => temporaryRoots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
 
 describe('React Vite surface contract', () => {
+  test('keeps the browser relay host for authenticated WebSocket audiences', () => {
+    const source = readFileSync(join(FRONTEND_ROOT, 'vite.react.config.ts'), 'utf8');
+    const relayStart = source.indexOf("'/relay': {");
+    const relayEnd = source.indexOf('\n  },', relayStart);
+    const relaySource = source.slice(relayStart, relayEnd);
+
+    expect(relayStart).toBeGreaterThan(0);
+    expect(relaySource).toContain('changeOrigin: false');
+    expect(relaySource).toContain('configure: configureWsProxyLifecycle');
+  });
+
   test('maps every public route to an exact MPA entry and isolated output', () => {
     const expectedRoutes = FRONTEND_ROUTES.filter(route => route.surface === 'site' && route.kind === 'page');
     const site = createReactViteSurfaceContract(FRONTEND_ROOT, 'site');

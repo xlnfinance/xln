@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from '../../frontend/node_modules/react-dom/server.browser.js';
 
-import { WalletLoading } from '../../frontend/apps/wallet/src/WalletBootScreens';
+import { WalletBootError, WalletLoading } from '../../frontend/apps/wallet/src/WalletBootScreens';
 import { WalletSettings, WalletShell } from '../../frontend/apps/wallet/src/WalletShell';
 import type { WalletViewSnapshot } from '../../frontend/apps/wallet/src/wallet-view-store';
 import type { Settings } from '../../frontend/src/lib/types/ui';
@@ -31,6 +31,23 @@ test('loading surface exposes the preserved behavior id and current boot evidenc
   expect(html).toContain('data-testid="app-loading-screen"');
   expect(html).toContain('Opening the protected vault');
   expect(html).toContain('aria-busy="true"');
+});
+
+test('schema mismatch stops on an authenticated recovery surface without an implicit reset', () => {
+  const html = renderToStaticMarkup(
+    <WalletBootError
+      message="STORAGE_SCHEMA_MISMATCH:stored=3:current=2"
+      recoverable={false}
+      canRecoverBackup
+      onRetry={noAction}
+      onRecoverBackup={noAction}
+    />,
+  );
+  expect(html).toContain('Local runtime needs recovery');
+  expect(html).toContain('storage schema 3');
+  expect(html).toContain('requires schema 2');
+  expect(html).toContain('data-testid="storage-schema-recover"');
+  expect(html).not.toContain('storage-schema-reset');
 });
 
 test('ready shell has navigation, connection evidence, runtime selection, and no placeholder panels', () => {

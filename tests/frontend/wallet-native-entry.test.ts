@@ -8,6 +8,7 @@ import { buildReactWalletCandidateManifest } from '../../frontend/packages/build
 import { createReactViteSurfaceContract } from '../../frontend/packages/build-contracts/vite-surfaces';
 import { BROWSER_PERSISTENCE_CONTRACT } from '../../frontend/src/lib/contracts/browserPersistence';
 import { FRONTEND_ROUTES } from '../../frontend/src/lib/contracts/frontendSurfaces';
+import { parseNativeBuildOptions } from '../../scripts/native/build-platforms';
 
 const ROOT = resolve(import.meta.dir, '../..');
 
@@ -34,6 +35,15 @@ test('wallet build stays activation-blocked and contains every wallet page entry
   expect(manifest.surface).toBe('wallet');
   expect(contract.routes).toEqual(routes);
   for (const input of Object.values(contract.inputs)) expect(readFileSync(input, 'utf8')).toContain('src/main.tsx');
+});
+
+test('native migration smoke selects the blocked React wallet explicitly', () => {
+  const options = parseNativeBuildOptions(['mobile', '--react-wallet-candidate']);
+  expect(options.targets).toEqual(['ios', 'android']);
+  expect(options.flags.has('--react-wallet-candidate')).toBe(true);
+  const pipeline = readFileSync(resolve(ROOT, 'scripts/native/build-platforms.ts'), 'utf8');
+  expect(pipeline).toContain("validateReactCandidateManifest(candidate, expectedEntrypoints, 'wallet')");
+  expect(pipeline).toContain('activationBlocked: true');
 });
 
 test('public React entries do not import wallet native initialization', () => {

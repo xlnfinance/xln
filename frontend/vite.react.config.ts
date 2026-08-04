@@ -6,6 +6,7 @@ import { defineConfig, type Plugin } from 'vite';
 import { createSiteBuildPlugin } from './apps/site/build/site-build-plugin';
 import { createDocsBuildPlugin } from './apps/docs/build/docs-build-plugin';
 import { createWalletBuildPlugin } from './apps/wallet/build/wallet-build-plugin';
+import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle';
 import {
   createReactViteSurfaceContract,
   resolveReactFrontendSurface,
@@ -13,6 +14,31 @@ import {
 } from './packages/build-contracts/vite-surfaces';
 
 const FRONTEND_ROOT = fileURLToPath(new URL('.', import.meta.url));
+
+const apiProxyTarget = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
+const proxy = {
+  '/api': { target: apiProxyTarget, changeOrigin: true, secure: false },
+  '/rpc': {
+    target: apiProxyTarget,
+    changeOrigin: true,
+    secure: false,
+    ws: true,
+    configure: configureWsProxyLifecycle,
+  },
+  '/rpc2': {
+    target: apiProxyTarget,
+    changeOrigin: true,
+    secure: false,
+    ws: true,
+    configure: configureWsProxyLifecycle,
+  },
+  '/relay': {
+    target: apiProxyTarget,
+    changeOrigin: false,
+    ws: true,
+    configure: configureWsProxyLifecycle,
+  },
+};
 
 const canonicalRoutes = (contract: ReactViteSurfaceContract): readonly (readonly [string, string])[] => (
   contract.routes.map(route => {
@@ -59,7 +85,10 @@ const canonicalRoutePlugin = (contract: ReactViteSurfaceContract): Plugin => {
 
 export default defineConfig(({ command }) => {
   const surface = resolveReactFrontendSurface(process.env['XLN_FRONTEND_SURFACE']);
-  const contract = createReactViteSurfaceContract(FRONTEND_ROOT, surface);
+  const baseContract = createReactViteSurfaceContract(FRONTEND_ROOT, surface);
+  const contract: ReactViteSurfaceContract = process.env['XLN_REACT_BUILD_DIR']
+    ? { ...baseContract, outDir: resolve(FRONTEND_ROOT, process.env['XLN_REACT_BUILD_DIR']) }
+    : baseContract;
   return {
     root: contract.root,
     base: '/',
@@ -78,6 +107,8 @@ export default defineConfig(({ command }) => {
         '@xln/runtime': resolve(FRONTEND_ROOT, '../runtime'),
       },
     },
+    server: { proxy },
+    preview: { proxy },
     build: {
       outDir: contract.outDir,
       emptyOutDir: true,

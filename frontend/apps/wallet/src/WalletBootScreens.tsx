@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import type { WalletBootPhase } from '../../../packages/runtime-client/wallet-boot-machine';
+import { parseStorageSchemaMismatch } from '$lib/utils/storageSchemaRecovery';
 import { walletErrorText } from './error-surface';
 
 const BOOT_LABELS: Partial<Record<WalletBootPhase, string>> = {
@@ -60,6 +61,7 @@ type BootErrorProps = Readonly<{
 export const WalletBootError = (props: BootErrorProps) => {
   const [pending, setPending] = useState<'retry' | 'recover' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const schemaMismatch = parseStorageSchemaMismatch(props.message);
   const run = async (kind: 'retry' | 'recover', action: () => Promise<void>): Promise<void> => {
     setPending(kind);
     setActionError(null);
@@ -74,9 +76,22 @@ export const WalletBootError = (props: BootErrorProps) => {
   return (
     <main className="wallet-state wallet-state-error" data-testid="app-initialization-error" role="alert">
       <p className="wallet-eyebrow">initialization stopped</p>
-      <h1>Your wallet did not continue.</h1>
-      <pre>{props.message}</pre>
-      {actionError && <p className="wallet-inline-error">{actionError}</p>}
+      <h1>{schemaMismatch ? 'Local runtime needs recovery' : 'Your wallet did not continue.'}</h1>
+      {schemaMismatch ? (
+        <>
+          <p>This device has storage schema {schemaMismatch.storedVersion}, while this build requires schema {schemaMismatch.currentVersion}. No incompatible data was applied or deleted.</p>
+          <p>Restore an authenticated encrypted backup. The React candidate never resets local data automatically.</p>
+          <details><summary>Technical details</summary><pre>{props.message}</pre></details>
+        </>
+      ) : <pre>{props.message}</pre>}
+      {actionError && (
+        <p
+          className="wallet-inline-error"
+          data-testid={schemaMismatch ? 'storage-schema-recovery-error' : undefined}
+        >
+          {actionError}
+        </p>
+      )}
       <div className="wallet-actions">
         {props.recoverable && (
           <button type="button" disabled={pending !== null} onClick={() => void run('retry', props.onRetry)}>
@@ -85,7 +100,7 @@ export const WalletBootError = (props: BootErrorProps) => {
         )}
         {props.canRecoverBackup && (
           <button data-testid="storage-schema-recover" className="wallet-button-secondary" type="button" disabled={pending !== null} onClick={() => void run('recover', props.onRecoverBackup)}>
-            {pending === 'recover' ? 'Recovering…' : 'Recover authenticated backup'}
+            {pending === 'recover' ? 'Recovering…' : 'Restore encrypted backup'}
           </button>
         )}
       </div>

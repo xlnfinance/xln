@@ -28,8 +28,32 @@ const readSanitizedVault = async (page: import('@playwright/test').Page): Promis
     };
   });
 
+const captureWalletState = async (
+  page: import('@playwright/test').Page,
+  testInfo: import('@playwright/test').TestInfo,
+  state: 'ready' | 'locked',
+): Promise<void> => {
+  for (const [name, width, height] of [
+    ['wide', 1920, 1080],
+    ['laptop', 1440, 900],
+    ['iphone', 393, 852],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    const dimensions = await page.evaluate(() => ({
+      viewport: window.innerWidth,
+      document: document.documentElement.scrollWidth,
+    }));
+    expect(dimensions.document, `${state} ${name} horizontal overflow`).toBeLessThanOrEqual(dimensions.viewport);
+    await page.screenshot({
+      path: testInfo.outputPath(`wallet-${state}-${name}.png`),
+      fullPage: true,
+      animations: 'disabled',
+    });
+  }
+};
+
 test.describe('Vault reload and recovery', () => {
-  test('create, lock, unlock, and reload preserve one protected vault without exposing secrets', {
+  test('create, settings, lock, unlock, and reload preserve one protected vault without exposing secrets', {
     tag: '@resilience',
   }, async ({ page }, testInfo) => {
     test.setTimeout(5 * 60_000);
@@ -47,6 +71,7 @@ test.describe('Vault reload and recovery', () => {
         skipRecoveryRestore: true,
         recovery: { useDefaultTowers: false, towers: [] },
         unlockDurationMs: null,
+        fundSigner: false,
       });
       const id = String(runtime.id ?? '').toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(id)) throw new Error(`VAULT_RELOAD_E2E_ID_INVALID:${id}`);
@@ -66,21 +91,57 @@ test.describe('Vault reload and recovery', () => {
       },
     });
 
-    await page.evaluate(async id => {
-      const vault = window.__xln?.vault as VaultDebugOperations | undefined;
-      if (!vault?.lockRuntime) throw new Error('VAULT_RELOAD_E2E_LOCK_MISSING');
-      await vault.lockRuntime(id);
-      if (vault.getSignerPrivateKey?.(0) !== null) throw new Error('VAULT_RELOAD_E2E_LOCK_DID_NOT_REVOKE_SIGNER');
-    }, runtimeId);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('app-runtime-ready')).toBeVisible({ timeout: 60_000 });
+    expect(await page.locator('body').textContent()).not.toContain(seed);
+    await captureWalletState(page, testInfo, 'ready');
 
-    await page.evaluate(async ({ id, phrase }) => {
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByLabel('Theme').selectOption('arctic');
+    await page.getByLabel('Lite mode').check();
+    await page.getByLabel('xln mascot').uncheck();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('app-runtime-ready')).toBeVisible({ timeout: 60_000 });
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByLabel('Theme')).toHaveValue('arctic');
+    await expect(page.getByLabel('Lite mode')).toBeChecked();
+    await expect(page.getByLabel('xln mascot')).not.toBeChecked();
+    await page.getByRole('button', { name: 'Overview' }).click();
+
+    await page.getByRole('button', { name: 'Lock this runtime' }).click();
+    await expect(page.getByRole('heading', { name: 'Unlock your local runtime.' })).toBeVisible();
+    expect(await page.evaluate(() =>
+      (window.__xln?.vault as VaultDebugOperations | undefined)?.getSignerPrivateKey?.(0) ?? null,
+    )).toBeNull();
+    await captureWalletState(page, testInfo, 'locked');
+
+    const wrongSeed = Wallet.createRandom().mnemonic?.phrase;
+    if (!wrongSeed) throw new Error('VAULT_RELOAD_E2E_WRONG_MNEMONIC_GENERATION_FAILED');
+    const failedUnlock = await page.evaluate(async ({ id, phrase }) => {
       const vault = window.__xln?.vault as VaultDebugOperations | undefined;
       if (!vault?.unlockRuntime) throw new Error('VAULT_RELOAD_E2E_UNLOCK_MISSING');
-      await vault.unlockRuntime(id, phrase, null);
-      if (!vault.getSignerPrivateKey?.(0)) throw new Error('VAULT_RELOAD_E2E_UNLOCK_DID_NOT_RESTORE_SIGNER');
+      try {
+        await vault.unlockRuntime(id, phrase, null);
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    }, { id: runtimeId, phrase: wrongSeed });
+    expect(failedUnlock).toBeTruthy();
+    expect(await page.evaluate(() =>
+      (window.__xln?.vault as VaultDebugOperations | undefined)?.getSignerPrivateKey?.(0) ?? null,
+    )).toBeNull();
+
+    await page.getByTestId('wallet-unlock-mnemonic').fill(seed);
+    await page.getByRole('button', { name: 'Unlock wallet' }).click();
+    await expect(page.getByTestId('app-runtime-ready')).toBeVisible({ timeout: 60_000 });
+    expect(await page.locator('body').textContent()).not.toContain(seed);
+    await page.evaluate(async () => {
+      const vault = window.__xln?.vault as VaultDebugOperations | undefined;
+      if (!vault?.getSignerPrivateKey?.(0)) throw new Error('VAULT_RELOAD_E2E_UNLOCK_DID_NOT_RESTORE_SIGNER');
       if (!vault.suspendAllRuntimeActivity) throw new Error('VAULT_RELOAD_E2E_SUSPEND_MISSING');
       await vault.suspendAllRuntimeActivity();
-    }, { id: runtimeId, phrase: seed });
+    });
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect.poll(() => page.evaluate(id => {

@@ -28,7 +28,9 @@ export const WALLET_STATIC_ASSETS = [
 
 const copyWalletAssets = (staticRoot: string, outputRoot: string): void => {
   for (const file of WALLET_STATIC_ASSETS) {
-    const source = join(staticRoot, file);
+    const source = file === 'runtime.js' && process.env['XLN_RUNTIME_BUNDLE_PATH']
+      ? resolve(process.env['XLN_RUNTIME_BUNDLE_PATH'])
+      : join(staticRoot, file);
     if (!existsSync(source)) throw new Error(`REACT_WALLET_ASSET_MISSING:${source}`);
     const destination = join(outputRoot, file);
     mkdirSync(dirname(destination), { recursive: true });
@@ -43,7 +45,10 @@ export const createWalletBuildPlugin = (
   name: 'xln-react-wallet-assets',
   closeBundle() {
     if (contract.surface !== 'wallet') return;
-    copyWalletAssets(resolve(frontendRoot, 'static'), contract.outDir);
+    const staticRoot = process.env['XLN_REACT_STATIC_ROOT']
+      ? resolve(process.env['XLN_REACT_STATIC_ROOT'])
+      : resolve(frontendRoot, 'static');
+    copyWalletAssets(staticRoot, contract.outDir);
     const manifest = buildReactWalletCandidateManifest(contract.routes);
     writeFileSync(
       join(contract.outDir, REACT_CANDIDATE_MANIFEST_FILE),

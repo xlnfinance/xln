@@ -17,7 +17,7 @@
 - **Depends on:** `plans/006-extract-vault-command-external-stores.md`
 - **Category:** migration
 - **Planned at:** commit `5749e283d`, 2026-08-03
-- **Execution:** IN PROGRESS — boot, shell, onboarding, build, and candidate browser checkpoint implemented
+- **Execution:** DONE — React wallet lifecycle, vault/recovery/settings flows, viewport evidence, and candidate native smoke green
 
 ## Executor instructions
 
@@ -58,9 +58,9 @@ Out of scope:
 |---|---|---|
 | Drift | `git diff --stat 5749e283d..HEAD -- frontend/src/routes/app frontend/src/lib/components frontend/src/lib/stores frontend/src/app.html frontend/static frontend/capacitor.config.ts tests` | Exit 0; lifecycle drift reconciled |
 | L1 | `bun test tests/frontend/wallet-boot-machine.test.ts tests/frontend/wallet-shell.test.tsx tests/frontend/wallet-onboarding.test.tsx tests/frontend/wallet-native-entry.test.ts` | Exit 0; state/lifecycle cases pass |
-| Shell browser | `bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/wallet-shell-onboarding.spec.ts` | Exit 0; clean browser health |
-| Recovery browser | `bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/vault-reload-and-recovery.spec.ts` | Exit 0; persistence/recovery pass |
-| Native | `bun run native:mobile && bun run native:desktop:smoke` | Both exit 0 |
+| Shell browser | `bun runtime/scripts/run-e2e-parallel-isolated.ts --react-surface=wallet --prewait-health=http --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/wallet-shell-onboarding.spec.ts` | Exit 0; clean browser health |
+| Recovery browser | `bun runtime/scripts/run-e2e-parallel-isolated.ts --react-surface=wallet --prewait-health=http --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/vault-reload-and-recovery.spec.ts,tests/e2e-storage-schema-recovery.spec.ts` | Exit 0; persistence/recovery pass |
+| Native | `bun scripts/native/build-platforms.ts mobile --react-wallet-candidate && bun scripts/native/build-platforms.ts desktop --smoke --react-wallet-candidate --no-build` | Both exit 0; candidate remains blocked |
 | Broad gate | `bun run check` | Exit 0; no frozen-core violation |
 
 ## Git workflow
@@ -126,10 +126,10 @@ bun test tests/frontend/wallet-native-entry.test.ts
 L2 targeted browser/native:
 
 ```bash
-bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/wallet-shell-onboarding.spec.ts
-bun runtime/scripts/run-e2e-parallel-isolated.ts --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/vault-reload-and-recovery.spec.ts
-bun run native:mobile
-bun run native:desktop:smoke
+bun runtime/scripts/run-e2e-parallel-isolated.ts --react-surface=wallet --prewait-health=http --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/wallet-shell-onboarding.spec.ts
+bun runtime/scripts/run-e2e-parallel-isolated.ts --react-surface=wallet --prewait-health=http --strict-browser-health --shards=1 --workers-per-shard=1 --pw-project=chromium --pw-files=tests/vault-reload-and-recovery.spec.ts,tests/e2e-storage-schema-recovery.spec.ts
+bun scripts/native/build-platforms.ts mobile --react-wallet-candidate
+bun scripts/native/build-platforms.ts desktop --smoke --react-wallet-candidate --no-build
 ```
 
 Inspect F12 console/storage/service-worker state and screenshots at iPhone, laptop, and wide desktop.
@@ -144,13 +144,13 @@ Run once on the unchanged checkpoint candidate.
 
 ## Done criteria
 
-- [ ] React wallet boot is an explicit tested state machine over the canonical external stores.
-- [ ] Create/import/unlock/lock/recover, runtime creation/selection, and settings work with real integrations.
-- [ ] Strict Mode and multi-tab behavior do not duplicate initialization or commands.
-- [ ] Native/PWA initialization belongs only to wallet and preserves current same-origin behavior.
-- [ ] Every key state has clean-console, inspected screenshots at all required viewports.
-- [ ] Artifact remains release-blocked; `bun run check` passes; commit only as `wip:`.
-- [ ] `git status --short` is reviewed and the Plan 007 index row is updated.
+- [x] React wallet boot is an explicit tested state machine over the canonical external stores.
+- [x] Create/import/unlock/lock/recover, runtime creation/selection, and settings work with real integrations.
+- [x] Strict Mode and multi-tab behavior do not duplicate initialization or commands.
+- [x] Native/PWA initialization belongs only to wallet and preserves current same-origin behavior.
+- [x] Every key state has clean-console, inspected screenshots at all required viewports.
+- [x] Artifact remains release-blocked; `bun run check` passes; commit only as `wip:`.
+- [x] `git status --short` is reviewed and the Plan 007 index row is updated.
 
 ## Current checkpoint evidence
 
@@ -158,7 +158,10 @@ Run once on the unchanged checkpoint candidate.
 - The release-blocked React wallet candidate builds `/app`, `/address/**`, and `/testnet`, owns its native/PWA entry assets, and keeps public site/docs bundles free of native initialization.
 - Real canonical vault commands back create/import/unlock/lock/recovery/runtime selection; React components receive typed commands and a secret-redacted wallet projection instead of storage or protection ports.
 - L1 plus adjacent boundary evidence: 41 tests / 140 assertions pass. Candidate-only Playwright: 2 flows pass in 4.2 seconds with clean console/network health and inspected iPhone, laptop, and wide screenshots.
-- Remaining before Plan 007 `DONE`: real create → reload → unlock/lock/recover integration on the React artifact, ready/locked/recovery viewport evidence, native mobile/desktop smoke, and the unchanged-commit broad gate.
+- The isolated React runner now builds the wallet against per-shard runtime/static assets, provisions real local jurisdiction contracts without starting an unrelated hub mesh, and preserves authenticated WebSocket audience binding through Vite.
+- Real browser evidence covers protected create → reload, persisted settings, failed unlock, UI lock/unlock, incompatible-schema recovery interruption, and secret-redacted storage with strict browser health.
+- Inspected ready, locked, and recovery screenshots are clean at iPhone/mobile, laptop, and wide desktop sizes; no horizontal overflow or secret phrase appears.
+- Native candidate packaging validates `react-candidate.json`, records `activationBlocked: true`, syncs exact assets to iOS/Android, and passes Electron smoke without writing a canonical release manifest.
 
 ## Stop conditions
 

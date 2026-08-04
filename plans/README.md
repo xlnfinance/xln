@@ -33,7 +33,7 @@ Use one `frontend/package.json` and lockfile initially. Put entry applications u
 | [004](004-migrate-docs-to-react-vite.md) | Deterministic docs producer and React docs reader | P2 | L | 003 | DONE — deterministic catalog and React reader; L1/L2/L3 green | WIP checkpoint only |
 | [005](005-extract-runtime-ui-external-stores.md) | Framework-neutral runtime/UI state contracts | P1 | L | 001, 003 | DONE | WIP checkpoint only |
 | [006](006-extract-vault-command-external-stores.md) | Framework-neutral vault/command/recovery contracts | P1 | L | 005 | DONE — L1/L3 green; focused vault Playwright passed | WIP checkpoint only |
-| [007](007-migrate-wallet-shell-onboarding-settings.md) | React wallet boot, onboarding, recovery, settings | P1 | L | 006 | IN PROGRESS — boot/shell/onboarding checkpoint green | WIP checkpoint only |
+| [007](007-migrate-wallet-shell-onboarding-settings.md) | React wallet boot, onboarding, recovery, settings | P1 | L | 006 | DONE — real vault/recovery/settings + browser/native evidence green | WIP checkpoint only |
 | [008](008-migrate-wallet-accounts-payments.md) | React accounts and payment operations | P1 | L | 007 | TODO | WIP checkpoint only |
 | [009](009-migrate-wallet-swap-history.md) | React swap, routing, history, activity | P1 | L | 008 | TODO | WIP checkpoint only |
 | [010](010-migrate-ops-dev-react.md) | React operator/developer surfaces and Dockview | P2 | L | 005, 009 | TODO | WIP checkpoint only |
