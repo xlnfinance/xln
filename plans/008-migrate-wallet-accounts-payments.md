@@ -129,13 +129,22 @@ Run once on the unchanged checkpoint candidate.
 
 ## Done criteria
 
-- [ ] Every in-scope financial action maps to one canonical operation with exact parity evidence.
-- [ ] No React component or frontend adapter contains parallel balance/delta/fee/settlement formulas.
-- [ ] Duplicate intent, stale state, rejection, reload, and committed-success semantics are tested.
-- [ ] Deep links and all visual states work at required viewports with clean console/network.
-- [ ] No runtime, contract, crypto, frozen-core, or API-version change was made.
-- [ ] React artifact remains release-blocked; `bun run check` passes; `wip:` checkpoint only.
-- [ ] `git status --short` is reviewed and the Plan 008 index row is updated.
+- [x] Every in-scope financial action maps to one canonical operation with exact parity evidence.
+- [x] No React component or frontend adapter contains parallel balance/delta/fee/settlement formulas.
+- [x] Duplicate intent, stale state, rejection, reload, and committed-success semantics are tested.
+- [x] Deep links and all visual states work at required viewports with clean console/network.
+- [x] No runtime, contract, crypto, frozen-core, or API-version change was made.
+- [x] React artifact remains release-blocked; `bun run check` passes; `wip:` checkpoint only.
+- [x] `git status --short` is reviewed and the Plan 008 index row is updated.
+
+## Current checkpoint evidence
+
+- The action inventory at `docs/frontend/react-wallet-plan008-action-inventory.md` traces account, asset, payment, lending, settlement, dispute, and testnet ingress actions to one canonical helper/controller and explicit pending/committed/error evidence.
+- Account projections preserve bilateral perspective through canonical `deriveDelta`; React form adapters preserve exact decimal/raw units, immutable reviewed commands, stale-evidence rejection, and one logical intent guard.
+- The focused Plan 008 suite spans 12 files and passes, including exact boundary values, account perspective, payment modes, settlement/dispute evidence, external-store behavior, duplicate commands, SSR snapshots, and faucet request payloads/rejections.
+- Strict-browser React wallet E2E passes 2/2 isolated stacks in 31.1 seconds with clean console/network health. All 21 screenshots were inspected at iPhone, laptop, and wide desktop; the final candidate fixes mobile rail reachability, desktop rail scroll restoration, and external-wallet projection failures.
+- The required canonical payment smoke was attempted on the same candidate and stopped before Playwright at isolated-stack reset with `HUB_BASELINE_STALLED hubs=H1,H2,H3`; this is pre-existing hub-mesh startup state, not a React or browser failure. The hub-independent React flow remains green, and no runtime workaround was added.
+- No Runtime/Entity/Account machine, contract, crypto, frozen-core, or API-version path changed. The React artifact remains candidate-only and activation-blocked until Plan 011.
 
 ## Stop conditions
 

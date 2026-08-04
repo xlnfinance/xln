@@ -50,6 +50,8 @@ type OpenDebtTotalsOptions = {
   activeXlnFunctions: FrontendXlnFunctions | null;
 };
 
+type OutgoingDebtLedger = EntityReplica['state']['outDebtsByToken'];
+
 export function countBatchOps(batch: JBatch | null | undefined): number {
   if (!batch) return 0;
   return (batch.reserveToCollateral?.length || 0) +
@@ -284,30 +286,48 @@ export function buildPendingBatchPreview(
   return [...reserveIncreaseItems, ...reserveDecreaseItems, ...neutralItems];
 }
 
+const collectOpenOutgoingDebtByToken = (
+  ledger: OutgoingDebtLedger,
+  onDebt?: (tokenId: number, amount: bigint) => void,
+): { count: number; byToken: Map<number, bigint> } => {
+  const byToken = new Map<number, bigint>();
+  let count = 0;
+  for (const [tokenId, bucket] of ledger?.entries?.() || []) {
+    let tokenTotal = 0n;
+    for (const debt of bucket.values()) {
+      if (debt.status !== 'open') continue;
+      const amount = BigInt(debt.remainingAmount || 0);
+      count += 1;
+      tokenTotal += amount;
+      onDebt?.(tokenId, amount);
+    }
+    if (tokenTotal > 0n) byToken.set(tokenId, tokenTotal);
+  }
+  return { count, byToken };
+};
+
+export const buildOpenOutgoingDebtByToken = (
+  ledger: OutgoingDebtLedger,
+): { count: number; byToken: Map<number, bigint> } => collectOpenOutgoingDebtByToken(ledger);
+
 export function buildOpenOutgoingDebtTotals(options: OpenDebtTotalsOptions): {
   count: number;
   usdTotal: number;
   byToken: Map<number, bigint>;
 } {
-  const byToken = new Map<number, bigint>();
-  let count = 0;
   let usdTotal = 0;
-  for (const [tokenId, bucket] of options.replica?.state?.outDebtsByToken?.entries?.() || []) {
-    let tokenTotal = 0n;
-    for (const debt of bucket.values()) {
-      if (debt.status !== 'open') continue;
-      count += 1;
-      tokenTotal += BigInt(debt.remainingAmount || 0);
+  const { count, byToken } = collectOpenOutgoingDebtByToken(
+    options.replica?.state?.outDebtsByToken,
+    (tokenId, amount) => {
       const tokenInfo = options.activeXlnFunctions?.getTokenInfo?.(tokenId);
       if (!tokenInfo) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${tokenId}`);
       usdTotal += amountToUsd(
-        BigInt(debt.remainingAmount || 0),
+        amount,
         requireTokenDecimals(tokenInfo.decimals, `token:${tokenId}`),
         String(tokenInfo.symbol),
       );
-    }
-    if (tokenTotal > 0n) byToken.set(tokenId, tokenTotal);
-  }
+    },
+  );
   return { count, usdTotal, byToken };
 }
 

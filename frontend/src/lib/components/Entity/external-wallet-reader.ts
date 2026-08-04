@@ -21,6 +21,24 @@ function cloneTokenCatalog(tokens: ExternalToken[]): ExternalToken[] {
   return tokens.map(token => ({ ...token, balance: 0n }));
 }
 
+export function buildExternalTokenCatalogFromRegistry(
+  registry: readonly JTokenRegistryItem[],
+): ExternalToken[] {
+  return registry.map(token => {
+    const decimals = Number(token.decimals);
+    if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
+      throw new Error(`TOKEN_CATALOG_DECIMALS_INVALID:${String(token.tokenId)}:${String(token.decimals)}`);
+    }
+    return {
+      symbol: token.symbol,
+      address: token.address,
+      balance: 0n,
+      decimals,
+      tokenId: normalizeOptionalTokenId(token.tokenId),
+    };
+  });
+}
+
 /** Keeps immutable token metadata cached while returning fresh balance holders to callers. */
 export function createExternalTokenCatalogLoader(fetchCatalog: () => Promise<ExternalToken[]>) {
   let cacheKey = '';
@@ -44,19 +62,7 @@ export function createExternalTokenCatalogLoader(fetchCatalog: () => Promise<Ext
     if (tokens.length === 0 && jadapter?.getTokenRegistry) {
       const registry = await jadapter.getTokenRegistry();
       if (registry?.length) {
-        tokens = registry.map((token: JTokenRegistryItem) => {
-          const decimals = Number(token.decimals);
-          if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
-            throw new Error(`TOKEN_CATALOG_DECIMALS_INVALID:${String(token.tokenId)}:${String(token.decimals)}`);
-          }
-          return {
-            symbol: token.symbol,
-            address: token.address,
-            balance: 0n,
-            decimals,
-            tokenId: normalizeOptionalTokenId(token.tokenId),
-          };
-        });
+        tokens = buildExternalTokenCatalogFromRegistry(registry);
       }
     }
     if (tokens.length === 0) {

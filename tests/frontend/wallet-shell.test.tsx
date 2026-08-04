@@ -69,6 +69,7 @@ test('ready shell has navigation, connection evidence, runtime selection, and no
   expect(html).toContain('aria-label="Wallet navigation"');
   expect(html).toContain('Active runtime');
   expect(html).toContain('Runtime state');
+  expect(html).toContain('Settlement');
   expect(html).not.toContain('coming soon');
 });
 

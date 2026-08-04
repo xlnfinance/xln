@@ -28,9 +28,11 @@ test('payment panel view projects only payment routing state from replicas', () 
         lockBook: new Map([['lock-1', { accountId: HUB, tokenId: 1, direction: 'outgoing' }]]),
         accounts: new Map([
           [HUB, {
-            leftEntity: SOURCE,
-            rightEntity: HUB,
-            deltas: new Map([[1, delta]]),
+            state: {
+              leftEntity: SOURCE,
+              rightEntity: HUB,
+              deltas: new Map([[1, delta]]),
+            },
             activeDispute: { reason: 'test' },
           }],
         ]),
@@ -82,9 +84,11 @@ test('payment panel view projects payment routing state from runtime adapter fra
       accounts: {
         items: [
           {
-            leftEntity: SOURCE,
-            rightEntity: HUB,
-            deltas: new Map([[1, delta]]),
+            state: {
+              leftEntity: SOURCE,
+              rightEntity: HUB,
+              deltas: new Map([[1, delta]]),
+            },
             status: 'disputed',
           },
         ],
@@ -137,7 +141,8 @@ test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', 
   expect(panel).toContain('export let paymentView: PaymentPanelView');
   expect(panel).toContain('export let actionRuntimeEnv: RuntimeReplica | null');
   expect(panel).toContain('export let submitRuntimeInput');
-  expect(panel).toContain('await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] })');
+  expect(panel).toContain('buildWalletPaymentCommand({');
+  expect(panel).toContain('await submitRuntimeInput(paymentCommand.input)');
   expect(panel).toContain('function resolveProjectedSignerId');
   expect(panel).toContain('function resolvePaymentSignerId(env: RuntimeReplica | null)');
   expect(panel).toContain('const resolvedSignerId = resolvePaymentSignerId(currentEnv)');

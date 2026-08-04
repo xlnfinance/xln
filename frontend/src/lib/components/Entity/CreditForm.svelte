@@ -9,6 +9,7 @@
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
   import { requireTokenDecimals } from './token-metadata';
+  import { buildWalletCreditInputRaw } from '../../../../packages/runtime-client/wallet-financial-input-adapter';
 
   export let entityId: string;
   export let actionRuntimeEnv: RuntimeReplica | null = null;
@@ -39,19 +40,6 @@
       `token:${selectedTokenId}`,
     );
   })();
-
-  type CreditEntityInput = {
-    entityId: string;
-    signerId: string;
-    entityTxs: Array<{
-      type: 'extendCredit';
-      data: {
-        counterpartyEntityId: string;
-        tokenId: number;
-        amount: bigint;
-      };
-    }>;
-  };
 
   type CreditRequestResponse = {
     success?: boolean;
@@ -88,21 +76,16 @@
         || (env ? requireSignerIdForEntity(env, entityId, 'credit-form') : '');
       if (!resolvedSigner) throw new Error('Signer is required for credit command');
 
-      const input: CreditEntityInput = {
+      const input = buildWalletCreditInputRaw({
         entityId,
         signerId: resolvedSigner,
-        entityTxs: [{
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: effectiveCounterparty,
-            tokenId: selectedTokenId,
-            amount: creditAmountBigInt,
-          },
-        }],
-      };
+        counterpartyEntityId: effectiveCounterparty,
+        tokenId: selectedTokenId,
+        amount: creditAmountBigInt,
+      });
 
       if (!submitRuntimeInput) throw new Error('Credit command path is not connected');
-      await submitRuntimeInput({ runtimeTxs: [], entityInputs: [input], jInputs: [] });
+      await submitRuntimeInput(input);
       creditAmountBigInt = 0n;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';

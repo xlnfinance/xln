@@ -8,6 +8,12 @@
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
   import { requireTokenDecimals } from './token-metadata';
+  import {
+    buildWalletLendingBorrowTx,
+    buildWalletLendingOfferTx,
+    buildWalletLendingRepayTx,
+    getWalletLendingRemaining,
+  } from '../../../../packages/runtime-client/wallet-financial-input-adapter';
 
   export let entityId: string;
   export let replica: EntityReplica | null = null;
@@ -239,47 +245,38 @@
 
   async function submitLend(): Promise<void> {
     if (lendAmount <= 0n) return;
-    await submitLendingTx({
-      type: 'lendingOffer',
-      data: {
-        positionId: newIntentId('lend'),
-        hubEntityId: selectedHubEntityId,
-        tokenId: selectedTokenId,
-        amount: lendAmount,
-        termId: lendTermId,
-        interestBps: Math.max(0, Math.floor(Number(lendInterestBps) || 0)),
-      },
-    });
+    await submitLendingTx(buildWalletLendingOfferTx({
+      positionId: newIntentId('lend'),
+      hubEntityId: selectedHubEntityId,
+      tokenId: selectedTokenId,
+      amount: lendAmount,
+      termId: lendTermId,
+      interestBps: lendInterestBps,
+    }));
     if (!lastError) lendAmount = 0n;
   }
 
   async function submitBorrow(): Promise<void> {
     if (borrowAmount <= 0n) return;
-    await submitLendingTx({
-      type: 'lendingBorrow',
-      data: {
-        requestId: newIntentId('borrow'),
-        hubEntityId: selectedHubEntityId,
-        tokenId: selectedTokenId,
-        amount: borrowAmount,
-        termId: borrowTermId,
-        maxInterestBps: Math.max(0, Math.floor(Number(maxBorrowInterestBps) || 0)),
-      },
-    });
+    await submitLendingTx(buildWalletLendingBorrowTx({
+      requestId: newIntentId('borrow'),
+      hubEntityId: selectedHubEntityId,
+      tokenId: selectedTokenId,
+      amount: borrowAmount,
+      termId: borrowTermId,
+      maxInterestBps: maxBorrowInterestBps,
+    }));
     if (!lastError) borrowAmount = 0n;
   }
 
   async function repayLoan(loan: LendingLoan): Promise<void> {
-    const remaining = parseAmount(loan.repaymentAmount) - parseAmount(loan.repaidAmount);
-    await submitLendingTx({
-      type: 'lendingRepay',
-      data: {
-        hubEntityId: selectedHubEntityId,
-        loanId: loan.loanId,
-        tokenId: loan.tokenId,
-        amount: remaining,
-      },
-    });
+    const remaining = getWalletLendingRemaining(loan.repaymentAmount, loan.repaidAmount);
+    await submitLendingTx(buildWalletLendingRepayTx({
+      hubEntityId: selectedHubEntityId,
+      loanId: loan.loanId,
+      tokenId: loan.tokenId,
+      amountRaw: remaining,
+    }));
   }
 
   $: lendingStateKey = isLive && selectedHubEntityId && normalizedEntityId && selectedTokenId

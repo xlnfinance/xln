@@ -3,4 +3,4 @@ import type { ExternalStore } from '../client-core/external-store';
 
 export const useExternalStore = <TSnapshot>(
   store: ExternalStore<TSnapshot>,
-): TSnapshot => useSyncExternalStore(store.subscribe, store.getSnapshot);
+): TSnapshot => useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);

@@ -35,6 +35,20 @@ export function getCrossJTargetDisputeRiskForState(
 ): CrossJTargetDisputeRisk | null {
   const account = state?.accounts?.get?.(counterpartyEntityId);
   if (!state || !account) return null;
+  return getCrossJTargetDisputeRiskForProjection({
+    entityId: state.entityId,
+    crossJurisdictionSwaps: state.crossJurisdictionSwaps,
+  }, account, counterpartyEntityId);
+}
+
+export function getCrossJTargetDisputeRiskForProjection(
+  state: Readonly<{
+    entityId: EntityState['entityId'];
+    crossJurisdictionSwaps: EntityState['crossJurisdictionSwaps'];
+  }>,
+  account: Pick<AccountReplica, 'state'>,
+  counterpartyEntityId: string,
+): CrossJTargetDisputeRisk | null {
   const self = String(state.entityId || '').toLowerCase();
   const counterparty = String(counterpartyEntityId || '').toLowerCase();
   let amount = 0n;

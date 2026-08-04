@@ -5,7 +5,6 @@
   import jsQR from 'jsqr';
   import type {
     AccountState,
-    RoutedEntityInput as EntityInputPayload,
     RuntimeReplica,
     PaymentRoute,
     PaymentDeliveryMode,
@@ -41,6 +40,7 @@
     type PaymentPanelView,
     type PaymentReplicaView,
   } from './payment-panel-view';
+  import { buildWalletPaymentCommand } from '../../../../packages/runtime-client/wallet-payment-input-adapter';
 
   export let entityId: string;
   export let paymentView: PaymentPanelView = emptyPaymentPanelView();
@@ -1248,51 +1248,22 @@
 
       const resolvedSignerId = resolvePaymentSignerId(currentEnv);
 
-      const descriptionValue = description.trim();
-      const isDirect = deliveryMode === 'direct';
-      const isTrusted = deliveryMode === 'trusted';
-      const usesDirectPayment = isDirect || isTrusted;
-      const conditionalDeliveryMode = deliveryMode === 'instant' ? 'instant' as const : 'async' as const;
-      const trustedGatewayEntityId = route.path.length === 3
-        ? route.path[1]
-        : undefined;
-      if (isTrusted && (!trustedGatewayEntityId || route.totalFee !== 0n)) {
-        throw new Error('Trusted delivery requires exactly one fee-free gateway');
-      }
-      if (isDirect && route.path.length !== 2) {
-        throw new Error('Direct delivery requires a bilateral route');
-      }
-      const paymentInput: EntityInputPayload = {
+      const paymentCommand = buildWalletPaymentCommand({
         entityId,
         signerId: resolvedSignerId,
-        entityTxs: usesDirectPayment
-          ? [{
-              type: 'directPayment' as const,
-              data: {
-                targetEntityId: routeTargetEntityId,
-                tokenId,
-                amount: route.recipientAmount,
-                route: route.path,
-                deliveryMode: isTrusted ? 'trusted' as const : 'direct' as const,
-                ...(isTrusted ? { trustedGatewayEntityId: trustedGatewayEntityId! } : {}),
-                ...(descriptionValue ? { description: descriptionValue } : {}),
-              },
-            }]
-          : [{
-              type: 'htlcPayment' as const,
-              data: {
-                targetEntityId: routeTargetEntityId,
-                tokenId,
-                amount: route.recipientAmount,
-                route: route.path,
-                deliveryMode: conditionalDeliveryMode,
-                ...(descriptionValue ? { description: descriptionValue } : {}),
-              },
-            }],
-      };
+        targetEntityId: routeTargetEntityId,
+        tokenId,
+        tokenSymbol: getTokenSymbol(tokenId),
+        tokenDecimals: getTokenDecimals(tokenId),
+        amountInput: amount,
+        route: route.path,
+        deliveryMode,
+        totalFee: route.totalFee,
+        description,
+      });
 
       if (!submitRuntimeInput) throw new Error('Payment command path is not connected');
-      await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] });
+      await submitRuntimeInput(paymentCommand.input);
       queued = true;
       return { queued: true };
     } catch (error) {

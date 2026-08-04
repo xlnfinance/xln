@@ -707,11 +707,13 @@ test('credit and collateral configure forms submit RuntimeInput through shared c
 
   for (const source of [creditSource, collateralSource]) {
     expect(source).toContain('export let submitRuntimeInput');
-    expect(source).toContain('await submitRuntimeInput({ runtimeTxs: [], entityInputs: [');
     expect(source).toContain("handle.mode === 'remote' && handle.authLevel === 'admin'");
     expect(source).not.toContain('submitEntityInputs([');
     expect(source).not.toContain("from '../../stores/xlnStore';\n  import { submitEntityInputs");
   }
+  expect(creditSource).toContain('buildWalletCreditInputRaw({');
+  expect(creditSource).toContain('await submitRuntimeInput(input)');
+  expect(collateralSource).toContain('await submitRuntimeInput({ runtimeTxs: [], entityInputs: [');
 
   expect(configureSource).toContain('remoteAdminReady');
   expect(configureSource).toContain('commandReady = activeIsLive && Boolean(liveRuntimeEnv || remoteAdminReady)');
@@ -728,7 +730,8 @@ test('payment panel submits RuntimeInput through shared command path', () => {
   const accountWorkspaceSource = readFileSync('frontend/src/lib/components/Entity/AccountWorkspaceView.svelte', 'utf8');
 
   expect(paymentSource).toContain('export let submitRuntimeInput');
-  expect(paymentSource).toContain('await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] })');
+  expect(paymentSource).toContain('buildWalletPaymentCommand({');
+  expect(paymentSource).toContain('await submitRuntimeInput(paymentCommand.input)');
   expect(paymentSource).toContain('pendingPaymentCommandId');
   expect(paymentSource).toContain('Payment submission pending');
   expect(paymentSource).toContain("failure.kind === 'defer'");
@@ -739,12 +742,16 @@ test('payment panel submits RuntimeInput through shared command path', () => {
 
 test('lending mutations use the signer runtime command path instead of unauthenticated server POSTs', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/LendingPanel.svelte', 'utf8');
+  const adapter = readFileSync('frontend/packages/runtime-client/wallet-financial-input-adapter.ts', 'utf8');
 
   expect(source).toContain('export let submitRuntimeInput');
   expect(source).toContain('await submitRuntimeInput({');
-  expect(source).toContain("type: 'lendingOffer'");
-  expect(source).toContain("type: 'lendingBorrow'");
-  expect(source).toContain("type: 'lendingRepay'");
+  expect(source).toContain('buildWalletLendingOfferTx({');
+  expect(source).toContain('buildWalletLendingBorrowTx({');
+  expect(source).toContain('buildWalletLendingRepayTx({');
+  expect(adapter).toContain("type: 'lendingOffer'");
+  expect(adapter).toContain("type: 'lendingBorrow'");
+  expect(adapter).toContain("type: 'lendingRepay'");
   expect(source).toContain('if (!isLive || !selectedHubEntityId || !normalizedEntityId)');
   expect(source).toContain('$: lendingStateKey = isLive && selectedHubEntityId');
   expect(source).toContain('disabled={!isLive || loading}');

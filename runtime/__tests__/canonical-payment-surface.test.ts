@@ -100,11 +100,12 @@ test('each payment operation retains one explicit canonical transaction path', (
   expect(ENTITY_TX_TYPES.includes('lendingClosePosition')).toBe(true);
 
   const paymentPanel = source('frontend/src/lib/components/Entity/PaymentPanel.svelte');
-  expect(paymentPanel).toContain("const isDirect = deliveryMode === 'direct';");
-  expect(paymentPanel).toContain("const isTrusted = deliveryMode === 'trusted';");
-  expect(paymentPanel).toContain('const usesDirectPayment = isDirect || isTrusted;');
-  expect(paymentPanel).toContain("entityTxs: usesDirectPayment\n          ? [{\n              type: 'directPayment' as const");
-  expect(paymentPanel).toContain("          : [{\n              type: 'htlcPayment' as const");
+  const paymentAdapter = source('frontend/packages/runtime-client/wallet-payment-input-adapter.ts');
+  expect(paymentPanel).toContain('buildWalletPaymentCommand({');
+  expect(paymentPanel).toContain('await submitRuntimeInput(paymentCommand.input)');
+  expect(paymentAdapter).toContain("const direct = draft.deliveryMode === 'direct' || draft.deliveryMode === 'trusted';");
+  expect(paymentAdapter).toContain("type: 'directPayment' as const");
+  expect(paymentAdapter).toContain("type: 'htlcPayment' as const");
 
   expect(source('runtime/entity/tx/handlers/direct-payment.ts'))
     .toContain("type: 'direct_payment'");
@@ -123,8 +124,12 @@ test('each payment operation retains one explicit canonical transaction path', (
     .toContain("type: 'set_credit_limit'");
 
   const lendingPanel = source('frontend/src/lib/components/Entity/LendingPanel.svelte');
+  const financialAdapter = source('frontend/packages/runtime-client/wallet-financial-input-adapter.ts');
+  for (const builder of ['buildWalletLendingOfferTx', 'buildWalletLendingBorrowTx', 'buildWalletLendingRepayTx']) {
+    expect(lendingPanel).toContain(builder);
+  }
   for (const type of ['lendingOffer', 'lendingBorrow', 'lendingRepay']) {
-    expect(lendingPanel).toContain(`type: '${type}'`);
+    expect(financialAdapter).toContain(`type: '${type}'`);
   }
   const lendingHandler = source('runtime/entity/tx/handlers/lending.ts');
   for (const type of ['lending_fund', 'lending_borrow_request', 'lending_repay', 'lending_close_request']) {
@@ -169,10 +174,12 @@ test('four payment modes stay distinct while retired swap alternatives fail loud
   }, 'CANONICAL_SWAP')).toThrow();
 
   const paymentPanel = source('frontend/src/lib/components/Entity/PaymentPanel.svelte');
+  const paymentAdapter = source('frontend/packages/runtime-client/wallet-payment-input-adapter.ts');
   for (const mode of ['direct', 'instant', 'async', 'trusted']) {
     expect(paymentPanel).toContain(`value: '${mode}'`);
   }
-  expect(paymentPanel).toContain("type: 'directPayment' as const");
+  expect(paymentPanel).toContain('buildWalletPaymentCommand({');
+  expect(paymentAdapter).toContain("type: 'directPayment' as const");
 });
 
 test('same-j offers are projected only by the counterparty matcher', () => {

@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { Settings, ThemeName } from '$lib/types/ui';
 import { walletErrorText } from './error-surface';
 import type { WalletViewSnapshot } from './wallet-view-store';
+import { WalletAccountsWorkspace, type WalletAccountSection } from './features/accounts/WalletAccountsWorkspace';
 
-type WalletSection = 'overview' | 'settings';
+type WalletSection = 'overview' | 'settings' | WalletAccountSection;
 
 export type WalletShellProps = Readonly<{
   wallet: WalletViewSnapshot;
@@ -22,10 +23,28 @@ export type WalletShellProps = Readonly<{
 const shortId = (value: string): string => `${value.slice(0, 8)}…${value.slice(-6)}`;
 
 export const WalletShell = (props: WalletShellProps) => {
-  const [section, setSection] = useState<WalletSection>('overview');
+  const initialSection: WalletSection = typeof window !== 'undefined' && window.location.hash.startsWith('#pay/') ? 'pay' : 'overview';
+  const [section, setSection] = useState<WalletSection>(initialSection);
+  const railRef = useRef<HTMLElement>(null);
   const [pending, setPending] = useState<'select' | 'lock' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const active = props.wallet.runtimes.find(runtime => runtime.id === props.wallet.activeRuntimeId) ?? null;
+  const selectSection = (next: WalletSection, button: HTMLButtonElement): void => {
+    setSection(next);
+    if (window.matchMedia('(max-width: 760px)').matches) {
+      button.scrollIntoView({ block: 'nearest', inline: 'center' });
+    } else if (railRef.current) {
+      railRef.current.scrollLeft = 0;
+    }
+  };
+  useEffect(() => {
+    const resetDesktopRail = (): void => {
+      if (window.innerWidth > 760 && railRef.current) railRef.current.scrollLeft = 0;
+    };
+    window.addEventListener('resize', resetDesktopRail);
+    resetDesktopRail();
+    return () => window.removeEventListener('resize', resetDesktopRail);
+  }, []);
   const run = async (kind: 'select' | 'lock', action: () => Promise<void>): Promise<void> => {
     setPending(kind);
     setError(null);
@@ -54,12 +73,18 @@ export const WalletShell = (props: WalletShellProps) => {
           </select>
         </div>
       </header>
-      <aside className="wallet-rail" aria-label="Wallet navigation">
-        <button type="button" aria-current={section === 'overview' ? 'page' : undefined} onClick={() => setSection('overview')}>
+      <aside ref={railRef} className="wallet-rail" aria-label="Wallet navigation">
+        <button type="button" aria-current={section === 'overview' ? 'page' : undefined} onClick={event => selectSection('overview', event.currentTarget)}>
           <span>01</span>Overview
         </button>
-        <button type="button" aria-current={section === 'settings' ? 'page' : undefined} onClick={() => setSection('settings')}>
-          <span>02</span>Settings
+        <button type="button" aria-current={section === 'accounts' ? 'page' : undefined} onClick={event => selectSection('accounts', event.currentTarget)}><span>02</span>Accounts</button>
+        <button type="button" aria-current={section === 'pay' ? 'page' : undefined} onClick={event => selectSection('pay', event.currentTarget)}><span>03</span>Pay</button>
+        <button type="button" aria-current={section === 'receive' ? 'page' : undefined} onClick={event => selectSection('receive', event.currentTarget)}><span>04</span>Receive</button>
+        <button type="button" aria-current={section === 'move' ? 'page' : undefined} onClick={event => selectSection('move', event.currentTarget)}><span>05</span>Move</button>
+        <button type="button" aria-current={section === 'lending' ? 'page' : undefined} onClick={event => selectSection('lending', event.currentTarget)}><span>06</span>Lending</button>
+        <button type="button" aria-current={section === 'settlement' ? 'page' : undefined} onClick={event => selectSection('settlement', event.currentTarget)}><span>07</span>Settlement</button>
+        <button type="button" aria-current={section === 'settings' ? 'page' : undefined} onClick={event => selectSection('settings', event.currentTarget)}>
+          <span>08</span>Settings
         </button>
       </aside>
       <main className="wallet-main">
@@ -86,7 +111,7 @@ export const WalletShell = (props: WalletShellProps) => {
               </button>
             )}
           </section>
-        ) : (
+        ) : section === 'settings' ? (
           <WalletSettings
             settings={props.settings}
             onTheme={props.onTheme}
@@ -94,6 +119,8 @@ export const WalletShell = (props: WalletShellProps) => {
             onTimeMachine={props.onTimeMachine}
             onMascot={props.onMascot}
           />
+        ) : (
+          <WalletAccountsWorkspace section={section} />
         )}
       </main>
       <footer className="wallet-footer">

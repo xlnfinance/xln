@@ -18,6 +18,9 @@ import { WalletOnboarding } from './WalletOnboarding';
 import { WalletShell } from './WalletShell';
 import { WalletUnlock } from './WalletUnlock';
 import { walletViewExternalStore } from './wallet-view-store';
+import { WalletAddressDetail } from './features/routes/WalletAddressDetail';
+import { WalletAddressDirectory } from './features/routes/WalletAddressDirectory';
+import { WalletTestnetPage } from './features/routes/WalletTestnetPage';
 
 const LOADING_PHASES = new Set([
   'cold',
@@ -48,6 +51,8 @@ export const WalletApp = () => {
   const wallet = useExternalStore(walletViewExternalStore);
   const settings = useExternalStore(settingsExternalStore);
   const online = useOnlineStatus();
+  const pathname = window.location.pathname;
+  if (pathname === '/testnet') return <WalletTestnetPage />;
   let content;
   if (LOADING_PHASES.has(boot.phase as typeof LOADING_PHASES extends Set<infer T> ? T : never)) {
     content = <WalletLoading phase={boot.phase} />;
@@ -69,7 +74,12 @@ export const WalletApp = () => {
   } else if (boot.phase === 'locked') {
     content = <WalletUnlock wallet={wallet} onSelect={selectWalletRuntime} onUnlock={unlockWalletRuntime} />;
   } else if (boot.phase === 'connecting' || boot.phase === 'ready') {
-    content = (
+    const addressMatch = /^\/address\/([^/]+)$/.exec(pathname);
+    content = pathname === '/address'
+      ? <WalletAddressDirectory />
+      : addressMatch?.[1]
+        ? <WalletAddressDetail entityId={decodeURIComponent(addressMatch[1])} />
+        : (
       <WalletShell
         wallet={wallet}
         settings={settings}
