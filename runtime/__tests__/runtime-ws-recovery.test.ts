@@ -6,6 +6,9 @@ import { deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
 import { RuntimeWsClient } from '../network/p2p/ws-client';
 import { canonicalizeRuntimeWsAudience, deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
 import { startStandaloneRelayServer, type StandaloneRelayServer } from '../network/relay/standalone-server';
+import { createEmptyEnv } from '../runtime';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
+import { RETRYABLE_INGRESS_BACKPRESSURE } from '../network/p2p/ingress-backpressure';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const SEED_A = 'runtime-ws-recovery-client-a';
@@ -292,7 +295,7 @@ describe('runtime websocket recovery requests', () => {
       signerId: '2',
       onEntityInputs: () => {
         received += 1;
-        throw new Error('INBOUND_ENTITY_RUNTIME_QUIESCING');
+        throw new Error(`${RETRYABLE_INGRESS_BACKPRESSURE} test-quiesce`);
       },
       onError: error => receiverErrors.push(error.message),
     });
@@ -301,22 +304,25 @@ describe('runtime websocket recovery requests', () => {
     await waitUntil(() => relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B), 'relay clients');
     await waitUntil(() => sender.isOpen() && receiver.isOpen(), 'authenticated clients');
 
-    expect(
-      sender.sendEntityInputsRaw(RUNTIME_B, {
-        sourceRuntimeId: RUNTIME_A,
-        sourceRuntimeHeight: 7,
-        sourceRuntimeTimestamp: 7000,
-        entityInputs: [
-          {
-            entityId: `0x${'44'.repeat(32)}`,
-            signerId: '2',
-            runtimeId: RUNTIME_B,
-            entityTxs: [],
-          },
-        ],
-      }),
-    ).toBe(true);
-    await waitUntil(() => receiverErrors.includes('INBOUND_ENTITY_RUNTIME_QUIESCING'), 'retryable rejection reported');
+    const source = createEmptyEnv(SEED_A);
+    const envelope = signRuntimeEntityInputsEnvelope(source, RUNTIME_B, {
+      sourceRuntimeId: RUNTIME_A,
+      sourceRuntimeHeight: 7,
+      sourceRuntimeTimestamp: 7000,
+      entityInputs: [
+        {
+          entityId: `0x${'44'.repeat(32)}`,
+          signerId: '2',
+          runtimeId: RUNTIME_B,
+          entityTxs: [],
+        },
+      ],
+    });
+    expect(sender.sendEntityInputsRaw(RUNTIME_B, envelope)).toBe(true);
+    await waitUntil(
+      () => receiverErrors.some(message => message.startsWith(RETRYABLE_INGRESS_BACKPRESSURE)),
+      'retryable rejection reported',
+    );
 
     expect(received).toBe(1);
     expect(receiver.isOpen()).toBe(true);
