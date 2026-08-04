@@ -1,0 +1,69 @@
+import { describe, expect, test } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  createDemoMnemonic,
+  deriveHd,
+  saveWallet,
+  unlockWallet,
+  walletExists,
+} from '../lib/identity';
+import type { CliSettings } from '../lib/settings';
+import { resolveJurisdictionRpc } from '../lib/api';
+
+const tempSettings = async (): Promise<CliSettings> => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'xln-cli-id-'));
+  return {
+    barStyle: 'closed',
+    apiBase: 'https://xln.finance',
+    dbPath: join(homeDir, 'db'),
+    homeDir,
+    socketPath: join(homeDir, 'daemon.sock'),
+    profileName: 'wallet',
+  };
+};
+
+describe('cli identity', () => {
+  test('encrypts and unlocks mnemonic roundtrip', async () => {
+    const settings = await tempSettings();
+    try {
+      const mnemonic = createDemoMnemonic();
+      const { address } = deriveHd(mnemonic, 0);
+      expect(await walletExists(settings)).toBe(false);
+      await saveWallet(settings, { mnemonic, passphrase: 'secret', label: 't' });
+      expect(await walletExists(settings)).toBe(true);
+      const unlocked = await unlockWallet(settings, 'secret');
+      expect(unlocked.runtimeId).toBe(address);
+      expect(unlocked.signerAddress).toBe(address);
+      expect(unlocked.mnemonic.split(' ').length).toBe(12);
+    } finally {
+      await rm(settings.homeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('wrong passphrase fails loud', async () => {
+    const settings = await tempSettings();
+    try {
+      await saveWallet(settings, {
+        mnemonic: createDemoMnemonic(),
+        passphrase: 'right',
+        label: 't',
+      });
+      await expect(unlockWallet(settings, 'wrong')).rejects.toThrow();
+    } finally {
+      await rm(settings.homeDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolveJurisdictionRpc', () => {
+  test('resolves relative /rpc against api base like frontend', () => {
+    expect(resolveJurisdictionRpc({ rpc: '/rpc' }, 'https://xln.finance')).toBe(
+      'https://xln.finance/rpc',
+    );
+    expect(resolveJurisdictionRpc({ rpc: '/rpc2' }, 'http://127.0.0.1:8080')).toBe(
+      'http://127.0.0.1:8080/rpc2',
+    );
+  });
+});
