@@ -216,11 +216,19 @@
     error.set(null);
   }
 
-  async function processRemoteRuntimeBootstrapFromLocation(): Promise<RemoteRuntimeBootstrapResult> {
+  /**
+   * `readRemoteRuntimeRequestFromUrl` strips the capability out of the URL as
+   * it parses, so reading it is a one-shot consume. Callers that already
+   * parsed the location pass their request in; re-reading here would find an
+   * empty hash and silently boot a local runtime instead of the remote one.
+   */
+  async function processRemoteRuntimeBootstrapFromLocation(
+    parsedRemoteRequest?: ReturnType<typeof readRemoteRuntimeRequestFromUrl>,
+  ): Promise<RemoteRuntimeBootstrapResult> {
     const pairingToken = readLocalRuntimePairingToken();
     const importPayload = readRemoteRuntimeImportPayloadFromHash();
     const importSource = readRemoteRuntimeImportSourceFromHash();
-    const remoteRequest = readRemoteRuntimeRequestFromUrl();
+    const remoteRequest = parsedRemoteRequest ?? readRemoteRuntimeRequestFromUrl();
     await pairLocalRuntimeIntoApp(pairingToken);
     await importRemoteRuntimesIntoApp({
       payload: importPayload,
@@ -520,7 +528,7 @@
         return;
       }
       if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;
-      const bootstrapResult = await processRemoteRuntimeBootstrapFromLocation();
+      const bootstrapResult = await processRemoteRuntimeBootstrapFromLocation(remoteRequest);
       if (bootstrapResult === 'pending-auth') return;
       releaseActiveTabLock = await initializeActiveTabLock(async () => {
         await deactivateThisTab();

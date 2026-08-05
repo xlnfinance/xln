@@ -50,6 +50,15 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   exported solely for tests, and deleting them blind removes coverage rather
   than complexity. Separate test-only exports from genuinely unreachable ones
   before removing anything; `check:dead-code:report` lists them.
+- [ ] `multi-sig` is the one scenario still red, and it is aspirational rather
+  than gating: the wired suite (`test:scenarios:parallel:isolated`) runs the
+  default seven and is green, while multi-sig only appears under `--set=all`.
+  Its first blocker is fixed - validators of one Entity hold different valid
+  certificate variants of the same committed frame, and the storage guard
+  compared whole links instead of the frame hash, so any multi-validator
+  Entity failed its first history write. Past that it now reaches
+  `RELIABLE_INGRESS_TERMINAL_ORDER_CONFLICT:hash-precommit`, which is the real
+  question: whether multi-validator Entities are expected to work today.
 
 ### Model-audit findings resolved — 2026-08-03
 
