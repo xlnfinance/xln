@@ -1467,6 +1467,59 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   });
 };
 
+const handleUnexpectedMarketMakerExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+  const observation: ChildFailureObservation = {
+    role: 'market-maker',
+    name: marketMakerChild.name,
+    code,
+    signal,
+    reason: selectChildFailureReason(
+      marketMakerChild.recentStderr,
+      marketMakerChild.recentStdout,
+      `MM_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
+    ),
+  };
+  const decision = decideChildFailure(marketMakerChild.failureCounts, observation);
+  marketMakerChild.failureCounts = decision.counts;
+  let receiptPath: string;
+  try {
+    receiptPath = persistManagedChildFailure(
+      marketMakerChild,
+      observation,
+      decision,
+      resetState.inProgress && decision.action === 'recover' ? 'recover' : 'fail-stop',
+    );
+  } catch (error) {
+    const diagnosticError = serializeError(error);
+    meshLog.error('child.failure_receipt_write_failed', {
+      child: marketMakerChild.name,
+      error: diagnosticError,
+      originalFailure: observation.reason,
+    });
+    failFastUnexpectedChildExit(`MM diagnostics persistence failed: ${diagnosticError}`);
+    return;
+  }
+  meshLog.error('child.failure_captured', {
+    child: marketMakerChild.name,
+    reasonCode: decision.reasonCode,
+    identicalFailureCount: decision.count,
+    receiptPath,
+  });
+  pushManagedChildIncident(marketMakerChild, decision.reasonCode, observation.reason, {
+    code: observation.code,
+    signal: observation.signal,
+    fingerprint: decision.fingerprint,
+    identicalFailureCount: decision.count,
+    action: decision.action,
+    receiptPath,
+  });
+  if (!resetState.inProgress || decision.action === 'fail-stop') {
+    failFastUnexpectedChildExit(
+      `MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)} receipt=${receiptPath}`,
+    );
+  }
+};
+
 const spawnMarketMaker = async (): Promise<void> => {
   await reapStaleMarketMakerProcess();
   mkdirSync(marketMakerChild.dbPath, { recursive: true });
@@ -1556,61 +1609,7 @@ const spawnMarketMaker = async (): Promise<void> => {
       orchestratorShutdownStarted,
       isCurrentProc,
     )) {
-      const observation: ChildFailureObservation = {
-        role: 'market-maker',
-        name: marketMakerChild.name,
-        code: code ?? null,
-        signal: signal ?? null,
-        reason: selectChildFailureReason(
-          marketMakerChild.recentStderr,
-          marketMakerChild.recentStdout,
-          `MM_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
-        ),
-      };
-      const decision = decideChildFailure(marketMakerChild.failureCounts, observation);
-      marketMakerChild.failureCounts = decision.counts;
-      let receiptPath: string;
-      try {
-        receiptPath = persistManagedChildFailure(
-          marketMakerChild,
-          observation,
-          decision,
-          resetState.inProgress && decision.action === 'recover' ? 'recover' : 'fail-stop',
-        );
-      } catch (error) {
-        const diagnosticError = serializeError(error);
-        meshLog.error('child.failure_receipt_write_failed', {
-          child: marketMakerChild.name,
-          error: diagnosticError,
-          originalFailure: observation.reason,
-        });
-        failFastUnexpectedChildExit(`MM diagnostics persistence failed: ${diagnosticError}`);
-        return;
-      }
-      meshLog.error('child.failure_captured', {
-        child: marketMakerChild.name,
-        reasonCode: decision.reasonCode,
-        identicalFailureCount: decision.count,
-        receiptPath,
-      });
-      pushManagedChildIncident(
-        marketMakerChild,
-        decision.reasonCode,
-        observation.reason,
-        {
-          code: observation.code,
-          signal: observation.signal,
-          fingerprint: decision.fingerprint,
-          identicalFailureCount: decision.count,
-          action: decision.action,
-          receiptPath,
-        },
-      );
-      if (!resetState.inProgress || decision.action === 'fail-stop') {
-        failFastUnexpectedChildExit(
-          `MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)} receipt=${receiptPath}`,
-        );
-      }
+      handleUnexpectedMarketMakerExit(code ?? null, signal ?? null);
     }
   });
   await writeInheritedChildSecrets(proc, {
