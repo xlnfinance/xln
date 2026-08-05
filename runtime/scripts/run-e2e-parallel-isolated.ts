@@ -305,7 +305,14 @@ export type E2EBrowserHealthCounters = {
   httpErrorCount: number;
 };
 const RESET_CONFIRMATION = 'RESET_MESH_STATE';
-const E2E_ANVIL_HISTORY_STATES = 256;
+/**
+ * Restoring a runtime re-proves the EntityProvider deployment by reading code
+ * at its deployment block and the one before it. Dispute scenarios mine
+ * hundreds of blocks first, so a short history window prunes those states away
+ * and the restore fails RPC_ENTITY_PROVIDER_DEPLOYMENT_ORIGIN_UNAVAILABLE.
+ * These chains live for one shard and are thrown away.
+ */
+const E2E_ANVIL_HISTORY_STATES = 8192;
 const DEFAULT_E2E_TEST_TIMEOUT_MS = 660_000;
 
 const isRecord = (value: unknown): value is JsonRecord =>

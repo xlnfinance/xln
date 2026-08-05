@@ -68,6 +68,25 @@ async function getActiveApiBase(page: Page): Promise<string> {
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
 }
 
+/**
+ * Base URL for operator-only hub routes. The orchestrator stamps everything it
+ * forwards to a hub as coming from a public proxy, so those routes must be
+ * asked of the hub's own port. Falls back to the orchestrator when health does
+ * not publish hub URLs, which keeps deployments that hide them working.
+ */
+async function hubDebugApiBase(page: Page, apiBase: string, hubEntityId?: string): Promise<string> {
+  const health = await page.request.get(`${apiBase}/api/health`)
+    .then(response => (response.ok() ? response.json() : null))
+    .catch(() => null) as { hubs?: Array<{ entityId?: string; apiUrl?: string }> } | null;
+  const hubs = health?.hubs ?? [];
+  const wanted = String(hubEntityId || '').trim().toLowerCase();
+  const match = wanted
+    ? hubs.find(hub => String(hub.entityId || '').trim().toLowerCase() === wanted)
+    : undefined;
+  const apiUrl = String((match ?? hubs.find(hub => hub.apiUrl))?.apiUrl || '').trim();
+  return apiUrl ? apiUrl.replace(/\/+$/, '') : apiBase;
+}
+
 async function ensureHubAccountOpen(
   page: Page,
   disputeMode: 'auto' | 'manual' = 'auto',
@@ -181,8 +200,12 @@ async function readOnchainReserveViaAnvil(
   });
   if (jurisdictionRef) params.set('jurisdiction', jurisdictionRef);
   if (opts?.hubEntityId) params.set('hubEntityId', opts.hubEntityId);
+  // Anything the orchestrator forwards to a hub is stamped as coming from a
+  // public proxy, so the hub refuses operator-only routes like /api/debug/*.
+  // Ask the hub that owns the reserve directly; its own port is local operator.
+  const debugBase = await hubDebugApiBase(page, apiBase, opts?.hubEntityId);
   const response = await page.request.get(
-    `${apiBase}/api/debug/reserve?${params.toString()}`,
+    `${debugBase}/api/debug/reserve?${params.toString()}`,
   );
   if (!response.ok()) {
     if (opts?.allowUnavailable) return 0n;
@@ -262,7 +285,8 @@ async function readCurrentChainBlock(page: Page): Promise<number> {
 
 async function postRpc(page: Page, method: string, params: unknown[]): Promise<{ result?: unknown; error?: unknown }> {
   const apiBase = await getActiveApiBase(page);
-  const response = await page.request.post(`${apiBase}/api/rpc`, {
+  // The stack serves JSON-RPC at /rpc; /api/rpc has no route and 404s.
+  const response = await page.request.post(`${apiBase}/rpc`, {
     data: {
       jsonrpc: '2.0',
       id: 1,
