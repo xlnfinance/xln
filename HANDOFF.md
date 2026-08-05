@@ -90,13 +90,34 @@ legs move symmetrically. Fix it; do not design it away.
 
 ## 4. The next task, in order
 
-1. **Write `runtime/scenarios/cross-j.ts`** mirroring the e2e cross-swap logic:
-   two jurisdictions on two local anvils in one process (now expressible after
-   `6784d1b13`), hub + user entities in each, a two-sided book. This is both the
-   missing coverage and the debugging instrument — it should reproduce §3
-   deterministically and in seconds.
-   **The repo currently has zero cross-jurisdiction scenarios** (15 scenarios,
-   none cover cross-j). That gap is why this area rotted.
+1. **Finish the cross-jurisdiction scenario.** The repo had zero of them (15
+   scenarios, none cover cross-j) — that gap is why this area rotted.
+
+   `runtime/scenarios/cross-j.ts` exists and gets as far as applying the intent,
+   then stops at `CROSS_J_OWNER_RUNTIME_COLLISION`, because it runs everything
+   in one process. That is the protocol refusing the shape, not a bug to work
+   around: `resolveCrossJurisdictionRuntimeTopology`
+   (`runtime/extensions/cross-j/boundary.ts`) requires both users on one
+   Runtime, both hubs on another, and the two distinct.
+
+   **Build it the way this repo already does multi-Runtime — do not invent an
+   in-process bridge.** `p2p-relay.ts` is the orchestrator and `p2p-node.ts` is
+   the node; copy that shape:
+   - the orchestrator reserves a free relay port, `spawn`s node processes with
+     `--role/--seed/--relay-url`, waits on stdout markers via
+     `waitForLineOrError`, and `killAll`s at the end;
+   - each node is one process: `main(seed)` → `startRuntimeLoop(env)` →
+     `startP2P(env, { relayUrls, seedRuntimeIds, advertiseEntityIds })`, each
+     with its own `XLN_DB_PATH`.
+
+   Two facts already established the hard way, worth not rediscovering:
+   - `P2PConfig` carries **no** relay port or host. The relay *server* is a
+     separate thing `p2p-node.ts` starts when given `--relay-port`; that part
+     must be lifted into the cross-j node before its hub role can host it.
+   - The second node must not redeploy the stacks or it lands on different
+     contract addresses. Connect via `JAdapterConfig.fromReplica`
+     (`{ name, chainId, rpcs, contracts }`) and have the hub node publish its
+     deployed addresses on stdout for the orchestrator to pass along.
 2. Fix the delivery bug it exposes.
 3. Extend to the flagship case the owner named: **MM disputes with two-sided
    cross swaps** — the original problem, where a market maker loses its receive
