@@ -89,11 +89,8 @@ const collectPullCloseEvidence = (account: AccountReplica): Map<string, string> 
     account.activeDispute?.crossJurisdictionRecovery?.resultsByPullId ??
     {};
   const resolves = new Map<string, string>(Object.entries(certifiedResults));
-  // Both terminal closes and non-terminal reveals carry the same ladder binary
-  // shape; an uncommitted reveal is exactly the evidence a dispute needs for a
-  // level the frame chain has not restated into claimedRatio yet.
   for (const tx of [...(account.pendingFrame?.accountTxs ?? []), ...(account.mempool ?? [])]) {
-    if (tx.type !== 'cross_pull_close' && tx.type !== 'cross_pull_reveal') continue;
+    if (tx.type !== 'cross_pull_close') continue;
     // Source-final recovery is independently verified and Entity-root
     // committed. Older retained mempool evidence cannot erase it.
     if (Object.hasOwn(certifiedResults, tx.data.pullId)) continue;
