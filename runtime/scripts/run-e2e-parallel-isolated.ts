@@ -1966,6 +1966,10 @@ const runShard = async (
           XLN_STORAGE_HISTORY_PATH: join(shardPaths.rdbRoot, 'storage-health-history.json'),
           XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
           XLN_EPHEMERAL_TESTNET: '1',
+          // Same default the deployed stack ships with (scripts/start-server.sh).
+          // Tests reach the faucet through the preview proxy, so they arrive as
+          // ordinary callers rather than the local operator.
+          XLN_PUBLIC_FAUCET: '1',
           XLN_MESH_ROOT_SEED: `xln-e2e-mesh-root:${dbPath}`,
           XLN_MESH_RUNTIME_SEEDS_JSON: JSON.stringify({
             H1: 'xln-e2e-h1',
