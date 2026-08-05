@@ -9,7 +9,7 @@ describe('native mobile shell configuration', () => {
 	test('serves the shared frontend build with production-safe webview defaults', () => {
 		expect(config.appId).toBe('finance.xln.wallet');
 		expect(config.appName).toBe('xln finance');
-		expect(config.webDir).toBe('build');
+		expect(config.webDir).toBe('.native-wallet-build');
 		expect(config.server?.hostname).toBe('localhost');
 		expect(config.android?.allowMixedContent).toBe(false);
 		expect(config.android?.webContentsDebuggingEnabled).toBe(false);
