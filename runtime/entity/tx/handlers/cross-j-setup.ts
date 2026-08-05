@@ -135,6 +135,25 @@ const prepareRawCrossJurisdictionIntent = (
   state.crossJurisdictionSwaps ||= new Map();
   const existing = state.crossJurisdictionSwaps.get(route.orderId);
   if (existing?.sourcePull || existing?.targetPull) {
+    // A duplicate raw intent for a route this hub already materialized is an
+    // honest retry, not an attack: the submitter cannot observe our
+    // materialization until the account-level offer surfaces, so it resends
+    // while its own view still says "in flight". Throwing here fails the whole
+    // Runtime input, which killed the hub process outright
+    // (RUNTIME_ENTITY_INPUT_APPLY_FAILED -> RUNTIME_LOOP_ERROR) and took the
+    // mesh down with it. Absorb the replay when it names the same route.
+    //
+    // `exactRouteBytes` cannot be used for this comparison: materialization
+    // mutates the stored route (pulls attached, status advanced), so a stale
+    // but legitimate intent never matches it byte for byte. The route hash is
+    // the stable identity, and a mismatch still means a different route
+    // reusing one orderId, which stays fatal.
+    if (
+      normalizeEntityRef(existing.routeHash || '') === normalizeEntityRef(route.routeHash || '')
+    ) {
+      addMessage(state, `🌉 Cross-j prepare ${route.orderId} already materialized; replay ignored`);
+      return { newState: state, outputs };
+    }
     throw new Error(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${route.orderId}`);
   }
   if (existing) {

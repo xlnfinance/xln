@@ -627,6 +627,27 @@ describe('cross-jurisdiction hashledger swap', () => {
     ).rejects.toThrow('CROSS_J_RAW_PREPARE_CONFLICT');
     expect(proposerRaw.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)).toEqual(baseRoute);
 
+    // Regression: a hub must absorb a duplicate raw intent naming a route it
+    // has already materialized. The submitter cannot observe that
+    // materialization until the account-level offer surfaces, so it resends in
+    // good faith; throwing failed the whole Runtime input and killed the hub
+    // process (RUNTIME_ENTITY_INPUT_APPLY_FAILED -> RUNTIME_LOOP_ERROR), which
+    // took the mesh down with it.
+    const materializedState = cloneEntityState(delayedProposerRegistered.newState);
+    expect(materializedState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull).toBeDefined();
+    const replayAfterMaterialization = await applyEntityTx(proposerEnv, materializedState, rawTx);
+    expect(replayAfterMaterialization.outputs).toHaveLength(0);
+    expect(
+      replayAfterMaterialization.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull,
+    ).toEqual(preparedRoute.sourcePull);
+    // A different route reusing one orderId is still a real conflict.
+    await expect(
+      applyEntityTx(proposerEnv, cloneEntityState(delayedProposerRegistered.newState), {
+        type: 'prepareCrossJurisdictionSwap',
+        data: { route: conflictingIntent },
+      }),
+    ).rejects.toThrow('CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION');
+
     const mismatchedMaterialization = cloneCrossJurisdictionRoute(preparedRoute);
     mismatchedMaterialization.targetSignerId = addr('99');
     await expect(
