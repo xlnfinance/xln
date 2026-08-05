@@ -222,6 +222,16 @@ const buildBootstrapStallCapsule = ({
       lastSeen: lastDirectEntityInput,
       lastError: lastDirectEntityInputError,
     },
+    // The queue counts alone say "2 outputs stuck for 59s" without saying what
+    // they are, which is the one thing needed to tell an atomic cross-j cohort
+    // waiting for a sibling apart from a reliable lane waiting on a receipt.
+    pendingNetworkOutputs: (env.pendingNetworkOutputs ?? []).map(output => ({
+      runtimeId: output.runtimeId,
+      entityId: output.entityId,
+      sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
+      atomicCrossJurisdictionPair: output.atomicCrossJurisdictionPair ?? null,
+      entityTxTypes: (output.entityTxs ?? []).map(entityTx => entityTx.type),
+    })),
     visibleHubs: visibleHubs.map(profile => ({
       name: profile.name,
       entityId: profile.entityId,
