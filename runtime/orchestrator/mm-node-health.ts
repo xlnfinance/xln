@@ -48,6 +48,7 @@ buildMarketMakerCrossTokenPairs,
 buildMarketMakerOfferSpecs,
 collectOfferIdsForAccount,
 collectPendingCrossRequestOrderIds,
+consumeExpiredBootstrapIntentAttempt,
 countCommittedMarketMakerOffersForHub,
 countCommittedMarketMakerOffersForHubPair,
 countCrossPairCoverageGaps,
@@ -519,7 +520,15 @@ type CrossQuoteMaintenanceContext = {
   maxSourceHubGroups: number;
   direction: string;
   startedAt: number;
-  attemptedBootstrapIntentOrderIds: Set<string>;
+  /**
+   * offerId -> attempt timestamp (ms). A cross-j offerId is stable for a whole
+   * MARKET_MAKER_CROSS_EXPIRY_MS generation, so this must expire (see
+   * MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS) rather than blacklist forever: a
+   * permanent Set here means one rejected/stale attempt starves that book slot
+   * for the rest of the run, because no durable progress was ever recorded for
+   * `hasCrossSpecBootstrapProgress` to find.
+   */
+  attemptedBootstrapIntentOrderIds: Map<string, number>;
 };
 
 const createPendingCrossRequestLookup = (env: RuntimeReplica): PendingCrossRequestLookup => {
@@ -548,7 +557,10 @@ const selectEligibleCrossOfferSpecs = (
       const route = spec.crossJurisdiction;
       if (!route) return false;
       if (excludedOfferIds?.has(spec.offerId)) return false;
-      if (excludedOfferIds && attemptedBootstrapIntentOrderIds.has(spec.offerId)) return false;
+      if (
+        excludedOfferIds &&
+        consumeExpiredBootstrapIntentAttempt(attemptedBootstrapIntentOrderIds, spec.offerId)
+      ) return false;
       if (hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) return false;
       const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);
       if (!targetAccount || String(targetAccount.status || 'active') !== 'active') return false;
@@ -674,7 +686,7 @@ const maintainBootstrapCrossQuotes = async (
       candidateCount += candidates.length;
       for (const spec of candidates.slice(0, allowedNewOffers)) {
         await submitCrossJurisdictionIntent(env, spec.crossJurisdiction!);
-        attemptedBootstrapIntentOrderIds.add(spec.offerId);
+        attemptedBootstrapIntentOrderIds.set(spec.offerId, Date.now());
         existingOfferIds.add(spec.offerId);
         submittedIntentCount += 1;
         selectedForSourceHub += 1;
@@ -785,7 +797,7 @@ export const maintainMarketMakerCrossQuotes = async (
   shouldContinue: () => boolean = () => true,
   maxSourceHubGroups = Number.MAX_SAFE_INTEGER,
   emitBootstrapWaveEvents = false,
-  attemptedBootstrapIntentOrderIds: Set<string> = new Set(),
+  attemptedBootstrapIntentOrderIds: Map<string, number> = new Map(),
 ): Promise<boolean> => {
   const startedAt = Date.now();
   const direction = `${sourceContext.jurisdictionName}->${targetContext.jurisdictionName}`;

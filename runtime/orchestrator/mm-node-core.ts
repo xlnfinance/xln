@@ -329,6 +329,42 @@ export const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '3'),
 );
+// A cross-j offerId is stable for one MARKET_MAKER_CROSS_EXPIRY_MS generation
+// (default 24h): the same (hub, pair, level) reproduces the exact same offerId
+// on every later wave within that window. Excluding an attempted offerId must
+// therefore expire — otherwise one transient Account/atomic-cohort rejection
+// (races, stale nonces, a fat-frame cohort that failed to pair) permanently
+// starves that book slot for the rest of the run, since `hasCrossSpecBootstrapProgress`
+// alone cannot resurrect it once nothing durable was ever recorded. The TTL only
+// needs to outlast one submit -> Runtime-process -> progress-visible round trip.
+export const MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS = Math.max(
+  1000,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS'] || '5000'),
+);
+/** Pure so the expiry rule is unit-testable without a RuntimeReplica fixture. */
+export const isBootstrapIntentAttemptExpired = (
+  attemptedAtMs: number,
+  nowMs: number = Date.now(),
+  retryMs: number = MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS,
+): boolean => nowMs - attemptedAtMs >= retryMs;
+
+/**
+ * Returns true while `offerId` must still be excluded from candidate
+ * selection. Prunes the entry once it expires so a spec whose earlier attempt
+ * never produced durable progress (rejected cohort, dropped race, stale
+ * nonce) is retried instead of starved for the rest of the bootstrap run.
+ */
+export const consumeExpiredBootstrapIntentAttempt = (
+  attemptedBootstrapIntentOrderIds: Map<string, number>,
+  offerId: string,
+  nowMs: number = Date.now(),
+): boolean => {
+  const attemptedAt = attemptedBootstrapIntentOrderIds.get(offerId);
+  if (attemptedAt === undefined) return false;
+  if (!isBootstrapIntentAttemptExpired(attemptedAt, nowMs)) return true;
+  attemptedBootstrapIntentOrderIds.delete(offerId);
+  return false;
+};
 export const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
   Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '1000'),
@@ -1558,6 +1594,7 @@ export const hasCrossSpecBootstrapProgress = (
   const route = spec.crossJurisdiction;
   if (!route) return false;
   if (hasSourceAccountCrossOffer(env, route)) return true;
+  if (hasCrossRouteAuthorizedLocally(env, route.source.entityId, route.orderId)) return true;
   if (hasCrossRouteRegistered(env, route.source.entityId, route.orderId)) return true;
   if (hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)) return true;
   return getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId);
@@ -1833,6 +1870,40 @@ export const maintainMarketMakerQuotes = async (
 export const hasCrossRouteRegistered = (env: RuntimeReplica, entityId: string, orderId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
   return Boolean(replica?.state?.crossJurisdictionSwaps?.has(orderId));
+};
+
+/**
+ * `crossJurisdictionAuthorizations` is the one durable record a *user* Entity
+ * (the MM acting as source, never a hub) commits for its own submitted
+ * intent — see `authorizeCrossJurisdictionIntent` in
+ * entity/tx/handlers/cross-j-setup.ts. `crossJurisdictionSwaps` is only ever
+ * populated on hub Entities, so `hasCrossRouteRegistered(env, mmEntityId, ...)`
+ * can never observe MM's own submission and always reads false for it. In a
+ * multi-Runtime-process deployment the source hub's replica is usually not
+ * present in this MM's local `env` either, so this authorization record is
+ * the only progress signal MM can see for itself before the much later
+ * account-level `swap_offer` shows up. Without it, the bootstrap retry loop
+ * cannot tell "committed locally, now in flight on a remote hub" apart from
+ * "never went anywhere", and burns its per-wave submission budget resending an
+ * intent that is already on its way.
+ *
+ * Those resends are not merely wasteful, they are inert: while the
+ * authorization is still present, `authorizeCrossJurisdictionIntent` sees an
+ * identical route and returns early *without* re-emitting the certified
+ * source-user -> source-hub command, so a resend can neither advance the route
+ * nor trip the hub's CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION guard. Excluding
+ * an authorized orderId therefore gives up nothing a retry could have
+ * recovered. (The flip side — that a certified command lost in flight is
+ * likewise unrecoverable by resubmission — is a liveness gap in that early
+ * return, not something this selector can paper over. Tracked in todo.md.)
+ */
+export const hasCrossRouteAuthorizedLocally = (
+  env: RuntimeReplica,
+  entityId: string,
+  orderId: string,
+): boolean => {
+  const replica = getEntityReplicaById(env, entityId);
+  return Boolean(replica?.state?.crossJurisdictionAuthorizations?.has(orderId));
 };
 
 const isMatchingCrossOfferRoute = (

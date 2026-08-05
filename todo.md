@@ -39,6 +39,21 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   failing the Runtime frame with `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION`.
   The mesh now forms and the market maker reaches ready, but full bootstrap
   still exceeds its readiness budget. Owner requirement: all tests green.
+- [ ] A cross-j certified command lost in flight is unrecoverable. Once a user
+  Entity has committed `crossJurisdictionAuthorizations[orderId]`, a resubmitted
+  identical intent hits the early return in `authorizeCrossJurisdictionIntent`
+  (`runtime/entity/tx/handlers/cross-j-setup.ts:82`), which returns *without*
+  re-emitting the certified source-user -> source-hub output that the first
+  authorization emitted. So if that one output is dropped, no retry can ever
+  re-issue it: the route is pinned at `intent` forever, and nothing prunes the
+  authorization (its only `delete` is the success path at
+  `runtime/entity/tx/handlers/account-cross-j-followups.ts:425`). The MM
+  bootstrap selector correctly treats such an orderId as in-flight and skips it,
+  which is right — a retry provably cannot advance it — but that means the stall
+  is silent. Decide whether the early return should re-emit, or whether expired
+  authorizations should be swept deterministically. Consensus-critical: the
+  authorization map is in the state root
+  (`runtime/entity/consensus/state-root.ts:65`).
 - [ ] `runtime/runtime/solvency.ts` computes `reserves - collateral == 0`,
   which is not the conservation law the jurisdiction enforces
   (`invariant_valueConservation`: reserves + collateral equals minted plus

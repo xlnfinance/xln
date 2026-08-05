@@ -1782,7 +1782,13 @@ type MarketMakerQuoteEngineState = {
   inFlight: boolean;
   bootstrapCrossCursor: number;
   steadyCrossCursor: number;
-  attemptedBootstrapIntentOrderIds: Set<string>;
+  // offerId -> attempt timestamp (ms), expired via MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS.
+  // See the comment on CrossQuoteMaintenanceContext.attemptedBootstrapIntentOrderIds
+  // in mm-node-health.ts: this must not be a permanent blacklist, because a
+  // cross-j offerId is stable for a whole MARKET_MAKER_CROSS_EXPIRY_MS
+  // generation and one transient rejection would otherwise starve that book
+  // slot for the rest of the run.
+  attemptedBootstrapIntentOrderIds: Map<string, number>;
 };
 
 type MarketMakerQuoteEngineDeps = {
@@ -2229,7 +2235,7 @@ const createMarketMakerQuoteLifecycle = (
     inFlight: false,
     bootstrapCrossCursor: 0,
     steadyCrossCursor: 0,
-    attemptedBootstrapIntentOrderIds: new Set(),
+    attemptedBootstrapIntentOrderIds: new Map(),
   };
   const quoteEngineDeps: MarketMakerQuoteEngineDeps = {
     env,
