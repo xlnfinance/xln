@@ -86,11 +86,6 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
     signerIds: ['1', '2', '3', '4'],
     seed: 'cross-j-deterministic',
     jurisdictionName: 'CrossJ Source',
-    // Storage on, deliberately. Scenarios default it off, which sets
-    // persistencePaused, and the command API is fenced behind exactly that.
-    // Clearing the fence by hand would be bypassing a durability guard inside
-    // the test that exists to catch durability bugs.
-    storageEnabled: true,
     ...(_existingEnv?.scenarioJAdapterMode ? { mode: _existingEnv.scenarioJAdapterMode } : {}),
   });
   env.quietRuntimeLogs = true;
@@ -204,17 +199,17 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
   console.log('  ✅ Bilateral accounts open on both stacks\n');
 
   // ── The cross-jurisdiction swap ───────────────────────────────────────────
-  // The command API refuses to run outside lifecycle phase `running`, and a
-  // scenario drives the Runtime by hand rather than through startRuntimeLoop.
-  // Declare the phase instead of bypassing the command path — submitting the
-  // intent through the same entry point production uses is the point.
-  const { transitionRuntimeLifecycle } = await import('../runtime/lifecycle');
-  const { ensureRuntimeInfrastructure } = await import('../runtime/runtime-infrastructure');
-  transitionRuntimeLifecycle(ensureRuntimeInfrastructure(env), 'running');
-
-  const { submitCrossJurisdictionSwap } = await import('../runtime');
+  // Driven through the Runtime with `process`, exactly like every other
+  // scenario. The command API (`submitCrossJurisdictionSwap`) is the entry
+  // point for a live node running the event loop; it is fenced on lifecycle
+  // phase and persistence, and forcing those flags by hand would only prove the
+  // forcing worked. What it actually does is build the route and enqueue one
+  // `prepareCrossJurisdictionSwap` per user sibling — so the scenario builds
+  // the same route and enqueues the same two entity txs, and the Runtime
+  // applies them through the real path.
+  const { buildCrossJurisdictionSwapSubmission } = await import('../runtime/jurisdiction-api');
   const orderId = 'cross-j-scenario-1';
-  await submitCrossJurisdictionSwap(env, {
+  const { route } = buildCrossJurisdictionSwapSubmission(env, {
     orderId,
     sourceUserEntityId: mm.id,
     sourceHubEntityId: hubSrc.id,
@@ -229,6 +224,21 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
     targetHubSignerId: hubTgt.signer,
     targetUserSignerId: mmt.signer,
   });
+  // Target sibling first, mirroring the command API: the source authorization
+  // may emit the certified source-user -> source-hub command, and no value may
+  // cross the later Account boundary unless both records exist.
+  await process(env, [
+    {
+      entityId: mmt.id,
+      signerId: mmt.signer,
+      entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
+    },
+    {
+      entityId: mm.id,
+      signerId: mm.signer,
+      entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
+    },
+  ]);
   console.log(`  → submitted cross-j intent ${orderId}`);
 
   await converge(env, 40);

@@ -648,6 +648,12 @@ export function createJurisdictionConfig(
   entityProviderAddress: string = '0x0000000000000000000000000000000000000000',
   address: string = 'browservm://',
   chainId: number = 31337,
+  // Cross-j derives wall-clock dispute deadlines from the settlement chain's
+  // block time (`committedCrossJSourceDisputeDelayMs`), and the real
+  // jurisdiction loader requires the field. Omitting it here left scenario
+  // jurisdictions incomplete in a way only cross-j could notice, as
+  // CROSS_J_PREPARED_BLOCK_TIME_MISSING.
+  blockTimeMs: number = 1_000,
 ): JurisdictionConfig {
   return {
     address,
@@ -655,6 +661,7 @@ export function createJurisdictionConfig(
     chainId,
     entityProviderAddress,
     depositoryAddress,
+    blockTimeMs,
   };
 }
 
