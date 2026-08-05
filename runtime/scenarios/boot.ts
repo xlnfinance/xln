@@ -36,6 +36,16 @@ const getDefaultAnvilRpcUrl = (): string => {
   return new URL('/rpc', window.location.origin).toString();
 };
 
+/**
+ * The endpoint a scenario must record as its jurisdiction `address`. Storage
+ * validation requires a non-empty string, so a scenario that hand-rolls this
+ * and leaves it blank cannot commit its very first frame.
+ */
+export const resolveScenarioJurisdictionAddress = (mode: JAdapterMode): string =>
+  mode === 'browservm'
+    ? 'browservm://'
+    : (process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl());
+
 type ManagedAnvilProcess = {
   exitCode: number | null;
   kill: (signal?: NodeJS.Signals | number) => boolean;

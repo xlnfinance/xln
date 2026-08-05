@@ -18,11 +18,13 @@ import type { RuntimeReplica } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import {
   bindScenarioJReplica,
+  createJurisdictionConfig,
   ensureJAdapter,
   getScenarioJAdapter,
   isScenarioJAdapterMissingError,
   createJReplica,
   resolveScenarioBoardSigner,
+  resolveScenarioJurisdictionAddress,
 } from './boot';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
@@ -139,14 +141,13 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const browserVM = jadapter.getBrowserVM();
     const vm = browserVM as unknown as (RequiredBrowserVM | null);
 
-    const arrakis = {
-      name: 'AHB Demo',
-      chainId: jadapter.chainId,
-      address: jadapter.mode === 'browservm' ? 'browservm://' : '',
-      entityProviderAddress: jadapter.addresses.entityProvider,
-      depositoryAddress: jadapter.addresses.depository,
-      rpc: jadapter.mode === 'browservm' ? 'browservm://' : '',
-    };
+    const arrakis = createJurisdictionConfig(
+      'AHB Demo',
+      jadapter.addresses.depository,
+      jadapter.addresses.entityProvider,
+      resolveScenarioJurisdictionAddress(jadapter.mode),
+      Number(jadapter.chainId || 31337),
+    );
 
     console.log(`📋 Jurisdiction: ${arrakis.name}`);
     console.log('✅ AHB JAdapter + J-Machine ready');
