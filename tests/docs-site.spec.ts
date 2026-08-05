@@ -33,6 +33,19 @@ async function assertNoHorizontalOverflow(page: Page): Promise<void> {
   expect(dimensions.document, 'docs page must stay within its viewport').toBeLessThanOrEqual(dimensions.viewport);
 }
 
+async function assertDocsImagesLoaded(page: Page): Promise<void> {
+  const images = page.locator('.markdown-body img');
+  const count = await images.count();
+  expect(count, 'docs article should retain its referenced images').toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const image = images.nth(index);
+    await image.scrollIntoViewIfNeeded();
+    await expect(image, `docs image ${index + 1} should load`).toHaveJSProperty('complete', true);
+    expect(await image.evaluate(element => (element as HTMLImageElement).naturalWidth),
+      `docs image ${index + 1} should have intrinsic width`).toBeGreaterThan(0);
+  }
+}
+
 function trackSameOriginFailures(page: Page, failures: FailureEntry[]): void {
   page.on('requestfailed', (request) => {
     const url = request.url();
@@ -187,6 +200,7 @@ test.describe('Docs site', () => {
 
         await page.goto('/docs?doc=core%2F00_QA', { waitUntil: 'networkidle' });
         await expect(page.locator('.doc-title')).toHaveText('0.0 Questions & Answers');
+        await assertDocsImagesLoaded(page);
         await assertNoHorizontalOverflow(page);
         await page.screenshot({
           path: testInfo.outputPath(`docs-nested-${viewport.name}.png`),

@@ -8,6 +8,7 @@ import { settingsOperations } from '$lib/stores/settingsStore';
 import { vaultOperations } from '$lib/stores/vaultStore';
 import type { ThemeName } from '$lib/types/ui';
 import { walletBootController } from './wallet-controller';
+import { walletAccountStoreController } from './features/accounts/wallet-account-store';
 
 export const generateWalletMnemonic = async (): Promise<string> => {
   const entropy = new Uint8Array(32);
@@ -43,6 +44,7 @@ export const selectWalletRuntime = async (runtimeId: string): Promise<void> => {
   const selected = await vaultOperations.selectRuntime(runtimeId);
   if (!selected) throw new Error('RUNTIME_SELECTION_REJECTED');
   await walletBootController.activateRuntime();
+  await walletAccountStoreController.showActiveEntity();
 };
 
 export const recoverWalletFromConfiguredBackups = async (): Promise<void> => {

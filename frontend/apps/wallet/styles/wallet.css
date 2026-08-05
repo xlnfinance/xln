@@ -136,6 +136,10 @@ label { color: var(--wallet-muted); font-size: .78rem; font-weight: 680; letter-
 .wallet-operation header h1, .wallet-operation header h2 { margin: 0; font-size: clamp(2.4rem, 7vw, 5rem); font-weight: 480; letter-spacing: -.065em; line-height: .92; }
 .wallet-operation label { display: grid; gap: .45rem; }
 .wallet-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.wallet-payment-modes { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .35rem; margin: 0; padding: .35rem; border: 1px solid var(--wallet-line); }
+.wallet-payment-modes legend { padding: 0 .35rem; color: var(--wallet-muted); font-size: .78rem; font-weight: 680; letter-spacing: .04em; }
+.wallet-payment-modes button { min-width: 0; min-height: 46px; padding: 0 .35rem; border-color: transparent; background: transparent; color: var(--wallet-muted); }
+.wallet-payment-modes button[aria-checked="true"] { border-color: var(--wallet-accent); background: var(--wallet-accent); color: #10120d; }
 .wallet-field-note { margin: -.3rem 0 0; color: var(--wallet-muted); font: .72rem ui-monospace, monospace; }
 .wallet-action-row { display: flex; justify-content: flex-end; gap: .7rem; }
 .wallet-confirm { padding: 1.2rem; border: 1px solid var(--wallet-accent); background: color-mix(in srgb, var(--wallet-accent) 4%, transparent); }
@@ -426,6 +430,7 @@ label { color: var(--wallet-muted); font-size: .78rem; font-weight: 680; letter-
   .wallet-order-detail dl { grid-template-columns: 1fr; }
 }
 @media (max-width: 440px) {
+  .wallet-payment-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .wallet-onboarding-intro h1, .wallet-unlock section h1 { font-size: 3.5rem; }
   .wallet-onboarding-form, .wallet-unlock form { margin-inline: -1rem; border-inline: 0; }
   .wallet-runtime-picker select { min-width: 110px; max-width: 140px; }
