@@ -39,6 +39,37 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   failing the Runtime frame with `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION`.
   The mesh now forms and the market maker reaches ready, but full bootstrap
   still exceeds its readiness budget. Owner requirement: all tests green.
+
+  Root-caused 2026-08-05. It is not a budget problem and not machine load:
+  `reset_market_maker` measured 280762ms under load and 280798ms on an idle box
+  — a 36ms spread, which is a fixed deadline, not slow work. Every earlier stage
+  matches a healthy fresh boot (`reset_wait_hubs` 23.4s vs 20.6s benchmarked).
+  At failure, same-chain depth is fully ready while cross-j has 0 of 6 routes,
+  and `crossj.incomplete_cohort_deferred` is the *only* cross-j routing event in
+  the whole 280s run — there is no `crossj.admission_envelope_dispatch`, so
+  cross-j envelopes are never dispatched even once. Four mechanisms, each
+  behaving exactly as designed, deadlock:
+  1. `runtime/runtime/delivery/dispatch.ts:483` defers an atomic cohort whose
+     sibling is not in the same ready batch, expecting it next frame.
+  2. `runtime/runtime/delivery/pending.ts:609` excludes incomplete atomic units
+     from retry scheduling (`if (!unit.complete) return []`), so if that unit is
+     the only pending output, `nextRetryAt` stays `Infinity` and **no retry is
+     ever scheduled**.
+  3. The MM selector treats the orderId as in flight and never resubmits — and
+     resubmitting would be inert anyway, per the entry below.
+  4. The resulting permanent `pendingRuntimeWork` keeps
+     `hasMarketMakerRuntimeBacklog` true, so the backlog exemption in
+     `assertNotStalled` (`runtime/orchestrator/mm-node-run.ts:1411`) never
+     expires and the 60s stall watchdog never fires. The watchdog is blinded by
+     the very defect it exists to catch, which is why this is 280s of silence
+     rather than a 60s `MARKET_MAKER_BOOTSTRAP_STALLED`.
+
+  Still open: why each Runtime holds only one side of the pair. Two incidents on
+  two different runtimeIds suggest source legs stuck on one and target legs on
+  the other. Not proven.
+
+  Do NOT close this by raising `--stack-timeout-ms` or by making the shard
+  deadline progress-aware: both only change the wording of the failure.
 - [ ] A cross-j certified command lost in flight is unrecoverable. Once a user
   Entity has committed `crossJurisdictionAuthorizations[orderId]`, a resubmitted
   identical intent hits the early return in `authorizeCrossJurisdictionIntent`
