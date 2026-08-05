@@ -1968,8 +1968,12 @@ const runShard = async (
           XLN_EPHEMERAL_TESTNET: '1',
           // Same default the deployed stack ships with (scripts/start-server.sh).
           // Tests reach the faucet through the preview proxy, so they arrive as
-          // ordinary callers rather than the local operator.
+          // ordinary callers rather than the local operator. The deployed cap
+          // rations a public faucet against strangers; this stack is ephemeral
+          // and loopback-only, and its scenarios fund positions far above it.
           XLN_PUBLIC_FAUCET: '1',
+          XLN_FAUCET_MAX_AMOUNT: '1000000000000000000000',
+          XLN_FAUCET_MAX_GAS_AMOUNT: '1000',
           XLN_MESH_ROOT_SEED: `xln-e2e-mesh-root:${dbPath}`,
           XLN_MESH_RUNTIME_SEEDS_JSON: JSON.stringify({
             H1: 'xln-e2e-h1',
