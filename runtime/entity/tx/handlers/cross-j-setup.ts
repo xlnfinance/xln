@@ -148,10 +148,22 @@ const prepareRawCrossJurisdictionIntent = (
     // but legitimate intent never matches it byte for byte. The route hash is
     // the stable identity, and a mismatch still means a different route
     // reusing one orderId, which stays fatal.
-    if (
-      normalizeEntityRef(existing.routeHash || '') === normalizeEntityRef(route.routeHash || '')
-    ) {
-      addMessage(state, `🌉 Cross-j prepare ${route.orderId} already materialized; replay ignored`);
+    const storedHash = normalizeEntityRef(existing.routeHash || '');
+    const replayHash = normalizeEntityRef(route.routeHash || '');
+    if (storedHash && replayHash && storedHash === replayHash) {
+      // Idempotent means reproducing the observable outcome, not swallowing the
+      // message. Absorbing silently left the submitter blind: it cannot see our
+      // materialization, so it resent every retry window forever while the hub
+      // dropped each one on the floor. Re-emit the registrations the successful
+      // materialization sent, so the retry converges the submitter's view.
+      const storedRoute = cloneCrossJurisdictionRoute(existing);
+      pushCrossJurisdictionEntityOutput(outputs, storedRoute.source.counterpartyEntityId, [
+        { type: 'registerCrossJurisdictionSwap', data: { route: storedRoute } },
+      ], storedRoute.sourceHubSignerId);
+      pushCrossJurisdictionEntityOutput(outputs, storedRoute.target.entityId, [
+        { type: 'registerCrossJurisdictionSwap', data: { route: storedRoute } },
+      ], storedRoute.targetHubSignerId);
+      addMessage(state, `🌉 Cross-j prepare ${route.orderId} already materialized; re-announced`);
       return { newState: state, outputs };
     }
     throw new Error(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${route.orderId}`);

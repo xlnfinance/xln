@@ -628,15 +628,24 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(proposerRaw.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)).toEqual(baseRoute);
 
     // Regression: a hub must absorb a duplicate raw intent naming a route it
-    // has already materialized. The submitter cannot observe that
-    // materialization until the account-level offer surfaces, so it resends in
-    // good faith; throwing failed the whole Runtime input and killed the hub
-    // process (RUNTIME_ENTITY_INPUT_APPLY_FAILED -> RUNTIME_LOOP_ERROR), which
-    // took the mesh down with it.
+    // has already materialized, and must RE-ANNOUNCE rather than swallow it.
+    // The submitter cannot observe the materialization until the account-level
+    // offer surfaces, so it resends in good faith. Throwing failed the whole
+    // Runtime input and killed the hub process
+    // (RUNTIME_ENTITY_INPUT_APPLY_FAILED -> RUNTIME_LOOP_ERROR), taking the mesh
+    // with it; but silently dropping the replay was no better, because then the
+    // submitter stayed blind and resent every retry window forever. Idempotent
+    // here means reproducing the observable outcome of the original
+    // materialization, so the retry converges the submitter's view.
     const materializedState = cloneEntityState(delayedProposerRegistered.newState);
     expect(materializedState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull).toBeDefined();
     const replayAfterMaterialization = await applyEntityTx(proposerEnv, materializedState, rawTx);
-    expect(replayAfterMaterialization.outputs).toHaveLength(0);
+    expect(replayAfterMaterialization.outputs).toHaveLength(2);
+    expect(
+      replayAfterMaterialization.outputs.flatMap(output =>
+        (output.entityTxs ?? []).map(tx => tx.type),
+      ),
+    ).toEqual(['registerCrossJurisdictionSwap', 'registerCrossJurisdictionSwap']);
     expect(
       replayAfterMaterialization.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull,
     ).toEqual(preparedRoute.sourcePull);
