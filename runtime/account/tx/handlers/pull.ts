@@ -357,13 +357,16 @@ export async function handleCrossPullClose(
 }
 
 /**
- * Payer-authored housekeeping of an expired pull (the off-chain half of the
- * "D1" exit): releases the unclaimed remainder of the hold and deletes the
- * pull. Deliberately moves no value and carries no proof — increments already
- * settled by reveals live in offdelta, and an expired ladder can no longer be
- * claimed on-chain, so the release mirrors what a dispute would conclude.
- * Only the payer may propose: the beneficiary giving up early would be a
- * different (voluntary) flow, and the Hub already owns ratio-0 closes.
+ * Payer-authored housekeeping of an expired pull: releases the hold and drops
+ * the pull. Carries no proof and moves no value — past its deadline the ladder
+ * can no longer be claimed on-chain either, so this only frees capacity the
+ * beneficiary can no longer reach.
+ *
+ * Without it the payer waits on the Hub for a ratio-0 close, since the Hub owns
+ * every close (`handleCrossPullClose`). This is proposal authority only: like
+ * any Account tx it still commits through the counterparty's ACK, so it removes
+ * the Hub's reason to act, not its ability to stall. A truly unilateral exit
+ * stays a jurisdiction-level primitive.
  */
 export async function handleCrossPullExpire(
   account: AccountState,
