@@ -280,13 +280,19 @@ export function getJAdapterMode(): JAdapterMode {
 export async function ensureJAdapter(
   env?: RuntimeReplica,
   mode?: JAdapterMode,
-  options?: { deployStack?: boolean },
+  options?: { deployStack?: boolean; rpcUrl?: string },
 ): Promise<JAdapter> {
   const { createJAdapter } = await import('../jurisdiction/adapter');
   const { assertBrowserVMJurisdiction } = await import('../jurisdiction/adapter');
 
   const actualMode = mode ?? env?.scenarioJAdapterMode ?? getJAdapterMode();
-  const rpcUrl = process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl();
+  // An explicit rpcUrl must win over the ambient ANVIL_RPC. Without this the
+  // adapter always connected to the one ambient endpoint while step 7 of
+  // bootScenario recorded whatever the caller asked for, so the jurisdiction
+  // config could name an endpoint the adapter was not talking to — and a second
+  // jurisdiction in one process (the whole point of a cross-j scenario) was
+  // impossible to express.
+  const rpcUrl = options?.rpcUrl || process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl();
   const chainId = actualMode === 'browservm'
     ? 31337
     : await ensureScenarioRpcReady(rpcUrl, 31337);
@@ -343,7 +349,10 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
 
   // 3. Create JAdapter (creates BrowserVM or connects to RPC)
   const jReplicaName = config.jurisdictionName ?? `${config.name} Demo`;
-  const jadapter = await ensureJAdapter(env, config.mode, { deployStack: true });
+  const jadapter = await ensureJAdapter(env, config.mode, {
+    deployStack: true,
+    ...(config.rpcUrl ? { rpcUrl: config.rpcUrl } : {}),
+  });
   const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, jReplicaName);
 
   // 4. Create jReplica
