@@ -32,6 +32,7 @@ import {
 import { generateLazyEntityId } from '../entity/factory';
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 import {
+  coalesceExactAtomicProposalIngressRetries,
   orderReliableEntityInputsWithinSourceLanes,
   registerReliableEntityInputs,
 } from '../runtime/frame/input-admission';
@@ -63,6 +64,7 @@ import type { EntityTx } from '../types/entity-tx';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';
 import { makeAccount } from './helpers/cross-j';
 import { selectPotentialCrossJAccountInputPairs } from '../runtime/entity-routing';
+import { markCommittedAtomicCrossJAckOutputs } from '../runtime/frame/cross-j-evidence';
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -538,6 +540,93 @@ describe('durable scoped reliable delivery receipts', () => {
     }).kind).toBe('pending');
   });
 
+  test('committing terminal Account ACK H+1 also receipts a queued stale ACK H', () => {
+    const sender = runtime('reliable-cross-j-terminal-successor-sender');
+    const receiver = runtime('reliable-cross-j-terminal-successor-receiver');
+    const predecessor = accountAckOutput(receiver.runtimeId!, 5);
+    const successor = accountAckOutput(receiver.runtimeId!, 6);
+
+    expect(registerReliableIngress(receiver, sender.runtimeId!, predecessor).kind).toBe('enqueue');
+    expect(registerReliableIngress(receiver, sender.runtimeId!, successor, {
+      allowContiguousPendingAccountAck: true,
+    }).kind).toBe('enqueue');
+    ensureAppliedAuthority(receiver, predecessor);
+    ensureAppliedAuthority(receiver, successor);
+    const replica = receiver.state.eReplicas.get(`${predecessor.entityId}:${predecessor.signerId}`);
+    if (!replica) throw new Error('TEST_TERMINAL_SUCCESSOR_REPLICA_MISSING');
+    const account = makeAccount(predecessor.entityId, entityId('d1'));
+    account.currentHeight = 7;
+    account.currentFrame = { ...account.currentFrame, height: 7 };
+    replica.state.accounts.set(entityId('d1'), account);
+
+    const commits = commitReliableIngress(receiver, [successor]);
+    const deliveries = finalizeReliableIngressCommit(receiver, commits);
+
+    expect(deliveries.map(delivery => delivery.receipt.body.identity.height).sort())
+      .toEqual([5, 6]);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.values().next().value?.body.identity.height)
+      .toBe(6);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
+  });
+
+  test('atomic proposal response marks plain ACKs instead of richer follow-on frame_ack outputs', () => {
+    const receiverRuntimeId = runtime('atomic-ack-selection-receiver').runtimeId!;
+    const left = accountAckOutput(receiverRuntimeId, 5, '0xleft-frame-5');
+    const right = accountAckOutput(receiverRuntimeId, 7, '0xright-frame-7');
+    right.entityId = entityId('d1');
+    right.entityTxs![0] = {
+      type: 'accountInput',
+      data: {
+        kind: 'ack',
+        fromEntityId: entityId('b1'),
+        toEntityId: entityId('d1'),
+        ack: { height: 7, frameHash: '0xright-frame-7', frameHanko: '0xright-hanko-7' },
+      },
+    } as never;
+    const leftRicher = accountFrameAckOutput(receiverRuntimeId, 5);
+    leftRicher.entityTxs![0] = {
+      ...(leftRicher.entityTxs![0] as Extract<EntityTx, { type: 'accountInput' }>),
+      data: {
+        ...((leftRicher.entityTxs![0] as Extract<EntityTx, { type: 'accountInput' }>).data as never),
+        ack: { height: 5, frameHash: '0xleft-frame-5', frameHanko: '0xleft-hanko-5' },
+      },
+    } as never;
+    const rightRicher = structuredClone(right);
+    rightRicher.entityTxs![0] = {
+      type: 'accountInput',
+      data: {
+        kind: 'frame_ack',
+        fromEntityId: entityId('b1'),
+        toEntityId: entityId('d1'),
+        ack: { height: 7, frameHash: '0xright-frame-7', frameHanko: '0xright-hanko-7' },
+        proposal: (accountFrameAckOutput(receiverRuntimeId, 7).entityTxs![0] as never as {
+          data: { proposal: unknown };
+        }).data.proposal,
+      },
+    } as never;
+    const pairKey = 'proposal-pair';
+    const outputs = [left, right, leftRicher, rightRicher];
+
+    markCommittedAtomicCrossJAckOutputs(outputs, [{
+      pairKey,
+      phase: 'proposal',
+      sourceInputIndex: 0,
+      targetInputIndex: 1,
+      sourceAccountFrame: {
+        entityId: entityId('d1'), signerId: signerId('d2'),
+        counterpartyEntityId: entityId('b1'), height: 5, stateHash: '0xleft-frame-5',
+      },
+      targetAccountFrame: {
+        entityId: entityId('b1'), signerId: signerId('b2'),
+        counterpartyEntityId: entityId('d1'), height: 7, stateHash: '0xright-frame-7',
+      },
+    }]);
+
+    expect(outputs.slice(0, 2).map(output => output.atomicCrossJurisdictionPair))
+      .toEqual([{ phase: 'ack', pairKey }, { phase: 'ack', pairKey }]);
+    expect(outputs.slice(2).every(output => !output.atomicCrossJurisdictionPair)).toBe(true);
+  });
+
   test('an atomic cross-j envelope reserves neither sibling while a same-height plain ACK is pending', () => {
     const sender = runtime('reliable-cross-j-atomic-pending-sender');
     const receiver = runtime('reliable-cross-j-atomic-pending-receiver');
@@ -612,6 +701,19 @@ describe('durable scoped reliable delivery receipts', () => {
       ...input,
       atomicCrossJurisdictionPair: atomicPair,
     }));
+
+    const exactLegRetry = structuredClone(cohort[0]!);
+    const retriedCohort = [cohort[0]!, cohort[1]!, exactLegRetry];
+    expect(selectPotentialCrossJAccountInputPairs(retriedCohort)).toHaveLength(2);
+    const coalesced = coalesceExactAtomicProposalIngressRetries(retriedCohort);
+    expect(coalesced).toHaveLength(2);
+    expect(selectPotentialCrossJAccountInputPairs(coalesced)).toHaveLength(1);
+    const interleavedRetry = [cohort[0]!, exactLegRetry, cohort[1]!];
+    const retryReceiver = runtime('reliable-cross-j-atomic-retry-receiver');
+    retryReceiver.runtimeId = receiver.runtimeId;
+    const retryAdmission = registerReliableEntityInputs(retryReceiver, interleavedRetry, false);
+    expect(retryAdmission.entityInputs).toEqual(cohort);
+    expect(retryAdmission.immediateReliableReceipts).toEqual([]);
 
     const admitted = registerReliableEntityInputs(receiver, cohort, false);
     expect(admitted.entityInputs).toEqual([]);

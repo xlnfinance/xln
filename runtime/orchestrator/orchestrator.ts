@@ -158,6 +158,7 @@ import { createProcessHealthBuilder } from './process-health';
 import {
   flushPrefixedLogChunk,
   pushChildLogLines,
+  truncateManagedChildIncidentMessage,
   type PrefixLogState,
   writePrefixedLogChunk,
 } from './child-log-buffer';
@@ -1134,6 +1135,7 @@ const pushManagedChildIncident = (
   details: Record<string, unknown>,
 ): string => {
   const runtimeId = String(child.lastHealth?.runtimeId || child.lastInfo?.runtimeId || '').trim() || undefined;
+  const boundedMessage = truncateManagedChildIncidentMessage(message);
   const incident = pushDebugEvent(relayStore, {
     event: 'error',
     ...(managedChildFatalRoot.get(child.name)
@@ -1145,7 +1147,7 @@ const pushManagedChildIncident = (
     details: {
       source: 'orchestrator',
       severity: 'fatal',
-      message,
+      message: boundedMessage,
       child: child.name,
       ...details,
     },

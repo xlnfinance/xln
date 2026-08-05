@@ -125,7 +125,18 @@ const groupAtomicPairsFirst = (
   env: RuntimeReplica,
   selection: CrossJSelection,
 ): CrossJSelection => {
-  if (selection.pairs.length === 0) return selection;
+  const withoutAtomicPairMarker = (input: RoutedEntityInput): RoutedEntityInput => {
+    if (!input.atomicCrossJurisdictionPair) return input;
+    const retained = { ...input };
+    delete retained.atomicCrossJurisdictionPair;
+    return retained;
+  };
+  if (selection.pairs.length === 0) {
+    return {
+      ...selection,
+      inputs: selection.inputs.map(withoutAtomicPairMarker),
+    };
+  }
   const orderedPairs = [...selection.pairs].sort(
     (left, right) =>
       Math.min(left.sourceInputIndex, left.targetInputIndex) -
@@ -159,7 +170,7 @@ const groupAtomicPairsFirst = (
       const marker = markers.get(inputIndex);
       return marker
         ? { ...input, atomicCrossJurisdictionPair: { ...marker } }
-        : input;
+        : withoutAtomicPairMarker(input);
     }),
   };
 };

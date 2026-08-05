@@ -1,0 +1,42 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - link "xln home" [ref=e5] [cursor=pointer]:
+      - /url: /
+      - text: xln
+    - navigation "Primary navigation" [ref=e6]:
+      - link "Overview" [ref=e7] [cursor=pointer]:
+        - /url: /
+      - link "Docs" [ref=e8] [cursor=pointer]:
+        - /url: /docs
+      - link "Releases" [ref=e9] [cursor=pointer]:
+        - /url: /releases
+      - link "Open wallet" [ref=e10] [cursor=pointer]:
+        - /url: /app
+  - generic [ref=e11]:
+    - complementary [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e15]:
+          - generic [ref=e16]: ◫
+          - text: XLN Docs
+        - paragraph [ref=e17]: Canonical theory, live specs, launch status, and historical context.
+      - generic [ref=e18]:
+        - generic [ref=e19]: ⌕
+        - generic [ref=e20]: Search docs
+        - searchbox "Search docs" [ref=e21]
+      - generic [ref=e22]:
+        - button "Live" [ref=e23] [cursor=pointer]
+        - button "Live + Archive" [ref=e24] [cursor=pointer]
+    - main [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - paragraph [ref=e28]: Documentation
+          - heading "Full XLN Project Docs" [level=1] [ref=e29]
+          - paragraph [ref=e30]: Start with the live docs. Use archive only for historical wording, superseded plans, or research branches.
+        - generic [ref=e31]:
+          - generic [ref=e32]:
+            - generic [ref=e33]: Visible docs
+            - strong [ref=e34]: "0"
+          - generic [ref=e35]:
+            - generic [ref=e36]: Current source of truth
+            - strong [ref=e37]: Status + Mainnet
+      - generic [ref=e38]: Loading docs…

@@ -1,0 +1,33 @@
+- generic [ref=f2e2]:
+  - main [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - paragraph [ref=f2e5]: first local runtime
+      - heading "Create xln wallet" [level=1] [ref=f2e6]
+      - paragraph [ref=f2e7]: One recovery phrase controls the local runtime. xln never sends it to an analytics service or remote wallet UI.
+      - list [ref=f2e8]:
+        - listitem [ref=f2e9]:
+          - generic [ref=f2e10]: "01"
+          - text: Generated on this device
+        - listitem [ref=f2e11]:
+          - generic [ref=f2e12]: "02"
+          - text: Protected by the existing vault
+        - listitem [ref=f2e13]:
+          - generic [ref=f2e14]: "03"
+          - text: Used only to sign explicit commands
+    - generic [ref=f2e15]:
+      - generic "Wallet setup method" [ref=f2e16]:
+        - button "New wallet" [pressed] [ref=f2e17] [cursor=pointer]
+        - button "Import phrase" [ref=f2e18] [cursor=pointer]
+      - generic [ref=f2e19]: Wallet name
+      - textbox "Wallet name" [ref=f2e20]: My wallet
+      - generic [ref=f2e21]:
+        - generic [ref=f2e22]: Recovery phrase
+        - generic [ref=f2e23]: 0 words
+      - textbox "Recovery phrase" [ref=f2e24]:
+        - /placeholder: Generate a new 24-word phrase
+      - button "Generate recovery phrase" [ref=f2e25] [cursor=pointer]
+      - generic [ref=f2e26]:
+        - checkbox "I stored this phrase offline and understand it cannot be recovered by xln." [ref=f2e27]
+        - generic [ref=f2e28]: I stored this phrase offline and understand it cannot be recovered by xln.
+      - button "Create wallet" [disabled] [ref=f2e29]
+  - complementary "Wallet notifications"

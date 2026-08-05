@@ -1,6 +1,14 @@
 import { CHILD_LOG_RING_MAX } from './orchestrator-config';
 
 export type PrefixLogState = { pending: string };
+export const MAX_MANAGED_CHILD_INCIDENT_MESSAGE_CHARS = 8 * 1024;
+
+export const truncateManagedChildIncidentMessage = (message: string): string => {
+  if (message.length <= MAX_MANAGED_CHILD_INCIDENT_MESSAGE_CHARS) return message;
+  const omitted = message.length - MAX_MANAGED_CHILD_INCIDENT_MESSAGE_CHARS;
+  return `${message.slice(0, MAX_MANAGED_CHILD_INCIDENT_MESSAGE_CHARS)}` +
+    `...[managed-child incident truncated ${omitted} chars]`;
+};
 
 /**
  * Retains a small diagnostic tail without allowing noisy children to grow the

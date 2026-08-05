@@ -101,17 +101,18 @@ export const readLocalTestListeningPortPids = (ports: readonly number[]): Map<nu
     '-FnP',
     ...normalizedPorts.map(port => `-iTCP:${port}`),
   ], {
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf8',
     timeout: 5_000,
     killSignal: 'SIGKILL',
   });
   const output = String(result.stdout || '').trim();
   if (!output && result.status === 1 && !result.error) return new Map();
-  if (result.error || result.status !== 0) {
+  if (result.error || (result.status !== 0 && result.status !== 1)) {
+    const stderr = String(result.stderr || '').trim();
     throw new Error(
       `LOCAL_TEST_PORT_SCAN_FAILED:ports=${normalizedPorts.length}:status=${String(result.status)}:` +
-      `${result.error?.message || 'unknown'}`,
+      `${result.error?.message || stderr || 'unknown'}`,
     );
   }
   const requested = new Set(normalizedPorts);

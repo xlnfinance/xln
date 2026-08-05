@@ -1,0 +1,705 @@
+- generic [ref=f1e3]:
+  - banner [ref=f1e4]:
+    - link "xln home" [ref=f1e5] [cursor=pointer]:
+      - /url: /
+      - text: xln
+    - navigation "Primary navigation" [ref=f1e6]:
+      - link "Overview" [ref=f1e7] [cursor=pointer]:
+        - /url: /
+      - link "Docs" [ref=f1e8] [cursor=pointer]:
+        - /url: /docs
+      - link "Releases" [ref=f1e9] [cursor=pointer]:
+        - /url: /releases
+      - link "Open wallet" [ref=f1e10] [cursor=pointer]:
+        - /url: /app
+  - generic [ref=f1e11]:
+    - complementary [ref=f1e12]:
+      - generic [ref=f1e13]:
+        - generic [ref=f1e15]:
+          - generic [ref=f1e16]: ◫
+          - text: XLN Docs
+        - paragraph [ref=f1e17]: Canonical theory, live specs, launch status, and historical context.
+        - generic [ref=f1e18]:
+          - generic [ref=f1e19]: 102 live
+          - generic [ref=f1e20]: 34 archive
+          - generic [ref=f1e21]: 136 total
+      - generic [ref=f1e22]:
+        - generic [ref=f1e23]: ⌕
+        - generic [ref=f1e24]: Search docs
+        - searchbox "Search docs" [ref=f1e25]
+      - generic [ref=f1e26]:
+        - button "Live" [ref=f1e27] [cursor=pointer]
+        - button "Live + Archive" [ref=f1e28] [cursor=pointer]
+      - generic [ref=f1e29]:
+        - generic [ref=f1e30]: Reading Paths
+        - generic [ref=f1e31]:
+          - button "New to XLN Problem, invariant, architecture, then the current truth." [ref=f1e32] [cursor=pointer]:
+            - strong [ref=f1e33]: New to XLN
+            - generic [ref=f1e34]: Problem, invariant, architecture, then the current truth.
+          - button "Launch and Risk What blocks launch, what the release bar is, and where recovery fits." [ref=f1e35] [cursor=pointer]:
+            - strong [ref=f1e36]: Launch and Risk
+            - generic [ref=f1e37]: What blocks launch, what the release bar is, and where recovery fits.
+          - button "Runtime and Storage Core implementation surfaces for state, transport, and proofs." [ref=f1e38] [cursor=pointer]:
+            - strong [ref=f1e39]: Runtime and Storage
+            - generic [ref=f1e40]: Core implementation surfaces for state, transport, and proofs.
+      - generic [ref=f1e41]:
+        - generic [ref=f1e42]: Featured
+        - generic [ref=f1e43]:
+          - button "xln Documentation readme" [ref=f1e44] [cursor=pointer]:
+            - generic [ref=f1e45]: xln Documentation
+            - generic [ref=f1e46]: readme
+          - 'button "Unavoidable Constraints: Why XLN is Not Optional constraints" [ref=f1e47] [cursor=pointer]':
+            - generic [ref=f1e48]: "Unavoidable Constraints: Why XLN is Not Optional"
+            - generic [ref=f1e49]: constraints
+          - button "XLN in 5 minutes intro" [ref=f1e50] [cursor=pointer]:
+            - generic [ref=f1e51]: XLN in 5 minutes
+            - generic [ref=f1e52]: intro
+          - button "1.2 RCPAN Invariant core/12_invariant" [ref=f1e53] [cursor=pointer]:
+            - generic [ref=f1e54]: 1.2 RCPAN Invariant
+            - generic [ref=f1e55]: core/12_invariant
+          - button "Runtime → Entity → Account → Jurisdiction core/rjea-architecture" [ref=f1e56] [cursor=pointer]:
+            - generic [ref=f1e57]: Runtime → Entity → Account → Jurisdiction
+            - generic [ref=f1e58]: core/rjea-architecture
+          - button "XLN Status status" [ref=f1e59] [cursor=pointer]:
+            - generic [ref=f1e60]: XLN Status
+            - generic [ref=f1e61]: status
+          - button "XLN Mainnet Bar mainnet" [ref=f1e62] [cursor=pointer]:
+            - generic [ref=f1e63]: XLN Mainnet Bar
+            - generic [ref=f1e64]: mainnet
+          - button "XLN Roadmap roadmap" [ref=f1e65] [cursor=pointer]:
+            - generic [ref=f1e66]: XLN Roadmap
+            - generic [ref=f1e67]: roadmap
+          - button "Payment and HTLC flow implementation/payment-spec" [ref=f1e68] [cursor=pointer]:
+            - generic [ref=f1e69]: Payment and HTLC flow
+            - generic [ref=f1e70]: implementation/payment-spec
+          - button "XLN Recovery and Watchtower Protocol recovery-watchtower-protocol" [ref=f1e71] [cursor=pointer]:
+            - generic [ref=f1e72]: XLN Recovery and Watchtower Protocol
+            - generic [ref=f1e73]: recovery-watchtower-protocol
+      - navigation "Documentation catalog" [ref=f1e74]:
+        - generic [ref=f1e75]:
+          - generic [ref=f1e76]: Start Here
+          - paragraph [ref=f1e77]: The shortest path to understanding XLN and the current project state.
+          - generic [ref=f1e78]:
+            - button "xln Documentation readme" [ref=f1e79] [cursor=pointer]:
+              - generic [ref=f1e80]: xln Documentation
+              - generic [ref=f1e81]: readme
+            - 'button "Unavoidable Constraints: Why XLN is Not Optional constraints" [ref=f1e82] [cursor=pointer]':
+              - generic [ref=f1e83]: "Unavoidable Constraints: Why XLN is Not Optional"
+              - generic [ref=f1e84]: constraints
+            - button "XLN in 5 minutes intro" [ref=f1e85] [cursor=pointer]:
+              - generic [ref=f1e86]: XLN in 5 minutes
+              - generic [ref=f1e87]: intro
+            - button "1.2 RCPAN Invariant core/12_invariant" [ref=f1e88] [cursor=pointer]:
+              - generic [ref=f1e89]: 1.2 RCPAN Invariant
+              - generic [ref=f1e90]: core/12_invariant
+            - button "Runtime → Entity → Account → Jurisdiction core/rjea-architecture" [ref=f1e91] [cursor=pointer]:
+              - generic [ref=f1e92]: Runtime → Entity → Account → Jurisdiction
+              - generic [ref=f1e93]: core/rjea-architecture
+            - button "XLN Status status" [ref=f1e94] [cursor=pointer]:
+              - generic [ref=f1e95]: XLN Status
+              - generic [ref=f1e96]: status
+            - button "XLN Mainnet Bar mainnet" [ref=f1e97] [cursor=pointer]:
+              - generic [ref=f1e98]: XLN Mainnet Bar
+              - generic [ref=f1e99]: mainnet
+            - button "XLN Roadmap roadmap" [ref=f1e100] [cursor=pointer]:
+              - generic [ref=f1e101]: XLN Roadmap
+              - generic [ref=f1e102]: roadmap
+        - generic [ref=f1e103]:
+          - generic [ref=f1e104]: Theory and Narrative
+          - paragraph [ref=f1e105]: Core theory, conceptual models, and long-form explanation.
+          - generic [ref=f1e106]:
+            - button "0.0 Questions & Answers core/00_QA" [ref=f1e107] [cursor=pointer]:
+              - generic [ref=f1e108]: 0.0 Questions & Answers
+              - generic [ref=f1e109]: core/00_QA
+            - 'button "1.0 Unified Financial Theory: Reserve-Credit Provable Account Network core/10_UFT" [ref=f1e110] [cursor=pointer]':
+              - generic [ref=f1e111]: "1.0 Unified Financial Theory: Reserve-Credit Provable Account Network"
+              - generic [ref=f1e112]: core/10_UFT
+            - button "1.1 Jurisdiction Machine / J-machine core/11_Jurisdiction_Machine" [ref=f1e113] [cursor=pointer]:
+              - generic [ref=f1e114]: 1.1 Jurisdiction Machine / J-machine
+              - generic [ref=f1e115]: core/11_Jurisdiction_Machine
+            - 'button "The Inevitability of Provable Credit: Why XLN Represents the True Evolution of Finance essay" [ref=f1e116] [cursor=pointer]':
+              - generic [ref=f1e117]: "The Inevitability of Provable Credit: Why XLN Represents the True Evolution of Finance"
+              - generic [ref=f1e118]: essay
+            - button "bilateral insights/bilateral" [ref=f1e119] [cursor=pointer]:
+              - generic [ref=f1e120]: bilateral
+              - generic [ref=f1e121]: insights/bilateral
+            - 'button "bilaterality: not a feature, a necessity architecture/bilaterality" [ref=f1e122] [cursor=pointer]':
+              - generic [ref=f1e123]: "bilaterality: not a feature, a necessity"
+              - generic [ref=f1e124]: architecture/bilaterality
+            - button "Why EVM? (Technical Constraint, Not Preference) architecture/why-evm" [ref=f1e125] [cursor=pointer]:
+              - generic [ref=f1e126]: Why EVM? (Technical Constraint, Not Preference)
+              - generic [ref=f1e127]: architecture/why-evm
+        - generic [ref=f1e128]:
+          - generic [ref=f1e129]: Architecture
+          - paragraph [ref=f1e130]: Protocol structure, contract surface, durable state, and runtime boundaries.
+          - generic [ref=f1e131]:
+            - button "XLN Smart Contract Architecture architecture/contracts" [ref=f1e132] [cursor=pointer]:
+              - generic [ref=f1e133]: XLN Smart Contract Architecture
+              - generic [ref=f1e134]: architecture/contracts
+            - 'button "hanko: xln''s universal signature system architecture/hanko" [ref=f1e135] [cursor=pointer]':
+              - generic [ref=f1e136]: "hanko: xln's universal signature system"
+              - generic [ref=f1e137]: architecture/hanko
+            - button "XLN Storage Merkle Architecture merkle" [ref=f1e138] [cursor=pointer]:
+              - generic [ref=f1e139]: XLN Storage Merkle Architecture
+              - generic [ref=f1e140]: merkle
+            - 'button "radapter: minimal runtime adapter for mainnet radapter" [ref=f1e141] [cursor=pointer]':
+              - generic [ref=f1e142]: "radapter: minimal runtime adapter for mainnet"
+              - generic [ref=f1e143]: radapter
+        - generic [ref=f1e144]:
+          - generic [ref=f1e145]: Specifications
+          - paragraph [ref=f1e146]: Mechanism-level specs for payments, custody, rebalance, recovery, and code safety.
+          - generic [ref=f1e147]:
+            - button "Payment and HTLC flow implementation/payment-spec" [ref=f1e148] [cursor=pointer]:
+              - generic [ref=f1e149]: Payment and HTLC flow
+              - generic [ref=f1e150]: implementation/payment-spec
+            - button "custody balance spec custody" [ref=f1e151] [cursor=pointer]:
+              - generic [ref=f1e152]: custody balance spec
+              - generic [ref=f1e153]: custody
+            - button "hub auto-rebalance spec rebalance" [ref=f1e154] [cursor=pointer]:
+              - generic [ref=f1e155]: hub auto-rebalance spec
+              - generic [ref=f1e156]: rebalance
+            - button "XLN Recovery and Watchtower Protocol recovery-watchtower-protocol" [ref=f1e157] [cursor=pointer]:
+              - generic [ref=f1e158]: XLN Recovery and Watchtower Protocol
+              - generic [ref=f1e159]: recovery-watchtower-protocol
+            - button "Fintech Type Safety Protocol fintech-type-safety-protocol" [ref=f1e160] [cursor=pointer]:
+              - generic [ref=f1e161]: Fintech Type Safety Protocol
+              - generic [ref=f1e162]: fintech-type-safety-protocol
+            - button "XLN Native Wallet Product Plan native-wallet-product-plan" [ref=f1e163] [cursor=pointer]:
+              - generic [ref=f1e164]: XLN Native Wallet Product Plan
+              - generic [ref=f1e165]: native-wallet-product-plan
+        - generic [ref=f1e166]:
+          - generic [ref=f1e167]: Ops and Debugging
+          - paragraph [ref=f1e168]: Consensus footguns, debug surfaces, E2E triage, deployment, and operator guidance.
+          - generic [ref=f1e169]:
+            - button "consensus invariants consensus-invariants" [ref=f1e170] [cursor=pointer]:
+              - generic [ref=f1e171]: consensus invariants
+              - generic [ref=f1e172]: consensus-invariants
+            - button "Single Source Network Debugging debug" [ref=f1e173] [cursor=pointer]:
+              - generic [ref=f1e174]: Single Source Network Debugging
+              - generic [ref=f1e175]: debug
+            - button "XLN Consensus Debugging Guide debugging/consensus-debugging-guide" [ref=f1e176] [cursor=pointer]:
+              - generic [ref=f1e177]: XLN Consensus Debugging Guide
+              - generic [ref=f1e178]: debugging/consensus-debugging-guide
+            - button "E2E Debug Protocol e2e-debug-protocol" [ref=f1e179] [cursor=pointer]:
+              - generic [ref=f1e180]: E2E Debug Protocol
+              - generic [ref=f1e181]: e2e-debug-protocol
+            - button "XLN Deployment deployment/deployment" [ref=f1e182] [cursor=pointer]:
+              - generic [ref=f1e183]: XLN Deployment
+              - generic [ref=f1e184]: deployment/deployment
+            - button "XLN Ops Runbook deployment/ops-runbook" [ref=f1e185] [cursor=pointer]:
+              - generic [ref=f1e186]: XLN Ops Runbook
+              - generic [ref=f1e187]: deployment/ops-runbook
+            - button "Code Cleanup Plan code-cleanup-plan" [ref=f1e188] [cursor=pointer]:
+              - generic [ref=f1e189]: Code Cleanup Plan
+              - generic [ref=f1e190]: code-cleanup-plan
+            - button "Account Machine runtime/account" [ref=f1e191] [cursor=pointer]:
+              - generic [ref=f1e192]: Account Machine
+              - generic [ref=f1e193]: runtime/account
+            - button "Account Tx Map runtime/account-transactions" [ref=f1e194] [cursor=pointer]:
+              - generic [ref=f1e195]: Account Tx Map
+              - generic [ref=f1e196]: runtime/account-transactions
+            - button "Canonical Fill Scan security/canonical-fill-scan" [ref=f1e197] [cursor=pointer]:
+              - generic [ref=f1e198]: Canonical Fill Scan
+              - generic [ref=f1e199]: security/canonical-fill-scan
+            - button "Canonical Identity Scan security/canonical-identity-scan" [ref=f1e200] [cursor=pointer]:
+              - generic [ref=f1e201]: Canonical Identity Scan
+              - generic [ref=f1e202]: security/canonical-identity-scan
+            - button "Consensus And Hanko Production Scan security/consensus-hanko-scan" [ref=f1e203] [cursor=pointer]:
+              - generic [ref=f1e204]: Consensus And Hanko Production Scan
+              - generic [ref=f1e205]: security/consensus-hanko-scan
+            - button "Contract Governance And Access-Control Scan security/contract-governance-scan" [ref=f1e206] [cursor=pointer]:
+              - generic [ref=f1e207]: Contract Governance And Access-Control Scan
+              - generic [ref=f1e208]: security/contract-governance-scan
+            - button "counterfactual transformers (custom clauses) counterfactual-transformers" [ref=f1e209] [cursor=pointer]:
+              - generic [ref=f1e210]: counterfactual transformers (custom clauses)
+              - generic [ref=f1e211]: counterfactual-transformers
+            - button "Dedup audit snapshot — 2026-07-31 audit/dedup-backlog-2026-07-31" [ref=f1e212] [cursor=pointer]:
+              - generic [ref=f1e213]: Dedup audit snapshot — 2026-07-31
+              - generic [ref=f1e214]: audit/dedup-backlog-2026-07-31
+            - button "Deep audit — contracts / runtime / frontend (2026-06-16) audit/audit-2026-06-16-deep-audit" [ref=f1e215] [cursor=pointer]:
+              - generic [ref=f1e216]: Deep audit — contracts / runtime / frontend (2026-06-16)
+              - generic [ref=f1e217]: audit/audit-2026-06-16-deep-audit
+            - button "Entity Machine runtime/entity" [ref=f1e218] [cursor=pointer]:
+              - generic [ref=f1e219]: Entity Machine
+              - generic [ref=f1e220]: runtime/entity
+            - button "Entity Tx Map runtime/entity-transactions" [ref=f1e221] [cursor=pointer]:
+              - generic [ref=f1e222]: Entity Tx Map
+              - generic [ref=f1e223]: runtime/entity-transactions
+            - button "Evidence-driven modular audit protocol audit-protocol" [ref=f1e224] [cursor=pointer]:
+              - generic [ref=f1e225]: Evidence-driven modular audit protocol
+              - generic [ref=f1e226]: audit-protocol
+            - button "External Wallet State external-wallet-state" [ref=f1e227] [cursor=pointer]:
+              - generic [ref=f1e228]: External Wallet State
+              - generic [ref=f1e229]: external-wallet-state
+            - button "Frontend UX Audit — Simplify for ordinary users without losing informativeness audit/audit-2026-06-19-frontend-ux" [ref=f1e230] [cursor=pointer]:
+              - generic [ref=f1e231]: Frontend UX Audit — Simplify for ordinary users without losing informativeness
+              - generic [ref=f1e232]: audit/audit-2026-06-19-frontend-ux
+            - button "Frozen Core Integrity security/frozen-core" [ref=f1e233] [cursor=pointer]:
+              - generic [ref=f1e234]: Frozen Core Integrity
+              - generic [ref=f1e235]: security/frozen-core
+            - button "JAdapter Map runtime/jadapter" [ref=f1e236] [cursor=pointer]:
+              - generic [ref=f1e237]: JAdapter Map
+              - generic [ref=f1e238]: runtime/jadapter
+            - button "Jurisdiction Machine runtime/jurisdiction" [ref=f1e239] [cursor=pointer]:
+              - generic [ref=f1e240]: Jurisdiction Machine
+              - generic [ref=f1e241]: runtime/jurisdiction
+            - button "Mainnet engineering principles mainnet-engineering-principles" [ref=f1e242] [cursor=pointer]:
+              - generic [ref=f1e243]: Mainnet engineering principles
+              - generic [ref=f1e244]: mainnet-engineering-principles
+            - button "Networking Map runtime/networking" [ref=f1e245] [cursor=pointer]:
+              - generic [ref=f1e246]: Networking Map
+              - generic [ref=f1e247]: runtime/networking
+            - button "Protocol codecs and account commitments protocol-codecs" [ref=f1e248] [cursor=pointer]:
+              - generic [ref=f1e249]: Protocol codecs and account commitments
+              - generic [ref=f1e250]: protocol-codecs
+            - button "Protocol Primitives runtime/protocol" [ref=f1e251] [cursor=pointer]:
+              - generic [ref=f1e252]: Protocol Primitives
+              - generic [ref=f1e253]: runtime/protocol
+            - button "Public Testnet Flow Coverage testnet-flow-coverage" [ref=f1e254] [cursor=pointer]:
+              - generic [ref=f1e255]: Public Testnet Flow Coverage
+              - generic [ref=f1e256]: testnet-flow-coverage
+            - button "qa cockpit qa-cockpit" [ref=f1e257] [cursor=pointer]:
+              - generic [ref=f1e258]: qa cockpit
+              - generic [ref=f1e259]: qa-cockpit
+            - button "React ops Plan 010 route, capability, and resource inventory frontend/react-ops-plan010-inventory" [ref=f1e260] [cursor=pointer]:
+              - generic [ref=f1e261]: React ops Plan 010 route, capability, and resource inventory
+              - generic [ref=f1e262]: frontend/react-ops-plan010-inventory
+            - button "React wallet Plan 008 action inventory frontend/react-wallet-plan008-action-inventory" [ref=f1e263] [cursor=pointer]:
+              - generic [ref=f1e264]: React wallet Plan 008 action inventory
+              - generic [ref=f1e265]: frontend/react-wallet-plan008-action-inventory
+            - button "React wallet Plan 009 swap and activity inventory frontend/react-wallet-plan009-action-inventory" [ref=f1e266] [cursor=pointer]:
+              - generic [ref=f1e267]: React wallet Plan 009 swap and activity inventory
+              - generic [ref=f1e268]: frontend/react-wallet-plan009-action-inventory
+            - button "Recovery Map runtime/recovery" [ref=f1e269] [cursor=pointer]:
+              - generic [ref=f1e270]: Recovery Map
+              - generic [ref=f1e271]: runtime/recovery
+            - button "Runtime code map runtime/overview" [ref=f1e272] [cursor=pointer]:
+              - generic [ref=f1e273]: Runtime code map
+              - generic [ref=f1e274]: runtime/overview
+            - button "Runtime Delivery Boundary Scan security/delivery-boundary-scan" [ref=f1e275] [cursor=pointer]:
+              - generic [ref=f1e276]: Runtime Delivery Boundary Scan
+              - generic [ref=f1e277]: security/delivery-boundary-scan
+            - button "Runtime Extensions runtime/extensions" [ref=f1e278] [cursor=pointer]:
+              - generic [ref=f1e279]: Runtime Extensions
+              - generic [ref=f1e280]: runtime/extensions
+            - button "Runtime Failure Taxonomy Scan security/failure-taxonomy-scan" [ref=f1e281] [cursor=pointer]:
+              - generic [ref=f1e282]: Runtime Failure Taxonomy Scan
+              - generic [ref=f1e283]: security/failure-taxonomy-scan
+            - button "Runtime Machine runtime/runtime" [ref=f1e284] [cursor=pointer]:
+              - generic [ref=f1e285]: Runtime Machine
+              - generic [ref=f1e286]: runtime/runtime
+            - button "Runtime REAJ Architecture architecture/runtime-reaj" [ref=f1e287] [cursor=pointer]:
+              - generic [ref=f1e288]: Runtime REAJ Architecture
+              - generic [ref=f1e289]: architecture/runtime-reaj
+            - button "Server Map runtime/server" [ref=f1e290] [cursor=pointer]:
+              - generic [ref=f1e291]: Server Map
+              - generic [ref=f1e292]: runtime/server
+            - button "Storage Map runtime/storage" [ref=f1e293] [cursor=pointer]:
+              - generic [ref=f1e294]: Storage Map
+              - generic [ref=f1e295]: runtime/storage
+            - button "Tower Backup and Last-Resort Dispute Services watchtower-services" [ref=f1e296] [cursor=pointer]:
+              - generic [ref=f1e297]: Tower Backup and Last-Resort Dispute Services
+              - generic [ref=f1e298]: watchtower-services
+            - button "Two-Argument Dispute Arguments Specification security/dispute-two-arguments-spec" [ref=f1e299] [cursor=pointer]:
+              - generic [ref=f1e300]: Two-Argument Dispute Arguments Specification
+              - generic [ref=f1e301]: security/dispute-two-arguments-spec
+            - button "Watchtower Service Map runtime/watchtower" [ref=f1e302] [cursor=pointer]:
+              - generic [ref=f1e303]: Watchtower Service Map
+              - generic [ref=f1e304]: runtime/watchtower
+            - button "xln 0.1.10 releases/0.1.10" [ref=f1e305] [cursor=pointer]:
+              - generic [ref=f1e306]: xln 0.1.10
+              - generic [ref=f1e307]: releases/0.1.10
+            - button "xln 0.1.11 releases/0.1.11" [ref=f1e308] [cursor=pointer]:
+              - generic [ref=f1e309]: xln 0.1.11
+              - generic [ref=f1e310]: releases/0.1.11
+            - button "xln 0.1.12 releases/0.1.12" [ref=f1e311] [cursor=pointer]:
+              - generic [ref=f1e312]: xln 0.1.12
+              - generic [ref=f1e313]: releases/0.1.12
+            - button "xln 0.1.13 releases/0.1.13" [ref=f1e314] [cursor=pointer]:
+              - generic [ref=f1e315]: xln 0.1.13
+              - generic [ref=f1e316]: releases/0.1.13
+            - button "xln 0.1.14 releases/0.1.14" [ref=f1e317] [cursor=pointer]:
+              - generic [ref=f1e318]: xln 0.1.14
+              - generic [ref=f1e319]: releases/0.1.14
+            - button "xln 0.1.15 releases/0.1.15" [ref=f1e320] [cursor=pointer]:
+              - generic [ref=f1e321]: xln 0.1.15
+              - generic [ref=f1e322]: releases/0.1.15
+            - button "xln 0.1.16 releases/0.1.16" [ref=f1e323] [cursor=pointer]:
+              - generic [ref=f1e324]: xln 0.1.16
+              - generic [ref=f1e325]: releases/0.1.16
+            - button "xln 0.1.18 releases/0.1.18" [ref=f1e326] [cursor=pointer]:
+              - generic [ref=f1e327]: xln 0.1.18
+              - generic [ref=f1e328]: releases/0.1.18
+            - button "xln 0.1.19 releases/0.1.19" [ref=f1e329] [cursor=pointer]:
+              - generic [ref=f1e330]: xln 0.1.19
+              - generic [ref=f1e331]: releases/0.1.19
+            - button "xln 0.1.20 releases/0.1.20" [ref=f1e332] [cursor=pointer]:
+              - generic [ref=f1e333]: xln 0.1.20
+              - generic [ref=f1e334]: releases/0.1.20
+            - button "xln 0.1.21 releases/0.1.21" [ref=f1e335] [cursor=pointer]:
+              - generic [ref=f1e336]: xln 0.1.21
+              - generic [ref=f1e337]: releases/0.1.21
+            - button "xln 0.1.22 releases/0.1.22" [ref=f1e338] [cursor=pointer]:
+              - generic [ref=f1e339]: xln 0.1.22
+              - generic [ref=f1e340]: releases/0.1.22
+            - button "xln 0.1.23 releases/0.1.23" [ref=f1e341] [cursor=pointer]:
+              - generic [ref=f1e342]: xln 0.1.23
+              - generic [ref=f1e343]: releases/0.1.23
+            - button "xln 0.1.24 releases/0.1.24" [ref=f1e344] [cursor=pointer]:
+              - generic [ref=f1e345]: xln 0.1.24
+              - generic [ref=f1e346]: releases/0.1.24
+            - button "xln 0.1.25 releases/0.1.25" [ref=f1e347] [cursor=pointer]:
+              - generic [ref=f1e348]: xln 0.1.25
+              - generic [ref=f1e349]: releases/0.1.25
+            - button "xln 0.1.26 releases/0.1.26" [ref=f1e350] [cursor=pointer]:
+              - generic [ref=f1e351]: xln 0.1.26
+              - generic [ref=f1e352]: releases/0.1.26
+            - button "xln 0.1.27 releases/0.1.27" [ref=f1e353] [cursor=pointer]:
+              - generic [ref=f1e354]: xln 0.1.27
+              - generic [ref=f1e355]: releases/0.1.27
+            - button "xln 0.1.28 releases/0.1.28" [ref=f1e356] [cursor=pointer]:
+              - generic [ref=f1e357]: xln 0.1.28
+              - generic [ref=f1e358]: releases/0.1.28
+            - button "xln 0.1.29 releases/0.1.29" [ref=f1e359] [cursor=pointer]:
+              - generic [ref=f1e360]: xln 0.1.29
+              - generic [ref=f1e361]: releases/0.1.29
+            - button "xln 0.1.30 releases/0.1.30" [ref=f1e362] [cursor=pointer]:
+              - generic [ref=f1e363]: xln 0.1.30
+              - generic [ref=f1e364]: releases/0.1.30
+            - button "xln 0.1.31 releases/0.1.31" [ref=f1e365] [cursor=pointer]:
+              - generic [ref=f1e366]: xln 0.1.31
+              - generic [ref=f1e367]: releases/0.1.31
+            - button "xln 0.1.5 releases/0.1.5" [ref=f1e368] [cursor=pointer]:
+              - generic [ref=f1e369]: xln 0.1.5
+              - generic [ref=f1e370]: releases/0.1.5
+            - button "xln 0.1.6 releases/0.1.6" [ref=f1e371] [cursor=pointer]:
+              - generic [ref=f1e372]: xln 0.1.6
+              - generic [ref=f1e373]: releases/0.1.6
+            - button "xln 0.1.7 releases/0.1.7" [ref=f1e374] [cursor=pointer]:
+              - generic [ref=f1e375]: xln 0.1.7
+              - generic [ref=f1e376]: releases/0.1.7
+            - button "xln 0.1.8 releases/0.1.8" [ref=f1e377] [cursor=pointer]:
+              - generic [ref=f1e378]: xln 0.1.8
+              - generic [ref=f1e379]: releases/0.1.8
+            - button "xln 0.1.9 releases/0.1.9" [ref=f1e380] [cursor=pointer]:
+              - generic [ref=f1e381]: xln 0.1.9
+              - generic [ref=f1e382]: releases/0.1.9
+            - button "xln audit prompts and answers - 2026-07-02 audit/audit-prompts-2026-07-02" [ref=f1e383] [cursor=pointer]:
+              - generic [ref=f1e384]: xln audit prompts and answers - 2026-07-02
+              - generic [ref=f1e385]: audit/audit-prompts-2026-07-02
+            - button "xln auditor memo audit/auditor-memo" [ref=f1e386] [cursor=pointer]:
+              - generic [ref=f1e387]: xln auditor memo
+              - generic [ref=f1e388]: audit/auditor-memo
+            - button "xln distribution platform-distribution-plan" [ref=f1e389] [cursor=pointer]:
+              - generic [ref=f1e390]: xln distribution
+              - generic [ref=f1e391]: platform-distribution-plan
+            - button "XLN External Security Audit Brief security/external-audit-brief" [ref=f1e392] [cursor=pointer]:
+              - generic [ref=f1e393]: XLN External Security Audit Brief
+              - generic [ref=f1e394]: security/external-audit-brief
+            - button "XLN Lend/Borrow lend" [ref=f1e395] [cursor=pointer]:
+              - generic [ref=f1e396]: XLN Lend/Borrow
+              - generic [ref=f1e397]: lend
+            - button "xln mainnet acceptance gate mainnet-acceptance-gate" [ref=f1e398] [cursor=pointer]:
+              - generic [ref=f1e399]: xln mainnet acceptance gate
+              - generic [ref=f1e400]: mainnet-acceptance-gate
+    - main [ref=f1e401]:
+      - generic [ref=f1e402]:
+        - generic [ref=f1e403]:
+          - paragraph [ref=f1e404]: Documentation
+          - heading "Full XLN Project Docs" [level=1] [ref=f1e405]
+          - paragraph [ref=f1e406]: Start with the live docs. Use archive only for historical wording, superseded plans, or research branches.
+        - generic [ref=f1e407]:
+          - generic [ref=f1e408]:
+            - generic [ref=f1e409]: Visible docs
+            - strong [ref=f1e410]: "102"
+          - generic [ref=f1e411]:
+            - generic [ref=f1e412]: Current source of truth
+            - strong [ref=f1e413]: Status + Mainnet
+      - generic [ref=f1e414]:
+        - article [ref=f1e415]:
+          - generic [ref=f1e416]:
+            - generic [ref=f1e417]:
+              - generic [ref=f1e418]: Live
+              - generic [ref=f1e419]: readme
+              - generic [ref=f1e420]: Start Here
+            - heading "xln Documentation" [level=2] [ref=f1e421]
+            - paragraph [ref=f1e422]: Reserve-Credit Provable Account Network — bilateral finance with provable credit, collateral enforcement, and EVM dispute resolution.
+            - link "Raw markdown ↗" [ref=f1e424] [cursor=pointer]:
+              - /url: /docs-catalog/readme.md
+          - generic [ref=f1e425]:
+            - heading "xln Documentation" [level=1] [ref=f1e426]
+            - paragraph [ref=f1e427]:
+              - strong [ref=f1e428]: Reserve-Credit Provable Account Network
+              - text: — bilateral finance with provable credit, collateral enforcement, and EVM dispute resolution.
+            - paragraph [ref=f1e429]:
+              - text: Start with
+              - link "constraints.md" [ref=f1e430] [cursor=pointer]:
+                - /url: /docs?doc=constraints
+              - text: . It explains why XLN is not "one more L2", but a consequence of the scaling and enforcement constraints.
+            - heading "Quick Start" [level=2] [ref=f1e431]
+            - paragraph [ref=f1e432]:
+              - strong [ref=f1e433]: New to XLN
+            - list [ref=f1e434]:
+              - listitem [ref=f1e435]:
+                - link "constraints.md" [ref=f1e436] [cursor=pointer]:
+                  - /url: /docs?doc=constraints
+                - text: — why broadcast finance cannot scale
+              - listitem [ref=f1e437]:
+                - link "intro.md" [ref=f1e438] [cursor=pointer]:
+                  - /url: /docs?doc=intro
+                - text: — XLN in 5 minutes
+              - listitem [ref=f1e439]:
+                - link "core/12_invariant.md" [ref=f1e440] [cursor=pointer]:
+                  - /url: /docs?doc=core%2F12_invariant
+                - text: — the RCPAN invariant
+              - listitem [ref=f1e441]:
+                - link "core/rjea-architecture.md" [ref=f1e442] [cursor=pointer]:
+                  - /url: /docs?doc=core%2Frjea-architecture
+                - text: — the runtime/entity/account/jurisdiction stack
+              - listitem [ref=f1e443]:
+                - link "architecture/reactive-network.html" [ref=f1e444] [cursor=pointer]:
+                  - /url: architecture/reactive-network.html
+                - text: — the reactive cascade diagram
+              - listitem [ref=f1e445]:
+                - link "status.md" [ref=f1e446] [cursor=pointer]:
+                  - /url: /docs?doc=status
+                - text: — the current source of truth
+              - listitem [ref=f1e447]:
+                - link "../todo.md" [ref=f1e448] [cursor=pointer]:
+                  - /url: ../todo.md
+                - text: — the active TODO/NEXT backlog
+            - paragraph [ref=f1e449]:
+              - strong [ref=f1e450]: Developers
+            - list [ref=f1e451]:
+              - listitem [ref=f1e452]:
+                - link "implementation/payment-spec.md" [ref=f1e453] [cursor=pointer]:
+                  - /url: /docs?doc=implementation%2Fpayment-spec
+                - text: — payments, HTLCs, onion routing
+              - listitem [ref=f1e454]:
+                - link "radapter.md" [ref=f1e455] [cursor=pointer]:
+                  - /url: /docs?doc=radapter
+                - text: — canonical frontend/runtime adapter spec
+              - listitem [ref=f1e456]:
+                - link "merkle.md" [ref=f1e457] [cursor=pointer]:
+                  - /url: /docs?doc=merkle
+                - text: — storage and proof layout
+              - listitem [ref=f1e458]:
+                - link "consensus-invariants.md" [ref=f1e459] [cursor=pointer]:
+                  - /url: /docs?doc=consensus-invariants
+                - text: — bilateral consensus footguns
+              - listitem [ref=f1e460]:
+                - link "audit-protocol.md" [ref=f1e461] [cursor=pointer]:
+                  - /url: /docs?doc=audit-protocol
+                - text: — canonical evidence-driven modular audit workflow
+              - listitem [ref=f1e462]:
+                - link "debug.md" [ref=f1e463] [cursor=pointer]:
+                  - /url: /docs?doc=debug
+                - text: — the required runtime/network debug surface
+            - heading "Core Protocol" [level=2] [ref=f1e464]
+            - table [ref=f1e465]:
+              - rowgroup [ref=f1e466]:
+                - row [ref=f1e467]:
+                  - columnheader "Document" [ref=f1e468]
+                  - columnheader "Description" [ref=f1e469]
+              - rowgroup [ref=f1e470]:
+                - row [ref=f1e471]:
+                  - cell [ref=f1e472]:
+                    - link "core/00_QA.md" [ref=f1e473] [cursor=pointer]:
+                      - /url: /docs?doc=core%2F00_QA
+                  - cell "motivation, objections, and framing" [ref=f1e474]
+                - row [ref=f1e475]:
+                  - cell [ref=f1e476]:
+                    - link "core/10_UFT.md" [ref=f1e477] [cursor=pointer]:
+                      - /url: /docs?doc=core%2F10_UFT
+                  - cell "Unified Financial Theory" [ref=f1e478]
+                - row [ref=f1e479]:
+                  - cell [ref=f1e480]:
+                    - link "core/11_Jurisdiction_Machine.md" [ref=f1e481] [cursor=pointer]:
+                      - /url: /docs?doc=core%2F11_Jurisdiction_Machine
+                  - cell "J-machine conceptual model" [ref=f1e482]
+                - row [ref=f1e483]:
+                  - cell [ref=f1e484]:
+                    - link "core/12_invariant.md" [ref=f1e485] [cursor=pointer]:
+                      - /url: /docs?doc=core%2F12_invariant
+                  - cell [ref=f1e486]:
+                    - code [ref=f1e487]: −Lₗ ≤ Δ ≤ C + Lᵣ
+                - row [ref=f1e488]:
+                  - cell [ref=f1e489]:
+                    - link "core/rjea-architecture.md" [ref=f1e490] [cursor=pointer]:
+                      - /url: /docs?doc=core%2Frjea-architecture
+                  - cell "canonical system architecture" [ref=f1e491]
+            - heading "Architecture" [level=2] [ref=f1e492]
+            - table [ref=f1e493]:
+              - rowgroup [ref=f1e494]:
+                - row [ref=f1e495]:
+                  - columnheader "Document" [ref=f1e496]
+                  - columnheader "Description" [ref=f1e497]
+              - rowgroup [ref=f1e498]:
+                - row [ref=f1e499]:
+                  - cell [ref=f1e500]:
+                    - link "architecture/bilaterality.md" [ref=f1e501] [cursor=pointer]:
+                      - /url: /docs?doc=architecture%2Fbilaterality
+                  - cell "why bilateral topology is necessary" [ref=f1e502]
+                - row [ref=f1e503]:
+                  - cell [ref=f1e504]:
+                    - link "architecture/reactive-network.html" [ref=f1e505] [cursor=pointer]:
+                      - /url: architecture/reactive-network.html
+                  - cell "visual cascade of account/entity/runtime/cross-runtime reactions" [ref=f1e506]
+                - row [ref=f1e507]:
+                  - cell [ref=f1e508]:
+                    - link "architecture/why-evm.md" [ref=f1e509] [cursor=pointer]:
+                      - /url: /docs?doc=architecture%2Fwhy-evm
+                  - cell "why XLN needs EVM enforcement" [ref=f1e510]
+                - row [ref=f1e511]:
+                  - cell [ref=f1e512]:
+                    - link "architecture/hanko.md" [ref=f1e513] [cursor=pointer]:
+                      - /url: /docs?doc=architecture%2Fhanko
+                  - cell "hierarchical entity signatures" [ref=f1e514]
+                - row [ref=f1e515]:
+                  - cell [ref=f1e516]:
+                    - link "architecture/contracts.md" [ref=f1e517] [cursor=pointer]:
+                      - /url: /docs?doc=architecture%2Fcontracts
+                  - cell "on-chain contract surface" [ref=f1e518]
+                - row [ref=f1e519]:
+                  - cell [ref=f1e520]:
+                    - link "merkle.md" [ref=f1e521] [cursor=pointer]:
+                      - /url: /docs?doc=merkle
+                  - cell "durable state and Merkle roots" [ref=f1e522]
+                - row [ref=f1e523]:
+                  - cell [ref=f1e524]:
+                    - link "radapter.md" [ref=f1e525] [cursor=pointer]:
+                      - /url: /docs?doc=radapter
+                  - cell "production runtime adapter" [ref=f1e526]
+            - heading "Specs" [level=2] [ref=f1e527]
+            - table [ref=f1e528]:
+              - rowgroup [ref=f1e529]:
+                - row [ref=f1e530]:
+                  - columnheader "Document" [ref=f1e531]
+                  - columnheader "Description" [ref=f1e532]
+              - rowgroup [ref=f1e533]:
+                - row [ref=f1e534]:
+                  - cell [ref=f1e535]:
+                    - link "implementation/payment-spec.md" [ref=f1e536] [cursor=pointer]:
+                      - /url: /docs?doc=implementation%2Fpayment-spec
+                  - cell "direct payments, HTLCs, onion routing" [ref=f1e537]
+                - row [ref=f1e538]:
+                  - cell [ref=f1e539]:
+                    - link "custody.md" [ref=f1e540] [cursor=pointer]:
+                      - /url: /docs?doc=custody
+                  - cell "custody balance for prepaid fees" [ref=f1e541]
+                - row [ref=f1e542]:
+                  - cell [ref=f1e543]:
+                    - link "rebalance.md" [ref=f1e544] [cursor=pointer]:
+                      - /url: /docs?doc=rebalance
+                  - cell "hub auto-rebalance" [ref=f1e545]
+                - row [ref=f1e546]:
+                  - cell [ref=f1e547]:
+                    - link "lend.md" [ref=f1e548] [cursor=pointer]:
+                      - /url: /docs?doc=lend
+                  - cell "Lend/Borrow product and runtime design" [ref=f1e549]
+                - row [ref=f1e550]:
+                  - cell [ref=f1e551]:
+                    - link "recovery-watchtower-protocol.md" [ref=f1e552] [cursor=pointer]:
+                      - /url: /docs?doc=recovery-watchtower-protocol
+                  - cell "recovery, peer refresh, watchtower storage" [ref=f1e553]
+                - row [ref=f1e554]:
+                  - cell [ref=f1e555]:
+                    - link "watchtower-services.md" [ref=f1e556] [cursor=pointer]:
+                      - /url: /docs?doc=watchtower-services
+                  - cell "encrypted backup and last-resort dispute operations" [ref=f1e557]
+                - row [ref=f1e558]:
+                  - cell [ref=f1e559]:
+                    - link "fintech-type-safety-protocol.md" [ref=f1e560] [cursor=pointer]:
+                      - /url: /docs?doc=fintech-type-safety-protocol
+                  - cell "type-safety rules for money-moving code" [ref=f1e561]
+            - heading "Status" [level=2] [ref=f1e562]
+            - table [ref=f1e563]:
+              - rowgroup [ref=f1e564]:
+                - row [ref=f1e565]:
+                  - columnheader "Document" [ref=f1e566]
+                  - columnheader "Description" [ref=f1e567]
+              - rowgroup [ref=f1e568]:
+                - row [ref=f1e569]:
+                  - cell [ref=f1e570]:
+                    - link "status.md" [ref=f1e571] [cursor=pointer]:
+                      - /url: /docs?doc=status
+                  - cell "canonical current blockers and workstreams" [ref=f1e572]
+                - row [ref=f1e573]:
+                  - cell [ref=f1e574]:
+                    - link "mainnet.md" [ref=f1e575] [cursor=pointer]:
+                      - /url: /docs?doc=mainnet
+                  - cell "release bar for real-user-fund launch" [ref=f1e576]
+                - row [ref=f1e577]:
+                  - cell [ref=f1e578]:
+                    - link "mainnet-acceptance-gate.md" [ref=f1e579] [cursor=pointer]:
+                      - /url: /docs?doc=mainnet-acceptance-gate
+                  - cell "strict capped-testnet / pre-mainnet acceptance loop" [ref=f1e580]
+                - row [ref=f1e581]:
+                  - cell [ref=f1e582]:
+                    - link "roadmap.md" [ref=f1e583] [cursor=pointer]:
+                      - /url: /docs?doc=roadmap
+                  - cell "phased rollout and strategic direction" [ref=f1e584]
+                - row [ref=f1e585]:
+                  - cell [ref=f1e586]:
+                    - link "../todo.md" [ref=f1e587] [cursor=pointer]:
+                      - /url: ../todo.md
+                  - cell "active TODO/NEXT backlog" [ref=f1e588]
+            - heading "Ops and Debugging" [level=2] [ref=f1e589]
+            - table [ref=f1e590]:
+              - rowgroup [ref=f1e591]:
+                - row [ref=f1e592]:
+                  - columnheader "Document" [ref=f1e593]
+                  - columnheader "Description" [ref=f1e594]
+              - rowgroup [ref=f1e595]:
+                - row [ref=f1e596]:
+                  - cell [ref=f1e597]:
+                    - link "debug.md" [ref=f1e598] [cursor=pointer]:
+                      - /url: /docs?doc=debug
+                  - cell "single-source event debugging" [ref=f1e599]
+                - row [ref=f1e600]:
+                  - cell [ref=f1e601]:
+                    - link "debugging/consensus-debugging-guide.md" [ref=f1e602] [cursor=pointer]:
+                      - /url: /docs?doc=debugging%2Fconsensus-debugging-guide
+                  - cell "consensus debugging patterns" [ref=f1e603]
+                - row [ref=f1e604]:
+                  - cell [ref=f1e605]:
+                    - link "e2e-debug-protocol.md" [ref=f1e606] [cursor=pointer]:
+                      - /url: /docs?doc=e2e-debug-protocol
+                  - cell "E2E triage protocol" [ref=f1e607]
+                - row [ref=f1e608]:
+                  - cell [ref=f1e609]:
+                    - link "deployment/deployment.md" [ref=f1e610] [cursor=pointer]:
+                      - /url: /docs?doc=deployment%2Fdeployment
+                  - cell "canonical deploy surface" [ref=f1e611]
+                - row [ref=f1e612]:
+                  - cell [ref=f1e613]:
+                    - link "deployment/ops-runbook.md" [ref=f1e614] [cursor=pointer]:
+                      - /url: /docs?doc=deployment%2Fops-runbook
+                  - cell "health, alerts, recovery" [ref=f1e615]
+            - heading "Archive" [level=2] [ref=f1e616]
+            - list [ref=f1e617]:
+              - listitem [ref=f1e618]:
+                - link "archive/" [ref=f1e619] [cursor=pointer]:
+                  - /url: archive/
+                - text: — historical planning, research, philosophy, and logs
+            - paragraph [ref=f1e620]:
+              - strong [ref=f1e621]: "Last updated:"
+              - text: 2026-06-16
+        - complementary [ref=f1e622]:
+          - generic [ref=f1e623]:
+            - generic [ref=f1e624]: On this page
+            - navigation [ref=f1e625]:
+              - link "Quick Start" [ref=f1e626] [cursor=pointer]:
+                - /url: "#quick-start"
+              - link "Core Protocol" [ref=f1e627] [cursor=pointer]:
+                - /url: "#core-protocol"
+              - link "Architecture" [ref=f1e628] [cursor=pointer]:
+                - /url: "#architecture"
+              - link "Specs" [ref=f1e629] [cursor=pointer]:
+                - /url: "#specs"
+              - link "Status" [ref=f1e630] [cursor=pointer]:
+                - /url: "#status"
+              - link "Ops and Debugging" [ref=f1e631] [cursor=pointer]:
+                - /url: "#ops-and-debugging"
+              - link "Archive" [ref=f1e632] [cursor=pointer]:
+                - /url: "#archive"

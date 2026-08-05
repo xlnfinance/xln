@@ -219,6 +219,52 @@ const applyRetainedNonAtomicInputs = async (
   }
 };
 
+const summarizeAtomicCollisionTx = (
+  tx: ReturnType<typeof getEffectiveEntityInputTxs>[number],
+) => {
+  if (tx.type !== 'accountInput') return { type: tx.type };
+  const proposal = accountInputProposal(tx.data);
+  const ack = accountInputAck(tx.data);
+  return {
+    type: tx.type,
+    kind: tx.data.kind,
+    fromEntityId: tx.data.fromEntityId,
+    toEntityId: tx.data.toEntityId,
+    proposalHeight: proposal?.frame.height ?? null,
+    proposalHash: proposal?.frame.stateHash ?? null,
+    ackHeight: ack?.height ?? null,
+    ackHash: ack?.frameHash ?? null,
+  };
+};
+
+const summarizeAtomicReplicaCollisionLeg = (entry: StagedEntityInput) => ({
+  inputIndex: entry.inputIndex,
+  entityId: entry.input.entityId,
+  signerId: entry.input.signerId,
+  resolvedReplicaKey: entry.replicaKey,
+  from: entry.input.from ?? null,
+  sourceRuntimeFrame: entry.input.sourceRuntimeFrame ?? null,
+  proposedFrame: entry.input.proposedFrame
+    ? { height: entry.input.proposedFrame.height, hash: entry.input.proposedFrame.hash }
+    : null,
+  entityTxCount: getEffectiveEntityInputTxs(entry.input).length,
+  entityTxSamples: getEffectiveEntityInputTxs(entry.input)
+    .slice(0, 8)
+    .map(summarizeAtomicCollisionTx),
+  phase: entry.input.atomicCrossJurisdictionPair?.phase,
+  pairKeyPrefix: entry.input.atomicCrossJurisdictionPair?.pairKey.slice(0, 160),
+  pairKeyLength: entry.input.atomicCrossJurisdictionPair?.pairKey.length,
+});
+
+const atomicReplicaCollisionError = (
+  staged: readonly [StagedEntityInput, StagedEntityInput],
+): Error => new Error(
+  'RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION:' + safeStringify({
+    replicaKey: staged[0].replicaKey,
+    legs: staged.map(summarizeAtomicReplicaCollisionLeg),
+  }),
+);
+
 export const applyAtomicEntityInputPair = async (
   env: RuntimeReplica,
   pair: readonly [RoutedEntityInput, RoutedEntityInput],
@@ -250,9 +296,7 @@ export const applyAtomicEntityInputPair = async (
   }
 
   if (staged[0].replicaKey === staged[1].replicaKey) {
-    throw new Error(
-      `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION:${staged[0].replicaKey}`,
-    );
+    throw atomicReplicaCollisionError(staged);
   }
   const committedLegs = staged.map(stagedAtomicLegCommitted);
   if (!committedLegs.every(Boolean)) {

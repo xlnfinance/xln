@@ -107,6 +107,17 @@ test('batched listener reader finds two live ports in one snapshot', () => {
   ]));
 });
 
+test('batched listener reader accepts a sparse partial match', () => {
+  const listening = Bun.serve({ port: 0, fetch: () => new Response('ok') });
+  const released = Bun.serve({ port: 0, fetch: () => new Response('ok') });
+  const releasedPort = released.port;
+  released.stop(true);
+  servers.push(listening);
+  expect(readLocalTestListeningPortPids([listening.port, releasedPort])).toEqual(new Map([
+    [listening.port, [process.pid]],
+  ]));
+});
+
 test('port preflight refuses to signal a foreign listener', async () => {
   const reservation = Bun.serve({ port: 0, fetch: () => new Response('reserved') });
   const port = reservation.port;

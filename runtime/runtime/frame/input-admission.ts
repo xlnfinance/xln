@@ -1,5 +1,6 @@
 import { createStructuredLogger, logError, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
+import { safeStringify } from '../../protocol/serialization';
 import { decodeRoutedEntityInput } from '../routing-validation';
 import { validateJInputs } from '../../storage/wal/runtime-machine-schema/j';
 import type {
@@ -48,6 +49,25 @@ export type PreparedRuntimeIngress = {
     runtimeId: string;
     receipt: ReliableDeliveryReceipt;
   }>;
+};
+
+/**
+ * A transport retry can enqueue one signed proposal envelope while its first
+ * copy is still waiting in the Runtime mempool. Collapse only byte-identical
+ * proposal legs. Any changed provenance, evidence, or transaction bytes keep
+ * separate indexes and fail the atomic-overlap invariant below.
+ */
+export const coalesceExactAtomicProposalIngressRetries = (
+  inputs: readonly RoutedEntityInput[],
+): RoutedEntityInput[] => {
+  const seen = new Set<string>();
+  return inputs.filter(input => {
+    if (input.atomicCrossJurisdictionPair?.phase !== 'proposal') return true;
+    const key = safeStringify(input);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 };
 
 const rejectRuntimeInput = (message: string): never => {
@@ -191,6 +211,66 @@ const registerOneReliableEntityInput = (
   };
 };
 
+const summarizeAtomicReliableInput = (
+  input: RoutedEntityInput,
+  inputIndex: number,
+) => {
+  const identity = getInputReliableIdentity(input);
+  const marker = input.atomicCrossJurisdictionPair;
+  return {
+    inputIndex,
+    entityId: input.entityId,
+    signerId: input.signerId,
+    from: input.from,
+    sourceRuntimeFrame: input.sourceRuntimeFrame,
+    atomicCrossJurisdictionPair: marker ? {
+      phase: marker.phase,
+      pairKeyPrefix: marker.pairKey.slice(0, 160),
+      pairKeyLength: marker.pairKey.length,
+    } : null,
+    reliableIdentity: identity ? {
+      kind: identity.kind,
+      height: identity.height,
+      frameHash: identity.frameHash,
+      laneKey: identity.laneKey,
+      logicalKey: identity.logicalKey,
+    } : null,
+  };
+};
+
+const indexAtomicReliablePairs = (
+  inputs: readonly RoutedEntityInput[],
+): {
+  pairByFirstIndex: Map<number, readonly [number, number]>;
+  trailingIndexes: Set<number>;
+} => {
+  const pairs = selectPotentialAtomicCrossJInputPairs(inputs);
+  const pairByFirstIndex = new Map<number, readonly [number, number]>();
+  const trailingIndexes = new Set<number>();
+  for (const pair of pairs) {
+    const indexes = [pair.sourceInputIndex, pair.targetInputIndex]
+      .sort((left, right) => left - right) as [number, number];
+    if (
+      pairByFirstIndex.has(indexes[0]) ||
+      trailingIndexes.has(indexes[0]) ||
+      pairByFirstIndex.has(indexes[1]) ||
+      trailingIndexes.has(indexes[1])
+    ) {
+      throw new Error('RELIABLE_INGRESS_ATOMIC_PAIR_OVERLAP:' + safeStringify({
+        overlappingPair: { pairKey: pair.pairKey, indexes },
+        pairs: pairs.map(candidate => ({
+          pairKey: candidate.pairKey,
+          indexes: [candidate.sourceInputIndex, candidate.targetInputIndex],
+        })),
+        inputs: inputs.map(summarizeAtomicReliableInput),
+      }));
+    }
+    pairByFirstIndex.set(indexes[0], indexes);
+    trailingIndexes.add(indexes[1]);
+  }
+  return { pairByFirstIndex, trailingIndexes };
+};
+
 /**
  * Reliable identities are per Account lane, but a cross-j envelope is one
  * authenticated two-Account unit. If a preceding plain ACK fences either leg,
@@ -202,29 +282,16 @@ export const registerReliableEntityInputs = (
   inputs: RoutedEntityInput[],
   isReplay: boolean,
 ): Pick<PreparedRuntimeIngress, 'entityInputs' | 'immediateReliableReceipts'> => {
-  const atomicIndexes = selectPotentialAtomicCrossJInputIndexes(inputs);
+  const coalescedInputs = coalesceExactAtomicProposalIngressRetries(inputs);
+  const atomicIndexes = selectPotentialAtomicCrossJInputIndexes(coalescedInputs);
   const entityInputs: RoutedEntityInput[] = [];
   const immediateReliableReceipts: PreparedRuntimeIngress['immediateReliableReceipts'] = [];
+  const {
+    pairByFirstIndex: atomicPairByFirstIndex,
+    trailingIndexes: atomicPairTrailingIndexes,
+  } = indexAtomicReliablePairs(coalescedInputs);
 
-  const atomicPairs = selectPotentialAtomicCrossJInputPairs(inputs);
-  const atomicPairByFirstIndex = new Map<number, readonly [number, number]>();
-  const atomicPairTrailingIndexes = new Set<number>();
-  for (const pair of atomicPairs) {
-    const indexes = [pair.sourceInputIndex, pair.targetInputIndex]
-      .sort((left, right) => left - right) as [number, number];
-    if (
-      atomicPairByFirstIndex.has(indexes[0]) ||
-      atomicPairTrailingIndexes.has(indexes[0]) ||
-      atomicPairByFirstIndex.has(indexes[1]) ||
-      atomicPairTrailingIndexes.has(indexes[1])
-    ) {
-      throw new Error('RELIABLE_INGRESS_ATOMIC_PAIR_OVERLAP');
-    }
-    atomicPairByFirstIndex.set(indexes[0], indexes);
-    atomicPairTrailingIndexes.add(indexes[1]);
-  }
-
-  for (const [inputIndex, input] of inputs.entries()) {
+  for (const [inputIndex, input] of coalescedInputs.entries()) {
     if (isReplay) {
       /*
        * WAL records the canonical Entity input that consensus actually
@@ -248,11 +315,11 @@ export const registerReliableEntityInputs = (
     if (atomicPair) {
       const pendingBefore = clonePendingReliableIngress(env);
       const registrations = atomicPair.map(index =>
-        registerOneReliableEntityInput(env, inputs[index]!, true));
+        registerOneReliableEntityInput(env, coalescedInputs[index]!, true));
       const complete = registrations.every(({ registration }) =>
         registration.kind === 'ordinary' || registration.kind === 'enqueue');
       if (complete) {
-        entityInputs.push(...atomicPair.map(index => inputs[index]!));
+        entityInputs.push(...atomicPair.map(index => coalescedInputs[index]!));
       } else {
         ensureReliableIngressState(env).pendingReliableIngress = pendingBefore;
         runtimeLog.info('crossj.atomic_reliable_ingress_deferred', {

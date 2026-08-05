@@ -1439,6 +1439,21 @@ describe('cross-jurisdiction hashledger swap', () => {
     const currentAtomicCohort = atomicRepeatedCohorts.filter(
       input => input.sourceRuntimeFrame?.height === hubFrame.height,
     );
+    const hubRoleReceiverEnv = createEmptyEnv(`${seed}-hub-role-receiver`);
+    hubRoleReceiverEnv.runtimeId = userEnv.runtimeId;
+    hubRoleReceiverEnv.state.timestamp = userEnv.state.timestamp;
+    hubRoleReceiverEnv.quietRuntimeLogs = true;
+    installJurisdictions(hubRoleReceiverEnv, sourceJ, targetJ);
+    const hubRoleSourceState = cloneEntityState(liveSourceUserState);
+    const hubRoleTargetState = cloneEntityState(liveTargetUserState);
+    hubRoleSourceState.profile = { ...hubRoleSourceState.profile, isHub: true };
+    hubRoleTargetState.profile = { ...hubRoleTargetState.profile, isHub: true };
+    addReplica(hubRoleReceiverEnv, hubRoleSourceState, sourceUserSigner);
+    addReplica(hubRoleReceiverEnv, hubRoleTargetState, targetUserSigner);
+    expect(selectMatchedCrossJAccountInputPairs(hubRoleReceiverEnv, currentAtomicCohort)).toMatchObject({
+      pairs: [{ phase: 'proposal' }],
+      rejectedLegs: [],
+    });
     const mergedSameFrameReplay = mergeEntityInputs([
       ...currentAtomicCohort,
       ...currentAtomicCohort,
@@ -1893,6 +1908,26 @@ describe('cross-jurisdiction hashledger swap', () => {
       routingDeps: makeLocalCrossJRoutingDeps(),
     });
     expect(exactRetryPass.rejectedAtomicPairs).toEqual([]);
+    const orphanRetry = await admitAtomicCrossJAccountInputs(
+      userEnv,
+      [atomicRepeatedCohorts[0]!, atomicRepeatedCohorts[2]!],
+      false,
+    );
+    expect(orphanRetry).toMatchObject({ inputs: [], pairs: [] });
+    const unrelatedMarkedInputs = currentAtomicCohort.map(input => ({
+      ...input,
+      entityTxs: [],
+    }));
+    const unrelatedMarkedAdmission = await admitAtomicCrossJAccountInputs(
+      userEnv,
+      unrelatedMarkedInputs,
+      false,
+    );
+    expect(unrelatedMarkedAdmission.pairs).toEqual([]);
+    expect(unrelatedMarkedAdmission.inputs).toHaveLength(2);
+    expect(unrelatedMarkedAdmission.inputs.every(
+      input => input.atomicCrossJurisdictionPair === undefined,
+    )).toBe(true);
     expect([...userEnv.state.eReplicas.entries()].map(
       ([entityKey, replica]) => [
         entityKey,

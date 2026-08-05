@@ -85,6 +85,31 @@ const assertTerminalAdvance = (
   return identity;
 };
 
+const advanceTerminalReceipt = (
+  env: RuntimeReplica,
+  state: ReliableIngressMutationContext['state'],
+  key: string,
+  identity: ReliableDeliveryIdentity,
+): ReliableDeliveryReceipt => {
+  const previous = state.reliableIngressTerminalWatermarks!.get(key);
+  if (
+    previous &&
+    previous.body.identity.kind === 'account-ack' &&
+    identity.kind === 'account-ack' &&
+    compareReliableIdentityPosition(identity, previous.body.identity) < 0
+  ) {
+    // A higher terminal ACK does not authenticate the exact lower frame hash.
+    // Sign the stale identity so its sender can retire that exact retry, while
+    // preserving the monotonic receiver watermark at the higher height.
+    return createReliableDeliveryReceipt(env, identity, 'terminal');
+  }
+  const nextIdentity = assertTerminalAdvance(previous, identity);
+  if (previous && reliableReceiptCoversIdentity(previous, nextIdentity)) return previous;
+  const receipt = createReliableDeliveryReceipt(env, nextIdentity, 'terminal');
+  state.reliableIngressTerminalWatermarks!.set(key, receipt);
+  return receipt;
+};
+
 const installTerminalFrontier = (
   env: RuntimeReplica,
   context: ReliableIngressMutationContext,
@@ -93,19 +118,15 @@ const installTerminalFrontier = (
 ): ReliableDeliveryReceipt => {
   const { state, sourceLaneKeys } = context;
   assertReceiverSourceLaneCapacity(state, key, sourceLaneKeys);
-  const previous = state.reliableIngressTerminalWatermarks!.get(key);
-  const nextIdentity = assertTerminalAdvance(previous, identity);
-  if (previous && reliableReceiptCoversIdentity(previous, nextIdentity)) return previous;
-  const receipt = createReliableDeliveryReceipt(env, nextIdentity, 'terminal');
-  state.reliableIngressTerminalWatermarks!.set(key, receipt);
+  const receipt = advanceTerminalReceipt(env, state, key, identity);
   const active = state.reliableIngressReceiptLedger!.get(key);
   if (
     active &&
     (
       reliableReceiptCoversIdentity(receipt, active.body.identity) ||
       (
-        nextIdentity.kind === 'j-finality' &&
-        active.body.identity.height < nextIdentity.height
+        receipt.body.identity.kind === 'j-finality' &&
+        active.body.identity.height < receipt.body.identity.height
       )
     )
   ) {
@@ -345,7 +366,10 @@ export const finalizeReliableIngressCommit = (
     state.pendingReliableIngress!.delete(commit.key);
     if (!commit.receipt) throw new Error('RELIABLE_INGRESS_COMMIT_RECEIPT_MISSING');
     for (const runtimeId of commit.targetRuntimeIds) {
-      deliveries.set(`${runtimeId}:${commit.frontierKey}`, {
+      // One durable batch can terminalize H+1 and a queued H retry together.
+      // They share a frontier but require distinct exact receiver signatures;
+      // coalesce only repeated commits for the same authenticated identity.
+      deliveries.set(`${runtimeId}:${reliableIdentityExactKey(commit.receipt.body.identity)}`, {
         runtimeId,
         receipt: commit.receipt,
       });

@@ -4,6 +4,7 @@ import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, Runtim
 import type { JInput } from '../jurisdiction/machine/input';
 import type { EntityTx } from '../types/entity-tx';
 import type { Profile } from '../entity/profile';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { RuntimeOutputRoutingDeps } from './output-routing';
 import { extractCrossJurisdictionRouteFromTx } from '../extensions/cross-j/boundary';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
@@ -575,12 +576,21 @@ const collectCrossJAdmissionCandidates = (
   const replica = findInputReplica(env, input);
   if (!replica) return [];
   const receivingHub = replica.state.profile?.isHub === true;
+  const authenticatedPhase = input.atomicCrossJurisdictionPair?.phase;
   return effectiveAccountInputs(input).flatMap(accountInput => {
-    const candidate = receivingHub
-      ? buildCrossJAckFrameCandidate(env, input, inputIndex, accountInput)
-      : buildCrossJProposalFrameCandidate(input, inputIndex, accountInput);
+    // Hub/user profile role cannot identify the transport phase: market-maker
+    // hubs legitimately receive proposal cohorts from peer hubs, and a
+    // frame_ack may carry the next proposal alongside its ACK. The signed
+    // Runtime envelope marker is the authoritative cohort phase.
+    const candidate = authenticatedPhase === 'proposal'
+      ? buildCrossJProposalFrameCandidate(input, inputIndex, accountInput)
+      : authenticatedPhase === 'ack'
+        ? buildCrossJAckFrameCandidate(env, input, inputIndex, accountInput)
+        : receivingHub
+          ? buildCrossJAckFrameCandidate(env, input, inputIndex, accountInput)
+          : buildCrossJProposalFrameCandidate(input, inputIndex, accountInput);
     if (!candidate) return [];
-    if (!receivingHub) {
+    if (candidate.phase === 'proposal') {
       candidate.alreadyCommitted = proposalAlreadyCommitted(env, input, accountInput);
     }
     return [candidate];
@@ -656,6 +666,77 @@ const groupUncommittedCrossJCandidates = (
   return { candidates: uncommitted, byCohort, invalidIndexes };
 };
 
+const openingAuthorizationMatchesRoute = (
+  authorization: CrossJurisdictionSwapRoute | undefined,
+  routeHash: string,
+): boolean => Boolean(
+  authorization &&
+  authorization.status === 'intent' &&
+  !authorization.sourcePull &&
+  !authorization.targetPull &&
+  normalizeEntityKey(authorization.routeHash || '') === routeHash
+);
+
+const openingRouteOwnershipMatches = (
+  sourceInput: RoutedEntityInput,
+  targetInput: RoutedEntityInput,
+  source: CrossJAdmissionFrameCandidate,
+  target: CrossJAdmissionFrameCandidate,
+  route: CrossJurisdictionSwapRoute,
+): boolean =>
+  normalizeEntityKey(sourceInput.entityId) === normalizeEntityKey(route.source.entityId) &&
+  normalizeEntityKey(sourceInput.signerId) === normalizeEntityKey(route.sourceSignerId || '') &&
+  normalizeEntityKey(source.accountInput.fromEntityId) === normalizeEntityKey(route.source.counterpartyEntityId) &&
+  normalizeEntityKey(targetInput.entityId) === normalizeEntityKey(route.target.counterpartyEntityId) &&
+  normalizeEntityKey(targetInput.signerId) === normalizeEntityKey(route.targetSignerId || '') &&
+  normalizeEntityKey(target.accountInput.fromEntityId) === normalizeEntityKey(route.target.entityId);
+
+const openingPullHasExactUserAuthorizations = (
+  env: RuntimeReplica,
+  sourceInput: RoutedEntityInput,
+  targetInput: RoutedEntityInput,
+  source: CrossJAdmissionFrameCandidate,
+  target: CrossJAdmissionFrameCandidate,
+  sourceReplica: EntityReplica,
+  targetReplica: EntityReplica,
+  sourcePull: Extract<AccountTx, { type: 'cross_pull_lock' }>,
+): boolean => {
+  const route = routeForCrossJPull(sourcePull);
+  if (!route) return false;
+  const routeHash = normalizeEntityKey(route.routeHash || '');
+  const sourceAuth = sourceReplica.state.crossJurisdictionAuthorizations?.get(route.orderId);
+  const targetAuth = targetReplica.state.crossJurisdictionAuthorizations?.get(route.orderId);
+  if (
+    !routeHash ||
+    !openingAuthorizationMatchesRoute(sourceAuth, routeHash) ||
+    !openingAuthorizationMatchesRoute(targetAuth, routeHash) ||
+    safeStringify(sourceAuth) !== safeStringify(targetAuth) ||
+    !openingRouteOwnershipMatches(sourceInput, targetInput, source, target, route)
+  ) return false;
+  validatePreparedCrossJurisdictionRoute({
+    ...sourceReplica.state,
+    timestamp: Math.max(sourceReplica.state.timestamp, env.state.timestamp),
+  }, { ...cloneCrossJurisdictionRoute(route), status: 'target_prepared' });
+  return true;
+};
+
+const openingCandidateHasExactUserAuthorizations = (
+  env: RuntimeReplica,
+  source: CrossJAdmissionFrameCandidate,
+  target: CrossJAdmissionFrameCandidate,
+  inputs: readonly RoutedEntityInput[],
+): boolean => {
+  const sourceInput = inputs[source.inputIndex];
+  const targetInput = inputs[target.inputIndex];
+  if (!sourceInput || !targetInput) return false;
+  const sourceReplica = findInputReplica(env, sourceInput);
+  const targetReplica = findInputReplica(env, targetInput);
+  if (!sourceReplica || !targetReplica) return false;
+  return source.sourcePulls.every(sourcePull => openingPullHasExactUserAuthorizations(
+    env, sourceInput, targetInput, source, target, sourceReplica, targetReplica, sourcePull,
+  ));
+};
+
 const openingPairHasExactUserAuthorizations = (
   env: RuntimeReplica,
   group: readonly CrossJAdmissionFrameCandidate[],
@@ -665,52 +746,14 @@ const openingPairHasExactUserAuthorizations = (
   const hasOpening = group.some(candidate =>
     candidate.sourcePulls.length > 0 || candidate.targetPulls.length > 0);
   if (!hasOpening) return true;
-  const source = group.find(candidate =>
-    candidate.sourcePulls.length > 0 && candidate.targetPulls.length === 0);
-  const target = group.find(candidate =>
-    candidate.targetPulls.length > 0 && candidate.sourcePulls.length === 0);
-  if (!source || !target || source.sourcePulls.length !== target.targetPulls.length) return false;
-  const sourceInput = inputs[source.inputIndex];
-  const targetInput = inputs[target.inputIndex];
-  if (!sourceInput || !targetInput) return false;
-  const sourceReplica = findInputReplica(env, sourceInput);
-  const targetReplica = findInputReplica(env, targetInput);
-  if (!sourceReplica || !targetReplica) return false;
-
+  if (group.length !== 2) return false;
   try {
-    for (const sourcePull of source.sourcePulls) {
-      const route = routeForCrossJPull(sourcePull);
-      if (!route) return false;
-      const routeHash = normalizeEntityKey(route.routeHash || '');
-      const sourceAuth = sourceReplica.state.crossJurisdictionAuthorizations?.get(route.orderId);
-      const targetAuth = targetReplica.state.crossJurisdictionAuthorizations?.get(route.orderId);
-      if (
-        !routeHash ||
-        !sourceAuth ||
-        !targetAuth ||
-        sourceAuth.status !== 'intent' ||
-        targetAuth.status !== 'intent' ||
-        sourceAuth.sourcePull || sourceAuth.targetPull ||
-        targetAuth.sourcePull || targetAuth.targetPull ||
-        normalizeEntityKey(sourceAuth.routeHash || '') !== routeHash ||
-        normalizeEntityKey(targetAuth.routeHash || '') !== routeHash ||
-        safeStringify(sourceAuth) !== safeStringify(targetAuth) ||
-        normalizeEntityKey(sourceInput.entityId) !== normalizeEntityKey(route.source.entityId) ||
-        normalizeEntityKey(sourceInput.signerId) !== normalizeEntityKey(route.sourceSignerId || '') ||
-        normalizeEntityKey(source.accountInput.fromEntityId) !== normalizeEntityKey(route.source.counterpartyEntityId) ||
-        normalizeEntityKey(targetInput.entityId) !== normalizeEntityKey(route.target.counterpartyEntityId) ||
-        normalizeEntityKey(targetInput.signerId) !== normalizeEntityKey(route.targetSignerId || '') ||
-        normalizeEntityKey(target.accountInput.fromEntityId) !== normalizeEntityKey(route.target.entityId)
-      ) return false;
-      validatePreparedCrossJurisdictionRoute({
-        ...sourceReplica.state,
-        timestamp: Math.max(sourceReplica.state.timestamp, env.state.timestamp),
-      }, {
-        ...cloneCrossJurisdictionRoute(route),
-        status: 'target_prepared',
-      });
-    }
-    return true;
+    return group.every((source, sourceIndex) => openingCandidateHasExactUserAuthorizations(
+      env,
+      source,
+      group[1 - sourceIndex]!,
+      inputs,
+    ));
   } catch {
     return false;
   }

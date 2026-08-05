@@ -6,6 +6,10 @@ import { scheduler } from 'node:timers/promises';
 
 import { createHttpDrainTracker, stopServerGracefully } from '../orchestrator/graceful-server';
 import { startParentLivenessWatch } from '../infra/parent-watch';
+import {
+  MAX_MANAGED_CHILD_INCIDENT_MESSAGE_CHARS,
+  truncateManagedChildIncidentMessage,
+} from '../orchestrator/child-log-buffer';
 
 const withSuppressedStructuredLogs = async <T>(fn: () => T | Promise<T>): Promise<T> => {
   const previousScopes = process.env['XLN_LOG_SCOPES'];
@@ -32,6 +36,14 @@ test('orchestrator lifecycle helpers use structured logging without direct conso
   for (const source of sources) {
     expect(source).not.toContain('console.');
   }
+});
+
+test('managed child incidents retain a bounded diagnostic prefix', () => {
+  const message = `RUNTIME_FATAL:${'x'.repeat(MAX_MANAGED_CHILD_INCIDENT_MESSAGE_CHARS + 100)}`;
+  const bounded = truncateManagedChildIncidentMessage(message);
+  expect(bounded.startsWith('RUNTIME_FATAL:')).toBe(true);
+  expect(bounded).toContain('managed-child incident truncated');
+  expect(bounded.length).toBeLessThan(MAX_MANAGED_CHILD_INCIDENT_MESSAGE_CHARS + 100);
 });
 
 test('HTTP drain timeout still force-closes active connections', async () => {
