@@ -5,7 +5,11 @@ import {
   qaRunTestCategory,
   qaTestCategoryFromTags,
 } from '../qa/test-categories';
-import { parsePlaywrightTestMetadata } from '../scripts/playwright-test-metadata';
+import {
+  chunkPlaywrightMetadataFiles,
+  parsePlaywrightTestMetadata,
+} from '../scripts/playwright-test-metadata';
+import { PLAYWRIGHT_NODE_EXECUTABLE, playwrightCliArgs } from '../scripts/playwright-command';
 
 test('classifies exactly one native Playwright QA category tag', () => {
   expect(qaTestCategoryFromTags(['@functional'])).toBe('functional');
@@ -50,4 +54,19 @@ test('parses Playwright JSON metadata and restores native tag prefixes', () => {
     title: 'opens an account',
     tags: ['@functional'],
   }]);
+});
+
+test('runs the Playwright CLI with its supported Node runtime', () => {
+  expect(PLAYWRIGHT_NODE_EXECUTABLE).toBe('node');
+  expect(playwrightCliArgs(['test', '--list'])).toEqual([
+    `${process.cwd()}/node_modules/playwright/cli.js`,
+    'test',
+    '--list',
+  ]);
+});
+
+test('batches Playwright metadata discovery below the transform failure threshold', () => {
+  const files = Array.from({ length: 21 }, (_, index) => `tests/example-${index}.spec.ts`);
+  expect(chunkPlaywrightMetadataFiles(files).map(batch => batch.length)).toEqual([10, 10, 1]);
+  expect(chunkPlaywrightMetadataFiles([])).toEqual([]);
 });

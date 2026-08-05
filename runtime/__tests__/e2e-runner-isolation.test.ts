@@ -223,10 +223,12 @@ describe('isolated E2E runner resources', () => {
   test('passes the provisioned shard jurisdiction registry into Playwright-owned child runtimes', () => {
     const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
     const playwrightEnv = runner.slice(
-      runner.indexOf("const playwrightResult = await runE2ECommand(BUN_EXECUTABLE"),
+      runner.indexOf('const playwrightResult = await runE2ECommand('),
       runner.indexOf("markPhase('playwright'"),
     );
 
+    expect(playwrightEnv).toContain('PLAYWRIGHT_NODE_EXECUTABLE');
+    expect(playwrightEnv).toContain('playwrightCliArgs(playwrightArgs)');
     expect(playwrightEnv).toContain("XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json')");
     expect(playwrightEnv).toContain('XLN_BUN_EXECUTABLE: BUN_EXECUTABLE');
     expect(runner).toContain("XLN_EPHEMERAL_TESTNET: '1'");

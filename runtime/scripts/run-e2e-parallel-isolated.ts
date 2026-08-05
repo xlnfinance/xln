@@ -84,6 +84,7 @@ import {
 } from './e2e-failure-capsule';
 import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';
 import { listPlaywrightTestMetadata } from './playwright-test-metadata';
+import { PLAYWRIGHT_NODE_EXECUTABLE, playwrightCliArgs } from './playwright-command';
 import {
   assertE2EBrowserHealthGate,
   parseStepTimings,
@@ -654,8 +655,8 @@ const listDynamicPlaywrightTargets = (
     E2E_RESET_BASE_URL: process.env['E2E_RESET_BASE_URL'] || 'http://127.0.0.1:1',
   };
   const res = spawnSync(
-    BUN_EXECUTABLE,
-    ['x', 'playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json', file],
+    PLAYWRIGHT_NODE_EXECUTABLE,
+    playwrightCliArgs(['test', '--config', 'playwright.config.ts', '--list', '--reporter=json', file]),
     {
       cwd: process.cwd(),
       env,
@@ -2073,7 +2074,7 @@ const runShard = async (
     const plannedFailureCapsulePath = join(shardPaths.resultsDir, 'failure-capsule.json');
     const failureCapsuleErrorPath = join(shardPaths.resultsDir, 'failure-capsule.error.txt');
     const shardArg = `${shard + 1}/${totalShards}`;
-    const playwrightArgs = ['playwright', 'test', '--config', 'playwright.config.ts'];
+    const playwrightArgs = ['test', '--config', 'playwright.config.ts'];
     if (task.usePlaywrightShard) {
       playwrightArgs.push('--shard', shardArg);
     }
@@ -2095,55 +2096,59 @@ const runShard = async (
     log.write(`[runner] playwright args: ${JSON.stringify(playwrightArgs)}\n`);
 
     const playwrightStart = Date.now();
-    const playwrightResult = await runE2ECommand(BUN_EXECUTABLE, ['x', ...playwrightArgs], {
-      env: {
-        ...process.env,
-        XLN_BUN_EXECUTABLE: BUN_EXECUTABLE,
-        // Keep isolated CI-style runs headless even if the parent shell has
-        // debugging/browser-opening variables set.
-        CI: process.env['CI'] || '1',
-        HEADED: 'false',
-        PWDEBUG: '0',
-        PLAYWRIGHT_HTML_OPEN: 'never',
-        PW_BASE_URL: webUrl,
-        PW_SKIP_WEBSERVER: '1',
-        PW_PROFILE: args.pwProject === 'brainvault' ? 'brainvault' : '',
-        PW_WORKERS: String(args.workersPerShard),
-        PW_TEST_TIMEOUT: String(args.testTimeoutMs),
-        PW_VIDEO: args.videoMode,
-        PW_TRACE: args.traceMode,
-        PW_SCREENSHOT: args.screenshotMode,
-        PW_SIMPLE_REPORTER: '1',
-        PW_REPORTER: args.reporter,
-        PLAYWRIGHT_JSON_OUTPUT_FILE: playwrightReportPath,
-        PW_OUTPUT_DIR: shardPaths.resultsDir,
-        E2E_BASE_URL: webUrl,
-        E2E_API_BASE_URL: apiUrl,
-        E2E_ANVIL_RPC: rpcUrl,
-        E2E_ANVIL_RPC2: rpc2Url,
-        XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
-        E2E_RESET_BASE_URL: apiUrl,
-        E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
-        E2E_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
-        E2E_BROWSER_EVENTS_PATH: shardBrowserEventsPath(logsDir, shard),
-        E2E_PLAYWRIGHT_STARTED_AT_MS: String(playwrightStart),
-        E2E_FAST: process.env['E2E_FAST'] ?? '1',
-        E2E_ISOLATED_STACK: '1',
-        E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
-        XLN_TEST_ARTIFACT_CLEANUP_DONE: '1',
-        XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
-        XLN_INCLUDE_CUSTODY: task.requireCustody ? '1' : '0',
+    const playwrightResult = await runE2ECommand(
+      PLAYWRIGHT_NODE_EXECUTABLE,
+      playwrightCliArgs(playwrightArgs),
+      {
+        env: {
+          ...process.env,
+          XLN_BUN_EXECUTABLE: BUN_EXECUTABLE,
+          // Keep isolated CI-style runs headless even if the parent shell has
+          // debugging/browser-opening variables set.
+          CI: process.env['CI'] || '1',
+          HEADED: 'false',
+          PWDEBUG: '0',
+          PLAYWRIGHT_HTML_OPEN: 'never',
+          PW_BASE_URL: webUrl,
+          PW_SKIP_WEBSERVER: '1',
+          PW_PROFILE: args.pwProject === 'brainvault' ? 'brainvault' : '',
+          PW_WORKERS: String(args.workersPerShard),
+          PW_TEST_TIMEOUT: String(args.testTimeoutMs),
+          PW_VIDEO: args.videoMode,
+          PW_TRACE: args.traceMode,
+          PW_SCREENSHOT: args.screenshotMode,
+          PW_SIMPLE_REPORTER: '1',
+          PW_REPORTER: args.reporter,
+          PLAYWRIGHT_JSON_OUTPUT_FILE: playwrightReportPath,
+          PW_OUTPUT_DIR: shardPaths.resultsDir,
+          E2E_BASE_URL: webUrl,
+          E2E_API_BASE_URL: apiUrl,
+          E2E_ANVIL_RPC: rpcUrl,
+          E2E_ANVIL_RPC2: rpc2Url,
+          XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
+          E2E_RESET_BASE_URL: apiUrl,
+          E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
+          E2E_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
+          E2E_BROWSER_EVENTS_PATH: shardBrowserEventsPath(logsDir, shard),
+          E2E_PLAYWRIGHT_STARTED_AT_MS: String(playwrightStart),
+          E2E_FAST: process.env['E2E_FAST'] ?? '1',
+          E2E_ISOLATED_STACK: '1',
+          E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
+          XLN_TEST_ARTIFACT_CLEANUP_DONE: '1',
+          XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
+          XLN_INCLUDE_CUSTODY: task.requireCustody ? '1' : '0',
+        },
+        log,
+        timeoutMs: args.testTimeoutMs,
+        signal: shardAbortController.signal,
+        onSpawn: (pid) => {
+          playwrightPid = pid;
+        },
+        onExit: () => {
+          playwrightPid = undefined;
+        },
       },
-      log,
-      timeoutMs: args.testTimeoutMs,
-      signal: shardAbortController.signal,
-      onSpawn: (pid) => {
-        playwrightPid = pid;
-      },
-      onExit: () => {
-        playwrightPid = undefined;
-      },
-    });
+    );
     markPhase('playwright', playwrightStart);
     if (
       playwrightResult.kind === 'aborted' &&

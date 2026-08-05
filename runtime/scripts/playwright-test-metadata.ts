@@ -2,8 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { relative, resolve } from 'node:path';
 
 import type { QaTaggedTest } from '../qa/test-categories';
+import { PLAYWRIGHT_NODE_EXECUTABLE, playwrightCliArgs } from './playwright-command';
 
 type JsonRecord = Record<string, unknown>;
+const PLAYWRIGHT_METADATA_BATCH_SIZE = 10;
 
 const record = (value: unknown): JsonRecord =>
   value !== null && typeof value === 'object' ? value as JsonRecord : {};
@@ -15,6 +17,13 @@ const normalizePath = (value: string): string => value.replace(/\\/g, '/');
 const normalizeTag = (value: unknown): string => {
   const tag = String(value).trim();
   return tag && !tag.startsWith('@') ? `@${tag}` : tag;
+};
+
+const uniqueSortedTests = (tests: readonly QaTaggedTest[]): QaTaggedTest[] => {
+  const unique = new Map<string, QaTaggedTest>();
+  for (const test of tests) unique.set(`${test.file}:${test.line ?? 0}:${test.title}`, test);
+  return [...unique.values()].sort((a, b) =>
+    a.file.localeCompare(b.file) || (a.line ?? 0) - (b.line ?? 0) || a.title.localeCompare(b.title));
 };
 
 const collectSuiteTests = (suite: JsonRecord, rootDir: string, out: QaTaggedTest[]): void => {
@@ -44,10 +53,7 @@ export const parsePlaywrightTestMetadata = (payload: unknown): QaTaggedTest[] =>
   if (errors.length > 0) throw new Error(`PLAYWRIGHT_LIST_FAILED\n${errors.join('\n')}`);
   const tests: QaTaggedTest[] = [];
   for (const suite of records(report['suites'])) collectSuiteTests(suite, rootDir, tests);
-  const unique = new Map<string, QaTaggedTest>();
-  for (const test of tests) unique.set(`${test.file}:${test.line ?? 0}:${test.title}`, test);
-  return [...unique.values()].sort((a, b) =>
-    a.file.localeCompare(b.file) || (a.line ?? 0) - (b.line ?? 0) || a.title.localeCompare(b.title));
+  return uniqueSortedTests(tests);
 };
 
 export type PlaywrightMetadataOptions = {
@@ -55,15 +61,23 @@ export type PlaywrightMetadataOptions = {
   project?: string | undefined;
 };
 
-export const listPlaywrightTestMetadata = (
+export const chunkPlaywrightMetadataFiles = (files: readonly string[]): string[][] =>
+  Array.from(
+    { length: Math.ceil(files.length / PLAYWRIGHT_METADATA_BATCH_SIZE) },
+    (_, index) => files.slice(
+      index * PLAYWRIGHT_METADATA_BATCH_SIZE,
+      (index + 1) * PLAYWRIGHT_METADATA_BATCH_SIZE,
+    ),
+  );
+
+const listPlaywrightMetadataBatch = (
   files: readonly string[],
   options: PlaywrightMetadataOptions = {},
 ): QaTaggedTest[] => {
-  if (files.length === 0) return [];
-  const args = ['playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json'];
+  const args = ['test', '--config', 'playwright.config.ts', '--list', '--reporter=json'];
   if (options.project) args.push(`--project=${options.project}`);
   args.push(...files);
-  const result = spawnSync(process.execPath, ['x', ...args], {
+  const result = spawnSync(PLAYWRIGHT_NODE_EXECUTABLE, playwrightCliArgs(args), {
     cwd: process.cwd(),
     env: {
       ...process.env,
@@ -89,3 +103,11 @@ export const listPlaywrightTestMetadata = (
     throw new Error(stderr ? `${message}\n${stderr}` : message);
   }
 };
+
+export const listPlaywrightTestMetadata = (
+  files: readonly string[],
+  options: PlaywrightMetadataOptions = {},
+): QaTaggedTest[] => uniqueSortedTests(
+  chunkPlaywrightMetadataFiles(files)
+    .flatMap(batch => listPlaywrightMetadataBatch(batch, options)),
+);
