@@ -188,19 +188,6 @@ const inspectPullDeadline = (
     scan.pulls.delete(tx.data.pullId);
     return undefined;
   }
-  if (tx.type === 'cross_pull_expire') {
-    const pull = scan.pulls.get(tx.data.pullId);
-    if (!pull) return undefined;
-    // Mirror of HTLC_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY: the payer must not
-    // exercise its timeout while the LOCAL clock still sees a live window.
-    if (!isPullRevealExpired(pull.revealedUntilTimestamp, scan.context.entityTimestamp)) {
-      return deadlineViolation(
-        `CROSS_PULL_EXPIRE_BEFORE_LOCAL_EXPIRY: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
-      );
-    }
-    scan.pulls.delete(tx.data.pullId);
-    return undefined;
-  }
   return undefined;
 };
 

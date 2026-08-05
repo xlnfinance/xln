@@ -931,17 +931,6 @@ export type AccountTx =
         fill: CrossSwapFillAckData;
       };
     }
-  | {
-      /**
-       * Payer-authored housekeeping close of an expired pull: releases the
-       * unclaimed remainder of the hold and deletes the pull. Moves no value —
-       * increments already settled by reveals stay in offdelta.
-       */
-      type: 'cross_pull_expire';
-      data: {
-        pullId: string;
-      };
-    }
   // === SWAP TRANSACTION TYPES ===
   | {
       type: 'swap_offer';

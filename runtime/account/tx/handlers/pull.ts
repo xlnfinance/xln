@@ -24,7 +24,6 @@ import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;
 type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
 type CrossPullProgressTx = Extract<AccountTx, { type: 'cross_pull_progress' }>;
-type CrossPullExpireTx = Extract<AccountTx, { type: 'cross_pull_expire' }>;
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -354,57 +353,6 @@ export async function handleCrossPullClose(
     success: true,
     events,
   };
-}
-
-/**
- * Payer-authored housekeeping of an expired pull: releases the hold and drops
- * the pull. Carries no proof and moves no value — past its deadline the ladder
- * can no longer be claimed on-chain either, so this only frees capacity the
- * beneficiary can no longer reach.
- *
- * Without it the payer waits on the Hub for a ratio-0 close, since the Hub owns
- * every close (`handleCrossPullClose`). This is proposal authority only: like
- * any Account tx it still commits through the counterparty's ACK, so it removes
- * the Hub's reason to act, not its ability to stall. A truly unilateral exit
- * stays a jurisdiction-level primitive.
- */
-export async function handleCrossPullExpire(
-  account: AccountState,
-  accountTx: CrossPullExpireTx,
-  byLeft: boolean,
-  currentTimestamp: number,
-): Promise<{ success: boolean; events: string[]; error?: string }> {
-  const { pullId } = accountTx.data;
-  const events: string[] = [];
-  const pull = account.pulls?.get(pullId);
-  // Racing a terminal close is legal; the close already released everything.
-  if (!pull) {
-    return {
-      success: true,
-      events: [`🪝 Cross-j pull expire ignored: ${pullId.slice(0, 8)}... already closed`],
-    };
-  }
-  const beneficiaryIsLeft = pull.amount > 0n;
-  const payerIsLeft = !beneficiaryIsLeft;
-  if (byLeft !== payerIsLeft) {
-    return { success: false, error: `Only the payer can expire cross-j pull`, events };
-  }
-  if (!isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp)) {
-    return { success: false, error: `Pull reveal deadline not reached`, events };
-  }
-  const absAmount = absBigInt(pull.amount);
-  const remaining = absAmount - (pull.claimedAmount ?? 0n);
-  const delta = ensureDelta(account, pull.tokenId);
-  const holdError = releaseHold(
-    delta,
-    payerIsLeft ? 'left' : 'right',
-    remaining,
-    () => `Pull ${payerIsLeft ? 'left' : 'right'} hold underflow`,
-  );
-  if (holdError) return { success: false, error: holdError, events };
-  account.pulls?.delete(pullId);
-  events.push(`🪝 Cross-j pull expired: ${pullId.slice(0, 8)}... released ${remaining}`);
-  return { success: true, events };
 }
 
 export async function handleCrossPullProgress(

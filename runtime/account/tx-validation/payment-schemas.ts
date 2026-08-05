@@ -46,7 +46,6 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
     },
   },
   cross_pull_progress: { required: { pullId: 'string', fill: 'record' } },
-  cross_pull_expire: { required: { pullId: 'string' } },
   swap_offer: {
     required: {
       offerId: 'string', giveTokenId: 'integer', giveAmount: 'bigint',

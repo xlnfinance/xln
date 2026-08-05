@@ -17,7 +17,6 @@ import { handleHtlcLock } from './handlers/htlc-lock';
 import { handleHtlcResolve } from './handlers/htlc-resolve';
 import {
   handleCrossPullClose,
-  handleCrossPullExpire,
   handleCrossPullProgress,
   handlePullLock,
 } from './handlers/pull';
@@ -222,7 +221,6 @@ export const applyAccountTxMutation = async (
     case 'cross_pull_lock': return handlePullLock(account.state, tx, byLeft, height, timestamp);
     case 'cross_pull_close': return handleCrossPullClose(account.state, tx, byLeft, timestamp);
     case 'cross_pull_progress': return handleCrossPullProgress(account.state, tx, byLeft);
-    case 'cross_pull_expire': return handleCrossPullExpire(account.state, tx, byLeft, timestamp);
     case 'swap_offer': return handleSwapOffer(account, tx, byLeft, height, isValidation);
     case 'swap_resolve': return handleSwapResolve(account, tx, byLeft, height, isValidation);
     case 'cross_swap_fill_ack':
