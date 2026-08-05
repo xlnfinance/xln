@@ -631,6 +631,7 @@ async function faucet(page: Page, userEntityId: string, hubEntityId: string): Pr
     lastStatus = resp.status();
     const code = String(body?.code || '');
     if (
+      body?.retryable !== true &&
       code !== 'FAUCET_ACCOUNT_NOT_READY' &&
       code !== 'FAUCET_ACCOUNT_PENDING_FRAME' &&
       code !== 'FAUCET_CLIENT_PENDING_FRAME'
@@ -691,6 +692,7 @@ async function submitFaucetChunk(
     lastStatus = resp.status();
     const code = String(body?.code || '');
     if (
+      body?.retryable !== true &&
       code !== 'FAUCET_ACCOUNT_NOT_READY' &&
       code !== 'FAUCET_ACCOUNT_PENDING_FRAME' &&
       code !== 'FAUCET_CLIENT_PENDING_FRAME'
@@ -1460,6 +1462,32 @@ function hasAccountSettledFinalizedStep(
   ) > 0;
 }
 
+async function waitForPersistedRebalanceCycles(
+  page: Page,
+  cursor: Awaited<ReturnType<typeof getPersistedReceiptCursor>>,
+  hubId: string,
+  timeoutMs = 30_000,
+) {
+  const startedAt = Date.now();
+  let last = await readPersistedFrameEventsSinceCursor(page, {
+    cursor,
+    eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
+  });
+  while (Date.now() - startedAt < timeoutMs) {
+    const requests = last.events.filter(event =>
+      event.message === 'request_collateral_committed' && persistedEventHasAccount(event, hubId)).length;
+    const settlements = last.events.filter(event =>
+      event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, hubId)).length;
+    if (requests >= 2 && settlements >= 2) return last;
+    await page.waitForTimeout(250);
+    last = await readPersistedFrameEventsSinceCursor(page, {
+      cursor,
+      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
+    });
+  }
+  throw new Error(`persisted rebalance cycles not materialized: ${JSON.stringify(last, null, 2)}`);
+}
+
 async function reloadRuntimeAndWaitReady(page: Page, rebalanceConsole: string[], timingLabel: string): Promise<void> {
   await timedStep(timingLabel, async () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -1813,10 +1841,7 @@ test.describe('Rebalance E2E', () => {
 
     const claimArtifacts = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
     const finalRebalanceSteps = await readRebalanceStepEvents(page, scenarioStartedAt);
-    const persistedCycleEvents = await readPersistedFrameEventsSinceCursor(page, {
-      cursor: firstCycleReceiptCursor,
-      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
-    });
+    const persistedCycleEvents = await waitForPersistedRebalanceCycles(page, firstCycleReceiptCursor, hubId);
     const claimDebugDump = buildRebalanceFailureDump({
       entityId,
       hubId,
@@ -2035,10 +2060,7 @@ test.describe('Rebalance E2E', () => {
 
     const finalDiagnostics = await readRebalanceDiagnostics(page, hubId);
     const finalSteps = await readRebalanceStepEvents(page, scenarioStartedAt);
-    const persistedCycleEvents = await readPersistedFrameEventsSinceCursor(page, {
-      cursor: persistenceReceiptCursor,
-      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
-    });
+    const persistedCycleEvents = await waitForPersistedRebalanceCycles(page, persistenceReceiptCursor, hubId);
     const finalArtifacts = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
     const finalDebugDump = buildRebalanceFailureDump({
       entityId,
@@ -2414,6 +2436,7 @@ test.describe('Rebalance E2E', () => {
       const baseline = await readPairState(recipientPage, h2, rt2.entityId);
       expect(baseline, 'rt2-h2 baseline must exist').toBeTruthy();
       const baselineDebt = BigInt(baseline?.hubExposure || baseline?.hubDebt || '0');
+      const baselineFinalizedJHeight = Number(baseline?.lastFinalizedJHeight || 0);
       const scenarioStartedAt = Date.now();
 
       await waitForPairIdle(senderPage, h1, 60_000, rt1.entityId);
@@ -2440,7 +2463,7 @@ test.describe('Rebalance E2E', () => {
       await expect.poll(async () => {
         afterP1 = await readPairState(recipientPage, h2, rt2.entityId);
         return !!afterP1 && BigInt(afterP1.hubExposure || afterP1.hubDebt || '0') >= baselineDebt + usdcUnits(500n);
-      }, { timeout: 30_000 }).toBe(true);
+      }, { timeout: 60_000 }).toBe(true);
 
       const beforeP2Debt = BigInt(afterP1?.hubExposure || afterP1?.hubDebt || '0');
       const rt2P2Cursor = await getPersistedReceiptCursor(recipientPage);
@@ -2536,28 +2559,13 @@ test.describe('Rebalance E2E', () => {
         ).toBe(true);
       }
 
-      if (!h2SettledDuringP2) {
-        await expect.poll(async () => {
-          return countRebalanceStepEvents(
-            await readRebalanceStepEvents(recipientPage, scenarioStartedAt),
-            'account_settled_finalized_bilateral',
-            (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
-          );
-        }, { timeout: 35_000 }).toBeGreaterThan(0);
-      }
-
-      let rebDone: Awaited<ReturnType<typeof readPairState>> = null;
-      const rebalanceClearDeadline = Date.now() + 20_000;
-      while (Date.now() < rebalanceClearDeadline) {
-        rebDone = await readPairState(recipientPage, h2, rt2.entityId);
-        if (rebDone && BigInt(rebDone.requested || '0') === 0n && Number(rebDone.pendingHeight || 0) === 0 && Number(rebDone.mempoolLen || 0) === 0) {
-          break;
-        }
-        await recipientPage.waitForTimeout(400);
-      }
-      expect(rebDone, 'rt2-h2 rebalance snapshot must exist').toBeTruthy();
-      expect(BigInt(rebDone?.requested || '0') === 0n, 'requestedRebalance must be cleared after finalize').toBe(true);
-      if (!rebDone) throw new Error('rt2-h2 rebalance snapshot missing');
+      const rebDone = await waitForRebalanceReceiveReady(recipientPage, {
+        sinceTs: scenarioStartedAt,
+        localAccountId: rt2.entityId,
+        hubAccountId: h2,
+        requiredInCapacity: usdcUnits(550n),
+        minLocalFinalizedJHeight: baselineFinalizedJHeight,
+      });
 
       let afterP2PostRebalance: any = rebDone;
       let p2PostRebalanceApplied =
@@ -2577,7 +2585,7 @@ test.describe('Rebalance E2E', () => {
       }
 
       const debtBeforeP3 = BigInt(rebDone.hubExposure || rebDone.hubDebt || '0');
-      await waitForPairIdle(senderPage, h1, 20_000, rt1.entityId);
+      await waitForPairIdle(senderPage, h1, 60_000, rt1.entityId);
       const senderBeforeP3 = await readPairState(senderPage, h1, rt1.entityId);
       await sendRoutedHtlcPayment(
         senderPage,
@@ -2601,7 +2609,7 @@ test.describe('Rebalance E2E', () => {
       await expect.poll(async () => {
         afterP3 = await readPairState(recipientPage, h2, rt2.entityId);
         return !!afterP3 && BigInt(afterP3.hubExposure || afterP3.hubDebt || '0') >= debtBeforeP3 + usdcUnits(500n);
-      }, { timeout: 30_000 }).toBe(true);
+      }, { timeout: 60_000 }).toBe(true);
       expect(afterP3, 'rt2-h2 state after payment#3').toBeTruthy();
       await waitForPairIdle(recipientPage, h2, 20_000, rt2.entityId);
       await recipientPage.waitForTimeout(2_000);

@@ -1,23 +1,4 @@
-import { devices, expect, test, type Browser, type Page } from '@playwright/test';
-
-type BrowserIssue = Readonly<{ type: string; text: string }>;
-
-const trackBrowserIssues = (page: Page): BrowserIssue[] => {
-  const issues: BrowserIssue[] = [];
-  page.on('console', message => {
-    if (message.type() === 'error' || message.type() === 'warning') {
-      issues.push({ type: `console:${message.type()}`, text: message.text() });
-    }
-  });
-  page.on('pageerror', error => issues.push({ type: 'pageerror', text: error.message }));
-  page.on('requestfailed', request => {
-    issues.push({ type: 'requestfailed', text: `${request.url()} ${request.failure()?.errorText ?? ''}` });
-  });
-  page.on('response', response => {
-    if (response.status() >= 400) issues.push({ type: `http:${response.status()}`, text: response.url() });
-  });
-  return issues;
-};
+import { devices, expect, test, type Browser, type Page } from './global-setup.mts';
 
 const assertNoHorizontalOverflow = async (page: Page): Promise<void> => {
   const dimensions = await page.evaluate(() => ({
@@ -39,7 +20,6 @@ test.describe('React wallet shell and onboarding', () => {
     for (const viewport of viewports) {
       const context = await (browser as Browser).newContext(viewport.context);
       const page = await context.newPage();
-      const issues = trackBrowserIssues(page);
       await page.goto('/app', { waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { name: 'Create xln wallet' })).toBeVisible();
       await expect(page.getByTestId('wallet-mnemonic-input')).toHaveAttribute('autocomplete', 'off');
@@ -50,13 +30,11 @@ test.describe('React wallet shell and onboarding', () => {
         fullPage: true,
         animations: 'disabled',
       });
-      expect(issues, `${viewport.name} browser health`).toEqual([]);
       await context.close();
     }
   });
 
   test('supports keyboard setup choice and exposes offline state without leaking a phrase', { tag: '@functional' }, async ({ page }) => {
-    const issues = trackBrowserIssues(page);
     await page.goto('/app', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Import phrase' }).focus();
     await page.keyboard.press('Enter');
@@ -65,6 +43,5 @@ test.describe('React wallet shell and onboarding', () => {
     await expect(page.getByText('Offline — wallet setup and local vault access remain available.')).toBeVisible();
     expect(await page.locator('body').textContent()).not.toContain('abandon ability able');
     await page.context().setOffline(false);
-    expect(issues).toEqual([]);
   });
 });

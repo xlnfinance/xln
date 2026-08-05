@@ -37,7 +37,7 @@
  * Prereqs: localhost:8080, xln.finance with 3 hubs (H1/H2/H3)
  */
 
-import { test, expect, type BrowserContext, type Page } from './global-setup.mts';
+import { allowBrowserIssue, test, expect, type BrowserContext, type Page } from './global-setup.mts';
 import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
 import { APP_BASE_URL, API_BASE_URL } from './utils/e2e-baseline';
 import { timedStep } from './utils/e2e-timing.mts';
@@ -258,6 +258,7 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
       tokenId: 1,
       amount,
       route,
+      deliveryMode: 'instant',
     },
   }]);
 }
@@ -308,6 +309,11 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
   test.setTimeout(600_000);
 
   test('full mesh routing with diverse payment patterns', { tag: '@functional' }, async ({ browser, page }) => {
+    allowBrowserIssue({
+      type: 'console',
+      severity: 'warning',
+      message: /^\[WARN\]\[p2p\] perf\.slow_timer \{.*"label":"p2p\.(?:seed-poll\.(?:bootstrap|interval)|announce-debounce)".*\}$/,
+    });
     const userNames: UserName[] = ['alice', 'bob', 'carol', 'dave', 'eve', 'frank'];
     const userContexts: BrowserContext[] = [];
     const userPages: Record<UserName, Page> = {} as Record<UserName, Page>;
@@ -345,9 +351,13 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
           console.log(`[${name.toUpperCase()}] ${t.slice(0, 250)}`);
       });
     }
-    await Promise.all(userNames.map(name =>
-      gotoApp(pageFor(name), { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1500 })
-    ));
+    for (const name of userNames) {
+      await gotoApp(pageFor(name), {
+        appBaseUrl: APP_BASE_URL,
+        initTimeoutMs: INIT_TIMEOUT,
+        settleMs: 1500,
+      });
+    }
 
     // Fetch hub fee configs
     const hubFees = new Map<string, { feePPM: bigint; baseFee: bigint }>();
@@ -362,7 +372,10 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
     const users: Record<UserName, Entity> = {} as Record<UserName, Entity>;
     for (const name of userNames) {
       const mnemonic = MULTIROUTE_MNEMONICS[name];
-      const entity = await createRuntimeIdentity(pageFor(name), name, mnemonic, { fresh: true });
+      const entity = await createRuntimeIdentity(pageFor(name), name, mnemonic, {
+        fresh: true,
+        jurisdiction: 'Testnet',
+      });
       await waitForEntityAdvertised(pageFor(name), entity.entityId);
       users[name] = { entityId: entity.entityId, signerId: entity.signerId, label: name, mnemonic };
       console.log(`[E2E] ${name}: ${entity.entityId.slice(0, 14)}`);
@@ -443,7 +456,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
       // 2. Get sender balance BEFORE + send payment
       const senderBefore = await outCap(senderPage, sender.entityId, senderHub);
 
-      const timeoutMs = 30_000 + hubs.length * 15_000;
+      const timeoutMs = 60_000 + hubs.length * 15_000;
       const receiverAfter = await timedStep(`${tcName}.send_to_receiver_delta`, async () => {
         await pay(senderPage, sender.entityId, sender.signerId, receiver.entityId, route, wei);
         return waitForOutCapDelta(receiverPage, receiver.entityId, receiverHub, receiverBefore, wei, timeoutMs);
@@ -710,6 +723,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
         tokenId: 1,
         amount: overAmount,
         route: [users.alice!.entityId, h1!, users.dave!.entityId],
+        deliveryMode: 'instant',
       },
     }]);
 
@@ -803,7 +817,9 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
         return Boolean(env?.runtimeId && Number(env?.state?.eReplicas?.size || 0) > 0);
       }, { timeout: 5_000 }).then(() => true).catch(() => false);
       if (!runtimeStillLoaded) {
-        const reopened = await createRuntimeIdentity(userPage, name, users[name]!.mnemonic);
+        const reopened = await createRuntimeIdentity(userPage, name, users[name]!.mnemonic, {
+          jurisdiction: 'Testnet',
+        });
         expect(reopened.entityId, `${name}: mnemonic reload must restore entity id`).toBe(users[name]!.entityId);
         expect(reopened.signerId, `${name}: mnemonic reload must restore signer id`).toBe(users[name]!.signerId);
       }

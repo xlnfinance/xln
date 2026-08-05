@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { getTokenInfo } from '../../runtime/account/utils';
+import { selectContextEntityIfAvailable } from './e2e-demo-users';
 import { enqueueEntityTxs } from './e2e-runtime-input';
 
 const DEFAULT_TOKEN_IDS = [1] as const;
@@ -263,14 +264,133 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
   await expect(workspace, 'accounts workspace must be visible').toBeVisible({ timeout: 20_000 });
 }
 
-async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
+async function waitForUsableOpenAccountProfile(
+  page: Page,
+  sourceEntityId: string,
+  hubId: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  let lastProfileState: unknown = null;
+  try {
+    await expect.poll(
+      async () => page.evaluate(async ({ sourceEntityId, hubId }) => {
+        type JurisdictionLike = {
+          name?: unknown;
+          chainId?: unknown;
+          depositoryAddress?: unknown;
+        };
+        type EntityReplicaLike = {
+          entityId?: unknown;
+          position?: { jurisdiction?: unknown };
+          state?: {
+            entityId?: unknown;
+            config?: { jurisdiction?: unknown };
+          };
+        };
+        const env = (window as typeof window & {
+          isolatedEnv?: {
+            state?: { eReplicas?: Map<unknown, EntityReplicaLike> };
+            gossip?: {
+              getProfiles?: () => Array<{
+                entityId?: string;
+                runtimeId?: string;
+                metadata?: { jurisdiction?: unknown };
+              }>;
+            };
+            infrastructure?: {
+              p2p?: { ensureProfiles?: (ids: string[]) => Promise<boolean> };
+            };
+          };
+        }).isolatedEnv;
+        const normalizeEntityId = (value: unknown): string =>
+          String(value || '').trim().toLowerCase();
+        const jurisdictionKey = (value: unknown): string => {
+          if (value && typeof value === 'object') {
+            const jurisdiction = value as JurisdictionLike;
+            const chainId = String(jurisdiction.chainId ?? '').trim();
+            const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
+            if (chainId && depository) return `dep:${chainId}:${depository}`;
+            if (chainId) return '';
+            return String(jurisdiction.name || '').trim().toLowerCase();
+          }
+          return String(value || '').trim().toLowerCase();
+        };
+        const getLocalJurisdiction = (targetEntityId: string): { found: boolean; key: string } => {
+          const target = normalizeEntityId(targetEntityId);
+          for (const [replicaKey, replica] of env?.state?.eReplicas?.entries?.() || []) {
+            const entityId = normalizeEntityId(
+              replica?.state?.entityId || replica?.entityId || replicaKey,
+            );
+            if (entityId !== target) continue;
+            return {
+              found: true,
+              key: jurisdictionKey(replica?.state?.config?.jurisdiction)
+                || jurisdictionKey(replica?.position?.jurisdiction),
+            };
+          }
+          return { found: false, key: '' };
+        };
+
+        const source = normalizeEntityId(sourceEntityId);
+        const target = normalizeEntityId(hubId);
+        const ensureResult = await env?.infrastructure?.p2p?.ensureProfiles?.([target])
+          .catch((error) => error instanceof Error ? error.message : String(error));
+        const sourceJurisdiction = getLocalJurisdiction(source);
+        const localCounterparty = getLocalJurisdiction(target);
+        const profile = env?.gossip?.getProfiles?.().find((candidate) =>
+          normalizeEntityId(candidate?.entityId) === target,
+        );
+        const profileJurisdiction = jurisdictionKey(profile?.metadata?.jurisdiction);
+        const runtimeId = String(profile?.runtimeId || '').trim();
+        const usable = Boolean(sourceJurisdiction.key) && (
+          localCounterparty.found
+            ? Boolean(localCounterparty.key && localCounterparty.key === sourceJurisdiction.key)
+            : Boolean(runtimeId && profileJurisdiction === sourceJurisdiction.key)
+        );
+
+        return {
+          ok: usable,
+          ensureResult,
+          sourceJurisdiction: sourceJurisdiction.key,
+          localCounterpartyFound: localCounterparty.found,
+          counterpartyJurisdiction: localCounterparty.found
+            ? localCounterparty.key
+            : profileJurisdiction,
+          runtimeId,
+        };
+      }, { sourceEntityId, hubId }).then((state) => {
+        lastProfileState = state;
+        return state.ok;
+      }),
+      {
+        timeout: timeoutMs,
+        intervals: [100, 250, 500],
+        message: `hub ${hubId.slice(0, 10)} must have a production-usable profile before UI connect`,
+      },
+    ).toBe(true);
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n`
+      + `lastOpenAccountProfileState=${stringifyDebug(lastProfileState)}`,
+    );
+  }
+}
+
+async function connectHubThroughUi(page: Page, sourceEntityId: string, hubId: string): Promise<void> {
+  await selectContextEntityIfAvailable(page, sourceEntityId);
   await openAccountsWorkspace(page);
+  const selectedIdentity = await readSelectedUiRuntimeIdentity(page);
+  expect(
+    selectedIdentity.entityId.toLowerCase(),
+    'UI-selected entity must match the account-open source entity',
+  ).toBe(sourceEntityId.toLowerCase());
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
   if (await hasExportedRuntimeP2P(page)) {
     await waitForHubRuntimeTransportReady(page, hubId);
   } else {
     await waitForPublicHubRuntimeProfile(page, hubId);
   }
+  await waitForUsableOpenAccountProfile(page, sourceEntityId, hubId);
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
   const form = page.getByTestId('wallet-open-account');
   await expect(form).toBeVisible({ timeout: 20_000 });
@@ -1319,7 +1439,7 @@ export async function connectRuntimeToHubWithCredit(
       throw new Error(`prod/runtime-global-free connect only supports default hub connect for ${hubId.slice(0, 10)}`);
     }
     if (await hasRenderedCommittedAccountCard(page, hubId)) return;
-    await connectHubThroughUi(page, hubId);
+    await connectHubThroughUi(page, identity.entityId, hubId);
     await expect.poll(
       async () => await hasRenderedCommittedAccountCard(page, hubId),
       {
@@ -1359,7 +1479,7 @@ export async function connectRuntimeToHubWithCredit(
 
   if (!initialStatus.exists || (initialStatus.currentHeight === 0 && !initialStatus.pendingHeight)) {
     if (canUseDefaultUiConnect) {
-      await connectHubThroughUi(page, hubId);
+      await connectHubThroughUi(page, identity.entityId, hubId);
     } else {
       await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
     }
@@ -1381,7 +1501,7 @@ export async function connectRuntimeToHubWithCredit(
         ) {
           reopenAttempted = true;
           if (canUseDefaultUiConnect) {
-            await connectHubThroughUi(page, hubId);
+            await connectHubThroughUi(page, identity.entityId, hubId);
           } else {
             await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
           }

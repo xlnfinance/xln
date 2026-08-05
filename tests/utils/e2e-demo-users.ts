@@ -229,15 +229,45 @@ async function openRuntimeDropdown(page: Page): Promise<void> {
   await expect(menu).toBeVisible({ timeout: 10_000 });
 }
 
-async function selectContextEntityIfAvailable(
+export async function selectContextEntityIfAvailable(
   page: Page,
   entityId: string,
 ): Promise<void> {
   const normalizedEntityId = String(entityId || '').trim().toLowerCase();
   if (!normalizedEntityId) return;
 
-  const current = await getActiveEntity(page).catch(() => null);
-  if (String(current?.entityId || '').trim().toLowerCase() === normalizedEntityId) return;
+  const currentEntityId = async (): Promise<string> => String(
+    await page.getByTestId('context-current').first().getAttribute('data-entity-id') || '',
+  ).trim().toLowerCase();
+  const entityPicker = page.getByTestId('wallet-entity-picker').first();
+  const localEntityCount = await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: { runtimeId?: string; state?: { eReplicas?: Map<string, unknown> } };
+    }).isolatedEnv;
+    const runtimeId = String(env?.runtimeId || '').trim().toLowerCase();
+    if (!runtimeId || !env?.state?.eReplicas) return 0;
+    return Array.from(env.state.eReplicas.keys()).filter((replicaKey) => {
+      const [, signerId] = String(replicaKey).split(':');
+      return String(signerId || '').trim().toLowerCase() === runtimeId;
+    }).length;
+  });
+  if (localEntityCount > 1 || await entityPicker.isVisible().catch(() => false)) {
+    await expect(entityPicker, 'multi-entity runtime must expose the wallet entity picker')
+      .toBeVisible({ timeout: 15_000 });
+    await expect(
+      entityPicker.locator(`option[value="${normalizedEntityId}"]`),
+      `wallet entity picker must expose entity ${normalizedEntityId}`,
+    ).toHaveCount(1, { timeout: 10_000 });
+    await entityPicker.selectOption(normalizedEntityId);
+    await expect.poll(currentEntityId, {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: `wallet entity picker must select entity ${normalizedEntityId}`,
+    }).toBe(normalizedEntityId);
+    return;
+  }
+
+  if (await currentEntityId() === normalizedEntityId) return;
 
   await openRuntimeDropdown(page);
   const row = page
@@ -245,16 +275,11 @@ async function selectContextEntityIfAvailable(
     .first();
   await expect(row, `context switcher must expose entity ${normalizedEntityId}`).toBeVisible({ timeout: 10_000 });
   await row.click({ force: true });
-  await expect
-    .poll(async () => {
-      const active = await getActiveEntity(page).catch(() => null);
-      return String(active?.entityId || '').trim().toLowerCase();
-    }, {
+  await expect.poll(currentEntityId, {
       timeout: 10_000,
       intervals: [100, 250, 500],
       message: `context switcher must select entity ${normalizedEntityId}`,
-    })
-    .toBe(normalizedEntityId);
+    }).toBe(normalizedEntityId);
 }
 
 async function ensureRuntimeCreationView(page: Page, label: string): Promise<void> {
@@ -1275,9 +1300,7 @@ export async function createRuntimeIdentity(
       `${expectedJurisdiction ? ` jurisdiction=${expectedJurisdiction}` : ''}: ${JSON.stringify(diagnostics)}`,
     );
   }
-  if (expectedJurisdiction) {
-    await selectContextEntityIfAvailable(page, entity.entityId);
-  }
+  await selectContextEntityIfAvailable(page, entity.entityId);
   return entity as { entityId: string; signerId: string; runtimeId: string };
 }
 
@@ -1295,22 +1318,6 @@ export async function getActiveEntity(page: Page): Promise<{ entityId: string; s
       };
     }).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '').toLowerCase();
-    if (runtimeId && env?.state?.eReplicas) {
-      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
-        const [entityId, signerId] = String(replicaKey).split(':');
-        const normalizedSignerId = String(signerId || '').toLowerCase();
-        if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
-        if (normalizedSignerId !== runtimeId) continue;
-        const jurisdiction = String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || '').trim();
-        return {
-          entityId,
-          signerId,
-          runtimeId: String(env.runtimeId || ''),
-          jurisdiction,
-        };
-      }
-    }
-
     const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
     const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '').trim();
     const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '').trim();

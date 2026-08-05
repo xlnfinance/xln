@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { useExternalStore } from '../../../../../packages/react-adapters/use-external-store';
 import { runtimeCommandLatestReceiptExternalStore } from '$lib/stores/runtimeCommandBus';
@@ -29,9 +29,6 @@ export const WalletAccountsWorkspace = ({ section }: Readonly<{ section: WalletA
   const state = useExternalStore(walletAccountExternalStore);
   const receipt = useExternalStore(runtimeCommandLatestReceiptExternalStore);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
-  useEffect(() => {
-    void walletAccountStoreController.showActiveEntity();
-  }, []);
   const entity = state.entity;
   if (state.loading && !entity) return <section className="wallet-operation"><p className="wallet-eyebrow">runtime projection</p><h1>Loading accounts…</h1></section>;
   if (state.error) return <section className="wallet-operation"><p className="wallet-eyebrow">runtime projection failed</p><h1>Accounts unavailable</h1><p className="wallet-inline-error" role="alert">{state.error}</p><button type="button" onClick={() => void walletAccountStoreController.refresh()}>Retry</button></section>;
