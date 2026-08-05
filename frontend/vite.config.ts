@@ -125,6 +125,19 @@ const proxyConfig = {
 	},
 };
 
+/**
+ * Preview keeps the browser's own Host on `/relay`. The relay picks its hello
+ * audience from the request Host and validates it against the operator's
+ * configured URLs, so rewriting the Host here would hand the browser an
+ * audience for the API origin it never dialled and every hello would fail
+ * `WS_HELLO_AUDIENCE_MISMATCH`. Dev keeps `changeOrigin` because its browser
+ * and relay already share an origin.
+ */
+const previewProxyConfig = {
+	...proxyConfig,
+	'/relay': { ...proxyConfig['/relay'], changeOrigin: false },
+};
+
 const PREVIEW_PROXY_PREFIXES = ['/api', '/rpc'];
 
 function createPreviewHttpProxyMiddleware(targetBase: string) {
@@ -303,7 +316,7 @@ export default defineConfig({
 				cert: fs.readFileSync(certPath),
 			}
 		}),
-		proxy: proxyConfig,
+		proxy: previewProxyConfig,
 		headers: {
 			'Cache-Control': 'no-cache, no-store, must-revalidate',
 			'Pragma': 'no-cache',

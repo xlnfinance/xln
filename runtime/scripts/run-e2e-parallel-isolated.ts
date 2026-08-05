@@ -1924,8 +1924,15 @@ const runShard = async (
         '127.0.0.1',
         '--port',
         String(apiPort),
+        // The browser reaches the relay through the preview server, so that
+        // origin has to be one of the operator-configured relay audiences or
+        // its hello is signed for an endpoint the relay does not recognise.
+        // `--relay-url` stays explicit because it otherwise defaults to this
+        // base URL, which would send the mesh through the preview proxy too.
         '--public-ws-base-url',
-        `ws://127.0.0.1:${apiPort}`,
+        `ws://localhost:${webPort}`,
+        '--relay-url',
+        `ws://127.0.0.1:${apiPort}/relay`,
         '--rpc-url',
         rpcUrl,
         '--rpc2-url',
