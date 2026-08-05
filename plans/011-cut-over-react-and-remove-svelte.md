@@ -167,9 +167,9 @@ Run each broad gate once on the unchanged release candidate. If one fails, retur
 
 ## Done criteria
 
-- [ ] React/Vite/TypeScript is the only active frontend implementation and build path.
+- [x] React/Vite/TypeScript is the only active frontend implementation and build path.
 - [ ] Site, docs, wallet, and ops ship from one commit/version/manifest and activate atomically on one origin.
-- [ ] No `.svelte`, Svelte/SvelteKit dependency, adapter, fallback route, selector flag, or compiler-specific test remains.
+- [x] No `.svelte`, Svelte/SvelteKit dependency, adapter, fallback route, selector flag, or compiler-specific test remains.
 - [ ] Existing persisted profiles open without migration/data loss; real financial flows preserve canonical command and completion semantics.
 - [ ] Browser/native/PWA/extension route, visual, console, and build-identity evidence is complete.
 - [ ] `bun run check`, `gate:ci`, and `gate:release` pass on the exact unchanged candidate.

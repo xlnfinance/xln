@@ -43,14 +43,15 @@ The ops scenario player exposes deterministic playback controls and opens a wall
 ## Verification checkpoint
 
 - React TypeScript and the canonical four-surface production build pass. The latest build emits all four roots; wallet and health/Three.js chunks retain known size warnings for later optimization, not correctness failures.
-- Frontend unit boundary: 593 tests pass. The only failing test cannot start `Bun.serve({ port: 0 })` because this execution sandbox rejects local listeners before assertions run.
-- Deployment/release/integrity: 46 assertions pass for surface ownership, manifest validation, route isolation, atomic activation/rollback, audit registry, Foundation Hanko, and frozen-core behavior. Two HTTP health tests are blocked by the same sandbox listener restriction.
-- Prior strict browser evidence covers site, docs, wallet shell/onboarding, health/QA/runs, Dockview/3D, and embed at iPhone, laptop, and wide-desktop viewports. The final scenario-to-wallet preview patch has L1/type/build evidence but still requires its post-patch browser rerun.
-- Native wallet sync and desktop/extension/mobile package checks passed earlier in this migration worktree. Final unchanged-candidate parity and build-identity evidence is still required.
+- Frontend/deployment L1 is green: 633 tests pass across 118 files with 2,767 expectations, including the real HTTP release-health tests run with loopback listener access.
+- Strict browser evidence covers public site, docs and nested image assets, wallet onboarding/recovery/accounts/payment routes, swap empty/history, ops health/QA/runs, Dockview/3D suspension, embed commands, and scenario-to-wallet preview. Every captured iPhone, laptop, and wide-desktop screenshot was inspected; the tested browser-health gates reported no unexpected console, page, request, or response failures.
+- The final graph/scenario batch passed 3 isolated targets in 35.6 seconds. Account/onboarding/recovery passed 5 targets in 49.3 seconds, docs passed 5 targets in 27.3 seconds, and the static public-site gate passed 3 targets in 42.8 seconds.
+- Native wallet sync and desktop/extension/mobile package checks passed earlier in this migration worktree. They still require one exact-final-commit rerun after this evidence update.
 
 ## Remaining release blockers
 
-- Run the final scenario/wallet preview browser assertion and the complete fresh/prior-profile route matrix where local listeners are permitted.
-- Run `bun run check`, `bun run gate:ci`, and `bun run gate:release` on one unchanged candidate with `bun` available to nested package scripts.
-- Run the required payment/user-flow and final native/browser parity gates, inspect F12 console/network/storage and screenshots, then review exact status/diff.
+- The live swap target cannot start its market-maker stack because Runtime rejects the atomic pair with `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION` in `runtime/runtime/entity-input-atomic.ts`. This is below the frontend boundary and requires explicit owner authorization before any protocol edit.
+- The rebalance user-flow target reaches the Account recovery path and then fails with `ACCOUNT_PEER_FRAME_STALE_SETTLEMENT_SEAL` / `SETTLEMENT_SEAL_NONCE_MISMATCH`, leaving the bilateral pair pending across adjacent frames. This is an Account consensus invariant and requires explicit owner authorization before any protocol edit.
+- Rerun payment/user-flow, native mobile/desktop/extension, `bun run check`, `bun run gate:ci`, and `bun run gate:release` on the exact final commit. The protocol failures above remain release blockers even if every frontend-only target is green.
+- Review exact status/diff and retain the final candidate hashes, F12 browser-health evidence, and screenshots required by the distribution plan.
 - Do not mark Plan 011 done, create a non-WIP release commit, push, merge, tag, or activate production before those gates pass.

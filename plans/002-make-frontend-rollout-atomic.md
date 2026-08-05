@@ -150,13 +150,13 @@ Run once on the unchanged candidate and provide output. Do not deploy merely to 
 
 ## Done criteria
 
-- [ ] Activation and rollback switch all surface artifacts as one release.
-- [ ] Corrupt, incomplete, mixed-commit, or path-unsafe staging cannot affect the live pointer.
-- [ ] Nginx/static routing has an exhaustive route-owner matrix.
-- [ ] Native builders consume manifest-declared artifacts and fail loudly on drift.
-- [ ] Documentation describes exact staging, activation, health, rollback, and retention commands.
-- [ ] `bun run check` passes without a frozen-core violation.
-- [ ] `git status --short` contains only reviewed in-scope changes, and the Plan 002 index row is updated.
+- [x] Activation and rollback switch all surface artifacts as one release.
+- [x] Corrupt, incomplete, mixed-commit, or path-unsafe staging cannot affect the live pointer.
+- [x] Nginx/static routing has an exhaustive route-owner matrix.
+- [x] Native builders consume manifest-declared artifacts and fail loudly on drift.
+- [x] Documentation describes exact staging, activation, health, rollback, and retention commands.
+- [x] `bun run check` passes without a frozen-core violation.
+- [x] `git status --short` contains only reviewed in-scope changes, and the Plan 002 index row is updated.
 
 ## Stop conditions
 
