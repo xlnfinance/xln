@@ -27,7 +27,7 @@ import {
   resolveScenarioJurisdictionAddress,
 } from './boot';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
+import { snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta, isLeftEntity } from '../account/utils';
 import { createGossipLayer } from '../network/p2p/gossip';
@@ -957,6 +957,13 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     await process(env);
     logPending();
 
+    // How many frames an HTLC settlement takes is a property of the payment
+    // path - the secret still travels back B->H->A after frame 13 - so an
+    // assertion about settled balances must wait for quiescence rather than
+    // re-count frames here. The ordering assertions further down deliberately
+    // do not drain: they are about what has NOT happened yet.
+    await drainRuntime(env);
+
     // Verify payment 1 landed (canonical LEFT perspective)
     const ahDelta1 = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDelta1 = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
@@ -1040,6 +1047,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log('🏃 FRAME 17: Hub commits H-B');
     await process(env);
     logPending();
+
+    await drainRuntime(env);
 
     // Verify total shift = $250K (canonical LEFT perspective)
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
@@ -1167,6 +1176,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log('🏃 FRAME 21: Hub commits H-A (reverse payment complete)');
     await process(env);
     logPending();
+
+    await drainRuntime(env);
 
     // FINAL ASSERTION: Verify reverse payment shifted correctly
     const ahDeltaRev = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
@@ -1714,7 +1725,17 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   // To trigger debt: delta must exceed collateral
   // derived.delta = +$150K (collateral only $100K), so position is undercollateralized
   // → Bob gets all $100K collateral, Hub owes $50K extra (becomes debt when Hub has $0 reserves)
-  const disputeOffdeltaTarget = hubIsLeft ? -usd(150_000) : usd(150_000);
+  // Bob must end up entitled to the whole collateral plus $50K of debt. The
+  // collateral/debt split is not symmetric around zero, so the target is not a
+  // sign flip of one number (Depository._applyAccountDelta):
+  //   Bob LEFT  - Bob's allocation must exceed the collateral by the shortfall,
+  //               and RIGHT owes the excess, so delta = collateral + $50K.
+  //   Bob RIGHT - LEFT's allocation goes negative, RIGHT takes all collateral
+  //               and LEFT owes the full magnitude, so delta = -$50K.
+  const disputeShortfall = usd(50_000);
+  const disputeOffdeltaTarget = hubIsLeft
+    ? -disputeShortfall
+    : disputeCollateralTarget + disputeShortfall;
   const disputeOndeltaTarget = 0n;
   const leftActor = hubIsLeft ? hub : bob;
   const rightActor = hubIsLeft ? bob : hub;
@@ -2218,12 +2239,21 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }]
   }]);
 
-  await processUntil(env, () => {
-    const jRep = env.state.jReplicas?.get('AHB Demo');
-    return jRep ? jRep.mempool.length === 0 : false;
-  }, 40, 'J-machine process edge disputeStart');
-
-  await processJEvents(env);
+  // An empty J mempool is true both before the broadcast is queued and after it
+  // is mined, so waiting on it can return before the dispute ever reaches the
+  // chain. Wait for the chain itself to carry the dispute instead.
+  let edgeDisputeOnChain = false;
+  for (let round = 0; round < 40; round++) {
+    await syncChain(env, 1);
+    await processJEvents(env);
+    if ((await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout !== 0n) {
+      edgeDisputeOnChain = true;
+      break;
+    }
+  }
+  if (!edgeDisputeOnChain) {
+    throw new Error('PHASE 8: edge disputeStart never reached the chain');
+  }
 
   const [, bobEdgeStart] = findReplica(env, bob.id);
   const bobEdgeAccount = bobEdgeStart.state.accounts.get(hub.id);
