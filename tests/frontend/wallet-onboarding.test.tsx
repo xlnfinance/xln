@@ -40,6 +40,7 @@ test('first-run UI keeps the secret field private and the submit action gated', 
     />,
   );
   expect(html).toContain('Create xln wallet');
+  expect(html).toContain('data-testid="wallet-onboarding"');
   expect(html).toContain('data-testid="wallet-mnemonic-input"');
   expect(html).toContain('autoComplete="off"');
   expect(html).toContain('spellCheck="false"');

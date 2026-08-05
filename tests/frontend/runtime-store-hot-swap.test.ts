@@ -123,6 +123,8 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
   expect(storeSource).not.toContain('export const xlnEnvironment = derived');
   expect(storeSource).not.toContain('export function setXlnEnvironment');
   expect(embeddedSource).toContain('const bootstrapEnvironment = writable<RuntimeReplica | null>(null);');
+  expect(embeddedSource).toContain("registerDebugSurface('liveRuntimeSnapshot', () => localLiveDebugEnv);");
+  expect(setEnvSource).toContain('localLiveDebugEnv = runtimeEnv;');
   expect(derivedSource).toContain('return runtimeEntry?.env ?? null;');
   expect(derivedSource).not.toContain('if (runtimeEntry) return runtimeEntry.env ?? null;');
   expect(embeddedSource).toContain("import { errorLog } from './errorLogStore';");

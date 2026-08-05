@@ -60,7 +60,7 @@ export const WalletOnboarding = ({ onSubmit, onGenerateMnemonic }: WalletOnboard
   };
 
   return (
-    <main className="wallet-onboarding">
+    <main className="wallet-onboarding" data-testid="wallet-onboarding">
       <section className="wallet-onboarding-intro">
         <p className="wallet-eyebrow">first local runtime</p>
         <h1>Create xln wallet</h1>

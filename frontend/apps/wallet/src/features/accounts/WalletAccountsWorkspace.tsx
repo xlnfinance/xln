@@ -22,6 +22,8 @@ import {
 export type WalletAccountSection = 'accounts' | 'pay' | 'receive' | 'move' | 'lending' | 'settlement' | 'swap' | 'activity';
 
 const shortId = (value: string): string => `${value.slice(0, 10)}…${value.slice(-8)}`;
+const coverageTone = (coverage: number): string => coverage >= 100 ? 'cov-good' : coverage >= 50 ? 'cov-warn' : 'cov-risk';
+const coverageText = (coverage: number): string => `${Number.isInteger(coverage) ? coverage : coverage.toFixed(2)}%`;
 
 export const WalletAccountsWorkspace = ({ section }: Readonly<{ section: WalletAccountSection }>) => {
   const state = useExternalStore(walletAccountExternalStore);
@@ -34,7 +36,7 @@ export const WalletAccountsWorkspace = ({ section }: Readonly<{ section: WalletA
   if (state.loading && !entity) return <section className="wallet-operation"><p className="wallet-eyebrow">runtime projection</p><h1>Loading accounts…</h1></section>;
   if (state.error) return <section className="wallet-operation"><p className="wallet-eyebrow">runtime projection failed</p><h1>Accounts unavailable</h1><p className="wallet-inline-error" role="alert">{state.error}</p><button type="button" onClick={() => void walletAccountStoreController.refresh()}>Retry</button></section>;
   if (!entity) return <section className="wallet-operation"><p className="wallet-eyebrow">no active entity</p><h1>Create an entity to use accounts</h1><p>The runtime is connected, but it has no active Entity projection yet.</p></section>;
-  if (section === 'pay') return <WalletPaymentForm entity={entity} receipt={receipt} initialInvoice={window.location.hash.startsWith('#pay/') ? window.location.href : null} />;
+  if (section === 'pay') return <WalletPaymentForm entity={entity} directory={state.directory} receipt={receipt} initialInvoice={window.location.hash.startsWith('#pay/') ? window.location.href : null} />;
   if (section === 'receive') return <WalletReceiveForm entity={entity} />;
   if (section === 'move') return <div className="wallet-operation-stack"><WalletMoveCredit entity={entity} receipt={receipt} /><WalletExternalMove entity={entity} receipt={receipt} /></div>;
   if (section === 'lending') return <WalletLending entity={entity} receipt={receipt} />;
@@ -57,17 +59,17 @@ export const WalletAccountsWorkspace = ({ section }: Readonly<{ section: WalletA
       <div className="wallet-account-layout">
         <div className="wallet-account-list" role="list">
           {entity.accounts.length === 0 ? <p className="wallet-empty-state">No bilateral accounts are committed.</p> : entity.accounts.map(account => (
-            <button key={account.counterpartyId} type="button" className={selectedAccountId === account.counterpartyId ? 'is-selected' : ''} onClick={() => setSelectedAccountId(account.counterpartyId)}>
+            <button key={account.counterpartyId} type="button" data-testid="wallet-account-row" data-counterparty-id={account.counterpartyId} className={selectedAccountId === account.counterpartyId ? 'is-selected' : ''} onClick={() => setSelectedAccountId(account.counterpartyId)}>
               <span>{shortId(account.counterpartyId)}</span><small>{account.status} · A{account.currentHeight}{account.pending ? ' · pending' : ''}</small>
             </button>
           ))}
         </div>
-        <div className="wallet-account-detail">
+        <div className="wallet-account-detail" data-testid="wallet-account-detail" data-counterparty-id={selected?.counterpartyId}>
           {!selected ? <p>Select an account to inspect exact bilateral capacity.</p> : <>
             <header><div><span>Counterparty</span><strong>{selected.counterpartyId}</strong></div><em className={selected.disputed ? 'is-error' : ''}>{selected.disputed ? 'disputed' : selected.pending ? 'pending' : 'committed'}</em></header>
-            {selected.tokens.map(token => <article key={token.tokenId} data-testid="wallet-account-token">
+            {selected.tokens.map(token => <article key={token.tokenId} data-testid="wallet-account-token" data-token-id={token.tokenId}>
               <div><strong>{token.symbol}</strong><small>token {token.tokenId}</small></div>
-              <dl><div><dt>Outbound</dt><dd data-testid="wallet-token-outbound">{token.outbound}</dd></div><div><dt>Inbound</dt><dd data-testid="wallet-token-inbound">{token.inbound}</dd></div><div><dt>Collateral</dt><dd>{token.collateralRaw}</dd></div><div><dt>Delta</dt><dd>{token.raw}</dd></div></dl>
+              <dl><div><dt>Outbound</dt><dd data-testid="wallet-token-outbound">{token.outbound}</dd></div><div><dt>Inbound</dt><dd data-testid="wallet-token-inbound">{token.inbound}</dd></div><div><dt>Collateral</dt><dd>{token.collateralRaw}</dd></div><div><dt>Delta</dt><dd>{token.raw}</dd></div><div><dt>Unsecured</dt><dd>{token.uncollateralizedRaw}</dd></div><div><dt>Rebalance requested</dt><dd>{token.requestedRebalanceRaw}</dd></div><div className="wallet-account-coverage"><dt>Secured coverage</dt><dd data-testid="account-status-coverage" className={coverageTone(token.securedCoveragePercent)}>{coverageText(token.securedCoveragePercent)}</dd><progress max="100" value={token.securedCoveragePercent}>{coverageText(token.securedCoveragePercent)}</progress></div></dl>
             </article>)}
             <WalletAccountConfigure entity={entity} account={selected} receipt={receipt} />
             <WalletAccountDispute entity={entity} account={selected} receipt={receipt} />

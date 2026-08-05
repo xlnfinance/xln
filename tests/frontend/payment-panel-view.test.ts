@@ -134,10 +134,10 @@ test('payment key coverage requires every validator key in a certified profile',
 });
 
 
-test('payment gossip refresh is owned by runtime store operation', () => {
+test('runtime gossip refresh owns exact payment and open-account readiness', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
 
-  expect(source).toContain('export async function refreshPaymentRuntimeGossip');
+  expect(source).toContain('export async function refreshRuntimeGossipProfiles');
   expect(source).toContain('const xln = env ? await getXLN() : null;');
   expect(source).toContain("if (!env) {");
   expect(source).toContain('PAYMENT_PREFLIGHT_GOSSIP_PROJECTION_ONLY');
@@ -145,6 +145,8 @@ test('payment gossip refresh is owned by runtime store operation', () => {
   expect(source).toContain('env.gossip.announce(profile)');
   expect(source).toContain('env.infrastructure?.p2p?.syncProfiles?.()');
   expect(source).toContain('xln?.ensureGossipProfiles');
+  expect(source).toContain('hasUsableOpenAccountCounterpartyProfile(env, sourceEntityId, targetEntityId)');
+  expect(source).toContain("throw new Error('OPEN_ACCOUNT_COUNTERPARTY_PROFILE_NOT_READY");
   expect(source).toContain('xln?.refreshGossip?.(env)');
   expect(source).not.toContain("if (!env) throw new Error('Runtime env is not loaded')");
   expect(source).toContain('export function sendRuntimeDebugEvent');

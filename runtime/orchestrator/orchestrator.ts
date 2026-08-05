@@ -198,6 +198,7 @@ import {
 } from './reset-coordinator';
 import { buildDiskSummary } from './disk-health';
 
+const BUN_EXECUTABLE = process.execPath;
 const args = parseArgs();
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
 const readGitValue = (gitArgs: string[]): string => {
@@ -1385,12 +1386,13 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     ...(child.deployTokens ? ['--deploy-tokens'] : []),
   ];
   resetSupervisedChildForSpawn(child);
-  const proc = spawn('bun', cmd, {
+  const proc = spawn(BUN_EXECUTABLE, cmd, {
     cwd: process.cwd(),
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     env: sanitizeChildProcessEnv({
       ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: child.dbPath,
+      XLN_BUN_EXECUTABLE: BUN_EXECUTABLE,
       XLN_BRAINVAULT_OWNER_PATH: join(child.dbPath, 'brainvault-owner.json'),
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
@@ -1485,12 +1487,13 @@ const spawnMarketMaker = async (): Promise<void> => {
   ];
   resetSupervisedChildForSpawn(marketMakerChild);
   marketMakerChild.lastStartupPhase = null;
-  const proc = spawn('bun', cmd, {
+  const proc = spawn(BUN_EXECUTABLE, cmd, {
     cwd: process.cwd(),
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     env: sanitizeChildProcessEnv({
       ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: marketMakerChild.dbPath,
+      XLN_BUN_EXECUTABLE: BUN_EXECUTABLE,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
       USE_ANVIL: 'true',

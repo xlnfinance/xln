@@ -8,6 +8,7 @@ import type {
   RuntimeAdapterEntitySummary,
   RuntimeAdapterFrameSummary,
   RuntimeAdapterHistoryFrameBatch,
+  RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterReadQuery,
   RuntimeAdapterSolvencySummary,
   RuntimeAdapterTimelineIndexPage,
@@ -196,6 +197,10 @@ export class RuntimeQueryClient {
     return this.cachedRead<RuntimeAdapterActivityPage>('activity', query);
   }
 
+  findPaymentRoutes(query: RuntimeAdapterReadQuery): Promise<RuntimeAdapterPaymentRoutesResponse> {
+    return this.read<RuntimeAdapterPaymentRoutesResponse>('payment-routes', query);
+  }
+
   readSolvencySummary(query: RuntimeAdapterReadQuery = {}): Promise<RuntimeAdapterSolvencySummary> {
     return this.cachedRead<RuntimeAdapterSolvencySummary>('solvency-summary', query);
   }
@@ -231,6 +236,7 @@ const exposeRuntimeAdapterDebugSurface = (): void => {
       historyFrameBatch: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.readHistoryFrameBatch(query),
       timelineIndex: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readTimelineIndex(query),
       activity: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.readActivity(query),
+      paymentRoutes: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.findPaymentRoutes(query),
       solvencySummary: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readSolvencySummary(query),
       checkpoints: async () => runtimeQueryClient.readCheckpoints(),
       receiptStatus: async (receiptId: string) => runtimeQueryClient.readReceiptStatus(receiptId),

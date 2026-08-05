@@ -928,6 +928,7 @@ export async function gotoApp(
           isVisible('#runtime-creation') ||
           isVisible('.brainvault-wrapper') ||
           isVisible('.quick-login-grid') ||
+          isVisible('[data-testid="wallet-onboarding"]') ||
           Boolean(Array.from(document.querySelectorAll('button')).find((button) => {
             const label = (button.textContent || '').trim().toLowerCase();
             return label === 'alice' || label === 'bob' || label === 'carol' || label === 'dave';
@@ -971,7 +972,10 @@ export async function gotoApp(
     hasLoading: Boolean(document.querySelector('.loading-screen')),
     hasError: Boolean(document.querySelector('.error-screen')),
     hasView: Boolean(document.querySelector('.view-wrapper')),
-    hasRuntimeCreation: Boolean(document.querySelector('#runtime-creation')),
+    hasRuntimeCreation: Boolean(
+      document.querySelector('#runtime-creation') ||
+      document.querySelector('[data-testid="wallet-onboarding"]'),
+    ),
   })).catch(() => null);
   throw new Error(`gotoApp failed to reach ready view: ${JSON.stringify(appDiagnostics)}`);
 }
@@ -1050,6 +1054,8 @@ export async function createRuntime(
         ...(skipRecoveryRestore ? { recovery: { useDefaultTowers: false, towers: [] } } : {}),
       });
     }, { runtimeLabel: label, seed: mnemonic, loginType, requiresOnboarding, skipRecoveryRestore });
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await expect(page.getByTestId('app-runtime-ready')).toBeVisible({ timeout: RUNTIME_READY_TIMEOUT });
     await waitForRuntimeReady(page, runtimeId);
     runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
     if (requiresOnboarding) {

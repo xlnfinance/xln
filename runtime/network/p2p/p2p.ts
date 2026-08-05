@@ -1501,6 +1501,11 @@ export class RuntimeP2P {
       if (this.closing || this.closed) return;
       this.rememberVerifiedProfileRoute(sanitized);
       this.env.gossip?.announce?.(sanitized);
+      // Hub bootstrap waits for direct transport before it creates bilateral
+      // accounts. Establish that transport as soon as its signed route is
+      // accepted; waiting for the first account input would deadlock because
+      // that input is deliberately held until the direct peer is open.
+      this.connectVerifiedHubRoute(sanitized);
       accepted++;
       acceptedProfiles.push(sanitized);
     }
@@ -1681,6 +1686,11 @@ export class RuntimeP2P {
         error: (error as Error).message,
       });
     });
+  }
+
+  private connectVerifiedHubRoute(profile: Profile): void {
+    if (profile.metadata?.isHub !== true) return;
+    this.ensureDirectClientForRuntime(profile.runtimeId);
   }
 
 }

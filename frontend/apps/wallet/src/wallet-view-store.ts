@@ -7,6 +7,8 @@ export type WalletRuntimeSummary = Readonly<{
   createdAt: number;
   signerCount: number;
   unlocked: boolean;
+  entityId: string | null;
+  signerId: string | null;
 }>;
 
 export type WalletViewSnapshot = Readonly<{
@@ -17,13 +19,18 @@ export type WalletViewSnapshot = Readonly<{
 const projectWalletView = (): WalletViewSnapshot => {
   const vault = runtimesStateExternalStore.getSnapshot();
   const runtimes = Object.values(vault.runtimes)
-    .map(runtime => Object.freeze({
-      id: runtime.id,
-      label: runtime.label,
-      createdAt: runtime.createdAt,
-      signerCount: runtime.signers.length,
-      unlocked: Boolean(runtime.seed),
-    }))
+    .map(runtime => {
+      const activeSigner = runtime.signers[runtime.activeSignerIndex] ?? null;
+      return Object.freeze({
+        id: runtime.id,
+        label: runtime.label,
+        createdAt: runtime.createdAt,
+        signerCount: runtime.signers.length,
+        unlocked: Boolean(runtime.seed),
+        entityId: String(activeSigner?.entityId || '').trim().toLowerCase() || null,
+        signerId: String(activeSigner?.address || '').trim().toLowerCase() || null,
+      });
+    })
     .toSorted((left, right) => left.createdAt - right.createdAt);
   return Object.freeze({
     activeRuntimeId: vault.activeRuntimeId,

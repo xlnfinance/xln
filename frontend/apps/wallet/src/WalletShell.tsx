@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { Settings, ThemeName } from '$lib/types/ui';
+import { useExternalStore } from '../../../packages/react-adapters/use-external-store';
 import { walletErrorText } from './error-surface';
-import type { WalletViewSnapshot } from './wallet-view-store';
+import type { WalletRuntimeSummary, WalletViewSnapshot } from './wallet-view-store';
 import { WalletAccountsWorkspace, type WalletAccountSection } from './features/accounts/WalletAccountsWorkspace';
+import type { WalletEntityAccountsView } from './features/accounts/account-view-model';
+import { walletAccountExternalStore, type WalletDirectoryEntity } from './features/accounts/wallet-account-store';
 
 type WalletSection = 'overview' | 'settings' | WalletAccountSection;
 
@@ -13,6 +16,7 @@ export type WalletShellProps = Readonly<{
   connected: boolean;
   online: boolean;
   onSelectRuntime: (runtimeId: string) => Promise<void>;
+  onSelectEntity: (entityId: string) => Promise<void>;
   onLockRuntime: (runtimeId: string) => Promise<void>;
   onTheme: (theme: ThemeName) => void;
   onLiteMode: (enabled: boolean) => void;
@@ -22,13 +26,39 @@ export type WalletShellProps = Readonly<{
 
 const shortId = (value: string): string => `${value.slice(0, 8)}…${value.slice(-6)}`;
 
+export const resolveWalletShellIdentity = (
+  active: WalletRuntimeSummary | null,
+  entity: Pick<WalletEntityAccountsView, 'runtimeId' | 'entityId' | 'signerId'> | null,
+) => Object.freeze({
+  runtimeId: entity?.runtimeId || active?.id || null,
+  entityId: entity?.entityId || active?.entityId || null,
+  signerId: entity?.signerId || active?.signerId || null,
+});
+
+export const resolveWalletShellEntities = (
+  runtimeId: string | null,
+  directory: readonly WalletDirectoryEntity[],
+): readonly WalletDirectoryEntity[] => {
+  const runtime = String(runtimeId || '').trim().toLowerCase();
+  if (!runtime) return Object.freeze([]);
+  return Object.freeze(directory
+    .filter(entity => !entity.isHub && entity.runtimeId === runtime)
+    .toSorted((left, right) =>
+      String(left.jurisdiction || '').localeCompare(String(right.jurisdiction || '')) ||
+      left.entityId.localeCompare(right.entityId)
+    ));
+};
+
 export const WalletShell = (props: WalletShellProps) => {
+  const accountState = useExternalStore(walletAccountExternalStore);
   const initialSection: WalletSection = typeof window !== 'undefined' && window.location.hash.startsWith('#pay/') ? 'pay' : 'overview';
   const [section, setSection] = useState<WalletSection>(initialSection);
   const railRef = useRef<HTMLElement>(null);
-  const [pending, setPending] = useState<'select' | 'lock' | null>(null);
+  const [pending, setPending] = useState<'runtime' | 'entity' | 'lock' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const active = props.wallet.runtimes.find(runtime => runtime.id === props.wallet.activeRuntimeId) ?? null;
+  const selectedIdentity = resolveWalletShellIdentity(active, accountState.entity);
+  const localEntities = resolveWalletShellEntities(active?.id ?? null, accountState.directory);
   const selectSection = (next: WalletSection, button: HTMLButtonElement): void => {
     setSection(next);
     if (window.matchMedia('(max-width: 760px)').matches) {
@@ -45,7 +75,7 @@ export const WalletShell = (props: WalletShellProps) => {
     resetDesktopRail();
     return () => window.removeEventListener('resize', resetDesktopRail);
   }, []);
-  const run = async (kind: 'select' | 'lock', action: () => Promise<void>): Promise<void> => {
+  const run = async (kind: 'runtime' | 'entity' | 'lock', action: () => Promise<void>): Promise<void> => {
     setPending(kind);
     setError(null);
     try {
@@ -64,29 +94,42 @@ export const WalletShell = (props: WalletShellProps) => {
         <div className="wallet-runtime-picker">
           <span className={`wallet-status-dot ${props.connected ? 'is-ready' : ''}`} aria-hidden="true" />
           <select
+            data-testid="context-current"
+            data-runtime-id={selectedIdentity.runtimeId ?? undefined}
+            data-entity-id={selectedIdentity.entityId ?? undefined}
+            data-signer-id={selectedIdentity.signerId ?? undefined}
             aria-label="Active runtime"
             value={props.wallet.activeRuntimeId ?? ''}
             disabled={pending !== null}
-            onChange={event => void run('select', () => props.onSelectRuntime(event.target.value))}
+            onChange={event => void run('runtime', () => props.onSelectRuntime(event.target.value))}
           >
             {props.wallet.runtimes.map(runtime => <option key={runtime.id} value={runtime.id}>{runtime.label}</option>)}
           </select>
+          {localEntities.length > 1 ? <select
+            data-testid="wallet-entity-picker"
+            aria-label="Active entity"
+            value={selectedIdentity.entityId ?? ''}
+            disabled={pending !== null}
+            onChange={event => void run('entity', () => props.onSelectEntity(event.target.value))}
+          >
+            {localEntities.map(entity => <option key={entity.entityId} value={entity.entityId} data-jurisdiction={entity.jurisdiction ?? ''}>{entity.label} · {entity.jurisdiction ?? 'jurisdiction'}</option>)}
+          </select> : null}
         </div>
       </header>
       <aside ref={railRef} className="wallet-rail" aria-label="Wallet navigation">
         <button type="button" aria-current={section === 'overview' ? 'page' : undefined} onClick={event => selectSection('overview', event.currentTarget)}>
-          <span>01</span>Overview
+          <span aria-hidden="true">01</span>Overview
         </button>
-        <button type="button" aria-current={section === 'accounts' ? 'page' : undefined} onClick={event => selectSection('accounts', event.currentTarget)}><span>02</span>Accounts</button>
-        <button type="button" aria-current={section === 'pay' ? 'page' : undefined} onClick={event => selectSection('pay', event.currentTarget)}><span>03</span>Pay</button>
-        <button type="button" aria-current={section === 'receive' ? 'page' : undefined} onClick={event => selectSection('receive', event.currentTarget)}><span>04</span>Receive</button>
-        <button type="button" aria-current={section === 'move' ? 'page' : undefined} onClick={event => selectSection('move', event.currentTarget)}><span>05</span>Move</button>
-        <button type="button" aria-current={section === 'lending' ? 'page' : undefined} onClick={event => selectSection('lending', event.currentTarget)}><span>06</span>Lending</button>
-        <button type="button" aria-current={section === 'settlement' ? 'page' : undefined} onClick={event => selectSection('settlement', event.currentTarget)}><span>07</span>Settlement</button>
-        <button type="button" aria-current={section === 'swap' ? 'page' : undefined} onClick={event => selectSection('swap', event.currentTarget)}><span>08</span>Swap</button>
-        <button type="button" aria-current={section === 'activity' ? 'page' : undefined} onClick={event => selectSection('activity', event.currentTarget)}><span>09</span>Activity</button>
+        <button type="button" data-testid="wallet-nav-accounts" aria-current={section === 'accounts' ? 'page' : undefined} onClick={event => selectSection('accounts', event.currentTarget)}><span aria-hidden="true">02</span>Accounts</button>
+        <button type="button" data-testid="wallet-nav-pay" aria-current={section === 'pay' ? 'page' : undefined} onClick={event => selectSection('pay', event.currentTarget)}><span aria-hidden="true">03</span>Pay</button>
+        <button type="button" data-testid="wallet-nav-receive" aria-current={section === 'receive' ? 'page' : undefined} onClick={event => selectSection('receive', event.currentTarget)}><span aria-hidden="true">04</span>Receive</button>
+        <button type="button" data-testid="wallet-nav-move" aria-current={section === 'move' ? 'page' : undefined} onClick={event => selectSection('move', event.currentTarget)}><span aria-hidden="true">05</span>Move</button>
+        <button type="button" data-testid="wallet-nav-lending" aria-current={section === 'lending' ? 'page' : undefined} onClick={event => selectSection('lending', event.currentTarget)}><span aria-hidden="true">06</span>Lending</button>
+        <button type="button" aria-current={section === 'settlement' ? 'page' : undefined} onClick={event => selectSection('settlement', event.currentTarget)}><span aria-hidden="true">07</span>Settlement</button>
+        <button type="button" data-testid="wallet-nav-swap" aria-current={section === 'swap' ? 'page' : undefined} onClick={event => selectSection('swap', event.currentTarget)}><span aria-hidden="true">08</span>Swap</button>
+        <button type="button" data-testid="wallet-nav-activity" aria-current={section === 'activity' ? 'page' : undefined} onClick={event => selectSection('activity', event.currentTarget)}><span aria-hidden="true">09</span>Activity</button>
         <button type="button" aria-current={section === 'settings' ? 'page' : undefined} onClick={event => selectSection('settings', event.currentTarget)}>
-          <span>10</span>Settings
+          <span aria-hidden="true">10</span>Settings
         </button>
       </aside>
       <main className="wallet-main">

@@ -48,8 +48,10 @@ describe('isolated E2E runner resources', () => {
     expect(shouldDeferInitialReset({ prewaitHealth: 'reset' })).toBe(true);
   });
 
-  test('boots managed Runtime peers against the API-owned relay before Vite starts', () => {
-    expect(resolveE2EPublicWsBaseUrl({}, 20_002, 20_004)).toBe('ws://127.0.0.1:20002');
+  test('binds browser relay auth to Vite while managed peers use the API relay', () => {
+    expect(resolveE2EPublicWsBaseUrl({}, 20_002, 20_004)).toBe('ws://localhost:20004');
+    const source = readFileSync(resolve('runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    expect(source).toContain("'--relay-url',\n        `ws://127.0.0.1:${apiPort}/relay`");
   });
 
   test('--help prints usage without acquiring a lease or starting a stack', () => {
@@ -228,6 +230,7 @@ describe('isolated E2E runner resources', () => {
     expect(playwrightEnv).toContain("XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json')");
     expect(playwrightEnv).toContain('XLN_BUN_EXECUTABLE: BUN_EXECUTABLE');
     expect(runner).toContain("XLN_EPHEMERAL_TESTNET: '1'");
+    expect(runner).toContain("XLN_PUBLIC_FAUCET: '1'");
   });
 
   test('payment smoke shortcut runs through one isolated shard', () => {

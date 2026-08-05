@@ -10,7 +10,6 @@
 
 import type { RuntimeReplica } from '../runtime/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { bootScenario, registerEntities, fundEntities } from './boot';
 import {
   getProcess,
@@ -89,6 +88,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
     name: 'dispute-lifecycle',
     signerIds: ['2', '3'],
     seed: 'dispute-lifecycle-deterministic',
+    ...(_existingEnv ? { existingEnv: _existingEnv } : {}),
     ...(_existingEnv?.scenarioJAdapterMode
       ? { mode: _existingEnv.scenarioJAdapterMode }
       : {}),
@@ -97,9 +97,6 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       : {}),
   });
   env.quietRuntimeLogs = true;
-  const visualTrace = _existingEnv?.scenarioMode
-    ? startRuntimeHistoryTraceForTesting(env)
-    : null;
   const scenarioDebug = (globalThis as { process?: { env?: Record<string, string | undefined> } })
     .process?.env?.['XLN_SCENARIO_DEBUG'] === '1';
   if (scenarioDebug) env.scenarioLogLevel = 'debug';
@@ -394,11 +391,9 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
     assert(!aliceAfterReopen?.pendingFrame, 'Alice pendingFrame must clear after explicit reopen', env);
     assert(!hubAfterReopen?.pendingFrame, 'Hub pendingFrame must clear after explicit reopen', env);
 
-    if (visualTrace) env.history = [...visualTrace.snapshots];
     console.log('✅ dispute-lifecycle passed');
     return env;
   } finally {
-    visualTrace?.stop();
     restoreStrict();
   }
 }

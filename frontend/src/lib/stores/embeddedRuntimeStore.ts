@@ -22,13 +22,16 @@ export const xlnEnvironment = derived(
 );
 
 let localDebugEnv: RuntimeReplica | null = null;
+let localLiveDebugEnv: RuntimeReplica | null = null;
 registerDebugSurface('env', () => localDebugEnv);
+registerDebugSurface('liveRuntimeSnapshot', () => localLiveDebugEnv);
 
 export function setXlnEnvironment(env: RuntimeReplica | null): void {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   if (!runtimeEnv) {
     bootstrapEnvironment.set(null);
     localDebugEnv = null;
+    localLiveDebugEnv = null;
     return;
   }
 
@@ -40,6 +43,7 @@ export function setXlnEnvironment(env: RuntimeReplica | null): void {
   if (canPublishActiveEnv) {
     bootstrapEnvironment.set(viewEnv);
     localDebugEnv = createDetachedRuntimeViewEnv(runtimeEnv);
+    localLiveDebugEnv = runtimeEnv;
   } else {
     const message = `RUNTIME_STORE_ENV_OVERWRITE_REFUSED: refusing to publish env ${envRuntimeId || '<missing>'} while runtime ${selectedRuntimeId} is selected`;
     errorLog.log(message, 'Runtime RuntimeReplica', { envRuntimeId: envRuntimeId || null, selectedRuntimeId });

@@ -43,6 +43,10 @@ test('native packaging consumes only the manifest-bound wallet surface', () => {
   const pipeline = readFileSync(resolve(ROOT, 'scripts/native/build-platforms.ts'), 'utf8');
   expect(pipeline).toContain('copyManifestBoundWallet(releaseRoot, manifest)');
   expect(pipeline).toContain('assertNativeWalletCopy(NATIVE_WEB_DIR, bundle');
+  expect(pipeline).toContain('const BUN_EXECUTABLE = process.execPath');
+  expect(pipeline).toContain("runBun(['scripts/build-surfaces.ts'], FRONTEND)");
+  expect(pipeline).not.toContain("run('bun'");
+  expect(pipeline).not.toContain("run('bunx'");
 });
 
 test('public React entries do not import wallet native initialization', () => {

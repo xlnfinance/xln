@@ -219,6 +219,7 @@ const ensureScenarioRpcReady = async (rpcUrl: string, expectedChainId: number): 
 export interface ScenarioConfig {
   name: string;
   signerIds: string[];
+  existingEnv?: RuntimeReplica; // Browser recorders pass one pristine replica so frame capture has one owner.
   mode?: JAdapterMode;       // default: JADAPTER_MODE env var → 'rpc'
   rpcUrl?: string;            // default: ANVIL_RPC env var → 'http://localhost:8545'
   jurisdictionName?: string;  // default: `${name} Demo`
@@ -322,7 +323,16 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
 
   // 1. Create fresh env with deterministic seed
   const seed = config.seed ?? `${config.name}-scenario-seed`;
-  const env = createEmptyEnv(seed);
+  const env = config.existingEnv ?? createEmptyEnv(seed);
+  if (config.existingEnv && (
+    env.state.height !== 0 ||
+    env.state.eReplicas.size !== 0 ||
+    env.state.jReplicas.size !== 0 ||
+    env.runtimeMempool.runtimeTxs.length !== 0 ||
+    env.runtimeMempool.entityInputs.length !== 0
+  )) {
+    throw new Error(`SCENARIO_EXISTING_ENV_NOT_PRISTINE:${config.name}`);
+  }
   env.scenarioMode = true;
   env.state.timestamp = 1;
   setScenarioStorageEnabled(env, config.storageEnabled ?? false);

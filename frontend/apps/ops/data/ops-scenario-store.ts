@@ -38,13 +38,12 @@ const prepareEnv = (env: RuntimeReplica): RuntimeReplica => {
   if (env.infrastructure) env.infrastructure.persistencePaused = true;
   return env;
 };
-type ScenarioRuntime = XLNModule & { scenarios?: Record<string, (env: RuntimeReplica) => Promise<RuntimeReplica | void>>; getScenario?: (id: string) => { run(env: RuntimeReplica): Promise<RuntimeReplica | void> } | undefined; SCENARIOS?: Array<{ id: string; run(env: RuntimeReplica): Promise<RuntimeReplica | void> }> };
-const runScenario = async (runtime: XLNModule, scenario: OpsScenario, env: RuntimeReplica): Promise<RuntimeReplica> => {
-  const api = runtime as ScenarioRuntime; const direct = api.scenarios?.[scenario.runner];
-  if (direct) return (await direct(env)) ?? env;
-  const registered = api.getScenario?.(scenario.runtimeId) ?? api.SCENARIOS?.find(item => item.id === scenario.runtimeId);
-  if (!registered) throw new Error(`OPS_SCENARIO_NOT_FOUND:${scenario.runtimeId}`);
-  return (await registered.run(env)) ?? env;
+const recordScenario = async (runtime: XLNModule, scenario: OpsScenario, env: RuntimeReplica): Promise<{ env: RuntimeReplica; frames: readonly EnvSnapshot[] }> => {
+  const key = runtime.scenarioKeys.find(candidate => candidate === scenario.runner);
+  if (!key) throw new Error(`OPS_SCENARIO_NOT_FOUND:${scenario.runner}`);
+  const recording = await runtime.recordScenario(key, env);
+  if (recording.frames.length === 0) throw new Error(`OPS_SCENARIO_EMPTY_RECORDING:${scenario.id}`);
+  return recording;
 };
 const setFrame = (index: number): void => binding.controller.update(state => {
   if (state.frames.length === 0) return state;
@@ -76,10 +75,10 @@ const load = async (scenarioId: string): Promise<void> => {
   binding.controller.set(Object.freeze({ ...initial, status: 'loading', scenarioId, diagnostics }));
   try {
     const runtime = await loadOpsRuntime(); const env = prepareEnv(runtime.createEmptyEnv(`ops-scenario:${scenario.id}`));
-    const result = prepareEnv(await runScenario(runtime, scenario, env)); const stopped = stopInfra(result, scenario.id);
+    const recording = await recordScenario(runtime, scenario, env);
+    const result = prepareEnv(recording.env); const stopped = stopInfra(result, scenario.id);
     if (version !== requestVersion || owners === 0) return;
-    const frames = Array.isArray(result.history) ? Object.freeze([...result.history]) : Object.freeze([]);
-    if (frames.length === 0) throw new Error(`OPS_SCENARIO_EMPTY_HISTORY:${scenario.id}`);
+    const frames = Object.freeze([...recording.frames]);
     liveEnv = result; const index = focusFrame(scenario, frames); const graph = projectOpsGraphFrame(frames[index]!);
     binding.controller.set(Object.freeze({ ...initial, status: 'ready', scenarioId, frames, index, graph, diagnostics: Object.freeze([...diagnostics, ...stopped]) }));
   } catch (error) {

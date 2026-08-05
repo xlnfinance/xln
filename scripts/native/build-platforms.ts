@@ -51,6 +51,7 @@ type NativeFrontendBundle = Readonly<{
 }>;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const BUN_EXECUTABLE = process.execPath;
 const FRONTEND = path.join(ROOT, 'frontend');
 const SURFACE_BUILD_ROOT = path.join(FRONTEND, 'build');
 const NATIVE_WEB_DIR = path.join(FRONTEND, '.native-wallet-build');
@@ -103,6 +104,13 @@ function run(command: string, commandArgs: string[], cwd: string, env: NodeJS.Pr
 	if (result.status !== 0) {
 		throw new Error(`${pretty} failed with exit code ${result.status ?? 'unknown'}`);
 	}
+}
+
+function runBun(commandArgs: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): void {
+	run(BUN_EXECUTABLE, commandArgs, cwd, {
+		...env,
+		XLN_BUN_EXECUTABLE: BUN_EXECUTABLE,
+	});
 }
 
 function existingJavaHome(): string | null {
@@ -316,8 +324,8 @@ const copyManifestBoundWallet = (
 function ensureFrontendBuild(flags: Set<string>): { artifacts: NativeArtifact[]; bundle: NativeFrontendBundle } {
 	const status: ArtifactStatus = flags.has('--no-build') ? 'reused' : 'built';
 	if (!flags.has('--no-build')) {
-		run('bun', ['run', 'build'], ROOT);
-		run('bun', ['run', 'build'], FRONTEND);
+		runBun(['run', 'build'], ROOT);
+		runBun(['scripts/build-surfaces.ts'], FRONTEND);
 	}
 	const walletRoot = path.join(SURFACE_BUILD_ROOT, 'wallet');
 	if (!existsSync(path.join(walletRoot, 'index.html'))) {
@@ -394,12 +402,12 @@ function syncCapacitorPlatform(
 		? path.join(FRONTEND, 'ios/App/App/public')
 		: path.join(FRONTEND, 'android/app/src/main/assets/public');
 	if (existsSync(platformDir)) {
-		run('bunx', ['cap', 'sync', platform], FRONTEND, capacitorEnv);
+		runBun(['x', 'cap', 'sync', platform], FRONTEND, capacitorEnv);
 		pruneGeneratedNoise(publicDir);
 		assertNativeWalletCopy(publicDir, bundle, platform, false);
 		return { target: platform, kind: 'capacitor-sync', status: 'synced', path: platformDir };
 	}
-	run('bunx', ['cap', 'add', platform], FRONTEND, capacitorEnv);
+	runBun(['x', 'cap', 'add', platform], FRONTEND, capacitorEnv);
 	pruneGeneratedNoise(publicDir);
 	assertNativeWalletCopy(publicDir, bundle, platform, false);
 	return { target: platform, kind: 'capacitor-add', status: 'synced', path: platformDir };
@@ -533,7 +541,7 @@ function packageDesktopApp(bundle: NativeFrontendBundle): NativeArtifact[] {
 
 	const electronApp = path.join(ROOT, 'node_modules/electron/dist/Electron.app');
 	if (!existsSync(electronApp)) {
-		run('bunx', ['electron', '--version'], ROOT);
+		runBun(['x', 'electron', '--version'], ROOT);
 	}
 	if (!existsSync(electronApp)) {
 		throw new Error(`Electron bootstrap completed without creating ${electronApp}`);
@@ -582,7 +590,7 @@ function desktopLaunchCommand(artifact: NativeArtifact | null): [string, string[
 		const executable = path.join(artifact.path, 'Contents/MacOS/Electron');
 		if (existsSync(executable)) return [executable, [], ROOT];
 	}
-	return ['bunx', ['electron', 'native/desktop/main.cjs'], ROOT];
+	return [BUN_EXECUTABLE, ['x', 'electron', 'native/desktop/main.cjs'], ROOT];
 }
 
 function prepareDesktop(flags: Set<string>, bundle: NativeFrontendBundle): NativeArtifact[] {
@@ -689,7 +697,7 @@ async function main(): Promise<void> {
 		if (target === 'ios' || target === 'android') {
 			artifacts.push(syncCapacitorPlatform(target, frontendBuild.bundle));
 			if (flags.has('--package')) artifacts.push(packageCapacitorPlatform(target, flags));
-			if (flags.has('--open')) run('bunx', ['cap', 'open', target], FRONTEND);
+			if (flags.has('--open')) runBun(['x', 'cap', 'open', target], FRONTEND);
 		} else if (target === 'desktop') {
 			artifacts.push(...prepareDesktop(flags, frontendBuild.bundle));
 		} else if (target === 'extension') {

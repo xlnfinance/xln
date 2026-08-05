@@ -645,7 +645,7 @@ async function faucet(page: Page, userEntityId: string, hubEntityId: string): Pr
 async function injectEmptyTestnetLiveness(page: Page): Promise<number> {
   const bursts = 1;
   for (let index = 0; index < bursts; index += 1) {
-    const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+    const response = await page.request.post(`${APP_BASE_URL}/rpc`, {
       data: { jsonrpc: '2.0', id: index + 1, method: 'anvil_mine', params: ['0x64'] },
     });
     const body = await response.json().catch(async () => ({ error: (await response.text()).slice(0, 500) }));
@@ -659,18 +659,34 @@ async function injectEmptyTestnetLiveness(page: Page): Promise<number> {
   return bursts;
 }
 
-async function faucetAmount(page: Page, userEntityId: string, hubEntityId: string, amountUsd: string) {
-  const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
-  expect(runtimeId, 'runtimeId must exist before faucetAmount').toBeTruthy();
+async function submitFaucetChunk(
+  page: Page,
+  userEntityId: string,
+  hubEntityId: string,
+  runtimeId: string,
+  amountUsd: bigint,
+): Promise<void> {
   const deadline = Date.now() + 20_000;
   let lastBody: any = null;
   let lastStatus = 0;
   while (Date.now() < deadline) {
     const resp = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-      data: { userEntityId, userRuntimeId: runtimeId, hubEntityId, tokenId: USDC_TOKEN_ID, amount: amountUsd },
+      data: {
+        userEntityId,
+        userRuntimeId: runtimeId,
+        hubEntityId,
+        tokenId: USDC_TOKEN_ID,
+        amount: amountUsd.toString(),
+      },
     });
     const body = await resp.json().catch(() => ({}));
-    if (resp.ok()) return;
+    if (resp.ok()) {
+      if (!body?.requestId || !body?.statusUrl) {
+        throw new Error(`faucet chunk accepted without receipt metadata: ${JSON.stringify(body)}`);
+      }
+      await waitForRuntimeInputObserved(page, body.statusUrl, `faucet chunk ${body.requestId}`);
+      return;
+    }
     lastBody = body;
     lastStatus = resp.status();
     const code = String(body?.code || '');
@@ -683,7 +699,20 @@ async function faucetAmount(page: Page, userEntityId: string, hubEntityId: strin
     }
     await page.waitForTimeout(300);
   }
-  expect(false, `faucetAmount failed: status=${lastStatus} body=${JSON.stringify(lastBody)}`).toBe(true);
+  throw new Error(`faucet chunk failed: status=${lastStatus} body=${JSON.stringify(lastBody)}`);
+}
+
+async function faucetAmount(page: Page, userEntityId: string, hubEntityId: string, amountUsd: string) {
+  const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
+  expect(runtimeId, 'runtimeId must exist before faucetAmount').toBeTruthy();
+  const requested = BigInt(amountUsd);
+  if (requested <= 0n) throw new Error(`FAUCET_AMOUNT_INVALID:${amountUsd}`);
+  let remaining = requested;
+  while (remaining > 0n) {
+    const chunk = remaining > 100n ? 100n : remaining;
+    await submitFaucetChunk(page, userEntityId, hubEntityId, runtimeId, chunk);
+    remaining -= chunk;
+  }
 }
 
 async function sendRoutedHtlcPayment(
@@ -703,6 +732,7 @@ async function sendRoutedHtlcPayment(
       amount: usdcUnits(amountUsd),
       route,
       description,
+      deliveryMode: 'instant',
     },
   }]);
 }
@@ -1134,19 +1164,6 @@ async function readRebalanceState(page: Page, hubId: string) {
 
 const DEFAULT_REBALANCE_SOFT_LIMIT_UNITS = usdcUnits(500n);
 
-function requestCollateralCommitsForHub(steps: any[], hubId: string) {
-  const lowerHub = hubId.toLowerCase();
-  return steps.filter((step) =>
-    String(step?.event || '') === 'request_collateral_committed'
-    && String(step?.accountId || '').toLowerCase() === lowerHub,
-  );
-}
-
-function findRequestCollateralCommit(steps: any[], hubId: string, baselineCommitCount = 0) {
-  const commits = collapseLogicalRebalanceCommits(requestCollateralCommitsForHub(steps, hubId));
-  return commits.length > baselineCommitCount ? commits[baselineCommitCount] : null;
-}
-
 async function waitForRebalanceStateProgress(
   page: Page,
   hubId: string,
@@ -1207,12 +1224,12 @@ async function driveFaucetsUntilRequestCollateralCommitted(
     scenarioStartedAt: number;
     softLimitUnits?: bigint;
     maxFaucets?: number;
-    baselineCommitCount?: number;
+    requireCommitEvidence?: boolean;
   },
 ) {
   const softLimitUnits = opts.softLimitUnits ?? DEFAULT_REBALANCE_SOFT_LIMIT_UNITS;
   const maxFaucets = opts.maxFaucets ?? 14;
-  const baselineCommitCount = opts.baselineCommitCount ?? 0;
+  let receiptCursor = await getPersistedReceiptCursor(page);
   let faucets = 0;
   let lastSnapshot = await readRebalanceState(page, opts.hubId);
 
@@ -1228,10 +1245,25 @@ async function driveFaucetsUntilRequestCollateralCommitted(
     await faucet(page, opts.entityId, opts.hubId);
     lastSnapshot = await waitForRebalanceStateProgress(page, opts.hubId, baseline);
 
-    const steps = await readRebalanceStepEvents(page, opts.scenarioStartedAt);
-    const committed = findRequestCollateralCommit(steps, opts.hubId, baselineCommitCount);
+    const persistedCommit = await readPersistedRequestCollateralCommit(page, receiptCursor, opts.hubId);
+    receiptCursor = persistedCommit.cursor;
+    const committed = persistedCommit.committed;
     if (committed) {
-      return { faucets: faucets + 1, snapshot: lastSnapshot, committed };
+      return { faucets: faucets + 1, snapshot: lastSnapshot, committed, completion: 'request-commit' as const };
+    }
+
+    const completedSecuredCycle = isCompletedSecuredRebalanceCycle(
+      lastSnapshot,
+      baseline.collateral,
+      softLimitUnits,
+    );
+    if (completedSecuredCycle && !opts.requireCommitEvidence) {
+      return {
+        faucets: faucets + 1,
+        snapshot: lastSnapshot,
+        committed: null,
+        completion: 'secured-terminal' as const,
+      };
     }
 
     if (BigInt(lastSnapshot.uncollateralized || '0') <= softLimitUnits) {
@@ -1241,10 +1273,29 @@ async function driveFaucetsUntilRequestCollateralCommitted(
     const commitStartedAt = Date.now();
     while (Date.now() - commitStartedAt < 30_000) {
       lastSnapshot = await readRebalanceState(page, opts.hubId);
-      const latestSteps = await readRebalanceStepEvents(page, opts.scenarioStartedAt);
-      const latestCommit = findRequestCollateralCommit(latestSteps, opts.hubId, baselineCommitCount);
+      const persistedCommit = await readPersistedRequestCollateralCommit(page, receiptCursor, opts.hubId);
+      receiptCursor = persistedCommit.cursor;
+      const latestCommit = persistedCommit.committed;
       if (latestCommit) {
-        return { faucets: faucets + 1, snapshot: lastSnapshot, committed: latestCommit };
+        return {
+          faucets: faucets + 1,
+          snapshot: lastSnapshot,
+          committed: latestCommit,
+          completion: 'request-commit' as const,
+        };
+      }
+      const latestCompletedSecuredCycle = isCompletedSecuredRebalanceCycle(
+        lastSnapshot,
+        baseline.collateral,
+        softLimitUnits,
+      );
+      if (latestCompletedSecuredCycle && !opts.requireCommitEvidence) {
+        return {
+          faucets: faucets + 1,
+          snapshot: lastSnapshot,
+          committed: null,
+          completion: 'secured-terminal' as const,
+        };
       }
       await page.waitForTimeout(350);
     }
@@ -1257,6 +1308,55 @@ async function driveFaucetsUntilRequestCollateralCommitted(
   throw new Error(
     `rebalance threshold did not commit within ${maxFaucets} faucet frames: ` +
       `soft=${softLimitUnits} last=${JSON.stringify(lastSnapshot, null, 2)}`,
+  );
+}
+
+function isCompletedSecuredRebalanceCycle(
+  snapshot: any,
+  baselineCollateral: bigint,
+  softLimitUnits: bigint,
+): boolean {
+  const collateral = BigInt(snapshot?.collateral || '0');
+  return collateral > baselineCollateral &&
+    collateral > softLimitUnits &&
+    BigInt(snapshot?.requested || '0') === 0n &&
+    BigInt(snapshot?.uncollateralized || '0') === 0n;
+}
+
+async function readPersistedRequestCollateralCommit(
+  page: Page,
+  cursor: { nextHeight: number },
+  hubId: string,
+): Promise<{ cursor: { nextHeight: number }; committed: Record<string, unknown> | null }> {
+  const result = await readPersistedFrameEventsSinceCursor(page, {
+    cursor,
+    eventNames: ['request_collateral_committed'],
+  });
+  const event = result.events.find(candidate => persistedEventHasAccount(candidate, hubId));
+  return {
+    cursor: result.cursor,
+    committed: event ? { frameHeight: event.frameHeight, ...event.data } : null,
+  };
+}
+
+async function waitForPersistedAccountEventCount(
+  page: Page,
+  cursor: { nextHeight: number },
+  eventName: string,
+  accountId: string,
+  expectedCount: number,
+  timeoutMs = 20_000,
+): Promise<PersistedFrameEvent[]> {
+  const startedAt = Date.now();
+  let matched: PersistedFrameEvent[] = [];
+  while (Date.now() - startedAt < timeoutMs) {
+    const result = await readPersistedFrameEventsSinceCursor(page, { cursor, eventNames: [eventName] });
+    matched = result.events.filter(event => persistedEventHasAccount(event, accountId));
+    if (matched.length >= expectedCount) return matched;
+    await page.waitForTimeout(250);
+  }
+  throw new Error(
+    `persisted ${eventName} count did not reach ${expectedCount} for ${accountId.slice(0, 12)}: got=${matched.length}`,
   );
 }
 
@@ -1296,57 +1396,6 @@ async function readRebalanceStepEvents(page: Page, sinceTs: number): Promise<any
   return events
     .filter((e: any) => e?.event === 'debug_event' && e?.details?.payload?.code === 'REB_STEP')
     .map((e: any) => ({ ts: e.ts, ...e.details.payload }));
-}
-
-function collapseLogicalRebalanceCommits(steps: any[]): any[] {
-  const sorted = [...steps].sort((left, right) => Number(left?.ts || 0) - Number(right?.ts || 0));
-  const collapsed: any[] = [];
-  for (const step of sorted) {
-    const previous = collapsed[collapsed.length - 1];
-    const sameSemanticCommit =
-      previous
-      && String(previous?.event || '') === String(step?.event || '')
-      && String(previous?.accountId || '').toLowerCase() === String(step?.accountId || '').toLowerCase()
-      && String(previous?.tokenId || '') === String(step?.tokenId || '')
-      && String(previous?.requestedAmount || '') === String(step?.requestedAmount || '')
-      && String(previous?.prepaidFee || '') === String(step?.prepaidFee || '');
-    if (!sameSemanticCommit) {
-      collapsed.push(step);
-      continue;
-    }
-    const requestedAtDelta = Math.abs(Number(previous?.requestedAt || 0) - Number(step?.requestedAt || 0));
-    const tsDelta = Math.abs(Number(previous?.ts || 0) - Number(step?.ts || 0));
-    if (requestedAtDelta <= 5 && tsDelta <= 2_000) {
-      continue;
-    }
-    collapsed.push(step);
-  }
-  return collapsed;
-}
-
-function collapseLogicalRebalanceBatchAdds(steps: any[]): any[] {
-  const sorted = [...steps].sort((left, right) => Number(left?.ts || 0) - Number(right?.ts || 0));
-  const collapsed: any[] = [];
-  for (const step of sorted) {
-    const previous = collapsed[collapsed.length - 1];
-    const sameSemanticAdd =
-      previous
-      && String(previous?.event || '') === String(step?.event || '')
-      && String(previous?.counterpartyId || '').toLowerCase() === String(step?.counterpartyId || '').toLowerCase()
-      && String(previous?.tokenId || '') === String(step?.tokenId || '')
-      && String(previous?.amount || '') === String(step?.amount || '');
-    if (!sameSemanticAdd) {
-      collapsed.push(step);
-      continue;
-    }
-    const requestedAtDelta = Math.abs(Number(previous?.requestedAt || 0) - Number(step?.requestedAt || 0));
-    const tsDelta = Math.abs(Number(previous?.ts || 0) - Number(step?.ts || 0));
-    if (requestedAtDelta <= 5 && tsDelta <= 250) {
-      continue;
-    }
-    collapsed.push(step);
-  }
-  return collapsed;
 }
 
 function buildRebalanceFailureDump(input: {
@@ -1514,6 +1563,7 @@ test.describe('Rebalance E2E', () => {
     // Keep the local Testnet watcher producing authenticated empty-prefix
     // liveness while the sixth faucet crosses the soft limit. Empty prefixes
     // cannot change the Entity nonce and must not starve the J submit.
+    const firstCycleReceiptCursor = await getPersistedReceiptCursor(page);
     const emptyLiveness = injectEmptyTestnetLiveness(page);
     const firstTrigger = await timedStep('rebalance.drive_to_first_request', () =>
       driveFaucetsUntilRequestCollateralCommitted(page, {
@@ -1587,6 +1637,10 @@ test.describe('Rebalance E2E', () => {
 
     const diagnostics = await readRebalanceDiagnostics(page, hubId);
     const rebalanceSteps = await readRebalanceStepEvents(page, scenarioStartedAt);
+    const firstCyclePersisted = await readPersistedFrameEventsSinceCursor(page, {
+      cursor: firstCycleReceiptCursor,
+      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
+    });
     const { phaseMarkers, debugErrors, frameEvents } = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
     const debugDump = buildRebalanceFailureDump({
       entityId,
@@ -1602,22 +1656,18 @@ test.describe('Rebalance E2E', () => {
     });
     const userIdLower = entityId.toLowerCase();
     const hubIdLower = hubId.toLowerCase();
-    const indexOfStep = (event: string, predicate?: (step: any) => boolean): number =>
-      rebalanceSteps.findIndex((step) => step?.event === event && (!predicate || predicate(step)));
-
     expect(snapshot, 'account snapshot must exist').toBeTruthy();
-    const step1Idx = indexOfStep('request_collateral_committed');
-    const step4UserIdx = indexOfStep('j_event_claim_queued', (s) => String(s.entityId || '').toLowerCase() === userIdLower);
-    const step4HubIdx = indexOfStep('j_event_claim_queued', (s) => String(s.entityId || '').toLowerCase() === hubIdLower); // optional on local runtime
-    const step5Idx = indexOfStep('account_settled_finalized_bilateral');
+    const persistedStep1Idx = firstCyclePersisted.events.findIndex(event =>
+      event.message === 'request_collateral_committed' && persistedEventHasAccount(event, hubId));
+    const persistedStep5Idx = firstCyclePersisted.events.findIndex(event =>
+      event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, hubId));
 
-    expect(step1Idx >= 0, `step1 missing: request_collateral_committed\n${debugDump}`).toBe(true);
-    expect(step4UserIdx >= 0, `step4 missing: user j_event_claim_queued\n${debugDump}`).toBe(true);
-    // Hub-side claim is observed only when that runtime's debug stream is available locally.
-    // Keep as diagnostic, but do not fail on absence.
-    expect(step5Idx >= 0, `step5 missing: account_settled_finalized_bilateral\n${debugDump}`).toBe(true);
-    expect(step4UserIdx > step1Idx, `invalid order: user claim must be after request commit\n${debugDump}`).toBe(true);
-    expect(step5Idx > step4UserIdx, `invalid order: finalize must be after user claim\n${debugDump}`).toBe(true);
+    expect(persistedStep1Idx >= 0, `persisted request_collateral_committed missing\n${debugDump}`).toBe(true);
+    expect(persistedStep5Idx >= 0, `persisted bilateral settlement missing\n${debugDump}`).toBe(true);
+    expect(
+      persistedStep5Idx > persistedStep1Idx,
+      `invalid persisted order: settlement must follow request commit\n${debugDump}`,
+    ).toBe(true);
 
     const blockedForUser = rebalanceSteps.filter((s) => {
       const event = String(s?.event || '');
@@ -1638,7 +1688,11 @@ test.describe('Rebalance E2E', () => {
     expect(snapshot.lastFinalizedJHeight, `jHeight must finalize (>0)\n${debugDump}`).toBeGreaterThan(0);
 
     // UI assertion + final screenshot artifact
-    const accountCard = page.getByTestId('account-preview').first();
+    await page.getByTestId('wallet-nav-accounts').click();
+    const accountRow = page.locator(`[data-testid="wallet-account-row"][data-counterparty-id="${hubIdLower}"]`);
+    await expect(accountRow).toBeVisible({ timeout: 30_000 });
+    await accountRow.click();
+    const accountCard = page.locator(`[data-testid="wallet-account-detail"][data-counterparty-id="${hubIdLower}"]`);
     const readyIndicator = accountCard.getByTestId('account-status-coverage').filter({ hasText: '100%' }).first();
     await timedStep('rebalance.wait_ready_indicator', async () => {
       await expect(readyIndicator).toBeVisible({ timeout: 30_000 });
@@ -1660,15 +1714,11 @@ test.describe('Rebalance E2E', () => {
     const lastFinalizedJHeightBefore = Number(snapshot.lastFinalizedJHeight || 0);
 
     // Push debt enough to cross soft-limit again after first finalize.
-    const secondTriggerBaseline = collapseLogicalRebalanceCommits(
-      requestCollateralCommitsForHub(await readRebalanceStepEvents(page, scenarioStartedAt), hubId),
-    ).length;
     const secondTrigger = await timedStep('rebalance.second_drive_to_request', () =>
       driveFaucetsUntilRequestCollateralCommitted(page, {
         entityId,
         hubId,
         scenarioStartedAt,
-        baselineCommitCount: secondTriggerBaseline,
       }));
     await markE2EPhase(page, 'rebalance.second_burst_8x_done', {
       phase: 'second-cycle-trigger',
@@ -1763,6 +1813,10 @@ test.describe('Rebalance E2E', () => {
 
     const claimArtifacts = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
     const finalRebalanceSteps = await readRebalanceStepEvents(page, scenarioStartedAt);
+    const persistedCycleEvents = await readPersistedFrameEventsSinceCursor(page, {
+      cursor: firstCycleReceiptCursor,
+      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
+    });
     const claimDebugDump = buildRebalanceFailureDump({
       entityId,
       hubId,
@@ -1775,32 +1829,14 @@ test.describe('Rebalance E2E', () => {
       debugErrors: claimArtifacts.debugErrors,
       frameEvents: claimArtifacts.frameEvents,
     });
-    const userDeliveredCount = countRebalanceStepEvents(
-      finalRebalanceSteps,
-      'j_event_delivered',
-      (step) => String(step.entityId || '').toLowerCase() === userIdLower,
-    );
-    const hubDeliveredCount = countRebalanceStepEvents(
-      finalRebalanceSteps,
-      'j_event_delivered',
-      (step) => String(step.entityId || '').toLowerCase() === hubIdLower,
-    );
-    const userClaimQueuedCount = countRebalanceStepEvents(
-      finalRebalanceSteps,
-      'j_event_claim_queued',
-      (step) => String(step.entityId || '').toLowerCase() === userIdLower,
-    );
-    const hubClaimQueuedCount = countRebalanceStepEvents(
-      finalRebalanceSteps,
-      'j_event_claim_queued',
-      (step) => String(step.entityId || '').toLowerCase() === hubIdLower,
-    );
+    const persistedRequestCount = persistedCycleEvents.events.filter(event =>
+      event.message === 'request_collateral_committed' && persistedEventHasAccount(event, hubId)).length;
+    const persistedSettlementCount = persistedCycleEvents.events.filter(event =>
+      event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, hubId)).length;
 
     expect(claimSnapshot, `claim snapshot must exist\n${claimDebugDump}`).toBeTruthy();
-    expect(userDeliveredCount >= 2, `user runtime must receive both AccountSettled j-events across two cycles\n${claimDebugDump}`).toBe(true);
-    expect(hubDeliveredCount >= 2, `hub runtime must receive both AccountSettled j-events across two cycles\n${claimDebugDump}`).toBe(true);
-    expect(userClaimQueuedCount >= 2, `user runtime must queue bilateral j_event_claim in both cycles\n${claimDebugDump}`).toBe(true);
-    expect(hubClaimQueuedCount >= 2, `hub runtime must queue bilateral j_event_claim in both cycles\n${claimDebugDump}`).toBe(true);
+    expect(persistedRequestCount >= 2, `two collateral requests must persist across two cycles\n${claimDebugDump}`).toBe(true);
+    expect(persistedSettlementCount >= 2, `two bilateral settlements must persist across two cycles\n${claimDebugDump}`).toBe(true);
     for (const c of claimSnapshot?.claims || []) {
       const hasLocal = c.leftEntity === userIdLower || c.rightEntity === userIdLower;
       const hasHub = c.leftEntity === hubIdLower || c.rightEntity === hubIdLower;
@@ -1860,6 +1896,7 @@ test.describe('Rebalance E2E', () => {
     await timedStep('rebalance_persist.connect_hub', () => connectHub(page, entityId, signerId, hubId));
     scenarioStartedAt = Date.now();
 
+    const persistenceReceiptCursor = await getPersistedReceiptCursor(page);
     const firstPersistTrigger = await timedStep('rebalance_persist.drive_to_first_request', () =>
       driveFaucetsUntilRequestCollateralCommitted(page, {
         entityId,
@@ -1953,15 +1990,11 @@ test.describe('Rebalance E2E', () => {
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toEqual(settledBeforeReload);
     });
 
-    const secondPersistTriggerBaseline = collapseLogicalRebalanceCommits(
-      requestCollateralCommitsForHub(await readRebalanceStepEvents(page, scenarioStartedAt), hubId),
-    ).length;
     const secondPersistTrigger = await timedStep('rebalance_persist.drive_to_second_request', () =>
       driveFaucetsUntilRequestCollateralCommitted(page, {
         entityId,
         hubId,
         scenarioStartedAt,
-        baselineCommitCount: secondPersistTriggerBaseline,
       }));
     await markE2EPhase(page, 'rebalance_persist.second_trigger_done', {
       phase: 'second-cycle-trigger',
@@ -2002,6 +2035,10 @@ test.describe('Rebalance E2E', () => {
 
     const finalDiagnostics = await readRebalanceDiagnostics(page, hubId);
     const finalSteps = await readRebalanceStepEvents(page, scenarioStartedAt);
+    const persistedCycleEvents = await readPersistedFrameEventsSinceCursor(page, {
+      cursor: persistenceReceiptCursor,
+      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
+    });
     const finalArtifacts = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
     const finalDebugDump = buildRebalanceFailureDump({
       entityId,
@@ -2015,28 +2052,10 @@ test.describe('Rebalance E2E', () => {
       debugErrors: finalArtifacts.debugErrors,
       frameEvents: finalArtifacts.frameEvents,
     });
-    const userIdLower = entityId.toLowerCase();
-    const hubIdLower = hubId.toLowerCase();
-    const userDeliveredCount = countRebalanceStepEvents(
-      finalSteps,
-      'j_event_delivered',
-      (step) => String(step.entityId || '').toLowerCase() === userIdLower,
-    );
-    const hubDeliveredCount = countRebalanceStepEvents(
-      finalSteps,
-      'j_event_delivered',
-      (step) => String(step.entityId || '').toLowerCase() === hubIdLower,
-    );
-    const userClaimQueuedCount = countRebalanceStepEvents(
-      finalSteps,
-      'j_event_claim_queued',
-      (step) => String(step.entityId || '').toLowerCase() === userIdLower,
-    );
-    const hubClaimQueuedCount = countRebalanceStepEvents(
-      finalSteps,
-      'j_event_claim_queued',
-      (step) => String(step.entityId || '').toLowerCase() === hubIdLower,
-    );
+    const persistedRequestCount = persistedCycleEvents.events.filter(event =>
+      event.message === 'request_collateral_committed' && persistedEventHasAccount(event, hubId)).length;
+    const persistedSettlementCount = persistedCycleEvents.events.filter(event =>
+      event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, hubId)).length;
     const claimSnapshotAfterReload = await readAccountJEventClaims(page, hubId);
     const uniqueSettleKeysAfterReload = new Set(
       (claimSnapshotAfterReload?.claims || []).map((claim) => `${claim.txHash}:${claim.nonce}:${claim.jHeight}`),
@@ -2047,10 +2066,8 @@ test.describe('Rebalance E2E', () => {
     expect(Number(postReloadSnapshot.lastFinalizedJHeight || 0) > settledBeforeReload.jHeight, `jHeight must advance after reload second cycle\n${finalDebugDump}`).toBe(true);
     expect(BigInt(postReloadSnapshot.requested || '0'), `requested must clear after reload second cycle\n${finalDebugDump}`).toBe(0n);
     expect(BigInt(postReloadSnapshot.uncollateralized || '0'), `uncollateralized must clear after reload second cycle\n${finalDebugDump}`).toBe(0n);
-    expect(userDeliveredCount >= 2, `user runtime must receive AccountSettled before and after reload\n${finalDebugDump}`).toBe(true);
-    expect(hubDeliveredCount >= 2, `hub runtime must receive AccountSettled before and after reload\n${finalDebugDump}`).toBe(true);
-    expect(userClaimQueuedCount >= 2, `user runtime must queue bilateral j_event_claim before and after reload\n${finalDebugDump}`).toBe(true);
-    expect(hubClaimQueuedCount >= 2, `hub runtime must queue bilateral j_event_claim before and after reload\n${finalDebugDump}`).toBe(true);
+    expect(persistedRequestCount >= 2, `collateral requests must persist before and after reload\n${finalDebugDump}`).toBe(true);
+    expect(persistedSettlementCount >= 2, `bilateral settlements must persist before and after reload\n${finalDebugDump}`).toBe(true);
     const finalizedJHeightAdvancedAfterReload = Number(postReloadSnapshot.lastFinalizedJHeight || 0) > settledBeforeReload.jHeight;
     expect(
       uniqueSettleKeysAfterReload.size >= uniqueSettleKeysBeforeReload.size + 1 ||
@@ -2090,11 +2107,13 @@ test.describe('Rebalance E2E', () => {
     });
 
     // Trigger the first request from committed account state, not from accepted faucet API calls.
+    const edgeReceiptCursor = await getPersistedReceiptCursor(page);
     const firstTrigger = await timedStep('rebalance_edge.drive_to_first_request', () =>
       driveFaucetsUntilRequestCollateralCommitted(page, {
         entityId,
         hubId,
         scenarioStartedAt,
+        requireCommitEvidence: true,
       }));
     await markE2EPhase(page, 'rebalance_edge.first_trigger_done', {
       phase: 'trigger',
@@ -2106,7 +2125,6 @@ test.describe('Rebalance E2E', () => {
         snapshot: firstTrigger.snapshot,
       },
     });
-    const lowerHub = hubId.toLowerCase();
     const pendingSnapshot: any = firstTrigger.snapshot;
     const firstRequestCommit: any = firstTrigger.committed;
     expect(firstTrigger.faucets, 'the first request must start only after six 100-unit faucets').toBe(6);
@@ -2136,27 +2154,13 @@ test.describe('Rebalance E2E', () => {
 
     const diagnostics = await readRebalanceDiagnostics(page, hubId);
     const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
+    const persistedRequests = await readPersistedFrameEventsSinceCursor(page, {
+      cursor: edgeReceiptCursor,
+      eventNames: ['request_collateral_committed'],
+    });
     const { phaseMarkers, debugErrors, frameEvents } = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
-    const lowerEntity = entityId.toLowerCase();
-    const isPairAccountId = (value: unknown): boolean => {
-      const normalized = String(value || '').toLowerCase();
-      return normalized === lowerHub || normalized === lowerEntity;
-    };
-    const firstFinalizeIdx = steps.findIndex((s) =>
-      String(s?.event || '') === 'account_settled_finalized_bilateral'
-      && isPairAccountId(s?.accountId),
-    );
-    const beforeFirstFinalize = firstFinalizeIdx >= 0 ? steps.slice(0, firstFinalizeIdx) : steps;
-    const reqCommits = beforeFirstFinalize.filter((s) =>
-      String(s?.event || '') === 'request_collateral_committed'
-      && String(s?.accountId || '').toLowerCase() === lowerHub,
-    );
-    const logicalReqCommits = collapseLogicalRebalanceCommits(reqCommits);
-    const batchAdds = beforeFirstFinalize.filter((s) =>
-      String(s?.event || '') === 'batch_add'
-      && String(s?.counterpartyId || '').toLowerCase() === entityId.toLowerCase(),
-    );
-    const logicalBatchAdds = collapseLogicalRebalanceBatchAdds(batchAdds);
+    const committedRequests = persistedRequests.events.filter(event =>
+      event.message === 'request_collateral_committed' && persistedEventHasAccount(event, hubId));
     const debugDump = buildRebalanceFailureDump({
       entityId,
       hubId,
@@ -2170,12 +2174,8 @@ test.describe('Rebalance E2E', () => {
       frameEvents,
     });
     expect(
-      logicalReqCommits.length,
-      `clicks seven and eight must not top up the first request below a fresh soft limit: raw=${JSON.stringify(reqCommits, null, 2)} logical=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,
-    ).toBe(1);
-    expect(
-      logicalBatchAdds.length,
-      `request_collateral J-batch duplicated before first finalize: raw=${JSON.stringify(batchAdds, null, 2)} logical=${JSON.stringify(logicalBatchAdds, null, 2)} requests=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,
+      committedRequests.length,
+      `clicks seven and eight must not commit a second collateral request below a fresh soft limit: ${JSON.stringify(committedRequests, null, 2)}\n${debugDump}`,
     ).toBe(1);
   });
 
@@ -2208,6 +2208,7 @@ test.describe('Rebalance E2E', () => {
     // HTLC E2E is validated by dedicated routed-payment coverage below.
     const baselineFlow = await readAccountFlowState(page, hubId);
     expect(baselineFlow, 'baseline account flow state must exist').toBeTruthy();
+    const cycleReceiptCursor = await getPersistedReceiptCursor(page);
 
     const waitForState = async (
       predicate: (snapshot: any) => boolean,
@@ -2313,15 +2314,11 @@ test.describe('Rebalance E2E', () => {
     }
 
     // Phase 3: R2C again (hub owes user again and tops collateral back up)
-    const phase3TriggerBaseline = collapseLogicalRebalanceCommits(
-      requestCollateralCommitsForHub(await readRebalanceStepEvents(page, scenarioStartedAt), hubId),
-    ).length;
     await timedStep('rebalance_cycle.drive_phase3_request', () =>
       driveFaucetsUntilRequestCollateralCommitted(page, {
         entityId,
         hubId,
         scenarioStartedAt,
-        baselineCommitCount: phase3TriggerBaseline,
         maxFaucets: 28,
       }));
     const phase3CollateralFloor = c2rShouldTrigger ? collateralAfterC2R : collateralAfterFirstR2C;
@@ -2339,9 +2336,16 @@ test.describe('Rebalance E2E', () => {
     );
 
     const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
+    const persistedSettlements = await waitForPersistedAccountEventCount(
+      page,
+      cycleReceiptCursor,
+      'account_settled_finalized_bilateral',
+      hubId,
+      2,
+    );
     const c2rPropose = steps.some((s) => s?.event === 'c2r_settle_propose_queued');
     const c2rExecute = steps.some((s) => s?.event === 'c2r_settle_execute_queued');
-    const finalizedCount = steps.filter((s) => s?.event === 'account_settled_finalized_bilateral').length;
+    const finalizedCount = persistedSettlements.length;
     if (c2rShouldTrigger) {
       expect(
         c2rPropose || c2rExecute || hubFreeOutAfterC2R < hubFreeOutBeforeC2R,

@@ -82,6 +82,27 @@ describe('RuntimeP2P direct transport policy', () => {
       .getDirectPeerEndpoint(hubRuntimeId)).toBe(endpoint);
   });
 
+  test('eagerly connects a verified hub route without connecting user routes', () => {
+    const hubRuntimeId = runtimeIdFor('verified-hub-route');
+    const userRuntimeId = runtimeIdFor('verified-user-route');
+    const p2p = makeP2P([]);
+    const connected: string[] = [];
+    const internal = p2p as unknown as {
+      connectVerifiedHubRoute: (profile: Profile) => void;
+      ensureDirectClientForRuntime: (runtimeId: string) => void;
+    };
+    internal.ensureDirectClientForRuntime = runtimeId => connected.push(runtimeId);
+
+    internal.connectVerifiedHubRoute(
+      buildProfile('66', hubRuntimeId, key('66'), true, 'ws://127.0.0.1:9106/direct-runtime'),
+    );
+    internal.connectVerifiedHubRoute(
+      buildProfile('77', userRuntimeId, key('77'), false, 'ws://127.0.0.1:9107/direct-runtime'),
+    );
+
+    expect(connected).toEqual([hubRuntimeId]);
+  });
+
   test('does not use an unverified cached profile as encryption authority', () => {
     const runtimeId = runtimeIdFor('unverified-key');
     const p2p = makeP2P([

@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
+
 import { getTokenInfo } from '../../runtime/account/utils';
-import { openAccountWorkspaceTab } from './e2e-account-workspace';
 
 export type UiPaymentIntent = {
   recipientEntityId: string;
@@ -14,226 +14,104 @@ type PreparedUiPayment = {
   selectedRouteText: string;
 };
 
-const escapeRegex = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const openPayWorkspace = async (page: Page): Promise<void> => {
+  const form = page.getByTestId('wallet-payment-form');
+  if (!await form.isVisible().catch(() => false)) {
+    const nav = page.getByTestId('wallet-nav-pay');
+    await expect(nav).toBeVisible({ timeout: 20_000 });
+    await nav.click();
+  }
+  await expect(form).toBeVisible({ timeout: 20_000 });
+};
 
-export async function openPayWorkspace(page: Page): Promise<void> {
-  await openAccountWorkspaceTab(page, 'send');
-}
-
-export async function fillUiPaymentIntent(
+export const fillUiPaymentIntent = async (
   page: Page,
   recipientEntityId: string,
   amount: bigint,
   tokenId: number,
-): Promise<void> {
-  const invoiceInput = page.locator('#payment-invoice-input').first();
-  const invoiceVisible = await invoiceInput.isVisible().catch(() => false);
-  if (invoiceVisible) {
-    await invoiceInput.click();
-    await invoiceInput.fill(recipientEntityId);
-  } else {
-    const recipientHint = String(recipientEntityId || '').trim().slice(0, 10);
-    const selectedRecipient = page
-      .locator('.payment-panel button')
-      .filter({ hasText: new RegExp(escapeRegex(recipientHint), 'i') })
-      .first();
-    await expect(selectedRecipient).toBeVisible({ timeout: 10_000 });
-  }
+): Promise<void> => {
+  const form = page.getByTestId('wallet-payment-form');
+  const recipient = form.locator('#payment-invoice-input');
+  await expect(recipient).toBeVisible({ timeout: 10_000 });
+  await recipient.fill(recipientEntityId.toLowerCase());
+  await form.getByTestId('wallet-payment-token').selectOption(String(tokenId));
+  await form.getByTestId('payment-amount-input').fill(
+    ethers.formatUnits(amount, getTokenInfo(tokenId).decimals),
+  );
+};
 
-  const amountInput = page.locator('#payment-amount-input');
-  await expect(amountInput).toBeVisible({ timeout: 10_000 });
-  await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, getTokenInfo(tokenId).decimals));
-}
-
-export async function chooseVisibleRoute(
+export const chooseVisibleRoute = async (
   page: Page,
   routeEntityIds: string[],
-): Promise<string> {
-  const routeOptions = page.locator('.route-option');
-  let routeCount = await routeOptions.count();
-  const expectedPath = routeEntityIds.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean);
-
-  if (routeCount === 0 && expectedPath.length === 0) {
-    const directRoute = page.locator('.route-inline').first();
-    await expect(directRoute, 'expected visible direct payment route').toBeVisible({ timeout: 10_000 });
-    return (await directRoute.textContent().catch(() => '')) || 'Direct';
+): Promise<string> => {
+  const options = page.locator('.route-option');
+  const expected = routeEntityIds.map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+  const count = await options.count();
+  expect(count, 'expected at least one canonical payment route').toBeGreaterThan(0);
+  if (expected.length === 0 && count !== 1) {
+    const paths = await options.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-route-path')));
+    throw new Error(`ambiguous route selection without route ids: ${JSON.stringify(paths)}`);
   }
-
-  expect(routeCount, 'expected at least one visible payment route').toBeGreaterThan(0);
-
-  if (expectedPath.length > 0) {
-    const expandRoutes = page.locator('.routes-expand').first();
-    if (await expandRoutes.isVisible().catch(() => false)) {
-      await expandRoutes.click();
-      await expect(expandRoutes).toBeHidden({ timeout: 5_000 });
-      routeCount = await routeOptions.count();
-    }
-  }
-
-  const routeNeedles = await page.evaluate((ids) => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        gossip?: {
-          getProfiles?: () => Array<Record<string, unknown>>;
-        };
-      };
-      document: Document;
-    }).isolatedEnv;
-
-    const currentEntityId = String(
-      document.querySelector('[data-testid="context-current"]')?.getAttribute('data-entity-id') || '',
-    ).trim().toLowerCase();
-
-    const profiles = env?.gossip?.getProfiles?.() || [];
-    const profilesById = new Map<string, Record<string, unknown>>();
-    for (const profile of profiles) {
-      const entityId = String(profile?.entityId || '').trim().toLowerCase();
-      if (entityId) profilesById.set(entityId, profile);
-    }
-
-    const addAlias = (set: Set<string>, value: unknown) => {
-      const alias = String(value || '').trim().toLowerCase();
-      if (!alias) return;
-      set.add(alias);
-    };
-
-    return ids
-      .map((rawId) => String(rawId || '').trim().toLowerCase())
-      .filter((entityId) => entityId.length > 0)
-      .map((entityId) => {
-        const aliases = new Set<string>();
-        aliases.add(entityId.slice(0, 10));
-        if (entityId === currentEntityId) aliases.add('self');
-
-        const profile = profilesById.get(entityId);
-        addAlias(aliases, profile?.name);
-        addAlias(aliases, profile?.label);
-        addAlias(aliases, (profile?.metadata as Record<string, unknown> | undefined)?.name);
-        addAlias(aliases, (profile?.metadata as Record<string, unknown> | undefined)?.label);
-        addAlias(aliases, (profile?.metadata as Record<string, unknown> | undefined)?.displayName);
-
-        return [...aliases];
-      });
-  }, routeEntityIds);
-
-  if (expectedPath.length === 0) {
-    if (routeCount !== 1) {
-      const routeTexts = await routeOptions.evaluateAll((nodes) =>
-        nodes.map((node) => String(node.textContent || '').trim()).filter((text) => text.length > 0),
-      );
-      throw new Error(`ambiguous route selection without route ids: ${JSON.stringify(routeTexts)}`);
-    }
-    const onlyRoute = routeOptions.first();
-    await onlyRoute.click();
-    return (await onlyRoute.textContent().catch(() => '')) || '';
-  }
-
-  for (let index = 0; index < routeCount; index += 1) {
-    const option = routeOptions.nth(index);
-    const path = String((await option.getAttribute('data-route-path').catch(() => '')) || '').trim().toLowerCase();
-    const routePath = path.split(',').map((entry) => entry.trim()).filter(Boolean);
-    const exact = path === expectedPath.join(',');
-    const suffix = routePath.length >= expectedPath.length
-      && expectedPath.every((entityId, offset) => routePath[routePath.length - expectedPath.length + offset] === entityId);
+  for (let index = 0; index < count; index += 1) {
+    const option = options.nth(index);
+    const path = String(await option.getAttribute('data-route-path') || '').toLowerCase().split(',').filter(Boolean);
+    const exact = expected.length === 0 || path.join(',') === expected.join(',');
+    const suffix = expected.length > 0 && path.length >= expected.length
+      && expected.every((entityId, offset) => path[path.length - expected.length + offset] === entityId);
     if (!exact && !suffix) continue;
     await option.click();
-    return (await option.textContent().catch(() => '')) || '';
+    return String(await option.textContent() || '');
   }
+  const paths = await options.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-route-path')));
+  throw new Error(`no canonical payment route matched ${JSON.stringify(expected)} among ${JSON.stringify(paths)}`);
+};
 
-  for (let index = 0; index < routeCount; index += 1) {
-    const option = routeOptions.nth(index);
-    const hopIds = await option.locator('.hop-card').evaluateAll((nodes) =>
-      nodes.map((node) => String(node.getAttribute('data-hop-entity-id') || '').trim().toLowerCase()),
-    );
-    const matches = hopIds.length >= expectedPath.length
-      && expectedPath.every((entityId, hopIndex) => hopIds[hopIds.length - expectedPath.length + hopIndex] === entityId);
-    if (!matches) continue;
-    await option.click();
-    return (await option.textContent().catch(() => '')) || '';
-  }
-
-  for (let index = 0; index < routeCount; index += 1) {
-    const option = routeOptions.nth(index);
-    const text = String((await option.textContent().catch(() => '')) || '').toLowerCase();
-    const matches = routeNeedles.every((aliases) => aliases.some((alias) => text.includes(alias)));
-    if (!matches) continue;
-    await option.click();
-    return (await option.textContent().catch(() => '')) || '';
-  }
-
-  const routeTexts = await routeOptions.evaluateAll((nodes) =>
-    nodes.map((node) => String(node.textContent || '').trim()).filter((text) => text.length > 0),
-  );
-  throw new Error(
-    `no visible route matched path=${JSON.stringify(expectedPath)} aliases=${JSON.stringify(routeNeedles)} among ${JSON.stringify(routeTexts)}`,
-  );
-}
-
-export async function prepareUiPayment(
+export const prepareUiPayment = async (
   page: Page,
   intent: UiPaymentIntent,
-): Promise<PreparedUiPayment> {
+): Promise<PreparedUiPayment> => {
   await openPayWorkspace(page);
-  const directMode = page.getByTestId('payment-mode-direct');
-  const instantMode = page.getByTestId('payment-mode-instant');
-  const asyncMode = page.getByTestId('payment-mode-async');
-  const trustedMode = page.getByTestId('payment-mode-trusted');
-  await expect(directMode).toBeVisible({ timeout: 10_000 });
-  await expect(instantMode).toBeVisible({ timeout: 10_000 });
-  await expect(asyncMode).toBeVisible({ timeout: 10_000 });
-  await expect(trustedMode).toBeVisible({ timeout: 10_000 });
-  await expect(instantMode).toHaveAttribute('aria-checked', 'true');
-  await expect(asyncMode).toHaveAttribute('aria-checked', 'false');
-  await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount, intent.tokenId);
-
-  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
-  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
-  await findRoutesBtn.click();
-
-  if (intent.routeEntityIds.length === 0) {
-    await expect(page.locator('.route-inline').first()).toBeVisible({ timeout: 15_000 });
-  } else {
-    await expect(page.locator('.route-option').first()).toBeVisible({ timeout: 15_000 });
+  for (const mode of ['direct', 'instant', 'async', 'trusted'] as const) {
+    await expect(page.getByTestId(`payment-mode-${mode}`)).toBeVisible({ timeout: 10_000 });
   }
+  await expect(page.getByTestId('payment-mode-instant')).toHaveAttribute('aria-checked', 'true');
+  await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount, intent.tokenId);
+  const findRoutes = page.getByRole('button', { name: /^Find routes$/i });
+  await expect(findRoutes).toBeEnabled({ timeout: 10_000 });
+  await findRoutes.click();
+  await expect(page.locator('.route-option').first()).toBeVisible({ timeout: 15_000 });
   const selectedRouteText = await chooseVisibleRoute(page, intent.routeEntityIds);
-
-  const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
-  await expect(sendPaymentBtn).toBeVisible({ timeout: 10_000 });
+  const review = page.getByRole('button', { name: 'Review payment' });
+  await expect(review).toBeEnabled({ timeout: 10_000 });
+  await review.click();
+  await expect(page.getByTestId('wallet-payment-confirmation')).toBeVisible({ timeout: 10_000 });
   return { selectedRouteText };
-}
+};
 
-export async function expectUiPaymentNoRoute(
+export const expectUiPaymentNoRoute = async (
   page: Page,
   intent: UiPaymentIntent,
   expectedMessage = 'No route has enough real capacity for this amount',
-): Promise<string> {
+): Promise<string> => {
   await openPayWorkspace(page);
   await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount, intent.tokenId);
-
-  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
-  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
-  await findRoutesBtn.click();
-
-  const error = page.locator('.form-error').filter({ hasText: expectedMessage }).first();
+  const findRoutes = page.getByRole('button', { name: /^Find routes$/i });
+  await expect(findRoutes).toBeEnabled({ timeout: 10_000 });
+  await findRoutes.click();
+  const error = page.locator('.form-error').filter({ hasText: expectedMessage });
   await expect(error).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.route-option')).toHaveCount(0);
-  await expect(page.locator('.route-inline')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Review payment' })).toBeDisabled();
+  return String(await error.textContent() || '');
+};
 
-  const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
-  await expect(sendPaymentBtn).toBeDisabled({ timeout: 10_000 });
-  return (await error.textContent().catch(() => '')) || '';
-}
-
-export async function submitUiPayment(
+export const submitUiPayment = async (
   page: Page,
   intent: UiPaymentIntent,
-): Promise<PreparedUiPayment> {
+): Promise<PreparedUiPayment> => {
   const prepared = await prepareUiPayment(page, intent);
-  const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
-  await expect(sendPaymentBtn).toBeEnabled({ timeout: 10_000 });
-  await sendPaymentBtn.click();
-  await page.waitForTimeout(200);
+  const submit = page.getByRole('button', { name: 'Submit payment' });
+  await expect(submit).toBeEnabled({ timeout: 10_000 });
+  await submit.click();
   return prepared;
-}
+};

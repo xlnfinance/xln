@@ -1,348 +1,183 @@
-import { type Page } from '@playwright/test';
-
-type RenderedAccountCapacityView = {
-  counterpartyId: string;
-  outbound: number;
-  inbound: number;
-  selected: boolean;
-};
+import { expect, type Page } from '@playwright/test';
 
 type RenderedCapacityDirection = 'outbound' | 'inbound';
 
-function normalizeEntityId(value: string): string {
-  return String(value || '').trim().toLowerCase();
-}
+const normalizeEntityId = (value: string): string => String(value || '').trim().toLowerCase();
 
-function parseRenderedCapacity(rawValue: string): number {
-  const raw = String(rawValue || '').replace(/,/g, '').trim();
-  const numeric = Number(raw.replace(/[^0-9.-]/g, ''));
+const parseRenderedCapacity = (rawValue: string): number => {
+  const numeric = Number(String(rawValue || '').replace(/,/g, '').replace(/[^0-9.-]/g, '').trim());
   return Number.isFinite(numeric) ? numeric : 0;
-}
+};
 
-async function readRenderedAccountCards(page: Page): Promise<RenderedAccountCapacityView[]> {
-  return page.evaluate(() => {
-    const extractAmountText = (valueEl: Element): string => {
-      const children = Array.from(valueEl.children);
-      for (const child of children) {
-        if (child instanceof HTMLElement && child.classList.contains('usd-hint')) continue;
-        const raw = String(child.textContent || '').trim();
-        if (raw.length > 0) return raw;
-      }
+const openAccountsWorkspace = async (page: Page): Promise<void> => {
+  const workspace = page.getByTestId('wallet-accounts-overview');
+  if (!await workspace.isVisible().catch(() => false)) {
+    const nav = page.getByTestId('wallet-nav-accounts');
+    await expect(nav).toBeVisible({ timeout: 20_000 });
+    await nav.click();
+  }
+  await expect(workspace).toBeVisible({ timeout: 20_000 });
+};
 
-      const raw = String(valueEl.textContent || '').trim();
-      const usdHintText = children
-        .filter((child) => child instanceof HTMLElement && child.classList.contains('usd-hint'))
-        .map((child) => String(child.textContent || ''))
-        .join('');
-      return usdHintText.length > 0 ? raw.replace(usdHintText, '').trim() : raw;
-    };
+const accountRows = (page: Page) => page.getByTestId('wallet-account-row');
 
-    const readMetric = (card: Element, selectors: string): number => {
-      const valueEl = card.querySelector(selectors);
-      if (!valueEl) return 0;
-      return Number.parseFloat(extractAmountText(valueEl).replace(/,/g, '').trim()) || 0;
-    };
+const selectAccount = async (page: Page, counterpartyId: string): Promise<void> => {
+  await openAccountsWorkspace(page);
+  const row = page.locator(
+    `[data-testid="wallet-account-row"][data-counterparty-id="${normalizeEntityId(counterpartyId)}"]`,
+  ).first();
+  await expect(row, `rendered account ${counterpartyId} must exist`).toBeVisible({ timeout: 20_000 });
+  if (!String(await row.getAttribute('class') || '').split(/\s+/).includes('is-selected')) await row.click();
+  await expect(page.getByTestId('wallet-account-detail')).toHaveAttribute(
+    'data-counterparty-id',
+    normalizeEntityId(counterpartyId),
+    { timeout: 20_000 },
+  );
+};
 
-    return Array.from(document.querySelectorAll('.account-preview')).map((card) => {
-      const counterpartyId = String(
-        card.getAttribute('data-counterparty-id')
-        || card.querySelector('.entity-id, .id, [data-entity-id]')?.textContent
-        || '',
-      ).trim();
-      return {
-        counterpartyId,
-        outbound: readMetric(card, '.delta-row .compact-out-value, .compact-out-value, .cap.out .cap-value'),
-        inbound: readMetric(card, '.delta-row .compact-in-value, .compact-in-value, .cap.in .cap-value'),
-        selected: card.classList.contains('selected'),
-      };
-    });
-  });
-}
+const readSelectedCapacity = async (
+  page: Page,
+  direction: RenderedCapacityDirection,
+): Promise<number> => {
+  const token = page.locator('[data-testid="wallet-account-token"][data-token-id="1"]').first();
+  await expect(token, 'token 1 account capacity must be rendered').toBeVisible({ timeout: 20_000 });
+  const value = token.getByTestId(direction === 'outbound' ? 'wallet-token-outbound' : 'wallet-token-inbound');
+  return parseRenderedCapacity(String(await value.textContent() || ''));
+};
 
-export async function listRenderedCounterpartyIds(page: Page): Promise<string[]> {
-  const cards = await readRenderedAccountCards(page);
-  return cards
-    .map((card) => normalizeEntityId(card.counterpartyId))
-    .filter((counterpartyId) => counterpartyId.length > 0);
-}
-
-async function getRenderedCapacityForAccount(
+const getRenderedCapacityForAccount = async (
   page: Page,
   counterpartyId: string,
   direction: RenderedCapacityDirection,
-): Promise<number> {
-  const target = normalizeEntityId(counterpartyId);
-  const cards = await readRenderedAccountCards(page);
-  const match = cards.find((card) => normalizeEntityId(card.counterpartyId) === target) ?? null;
-  if (!match) {
-    throw new Error(
-      `No rendered account card for ${counterpartyId}. Visible=${cards.map((card) => card.counterpartyId || 'unknown').join(',') || 'none'}`,
-    );
-  }
-  return direction === 'outbound' ? match.outbound : match.inbound;
-}
+): Promise<number> => {
+  await selectAccount(page, counterpartyId);
+  return readSelectedCapacity(page, direction);
+};
 
-async function getRenderedPrimaryCapacity(page: Page, selectors: string): Promise<number> {
-  const cards = await readRenderedAccountCards(page);
-  const selectedCards = cards.filter((card) => card.selected);
-  const targetCard =
-    selectedCards[0]
-    ?? (cards.length === 1 ? cards[0] : null);
-
-  if (!targetCard) {
-    const debug = await page.evaluate(() => {
-      const env = (window as any).isolatedEnv;
-      const replicas = env?.state?.eReplicas instanceof Map ? Array.from(env.state.eReplicas.entries()) : [];
-      const descriptor = Object.getOwnPropertyDescriptor(window, 'isolatedEnv');
-      const xlnRoot = (window as any).__xln || {};
-      return {
-        runtimeId: String(env?.runtimeId || ''),
-        height: Number(env?.state?.height || 0),
-        selectedRuntimeId: String(document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId || ''),
-        runtimeSelection: (window as any).__xlnRuntimeSelection ?? xlnRoot.runtimeSelection ?? null,
-        isolatedEnvDescriptor: {
-          configurable: Boolean(descriptor?.configurable),
-          enumerable: Boolean(descriptor?.enumerable),
-          hasGet: typeof descriptor?.get === 'function',
-          hasSet: typeof descriptor?.set === 'function',
-          valueType: typeof descriptor?.value,
-        },
-        activeEntityText: String(document.querySelector('[data-testid="entity-header-id"], .entity-id, [data-entity-id]')?.textContent || '').trim(),
-        replicas: replicas.map(([key, replica]: [unknown, any]) => ({
-          key: String(key || ''),
-          entityId: String(replica?.entityId || replica?.state?.entityId || ''),
-          signerId: String(replica?.signerId || ''),
-          accounts: replica?.state?.accounts instanceof Map
-            ? Array.from(replica.state.accounts.keys()).map((item) => String(item))
-            : [],
-        })),
-      };
-    }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
-    throw new Error(
-      `Primary rendered capacity is ambiguous. Selected=${selectedCards.length} visible=${cards.map((card) => card.counterpartyId || 'unknown').join(',') || 'none'} debug=${JSON.stringify(debug)}`,
-    );
-  }
-
-  return page.evaluate(({ selectors, counterpartyId }) => {
-    const normalizeEntityId = (value: string): string => String(value || '').trim().toLowerCase();
-    const extractAmountText = (valueEl: Element): string => {
-      const children = Array.from(valueEl.children);
-      for (const child of children) {
-        if (child instanceof HTMLElement && child.classList.contains('usd-hint')) continue;
-        const raw = String(child.textContent || '').trim();
-        if (raw.length > 0) return raw;
-      }
-
-      const raw = String(valueEl.textContent || '').trim();
-      const usdHintText = children
-        .filter((child) => child instanceof HTMLElement && child.classList.contains('usd-hint'))
-        .map((child) => String(child.textContent || ''))
-        .join('');
-      return usdHintText.length > 0 ? raw.replace(usdHintText, '').trim() : raw;
-    };
-
-    const cards = Array.from(document.querySelectorAll('.account-preview'));
-    const card = cards.find((entry) => {
-      const rawCounterpartyId = String(
-        entry.getAttribute('data-counterparty-id')
-        || entry.querySelector('.entity-id, .id, [data-entity-id]')?.textContent
-        || '',
-      ).trim();
-      return normalizeEntityId(rawCounterpartyId) === normalizeEntityId(counterpartyId);
-    });
-    const valueEl = card?.querySelector(selectors);
-    if (!valueEl) {
-      throw new Error(`Primary rendered capacity target not found for ${counterpartyId}`);
+const getRenderedPrimaryCapacity = async (
+  page: Page,
+  direction: RenderedCapacityDirection,
+): Promise<number> => {
+  await openAccountsWorkspace(page);
+  const rows = accountRows(page);
+  const count = await rows.count();
+  if (count === 0) throw new Error('Primary rendered capacity is unavailable: no committed accounts');
+  let selected = page.locator('[data-testid="wallet-account-row"].is-selected').first();
+  if (!await selected.isVisible().catch(() => false)) {
+    if (count !== 1) {
+      const visible = await rows.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-counterparty-id')));
+      throw new Error(`Primary rendered capacity is ambiguous: ${JSON.stringify(visible)}`);
     }
+    selected = rows.first();
+    await selected.click();
+  }
+  return readSelectedCapacity(page, direction);
+};
 
-    return Number.parseFloat(extractAmountText(valueEl).replace(/,/g, '').trim()) || 0;
-  }, { selectors, counterpartyId: targetCard.counterpartyId });
-}
-
-async function getNumericTextByTestId(page: Page, testId: string): Promise<number> {
+const numericTextByTestId = async (page: Page, testId: string): Promise<number> => {
   const locator = page.getByTestId(testId).first();
-  await locator.waitFor({ state: 'visible', timeout: 20_000 });
-  const text = (await locator.textContent())?.trim() ?? '0';
-  return parseRenderedCapacity(text);
-}
+  await expect(locator).toBeVisible({ timeout: 20_000 });
+  return parseRenderedCapacity(String(await locator.textContent() || ''));
+};
 
-async function waitForRenderedAccountCapacityDelta(
+const waitForAccountDelta = async (
   page: Page,
   counterpartyId: string,
   baseline: number,
   expectedDelta: number,
   direction: RenderedCapacityDirection,
-  options?: {
-    timeoutMs?: number;
-    tolerance?: number;
-  },
-): Promise<number> {
+  options?: { timeoutMs?: number; tolerance?: number },
+): Promise<number> => {
   const timeoutMs = options?.timeoutMs ?? 20_000;
   const tolerance = options?.tolerance ?? 0.000000001;
-  const startedAt = Date.now();
   let latest = baseline;
-
-  while (Date.now() - startedAt < timeoutMs) {
+  await expect.poll(async () => {
     latest = await getRenderedCapacityForAccount(page, counterpartyId, direction);
-    if (Math.abs((latest - baseline) - expectedDelta) <= tolerance) return latest;
-    await page.waitForTimeout(250);
+    return latest - baseline;
+  }, { timeout: timeoutMs, intervals: [250, 500, 750] }).toBeCloseTo(expectedDelta, 8);
+  if (Math.abs((latest - baseline) - expectedDelta) > tolerance) {
+    throw new Error(`Rendered ${direction} delta mismatch: baseline=${baseline} latest=${latest} expected=${expectedDelta}`);
   }
+  return latest;
+};
 
-  const cards = await readRenderedAccountCards(page);
-  throw new Error(
-    `Timed out waiting for rendered ${direction} capacity on ${counterpartyId} baseline=${baseline} latest=${latest} expectedDelta=${expectedDelta} visible=${JSON.stringify(cards)}`,
-  );
-}
-
-async function waitForRenderedPrimaryCapacityDelta(
+const waitForPrimaryDelta = async (
   page: Page,
   baseline: number,
   expectedDelta: number,
-  selectors: string,
-  options?: {
-    timeoutMs?: number;
-    tolerance?: number;
-  },
-): Promise<number> {
+  direction: RenderedCapacityDirection,
+  options?: { timeoutMs?: number; tolerance?: number },
+): Promise<number> => {
   const timeoutMs = options?.timeoutMs ?? 20_000;
   const tolerance = options?.tolerance ?? 0.000000001;
-  const startedAt = Date.now();
   let latest = baseline;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    latest = await getRenderedPrimaryCapacity(page, selectors);
-    if (Math.abs((latest - baseline) - expectedDelta) <= tolerance) return latest;
-    await page.waitForTimeout(250);
+  await expect.poll(async () => {
+    latest = await getRenderedPrimaryCapacity(page, direction);
+    return latest - baseline;
+  }, { timeout: timeoutMs, intervals: [250, 500, 750] }).toBeCloseTo(expectedDelta, 8);
+  if (Math.abs((latest - baseline) - expectedDelta) > tolerance) {
+    throw new Error(`Rendered primary ${direction} delta mismatch: baseline=${baseline} latest=${latest} expected=${expectedDelta}`);
   }
+  return latest;
+};
 
-  throw new Error(
-    `Timed out waiting for rendered capacity delta baseline=${baseline} latest=${latest} expectedDelta=${expectedDelta}`,
-  );
-}
+export const listRenderedCounterpartyIds = async (page: Page): Promise<string[]> => {
+  await openAccountsWorkspace(page);
+  return (await accountRows(page).evaluateAll(nodes => nodes.map(node => node.getAttribute('data-counterparty-id'))))
+    .map(value => normalizeEntityId(String(value || '')))
+    .filter(Boolean);
+};
 
-export async function getRenderedPrimaryOutbound(page: Page): Promise<number> {
-  return getRenderedPrimaryCapacity(page, '.delta-row .compact-out-value, .compact-out-value, .cap.out .cap-value');
-}
+export const getRenderedPrimaryOutbound = (page: Page): Promise<number> =>
+  getRenderedPrimaryCapacity(page, 'outbound');
 
-export async function getRenderedPrimaryInbound(page: Page): Promise<number> {
-  return getRenderedPrimaryCapacity(page, '.delta-row .compact-in-value, .compact-in-value, .cap.in .cap-value');
-}
+export const getRenderedPrimaryInbound = (page: Page): Promise<number> =>
+  getRenderedPrimaryCapacity(page, 'inbound');
 
-export async function waitForRenderedPrimaryOutboundDelta(
-  page: Page,
-  baseline: number,
-  expectedDelta: number,
-  options?: {
-    timeoutMs?: number;
-    tolerance?: number;
-  },
-): Promise<number> {
-  return waitForRenderedPrimaryCapacityDelta(
-    page,
-    baseline,
-    expectedDelta,
-    '.delta-row .compact-out-value, .compact-out-value, .cap.out .cap-value',
-    options,
-  );
-}
+export const waitForRenderedPrimaryOutboundDelta = (
+  page: Page, baseline: number, expectedDelta: number,
+  options?: { timeoutMs?: number; tolerance?: number },
+): Promise<number> => waitForPrimaryDelta(page, baseline, expectedDelta, 'outbound', options);
 
-export async function waitForRenderedPrimaryInboundDelta(
-  page: Page,
-  baseline: number,
-  expectedDelta: number,
-  options?: {
-    timeoutMs?: number;
-    tolerance?: number;
-  },
-): Promise<number> {
-  return waitForRenderedPrimaryCapacityDelta(
-    page,
-    baseline,
-    expectedDelta,
-    '.delta-row .compact-in-value, .compact-in-value, .cap.in .cap-value',
-    options,
-  );
-}
+export const waitForRenderedPrimaryInboundDelta = (
+  page: Page, baseline: number, expectedDelta: number,
+  options?: { timeoutMs?: number; tolerance?: number },
+): Promise<number> => waitForPrimaryDelta(page, baseline, expectedDelta, 'inbound', options);
 
-export async function getRenderedOutboundForAccount(page: Page, counterpartyId: string): Promise<number> {
-  return getRenderedCapacityForAccount(page, counterpartyId, 'outbound');
-}
+export const getRenderedOutboundForAccount = (page: Page, counterpartyId: string): Promise<number> =>
+  getRenderedCapacityForAccount(page, counterpartyId, 'outbound');
 
-export async function getRenderedInboundForAccount(page: Page, counterpartyId: string): Promise<number> {
-  return getRenderedCapacityForAccount(page, counterpartyId, 'inbound');
-}
+export const getRenderedInboundForAccount = (page: Page, counterpartyId: string): Promise<number> =>
+  getRenderedCapacityForAccount(page, counterpartyId, 'inbound');
 
-export async function getRenderedExternalBalance(page: Page, symbol: string): Promise<number> {
-  return getNumericTextByTestId(page, `external-balance-${symbol}`);
-}
+export const getRenderedExternalBalance = (page: Page, symbol: string): Promise<number> =>
+  numericTextByTestId(page, `external-balance-${symbol}`);
 
-export async function getRenderedReserveBalance(page: Page, symbol: string): Promise<number> {
-  return getNumericTextByTestId(page, `reserve-balance-${symbol}`);
-}
+export const getRenderedReserveBalance = (page: Page, symbol: string): Promise<number> =>
+  numericTextByTestId(page, `reserve-balance-${symbol}`);
 
-export async function getRenderedAccountSpendableBalance(page: Page, symbol: string): Promise<number> {
-  return getNumericTextByTestId(page, `account-spendable-${symbol}`);
-}
+export const getRenderedAccountSpendableBalance = (page: Page, symbol: string): Promise<number> =>
+  numericTextByTestId(page, `account-spendable-${symbol}`);
 
-export async function waitForRenderedOutboundForAccount(
+export const waitForRenderedOutboundForAccount = async (
   page: Page,
   counterpartyId: string,
-  options?: {
-    timeoutMs?: number;
-  },
-): Promise<number> {
-  const timeoutMs = options?.timeoutMs ?? 20_000;
-  const startedAt = Date.now();
-  let lastError: Error | null = null;
+  options?: { timeoutMs?: number },
+): Promise<number> => {
+  let latest = 0;
+  await expect.poll(async () => {
+    latest = await getRenderedOutboundForAccount(page, counterpartyId);
+    return true;
+  }, { timeout: options?.timeoutMs ?? 20_000, intervals: [250, 500, 750] }).toBe(true);
+  return latest;
+};
 
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      return await getRenderedOutboundForAccount(page, counterpartyId);
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      await page.waitForTimeout(250);
-    }
-  }
+export const waitForRenderedOutboundForAccountDelta = (
+  page: Page, counterpartyId: string, baseline: number, expectedDelta: number,
+  options?: { timeoutMs?: number; tolerance?: number },
+): Promise<number> => waitForAccountDelta(page, counterpartyId, baseline, expectedDelta, 'outbound', options);
 
-  throw lastError ?? new Error(`Timed out waiting for rendered outbound account ${counterpartyId}`);
-}
-
-export async function waitForRenderedOutboundForAccountDelta(
-  page: Page,
-  counterpartyId: string,
-  baseline: number,
-  expectedDelta: number,
-  options?: {
-    timeoutMs?: number;
-    tolerance?: number;
-  },
-): Promise<number> {
-  return waitForRenderedAccountCapacityDelta(
-    page,
-    counterpartyId,
-    baseline,
-    expectedDelta,
-    'outbound',
-    options,
-  );
-}
-
-export async function waitForRenderedInboundForAccountDelta(
-  page: Page,
-  counterpartyId: string,
-  baseline: number,
-  expectedDelta: number,
-  options?: {
-    timeoutMs?: number;
-    tolerance?: number;
-  },
-): Promise<number> {
-  return waitForRenderedAccountCapacityDelta(
-    page,
-    counterpartyId,
-    baseline,
-    expectedDelta,
-    'inbound',
-    options,
-  );
-}
+export const waitForRenderedInboundForAccountDelta = (
+  page: Page, counterpartyId: string, baseline: number, expectedDelta: number,
+  options?: { timeoutMs?: number; tolerance?: number },
+): Promise<number> => waitForAccountDelta(page, counterpartyId, baseline, expectedDelta, 'inbound', options);

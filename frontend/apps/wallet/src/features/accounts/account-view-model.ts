@@ -40,6 +40,9 @@ export type WalletAccountTokenView = WalletBalanceView & Readonly<{
   ownCreditLimitRaw: string;
   peerCreditLimitRaw: string;
   withdrawableCollateralRaw: string;
+  requestedRebalanceRaw: string;
+  uncollateralizedRaw: string;
+  securedCoveragePercent: number;
   outbound: string;
   inbound: string;
 }>;
@@ -141,11 +144,18 @@ const tokenView = (
 const accountTokenView = (
   tokenId: number,
   delta: Delta,
+  requestedRebalance: bigint,
   isLeftPerspective: boolean,
   deps: WalletAccountProjectionDeps,
 ): WalletAccountTokenView => {
   const derived = deps.deriveDelta(delta, isLeftPerspective);
   const token = deps.getTokenMeta(tokenId);
+  const uncollateralized = derived.outPeerCredit > derived.outCollateral
+    ? derived.outPeerCredit - derived.outCollateral
+    : 0n;
+  const securedCoverageBps = derived.outPeerCredit === 0n || derived.outCollateral >= derived.outPeerCredit
+    ? 10_000n
+    : derived.outCollateral * 10_000n / derived.outPeerCredit;
   return Object.freeze({
     ...tokenView(tokenId, derived.delta, deps),
     outboundRaw: derived.outCapacity.toString(),
@@ -154,6 +164,9 @@ const accountTokenView = (
     ownCreditLimitRaw: derived.ownCreditLimit.toString(),
     peerCreditLimitRaw: derived.peerCreditLimit.toString(),
     withdrawableCollateralRaw: derived.outCollateral.toString(),
+    requestedRebalanceRaw: requestedRebalance.toString(),
+    uncollateralizedRaw: uncollateralized.toString(),
+    securedCoveragePercent: Number(securedCoverageBps) / 100,
     outbound: formatTokenAmount(derived.outCapacity, token.decimals, deps.precision ?? 4),
     inbound: formatTokenAmount(derived.inCapacity, token.decimals, deps.precision ?? 4),
   });
@@ -185,7 +198,13 @@ export const projectWalletAccountFrame = (
         }, account, perspective.counterpartyId)
       : null;
     const tokens = [...account.state.deltas.entries()]
-      .map(([tokenId, delta]) => accountTokenView(Number(tokenId), delta, perspective.isLeftPerspective, deps))
+      .map(([tokenId, delta]) => accountTokenView(
+        Number(tokenId),
+        delta,
+        account.state.requestedRebalance?.get(Number(tokenId)) ?? 0n,
+        perspective.isLeftPerspective,
+        deps,
+      ))
       .toSorted((left, right) => left.tokenId - right.tokenId);
     const workspace = account.state.settlementWorkspace;
     return Object.freeze({

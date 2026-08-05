@@ -175,9 +175,8 @@ test('four payment modes stay distinct while retired swap alternatives fail loud
 
   const paymentPanel = source('frontend/apps/wallet/src/features/payments/WalletPaymentForm.tsx');
   const paymentAdapter = source('frontend/packages/runtime-client/wallet-payment-input-adapter.ts');
-  for (const mode of ['direct', 'instant', 'async']) {
-    expect(paymentPanel).toContain(`value="${mode}"`);
-  }
+  expect(paymentPanel).toContain("(['direct', 'instant', 'async', 'trusted'] as const)");
+  expect(paymentPanel).toContain('data-testid={`payment-mode-${mode}`}');
   expect(paymentPanel).toContain('buildWalletPaymentCommand({');
   expect(paymentAdapter).toContain("draft.deliveryMode === 'trusted'");
   expect(paymentAdapter).toContain("type: 'directPayment' as const");

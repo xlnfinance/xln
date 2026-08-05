@@ -458,9 +458,9 @@ export const shouldDeferInitialReset = (
 
 export const resolveE2EPublicWsBaseUrl = (
   _args: object,
-  apiPort: number,
-  _webPort: number,
-): string => `ws://127.0.0.1:${apiPort}`;
+  _apiPort: number,
+  webPort: number,
+): string => `ws://localhost:${webPort}`;
 
 const provisionE2EJurisdictions = async (
   config: OrchestratorJurisdictionsConfig,
@@ -1918,6 +1918,8 @@ const runShard = async (
         String(apiPort),
         '--public-ws-base-url',
         resolveE2EPublicWsBaseUrl(args, apiPort, webPort),
+        '--relay-url',
+        `ws://127.0.0.1:${apiPort}/relay`,
         '--rpc-url',
         rpcUrl,
         '--rpc2-url',
@@ -1960,6 +1962,7 @@ const runShard = async (
             CUSTODY: 'xln-mesh-custody-seed',
           }),
           XLN_SKIP_STALE_REAP: '1',
+          XLN_PUBLIC_FAUCET: '1',
           XLN_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
           MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS:

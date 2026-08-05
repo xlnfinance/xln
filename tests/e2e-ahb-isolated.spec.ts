@@ -17,6 +17,7 @@ import {
 } from './utils/e2e-account-ui';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { expectUiPaymentNoRoute, submitUiPayment } from './utils/e2e-pay-ui';
 import {
   getPersistedReceiptCursor,
   getPersistedRuntimeDbMeta,
@@ -569,40 +570,6 @@ function expectRenderedDeltaClose(actualDelta: number, expectedDelta: number, la
   ).toBeLessThanOrEqual(0.000000001);
 }
 
-async function openPayWorkspace(page: Page): Promise<void> {
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
-  const invoiceInput = page.locator('#payment-invoice-input').first();
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < 15_000) {
-    await accountsTab.click().catch(() => {});
-    const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
-    if (await mobileToggle.isVisible().catch(() => false)) {
-      await mobileToggle.click().catch(() => {});
-    }
-    const candidateLocators = [
-      page.getByTestId('account-workspace-tab-pay'),
-      page.locator('.workspace-rail').getByRole('button', { name: /^Pay$/i }),
-    ];
-    for (const locator of candidateLocators) {
-      const count = await locator.count().catch(() => 0);
-      for (let index = 0; index < count; index += 1) {
-        const payTab = locator.nth(index);
-        if (await payTab.isVisible().catch(() => false)) {
-          await payTab.click().catch(() => {});
-          if (await invoiceInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-            return;
-          }
-        }
-      }
-    }
-    if (await invoiceInput.isVisible({ timeout: 500 }).catch(() => false)) return;
-    await page.waitForTimeout(250);
-  }
-  throw new Error('payment form did not become visible after selecting Accounts -> Pay');
-}
-
 async function reloadAppForProject(
   page: Page,
   appBaseUrl: string,
@@ -615,13 +582,6 @@ async function reloadAppForProject(
   await page.reload({ waitUntil: 'domcontentloaded' });
 }
 
-async function fillPayIntent(page: Page, targetEntityId: string): Promise<void> {
-  const invoiceInput = page.locator('#payment-invoice-input').first();
-  await expect(invoiceInput).toBeVisible({ timeout: 10_000 });
-  await invoiceInput.click();
-  await invoiceInput.fill(targetEntityId);
-}
-
 async function pay(
   page: Page,
   from: string,
@@ -632,47 +592,21 @@ async function pay(
 ): Promise<void> {
   void from;
   void signerId;
-  void route;
-
-  await openPayWorkspace(page);
-
-  await fillPayIntent(page, to);
-
-  const amountInput = page.locator('#payment-amount-input');
-  await expect(amountInput).toBeVisible({ timeout: 10_000 });
-  await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, USDC_DECIMALS));
-
-  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
-  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
-  await findRoutesBtn.click();
-  await expect(page.locator('text=/1 hop|route/i').first()).toBeVisible({ timeout: 15_000 });
-
-  const payNowBtn = page.getByRole('button', { name: 'Pay now' }).first();
-  await expect(payNowBtn).toBeEnabled({ timeout: 10_000 });
-  await payNowBtn.click();
-  await page.waitForTimeout(200);
+  await submitUiPayment(page, {
+    recipientEntityId: to,
+    amount,
+    tokenId: 1,
+    routeEntityIds: route,
+  });
 }
 
 async function attemptOverspend(page: Page, to: string, amount: bigint): Promise<void> {
-  await openPayWorkspace(page);
-  await fillPayIntent(page, to);
-
-  const amountInput = page.locator('#payment-amount-input');
-  await expect(amountInput).toBeVisible({ timeout: 10_000 });
-  await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, USDC_DECIMALS));
-
-  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
-  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
-  await findRoutesBtn.click();
-  await page.waitForTimeout(500);
-
-  const payNowBtn = page.getByRole('button', { name: 'Pay now' }).first();
-  if (await payNowBtn.isEnabled().catch(() => false)) {
-    await payNowBtn.click();
-    await page.waitForTimeout(300);
-  }
+  await expectUiPaymentNoRoute(page, {
+    recipientEntityId: to,
+    amount,
+    tokenId: 1,
+    routeEntityIds: [],
+  });
 }
 
 async function runtimeDbMeta(page: Page): Promise<{

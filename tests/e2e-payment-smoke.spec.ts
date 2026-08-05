@@ -9,6 +9,7 @@ import { ensureE2EBaseline } from './utils/e2e-baseline';
 import { connectRuntimeToHub } from './utils/e2e-connect';
 import { APP_BASE_URL, createRuntimeIdentity, gotoApp } from './utils/e2e-demo-users';
 import { submitUiPayment } from './utils/e2e-pay-ui';
+import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEventMatch,
@@ -21,13 +22,6 @@ const USDC_DECIMALS = 6n;
 const PAYMENT_AMOUNT = 7n * 10n ** USDC_DECIMALS;
 const USE_BASELINE = Boolean(process.env.E2E_RESET_BASE_URL);
 const HISTORY_SCREENSHOT_PATH = String(process.env.E2E_HISTORY_SCREENSHOT_PATH || '').trim();
-
-type HubDirectoryEntry = {
-  entityId?: string;
-  isHub?: boolean;
-  online?: boolean;
-  name?: string;
-};
 
 type ActivityApiEvent = {
   type?: string;
@@ -42,7 +36,6 @@ type RuntimeAdapterDebugSurface = {
   query?: {
     activity?: <T = unknown>(query: Record<string, unknown>) => Promise<T>;
   };
-  status?: () => { runtimeId?: string; connected?: boolean };
 };
 
 function isExpectedUiPaymentActivity(event: ActivityApiEvent): boolean {
@@ -161,25 +154,72 @@ async function readJWatcherDiagnostics(page: Page): Promise<unknown> {
   });
 }
 
-async function discoverPrimaryHub(page: Page): Promise<string> {
-  const response = await page.request.get(`${API_BASE_URL}/api/debug/entities?limit=5000`);
-  expect(response.ok(), 'debug entities endpoint must be reachable').toBe(true);
-  const body = await response.json() as { entities?: HubDirectoryEntry[] };
-  const hubs = (Array.isArray(body.entities) ? body.entities : [])
-    .filter((entry) => entry.isHub === true && entry.online !== false)
-    .sort((a, b) => {
-      const rank = (name: string | undefined): number => {
-        const normalized = String(name || '').trim().toUpperCase();
-        if (normalized === 'H3') return 0;
-        if (normalized === 'H2') return 1;
-        if (normalized === 'H1') return 2;
-        return 3;
-      };
-      return rank(a.name) - rank(b.name);
-    });
+async function readWalletHubOptions(page: Page): Promise<string[]> {
+  await openAccountWorkspaceTab(page, 'open');
+  const select = page.getByTestId('wallet-open-account').getByLabel('Open account with discovered entity');
+  await expect(select).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+  await expect.poll(() => select.locator('option').count(), {
+    timeout: CONSENSUS_TIMEOUT_MS,
+    intervals: [250, 500, 750],
+    message: 'wallet must expose at least one same-jurisdiction hub',
+  }).toBeGreaterThan(0);
+  return select.locator('option').evaluateAll(options => options
+    .map(option => String((option as HTMLOptionElement).value || '').trim().toLowerCase())
+    .filter(value => /^0x[0-9a-f]{64}$/.test(value)));
+}
 
-  const hubId = String(hubs[0]?.entityId || '').trim();
-  expect(hubId, 'at least one online hub must be discoverable').toMatch(/^0x[0-9a-f]{64}$/i);
+async function alignWalletJurisdictions(senderPage: Page, recipientPage: Page): Promise<{
+  sender: { entityId: string; signerId: string };
+  recipient: { entityId: string; signerId: string };
+}> {
+  const readLanes = async (page: Page): Promise<Array<{ entityId: string; jurisdiction: string }>> => {
+    const picker = page.getByTestId('wallet-entity-picker');
+    await expect(picker).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+    return picker.locator('option').evaluateAll(options => options.map(option => ({
+      entityId: String((option as HTMLOptionElement).value || '').trim().toLowerCase(),
+      jurisdiction: String(option.getAttribute('data-jurisdiction') || '').trim().toLowerCase(),
+    })));
+  };
+  const [senderLanes, recipientLanes] = await Promise.all([readLanes(senderPage), readLanes(recipientPage)]);
+  const recipientJurisdictions = new Set(recipientLanes.map(lane => lane.jurisdiction));
+  const jurisdiction = senderLanes.map(lane => lane.jurisdiction)
+    .filter(candidate => candidate && recipientJurisdictions.has(candidate))
+    .toSorted()[0] || '';
+  const senderEntityId = senderLanes.find(lane => lane.jurisdiction === jurisdiction)?.entityId || '';
+  const recipientEntityId = recipientLanes.find(lane => lane.jurisdiction === jurisdiction)?.entityId || '';
+  expect(jurisdiction, `wallets must share a jurisdiction lane: sender=${JSON.stringify(senderLanes)} recipient=${JSON.stringify(recipientLanes)}`)
+    .not.toBe('');
+  await Promise.all([
+    senderPage.getByTestId('wallet-entity-picker').selectOption(senderEntityId),
+    recipientPage.getByTestId('wallet-entity-picker').selectOption(recipientEntityId),
+  ]);
+  await Promise.all([
+    expect(senderPage.getByTestId('context-current')).toHaveAttribute('data-entity-id', senderEntityId),
+    expect(recipientPage.getByTestId('context-current')).toHaveAttribute('data-entity-id', recipientEntityId),
+  ]);
+  const readIdentity = async (page: Page): Promise<{ entityId: string; signerId: string }> => {
+    const context = page.getByTestId('context-current');
+    const [entityId, signerId] = await Promise.all([
+      context.getAttribute('data-entity-id'),
+      context.getAttribute('data-signer-id'),
+    ]);
+    expect(entityId).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(signerId).toMatch(/^0x[0-9a-f]{40}$/);
+    return { entityId: entityId!, signerId: signerId! };
+  };
+  const [sender, recipient] = await Promise.all([readIdentity(senderPage), readIdentity(recipientPage)]);
+  return { sender, recipient };
+}
+
+async function discoverSharedWalletHub(senderPage: Page, recipientPage: Page): Promise<string> {
+  const [senderHubs, recipientHubs] = await Promise.all([
+    readWalletHubOptions(senderPage),
+    readWalletHubOptions(recipientPage),
+  ]);
+  const recipientSet = new Set(recipientHubs);
+  const hubId = senderHubs.find(candidate => recipientSet.has(candidate)) || '';
+  expect(hubId, `expected shared same-jurisdiction hub: sender=${senderHubs.join(',')} recipient=${recipientHubs.join(',')}`)
+    .toMatch(/^0x[0-9a-f]{64}$/);
   return hubId;
 }
 
@@ -382,40 +422,6 @@ async function hasActivityDebugQuery(page: Page): Promise<boolean> {
   });
 }
 
-async function waitForAdapterRuntime(page: Page, runtimeId: string): Promise<void> {
-  await expect
-    .poll(async () => {
-      return await page.evaluate(() => {
-        const view = window as typeof window & {
-          __xln?: {
-            adapter?: RuntimeAdapterDebugSurface;
-          };
-        };
-        const status = view.__xln?.adapter?.status?.();
-        return {
-          connected: status?.connected === true,
-          runtimeId: String(status?.runtimeId || '').trim().toLowerCase(),
-        };
-      }).catch(() => ({ connected: false, runtimeId: '' }));
-    }, {
-      timeout: CONSENSUS_TIMEOUT_MS,
-      intervals: [500, 1000, 1500],
-      message: `history page must bind to runtime ${runtimeId.slice(0, 12)}`,
-    })
-    .toEqual({ connected: true, runtimeId: runtimeId.toLowerCase() });
-}
-
-async function openEntityHistoryPage(page: Page, entityId: string, runtimeId: string): Promise<Page> {
-  const target = `${APP_BASE_URL}/address/${encodeURIComponent(entityId)}?runtimeId=${encodeURIComponent(runtimeId)}`;
-  const historyPage = await page.context().newPage();
-  await historyPage.goto(target, { waitUntil: 'domcontentloaded' });
-  await historyPage.waitForURL(target, { timeout: CONSENSUS_TIMEOUT_MS });
-  if (await hasActivityDebugQuery(historyPage)) {
-    await waitForAdapterRuntime(historyPage, runtimeId);
-  }
-  return historyPage;
-}
-
 async function verifyEntityActivityHistory(page: Page, entityId: string, options: { requirePaymentFilter?: boolean } = {}): Promise<void> {
   const hasDebugQuery = await hasActivityDebugQuery(page);
   if (hasDebugQuery) {
@@ -436,94 +442,50 @@ async function verifyEntityActivityHistory(page: Page, entityId: string, options
       .toBeGreaterThan(0);
   }
 
-  const runtimeId = await getActiveRuntimeId(page);
-  const historyPage = await openEntityHistoryPage(page, entityId, runtimeId);
-  try {
-    await expect(historyPage.getByTestId('entity-history-panel')).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+  await page.getByTestId('wallet-nav-activity').click();
+  const history = page.getByTestId('wallet-activity-history');
+  const rows = history.getByTestId('wallet-activity-row');
+  const ledger = history.getByRole('combobox', { name: 'Ledger' });
+  const search = history.getByRole('textbox', { name: 'Search' });
+  const paymentFilter = history.getByRole('button', { name: 'payment', exact: true });
+
+  await expect(history).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+  await ledger.selectOption('offchain');
+  await expect
+    .poll(() => rows.count(), {
+      timeout: CONSENSUS_TIMEOUT_MS,
+      intervals: [500, 1000, 1500],
+      message: 'React Activity workspace should render off-chain history',
+    })
+    .toBeGreaterThan(0);
+
+  if (options.requirePaymentFilter) {
+    await paymentFilter.click();
+    await expect(paymentFilter).toHaveAttribute('aria-pressed', 'true');
     await expect
-      .poll(() => historyPage.getByTestId('entity-history-event').count(), {
+      .poll(() => rows.filter({ hasText: '7000000 raw USDC' }).filter({ hasText: /Payment/i }).count(), {
         timeout: CONSENSUS_TIMEOUT_MS,
         intervals: [500, 1000, 1500],
-        message: 'entity history should render at least one event',
+        message: 'sender Activity workspace should render the exact UI payment row',
       })
       .toBeGreaterThan(0);
-
-    if (await hasActivityDebugQuery(historyPage)) {
-      await expect
-        .poll(
-          () => countRuntimeActivityEvents(
-            historyPage,
-            entityId,
-            { kind: 'offchain' },
-            isExpectedUiPaymentActivity,
-          ),
-          {
-            timeout: CONSENSUS_TIMEOUT_MS,
-            intervals: [500, 1000, 1500],
-            message: 'history page adapter must expose off-chain payment history',
-          },
-        )
-        .toBeGreaterThan(0);
+    if (HISTORY_SCREENSHOT_PATH) {
+      await page.screenshot({ path: HISTORY_SCREENSHOT_PATH, fullPage: true });
     }
-
-    await historyPage.getByTestId('history-kind-offchain').click();
-    await expect
-      .poll(() => historyPage.getByTestId('entity-history-event').count(), {
-        timeout: CONSENSUS_TIMEOUT_MS,
-        intervals: [500, 1000, 1500],
-        message: 'off-chain history tab should keep payment events visible',
-      })
-      .toBeGreaterThan(0);
-
-    if (options.requirePaymentFilter) {
-      await historyPage.getByTestId('history-type-payment').click();
-      await expect
-        .poll(() => historyPage.getByTestId('entity-history-event').count(), {
-          timeout: CONSENSUS_TIMEOUT_MS,
-          intervals: [500, 1000, 1500],
-          message: 'payment filter should keep payment events visible',
-        })
-        .toBeGreaterThan(0);
-      await expect(
-        historyPage.getByTestId('history-event-amount').filter({ hasText: /^7(\.|$)/ }).first(),
-      ).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
-      await expect
-        .poll(() => historyPage.getByTestId('entity-history-event').evaluateAll((rows) => rows.filter((row) => {
-          const amount = row.querySelector('[data-testid="history-event-amount"]')?.textContent?.trim() || '';
-          const text = row.textContent || '';
-          return /^7(\.|$)/.test(amount) && text.includes('Payment');
-        }).length), {
-          timeout: CONSENSUS_TIMEOUT_MS,
-          intervals: [500, 1000, 1500],
-          message: 'sender history should render the UI payment row',
-        })
-        .toBeGreaterThan(0);
-      if (HISTORY_SCREENSHOT_PATH) {
-        await historyPage.screenshot({ path: HISTORY_SCREENSHOT_PATH, fullPage: true });
-      }
-      await historyPage.getByTestId('history-clear-filters').click();
-    }
-
-    await historyPage.getByTestId('history-search').fill('payment');
-    await expect
-      .poll(() => historyPage.getByTestId('entity-history-event').count(), {
-        timeout: CONSENSUS_TIMEOUT_MS,
-        intervals: [500, 1000, 1500],
-        message: 'search should find payment history',
-      })
-      .toBeGreaterThan(0);
-    await historyPage.getByTestId('history-clear-filters').click();
-
-    await historyPage.getByTestId('history-mode-infinite').click();
-    await expect(historyPage.getByTestId('history-load-older')).toBeVisible();
-    await historyPage.getByTestId('history-mode-timeframe').click();
-    await expect(historyPage.getByTestId('history-from')).toBeVisible();
-    await expect(historyPage.getByTestId('history-to')).toBeVisible();
-    await historyPage.getByTestId('history-kind-onchain').click();
-    await expect(historyPage.getByTestId('entity-history-panel')).toBeVisible();
-  } finally {
-    await historyPage.close().catch(() => {});
   }
+
+  await search.fill('payment');
+  await expect
+    .poll(() => rows.count(), {
+      timeout: CONSENSUS_TIMEOUT_MS,
+      intervals: [500, 1000, 1500],
+      message: 'React Activity search should find payment history',
+    })
+    .toBeGreaterThan(0);
+  await search.fill('');
+  if (options.requirePaymentFilter) await paymentFilter.click();
+  await ledger.selectOption('onchain');
+  await expect(history).toBeVisible();
 }
 
 test.describe('Payment Smoke', () => {
@@ -556,15 +518,18 @@ test.describe('Payment Smoke', () => {
         gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
       ]);
 
-      const sender = await createRuntimeIdentity(senderPage, randomLabel('prodpay-a'), randomMnemonic(), {
+      let sender = await createRuntimeIdentity(senderPage, randomLabel('prodpay-a'), randomMnemonic(), {
         requireOnline: false,
       });
-      const recipient = await createRuntimeIdentity(recipientPage, randomLabel('prodpay-b'), randomMnemonic(), {
+      let recipient = await createRuntimeIdentity(recipientPage, randomLabel('prodpay-b'), randomMnemonic(), {
         requireOnline: false,
       });
       expect(sender.entityId).not.toBe(recipient.entityId);
 
-      const hubId = await discoverPrimaryHub(senderPage);
+      const aligned = await alignWalletJurisdictions(senderPage, recipientPage);
+      sender = { ...sender, ...aligned.sender };
+      recipient = { ...recipient, ...aligned.recipient };
+      const hubId = await discoverSharedWalletHub(senderPage, recipientPage);
       process.stdout.write(
         `[PAY-SMOKE] baseline=${USE_BASELINE ? 'yes' : 'no'} sender=${sender.entityId} recipient=${recipient.entityId} hub=${hubId}\n`,
       );

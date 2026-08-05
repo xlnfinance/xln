@@ -20,7 +20,8 @@ test('route projection exposes one same-j and multiple cross-j candidates from c
       { entityId: 'hub-3', runtimeId: 'remote', signerId: 'signer-h3', label: 'H3', isHub: true, jurisdictionRef: 'stack:2:0xj2' },
     ],
   });
-  expect(routes.map(route => route.mode)).toEqual(['cross', 'cross', 'same']);
+  expect(routes.map(route => route.mode)).toEqual(['same', 'cross', 'cross']);
+  expect(routes[0]?.label).toBe('Same jurisdiction · H1');
   expect(routes.every(route => route.enabled)).toBe(true);
   expect(routes.map(route => route.value)).toContain('cross:alice:hub-1:bob:hub-3');
 });
@@ -30,6 +31,27 @@ test('route projection returns no invented route when no source hub account exis
     sourceEntityId: 'alice', sourceRuntimeId: 'runtime-1', sourceJurisdictionRef: 'stack:1:0xj1',
     sourceAccountIds: ['peer'], directory: [],
   })).toEqual([]);
+});
+
+test('route projection exposes one deterministic same-jurisdiction lane across multiple hub accounts', () => {
+  const routes = buildWalletSwapRouteOptions({
+    sourceEntityId: 'alice',
+    sourceRuntimeId: 'runtime-1',
+    sourceJurisdictionRef: 'stack:1:0xj1',
+    sourceAccountIds: ['hub-3', 'hub-1', 'hub-2'],
+    directory: [
+      { entityId: 'hub-3', runtimeId: 'remote', signerId: 'signer-h3', label: 'H3', isHub: true, jurisdictionRef: 'stack:1:0xj1' },
+      { entityId: 'hub-1', runtimeId: 'remote', signerId: 'signer-h1', label: 'H1', isHub: true, jurisdictionRef: 'stack:1:0xj1' },
+      { entityId: 'hub-2', runtimeId: 'remote', signerId: 'signer-h2', label: 'H2', isHub: true, jurisdictionRef: 'stack:1:0xj1' },
+    ],
+  });
+
+  expect(routes).toHaveLength(1);
+  expect(routes[0]).toMatchObject({
+    value: 'same:alice:hub-1',
+    label: 'Same jurisdiction · H1',
+    enabled: true,
+  });
 });
 
 test('quote projection preserves canonical planner amounts without a UI formula', () => {

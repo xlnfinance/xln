@@ -492,9 +492,12 @@ const summaryFromProfile = (
   const profileName = String(profile.name || profile.metadata?.hubName || '').trim();
   const jurisdiction = jurisdictionSummary(profile.metadata?.jurisdiction);
   const runtimeId = normalizeEntityId(profile.runtimeId);
+  const certifiedSignerId = profile.metadata?.board?.validators?.[0]?.signerId;
+  const signerId = certifiedSignerId ? normalizeEntityId(certifiedSignerId) : '';
   return {
     entityId,
     ...(runtimeId ? { runtimeId } : {}),
+    ...(signerId ? { signerId } : {}),
     label: profileName || entityId,
     height: Math.max(0, Math.floor(Number(profile.lastUpdated || fallbackHeight || 0))),
     ...(profile.metadata?.isHub === true ? { isHub: true } : {}),

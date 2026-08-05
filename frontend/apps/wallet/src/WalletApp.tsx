@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 import { useExternalStore } from '../../../packages/react-adapters/use-external-store';
 import { settingsExternalStore } from '$lib/stores/settingsStore';
+import { runtimesStateExternalStore } from '$lib/stores/vaultStore';
+import { readAnyOnboardingComplete, writeOnboardingCompleteForEntities } from '$lib/utils/onboardingState';
 import {
   createOrImportWallet,
   generateWalletMnemonic,
@@ -21,6 +23,12 @@ import { walletViewExternalStore } from './wallet-view-store';
 import { WalletAddressDetail } from './features/routes/WalletAddressDetail';
 import { WalletAddressDirectory } from './features/routes/WalletAddressDirectory';
 import { WalletTestnetPage } from './features/routes/WalletTestnetPage';
+import { WalletProfileOnboarding } from './features/onboarding/WalletProfileOnboarding';
+import {
+  walletProfileOnboardingEntityIds,
+  walletProfileOnboardingRequired,
+} from './features/onboarding/wallet-profile-onboarding';
+import { walletAccountStoreController } from './features/accounts/wallet-account-store';
 import { parseWalletScenarioPreview } from './wallet-entry';
 
 const LOADING_PHASES = new Set([
@@ -50,9 +58,18 @@ const useOnlineStatus = (): boolean => {
 const WalletRuntimeApp = () => {
   const boot = useExternalStore(walletBootController.store);
   const wallet = useExternalStore(walletViewExternalStore);
+  const vault = useExternalStore(runtimesStateExternalStore);
   const settings = useExternalStore(settingsExternalStore);
+  const [onboardingRevision, setOnboardingRevision] = useState(0);
   const online = useOnlineStatus();
   const pathname = window.location.pathname;
+  const runtime = vault.activeRuntimeId ? vault.runtimes[vault.activeRuntimeId] ?? null : null;
+  const onboardingEntityIds = walletProfileOnboardingEntityIds(runtime);
+  const onboardingComplete = onboardingRevision > 0 || readAnyOnboardingComplete(onboardingEntityIds);
+  const onboardingRequired = walletProfileOnboardingRequired(runtime, onboardingComplete);
+  useEffect(() => {
+    if (onboardingComplete) writeOnboardingCompleteForEntities(onboardingEntityIds, true);
+  }, [onboardingComplete, onboardingEntityIds.join('|')]);
   if (pathname === '/testnet') return <WalletTestnetPage />;
   let content;
   if (LOADING_PHASES.has(boot.phase as typeof LOADING_PHASES extends Set<infer T> ? T : never)) {
@@ -74,6 +91,8 @@ const WalletRuntimeApp = () => {
     content = <WalletOnboarding onSubmit={createOrImportWallet} onGenerateMnemonic={generateWalletMnemonic} />;
   } else if (boot.phase === 'locked') {
     content = <WalletUnlock wallet={wallet} onSelect={selectWalletRuntime} onUnlock={unlockWalletRuntime} />;
+  } else if (boot.phase === 'ready' && runtime && onboardingRequired) {
+    content = <WalletProfileOnboarding runtime={runtime} onComplete={() => setOnboardingRevision(revision => revision + 1)} />;
   } else if (boot.phase === 'connecting' || boot.phase === 'ready') {
     const addressMatch = /^\/address\/([^/]+)$/.exec(pathname);
     content = pathname === '/address'
@@ -87,6 +106,7 @@ const WalletRuntimeApp = () => {
         connected={boot.phase === 'ready'}
         online={online}
         onSelectRuntime={selectWalletRuntime}
+        onSelectEntity={walletAccountStoreController.selectEntity}
         onLockRuntime={lockWalletRuntime}
         onTheme={walletSettingsActions.setTheme}
         onLiteMode={walletSettingsActions.setLiteMode}

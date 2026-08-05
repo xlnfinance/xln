@@ -93,6 +93,8 @@ export type {
   RuntimeAdapterAuthLevel,
   RuntimeAdapterConfig,
   RuntimeAdapterReadQuery,
+  RuntimeAdapterPaymentRoute,
+  RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterSendResult,
   RuntimeAdapterStatus,
   NumberedRegistrationCommand,

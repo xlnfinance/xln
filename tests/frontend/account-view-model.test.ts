@@ -88,6 +88,7 @@ test('projects canonical settlement and batch evidence without React-side financ
       inCapacity: 0n,
       ownCreditLimit: 0n,
       peerCreditLimit: 0n,
+      outPeerCredit: 0n,
     })) as never,
     getTokenMeta: () => ({ symbol: 'USDC', decimals: 6 }),
     getKnownTokenIds: () => [1],
@@ -123,6 +124,7 @@ test('projects exact bilateral values from the canonical derive helper for both 
       inCapacity: isLeft ? 15_000_000n : 25_000_000n,
       ownCreditLimit: isLeft ? 3_000_000n : 4_000_000n,
       peerCreditLimit: isLeft ? 4_000_000n : 3_000_000n,
+      outPeerCredit: isLeft ? 12_000_000n : 18_000_000n,
     };
   };
   const deps = {
@@ -138,9 +140,11 @@ test('projects exact bilateral values from the canonical derive helper for both 
   expect(right?.accounts[0]?.counterpartyId).toBe(LEFT);
   expect(left?.accounts[0]?.tokens[0]).toMatchObject({
     raw: '8000000', outboundRaw: '25000000', inboundRaw: '15000000', outbound: '25', inbound: '15',
+    securedCoveragePercent: 100, uncollateralizedRaw: '0', requestedRebalanceRaw: '0',
   });
   expect(right?.accounts[0]?.tokens[0]).toMatchObject({
     raw: '-8000000', outboundRaw: '15000000', inboundRaw: '25000000', outbound: '15', inbound: '25',
+    securedCoveragePercent: 50, uncollateralizedRaw: '9000000', requestedRebalanceRaw: '0',
   });
   expect(left?.reserves[0]).toMatchObject({ raw: '12345678', formatted: '12.3456' });
 });
@@ -150,6 +154,7 @@ test('projects canonical cross-j dispute risk only when projection evidence is c
     deriveDelta: (() => ({
       delta: 0n, collateral: 0n, outCollateral: 0n, outCapacity: 0n, inCapacity: 0n,
       ownCreditLimit: 0n, peerCreditLimit: 0n,
+      outPeerCredit: 0n,
     })) as never,
     getTokenMeta: () => ({ symbol: 'USDC', decimals: 6 }),
     getKnownTokenIds: () => [1],

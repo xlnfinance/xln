@@ -28,6 +28,7 @@ export type {
 } from '../../runtime/swap-command-plan';
 export { enqueueRuntimeInput } from '../../runtime/input-queue';
 export { resolveRuntimeAdapterRead, EmbeddedRuntimeAdapter, RemoteRuntimeAdapter } from '../runtime-adapter';
+export { findRuntimePaymentRoutes } from '../runtime-adapter/payment-routes';
 export type {
   RuntimeAdapter,
   RuntimeAdapterConfig,

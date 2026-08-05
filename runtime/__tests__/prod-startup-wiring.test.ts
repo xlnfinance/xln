@@ -380,8 +380,9 @@ describe('production startup wiring', () => {
     const receiptHelper = readFileSync(join(repoRoot, 'tests/utils/e2e-runtime-receipts.ts'), 'utf8');
 
     expect(paymentSmoke).toContain("Boolean(env && typeof env === 'object' && String(env.runtimeId || '').trim())");
-    expect(paymentSmoke).toContain('if (await hasActivityDebugQuery(historyPage))');
-    expect(paymentSmoke).toContain("historyPage.getByTestId('entity-history-event').count()");
+    expect(paymentSmoke).toContain('const hasDebugQuery = await hasActivityDebugQuery(page);');
+    expect(paymentSmoke).toContain("history.getByTestId('wallet-activity-row')");
+    expect(paymentSmoke).not.toContain("getByTestId('entity-history-panel')");
     expect(receiptHelper).toContain("throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE')");
     expect(receiptHelper).toContain("throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE')");
     expect(receiptHelper).not.toContain('catch {\n      return { cursor: { nextHeight }');
@@ -1732,6 +1733,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('buildInheritedLocalTestLeaseEnv(localTestLease, repoRoot)');
     expect(smoke).toContain('assertLocalTestPortsFree(localTestLease.ports);');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
+    expect(orchestrator).toContain('const BUN_EXECUTABLE = process.execPath;');
+    expect(orchestrator.match(/spawn\(BUN_EXECUTABLE/g)?.length).toBe(2);
+    expect(orchestrator).not.toContain("spawn('bun'");
     expect(soundcheck).not.toContain('XLN_LOCAL_PROD_SMOKE_PORT_BASE');
     expect(benchmark).not.toContain('XLN_LOCAL_PROD_SMOKE_PORT_BASE');
     expect(smoke).toContain("schema: 'xln-local-prod-bootstrap-benchmark-v1'");
@@ -2557,7 +2561,7 @@ describe('production startup wiring', () => {
 
     expect(paymentForm).not.toContain('/api/gossip/profile?entityId=');
     expect(xlnStore).toContain('/api/gossip/profile?entityId=');
-    expect(xlnStore).toContain('export async function refreshPaymentRuntimeGossip');
+    expect(xlnStore).toContain('export async function refreshRuntimeGossipProfiles');
     expect(debugApi).toContain("import { buildKnownProfileBundle } from '../api/server/gossip-profiles';");
     expect(debugApi).toContain("if (deps.pathname === '/api/gossip/profile')");
     expect(debugApi).toContain('const bundle = buildKnownProfileBundle({');

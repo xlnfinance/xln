@@ -919,7 +919,8 @@ test('runtime adapter view-frame includes live gossip summaries for visible acco
   const env = makeEnv();
   env.gossip = createGossipLayer();
   env.gossip.announce(makeHubProfile(entityId, 'H1'));
-  env.gossip.announce(makeHubProfile(counterpartyId, 'H2'));
+  const peerProfile = makeHubProfile(counterpartyId, 'H2');
+  env.gossip.announce(peerProfile);
 
   const frame = await resolveRuntimeAdapterRead<{
     entities: Array<{
@@ -936,6 +937,7 @@ test('runtime adapter view-frame includes live gossip summaries for visible acco
   const peer = frame.entities.find(entry => entry.entityId === counterpartyId);
   expect(peer?.label).toBe('H2');
   expect(peer?.isHub).toBe(true);
+  expect(peer?.signerId).toBe(peerProfile.metadata.board.validators[0]?.signerId);
   expect(peer?.jurisdiction?.name).toBe('Testnet');
   expect(peer?.jurisdiction?.chainId).toBe(31337);
 });

@@ -40,16 +40,22 @@ export const buildWalletSwapRouteOptions = (input: Readonly<{
   const sourceHubs = [...new Set(input.sourceAccountIds.map(value => value.trim().toLowerCase()))]
     .map(accountId => directory.get(accountId))
     .filter((entity): entity is SwapRouteEntity => Boolean(entity?.isHub));
+  const sourceJurisdictionHubs = sourceHubs.filter(hub =>
+    hub.jurisdictionRef?.trim().toLowerCase() === sourceJurisdictionRef
+  );
   const options: WalletSwapRouteOption[] = [];
-  for (const hub of sourceHubs) {
+  const sameHub = sourceJurisdictionHubs.toSorted((left, right) =>
+    Number(Boolean(right.signerId)) - Number(Boolean(left.signerId)) || left.entityId.localeCompare(right.entityId)
+  )[0];
+  if (sameHub) {
+    const hub = sameHub;
     const hubSigner = hub.signerId?.trim().toLowerCase() || null;
-    const sameJurisdiction = hub.jurisdictionRef?.trim().toLowerCase() === sourceJurisdictionRef;
     options.push(Object.freeze({
       value: `same:${sourceEntityId}:${hub.entityId}`,
       mode: 'same',
       label: `Same jurisdiction · ${hub.label}`,
-      enabled: Boolean(hubSigner && sameJurisdiction),
-      disabledReason: !sameJurisdiction ? 'Hub jurisdiction differs from source' : !hubSigner ? 'Hub signer unavailable' : null,
+      enabled: Boolean(hubSigner),
+      disabledReason: hubSigner ? null : 'Hub signer unavailable',
       sourceHubEntityId: hub.entityId,
       sourceHubSignerId: hubSigner,
       targetEntityId: null,
@@ -67,7 +73,7 @@ export const buildWalletSwapRouteOptions = (input: Readonly<{
     Boolean(entity.jurisdictionRef) &&
     entity.jurisdictionRef!.trim().toLowerCase() !== sourceJurisdictionRef
   );
-  for (const sourceHub of sourceHubs) {
+  for (const sourceHub of sourceJurisdictionHubs) {
     for (const target of targets) {
       const targetJurisdictionRef = target.jurisdictionRef!.trim().toLowerCase();
       const targetHubs = input.directory.filter(entity =>
@@ -97,6 +103,8 @@ export const buildWalletSwapRouteOptions = (input: Readonly<{
     }
   }
   return Object.freeze(options.toSorted((left, right) =>
-    Number(right.enabled) - Number(left.enabled) || left.mode.localeCompare(right.mode) || left.value.localeCompare(right.value)
+    Number(right.enabled) - Number(left.enabled) ||
+    Number(right.mode === 'same') - Number(left.mode === 'same') ||
+    left.value.localeCompare(right.value)
   ));
 };

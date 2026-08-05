@@ -12,6 +12,7 @@ import {
   buildWalletLendingBorrowInput,
   buildWalletLendingOfferInput,
   buildWalletLendingRepayInput,
+  buildWalletOpenAccountInput,
   buildWalletPendingBatchInput,
   buildWalletReserveToCollateralInput,
   buildWalletReserveToExternalInput,
@@ -28,6 +29,11 @@ const RECIPIENT = `0x${'33'.repeat(32)}`;
 const owner = { entityId: ENTITY, signerId: 'signer' };
 
 test('builds exact credit and reserve movement commands through canonical transaction types', () => {
+  expect(buildWalletOpenAccountInput(owner, PEER, { tokenId: 1, amount: 10_000_000_000n })
+    .entityInputs?.[0]?.entityTxs).toEqual([{
+      type: 'openAccount',
+      data: { targetEntityId: PEER, tokenId: 1, creditAmount: 10_000_000_000n },
+    }]);
   expect(buildWalletAddTokenInput({
     ...owner, counterpartyEntityId: PEER, tokenId: 1,
   }).entityInputs?.[0]?.entityTxs).toEqual([{
@@ -172,6 +178,8 @@ test('builds dispute lifecycle commands with explicit accepted cross-j risk', ()
 });
 
 test('rejects unavailable boundaries before command submission', () => {
+  expect(() => buildWalletOpenAccountInput(owner, PEER, { tokenId: 1, amount: 0n }))
+    .toThrow('WALLET_OPEN_ACCOUNT_CREDIT_NOT_POSITIVE');
   expect(() => buildWalletCreditInput({
     ...owner, counterpartyEntityId: PEER, tokenId: 1, tokenDecimals: 6, amountInput: '-1',
   })).toThrow('TOKEN_AMOUNT_FORMAT_INVALID');

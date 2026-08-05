@@ -254,145 +254,17 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
 
 async function openAccountsWorkspace(page: Page): Promise<void> {
   await dismissOnboardingIfVisible(page);
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  const accountList = page.getByTestId('account-list-wrapper').first();
-  const workspaceTabs = page.locator('nav[aria-label="Account workspace"]').first();
-  const activeWalletGate = page.getByRole('heading', { name: /XLN wallet available/i }).first();
-  const isAccountsWorkspaceVisible = async () =>
-    await accountList.isVisible().catch(() => false)
-      || await workspaceTabs.isVisible().catch(() => false);
-
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    await dismissOnboardingIfVisible(page);
-    if (await isAccountsWorkspaceVisible()) break;
-    if (await activeWalletGate.isVisible().catch(() => false)) {
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await page.waitForTimeout(500);
-      await dismissOnboardingIfVisible(page);
-      continue;
-    }
-    if (await accountsTab.isVisible().catch(() => false)) {
-      await accountsTab.click({ timeout: 5_000 });
-      await page.waitForTimeout(300);
-      continue;
-    }
+  const workspace = page.getByTestId('wallet-accounts-overview');
+  if (!await workspace.isVisible().catch(() => false)) {
+    const accountsNav = page.getByTestId('wallet-nav-accounts');
+    await expect(accountsNav).toBeVisible({ timeout: 20_000 });
+    await accountsNav.click();
   }
-
-  await dismissOnboardingIfVisible(page);
-  await expect
-    .poll(async () => {
-      await dismissOnboardingIfVisible(page);
-      return await isAccountsWorkspaceVisible();
-    }, {
-      timeout: 20_000,
-      intervals: [200, 400, 800],
-      message: 'accounts workspace must be visible',
-    })
-    .toBe(true);
-}
-
-async function openWorkspaceTab(page: Page, tabTestId: string): Promise<void> {
-  await openAccountsWorkspace(page);
-  const tabs = page.getByTestId(tabTestId);
-  const readTabStatus = async (): Promise<'visible' | 'active-hidden' | 'missing'> => {
-    const count = await tabs.count();
-    for (let index = 0; index < count; index += 1) {
-      const tab = tabs.nth(index);
-      if (await tab.isVisible().catch(() => false)) return 'visible';
-      const [className, ariaSelected, dataState, ariaCurrent] = await Promise.all([
-        tab.getAttribute('class').catch(() => ''),
-        tab.getAttribute('aria-selected').catch(() => ''),
-        tab.getAttribute('data-state').catch(() => ''),
-        tab.getAttribute('aria-current').catch(() => ''),
-      ]);
-      const active = /\bactive\b/.test(String(className || ''))
-        || ariaSelected === 'true'
-        || dataState === 'active'
-        || ariaCurrent === 'page';
-      if (active) return 'active-hidden';
-    }
-    return 'missing';
-  };
-
-  await expect
-    .poll(readTabStatus, {
-      timeout: 20_000,
-      intervals: [200, 400, 800],
-      message: `${tabTestId} workspace tab must be visible or already active`,
-    })
-    .not.toBe('missing');
-
-  const count = await tabs.count();
-  for (let index = 0; index < count; index += 1) {
-    const tab = tabs.nth(index);
-    if (!await tab.isVisible().catch(() => false)) continue;
-    await tab.scrollIntoViewIfNeeded();
-    await tab.click({ timeout: 5_000 });
-    return;
-  }
-  // Responsive screenshot layouts can hide the already-active tab. In that case the requested workspace is open.
-}
-
-function compactEntityLabel(entityId: string): string {
-  return `${entityId.slice(0, 10)}...${entityId.slice(-6)}`;
-}
-
-async function resolveHubCardLabel(page: Page, hubId: string): Promise<string> {
-  const resolved = await page.evaluate((targetHubId) => {
-    const view = window as typeof window & {
-      isolatedEnv?: {
-        gossip?: {
-          getProfiles?: () => Array<{ entityId?: string; metadata?: { name?: string }; name?: string }>;
-        };
-      };
-    };
-    const profiles = view.isolatedEnv?.gossip?.getProfiles?.() || [];
-    const match = profiles.find((profile) => String(profile?.entityId || '').toLowerCase() === String(targetHubId || '').toLowerCase());
-    return String(match?.metadata?.name || match?.name || '').trim();
-  }, hubId);
-  return resolved || compactEntityLabel(hubId);
-}
-
-async function resolveHubCardLocator(page: Page, hubId: string, root = page.locator('body')) {
-  const hubIdNorm = hubId.toLowerCase();
-  const exactHubCard = root.locator(`.hub-card[data-hub-entity-id="${hubIdNorm}"]`).first();
-  if (await exactHubCard.isVisible().catch(() => false)) return exactHubCard;
-
-  const hubCardLabel = await resolveHubCardLabel(page, hubId);
-  return root.locator('.hub-card').filter({ hasText: hubCardLabel }).first();
-}
-
-async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
-  await openWorkspaceTab(page, 'account-workspace-tab-open');
-  const panel = page.locator('.hub-panel').first();
-  await expect(panel).toBeVisible({ timeout: 20_000 });
-  const refresh = panel.getByRole('button', { name: /^Refresh$/ }).first();
-  const detailsButtons = panel.locator('.expand-toggle');
-
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const hubCard = await resolveHubCardLocator(page, hubId, panel);
-    if (await hubCard.isVisible().catch(() => false)) return;
-    const count = await detailsButtons.count();
-    for (let index = 0; index < count; index += 1) {
-      const button = detailsButtons.nth(index);
-      if (await button.isVisible().catch(() => false)) {
-        await button.click({ timeout: 2_000 }).catch(() => {});
-      }
-    }
-    if (await hubCard.isVisible().catch(() => false)) return;
-    await expect(refresh).toBeVisible({ timeout: 10_000 });
-    if (await refresh.isEnabled().catch(() => false)) {
-      await refresh.click({ timeout: 5_000 });
-    }
-    await page.waitForTimeout(1_000);
-  }
-
-  const hubCard = await resolveHubCardLocator(page, hubId, panel);
-  await expect(hubCard, `hub ${hubId} must appear in hub discovery`).toBeVisible({ timeout: 20_000 });
+  await expect(workspace, 'accounts workspace must be visible').toBeVisible({ timeout: 20_000 });
 }
 
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
-  await ensureHubCardVisible(page, hubId);
+  await openAccountsWorkspace(page);
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
   if (await hasExportedRuntimeP2P(page)) {
     await waitForHubRuntimeTransportReady(page, hubId);
@@ -400,111 +272,26 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
     await waitForPublicHubRuntimeProfile(page, hubId);
   }
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
-
-  let lastUiState = 'not-read';
-  let connectClicked = false;
-  try {
-    await expect
-      .poll(
-        async () => {
-          if (await hasRenderedCommittedAccountCard(page, hubId)) {
-            lastUiState = 'committed-account-card';
-            return true;
-          }
-
-          const panel = page.locator('.hub-panel').first();
-          if (!await panel.isVisible().catch(() => false)) {
-            lastUiState = 'hub-panel-missing';
-            return false;
-          }
-
-          const hubCard = await resolveHubCardLocator(page, hubId, panel);
-          if (!await hubCard.isVisible().catch(() => false)) {
-            lastUiState = 'hub-card-missing';
-            return false;
-          }
-
-          const inlineError = panel.locator('.error-banner').first();
-          if (await inlineError.isVisible().catch(() => false)) {
-            const message = String(await inlineError.textContent().catch(() => '') || '').trim();
-            if (message) throw new Error(`HUB_CONNECT_UI_ERROR:${message}`);
-          }
-
-          const dataState = String(await hubCard.getAttribute('data-connection-state').catch(() => '') || '').toLowerCase();
-          if (connectClicked) {
-            lastUiState = `connect-clicked-awaiting-state:${dataState || 'unknown'}`;
-            return false;
-          }
-          if (dataState === 'open') {
-            lastUiState = 'open-awaiting-committed-card';
-            return false;
-          }
-          if (dataState === 'opening') {
-            lastUiState = 'opening-awaiting-committed-card';
-            return false;
-          }
-
-          const openState = hubCard.locator('.connection-state').filter({ hasText: /^Open$/i }).first();
-          if (await openState.isVisible().catch(() => false)) {
-            lastUiState = 'open-legacy-awaiting-committed-card';
-            return false;
-          }
-
-          const openingState = hubCard.locator('.connection-state').filter({ hasText: /^Opening$/i }).first();
-          if (await openingState.isVisible().catch(() => false)) {
-            lastUiState = 'opening-legacy-awaiting-committed-card';
-            return false;
-          }
-
-          const connectByTestId = hubCard.getByTestId('hub-connect-button').first();
-          const connectButton = await connectByTestId.isVisible().catch(() => false)
-            ? connectByTestId
-            : hubCard.getByRole('button', { name: /Connect/i }).first();
-          if (
-            await connectButton.isVisible().catch(() => false)
-            && await connectButton.isEnabled().catch(() => false)
-          ) {
-            try {
-              await connectButton.click({ timeout: 5_000 });
-              connectClicked = true;
-              lastUiState = 'connect-clicked';
-            } catch (clickError) {
-              if (await hasRenderedCommittedAccountCard(page, hubId)) {
-                lastUiState = 'connect-click-raced-committed-account-card';
-                return true;
-              }
-              const message = clickError instanceof Error ? clickError.message : String(clickError);
-              if (/detached from the DOM|not visible|Timeout/i.test(message)) {
-                connectClicked = true;
-                lastUiState = `connect-click-raced:${message.split('\n')[0]?.slice(0, 120) || 'transient click race'}`;
-                return false;
-              }
-              throw clickError;
-            }
-            return false;
-          }
-
-          const text = await hubCard.innerText({ timeout: 1_000 }).catch(() => '');
-          lastUiState = `state=${dataState || 'unknown'} text=${text.replace(/\s+/g, ' ').slice(0, 180)}`;
-          return false;
-        },
-        {
-          timeout: DEFAULT_OPEN_TIMEOUT_MS,
-          intervals: [100, 250, 500],
-          message: `hub ${hubId} must render a committed account card after Connect`,
-        },
-      )
-      .toBe(true);
-  } catch (error) {
-    const localRuntime = await readLocalConnectRuntimeDiagnostic(page, hubId).catch((debugError) => ({
-      error: debugError instanceof Error ? debugError.message : String(debugError),
-    }));
-    throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\n` +
-      `lastHubConnectUiState=${lastUiState}\n` +
-      `localRuntime=${stringifyDebug(localRuntime)}`,
-    );
-  }
+  const form = page.getByTestId('wallet-open-account');
+  await expect(form).toBeVisible({ timeout: 20_000 });
+  await form.getByLabel('Open account with entity ID').fill(hubId.toLowerCase());
+  await form.getByRole('button', { name: 'Review open account' }).click();
+  await form.getByRole('button', { name: 'Submit account intent' }).click();
+  await expect.poll(async () => {
+    const error = form.getByRole('alert');
+    if (await error.isVisible().catch(() => false)) {
+      const diagnostics = await readLocalConnectRuntimeDiagnostic(page, hubId);
+      throw new Error(
+        `OPEN_ACCOUNT_UI_ERROR:${String(await error.textContent() || '').trim()}`
+        + ` diagnostics=${stringifyDebug(diagnostics)}`,
+      );
+    }
+    return hasRenderedCommittedAccountCard(page, hubId);
+  }, {
+    timeout: DEFAULT_OPEN_TIMEOUT_MS,
+    intervals: [250, 500, 750],
+    message: `hub ${hubId} must render a committed account after submit`,
+  }).toBe(true);
 }
 
 async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Promise<unknown> {
@@ -559,10 +346,23 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
           }>;
         };
         runtimeId?: string;
+        gossip?: {
+          getProfiles?: () => Array<{
+            entityId?: string;
+            runtimeId?: string;
+            lastUpdated?: number;
+            metadata?: { isHub?: boolean; jurisdiction?: unknown };
+          }>;
+        };
         infrastructure?: {
           halted?: boolean;
           fatalDebugPayload?: unknown;
           loopActive?: boolean;
+          p2p?: {
+            isConnected?: () => boolean;
+            getQueueState?: () => unknown;
+            getReconnectState?: () => unknown;
+          };
         };
         runtimeInput?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
         runtimeMempool?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
@@ -582,6 +382,7 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
       }));
     const normalize = (value: unknown): string => String(value || '').trim().toLowerCase();
     const targetHub = normalize(hubId);
+    const targetProfile = env?.gossip?.getProfiles?.().find((profile) => normalize(profile.entityId) === targetHub);
     const replicas = Array.from(env?.state?.eReplicas?.entries?.() || []).map(([key, replica]) => {
       const account = replica.state?.accounts instanceof Map
         ? replica.state.accounts.get(targetHub) ?? null
@@ -653,10 +454,21 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
       height: Number(env?.state?.height || 0),
       timestamp: Number(env?.state?.timestamp || 0),
       runtimeId: env?.runtimeId ?? null,
+      targetProfile: targetProfile ? {
+        entityId: targetProfile.entityId ?? null,
+        runtimeId: targetProfile.runtimeId ?? null,
+        lastUpdated: Number(targetProfile.lastUpdated || 0),
+        metadata: targetProfile.metadata ?? null,
+      } : null,
       infrastructure: env?.infrastructure ? {
         halted: Boolean(env.infrastructure.halted),
         loopActive: Boolean(env.infrastructure.loopActive),
         fatalDebugPayload: env.infrastructure.fatalDebugPayload ?? null,
+        p2p: env.infrastructure.p2p ? {
+          connected: env.infrastructure.p2p.isConnected?.() ?? null,
+          queue: env.infrastructure.p2p.getQueueState?.() ?? null,
+          reconnect: env.infrastructure.p2p.getReconnectState?.() ?? null,
+        } : null,
       } : null,
       uiErrors: Array.from(document.querySelectorAll('.hub-panel .error-banner, [role="alert"], .toast'))
         .map((entry) => String(entry.textContent || '').trim())
@@ -957,39 +769,14 @@ async function enqueueOpenAccount(
   }]);
 }
 
-async function selectConfigureAccount(page: Page, hubId: string): Promise<void> {
-  const selector = page.getByTestId('configure-account-selector').first();
-  await expect(selector).toBeVisible({ timeout: 20_000 });
-  const optionTestId = `configure-account-selector-option-${hubId.toLowerCase()}`;
-
-  const closedTrigger = selector.locator('.closed-trigger').first();
-  if (await closedTrigger.isVisible().catch(() => false)) {
-    if (await closedTrigger.textContent().then((text) => String(text || '').toLowerCase().includes(hubId.toLowerCase().slice(0, 10))).catch(() => false)) {
-      return;
-    }
-    await closedTrigger.click();
-  }
-
-  const input = selector.locator('input').first();
-  await expect(input).toBeVisible({ timeout: 20_000 });
-  await input.click();
-  await input.fill(hubId);
-  const option = page.getByTestId(optionTestId).first();
-  if (await option.isVisible().catch(() => false)) {
-    await option.dispatchEvent('mousedown');
-  } else {
-    const fallbackOption = page.locator('.dropdown-item').filter({ hasText: hubId }).first();
-    await expect(fallbackOption).toBeVisible({ timeout: 20_000 });
-    await fallbackOption.dispatchEvent('mousedown');
-  }
-  await expect(selector.locator('.closed-trigger').first()).toContainText(hubId.slice(0, 10), { timeout: 20_000 });
-}
-
 async function openConfigureWorkspace(page: Page, hubId: string): Promise<void> {
-  await openWorkspaceTab(page, 'account-workspace-tab-configure');
-  await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.configure-empty').first()).not.toBeVisible({ timeout: 20_000 });
-  await selectConfigureAccount(page, hubId);
+  await openAccountsWorkspace(page);
+  const account = page.locator(
+    `[data-testid="wallet-account-row"][data-counterparty-id="${hubId.toLowerCase()}"]`,
+  ).first();
+  await expect(account).toBeVisible({ timeout: 20_000 });
+  await account.click();
+  await expect(page.getByTestId('wallet-account-configure')).toBeVisible({ timeout: 20_000 });
 }
 
 async function addTokenToAccount(page: Page, hubId: string, tokenId: number): Promise<void> {
@@ -1484,20 +1271,12 @@ async function hasExportedRuntimeP2P(page: Page): Promise<boolean> {
 
 async function hasRenderedCommittedAccountCard(page: Page, hubId: string): Promise<boolean> {
   return page.evaluate((targetHubId) => {
-    const normalizeEntityId = (value: string): string => String(value || '').trim().toLowerCase();
-    const target = normalizeEntityId(targetHubId);
-    const cards = Array.from(document.querySelectorAll('.account-preview'));
-    const card = cards.find((entry) => {
-      const rawCounterpartyId = String(
-        entry.getAttribute('data-counterparty-id')
-        || entry.querySelector('.entity-id, .id, [data-entity-id]')?.textContent
-        || '',
-      ).trim();
-      return normalizeEntityId(rawCounterpartyId) === target;
-    });
+    const target = String(targetHubId || '').trim().toLowerCase();
+    const card = Array.from(document.querySelectorAll('[data-testid="wallet-account-row"]'))
+      .find(entry => String(entry.getAttribute('data-counterparty-id') || '').trim().toLowerCase() === target);
     if (!card) return false;
     const text = String(card.textContent || '');
-    return !/Awaiting first frame/i.test(text);
+    return !/pending/i.test(text) && /A[1-9][0-9]*/.test(text);
   }, hubId);
 }
 

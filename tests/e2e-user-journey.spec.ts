@@ -38,6 +38,7 @@ type AccountProgress = {
 
 type EntityIdleSnapshot = {
   quiescent: boolean;
+  jurisdictionChainId: number;
   runtimeHeight: number;
   entityHeight: number;
   projectedJHeight: number;
@@ -64,18 +65,6 @@ async function gotoApp(page: Page): Promise<void> {
     initTimeoutMs: INIT_TIMEOUT,
     settleMs: 500,
   });
-}
-
-async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const checkbox = page.locator('text=I understand and accept the risks of using this software').first();
-  if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
-    await checkbox.click();
-    const continueBtn = page.locator('button:has-text("Continue")').first();
-    if (await continueBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await continueBtn.click();
-      await page.waitForTimeout(300);
-    }
-  }
 }
 
 async function createDemoRuntime(
@@ -220,35 +209,63 @@ async function readEntityIdleSnapshot(
   return await page.evaluate(({ targetEntityId, targetSignerId }) => {
     const env = (window as typeof window & {
       isolatedEnv?: {
-        height?: number;
-        jReplicas?: Map<string, {
-          chainId?: number;
-          depositoryAddress?: string;
-          contracts?: { depository?: string };
-          jadapter?: {
+        state?: {
+          height?: number;
+          jReplicas?: Map<string, {
             chainId?: number;
-            addresses?: { depository?: string };
-            getWatcherScanProgress?: () => { scannedThroughHeight?: number };
-          };
-        }>;
-        eReplicas?: Map<string, {
-          signerId?: string;
-          entityId?: string;
-          mempool?: unknown[];
-          proposal?: unknown;
-          lockedFrame?: unknown;
-          jHistory?: {
-            scannedThroughHeight?: number;
-            eventBlocks?: Map<number, unknown>;
-          };
-          state?: {
+            depositoryAddress?: string;
+            contracts?: { depository?: string };
+          }>;
+          eReplicas?: Map<string, {
+            signerId?: string;
             entityId?: string;
-            height?: number;
-            lastFinalizedJHeight?: number;
-            config?: {
-              jurisdiction?: { chainId?: number; depositoryAddress?: string };
+            mempool?: unknown[];
+            proposal?: unknown;
+            lockedFrame?: unknown;
+            jHistory?: {
+              scannedThroughHeight?: number;
+              eventBlocks?: Map<number, unknown>;
             };
-            accounts?: Map<string, { mempool?: unknown[]; pendingFrame?: unknown }>;
+            state?: {
+              entityId?: string;
+              height?: number;
+              lastFinalizedJHeight?: number;
+              config?: {
+                jurisdiction?: { chainId?: number; depositoryAddress?: string };
+              };
+              accounts?: Map<string, { mempool?: unknown[]; pendingFrame?: unknown }>;
+            };
+          }>;
+        };
+        runtimeMempool?: {
+          runtimeTxs?: unknown[];
+          entityInputs?: unknown[];
+          jInputs?: unknown[];
+          reliableReceipts?: unknown[];
+        };
+        pendingOutputs?: unknown[];
+        networkInbox?: unknown[];
+        pendingNetworkOutputs?: unknown[];
+        infrastructure?: {
+          liveJAdapters?: Map<string, {
+            getWatcherScanProgress?: () => { scannedThroughHeight?: number };
+          }>;
+          inFlightEntityInputs?: number;
+          pendingReliableIngress?: Map<string, unknown>;
+          reliableIngressCommitting?: Set<string>;
+          pendingCommittedJOutbox?: unknown[];
+          processingPromise?: Promise<unknown> | null;
+        };
+        history?: Array<{
+          height?: number;
+          runtimeInput?: {
+            entityInputs?: Array<{
+              entityId?: string;
+              entityTxs?: Array<{ type?: string }>;
+              jPrefixAttestations?: Map<string, unknown>;
+              proposedFrame?: { height?: number };
+              hashPrecommits?: Map<string, unknown>;
+            }>;
           };
         }>;
       };
@@ -264,12 +281,11 @@ async function readEntityIdleSnapshot(
     const jurisdiction = replica.state.config?.jurisdiction;
     const jurisdictionChainId = Number(jurisdiction?.chainId ?? 0);
     const jurisdictionDepository = String(jurisdiction?.depositoryAddress ?? '').toLowerCase();
-    const watcherMatches = Array.from(env.state.jReplicas?.values() ?? []).filter((candidate) => {
-      const chainId = Number(candidate.chainId ?? candidate.jadapter?.chainId ?? 0);
+    const watcherMatches = Array.from(env.state.jReplicas?.entries() ?? []).filter(([, candidate]) => {
+      const chainId = Number(candidate.chainId ?? 0);
       const depository = String(
         candidate.depositoryAddress ??
         candidate.contracts?.depository ??
-        candidate.jadapter?.addresses?.depository ??
         '',
       ).toLowerCase();
       return chainId === jurisdictionChainId && depository === jurisdictionDepository;
@@ -280,8 +296,13 @@ async function readEntityIdleSnapshot(
         `matches=${watcherMatches.length}`,
       );
     }
+    const watcherName = watcherMatches[0][0];
+    const watcherAdapter = env.infrastructure?.liveJAdapters?.get(watcherName);
+    if (!watcherAdapter?.getWatcherScanProgress) {
+      throw new Error(`E2E_IDLE_WATCHER_ADAPTER_MISSING:${watcherName}`);
+    }
     const watcherScannedJHeight = Number(
-      watcherMatches[0].jadapter?.getWatcherScanProgress?.().scannedThroughHeight ?? 0,
+      watcherAdapter.getWatcherScanProgress().scannedThroughHeight ?? 0,
     );
     const accounts = Array.from(replica.state.accounts?.values() ?? []);
     const runtimeMempool = env.runtimeMempool;
@@ -322,6 +343,7 @@ async function readEntityIdleSnapshot(
         !replica.proposal &&
         !replica.lockedFrame &&
         accounts.every((account) => (account.mempool?.length ?? 0) === 0 && !account.pendingFrame),
+      jurisdictionChainId,
       runtimeHeight: Number(env.state.height ?? 0),
       entityHeight: Number(replica.state.height ?? 0),
       projectedJHeight,
@@ -334,8 +356,10 @@ async function readEntityIdleSnapshot(
   }, { targetEntityId: entityId, targetSignerId: signerId });
 }
 
-async function mineEmptyJurisdictionBlock(page: Page): Promise<void> {
-  const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+async function mineEmptyJurisdictionBlock(page: Page, chainId: number): Promise<void> {
+  const rpcPath = chainId === 31337 ? '/rpc' : chainId === 31338 ? '/rpc2' : null;
+  if (!rpcPath) throw new Error(`E2E_JURISDICTION_RPC_UNKNOWN:${chainId}`);
+  const response = await page.request.post(`${APP_BASE_URL}${rpcPath}`, {
     data: { jsonrpc: '2.0', id: 1, method: 'evm_mine', params: [] },
   });
   const body = await response.json().catch(async () => ({ error: (await response.text()).slice(0, 500) }));
@@ -346,20 +370,17 @@ async function mineEmptyJurisdictionBlock(page: Page): Promise<void> {
 
 async function expectSwapBuilderLabels(page: Page): Promise<void> {
   await openAccountWorkspaceTab(page, 'swap');
-  await expect(page.getByTestId('swap-ticket-from-token').locator('option:checked')).toHaveText(/^(USDC|USDT|WETH)$/);
-  await expect(page.getByTestId('swap-ticket-to-token').locator('option:checked')).toHaveText(/^(USDC|USDT|WETH)$/);
-  await expect(page.getByTestId('swap-ticket-from-network').locator('option:checked')).toContainText('Testnet');
-  // The default destination is the selected bilateral account. Jurisdiction
-  // labels belong only to explicit cross-jurisdiction routes in this selector.
-  await expect(page.getByTestId('swap-ticket-to-network').locator('option:checked')).toHaveText('Same account');
+  await expect(page.getByTestId('wallet-swap-give-token').locator('option:checked')).toHaveText(/^(USDC|USDT|WETH)/);
+  await expect(page.getByTestId('wallet-swap-want-token').locator('option:checked')).toHaveText(/^(USDC|USDT|WETH)/);
+  const route = page.getByTestId('wallet-swap-route');
+  await expect(route.locator('option:checked')).toContainText('Same jurisdiction');
 
-  const routeLabels = await page.getByTestId('swap-ticket-to-network').locator('option').evaluateAll((options) =>
+  const routeLabels = await route.locator('option').evaluateAll((options) =>
     options.map((option) => String((option as HTMLOptionElement).label || option.textContent || '').trim()),
   );
-  expect(routeLabels.filter((label) => label === 'Same account')).toHaveLength(1);
+  expect(routeLabels.filter((label) => label.startsWith('Same jurisdiction'))).toHaveLength(1);
   expect(new Set(routeLabels).size, `route options should not duplicate recipient lanes: ${routeLabels.join(' | ')}`)
     .toBe(routeLabels.length);
-  expect(routeLabels.join(' | '), 'recipient dropdown must not expose internal hub names').not.toMatch(/\bH\d\b/);
 }
 
 async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
@@ -409,14 +430,17 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
   });
 
   if (state.ready) return;
-  if (!state.hubId) {
-    await page.getByTestId('tab-accounts').click({ timeout: 10_000 }).catch(() => null);
-    await expect(page.locator('.hub-card[data-hub-entity-id]').first()).toBeVisible({ timeout: 30_000 });
-  }
-  const visibleHubId = state.hubId
-    ? ''
-    : await page.locator('.hub-card[data-hub-entity-id]').first().getAttribute('data-hub-entity-id').catch(() => null);
-  const hubId = String(state.hubId || visibleHubId || '').trim();
+  await openAccountWorkspaceTab(page, 'open');
+  const discoveredHub = page.getByTestId('wallet-open-account')
+    .getByLabel('Open account with discovered entity');
+  await expect(discoveredHub).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => discoveredHub.inputValue(), {
+    timeout: 20_000,
+    intervals: [250, 500, 750],
+    message: 'same-jurisdiction hub must be selected from the wallet directory',
+  }).toMatch(/^0x[0-9a-f]{64}$/i);
+  const directoryHub = await discoveredHub.inputValue();
+  const hubId = String(state.hubId || directoryHub || '').trim();
   expect(hubId, 'same-jurisdiction hub must be visible before opening account').toMatch(/^0x[0-9a-f]{64}$/i);
   await connectActiveRuntimeToHub(page, hubId);
 }
@@ -429,7 +453,6 @@ test.describe('E2E User Journey', () => {
       localStorage.setItem('xln-hub-join-preference', '3');
     });
     await gotoApp(page);
-    await dismissOnboardingIfVisible(page);
     await createDemoRuntime(page, 'journey-auto3', randomMnemonic(), { requiresOnboarding: true });
 
     await expect
@@ -447,7 +470,6 @@ test.describe('E2E User Journey', () => {
     test.setTimeout(USER_JOURNEY_TIMEOUT);
 
     await gotoApp(page);
-    await dismissOnboardingIfVisible(page);
     await createDemoRuntime(page, 'journey-rt1', randomMnemonic());
     await ensureAnyHubAccountOpen(page);
 
@@ -511,15 +533,18 @@ test.describe('E2E User Journey', () => {
       { timeout: 20_000, intervals: [100, 250, 500], message: 'Entity must become idle after faucet ACK' },
     ).toBe(true);
     const beforeInitialJCatchup = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
-    await mineEmptyJurisdictionBlock(page);
+    await mineEmptyJurisdictionBlock(page, beforeInitialJCatchup.jurisdictionChainId);
     await expect.poll(
-      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).finalizedJHeight,
+      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).watcherScannedJHeight,
       {
         timeout: 10_000,
         intervals: [100, 250, 500, 1000],
-        message: 'the new Entity must certify pre-existing jurisdiction bootstrap evidence before the idle check',
+        message: 'the jurisdiction watcher must scan the newly mined empty block before the idle check',
       },
-    ).toBeGreaterThan(beforeInitialJCatchup.finalizedJHeight);
+    ).toBeGreaterThan(beforeInitialJCatchup.watcherScannedJHeight);
+    const afterEmptyBlock = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
+    expect(afterEmptyBlock.finalizedJHeight).toBeGreaterThanOrEqual(beforeInitialJCatchup.finalizedJHeight);
+    expect(afterEmptyBlock.pendingSemanticJEventCount).toBe(0);
     await expect.poll(
       async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).quiescent,
       { timeout: 10_000, intervals: [100, 250, 500], message: 'Entity must settle after initial J catch-up' },

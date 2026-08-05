@@ -69,7 +69,10 @@ import {
   resolveStoredRemoteRuntimeAuthKey,
   type RemoteRuntimeHubSummary,
 } from '$lib/utils/remoteRuntimeImport';
-import { waitForOpenAccountCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
+import {
+  hasUsableOpenAccountCounterpartyProfile,
+  waitForOpenAccountCounterpartyProfiles,
+} from '$lib/utils/p2pPrefetch';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
 import { parseProfile } from '@xln/runtime/entity/profile';
@@ -889,6 +892,7 @@ const createEmbeddedRuntimeAdapter = async (
       loadEntityViewPage: (entityId, height, query) => xln.loadEntityViewPageFromStorageDb(env, entityId, height, query),
       listEntityIdsAtHeight: (height) => xln.listPersistedEntityIdsAtHeight(env, height),
       readActivityPage: (opts) => xln.readPersistedRuntimeActivityPage(env, opts),
+      findPaymentRoutes: (query) => xln.findRuntimePaymentRoutes(env, query),
     }),
   });
 };
@@ -1259,16 +1263,23 @@ const announcePaymentGossipProfiles = (env: RuntimeReplica, profiles: GossipProf
   return announced;
 };
 
-export async function refreshPaymentRuntimeGossip(options: {
+export async function refreshRuntimeGossipProfiles(options: {
   reason: string;
   targetEntities: string[];
+  sourceEntityId?: string;
   onDebug?: (code: string, message: string, details?: Record<string, unknown>) => void;
 }): Promise<{ profiles: GossipProfile[]; announced: number }> {
   const env = getEnv();
   const xln = env ? await getXLN() : null;
   const targetEntities = Array.from(new Set((options.targetEntities || []).map(normalizeGossipEntityId).filter(Boolean)));
+  const sourceEntityId = normalizeGossipEntityId(options.sourceEntityId || '');
   const mergedProfiles = new Map<string, GossipProfile>();
   let announced = 0;
+
+  const profilesReady = (): boolean => !sourceEntityId || (
+    !!env && targetEntities.every(targetEntityId =>
+      hasUsableOpenAccountCounterpartyProfile(env, sourceEntityId, targetEntityId))
+  );
 
   const mergeProfiles = (profiles: GossipProfile[]): void => {
     for (const profile of profiles) {
@@ -1290,6 +1301,7 @@ export async function refreshPaymentRuntimeGossip(options: {
     });
     return { profiles: Array.from(mergedProfiles.values()), announced };
   }
+  if (profilesReady()) return { profiles: Array.from(mergedProfiles.values()), announced };
 
   try {
     await env.infrastructure?.p2p?.syncProfiles?.();
@@ -1303,7 +1315,7 @@ export async function refreshPaymentRuntimeGossip(options: {
     });
     try {
       const resolved = await xln.ensureGossipProfiles(env, targetEntities);
-      if (resolved) return { profiles: Array.from(mergedProfiles.values()), announced };
+      if (resolved && profilesReady()) return { profiles: Array.from(mergedProfiles.values()), announced };
     } catch (error) {
       errorLog.log('Payment gossip targeted ensure failed', 'Payment Gossip', { targetEntities, error });
     }
@@ -1328,8 +1340,12 @@ export async function refreshPaymentRuntimeGossip(options: {
     if (targetEntities.length > 0) {
       mergeProfiles(await fetchPaymentGossipProfiles(targetEntities));
     }
+    if (profilesReady()) return { profiles: Array.from(mergedProfiles.values()), announced };
   }
 
+  if (sourceEntityId) {
+    throw new Error('OPEN_ACCOUNT_COUNTERPARTY_PROFILE_NOT_READY: counterparty jurisdiction profile is not ready');
+  }
   return { profiles: Array.from(mergedProfiles.values()), announced };
 }
 

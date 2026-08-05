@@ -50,7 +50,20 @@ const tokenId = (value: number): number => {
 export const buildWalletOpenAccountInput = (
   owner: CommandOwner,
   targetEntityId: string,
-): RuntimeInput => ownerInput(owner, [buildOpenAccountTx(counterpartyId(targetEntityId))]);
+  initialCredit?: Readonly<{ tokenId: number; amount: bigint }>,
+): RuntimeInput => {
+  const openAccount = buildOpenAccountTx(counterpartyId(targetEntityId));
+  if (!initialCredit) return ownerInput(owner, [openAccount]);
+  if (initialCredit.amount <= 0n) throw new Error('WALLET_OPEN_ACCOUNT_CREDIT_NOT_POSITIVE');
+  return ownerInput(owner, [{
+    ...openAccount,
+    data: {
+      ...openAccount.data,
+      tokenId: tokenId(initialCredit.tokenId),
+      creditAmount: initialCredit.amount,
+    },
+  }]);
+};
 
 export const buildWalletAddTokenInput = (input: CommandOwner & Readonly<{
   counterpartyEntityId: string;
