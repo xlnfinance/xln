@@ -147,6 +147,64 @@ const terminalCrossCoverage = (
   receipt,
 );
 
+const accountScope = (identity: ReliableDeliveryReceipt['body']['identity']): string[] => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(identity.laneKey);
+  } catch {
+    throw new Error('RELIABLE_RECEIPT_ACCOUNT_LANE_INVALID');
+  }
+  const scope = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)['scope']
+    : undefined;
+  if (!Array.isArray(scope) || scope.length !== 2 || scope.some(value => typeof value !== 'string')) {
+    throw new Error('RELIABLE_RECEIPT_ACCOUNT_SCOPE_INVALID');
+  }
+  return scope.map(value => String(value).trim().toLowerCase()).sort();
+};
+
+const localAccountPassedReceipt = (
+  env: RuntimeReplica,
+  receipt: ReliableDeliveryReceipt,
+): boolean => {
+  const scope = accountScope(receipt.body.identity);
+  return [...env.state.eReplicas.values()].some(replica => [...replica.state.accounts.values()].some(account => {
+    const participants = [account.state.leftEntity, account.state.rightEntity]
+      .map(value => value.trim().toLowerCase())
+      .sort();
+    return participants[0] === scope[0] &&
+      participants[1] === scope[1] &&
+      account.currentHeight > receipt.body.identity.height;
+  }));
+};
+
+/**
+ * A delayed exact receipt for frame_ack H may arrive after a terminal plain ACK
+ * for the same H and after local Account state has committed H+1. The richer
+ * outbox item is then legitimately gone, but the plain terminal cannot cover
+ * its proposal evidence. Ignore that exact late receipt without installing it:
+ * treating it as cumulative would let a receiver poison the richer frontier,
+ * while rejecting it halts a sender for ordinary transport reordering.
+ */
+const isRetiredAccountFrameAckReceipt = (
+  env: RuntimeReplica,
+  terminalLedger: Map<string, ReliableDeliveryReceipt> | undefined,
+  receipt: ReliableDeliveryReceipt,
+): boolean => {
+  const incoming = receipt.body.identity;
+  if (receipt.body.coverage !== 'exact' || incoming.kind !== 'account-ack' ||
+      incoming.evidenceKind !== 'account-frame-ack') return false;
+  const terminal = terminalLedger?.get(senderFrontierKey(receipt));
+  if (!terminal || terminal.body.identity.evidenceKind !== 'account-ack' ||
+      terminal.body.identity.height !== incoming.height) return false;
+  assertReliableLaneCompatible(
+    terminal.body.identity,
+    incoming,
+    'RELIABLE_RECEIPT_LANE_ORDER_CONFLICT',
+  );
+  return localAccountPassedReceipt(env, receipt);
+};
+
 /** Suppress signed stale frontiers but reject same-height equivocation. */
 export const registerReliableReceiptIngress = (
   env: RuntimeReplica,
@@ -159,6 +217,16 @@ export const registerReliableReceiptIngress = (
   if (
     crossCoverage === 'lower-exact' &&
     !(env.pendingNetworkOutputs ?? []).some(output => reliableReceiptMatchesOutput(output, receipt))
+  ) {
+    return 'duplicate';
+  }
+  if (
+    !(env.pendingNetworkOutputs ?? []).some(output => reliableReceiptMatchesOutput(output, receipt)) &&
+    isRetiredAccountFrameAckReceipt(
+      env,
+      env.infrastructure?.receivedReliableTerminalWatermarks,
+      receipt,
+    )
   ) {
     return 'duplicate';
   }
@@ -222,16 +290,19 @@ export const applyReliableDeliveryReceipts = (
     for (const candidate of indexedOutputs.get(senderFrontierKey(receipt)) ?? []) {
       if (reliableReceiptCoversIdentity(receipt, candidate.identity)) pendingMatches += 1;
     }
+    const retiredAccountFrameAck = pendingMatches === 0 &&
+      isRetiredAccountFrameAckReceipt(env, terminal, receipt);
     if (
       pendingMatches === 0 &&
       !existing &&
-      crossCoverage !== 'lower-exact'
+      crossCoverage !== 'lower-exact' &&
+      !retiredAccountFrameAck
     ) {
       throw new Error(
         `RELIABLE_RECEIPT_OUTPUT_NOT_PENDING:${receipt.body.identity.kind}:${receipt.body.identity.height}`,
       );
     }
-    if (crossCoverage !== 'lower-exact') {
+    if (crossCoverage !== 'lower-exact' && !retiredAccountFrameAck) {
       applyReceiptToSenderLedgers(active, terminal, receipt);
     }
   }

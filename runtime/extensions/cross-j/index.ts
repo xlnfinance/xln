@@ -1086,6 +1086,15 @@ export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEn
 });
 
 export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
+  if (tx.type === 'cross_j_intent') {
+    return {
+      ...tx,
+      data: {
+        ...tx.data,
+        route: cloneCrossJurisdictionRoute(tx.data.route),
+      },
+    };
+  }
   if (tx.type === 'cross_pull_lock' && tx.data.crossJurisdiction) {
     return {
       ...tx,

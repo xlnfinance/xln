@@ -220,6 +220,15 @@ const applyRuntimeEntityBatch = async (
   }
   for (const [code, rejections] of rejectionGroups) {
     const inputIndexes = rejections.flatMap(rejection => rejection.inputIndexes);
+    if (code === 'CROSS_J_ACCOUNT_PAIR_DEFERRED') {
+      runtimeLog.info('crossj.atomic_pair_deferred', {
+        deferredPairCount: rejections.length,
+        deferredInputCount: inputIndexes.length,
+        deferredInputIndexes: inputIndexes.slice(0, 8),
+        detail: rejections[0]?.detail ?? code,
+      });
+      continue;
+    }
     env.warn('network', code, {
       rejectedPairCount: rejections.length,
       rejectedInputCount: inputIndexes.length,

@@ -85,6 +85,7 @@ const invalidateCommittedMapsForTx = (
       // non-committed lifecycle history; the bilateral committed maps stay
       // byte-identical until a later swap_resolve applies the cancellation.
       return;
+    case 'cross_j_intent':
     case 'rebalance_policy':
     case 'reopen_disputed':
       return;

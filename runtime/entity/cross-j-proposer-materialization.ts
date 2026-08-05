@@ -7,6 +7,7 @@ import {
 } from '../extensions/cross-j/index';
 import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
+import { safeStringify } from '../protocol/serialization';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityReplica, EntityState } from './types';
@@ -16,6 +17,20 @@ import { findAccountKey, normalizeEntityRef } from './tx/account-key';
 import { accountHasCrossPullCloseQueued } from './tx/cross-jurisdiction-helpers';
 
 const normalized = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+
+// A 1 MiB WebSocket frame can carry at most about 768 KiB of encrypted
+// plaintext after AEAD framing and base64 expansion. Keep the exact two-Account
+// transaction cohort below 640 KiB so signed Account/Entity/Runtime envelope
+// metadata has a deterministic 128 KiB reserve. A larger complete route is
+// rejected loudly below; multiple routes are partitioned without separating
+// their source and target money legs.
+export const MAX_CROSS_J_OPENING_ATOMIC_TX_BYTES = 640 * 1024;
+const UTF8_ENCODER = new TextEncoder();
+
+export const getCrossJOpeningAtomicTxByteLength = (
+  localTxs: readonly AccountTx[],
+  siblingTxs: readonly AccountTx[],
+): number => UTF8_ENCODER.encode(safeStringify([localTxs, siblingTxs])).byteLength;
 
 const nestedTxs = (tx: EntityTx): readonly EntityTx[] =>
   tx.type === 'entityCommand'
@@ -198,18 +213,34 @@ const fitOpeningCohort = (
   candidateOrderIds: readonly string[],
 ): Set<string> => {
   const selected = new Set<string>();
-  let localCount = 0;
-  let siblingCount = 0;
+  const selectedLocalTxs: AccountTx[] = [];
+  const selectedSiblingTxs: AccountTx[] = [];
   for (const orderId of candidateOrderIds) {
     const oneOrder = new Set([orderId]);
-    const nextLocalCount = selectOpeningTxs(localTxs, oneOrder).length;
-    const nextSiblingCount = selectOpeningTxs(siblingTxs, oneOrder).length;
-    if (nextLocalCount === 0 || nextSiblingCount === 0) continue;
-    if (localCount + nextLocalCount > MAX_ACCOUNT_FRAME_TXS || siblingCount + nextSiblingCount > MAX_ACCOUNT_FRAME_TXS)
+    const nextLocalTxs = selectOpeningTxs(localTxs, oneOrder);
+    const nextSiblingTxs = selectOpeningTxs(siblingTxs, oneOrder);
+    if (nextLocalTxs.length === 0 || nextSiblingTxs.length === 0) continue;
+    if (
+      selectedLocalTxs.length + nextLocalTxs.length > MAX_ACCOUNT_FRAME_TXS ||
+      selectedSiblingTxs.length + nextSiblingTxs.length > MAX_ACCOUNT_FRAME_TXS
+    )
       break;
+    const nextBytes = getCrossJOpeningAtomicTxByteLength(
+      [...selectedLocalTxs, ...nextLocalTxs],
+      [...selectedSiblingTxs, ...nextSiblingTxs],
+    );
+    if (nextBytes > MAX_CROSS_J_OPENING_ATOMIC_TX_BYTES) {
+      if (selected.size === 0) {
+        throw new Error(
+          `CROSS_J_OPENING_ROUTE_TRANSPORT_BUDGET_EXCEEDED:${orderId}:` +
+          `${nextBytes}:${MAX_CROSS_J_OPENING_ATOMIC_TX_BYTES}`,
+        );
+      }
+      break;
+    }
     selected.add(orderId);
-    localCount += nextLocalCount;
-    siblingCount += nextSiblingCount;
+    selectedLocalTxs.push(...nextLocalTxs);
+    selectedSiblingTxs.push(...nextSiblingTxs);
   }
   return selected;
 };
@@ -280,6 +311,14 @@ export const selectCrossJOpeningAccountProposalTxs = (
       const selected = selectOpeningTxs(account.mempool, selectedOrderIds);
       if (selected.length > MAX_ACCOUNT_FRAME_TXS) {
         throw new Error(`CROSS_J_OPENING_RECIPROCAL_COHORT_TOO_LARGE:${selected.length}`);
+      }
+      const reciprocal = selectOpeningTxs(siblingTxs, selectedOrderIds);
+      const atomicBytes = getCrossJOpeningAtomicTxByteLength(selected, reciprocal);
+      if (atomicBytes > MAX_CROSS_J_OPENING_ATOMIC_TX_BYTES) {
+        throw new Error(
+          `CROSS_J_OPENING_RECIPROCAL_TRANSPORT_BUDGET_EXCEEDED:` +
+          `${atomicBytes}:${MAX_CROSS_J_OPENING_ATOMIC_TX_BYTES}`,
+        );
       }
       return selected;
     }

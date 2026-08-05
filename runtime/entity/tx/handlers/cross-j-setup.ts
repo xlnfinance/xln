@@ -9,7 +9,6 @@ import {
   validatePreparedCrossJurisdictionRoute,
 } from '../../../extensions/cross-j/prepared-route';
 import {
-  buildCertifiedEntityOutput,
   pushCrossJurisdictionEntityOutput,
 } from '../cross-j-outputs';
 import {
@@ -91,17 +90,26 @@ const authorizeCrossJurisdictionIntent = (
     cloneCrossJurisdictionRoute(route),
   );
   if (role === 'source') {
-    outputs.push(buildCertifiedEntityOutput(
-      route.source.counterpartyEntityId,
-      sourceHubSignerId,
-      [{ type: 'prepareCrossJurisdictionSwap', data: { route: cloneCrossJurisdictionRoute(route) } }],
-    ));
+    const accountId = findAccountKey(state, route.source.counterpartyEntityId);
+    if (!accountId) throw new Error(`CROSS_J_SOURCE_ACCOUNT_MISSING:${route.orderId}`);
+    addMessage(state, `🌉 Cross-j swap ${route.orderId} authorized by ${role} user`);
+    return {
+      newState: state,
+      outputs,
+      accountTxs: [{
+        accountId,
+        tx: {
+          type: 'cross_j_intent',
+          data: { route: cloneCrossJurisdictionRoute(route) },
+        },
+      }],
+    };
   }
   addMessage(state, `🌉 Cross-j swap ${route.orderId} authorized by ${role} user`);
   return { newState: state, outputs };
 };
 
-const prepareRawCrossJurisdictionIntent = (
+export const prepareRawCrossJurisdictionIntent = (
   env: EntityRuntimeContext,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,

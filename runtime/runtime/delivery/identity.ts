@@ -11,7 +11,7 @@ import { hashJPrefixAttestation } from '../../jurisdiction/machine/j-prefix-cons
 
 import { assertCertifiedOutputSemanticIdentity } from '../../entity/consensus/output-certification';
 import { getCertifiedOutputNestedTxs, getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
-import { accountInputProposal } from '../../account/consensus/flush';
+import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
 
 export const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>
   hasEntityCommitCertificate(output.proposedFrame);
@@ -649,6 +649,42 @@ export const accountProposalCommittedBySender = (env: RuntimeReplica, output: Ro
       );
     }),
   );
+};
+
+const senderAccountForInput = (
+  env: RuntimeReplica,
+  input: AccountInputData,
+) => [...env.state.eReplicas.values()].flatMap(replica => {
+  if (replica.entityId.toLowerCase() !== input.fromEntityId.toLowerCase()) return [];
+  const counterpartyId = input.toEntityId.toLowerCase();
+  const account = [...replica.state.accounts.entries()].find(
+    ([candidateId]) => candidateId.toLowerCase() === counterpartyId,
+  )?.[1];
+  return account ? [account] : [];
+})[0];
+
+const accountFrameMatches = (
+  frame: { height: number; stateHash: string } | undefined,
+  expected: { height: number; stateHash: string },
+): boolean => frame?.height === expected.height &&
+  frame.stateHash.toLowerCase() === expected.stateHash.toLowerCase();
+
+/** A newer local Account frontier is deterministic proof that this signed proposal was retired. */
+export const accountProposalRetiredBySender = (env: RuntimeReplica, output: RoutedEntityInput): boolean => {
+  const txs = getEffectiveEntityInputTxs(output);
+  if (txs.length === 0) return false;
+  return txs.every(tx => {
+    if (tx.type !== 'accountInput') return false;
+    const proposal = accountInputProposal(tx.data)?.frame;
+    const account = senderAccountForInput(env, tx.data);
+    if (!proposal || !account) return false;
+    if (accountFrameMatches(account.currentFrame, proposal) || accountFrameMatches(account.pendingFrame, proposal)) {
+      return false;
+    }
+    const frontierHeight = Math.max(account.currentFrame.height, account.pendingFrame?.height ?? -1);
+    const ack = accountInputAck(tx.data);
+    return frontierHeight >= proposal.height && (!ack || account.currentFrame.height > ack.height);
+  });
 };
 
 export const buildRouteOutputKey = (output: RoutedEntityInput): string => {

@@ -2,12 +2,21 @@ import { createStructuredLogger, logError, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
 import { decodeRoutedEntityInput } from '../routing-validation';
 import { validateJInputs } from '../../storage/wal/runtime-machine-schema/j';
-import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import type {
+  PendingReliableIngress,
+  RuntimeReplica,
+  ReliableDeliveryReceipt,
+  RoutedEntityInput,
+  RuntimeInput,
+  RuntimeTx,
+} from '../types';
 import type { JInput } from '../../jurisdiction/machine/input';
 import {
   getInputReliableIdentity,
   registerReliableIngress,
 } from '../reliable-delivery';
+import type { ReliableIngressRegistration } from '../reliable-ingress-registration';
+import { ensureReliableIngressState } from '../reliable-ingress-state';
 import { compareReliableIdentityPosition } from '../reliable-frontier';
 import {
   validateExternalEntityInputTargets,
@@ -16,7 +25,10 @@ import {
 import { splitRoutedOutputByDeliveryLane } from '../output-routing';
 import { assertScheduledWakeTxAuthorized } from '../scheduled-wake';
 import { validateRuntimeInputShapeAndLimits } from '../input-validation';
-import { selectPotentialAtomicCrossJInputIndexes } from './cross-j-atomic-admission';
+import {
+  selectPotentialAtomicCrossJInputIndexes,
+  selectPotentialAtomicCrossJInputPairs,
+} from './cross-j-atomic-admission';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -151,7 +163,41 @@ export const orderReliableEntityInputsWithinSourceLanes = (
   return ordered;
 };
 
-const registerReliableEntityInputs = (
+const clonePendingReliableIngress = (
+  env: RuntimeReplica,
+): Map<string, PendingReliableIngress> =>
+  new Map(
+    [...(ensureReliableIngressState(env).pendingReliableIngress?.entries() ?? [])]
+      .map(([key, pending]) => [key, {
+        identity: pending.identity,
+        targetRuntimeIds: new Set(pending.targetRuntimeIds),
+      }]),
+  );
+
+const registerOneReliableEntityInput = (
+  env: RuntimeReplica,
+  input: RoutedEntityInput,
+  allowContiguousPendingAccountAck: boolean,
+): { sourceRuntimeId: string; registration: ReliableIngressRegistration } => {
+  const sourceRuntimeId = normalizeRuntimeId(input.from);
+  if (!sourceRuntimeId || !getInputReliableIdentity(input)) {
+    return { sourceRuntimeId, registration: { kind: 'ordinary' } };
+  }
+  return {
+    sourceRuntimeId,
+    registration: registerReliableIngress(env, sourceRuntimeId, input, {
+      allowContiguousPendingAccountAck,
+    }),
+  };
+};
+
+/**
+ * Reliable identities are per Account lane, but a cross-j envelope is one
+ * authenticated two-Account unit. If a preceding plain ACK fences either leg,
+ * reserve neither leg: admitting its sibling alone would turn ordinary
+ * transport ordering into a false structural-security incident.
+ */
+export const registerReliableEntityInputs = (
   env: RuntimeReplica,
   inputs: RoutedEntityInput[],
   isReplay: boolean,
@@ -159,6 +205,24 @@ const registerReliableEntityInputs = (
   const atomicIndexes = selectPotentialAtomicCrossJInputIndexes(inputs);
   const entityInputs: RoutedEntityInput[] = [];
   const immediateReliableReceipts: PreparedRuntimeIngress['immediateReliableReceipts'] = [];
+
+  const atomicPairs = selectPotentialAtomicCrossJInputPairs(inputs);
+  const atomicPairByFirstIndex = new Map<number, readonly [number, number]>();
+  const atomicPairTrailingIndexes = new Set<number>();
+  for (const pair of atomicPairs) {
+    const indexes = [pair.sourceInputIndex, pair.targetInputIndex]
+      .sort((left, right) => left - right) as [number, number];
+    if (
+      atomicPairByFirstIndex.has(indexes[0]) ||
+      atomicPairTrailingIndexes.has(indexes[0]) ||
+      atomicPairByFirstIndex.has(indexes[1]) ||
+      atomicPairTrailingIndexes.has(indexes[1])
+    ) {
+      throw new Error('RELIABLE_INGRESS_ATOMIC_PAIR_OVERLAP');
+    }
+    atomicPairByFirstIndex.set(indexes[0], indexes);
+    atomicPairTrailingIndexes.add(indexes[1]);
+  }
 
   for (const [inputIndex, input] of inputs.entries()) {
     if (isReplay) {
@@ -179,16 +243,30 @@ const registerReliableEntityInputs = (
       entityInputs.push(input);
       continue;
     }
-    const sourceRuntimeId = normalizeRuntimeId(input.from);
-    if (!sourceRuntimeId || !getInputReliableIdentity(input)) {
-      entityInputs.push(input);
+    if (atomicPairTrailingIndexes.has(inputIndex)) continue;
+    const atomicPair = atomicPairByFirstIndex.get(inputIndex);
+    if (atomicPair) {
+      const pendingBefore = clonePendingReliableIngress(env);
+      const registrations = atomicPair.map(index =>
+        registerOneReliableEntityInput(env, inputs[index]!, true));
+      const complete = registrations.every(({ registration }) =>
+        registration.kind === 'ordinary' || registration.kind === 'enqueue');
+      if (complete) {
+        entityInputs.push(...atomicPair.map(index => inputs[index]!));
+      } else {
+        ensureReliableIngressState(env).pendingReliableIngress = pendingBefore;
+        runtimeLog.info('crossj.atomic_reliable_ingress_deferred', {
+          inputIndexes: atomicPair,
+          registrationKinds: registrations.map(entry => entry.registration.kind),
+        });
+      }
       continue;
     }
-    // Registration mutates only the isolated candidate. The live Runtime is
-    // untouched until the frame's WAL commit succeeds.
-    const registration = registerReliableIngress(env, sourceRuntimeId, input, {
-      allowContiguousPendingAccountAck: atomicIndexes.has(inputIndex),
-    });
+    const { sourceRuntimeId, registration } = registerOneReliableEntityInput(
+      env,
+      input,
+      atomicIndexes.has(inputIndex),
+    );
     if (registration.kind === 'ordinary' || registration.kind === 'enqueue') {
       entityInputs.push(input);
     } else if (registration.kind === 'receipt') {

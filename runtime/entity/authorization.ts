@@ -84,7 +84,6 @@ const individualTxTypes = new Set<EntityTx['type']>([
 
 const crossEntityCertifiedTxTypes = new Set<EntityTx['type']>([
   'accountInput',
-  'prepareCrossJurisdictionSwap',
 ]);
 
 export const isEntityProtocolTx = (tx: EntityTx): boolean => protocolTxTypes.has(tx.type);
@@ -478,10 +477,6 @@ export const assertCertifiedOutputSemanticAuthority = (
       assertSemanticSource(tx.type, source, [tx.data.fromEntityId]);
       assertSemanticTarget(tx.type, target, tx.data.toEntityId);
       return;
-    case 'prepareCrossJurisdictionSwap':
-      assertSemanticSource(tx.type, source, [tx.data.route.source.entityId]);
-      assertSemanticTarget(tx.type, target, tx.data.route.source.counterpartyEntityId);
-      return;
     case 'registerCrossJurisdictionSwap': {
       const route = tx.data.route;
       assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
@@ -522,6 +517,9 @@ export const assertRuntimeOutputAuthorization = (
   for (const tx of txs) {
     if (protocolTxTypes.has(tx.type)) {
       throw new Error(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
+    }
+    if (tx.type === 'prepareCrossJurisdictionSwap') {
+      throw new Error('RUNTIME_OUTPUT_CROSS_J_INTENT_MUST_USE_ACCOUNT');
     }
     const suppliedRoute =
       tx.type === 'crossJurisdictionFillNotice' ||

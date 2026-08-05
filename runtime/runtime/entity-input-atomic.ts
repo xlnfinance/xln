@@ -23,6 +23,7 @@ import {
   stageExternalEntityInput,
   type StagedEntityInput,
 } from './entity-input-staging';
+import { safeStringify } from '../protocol/serialization';
 
 export const atomicPairInputsMatch = (
   first: RoutedEntityInput,
@@ -87,6 +88,69 @@ const stagedAtomicLegCommitted = (staged: StagedEntityInput): boolean => {
     frame.height === expected.height &&
     frame.stateHash === expected.stateHash,
   );
+};
+
+const stagedAtomicLegHasSimultaneousProposal = (
+  env: RuntimeReplica,
+  staged: StagedEntityInput,
+): boolean => {
+  const proposals = getEffectiveEntityInputTxs(staged.input).flatMap(tx => {
+    if (tx.type !== 'accountInput') return [];
+    const proposal = accountInputProposal(tx.data)?.frame;
+    return proposal ? [{ counterpartyEntityId: tx.data.fromEntityId.toLowerCase(), proposal }] : [];
+  });
+  if (proposals.length !== 1) return false;
+  const { counterpartyEntityId, proposal } = proposals[0]!;
+  const priorReplica = env.state.eReplicas.get(staged.replicaKey);
+  const priorAccount = priorReplica?.state.accounts.get(counterpartyEntityId);
+  const pending = priorAccount?.pendingFrame;
+  return Boolean(
+    pending &&
+      pending.height === proposal.height &&
+      String(pending.stateHash || '').toLowerCase() !==
+        String(proposal.stateHash || '').toLowerCase(),
+  );
+};
+
+const summarizeStagedAtomicLeg = (
+  env: RuntimeReplica,
+  staged: StagedEntityInput,
+) => {
+  const expected = expectedAtomicAccountFrame(staged.input);
+  const priorReplica = env.state.eReplicas.get(staged.replicaKey);
+  const priorAccount = expected
+    ? priorReplica?.state.accounts.get(expected.counterpartyEntityId)
+    : undefined;
+  const nextAccount = expected
+    ? staged.result.nextReplica.state.accounts.get(expected.counterpartyEntityId)
+    : undefined;
+  return {
+    inputIndex: staged.inputIndex,
+    entityId: staged.input.entityId,
+    outcome: staged.result.outcome,
+    entityFrameCommitted: staged.result.entityFrameCommitted,
+    expected,
+    prior: priorAccount
+      ? {
+          currentHeight: priorAccount.currentFrame.height,
+          currentStateHash: priorAccount.currentFrame.stateHash,
+          pendingHeight: priorAccount.pendingFrame?.height ?? null,
+          pendingStateHash: priorAccount.pendingFrame?.stateHash ?? null,
+        }
+      : null,
+    next: nextAccount
+      ? {
+          currentHeight: nextAccount.currentFrame.height,
+          currentStateHash: nextAccount.currentFrame.stateHash,
+          pendingHeight: nextAccount.pendingFrame?.height ?? null,
+          pendingStateHash: nextAccount.pendingFrame?.stateHash ?? null,
+        }
+      : null,
+    committedAccountFrames: collectCommittedAccountFrames(
+      staged.input,
+      staged.result.nextReplica,
+    ),
+  };
 };
 
 const atomicPairProtocolRejection = (
@@ -190,15 +254,26 @@ export const applyAtomicEntityInputPair = async (
       `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION:${staged[0].replicaKey}`,
     );
   }
-  if (!staged.every(stagedAtomicLegCommitted)) {
+  const committedLegs = staged.map(stagedAtomicLegCommitted);
+  if (!committedLegs.every(Boolean)) {
     if (options.isReplay) {
       throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED');
     }
+    const deferredBySimultaneousProposal = staged.every((entry, index) =>
+      committedLegs[index] || stagedAtomicLegHasSimultaneousProposal(env, entry));
+    const detail = safeStringify({
+      reason: deferredBySimultaneousProposal
+        ? 'simultaneous-account-proposal'
+        : 'stale-or-rejected-account-leg',
+      legs: staged.map(entry => summarizeStagedAtomicLeg(env, entry)),
+    });
     recordAtomicPairRejection(
       context,
       indexes,
-      'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED',
-      'One or both signed Account legs were stale or rejected',
+      deferredBySimultaneousProposal
+        ? 'CROSS_J_ACCOUNT_PAIR_DEFERRED'
+        : 'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED',
+      detail,
     );
     await applyRetainedNonAtomicInputs(env, pair, indexes, options, context);
     return;

@@ -53,6 +53,7 @@ export interface RuntimeEntityInputApplyResult {
     inputIndexes: [number, number];
     code:
       | 'CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED'
+      | 'CROSS_J_ACCOUNT_PAIR_DEFERRED'
       | 'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED';
     detail: string;
   }>;

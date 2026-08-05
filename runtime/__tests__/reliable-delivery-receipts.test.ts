@@ -31,7 +31,10 @@ import {
 } from '../entity/consensus/output-certification';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
-import { orderReliableEntityInputsWithinSourceLanes } from '../runtime/frame/input-admission';
+import {
+  orderReliableEntityInputsWithinSourceLanes,
+  registerReliableEntityInputs,
+} from '../runtime/frame/input-admission';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import {
@@ -48,13 +51,18 @@ import {
   processRuntime,
 } from '../runtime';
 import { readStorageFrameRecord } from '../storage';
-import { buildRouteOutputKey, getReliableOutputIdentity } from '../runtime/output-routing';
+import {
+  buildRouteOutputKey,
+  getReliableOutputIdentity,
+  pruneReceiptedReliableOutputs,
+} from '../runtime/output-routing';
 import { computeAccountStateRoot } from '../account/state-root';
 import type { DeliverableEntityInput, RuntimeReplica, ReliableDeliveryReceipt } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';
 import { makeAccount } from './helpers/cross-j';
+import { selectPotentialCrossJAccountInputPairs } from '../runtime/entity-routing';
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -530,6 +538,88 @@ describe('durable scoped reliable delivery receipts', () => {
     }).kind).toBe('pending');
   });
 
+  test('an atomic cross-j envelope reserves neither sibling while a same-height plain ACK is pending', () => {
+    const sender = runtime('reliable-cross-j-atomic-pending-sender');
+    const receiver = runtime('reliable-cross-j-atomic-pending-receiver');
+    const plain = {
+      ...accountAckOutput(receiver.runtimeId!, 5),
+      from: sender.runtimeId,
+      sourceRuntimeFrame: { height: 20, timestamp: 20 },
+    };
+    expect(registerReliableEntityInputs(receiver, [plain], false).entityInputs).toEqual([plain]);
+
+    const orderId = 'atomic-pending-order';
+    const routeHash = `0x${'47'.repeat(32)}`;
+    const route = {
+      orderId,
+      routeHash,
+      sourcePull: { pullId: 'source-pull' },
+      targetPull: { pullId: 'target-pull' },
+    } as never;
+    const source = {
+      ...accountFrameAckOutput(receiver.runtimeId!, 5),
+      from: sender.runtimeId,
+      sourceRuntimeFrame: { height: 21, timestamp: 21 },
+    };
+    const sourceAccountInput = source.entityTxs?.[0];
+    if (sourceAccountInput?.type !== 'accountInput' || sourceAccountInput.data.kind !== 'frame_ack') {
+      throw new Error('TEST_ATOMIC_PENDING_SOURCE_ACCOUNT_INPUT_MISSING');
+    }
+    sourceAccountInput.data.proposal.frame.accountTxs = [
+      {
+        type: 'cross_pull_lock',
+        data: {
+          pullId: 'source-pull',
+          fullHash: `0x${'48'.repeat(32)}`,
+          partialRoot: `0x${'49'.repeat(32)}`,
+          crossJurisdiction: { leg: 'source', orderId, routeHash },
+          crossJurisdictionRoute: route,
+        },
+      },
+      {
+        type: 'swap_offer',
+        data: { offerId: orderId, crossJurisdiction: { orderId, routeHash } },
+      },
+    ] as never;
+
+    const target = {
+      ...accountFrameAckOutput(receiver.runtimeId!, 3),
+      entityId: entityId('b3'),
+      signerId: signerId('b4'),
+      from: sender.runtimeId,
+      sourceRuntimeFrame: { height: 21, timestamp: 21 },
+    };
+    const targetAccountInput = target.entityTxs?.[0];
+    if (targetAccountInput?.type !== 'accountInput' || targetAccountInput.data.kind !== 'frame_ack') {
+      throw new Error('TEST_ATOMIC_PENDING_TARGET_ACCOUNT_INPUT_MISSING');
+    }
+    targetAccountInput.data.toEntityId = target.entityId;
+    targetAccountInput.data.fromEntityId = entityId('d3');
+    targetAccountInput.data.proposal.frame.accountTxs = [{
+      type: 'cross_pull_lock',
+      data: {
+        pullId: 'target-pull',
+        fullHash: `0x${'48'.repeat(32)}`,
+        partialRoot: `0x${'49'.repeat(32)}`,
+        crossJurisdiction: { leg: 'target', orderId, routeHash },
+        crossJurisdictionRoute: route,
+      },
+    }] as never;
+    const pair = selectPotentialCrossJAccountInputPairs([source, target])[0];
+    if (!pair) throw new Error('TEST_ATOMIC_PENDING_STRUCTURAL_PAIR_MISSING');
+    const atomicPair = { phase: 'proposal' as const, pairKey: pair.pairKey };
+    const cohort = [source, target].map(input => ({
+      ...input,
+      atomicCrossJurisdictionPair: atomicPair,
+    }));
+
+    const admitted = registerReliableEntityInputs(receiver, cohort, false);
+    expect(admitted.entityInputs).toEqual([]);
+    expect(admitted.immediateReliableReceipts).toEqual([]);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size).toBe(1);
+    expect(registerReliableIngress(receiver, sender.runtimeId!, target).kind).toBe('enqueue');
+  });
+
   test('an Account ACK staged behind another Entity transition stays pending until its exact frame commits', () => {
     const sender = runtime('reliable-receipt-staged-account-ack-sender');
     const receiver = runtime('reliable-receipt-staged-account-ack-receiver');
@@ -985,6 +1075,64 @@ describe('durable scoped reliable delivery receipts', () => {
       .toEqual({ removed: 1 });
     expect(sender.pendingNetworkOutputs).toEqual([]);
     expect(receiverFrontierCount(receiver)).toBe(1);
+  });
+
+  test('delayed frame_ack receipt is harmless after its plain ACK terminal and a competing successor retires it', () => {
+    const sender = runtime('reliable-receipt-sender-retired-frame-ack');
+    const receiverSeed = 'reliable-receipt-receiver-retired-frame-ack';
+    const terminalReceiver = runtime(receiverSeed);
+    const exactReceiver = runtime(receiverSeed);
+    const plain = accountAckOutput(terminalReceiver.runtimeId!);
+    const richer = accountFrameAckOutput(terminalReceiver.runtimeId!);
+    const terminalReceipt = commitTerminalAccountAtReceiver(
+      terminalReceiver,
+      sender.runtimeId!,
+      plain,
+      7,
+      '0xaccount-frame-7',
+    )[0]!.receipt;
+    const exactReceipt = commitAtReceiver(exactReceiver, sender.runtimeId!, richer)[0]!.receipt;
+    sender.pendingNetworkOutputs = [plain, richer];
+
+    expect(terminalReceipt.body.coverage).toBe('terminal');
+    expect(exactReceipt.body).toMatchObject({
+      coverage: 'exact',
+      identity: { height: 7, evidenceKind: 'account-frame-ack' },
+    });
+    expect(applyReliableDeliveryReceipts(sender, [terminalReceipt])).toEqual({ removed: 1 });
+
+    const sourceEntityId = entityId('d1');
+    const targetEntityId = entityId('b1');
+    const account = makeAccount(sourceEntityId, targetEntityId);
+    account.currentHeight = 8;
+    account.currentFrame = {
+      ...account.currentFrame,
+      height: 8,
+      prevFrameHash: '0xaccount-frame-7',
+      stateHash: '0xcompeting-account-frame-8',
+    };
+    sender.state.eReplicas.set(`${sourceEntityId}:${signerId('d2')}`, {
+      entityId: sourceEntityId,
+      signerId: signerId('d2'),
+      entityEncPubKey: '',
+      isProposer: false,
+      mempool: [],
+      state: {
+        entityId: sourceEntityId,
+        height: 0,
+        prevFrameHash: '',
+        lastFinalizedJHeight: 0,
+        jBlockChain: [],
+        accounts: new Map([[targetEntityId, account]]),
+      },
+    } as unknown as EntityReplica);
+    sender.pendingNetworkOutputs = pruneReceiptedReliableOutputs(sender, sender.pendingNetworkOutputs);
+
+    expect(sender.pendingNetworkOutputs).toEqual([]);
+    expect(registerReliableReceiptIngress(sender, exactReceipt)).toBe('duplicate');
+    expect(applyReliableDeliveryReceipts(sender, [exactReceipt])).toEqual({ removed: 0 });
+    expect(sender.infrastructure?.receivedReliableReceiptLedger?.size).toBe(0);
+    expect(sender.infrastructure?.receivedReliableTerminalWatermarks?.size).toBe(1);
   });
 
   test('frame_ack rejects same-variant equivocation and any later plain-ACK regression', () => {

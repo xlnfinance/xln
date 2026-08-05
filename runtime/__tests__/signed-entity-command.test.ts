@@ -1324,6 +1324,12 @@ describe('signed Entity command admission', () => {
       stateFor(sourceHub),
     )).not.toThrow();
     expect(() => assertCertifiedEntityOutputAuthorization(
+      sourceUser,
+      sourceHub,
+      [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
+      stateFor(sourceHub),
+    )).toThrow('CONSENSUS_OUTPUT_CROSS_ENTITY_TX_FORBIDDEN:prepareCrossJurisdictionSwap');
+    expect(() => assertCertifiedEntityOutputAuthorization(
       sourceHub,
       targetHub,
       [targetRegistration],

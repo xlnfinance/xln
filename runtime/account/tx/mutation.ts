@@ -30,6 +30,7 @@ import {
 } from './handlers/settle-transition';
 import { handleJEventClaim } from './handlers/j-event-claim';
 import { handleLendingAccountTx } from './handlers/lending';
+import { handleCrossJIntent } from './handlers/cross-j-intent';
 
 type MutationContext = {
   account: AccountReplica;
@@ -199,6 +200,7 @@ export const applyAccountTxMutation = async (
   if (freezeError) return { success: false, events: [freezeError], error: freezeError };
 
   switch (tx.type) {
+    case 'cross_j_intent': return handleCrossJIntent(account, tx, byLeft);
     case 'add_delta': return handleAddDelta(account.state, tx);
     case 'set_credit_limit': return handleSetCreditLimit(account.state, tx, byLeft);
     case 'direct_payment': return handleDirectPayment(account, tx, byLeft);

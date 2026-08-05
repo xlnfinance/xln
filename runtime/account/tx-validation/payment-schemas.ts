@@ -1,6 +1,7 @@
 import type { AccountTxDataSchema } from './fields';
 
 export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
+  cross_j_intent: { required: { route: 'record' } },
   direct_payment: {
     required: {
       tokenId: 'integer', amount: 'bigint', route: 'stringArray', deliveryMode: 'string',

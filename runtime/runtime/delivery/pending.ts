@@ -25,6 +25,7 @@ import { reliableReceiptCoversIdentity, senderFrontierKey, senderFrontierKeyForI
 import { selectPotentialCrossJAccountInputPairs } from '../entity-routing';
 import {
   accountProposalCommittedBySender,
+  accountProposalRetiredBySender,
   accountProposalEvidenceRank,
   accountProposalOutputIdentity,
   assertReliableEvidenceCompatible,
@@ -512,6 +513,16 @@ export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: strin
   return validators.map(readBoardValidatorSignerId).filter(Boolean);
 };
 
+const bindResolvedPendingRuntimeIds = (
+  env: RuntimeReplica,
+  outputs: readonly RoutedEntityInput[],
+  deps: RuntimeOutputRoutingDeps,
+): RoutedEntityInput[] => outputs.map(output => {
+  if (normalizeRuntimeId(output.runtimeId)) return output;
+  const runtimeId = normalizeRuntimeId(deps.resolveRuntimeIdForEntity(env, output.entityId));
+  return runtimeId ? { ...output, runtimeId } : output;
+});
+
 export const splitPendingOutputsByRetryWindow = (
   env: RuntimeReplica,
   pending: RoutedEntityInput[],
@@ -527,7 +538,13 @@ export const splitPendingOutputsByRetryWindow = (
   // account-ACK and J-finality heights are not mutually comparable; a
   // universal per-Entity queue can deadlock the protocols against each other.
   const blockedReliableLanes = new Set<string>();
-  const orderedPending = buildPendingNetworkOutputs(pending);
+  // Atomic siblings are grouped before ordinary routing. Resolve each target
+  // independently here so one unbound replacement leg cannot wait forever
+  // beside its already-bound sibling. Never copy the sibling destination:
+  // only an authenticated hint/profile may establish this routing metadata.
+  const orderedPending = buildPendingNetworkOutputs(
+    bindResolvedPendingRuntimeIds(env, pending, deps),
+  );
   const readyAccountAckLanes = new Set(
     orderedPending.flatMap(output => {
       const identity = getReliableOutputIdentity(output);
@@ -589,7 +606,7 @@ export const splitPendingOutputsByRetryWindow = (
 };
 
 export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeOutputRoutingDeps): number | null => {
-  const pending = env.pendingNetworkOutputs ?? [];
+  const pending = bindResolvedPendingRuntimeIds(env, env.pendingNetworkOutputs ?? [], deps);
   if (pending.length === 0) return null;
   const meta = getDeferredNetworkMeta(env, deps);
   if (
@@ -808,12 +825,17 @@ export const pruneReceiptedReliableOutputs = (
   outputs: RoutedEntityInput[],
   appliedReceipts: readonly ReliableDeliveryReceipt[] = [],
 ): RoutedEntityInput[] => {
+  const liveOutputs = outputs.filter(output => {
+    if (!accountProposalRetiredBySender(env, output)) return true;
+    env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+    return false;
+  });
   // Proposal cohorts intentionally have no transport receipt. Their business
   // terminal is the ordinary bilateral Account ACK that commits the exact
   // proposed frame on both Hub sibling Entities. Once both frames are current,
   // keep no transport retry state: retaining the original proposal envelope
   // would either leak outbox entries forever or invite a manual duplicate.
-  const uncommittedOutputs = groupAtomicCrossJAdmissionOutputs(outputs).flatMap(unit => {
+  const uncommittedOutputs = groupAtomicCrossJAdmissionOutputs(liveOutputs).flatMap(unit => {
     const committedProposalCohort =
       unit.atomic &&
       unit.complete &&

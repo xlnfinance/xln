@@ -85,6 +85,10 @@ export const selectPotentialAtomicCrossJInputIndexes = (
       .flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]),
   );
 
+export const selectPotentialAtomicCrossJInputPairs = (
+  inputs: readonly RoutedEntityInput[],
+) => selectPotentialCrossJAccountInputPairs(inputs);
+
 export const atomicCrossJPairIndexesThatDidNotCommit = (
   pairs: CrossJSelection['pairs'],
   outcomes: EntityInputOutcomes,

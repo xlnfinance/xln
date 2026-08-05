@@ -32,6 +32,7 @@ import {
 } from '../cross-j-outputs';
 import { applyCrossJurisdictionBookProgressToState } from './cross-j-book-order';
 import { handleAdmitCrossJurisdictionBookOrderEntityTx } from './cross-j-book-order';
+import { prepareRawCrossJurisdictionIntent } from './cross-j-setup';
 import type { SwapOfferEvent } from './account';
 
 const crossJFollowupLog = createStructuredLogger('crossj.followup');
@@ -40,6 +41,30 @@ const normalizeEntityRef = (value: string): string => String(value || '').toLowe
 
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
   getCrossJurisdictionCommittedProofRatio(route);
+
+const applyIntentFollowup = (
+  env: EntityRuntimeContext,
+  newState: EntityState,
+  counterpartyId: string,
+  accountTx: Extract<AccountTx, { type: 'cross_j_intent' }>,
+  outputs: EntityInput[],
+): boolean => {
+  const route = cloneCrossJurisdictionRoute(accountTx.data.route);
+  const current = normalizeEntityRef(newState.entityId);
+  const counterparty = normalizeEntityRef(counterpartyId);
+  const sourceUser = normalizeEntityRef(route.source.entityId);
+  const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
+  if (!(
+    (current === sourceUser && counterparty === sourceHub) ||
+    (current === sourceHub && counterparty === sourceUser)
+  )) {
+    throw new Error(`CROSS_J_INTENT_ACCOUNT_PARTICIPANTS_INVALID:${route.orderId}:${current}:${counterparty}`);
+  }
+  if (current === sourceHub) {
+    prepareRawCrossJurisdictionIntent(env, newState, route, outputs);
+  }
+  return true;
+};
 
 const assertTerminalPullReplay = (
   route: CrossJurisdictionSwapRoute,
@@ -746,6 +771,9 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
   storageChanges: RuntimeOverlayRecord[],
   candidateEffects: EntityCandidateEffect[],
 ): boolean {
+  if (accountTx.type === 'cross_j_intent') {
+    return applyIntentFollowup(env, newState, counterpartyId, accountTx, outputs);
+  }
   if (accountTx.type === 'cross_pull_lock') {
     return queueBookAdmissionOnCommittedPull(
       env,

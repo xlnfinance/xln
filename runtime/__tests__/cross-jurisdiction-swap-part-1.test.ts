@@ -1,35 +1,25 @@
 import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
-
 import { ethers } from 'ethers';
-
 import { applyEntityTx } from '../entity/tx/apply';
-
 import { applyAccountTx } from '../account/tx/apply';
-
-import { proposeAccountFrame } from '../account/consensus/propose';
-
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
-
 import { computeAccountStateRoot } from '../account/state-root';
-
 import {
   collectCommittedCrossJurisdictionCancelAcks,
   processOrderbookCancels,
   routeRemoteCrossJurisdictionBookCancels,
 } from '../entity/tx/handlers/account';
-
 import { applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
-
 import {
   appendDefaultProposerCrossJMaterializations,
   entityTxContainsCrossJMaterialization,
+  getCrossJOpeningAtomicTxByteLength,
+  MAX_CROSS_J_OPENING_ATOMIC_TX_BYTES,
   selectCrossJCommitPhaseTxs,
   selectCrossJOpeningAccountProposalTxs,
 } from '../entity/cross-j-proposer-materialization';
-
 import { prepareLocallyAuthoredEntityTxs } from '../entity/command';
-
 import {
   createEmptyEnv,
   handleInboundP2PEntityInputs,
@@ -37,11 +27,8 @@ import {
   submitCrossJurisdictionIntent,
   submitCrossJurisdictionSwap,
 } from '../runtime';
-
 import { buildCrossJurisdictionSwapSubmission } from '../runtime/jurisdiction-api';
-
 import { hashHtlcSecret } from '../protocol/htlc/utils';
-
 import type { AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica } from '../entity/types';
@@ -49,19 +36,13 @@ import type { RoutedEntityInput } from '../runtime/types';
 import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
-
 import { generateLazyEntityId } from '../entity/factory';
-
 import { createDefaultDelta } from '../account/delta';
-
 import { cloneAccountReplica } from '../account/state-clone';
 import { cloneEntityReplica } from '../entity/replica-clone';
 import { cloneEntityState } from '../entity/state-clone';
-
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
-
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/handlers/account-cross-j-followups';
-
 import {
   CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS,
   CROSS_J_MIN_TARGET_RESPONSE_WINDOW_MS,
@@ -83,7 +64,6 @@ import {
   withCrossJurisdictionCloseProofProgress,
   cloneCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
-
 import {
   buildCrossJurisdictionCancelAck,
   buildCrossJurisdictionFillAck,
@@ -92,38 +72,23 @@ import {
   mergeCrossJurisdictionBookAdmission,
   resolveCrossJurisdictionExecutionPriceTicks,
 } from '../extensions/cross-j/orderbook';
-
 import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
-
 import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
-
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
 } from '../extensions/cross-j/market';
-
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account/utils';
-
 import { normalizeEntitySwapTradingPairs } from '../runtime/swap-pairs';
-
 import { verifyHashLadderBinary } from '../protocol/htlc/hash-ladder';
-
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../orderbook/types';
-
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../protocol/dispute/proof-builder';
-
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../protocol/dispute/arguments';
-
 import { signEntityHashes } from '../hanko/signing';
-
 import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output-certification';
-
 import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../entity/tx/j-events-htlc';
-
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
-
 import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching-cross';
-
 import {
   createRuntimeOutputRoutingDeps,
   registerEntityRuntimeHintWithDeps,
@@ -132,7 +97,6 @@ import {
   validateInboundP2PEntityInputsEnvelope,
   type RuntimeEntityRoutingDeps,
 } from '../runtime/entity-routing';
-
 import {
   buildPendingNetworkOutputs,
   buildRouteOutputKey,
@@ -143,8 +107,6 @@ import {
   splitPendingOutputsByRetryWindow,
 } from '../runtime/output-routing';
 import { groupAtomicCrossJAdmissionOutputs } from '../runtime/delivery/pending';
-
-
 import {
   addReplica,
   addr,
@@ -159,25 +121,16 @@ import {
   secret,
   prepareJEventInput,
 } from './helpers/cross-j';
-
 import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
-
 import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
-
 import { collectLocalProfileEncryptionAnnouncements } from '../entity/profile-encryption';
-
 import { LIMITS } from '../config/constants';
-
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
-
 import { assertRuntimeOutputAuthorization } from '../entity/authorization';
 import { getConsumptionNodeStore } from '../entity/consumption-store';
 import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
-
 import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
-
 import { createDueScheduledWakeInputs } from '../runtime/scheduled-wake';
-
 import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../entity/scheduler';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
@@ -783,6 +736,138 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(targetAccount.mempool).toHaveLength(2);
   });
 
+  test('opening proposal partitions one exact sibling cohort below the encrypted transport budget', () => {
+    const env = createEmptyEnv('cross-j-opening-transport-budget');
+    const sourceJ = makeJurisdiction('Source', 1, '11', '12');
+    const targetJ = makeJurisdiction('Target', 8453, '21', '22');
+    const sourceHub = entity('71');
+    const targetHub = entity('72');
+    const sourceUser = entity('73');
+    const targetUser = entity('74');
+    const sourceHubSigner = addr('91');
+    const targetHubSigner = addr('92');
+    const sourceUserSigner = addr('93');
+    const targetUserSigner = addr('94');
+    const sourceState = makeState(sourceHub, sourceHubSigner, sourceJ, sourceUser);
+    const targetState = makeState(targetHub, targetHubSigner, targetJ, targetUser);
+    const sourceAccount = sourceState.accounts.get(sourceUser)!;
+    const targetAccount = targetState.accounts.get(targetUser)!;
+
+    for (let index = 0; index < 12; index += 1) {
+      const orderId = `cross-j-opening-budget-${String(index).padStart(2, '0')}`;
+      const route = withCanonicalCrossJurisdictionRouteHash({
+        orderId,
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        sourceSignerId: sourceUserSigner,
+        sourceHubSignerId: sourceHubSigner,
+        targetHubSignerId: targetHubSigner,
+        targetSignerId: targetUserSigner,
+        source: {
+          jurisdiction: jref(sourceJ),
+          entityId: sourceUser,
+          counterpartyEntityId: sourceHub,
+          tokenId: 1,
+          amount: 1_000n + BigInt(index),
+        },
+        target: {
+          jurisdiction: jref(targetJ),
+          entityId: targetHub,
+          counterpartyEntityId: targetUser,
+          tokenId: 1,
+          amount: 900n + BigInt(index),
+        },
+        sourcePull: {
+          pullId: `source-${orderId}`,
+          tokenId: 1,
+          amount: 1_000n + BigInt(index),
+          signedAmount: -(1_000n + BigInt(index)),
+          revealedUntilTimestamp: 50_000,
+          fullHash: secret('a1'),
+          partialRoot: secret('a2'),
+        },
+        targetPull: {
+          pullId: `target-${orderId}`,
+          tokenId: 1,
+          amount: 900n + BigInt(index),
+          signedAmount: -(900n + BigInt(index)),
+          revealedUntilTimestamp: 60_000,
+          fullHash: secret('a1'),
+          partialRoot: secret('a2'),
+        },
+        status: 'resting',
+        createdAt: 1_000,
+        updatedAt: 1_000,
+        memo: `route-${index}:` + 'x'.repeat(24_000),
+      });
+      sourceAccount.mempool.push(
+        {
+          type: 'cross_pull_lock',
+          data: {
+            pullId: route.sourcePull!.pullId,
+            tokenId: 1,
+            amount: route.sourcePull!.signedAmount,
+            revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+            fullHash: route.sourcePull!.fullHash,
+            partialRoot: route.sourcePull!.partialRoot,
+            crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+            crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
+          },
+        },
+        {
+          type: 'swap_offer',
+          data: {
+            offerId: orderId,
+            giveTokenId: 1,
+            giveAmount: route.source.amount,
+            wantTokenId: 1,
+            wantAmount: route.target.amount,
+            timeInForce: 0,
+            crossJurisdiction: cloneCrossJurisdictionRoute(route),
+          },
+        },
+      );
+      targetAccount.mempool.push({
+        type: 'cross_pull_lock',
+        data: {
+          pullId: route.targetPull!.pullId,
+          tokenId: 1,
+          amount: route.targetPull!.signedAmount,
+          revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
+          fullHash: route.targetPull!.fullHash,
+          partialRoot: route.targetPull!.partialRoot,
+          crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
+          crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
+        },
+      });
+    }
+    addReplica(env, sourceState, sourceHubSigner);
+    addReplica(env, targetState, targetHubSigner);
+
+    const sourceSelected = selectCrossJOpeningAccountProposalTxs(env, sourceState, sourceAccount);
+    expect(sourceSelected).not.toBeNull();
+    expect(sourceSelected).not.toBeUndefined();
+    expect(sourceSelected!.length).toBeGreaterThan(0);
+    expect(sourceSelected!.length).toBeLessThan(sourceAccount.mempool.length);
+    sourceAccount.pendingFrame = {
+      ...sourceAccount.currentFrame,
+      height: sourceAccount.currentHeight + 1,
+      accountTxs: structuredClone(sourceSelected!),
+    };
+
+    const targetSelected = selectCrossJOpeningAccountProposalTxs(env, targetState, targetAccount);
+    expect(targetSelected).not.toBeNull();
+    expect(targetSelected).not.toBeUndefined();
+    const orderIds = (txs: readonly AccountTx[]): string[] => [...new Set(txs.flatMap(tx => {
+      if (tx.type === 'cross_pull_lock') return [tx.data.crossJurisdiction?.orderId || ''];
+      if (tx.type === 'swap_offer') return [tx.data.offerId];
+      return [];
+    }))].filter(Boolean).sort();
+    expect(orderIds(targetSelected!)).toEqual(orderIds(sourceSelected!));
+    expect(getCrossJOpeningAtomicTxByteLength(sourceSelected!, targetSelected!))
+      .toBeLessThanOrEqual(MAX_CROSS_J_OPENING_ATOMIC_TX_BYTES);
+  });
+
   test('hub sibling cascade commits both Entity frames in one Runtime input pass', async () => {
     const seed = 'cross-j-runtime-same-frame-cascade';
     const env = createEmptyEnv(seed);
@@ -1205,6 +1290,46 @@ describe('cross-jurisdiction hashledger swap', () => {
       runtimeId: userEnv.runtimeId,
       sourceRuntimeFrame: hubFrame,
     }));
+    const activeSourceProposal = proposals.find(output => output.entityId === sourceUser);
+    const activeTargetProposal = proposals.find(output => output.entityId === targetUser);
+    if (!activeSourceProposal || !activeTargetProposal) {
+      throw new Error('TEST_CROSS_J_ATOMIC_OPENING_OUTPUT_MISSING');
+    }
+    const retiredSourceProposal = cloneIsolatedRoutedEntityInputs([activeSourceProposal])[0]!;
+    const retiredSourceInput = getEffectiveEntityInputTxs(retiredSourceProposal)
+      .find(tx => tx.type === 'accountInput');
+    const retiredSourceFrame = retiredSourceInput?.type === 'accountInput'
+      ? accountInputProposal(retiredSourceInput.data)?.frame
+      : undefined;
+    if (!retiredSourceFrame) throw new Error('TEST_CROSS_J_RETIRED_SOURCE_FRAME_MISSING');
+    retiredSourceFrame.stateHash = `0x${'11'.repeat(32)}`;
+    const ambiguousOutbox = [activeTargetProposal, retiredSourceProposal, activeSourceProposal];
+    expect(groupAtomicCrossJAdmissionOutputs(ambiguousOutbox).every(unit => !unit.complete)).toBe(true);
+    const prunedCollision = pruneReceiptedReliableOutputs(hubEnv, ambiguousOutbox);
+    expect(prunedCollision.map(buildRouteOutputKey).sort()).toEqual(
+      [activeSourceProposal, activeTargetProposal].map(buildRouteOutputKey).sort(),
+    );
+    expect(groupAtomicCrossJAdmissionOutputs(prunedCollision)).toMatchObject([{
+      atomic: true,
+      complete: true,
+    }]);
+    const unboundSourceProposal = cloneIsolatedRoutedEntityInputs([activeSourceProposal])[0]!;
+    delete unboundSourceProposal.runtimeId;
+    const prebindingDeps = {
+      ...makeLocalCrossJRoutingDeps(),
+      resolveRuntimeIdForEntity: () => userEnv.runtimeId ?? null,
+    };
+    const preboundAtomic = splitPendingOutputsByRetryWindow(
+      hubEnv,
+      [activeTargetProposal, unboundSourceProposal],
+      prebindingDeps,
+    );
+    expect(preboundAtomic.waiting).toEqual([]);
+    expect(preboundAtomic.ready.every(output => output.runtimeId === userEnv.runtimeId)).toBe(true);
+    expect(groupAtomicCrossJAdmissionOutputs(preboundAtomic.ready)).toMatchObject([{
+      atomic: true,
+      complete: true,
+    }]);
     expect(selectMatchedCrossJAccountInputPairs(userEnv, proposals).pairs).toEqual([]);
     const liveSourceUserState = userEnv.state.eReplicas.get(
       `${sourceUser}:${sourceUserSigner}`,
@@ -1453,6 +1578,59 @@ describe('cross-jurisdiction hashledger swap', () => {
     const proposalSelection = selectMatchedCrossJAccountInputPairs(userEnv, proposals);
     expect(proposalSelection.pairs.map(pair => pair.phase)).toEqual(['proposal']);
     expect(proposalSelection.rejectedLegs).toEqual([]);
+
+    const simultaneousUserEnv = createEmptyEnv(`${seed}-simultaneous-user`);
+    simultaneousUserEnv.runtimeId = userEnv.runtimeId;
+    simultaneousUserEnv.state.timestamp = userEnv.state.timestamp;
+    simultaneousUserEnv.quietRuntimeLogs = true;
+    installJurisdictions(simultaneousUserEnv, sourceJ, targetJ);
+    expect(registerTestSigner(simultaneousUserEnv, seed, 'source-user')).toBe(sourceUserSigner);
+    expect(registerTestSigner(simultaneousUserEnv, seed, 'target-user')).toBe(targetUserSigner);
+    addReplica(simultaneousUserEnv, cloneEntityState(liveSourceUserState), sourceUserSigner);
+    addReplica(simultaneousUserEnv, cloneEntityState(liveTargetUserState), targetUserSigner);
+    collectLocalProfileEncryptionAnnouncements(simultaneousUserEnv, new Set([sourceUser, targetUser]));
+    simultaneousUserEnv.gossip = userEnv.gossip;
+    const simultaneousSourceState = simultaneousUserEnv.state.eReplicas
+      .get(`${sourceUser}:${sourceUserSigner}`)!.state;
+    simultaneousSourceState.crossJurisdictionAuthorizations?.delete(intent.orderId);
+    const localIntentPass = await applyMergedEntityInputs(
+      simultaneousUserEnv,
+      [{
+        entityId: sourceUser,
+        signerId: sourceUserSigner,
+        entityTxs: [{
+          type: 'prepareCrossJurisdictionSwap',
+          data: { route: cloneCrossJurisdictionRoute(intent) },
+        }],
+      }],
+      [],
+      { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
+    );
+    expect(localIntentPass.appliedEntityInputs).toHaveLength(1);
+    const simultaneousSourceAccount = simultaneousSourceState.accounts.get(sourceHub)!;
+    expect(simultaneousSourceAccount.pendingFrame?.accountTxs.map(tx => tx.type))
+      .toEqual(['cross_j_intent']);
+    const simultaneousBefore = [...simultaneousUserEnv.state.eReplicas.entries()].map(
+      ([key, replica]) => [key, cloneEntityReplica(replica)] as const,
+    );
+    const simultaneousAdmission = await admitAtomicCrossJAccountInputs(
+      simultaneousUserEnv,
+      proposals,
+      false,
+    );
+    expect(simultaneousAdmission.pairs).toHaveLength(1);
+    const simultaneousApply = await applyMergedEntityInputs(
+      simultaneousUserEnv,
+      simultaneousAdmission.inputs,
+      [],
+      { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
+    );
+    expect(simultaneousApply.rejectedAtomicPairs).toMatchObject([{
+      code: 'CROSS_J_ACCOUNT_PAIR_DEFERRED',
+      inputIndexes: [0, 1],
+    }]);
+    expect(simultaneousApply.appliedEntityInputs).toEqual([]);
+    expect([...simultaneousUserEnv.state.eReplicas.entries()]).toEqual(simultaneousBefore);
 
     const proposalFrame = (input: RoutedEntityInput) => {
       const accountInput = getEffectiveEntityInputTxs(input).flatMap(tx =>
@@ -2091,7 +2269,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   });
 
-  test('submitCrossJurisdictionSwap queues hub prepare, then prepare builds symmetric pull commitments', async () => {
+  test('submitCrossJurisdictionSwap carries durable intent through source Account before hub materialization', async () => {
     const env = createEmptyEnv('cross-submit');
     const hubEnv = createEmptyEnv('cross-submit-hub-runtime');
     env.scenarioMode = true;
@@ -2224,8 +2402,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(sourceRetry.outputs).toEqual([]);
     env.state.eReplicas.get(`${targetUser}:${targetUserSigner}`)!.state = targetRetry.newState;
     env.state.eReplicas.get(`${sourceUser}:${sourceUserSigner}`)!.state = sourceRetry.newState;
-    expect(sourceAuthorization.outputs).toHaveLength(1);
-    expect(sourceAuthorization.outputs[0]?.entityId).toBe(sourceHub);
+    expect(sourceAuthorization.outputs).toEqual([]);
+    expect(sourceAuthorization.accountTxs?.map(operation => operation.tx.type)).toEqual(['cross_j_intent']);
     expect(sourceRetry.newState.crossJurisdictionAuthorizations?.has(result.route.orderId)).toBe(true);
     expect(targetRetry.newState.crossJurisdictionAuthorizations?.has(result.route.orderId)).toBe(true);
 
@@ -2251,35 +2429,64 @@ describe('cross-jurisdiction hashledger swap', () => {
     targetReceivingDelta.leftCreditLimit = previousLeftCredit;
     targetReceivingDelta.rightCreditLimit = previousRightCredit;
 
-    const queued = sourceAuthorization.outputs;
+    const queued = sourceAuthorization.accountTxs;
     expect(result.hashlock).toBeUndefined();
     expect(result.secret).toBeUndefined();
     expect(result.route.routeHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(result.route.source.jurisdiction).toBe(jref(eth));
     expect(result.route.target.jurisdiction).toBe(jref(base));
     expect(queued).toHaveLength(1);
-    expect(queued[0]?.entityId).toBe(sourceHub);
-    expect(queued[0]?.from).toBeUndefined();
-    expect(queued[0]?.sourceRuntimeFrame).toBeUndefined();
-    expect(getEffectiveEntityInputTxs(queued[0]!)?.[0]?.type).toBe('prepareCrossJurisdictionSwap');
+    expect(queued?.[0]?.accountId).toBe(sourceHub);
+    expect(queued?.[0]?.tx.type).toBe('cross_j_intent');
     expect(env.runtimeMempool?.entityInputs).toEqual([]);
 
     sourceHubState.timestamp = hubEnv.state.timestamp;
-    const sourceHubPrepare = getEffectiveEntityInputTxs(queued[0]!)[0];
-    if (sourceHubPrepare?.type !== 'prepareCrossJurisdictionSwap') {
-      throw new Error('TEST_CROSS_J_CERTIFIED_PREPARE_MISSING');
+    const intentTx = queued?.[0]?.tx;
+    if (intentTx?.type !== 'cross_j_intent') {
+      throw new Error('TEST_CROSS_J_ACCOUNT_INTENT_MISSING');
     }
-    const requested = await applyEntityTx(hubEnv, sourceHubState, sourceHubPrepare);
-    expect(requested.outputs).toEqual([{ entityId: sourceHub, signerId: sourceHubSigner, entityTxs: [] }]);
-    expect(requested.accountTxs).toBeUndefined();
+    const sourceUserAccount = cloneAccountReplica(
+      sourceAuthorization.newState.accounts.get(sourceHub)!,
+    );
+    const intentApplied = await applyAccountTx(
+      sourceUserAccount,
+      intentTx,
+      sourceUserAccount.state.leftEntity === sourceUser,
+      env.state.timestamp,
+      sourceUserAccount.currentHeight + 1,
+    );
+    expect(intentApplied).toMatchObject({ success: true });
+    expect(await applyAccountTx(
+      cloneAccountReplica(sourceUserAccount),
+      intentTx,
+      sourceUserAccount.state.leftEntity !== sourceUser,
+      env.state.timestamp,
+      sourceUserAccount.currentHeight + 1,
+    )).toMatchObject({
+      success: false,
+      error: 'Cross-j intent author or source Account endpoints mismatch',
+    });
+    const requestedOutputs: EntityInput[] = [];
+    expect(applyCommittedCrossJurisdictionAccountTxFollowup(
+      hubEnv,
+      sourceHubState,
+      sourceUser,
+      intentTx,
+      requestedOutputs,
+      hubEnv.state.timestamp,
+      [],
+      [],
+      [],
+    )).toBe(true);
+    expect(requestedOutputs).toEqual([{ entityId: sourceHub, signerId: sourceHubSigner, entityTxs: [] }]);
     const sourceHubReplica = {
       ...(hubEnv.state.eReplicas.get(`${sourceHub}:${sourceHubSigner}`) as EntityReplica),
-      state: requested.newState,
+      state: sourceHubState,
     };
     const materialized = appendDefaultProposerCrossJMaterializations(hubEnv, sourceHubReplica, []);
     expect(materialized).toHaveLength(1);
     expect(materialized[0]?.type).toBe('materializeCrossJurisdictionSwap');
-    const prepared = await applyEntityTx(hubEnv, requested.newState, materialized[0]!);
+    const prepared = await applyEntityTx(hubEnv, sourceHubState, materialized[0]!);
     expect(prepared.accountTxs).toBeUndefined();
     expect(prepared.outputs).toHaveLength(2);
     const sourceHubOutput = prepared.outputs.find(output => output.entityId === sourceHub);
