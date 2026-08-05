@@ -1466,6 +1466,7 @@ async function waitForPersistedRebalanceCycles(
   page: Page,
   cursor: Awaited<ReturnType<typeof getPersistedReceiptCursor>>,
   hubId: string,
+  expectedCycles = 2,
   timeoutMs = 30_000,
 ) {
   const startedAt = Date.now();
@@ -1478,14 +1479,16 @@ async function waitForPersistedRebalanceCycles(
       event.message === 'request_collateral_committed' && persistedEventHasAccount(event, hubId)).length;
     const settlements = last.events.filter(event =>
       event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, hubId)).length;
-    if (requests >= 2 && settlements >= 2) return last;
+    if (requests >= expectedCycles && settlements >= expectedCycles) return last;
     await page.waitForTimeout(250);
     last = await readPersistedFrameEventsSinceCursor(page, {
       cursor,
       eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
     });
   }
-  throw new Error(`persisted rebalance cycles not materialized: ${JSON.stringify(last, null, 2)}`);
+  throw new Error(
+    `persisted rebalance cycles did not reach ${expectedCycles}: ${JSON.stringify(last, null, 2)}`,
+  );
 }
 
 async function reloadRuntimeAndWaitReady(page: Page, rebalanceConsole: string[], timingLabel: string): Promise<void> {
@@ -1665,10 +1668,12 @@ test.describe('Rebalance E2E', () => {
 
     const diagnostics = await readRebalanceDiagnostics(page, hubId);
     const rebalanceSteps = await readRebalanceStepEvents(page, scenarioStartedAt);
-    const firstCyclePersisted = await readPersistedFrameEventsSinceCursor(page, {
-      cursor: firstCycleReceiptCursor,
-      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
-    });
+    const firstCyclePersisted = await waitForPersistedRebalanceCycles(
+      page,
+      firstCycleReceiptCursor,
+      hubId,
+      1,
+    );
     const { phaseMarkers, debugErrors, frameEvents } = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
     const debugDump = buildRebalanceFailureDump({
       entityId,
