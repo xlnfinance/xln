@@ -15,7 +15,7 @@
 - **Priority:** P1
 - **Effort:** L
 - **Risk:** HIGH
-- **Status:** IN PROGRESS — canonical React cutover implemented; final unchanged-candidate browser/native/CI/release gates pending
+- **Status:** BLOCKED — canonical React cutover implemented; Account/Runtime protocol failures in L2 and CI require owner authority
 - **Depends on:** Plans 001–010
 - **Category:** migration, release engineering
 - **Planned at:** commit `5749e283d`, 2026-08-03
@@ -173,7 +173,7 @@ Run each broad gate once on the unchanged release candidate. If one fails, retur
 - [ ] Existing persisted profiles open without migration/data loss; real financial flows preserve canonical command and completion semantics.
 - [ ] Browser/native/PWA/extension route, visual, console, and build-identity evidence is complete.
 - [ ] `bun run check`, `gate:ci`, and `gate:release` pass on the exact unchanged candidate.
-- [ ] `git status --short` is reviewed and the Plan 011 index row is updated.
+- [x] `git status --short` is reviewed and the Plan 011 index row is updated.
 
 ## Stop conditions
 

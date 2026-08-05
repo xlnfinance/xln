@@ -1,6 +1,6 @@
 # React cutover Plan 011 inventory
 
-This document records the implementation checkpoint for the atomic React/Vite/TypeScript cutover. It is not production activation evidence: Plan 011 remains in progress until the unchanged candidate passes every browser, native, CI, and release gate.
+This document records the implementation checkpoint for the atomic React/Vite/TypeScript cutover. It is not production activation evidence: Plan 011 is blocked until the owner authorizes the protocol work identified by the unchanged-candidate browser and CI gates.
 
 ## Canonical surface ownership
 
@@ -43,15 +43,16 @@ The ops scenario player exposes deterministic playback controls and opens a wall
 ## Verification checkpoint
 
 - React TypeScript and the canonical four-surface production build pass. The latest build emits all four roots; wallet and health/Three.js chunks retain known size warnings for later optimization, not correctness failures.
-- Frontend/deployment L1 is green: 633 tests pass across 118 files with 2,767 expectations, including the real HTTP release-health tests run with loopback listener access.
-- Strict browser evidence covers public site, docs and nested image assets, wallet onboarding/recovery/accounts/payment routes, swap empty/history, ops health/QA/runs, Dockview/3D suspension, embed commands, and scenario-to-wallet preview. Every captured iPhone, laptop, and wide-desktop screenshot was inspected; the tested browser-health gates reported no unexpected console, page, request, or response failures.
-- The final graph/scenario batch passed 3 isolated targets in 35.6 seconds. Account/onboarding/recovery passed 5 targets in 49.3 seconds, docs passed 5 targets in 27.3 seconds, and the static public-site gate passed 3 targets in 42.8 seconds.
-- Native wallet sync and desktop/extension/mobile package checks passed earlier in this migration worktree. They still require one exact-final-commit rerun after this evidence update.
+- Frontend/deployment L1 is green: 633 tests pass across 118 files with 2,767 expectations, including the real HTTP release-health tests run with loopback listener access. The CI-discovered native/watchtower regressions have a separate narrow result of 7 pass and 0 fail on commit `0c22c2356`.
+- Commit `68b807b112f4` has strict browser evidence for the public site (1 target), docs and nested image assets (5), wallet onboarding/recovery/accounts/payment routes (5), ops health/QA/runs plus Dockview/3D suspension and scenario preview (4), payment smoke (1), AHB (1), and multiroute load (1). Every captured iPhone, laptop, and wide-desktop screenshot was inspected; the passing browser-health gates reported no unexpected console, page, request, or response failures.
+- The complete flow batch on that commit passed 8 targets, failed 1 rebalance target, and cancelled 1 after the Account failure. The empty swap/history target separately passed in 8.8 seconds; the live swap target failed during market-maker Runtime startup before Playwright.
+- Native mobile iOS/Android sync, desktop smoke, and extension packaging passed on commit `68b807b112f4` with manifest version `0.1.31-68b807b112f4`. `bun run check` also passed on that exact commit with frozen core unchanged.
+- `bun run gate:ci` stopped at runtime core tests with 473 pass and 11 fail. Three migration-owned failures were fixed and passed narrowly in `0c22c2356`; the remaining eight failures touch Runtime/Entity/Account semantics and require owner authority before implementation.
 
 ## Remaining release blockers
 
-- The live swap target cannot start its market-maker stack because Runtime rejects the atomic pair with `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION` in `runtime/runtime/entity-input-atomic.ts`. This is below the frontend boundary and requires explicit owner authorization before any protocol edit.
-- The rebalance user-flow target reaches the Account recovery path and then fails with `ACCOUNT_PEER_FRAME_STALE_SETTLEMENT_SEAL` / `SETTLEMENT_SEAL_NONCE_MISMATCH`, leaving the bilateral pair pending across adjacent frames. This is an Account consensus invariant and requires explicit owner authorization before any protocol edit.
-- Rerun payment/user-flow, native mobile/desktop/extension, `bun run check`, `bun run gate:ci`, and `bun run gate:release` on the exact final commit. The protocol failures above remain release blockers even if every frontend-only target is green.
-- Review exact status/diff and retain the final candidate hashes, F12 browser-health evidence, and screenshots required by the distribution plan.
+- The live swap market-maker stack repeatedly rejects sibling legs with `CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH`, then emits 2.15 MB direct WebSocket messages above the 1 MB limit and crashes incident persistence with `DEBUG_EVENT_TOO_LARGE:bytes=149034:max=65536`. This is Runtime/network protocol scope and requires explicit owner authorization.
+- The rebalance flow reaches Account recovery and fails with `SETTLEMENT_SEAL_NONCE_MISMATCH:28:29:j=0:next=29:local=28:peer=24`, leaving the bilateral pair at committed height 30 with height 31 pending. This is an Account consensus invariant and requires explicit owner authorization.
+- The CI core batch also has eight protocol-owned regressions, including cross-j exact-ratio/admission fixtures, validator secondary-hash evidence, and restored frame resend behavior. These must be localized L1-first under owner-authorized Runtime/Entity/Account work.
+- After those fixes, rerun the affected L1 tests, payment/user-flow and swap L2, native mobile/desktop/extension, `bun run check`, `bun run gate:ci`, and `bun run gate:release` on one unchanged final candidate.
 - Do not mark Plan 011 done, create a non-WIP release commit, push, merge, tag, or activate production before those gates pass.
