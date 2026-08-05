@@ -1015,7 +1015,15 @@ test.describe('E2E Custody Flow', () => {
       await expect(custodyPage.getByText('Insufficient custody balance')).toBeVisible({ timeout: 15_000 });
       expect(browserWithdrawalRequests, 'displayed zero balance must reject before browser POST').toBe(0);
 
+      // Send this the way the dashboard would. Without same-origin headers the
+      // custody CSRF guard rejects the mutation before any balance check, and
+      // the assertion below would pass on the wrong gate.
       const directWithdrawal = await context.request.post(`${custodyBaseUrl}/api/withdraw`, {
+        headers: {
+          origin: new URL(custodyBaseUrl).origin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        },
         data: {
           tokenId: usdcToken.tokenId,
           amount: '1',
