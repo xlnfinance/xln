@@ -49,10 +49,25 @@ The ops scenario player exposes deterministic playback controls and opens a wall
 - Native mobile iOS/Android sync, desktop smoke, and extension packaging passed on commit `68b807b112f4` with manifest version `0.1.31-68b807b112f4`. `bun run check` passed there and again on `da3f1fe87`, with frozen core unchanged.
 - On commit `da3f1fe87`, both `bun run gate:ci` and `bun run gate:release` passed frontend types, source checks, and release-integrity tests, then stopped at runtime core tests with 476 pass and 8 fail. The corrected native/watchtower tests passed inside both gates; all eight failures touch Runtime/Entity semantics and require owner authority before implementation.
 
+## CI core failure localization
+
+The eight runtime-core failures reproduce independently. Seven are obsolete test inputs that no longer satisfy the canonical protocol validators; one exposes a real admission-order regression. Updating even the fixtures changes consensus evidence or cross-j protocol expectations, so none of these changes is authorized by the frontend cutover alone.
+
+| Test | Classification | Authorized L1 change |
+|---|---|---|
+| `cross-j source fill ack routes book removal to canonical sibling owner` | Fixture omits the mandatory exact fill numerator/denominator | Bind the full-fill route to exact `1/1` evidence |
+| `cross-j book-owner fill ack routes admitted remote order to source hub` | Fixture gives source and target progress the same hub | Build distinct source/target hub topology before asserting routing |
+| `cross-j local fill ack stays on the local source offer when an admission key collides` | Fill notice has coarse and amount evidence but no exact ratio | Bind exact cumulative ratio evidence consistent with the claimed amounts |
+| `entity validator signs only the secondary hash manifest emitted by local replay` | The purported honest proposal has no proposer signature | Add the canonical proposer frame signature at manifest index zero |
+| `crontab resends a restored pending frame without persisting transport routing` | Persisted pending frame uses an arbitrary, noncanonical state hash | Construct the pending frame through the canonical Account frame hash path |
+| `cross-j fill notice waits for source offer instead of looping fatal errors` | Fixture reaches the intended capacity branch with invalid coarse-only fill evidence | Add exact fill ratio evidence, then retain the capacity assertion |
+| `disputeStart treats pending cross_pull_close as foldable dispute evidence` | Close-proof route has explicit fill evidence without an exact ratio | Bind the existing quarter-fill claim to exact `1/4` evidence |
+| `cross-j system entity txs reject every raw ingress outside certified runtimeOutput` | Real Runtime admission-order regression | Run the external cross-j trust-boundary check before local target lookup and retain the same fail-fast code |
+
 ## Remaining release blockers
 
 - The live swap market-maker stack repeatedly rejects sibling legs with `CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH`, then emits 2.15 MB direct WebSocket messages above the 1 MB limit and crashes incident persistence with `DEBUG_EVENT_TOO_LARGE:bytes=149034:max=65536`. This is Runtime/network protocol scope and requires explicit owner authorization.
 - The rebalance flow reaches Account recovery and fails with `SETTLEMENT_SEAL_NONCE_MISMATCH:28:29:j=0:next=29:local=28:peer=24`, leaving the bilateral pair at committed height 30 with height 31 pending. This is an Account consensus invariant and requires explicit owner authorization.
-- The CI core batch also has eight protocol-owned regressions, including cross-j exact-ratio/admission fixtures, validator secondary-hash evidence, and restored frame resend behavior. These must be localized L1-first under owner-authorized Runtime/Entity/Account work.
+- The CI core batch is localized above: seven protocol fixture updates and one Runtime admission-order fix remain owner-authorized Runtime/Entity/Account work.
 - After those fixes, rerun the affected L1 tests, payment/user-flow and swap L2, native mobile/desktop/extension, `bun run check`, `bun run gate:ci`, and `bun run gate:release` on one unchanged final candidate.
 - Do not mark Plan 011 done, create a non-WIP release commit, push, merge, tag, or activate production before those gates pass.
