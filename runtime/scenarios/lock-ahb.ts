@@ -813,6 +813,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // PAYMENT 2: A → H → B ($125K) - Second payment, total shift = $250K
     // ============================================================================
     const payment2 = usd(125_000);
+    // Payment 2 takes the same Alice->Hub->Bob route as payment 1, so the payer
+    // owes the same routing fee on top. Recipient-exact delivery means Bob still
+    // receives payment2 while Alice is debited the gross.
+    const payment2SenderGross = calculateRequiredInboundForDesiredForward(payment2, hubFeePpm, 0n);
     console.log('\n🏃 FRAME 14: Alice initiates second A→H→B $125K');
 
     // Frame 14: Alice sends again
@@ -871,13 +875,14 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     assertRuntimeIdle(env, 'HTLC AHB mid-payment drain');
 
     // Verify total shift with recipient-exact HTLC:
-    // A-H includes sender gross for payment1 + direct payment2; H-B tracks recipient net.
+    // A-H carries the sender gross of both routed payments; H-B tracks the
+    // recipient net, because the Hub keeps the fee out of Bob's leg.
     // Deferred rebalance fee is charged on fulfillment (AccountSettled), not at request time.
     const htlcFee = payment1SenderGross - payment1;
 
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDeltaFinal = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
-    const expectedAHShift = -(payment1SenderGross + payment2);
+    const expectedAHShift = -(payment1SenderGross + payment2SenderGross);
     // H-B leg can already include prepaid request_collateral fee debits committed
     // in the same bilateral account while payments are flowing.
     // That fee is paid by Bob to Hub, so it offsets (reduces magnitude of) Hub->Bob debt.
@@ -928,6 +933,9 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log('\n💸 PHASE 4: REVERSE PAYMENT: B→H→A ($50K)');
 
     const reversePayment = usd(50_000);
+    // The reverse leg is routed too, so Bob is debited the gross while Alice is
+    // credited the net; the Hub keeps the difference on the B-H side.
+    const reverseSenderGross = calculateRequiredInboundForDesiredForward(reversePayment, hubFeePpm, 0n);
 
     // Frame 18: Bob initiates B→H→A
     console.log('🏃 FRAME 18: Bob initiates B→H→A $50K');
@@ -965,6 +973,12 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     await process(env);
     logPending();
 
+    // The B->H leg settles only once its secret has travelled back, which takes
+    // more frames than the two spent above; wait for it rather than counting.
+    // The A-H reading below stays an ordering check and is taken from the same
+    // committed state: Hub forwards to Alice only in the next frame.
+    env = await drainRuntime(env);
+
     // CRITICAL ASSERTION: B→H should be committed BEFORE H→A is initiated
     const bhDelta19 = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
     const ahDelta19 = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
@@ -973,10 +987,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // B-H should have shifted +$50K (Bob paid Hub, reducing Hub's debt)
     // Account for the HTLC fee already retained on payment1.
     // A-H should NOT have changed yet (Hub forwarding is in next frame)
-    const [, hubRepBH19] = findReplica(env, hub.id);
-    const hbAcc19 = hubRepBH19.state.accounts.get(bob.id);
-    const hbPrepaidFee19 = hbAcc19?.state.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
-    const expectedBH19 = -(payment1 + payment2) + reversePayment + hbPrepaidFee19;
+    const expectedBH19 = -(payment1 + payment2) + reverseSenderGross;
     if (bhDelta19 !== expectedBH19) {
       throw new Error(`B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
     }
@@ -1000,13 +1011,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     const ahDeltaRev = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const bhDeltaRev = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
 
-    // After recipient-exact HTLC + direct + reverse:
-    // A-H includes initial sender gross fee burden.
-    const expectedAH = -(payment1SenderGross + payment2) + reversePayment;
-    const [, hubRepBHFinal] = findReplica(env, hub.id);
-    const hbAccFinal = hubRepBHFinal.state.accounts.get(bob.id);
-    const hbPrepaidFeeFinal = hbAccFinal?.state.requestedRebalanceFeeState?.get(USDC_TOKEN_ID)?.feePaidUpfront ?? 0n;
-    const expectedBH = -(payment1 + payment2) + reversePayment + hbPrepaidFeeFinal;
+    // After both recipient-exact forward payments and the reverse leg,
+    // A-H still carries the sender gross fee burden of both.
+    const expectedAH = -(payment1SenderGross + payment2SenderGross) + reversePayment;
+    const expectedBH = -(payment1 + payment2) + reverseSenderGross;
 
     if (ahDeltaRev !== expectedAH) {
       throw new Error(`❌ REVERSE PAYMENT FAIL: A-H offdelta=${ahDeltaRev}, expected ${expectedAH}`);
@@ -1014,7 +1022,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     if (bhDeltaRev !== expectedBH) {
       throw new Error(`❌ REVERSE PAYMENT FAIL: B-H offdelta=${bhDeltaRev}, expected ${expectedBH}`);
     }
-    console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (htlcFee=${htlcFee}, hbPrepaidFee=${hbPrepaidFeeFinal})`);
+    console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (htlcFee=${htlcFee}, reverseFee=${reverseSenderGross - reversePayment})`);
 
     await pushSnapshot(env, 'Frame 21: Reverse payment complete', {
       title: '✅ Reverse Payment: $50K B→A',
