@@ -55,7 +55,7 @@ The eight runtime-core failures reproduce independently. Seven are obsolete test
 
 | Test | Classification | Authorized L1 change |
 |---|---|---|
-| `cross-j source fill ack routes book removal to canonical sibling owner` | Fixture omits the mandatory exact fill numerator/denominator | Bind the full-fill route to exact `1/1` evidence |
+| `cross-j source fill ack routes book removal to canonical sibling owner` | Fixture omits the mandatory exact fill numerator/denominator | Bind its 100/65,535 partial-fill evidence before cancelling the remainder |
 | `cross-j book-owner fill ack routes admitted remote order to source hub` | Fixture gives source and target progress the same hub | Build distinct source/target hub topology before asserting routing |
 | `cross-j local fill ack stays on the local source offer when an admission key collides` | Fill notice has coarse and amount evidence but no exact ratio | Bind exact cumulative ratio evidence consistent with the claimed amounts |
 | `entity validator signs only the secondary hash manifest emitted by local replay` | The purported honest proposal has no proposer signature | Add the canonical proposer frame signature at manifest index zero |

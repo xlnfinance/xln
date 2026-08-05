@@ -762,12 +762,13 @@ describe('audit fail-fast regressions', () => {
     env.state.timestamp = 42_500;
     const first = registerLazySigner(seed, '1');
     const second = registerLazySigner(seed, '2');
-    const entityId = generateLazyEntityId([first.signerId, second.signerId], 2n).toLowerCase();
+    const third = registerLazySigner(seed, '3');
+    const entityId = generateLazyEntityId([first.signerId, second.signerId, third.signerId], 3n).toLowerCase();
     const config: ConsensusConfig = {
       ...makeSingleSignerConfigFor(first.signerId),
-      threshold: 2n,
-      validators: [first.signerId, second.signerId],
-      shares: { [first.signerId]: 1n, [second.signerId]: 1n },
+      threshold: 3n,
+      validators: [first.signerId, second.signerId, third.signerId],
+      shares: { [first.signerId]: 1n, [second.signerId]: 1n, [third.signerId]: 1n },
     };
     const collectiveTxs: EntityTx[] = [
       {
@@ -871,12 +872,19 @@ describe('audit fail-fast regressions', () => {
       hash: frameHash,
       leader: { proposerSignerId: first.signerId, view: 0 },
       hashesToSign: localManifest,
+      collectedSigs: new Map([
+        [
+          first.signerId,
+          localManifest.map(({ hash }) => signAccountFrame(env, first.signerId, hash)),
+        ],
+      ]),
     };
     const precommitResult = await applyEntityInput(env, validatorReplica, {
       entityId,
       signerId: second.signerId,
       proposedFrame: honestProposal,
     });
+    expect(precommitResult.outcome).toEqual({ kind: 'committed' });
     expect(precommitResult.workingReplica.lockedFrame?.hash).toBe(frameHash);
 
     const signaturesBySigner = new Map([
@@ -1469,16 +1477,17 @@ describe('audit fail-fast regressions', () => {
     const counterpartyId = `0x${'25'.repeat(32)}`;
     const counterpartySignerId = hex20('26');
     const pendingFrame = {
-      height: 11,
+      height: 1,
       timestamp: replica.state.timestamp - ACCOUNT_PENDING_RESEND_AFTER_MS - 1,
       jHeight: 0,
       accountTxs: [{ type: 'add_delta' as const, data: { tokenId: 1 } }],
-      prevFrameHash: `0x${'ab'.repeat(32)}`,
+      prevFrameHash: 'genesis',
       accountStateRoot: `0x${'00'.repeat(32)}`,
       deltas: [],
       stateHash: `0x${'cd'.repeat(32)}`,
       byLeft: true,
     };
+    pendingFrame.stateHash = await createFrameHash(pendingFrame);
     const accountMachine = makeProposalAccount([], replica.entityId, counterpartyId);
     accountMachine.pendingFrame = pendingFrame;
     accountMachine.pendingAccountInput = {

@@ -43,6 +43,7 @@ import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeInput } from './types';
 import { clearRuntimeGossip } from './loop-gossip';
 import { assertRuntimeInputCapabilitiesAuthorized } from './internal-tx-auth';
+import { assertExternalEntityInputAllowed } from './entity-input-admission';
 import {
   deriveRuntimeId,
   getLocalSignerIdsForEntity,
@@ -198,6 +199,10 @@ const validateRuntimeInputAdmission = (
   runtimeInput.entityInputs.forEach((input, index) => {
     for (const tx of input.entityTxs ?? []) assertScheduledWakeTxAuthorized(tx, false);
     const validated = normalizeRuntimeEntityInput(env, decodeRoutedEntityInput(input), `runtimeInput[${index}]`);
+    // Authenticate the Runtime-private cross-j boundary before target lookup.
+    // A hostile sender must never turn a forbidden protocol envelope into an
+    // entity-existence oracle by choosing an unknown local target.
+    assertExternalEntityInputAllowed(validated);
     const localSignerIds = [
       ...getLocalSignerIdsForEntity(env, validated.entityId),
       ...(importedSigners.get(String(validated.entityId).toLowerCase()) ?? []),

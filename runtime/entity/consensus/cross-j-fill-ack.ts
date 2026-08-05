@@ -158,6 +158,12 @@ export const drainPendingCrossJurisdictionFillAcks = async (
           ...(pendingAck.tx.data.cumulativeTargetAmount !== undefined
             ? { cumulativeTargetAmount: pendingAck.tx.data.cumulativeTargetAmount }
             : {}),
+          ...(pendingAck.tx.data.fillNumerator !== undefined
+            ? { fillNumerator: pendingAck.tx.data.fillNumerator }
+            : {}),
+          ...(pendingAck.tx.data.fillDenominator !== undefined
+            ? { fillDenominator: pendingAck.tx.data.fillDenominator }
+            : {}),
         }),
         ackKind: pendingAck.tx.data.ackKind || (pendingAck.tx.data.cancelRemainder ? 'cancel_or_fill' : 'fill'),
         cumulativeFillRatio: pendingAck.tx.data.cumulativeFillRatio,

@@ -15,6 +15,7 @@ import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelo
  * all four route participants happen to form a known two-runtime topology.
  */
 export const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
+  'prepareCrossJurisdictionSwap',
   'registerCrossJurisdictionSwap',
   'crossJurisdictionFillNotice',
   'requestCrossJurisdictionClear',

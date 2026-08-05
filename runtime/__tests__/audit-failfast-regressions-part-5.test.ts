@@ -1798,6 +1798,8 @@ describe('audit fail-fast regressions', () => {
       status: 'partially_filled',
       fillSeq: 1,
       cumulativeFillRatio: 100,
+      fillNumerator: 100n,
+      fillDenominator: 65_535n,
       filledSourceAmount: 1n,
       filledTargetAmount: 1n,
       createdAt: 1,
@@ -1858,6 +1860,8 @@ describe('audit fail-fast regressions', () => {
         cumulativeSourceAmount: 1n,
         cumulativeTargetAmount: 1n,
         cumulativeFillRatio: 100,
+        fillNumerator: 100n,
+        fillDenominator: 65_535n,
         cancelRemainder: true,
       },
     };
@@ -1945,7 +1949,12 @@ describe('audit fail-fast regressions', () => {
           venueId: pairId,
           sourceSignerId: `${orderId}-source-signer`,
           sourceHubSignerId: sourceHubId === sourceHub ? sourceHubSigner : bookOwnerSigner,
-          targetHubSignerId: targetHubId === bookOwnerHub ? bookOwnerSigner : 'target-hub-signer',
+          targetHubSignerId:
+            targetHubId === sourceHub
+              ? sourceHubSigner
+              : targetHubId === bookOwnerHub
+                ? bookOwnerSigner
+                : 'target-hub-signer',
           targetSignerId: `${orderId}-target-signer`,
           bookHubSignerId: bookOwnerSigner,
           source: {
@@ -1985,6 +1994,9 @@ describe('audit fail-fast regressions', () => {
       1,
       75_000n * lot,
     );
+    makerRoute.sourceHubSignerId = 'committed-source-hub-route';
+    delete makerRoute.routeHash;
+    Object.assign(makerRoute, withCanonicalCrossJurisdictionRouteHash(makerRoute));
     const takerRoute = buildRoute(
       'local-taker-cross',
       bookOwnerJurisdiction,
@@ -1993,7 +2005,7 @@ describe('audit fail-fast regressions', () => {
       1,
       75_000n * lot,
       sourceJurisdiction,
-      bookOwnerHub,
+      sourceHub,
       localTargetUser,
       2,
       30n * lot,
@@ -2136,8 +2148,6 @@ describe('audit fail-fast regressions', () => {
         data: { route: takerRoute, reason: 'atomic_account_pair_committed' },
       },
     ];
-    makerAdmission.route.sourceHubSignerId = 'committed-source-hub-route';
-
     const matched = await applyEntityFrame(
       env,
       bookOwnerState,
@@ -2304,6 +2314,8 @@ describe('audit fail-fast regressions', () => {
           cumulativeSourceAmount: restingRoute.source.amount,
           cumulativeTargetAmount: restingRoute.target.amount,
           cumulativeFillRatio: 65_535,
+          fillNumerator: 1n,
+          fillDenominator: 1n,
           pairId,
         },
       },
