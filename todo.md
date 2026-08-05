@@ -64,9 +64,19 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
      the very defect it exists to catch, which is why this is 280s of silence
      rather than a 60s `MARKET_MAKER_BOOTSTRAP_STALLED`.
 
-  Still open: why each Runtime holds only one side of the pair. Two incidents on
-  two different runtimeIds suggest source legs stuck on one and target legs on
-  the other. Not proven.
+  Still open: why the sibling leg never joins its cohort. Ruled out — the legs
+  are NOT split across Runtimes. `outputEnvelopeGroupKey` is the target
+  `runtimeId` alone (`dispatch.ts:92`), so a pair addressed to two Runtimes
+  could never complete by construction; but the failing orderIds
+  (`mmx-88dfa2-78e1da-*`, `mmx-2e44e6-f6a3e5-*`) name two entities of the *same*
+  hub, and each hub hosts its two per-jurisdiction entities in one Runtime
+  (H1 `0x25242ed1`, H2 `0x39fb68eb`). Both legs share a target Runtime.
+  Note also that if both legs were merely sitting in the pending set,
+  `getNextNetworkRetryTimestamp` regroups all pending outputs together
+  (`pending.ts:607`) and would pair them into a complete unit. So the live
+  question is narrower: one leg is pending forever while its sibling is never
+  produced, or never reaches the same pending set. Answer it by logging the
+  pending-set contents and orderIds at dispatch time before writing any fix.
 
   Do NOT close this by raising `--stack-timeout-ms` or by making the shard
   deadline progress-aware: both only change the wording of the failure.

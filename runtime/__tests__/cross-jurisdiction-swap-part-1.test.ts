@@ -1301,6 +1301,29 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...proposals,
     ];
     expect(selectPotentialCrossJAccountInputPairs(repeatedCohorts)).toHaveLength(2);
+    // Regression: dispatch pairs with allowDifferentSourceRuntimeFrames because
+    // sibling Entity consensus may certify the two legs of one cohort in
+    // adjacent Runtime frames. That option also drops the only predicate
+    // separating two concurrent cohorts carrying identical route sets, so every
+    // leg saw two partners and the uniqueness rule discarded all of them. The
+    // unclaimed legs then became lone cross-j proposals, which dispatch defers
+    // as incomplete atomic cohorts and never retries — MM bootstrap-cross hung
+    // at 0 of 6 routes. Both cohorts are unambiguous inside their own frame, so
+    // pairing must resolve there first and still return both.
+    // The count alone never caught this: the buggy result was also two pairs,
+    // but they OVERLAPPED — (1,2) and (2,3) — and the greedy claim in
+    // groupAtomicCrossJAdmissionOutputs then dropped the second and orphaned
+    // inputs 0 and 3. Assert a real matching: disjoint, and covering every leg.
+    const crossFramePairs = selectPotentialCrossJAccountInputPairs(repeatedCohorts, {
+      allowDifferentSourceRuntimeFrames: true,
+    });
+    expect(crossFramePairs).toHaveLength(2);
+    const pairedIndexes = crossFramePairs.flatMap(pair => [
+      pair.sourceInputIndex,
+      pair.targetInputIndex,
+    ]);
+    expect(new Set(pairedIndexes).size).toBe(pairedIndexes.length);
+    expect([...pairedIndexes].sort((left, right) => left - right)).toEqual([0, 1, 2, 3]);
     const atomicRepeatedCohorts = repeatedCohorts.map(input => {
       const frame = input.sourceRuntimeFrame!;
       const cohort = repeatedCohorts.filter(

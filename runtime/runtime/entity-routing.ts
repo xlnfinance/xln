@@ -572,25 +572,60 @@ export const selectPotentialCrossJAccountInputPairs = (
       return candidate ? [candidate] : [];
     }));
   const pairs: PotentialCrossJAccountInputPair[] = [];
-  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
-    const left = candidates[leftIndex]!;
-    const matches = candidates.filter((right, rightIndex) =>
+  const pairedInputs = new Set<number>();
+  const matchesForLeft = (
+    left: CrossJAdmissionFrameCandidate,
+    leftIndex: number,
+    requireSameSourceRuntimeFrame: boolean,
+  ): CrossJAdmissionFrameCandidate[] =>
+    candidates.filter((right, rightIndex) =>
       rightIndex > leftIndex &&
       right.inputIndex !== left.inputIndex &&
+      !pairedInputs.has(right.inputIndex) &&
       targetsDistinctSiblingEntities(inputs, left.inputIndex, right.inputIndex) &&
       normalizeRuntimeId(inputs[right.inputIndex]!.runtimeId) ===
         normalizeRuntimeId(inputs[left.inputIndex]!.runtimeId) &&
-        (options.allowDifferentSourceRuntimeFrames === true ||
-          sameSourceRuntimeFrame(inputs[right.inputIndex]!, inputs[left.inputIndex]!)) &&
+        (requireSameSourceRuntimeFrame
+          ? sameSourceRuntimeFrame(inputs[right.inputIndex]!, inputs[left.inputIndex]!)
+          : options.allowDifferentSourceRuntimeFrames === true ||
+            sameSourceRuntimeFrame(inputs[right.inputIndex]!, inputs[left.inputIndex]!)) &&
       admissionOriginKey(inputs[right.inputIndex]!) === admissionOriginKey(inputs[left.inputIndex]!) &&
       admissionFramesMatch(left, right));
-    if (matches.length !== 1) continue;
-    const right = matches[0]!;
-    pairs.push({
-      pairKey: left.pairKey,
-      sourceInputIndex: left.inputIndex,
-      targetInputIndex: right.inputIndex,
-    });
+
+  // Two passes, same-source-frame first.
+  //
+  // `allowDifferentSourceRuntimeFrames` exists because sibling Entity consensus
+  // may certify the two legs of ONE cohort in adjacent Runtime frames. But it
+  // drops `sameSourceRuntimeFrame` for every comparison, and that predicate is
+  // also the only thing telling two *concurrent* cohorts apart when they carry
+  // identical route sets. Both legs of cohort A (frame h) then match both legs
+  // of cohort B (frame h'), every candidate sees two partners, and the
+  // uniqueness rule below discards all of them — even though each cohort was
+  // perfectly unambiguous within its own frame. Downstream that is not a
+  // harmless skip: `groupAtomicCrossJAdmissionOutputs` leaves the unclaimed
+  // legs as lone cross-j proposals, which dispatch classifies as incomplete
+  // atomic cohorts and defers forever (they are excluded from retry scheduling
+  // and parked in `waiting` unconditionally). That wedged MM bootstrap-cross at
+  // 0 of 6 routes until the harness deadline fired.
+  //
+  // So resolve within a frame before reaching across frames. Pairs found here
+  // are claimed, which is what keeps two sequential cohorts in separate
+  // envelopes instead of cross-linking them under one misleading pairKey.
+  for (const requireSameSourceRuntimeFrame of [true, false]) {
+    for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+      const left = candidates[leftIndex]!;
+      if (pairedInputs.has(left.inputIndex)) continue;
+      const matches = matchesForLeft(left, leftIndex, requireSameSourceRuntimeFrame);
+      if (matches.length !== 1) continue;
+      const right = matches[0]!;
+      pairedInputs.add(left.inputIndex);
+      pairedInputs.add(right.inputIndex);
+      pairs.push({
+        pairKey: left.pairKey,
+        sourceInputIndex: left.inputIndex,
+        targetInputIndex: right.inputIndex,
+      });
+    }
   }
   if (pairs.length === 0 && inputs.length === 2) {
     const cohort = inputs[0]?.atomicCrossJurisdictionPair;
