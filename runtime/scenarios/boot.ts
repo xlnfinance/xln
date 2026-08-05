@@ -54,8 +54,11 @@ type ManagedAnvilProcess = {
   removeListener?: (event: 'exit' | 'error', listener: (...args: unknown[]) => void) => unknown;
 };
 
-let managedAnvil: ManagedAnvilProcess | null = null;
-let managedAnvilRpc: string | null = null;
+// Keyed by RPC url, not a single slot. A cross-jurisdiction scenario runs two
+// stacks in one process, and the old single-slot form stopped the first anvil
+// the moment the second was requested — the source chain then died mid-run with
+// ECONNREFUSED.
+const managedAnvils = new Map<string, ManagedAnvilProcess>();
 let managedAnvilCleanupRegistered = false;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -78,11 +81,13 @@ const isLocalRpcUrl = (rpcUrl: string): boolean => {
 };
 
 const killManagedAnvil = (): void => {
-  if (!managedAnvil || managedAnvil.exitCode !== null) return;
-  try {
-    managedAnvil.kill('SIGTERM');
-  } catch (error) {
-    console.warn('[scenario] managed Anvil SIGTERM failed', error);
+  for (const child of managedAnvils.values()) {
+    if (child.exitCode !== null) continue;
+    try {
+      child.kill('SIGTERM');
+    } catch (error) {
+      console.warn('[scenario] managed Anvil SIGTERM failed', error);
+    }
   }
 };
 
@@ -107,25 +112,32 @@ const waitForManagedAnvilExit = async (
   });
 };
 
-export const stopManagedScenarioAnvil = async (timeoutMs = 3_000): Promise<void> => {
-  const child = managedAnvil;
-  managedAnvil = null;
-  managedAnvilRpc = null;
-  if (!child || child.exitCode !== null) return;
-  try {
-    child.kill('SIGTERM');
-  } catch (error) {
-    console.warn('[scenario] managed Anvil SIGTERM failed', error);
-    return;
-  }
-  await waitForManagedAnvilExit(child, timeoutMs);
-  if (child.exitCode === null) {
+/** Stops one managed anvil, or every one of them when no url is given. */
+export const stopManagedScenarioAnvil = async (
+  timeoutMs = 3_000,
+  rpcUrl?: string,
+): Promise<void> => {
+  const entries = rpcUrl
+    ? (managedAnvils.has(rpcUrl) ? [[rpcUrl, managedAnvils.get(rpcUrl)!] as const] : [])
+    : [...managedAnvils.entries()];
+  for (const [url, child] of entries) {
+    managedAnvils.delete(url);
+    if (child.exitCode !== null) continue;
     try {
-      child.kill('SIGKILL');
+      child.kill('SIGTERM');
     } catch (error) {
-      console.warn('[scenario] managed Anvil SIGKILL failed', error);
+      console.warn('[scenario] managed Anvil SIGTERM failed', error);
+      continue;
     }
-    await waitForManagedAnvilExit(child, Math.min(timeoutMs, 1_000));
+    await waitForManagedAnvilExit(child, timeoutMs);
+    if (child.exitCode === null) {
+      try {
+        child.kill('SIGKILL');
+      } catch (error) {
+        console.warn('[scenario] managed Anvil SIGKILL failed', error);
+      }
+      await waitForManagedAnvilExit(child, Math.min(timeoutMs, 1_000));
+    }
   }
 };
 
@@ -155,16 +167,14 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
     throw new Error(`Invalid RPC port for auto Anvil bootstrap: ${rpcUrl}`);
   }
 
-  if (managedAnvil && managedAnvil.exitCode === null && managedAnvilRpc === rpcUrl) {
-    return;
-  }
-
-  await stopManagedScenarioAnvil();
+  const existing = managedAnvils.get(rpcUrl);
+  if (existing && existing.exitCode === null) return;
+  await stopManagedScenarioAnvil(3_000, rpcUrl);
   console.warn(`[Boot] RPC ${rpcUrl} unavailable, auto-starting local anvil (chainId=${chainId}, port=${port})`);
   const { spawn } = await import('node:child_process');
   // Keep scenario auto-start aligned with the E2E/dev stack. If this diverges,
   // scenarios can fail on contract deployment while the rest of the system passes.
-  managedAnvil = spawn('anvil', [
+  const child = spawn('anvil', [
     '--host', '127.0.0.1',
     '--port', String(port),
     '--chain-id', String(chainId),
@@ -177,13 +187,13 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
   ], {
     stdio: 'ignore',
   });
-  managedAnvil.unref?.();
-  managedAnvilRpc = rpcUrl;
+  child.unref?.();
+  managedAnvils.set(rpcUrl, child);
   ensureAnvilCleanupHooks();
 
   const deadline = Date.now() + 12_000;
   while (Date.now() < deadline) {
-    if (!managedAnvil || managedAnvil.exitCode !== null) {
+    if (child.exitCode !== null) {
       throw new Error(`Auto-started anvil exited early (rpc=${rpcUrl})`);
     }
     const readyChainId = await readRpcChainId(rpcUrl);
@@ -280,7 +290,7 @@ export function getJAdapterMode(): JAdapterMode {
 export async function ensureJAdapter(
   env?: RuntimeReplica,
   mode?: JAdapterMode,
-  options?: { deployStack?: boolean; rpcUrl?: string },
+  options?: { deployStack?: boolean; rpcUrl?: string; chainId?: number },
 ): Promise<JAdapter> {
   const { createJAdapter } = await import('../jurisdiction/adapter');
   const { assertBrowserVMJurisdiction } = await import('../jurisdiction/adapter');
@@ -293,9 +303,16 @@ export async function ensureJAdapter(
   // jurisdiction in one process (the whole point of a cross-j scenario) was
   // impossible to express.
   const rpcUrl = options?.rpcUrl || process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl();
+  // A jurisdiction is identified by (chainId, depository address). Two fresh
+  // anvils deploy the identical deterministic addresses, so a second stack that
+  // reuses 31337 is indistinguishable from the first and the event watcher
+  // fails with J_WATCHER_JURISDICTION_AMBIGUOUS. A cross-jurisdiction scenario
+  // must therefore be able to name its own chain id, exactly as the mesh does
+  // (31337 / 31338).
+  const expectedChainId = options?.chainId ?? 31337;
   const chainId = actualMode === 'browservm'
-    ? 31337
-    : await ensureScenarioRpcReady(rpcUrl, 31337);
+    ? expectedChainId
+    : await ensureScenarioRpcReady(rpcUrl, expectedChainId);
 
   console.log(`[JAdapter] Mode: ${actualMode}${actualMode !== 'browservm' ? ` (${rpcUrl})` : ''}, chainId=${chainId}`);
 
