@@ -23,7 +23,9 @@ import {
   type Runtime,
 } from '../../frontend/src/lib/stores/vaultStore';
 import { createDefaultDelta } from '../../runtime/account/delta';
-import type { AccountState } from '../../runtime/types';
+import { createEmptyAccountJClaimAccumulator } from '../../runtime/account/j-claim-accumulator';
+import { computeAccountStateRoot } from '../../runtime/account/state-root';
+import type { AccountReplica, AccountState } from '../../runtime/types';
 import { runWatchtowerSweep } from '../../runtime/watchtower/action';
 import {
   resolveDbPath,
@@ -115,17 +117,33 @@ const installJurisdiction = (env: ReturnType<typeof xln.createEmptyEnv>, name = 
   return jurisdiction;
 };
 
-const makeAccount = (selfId: string, counterpartyId: string, watchSeed: string): AccountState => {
+const makeAccount = (selfId: string, counterpartyId: string, watchSeed: string): AccountReplica => {
   const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
     ? [selfId, counterpartyId]
     : [counterpartyId, selfId];
   const delta = createDefaultDelta(1);
   delta.leftCreditLimit = 10n ** 30n;
   delta.rightCreditLimit = 10n ** 30n;
-  return {
+  const state: AccountState = {
     leftEntity,
     rightEntity,
+    domain: { chainId: 31337, depositoryAddress: addr('11') },
     watchSeed,
+    deltas: new Map([[1, delta]]),
+    locks: new Map(),
+    swapOffers: new Map(),
+    pulls: new Map(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    lastFinalizedJHeight: 0,
+    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    jNonce: 0,
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+  };
+  return {
+    state,
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -134,29 +152,18 @@ const makeAccount = (selfId: string, counterpartyId: string, watchSeed: string):
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
+      accountStateRoot: computeAccountStateRoot(state),
       stateHash: '',
       deltas: [],
-      byLeft: true,
+      byLeft: selfId === leftEntity,
     },
-    deltas: new Map([[1, delta]]),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
-    lastFinalizedJHeight: 0,
-    proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nonce: 0 },
+    proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nextProofNonce: 1 },
     proofBody: { tokenIds: [], deltas: [] },
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    onChainSettlementNonce: 0,
     pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
-    rebalancePolicy: new Map(),
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
 };
 
