@@ -1,6 +1,6 @@
 # React cutover Plan 011 inventory
 
-This document records the implementation checkpoint for the atomic React/Vite/TypeScript cutover. It is not production activation evidence: Plan 011 is blocked until the owner authorizes the protocol work identified by the unchanged-candidate browser and CI gates.
+This document records the implementation checkpoint for the atomic React/Vite/TypeScript cutover. It is not production activation evidence. On 5 August 2026 the owner authorized all listed Runtime/Entity/Account work; the protocol fixes are implemented through checkpoint commit `2fab8468a`, while unchanged-candidate browser and release gates remain outstanding.
 
 ## Canonical surface ownership
 
@@ -47,13 +47,16 @@ The ops scenario player exposes deterministic playback controls and opens a wall
 - Commit `68b807b112f4` has strict browser evidence for the public site (1 target), docs and nested image assets (5), wallet onboarding/recovery/accounts/payment routes (5), ops health/QA/runs plus Dockview/3D suspension and scenario preview (4), payment smoke (1), AHB (1), and multiroute load (1). Every captured iPhone, laptop, and wide-desktop screenshot was inspected; the passing browser-health gates reported no unexpected console, page, request, or response failures.
 - The complete flow batch on that commit passed 8 targets, failed 1 rebalance target, and cancelled 1 after the Account failure. The empty swap/history target separately passed in 8.8 seconds; the live swap target failed during market-maker Runtime startup before Playwright.
 - Native mobile iOS/Android sync, desktop smoke, and extension packaging passed on commit `68b807b112f4` with manifest version `0.1.31-68b807b112f4`. `bun run check` passed there and again on `da3f1fe87`, with frozen core unchanged.
-- On commit `da3f1fe87`, both `bun run gate:ci` and `bun run gate:release` passed frontend types, source checks, and release-integrity tests, then stopped at runtime core tests with 476 pass and 8 fail. The corrected native/watchtower tests passed inside both gates; all eight failures touch Runtime/Entity semantics and require owner authority before implementation.
+- On commit `da3f1fe87`, both `bun run gate:ci` and `bun run gate:release` passed frontend types, source checks, and release-integrity tests, then stopped at runtime core tests with 476 pass and 8 fail. The corrected native/watchtower tests passed inside both gates; those eight Runtime/Entity failures were the scope subsequently authorized and resolved below.
+- Commit `38c64c60d` restores the seven canonical protocol fixtures and fixes external cross-j trust-boundary admission before local target lookup. Commit `5a29190b5` makes the rebalance browser assertion wait for durable cycle evidence instead of sampling an in-flight settlement frontier.
+- Checkpoint `2fab8468a` makes source intent durable through its Account, partitions exact cross-j opening cohorts below the encrypted transport budget, preserves atomic sibling reservation, and classifies a simultaneous Account proposal as deterministic deferral instead of a security incident. The focused protocol batch passes 87 tests with 796 expectations.
+- `bun run check` passes on `2fab8468a`: frozen core is unchanged, Runtime TypeScript and all source invariants pass, the cross-j test file is 2,968/3,000 lines, and all four React/Vite/TypeScript production surfaces build.
 
-## CI core failure localization
+## Authorized CI core resolution
 
-The eight runtime-core failures reproduce independently. Seven are obsolete test inputs that no longer satisfy the canonical protocol validators; one exposes a real admission-order regression. Updating even the fixtures changes consensus evidence or cross-j protocol expectations, so none of these changes is authorized by the frontend cutover alone.
+The eight runtime-core failures reproduced independently and were resolved only after explicit owner authorization. Seven fixtures now carry the mandatory canonical evidence; the Runtime fix preserves the same fail-fast trust boundary while checking it before local target lookup.
 
-| Test | Classification | Authorized L1 change |
+| Test | Classification | Implemented resolution |
 |---|---|---|
 | `cross-j source fill ack routes book removal to canonical sibling owner` | Fixture omits the mandatory exact fill numerator/denominator | Bind its 100/65,535 partial-fill evidence before cancelling the remainder |
 | `cross-j book-owner fill ack routes admitted remote order to source hub` | Fixture gives source and target progress the same hub | Build distinct source/target hub topology before asserting routing |
@@ -66,8 +69,7 @@ The eight runtime-core failures reproduce independently. Seven are obsolete test
 
 ## Remaining release blockers
 
-- The live swap market-maker stack repeatedly rejects sibling legs with `CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH`, then emits 2.15 MB direct WebSocket messages above the 1 MB limit and crashes incident persistence with `DEBUG_EVENT_TOO_LARGE:bytes=149034:max=65536`. This is Runtime/network protocol scope and requires explicit owner authorization.
-- The rebalance flow reaches Account recovery and fails with `SETTLEMENT_SEAL_NONCE_MISMATCH:28:29:j=0:next=29:local=28:peer=24`, leaving the bilateral pair at committed height 30 with height 31 pending. This is an Account consensus invariant and requires explicit owner authorization.
-- The CI core batch is localized above: seven protocol fixture updates and one Runtime admission-order fix remain owner-authorized Runtime/Entity/Account work.
-- After those fixes, rerun the affected L1 tests, payment/user-flow and swap L2, native mobile/desktop/extension, `bun run check`, `bun run gate:ci`, and `bun run gate:release` on one unchanged final candidate.
+- The exact live swap browser rerun is not yet evidence for `2fab8468a`. Two isolated-runner attempts stopped before stack startup because all seven machine-wide lease lanes (`20000` through `20120`) were occupied; no live `:8080` Runtime was stopped, reset, or reused.
+- When a lane is available, rerun the market-maker prepublish/cross-chain swap target under strict browser health and inspect its screenshot, video, trace, browser console, Runtime WAL, structural incidents, and WebSocket-size evidence.
+- On that unchanged candidate, rerun payment/user-flow and rebalance L2, native mobile/desktop/extension, `bun run gate:ci`, and `bun run gate:release`. `bun run check` is already green on the checkpoint and must be rerun only after a relevant code or documentation change.
 - Do not mark Plan 011 done, create a non-WIP release commit, push, merge, tag, or activate production before those gates pass.
