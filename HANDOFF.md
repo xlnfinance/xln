@@ -1,7 +1,8 @@
 # Handoff — XLN release gate + cross-J barrier design
 
-Owner goal, verbatim: **"доделывай все сценарии и е2е до зеленого! нужен релиз"**
-(get all scenarios and E2E green for release).
+Owner goal: **finish all scenarios and E2E to green — a release is needed.**
+(Stated in Russian; translated here because `check:english-source` gates every
+tracked `.md` and the original spelling broke `bun run check`.)
 
 Everything below is verified by running it, not inferred. Repo state at handoff:
 `main` = `d9f95421a`, pushed, working tree clean of this work.
