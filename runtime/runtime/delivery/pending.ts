@@ -7,10 +7,12 @@ import type {
   RuntimeEntityInputsEnvelope,
 } from '../types';
 import { createStructuredLogger } from '../../infra/logger';
+import { keccak256, toUtf8Bytes } from 'ethers';
 import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getWallClockMs } from '../../infra/time';
 import { validateDeliverableEntityInput } from '../routing-validation';
+import { recordRuntimeSecurityIncident } from '../security-incidents';
 
 import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output-envelope';
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
@@ -22,7 +24,7 @@ import {
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import { reliableReceiptCoversIdentity, senderFrontierKey, senderFrontierKeyForIdentity } from '../reliable-frontier';
-import { selectPotentialCrossJAccountInputPairs } from '../entity-routing';
+import { explainCrossJPairing, selectPotentialCrossJAccountInputPairs } from '../entity-routing';
 import {
   accountProposalSettledBySender,
   accountProposalEvidenceRank,
@@ -39,6 +41,113 @@ import {
 } from './identity';
 
 const routeLog = createStructuredLogger('network.route');
+
+const shortPairKey = (pairKey: string): string =>
+  `${keccak256(toUtf8Bytes(pairKey)).slice(0, 18)}:len=${pairKey.length}`;
+
+const summarizeAtomicUnitOutput = (
+  output: RoutedEntityInput,
+): Record<string, unknown> => {
+  const marker = output.atomicCrossJurisdictionPair;
+  const reliable = getReliableOutputIdentity(output);
+  const accountInputs = getEffectiveEntityInputTxs(output).flatMap(tx => {
+    if (tx.type !== 'accountInput') return [];
+    const proposal = accountInputProposal(tx.data);
+    const ack = accountInputAck(tx.data);
+    const pullOrders =
+      proposal?.frame.accountTxs.flatMap(accountTx =>
+        accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction
+          ? [`${accountTx.data.crossJurisdiction.leg}:${accountTx.data.crossJurisdiction.orderId.slice(-24)}`]
+          : [],
+      ) ?? [];
+    return [
+      {
+        kind: tx.data.kind,
+        from: tx.data.fromEntityId,
+        to: tx.data.toEntityId,
+        proposalHeight: proposal?.frame.height ?? null,
+        ackHeight: ack?.height ?? null,
+        pullOrders: pullOrders.slice(0, 6),
+        pullCount: pullOrders.length,
+      },
+    ];
+  });
+  return {
+    entityId: output.entityId,
+    targetRuntimeId: output.runtimeId,
+    entityTxTypes: [...new Set((output.entityTxs ?? []).map(tx => tx.type))],
+    sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
+    marker: marker ? { phase: marker.phase, pairKey: shortPairKey(marker.pairKey) } : null,
+    reliable: reliable
+      ? { kind: reliable.kind, laneKey: reliable.laneKey, height: reliable.height }
+      : null,
+    accountInputs,
+  };
+};
+
+const incompleteAtomicUnitLogAt = new Map<string, number>();
+const INCOMPLETE_ATOMIC_UNIT_LOG_INTERVAL_MS = 5_000;
+
+const completeAtomicUnitWaitingLogAt = new Map<string, number>();
+
+const logCompleteAtomicUnitWaiting = (
+  unit: { outputs: readonly RoutedEntityInput[] },
+  retryMeta: ReadonlyArray<Record<string, unknown>>,
+): void => {
+  if (!unit.outputs.some(output => isCrossJAdmissionProposal(output))) return;
+  const key = buildRouteOutputKey(unit.outputs[0]!);
+  const now = getWallClockMs();
+  if (now - (completeAtomicUnitWaitingLogAt.get(key) ?? 0) < INCOMPLETE_ATOMIC_UNIT_LOG_INTERVAL_MS) return;
+  completeAtomicUnitWaitingLogAt.set(key, now);
+  routeLog.info('crossj.atomic_complete_waiting', {
+    outputs: unit.outputs.map(summarizeAtomicUnitOutput),
+    retryMeta,
+  });
+};
+
+const logIncompleteAtomicUnitParked = (
+  env: RuntimeReplica,
+  unit: { outputs: readonly RoutedEntityInput[] },
+  allPending: readonly RoutedEntityInput[],
+): void => {
+  const marker = unit.outputs[0]?.atomicCrossJurisdictionPair;
+  const key = marker ? marker.pairKey : buildRouteOutputKey(unit.outputs[0]!);
+  const now = getWallClockMs();
+  const lastAt = incompleteAtomicUnitLogAt.get(key) ?? 0;
+  if (now - lastAt < INCOMPLETE_ATOMIC_UNIT_LOG_INTERVAL_MS) return;
+  incompleteAtomicUnitLogAt.set(key, now);
+  if (marker?.phase === 'ack') {
+    // ACK cohorts are born complete in one Runtime frame's outbox and retire
+    // only as a whole (pruneReceiptedReliableOutputs). A lone ack-marked leg
+    // therefore cannot exist under the pairwise-communication invariant; one
+    // here means a new splitter crept in upstream and this leg is wedged.
+    recordRuntimeSecurityIncident(env, {
+      domain: 'cross-j',
+      code: 'CROSS_J_ATOMIC_ACK_LEG_UNPAIRED',
+      source: 'local-consensus',
+      severity: 'critical',
+      summary: 'Atomic cross-j ACK leg observed without its sibling in the transport outbox',
+      entityId: unit.outputs[0]?.entityId ?? '',
+    });
+  }
+  const unitOutputs = new Set(unit.outputs);
+  routeLog.info('crossj.atomic_incomplete_parked', {
+    reason: marker
+      ? `explicit-${marker.phase}-group-size-${unit.outputs.length}`
+      : 'lone-cross-j-proposal',
+    outputs: unit.outputs.map(summarizeAtomicUnitOutput),
+    // The sibling this unit is waiting for should be another cross-j output in
+    // the same pending set. Listing them shows whether it is absent entirely
+    // (producer-side gap) or present with a diverging route set (pairing gap).
+    otherCrossJPending: allPending
+      .filter(output => !unitOutputs.has(output) && isCrossJAdmissionProposal(output))
+      .slice(0, 4)
+      .map(summarizeAtomicUnitOutput),
+    pairing: explainCrossJPairing(
+      allPending.filter(output => isCrossJAdmissionProposal(output)).slice(0, 6),
+    ),
+  });
+};
 
 export const MAX_PENDING_NETWORK_OUTPUTS = 10_000;
 const NETWORK_RETRY_BASE_MS = 1_000;
@@ -79,7 +188,7 @@ export const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): bool
     );
   });
 
-const isCrossJAdmissionProposal = (output: RoutedEntityInput): boolean =>
+export const isCrossJAdmissionProposal = (output: RoutedEntityInput): boolean =>
   getEffectiveEntityInputTxs(output).some(tx => {
     if (tx.type !== 'accountInput') return false;
     const proposal = accountInputProposal(tx.data);
@@ -545,6 +654,7 @@ export const splitPendingOutputsByRetryWindow = (
   for (const unit of groupAtomicCrossJAdmissionOutputs(orderedPending)) {
     if (unit.atomic) {
       if (!unit.complete) {
+        logIncompleteAtomicUnitParked(env, unit, orderedPending);
         waiting.push(...unit.outputs);
         continue;
       }
@@ -562,6 +672,11 @@ export const splitPendingOutputsByRetryWindow = (
       if (due) {
         ready.push(...unit.outputs);
       } else {
+        logCompleteAtomicUnitWaiting(unit, retryFenceOutputs.map(output => ({
+          key: buildRouteOutputKey(output).slice(0, 160),
+          nextRetryInMs: (meta.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0) - nowMs,
+          attempts: meta.get(buildRouteOutputKey(output))?.attempts ?? 0,
+        })));
         waiting.push(...unit.outputs);
         reliable.forEach(identity => blockedReliableLanes.add(identity.laneKey));
       }
@@ -859,10 +974,30 @@ export const pruneReceiptedReliableOutputs = (
       continue;
     }
     const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
-    if (unit.atomic && reliableOutputs.length > 0 && reliableOutputs.every(isReceipted)) {
-      for (const output of unit.outputs) {
-        env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+    if (unit.atomic) {
+      if (reliableOutputs.length > 0 && reliableOutputs.every(isReceipted)) {
+        for (const output of unit.outputs) {
+          env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+        }
+        continue;
       }
+      // Sibling entities communicate strictly pairwise: an atomic cohort must
+      // retire as a whole or retry as a whole. Retiring a receipted leg alone
+      // (per-leg, like the loop below) strands its sibling as a permanently
+      // incomplete unit that transport refuses to send and retry refuses to
+      // schedule. Partial receipts therefore retain the COMPLETE unit; the
+      // whole envelope retries, the receiver re-issues receipts for already
+      // applied ACK legs (reliable-ingress terminal/exact re-receipt paths),
+      // and the unit retires on the next pass with full coverage.
+      if (reliableOutputs.some(isReceipted)) {
+        routeLog.info('crossj.atomic_receipt_partial_hold', {
+          outputs: unit.outputs.map(output => ({
+            ...summarizeAtomicUnitOutput(output),
+            receipted: isReceipted(output),
+          })),
+        });
+      }
+      retained.push(...unit.outputs);
       continue;
     }
     for (const output of unit.outputs) {
