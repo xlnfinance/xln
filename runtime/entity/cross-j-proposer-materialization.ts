@@ -7,6 +7,7 @@ import {
 } from '../extensions/cross-j/index';
 import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
+import { safeStringify } from '../protocol/serialization';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityReplica, EntityState } from './types';
@@ -192,6 +193,23 @@ type CrossJOpeningGroup = Readonly<{
   orderIds: Set<string>;
 }>;
 
+/**
+ * Both cohort legs must fit one transport envelope: the receiver admits the
+ * atomic pair only when both certified Account proposals arrive together, and
+ * runtime WS transport refuses messages over DEFAULT_MAX_WS_MESSAGE_BYTES
+ * (1MB). A cohort selected past that ceiling is undeliverable by construction
+ * — the sender retries the oversized envelope forever and cross-j bootstrap
+ * wedges. Budget one quarter of the ceiling of encoded Account txs per leg;
+ * the other half of the envelope is certificates, evidence and framing.
+ * safeStringify(JSON) over-estimates the msgpack wire size, which keeps the
+ * bound conservative. Later arrivals stay queued and ship as the next
+ * sequential cohort, which transport already keeps in separate envelopes.
+ */
+const CROSS_J_OPENING_COHORT_MAX_TX_BYTES = 256 * 1024;
+
+const approximateAccountTxBytes = (txs: readonly AccountTx[]): number =>
+  txs.reduce((total, tx) => total + safeStringify(tx).length, 0);
+
 const fitOpeningCohort = (
   localTxs: readonly AccountTx[],
   siblingTxs: readonly AccountTx[],
@@ -200,16 +218,33 @@ const fitOpeningCohort = (
   const selected = new Set<string>();
   let localCount = 0;
   let siblingCount = 0;
+  let localBytes = 0;
+  let siblingBytes = 0;
   for (const orderId of candidateOrderIds) {
     const oneOrder = new Set([orderId]);
-    const nextLocalCount = selectOpeningTxs(localTxs, oneOrder).length;
-    const nextSiblingCount = selectOpeningTxs(siblingTxs, oneOrder).length;
-    if (nextLocalCount === 0 || nextSiblingCount === 0) continue;
-    if (localCount + nextLocalCount > MAX_ACCOUNT_FRAME_TXS || siblingCount + nextSiblingCount > MAX_ACCOUNT_FRAME_TXS)
+    const nextLocalTxs = selectOpeningTxs(localTxs, oneOrder);
+    const nextSiblingTxs = selectOpeningTxs(siblingTxs, oneOrder);
+    if (nextLocalTxs.length === 0 || nextSiblingTxs.length === 0) continue;
+    if (
+      localCount + nextLocalTxs.length > MAX_ACCOUNT_FRAME_TXS ||
+      siblingCount + nextSiblingTxs.length > MAX_ACCOUNT_FRAME_TXS
+    )
+      break;
+    const nextLocalBytes = approximateAccountTxBytes(nextLocalTxs);
+    const nextSiblingBytes = approximateAccountTxBytes(nextSiblingTxs);
+    // The first order is always admitted: a single order past the budget can
+    // only be helped by a larger transport limit, never by waiting.
+    if (
+      selected.size > 0 &&
+      (localBytes + nextLocalBytes > CROSS_J_OPENING_COHORT_MAX_TX_BYTES ||
+        siblingBytes + nextSiblingBytes > CROSS_J_OPENING_COHORT_MAX_TX_BYTES)
+    )
       break;
     selected.add(orderId);
-    localCount += nextLocalCount;
-    siblingCount += nextSiblingCount;
+    localCount += nextLocalTxs.length;
+    siblingCount += nextSiblingTxs.length;
+    localBytes += nextLocalBytes;
+    siblingBytes += nextSiblingBytes;
   }
   return selected;
 };
