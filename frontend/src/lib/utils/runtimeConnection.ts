@@ -89,6 +89,21 @@ export function remoteAccessFromAuthKey(authKey: string): 'admin' {
   return 'admin';
 }
 
+/**
+ * Persist a runtime adapter session opened outside the URL-import flow (the
+ * /health adapter panel). Same confinement contract as the import flow: the
+ * capability lives only in sessionStorage, so it survives same-tab navigation
+ * to /app but never outlives the tab.
+ */
+export function persistRuntimeAdapterSession(wsUrl: string, authKey: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('xln-runtime-adapter-mode', 'remote');
+  localStorage.setItem('xln-runtime-adapter-ws', wsUrl);
+  localStorage.setItem('xln-runtime-adapter-access', remoteAccessFromAuthKey(authKey));
+  localStorage.removeItem('xln-runtime-adapter-key');
+  sessionStorage.setItem('xln-runtime-adapter-key', authKey);
+}
+
 export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
   if (typeof window === 'undefined') return null;
   const query = new URLSearchParams(window.location.search);

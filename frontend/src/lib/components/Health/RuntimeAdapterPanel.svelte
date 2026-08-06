@@ -4,6 +4,7 @@
     disconnectRuntimeAdapter,
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
+  import { persistRuntimeAdapterSession } from '$lib/utils/runtimeConnection';
   import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
   import { makeQaSeveritySignal, type QaSeveritySignal } from '@xln/runtime/qa/severity';
 
@@ -129,6 +130,9 @@
         wsUrl,
         ...(authKey.trim() ? { authKey: authKey.trim() } : {}),
       });
+      // Same-tab navigation to /app resumes this session: the capability is
+      // session-confined (sessionStorage), the endpoint is not a secret.
+      if (authKey.trim()) persistRuntimeAdapterSession(wsUrl, authKey.trim());
       await refresh();
     } catch (err) {
       error = errorMessage(err);

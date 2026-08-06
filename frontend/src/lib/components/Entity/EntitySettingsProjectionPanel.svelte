@@ -1,3 +1,13 @@
+<script lang="ts" context="module">
+  // Draft state must survive a component remount: the enclosing panel subtree
+  // unmounts whenever the replica projection transiently flaps during a
+  // background frame refresh, and component-local drafts then reseed from the
+  // store, silently discarding in-progress user edits (observed as a Save
+  // submitting the OLD profile name with the NEW bio).
+  type ProfileDraftCacheEntry = { name: string; avatar: string; bio: string; website: string };
+  const profileDraftCache = new Map<string, ProfileDraftCacheEntry>();
+</script>
+
 <script lang="ts">
   import { Network, PlusCircle, Save, ShieldCheck, SlidersHorizontal } from 'lucide-svelte';
   import type { RuntimeReplica, HubRebalanceConfig } from '@xln/runtime/api/public/runtime-module';
@@ -127,21 +137,28 @@
   $: runtimeCanWrite = $runtimeControllerHandle.mode === 'embedded' || $runtimeControllerHandle.authLevel === 'admin';
   $: normalizedEntityId = normalizeText(entityId).toLowerCase();
   $: normalizedRuntimeId = normalizeText(runtimeId || $runtimeControllerHandle.id);
-  $: profileKey = [
-    normalizedEntityId,
-    profile?.name || '',
-    profile?.avatar || '',
-    profile?.bio || '',
-    profile?.website || '',
-  ].join('|');
-  $: if (profileKey !== loadedProfileKey && !savingProfile) {
-    loadedProfileKey = profileKey;
-    draftName = normalizeText(profile?.name);
-    draftAvatar = normalizeText(profile?.avatar);
-    draftBio = normalizeText(profile?.bio);
-    draftWebsite = normalizeText(profile?.website);
+  // Drafts reseed only when the edited ENTITY changes. Keying on live profile
+  // VALUES clobbered in-progress user input: a transient projection flap
+  // (profile briefly undefined during a background frame refresh, then back)
+  // changed the key twice and silently reset already-typed fields to the store
+  // values — a Save then submitted the OLD name with the NEW bio.
+  $: if (normalizedEntityId !== loadedProfileKey && !savingProfile && profile) {
+    loadedProfileKey = normalizedEntityId;
+    const cached = profileDraftCache.get(normalizedEntityId);
+    draftName = cached ? cached.name : normalizeText(profile?.name);
+    draftAvatar = cached ? cached.avatar : normalizeText(profile?.avatar);
+    draftBio = cached ? cached.bio : normalizeText(profile?.bio);
+    draftWebsite = cached ? cached.website : normalizeText(profile?.website);
     profileError = '';
     profileSaved = false;
+  }
+  $: if (loadedProfileKey) {
+    profileDraftCache.set(loadedProfileKey, {
+      name: draftName,
+      avatar: draftAvatar,
+      bio: draftBio,
+      website: draftWebsite,
+    });
   }
   $: canSaveProfile = Boolean(normalizedEntityId) && activeIsLive && runtimeCanWrite && !savingProfile;
   $: canImportJMachine = activeIsLive && runtimeCanWrite && !importingJMachine;
@@ -308,6 +325,9 @@
         website: draftWebsite.trim(),
       });
       profileSaved = true;
+      // The committed profile is now the canonical draft baseline; a retained
+      // cache entry would shadow later store updates after the next remount.
+      profileDraftCache.delete(normalizedEntityId);
     } catch (error) {
       errorLog.log('Entity profile update failed', 'Entity Settings', { entityId: normalizedEntityId, error });
       profileError = error instanceof Error ? error.message : String(error);
