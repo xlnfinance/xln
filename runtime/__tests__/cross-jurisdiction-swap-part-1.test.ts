@@ -640,12 +640,12 @@ describe('cross-jurisdiction hashledger swap', () => {
     const materializedState = cloneEntityState(delayedProposerRegistered.newState);
     expect(materializedState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull).toBeDefined();
     const replayAfterMaterialization = await applyEntityTx(proposerEnv, materializedState, rawTx);
-    expect(replayAfterMaterialization.outputs).toHaveLength(2);
-    expect(
-      replayAfterMaterialization.outputs.flatMap(output =>
-        (output.entityTxs ?? []).map(tx => tx.type),
-      ),
-    ).toEqual(['registerCrossJurisdictionSwap', 'registerCrossJurisdictionSwap']);
+    // Emits nothing on purpose. Re-announcing the route here would land a
+    // registerCrossJurisdictionSwap in the proposer's next wake, and
+    // appendDefaultProposerCrossJMaterializations treats any such wake as a
+    // commit phase and skips materialization - with a submitter retrying every
+    // few seconds the route then never leaves `intent`.
+    expect(replayAfterMaterialization.outputs).toHaveLength(0);
     expect(
       replayAfterMaterialization.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull,
     ).toEqual(preparedRoute.sourcePull);

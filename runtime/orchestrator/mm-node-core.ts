@@ -1612,7 +1612,9 @@ export const hasCrossSpecBootstrapProgress = (
   // by an actual account offer, a hub registration, or a pending request.
   if (hasCrossRouteRegistered(env, route.source.entityId, route.orderId)) return true;
   if (hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)) return true;
-  return getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId);
+  // Same rule for the pending-request view, which reads the very same map.
+  return hasCrossRouteRegistered(env, route.source.entityId, route.orderId) &&
+    getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId);
 };
 
 export const countCrossSpecBootstrapProgress = (
@@ -1882,9 +1884,20 @@ export const maintainMarketMakerQuotes = async (
   return false;
 };
 
+/**
+ * A route record only counts once it has actually left `intent`. A record
+ * parked at `intent` proves the submission was accepted somewhere, never that
+ * it advanced, and nothing prunes it when the route dies — so counting its mere
+ * presence as bootstrap progress made a dead spec permanently ineligible for
+ * resubmission. That is the same premature "in flight" verdict that already had
+ * to be removed for `crossJurisdictionAuthorizations`, reached through a second
+ * door: the wave reported candidateCount 0 and coverageGaps 0 while 135 offers
+ * were still unsent.
+ */
 export const hasCrossRouteRegistered = (env: RuntimeReplica, entityId: string, orderId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
-  return Boolean(replica?.state?.crossJurisdictionSwaps?.has(orderId));
+  const route = replica?.state?.crossJurisdictionSwaps?.get(orderId);
+  return Boolean(route && route.status !== 'intent');
 };
 
 const isMatchingCrossOfferRoute = (

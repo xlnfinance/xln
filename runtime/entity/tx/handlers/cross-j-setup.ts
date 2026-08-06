@@ -151,19 +151,19 @@ const prepareRawCrossJurisdictionIntent = (
     const storedHash = normalizeEntityRef(existing.routeHash || '');
     const replayHash = normalizeEntityRef(route.routeHash || '');
     if (storedHash && replayHash && storedHash === replayHash) {
-      // Idempotent means reproducing the observable outcome, not swallowing the
-      // message. Absorbing silently left the submitter blind: it cannot see our
-      // materialization, so it resent every retry window forever while the hub
-      // dropped each one on the floor. Re-emit the registrations the successful
-      // materialization sent, so the retry converges the submitter's view.
-      const storedRoute = cloneCrossJurisdictionRoute(existing);
-      pushCrossJurisdictionEntityOutput(outputs, storedRoute.source.counterpartyEntityId, [
-        { type: 'registerCrossJurisdictionSwap', data: { route: storedRoute } },
-      ], storedRoute.sourceHubSignerId);
-      pushCrossJurisdictionEntityOutput(outputs, storedRoute.target.entityId, [
-        { type: 'registerCrossJurisdictionSwap', data: { route: storedRoute } },
-      ], storedRoute.targetHubSignerId);
-      addMessage(state, `🌉 Cross-j prepare ${route.orderId} already materialized; re-announced`);
+      // Absorb the honest retry as a no-op and emit nothing. Re-announcing the
+      // route here looked like the right way to converge the submitter's view,
+      // but `appendDefaultProposerCrossJMaterializations` skips materialization
+      // for any wake whose txs contain a registerCrossJurisdictionSwap - that
+      // is its commit-phase guard. With the submitter retrying every
+      // MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS, the re-announcement landed in
+      // nearly every wake and the route never left `intent` at all.
+      //
+      // The submitter does not need to be told: bootstrap progress is judged on
+      // a route that actually advanced past `intent`, so it keeps retrying on
+      // its own, and each retry is now a cheap no-op instead of a poisoned
+      // commit phase.
+      addMessage(state, `🌉 Cross-j prepare ${route.orderId} already materialized; replay ignored`);
       return { newState: state, outputs };
     }
     throw new Error(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${route.orderId}`);
