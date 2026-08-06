@@ -54,3 +54,35 @@ processAccountTx(accountMachine, tx, byLeft, timestamp, height, isValidation)
 ## stale state risk
 
 `proofHeader.fromEntity` is perspective-dependent and persists in LevelDB. when account is loaded from DB, this field reflects the LAST entity that wrote it, which may not match current processing context. never derive canonical direction from it alone — always use frame-level `byLeft`.
+
+## cross-j hash-ladder canon (owner decision 2026-08-07)
+
+**rule:** the hash-ladder is the SINGLE settlement authority for a cross-j
+order, on BOTH jurisdictions. There are no signed fill receipts and none may
+be added: a Hanko-signed receipt path was explicitly rejected because ladder
+reveals are far cheaper in gas, and two authorities is how conservation broke.
+
+**rule:** off-chain fill progress (`cross_swap_fill_ack` / `cross_pull_progress`)
+is INFORMATIONAL only — the hub saying "matched X%" with exact amounts but no
+secrets. It is bookkeeping and UX, never authorization, and must never gate a
+close or a dispute. Revealing ladder secrets off-chain is forbidden: the ladder
+is single-shot, an escaped secret is spent forever.
+
+**rule:** ladder secrets are revealed in exactly two places:
+1. **swap close** — only when the user tells the hub "close at my current fill,
+   don't wait", or when the fill reaches 100%;
+2. **dispute** — the on-chain reveal, verified against `partialRoot`, governs
+   both jurisdictions symmetrically.
+
+**why:** the source chain finalizes whatever ratio the reveal proves. If the
+target side filters that reveal through local informational state (the old
+`exceeds committed fill` veto in salvage, or the `hasCrossJurisdictionCommittedFill`
+dispute-candidate filter), the two jurisdictions settle different ratios and
+cross-j conservation breaks — by the guard, not by the reveal. A verified
+reveal above the last informational update is NORMAL: the hub's actual fill
+legally runs ahead of its last "matched X%" message.
+
+**bug caught 2026-08-06:** dispute salvage rejected a cryptographically
+verified reveal because it exceeded the informational ratio; source J had
+already paid the full revealed amount while target recovery refused to mirror
+it (audit P1-2). Both gates removed; the reveal is the truth.

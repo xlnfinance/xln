@@ -11,7 +11,6 @@ import { addMessage } from '../frame-events';
 import { verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import {
   CROSS_J_MAX_FILL_RATIO,
-  hasCrossJurisdictionCommittedFill,
   isCrossJurisdictionTerminalStatus,
 } from '../../extensions/cross-j/index';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
@@ -89,7 +88,8 @@ function findCrossJurisdictionRoutesForSourceDispute(
       String(route.source.entityId || '').toLowerCase() === self &&
       String(route.source.counterpartyEntityId || '').toLowerCase() === counterparty &&
       Boolean(route.targetPull) &&
-      hasCrossJurisdictionCommittedFill(route) &&
+      // Informational fill progress must not gate dispute recovery: a valid
+      // on-chain reveal governs even when no local fill info ever arrived.
       !isCrossJurisdictionTerminalStatus(route.status),
     )
     .sort((left, right) => String(left.orderId).localeCompare(String(right.orderId)));
@@ -144,7 +144,8 @@ function findCrossJurisdictionRoutesForTargetDispute(
       String(route.target.counterpartyEntityId || '').toLowerCase() === self &&
       String(route.target.entityId || '').toLowerCase() === counterparty &&
       Boolean(route.targetPull) &&
-      hasCrossJurisdictionCommittedFill(route) &&
+      // Informational fill progress must not gate dispute recovery: a valid
+      // on-chain reveal governs even when no local fill info ever arrived.
       !isCrossJurisdictionTerminalStatus(route.status),
     )
     .sort((left, right) => {

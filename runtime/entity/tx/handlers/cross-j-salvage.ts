@@ -1,6 +1,5 @@
 import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
 import {
-  getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteTransitionAllowed,
   transitionCrossJurisdictionRouteStatus,
@@ -69,11 +68,12 @@ const verifySalvageFillRatio = (
     addMessage(state, `❌ Cross-j salvage ${routeId} fill mismatch: claimed ${claimedFillRatio}, verified ${verifiedFillRatio}`);
     return null;
   }
-  const committedRatio = getCrossJurisdictionCommittedProofRatio(route);
-  if (committedRatio > 0 && verifiedFillRatio > committedRatio) {
-    addMessage(state, `❌ Cross-j salvage ${routeId} exceeds committed fill: ${verifiedFillRatio}/${committedRatio}`);
-    return null;
-  }
+  // The verified hash-ladder reveal is the single dispute-time authority for
+  // BOTH jurisdictions. Off-chain fill progress is informational only (the hub
+  // saying "matched X%" without secrets), so it may lag the actual fill and
+  // must never veto a cryptographically verified reveal: the source chain has
+  // already finalized this ratio, and refusing to mirror it here is what
+  // breaks cross-jurisdiction conservation, not the reveal itself.
   return verifiedFillRatio;
 };
 
