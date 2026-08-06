@@ -6,6 +6,7 @@ import {
   getCrossJurisdictionCommittedFillAmounts,
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
+  cloneCrossJurisdictionCloseProof,
 } from '../../../extensions/cross-j/index';
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { buildCrossJurisdictionCancelAck } from '../../../extensions/cross-j/orderbook';
@@ -167,7 +168,7 @@ const requestPureCancel = (
   });
   const requestedAt = deterministicEntityTimestamp(newState, env);
   const targetCommandRoute = cloneCrossJurisdictionRoute(route);
-  targetCommandRoute.sourceCloseProof = proof;
+  targetCommandRoute.sourceCloseProof = cloneCrossJurisdictionCloseProof(proof);
   transitionCrossJurisdictionRouteStatus(targetCommandRoute, 'clearing', requestedAt);
   pushCrossJurisdictionEntityOutput(
     outputs,
@@ -185,7 +186,7 @@ const requestPureCancel = (
     }],
     route.targetHubSignerId,
   );
-  route.sourceCloseProof = proof;
+  route.sourceCloseProof = cloneCrossJurisdictionCloseProof(proof);
   transitionCrossJurisdictionRouteStatus(route, 'clearing', requestedAt);
   route.pendingClearRequestedAt = requestedAt;
   route.clearingPolicy = 'cancel_and_clear';
@@ -389,7 +390,7 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
   const targetPull = route.targetPull;
   if (!targetPull) throw new Error(`CROSS_J_CLEAR_TARGET_PULL_MISSING:${orderId}`);
   const targetCommandRoute = cloneCrossJurisdictionRoute(route);
-  targetCommandRoute.sourceCloseProof = proof;
+  targetCommandRoute.sourceCloseProof = cloneCrossJurisdictionCloseProof(proof);
   transitionCrossJurisdictionRouteStatus(
     targetCommandRoute,
     'clearing',
@@ -411,7 +412,7 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
     }],
     route.targetHubSignerId,
   );
-  route.sourceCloseProof = proof;
+  route.sourceCloseProof = cloneCrossJurisdictionCloseProof(proof);
   transitionCrossJurisdictionRouteStatus(route, 'clearing', deterministicEntityTimestamp(newState, env));
   newState.crossJurisdictionSwaps?.set(orderId, route);
   const firstValidator = entityState.config.validators[0];

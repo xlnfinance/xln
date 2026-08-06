@@ -5,6 +5,7 @@ import {
   isCrossJurisdictionRouteTransitionAllowed,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
+  cloneCrossJurisdictionCloseProof,
 } from '../../../extensions/cross-j/index';
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { prepareEntityTxState } from '../../state-clone';
@@ -142,7 +143,7 @@ export const handleCrossPullCloseEntityTx = (env: EntityRuntimeContext, state: E
   }
   const proofError = proofRouteError(route, proof, binary, leg, commandRoute);
   if (proofError) return fail(result, `❌ Cross-j ${leg} pull close ${pullId.slice(0, 8)} blocked: ${proofError}`);
-  route.sourceCloseProof = proof;
+  route.sourceCloseProof = cloneCrossJurisdictionCloseProof(proof);
   if (leg === 'target') {
     route.cumulativeFillRatio = proof.fillRatio;
     route.claimedRatio = proof.fillRatio;

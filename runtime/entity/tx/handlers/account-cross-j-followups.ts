@@ -17,6 +17,7 @@ import {
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionCloseProofProgress,
+  cloneCrossJurisdictionCloseProof,
 } from '../../../extensions/cross-j/index';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
 import {
@@ -509,8 +510,8 @@ const applyCrossPullCloseFollowup = (
         route,
         withCrossJurisdictionCloseProofProgress(route, accountTx.data.proof, newState.timestamp),
       );
-      route.sourceCloseProof = accountTx.data.proof;
-      route.targetCloseProof = accountTx.data.proof;
+      route.sourceCloseProof = cloneCrossJurisdictionCloseProof(accountTx.data.proof);
+      route.targetCloseProof = cloneCrossJurisdictionCloseProof(accountTx.data.proof);
       const terminal = transitionTargetLegTerminal(route, newState.timestamp, fillRatio);
       if (newState.crontabState) cancelHook(newState.crontabState, `cross-j-expiry:${route.orderId}`);
 
@@ -542,8 +543,8 @@ const applyCrossPullCloseFollowup = (
         route,
         withCrossJurisdictionCloseProofProgress(route, accountTx.data.proof, newState.timestamp),
       );
-      route.sourceCloseProof = accountTx.data.proof;
-      route.targetCloseProof = accountTx.data.proof;
+      route.sourceCloseProof = cloneCrossJurisdictionCloseProof(accountTx.data.proof);
+      route.targetCloseProof = cloneCrossJurisdictionCloseProof(accountTx.data.proof);
       transitionTargetLegTerminal(route, newState.timestamp, fillRatio);
       if (newState.crontabState) cancelHook(newState.crontabState, `cross-j-expiry:${route.orderId}`);
       crossJFollowupLog.debug('pull.close.settled', {
