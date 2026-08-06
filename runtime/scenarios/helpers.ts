@@ -498,6 +498,12 @@ export async function converge(env: RuntimeReplica, maxCycles = 10): Promise<voi
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
     }
+    // Retained reliable outputs are released by a retry deadline, not by more
+    // ticks. When they are the only thing left, a fixed time step just spins
+    // until the cycle budget runs out; jump to the deadline instead.
+    if (pendingNetwork > 0 && pendingOutputs === 0 && pendingInbox === 0 && pendingInputs === 0) {
+      advanceScenarioToNextNetworkRetry(env);
+    }
     for (const [, replica] of env.state.eReplicas) {
       // Check entity-level work (multi-signer consensus)
       if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) {
