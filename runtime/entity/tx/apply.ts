@@ -576,7 +576,10 @@ export const applyEntityTx = async (
       entityTxLog.error('failed_invariant', { type: String(entityTx.type), error: message });
       throw error;
     }
-    entityTxLog.debug('skipped_error', { type: String(entityTx.type), error: message });
+    // warn, not debug: a silently skipped tx is indistinguishable from a lost
+    // one from every caller's perspective (ingress receipts still report
+    // "observed"), and that blindness has already cost timeout-only failures.
+    entityTxLog.warn('skipped_error', { type: String(entityTx.type), error: message });
     return {
       newState: entityState,
       outputs: [],

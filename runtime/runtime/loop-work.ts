@@ -27,6 +27,10 @@ import type { EntityInput, EntityReplica } from '../entity/types';
 import type { RoutedEntityInput, RuntimeReplica, RuntimeInput } from './types';
 import { atomicCrossJInputCohortKey } from './entity-routing';
 
+import { createStructuredLogger } from '../infra/logger';
+
+const loopWorkLog = createStructuredLogger('runtime.loop-work');
+
 export type RuntimeWorkDeps = {
   runtimeInputHasQueuedWork(input: RuntimeInput): boolean;
   getOutputRoutingDeps(): RuntimeOutputRoutingDeps;
@@ -44,20 +48,55 @@ const entityJPrefixReadyForWake = (replica: EntityReplica): boolean => {
   );
 };
 
-const entityMempoolNeedsWake = (replica: EntityReplica): boolean =>
-  isEntityActiveLeader(replica) &&
-  entityJPrefixReadyForWake(replica) &&
-  (
+const suppressedWakeLogAt = new Map<string, number>();
+const SUPPRESSED_WAKE_LOG_INTERVAL_MS = 10_000;
+
+// A leader replica holding mempool txs but denied a wake is invisible from the
+// outside: the Runtime idles, the command sits, and the caller times out with
+// no error anywhere. Name the exact suppressor so a stall names its cause.
+const logSuppressedEntityMempoolWake = (replica: EntityReplica, reason: string): void => {
+  const key = `${replica.entityId}:${reason}`;
+  const now = Date.now();
+  if (now - (suppressedWakeLogAt.get(key) ?? 0) < SUPPRESSED_WAKE_LOG_INTERVAL_MS) return;
+  suppressedWakeLogAt.set(key, now);
+  loopWorkLog.info('entity.mempool_wake_suppressed', {
+    entityId: replica.entityId,
+    signerId: replica.signerId,
+    reason,
+    mempool: replica.mempool.length,
+    mempoolTxTypes: [...new Set(replica.mempool.map(tx => tx.type))].slice(0, 6),
+    hasProposal: Boolean(replica.proposal),
+    hasLockedFrame: Boolean(replica.lockedFrame),
+    jPrefixCertificate: Boolean(replica.jPrefixRound?.certificate),
+    entityHeight: replica.state.height,
+  });
+};
+
+const entityMempoolNeedsWake = (replica: EntityReplica): boolean => {
+  if (!isEntityActiveLeader(replica)) return false;
+  const hasWork =
     replica.mempool.length > 0 ||
     Boolean(
       replica.jPrefixRound?.certificate &&
       replica.jPrefixRound.certificate.selected.scannedThroughHeight >
         replica.state.lastFinalizedJHeight,
     ) ||
-    isFrozenBaseJPrefixRollAuthorized(replica, replica.jPrefixRound?.certificate)
-  ) &&
-  !replica.proposal &&
-  !replica.lockedFrame;
+    isFrozenBaseJPrefixRollAuthorized(replica, replica.jPrefixRound?.certificate);
+  if (!hasWork) return false;
+  if (!entityJPrefixReadyForWake(replica)) {
+    logSuppressedEntityMempoolWake(replica, 'j-prefix-round-incomplete');
+    return false;
+  }
+  if (replica.proposal) {
+    logSuppressedEntityMempoolWake(replica, 'proposal-in-flight');
+    return false;
+  }
+  if (replica.lockedFrame) {
+    logSuppressedEntityMempoolWake(replica, 'locked-frame');
+    return false;
+  }
+  return true;
+};
 
 export const collectAccountMempoolWakeInputs = (env: RuntimeReplica): EntityInput[] => {
   const inputs: EntityInput[] = [];
