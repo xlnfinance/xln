@@ -254,10 +254,13 @@
     "mocha": "^10.8.2",
     "playwright": "^1.62.1",
     "prettier": "^3.9.6",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "solc": "0.8.25",
     "tronweb": "^6.4.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
