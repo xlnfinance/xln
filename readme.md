@@ -112,9 +112,9 @@ that does not yet have a canonical owner. A low score therefore means
 
 | Surface | Main paths | What it owns | Quality /1000 | Current audit note |
 |---|---|---|---:|---|
-| User wallet | `components/Entity/`, `components/Wallet/`, `Views/RuntimeCreation.svelte`, `PaymentSpotlight.svelte`, `/app`, `/address`, `/testnet` | Registration, recovery, accounts, receive, payment, swap, lending, and durable status. | `0*` | Wallet and registration-to-payment evidence is stale. |
-| Developer panels | `components/QA/`, `Tools/`, `Runtime/`, `TimeMachine/`, `lib/network3d/`, `/admin`, `/qa`, `/runs`, `/scenarios`, `/rpc*` | Runtime inspection, Graph3D, QA playback, raw RPC, and operator controls. | N/A | Deliberately peripheral; no canonical audit owner yet. |
-| Shared client | `stores/`, `security/`, `native/`, navigation, and common UI | Runtime connection, command journal, sessions, and client security boundaries. | N/A | Cross-cutting ownership must be made explicit before scoring. |
+| User wallet | `frontend/apps/wallet/`, `frontend/packages/runtime-client/`, `/app`, `/address`, `/testnet` | Registration, recovery, accounts, receive, payment, swap, lending, and durable status. | `0*` | Wallet and registration-to-payment evidence is stale. |
+| Operator console | `frontend/apps/ops/`, `/health`, `/qa`, `/runs`, `/scenarios`, `/ai`, `/embed` | Runtime inspection, Graph3D, QA playback, and operator controls. Runtime-owned `/rpc*` endpoints remain outside the frontend. | N/A | Deliberately peripheral; no canonical audit owner yet. |
+| Shared client | `frontend/packages/client-core/`, `frontend/packages/react-adapters/`, `frontend/packages/runtime-client/` | Runtime connection, command journal, sessions, and client security boundaries. | N/A | Cross-cutting ownership must be made explicit before scoring. |
 | Mobile shells | `frontend/android/`, `frontend/ios/` | Capacitor packaging for mobile clients. | N/A | Release fingerprint ownership is not yet explicit. |
 
 ### Current total
@@ -283,7 +283,7 @@ The detailed protocol guide is
 ```bash
 # Development
 bun run dev              # Full stack (jurisdictions + runtime + frontend)
-bun run check            # TypeScript + Svelte validation
+bun run check            # TypeScript, source invariants, and four-surface build
 bun run build            # Build runtime.js for browser
 
 # Jurisdictions (Contracts)
@@ -322,9 +322,9 @@ bun run bench:radapter:hub1m:allmem  # Same, but materialize all 1M accounts int
 - **Builder**: Architect + Graph3D + Entities (creation mode)
 - **Embed**: Graph3D only (for docs/blog posts)
 
-**Tech:** Dockview (2.8k stars), Svelte reactivity, localStorage persistence
+**Tech:** React, Dockview, Three.js, and localStorage persistence
 
-**Source:** `frontend/src/lib/view/` and `frontend/src/lib/components/`
+**Source:** `frontend/apps/ops/workspace/` and `frontend/apps/ops/components/`
 
 ---
 
@@ -388,7 +388,7 @@ current protocol authority.
 ## 🛠️ Tech Stack
 
 **Runtime:** TypeScript + Bun
-**Frontend:** Svelte + Vite + Three.js
+**Frontend:** React + Vite + TypeScript + Three.js
 **Contracts:** Solidity + Hardhat
 **Blockchain:** @ethereumjs/vm (simnet) → Hardhat (local) → Ethereum/L2s (prod)
 **Panels:** Dockview (2.8k⭐)

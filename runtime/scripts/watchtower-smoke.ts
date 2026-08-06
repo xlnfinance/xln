@@ -32,11 +32,19 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>, name = 'Tow
     depositoryAddress: addr('11'),
     entityProviderAddress: addr('12'),
   };
+  const chainId = jurisdiction.chainId;
+  if (chainId === undefined) throw new Error(`WATCHTOWER_SMOKE_CHAIN_ID_MISSING:${name}`);
   env.activeJurisdiction = jurisdiction.name;
   env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: env.state.timestamp,
+    position: { x: 0, y: 0, z: 0 },
     rpcs: [jurisdiction.address],
-    chainId: jurisdiction.chainId,
+    chainId,
     depositoryAddress: jurisdiction.depositoryAddress,
     entityProviderAddress: jurisdiction.entityProviderAddress,
     contracts: {
@@ -45,7 +53,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>, name = 'Tow
       account: addr('13'),
       deltaTransformer: addr('14'),
     },
-  } as JReplica);
+  } satisfies JReplica);
   return jurisdiction;
 };
 

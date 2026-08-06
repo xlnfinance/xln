@@ -12,6 +12,10 @@ import type { JAdapterFailure, JReplica, JTx } from '../../types/jurisdiction-ru
 
 export type JAdapterMode = 'browservm' | 'anvil' | 'rpc' | 'tron';
 
+export type ReplicaAttachmentAuthority =
+  | 'deployment-origin-proof'
+  | 'committed-runtime-state';
+
 export type JAdapterReplicaConnection = Partial<JReplica>;
 
 export interface JAdapterConfig {
@@ -29,6 +33,13 @@ export interface JAdapterConfig {
   txWaitTimeoutMs?: number;           // Optional tx wait timeout override
   txWaitConfirms?: number;            // Optional tx.wait confirmations override
   fromReplica?: JAdapterReplicaConnection; // Connect to an already deployed stack
+  /**
+   * Required for RPC/TRON fromReplica attachment. External imports must prove
+   * the exact deployment transition from chain history. Runtime restore may
+   * rely on the deployment block already certified into committed RuntimeState;
+   * current bytecode, addresses, chain ID, and stack binding are still checked.
+   */
+  replicaAttachmentAuthority?: ReplicaAttachmentAuthority;
   browserVMState?: BrowserVMState;    // Import BrowserVM state directly
 }
 

@@ -1,12 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
-
 import { ethers } from 'ethers';
-
 import { applyEntityTx } from '../entity/tx/apply';
-
 import { applyAccountTx } from '../account/tx/apply';
-
 import { proposeAccountFrame } from '../account/consensus/propose';
 
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
@@ -19,7 +15,8 @@ import {
   routeRemoteCrossJurisdictionBookCancels,
 } from '../entity/tx/handlers/account';
 
-import { applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
+import { applyEntityFrame, applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
+import { initCrontab, scheduleHook } from '../entity/scheduler';
 
 import {
   appendDefaultProposerCrossJMaterializations,
@@ -1527,6 +1524,49 @@ describe('cross-jurisdiction hashledger swap', () => {
       entityTxs: [],
     }]);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clear_requested');
+
+    installJurisdictions(env, eth, base);
+    const frameState = cloneEntityState(state);
+    frameState.crontabState = initCrontab();
+    const jobs: Extract<EntityTx, { type: 'scheduledWake' }>['data']['jobs'] = [];
+    for (let index = 0; index < 4; index++) {
+      const hookId = `cross-j-sweep:fixed:${index}`;
+      scheduleHook(frameState.crontabState, {
+        id: hookId,
+        triggerAt: 70_000,
+        type: 'cross_j_orderbook_sweep',
+        data: { reason: hookId },
+      });
+      jobs.push({ kind: 'hook', id: hookId, dueAt: 70_000 });
+    }
+    const frameResult = await applyEntityFrame(env, frameState, [{
+      type: 'scheduledWake',
+      data: {
+        version: 1,
+        proposerSignerId: frameState.config.validators[0]!,
+        dueAt: 70_000,
+        jobs,
+      },
+    }], env.state.timestamp);
+    const frameAccount = frameResult.newState.accounts.get(sourceUser)!;
+    expect([
+      ...frameAccount.mempool,
+      ...(frameAccount.pendingFrame?.accountTxs ?? []),
+    ].map(tx => tx.type)).toEqual([
+      'cross_swap_fill_ack',
+    ]);
+    expect(frameResult.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
+    expect(readEntityFrameEventMessages(frameResult.newState)).toEqual([
+      `🌉 Cross-j clear ${route.orderId} queued account offer close before pull reveal`,
+      '🌉 Cross-j orderbook sweep: cross-j-sweep:fixed:0 expired=1 closedOffers=1 waiting=0',
+      `🌉 Cross-j clear ${route.orderId} waiting for account offer close ack`,
+      '🌉 Cross-j orderbook sweep: cross-j-sweep:fixed:1 expired=1 closedOffers=0 waiting=0',
+      `🌉 Cross-j clear ${route.orderId} waiting for account offer close ack`,
+      '🌉 Cross-j orderbook sweep: cross-j-sweep:fixed:2 expired=1 closedOffers=0 waiting=0',
+      `🌉 Cross-j clear ${route.orderId} waiting for account offer close ack`,
+      '🌉 Cross-j orderbook sweep: cross-j-sweep:fixed:3 expired=1 closedOffers=0 waiting=0',
+      '🚀 Proposed frame 1 with 1 transactions',
+    ]);
 
     const updatedAccount = result.newState.accounts.get(sourceUser)!;
     const cancelAck = result.accountTxs![0]!.tx;

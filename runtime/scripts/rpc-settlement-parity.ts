@@ -157,7 +157,11 @@ const loadDeployment = (args: Args): ParityDeployment => {
 const openAdapter = async (args: Args, privateKey: string): Promise<JAdapter> => {
   const base = { mode: 'rpc' as const, chainId: args.chainId, rpcUrl: args.rpcUrl, privateKey };
   if (args.mode !== 'attach') return await createJAdapter(base);
-  return await createJAdapter({ ...base, fromReplica: toReplicaConnection(loadDeployment(args)) });
+  return await createJAdapter({
+    ...base,
+    fromReplica: toReplicaConnection(loadDeployment(args)),
+    replicaAttachmentAuthority: 'deployment-origin-proof',
+  });
 };
 
 const main = async (): Promise<void> => {

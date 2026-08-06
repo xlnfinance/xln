@@ -71,6 +71,13 @@ export const attachRpcReplicaContracts = async (
   state: RpcContractStackState,
 ): Promise<void> => {
   if (!config.fromReplica) return;
+  const attachmentAuthority = config.replicaAttachmentAuthority;
+  if (
+    attachmentAuthority !== 'deployment-origin-proof'
+    && attachmentAuthority !== 'committed-runtime-state'
+  ) {
+    throw new Error('RPC_REPLICA_ATTACHMENT_AUTHORITY_REQUIRED');
+  }
   if (!Number.isSafeInteger(state.entityProviderDeploymentBlock) || state.entityProviderDeploymentBlock < 1) {
     throw new Error('RPC_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_REQUIRED');
   }
@@ -95,12 +102,14 @@ export const attachRpcReplicaContracts = async (
         `deltaTransformer=${addresses.deltaTransformer} code=${codes[3]}`,
     );
   }
-  await assertEntityProviderDeploymentOrigin(
-    provider,
-    addresses.entityProvider,
-    state.entityProviderDeploymentBlock,
-    codes[2]!,
-  );
+  if (attachmentAuthority === 'deployment-origin-proof') {
+    await assertEntityProviderDeploymentOrigin(
+      provider,
+      addresses.entityProvider,
+      state.entityProviderDeploymentBlock,
+      codes[2]!,
+    );
+  }
   state.account = Account__factory.connect(addresses.account, signer);
   state.depository = Depository__factory.connect(addresses.depository, signer);
   state.entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer);

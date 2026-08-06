@@ -142,6 +142,7 @@ test('RPC fromReplica rejects a live EntityProvider not bound to the Depository'
       mode: 'rpc',
       chainId: CHAIN_ID,
       rpcUrl: anvil.rpcUrl,
+      replicaAttachmentAuthority: 'deployment-origin-proof',
       fromReplica: replicaForAddresses(deployed, secondProviderAddress, secondDeployment.blockNumber),
     }).then(async (adapter) => {
       await adapter.close();
@@ -167,6 +168,7 @@ test('RPC fromReplica proves the exact EntityProvider deployment block', async (
       mode: 'rpc',
       chainId: CHAIN_ID,
       rpcUrl: anvil.rpcUrl,
+      replicaAttachmentAuthority: 'deployment-origin-proof',
       fromReplica: replicaForAddresses(
         deployed,
         deployed.addresses.entityProvider,

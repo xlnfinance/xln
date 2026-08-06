@@ -33,13 +33,18 @@ const sameCommittedFillNotice = (
     fillNumerator: data.fillNumerator,
     fillDenominator: data.fillDenominator,
   });
+  // A route with no committed fill omits its exact-ratio fields. Cancel
+  // notices encode that same state canonically as 0/1; accepting any other
+  // zero fraction would weaken same-sequence conflict detection.
+  const committedNumerator = route.fillNumerator ?? 0n;
+  const committedDenominator = route.fillDenominator ?? 1n;
   return (
     Math.floor(Number(route.fillSeq ?? 0)) === Math.floor(Number(data.fillSeq)) &&
     committed.fillRatio === noticeRatio &&
     committed.filledSourceAmount === data.cumulativeSourceAmount &&
     committed.filledTargetAmount === data.cumulativeTargetAmount &&
-    (route.fillNumerator ?? undefined) === (data.fillNumerator ?? undefined) &&
-    (route.fillDenominator ?? undefined) === (data.fillDenominator ?? undefined)
+    committedNumerator === data.fillNumerator &&
+    committedDenominator === data.fillDenominator
   );
 };
 

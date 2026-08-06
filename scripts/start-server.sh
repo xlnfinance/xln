@@ -99,6 +99,11 @@ export MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK=${MARKET_MAKER_BOOTS
 export ANVIL_TMPDIR=${ANVIL_TMPDIR:-${XLN_JDB_ROOT:-$REPO_ROOT/data}/tmp}
 export PATH="${HOME}/.bun/bin:$PATH"
 export XLN_MIN_DISK_FREE_BYTES=${XLN_MIN_DISK_FREE_BYTES:-$((5 * 1024 * 1024 * 1024))}
+BUN_EXECUTABLE="${XLN_BUN_EXECUTABLE:-$(command -v bun || true)}"
+if [ -z "$BUN_EXECUTABLE" ] || [ ! -x "$BUN_EXECUTABLE" ]; then
+  echo "[start-server] BUN_EXECUTABLE_INVALID path=${BUN_EXECUTABLE:-missing}" >&2
+  exit 1
+fi
 
 # QA evidence root: persistent on prod (outside the /root/xln checkout that the
 # canonical platform deploy hard-resets + git-cleans), and the local .logs dir for dev. Detected
@@ -139,7 +144,7 @@ fi
 unset XLN_LOCAL_TEST_LEASE_MODE XLN_LOCAL_TEST_LEASE_POOL XLN_LOCAL_TEST_LEASE_BASE
 unset XLN_LOCAL_TEST_LEASE_GUARD XLN_LOCAL_TEST_LEASE_OWNER_PID XLN_LOCAL_TEST_LEASE_REPO_ROOT
 
-exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
+exec "$BUN_EXECUTABLE" runtime/orchestrator/orchestrator.ts \
   --host 127.0.0.1 \
   --port "$API_PORT" \
   --public-ws-base-url "$PUBLIC_WS_BASE_URL" \

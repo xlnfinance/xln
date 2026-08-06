@@ -187,7 +187,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   gate from J-event dispute fields to every Account State mutation, forbidding
   Entity/Runtime writes to Account delta, collateral, holds or credit outside
   calls into Account-owned handlers.
-- [ ] Move multi-frame settlement continuation out of Svelte and into the
+- [ ] Move multi-frame settlement continuation out of the browser UI and into the
   deterministic Entity machine. A `settle_propose` intent must commit the
   exact allowed post-settlement continuation and broadcast policy in
   `EntityState`; Account remains the sole owner of workspace, Hanko and money

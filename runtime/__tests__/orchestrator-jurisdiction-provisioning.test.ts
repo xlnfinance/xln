@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { JAdapter } from '../jurisdiction/adapter/types';
+import { createJAdapter } from '../jurisdiction/adapter/factory';
 import { getLiveJAdapter } from '../runtime/live-jadapters';
 import { normalizeJurisdictionImportRequest } from '../runtime/jurisdiction-import';
 import { findMissingRpcContractCode } from '../orchestrator/contract-readiness';
@@ -356,6 +357,23 @@ test('fresh RPC import rejects a pruned endpoint that cannot prove deployment or
     );
     expect(env.state.jReplicas.has('Primary')).toBe(false);
     expect(getLiveJAdapter(env, 'Primary')).toBeUndefined();
+
+    const restoredAdapter = await createJAdapter({
+      mode: 'rpc',
+      chainId: CHAIN_ID,
+      rpcUrl,
+      watchOnly: true,
+      replicaAttachmentAuthority: 'committed-runtime-state',
+      fromReplica: {
+        chainId: CHAIN_ID,
+        contracts: provisioned.contracts,
+        depositoryAddress: provisioned.contracts.depository,
+        entityProviderAddress: provisioned.contracts.entityProvider,
+        entityProviderDeploymentBlock: deploymentBlock,
+      },
+    });
+    expect(restoredAdapter.addresses).toEqual(provisioned.contracts);
+    await restoredAdapter.close();
   } finally {
     await stopProcess(child, 3_000);
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

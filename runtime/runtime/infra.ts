@@ -177,6 +177,7 @@ export const ensureLiveJAdapterForReplica = async (
     if (!rpcUrl) return null;
     adapterConfig.rpcUrl = rpcUrl;
     adapterConfig.fromReplica = jReplica;
+    adapterConfig.replicaAttachmentAuthority = 'committed-runtime-state';
   } else if (env.browserVMState !== undefined) {
     adapterConfig.browserVMState = env.browserVMState;
   }

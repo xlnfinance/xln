@@ -23,6 +23,7 @@ describe('JAdapter static jurisdiction network', () => {
     });
     servers.push(server);
     const provider = createXlnJsonRpcProvider(`http://127.0.0.1:${server.port}`, 31337);
+    expect(provider._getConnection().timeout).toBe(10_000);
 
     await expect(readAndAssertRpcChainId(provider, 31337)).resolves.toBe(31337);
     await provider.getBlockNumber();

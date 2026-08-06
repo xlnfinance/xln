@@ -41,6 +41,14 @@ export type ApplyEntityTxsInOrderContext = {
     Extract<EntityTx, { type: 'consensusOutput' }>,
     VerifiedCertifiedEntityOutput
   >;
+  /**
+   * Reducer-local fixed-point replay for consecutive cross-j sweeps. It never
+   * enters EntityState or a frame hash and is discarded at every other tx.
+   */
+  stableCrossJurisdictionSweep?: {
+    statusMessagesBeforeSummary: string[];
+    summarySuffix: string;
+  };
   authorizedCommand?: true | undefined;
   authorizedCollective?: true | undefined;
   authorizedCertifiedOutput?: true | undefined;

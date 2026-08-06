@@ -457,6 +457,7 @@ const buildJurisdictionImportAdapterConfig = (
   if (!rpcUrl) throw new Error(`IMPORT_J_RPC_MISSING:${request.name}`);
   const contracts = normalizeContracts(request.contracts, true)!;
   config.rpcUrl = rpcUrl;
+  config.replicaAttachmentAuthority = 'deployment-origin-proof';
   config.fromReplica = {
     name: request.name,
     blockNumber: 0n,

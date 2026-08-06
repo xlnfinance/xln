@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 
+import { readStorageProgressClockMs } from '../storage/commit-deadline';
 import { evaluateStorageProgressDeadline } from '../storage/progress-deadline';
 
 test('storage deadline measures idle time after the latest completed phase', () => {
@@ -23,4 +24,17 @@ test('storage deadline rejects invalid clocks and timeouts', () => {
   expect(() => evaluateStorageProgressDeadline(0, 0, 0)).toThrow(
     'STORAGE_PROGRESS_TIMEOUT_INVALID:0',
   );
+});
+
+test('storage deadline clock is independent from adjustable wall time', async () => {
+  const before = readStorageProgressClockMs();
+  const wallClock = spyOn(Date, 'now').mockReturnValue(9_000_000_000_000);
+  try {
+    await Bun.sleep(2);
+    const after = readStorageProgressClockMs();
+    expect(after).toBeGreaterThanOrEqual(before);
+    expect(after).toBeLessThan(before + 1_000);
+  } finally {
+    wallClock.mockRestore();
+  }
 });

@@ -430,6 +430,51 @@ describe('runtime scheduled wake', () => {
     );
   });
 
+  test('replays a large fixed-point cross-j sweep batch with exact signed events', async () => {
+    const env = createEmptyEnv('scheduled-wake-cross-j-sweep-batch-test');
+    env.state.timestamp = 10_000;
+    env.scenarioMode = true;
+    const id = entityId('67');
+    const proposer = signerId('68');
+    const state = makeState(id, proposer, env.state.timestamp);
+    const jobs: ScheduledWakeTx['data']['jobs'] = [];
+    for (let index = 0; index < 110; index++) {
+      const hookId = `cross-j-sweep:batch:${index}`;
+      scheduleHook(state.crontabState!, {
+        id: hookId,
+        triggerAt: 9_000,
+        type: 'cross_j_orderbook_sweep',
+        data: { reason: hookId },
+      });
+      jobs.push({ kind: 'hook', id: hookId, dueAt: 9_000 });
+    }
+    jobs.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+    const tx: ScheduledWakeTx = {
+      type: 'scheduledWake',
+      data: {
+        version: 1,
+        proposerSignerId: proposer,
+        dueAt: 9_000,
+        jobs,
+      },
+    };
+
+    const startedAt = performance.now();
+    const result = await applyEntityFrame(env, state, [tx], env.state.timestamp);
+    const elapsedMs = performance.now() - startedAt;
+    const messages = readEntityFrameEventMessages(result.newState);
+
+    expect(result.outputs).toEqual([]);
+    expect(messages).toHaveLength(110);
+    expect(messages[0]).toBe(
+      '🌉 Cross-j orderbook sweep: cross-j-sweep:batch:0 expired=0 closedOffers=0 waiting=0',
+    );
+    expect(messages[109]).toBe(
+      '🌉 Cross-j orderbook sweep: cross-j-sweep:batch:109 expired=0 closedOffers=0 waiting=0',
+    );
+    expect(elapsedMs).toBeLessThan(1_000);
+  });
+
   test('accepts newly due jobs while a canonical wake waits for its frame', async () => {
     const env = createEmptyEnv('scheduled-wake-frame-delay-test');
     env.state.timestamp = 10_000;

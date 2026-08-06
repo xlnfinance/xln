@@ -29,7 +29,14 @@ import { assertScheduledWakeFrameOrder } from '../scheduled-wake-validation';
 import { createEntityFrameCandidateState } from '../state-clone';
 import { getAccountPerspective } from '../../account/perspective';
 import { emitScopedEvents } from '../../infra/scoped-events';
-import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../frame-events';
+import {
+  addMessage,
+  addMessages,
+  clearEntityFrameEvents,
+  getEntityFrameEventCursor,
+  readEntityFrameEvents,
+  readEntityFrameEventsSince,
+} from '../frame-events';
 import type { AccountPeerInput, AccountReplica, AccountTx, RuntimeOverlayRecord } from '../../types/account';
 import type { EntityCandidateEffect, EntityFrameEvent, EntityOutput, EntityState, HashType } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
@@ -290,6 +297,55 @@ const collectEntityTxResult = (
   }
 };
 
+const crossJurisdictionSweepSummaryPrefix = (
+  tx: Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>,
+): string => `🌉 Cross-j orderbook sweep${tx.data?.reason ? `: ${tx.data.reason}` : ''} `;
+
+const applyStableCrossJurisdictionSweep = (
+  context: ApplyEntityTxsInOrderContext,
+  state: EntityState,
+  tx: Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>,
+): EntityState => {
+  const stable = context.stableCrossJurisdictionSweep;
+  if (!stable) throw new Error('CROSS_J_SWEEP_STABLE_REPLAY_MISSING');
+  const startedAt = getPerfMs();
+  addMessages(state, stable.statusMessagesBeforeSummary);
+  addMessage(state, `${crossJurisdictionSweepSummaryPrefix(tx)}${stable.summarySuffix}`);
+  context.storageChanges.push({ family: 'entity', entityId: state.entityId.toLowerCase() });
+  const elapsedMs = Math.round(getPerfMs() - startedAt);
+  const profile = context.frameProfileTxTotals.get(tx.type) ?? { count: 0, elapsedMs: 0 };
+  profile.count += 1;
+  profile.elapsedMs += elapsedMs;
+  context.frameProfileTxTotals.set(tx.type, profile);
+  return state;
+};
+
+const captureStableCrossJurisdictionSweep = (
+  context: ApplyEntityTxsInOrderContext,
+  state: EntityState,
+  tx: Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>,
+  eventCursor: number,
+): void => {
+  const appended = readEntityFrameEventsSince(state, eventCursor);
+  const summary = appended.at(-1);
+  const prefix = crossJurisdictionSweepSummaryPrefix(tx);
+  if (
+    !summary ||
+    summary.type !== 'status' ||
+    !summary.message.startsWith(prefix) ||
+    appended.slice(0, -1).some(event => event.type !== 'status')
+  ) {
+    delete context.stableCrossJurisdictionSweep;
+    return;
+  }
+  context.stableCrossJurisdictionSweep = {
+    statusMessagesBeforeSummary: appended.slice(0, -1).map(event =>
+      event.type === 'status' ? event.message : ''
+    ),
+    summarySuffix: summary.message.slice(prefix.length),
+  };
+};
+
 const applyRegularEntityTx = async (
   context: ApplyEntityTxsInOrderContext,
   state: EntityState,
@@ -297,6 +353,12 @@ const applyRegularEntityTx = async (
   manualBroadcastInInput: boolean,
 ): Promise<EntityState> => {
   assertEntityTxAuthorization(context, tx);
+  if (tx.type === 'orderbookSweepCrossJurisdiction' && context.stableCrossJurisdictionSweep) {
+    return applyStableCrossJurisdictionSweep(context, state, tx);
+  }
+  const eventCursor = tx.type === 'orderbookSweepCrossJurisdiction'
+    ? getEntityFrameEventCursor(state)
+    : 0;
   const txProfileStartMs = getPerfMs();
   const result = await applyEntityTx(context.env, state, tx, {
     mutableFrameState: true,
@@ -321,12 +383,39 @@ const applyRegularEntityTx = async (
       authorizedRuntimeOutput: undefined,
     });
   }
+  const outputsBeforeEffects = context.allOutputs.length;
+  const storageChangesBeforeEffects = context.storageChanges.length;
+  const candidateEffectsBeforeEffects = context.candidateEffects.length;
+  const pendingFillAcksBeforeEffects = nextState.pendingCrossJurisdictionFillAcks?.size ?? 0;
   await applyEntityTxReturnedEffects(context, nextState, tx, txProfileStartMs, {
     ...(result.accountTxs ? { accountTxs: result.accountTxs } : {}),
     ...(result.swapOffersCreated ? { swapOffersCreated: result.swapOffersCreated } : {}),
     ...(result.swapCancelRequests ? { swapCancelRequests: result.swapCancelRequests } : {}),
     ...(result.swapOffersCancelled ? { swapOffersCancelled: result.swapOffersCancelled } : {}),
   });
+  if (tx.type === 'orderbookSweepCrossJurisdiction') {
+    const isFixedPoint =
+      (result.accountTxs?.length ?? 0) === 0 &&
+      result.outputs.length === 0 &&
+      (result.jOutputs?.length ?? 0) === 0 &&
+      result.storageChanges.length === 1 &&
+      result.storageChanges[0]?.family === 'entity' &&
+      result.candidateEffects.length === 0 &&
+      (result.hashesToSign?.length ?? 0) === 0 &&
+      (result.approvedEntityTxs?.length ?? 0) === 0 &&
+      pendingFillAcksBeforeEffects === 0 &&
+      (nextState.pendingCrossJurisdictionFillAcks?.size ?? 0) === 0 &&
+      context.allOutputs.length === outputsBeforeEffects &&
+      context.storageChanges.length === storageChangesBeforeEffects &&
+      context.candidateEffects.length === candidateEffectsBeforeEffects;
+    if (isFixedPoint) {
+      captureStableCrossJurisdictionSweep(context, nextState, tx, eventCursor);
+    } else {
+      delete context.stableCrossJurisdictionSweep;
+    }
+  } else {
+    delete context.stableCrossJurisdictionSweep;
+  }
   return nextState;
 };
 
@@ -338,9 +427,13 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
   // Reordering batched txs can change bilateral account state transitions
   // (e.g., openAccount + accountInput ACK in same frame).
   for (const entityTx of context.entityTxs) {
+    if (entityTx.type !== 'orderbookSweepCrossJurisdiction') {
+      delete context.stableCrossJurisdictionSweep;
+    }
     const nested = await applyNestedEntityTx(context, currentEntityState, entityTx);
     if (nested.handled) {
       currentEntityState = nested.state;
+      delete context.stableCrossJurisdictionSweep;
       continue;
     }
     currentEntityState = await applyRegularEntityTx(

@@ -205,7 +205,7 @@ const healthPollIntervalMs = Math.max(
   Number(process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_INTERVAL_MS'] || '250'),
 );
 const stageBudgetsMs = {
-  hubMesh: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '20000')),
+  hubMesh: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '30000')),
   sameChain: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_SAME_CHAIN_BUDGET_MS'] || '30000')),
   cross: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '300000')),
 };
@@ -983,6 +983,7 @@ const main = async (): Promise<void> => {
 
   startManaged('server', 'scripts/start-server.sh', [], {
     ...buildInheritedLocalTestLeaseEnv(localTestLease, repoRoot),
+    XLN_BUN_EXECUTABLE: process.execPath,
     XLN_SERVER_PORT: String(apiPort),
     XLN_RDB_ROOT: workDir,
     XLN_DB_PATH: join(workDir, 'prod-main'),

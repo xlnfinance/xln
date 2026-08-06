@@ -25,6 +25,22 @@ export const readEntityFrameEvents = (
   state: EntityState,
 ): EntityFrameEvent[] => structuredClone(mutableEntityFrameEvents(state));
 
+/** O(1) cursor for reducer-local event replay without cloning the whole frame. */
+export const getEntityFrameEventCursor = (state: EntityState): number =>
+  mutableEntityFrameEvents(state).length;
+
+/** Read only events appended after a reducer-local cursor. */
+export const readEntityFrameEventsSince = (
+  state: EntityState,
+  cursor: number,
+): EntityFrameEvent[] => {
+  const events = mutableEntityFrameEvents(state);
+  if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor > events.length) {
+    throw new Error(`ENTITY_FRAME_EVENT_CURSOR_INVALID:${String(cursor)}:${events.length}`);
+  }
+  return structuredClone(events.slice(cursor));
+};
+
 export const clearEntityFrameEvents = (state: EntityState): void => {
   const events =
     (state as EntityStateWithFrameEvents)[ENTITY_FRAME_EVENT_COLLECTOR];

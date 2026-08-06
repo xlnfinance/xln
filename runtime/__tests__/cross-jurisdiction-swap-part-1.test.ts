@@ -2270,7 +2270,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       .flatMap(input => proposalFrame(input).frame.accountTxs.map(tx => tx.type))
       .sort();
     expect(cancelTypes).toEqual(['cross_pull_progress', 'cross_swap_fill_ack']);
-
     const admittedCancel = await admitAtomicCrossJAccountInputs(userEnv, cancelProposals, false);
     expect(admittedCancel.pairs).toHaveLength(1);
     const userCancelPass = await applyMergedEntityInputs(userEnv, admittedCancel.inputs, [], {
@@ -2281,7 +2280,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('clear_requested');
     expect(userEnv.state.eReplicas.get(`${targetUser}:${targetUserSigner}`)
       ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('clear_requested');
-
     const cancelAckFrame = { height: 47, timestamp: userEnv.state.timestamp };
     const cancelAcks = userCancelPass.entityOutbox.map(output => ({
       ...output,
@@ -2301,7 +2299,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('clear_requested');
     expect(hubEnv.state.eReplicas.get(`${targetHub}:${targetHubSigner}`)
       ?.state.crossJurisdictionSwaps?.get(intent.orderId)?.status).toBe('clear_requested');
-
   });
 
   test('submitCrossJurisdictionSwap carries durable intent through source Account before hub materialization', async () => {

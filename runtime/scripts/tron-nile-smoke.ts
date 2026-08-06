@@ -55,6 +55,7 @@ const adapter = await createJAdapter({
   tronFullHost: fullHost,
   ...(privateKey ? { privateKey } : {}),
   ...(!privateKey ? { watchOnly: true } : {}),
+  replicaAttachmentAuthority: 'deployment-origin-proof',
   fromReplica: {
     contracts,
     depositoryAddress: contracts['depository'],

@@ -1269,6 +1269,7 @@ const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void>
     };
     if (fromReplica) {
       rpcAdapterConfig.fromReplica = fromReplica;
+      rpcAdapterConfig.replicaAttachmentAuthority = 'deployment-origin-proof';
     }
     globalJAdapter = await withStartupStepTimeout('createJAdapter(rpc)', createJAdapter(rpcAdapterConfig));
 

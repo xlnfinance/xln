@@ -26,6 +26,7 @@ export const buildJAdapterConfigFromJurisdiction = (jurisdiction: JurisdictionCo
       'J_ADAPTER_JURISDICTION_CHAIN_ID_INVALID',
     ),
     fromReplica: buildFromReplica(jurisdiction),
+    replicaAttachmentAuthority: 'deployment-origin-proof',
   };
   if (!browserVM) {
     config.rpcUrl = jurisdiction.address;

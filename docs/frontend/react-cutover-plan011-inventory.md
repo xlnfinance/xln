@@ -1,6 +1,6 @@
 # React cutover Plan 011 inventory
 
-This document records the implementation checkpoint for the atomic React/Vite/TypeScript cutover. It is not production activation evidence. On 5 August 2026 the owner authorized all listed Runtime/Entity/Account work; the protocol fixes are implemented through checkpoint commit `2fab8468a`, while unchanged-candidate browser and release gates remain outstanding.
+This document records the implementation and stabilization checkpoint for the atomic React/Vite/TypeScript cutover. It is not production activation evidence. On 5 August 2026 the owner authorized all listed Runtime/Entity/Account work. The canonical React surfaces and the authorized protocol fixes are implemented; unchanged-candidate local-stack, browser, and release gates still require a test process with loopback-listener permission.
 
 ## Canonical surface ownership
 
@@ -51,6 +51,10 @@ The ops scenario player exposes deterministic playback controls and opens a wall
 - Commit `38c64c60d` restores the seven canonical protocol fixtures and fixes external cross-j trust-boundary admission before local target lookup. Commit `5a29190b5` makes the rebalance browser assertion wait for durable cycle evidence instead of sampling an in-flight settlement frontier.
 - Checkpoint `2fab8468a` makes source intent durable through its Account, partitions exact cross-j opening cohorts below the encrypted transport budget, preserves atomic sibling reservation, and classifies a simultaneous Account proposal as deterministic deferral instead of a security incident. The focused protocol batch passes 87 tests with 796 expectations.
 - `bun run check` passes on `2fab8468a`: frozen core is unchanged, Runtime TypeScript and all source invariants pass, the cross-j test file is 2,968/3,000 lines, and all four React/Vite/TypeScript production surfaces build.
+- The current stabilization candidate makes RPC replica attachment authority explicit, avoids duplicate market-maker jurisdiction import, publishes startup phase changes synchronously, uses a monotonic storage deadline clock, and accepts only canonical `0/1` zero-progress cancellation evidence.
+- Consecutive expired-order sweeps now detect their deterministic fixed point inside one Entity frame. A real Account/Entity regression verifies the transition, one Account admission, final route state, and every signed event; the 110-hook regression completes in 70–78 ms instead of the observed 28–53 second quadratic replay.
+- Current source checks pass with frozen core unchanged. The changed protocol batch passes the zero-progress cancel, complete cross-j part 3, scheduled-wake, storage deadline/failure, and startup wiring regressions; the new focused tests are part of the release-gate core list.
+- The current CI gate passes frontend type contracts, source checks, release integrity, and 483 of 489 preexisting core tests. Its six failures are all loopback-listener denials (`EPERM`/`EADDRINUSE` on port `0`) in real-RPC or watchtower tests; no protocol assertion failed.
 
 ## Authorized CI core resolution
 
@@ -69,7 +73,7 @@ The eight runtime-core failures reproduced independently and were resolved only 
 
 ## Remaining release blockers
 
-- The exact live swap browser rerun is not yet evidence for `2fab8468a`. Two isolated-runner attempts stopped before stack startup because all seven machine-wide lease lanes (`20000` through `20120`) were occupied; no live `:8080` Runtime was stopped, reset, or reused.
-- When a lane is available, rerun the market-maker prepublish/cross-chain swap target under strict browser health and inspect its screenshot, video, trace, browser console, Runtime WAL, structural incidents, and WebSocket-size evidence.
-- On that unchanged candidate, rerun payment/user-flow and rebalance L2, native mobile/desktop/extension, `bun run gate:ci`, and `bun run gate:release`. `bun run check` is already green on the checkpoint and must be rerun only after a relevant code or documentation change.
+- The exact clone/hydrate soundcheck cannot acquire its kernel-held test-port lease inside the current sandbox. Two elevated retries timed out in permission review, so the optimized candidate has in-process replay evidence but not a completed historical WAL clone.
+- Rerun `bun run gate:ci` with loopback-listener permission, then run `bun run gate:release`. The release gate must include clone/hydrate, payment/user-flow, rebalance, market-maker cross-chain swap, native mobile/desktop/extension, and strict browser-console/screenshot evidence on one unchanged commit.
+- Inspect the resulting wallet and ops screenshots at iPhone, laptop, and wide-desktop viewports, plus trace/video, Runtime WAL, structural incidents, and WebSocket-size evidence. No live `:8080` Runtime may be stopped, reset, or reused for that verification.
 - Do not mark Plan 011 done, create a non-WIP release commit, push, merge, tag, or activate production before those gates pass.

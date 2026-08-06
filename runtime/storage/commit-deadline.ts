@@ -1,4 +1,5 @@
 import type { RuntimeReplica } from '../runtime/types';
+import { getPerfMs } from '../infra/time';
 import { evaluateStorageProgressDeadline } from './progress-deadline';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
@@ -49,6 +50,10 @@ const resolveStorageWriteTimeoutMs = (): number => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 };
 
+/** Storage stall deadlines measure process latency, never adjustable wall time. */
+export const readStorageProgressClockMs = (): number =>
+  Math.max(0, Math.floor(getPerfMs()));
+
 export const waitForRuntimeProcessingIdle = async (
   deps: RuntimeStorageApiDeps,
   env: RuntimeReplica,
@@ -82,7 +87,7 @@ export const withStorageWriteDeadline = async <T>(
   return await new Promise<T>((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let settled = false;
-    let lastProgressAtMs = Date.now();
+    let lastProgressAtMs = readStorageProgressClockMs();
     let lastProgressStep = 'start';
 
     const clearTimer = (): void => {
@@ -97,7 +102,7 @@ export const withStorageWriteDeadline = async <T>(
         try {
           deadline = evaluateStorageProgressDeadline(
             lastProgressAtMs,
-            Date.now(),
+            readStorageProgressClockMs(),
             timeoutMs,
           );
         } catch (error) {
@@ -123,7 +128,7 @@ export const withStorageWriteDeadline = async <T>(
     const markProgress = (step: string): void => {
       if (settled) return;
       markRuntimeProgress(step);
-      lastProgressAtMs = Date.now();
+      lastProgressAtMs = readStorageProgressClockMs();
       lastProgressStep = step;
       schedule(timeoutMs);
     };

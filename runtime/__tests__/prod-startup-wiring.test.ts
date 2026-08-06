@@ -454,6 +454,9 @@ describe('production startup wiring', () => {
     expect(script).toContain('RPC2_PORT="${ANVIL2_PORT:-$(xln_rpc2_port)}"');
     expect(script).toContain('export ANVIL_RPC2="${ANVIL_RPC2:-http://127.0.0.1:${RPC2_PORT}}"');
     expect(script).toContain('export RPC_TRON="${RPC_TRON:-$ANVIL_RPC2}"');
+    expect(script).toContain('BUN_EXECUTABLE="${XLN_BUN_EXECUTABLE:-$(command -v bun || true)}"');
+    expect(script).toContain('exec "$BUN_EXECUTABLE" runtime/orchestrator/orchestrator.ts');
+    expect(script).not.toContain('exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts');
     expect(script).toContain('export RELAY_URL=${RELAY_URL:-$INTERNAL_RELAY_URL}');
     expect(script).toContain('export XLN_PUBLIC_FAUCET=${XLN_PUBLIC_FAUCET:-1}');
     expect(script).toContain('export XLN_FAUCET_MAX_AMOUNT=${XLN_FAUCET_MAX_AMOUNT:-100}');
@@ -900,7 +903,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("crossOverride?: MarketMakerHealth['cross'];");
     expect(mmNode).toContain('const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps) => {');
     expect(mmNode).toContain('if (health) currentHealth = health;');
-    expect(mmNode.match(/startAtCurrentBlock: false/g)).toHaveLength(2);
+    expect(mmNode.match(/startAtCurrentBlock: false/g)).toHaveLength(1);
+    expect(mmNode.match(/await importJurisdictionIfNeeded\(env, /g)).toHaveLength(2);
     expect(runtimeTxHandlers).toContain('applyImportJurisdictionIntent(env, runtimeTx);');
     expect(jurisdictionImport).toContain('const resolveInitialBlockNumber = async (');
     expect(jurisdictionImport).toContain('IMPORT_J_CURRENT_BLOCK_UNAVAILABLE');
@@ -1340,6 +1344,10 @@ describe('production startup wiring', () => {
       'const primaryContext = await createMarketMakerEntityContext(',
       mmInitialization,
     );
+    const mmPrimaryJurisdictionReuse = mmSource.indexOf(
+      'await importJurisdictionIfNeeded(env, jurisdiction);',
+      mmInitialization,
+    );
     const mmSecondaryContexts = mmSource.indexOf(
       'for (const [index, secondary] of resolveSecondaryJurisdictions(jurisdiction.rpc).entries())',
       mmPrimaryContext,
@@ -1356,6 +1364,8 @@ describe('production startup wiring', () => {
     const mmP2PStart = mmSource.indexOf('const p2p = startP2P(env, {', mmInitializationCall);
     const mmP2PReady = mmSource.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", mmP2PStart);
     expect(mmInitialization).toBeGreaterThan(0);
+    expect(mmPrimaryJurisdictionReuse).toBeGreaterThan(mmInitialization);
+    expect(mmPrimaryJurisdictionReuse).toBeLessThan(mmPrimaryContext);
     expect(mmPrimaryContext).toBeGreaterThan(mmInitialization);
     expect(mmSecondaryContexts).toBeGreaterThan(mmPrimaryContext);
     expect(mmLoopStart).toBeGreaterThan(0);
@@ -1366,6 +1376,8 @@ describe('production startup wiring', () => {
     expect(mmP2PStart).toBeGreaterThan(mmInitializationCall);
     expect(mmP2PStart).toBeGreaterThan(mmIngressReady);
     expect(mmP2PReady).toBeGreaterThan(mmP2PStart);
+    expect(mmSource).toContain("context.emit('phase', { phase });");
+    expect(mmSource).toContain("context.emit('active-entity', { entityId });");
 
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     expect(orchestrator).toContain('const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;');
@@ -1763,7 +1775,7 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL: marketMakerEventsJsonlPath');
     expect(smoke).toContain('marketMakerEventsJsonl: marketMakerEventsJsonlPath');
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS'] === '1'");
-    expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '20000'");
+    expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '30000'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
     expect(smoke).toContain('spawnH1StartedAt: health.timings?.reset_spawn_h1?.startedAt');
     expect(orchestrator).toContain('if (preserveState) await Promise.all(h23.map(child => spawnHub(child)));');

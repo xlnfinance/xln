@@ -84,6 +84,7 @@ const adapter = await createJAdapter({
   txWaitConfirms: 1,
   txWaitTimeoutMs: 180_000,
   ...(isTron ? { tronFullHost: rpcUrl.replace(/\/jsonrpc\/?$/i, '') } : {}),
+  replicaAttachmentAuthority: 'deployment-origin-proof',
   fromReplica: {
     contracts: {
       account: accountAddress,

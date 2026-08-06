@@ -15,6 +15,7 @@ const readText = (path: string): string => {
     'runtime/__tests__/cross-jurisdiction-swap-part-2a.test.ts',
     'runtime/__tests__/cross-jurisdiction-swap-part-2b.test.ts',
     'runtime/__tests__/cross-jurisdiction-swap-part-3.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-4.test.ts',
     'runtime/__tests__/audit-failfast-regressions-part-6.test.ts',
   ].map(file => readFileSync(file, 'utf8')).join('\n');
 };
@@ -97,7 +98,7 @@ const requirements: CoverageRequirement[] = [
     area: 'cross-j',
     file: 'tests/e2e-cross-j-swap-helpers-a.ts',
     patterns: [
-      'swap-route-select',
+      'cross route select must retain the chosen route instead of falling back to same-chain',
     ],
   },
   {
@@ -159,8 +160,16 @@ const requirements: CoverageRequirement[] = [
     file: 'frontend/apps/wallet/src/features/payments/WalletPaymentForm.tsx',
     patterns: [
       'data-testid="payment-amount-input"',
-      "type: 'htlcPayment'",
+      'buildWalletPaymentCommand',
       'Submit payment',
+    ],
+  },
+  {
+    area: 'frontend',
+    file: 'frontend/packages/runtime-client/wallet-payment-input-adapter.ts',
+    patterns: [
+      "type: 'directPayment' as const",
+      "type: 'htlcPayment' as const",
     ],
   },
   {
@@ -171,7 +180,7 @@ const requirements: CoverageRequirement[] = [
       'clear request reveals one source pull binary and can cancel remainder',
       'target cross_pull_close rejects user-authored economics before target binding has fill progress',
       'cross-j orderbook sweep closes expired unfilled route instead of being a no-op',
-      'production cross-j API exposes only hashledger orderbook flow',
+      'production API exposes only the hashledger orderbook flow',
       'disputeStart treats pending cross_pull_close as foldable dispute evidence',
     ],
   },

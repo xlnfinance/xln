@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 
+import { readPositiveIntegerEnv } from '../../config/environment';
 import { normalizeLoopbackUrl } from '../../network/p2p/loopback-url';
 import { createBrowserVMAdapter } from './browservm';
 import { DEV_CHAIN_IDS, TRON_CHAIN_IDS } from './chain-ids';
@@ -7,6 +8,7 @@ import { createRpcAdapter } from './rpc-adapter';
 import type { JAdapter, JAdapterConfig } from './types';
 
 const DEFAULT_RPC_POLLING_INTERVAL_MS = 1_000;
+const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 10_000;
 
 /** Publicly known Hardhat account #0 key, allowed only on local dev chains. */
 export const DEFAULT_PRIVATE_KEY =
@@ -34,7 +36,16 @@ const xlnJsonRpcProviderOptions = (network?: ethers.Networkish): ethers.JsonRpcA
 });
 
 export const createXlnJsonRpcProvider = (rpcUrl: string, network?: ethers.Networkish): ethers.JsonRpcProvider =>
-  new ethers.JsonRpcProvider(rpcUrl, network, xlnJsonRpcProviderOptions(network));
+  new ethers.JsonRpcProvider(
+    Object.assign(new ethers.FetchRequest(rpcUrl), {
+      timeout: readPositiveIntegerEnv(
+        'XLN_RPC_REQUEST_TIMEOUT_MS',
+        DEFAULT_RPC_REQUEST_TIMEOUT_MS,
+      ),
+    }),
+    network,
+    xlnJsonRpcProviderOptions(network),
+  );
 
 const configureRpcPolling = (provider: ethers.JsonRpcProvider): void => {
   const configuredInterval =

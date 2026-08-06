@@ -62,13 +62,11 @@ import {
   getEntityReplicaById,
   isAccountConsensusReady,
   serializeAccountDelta,
-  settleRuntimeFor,
   sleep,
   summarizeRuntimeQuiescence,
 } from './mesh-common';
 import {
   formatJurisdictionDisplayName,
-  requireJurisdictionBlockTimeMs,
   resolveMeshJurisdictionRpcBindings,
   resolveSecondaryJurisdictions,
 } from './mesh-jurisdictions';
@@ -977,25 +975,7 @@ const initializeMarketMakerContexts = async (
 ): Promise<Map<string, number[]>> => {
   const { env, jurisdiction, contexts, setStartupPhase, setActiveEntityId } = input;
   setStartupPhase('import-jurisdiction');
-  enqueueRuntimeInput(env, {
-    runtimeTxs: [
-      {
-        type: 'importJ',
-        data: {
-          name: jurisdiction.name,
-          chainId: jurisdiction.chainId,
-          ticker: 'XLN',
-          rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
-          entityProviderDeploymentBlock: jurisdiction.entityProviderDeploymentBlock,
-          blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
-          contracts: jurisdiction.contracts,
-          startAtCurrentBlock: false,
-        },
-      },
-    ],
-    entityInputs: [],
-  });
-  await settleRuntimeFor(env, 35);
+  await importJurisdictionIfNeeded(env, jurisdiction);
   const jadapter = await waitForJurisdictionAdapter(env, jurisdiction);
   ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
   setStartupPhase('token-catalog');
@@ -2163,9 +2143,13 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
     contexts: state.contexts,
     setStartupPhase: phase => {
       state.phase = phase;
+      health.rebuildHealthResponse();
+      context.emit('phase', { phase });
     },
     setActiveEntityId: entityId => {
       state.activeEntityId = entityId;
+      health.rebuildHealthResponse();
+      context.emit('active-entity', { entityId });
     },
   });
   const primaryContext = state.contexts[0];
