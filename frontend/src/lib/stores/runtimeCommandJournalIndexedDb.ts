@@ -3,7 +3,7 @@ import { RUNTIME_COMMAND_JOURNAL_DATABASE } from '../contracts/browserPersistenc
 const DB_NAME = RUNTIME_COMMAND_JOURNAL_DATABASE.name;
 const DB_VERSION = RUNTIME_COMMAND_JOURNAL_DATABASE.version;
 const [INTENT_STORE] = RUNTIME_COMMAND_JOURNAL_DATABASE.stores;
-const [LEGACY_META_STORE] = RUNTIME_COMMAND_JOURNAL_DATABASE.retiredStores;
+const [REMOVED_META_STORE] = RUNTIME_COMMAND_JOURNAL_DATABASE.retiredStores;
 let journalDbPromise: Promise<IDBDatabase> | null = null;
 
 export const isBrowserCommandJournal = (): boolean => typeof window !== 'undefined';
@@ -17,8 +17,8 @@ const openJournalDb = (): Promise<IDBDatabase> => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (db.objectStoreNames.contains(LEGACY_META_STORE)) {
-        db.deleteObjectStore(LEGACY_META_STORE);
+      if (db.objectStoreNames.contains(REMOVED_META_STORE)) {
+        db.deleteObjectStore(REMOVED_META_STORE);
       }
       if (!db.objectStoreNames.contains(INTENT_STORE)) {
         db.createObjectStore(INTENT_STORE, { keyPath: 'commandId' });

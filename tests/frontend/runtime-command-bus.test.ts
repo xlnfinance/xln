@@ -381,8 +381,8 @@ test('remote command journal persists protected replayable intents outside local
   expect(journalSource).not.toContain('localStorage');
   expect(indexedDbSource).toContain('indexedDB');
   expect(indexedDbSource).toContain('const DB_VERSION = RUNTIME_COMMAND_JOURNAL_DATABASE.version');
-  expect(indexedDbSource).toContain('const [LEGACY_META_STORE] = RUNTIME_COMMAND_JOURNAL_DATABASE.retiredStores');
-  expect(indexedDbSource).toContain('db.deleteObjectStore(LEGACY_META_STORE)');
+  expect(indexedDbSource).toContain('const [REMOVED_META_STORE] = RUNTIME_COMMAND_JOURNAL_DATABASE.retiredStores');
+  expect(indexedDbSource).toContain('db.deleteObjectStore(REMOVED_META_STORE)');
   expect(storageSource).toContain('AES-GCM');
   expect(storageSource).toContain('safeParse');
   expect(storageSource).toContain("from './runtimeCommandJournalIndexedDb'");
