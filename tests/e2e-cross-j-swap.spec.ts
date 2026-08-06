@@ -53,15 +53,12 @@ import {
   placeCrossOrder,
   readCrossState,
   readHubCrossDeltas,
-  triggerSourceDisputeArguments,
   visibleOrderbookRow,
-  waitForCrossDisputeRouted,
   waitForCrossOffersCleared,
   waitForCrossPendingFill,
   waitForCrossPullFlow,
   waitForCrossRouteMaterialized,
   waitForCrossRouteStatus,
-  waitForCrossSalvageQueued,
   waitForLatestCrossResolveSnapshot,
 } from './e2e-cross-j-swap-helpers-b';
 import { allowDebugIncident, expect, test, type BrowserContext } from './global-setup.mts';
@@ -1628,15 +1625,15 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           ),
         );
 
-        await timedStep('cross_j_swap.dispute.source_args', () =>
-          triggerSourceDisputeArguments(alicePage, alice, hubId, aliceDisputePartial.routeId, primaryHubRuntimeSeed),
-        );
-        await timedStep('cross_j_swap.dispute.source_routed', () =>
-          waitForCrossDisputeRouted(alicePage, alice, hubId, aliceDisputePartial.routeId),
-        );
-        await timedStep('cross_j_swap.dispute.target_salvage', () =>
-          waitForCrossSalvageQueued(alicePage, aliceRpc2, targetHubId, aliceDisputePartial.routeId),
-        );
+        // Salvage from dispute evidence is no longer observable from a synthetic
+        // DisputeStarted: the hardened flow (8c2f98ba4) only extracts pull
+        // results from FINALIZED dispute arguments matched against the entity's
+        // own signed argument snapshot, so injected starter args are rejected
+        // by design. That contract is covered deterministically by
+        // queueCrossJurisdictionSalvageFromFinalizedArguments unit tests
+        // (audit-failfast-regressions part 1-3). This spec keeps the real
+        // browser coverage: a disputed-fill route stays recoverable with the
+        // counterparty browser gone (steps above).
       } finally {
         await Promise.all([
           aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
