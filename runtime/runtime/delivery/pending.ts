@@ -24,18 +24,15 @@ import {
 import { reliableReceiptCoversIdentity, senderFrontierKey, senderFrontierKeyForIdentity } from '../reliable-frontier';
 import { selectPotentialCrossJAccountInputPairs } from '../entity-routing';
 import {
-  accountProposalCommittedBySender,
-  accountProposalRetiredBySender,
+  accountProposalSettledBySender,
   accountProposalEvidenceRank,
   accountProposalOutputIdentity,
   assertReliableEvidenceCompatible,
   buildRouteOutputKey,
-  cacheRoutedOutputIdentity,
   carriesEntityCommitNotification,
   cloneRoutedOutputWithCachedIdentity,
   getEntityFrameIdentity,
   getReliableOutputIdentity,
-  invalidateReliableOutputIdentity,
   normalizeRouteText,
   splitRoutedOutputByDeliveryLane,
   type ReliableOutputIdentity,
@@ -113,6 +110,11 @@ export const summarizeAccountEnvelopeOutputs = (outputs: readonly RoutedEntityIn
           toEntityId: tx.data.toEntityId,
           ackHeight: ack?.height ?? null,
           proposalHeight: proposal?.frame.height ?? null,
+          // Two legs at one Account height are either the same signed proposal
+          // retried on a later Runtime frame or two different proposals racing
+          // that height. Only the state hash tells those apart, and they need
+          // opposite fixes.
+          proposalStateHash: proposal?.frame.stateHash ?? null,
           crossPulls:
             proposal?.frame.accountTxs.flatMap(accountTx =>
               accountTx.type === 'cross_pull_lock' && accountTx.data.crossJurisdiction
@@ -198,7 +200,6 @@ export const groupAtomicCrossJAdmissionOutputs = <T extends RoutedEntityInput>(
 };
 
 const overwriteRoutedEntityOutput = <T extends RoutedEntityInput>(target: T, source: T): T => {
-  invalidateReliableOutputIdentity(target);
   for (const key of Reflect.ownKeys(target)) {
     if (!Reflect.deleteProperty(target, key)) {
       throw new Error(`ROUTE_RELIABLE_OUTPUT_FIELD_DELETE_FAILED:${String(key)}`);
@@ -265,7 +266,6 @@ const mergePrecommitBundles = (existing: RoutedEntityInput, incoming: RoutedEnti
       merged.set(signerId, [...signatures]);
     }
   }
-  invalidateReliableOutputIdentity(existing);
   existing.hashPrecommits = new Map([...merged.entries()].sort(([left], [right]) => compareStableText(left, right)));
 };
 
@@ -327,14 +327,12 @@ const mergeOrdinaryOutput = <T extends RoutedEntityInput>(existing: T, incoming:
     throw new Error(`ROUTE_LEADER_VOTE_EQUIVOCATION:${incoming.leaderTimeoutVote?.voterId ?? 'missing'}`);
   }
   if (incoming.entityTxs?.length) {
-    invalidateReliableOutputIdentity(existing);
     existing.entityTxs = [...(existing.entityTxs || []), ...incoming.entityTxs];
   }
   if (incoming.proposedFrame) {
     const existingIsCommit = carriesEntityCommitNotification(existing);
     const incomingIsCommit = carriesEntityCommitNotification(incoming);
     if (!existing.proposedFrame || (incomingIsCommit && !existingIsCommit)) {
-      invalidateReliableOutputIdentity(existing);
       existing.proposedFrame = incoming.proposedFrame;
     }
   }
@@ -519,16 +517,6 @@ export const resolveGossipBoardSignerIds = (env: RuntimeReplica, entityId: strin
   return validators.map(readBoardValidatorSignerId).filter(Boolean);
 };
 
-const bindResolvedPendingRuntimeIds = (
-  env: RuntimeReplica,
-  outputs: readonly RoutedEntityInput[],
-  deps: RuntimeOutputRoutingDeps,
-): RoutedEntityInput[] => outputs.map(output => {
-  if (normalizeRuntimeId(output.runtimeId)) return output;
-  const runtimeId = normalizeRuntimeId(deps.resolveRuntimeIdForEntity(env, output.entityId));
-  return runtimeId ? { ...output, runtimeId } : output;
-});
-
 export const splitPendingOutputsByRetryWindow = (
   env: RuntimeReplica,
   pending: RoutedEntityInput[],
@@ -544,13 +532,7 @@ export const splitPendingOutputsByRetryWindow = (
   // account-ACK and J-finality heights are not mutually comparable; a
   // universal per-Entity queue can deadlock the protocols against each other.
   const blockedReliableLanes = new Set<string>();
-  // Atomic siblings are grouped before ordinary routing. Resolve each target
-  // independently here so one unbound replacement leg cannot wait forever
-  // beside its already-bound sibling. Never copy the sibling destination:
-  // only an authenticated hint/profile may establish this routing metadata.
-  const orderedPending = buildPendingNetworkOutputs(
-    bindResolvedPendingRuntimeIds(env, pending, deps),
-  );
+  const orderedPending = buildPendingNetworkOutputs(pending);
   const readyAccountAckLanes = new Set(
     orderedPending.flatMap(output => {
       const identity = getReliableOutputIdentity(output);
@@ -612,9 +594,14 @@ export const splitPendingOutputsByRetryWindow = (
 };
 
 export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeOutputRoutingDeps): number | null => {
-  const pending = bindResolvedPendingRuntimeIds(env, env.pendingNetworkOutputs ?? [], deps);
+  const pending = env.pendingNetworkOutputs ?? [];
   if (pending.length === 0) return null;
   const meta = getDeferredNetworkMeta(env, deps);
+  if (
+    hasRestoredReliableOutputsDue(env) &&
+    pending.some(output => getReliableOutputIdentity(output) !== null)
+  )
+    return 0;
   let nextRetryAt = Infinity;
   const blockedUntilByReliableLane = new Map<string, number>();
   const retryScheduledOutputs = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending)).flatMap(unit => {
@@ -627,17 +614,6 @@ export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeO
     // splitter correctly kept the whole envelope in its waiting set.
     return reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
   });
-  // Restore wakes only a deliverable reliable lane head. An incomplete atomic
-  // cohort can legitimately persist after its already-receipted siblings are
-  // pruned; treating its remaining ACK as immediately due makes the Runtime
-  // loop spin forever because the atomic splitter must keep it parked. When a
-  // missing sibling later arrives, the completed cohort enters this scheduled
-  // set and receives the intended immediate post-restore attempt.
-  if (
-    hasRestoredReliableOutputsDue(env) &&
-    retryScheduledOutputs.some(output => getReliableOutputIdentity(output) !== null)
-  )
-    return 0;
   for (const output of retryScheduledOutputs) {
     const retry = meta.get(buildRouteOutputKey(output));
     const ownRetryAt = retry?.nextRetryAt ?? 0;
@@ -771,13 +747,9 @@ export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): Routed
     else deduped.set(key, cloneRoutedOutputWithCachedIdentity(output));
   }
   const pending = [...deduped.values()]
-    .map(output => {
-      if (output.entityTxs) {
-        invalidateReliableOutputIdentity(output);
-        output.entityTxs = orderCertifiedOutputsBySequence(output.entityTxs);
-      }
-      return cacheRoutedOutputIdentity(output);
-    })
+    .map(output =>
+      output.entityTxs ? { ...output, entityTxs: orderCertifiedOutputsBySequence(output.entityTxs) } : output,
+    )
     .sort(compareOutputDelivery);
   const certifiedEntityFrames = new Set<string>();
   for (const output of pending) {
@@ -841,29 +813,24 @@ export const pruneReceiptedReliableOutputs = (
   outputs: RoutedEntityInput[],
   appliedReceipts: readonly ReliableDeliveryReceipt[] = [],
 ): RoutedEntityInput[] => {
-  const liveOutputs = outputs.filter(output => {
-    if (!accountProposalRetiredBySender(env, output)) return true;
-    env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
-    return false;
-  });
-  // Proposal cohorts intentionally have no transport receipt. Their business
-  // terminal is the ordinary bilateral Account ACK that commits the exact
-  // proposed frame on both Hub sibling Entities. Once both frames are current,
-  // keep no transport retry state: retaining the original proposal envelope
-  // would either leak outbox entries forever or invite a manual duplicate.
-  const uncommittedOutputs = groupAtomicCrossJAdmissionOutputs(liveOutputs).flatMap(unit => {
-    const committedProposalCohort =
-      unit.atomic &&
-      unit.complete &&
-      unit.outputs.every(
-        output => getReliableOutputIdentity(output) === null && accountProposalCommittedBySender(env, output),
-      );
-    if (!committedProposalCohort) return unit.outputs;
-    for (const output of unit.outputs) {
+  // Proposal cohorts intentionally have no transport receipt. Their terminal is
+  // the sender's own Account state: the frame either committed or was rolled
+  // back, and neither can be advanced by resending it.
+  //
+  // This is deliberately per-leg and not gated on a complete cohort. Gating on
+  // `unit.complete` made the cleanup self-disabling: one settled leg left behind
+  // is enough to make its cohort ambiguous, ambiguous cohorts never pair, and an
+  // unpaired unit is never complete - so the entry that caused the ambiguity
+  // could never be collected. Dropping a settled leg is safe on its own because
+  // a settled leg has no successor state to reach.
+  const uncommittedOutputs = groupAtomicCrossJAdmissionOutputs(outputs).flatMap(unit =>
+    unit.outputs.filter(output => {
+      const settled =
+        getReliableOutputIdentity(output) === null && accountProposalSettledBySender(env, output);
+      if (!settled) return true;
       env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
-    }
-    return [];
-  });
+      return false;
+    }));
   const active = env.infrastructure?.receivedReliableReceiptLedger;
   const terminal = env.infrastructure?.receivedReliableTerminalWatermarks;
   if ((!active || active.size === 0) && (!terminal || terminal.size === 0)) {
@@ -892,19 +859,10 @@ export const pruneReceiptedReliableOutputs = (
       continue;
     }
     const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
-    if (unit.atomic && reliableOutputs.length > 0) {
-      if (reliableOutputs.every(isReceipted)) {
-        for (const output of unit.outputs) {
-          env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
-        }
-        continue;
+    if (unit.atomic && reliableOutputs.length > 0 && reliableOutputs.every(isReceipted)) {
+      for (const output of unit.outputs) {
+        env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
       }
-      // A receipt for one leg proves only that leg committed. Pruning it here
-      // destroys the two-leg cohort, so the unreceipted sibling can never be
-      // retried atomically and its older lane height can block every later ACK.
-      // Keep the entire cohort until all reliable legs are receipted. Replayed
-      // committed legs are idempotent and regenerate their durable receipt.
-      retained.push(...unit.outputs);
       continue;
     }
     for (const output of unit.outputs) {

@@ -579,6 +579,36 @@ describe('cross-jurisdiction hashledger swap', () => {
     ).rejects.toThrow('CROSS_J_RAW_PREPARE_CONFLICT');
     expect(proposerRaw.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)).toEqual(baseRoute);
 
+    // Regression: a hub must absorb a duplicate raw intent naming a route it
+    // has already materialized, and must RE-ANNOUNCE rather than swallow it.
+    // The submitter cannot observe the materialization until the account-level
+    // offer surfaces, so it resends in good faith. Throwing failed the whole
+    // Runtime input and killed the hub process
+    // (RUNTIME_ENTITY_INPUT_APPLY_FAILED -> RUNTIME_LOOP_ERROR), taking the mesh
+    // with it; but silently dropping the replay was no better, because then the
+    // submitter stayed blind and resent every retry window forever. Idempotent
+    // here means reproducing the observable outcome of the original
+    // materialization, so the retry converges the submitter's view.
+    const materializedState = cloneEntityState(delayedProposerRegistered.newState);
+    expect(materializedState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull).toBeDefined();
+    const replayAfterMaterialization = await applyEntityTx(proposerEnv, materializedState, rawTx);
+    // Emits nothing on purpose. Re-announcing the route here would land a
+    // registerCrossJurisdictionSwap in the proposer's next wake, and
+    // appendDefaultProposerCrossJMaterializations treats any such wake as a
+    // commit phase and skips materialization - with a submitter retrying every
+    // few seconds the route then never leaves `intent`.
+    expect(replayAfterMaterialization.outputs).toHaveLength(0);
+    expect(
+      replayAfterMaterialization.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull,
+    ).toEqual(preparedRoute.sourcePull);
+    // A different route reusing one orderId is still a real conflict.
+    await expect(
+      applyEntityTx(proposerEnv, cloneEntityState(delayedProposerRegistered.newState), {
+        type: 'prepareCrossJurisdictionSwap',
+        data: { route: conflictingIntent },
+      }),
+    ).rejects.toThrow('CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION');
+
     const mismatchedMaterialization = cloneCrossJurisdictionRoute(preparedRoute);
     mismatchedMaterialization.targetSignerId = addr('99');
     await expect(
@@ -1425,6 +1455,29 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...proposals,
     ];
     expect(selectPotentialCrossJAccountInputPairs(repeatedCohorts)).toHaveLength(2);
+    // Regression: dispatch pairs with allowDifferentSourceRuntimeFrames because
+    // sibling Entity consensus may certify the two legs of one cohort in
+    // adjacent Runtime frames. That option also drops the only predicate
+    // separating two concurrent cohorts carrying identical route sets, so every
+    // leg saw two partners and the uniqueness rule discarded all of them. The
+    // unclaimed legs then became lone cross-j proposals, which dispatch defers
+    // as incomplete atomic cohorts and never retries — MM bootstrap-cross hung
+    // at 0 of 6 routes. Both cohorts are unambiguous inside their own frame, so
+    // pairing must resolve there first and still return both.
+    // The count alone never caught this: the buggy result was also two pairs,
+    // but they OVERLAPPED — (1,2) and (2,3) — and the greedy claim in
+    // groupAtomicCrossJAdmissionOutputs then dropped the second and orphaned
+    // inputs 0 and 3. Assert a real matching: disjoint, and covering every leg.
+    const crossFramePairs = selectPotentialCrossJAccountInputPairs(repeatedCohorts, {
+      allowDifferentSourceRuntimeFrames: true,
+    });
+    expect(crossFramePairs).toHaveLength(2);
+    const pairedIndexes = crossFramePairs.flatMap(pair => [
+      pair.sourceInputIndex,
+      pair.targetInputIndex,
+    ]);
+    expect(new Set(pairedIndexes).size).toBe(pairedIndexes.length);
+    expect([...pairedIndexes].sort((left, right) => left - right)).toEqual([0, 1, 2, 3]);
     const atomicRepeatedCohorts = repeatedCohorts.map(input => {
       const frame = input.sourceRuntimeFrame!;
       const cohort = repeatedCohorts.filter(
@@ -2319,8 +2372,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       name: eth.name,
       chainId: eth.chainId,
       rpcs: [eth.address],
-      depositoryAddress: eth.depositoryAddress,
-      entityProviderAddress: eth.entityProviderAddress,
+      contracts: { depository: eth.depositoryAddress, entityProvider: eth.entityProviderAddress },
       blockTimeMs: eth.blockTimeMs,
       defaultDisputeDelayBlocks: 5,
     } as any);
@@ -2328,8 +2380,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       name: base.name,
       chainId: base.chainId,
       rpcs: [base.address],
-      depositoryAddress: base.depositoryAddress,
-      entityProviderAddress: base.entityProviderAddress,
+      contracts: { depository: base.depositoryAddress, entityProvider: base.entityProviderAddress },
       blockTimeMs: 200,
       defaultDisputeDelayBlocks: 7,
     } as any);
@@ -2563,8 +2614,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         name: jurisdiction.name,
         chainId: jurisdiction.chainId,
         rpcs: [jurisdiction.address],
-        depositoryAddress: jurisdiction.depositoryAddress,
-        entityProviderAddress: jurisdiction.entityProviderAddress,
+        contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
         blockTimeMs: jurisdiction.blockTimeMs,
         defaultDisputeDelayBlocks: 5,
       } as any);

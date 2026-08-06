@@ -30,7 +30,7 @@ import {
 import { commitRuntimeInput, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { generateLazyEntityId } from '../entity/factory';
 import { DEFAULT_TOKENS } from '../jurisdiction/machine/default-tokens';
-import { isLeft } from '../account/utils';
+import { isLeftEntity } from '../account/utils';
 
 let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
 
@@ -246,8 +246,8 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   // Equal traffic in both directions should leave only symmetric routing-fee spread.
   const ahDelta = getOffdelta(env, alice.id, hub.id, USDC);
   const hbDelta = getOffdelta(env, hub.id, bob.id, USDC);
-  const alicePerspective = isLeft(alice.id, hub.id) ? ahDelta : -ahDelta;
-  const hubPerspective = isLeft(hub.id, bob.id) ? hbDelta : -hbDelta;
+  const alicePerspective = isLeftEntity(alice.id, hub.id) ? ahDelta : -ahDelta;
+  const hubPerspective = isLeftEntity(hub.id, bob.id) ? hbDelta : -hbDelta;
 
   console.log(`📊 Final positions:`);
   console.log(`   Alice→Hub: ${alicePerspective} (Alice perspective)`);

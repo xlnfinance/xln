@@ -1,3 +1,4 @@
+import { normalizeEntityRef } from '../account-key';
 import type { AccountTx, RuntimeOverlayRecord } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
@@ -11,6 +12,7 @@ import {
   getCrossJurisdictionCommittedProofRatio,
   getCrossJurisdictionCommittedFillAmounts,
   hashCrossJurisdictionCloseBinary,
+  isCrossJurisdictionFillTerminal,
   isCrossJurisdictionRouteExpired,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
@@ -37,7 +39,6 @@ import type { SwapOfferEvent } from './account';
 
 const crossJFollowupLog = createStructuredLogger('crossj.followup');
 
-const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
   getCrossJurisdictionCommittedProofRatio(route);
@@ -609,9 +610,22 @@ const applyCommittedFillAckProgress = (
     route.priceImprovementSourceAmount =
       (route.priceImprovementSourceAmount ?? 0n) + accountTx.data.priceImprovementAmount!;
   }
-  if (accountTx.data.cancelRemainder) {
+  // Mirror the Account transition: a terminal fill - including a sub-lot dust
+  // remainder the taker did not explicitly cancel - requests the clear.
+  const { terminal, dustClose } = isCrossJurisdictionFillTerminal(route, {
+    nextRatio: ratio,
+    cumulativeSourceAmount: accountTx.data.cumulativeSourceAmount,
+    cumulativeTargetAmount: accountTx.data.cumulativeTargetAmount,
+    ...(accountTx.data.cancelRemainder !== undefined
+      ? { cancelRemainder: accountTx.data.cancelRemainder }
+      : {}),
+  });
+  if (terminal) {
     transitionCrossJurisdictionRouteStatus(route, 'clear_requested', state.timestamp);
-    route.clearingPolicy = 'cancel_and_clear';
+    route.clearingPolicy =
+      accountTx.data.cancelRemainder || dustClose || ratio < CROSS_J_MAX_FILL_RATIO
+        ? 'cancel_and_clear'
+        : 'full_fill';
   }
 };
 
@@ -628,7 +642,19 @@ const closeOrProgressCrossJurisdictionBook = (
   if (normalizeEntityRef(state.entityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
     return;
   }
-  if (ratio < CROSS_J_MAX_FILL_RATIO && !accountTx.data.cancelRemainder) {
+  // The Account transition closes the offer on a sub-lot remainder too, so this
+  // must use the same terminal predicate. Deriving terminality from the tx
+  // flags alone leaves the source offer deleted with its pulls bound until
+  // expiry, because the clear is never requested.
+  const { terminal } = isCrossJurisdictionFillTerminal(route, {
+    nextRatio: ratio,
+    cumulativeSourceAmount: accountTx.data.cumulativeSourceAmount,
+    cumulativeTargetAmount: accountTx.data.cumulativeTargetAmount,
+    ...(accountTx.data.cancelRemainder !== undefined
+      ? { cancelRemainder: accountTx.data.cancelRemainder }
+      : {}),
+  });
+  if (!terminal) {
     applyOrRouteCrossJurisdictionBookProgress(
       env,
       state,

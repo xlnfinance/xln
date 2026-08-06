@@ -1,3 +1,4 @@
+import { normalizeSubmitId } from './submit-identity';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JTx } from '../types/jurisdiction-runtime';
@@ -7,7 +8,6 @@ import {
   buildJSubmitAttemptId,
   findJSubmitReplica,
   isMatchingJSubmitBatch,
-  normalizeJSubmitId,
 } from './j-submit-state';
 
 type RecordJSubmitResultTx = Extract<RuntimeTx, { type: 'recordJSubmitResult' }>;
@@ -56,10 +56,10 @@ const pendingAttemptMatchesResult = (
   const attempt = pending.jTx.data.runtimeSubmitAttempt;
   return Boolean(
     attempt &&
-    normalizeJSubmitId(pending.jTx.entityId) === normalizeJSubmitId(result.entityId) &&
-    normalizeJSubmitId(pending.jTx.data.signerId) === normalizeJSubmitId(result.signerId) &&
+    normalizeSubmitId(pending.jTx.entityId) === normalizeSubmitId(result.entityId) &&
+    normalizeSubmitId(pending.jTx.data.signerId) === normalizeSubmitId(result.signerId) &&
     pending.jurisdictionName === result.jurisdictionName &&
-    normalizeJSubmitId(pending.jTx.data.batchHash) === normalizeJSubmitId(result.batchHash) &&
+    normalizeSubmitId(pending.jTx.data.batchHash) === normalizeSubmitId(result.batchHash) &&
     Number(pending.jTx.data.entityNonce) === Number(result.entityNonce) &&
     Number(pending.jTx.data.batchGeneration) === result.batchGeneration &&
     attempt.attemptId === result.attemptId &&
@@ -69,10 +69,10 @@ const pendingAttemptMatchesResult = (
 };
 
 const assertValidJSubmitResult = (data: RecordJSubmitResultTx['data']): void => {
-  if (!normalizeJSubmitId(data.entityId)) throw new Error('J_SUBMIT_RESULT_ENTITY_MISSING');
-  if (!normalizeJSubmitId(data.signerId)) throw new Error('J_SUBMIT_RESULT_SIGNER_MISSING');
+  if (!normalizeSubmitId(data.entityId)) throw new Error('J_SUBMIT_RESULT_ENTITY_MISSING');
+  if (!normalizeSubmitId(data.signerId)) throw new Error('J_SUBMIT_RESULT_SIGNER_MISSING');
   if (!String(data.jurisdictionName || '').trim()) throw new Error('J_SUBMIT_RESULT_JURISDICTION_MISSING');
-  if (!normalizeJSubmitId(data.batchHash)) throw new Error('J_SUBMIT_RESULT_BATCH_HASH_MISSING');
+  if (!normalizeSubmitId(data.batchHash)) throw new Error('J_SUBMIT_RESULT_BATCH_HASH_MISSING');
   if (!String(data.attemptId || '').trim()) throw new Error('J_SUBMIT_RESULT_ATTEMPT_ID_MISSING');
   if (!Number.isSafeInteger(data.entityNonce) || data.entityNonce < 0) {
     throw new Error(`J_SUBMIT_RESULT_ENTITY_NONCE_INVALID:${data.entityNonce}`);
@@ -148,8 +148,8 @@ const activePendingAttemptIds = (env: RuntimeReplica, replica: EntityReplica): S
     for (const jTx of input.jTxs) {
       if (
         jTx.type === 'batch' &&
-        normalizeJSubmitId(jTx.entityId) === normalizeJSubmitId(replica.entityId) &&
-        normalizeJSubmitId(jTx.data.signerId) === normalizeJSubmitId(replica.signerId) &&
+        normalizeSubmitId(jTx.entityId) === normalizeSubmitId(replica.entityId) &&
+        normalizeSubmitId(jTx.data.signerId) === normalizeSubmitId(replica.signerId) &&
         jTx.data.runtimeSubmitAttempt
       ) active.add(jTx.data.runtimeSubmitAttempt.attemptId);
     }
@@ -261,7 +261,7 @@ export const applyRecordJSubmitResultRuntimeTx = (env: RuntimeReplica, tx: Recor
   );
   const matchesLocal = Boolean(
     local &&
-    normalizeJSubmitId(local.batchHash) === normalizeJSubmitId(tx.data.batchHash) &&
+    normalizeSubmitId(local.batchHash) === normalizeSubmitId(tx.data.batchHash) &&
     local.entityNonce === tx.data.entityNonce &&
     local.batchGeneration === tx.data.batchGeneration
   );

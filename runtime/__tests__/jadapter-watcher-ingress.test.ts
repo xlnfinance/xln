@@ -56,9 +56,11 @@ const makeJReplica = (
 ): JReplica => ({
   name,
   blockNumber,
-  depositoryAddress,
   chainId,
-  ...(entityProviderAddress !== undefined ? { entityProviderAddress } : {}),
+  contracts: {
+    depository: depositoryAddress,
+    ...(entityProviderAddress !== undefined ? { entityProvider: entityProviderAddress } : {}),
+  },
   stateRoot: new Uint8Array(32),
   mempool: [],
   blockDelayMs: 0,

@@ -10,7 +10,7 @@ import { main, startP2P, processRuntime, enqueueRuntimeInput, createLazyEntity, 
 import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
 import { getEntityReplicaById } from '../api/server/entity-lookup';
 import { processUntil } from './helpers';
-import { isLeft, deriveDelta } from '../account/utils';
+import { isLeftEntity, deriveDelta } from '../account/utils';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account/crypto';
 import { loadJurisdictions } from '../jurisdiction/adapter/jurisdiction-loader';
 import { deployMissingDefaultTokens } from '../jurisdiction/adapter/dev-token-deployment';
@@ -252,7 +252,7 @@ const resolveSides = (account: AccountReplica | undefined, entityId: string, cou
       counterpartyIsLeft: counterpartyId === leftEntity,
     };
   }
-  const weAreLeft = isLeft(entityId, counterpartyId);
+  const weAreLeft = isLeftEntity(entityId, counterpartyId);
   return {
     weAreLeft,
     counterpartyIsLeft: !weAreLeft,

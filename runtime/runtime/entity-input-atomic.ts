@@ -1,4 +1,5 @@
 import {
+  normalizeEntityKey,
   removeRejectedCrossJAccountInputsByIndex,
 } from './entity-routing';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
@@ -31,12 +32,18 @@ export const atomicPairInputsMatch = (
 ): second is RoutedEntityInput => {
   const left = first.atomicCrossJurisdictionPair;
   const right = second?.atomicCrossJurisdictionPair;
-  return Boolean(
-    left &&
-      right &&
-      left.phase === right.phase &&
-      left.pairKey === right.pairKey,
-  );
+  if (!left || !right) return false;
+  if (left.phase !== right.phase || left.pairKey !== right.pairKey) return false;
+  // Sibling legs are distinct Entities that happen to share a Runtime, and
+  // buildCrossJProposalFrameCandidate only ever pairs candidates that target
+  // different ones. This re-pairing walks adjacent inputs by their stamped
+  // {phase, pairKey} alone, so a batch that puts two same-Entity inputs of one
+  // pairKey side by side would otherwise form a pair the router never would.
+  //
+  // Two legs on one replica need no cross-Entity atomicity: they land in the
+  // same Entity frame and already commit or abort together. Declining the pair
+  // routes them through the ordinary path instead of failing the Runtime frame.
+  return normalizeEntityKey(first.entityId) !== normalizeEntityKey(second.entityId);
 };
 
 const expectedAtomicAccountFrame = (
@@ -195,6 +202,11 @@ const recordAtomicPairRejection = (
   }
 };
 
+/**
+ * Both Account legs of a failed atomic cohort are cancelled together. Any other
+ * Entity payload in those inputs is re-applied without the violating
+ * accountInputs — never a one-sided Account settle of the broken pair.
+ */
 const applyRetainedNonAtomicInputs = async (
   env: RuntimeReplica,
   pair: readonly [RoutedEntityInput, RoutedEntityInput],

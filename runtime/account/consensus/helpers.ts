@@ -61,8 +61,7 @@ export function requireAccountDeltaTransformerAddress(
   const matches = Array.from(jurisdictions.jReplicas.values()).flatMap((replica) => {
     if (Number(replica.chainId) !== domain.chainId) return [];
     const canonicalDepository = firstUsableContractAddress(replica.contracts?.depository)?.toLowerCase();
-    const aliasDepository = firstUsableContractAddress(replica.depositoryAddress)?.toLowerCase();
-    if (canonicalDepository !== depository && aliasDepository !== depository) return [];
+    if (canonicalDepository !== depository) return [];
     const stack = requireDurableJurisdictionStack(replica);
     return stack.depository === depository ? [stack] : [];
   });

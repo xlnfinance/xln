@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<meta name="color-scheme" content="dark light" />
+		<title>XLN</title>
+		<script>
+			(function () {
+				try {
+					var t = localStorage.getItem('xln-ui-theme');
+					if (t === 'light' || t === 'dark') {
+						document.documentElement.dataset.theme = t;
+					} else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+						document.documentElement.dataset.theme = 'light';
+					}
+				} catch (_) {}
+			})();
+		</script>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

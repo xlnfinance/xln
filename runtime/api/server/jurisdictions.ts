@@ -166,9 +166,9 @@ export const buildRuntimeJurisdictionsJson = async (env?: RuntimeReplica | null)
 
   const account = String(replica.contracts?.account || '').trim();
   const depository =
-    String(replica.depositoryAddress || replica.contracts?.depository || '').trim();
+    String(replica.contracts?.depository || '').trim();
   const entityProvider =
-    String(replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
+    String(replica.contracts?.entityProvider || '').trim();
   const deltaTransformer = String(replica.contracts?.deltaTransformer || '').trim();
   if (!account || !depository || !entityProvider || !deltaTransformer) return null;
   const entityProviderDeploymentBlock = Number(

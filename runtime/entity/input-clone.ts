@@ -2,8 +2,6 @@ import type { EntityInput, EntityOutput, EntityLeaderCertificate, EntityLeaderTi
 import type { EntityTx } from '../types/entity-tx';
 import type { JPrefixAttestation, JPrefixCertificate, JPrefixClaim } from '../types/jurisdiction-events';
 
-const cloneEntityInputField = (value: unknown): unknown => structuredClone(value);
-
 export const cloneIsolatedEntityTxs = (txs: readonly EntityTx[]): EntityTx[] =>
   txs.map(tx => structuredClone(tx));
 
@@ -163,7 +161,7 @@ export const cloneIsolatedEntityInput = <T extends EntityOutput>(input: T): T =>
       cloned[key] = cloneIsolatedEntityLeaderTimeoutVote(value as EntityLeaderTimeoutVote);
       continue;
     }
-    cloned[key] = cloneEntityInputField(value);
+    cloned[key] = structuredClone(value);
   }
   const entityTxs = cloned['entityTxs'];
   if (

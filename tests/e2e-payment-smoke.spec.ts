@@ -128,7 +128,7 @@ async function readJWatcherDiagnostics(page: Page): Promise<unknown> {
         chainId: replica.chainId,
         adapterChainId: replica.jadapter?.chainId,
         blockNumber: String(replica.blockNumber ?? ''),
-        depositoryAddress: replica.depositoryAddress,
+        depositoryAddress: replica.contracts?.depository,
         rpcs: replica.rpcs,
       })),
       entities: [...(env?.state?.eReplicas?.entries() ?? [])].map(([key, replica]) => {

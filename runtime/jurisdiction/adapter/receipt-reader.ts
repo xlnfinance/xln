@@ -82,6 +82,29 @@ const parseCanonicalBlock = (raw: unknown, height: number): CanonicalRpcBlock =>
   return block as CanonicalRpcBlock;
 };
 
+/**
+ * A JSON-RPC proxy caps how many calls one batch may carry
+ * (`MAX_RPC_PROXY_BATCH_CALLS`, runtime/api/server/rpc-proxy-safety.ts) and
+ * answers 413 above it, which the watcher treats as fatal. A poll reads its
+ * whole block range at once, so send it as several batches instead of letting
+ * the range dictate the batch size. Kept as a local constant because the
+ * adapter must not import the server surface; it only has to stay at or below
+ * it.
+ */
+const MAX_RPC_BATCH_CALLS = 128;
+
+const sendBatchInChunks = async (
+  sendBatch: RpcBatchSend,
+  calls: readonly RpcBatchCall[],
+): Promise<unknown[]> => {
+  if (calls.length <= MAX_RPC_BATCH_CALLS) return sendBatch(calls);
+  const results: unknown[] = [];
+  for (let offset = 0; offset < calls.length; offset += MAX_RPC_BATCH_CALLS) {
+    results.push(...await sendBatch(calls.slice(offset, offset + MAX_RPC_BATCH_CALLS)));
+  }
+  return results;
+};
+
 const readCanonicalBlocks = async (
   send: RpcSend,
   heights: readonly number[],
@@ -92,7 +115,7 @@ const readCanonicalBlocks = async (
     params: [ethers.toQuantity(height), false],
   }));
   const rawBlocks = sendBatch
-    ? await sendBatch(calls)
+    ? await sendBatchInChunks(sendBatch, calls)
     : await mapConcurrent(calls, 16, (call) => send(call.method, call.params));
   if (rawBlocks.length !== heights.length) {
     throw new Error(`J_RECEIPT_BATCH_LENGTH_MISMATCH:expected=${heights.length}:actual=${rawBlocks.length}`);
@@ -217,7 +240,7 @@ const readEthereumReceipts = async (
     params: [normalizeReceiptHash(transactionHash, `TRANSACTION_${index}_HASH`)],
   }));
   const rawReceipts = sendBatch
-    ? await sendBatch(calls)
+    ? await sendBatchInChunks(sendBatch, calls)
     : await mapConcurrent(calls, 16, (call) => send(call.method, call.params));
   if (rawReceipts.length !== block.transactions.length) {
     throw new Error(

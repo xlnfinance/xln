@@ -47,7 +47,6 @@ library Account {
     uint256 disputeTimeout
   );
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
-  event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
   // This signature intentionally matches Depository's public event ABI. The
   // library executes by DELEGATECALL, so logs are emitted from Depository.
   event TransformerDeltaClamped(
@@ -175,10 +174,6 @@ library Account {
   uint256 private constant INT256_SIGN_BIT = 1 << 255;
 
   // ========== PURE HELPERS ==========
-
-  function accountKey(bytes32 e1, bytes32 e2) external pure returns (bytes memory) {
-    return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
-  }
 
   function _accountKey(bytes32 e1, bytes32 e2) internal pure returns (bytes memory) {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
@@ -1059,6 +1054,35 @@ library Account {
     // The outer processBatch Hanko is current-board-only. This inner Hanko is
     // historical bilateral evidence held by the counterparty, so the current or
     // immediate previous board remains provable for the exact seven-day grace.
+    //
+    // This is a deliberate asymmetric trade-off, not an oversight. Both sides
+    // of it are real and neither can be removed without paying for the other:
+    //
+    //   grace on  - a quorum of an entity's *retired* board can, for seven
+    //               days, sign a proofbody against any counterparty account it
+    //               can pair with. The damage is not capped by that account's
+    //               collateral: Depository._settleShortfall drains the debtor's
+    //               reserves and books the remainder as debt. Nonce choice is
+    //               free, so a near-maximum nonce additionally denies the
+    //               victim any counter-proof, because finalization requires
+    //               finalNonce > account.nonce.
+    //
+    //   grace off - an entity repudiates every obligation it ever signed simply
+    //               by rotating its board, because all outstanding evidence
+    //               against it stops verifying at once. For a hub that is every
+    //               user it ever promised anything to, unilaterally and free.
+    //
+    // Grace stays on because the second attack is broader, cheaper, and needs
+    // no collusion: one innocent-looking rotation dumps the entire counterparty
+    // set, while the first needs a retired quorum, a funded account with the
+    // victim, and action inside the window. Seven days is kept because it is a
+    // widely understood revocation horizon and long enough for a counterparty
+    // to observe a rotation and force its state on-chain.
+    //
+    // A counterparty that does not trust an entity's retired board must force
+    // its latest state within boardChangeDelay instead of relying on this path.
+    // Do not narrow this to verifyCurrentHankoSignature without first replacing
+    // the repudiation defence it provides.
     (bytes32 recoveredEntity, bool valid) =
       IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();

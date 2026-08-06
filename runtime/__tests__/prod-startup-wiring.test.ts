@@ -1178,7 +1178,7 @@ describe('production startup wiring', () => {
     expect(runner).toContain(
       'assertLocalTestPortsFree([apiPort, apiPort + 10, apiPort + 11, apiPort + 12, apiPort + 13]);',
     );
-    expect(runner).toContain('const E2E_ANVIL_HISTORY_STATES = 256;');
+    expect(runner).toContain('const E2E_ANVIL_HISTORY_STATES = 8192;');
     expect(runner.match(/'--prune-history'/g)).toHaveLength(2);
     expect(runner.match(/String\(E2E_ANVIL_HISTORY_STATES\)/g)).toHaveLength(2);
     expect(runner).not.toContain("'--max-persisted-states'");
@@ -1840,8 +1840,8 @@ describe('production startup wiring', () => {
     expect(bootstrapCrossBranch).toContain(
       'progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs, getPendingCrossRequestOrderIds)',
     );
-    expect(bootstrapCrossBranch).toContain('await submitCrossJurisdictionIntents(');
-    expect(bootstrapCrossBranch).not.toContain('await submitCrossJurisdictionIntent(');
+    expect(bootstrapCrossBranch).toContain('await submitCrossJurisdictionIntent(');
+    expect(bootstrapCrossBranch).not.toContain('await submitCrossJurisdictionIntents(');
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
     expect(mmNode).not.toContain("direction: 'bootstrap-batch'");
     expect(mmNode).not.toContain('deferredBootstrapCrossLastIndex');
@@ -2337,7 +2337,10 @@ describe('production startup wiring', () => {
     expect(ensureConnectivity).toContain(
       'const deriveMarketMakerAccountWatchSeed = (counterpartyId: string): string =>',
     );
-    expect(ensureConnectivity).toContain('timestamp: 0,');
+    // The seed used to assert a literal `timestamp: 0` here, standing in for
+    // "derived deterministically, never from wall-clock". deriveAccountWatchSeed
+    // no longer accepts a timestamp at all, so the type enforces it.
+    expect(ensureConnectivity).toContain('counterpartyId,');
     expect(ensureConnectivity).toContain(
       'const [openTokenId = 1, ...extraCreditTokenIds] = normalizePositiveTokenIds(tokenIds);',
     );

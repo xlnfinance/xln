@@ -7,10 +7,10 @@ const normalizedLabel = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
 
 const depositoryOf = (replica: JReplica | null | undefined): string =>
-  normalizedLabel(replica?.depositoryAddress || replica?.contracts?.depository);
+  normalizedLabel(replica?.contracts?.depository);
 
 const entityProviderOf = (replica: JReplica | null | undefined): string =>
-  normalizedLabel(replica?.entityProviderAddress || replica?.contracts?.entityProvider);
+  normalizedLabel(replica?.contracts?.entityProvider);
 
 export const watcherChainIdOf = (
   replica: JReplica | null | undefined,
@@ -64,9 +64,7 @@ export const requireWatcherJurisdictionReplica = (
   if (replica) return replica;
   const available = [...(env.state.jReplicas?.values() || [])]
     .map(candidate => {
-      const address = normalizedLabel(
-        candidate.depositoryAddress || candidate.contracts?.depository,
-      );
+      const address = normalizedLabel(candidate.contracts?.depository);
       return `${candidate.name || 'unnamed'}/${String(candidate.chainId ?? 'missing')}/${address || 'missing'}`;
     })
     .join(',');

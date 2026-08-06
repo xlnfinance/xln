@@ -2,7 +2,6 @@
 /* tslint:disable */
 /* eslint-disable */
 export * as depositorySol from "./Depository.sol";
-export * as consoleSol from "./console.sol";
 export * as mocks from "./mocks";
 export { Account__factory } from "./Account__factory";
 export { DeltaTransformer__factory } from "./DeltaTransformer__factory";
@@ -13,7 +12,4 @@ export { EntityProvider__factory } from "./EntityProvider__factory";
 export { HankoCodec__factory } from "./HankoCodec__factory";
 export { HankoVerifier__factory } from "./HankoVerifier__factory";
 export { HashLadder__factory } from "./HashLadder__factory";
-export { IDeltaTransformer__factory } from "./IDeltaTransformer__factory";
-export { IDepository__factory } from "./IDepository__factory";
 export { IEntityProvider__factory } from "./IEntityProvider__factory";
-export { Token__factory } from "./Token__factory";

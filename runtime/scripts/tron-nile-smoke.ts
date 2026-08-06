@@ -58,8 +58,6 @@ const adapter = await createJAdapter({
   replicaAttachmentAuthority: 'deployment-origin-proof',
   fromReplica: {
     contracts,
-    depositoryAddress: contracts['depository'],
-    entityProviderAddress: contracts['entityProvider'],
     entityProviderDeploymentBlock: deploymentBlock,
   },
 });

@@ -226,8 +226,8 @@ describe('RPC J-watcher backlog drain', () => {
 
     const jurisdictionName = 'Backlog Drain';
     const jReplica = createJReplica(env, jurisdictionName, adapter.addresses.depository);
-    jReplica.depositoryAddress = adapter.addresses.depository;
-    jReplica.entityProviderAddress = adapter.addresses.entityProvider;
+    jReplica.contracts = { ...jReplica.contracts, depository: adapter.addresses.depository };
+    jReplica.contracts = { ...jReplica.contracts, entityProvider: adapter.addresses.entityProvider };
     jReplica.chainId = CHAIN_ID;
     jReplica.watcherConfirmationDepth = 0;
     jReplica.rpcs = [managedAnvil.rpcUrl];

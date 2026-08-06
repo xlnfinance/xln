@@ -670,26 +670,53 @@ export const accountProposalEvidenceRank = (output: RoutedEntityInput): number =
     return rank + Number(Boolean(proposal.frameHanko)) + Number(Boolean(proposal.disputeSeal));
   }, 0);
 
-export const accountProposalCommittedBySender = (env: RuntimeReplica, output: RoutedEntityInput): boolean => {
+const senderAccountForProposal = (
+  env: RuntimeReplica,
+  fromEntityId: string,
+  toEntityId: string,
+) => {
+  const owner = fromEntityId.toLowerCase();
+  const counterparty = toEntityId.toLowerCase();
+  for (const replica of env.state.eReplicas.values()) {
+    if (replica.entityId.toLowerCase() !== owner) continue;
+    const account = [...replica.state.accounts.entries()].find(
+      ([counterpartyId]) => counterpartyId.toLowerCase() === counterparty,
+    )?.[1];
+    if (account) return account;
+  }
+  return null;
+};
+
+/**
+ * Bilateral Account consensus allows exactly one pending frame per account, so a
+ * proposal is live in the outbox for exactly as long as it *is* that frame.
+ *
+ * Keying the outbox on "committed by the sender" instead recognised only one of
+ * a proposal's two terminals. The other is rollback: the RIGHT side discards its
+ * own frame when it loses a same-height collision, and that frame can never
+ * commit. Such a proposal used to stay in the outbox forever, and a stale
+ * sibling makes every later cross-j cohort find two matching candidates where
+ * the exact-pair selector demands one - so the whole cohort is rejected and its
+ * legs reach dispatch alone. Asking whether the sender still holds the frame
+ * covers both terminals with one question and cannot leave a duplicate behind.
+ */
+export const accountProposalSettledBySender = (env: RuntimeReplica, output: RoutedEntityInput): boolean => {
   const proposals = getEffectiveEntityInputTxs(output).flatMap(tx => {
     if (tx.type !== 'accountInput') return [];
     const proposal = accountInputProposal(tx.data);
     return proposal ? [{ accountInput: tx.data, proposal }] : [];
   });
   if (proposals.length === 0) return false;
-  return proposals.every(({ accountInput, proposal }) =>
-    [...env.state.eReplicas.values()].some(replica => {
-      if (replica.entityId.toLowerCase() !== accountInput.fromEntityId.toLowerCase()) return false;
-      const targetCounterparty = accountInput.toEntityId.toLowerCase();
-      const account = [...replica.state.accounts.entries()].find(
-        ([counterpartyId]) => counterpartyId.toLowerCase() === targetCounterparty,
-      )?.[1];
-      return (
-        account?.currentFrame.height === proposal.frame.height &&
-        account.currentFrame.stateHash.toLowerCase() === proposal.frame.stateHash.toLowerCase()
-      );
-    }),
-  );
+  return proposals.every(({ accountInput, proposal }) => {
+    const account = senderAccountForProposal(env, accountInput.fromEntityId, accountInput.toEntityId);
+    // An account the sender no longer hosts cannot advance this proposal either.
+    if (!account) return true;
+    const pending = account.pendingFrame;
+    return !(
+      pending?.height === proposal.frame.height &&
+      pending.stateHash.toLowerCase() === proposal.frame.stateHash.toLowerCase()
+    );
+  });
 };
 
 const senderAccountForInput = (

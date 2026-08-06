@@ -22,7 +22,7 @@ export type ValidatedSwapResolve = {
   canonicalWantAmount: bigint;
   canonicalQuantizedGive: bigint;
   canonicalQuantizedWant: bigint;
-  canonicalPriceTicks?: bigint;
+  canonicalPriceTicks: bigint;
   effectiveCancelRemainder: boolean;
   filledGive: bigint;
   filledWant: bigint;

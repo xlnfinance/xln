@@ -82,8 +82,7 @@ const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConf
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
+    contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
@@ -175,7 +174,7 @@ describe('multi-jurisdiction entity binding', () => {
     const resolved = getJReplicaByJurisdictionRef(env, canonicalRef);
 
     expect(resolved?.name).toBe('Canonical');
-    expect(resolved?.depositoryAddress).toBe(canonical.depositoryAddress);
+    expect(resolved?.contracts?.depository).toBe(canonical.depositoryAddress);
     expect(getJReplicaByJurisdictionRef(env, 'Canonical')).toBeUndefined();
   });
 

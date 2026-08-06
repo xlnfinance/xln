@@ -1,3 +1,4 @@
+import { normalizeSubmitId } from './submit-identity';
 import { ENTITY_J_SUBMIT_FALLBACK_MS, isEntityActiveLeader } from '../entity/consensus/leader';
 import { getJurisdictionConfigName } from '../jurisdiction/machine/jurisdiction-runtime';
 import type { EntityReplica } from '../entity/types';
@@ -6,7 +7,6 @@ import {
   canSubmitEntityProviderActionLocally,
   getMatchingEntityProviderActionSubmitState,
   hasPendingCommittedEntityProviderAction,
-  normalizeEntityProviderActionId,
 } from './entity-provider-action-submit-state';
 import { markLocalEntityProviderActionRuntimeTx } from './entity-provider-action-submit-auth';
 
@@ -17,10 +17,10 @@ const hasQueuedRetry = (
   identity: RetryActionTx['data'],
 ): boolean => (env.runtimeMempool?.runtimeTxs ?? []).some((tx) =>
   tx.type === 'retryEntityProviderAction' &&
-  normalizeEntityProviderActionId(tx.data.jurisdictionName) === normalizeEntityProviderActionId(identity.jurisdictionName) &&
-  normalizeEntityProviderActionId(tx.data.entityId) === normalizeEntityProviderActionId(identity.entityId) &&
-  normalizeEntityProviderActionId(tx.data.signerId) === normalizeEntityProviderActionId(identity.signerId) &&
-  normalizeEntityProviderActionId(tx.data.actionHash) === normalizeEntityProviderActionId(identity.actionHash) &&
+  normalizeSubmitId(tx.data.jurisdictionName) === normalizeSubmitId(identity.jurisdictionName) &&
+  normalizeSubmitId(tx.data.entityId) === normalizeSubmitId(identity.entityId) &&
+  normalizeSubmitId(tx.data.signerId) === normalizeSubmitId(identity.signerId) &&
+  normalizeSubmitId(tx.data.actionHash) === normalizeSubmitId(identity.actionHash) &&
   tx.data.actionNonce === identity.actionNonce &&
   tx.data.generation === identity.generation);
 

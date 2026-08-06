@@ -489,7 +489,10 @@ export class RuntimeWsClient {
         this.options.signerId,
         hashHelloMessage(this.options.runtimeId, encryptionPubKey, timestamp, nonce, expectedAudience),
       );
-      this.sendRaw({
+      // Only commit helloSent/nonce after a successful send. Marking them on a
+      // failed sendRaw lets later frames authenticate while the server still has
+      // handshakeDone=false, which surfaces as "Handshake required".
+      const sent = this.sendRaw({
         type: 'hello',
         from: this.options.runtimeId,
         fromEncryptionPubKey: encryptionPubKey,
@@ -497,6 +500,11 @@ export class RuntimeWsClient {
         audience: expectedAudience,
         auth: { nonce, signature, timestamp },
       });
+      if (!sent) {
+        this.options.onError?.(new Error('WS_HELLO_SEND_FAILED'));
+        this.ws?.close();
+        return false;
+      }
       this.helloAudience = expectedAudience;
       this.helloNonce = nonce;
       this.helloSent = true;
@@ -940,7 +948,10 @@ export class RuntimeWsClient {
 
   private sendRaw(msg: RuntimeWsMessage): boolean {
     if (this.closed) return false;
-    if (this.connecting && msg.type !== 'hello') return false;
+    // Gate on hello acknowledgement, not connecting. handleSocketError/Close clear
+    // connecting while the socket can still be OPEN, which previously let
+    // debug_event/entity_inputs race out as the first server frame.
+    if (!this.helloAcknowledged && msg.type !== 'hello') return false;
     if (!this.ws) return false;
     if ('readyState' in this.ws && this.ws.readyState !== 1) return false;
     const outboundMsg =

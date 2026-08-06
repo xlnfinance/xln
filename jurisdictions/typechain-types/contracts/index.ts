@@ -3,8 +3,6 @@
 /* eslint-disable */
 import type * as depositorySol from "./Depository.sol";
 export type { depositorySol };
-import type * as consoleSol from "./console.sol";
-export type { consoleSol };
 import type * as mocks from "./mocks";
 export type { mocks };
 export type { Account } from "./Account";
@@ -16,7 +14,4 @@ export type { EntityProvider } from "./EntityProvider";
 export type { HankoCodec } from "./HankoCodec";
 export type { HankoVerifier } from "./HankoVerifier";
 export type { HashLadder } from "./HashLadder";
-export type { IDeltaTransformer } from "./IDeltaTransformer";
-export type { IDepository } from "./IDepository";
 export type { IEntityProvider } from "./IEntityProvider";
-export type { Token } from "./Token";

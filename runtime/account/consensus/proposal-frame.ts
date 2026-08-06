@@ -7,7 +7,7 @@ import {
   createFrameHash,
   MAX_FRAME_SIZE_BYTES,
 } from './frame';
-import { isLeft } from '../utils';
+import { isLeftEntity } from '../utils';
 import { shouldIncludeToken } from './helpers';
 import {
   computeAccountStateRoot,
@@ -63,7 +63,7 @@ const buildFrameData = async (
       : account.currentFrame.stateHash || '',
     accountStateRoot,
     stateHash: '',
-    byLeft: isLeft(account.proofHeader.fromEntity, account.proofHeader.toEntity),
+    byLeft: isLeftEntity(account.proofHeader.fromEntity, account.proofHeader.toEntity),
     deltas: collectFrameDeltas(candidate),
   };
   frame.stateHash = await createFrameHash(frame);

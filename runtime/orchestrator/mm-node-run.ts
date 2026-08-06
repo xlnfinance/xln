@@ -60,7 +60,7 @@ import {
   getAccountReplica,
   getEntityOutCapacity,
   getEntityReplicaById,
-  isAccountConsensusReady,
+  isAccountWriteLaneIdle,
   serializeAccountDelta,
   sleep,
   summarizeRuntimeQuiescence,
@@ -220,6 +220,16 @@ const buildBootstrapStallCapsule = ({
       lastSeen: lastDirectEntityInput,
       lastError: lastDirectEntityInputError,
     },
+    // The queue counts alone say "2 outputs stuck for 59s" without saying what
+    // they are, which is the one thing needed to tell an atomic cross-j cohort
+    // waiting for a sibling apart from a reliable lane waiting on a receipt.
+    pendingNetworkOutputs: (env.pendingNetworkOutputs ?? []).map(output => ({
+      runtimeId: output.runtimeId,
+      entityId: output.entityId,
+      sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
+      atomicCrossJurisdictionPair: output.atomicCrossJurisdictionPair ?? null,
+      entityTxTypes: (output.entityTxs ?? []).map(entityTx => entityTx.type),
+    })),
     visibleHubs: visibleHubs.map(profile => ({
       name: profile.name,
       entityId: profile.entityId,
@@ -436,7 +446,7 @@ const buildMarketMakerAccountStatusDebug = (
     entityId,
     counterpartyEntityId,
     hasAccount: Boolean(account),
-    ready: Boolean(account && isAccountConsensusReady(account)),
+    ready: Boolean(account && isAccountWriteLaneIdle(account)),
     currentHeight: Number(account?.currentHeight ?? 0),
     pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
     pendingFrameTxs: (account?.pendingFrame?.accountTxs ?? []).map(tx => String(tx?.type || '')),
@@ -1762,7 +1772,13 @@ type MarketMakerQuoteEngineState = {
   inFlight: boolean;
   bootstrapCrossCursor: number;
   steadyCrossCursor: number;
-  attemptedBootstrapIntentOrderIds: Set<string>;
+  // offerId -> attempt timestamp (ms), expired via MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS.
+  // See the comment on CrossQuoteMaintenanceContext.attemptedBootstrapIntentOrderIds
+  // in mm-node-health.ts: this must not be a permanent blacklist, because a
+  // cross-j offerId is stable for a whole MARKET_MAKER_CROSS_EXPIRY_MS
+  // generation and one transient rejection would otherwise starve that book
+  // slot for the rest of the run.
+  attemptedBootstrapIntentOrderIds: Map<string, number>;
 };
 
 type MarketMakerQuoteEngineDeps = {
@@ -2237,7 +2253,7 @@ const createMarketMakerQuoteLifecycle = (
     inFlight: false,
     bootstrapCrossCursor: 0,
     steadyCrossCursor: 0,
-    attemptedBootstrapIntentOrderIds: new Set(),
+    attemptedBootstrapIntentOrderIds: new Map(),
   };
   const quoteEngineDeps: MarketMakerQuoteEngineDeps = {
     env,

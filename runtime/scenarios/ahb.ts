@@ -18,16 +18,18 @@ import type { RuntimeReplica } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import {
   bindScenarioJReplica,
+  createJurisdictionConfig,
   ensureJAdapter,
   getScenarioJAdapter,
   isScenarioJAdapterMissingError,
   createJReplica,
   resolveScenarioBoardSigner,
+  resolveScenarioJurisdictionAddress,
 } from './boot';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
+import { snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
 import { formatRuntime } from '../qa/runtime-ascii';
-import { deriveDelta, isLeft } from '../account/utils';
+import { deriveDelta, isLeftEntity } from '../account/utils';
 import { createGossipLayer } from '../network/p2p/gossip';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
@@ -139,14 +141,13 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const browserVM = jadapter.getBrowserVM();
     const vm = browserVM as unknown as (RequiredBrowserVM | null);
 
-    const arrakis = {
-      name: 'AHB Demo',
-      chainId: jadapter.chainId,
-      address: jadapter.mode === 'browservm' ? 'browservm://' : '',
-      entityProviderAddress: jadapter.addresses.entityProvider,
-      depositoryAddress: jadapter.addresses.depository,
-      rpc: jadapter.mode === 'browservm' ? 'browservm://' : '',
-    };
+    const arrakis = createJurisdictionConfig(
+      'AHB Demo',
+      jadapter.addresses.depository,
+      jadapter.addresses.entityProvider,
+      resolveScenarioJurisdictionAddress(jadapter.mode),
+      Number(jadapter.chainId || 31337),
+    );
 
     console.log(`📋 Jurisdiction: ${arrakis.name}`);
     console.log('✅ AHB JAdapter + J-Machine ready');
@@ -784,7 +785,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }
     // ✅ ASSERT: ondelta follows contract rule (left-side ondelta only)
     // Depository.reserveToCollateral only updates ondelta when receivingEntity is LEFT.
-    const aliceIsLeftAH9 = isLeft(alice.id, hub.id);
+    const aliceIsLeftAH9 = isLeftEntity(alice.id, hub.id);
     const expectedOndelta9 = aliceIsLeftAH9 ? aliceCollateralAmount : 0n;
     if (aliceDelta9.ondelta !== expectedOndelta9) {
       throw new Error(`ASSERT FAIL Frame 9: Alice-Hub ondelta = ${aliceDelta9.ondelta}, expected ${expectedOndelta9}. R2C ondelta mismatch!`);
@@ -864,7 +865,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const [, bobRep9] = findReplica(env, bob.id);
     const bobHubAccount9 = bobRep9.state.accounts.get(hub.id); // Account keyed by counterparty
     const bobDelta9 = bobHubAccount9?.state.deltas.get(USDC_TOKEN_ID);
-    const counterpartyIsLeft = isLeft(hub.id, bob.id);
+    const counterpartyIsLeft = isLeftEntity(hub.id, bob.id);
     const expectedField = counterpartyIsLeft ? 'leftCreditLimit' : 'rightCreditLimit';
     const actualLimit = bobDelta9 ? bobDelta9[expectedField] : 0n;
     if (!bobDelta9 || actualLimit !== bobCreditAmount) {
@@ -956,6 +957,13 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     await process(env);
     logPending();
 
+    // How many frames an HTLC settlement takes is a property of the payment
+    // path - the secret still travels back B->H->A after frame 13 - so an
+    // assertion about settled balances must wait for quiescence rather than
+    // re-count frames here. The ordering assertions further down deliberately
+    // do not drain: they are about what has NOT happened yet.
+    await drainRuntime(env);
+
     // Verify payment 1 landed (canonical LEFT perspective)
     const ahDelta1 = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDelta1 = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
@@ -963,11 +971,11 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     // Calculate expected from canonical LEFT perspective
     // Payment: Alice → Hub → Bob ($125K)
     // A-H: Alice pays Hub → LEFT (Alice or Hub?) owes
-    const ahLeftIsAlice = isLeft(alice.id, hub.id);
+    const ahLeftIsAlice = isLeftEntity(alice.id, hub.id);
     const expectedAH1 = ahLeftIsAlice ? -payment1 : payment1;  // If Alice=LEFT: negative (Alice owes)
 
     // H-B: Hub pays Bob → LEFT (Hub or Bob?) owes
-    const hbLeftIsHub = isLeft(hub.id, bob.id);
+    const hbLeftIsHub = isLeftEntity(hub.id, bob.id);
     const expectedHB1 = hbLeftIsHub ? -payment1 : payment1;  // If Hub=LEFT: negative (Hub owes)
 
     if (!hasExpectedDirection(ahDelta1, expectedAH1)) {
@@ -1040,6 +1048,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     await process(env);
     logPending();
 
+    await drainRuntime(env);
+
     // Verify total shift = $250K (canonical LEFT perspective)
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDeltaFinal = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
@@ -1064,7 +1074,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const bobHubAcc = bobRep.state.accounts.get(hub.id);
     const bobDelta = bobHubAcc?.state.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
-      const bobIsLeftHB = isLeft(bob.id, hub.id);
+      const bobIsLeftHB = isLeftEntity(bob.id, hub.id);
       const bobDerived = deriveDelta(bobDelta, bobIsLeftHB);
       console.log(`   Bob outCapacity: ${bobDerived.outCapacity} (quoted total ${payment1 + payment2})`);
       if (bobDerived.outCapacity <= 0n || bobDerived.outCapacity > payment1 + payment2) {
@@ -1167,6 +1177,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     await process(env);
     logPending();
 
+    await drainRuntime(env);
+
     // FINAL ASSERTION: Verify reverse payment shifted correctly
     const ahDeltaRev = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const bhDeltaRev = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
@@ -1233,7 +1245,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     //   +$250K + 0 + (-$250K) = 0 ✓
 
     // Alice creates settlement via SettlementWorkspace (PROPER BILATERAL FLOW)
-    const aliceIsLeftAH = isLeft(alice.id, hub.id);
+    const aliceIsLeftAH = isLeftEntity(alice.id, hub.id);
     const ahLeftDiff = aliceIsLeftAH ? 0n : rebalanceAmount; // Hub receives reserve
     const ahRightDiff = aliceIsLeftAH ? rebalanceAmount : 0n;
     const ahOndeltaDiff = aliceIsLeftAH ? rebalanceAmount : -rebalanceAmount; // Net-sender is Alice
@@ -1359,7 +1371,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     //   (-$200K) + 0 + (+$200K) = 0 ✓
 
     // Hub creates settlement via SettlementWorkspace (PROPER BILATERAL FLOW)
-    const hubIsLeftHB = isLeft(hub.id, bob.id);
+    const hubIsLeftHB = isLeftEntity(hub.id, bob.id);
     const hbLeftDiff = hubIsLeftHB ? -rebalanceAmount : 0n; // Hub pays reserve
     const hbRightDiff = hubIsLeftHB ? 0n : -rebalanceAmount;
     const hbOndeltaDiff = hubIsLeftHB ? rebalanceAmount : -rebalanceAmount; // Net-sender is Hub
@@ -1531,7 +1543,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     if (!aliceAccount || !hubAccount) return false;
     const aliceDelta = aliceAccount.state.deltas.get(USDC_TOKEN_ID);
     const hubDelta = hubAccount.state.deltas.get(USDC_TOKEN_ID);
-    const aliceIsLeftAH6 = isLeft(alice.id, hub.id);
+    const aliceIsLeftAH6 = isLeftEntity(alice.id, hub.id);
     const creditField = aliceIsLeftAH6 ? 'rightCreditLimit' : 'leftCreditLimit';
     const creditApplied = aliceDelta?.[creditField] === phase6Credit && hubDelta?.[creditField] === phase6Credit;
     const noPending = !aliceAccount.pendingFrame && !hubAccount.pendingFrame;
@@ -1542,8 +1554,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   // Preflight: Verify both have capacity (fail-fast with clear error)
   const [, aliceCheck] = findReplica(env, alice.id);
   const [, hubCheck] = findReplica(env, hub.id);
-  const aliceIsLeftAH6 = isLeft(alice.id, hub.id);
-  const hubIsLeftHA6 = isLeft(hub.id, alice.id);
+  const aliceIsLeftAH6 = isLeftEntity(alice.id, hub.id);
+  const hubIsLeftHA6 = isLeftEntity(hub.id, alice.id);
   const aliceCap = deriveDelta(aliceCheck.state.accounts.get(hub.id)!.state.deltas.get(USDC_TOKEN_ID)!, aliceIsLeftAH6).outCapacity;
   const hubCap = deriveDelta(hubCheck.state.accounts.get(alice.id)!.state.deltas.get(USDC_TOKEN_ID)!, hubIsLeftHA6).outCapacity;
 
@@ -1709,11 +1721,21 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   console.log('\n⚖️ PHASE 7: Dispute enforcement (Bob vs Hub)');
 
   const disputeCollateralTarget = usd(100_000);
-  const hubIsLeft = isLeft(hub.id, bob.id);
+  const hubIsLeft = isLeftEntity(hub.id, bob.id);
   // To trigger debt: delta must exceed collateral
   // derived.delta = +$150K (collateral only $100K), so position is undercollateralized
   // → Bob gets all $100K collateral, Hub owes $50K extra (becomes debt when Hub has $0 reserves)
-  const disputeOffdeltaTarget = hubIsLeft ? -usd(150_000) : usd(150_000);
+  // Bob must end up entitled to the whole collateral plus $50K of debt. The
+  // collateral/debt split is not symmetric around zero, so the target is not a
+  // sign flip of one number (Depository._applyAccountDelta):
+  //   Bob LEFT  - Bob's allocation must exceed the collateral by the shortfall,
+  //               and RIGHT owes the excess, so delta = collateral + $50K.
+  //   Bob RIGHT - LEFT's allocation goes negative, RIGHT takes all collateral
+  //               and LEFT owes the full magnitude, so delta = -$50K.
+  const disputeShortfall = usd(50_000);
+  const disputeOffdeltaTarget = hubIsLeft
+    ? -disputeShortfall
+    : disputeCollateralTarget + disputeShortfall;
   const disputeOndeltaTarget = 0n;
   const leftActor = hubIsLeft ? hub : bob;
   const rightActor = hubIsLeft ? bob : hub;
@@ -2217,12 +2239,21 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }]
   }]);
 
-  await processUntil(env, () => {
-    const jRep = env.state.jReplicas?.get('AHB Demo');
-    return jRep ? jRep.mempool.length === 0 : false;
-  }, 40, 'J-machine process edge disputeStart');
-
-  await processJEvents(env);
+  // An empty J mempool is true both before the broadcast is queued and after it
+  // is mined, so waiting on it can return before the dispute ever reaches the
+  // chain. Wait for the chain itself to carry the dispute instead.
+  let edgeDisputeOnChain = false;
+  for (let round = 0; round < 40; round++) {
+    await syncChain(env, 1);
+    await processJEvents(env);
+    if ((await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout !== 0n) {
+      edgeDisputeOnChain = true;
+      break;
+    }
+  }
+  if (!edgeDisputeOnChain) {
+    throw new Error('PHASE 8: edge disputeStart never reached the chain');
+  }
 
   const [, bobEdgeStart] = findReplica(env, bob.id);
   const bobEdgeAccount = bobEdgeStart.state.accounts.get(hub.id);
@@ -2240,7 +2271,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   if (!activeDispute) {
     throw new Error('PHASE 8: activeDispute missing before early finalize check');
   }
-  const senderIsCounterparty = activeDispute.startedByLeft !== isLeft(bob.id, hub.id);
+  const senderIsCounterparty = activeDispute.startedByLeft !== isLeftEntity(bob.id, hub.id);
   if (senderIsCounterparty) {
     throw new Error('PHASE 8: early finalize test expects starter (not counterparty)');
   }
@@ -2603,7 +2634,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }
 
     // Cooperative close: settle the ACTUAL position (Carol receives her collateral + ondelta)
-    const carolIsLeft = isLeft(carol.id, hub.id);
+    const carolIsLeft = isLeftEntity(carol.id, hub.id);
     // Conservation law: leftDiff + rightDiff + collateralDiff = 0
     // Carol gets her collateral back + the ondelta Hub owes her
     // Hub pays the ondelta from their reserve

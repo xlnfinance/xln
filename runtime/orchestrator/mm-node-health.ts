@@ -9,7 +9,7 @@ import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import { compareStableText,safeStringify } from '../protocol/serialization';
 import {
-submitCrossJurisdictionIntents
+submitCrossJurisdictionIntent
 } from '../runtime.ts';
 import { computeCanonicalEntityHashesFromEnv } from '../storage/canonical-hash';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
@@ -24,7 +24,7 @@ getEntityOutCapacity,
 getEntityReplicaById,
 hasCommittedAccountState,
 hasPairMutualCredit,
-isAccountConsensusReady
+isAccountWriteLaneIdle
 } from './mesh-common';
 import {
 buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes
@@ -48,6 +48,7 @@ buildMarketMakerCrossTokenPairs,
 buildMarketMakerOfferSpecs,
 collectOfferIdsForAccount,
 collectPendingCrossRequestOrderIds,
+consumeExpiredBootstrapIntentAttempt,
 countCommittedMarketMakerOffersForHub,
 countCommittedMarketMakerOffersForHubPair,
 countCrossPairCoverageGaps,
@@ -519,7 +520,15 @@ type CrossQuoteMaintenanceContext = {
   maxSourceHubGroups: number;
   direction: string;
   startedAt: number;
-  attemptedBootstrapIntentOrderIds: Set<string>;
+  /**
+   * offerId -> attempt timestamp (ms). A cross-j offerId is stable for a whole
+   * MARKET_MAKER_CROSS_EXPIRY_MS generation, so this must expire (see
+   * MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS) rather than blacklist forever: a
+   * permanent Set here means one rejected/stale attempt starves that book slot
+   * for the rest of the run, because no durable progress was ever recorded for
+   * `hasCrossSpecBootstrapProgress` to find.
+   */
+  attemptedBootstrapIntentOrderIds: Map<string, number>;
 };
 
 const createPendingCrossRequestLookup = (env: RuntimeReplica): PendingCrossRequestLookup => {
@@ -548,11 +557,14 @@ const selectEligibleCrossOfferSpecs = (
       const route = spec.crossJurisdiction;
       if (!route) return false;
       if (excludedOfferIds?.has(spec.offerId)) return false;
-      if (excludedOfferIds && attemptedBootstrapIntentOrderIds.has(spec.offerId)) return false;
+      if (
+        excludedOfferIds &&
+        consumeExpiredBootstrapIntentAttempt(attemptedBootstrapIntentOrderIds, spec.offerId)
+      ) return false;
       if (hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) return false;
       const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);
       if (!targetAccount || String(targetAccount.status || 'active') !== 'active') return false;
-      if (!isAccountConsensusReady(targetAccount)) return false;
+      if (!isAccountWriteLaneIdle(targetAccount)) return false;
       return (
         !hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId) &&
         !getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId) &&
@@ -608,6 +620,7 @@ const maintainBootstrapCrossQuotes = async (
   let remainingSourceHubGroups = Math.max(1, Math.floor(maxSourceHubGroups));
   const sortedTargetHubs = [...targetHubs].sort((left, right) => compareStableText(left.entityId, right.entityId));
   const orderedSourceHubs = [...sourceHubs].sort((left, right) => compareStableText(left.entityId, right.entityId));
+
   emitMarketMakerCrossBootstrapWaveEvent('cross-wave-start', {
     direction,
     groupedSourceHubs: orderedSourceHubs.length,
@@ -622,7 +635,7 @@ const maintainBootstrapCrossQuotes = async (
     if (remainingNewOffers <= 0 || remainingSourceHubGroups <= 0) break;
     const sourceHubEntityId = sourceHub.entityId;
     const account = getAccountReplica(env, sourceContext.entityId, sourceHubEntityId);
-    if (!account || String(account.status || 'active') !== 'active' || !isAccountConsensusReady(account)) continue;
+    if (!account || String(account.status || 'active') !== 'active' || !isAccountWriteLaneIdle(account)) continue;
     const sourceHubSpecs = buildMarketMakerCrossOfferSpecs(
       env,
       sourceContext,
@@ -638,7 +651,6 @@ const maintainBootstrapCrossQuotes = async (
     const existingOfferIds = collectOfferIdsForAccount(account);
     const perAccountLimit = Math.max(1, Math.floor(maxOffersPerAccount));
     let selectedForSourceHub = 0;
-    const selectedSourceHubSpecs: MarketMakerOfferSpec[] = [];
     let candidateCount = 0;
     const specsByTargetHub = new Map<string, MarketMakerOfferSpec[]>();
     for (const spec of sourceHubSpecs) {
@@ -646,7 +658,7 @@ const maintainBootstrapCrossQuotes = async (
       if (!route) continue;
       const targetAccount = getAccountReplica(env, targetContext.entityId, route.target.entityId);
       if (!targetAccount || String(targetAccount.status || 'active') !== 'active') continue;
-      if (!isAccountConsensusReady(targetAccount)) continue;
+      if (!isAccountWriteLaneIdle(targetAccount)) continue;
       desiredOffersSeen += 1;
       const targetHubEntityId = normalizeEntityRef(route.target.entityId);
       const targetSpecs = specsByTargetHub.get(targetHubEntityId) ?? [];
@@ -673,8 +685,10 @@ const maintainBootstrapCrossQuotes = async (
       );
       candidateCount += candidates.length;
       for (const spec of candidates.slice(0, allowedNewOffers)) {
+        await submitCrossJurisdictionIntent(env, spec.crossJurisdiction!);
+        attemptedBootstrapIntentOrderIds.set(spec.offerId, Date.now());
         existingOfferIds.add(spec.offerId);
-        selectedSourceHubSpecs.push(spec);
+        submittedIntentCount += 1;
         selectedForSourceHub += 1;
         remainingNewOffers -= 1;
       }
@@ -690,19 +704,10 @@ const maintainBootstrapCrossQuotes = async (
       selectedCount: selectedForSourceHub,
       durationMs: Date.now() - startedAt,
     };
+    emitMarketMakerCrossBootstrapWaveEvent('cross-wave-source-hub', wave);
     if (selectedForSourceHub > 0) {
-      await submitCrossJurisdictionIntents(
-        env,
-        selectedSourceHubSpecs.map(spec => spec.crossJurisdiction!),
-      );
-      for (const spec of selectedSourceHubSpecs) attemptedBootstrapIntentOrderIds.add(spec.offerId);
-      submittedIntentCount += selectedSourceHubSpecs.length;
-      remainingSourceHubGroups -= 1;
-      await yieldMarketMakerApi();
-      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-source-hub', wave);
       emitMarketMakerCrossBootstrapWaveEvent('cross-wave-select', wave);
-    } else {
-      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-source-hub', wave);
+      remainingSourceHubGroups -= 1;
     }
   }
   return desiredOffersSeen > 0 && submittedIntentCount > 0;
@@ -755,7 +760,7 @@ const maintainSteadyCrossQuotes = async (
     await yieldMarketMakerApi();
     if (!shouldContinue()) return false;
     const account = getAccountReplica(env, sourceContext.entityId, sourceHubEntityId);
-    if (!account || String(account.status || 'active') !== 'active' || !isAccountConsensusReady(account)) continue;
+    if (!account || String(account.status || 'active') !== 'active' || !isAccountWriteLaneIdle(account)) continue;
     const existingOfferIds = collectOfferIdsForAccount(account);
     const allowedNewOffers = Math.min(
       Math.max(1, Math.floor(maxOffersPerAccount)),
@@ -767,13 +772,9 @@ const maintainSteadyCrossQuotes = async (
       0,
       allowedNewOffers,
     );
-    if (selected.length > 0) {
-      await submitCrossJurisdictionIntents(
-        env,
-        selected.map(spec => spec.crossJurisdiction!),
-      );
-      submittedIntentCount += selected.length;
-      await yieldMarketMakerApi();
+    for (const spec of selected) {
+      await submitCrossJurisdictionIntent(env, spec.crossJurisdiction!);
+      submittedIntentCount += 1;
     }
     remainingNewOffers -= selected.length;
     if (selected.length > 0) remainingSourceHubGroups -= 1;
@@ -796,7 +797,7 @@ export const maintainMarketMakerCrossQuotes = async (
   shouldContinue: () => boolean = () => true,
   maxSourceHubGroups = Number.MAX_SAFE_INTEGER,
   emitBootstrapWaveEvents = false,
-  attemptedBootstrapIntentOrderIds: Set<string> = new Set(),
+  attemptedBootstrapIntentOrderIds: Map<string, number> = new Map(),
 ): Promise<boolean> => {
   const startedAt = Date.now();
   const direction = `${sourceContext.jurisdictionName}->${targetContext.jurisdictionName}`;
@@ -958,7 +959,7 @@ export const getMarketMakerHealth = (
     const account = getAccountReplica(env, mmEntityId, hubEntityId);
     return {
       hubEntityId,
-      accountReady: isAccountConsensusReady(account),
+      accountReady: isAccountWriteLaneIdle(account),
       status: account ? String(account.status || 'active') : null,
       currentHeight: account ? Number(account.currentHeight ?? 0) : null,
       mempoolLength: Number(account?.mempool?.length || 0),

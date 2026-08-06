@@ -101,7 +101,6 @@ export const makeAccount = (
         runtimeSeed: 'cross-j-test-helper',
         entityId: leftEntity,
         counterpartyId: rightEntity,
-        timestamp: 0,
       }),
       deltas: new Map([[1, delta]]),
       locks: new Map(),
@@ -189,8 +188,7 @@ export const installJurisdictions = (env: RuntimeReplica, ...jurisdictions: Juri
       name: jurisdiction.name,
       chainId: jurisdiction.chainId,
       rpcs: [jurisdiction.address],
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
       contracts: {
         depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,

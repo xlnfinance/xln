@@ -1,3 +1,4 @@
+import { normalizeSubmitId } from './submit-identity';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
 import { getLocalSignerPrivateKey } from '../account/crypto';
@@ -7,7 +8,6 @@ import {
   getMatchingJSubmitState,
   hasPendingCommittedJBatch,
   markLocalJSubmitRuntimeTx,
-  normalizeJSubmitId,
   type JSubmitBatchIdentity,
 } from './j-submit-state';
 
@@ -15,16 +15,16 @@ type RetryJSubmitTx = Extract<RuntimeTx, { type: 'retryJSubmit' }>;
 
 const hasQueuedAbort = (env: RuntimeReplica, entityId: string): boolean =>
   (env.runtimeMempool?.entityInputs ?? []).some((input) =>
-    normalizeJSubmitId(input.entityId) === normalizeJSubmitId(entityId) &&
+    normalizeSubmitId(input.entityId) === normalizeSubmitId(entityId) &&
     (input.entityTxs ?? []).some((tx) => tx.type === 'j_abort_sent_batch'));
 
 const hasQueuedRetry = (env: RuntimeReplica, identity: JSubmitBatchIdentity): boolean =>
   (env.runtimeMempool?.runtimeTxs ?? []).some((tx) =>
     tx.type === 'retryJSubmit' &&
-    normalizeJSubmitId(tx.data.jurisdictionName) === normalizeJSubmitId(identity.jurisdictionName) &&
-    normalizeJSubmitId(tx.data.entityId) === normalizeJSubmitId(identity.entityId) &&
-    normalizeJSubmitId(tx.data.signerId) === normalizeJSubmitId(identity.signerId) &&
-    normalizeJSubmitId(tx.data.batchHash) === normalizeJSubmitId(identity.batchHash) &&
+    normalizeSubmitId(tx.data.jurisdictionName) === normalizeSubmitId(identity.jurisdictionName) &&
+    normalizeSubmitId(tx.data.entityId) === normalizeSubmitId(identity.entityId) &&
+    normalizeSubmitId(tx.data.signerId) === normalizeSubmitId(identity.signerId) &&
+    normalizeSubmitId(tx.data.batchHash) === normalizeSubmitId(identity.batchHash) &&
     Number(tx.data.entityNonce) === Number(identity.entityNonce) &&
     tx.data.batchGeneration === identity.batchGeneration);
 
@@ -42,8 +42,8 @@ const jSubmitBatchIdentity = (replica: EntityReplica): JSubmitBatchIdentity | nu
 };
 
 const canSubmitLocally = (env: RuntimeReplica, signerId: string): boolean => {
-  const signer = normalizeJSubmitId(signerId);
-  return signer === normalizeJSubmitId(env.runtimeId) || Boolean(getLocalSignerPrivateKey(env, signer));
+  const signer = normalizeSubmitId(signerId);
+  return signer === normalizeSubmitId(env.runtimeId) || Boolean(getLocalSignerPrivateKey(env, signer));
 };
 
 const nextRetryAt = (replica: EntityReplica): number | null => {

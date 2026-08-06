@@ -395,7 +395,6 @@ const materializeLocallyAuthoredEntityTx = (
         runtimeId: env.runtimeId ?? null,
         entityId: state.entityId,
         counterpartyId,
-        timestamp: env.state.timestamp,
       })
     : normalizeAccountWatchSeed(tx.data.watchSeed, 'OPEN_ACCOUNT');
   return { ...tx, data: { ...tx.data, accountDomain: committedDomain, watchSeed } };

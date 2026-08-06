@@ -538,6 +538,17 @@ export async function verifyHankoForHash(
         );
       }
       if (reconstructedBoardHash === record.boardHash) return true;
+      // Previous-board grace defaults ON to mirror Account.sol:1063, where it
+      // exists so that rotating a board cannot repudiate the evidence a
+      // counterparty already holds - see the trade-off recorded there.
+      //
+      // Callers on a *fresh money* path must opt out with
+      // `allowPreviousBoard: false`, because the jurisdiction verifies those
+      // with verifyCurrentHankoSignature (cooperative settlement at
+      // Account.sol:894, C2R at Account.sol:790). Accepting a retired board
+      // here would commit a bilateral state the chain then rejects, leaving the
+      // channel ahead of settled truth. Historical evidence - dispute proofs -
+      // keeps the grace.
       return Boolean(
         authority?.allowPreviousBoard !== false &&
         record.previousBoardHash !== ethers.ZeroHash &&

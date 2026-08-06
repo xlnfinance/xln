@@ -327,7 +327,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
         return { hasDelta: Boolean(delta), inCapacity: 0n, outCapacity: 0n };
       }
       const isLeft = XLN?.isLeft
-        ? Boolean(XLN.isLeft(entityId, counterpartyId))
+        ? Boolean(XLN.isLeftEntity(entityId, counterpartyId))
         : String(entityId).toLowerCase() < String(counterpartyId).toLowerCase();
       const derived = XLN.deriveDelta(delta, isLeft);
       const inCapacity = typeof derived?.inCapacity === 'bigint' ? derived.inCapacity : BigInt(derived?.inCapacity || 0);

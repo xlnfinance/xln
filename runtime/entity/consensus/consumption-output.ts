@@ -24,6 +24,14 @@ import {
 import { orderCertifiedOutputsBySequence } from './output-envelope';
 import { entityLog } from './entity-log';
 
+/**
+ * Gap deferral can fire on every proposal tick while the missing predecessor
+ * is still in flight. Logging each repeat turned one lost sequence into tens
+ * of thousands of warn lines and starved hub/MM bootstrap under E2E load.
+ * Ops only needs the first sighting per (source,target,lane,received).
+ */
+const sequenceGapWarnSeen = new Set<string>();
+
 export const buildConsumptionOutputIdentity = (
   origin: ConsensusOutputOrigin,
   targetEntityId: string,
@@ -68,12 +76,21 @@ export const attachTargetConsumptionProofs = (
     const proof = createConsumptionProof(overlay, accumulator.root, key);
     const applied = applyConsumptionOutput(accumulator, identity, proof);
     if (applied.status === 'gap') {
-      entityLog.warn('consensus_output.sequence_gap_deferred', {
-        sourceEntityId: origin.sourceEntityId,
+      const gapKey = [
+        origin.sourceEntityId,
         targetEntityId,
-        lane: origin.lane,
-        received: origin.sequence.toString(),
-      });
+        origin.lane,
+        origin.sequence.toString(),
+      ].join('\u0000');
+      if (!sequenceGapWarnSeen.has(gapKey)) {
+        sequenceGapWarnSeen.add(gapKey);
+        entityLog.warn('consensus_output.sequence_gap_deferred', {
+          sourceEntityId: origin.sourceEntityId,
+          targetEntityId,
+          lane: origin.lane,
+          received: origin.sequence.toString(),
+        });
+      }
       continue;
     }
     if (applied.status === 'quarantined' && applied.newNodes.length === 0) {

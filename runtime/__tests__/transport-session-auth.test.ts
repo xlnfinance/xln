@@ -164,7 +164,7 @@ describe('bound websocket session authority', () => {
     (client as unknown as { ws: FakeSocket['ws'] }).ws = socket.ws;
 
     expect(client.sendDebugEvent({ code: 'test' })).toBe(false);
-    expect(errors).toEqual(['Authenticated WS frame requires a completed bound hello']);
+    expect(errors).toEqual([]);
     expect(socket.sent).toHaveLength(0);
   });
 

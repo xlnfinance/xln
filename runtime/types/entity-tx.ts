@@ -426,7 +426,7 @@ type EntityTxPayload =
         incrementalTargetAmount: bigint;
         cumulativeSourceAmount: bigint;
         cumulativeTargetAmount: bigint;
-        cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
+        cumulativeFillRatio: number; // Coarse 0-65535 ratio; this is the on-chain uint16 dispute form.
         fillNumerator: bigint;
         fillDenominator: bigint;
         priceImprovementMode?: 'source_savings';
@@ -479,7 +479,7 @@ type EntityTxPayload =
         incrementalTargetAmount: bigint;
         cumulativeSourceAmount: bigint;
         cumulativeTargetAmount: bigint;
-        cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
+        cumulativeFillRatio: number; // Coarse 0-65535 ratio; this is the on-chain uint16 dispute form.
         fillNumerator: bigint;
         fillDenominator: bigint;
         priceImprovementMode?: 'source_savings';

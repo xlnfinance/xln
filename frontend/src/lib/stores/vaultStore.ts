@@ -1560,14 +1560,9 @@ export const vaultOperations = {
           ? { entityProviderDeploymentBlock: existing.entityProviderDeploymentBlock }
           : {}),
         contracts: {
-          depository: String(
-            existing?.depositoryAddress || existing?.contracts?.depository || config.contracts?.depository || '',
-          ),
+          depository: String(existing?.contracts?.depository || config.contracts?.depository || ''),
           entityProvider: String(
-            existing?.entityProviderAddress ||
-              existing?.contracts?.entityProvider ||
-              config.contracts?.entityProvider ||
-              '',
+            existing?.contracts?.entityProvider || config.contracts?.entityProvider || '',
           ),
           account: String(existing?.contracts?.account || config.contracts?.account || ''),
           deltaTransformer: String(existing?.contracts?.deltaTransformer || config.contracts?.deltaTransformer || ''),
@@ -1646,14 +1641,9 @@ export const vaultOperations = {
         ? { entityProviderDeploymentBlock: imported.entityProviderDeploymentBlock }
         : {}),
       contracts: {
-        depository: String(
-          imported?.depositoryAddress || imported?.contracts?.depository || config.contracts?.depository || '',
-        ),
+        depository: String(imported?.contracts?.depository || config.contracts?.depository || ''),
         entityProvider: String(
-          imported?.entityProviderAddress ||
-            imported?.contracts?.entityProvider ||
-            config.contracts?.entityProvider ||
-            '',
+          imported?.contracts?.entityProvider || config.contracts?.entityProvider || '',
         ),
         account: String(imported?.contracts?.account || config.contracts?.account || ''),
         deltaTransformer: String(imported?.contracts?.deltaTransformer || config.contracts?.deltaTransformer || ''),

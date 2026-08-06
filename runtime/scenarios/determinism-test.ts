@@ -37,7 +37,7 @@ const INITIAL_TIMESTAMP = 1;
 const DEFAULT_RPC_BASE_PORT = 29_000 + (process.pid % 1_000) * 20;
 const RPC_BASE_PORT = Math.floor(Number(process.env['XLN_DETERMINISM_RPC_BASE_PORT'] ?? DEFAULT_RPC_BASE_PORT));
 const EXCLUDED_SCENARIOS = new Set([
-  'ahb', // legacy triangle demo does not drain under the RPC determinism harness
+  'ahb', // triangle demo does not drain under the RPC determinism harness
   'grid', // visual scalability demo; not a consensus correctness oracle
   'rapid-fire', // explicitly stress-only in the registry
   'swap-tps', // throughput benchmark, not a correctness scenario

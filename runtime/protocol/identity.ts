@@ -146,11 +146,6 @@ export const toEpAddress = (s: string): EntityProviderAddress => {
   return s;
 };
 
-export const toTokenId = (value: number): TokenId => {
-  if (!Number.isInteger(value) || value < 0) throw new Error(`FINTECH-SAFETY: Invalid token id: ${value}`);
-  return value as TokenId;
-};
-
 // =============================================================================
 // REPLICA KEY OPERATIONS - Replace all split(':') patterns
 // =============================================================================
@@ -248,24 +243,3 @@ export const isLazyEntity = (entityId: EntityId): boolean => {
 // =============================================================================
 // TOLERANT API BOUNDARY HELPERS
 // =============================================================================
-
-/**
- * Safely parse a user/API replica key without throwing.
- * Runtime state-machine code should prefer parseReplicaKey on validated data.
- */
-export const safeParseReplicaKey = (keyString: string): ReplicaKey | null => {
-  try {
-    return parseReplicaKey(keyString);
-  } catch {
-    console.warn(`[ids] Invalid replica key: ${keyString}`);
-    return null;
-  }
-};
-
-/**
- * Extract entityId from a user/API replica key string without throwing.
- */
-export const safeExtractEntityId = (keyString: string): EntityId | null => {
-  const key = safeParseReplicaKey(keyString);
-  return key?.entityId ?? null;
-};

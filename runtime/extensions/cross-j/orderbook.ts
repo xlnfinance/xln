@@ -1,3 +1,4 @@
+import { normalizeEntityRef } from '../../entity/tx/account-key';
 import {
   CROSS_J_MAX_FILL_RATIO,
   cloneCrossJurisdictionRoute,
@@ -43,7 +44,6 @@ const mergeAdmissionRoute = (
   return merged;
 };
 
-const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ADMISSION_ROUTE_INDEX = Symbol('xln.cross-j.admission-route-index');
 
 type EntityStateWithAdmissionRouteIndex = EntityState & {

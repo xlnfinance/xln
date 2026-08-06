@@ -273,8 +273,55 @@ const buildRuntimeWsEnvelope = (message: RuntimeWsMessage): RuntimeWsEnvelope =>
   v: XLN_PROTOCOL_VERSION,
 });
 
-export const serializeWsMessage = (msg: RuntimeWsMessage): Uint8Array =>
-  runtimeWsEnvelopeCodec.encode(buildRuntimeWsEnvelope(msg));
+/**
+ * Name what actually filled an oversized envelope.
+ *
+ * The size limit is enforced by the receiver, so a producer that builds a
+ * message past it learns nothing: the bytes leave, the peer refuses them, and
+ * the sender sees a transport error with no attribution. Encoding each payload
+ * element on its own costs nothing on the failure path and turns "1.3MB
+ * arrived" into "element 7 of 60 is 40KB".
+ */
+const oversizedWsPayloadCensus = (payload: unknown): string => {
+  const encodedSize = (value: unknown): number => {
+    try {
+      return encodeBinaryPayload(value as never, 'msgpack').byteLength;
+    } catch {
+      return -1;
+    }
+  };
+  if (Array.isArray(payload)) {
+    const sizes = payload.map(encodedSize);
+    const ranked = sizes
+      .map((bytes, index) => ({ index, bytes }))
+      .sort((left, right) => right.bytes - left.bytes)
+      .slice(0, 5);
+    return `array elements=${payload.length} ` +
+      `largest=${ranked.map(entry => `[${entry.index}]=${entry.bytes}`).join(',')}`;
+  }
+  if (payload && typeof payload === 'object') {
+    const ranked = Object.entries(payload as Record<string, unknown>)
+      .map(([key, value]) => ({ key, bytes: encodedSize(value) }))
+      .sort((left, right) => right.bytes - left.bytes)
+      .slice(0, 5);
+    return `object keys=${Object.keys(payload as object).length} ` +
+      `largest=${ranked.map(entry => `${entry.key}=${entry.bytes}`).join(',')}`;
+  }
+  return `scalar bytes=${encodedSize(payload)}`;
+};
+
+export const serializeWsMessage = (msg: RuntimeWsMessage): Uint8Array => {
+  const encoded = runtimeWsEnvelopeCodec.encode(buildRuntimeWsEnvelope(msg));
+  const maxBytes = resolveRuntimeWsMaxMessageBytes();
+  if (encoded.byteLength > maxBytes) {
+    throw new Error(
+      `WS_MESSAGE_TOO_LARGE_TO_SEND:bytes=${encoded.byteLength}:max=${maxBytes}` +
+      `:type=${msg.type}:entityId=${msg.entityId ?? 'none'}` +
+      `:payload=${oversizedWsPayloadCensus(msg.payload)}`,
+    );
+  }
+  return encoded;
+};
 
 export const serializeWsMessageForDebug = (msg: RuntimeWsMessage): string =>
   serializeTaggedJson(buildRuntimeWsEnvelope(msg));

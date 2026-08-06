@@ -1,0 +1,68 @@
+:root {
+	--font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+	--font-display: ui-serif, 'New York', Georgia, 'Times New Roman', serif;
+	--font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+	--radius-s: 10px;
+	--radius-m: 14px;
+	--radius-l: 20px;
+	--radius-pill: 999px;
+
+	--dur-fast: 140ms;
+	--dur-slow: 320ms;
+	--ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+	--rail-w: 76px;
+	--tabbar-h: 72px;
+}
+
+:root[data-theme='dark'] {
+	color-scheme: dark;
+	--bg: #09090b;
+	--bg-elevated: #101013;
+	--glow: radial-gradient(56% 40% at 50% -6%, rgba(201, 169, 106, 0.07), transparent 70%),
+		radial-gradient(70% 52% at 88% 112%, rgba(122, 132, 160, 0.05), transparent 60%);
+	--ink: #f2f1ed;
+	--ink-2: rgba(242, 241, 237, 0.52);
+	--ink-3: rgba(242, 241, 237, 0.32);
+	--hairline: rgba(242, 241, 237, 0.08);
+	--hairline-2: rgba(242, 241, 237, 0.16);
+	--glass: rgba(255, 255, 255, 0.04);
+	--glass-2: rgba(255, 255, 255, 0.07);
+	--glass-border: rgba(255, 255, 255, 0.09);
+	--champagne: #c9a96a;
+	--champagne-ink: #1a1508;
+	--champagne-dim: rgba(201, 169, 106, 0.16);
+	--danger: #c97a6d;
+	--danger-dim: rgba(201, 122, 109, 0.14);
+	--btn-primary-bg: #f2f1ed;
+	--btn-primary-ink: #0b0b0d;
+	--shadow-sheet: 0 -18px 60px rgba(0, 0, 0, 0.55);
+	--shadow-card: none;
+	--scrim: rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme='light'] {
+	color-scheme: light;
+	--bg: #f4f2ed;
+	--bg-elevated: #ffffff;
+	--glow: radial-gradient(56% 40% at 50% -6%, rgba(201, 169, 106, 0.1), transparent 70%);
+	--ink: #17150f;
+	--ink-2: rgba(23, 21, 15, 0.52);
+	--ink-3: rgba(23, 21, 15, 0.34);
+	--hairline: rgba(23, 21, 15, 0.09);
+	--hairline-2: rgba(23, 21, 15, 0.18);
+	--glass: rgba(255, 255, 255, 0.62);
+	--glass-2: rgba(255, 255, 255, 0.85);
+	--glass-border: rgba(23, 21, 15, 0.08);
+	--champagne: #a5813d;
+	--champagne-ink: #ffffff;
+	--champagne-dim: rgba(165, 129, 61, 0.14);
+	--danger: #b25a4c;
+	--danger-dim: rgba(178, 90, 76, 0.12);
+	--btn-primary-bg: #17150f;
+	--btn-primary-ink: #f4f2ed;
+	--shadow-sheet: 0 -18px 60px rgba(23, 21, 15, 0.18);
+	--shadow-card: 0 1px 3px rgba(23, 21, 15, 0.04);
+	--scrim: rgba(23, 21, 15, 0.35);
+}

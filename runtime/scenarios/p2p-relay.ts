@@ -65,8 +65,6 @@ const prefundRpcWallets = async (): Promise<void> => {
     blockDelayMs: 0,
     lastBlockTimestamp: 0,
     position: { x: 0, y: 0, z: 0 },
-    depositoryAddress: entry.contracts.depository,
-    entityProviderAddress: entry.contracts.entityProvider,
     contracts: entry.contracts,
     chainId: entry.chainId,
   };

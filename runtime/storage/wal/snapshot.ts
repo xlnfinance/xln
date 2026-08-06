@@ -143,8 +143,6 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   ...(jr.rpcs ? { rpcs: [...jr.rpcs] } : {}),
   ...(jr.chainId !== undefined ? { chainId: jr.chainId } : {}),
   position: requireFinitePosition(jr.position),
-  ...(jr.depositoryAddress ? { depositoryAddress: jr.depositoryAddress } : {}),
-  ...(jr.entityProviderAddress ? { entityProviderAddress: jr.entityProviderAddress } : {}),
   ...(jr.entityProviderDeploymentBlock !== undefined
     ? { entityProviderDeploymentBlock: jr.entityProviderDeploymentBlock }
     : {}),

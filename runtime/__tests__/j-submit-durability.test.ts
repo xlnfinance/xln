@@ -1,9 +1,9 @@
+import { MAX_SUBMIT_FAILURE_MESSAGE_CHARS } from '../runtime/submit-identity';
 import { describe, expect, test } from 'bun:test';
 
 import { applyRuntimeTx } from '../runtime/tx-handlers';
 import {
   makeJSubmitResultRuntimeTx,
-  MAX_J_SUBMIT_FAILURE_MESSAGE_CHARS,
   registerPendingCommittedJOutbox,
 } from '../runtime/j-submit-state';
 import { J_SUBMIT_RESULT_FINGERPRINT_LIMIT } from '../runtime/j-submit-result';
@@ -203,7 +203,7 @@ describe('durable validator-local J submit state', () => {
     const { env, replica, jOutbox } = await commitAttempt();
     const batchTx = jOutbox[0]?.jTxs[0];
     if (!batchTx || batchTx.type !== 'batch') throw new Error('batch attempt fixture missing');
-    const oversizedMessage = `NETWORK_ERROR:${'x'.repeat(MAX_J_SUBMIT_FAILURE_MESSAGE_CHARS * 2)}`;
+    const oversizedMessage = `NETWORK_ERROR:${'x'.repeat(MAX_SUBMIT_FAILURE_MESSAGE_CHARS * 2)}`;
     const resultTx = makeJSubmitResultRuntimeTx(batchTx, jurisdictionName, 'transientFailure', {
       message: oversizedMessage,
       adapterFailure: {
@@ -215,13 +215,13 @@ describe('durable validator-local J submit state', () => {
     await applyRuntimeTx(env, resultTx, { isReplay: true });
 
     const restored = buildCanonicalEntityReplicaSnapshot(replica);
-    expect(resultTx.data.message?.length).toBeLessThanOrEqual(MAX_J_SUBMIT_FAILURE_MESSAGE_CHARS);
+    expect(resultTx.data.message?.length).toBeLessThanOrEqual(MAX_SUBMIT_FAILURE_MESSAGE_CHARS);
     expect(restored.jSubmitState?.lastFailure?.adapterFailure).toMatchObject({
       category: 'transient',
       code: 'NETWORK_ERROR',
     });
     expect(restored.jSubmitState?.lastFailure?.adapterFailure?.message.length)
-      .toBeLessThanOrEqual(MAX_J_SUBMIT_FAILURE_MESSAGE_CHARS);
+      .toBeLessThanOrEqual(MAX_SUBMIT_FAILURE_MESSAGE_CHARS);
   });
 
   test('forged J-submit RuntimeTx is rejected outside replay', async () => {

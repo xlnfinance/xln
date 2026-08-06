@@ -55,10 +55,7 @@ export const sameJurisdictionIdentity = (left: unknown, right: unknown): boolean
 
 const getJReplicaStackId = (replica: JReplica | undefined): string => {
   if (!replica) return '';
-  const depository = firstUsableContractAddress(
-    replica.depositoryAddress,
-    replica.contracts?.depository,
-  );
+  const depository = firstUsableContractAddress(replica.contracts?.depository);
   const chainId = normalizeStackChainId(replica.chainId);
   return getJurisdictionStackId({
     depositoryAddress: depository || '',
@@ -110,12 +107,10 @@ export function resolveRuntimeJurisdictionConfig(
   const replica = getCandidateReplica(env, current);
 
   const depositoryAddress = firstUsableContractAddress(
-    replica?.depositoryAddress,
     replica?.contracts?.depository,
     current?.depositoryAddress,
   );
   const entityProviderAddress = firstUsableContractAddress(
-    replica?.entityProviderAddress,
     replica?.contracts?.entityProvider,
     current?.entityProviderAddress,
   );
@@ -179,12 +174,10 @@ export function requireRuntimeJurisdictionConfigByName(
     address: current?.address || replica.rpcs?.[0] || `jreplica://${replica.name || configuredName}`,
     entityProviderAddress:
       current?.entityProviderAddress ||
-      replica.entityProviderAddress ||
       replica.contracts?.entityProvider ||
       '',
     depositoryAddress:
       current?.depositoryAddress ||
-      replica.depositoryAddress ||
       replica.contracts?.depository ||
       '',
     ...(

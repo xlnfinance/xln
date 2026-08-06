@@ -1,3 +1,4 @@
+import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
 import {
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
@@ -26,8 +27,6 @@ type CrossJurisdictionSweepResult = {
   accountTxs?: AccountTxTarget[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
-  Number(state.timestamp || env.state.timestamp || 0);
 
 const refreshSweepRoute = (
   state: EntityState,

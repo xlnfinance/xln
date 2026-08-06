@@ -301,6 +301,4 @@ export function serializeTaggedJson(input: unknown, excludeKeys?: ReadonlySet<st
   return stringifyCanonical(input, excludeKeys === undefined ? {} : { excludeKeys });
 }
 
-export function deserializeTaggedJson<T = unknown>(json: string): T {
-  return safeParse<T>(json);
-}
+export const deserializeTaggedJson = safeParse;

@@ -157,7 +157,7 @@ export type NumberedRegistrationDefinition = Readonly<{
   threshold: bigint;
   localSignerId: string | null;
   profileName?: string;
-  position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
+  position?: { x: number; y: number; z: number; jurisdiction?: string };
 }>;
 
 export type NumberedRegistrationCommandEntity = Readonly<
@@ -193,7 +193,7 @@ export type NumberedRegistrationEntityPlan = {
   /** Local replica owner, or null when this Runtime only pays to register another board. */
   localSignerId: string | null;
   profileName?: string;
-  position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
+  position?: { x: number; y: number; z: number; jurisdiction?: string };
 };
 
 export type NumberedRegistrationRequest = {
@@ -305,7 +305,7 @@ export type RuntimeTx =
         config: ConsensusConfig;
         isProposer: boolean;
         profileName?: string;
-        position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
+        position?: { x: number; y: number; z: number; jurisdiction?: string };
       };
     }
   | {

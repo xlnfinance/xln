@@ -100,7 +100,9 @@ const registerAgainstDurableFrontiers = (
   }
   if (
     terminal &&
-    identity.kind === 'j-finality' &&
+    (identity.kind === 'j-finality' || identity.kind === 'hash-precommit' ||
+      identity.kind === 'j-prefix-attestation') &&
+    identity.kind === terminal.body.identity.kind &&
     identity.height < terminal.body.identity.height
   ) {
     assertTerminalReceiptCoversInput(env, terminal.body.identity, identity, input);

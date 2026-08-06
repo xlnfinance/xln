@@ -107,14 +107,18 @@ export const readLocalTestListeningPortPids = (ports: readonly number[]): Map<nu
     killSignal: 'SIGKILL',
   });
   const output = String(result.stdout || '').trim();
-  if (!output && result.status === 1 && !result.error) return new Map();
+  // `lsof` exits 1 whenever *any* `-i` selector matched nothing, even when the
+  // other selectors produced rows. A partially occupied lane is the normal case
+  // here, so exit 1 is a valid result and its stdout must still be parsed.
+  // Only a spawn failure, a timeout, or a status outside {0,1} is a scan error.
+  const stderr = String(result.stderr || '').trim();
   if (result.error || (result.status !== 0 && result.status !== 1)) {
-    const stderr = String(result.stderr || '').trim();
     throw new Error(
       `LOCAL_TEST_PORT_SCAN_FAILED:ports=${normalizedPorts.length}:status=${String(result.status)}:` +
       `${result.error?.message || stderr || 'unknown'}`,
     );
   }
+  if (!output) return new Map();
   const requested = new Set(normalizedPorts);
   return new Map(Array.from(parseLocalTestListeningPortOutput(output).entries())
     .filter(([port]) => requested.has(port)));

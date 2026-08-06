@@ -133,6 +133,10 @@ export const scenarioRegistry: ScenarioEntry[] = [
     return async (env: RuntimeReplica): Promise<void> => { await lockAhb(env); };
   }},
   { key: 'htlc-4hop', name: 'HTLC 4-Hop', load: async () => (await import('./htlc-4hop')).htlc4hop },
+  { key: 'cross-j', name: 'Cross-Jurisdiction Swap', load: async () => {
+    const { crossJ } = await import('./cross-j');
+    return async (env: RuntimeReplica): Promise<void> => { await crossJ(env); };
+  }},
   { key: 'swap', name: 'Swap Trading', load: async () => (await import('./swap')).swap },
   { key: 'swap-market', name: 'Swap Market', load: async () => (await import('./swap-market')).swapMarket },
   { key: 'swap-tps', name: 'Swap TPS', load: async () => (await import('./swap-tps')).swapTps },

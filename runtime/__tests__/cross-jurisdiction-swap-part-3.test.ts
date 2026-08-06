@@ -1700,8 +1700,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       name: eth.name,
       chainId: eth.chainId,
       rpcs: [eth.address],
-      depositoryAddress: eth.depositoryAddress,
-      entityProviderAddress: eth.entityProviderAddress,
+      contracts: { depository: eth.depositoryAddress, entityProvider: eth.entityProviderAddress },
       blockTimeMs: eth.blockTimeMs,
       defaultDisputeDelayBlocks: 5,
     } as any);
@@ -1709,8 +1708,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       name: base.name,
       chainId: base.chainId,
       rpcs: [base.address],
-      depositoryAddress: base.depositoryAddress,
-      entityProviderAddress: base.entityProviderAddress,
+      contracts: { depository: base.depositoryAddress, entityProvider: base.entityProviderAddress },
       blockTimeMs: base.blockTimeMs,
       defaultDisputeDelayBlocks: 5,
     } as any);

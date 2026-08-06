@@ -1,6 +1,8 @@
 import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger';
+import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
+import { registerReliableReceiptIngress } from '../reliable-sender';
 import { announceCertifiedLocalProfiles } from '../../network/p2p/local-profile-lifecycle';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
@@ -134,7 +136,18 @@ export const dispatchCommittedReceipts = (env: RuntimeReplica, frame: FrameExecu
   if (frame.reliableReceiptDeliveries.length === 0) return;
   const state = ensureRuntimeInfrastructure(env);
   const p2p = state.p2p ?? null;
+  const selfRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
   for (const delivery of frame.reliableReceiptDeliveries) {
+    // Loopback deliberately runs local reliable outputs through the same
+    // provenance and receipt protocol as remote transport, so the receipt that
+    // retires a retained local output is addressed to this Runtime itself.
+    // There is no transport to self: without this it is reported as
+    // RELIABLE_RECEIPT_SEND_DEFERRED and dropped, the retained output never
+    // retires, and its lane blocks forever. Apply it directly instead.
+    if (selfRuntimeId && normalizeRuntimeId(delivery.runtimeId) === selfRuntimeId) {
+      registerReliableReceiptIngress(env, delivery.receipt);
+      continue;
+    }
     const direct = state.directReliableReceiptDispatch?.(delivery.runtimeId, delivery.receipt);
     const usedDirect = Boolean(direct && isDeliveryDelivered(direct));
     const result = usedDirect

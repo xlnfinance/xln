@@ -71,7 +71,7 @@ import {
   hasQueuedExtendCredit,
   hasQueuedOpenAccount,
   HUB_REQUIRED_TOKEN_COUNT,
-  isAccountConsensusReady,
+  isAccountWriteLaneIdle,
   isCanonicalAccountOpener,
   settleRuntimeFor,
   sleep,
@@ -329,6 +329,42 @@ export const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '3'),
 );
+// A cross-j offerId is stable for one MARKET_MAKER_CROSS_EXPIRY_MS generation
+// (default 24h): the same (hub, pair, level) reproduces the exact same offerId
+// on every later wave within that window. Excluding an attempted offerId must
+// therefore expire — otherwise one transient Account/atomic-cohort rejection
+// (races, stale nonces, a fat-frame cohort that failed to pair) permanently
+// starves that book slot for the rest of the run, since `hasCrossSpecBootstrapProgress`
+// alone cannot resurrect it once nothing durable was ever recorded. The TTL only
+// needs to outlast one submit -> Runtime-process -> progress-visible round trip.
+export const MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS = Math.max(
+  1000,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS'] || '5000'),
+);
+/** Pure so the expiry rule is unit-testable without a RuntimeReplica fixture. */
+export const isBootstrapIntentAttemptExpired = (
+  attemptedAtMs: number,
+  nowMs: number = Date.now(),
+  retryMs: number = MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS,
+): boolean => nowMs - attemptedAtMs >= retryMs;
+
+/**
+ * Returns true while `offerId` must still be excluded from candidate
+ * selection. Prunes the entry once it expires so a spec whose earlier attempt
+ * never produced durable progress (rejected cohort, dropped race, stale
+ * nonce) is retried instead of starved for the rest of the bootstrap run.
+ */
+export const consumeExpiredBootstrapIntentAttempt = (
+  attemptedBootstrapIntentOrderIds: Map<string, number>,
+  offerId: string,
+  nowMs: number = Date.now(),
+): boolean => {
+  const attemptedAt = attemptedBootstrapIntentOrderIds.get(offerId);
+  if (attemptedAt === undefined) return false;
+  if (!isBootstrapIntentAttemptExpired(attemptedAt, nowMs)) return true;
+  attemptedBootstrapIntentOrderIds.delete(offerId);
+  return false;
+};
 export const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
   Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '1000'),
@@ -737,10 +773,8 @@ const assertMarketMakerJAdapterBinding = (
   }
   const bindings = [
     ['account', replica.contracts?.account, jadapter.addresses.account],
-    ['depository', replica.depositoryAddress, jadapter.addresses.depository],
-    ['depository_contract', replica.contracts?.depository, jadapter.addresses.depository],
-    ['entity_provider', replica.entityProviderAddress, jadapter.addresses.entityProvider],
-    ['entity_provider_contract', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
+    ['depository', replica.contracts?.depository, jadapter.addresses.depository],
+    ['entity_provider', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
     ['delta_transformer', replica.contracts?.deltaTransformer, jadapter.addresses.deltaTransformer],
   ] as const;
   for (const [contract, expected, actual] of bindings) {
@@ -1560,9 +1594,27 @@ export const hasCrossSpecBootstrapProgress = (
   const route = spec.crossJurisdiction;
   if (!route) return false;
   if (hasSourceAccountCrossOffer(env, route)) return true;
+  // A committed `crossJurisdictionAuthorizations` entry is deliberately NOT
+  // progress. It proves only that this MM signed the intent, never that the
+  // route advanced, and nothing prunes it when the route dies — its one
+  // `delete` is the success path in account-cross-j-followups.ts. Counting it
+  // made every failed spec permanently ineligible: the bootstrap wave reported
+  // candidateCount 0 and coverageGaps 0 with 135 offers still unsent and 110
+  // specs "in progress", waiting for offers that could never arrive.
+  //
+  // The tempting argument for counting it is that `crossJurisdictionSwaps` is
+  // populated on hub Entities only, so the `hasCrossRouteRegistered` check
+  // below can never observe MM's own submission, and a remote source hub's
+  // replica is usually absent from this MM's `env`. True, but the cost of a
+  // premature "in flight" verdict is a permanent stall, while the cost of an
+  // extra resend is one wasted wave slot. Retry pressure comes from
+  // MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS instead, and progress must be proven
+  // by an actual account offer, a hub registration, or a pending request.
   if (hasCrossRouteRegistered(env, route.source.entityId, route.orderId)) return true;
   if (hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)) return true;
-  return getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId);
+  // Same rule for the pending-request view, which reads the very same map.
+  return hasCrossRouteRegistered(env, route.source.entityId, route.orderId) &&
+    getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId);
 };
 
 export const countCrossSpecBootstrapProgress = (
@@ -1634,7 +1686,6 @@ export const ensureMarketMakerHubConnectivity = async (
       runtimeId: env.runtimeId ?? null,
       entityId: mmEntityId,
       counterpartyId,
-      timestamp: 0,
     });
   const pushLocalConnectivityTx = (
     entityId: string,
@@ -1781,7 +1832,7 @@ export const maintainMarketMakerQuotes = async (
     const account = getAccountReplica(env, mmEntityId, hubEntityId);
     if (!account) continue;
     if (String(account.status || 'active') !== 'active') continue;
-    if (!isAccountConsensusReady(account)) continue;
+    if (!isAccountWriteLaneIdle(account)) continue;
 
     const existingOfferIds = collectOfferIdsForAccount(account);
     for (const offerId of collectQueuedSwapOfferIds(env, mmEntityId, hubEntityId)) {
@@ -1833,9 +1884,20 @@ export const maintainMarketMakerQuotes = async (
   return false;
 };
 
+/**
+ * A route record only counts once it has actually left `intent`. A record
+ * parked at `intent` proves the submission was accepted somewhere, never that
+ * it advanced, and nothing prunes it when the route dies — so counting its mere
+ * presence as bootstrap progress made a dead spec permanently ineligible for
+ * resubmission. That is the same premature "in flight" verdict that already had
+ * to be removed for `crossJurisdictionAuthorizations`, reached through a second
+ * door: the wave reported candidateCount 0 and coverageGaps 0 while 135 offers
+ * were still unsent.
+ */
 export const hasCrossRouteRegistered = (env: RuntimeReplica, entityId: string, orderId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
-  return Boolean(replica?.state?.crossJurisdictionSwaps?.has(orderId));
+  const route = replica?.state?.crossJurisdictionSwaps?.get(orderId);
+  return Boolean(route && route.status !== 'intent');
 };
 
 const isMatchingCrossOfferRoute = (

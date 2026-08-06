@@ -15,7 +15,7 @@ export function listOpenSwapOffers(state: Pick<EntityState, 'accounts'>): SwapBo
         wantTokenId: offer.wantTokenId,
         wantAmount: offer.wantAmount,
         createdHeight,
-        priceTicks: offer.priceTicks ?? 0n,
+        priceTicks: offer.priceTicks,
         ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
       });
     }

@@ -511,8 +511,11 @@ async function createRuntimeViaUi(
     await factorOneButton.click({ force: true });
   }
 
+  // The derive button is labelled by input mode: Brain Vault derives in the
+  // browser or on a node, a raw seed continues with the seed. "Derive wallet"
+  // and the older wallet-opening labels no longer exist in the UI.
   const createButton = page.getByRole('button', {
-    name: /Derive wallet|Continue with seed|Create XLN wallet|Open XLN wallet|Open \/ restore wallet/i,
+    name: /Derive in browser|Derive on node|Continue with seed|Verify recovery/i,
   }).first();
   await expect(createButton).toBeEnabled({ timeout: 15_000 });
   await createButton.click({ force: true });

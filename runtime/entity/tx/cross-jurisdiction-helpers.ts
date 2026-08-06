@@ -1,3 +1,4 @@
+import { normalizeEntityRef } from './account-key';
 import {
   cloneCrossJurisdictionRoute,
   isCrossJurisdictionRouteTransitionAllowed,
@@ -12,7 +13,6 @@ import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction'
 import type { EntityState } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 
-const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const normalizeAddress = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 export const findCrossJurisdictionOfferRoute = (

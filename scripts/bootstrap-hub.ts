@@ -98,8 +98,8 @@ const resolveJurisdiction = (env: RuntimeReplica, requestedName?: string) => {
     name,
     chainId: Number(jr.chainId ?? 0),
     address: jr.rpcs?.[0] ?? '',
-    entityProviderAddress: jr.entityProviderAddress ?? jr.contracts?.entityProvider ?? '',
-    depositoryAddress: jr.depositoryAddress ?? jr.contracts?.depository ?? '',
+    entityProviderAddress: jr.contracts?.entityProvider ?? '',
+    depositoryAddress: jr.contracts?.depository ?? '',
     blockTimeMs,
   };
 };

@@ -6,6 +6,19 @@ import type { RuntimeReplica } from './types';
 
 const solvencyLog = createStructuredLogger('runtime.solvency');
 
+/**
+ * Off-chain mirror of the quantity the jurisdiction constrains.
+ *
+ * The on-chain law is `reserves + collateral == minted + externalBacking` per
+ * token, enforced by Depository.invariants `invariant_valueConservation`.
+ * `internalValue` is the left-hand side, which a Runtime can compute from its
+ * own committed state alone.
+ *
+ * The right-hand side is not knowable off-chain: minted supply and external
+ * escrow live in the Depository. A caller that has read those totals supplies
+ * them as `expectedInternalValue`, and only then is `isValid` meaningful -
+ * `null` means "not checked", never "checked and fine".
+ */
 export type AssetSolvency = {
   stackId: string;
   chainId: number;
@@ -14,20 +27,26 @@ export type AssetSolvency = {
   reserves: bigint;
   confirmedCollateral: bigint;
   pendingCollateral: bigint;
-  delta: bigint;
-  isValid: boolean;
+  internalValue: bigint;
+  expectedInternalValue: bigint | null;
+  delta: bigint | null;
+  isValid: boolean | null;
 };
 
 export interface Solvency {
   byAsset: Map<string, AssetSolvency>;
   entityCount: number;
   accountViews: number;
-  isValid: boolean;
+  /** null when no authoritative on-chain totals were supplied. */
+  isValid: boolean | null;
 }
+
+/** Authoritative per-token totals read from the Depository, keyed `stackId:tokenId`. */
+export type OnChainTokenTotals = ReadonlyMap<string, bigint>;
 
 const canonicalStack = (
   state: EntityState,
-): Omit<AssetSolvency, 'tokenId' | 'reserves' | 'confirmedCollateral' | 'pendingCollateral' | 'delta' | 'isValid'> => {
+): Pick<AssetSolvency, 'stackId' | 'chainId' | 'depositoryAddress'> => {
   const jurisdiction = state.config?.jurisdiction;
   const chainId = Number(jurisdiction?.chainId);
   const depositoryAddress = String(jurisdiction?.depositoryAddress || '')
@@ -96,14 +115,20 @@ const ensureAsset = (byAsset: Map<string, AssetSolvency>, state: EntityState, ra
     reserves: 0n,
     confirmedCollateral: 0n,
     pendingCollateral: 0n,
-    delta: 0n,
-    isValid: true,
+    internalValue: 0n,
+    expectedInternalValue: null,
+    delta: null,
+    isValid: null,
   };
   byAsset.set(key, created);
   return created;
 };
 
-export const calculateSolvency = (env: RuntimeReplica, snapshot?: RuntimeReplica): Solvency => {
+export const calculateSolvency = (
+  env: RuntimeReplica,
+  snapshot?: RuntimeReplica,
+  onChainTotals?: OnChainTokenTotals,
+): Solvency => {
   const states = selectCanonicalStates(snapshot || env);
   const byAsset = new Map<string, AssetSolvency>();
   let accountViews = 0;
@@ -128,28 +153,55 @@ export const calculateSolvency = (env: RuntimeReplica, snapshot?: RuntimeReplica
       }
     }
   }
+  let checked = 0;
   for (const asset of byAsset.values()) {
-    asset.delta = asset.reserves - asset.confirmedCollateral;
+    asset.internalValue = asset.reserves + asset.confirmedCollateral;
+    const expected = onChainTotals?.get(`${asset.stackId}:${asset.tokenId}`);
+    if (expected === undefined) continue;
+    asset.expectedInternalValue = expected;
+    asset.delta = asset.internalValue - expected;
     asset.isValid = asset.delta === 0n;
+    checked += 1;
   }
   return {
     byAsset,
     entityCount: states.length,
     accountViews,
-    isValid: byAsset.size > 0 && Array.from(byAsset.values()).every(asset => asset.isValid),
+    isValid: checked === 0
+      ? null
+      : Array.from(byAsset.values()).every(asset => asset.isValid !== false),
   };
 };
 
-export const verifySolvency = (env: RuntimeReplica, label?: string): boolean => {
-  const solvency = calculateSolvency(env);
-  const invalid = Array.from(solvency.byAsset.values()).filter(asset => !asset.isValid);
+/**
+ * Assert the conservation law against authoritative on-chain totals.
+ *
+ * Diagnostic only: nothing in the canonical tick calls this, and it must stay
+ * that way. Recomputing a whole-Runtime aggregate per frame would spend real
+ * work to restate what the jurisdiction already enforces on every batch.
+ *
+ * Without `onChainTotals` there is nothing to verify, and this throws rather
+ * than returning a green it did not earn.
+ */
+export const verifySolvency = (
+  env: RuntimeReplica,
+  label?: string,
+  onChainTotals?: OnChainTokenTotals,
+): boolean => {
+  const solvency = calculateSolvency(env, undefined, onChainTotals);
+  if (solvency.isValid === null) {
+    throw new Error(
+      `Solvency check failed: no on-chain totals supplied for ${solvency.byAsset.size} asset(s)`,
+    );
+  }
+  const invalid = Array.from(solvency.byAsset.values()).filter(asset => asset.isValid === false);
   if (!solvency.isValid) {
     solvencyLog.error('violation', {
       label: label ?? '',
-      assets: invalid.map(asset => ({ key: `${asset.stackId}:${asset.tokenId}`, delta: asset.delta.toString() })),
+      assets: invalid.map(asset => ({ key: `${asset.stackId}:${asset.tokenId}`, delta: String(asset.delta) })),
     });
     throw new Error(
-      `Solvency check failed: ${invalid.map(asset => `${asset.stackId}:${asset.tokenId}=${asset.delta}`).join(',') || 'no assets'}`,
+      `Solvency check failed: ${invalid.map(asset => `${asset.stackId}:${asset.tokenId}=${String(asset.delta)}`).join(',') || 'no assets'}`,
     );
   }
   solvencyLog.info('ok', { label: label ?? '', assets: solvency.byAsset.size });

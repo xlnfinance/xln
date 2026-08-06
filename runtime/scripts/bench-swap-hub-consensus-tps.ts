@@ -1,7 +1,7 @@
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { applyAccountInput, proposeAccountFrame } from '../account/consensus/index';
-import { isLeft } from '../account/utils';
+import { isLeftEntity } from '../account/utils';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
@@ -312,7 +312,7 @@ const makeSameCase = (
   installDelta(base, 1);
   const giveAmount = SWAP_LOT_SCALE;
   const wantAmount = 3_000n * SWAP_LOT_SCALE;
-  const makerIsLeft = isLeft(userId, hubId);
+  const makerIsLeft = isLeftEntity(userId, hubId);
   const totalGiveAmount = giveAmount * BigInt(count);
   if (makerIsLeft) giveDelta.leftHold = totalGiveAmount;
   else giveDelta.rightHold = totalGiveAmount;
@@ -374,7 +374,7 @@ const makeCrossCase = (
   const targetAmount = 2n * SWAP_LOT_SCALE;
   const base = makeAccount(sourceUser, hubId);
   const sourceDelta = installDelta(base, 1);
-  const makerIsLeft = isLeft(sourceUser, hubId);
+  const makerIsLeft = isLeftEntity(sourceUser, hubId);
   const totalSourceAmount = sourceAmount * BigInt(count);
   if (makerIsLeft) sourceDelta.leftHold = totalSourceAmount;
   else sourceDelta.rightHold = totalSourceAmount;

@@ -113,7 +113,6 @@ const oversizedAccount: AccountReplica = {
       runtimeSeed: seed,
       entityId,
       counterpartyId,
-      timestamp: 0,
     }),
     deltas: new Map(Array.from({ length: LIMITS.MAX_ACCOUNT_TOKEN_ROWS }, (_, tokenId) => {
       const delta = createDefaultDelta(tokenId);

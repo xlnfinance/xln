@@ -239,7 +239,7 @@ export function formatRuntime(env: RuntimeReplica, options?: FormatOptions): str
   if (env.state.jReplicas && env.state.jReplicas.size > 0) {
     output.push('  J-REPLICAS (Jurisdictions):');
     for (const [jName, jReplica] of env.state.jReplicas) {
-      const jDepository = jReplica.depositoryAddress || jReplica.contracts?.depository;
+      const jDepository = jReplica.contracts?.depository;
       const jInfo = [
         `Name: ${jName}`,
         `Block: ${jReplica.blockNumber} | State Root: ${formatStateRootPreview(jReplica.stateRoot)}`,

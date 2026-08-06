@@ -557,7 +557,21 @@ const MESH_BOOTSTRAP_STALL_TIMEOUT_MS = Math.max(
   5_000,
   Math.floor(Number(process.env['XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS'] || '30000')),
 );
+const MESH_PRODUCER_PAUSE_TIMEOUT_MS = Math.max(
+  1_000,
+  Math.floor(Number(process.env['XLN_MESH_PRODUCER_PAUSE_TIMEOUT_MS'] || '5000')),
+);
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
+
+/**
+ * How long the mesh bootstrap waits for a direct hub-to-hub link before opening
+ * accounts over the relay instead. Mirrors the baseline gate's grace so the two
+ * cannot disagree about whether a direct link is mandatory.
+ */
+const HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS = Math.max(
+  1_000,
+  Number(process.env['XLN_HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS'] || '15000'),
+);
 const createHubBrainVaultOwner = (): BrainVaultOwnerController => createBrainVaultOwnerController({
   path: String(process.env['XLN_BRAINVAULT_OWNER_PATH'] || ''),
   ...(process.env['XLN_BRAINVAULT_WORKER_PATH']
@@ -824,10 +838,8 @@ const assertHubJAdapterBinding = (
   }
   const bindings = [
     ['account', replica.contracts?.account, jadapter.addresses.account],
-    ['depository', replica.depositoryAddress, jadapter.addresses.depository],
-    ['depository_contract', replica.contracts?.depository, jadapter.addresses.depository],
-    ['entity_provider', replica.entityProviderAddress, jadapter.addresses.entityProvider],
-    ['entity_provider_contract', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
+    ['depository', replica.contracts?.depository, jadapter.addresses.depository],
+    ['entity_provider', replica.contracts?.entityProvider, jadapter.addresses.entityProvider],
     ['delta_transformer', replica.contracts?.deltaTransformer, jadapter.addresses.deltaTransformer],
   ] as const;
   for (const [contract, expected, actual] of bindings) {
@@ -866,9 +878,9 @@ const buildRuntimeJurisdictionsPayload = (env: RuntimeReplica): string | null =>
 
   const account = String(replica.contracts?.account || '').trim();
   const depository =
-    String(replica.depositoryAddress || replica.contracts?.depository || '').trim();
+    String(replica.contracts?.depository || '').trim();
   const entityProvider =
-    String(replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
+    String(replica.contracts?.entityProvider || '').trim();
   const deltaTransformer = String(replica.contracts?.deltaTransformer || '').trim();
   if (!account || !depository || !entityProvider || !deltaTransformer) return null;
 
@@ -1008,16 +1020,10 @@ const getImportedJurisdictionContracts = (
 ): ImportedJurisdictionContracts => {
   const replica = env.state.jReplicas?.get(jurisdictionName);
   const depositoryAddress = String(
-    replica?.depositoryAddress ||
-      replica?.contracts?.depository ||
-      fallback?.depository ||
-      '',
+    replica?.contracts?.depository || fallback?.depository || '',
   ).trim();
   const entityProviderAddress = String(
-    replica?.entityProviderAddress ||
-      replica?.contracts?.entityProvider ||
-      fallback?.entityProvider ||
-      '',
+    replica?.contracts?.entityProvider || fallback?.entityProvider || '',
   ).trim();
   const chainId = Number(replica?.chainId);
   return {
@@ -2303,6 +2309,7 @@ const handleHubHttpRequest = async (
 
 type MeshBootstrapMilestones = {
   gossipReady: boolean;
+  directPeerGraceLogged: boolean;
   accountsReady: boolean;
   creditReady: boolean;
   reserveReady: boolean;
@@ -2393,7 +2400,25 @@ const advanceHubMeshBootstrap = async (
     profile => profile.entityId !== input.bootstrap.entityId.toLowerCase(),
   );
   input.markProgress('direct-peers');
-  if (!directHubPeersReady(input.env, peers)) return;
+  // A direct link is preferred for the bootstrap burst, not required for it:
+  // account opens travel over the same direct-then-relay policy as any other
+  // output. Blocking here indefinitely contradicts the baseline gate, which
+  // proceeds after HUB_DIRECT_LINK_BASELINE_GRACE_MS unless
+  // XLN_REQUIRE_DIRECT_BASELINE=1 - so a mesh that never dials directly could
+  // never reach the gate that was willing to tolerate it.
+  if (!directHubPeersReady(input.env, peers)) {
+    const waitedMs = Date.now() - input.totalStartedAt;
+    if (waitedMs < HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS) return;
+    if (!input.milestones.directPeerGraceLogged) {
+      input.milestones.directPeerGraceLogged = true;
+      nodeLog.warn('mesh.direct_peers.grace_expired', {
+        waitedMs,
+        graceMs: HUB_DIRECT_LINK_BOOTSTRAP_GRACE_MS,
+        peers: peers.length,
+      });
+    }
+    input.markProgress('direct-peers:relayed');
+  }
   const { openInputs, creditInputs } = planMeshBootstrapInputs(
     input.env,
     input.bootstrap,
@@ -2672,13 +2697,25 @@ const createHubMeshBootstrapController = (
       clearInterval(loop);
       loop = null;
     }
-    while (live.meshLoopInFlight) await sleep(100);
+    // Unbounded wait here previously left orphaned hub-nodes holding E2E ports
+    // after SIGTERM: meshLoopInFlight can stick if advanceHubMeshBootstrap never
+    // returns, and the parent only SIGKILLs after its own graceful window.
+    const deadline = Date.now() + MESH_PRODUCER_PAUSE_TIMEOUT_MS;
+    while (live.meshLoopInFlight && Date.now() < deadline) await sleep(100);
+    if (live.meshLoopInFlight) {
+      nodeLog.warn('mesh_producer.pause_timeout', {
+        name: resolvedArgs.name,
+        timeoutMs: MESH_PRODUCER_PAUSE_TIMEOUT_MS,
+        progress: live.meshLoopProgress,
+      });
+    }
   };
 
   const start: HubMeshBootstrapController['start'] = (jurisdiction, tokenCatalog, externalWalletApi) => {
     const totalStartedAt = startTiming('mesh_ready_total');
     const milestones: MeshBootstrapMilestones = {
       gossipReady: false,
+      directPeerGraceLogged: false,
       accountsReady: false,
       creditReady: false,
       reserveReady: false,

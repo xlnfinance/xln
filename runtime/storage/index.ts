@@ -1531,7 +1531,14 @@ const certifiedFrameValuesMatch = (
       validateStoredEntityFrameValue(value, entityHeight));
     const right = decodeValidatedBuffer(candidate, value =>
       validateStoredEntityFrameValue(value, entityHeight));
-    return encodeCanonicalConsensusValue(left.link) === encodeCanonicalConsensusValue(right.link);
+    // Validators of one Entity hold different, individually valid certificate
+    // variants of the same committed frame, and they reach this key on
+    // different Runtime frames. `recordEntityFrameHistory` already collapses
+    // the variants it sees inside a single Runtime frame; across frames the
+    // stored variant is simply the first durable one. The frame hash is the
+    // identity of the immutable body, so a differing hash is a real fork and
+    // still conflicts.
+    return left.link.frame.hash === right.link.frame.hash;
   }
   throw new Error(`STORAGE_CERTIFIED_FRAME_KEY_INVALID:${key.toString('hex')}`);
 };

@@ -67,12 +67,11 @@ export interface JReplica {
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };
 
-  // Contract addresses (primary)
-  depositoryAddress?: string; // Primary depository address (for replay protection)
-  entityProviderAddress?: string; // Primary entity provider address
   entityProviderDeploymentBlock?: number;
 
-  // Additional deployed contract addresses.
+  // The single persisted source for this jurisdiction's on-chain stack.
+  // Adapters project whatever address shape they need from here; nothing
+  // outside this record may carry a second copy.
   contracts?: {
     depository?: string;
     entityProvider?: string;

@@ -824,7 +824,9 @@ export class RuntimeP2P {
   }
 
   private hasRelayConnectionActivity(): boolean {
-    return this.clients.some(client => client.isOpen() || client.isConnecting());
+    return this.clients.some(
+      client => client.isOpen() || client.isConnecting() || client.getReconnectState() !== null,
+    );
   }
 
   sendDebugEvent(payload: unknown): boolean {

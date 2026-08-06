@@ -22,7 +22,7 @@ const getProviderUrl = (adapter: JAdapter, replica: JReplica): string => {
  * producers for the same J event stream.
  */
 const getWatcherKey = (replica: JReplica, adapter: JAdapter): string => {
-  const depository = String(replica.depositoryAddress || replica.contracts?.depository || '')
+  const depository = String(replica.contracts?.depository || '')
     .trim()
     .toLowerCase();
   const chainId = String(replica.chainId ?? adapter.chainId ?? '');

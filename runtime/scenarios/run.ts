@@ -37,6 +37,7 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'processbatch':      { file: './processbatch',      fn: 'runProcessBatchScenario' },
   'dispute-lifecycle': { file: './dispute-lifecycle', fn: 'runDisputeLifecycle' },
   'dispute-transformer': { file: './dispute-transformer', fn: 'runDisputeTransformer' },
+  'cross-j':           { file: './cross-j',           fn: 'crossJ' },
 };
 
 const DEFAULT_PARALLEL_SET = [

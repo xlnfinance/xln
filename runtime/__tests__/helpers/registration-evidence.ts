@@ -46,8 +46,8 @@ export const installCanonicalRegistrationEvidence = async (
   const stackKey = getCertifiedBoardStackKey(jurisdiction);
   const replica = Array.from(env.state.jReplicas.values()).find(candidate => (
     candidate.chainId === jurisdiction.chainId &&
-    candidate.depositoryAddress?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
-    candidate.entityProviderAddress?.toLowerCase() === jurisdiction.entityProviderAddress.toLowerCase()
+    candidate.contracts?.depository?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
+    candidate.contracts?.entityProvider?.toLowerCase() === jurisdiction.entityProviderAddress.toLowerCase()
   ));
   if (!replica || replica.watcherConfirmationDepth === undefined) {
     throw new Error(`TEST_REGISTRATION_EVIDENCE_STACK_MISSING:${stackKey}`);

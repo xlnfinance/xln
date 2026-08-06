@@ -1,5 +1,5 @@
 import type { EnvSnapshot, RuntimeReplica } from '../runtime/types';
-import { startRuntimeFrameTrace } from '../runtime/history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 
 /**
  * Browser scenario registry.
@@ -94,7 +94,7 @@ export const recordScenario = async (
   };
   if (env.infrastructure) env.infrastructure.persistencePaused = true;
 
-  const trace = startRuntimeFrameTrace(env);
+  const trace = startRuntimeHistoryTraceForTesting(env);
   try {
     const result = await run(env);
     return { key, frames: [...trace.snapshots], env: result };

@@ -200,6 +200,27 @@ export async function handlePullLock(
   if (!HEX_32_RE.test(fullHash) || !HEX_32_RE.test(partialRoot)) {
     return { success: false, error: `Invalid pull hashladder commitment`, events };
   }
+  // INVARIANT: unique hashladder root per orderId. Runtime admission also
+  // scans every Entity/Account/swap in the Runtime; this Account-local guard
+  // catches same-frame sequential locks and anything that slipped past.
+  // Same orderId may reuse its own ladder (source/target of one swap).
+  const orderId = String(crossJurisdiction?.orderId || '').trim();
+  const normalizedFullHash = fullHash.toLowerCase();
+  const normalizedPartialRoot = partialRoot.toLowerCase();
+  for (const existing of account.pulls.values()) {
+    const existingOrderId = String(existing.crossJurisdiction?.orderId || '').trim();
+    if (existingOrderId && orderId && existingOrderId === orderId) continue;
+    if (
+      existing.fullHash.toLowerCase() === normalizedFullHash ||
+      existing.partialRoot.toLowerCase() === normalizedPartialRoot
+    ) {
+      return {
+        success: false,
+        error: `Pull hash material collides with live pull ${existing.pullId}`,
+        events,
+      };
+    }
+  }
   if (!Number.isInteger(tokenId) || tokenId < 0) {
     return { success: false, error: `Invalid pull tokenId`, events };
   }

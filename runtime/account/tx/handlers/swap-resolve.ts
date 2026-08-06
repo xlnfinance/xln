@@ -57,9 +57,7 @@ const recordSwapResolveHistory = (
       giveAmount: resolve.canonicalGiveAmount,
       wantTokenId: resolve.offer.wantTokenId,
       wantAmount: resolve.canonicalWantAmount,
-      ...(resolve.canonicalPriceTicks !== undefined
-        ? { priceTicks: resolve.canonicalPriceTicks }
-        : {}),
+      priceTicks: resolve.canonicalPriceTicks,
       createdHeight: resolve.offer.createdHeight,
     },
   );

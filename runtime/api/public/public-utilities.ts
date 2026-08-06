@@ -22,7 +22,7 @@ export {
   getSwapPairOrientation,
   getTokenIdsForJurisdiction,
   getTokenInfo,
-  isLeft,
+  isLeftEntity,
   isLiquidSwapToken,
 } from '../../account/utils';
 export {
@@ -34,13 +34,9 @@ export {
 } from '../../orderbook';
 export { listOpenSwapOffers } from '../../orderbook/open-swap-offers';
 export {
-  BigIntMath,
-  calculatePercentageEthers,
   convertTokenPrecision,
   FINANCIAL_CONSTANTS,
-  formatAssetAmountEthers,
   formatTokenAmount,
-  formatTokenAmountEthers,
   parseTokenAmount,
 } from '../../account/financial-utils';
 export { calculateSolvency, verifySolvency } from '../../runtime/solvency';
@@ -67,8 +63,6 @@ export {
   isValidSignerId,
   MAX_NUMBERED_ENTITY,
   parseReplicaKey,
-  safeExtractEntityId,
-  safeParseReplicaKey,
   toEpAddress,
   toEntityId,
   toJId,

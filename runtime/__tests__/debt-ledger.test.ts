@@ -84,8 +84,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
     rpcs: [JURISDICTION.address!],
     chainId: JURISDICTION.chainId,
     watcherConfirmationDepth: 0,
-    depositoryAddress: JURISDICTION.depositoryAddress,
-    entityProviderAddress: JURISDICTION.entityProviderAddress,
+    contracts: { depository: JURISDICTION.depositoryAddress, entityProvider: JURISDICTION.entityProviderAddress },
     contracts: {
       depository: JURISDICTION.depositoryAddress,
       entityProvider: JURISDICTION.entityProviderAddress,

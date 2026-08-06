@@ -314,7 +314,14 @@ export type E2EBrowserHealthCounters = {
   httpErrorCount: number;
 };
 const RESET_CONFIRMATION = 'RESET_MESH_STATE';
-const E2E_ANVIL_HISTORY_STATES = 256;
+/**
+ * Restoring a runtime re-proves the EntityProvider deployment by reading code
+ * at its deployment block and the one before it. Dispute scenarios mine
+ * hundreds of blocks first, so a short history window prunes those states away
+ * and the restore fails RPC_ENTITY_PROVIDER_DEPLOYMENT_ORIGIN_UNAVAILABLE.
+ * These chains live for one shard and are thrown away.
+ */
+const E2E_ANVIL_HISTORY_STATES = 8192;
 const DEFAULT_E2E_TEST_TIMEOUT_MS = 660_000;
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -852,7 +859,7 @@ export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] =
 
 export const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
   const excludedDefaultSpecs = new Set<string>([
-    // Legacy shared-page AHB flow. Useful assertions were ported into
+    // Shared-page AHB flow. Its useful assertions were ported into
     // tests/e2e-ahb-isolated.spec.ts; keep this out of the canonical isolated bar.
     'tests/e2e-ahb-payment.spec.ts',
     // Keep the default bar focused on fast isolated product checks.
@@ -1917,6 +1924,11 @@ const runShard = async (
         '127.0.0.1',
         '--port',
         String(apiPort),
+        // The browser reaches the relay through the preview server, so that
+        // origin has to be one of the operator-configured relay audiences or
+        // its hello is signed for an endpoint the relay does not recognise.
+        // `--relay-url` stays explicit because it otherwise defaults to this
+        // base URL, which would send the mesh through the preview proxy too.
         '--public-ws-base-url',
         resolveE2EPublicWsBaseUrl(args, apiPort, webPort),
         '--relay-url',
@@ -1954,6 +1966,14 @@ const runShard = async (
           XLN_STORAGE_HISTORY_PATH: join(shardPaths.rdbRoot, 'storage-health-history.json'),
           XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
           XLN_EPHEMERAL_TESTNET: '1',
+          // Same default the deployed stack ships with (scripts/start-server.sh).
+          // Tests reach the faucet through the preview proxy, so they arrive as
+          // ordinary callers rather than the local operator. The deployed cap
+          // rations a public faucet against strangers; this stack is ephemeral
+          // and loopback-only, and its scenarios fund positions far above it.
+          XLN_PUBLIC_FAUCET: '1',
+          XLN_FAUCET_MAX_AMOUNT: '1000000000000000000000',
+          XLN_FAUCET_MAX_GAS_AMOUNT: '1000',
           XLN_MESH_ROOT_SEED: `xln-e2e-mesh-root:${dbPath}`,
           XLN_MESH_RUNTIME_SEEDS_JSON: JSON.stringify({
             H1: 'xln-e2e-h1',
@@ -1963,7 +1983,6 @@ const runShard = async (
             CUSTODY: 'xln-mesh-custody-seed',
           }),
           XLN_SKIP_STALE_REAP: '1',
-          XLN_PUBLIC_FAUCET: '1',
           XLN_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
           MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS:

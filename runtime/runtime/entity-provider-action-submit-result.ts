@@ -1,3 +1,4 @@
+import { normalizeSubmitId, truncateSubmitFailureMessage } from './submit-identity';
 import { safeStringify } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
@@ -7,8 +8,6 @@ import {
   buildEntityProviderActionAttemptId,
   findEntityProviderActionReplica,
   isEntityProviderActionJTx,
-  normalizeEntityProviderActionId,
-  truncateEntityProviderActionFailureMessage,
 } from './entity-provider-action-submit-state';
 import { markLocalEntityProviderActionRuntimeTx } from './entity-provider-action-submit-auth';
 
@@ -34,12 +33,12 @@ const assertValidAdapterFailure = (data: RecordActionResultTx['data']): void => 
 };
 
 const assertValidActionResult = (data: RecordActionResultTx['data']): void => {
-  if (!normalizeEntityProviderActionId(data.entityId)) throw new Error('ENTITY_PROVIDER_ACTION_RESULT_ENTITY_MISSING');
-  if (!normalizeEntityProviderActionId(data.signerId)) throw new Error('ENTITY_PROVIDER_ACTION_RESULT_SIGNER_MISSING');
-  if (!normalizeEntityProviderActionId(data.jurisdictionName)) {
+  if (!normalizeSubmitId(data.entityId)) throw new Error('ENTITY_PROVIDER_ACTION_RESULT_ENTITY_MISSING');
+  if (!normalizeSubmitId(data.signerId)) throw new Error('ENTITY_PROVIDER_ACTION_RESULT_SIGNER_MISSING');
+  if (!normalizeSubmitId(data.jurisdictionName)) {
     throw new Error('ENTITY_PROVIDER_ACTION_RESULT_JURISDICTION_MISSING');
   }
-  if (!/^0x[0-9a-f]{64}$/.test(normalizeEntityProviderActionId(data.actionHash))) {
+  if (!/^0x[0-9a-f]{64}$/.test(normalizeSubmitId(data.actionHash))) {
     throw new Error('ENTITY_PROVIDER_ACTION_RESULT_HASH_INVALID');
   }
   if (data.actionNonce <= 0n || data.actionNonce > MAX_UINT256) {
@@ -94,10 +93,10 @@ const pendingMatchesResult = (
   const intent = pending.jTx.data.intent;
   return Boolean(
     attempt &&
-    normalizeEntityProviderActionId(pending.jurisdictionName) === normalizeEntityProviderActionId(data.jurisdictionName) &&
-    normalizeEntityProviderActionId(pending.jTx.entityId) === normalizeEntityProviderActionId(data.entityId) &&
-    normalizeEntityProviderActionId(pending.jTx.data.signerId) === normalizeEntityProviderActionId(data.signerId) &&
-    normalizeEntityProviderActionId(intent.actionHash) === normalizeEntityProviderActionId(data.actionHash) &&
+    normalizeSubmitId(pending.jurisdictionName) === normalizeSubmitId(data.jurisdictionName) &&
+    normalizeSubmitId(pending.jTx.entityId) === normalizeSubmitId(data.entityId) &&
+    normalizeSubmitId(pending.jTx.data.signerId) === normalizeSubmitId(data.signerId) &&
+    normalizeSubmitId(intent.actionHash) === normalizeSubmitId(data.actionHash) &&
     intent.actionNonce === data.actionNonce &&
     intent.generation === data.generation &&
     attempt.attemptId === data.attemptId &&
@@ -146,8 +145,8 @@ const activePendingAttemptIds = (env: RuntimeReplica, replica: EntityReplica): S
     for (const jTx of input.jTxs) {
       if (
         isEntityProviderActionJTx(jTx) &&
-        normalizeEntityProviderActionId(jTx.entityId) === normalizeEntityProviderActionId(replica.entityId) &&
-        normalizeEntityProviderActionId(jTx.data.signerId) === normalizeEntityProviderActionId(replica.signerId) &&
+        normalizeSubmitId(jTx.entityId) === normalizeSubmitId(replica.entityId) &&
+        normalizeSubmitId(jTx.data.signerId) === normalizeSubmitId(replica.signerId) &&
         jTx.data.runtimeSubmitAttempt
       ) active.add(jTx.data.runtimeSubmitAttempt.attemptId);
     }
@@ -197,16 +196,16 @@ export const makeEntityProviderActionResultRuntimeTx = (
 ): RecordActionResultTx => {
   const attempt = jTx.data.runtimeSubmitAttempt;
   if (!attempt) throw new Error('ENTITY_PROVIDER_ACTION_RESULT_ATTEMPT_METADATA_MISSING');
-  const message = extra.message ? truncateEntityProviderActionFailureMessage(extra.message) : undefined;
+  const message = extra.message ? truncateSubmitFailureMessage(extra.message) : undefined;
   const adapterFailure = extra.adapterFailure ? {
     ...structuredClone(extra.adapterFailure),
-    message: truncateEntityProviderActionFailureMessage(extra.adapterFailure.message),
+    message: truncateSubmitFailureMessage(extra.adapterFailure.message),
   } : undefined;
   return markLocalEntityProviderActionRuntimeTx({
     type: 'recordEntityProviderActionSubmitResult',
     data: {
       entityId: jTx.entityId,
-      signerId: normalizeEntityProviderActionId(jTx.data.signerId),
+      signerId: normalizeSubmitId(jTx.data.signerId),
       jurisdictionName,
       actionHash: jTx.data.intent.actionHash,
       actionNonce: jTx.data.intent.actionNonce,
@@ -243,13 +242,13 @@ export const applyRecordEntityProviderActionResultRuntimeTx = (
   const local = replica.entityProviderActionSubmitState;
   const matchesConsensus = Boolean(
     consensusPending &&
-    normalizeEntityProviderActionId(consensusPending.actionHash) === normalizeEntityProviderActionId(tx.data.actionHash) &&
+    normalizeSubmitId(consensusPending.actionHash) === normalizeSubmitId(tx.data.actionHash) &&
     consensusPending.actionNonce === tx.data.actionNonce &&
     consensusPending.generation === tx.data.generation
   );
   const matchesLocal = Boolean(
     local &&
-    normalizeEntityProviderActionId(local.actionHash) === normalizeEntityProviderActionId(tx.data.actionHash) &&
+    normalizeSubmitId(local.actionHash) === normalizeSubmitId(tx.data.actionHash) &&
     local.actionNonce === tx.data.actionNonce &&
     local.generation === tx.data.generation
   );

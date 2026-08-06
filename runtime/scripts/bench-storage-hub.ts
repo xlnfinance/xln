@@ -611,8 +611,6 @@ async function main() {
     blockDelayMs: 0,
     lastBlockTimestamp: env.state.timestamp,
     position: { x: 0, y: 0, z: 0 },
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
     chainId: jurisdiction.chainId,
     contracts: {
       account: '0x000000000000000000000000000000000000ac01',
@@ -649,7 +647,6 @@ async function main() {
           runtimeId,
           entityId: hub.entityId,
           counterpartyId: user.entityId,
-          timestamp: env.state.timestamp,
         }),
       );
     }

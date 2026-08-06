@@ -3,7 +3,7 @@ import type { EntityInput, EntityReplica } from '../entity/types';
 import type { Delta } from '../types/account';
 import type { FrameLogEntry } from '../types/logging';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
-import { deriveDelta, isLeft } from '../account/utils';
+import { deriveDelta, isLeftEntity } from '../account/utils';
 import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/machine/batch';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { advanceScenarioTime } from './helpers';
@@ -121,7 +121,7 @@ export function getDerivedOutCapacity(env: RuntimeReplica, entityId: string, cou
   const account = replica.state.accounts.get(counterpartyId);
   const delta = account?.state.deltas.get(tokenId);
   if (!delta) return 0n;
-  return deriveDelta(delta, isLeft(entityId, counterpartyId)).outCapacity;
+  return deriveDelta(delta, isLeftEntity(entityId, counterpartyId)).outCapacity;
 }
 
 /**
@@ -178,7 +178,7 @@ export async function maybeApproveSettlement(
   const account = approverRep.state.accounts.get(counterpartyId);
   const workspace = account?.state.settlementWorkspace;
   if (!workspace) throw new Error(`SETTLEMENT_WORKSPACE_MISSING:${approver.id}:${counterpartyId}`);
-  const approverIsLeft = isLeft(approver.id, counterpartyId);
+  const approverIsLeft = isLeftEntity(approver.id, counterpartyId);
   const myHanko = approverIsLeft ? workspace.leftHanko : workspace.rightHanko;
   let approved = false;
   if (myHanko) {
@@ -222,8 +222,8 @@ export async function processUntil(
 
 // Account deltas are stored canonically from the lower entity id's perspective.
 export function getOffdelta(env: RuntimeReplica, entityA: string, entityB: string, tokenId: number): bigint {
-  const leftEntity = isLeft(entityA, entityB) ? entityA : entityB;
-  const rightEntity = isLeft(entityA, entityB) ? entityB : entityA;
+  const leftEntity = isLeftEntity(entityA, entityB) ? entityA : entityB;
+  const rightEntity = isLeftEntity(entityA, entityB) ? entityB : entityA;
 
   const [, leftReplica] = findReplica(env, leftEntity);
   const account = leftReplica.state.accounts.get(rightEntity);

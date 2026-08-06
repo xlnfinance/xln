@@ -168,8 +168,8 @@ function buildJurisdictionConfig(env: RuntimeReplica, name?: string): Jurisdicti
     );
   }
 
-  const depositoryAddress = jReplica.depositoryAddress;
-  const entityProviderAddress = jReplica.entityProviderAddress;
+  const depositoryAddress = jReplica.contracts?.depository;
+  const entityProviderAddress = jReplica.contracts?.entityProvider;
 
   if (!depositoryAddress || !entityProviderAddress) {
     throw new Error(

@@ -95,7 +95,6 @@ import type {
   NumberedRegistrationCommandResult,
   EntityDisplayInfo,
   SignerDisplayInfo,
-  BigIntMathUtils,
   FinancialConstants,
   SwapBookEntry,
   CrossJurisdictionSwapRoute,
@@ -160,16 +159,11 @@ export interface FrontendXlnFunctions {
   prepareSwapOrder: XLNModule['prepareSwapOrder'];
   quantizeSwapOrder: XLNModule['quantizeSwapOrder'];
   requantizeRemainingSwapAtPrice: XLNModule['requantizeRemainingSwapAtPrice'];
-  isLeft: XLNModule['isLeft'];
   createDemoDelta: XLNModule['createDemoDelta'];
   getDefaultCreditLimit: XLNModule['getDefaultCreditLimit'];
   safeStringify: XLNModule['safeStringify'];
-  formatTokenAmountEthers: XLNModule['formatTokenAmountEthers'];
   parseTokenAmount: XLNModule['parseTokenAmount'];
   convertTokenPrecision: XLNModule['convertTokenPrecision'];
-  calculatePercentageEthers: XLNModule['calculatePercentageEthers'];
-  formatAssetAmountEthers: XLNModule['formatAssetAmountEthers'];
-  BigIntMath: BigIntMathUtils;
   FINANCIAL_CONSTANTS: FinancialConstants;
   getEntity: (entityId: string) => FrontendEntitySummary;
   getEntityShortId: XLNModule['getEntityShortId'];
@@ -412,7 +406,7 @@ const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeReplica): void
       const entityId = xln.extractEntityId(replicaKey);
       if (entityId && replica.position && !currentPositions.has(entityId)) {
         const pos = replica.position;
-        const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
+        const jurisdiction = pos.jurisdiction || env.activeJurisdiction || 'default';
         currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
         hasChanges = true;
       }
@@ -1139,7 +1133,7 @@ export async function initializeXLN(): Promise<RuntimeReplica | null> {
       if (entityId && replica.position) {
         const pos = replica.position;
         // Store relative position + jReplica reference (defaults to activeJurisdiction)
-        const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
+        const jurisdiction = pos.jurisdiction || env.activeJurisdiction || 'default';
         initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
       }
     }
@@ -1815,16 +1809,11 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       prepareSwapOrder: failFn('prepareSwapOrder'),
       quantizeSwapOrder: failFn('quantizeSwapOrder'),
       requantizeRemainingSwapAtPrice: failFn('requantizeRemainingSwapAtPrice'),
-      isLeft: failFn('isLeft'),
       createDemoDelta: failFn('createDemoDelta'),
       getDefaultCreditLimit: failFn('getDefaultCreditLimit'),
       safeStringify: failFn('safeStringify'),
-      formatTokenAmountEthers: failFn('formatTokenAmountEthers'),
       parseTokenAmount: failFn('parseTokenAmount'),
       convertTokenPrecision: failFn('convertTokenPrecision'),
-      calculatePercentageEthers: failFn('calculatePercentageEthers'),
-      formatAssetAmountEthers: failFn('formatAssetAmountEthers'),
-      BigIntMath: {} as BigIntMathUtils,
       FINANCIAL_CONSTANTS: {} as FinancialConstants,
       getEntity: failFn('getEntity'),
       getEntityShortId: failFn('getEntityShortId'),
@@ -1877,18 +1866,13 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     prepareSwapOrder: $xlnInstance.prepareSwapOrder,
     quantizeSwapOrder: $xlnInstance.quantizeSwapOrder,
     requantizeRemainingSwapAtPrice: $xlnInstance.requantizeRemainingSwapAtPrice,
-    isLeft: $xlnInstance.isLeft,
     createDemoDelta: $xlnInstance.createDemoDelta,
     getDefaultCreditLimit: $xlnInstance.getDefaultCreditLimit,
     safeStringify: $xlnInstance.safeStringify,
 
     // Financial utilities (ethers.js-based, precision-safe)
-    formatTokenAmountEthers: $xlnInstance.formatTokenAmountEthers,
     parseTokenAmount: $xlnInstance.parseTokenAmount,
     convertTokenPrecision: $xlnInstance.convertTokenPrecision,
-    calculatePercentageEthers: $xlnInstance.calculatePercentageEthers,
-    formatAssetAmountEthers: $xlnInstance.formatAssetAmountEthers,
-    BigIntMath: $xlnInstance.BigIntMath,
     FINANCIAL_CONSTANTS: $xlnInstance.FINANCIAL_CONSTANTS,
 
     // Entity utilities - UNIFIED ENTITY ACCESS

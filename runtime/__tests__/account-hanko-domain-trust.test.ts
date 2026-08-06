@@ -235,14 +235,12 @@ describe('account Hanko trusted domain boundary', () => {
     );
   });
 
-  test('rejects a split durable stack instead of trusting address aliases', () => {
+  test('resolves the stack only from persisted contracts, never a second address copy', () => {
     const env = createEmptyEnv('account-proof-split-stack');
     installReplica(env, `${FROM}:validator-a`, FROM, TRUSTED);
     env.state.jReplicas.set(TRUSTED.name, {
       name: TRUSTED.name,
       chainId: TRUSTED.chainId,
-      depositoryAddress: TRUSTED.depositoryAddress,
-      entityProviderAddress: TRUSTED.entityProviderAddress,
       contracts: {
         depository: HOSTILE.depositoryAddress,
         entityProvider: TRUSTED.entityProviderAddress,
@@ -257,8 +255,10 @@ describe('account Hanko trusted domain boundary', () => {
       position: { x: 0, y: 0, z: 0 },
     });
 
+    // `contracts.depository` is the only source, so a hostile depository is not
+    // reconciled against a trusted alias - the trusted stack is simply absent.
     expect(() => requireAccountDeltaTransformerAddress(env.state, ACCOUNT)).toThrow(
-      'JURISDICTION_DURABLE_STACK_DEPOSITORY_ALIAS_CONFLICT',
+      'ACCOUNT_PROOF_JURISDICTION_NOT_FOUND',
     );
   });
 });

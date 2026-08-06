@@ -200,7 +200,6 @@ const isHexAddress = (value: string): boolean => /^0x[a-fA-F0-9]{40}$/.test(valu
 export async function deriveSignerKey(masterSeed: Uint8Array | string, signerId: string): Promise<Uint8Array> {
   return deriveSignerKeySync(masterSeed, signerId);
 }
-
 export function deriveSignerKeySync(masterSeed: Uint8Array | string, signerId: string): Uint8Array {
   const signerIndex = parseSignerIndex(signerId);
   if (signerIndex !== null) {
@@ -565,14 +564,6 @@ export function registerSignerPublicKey(
 }
 
 /**
- * Register test keys for scenarios.
- * Deprecated: use real runtime seeds and numeric signer IDs instead.
- */
-export async function registerTestKeys(_signerIds: string[]): Promise<void> {
-  throw new Error('registerTestKeys is disabled. Use runtimeSeed + numeric signerIds (1,2,3...)');
-}
-
-/**
  * Clear all registered keys (for testing isolation)
  */
 export function clearSignerKeys(scope: SignerKeyScope): void {
@@ -741,31 +732,4 @@ export function verifyAccountSignature(
     console.error(`❌ Signature verification error for ${signerId.slice(-4)}:`, error);
     return false;
   }
-}
-
-/**
- * Validate multiple signatures for account frame
- */
-export function validateAccountSignatures(
-  env: SignerKeyEnv,
-  frameHash: string,
-  signatures: string[],
-  expectedSigners: string[]
-): { valid: boolean; validSigners: string[] } {
-  const validSigners: string[] = [];
-  const remaining = new Set(expectedSigners);
-
-  for (const signature of signatures) {
-    for (const signer of Array.from(remaining)) {
-      const isValid = verifyAccountSignature(env, signer, frameHash, signature);
-      if (isValid) {
-        validSigners.push(signer);
-        remaining.delete(signer);
-        break;
-      }
-    }
-  }
-
-  const allValid = validSigners.length === expectedSigners.length;
-  return { valid: allValid, validSigners };
 }

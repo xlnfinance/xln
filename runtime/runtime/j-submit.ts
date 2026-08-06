@@ -1,3 +1,4 @@
+import { normalizeSubmitId } from './submit-identity';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/machine/input';
@@ -18,7 +19,6 @@ import {
 import {
   findEntityProviderActionReplica,
   isEntityProviderActionJTx,
-  normalizeEntityProviderActionId,
   requireCanonicalEntityProviderActionAttempt,
   type ActionJTx,
 } from './entity-provider-action-submit-state';
@@ -194,7 +194,7 @@ const reconcileDurablyStaleEntityProviderAction = (
   if (
     pending &&
     isEntityActiveLeader(replica) &&
-    normalizeEntityProviderActionId(pending.actionHash) === normalizeEntityProviderActionId(jTx.data.intent.actionHash) &&
+    normalizeSubmitId(pending.actionHash) === normalizeSubmitId(jTx.data.intent.actionHash) &&
     pending.actionNonce === jTx.data.intent.actionNonce &&
     pending.generation === jTx.data.intent.generation
   ) return false;

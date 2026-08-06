@@ -195,8 +195,7 @@ const installCertifiedImportFixture = async (
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
+    contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
   } as JReplica);
   genesis.config.jurisdiction = jurisdiction;
   const certified = await certifyNextFrame(env, signerId, genesis, []);
@@ -486,8 +485,7 @@ describe('certified Entity storage lineage', () => {
       name: jurisdiction.name,
       rpcs: [jurisdiction.address],
       chainId: jurisdiction.chainId,
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
     } as JReplica);
     genesis.config.jurisdiction = jurisdiction;
     const replica = installReplica(env, signerId, genesis, {

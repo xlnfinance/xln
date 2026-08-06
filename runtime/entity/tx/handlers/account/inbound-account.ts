@@ -1,3 +1,4 @@
+import { normalizeEntityRef } from '../../account-key';
 import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import {
@@ -25,7 +26,6 @@ import { getEntityAccountInsertionCapacityError } from '../../../account-capacit
 import { isLeftEntity } from '../../../id';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
-const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const rejectPeerInput = (code: AccountPeerRejectionCode, reason: string): never => {
   throw new AccountPeerEvidenceError(code, reason);
 };

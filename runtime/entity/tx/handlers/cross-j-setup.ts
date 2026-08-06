@@ -1,3 +1,4 @@
+import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
 import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionRoute,
@@ -38,8 +39,6 @@ type CrossJSetupResult = {
   accountTxs?: AccountTxTarget[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
-  Number(state.timestamp || env.state.timestamp || 0);
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
   prepareEntityTxState(entityState, options?.mutableFrameState);
@@ -144,6 +143,37 @@ export const prepareRawCrossJurisdictionIntent = (
   state.crossJurisdictionSwaps ||= new Map();
   const existing = state.crossJurisdictionSwaps.get(route.orderId);
   if (existing?.sourcePull || existing?.targetPull) {
+    // A duplicate raw intent for a route this hub already materialized is an
+    // honest retry, not an attack: the submitter cannot observe our
+    // materialization until the account-level offer surfaces, so it resends
+    // while its own view still says "in flight". Throwing here fails the whole
+    // Runtime input, which killed the hub process outright
+    // (RUNTIME_ENTITY_INPUT_APPLY_FAILED -> RUNTIME_LOOP_ERROR) and took the
+    // mesh down with it. Absorb the replay when it names the same route.
+    //
+    // `exactRouteBytes` cannot be used for this comparison: materialization
+    // mutates the stored route (pulls attached, status advanced), so a stale
+    // but legitimate intent never matches it byte for byte. The route hash is
+    // the stable identity, and a mismatch still means a different route
+    // reusing one orderId, which stays fatal.
+    const storedHash = normalizeEntityRef(existing.routeHash || '');
+    const replayHash = normalizeEntityRef(route.routeHash || '');
+    if (storedHash && replayHash && storedHash === replayHash) {
+      // Absorb the honest retry as a no-op and emit nothing. Re-announcing the
+      // route here looked like the right way to converge the submitter's view,
+      // but `appendDefaultProposerCrossJMaterializations` skips materialization
+      // for any wake whose txs contain a registerCrossJurisdictionSwap - that
+      // is its commit-phase guard. With the submitter retrying every
+      // MARKET_MAKER_BOOTSTRAP_INTENT_RETRY_MS, the re-announcement landed in
+      // nearly every wake and the route never left `intent` at all.
+      //
+      // The submitter does not need to be told: bootstrap progress is judged on
+      // a route that actually advanced past `intent`, so it keeps retrying on
+      // its own, and each retry is now a cheap no-op instead of a poisoned
+      // commit phase.
+      addMessage(state, `🌉 Cross-j prepare ${route.orderId} already materialized; replay ignored`);
+      return { newState: state, outputs };
+    }
     throw new Error(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${route.orderId}`);
   }
   if (existing) {

@@ -13,13 +13,17 @@ export const normalizeAccountWatchSeed = (value: unknown, context: string): stri
   return value.toLowerCase();
 };
 
+/**
+ * A watch seed must be reproducible from identity alone: the same Account,
+ * re-derived after a retry, restart or recovery, has to yield the same seed or
+ * a watchtower cannot match what it was given. Nothing time-varying may enter
+ * this hash - the signature takes no timestamp for that reason.
+ */
 export const deriveAccountWatchSeed = (params: {
   runtimeSeed: string | Uint8Array;
   runtimeId?: string | null;
   entityId: string;
   counterpartyId: string;
-  /** Kept for caller compatibility. Account watch seeds must be stable across retry/recovery. */
-  timestamp: number;
 }): string => {
   const runtimeSeed = typeof params.runtimeSeed === 'string'
     ? params.runtimeSeed

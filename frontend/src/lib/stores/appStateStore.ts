@@ -104,6 +104,3 @@ export const appStateOperations = {
     return appStateExternalStore.getSnapshot();
   }
 };
-
-// Backward compat exports (for gradual migration)
-export const toggleMode = appStateOperations.toggleMode;

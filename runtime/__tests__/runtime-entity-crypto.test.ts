@@ -36,8 +36,7 @@ const addTestJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
     blockDelayMs: 0,
     lastBlockTimestamp: 0,
     position: { x: 0, y: 0, z: 0 },
-    depositoryAddress: testJurisdiction.depositoryAddress,
-    entityProviderAddress: testJurisdiction.entityProviderAddress,
+    contracts: { depository: testJurisdiction.depositoryAddress, entityProvider: testJurisdiction.entityProviderAddress },
     contracts: {
       account: `0x${'33'.repeat(20)}`,
       depository: testJurisdiction.depositoryAddress,

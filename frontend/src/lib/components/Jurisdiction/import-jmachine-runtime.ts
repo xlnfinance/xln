@@ -124,8 +124,8 @@ const readImportedContracts = (
 ): JMachineConfig['contracts'] | undefined => {
   const imported = env.state.jReplicas?.get?.(name);
   const contracts = {
-    depository: String(imported?.depositoryAddress || imported?.contracts?.depository || fallback?.depository || ''),
-    entityProvider: String(imported?.entityProviderAddress || imported?.contracts?.entityProvider || fallback?.entityProvider || ''),
+    depository: String(imported?.contracts?.depository || fallback?.depository || ''),
+    entityProvider: String(imported?.contracts?.entityProvider || fallback?.entityProvider || ''),
     account: String(imported?.contracts?.account || fallback?.account || ''),
     deltaTransformer: String(imported?.contracts?.deltaTransformer || fallback?.deltaTransformer || ''),
   };

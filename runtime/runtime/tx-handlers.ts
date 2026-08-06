@@ -437,7 +437,6 @@ const buildGenesisReplica = (
       ...runtimeTx.data.position,
       jurisdiction:
         runtimeTx.data.position.jurisdiction ||
-        runtimeTx.data.position.xlnomy ||
         env.activeJurisdiction ||
         'default',
     };

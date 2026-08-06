@@ -182,7 +182,6 @@ export type FinalDisputeProofStructOutput = [
 export interface AccountInterface extends Interface {
   getFunction(
     nameOrSignature:
-      | "accountKey"
       | "computeBatchHankoHash"
       | "encodeDisputeHash"
       | "encodeDisputeHashFromCommitments"
@@ -195,16 +194,11 @@ export interface AccountInterface extends Interface {
     nameOrSignatureOrTopic:
       | "AccountSettled"
       | "DebtCreated"
-      | "DebtForgiven"
       | "DisputeStarted"
       | "ReserveUpdated"
       | "TransformerDeltaClamped"
   ): EventFragment;
 
-  encodeFunctionData(
-    functionFragment: "accountKey",
-    values: [BytesLike, BytesLike]
-  ): string;
   encodeFunctionData(
     functionFragment: "computeBatchHankoHash",
     values: [BytesLike, BytesLike, BigNumberish]
@@ -246,7 +240,6 @@ export interface AccountInterface extends Interface {
     values: [InitialDisputeProofStruct[], FinalDisputeProofStruct[]]
   ): string;
 
-  decodeFunctionResult(functionFragment: "accountKey", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "computeBatchHankoHash",
     data: BytesLike
@@ -305,34 +298,6 @@ export namespace DebtCreatedEvent {
     creditor: string;
     tokenId: bigint;
     amount: bigint;
-    debtIndex: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace DebtForgivenEvent {
-  export type InputTuple = [
-    debtor: BytesLike,
-    creditor: BytesLike,
-    tokenId: BigNumberish,
-    amountForgiven: BigNumberish,
-    debtIndex: BigNumberish
-  ];
-  export type OutputTuple = [
-    debtor: string,
-    creditor: string,
-    tokenId: bigint,
-    amountForgiven: bigint,
-    debtIndex: bigint
-  ];
-  export interface OutputObject {
-    debtor: string;
-    creditor: string;
-    tokenId: bigint;
-    amountForgiven: bigint;
     debtIndex: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
@@ -474,12 +439,6 @@ export interface Account extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  accountKey: TypedContractMethod<
-    [e1: BytesLike, e2: BytesLike],
-    [string],
-    "view"
-  >;
-
   computeBatchHankoHash: TypedContractMethod<
     [domainSep: BytesLike, encodedBatch: BytesLike, nonce: BigNumberish],
     [string],
@@ -548,9 +507,6 @@ export interface Account extends BaseContract {
     key: string | FunctionFragment
   ): T;
 
-  getFunction(
-    nameOrSignature: "accountKey"
-  ): TypedContractMethod<[e1: BytesLike, e2: BytesLike], [string], "view">;
   getFunction(
     nameOrSignature: "computeBatchHankoHash"
   ): TypedContractMethod<
@@ -637,13 +593,6 @@ export interface Account extends BaseContract {
     DebtCreatedEvent.OutputObject
   >;
   getEvent(
-    key: "DebtForgiven"
-  ): TypedContractEvent<
-    DebtForgivenEvent.InputTuple,
-    DebtForgivenEvent.OutputTuple,
-    DebtForgivenEvent.OutputObject
-  >;
-  getEvent(
     key: "DisputeStarted"
   ): TypedContractEvent<
     DisputeStartedEvent.InputTuple,
@@ -686,17 +635,6 @@ export interface Account extends BaseContract {
       DebtCreatedEvent.InputTuple,
       DebtCreatedEvent.OutputTuple,
       DebtCreatedEvent.OutputObject
-    >;
-
-    "DebtForgiven(bytes32,bytes32,uint256,uint256,uint256)": TypedContractEvent<
-      DebtForgivenEvent.InputTuple,
-      DebtForgivenEvent.OutputTuple,
-      DebtForgivenEvent.OutputObject
-    >;
-    DebtForgiven: TypedContractEvent<
-      DebtForgivenEvent.InputTuple,
-      DebtForgivenEvent.OutputTuple,
-      DebtForgivenEvent.OutputObject
     >;
 
     "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes32,bytes,bytes,uint256)": TypedContractEvent<

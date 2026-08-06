@@ -8,30 +8,143 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 0. Current release handoff — 2026-08-02
 
-- Candidate branch: `ai/public-release-hardening`; last fully committed SHA
-  before final test-only cleanup: `2e96033e0`. Known P0: 0. Fixed in this
-  cycle: Cross-J durable dual authorization, Account storage admission,
-  transport replay/channel binding, watchtower owner pin, current-board-only
-  fresh C2R/settlement, FIFO one-per-broadcast dispute finalization,
-  jurisdiction deployment-origin proof, legacy path removal, and generated
-  contract-artifact drift enforcement.
-- Evidence already green: Solidity 148/148; targeted Runtime/Entity/Account/
-  Cross-J/network/storage/watchtower 194/194 (2,102 assertions); BrainVault
-  26/26 (100,156 assertions); frozen core unchanged. The combined `bun run
-  check` reached the final frontend build; preserve its final output as the
-  immutable-candidate gate.
-- Before merge: update the pruned-history import regression to expect a loud
-  archive-RPC rejection, retain the exact Cross-J validation error regression,
-  decide the one remaining contract policy below, rerun affected L1 plus one
-  final `bun run check`, obtain independent 0/0 P0/P1 verdicts on the resulting
-  SHA, then fast-forward `main` without overwriting its matching dependency WIP.
-- Owner decision required: a previous board can currently submit a new dispute
-  during its seven-day grace and choose a near-maximum nonce. Requiring the
-  current board for dispute start revokes that attack but means historical
-  evidence must be submitted during the board-change delay; already-active
-  disputes remain enforceable with previous-board evidence. Recommended release
-  policy: current-board-only dispute start, historical verifier only for
-  finalizing an already-active dispute.
+- Candidate branch: `ai/pre-mainnet-canonical-hardening`. Known P0: 0.
+- Closed this cycle: fail-open swap-offer admission and resolve validation
+  (committed price and quantized amounts are now required and rejected loudly
+  rather than reconstructed from the claim); cooperative settlement and C2R
+  seals bound to the current board, matching the jurisdiction; cross-j dust
+  fills now request the clear on both layers; `replica.contracts` made the only
+  persisted jurisdiction stack, with old records loudly rejected at the WAL
+  boundary; pre-mainnet legacy surface deleted.
+- Gates added to `check:src`: `check:no-legacy`, `check:no-vacuous-validation`
+  (the two shapes that make a check against committed state unable to fail),
+  `check:dead-code` (knip, enforcing zero unused files/dependencies/undeclared
+  imports/duplicate exports), and `check:contract-invariants` — the Foundry
+  conservation suite existed but no script ran it, so `forge` appeared nowhere
+  in `package.json`.
+- Evidence green: `bun run check` EXIT 0; Solidity invariants 15/15; frontend
+  0 errors; runtime unit suite shows no regression against the pre-change
+  baseline; frozen core unchanged.
+- Owner decision recorded below: the seven-day previous-board grace stays.
+
+### Open before release
+
+- [ ] The local E2E bar is not green, and was already red on a clean `main`
+  before this cycle. Two blockers were removed - `lsof` exits 1 whenever any
+  lane port is free, which made `LOCAL_TEST_PORT_SCAN_FAILED` unconditional on
+  a partially occupied machine; and mesh bootstrap waited forever for a direct
+  hub-to-hub link while the baseline gate it feeds treats direct links as
+  optional. A third is fixed: adjacent same-Entity inputs sharing one cross-j
+  `pairKey` were paired without the distinctness check the router applies,
+  failing the Runtime frame with `RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION`.
+  The mesh now forms and the market maker reaches ready, but full bootstrap
+  still exceeds its readiness budget. Owner requirement: all tests green.
+
+  Root-caused 2026-08-05. It is not a budget problem and not machine load:
+  `reset_market_maker` measured 280762ms under load and 280798ms on an idle box
+  — a 36ms spread, which is a fixed deadline, not slow work. Every earlier stage
+  matches a healthy fresh boot (`reset_wait_hubs` 23.4s vs 20.6s benchmarked).
+  At failure, same-chain depth is fully ready while cross-j has 0 of 6 routes,
+  and `crossj.incomplete_cohort_deferred` is the *only* cross-j routing event in
+  the whole 280s run — there is no `crossj.admission_envelope_dispatch`, so
+  cross-j envelopes are never dispatched even once. Four mechanisms, each
+  behaving exactly as designed, deadlock:
+  1. `runtime/runtime/delivery/dispatch.ts:483` defers an atomic cohort whose
+     sibling is not in the same ready batch, expecting it next frame.
+  2. `runtime/runtime/delivery/pending.ts:609` excludes incomplete atomic units
+     from retry scheduling (`if (!unit.complete) return []`), so if that unit is
+     the only pending output, `nextRetryAt` stays `Infinity` and **no retry is
+     ever scheduled**.
+  3. The MM selector treats the orderId as in flight and never resubmits — and
+     resubmitting would be inert anyway, per the entry below.
+  4. The resulting permanent `pendingRuntimeWork` keeps
+     `hasMarketMakerRuntimeBacklog` true, so the backlog exemption in
+     `assertNotStalled` (`runtime/orchestrator/mm-node-run.ts:1411`) never
+     expires and the 60s stall watchdog never fires. The watchdog is blinded by
+     the very defect it exists to catch, which is why this is 280s of silence
+     rather than a 60s `MARKET_MAKER_BOOTSTRAP_STALLED`.
+
+  Still open: why the sibling leg never joins its cohort. Ruled out — the legs
+  are NOT split across Runtimes. `outputEnvelopeGroupKey` is the target
+  `runtimeId` alone (`dispatch.ts:92`), so a pair addressed to two Runtimes
+  could never complete by construction; but the failing orderIds
+  (`mmx-88dfa2-78e1da-*`, `mmx-2e44e6-f6a3e5-*`) name two entities of the *same*
+  hub, and each hub hosts its two per-jurisdiction entities in one Runtime
+  (H1 `0x25242ed1`, H2 `0x39fb68eb`). Both legs share a target Runtime.
+  Note also that if both legs were merely sitting in the pending set,
+  `getNextNetworkRetryTimestamp` regroups all pending outputs together
+  (`pending.ts:607`) and would pair them into a complete unit. So the live
+  question is narrower: one leg is pending forever while its sibling is never
+  produced, or never reaches the same pending set. Answer it by logging the
+  pending-set contents and orderIds at dispatch time before writing any fix.
+
+  Do NOT close this by raising `--stack-timeout-ms` or by making the shard
+  deadline progress-aware: both only change the wording of the failure.
+- [ ] A cross-j certified command lost in flight is unrecoverable. Once a user
+  Entity has committed `crossJurisdictionAuthorizations[orderId]`, a resubmitted
+  identical intent hits the early return in `authorizeCrossJurisdictionIntent`
+  (`runtime/entity/tx/handlers/cross-j-setup.ts:82`), which returns *without*
+  re-emitting the certified source-user -> source-hub output that the first
+  authorization emitted. So if that one output is dropped, no retry can ever
+  re-issue it: the route is pinned at `intent` forever, and nothing prunes the
+  authorization (its only `delete` is the success path at
+  `runtime/entity/tx/handlers/account-cross-j-followups.ts:425`). The MM
+  bootstrap selector correctly treats such an orderId as in-flight and skips it,
+  which is right — a retry provably cannot advance it — but that means the stall
+  is silent. Decide whether the early return should re-emit, or whether expired
+  authorizations should be swept deterministically. Consensus-critical: the
+  authorization map is in the state root
+  (`runtime/entity/consensus/state-root.ts:65`).
+- [ ] `runtime/runtime/solvency.ts` computes `reserves - collateral == 0`,
+  which is not the conservation law the jurisdiction enforces
+  (`invariant_valueConservation`: reserves + collateral equals minted plus
+  external backing). It cannot see minted supply or backing, so it reports a
+  healthy stack as insolvent. It gates nothing today; decide whether to source
+  the on-chain totals or drop the verdict.
+- [ ] knip reports ~337 unused exports and ~264 unused exported types, only two
+  of them on the public API surface. Deliberately outside the gate: most are
+  exported solely for tests, and deleting them blind removes coverage rather
+  than complexity. Separate test-only exports from genuinely unreachable ones
+  before removing anything; `check:dead-code:report` lists them.
+- [ ] `multi-sig` is the one scenario still red, and it is aspirational rather
+  than gating: the wired suite (`test:scenarios:parallel:isolated`) runs the
+  default seven and is green, while multi-sig only appears under `--set=all`.
+  Its first blocker is fixed - validators of one Entity hold different valid
+  certificate variants of the same committed frame, and the storage guard
+  compared whole links instead of the frame hash, so any multi-validator
+  Entity failed its first history write. Past that it now reaches
+  `RELIABLE_INGRESS_TERMINAL_ORDER_CONFLICT:hash-precommit`, which is the real
+  question: whether multi-validator Entities are expected to work today.
+
+### Model-audit findings resolved — 2026-08-03
+
+Four models audited the core read-only. Applied findings are committed. The six
+items previously parked here are now decided; four turned out to be wrong, which
+is why they were parked rather than applied.
+
+Applied:
+
+- `isLeft` was a second name for `isLeftEntity`. One name, 31 call sites. The
+  frontend also exposed it through the store with no component reading it.
+
+Rejected - do not re-report:
+
+- `HankoCodec.computeXHashForDomain` family is not dead. `check-onchain-hanko-ast.ts`
+  pins its exact function list, requires each to stay `external pure`, and
+  requires each to call `HankoEncoding` exactly once. It is a deliberately
+  published codec surface for off-chain verification parity.
+- `EntityProvider.registerNumberedEntity` is live: four Solidity tests call it.
+- The 17 "unused" Hanko errors in `EntityProvider` are reverted by
+  `HankoVerifier`. EntityProvider declares them so that a caller holding only
+  its ABI can decode a revert that originates in the verifier it delegates to.
+  Deleting them would make those reverts undecodable.
+- `_increaseReserve` / `_decreaseReserve` are not wrappers worth inlining: they
+  have six or more call sites each, so removing them adds code.
+- The entity sort in `getCanonicalAccountKey` (`protocol/dispute/proof-builder.ts`)
+  is load-bearing, not a dead branch. `DisputeHashState` is a local, perspective-
+  dependent view rather than committed Account state, and
+  `proof-builder-dispute-hash` asserts the key is identical "regardless of local
+  left/right orientation". I removed it, the test caught it, and it is restored.
 
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 

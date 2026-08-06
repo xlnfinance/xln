@@ -141,8 +141,6 @@ export {
   toEpAddress,
   isNumberedEntity,
   isLazyEntity,
-  safeParseReplicaKey,
-  safeExtractEntityId,
   XLN_URI_SCHEME,
   DEFAULT_RUNTIME_HOST,
   MAX_NUMBERED_ENTITY,
@@ -246,8 +244,6 @@ export interface SignerDisplayInfo {
 /** Exact financial utility shapes exported by runtime. */
 export type FinancialConstants =
   typeof import('../../account/financial-utils').FINANCIAL_CONSTANTS;
-export type BigIntMathUtils =
-  typeof import('../../account/financial-utils').BigIntMath;
 
 /**
  * Exact browser bundle namespace; no handwritten mirror may drift.

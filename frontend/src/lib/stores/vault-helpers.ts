@@ -41,8 +41,6 @@ export async function waitForCondition(
 
 export const hasRuntimeJurisdictionAddresses = (replica: unknown): boolean => {
   const candidate = replica as {
-    depositoryAddress?: unknown;
-    entityProviderAddress?: unknown;
     contracts?: {
       account?: unknown;
       depository?: unknown;
@@ -51,17 +49,9 @@ export const hasRuntimeJurisdictionAddresses = (replica: unknown): boolean => {
     };
   } | null;
   const depository =
-    typeof candidate?.depositoryAddress === 'string' && candidate.depositoryAddress.length > 0
-      ? candidate.depositoryAddress
-      : typeof candidate?.contracts?.depository === 'string'
-        ? candidate.contracts.depository
-        : '';
+    typeof candidate?.contracts?.depository === 'string' ? candidate.contracts.depository : '';
   const entityProvider =
-    typeof candidate?.entityProviderAddress === 'string' && candidate.entityProviderAddress.length > 0
-      ? candidate.entityProviderAddress
-      : typeof candidate?.contracts?.entityProvider === 'string'
-        ? candidate.contracts.entityProvider
-        : '';
+    typeof candidate?.contracts?.entityProvider === 'string' ? candidate.contracts.entityProvider : '';
   const account = typeof candidate?.contracts?.account === 'string' ? candidate.contracts.account : '';
   const deltaTransformer =
     typeof candidate?.contracts?.deltaTransformer === 'string' ? candidate.contracts.deltaTransformer : '';

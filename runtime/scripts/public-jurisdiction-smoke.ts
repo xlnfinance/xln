@@ -92,8 +92,6 @@ const adapter = await createJAdapter({
       entityProvider: entityProviderAddress,
       deltaTransformer: deltaTransformerAddress,
     },
-    depositoryAddress,
-    entityProviderAddress,
     entityProviderDeploymentBlock: deploymentBlock,
   },
 });

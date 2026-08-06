@@ -389,10 +389,17 @@ const pendingNetworkLane = (output: RoutedEntityInput): string => {
 
 const pendingNetworkDiagnostics = (env: RuntimeReplica): string => {
   const outputs = env.pendingNetworkOutputs ?? [];
-  const visible = outputs.slice(0, 8).map(output =>
-    `${pendingNetworkLane(output)}@signer=${boundedDiagnosticText(output.signerId)},` +
-    `runtime=${boundedDiagnosticText(output.runtimeId)}`
-  );
+  const localReplicaSigners = new Set<string>();
+  for (const replicaKey of env.state.eReplicas.keys()) {
+    localReplicaSigners.add(String(replicaKey).toLowerCase());
+  }
+  const visible = outputs.slice(0, 8).map(output => {
+    const replicaKey = `${String(output.entityId || '').toLowerCase()}:${String(output.signerId || '').toLowerCase()}`;
+    return `${pendingNetworkLane(output)}@entity=${boundedDiagnosticText(output.entityId)},` +
+      `signer=${boundedDiagnosticText(output.signerId)},` +
+      `runtime=${boundedDiagnosticText(output.runtimeId)},` +
+      `hasReplica=${localReplicaSigners.has(replicaKey) ? 'y' : 'n'}`;
+  });
   if (outputs.length > visible.length) visible.push(`+${outputs.length - visible.length} more`);
   return visible.join(';');
 };
@@ -490,6 +497,12 @@ export async function converge(env: RuntimeReplica, maxCycles = 10): Promise<voi
     const pendingInputs = env.runtimeMempool?.entityInputs?.length || 0;
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
+    }
+    // Retained reliable outputs are released by a retry deadline, not by more
+    // ticks. When they are the only thing left, a fixed time step just spins
+    // until the cycle budget runs out; jump to the deadline instead.
+    if (pendingNetwork > 0 && pendingOutputs === 0 && pendingInbox === 0 && pendingInputs === 0) {
+      advanceScenarioToNextNetworkRetry(env);
     }
     for (const [, replica] of env.state.eReplicas) {
       // Check entity-level work (multi-signer consensus)
@@ -605,6 +618,10 @@ const throwScenarioConvergenceTimeout = (
     .sort();
   throw new Error(
     `${label}: not converged after ${maxCycles} cycles; ` +
+    // Own runtimeId, so a lane addressed to this very Runtime is visible as
+    // such: that is delivery to self queued as a network output, which has no
+    // transport in a scenario and can never drain.
+    `self=${String(env.runtimeId ?? 'none').slice(0, 10)},` +
     `outputs=${env.pendingOutputs?.length ?? 0},network=${env.pendingNetworkOutputs?.length ?? 0},` +
     `inbox=${env.networkInbox?.length ?? 0},inputs=${env.runtimeMempool?.entityInputs?.length ?? 0},` +
     `networkLanes=[${pendingNetworkDiagnostics(env)}],entities=[${entityBacklog.join(';')}]`,

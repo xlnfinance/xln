@@ -14,8 +14,8 @@ import type { EntityReplica } from './types';
  * cannot inspect Runtime mempools, WAL handles, transport state, or lifecycle
  * machinery. RuntimeReplica satisfies this contract at the call boundary.
  *
- * The remaining fields are the measured legacy transition surface. Shrink
- * this interface when a dependency becomes an explicit input; never widen it
+ * The remaining fields are the measured transition surface. Shrink this
+ * interface when a dependency becomes an explicit input; never widen it
  * merely to avoid threading a value through the owning composition root.
  */
 export interface EntityRuntimeContext {

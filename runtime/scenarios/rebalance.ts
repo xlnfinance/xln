@@ -27,7 +27,14 @@ import {
 import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta } from '../account/utils';
 import { isLeftEntity } from '../entity/id';
-import { bindScenarioJReplica, ensureJAdapter, getJAdapterMode, registerEntities } from './boot';
+import {
+  bindScenarioJReplica,
+  createJurisdictionConfig,
+  ensureJAdapter,
+  getJAdapterMode,
+  registerEntities,
+  resolveScenarioJurisdictionAddress,
+} from './boot';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(200_000); // $200K
@@ -125,14 +132,12 @@ export async function runRebalanceScenario(): Promise<void> {
   console.log('✅ JAdapter attached + watching');
 
   // Jurisdiction config for entity creation
-  const jurisdictionConfig = {
-    name: jReplicaName,
-    chainId: 31337,
-    address: jMode === 'browservm' ? 'browservm://' : rpcUrl,
-    entityProviderAddress: jadapter.addresses.entityProvider,
-    depositoryAddress: jadapter.addresses.depository,
-    rpc: jMode === 'browservm' ? 'browservm://' : rpcUrl,
-  };
+  const jurisdictionConfig = createJurisdictionConfig(
+    jReplicaName,
+    jadapter.addresses.depository,
+    jadapter.addresses.entityProvider,
+    resolveScenarioJurisdictionAddress(jMode),
+  );
 
   // ══════════════════════════════════════════════════════════════
   // CREATE 5 ENTITIES: Hub, Alice, Bob, Charlie, Dave

@@ -63,8 +63,28 @@ function currentSettlement(giveAmount: bigint, wantAmount: bigint, fillRatio: nu
   return { filledGive, filledWant };
 }
 
+/**
+ * Build the committed shape a real `commitSwapOffer` would write: price and
+ * quantized amounts are always present and always agree with the live amounts.
+ */
+function committedOffer(
+  offer: Omit<SwapOffer, 'priceTicks' | 'quantizedGive' | 'quantizedWant'>,
+): SwapOffer {
+  return {
+    ...offer,
+    priceTicks: computeSwapPriceTicks(
+      offer.giveTokenId,
+      offer.wantTokenId,
+      offer.giveAmount,
+      offer.wantAmount,
+    ),
+    quantizedGive: offer.giveAmount,
+    quantizedWant: offer.wantAmount,
+  };
+}
+
 function makeAccountMachine(offer: SwapOffer): AccountReplica {
-  const heldGiveAmount = offer.quantizedGive ?? offer.giveAmount;
+  const heldGiveAmount = offer.quantizedGive;
   const giveDelta = createDefaultDelta(offer.giveTokenId);
   giveDelta.leftCreditLimit = 10n ** 30n;
   giveDelta.rightCreditLimit = 10n ** 30n;
@@ -357,7 +377,7 @@ describe('price improvement', () => {
       const savedQuoteAmount = limitQuoteAmount - executionQuoteAmount;
       const offerId = 'buy-offer';
 
-      const offer: SwapOffer = {
+      const offer = committedOffer({
         offerId,
         giveTokenId: 1,
         giveAmount: limitQuoteAmount,
@@ -365,9 +385,7 @@ describe('price improvement', () => {
         wantAmount: executionBaseAmount,
         makerIsLeft: true,
         createdHeight: 0,
-        quantizedGive: limitQuoteAmount,
-        quantizedWant: executionBaseAmount,
-      };
+      });
       const accountMachine = makeAccountMachine(offer);
       const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
         type: 'swap_resolve',
@@ -439,7 +457,7 @@ describe('price improvement', () => {
       const gainedQuoteAmount = executionQuoteAmount - limitQuoteAmount;
       const offerId = 'sell-offer';
 
-      const offer: SwapOffer = {
+      const offer = committedOffer({
         offerId,
         giveTokenId: 2,
         giveAmount: executionBaseAmount,
@@ -447,9 +465,7 @@ describe('price improvement', () => {
         wantAmount: limitQuoteAmount,
         makerIsLeft: true,
         createdHeight: 0,
-        quantizedGive: executionBaseAmount,
-        quantizedWant: limitQuoteAmount,
-      };
+      });
       const accountMachine = makeAccountMachine(offer);
       const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
         type: 'swap_resolve',
@@ -477,7 +493,7 @@ describe('price improvement', () => {
       const executionQuoteAmount = ticksLotsToWei(9000n);
       const offerId = 'sell-capacity-offer';
 
-      const offer: SwapOffer = {
+      const offer = committedOffer({
         offerId,
         giveTokenId: 2,
         giveAmount: executionBaseAmount,
@@ -485,9 +501,7 @@ describe('price improvement', () => {
         wantAmount: ticksLotsToWei(8700n),
         makerIsLeft: true,
         createdHeight: 0,
-        quantizedGive: executionBaseAmount,
-        quantizedWant: ticksLotsToWei(8700n),
-      };
+      });
       const accountMachine = makeAccountMachine(offer);
       accountMachine.state.deltas.get(1)!.rightCreditLimit = executionQuoteAmount - 1n;
       const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
@@ -510,7 +524,7 @@ describe('price improvement', () => {
       const offerId = 'legacy-fill-offer';
       const giveAmount = 3n * LOT_SCALE;
       const wantAmount = ticksLotsToWei(8700n);
-      const offer: SwapOffer = {
+      const offer = committedOffer({
         offerId,
         giveTokenId: 2,
         giveAmount,
@@ -518,9 +532,7 @@ describe('price improvement', () => {
         wantAmount,
         makerIsLeft: true,
         createdHeight: 0,
-        quantizedGive: giveAmount,
-        quantizedWant: wantAmount,
-      };
+      });
       const accountMachine = makeAccountMachine(offer);
       const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
         type: 'swap_resolve',
@@ -540,7 +552,7 @@ describe('price improvement', () => {
       const offerId = 'zero-fill-auto-cancel';
       const giveAmount = 3n * LOT_SCALE;
       const wantAmount = ticksLotsToWei(8700n);
-      const offer: SwapOffer = {
+      const offer = committedOffer({
         offerId,
         giveTokenId: 2,
         giveAmount,
@@ -548,9 +560,7 @@ describe('price improvement', () => {
         wantAmount,
         makerIsLeft: true,
         createdHeight: 0,
-        quantizedGive: giveAmount,
-        quantizedWant: wantAmount,
-      };
+      });
       const accountMachine = makeAccountMachine(offer);
       const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
         type: 'swap_resolve',
@@ -573,7 +583,7 @@ describe('price improvement', () => {
       const offerId = 'hold-underflow-offer';
       const giveAmount = 3n * LOT_SCALE;
       const wantAmount = ticksLotsToWei(8700n);
-      const offer: SwapOffer = {
+      const offer = committedOffer({
         offerId,
         giveTokenId: 2,
         giveAmount,
@@ -581,9 +591,7 @@ describe('price improvement', () => {
         wantAmount,
         makerIsLeft: true,
         createdHeight: 0,
-        quantizedGive: giveAmount,
-        quantizedWant: wantAmount,
-      };
+      });
       const accountMachine = makeAccountMachine(offer);
       accountMachine.state.deltas.get(2)!.leftHold = giveAmount - 1n;
       const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
