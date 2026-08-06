@@ -1,6 +1,6 @@
 # React cutover Plan 011 inventory
 
-This document records the implementation and stabilization checkpoint for the atomic React/Vite/TypeScript cutover. It is not production activation evidence. On 5 August 2026 the owner authorized all listed Runtime/Entity/Account work. The canonical React surfaces and the authorized protocol fixes are implemented; unchanged-candidate local-stack, browser, and release gates still require a test process with loopback-listener permission.
+This document records the implementation and stabilization checkpoint for the atomic React/Vite/TypeScript cutover. It is not production activation evidence. On 5 August 2026 the owner authorized all listed Runtime/Entity/Account work. The canonical React surfaces and authorized protocol fixes are implemented. The unchanged-candidate production soundcheck now passes with isolated loopback listeners; activation still requires the CI, release, and browser-console gates described below.
 
 ## Canonical surface ownership
 
@@ -53,8 +53,11 @@ The ops scenario player exposes deterministic playback controls and opens a wall
 - `bun run check` passes on `2fab8468a`: frozen core is unchanged, Runtime TypeScript and all source invariants pass, the cross-j test file is 2,968/3,000 lines, and all four React/Vite/TypeScript production surfaces build.
 - The current stabilization candidate makes RPC replica attachment authority explicit, avoids duplicate market-maker jurisdiction import, publishes startup phase changes synchronously, uses a monotonic storage deadline clock, and accepts only canonical `0/1` zero-progress cancellation evidence.
 - Consecutive expired-order sweeps now detect their deterministic fixed point inside one Entity frame. A real Account/Entity regression verifies the transition, one Account admission, final route state, and every signed event; the 110-hook regression completes in 70–78 ms instead of the observed 28–53 second quadratic replay.
-- Current source checks pass with frozen core unchanged. The changed protocol batch passes the zero-progress cancel, complete cross-j part 3, scheduled-wake, storage deadline/failure, and startup wiring regressions; the new focused tests are part of the release-gate core list.
-- The current CI gate passes frontend type contracts, source checks, release integrity, and 483 of 489 preexisting core tests. Its six failures are all loopback-listener denials (`EPERM`/`EADDRINUSE` on port `0`) in real-RPC or watchtower tests; no protocol assertion failed.
+- Reliable-delivery recovery now parks incomplete restored atomic cohorts without spinning the Runtime, and a partial exact ACK receipt retains the complete atomic sibling cohort until every reliable sibling is receipted. Duplicate reapplication remains idempotent and regenerates the missing receipt.
+- Market-maker startup begins its idempotent commit loop before registration and peer startup. Cross-quote maintenance advances one deterministic directional wave per pass, bounding Account transition size while the existing backlog fence prevents the opposite direction from entering the same bilateral frame.
+- The soundcheck-only snapshot cadence is twelve frames, leaving restore margin without changing the production default. Clone attachment resolves exactly one committed predeployed replica and fails loudly on missing or ambiguous stack identity instead of synthesizing deployment authority.
+- The unchanged candidate production soundcheck passes fresh, clone, and hydrate modes in `.logs/bootstrap-soundcheck/2026-08-06T13-14-21-597Z`. Stable readiness completed in 293,214 ms, 92,810 ms, and 88,288 ms respectively; all three modes produced canonical bootstrap hash `1489ea17f5a70952930b4cd8e4452a12d3a8067690d2b2abe2e8f39ba6ac1e89`.
+- Current source checks pass with frozen core unchanged. The focused reliable-delivery suites pass 46 tests with 306 expectations, and targeted market-maker startup wiring passes 2 tests with 235 expectations; the regressions are included in the release-gate core list.
 
 ## Authorized CI core resolution
 
@@ -71,9 +74,8 @@ The eight runtime-core failures reproduced independently and were resolved only 
 | `disputeStart treats pending cross_pull_close as foldable dispute evidence` | Close-proof route has explicit fill evidence without an exact ratio | Bind the existing quarter-fill claim to exact `1/4` evidence |
 | `cross-j system entity txs reject every raw ingress outside certified runtimeOutput` | Real Runtime admission-order regression | Run the external cross-j trust-boundary check before local target lookup and retain the same fail-fast code |
 
-## Remaining release blockers
+## Release completion sequence
 
-- The exact clone/hydrate soundcheck cannot acquire its kernel-held test-port lease inside the current sandbox. Two elevated retries timed out in permission review, so the optimized candidate has in-process replay evidence but not a completed historical WAL clone.
-- Rerun `bun run gate:ci` with loopback-listener permission, then run `bun run gate:release`. The release gate must include clone/hydrate, payment/user-flow, rebalance, market-maker cross-chain swap, native mobile/desktop/extension, and strict browser-console/screenshot evidence on one unchanged commit.
+- Run `bun run gate:ci` and then `bun run gate:release` with isolated loopback-listener permission on the unchanged candidate. The release gate must include clone/hydrate, payment/user-flow, rebalance, market-maker cross-chain swap, native mobile/desktop/extension, and strict browser-console/screenshot evidence.
 - Inspect the resulting wallet and ops screenshots at iPhone, laptop, and wide-desktop viewports, plus trace/video, Runtime WAL, structural incidents, and WebSocket-size evidence. No live `:8080` Runtime may be stopped, reset, or reused for that verification.
-- Do not mark Plan 011 done, create a non-WIP release commit, push, merge, tag, or activate production before those gates pass.
+- Do not push, merge, tag, or activate production unless every required gate passes on one unchanged candidate and the resulting evidence has been reviewed.

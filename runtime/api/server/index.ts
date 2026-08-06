@@ -1182,6 +1182,22 @@ const loadPredeployedReplica = async (
   }
 };
 
+const findCommittedPredeployedReplica = (
+  env: RuntimeReplica,
+  configured: JAdapterConfig['fromReplica'] | undefined,
+): JAdapterConfig['fromReplica'] | undefined => {
+  if (!configured) return undefined;
+  const configuredRef = getJurisdictionIdentityRef(configured);
+  if (!configuredRef) throw new Error('PREDEPLOYED_JURISDICTION_IDENTITY_MISSING');
+  const matches = [...env.state.jReplicas.values()].filter(
+    replica => getJurisdictionIdentityRef(replica) === configuredRef,
+  );
+  if (matches.length > 1) {
+    throw new Error(`PREDEPLOYED_COMMITTED_JURISDICTION_AMBIGUOUS:${configuredRef}:${matches.length}`);
+  }
+  return matches[0];
+};
+
 const waitForAnvilChain = async (anvilRpc: string): Promise<number> => {
   const maxRetries = 30;
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
@@ -1244,7 +1260,7 @@ const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void>
     const usePredeployedAddresses = process.env['XLN_USE_PREDEPLOYED_ADDRESSES'] === 'true';
     const predeployedJurisdictionKey = String(process.env['XLN_PREDEPLOYED_JURISDICTION_KEY'] || '').trim();
 
-    const fromReplica = await loadPredeployedReplica(
+    const configuredReplica = await loadPredeployedReplica(
       anvilRpc,
       predeployedJurisdictionKey,
       usePredeployedAddresses,
@@ -1252,24 +1268,33 @@ const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void>
     const detectedChainId = await waitForAnvilChain(anvilRpc);
 
     // Ensure fromReplica carries correct chainId (override if stale)
-    if (fromReplica && fromReplica.chainId !== detectedChainId) {
+    if (configuredReplica && configuredReplica.chainId !== detectedChainId) {
       serverLog.warn('anvil.from_replica_chainid_override', {
-        fromReplicaChainId: fromReplica.chainId,
+        fromReplicaChainId: configuredReplica.chainId,
         detectedChainId,
       });
-      fromReplica.chainId = detectedChainId;
+      configuredReplica.chainId = detectedChainId;
     }
 
-    await assertPredeployedStackCode(anvilRpc, fromReplica);
+    // A restored Runtime already proved and committed the full jurisdiction
+    // stack. Reattach from those committed bytes, never from merely matching
+    // operator JSON: accepting different EntityProvider/Account addresses with
+    // the same depository would silently change the trust boundary. Fresh
+    // imports still require the historical deployment-origin proof below.
+    const committedReplica = findCommittedPredeployedReplica(env, configuredReplica);
+    const attachmentReplica = committedReplica ?? configuredReplica;
+    await assertPredeployedStackCode(anvilRpc, attachmentReplica);
 
     const rpcAdapterConfig: JAdapterConfig = {
       mode: 'rpc',
       chainId: detectedChainId,
       rpcUrl: anvilRpc,
     };
-    if (fromReplica) {
-      rpcAdapterConfig.fromReplica = fromReplica;
-      rpcAdapterConfig.replicaAttachmentAuthority = 'deployment-origin-proof';
+    if (attachmentReplica) {
+      rpcAdapterConfig.fromReplica = attachmentReplica;
+      rpcAdapterConfig.replicaAttachmentAuthority = committedReplica
+        ? 'committed-runtime-state'
+        : 'deployment-origin-proof';
     }
     globalJAdapter = await withStartupStepTimeout('createJAdapter(rpc)', createJAdapter(rpcAdapterConfig));
 
@@ -1306,7 +1331,7 @@ const initializeJurisdictionAdapter = async (env: RuntimeReplica): Promise<void>
       );
       if (!compatibility.ok) {
         await deployFreshLocalStack(compatibility.reason);
-      } else if (fromReplica) {
+      } else if (attachmentReplica) {
         serverLog.info('anvil.contracts.use_predeployed');
       } else {
         serverLog.info('anvil.contracts.use_existing');

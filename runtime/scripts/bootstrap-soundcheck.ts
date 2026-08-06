@@ -106,9 +106,12 @@ const runSmoke = async (
         // Soundcheck templates must exercise snapshot + bounded WAL-tail
         // restore. The production cadence stays sparse; using it here makes a
         // small synthetic template replay its entire high-amplification boot
-        // history and turns the mesh SLO into a machine-load race.
+        // history and turns the mesh SLO into a machine-load race. Twelve
+        // leaves deterministic margin below the 30-second mesh SLO even when
+        // the final pre-template snapshot lands just before a burst of frames
+        // without introducing a second bootstrap-only snapshot path.
         XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES:
-          process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] || '32',
+          process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] || '12',
         ...extraEnv,
       },
       stdio: 'inherit',

@@ -1,4 +1,3 @@
-import { replaceState } from '$app/navigation';
 import { get } from '../../../packages/client-core/store';
 import type { RuntimeHandle } from '$lib/stores/runtimeControllerStore';
 import {
@@ -209,11 +208,7 @@ export function stripRemoteRuntimeParamsFromHistory(): void {
     }
   }
   const nextPath = `${url.pathname}${url.search}${url.hash}`;
-  try {
-    replaceState(nextPath, {});
-  } catch {
-    window.history.replaceState(window.history.state, '', nextPath);
-  }
+  window.history.replaceState(window.history.state, '', nextPath);
 }
 
 function waitForRuntimeConnected(timeoutMs = PROJECTION_RUNTIME_CONNECT_TIMEOUT_MS): Promise<RuntimeHandle> {

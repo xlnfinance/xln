@@ -63,6 +63,18 @@ const readAvailability = () => {
       runtimeReady: handle.status === 'connected',
     };
   }
+  if (bootingRemoteRuntime()) {
+    // The boot machine checks availability before initializeRuntime(). A stored
+    // remote preference is complete boot intent, even before its adapter has
+    // published a handle; otherwise the empty local vault incorrectly wins and
+    // remote links fall through to wallet onboarding.
+    return {
+      activeRuntimeId: null,
+      runtimeCount: 1,
+      activeRuntimeUnlocked: true,
+      runtimeReady: false,
+    };
+  }
   const activeRuntime = vault.activeRuntimeId ? vault.runtimes[vault.activeRuntimeId] : null;
   return {
     activeRuntimeId: vault.activeRuntimeId,

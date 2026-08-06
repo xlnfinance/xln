@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type FormEvent, useState } from 'react';
 
 import type { WalletBootPhase } from '../../../packages/runtime-client/wallet-boot-machine';
 import { parseStorageSchemaMismatch } from '$lib/utils/storageSchemaRecovery';
@@ -46,6 +46,52 @@ export const WalletInactiveTab = ({ onClaim }: Readonly<{ onClaim: () => Promise
       <button data-testid="inactive-tab-acquire" type="button" disabled={pending} onClick={() => void claim()}>
         {pending ? 'Acquiring…' : 'Use wallet in this tab'}
       </button>
+    </main>
+  );
+};
+
+type RemoteRuntimeLoginProps = Readonly<{
+  hostLabel: string;
+  onConnect: (authKey: string) => Promise<void>;
+}>;
+
+export const WalletRemoteRuntimeLogin = ({ hostLabel, onConnect }: RemoteRuntimeLoginProps) => {
+  const [authKey, setAuthKey] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      await onConnect(authKey.trim());
+    } catch (connectError) {
+      setError(walletErrorText(connectError));
+      setPending(false);
+    }
+  };
+  return (
+    <main className="wallet-state" data-testid="remote-runtime-login-screen">
+      <div className="wallet-state-mark" aria-hidden="true">x</div>
+      <p className="wallet-eyebrow">remote runtime</p>
+      <h1>Authorize this runtime.</h1>
+      <p>The capability stays in this browser session and is checked by {hostLabel} before any command is accepted.</p>
+      <form className="wallet-remote-login" onSubmit={event => void submit(event)}>
+        <label htmlFor="remote-runtime-capability">Admin capability</label>
+        <input
+          id="remote-runtime-capability"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="xlnra1..."
+          value={authKey}
+          onChange={event => setAuthKey(event.target.value)}
+        />
+        {error && <p className="wallet-inline-error" role="alert">{error}</p>}
+        <button type="submit" disabled={pending || !authKey.trim()}>
+          {pending ? 'Connecting…' : 'Connect remote runtime'}
+        </button>
+      </form>
     </main>
   );
 };

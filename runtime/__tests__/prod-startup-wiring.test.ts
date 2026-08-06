@@ -585,6 +585,12 @@ describe('production startup wiring', () => {
     expect(standaloneServer).toContain(
       'entityProviderDeploymentBlock: Number(predeployedConfig.entityProviderDeploymentBlock)',
     );
+    expect(standaloneServer).toContain(
+      'const committedReplica = findCommittedPredeployedReplica(env, configuredReplica);',
+    );
+    expect(standaloneServer).toContain('rpcAdapterConfig.fromReplica = attachmentReplica;');
+    expect(standaloneServer).toContain("? 'committed-runtime-state'");
+    expect(standaloneServer).toContain(": 'deployment-origin-proof';");
     expect(standaloneServer).toContain('watcherConfirmationDepth: requireWatcherConfirmationDepth(adapter)');
     expect(standaloneServer).toContain("serverLog.error('anvil.predeployed.load_failed'");
     expect(standaloneServer).toContain('throw error;');
@@ -1038,13 +1044,14 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('if (state.phase === previousPhase) return;');
     expect(mmNode).toContain('rebuildCachedHealthResponseJson();');
     expect(mmNode).toContain("state.phase = 'bootstrap-cross';");
-    expect(mmNode).toContain("if (input.mode === 'steady') return true;");
+    expect(mmNode).toContain('One directional wave per pass bounds the Account transition');
+    expect(mmNode).toContain('hasCrossAccountBacklog(), so the opposite direction cannot accumulate');
     expect(mmNode).toContain('input.state.bootstrapCrossCursor = nextCursor;');
     expect(mmNode).toContain("if (mode === 'steady') state.steadyCrossCursor = selection.nextCursor;");
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
     expect(mmNode).toContain('sourceHubs,');
     expect(mmNode).toContain('targetHubs,');
-    expect(mmNode).toContain("if (input.mode === 'steady') return true;");
+    expect(mmNode).not.toContain("if (input.mode === 'steady') return true;");
     expect(mmNode).toContain(
       'allSameDepthReady(readVisibleHubProfiles(deps.env, true)) && isMarketMakerDepthComplete(health)',
     );
@@ -1337,9 +1344,7 @@ describe('production startup wiring', () => {
 
     const mmSource = readMarketMakerNodeSource();
     const mmInitialization = mmSource.indexOf('const initializeMarketMakerContexts = async (');
-    const mmLoopStart = mmSource.indexOf('startRuntimeLoop(env, {');
     const mmServicesStart = mmSource.indexOf('const startMarketMakerServices = async (');
-    const mmServicesCall = mmSource.indexOf('await startMarketMakerServices(context)', mmLoopStart);
     const mmPrimaryContext = mmSource.indexOf(
       'const primaryContext = await createMarketMakerEntityContext(',
       mmInitialization,
@@ -1356,6 +1361,8 @@ describe('production startup wiring', () => {
       'state.tokenIdsByContext = await initializeMarketMakerContexts({',
       mmServicesStart,
     );
+    const mmLoopStart = mmSource.indexOf('startMarketMakerCommitLoop(env);', mmInitializationCall);
+    const mmServicesCall = mmSource.indexOf('await startMarketMakerServices(context)', mmLoopStart);
     const mmResume = mmSource.indexOf(
       'await ensurePendingNumberedRegistrationsResumed(env);',
       mmInitializationCall,
@@ -1371,11 +1378,14 @@ describe('production startup wiring', () => {
     expect(mmLoopStart).toBeGreaterThan(0);
     expect(mmServicesCall).toBeGreaterThan(mmLoopStart);
     expect(mmInitializationCall).toBeGreaterThan(mmServicesStart);
+    expect(mmLoopStart).toBeGreaterThan(mmInitializationCall);
     expect(mmResume).toBeGreaterThan(mmInitializationCall);
+    expect(mmResume).toBeGreaterThan(mmLoopStart);
     expect(mmIngressReady).toBeGreaterThan(mmResume);
     expect(mmP2PStart).toBeGreaterThan(mmInitializationCall);
     expect(mmP2PStart).toBeGreaterThan(mmIngressReady);
     expect(mmP2PReady).toBeGreaterThan(mmP2PStart);
+    expect(mmSource).toContain('if (env.state.jReplicas.size === 0) startMarketMakerCommitLoop(env);');
     expect(mmSource).toContain("context.emit('phase', { phase });");
     expect(mmSource).toContain("context.emit('active-entity', { entityId });");
 
@@ -1749,6 +1759,7 @@ describe('production startup wiring', () => {
     expect(orchestrator.match(/spawn\(BUN_EXECUTABLE/g)?.length).toBe(2);
     expect(orchestrator).not.toContain("spawn('bun'");
     expect(soundcheck).not.toContain('XLN_LOCAL_PROD_SMOKE_PORT_BASE');
+    expect(soundcheck).toContain("process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] || '12'");
     expect(benchmark).not.toContain('XLN_LOCAL_PROD_SMOKE_PORT_BASE');
     expect(smoke).toContain("schema: 'xln-local-prod-bootstrap-benchmark-v1'");
     expect(smoke).toContain("schema: 'xln-bootstrap-debug-event-v1'");
@@ -2274,7 +2285,8 @@ describe('production startup wiring', () => {
     expect(quotePipeline).toContain('const enqueued = await maintainMarketMakerCrossQuotes(');
     expect(quotePipeline).toContain('job.sourceHubs,');
     expect(quotePipeline).toContain('job.targetHubs,');
-    expect(quotePipeline).toContain("if (input.mode === 'steady') return true;");
+    expect(quotePipeline).toContain('One directional wave per pass bounds the Account transition');
+    expect(quotePipeline).not.toContain("if (input.mode === 'steady') return true;");
     expect(meshCommon).toContain(
       'const queuedEntityTxsFor = (env: RuntimeReplica, targetEntityId: string): EntityTx[] => {',
     );

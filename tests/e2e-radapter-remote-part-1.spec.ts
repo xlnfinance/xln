@@ -777,23 +777,17 @@ test('remote /app opens an existing hub runtime through radapter', { tag: '@func
   expect(snapshot.debugRootAdapterConnected).toBe(true);
   expect(snapshot.debugRootAdapterAuthLevel).toBe('admin');
   await expect(page.getByTestId('context-current')).not.toContainText(/no runtime selected/i);
-  await expect(page.getByTestId('context-current')).toContainText(/\bH1\b/);
-  await expect(page.getByTestId('account-list-count')).toContainText(/\b\d+ Accounts\b/);
-  await expect(page.locator('[data-testid="account-list-wrapper"]')).toContainText(/0x[0-9a-f]{64}/i);
+  await expect(page.getByTestId('context-current').locator('option:checked')).toContainText(/\bH1\b/);
+  await page.getByTestId('wallet-nav-accounts').click();
+  const accountWorkspace = page.getByTestId('wallet-accounts-overview');
+  await expect(accountWorkspace).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(accountWorkspace).toContainText(h1);
+  await expect(page.getByTestId('wallet-account-row').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('wallet-account-row').first()).toHaveAttribute('data-counterparty-id', /^0x[0-9a-f]{64}$/i);
 
-  await page.getByTestId('context-current').click();
-  const runtimeRows = page.getByTestId('context-entity-row');
-  await expect(runtimeRows.filter({ hasText: /\bH1\b/ }).first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await page.keyboard.press('Escape');
-  const accountPreviews = page.getByTestId('account-preview');
-  await expect(accountPreviews.filter({ hasText: /\bH2\b/ }).first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(accountPreviews.filter({ hasText: /\bH3\b/ }).first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-
-  await page.getByTestId('account-workspace-tab-history').first().click();
-  await expect(page.locator('.settlement-panel')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.getByTestId('entity-history-panel').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.getByTestId('entity-history-event').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.locator('.settlement-panel')).not.toContainText('Settlement history requires a runtime frame');
+  await page.getByTestId('wallet-nav-activity').click();
+  await expect(page.getByTestId('wallet-activity-history')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('wallet-activity-history')).not.toContainText('History read failed');
 });
 
 test(
@@ -1845,7 +1839,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
   });
 
   await page.goto(`${APP_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('body')).toContainText('xln health admin', { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByRole('heading', { name: 'Health', exact: true })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.locator('body')).toContainText('Runtime Events', { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.locator('body')).toContainText('Runtime Projection Entities', { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.locator('body')).not.toContainText('Debug Events');

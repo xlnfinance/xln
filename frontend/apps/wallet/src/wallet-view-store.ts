@@ -1,8 +1,11 @@
 import { createExternalStore } from '../../../packages/client-core/external-store';
+import { runtimesExternalStore } from '$lib/stores/runtimeStore';
+import { runtimeControllerHandleExternalStore } from '$lib/stores/runtimeControllerStore';
 import { runtimesStateExternalStore } from '$lib/stores/vaultStore';
 
 export type WalletRuntimeSummary = Readonly<{
   id: string;
+  type: 'local' | 'remote';
   label: string;
   createdAt: number;
   signerCount: number;
@@ -18,22 +21,30 @@ export type WalletViewSnapshot = Readonly<{
 
 const projectWalletView = (): WalletViewSnapshot => {
   const vault = runtimesStateExternalStore.getSnapshot();
-  const runtimes = Object.values(vault.runtimes)
-    .map(runtime => {
-      const activeSigner = runtime.signers[runtime.activeSignerIndex] ?? null;
+  const controller = runtimeControllerHandleExternalStore.getSnapshot();
+  const runtimeMap = runtimesExternalStore.getSnapshot();
+  const runtimes = [...runtimeMap.values()]
+    .map((runtime, index) => {
+      const local = runtime.type === 'local' ? vault.runtimes[runtime.id] ?? null : null;
+      const activeSigner = local?.signers[local.activeSignerIndex] ?? null;
+      const primaryHub = runtime.hubEntities?.[0] ?? null;
       return Object.freeze({
         id: runtime.id,
+        type: runtime.type,
         label: runtime.label,
-        createdAt: runtime.createdAt,
-        signerCount: runtime.signers.length,
-        unlocked: Boolean(runtime.seed),
-        entityId: String(activeSigner?.entityId || '').trim().toLowerCase() || null,
+        createdAt: local?.createdAt ?? runtime.lastSynced ?? index,
+        signerCount: local?.signers.length ?? 0,
+        unlocked: runtime.type === 'remote' || Boolean(local?.seed),
+        entityId: String(activeSigner?.entityId || runtime.hubEntityId || primaryHub?.entityId || '').trim().toLowerCase() || null,
         signerId: String(activeSigner?.address || '').trim().toLowerCase() || null,
       });
     })
     .toSorted((left, right) => left.createdAt - right.createdAt);
   return Object.freeze({
-    activeRuntimeId: vault.activeRuntimeId,
+    activeRuntimeId:
+      (runtimeMap.has(controller.pendingRuntimeId) ? controller.pendingRuntimeId : null)
+      ?? (runtimeMap.has(controller.runtimeId) ? controller.runtimeId : null)
+      ?? (vault.activeRuntimeId && runtimeMap.has(vault.activeRuntimeId) ? vault.activeRuntimeId : null),
     runtimes: Object.freeze(runtimes),
   });
 };
@@ -41,6 +52,8 @@ const projectWalletView = (): WalletViewSnapshot => {
 const walletViewBinding = createExternalStore(projectWalletView());
 export const walletViewExternalStore = walletViewBinding.store;
 
-runtimesStateExternalStore.subscribe(() => {
-  walletViewBinding.controller.set(projectWalletView());
-});
+const publishWalletView = (): void => walletViewBinding.controller.set(projectWalletView());
+
+runtimesStateExternalStore.subscribe(publishWalletView);
+runtimesExternalStore.subscribe(publishWalletView);
+runtimeControllerHandleExternalStore.subscribe(publishWalletView);

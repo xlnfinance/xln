@@ -58,7 +58,7 @@ export const WalletShell = (props: WalletShellProps) => {
   const [error, setError] = useState<string | null>(null);
   const active = props.wallet.runtimes.find(runtime => runtime.id === props.wallet.activeRuntimeId) ?? null;
   const selectedIdentity = resolveWalletShellIdentity(active, accountState.entity);
-  const localEntities = resolveWalletShellEntities(active?.id ?? null, accountState.directory);
+  const localEntities = resolveWalletShellEntities(active?.id ?? accountState.entity?.runtimeId ?? null, accountState.directory);
   const selectSection = (next: WalletSection, button: HTMLButtonElement): void => {
     setSection(next);
     if (window.matchMedia('(max-width: 760px)').matches) {
@@ -138,7 +138,7 @@ export const WalletShell = (props: WalletShellProps) => {
         {error && <p className="wallet-inline-error" role="alert">{error}</p>}
         {section === 'overview' ? (
           <section className="wallet-overview">
-            <p className="wallet-eyebrow">active local runtime</p>
+            <p className="wallet-eyebrow">active {active?.type ?? 'local'} runtime</p>
             <h1>{active?.label ?? 'Wallet'}</h1>
             <p className="wallet-runtime-id">{active ? shortId(active.id) : 'No runtime selected'}</p>
             <div className="wallet-balance-line">
@@ -150,7 +150,7 @@ export const WalletShell = (props: WalletShellProps) => {
               <div><dt>Local runtimes</dt><dd>{props.wallet.runtimes.length}</dd></div>
               <div><dt>Vault</dt><dd>{active?.unlocked ? 'Unlocked' : 'Locked'}</dd></div>
             </dl>
-            {active && (
+            {active?.type === 'local' && (
               <button className="wallet-button-secondary" type="button" disabled={pending !== null} onClick={() => void run('lock', () => props.onLockRuntime(active.id))}>
                 {pending === 'lock' ? 'Locking…' : 'Lock this runtime'}
               </button>

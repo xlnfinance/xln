@@ -13,6 +13,7 @@ import {
 } from './runtimeControllerStore';
 import { errorLog } from './errorLogStore';
 import { runtimeQueryClient } from './runtimeQueryClient';
+import { registerDebugSurface } from '$lib/utils/debugSurface';
 
 export type RuntimeView = {
   runtimeId: string;
@@ -334,6 +335,8 @@ const clearHeightRefreshRetry = (): void => {
 };
 
 export const runtimeView = writable<RuntimeView>(emptyRuntimeView());
+
+registerDebugSurface('view', () => get(runtimeView), { enumerable: true });
 
 export const resetRuntimeView = (): void => {
   runtimeViewRefreshId += 1;

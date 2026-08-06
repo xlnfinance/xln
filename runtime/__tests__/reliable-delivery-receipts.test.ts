@@ -11,6 +11,7 @@ import {
   applyReliableDeliveryReceipts,
   captureReliableReceiptSenderCheckpoint,
   commitReliableIngress,
+  createReliableDeliveryReceipt,
   finalizeReliableIngressCommit,
   getReliableDeliveryReceiptValidationError,
   registerReliableIngress,
@@ -538,6 +539,43 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(registerReliableIngress(receiver, sender.runtimeId!, bundledSuccessor, {
       allowContiguousPendingAccountAck: true,
     }).kind).toBe('pending');
+  });
+
+  test('partial atomic ACK receipt keeps both siblings until the cohort is fully receipted', () => {
+    const sender = runtime('reliable-cross-j-partial-receipt-sender');
+    const receiver = runtime('reliable-cross-j-partial-receipt-receiver');
+    const pair = { phase: 'ack' as const, pairKey: 'partial-receipt-pair' };
+    const left = {
+      ...accountAckOutput(receiver.runtimeId!, 6),
+      atomicCrossJurisdictionPair: pair,
+    };
+    const right = {
+      ...accountAckOutput(receiver.runtimeId!, 10),
+      entityId: entityId('b3'),
+      signerId: signerId('b4'),
+      atomicCrossJurisdictionPair: pair,
+    };
+    right.entityTxs![0] = {
+      type: 'accountInput',
+      data: {
+        kind: 'ack',
+        fromEntityId: entityId('d3'),
+        toEntityId: entityId('b3'),
+        ack: { height: 10, frameHash: '0xaccount-frame-10', frameHanko: '0xhanko-10' },
+      },
+    } as never;
+    sender.pendingNetworkOutputs = [left, right];
+    const leftIdentity = getReliableOutputIdentity(left);
+    const rightIdentity = getReliableOutputIdentity(right);
+    if (!leftIdentity || !rightIdentity) throw new Error('TEST_ATOMIC_ACK_IDENTITY_MISSING');
+
+    const leftReceipt = createReliableDeliveryReceipt(receiver, leftIdentity, 'exact');
+    expect(applyReliableDeliveryReceipts(sender, [leftReceipt])).toEqual({ removed: 0 });
+    expect(sender.pendingNetworkOutputs).toEqual([left, right]);
+
+    const rightReceipt = createReliableDeliveryReceipt(receiver, rightIdentity, 'exact');
+    expect(applyReliableDeliveryReceipts(sender, [rightReceipt])).toEqual({ removed: 2 });
+    expect(sender.pendingNetworkOutputs).toEqual([]);
   });
 
   test('committing terminal Account ACK H+1 also receipts a queued stale ACK H', () => {

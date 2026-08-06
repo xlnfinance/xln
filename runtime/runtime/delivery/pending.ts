@@ -609,11 +609,6 @@ export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeO
   const pending = bindResolvedPendingRuntimeIds(env, env.pendingNetworkOutputs ?? [], deps);
   if (pending.length === 0) return null;
   const meta = getDeferredNetworkMeta(env, deps);
-  if (
-    hasRestoredReliableOutputsDue(env) &&
-    pending.some(output => getReliableOutputIdentity(output) !== null)
-  )
-    return 0;
   let nextRetryAt = Infinity;
   const blockedUntilByReliableLane = new Map<string, number>();
   const retryScheduledOutputs = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending)).flatMap(unit => {
@@ -626,6 +621,17 @@ export const getNextNetworkRetryTimestamp = (env: RuntimeReplica, deps: RuntimeO
     // splitter correctly kept the whole envelope in its waiting set.
     return reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
   });
+  // Restore wakes only a deliverable reliable lane head. An incomplete atomic
+  // cohort can legitimately persist after its already-receipted siblings are
+  // pruned; treating its remaining ACK as immediately due makes the Runtime
+  // loop spin forever because the atomic splitter must keep it parked. When a
+  // missing sibling later arrives, the completed cohort enters this scheduled
+  // set and receives the intended immediate post-restore attempt.
+  if (
+    hasRestoredReliableOutputsDue(env) &&
+    retryScheduledOutputs.some(output => getReliableOutputIdentity(output) !== null)
+  )
+    return 0;
   for (const output of retryScheduledOutputs) {
     const retry = meta.get(buildRouteOutputKey(output));
     const ownRetryAt = retry?.nextRetryAt ?? 0;
@@ -876,10 +882,19 @@ export const pruneReceiptedReliableOutputs = (
       continue;
     }
     const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
-    if (unit.atomic && reliableOutputs.length > 0 && reliableOutputs.every(isReceipted)) {
-      for (const output of unit.outputs) {
-        env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+    if (unit.atomic && reliableOutputs.length > 0) {
+      if (reliableOutputs.every(isReceipted)) {
+        for (const output of unit.outputs) {
+          env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+        }
+        continue;
       }
+      // A receipt for one leg proves only that leg committed. Pruning it here
+      // destroys the two-leg cohort, so the unreceipted sibling can never be
+      // retried atomically and its older lane height can block every later ACK.
+      // Keep the entire cohort until all reliable legs are receipted. Replayed
+      // committed legs are idempotent and regenerate their durable receipt.
+      retained.push(...unit.outputs);
       continue;
     }
     for (const output of unit.outputs) {

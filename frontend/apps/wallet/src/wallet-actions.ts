@@ -5,6 +5,7 @@ import {
   type WalletOnboardingInput,
 } from '../../../packages/runtime-client/wallet-onboarding';
 import { settingsOperations } from '$lib/stores/settingsStore';
+import { runtimeOperations, runtimesExternalStore } from '$lib/stores/runtimeStore';
 import { vaultOperations } from '$lib/stores/vaultStore';
 import type { ThemeName } from '$lib/types/ui';
 import { walletBootController } from './wallet-controller';
@@ -41,6 +42,14 @@ export const lockWalletRuntime = async (runtimeId: string): Promise<void> => {
 };
 
 export const selectWalletRuntime = async (runtimeId: string): Promise<void> => {
+  const runtime = runtimesExternalStore.getSnapshot().get(runtimeId);
+  if (runtime?.type === 'remote') {
+    const selected = await runtimeOperations.selectRuntime(runtimeId);
+    if (!selected) throw new Error('RUNTIME_SELECTION_REJECTED');
+    walletBootController.reconcile();
+    await walletAccountStoreController.showActiveEntity();
+    return;
+  }
   const selected = await vaultOperations.selectRuntime(runtimeId);
   if (!selected) throw new Error('RUNTIME_SELECTION_REJECTED');
   await walletBootController.activateRuntime();

@@ -1872,7 +1872,11 @@ const maintainSelectedCrossQuotes = async (input: SelectedCrossQuoteInput): Prom
       if (input.mode === 'bootstrap') input.state.bootstrapCrossCursor = nextCursor;
       if (input.mode === 'steady') input.state.steadyCrossCursor = nextCursor;
       await yieldMarketMakerApi();
-      if (input.mode === 'steady') return true;
+      // One directional wave per pass bounds the Account transition that the
+      // peer must certify. The next bootstrap pass is fenced by
+      // hasCrossAccountBacklog(), so the opposite direction cannot accumulate
+      // into the same bilateral frame and starve the node API while reducing.
+      return true;
     }
     await yieldMarketMakerApi();
   }
@@ -2053,6 +2057,20 @@ type StartedMarketMakerServices = {
   primaryContext: MarketMakerEntityContext;
 };
 
+const startMarketMakerCommitLoop = (env: RuntimeReplica): void => {
+  startRuntimeLoop(env, {
+    tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
+    maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
+    maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+    onFatal: async payload => {
+      await reportManagedChildFatal({
+        runtimeId: String(env.runtimeId || ''),
+        ...payload,
+      });
+    },
+  });
+};
+
 const startMarketMakerServices = async (context: MarketMakerNodeContext): Promise<StartedMarketMakerServices> => {
   const { env, state, ingressReceipts, health } = context;
   const runtimeInputStatusUrl = (id: string): string => `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
@@ -2157,6 +2175,12 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
   state.phase = 'j-catchup';
   startJurisdictionWatchers(env);
   const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
+  // Restore-time pending work can contain large cross-j batches. Starting the
+  // background loop before the bounded RPC bootstrap reads lets that work
+  // monopolize the event loop and starve token-catalog initialization. Match
+  // the hub startup boundary: finish local context + J catch-up first, then
+  // start the canonical commit loop before registration resume and P2P ingress.
+  startMarketMakerCommitLoop(env);
   await ensurePendingNumberedRegistrationsResumed(env);
   state.externalIngressReady = true;
   nodeLog.info('startup.j_catchup_ready', {
@@ -2372,20 +2396,11 @@ export const runMarketMakerNode = async (): Promise<void> => {
     context.ingressReceipts.observeRuntimeInput(height, runtimeInput);
   });
   configureMarketMakerRuntimeLogging(env);
-  // Bootstrap the local state machine before exposing this runtime to remote
-  // entity_input delivery. Persisted hub routes can send immediately when P2P
-  // connects, so every advertised MM entity must already exist at that point.
-  startRuntimeLoop(env, {
-    tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
-    maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
-    maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
-    onFatal: async payload => {
-      await reportManagedChildFatal({
-        runtimeId: String(env.runtimeId || ''),
-        ...payload,
-      });
-    },
-  });
+  // A fresh Runtime needs its commit loop to apply the first jurisdiction
+  // import requested during context initialization. A restored Runtime already
+  // has committed jurisdiction state, so defer its idempotent loop start until
+  // bounded bootstrap reads and J catch-up finish above.
+  if (env.state.jReplicas.size === 0) startMarketMakerCommitLoop(env);
   nodeLog.info('startup phase', { phase: state.phase });
   emitBootstrapDebugEvent('startup', { phase: state.phase });
   const { server, httpDrain, primaryContext: primaryMmContext } = await startMarketMakerServices(context);
