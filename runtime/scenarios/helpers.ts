@@ -605,6 +605,10 @@ const throwScenarioConvergenceTimeout = (
     .sort();
   throw new Error(
     `${label}: not converged after ${maxCycles} cycles; ` +
+    // Own runtimeId, so a lane addressed to this very Runtime is visible as
+    // such: that is delivery to self queued as a network output, which has no
+    // transport in a scenario and can never drain.
+    `self=${String(env.runtimeId ?? 'none').slice(0, 10)},` +
     `outputs=${env.pendingOutputs?.length ?? 0},network=${env.pendingNetworkOutputs?.length ?? 0},` +
     `inbox=${env.networkInbox?.length ?? 0},inputs=${env.runtimeMempool?.entityInputs?.length ?? 0},` +
     `networkLanes=[${pendingNetworkDiagnostics(env)}],entities=[${entityBacklog.join(';')}]`,
