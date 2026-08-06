@@ -389,10 +389,17 @@ const pendingNetworkLane = (output: RoutedEntityInput): string => {
 
 const pendingNetworkDiagnostics = (env: RuntimeReplica): string => {
   const outputs = env.pendingNetworkOutputs ?? [];
-  const visible = outputs.slice(0, 8).map(output =>
-    `${pendingNetworkLane(output)}@signer=${boundedDiagnosticText(output.signerId)},` +
-    `runtime=${boundedDiagnosticText(output.runtimeId)}`
-  );
+  const localReplicaSigners = new Set<string>();
+  for (const replicaKey of env.state.eReplicas.keys()) {
+    localReplicaSigners.add(String(replicaKey).toLowerCase());
+  }
+  const visible = outputs.slice(0, 8).map(output => {
+    const replicaKey = `${String(output.entityId || '').toLowerCase()}:${String(output.signerId || '').toLowerCase()}`;
+    return `${pendingNetworkLane(output)}@entity=${boundedDiagnosticText(output.entityId)},` +
+      `signer=${boundedDiagnosticText(output.signerId)},` +
+      `runtime=${boundedDiagnosticText(output.runtimeId)},` +
+      `hasReplica=${localReplicaSigners.has(replicaKey) ? 'y' : 'n'}`;
+  });
   if (outputs.length > visible.length) visible.push(`+${outputs.length - visible.length} more`);
   return visible.join(';');
 };
