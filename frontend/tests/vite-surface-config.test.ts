@@ -46,6 +46,7 @@ describe('canonical Vite surface contract', () => {
     expect(Object.keys(all.inputs)).toHaveLength(pageRoutes.length);
     expect(source).toContain("attrs: { href: devHtmlBase(context.filename) }");
     expect(source).toContain("canonicalRoutePlugin(contract, command === 'serve')");
+    expect(source).toContain("response.end('RADAPTER_QUERY_PARAMETERS_FORBIDDEN')");
   });
 
   test('rejects unknown surface selectors instead of choosing a fallback', () => {

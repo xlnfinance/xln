@@ -12,11 +12,13 @@ import {
   sendEntityInputWithRouting as sendEntityInputWithRoutingRaw,
   splitPendingOutputsByRetryWindow,
 } from '../runtime/output-routing';
+import { cloneRoutedOutputWithCachedIdentity } from '../runtime/delivery/identity';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../protocol/payments/delivery-result';
 import type { DeliverableEntityInput, RuntimeReplica, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import type { EntityLeaderTimeoutVote } from '../entity/types';
 import { getWallClockMs } from '../infra/time';
 import { deriveSignerAddressSync } from '../account/crypto';
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 
 const withRuntimeOwner = (env: RuntimeReplica): RuntimeReplica => {
   const seed = `runtime-output-routing:${String(env.runtimeId || 'anonymous')}`;
@@ -362,6 +364,37 @@ describe('runtime output routing', () => {
     caseDuplicate.hashPrecommits?.set(`0x${voter.slice(2).toUpperCase()}`, ['0xsig-a']);
     expect(() => mergeRoutedEntityOutput(output('0xsig-a'), caseDuplicate))
       .toThrow('ROUTE_PRECOMMIT_DUPLICATE_SIGNER');
+  });
+
+  test('invalidates a cached reliable identity when richer precommit evidence is merged', () => {
+    const base = {
+      runtimeId: runtimeId('7a'),
+      entityId: entityId('7b'),
+      signerId: runtimeId('7c'),
+      entityTxs: [],
+      hashPrecommitFrame: { height: 7, frameHash: '0xframe-7' },
+    } satisfies RoutedEntityInput;
+    const firstVoter = runtimeId('7d');
+    const secondVoter = runtimeId('7e');
+    const cached = cloneRoutedOutputWithCachedIdentity({
+      ...base,
+      hashPrecommits: new Map([[firstVoter, ['0xsig-a']]]),
+    });
+    const before = getReliableOutputIdentity(cached)!;
+    expect(() => encodeCanonicalConsensusValue(cached)).not.toThrow();
+
+    mergeRoutedEntityOutput(cached, {
+      ...base,
+      hashPrecommits: new Map([
+        [firstVoter, ['0xsig-a']],
+        [secondVoter, ['0xsig-b']],
+      ]),
+    });
+
+    const after = getReliableOutputIdentity(cached)!;
+    expect(before.variantOrder).toBe(1);
+    expect(after.variantOrder).toBe(2);
+    expect(after.evidenceDigest).not.toBe(before.evidenceDigest);
   });
 
   test('backs off retryable envelopes without treating them as fatal', () => {

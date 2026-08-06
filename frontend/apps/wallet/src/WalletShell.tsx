@@ -8,7 +8,17 @@ import { WalletAccountsWorkspace, type WalletAccountSection } from './features/a
 import type { WalletEntityAccountsView } from './features/accounts/account-view-model';
 import { walletAccountExternalStore, type WalletDirectoryEntity } from './features/accounts/wallet-account-store';
 
-type WalletSection = 'overview' | 'settings' | WalletAccountSection;
+export type WalletSection = 'overview' | 'settings' | WalletAccountSection;
+
+const walletSections = new Set<WalletSection>([
+  'overview', 'accounts', 'pay', 'receive', 'move', 'lending', 'settlement', 'swap', 'activity', 'settings',
+]);
+
+export const resolveWalletSectionFromHash = (hash: string): WalletSection => {
+  if (hash.startsWith('#pay/')) return 'pay';
+  const section = hash.startsWith('#') ? hash.slice(1) : hash;
+  return walletSections.has(section as WalletSection) ? section as WalletSection : 'overview';
+};
 
 export type WalletShellProps = Readonly<{
   wallet: WalletViewSnapshot;
@@ -51,7 +61,7 @@ export const resolveWalletShellEntities = (
 
 export const WalletShell = (props: WalletShellProps) => {
   const accountState = useExternalStore(walletAccountExternalStore);
-  const initialSection: WalletSection = typeof window !== 'undefined' && window.location.hash.startsWith('#pay/') ? 'pay' : 'overview';
+  const initialSection = resolveWalletSectionFromHash(typeof window === 'undefined' ? '' : window.location.hash);
   const [section, setSection] = useState<WalletSection>(initialSection);
   const railRef = useRef<HTMLElement>(null);
   const [pending, setPending] = useState<'runtime' | 'entity' | 'lock' | null>(null);
@@ -147,8 +157,8 @@ export const WalletShell = (props: WalletShellProps) => {
             </div>
             <dl className="wallet-facts">
               <div><dt>Signers</dt><dd>{active?.signerCount ?? 0}</dd></div>
-              <div><dt>Local runtimes</dt><dd>{props.wallet.runtimes.length}</dd></div>
-              <div><dt>Vault</dt><dd>{active?.unlocked ? 'Unlocked' : 'Locked'}</dd></div>
+              <div><dt>Available runtimes</dt><dd>{props.wallet.runtimes.length}</dd></div>
+              <div><dt>Runtime access</dt><dd>{active?.type === 'remote' ? 'Remote admin' : active?.unlocked ? 'Unlocked' : 'Locked'}</dd></div>
             </dl>
             {active?.type === 'local' && (
               <button className="wallet-button-secondary" type="button" disabled={pending !== null} onClick={() => void run('lock', () => props.onLockRuntime(active.id))}>

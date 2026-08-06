@@ -1078,6 +1078,7 @@ test('remote /app pasted capability connects without reloading the page', { tag:
     { runtimeId: h1Endpoint.runtimeId, ws: wsUrl },
     { timeout: REMOTE_E2E_WAIT_MS },
   );
+  await expect(remotePrompt).toHaveCount(0, { timeout: REMOTE_E2E_WAIT_MS });
 
   const state = await page.evaluate(() => ({
     url: window.location.href,
@@ -1186,13 +1187,12 @@ test(
   },
 );
 
-test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' }, async ({ page }) => {
+test('context select switches H1 H2 H3 remote runtimes', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const specs = [{ name: 'H1' }, { name: 'H2' }, { name: 'H3' }];
   const importedAt = Date.now();
   const entries: Array<{
     label: string;
-    entityLabel: string;
     access: 'admin';
     wsUrl: string;
     token: string;
@@ -1207,8 +1207,7 @@ test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' },
     const wsUrl = endpoint.wsUrl;
     const capability = await resolveRuntimeImportCapability(page, endpoint, 'admin');
     entries.push({
-      label: `${spec.name} dropdown`,
-      entityLabel: spec.name,
+      label: spec.name,
       access: 'admin',
       wsUrl,
       token: capability.token,
@@ -1223,7 +1222,7 @@ test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' },
   await page.addInitScript(
     ({ storageKey, entries }) => {
       const first = entries[0]!;
-      localStorage.setItem(storageKey, JSON.stringify(entries));
+      sessionStorage.setItem(storageKey, JSON.stringify(entries));
       localStorage.setItem('xln-runtime-adapter-mode', 'remote');
       localStorage.setItem('xln-runtime-adapter-ws', first.wsUrl);
       localStorage.setItem('xln-runtime-adapter-access', 'admin');
@@ -1233,92 +1232,6 @@ test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' },
   );
 
   await page.goto(`${APP_BASE_URL}/app#accounts`, { waitUntil: 'domcontentloaded' });
-
-  const openContextTree = async (): Promise<void> => {
-    await page.waitForFunction(() => Boolean(document.querySelector('[data-testid="context-current"]')), null, {
-      timeout: REMOTE_E2E_WAIT_MS,
-    });
-    await page.evaluate(() => {
-      const trigger = document.querySelector('[data-testid="context-current"]') as HTMLElement | null;
-      if (!trigger) throw new Error('CONTEXT_CURRENT_MISSING');
-      if (trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
-    });
-    await page.waitForFunction(
-      expectedRuntimeIds => {
-        const trigger = document.querySelector('[data-testid="context-current"]');
-        const menu = document.querySelector('.dropdown-menu');
-        if (trigger?.getAttribute('aria-expanded') !== 'true' || !menu) return false;
-        const groups = Array.from(menu.querySelectorAll('[data-testid="context-runtime-group"]'));
-        if (groups.length < expectedRuntimeIds.length) return false;
-        if (!menu.querySelector('[data-testid="context-runtime-rail"]')) return false;
-        if (!menu.querySelector('[data-testid="context-runtime-focus"]')) return false;
-        if (menu.querySelector('.runtime-main') || menu.querySelector('.runtime-delete')) return false;
-        return expectedRuntimeIds.every(runtimeId => {
-          const group = groups.find(candidate => candidate.getAttribute('data-runtime-id') === runtimeId);
-          return Boolean(
-            group
-              ?.querySelector('[data-testid="context-runtime-source"]')
-              ?.textContent?.toLowerCase()
-              .includes('remote'),
-          );
-        });
-      },
-      entries.map(entry => entry.runtimeId),
-      { timeout: REMOTE_E2E_WAIT_MS },
-    );
-  };
-
-  const focusRuntimeRow = async (runtimeId: string, entityLabel: string): Promise<void> => {
-    await openContextTree();
-    await page.evaluate(targetRuntimeId => {
-      const row = document.querySelector(
-        `[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`,
-      ) as HTMLElement | null;
-      if (!row) throw new Error(`REMOTE_RUNTIME_GROUP_MISSING:${targetRuntimeId}`);
-      row.click();
-    }, runtimeId);
-    await page.waitForFunction(
-      ({ targetRuntimeId, targetLabel }) => {
-        const label = String(targetLabel || '').toLowerCase();
-        const focus = document.querySelector('[data-testid="context-runtime-focus"]');
-        if (!focus) return false;
-        return Array.from(focus.querySelectorAll('[data-testid="context-entity-row"]')).some(
-          row =>
-            row.getAttribute('data-runtime-id') === targetRuntimeId &&
-            String(row.textContent || '')
-              .toLowerCase()
-              .includes(label),
-        );
-      },
-      { targetRuntimeId: runtimeId, targetLabel: entityLabel },
-      { timeout: REMOTE_E2E_WAIT_MS },
-    );
-  };
-
-  const clickRuntimeRow = async (runtimeId: string, entityLabel: string): Promise<void> => {
-    await focusRuntimeRow(runtimeId, entityLabel);
-    await page.evaluate(
-      ({ targetRuntimeId, targetLabel }) => {
-        const label = String(targetLabel || '').toLowerCase();
-        const menu = document.querySelector('.dropdown-menu');
-        if (!menu) throw new Error('CONTEXT_MENU_MISSING');
-        if (menu.querySelector('.runtime-main')) throw new Error('LEGACY_RUNTIME_MAIN_PRESENT');
-        if (menu.querySelector('.runtime-delete')) throw new Error('LEGACY_RUNTIME_DELETE_PRESENT');
-        const focus = menu.querySelector('[data-testid="context-runtime-focus"]');
-        if (!focus) throw new Error('CONTEXT_RUNTIME_FOCUS_MISSING');
-        const row = Array.from(focus.querySelectorAll('[data-testid="context-entity-row"]')).find(
-          candidate =>
-            candidate.getAttribute('data-runtime-id') === targetRuntimeId &&
-            String(candidate.textContent || '')
-              .toLowerCase()
-              .includes(label),
-        ) as HTMLElement | undefined;
-        if (!row) throw new Error(`REMOTE_RUNTIME_ENTITY_ROW_MISSING:${targetRuntimeId}:${targetLabel}`);
-        row.click();
-      },
-      { targetRuntimeId: runtimeId, targetLabel: entityLabel },
-    );
-  };
 
   const waitForRuntime = async (entry: (typeof entries)[number]): Promise<void> => {
     await page.waitForFunction(
@@ -1335,6 +1248,15 @@ test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' },
         const runtimeView = (view as any).__xln?.view;
         if (String(runtimeView?.runtimeId || '') !== runtimeId || Number(runtimeView?.height || 0) < 1) return false;
         if ((view as any).__xln?.adapter?.status().authLevel !== 'admin') return false;
+        const contextPicker = document.querySelector(
+          '[data-testid="context-current"]',
+        ) as HTMLSelectElement | null;
+        if (
+          contextPicker?.value !== runtimeId ||
+          contextPicker.getAttribute('data-runtime-id') !== runtimeId
+        ) {
+          return false;
+        }
         const expected = label.toLowerCase();
         const entities = runtimeView?.entities ?? runtimeView?.frame?.entities ?? [];
         return entities.some(
@@ -1345,7 +1267,7 @@ test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' },
               .includes(expected),
         );
       },
-      { runtimeId: entry.runtimeId, label: entry.entityLabel },
+      { runtimeId: entry.runtimeId, label: entry.label },
       { timeout: REMOTE_E2E_WAIT_MS },
     );
     const state = await page.evaluate(() => {
@@ -1369,40 +1291,21 @@ test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' },
     expect(state.contextRuntimeId).toBe(entry.runtimeId);
   };
 
-  await openContextTree();
-  const tree = await page.evaluate(() => {
-    const menu = document.querySelector('.dropdown-menu');
-    if (!menu) throw new Error('CONTEXT_MENU_MISSING');
-    return Array.from(menu.querySelectorAll('[data-testid="context-runtime-group"]')).map(group => ({
-      runtimeId: group.getAttribute('data-runtime-id') || '',
-      source: group.querySelector('[data-testid="context-runtime-source"]')?.textContent?.trim().toLowerCase() || '',
-    }));
-  });
+  const picker = page.getByTestId('context-current');
+  await expect(picker).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   for (const entry of entries) {
-    const group = tree.find(candidate => candidate.runtimeId === entry.runtimeId);
-    expect(group, `runtime group ${entry.entityLabel}`).toBeTruthy();
-    expect(group?.source).toContain('remote');
-    await focusRuntimeRow(entry.runtimeId, entry.entityLabel);
-    const focus = await page.evaluate(runtimeId => {
-      const panel = document.querySelector('[data-testid="context-runtime-focus"]');
-      return {
-        jurisdictionCount: panel?.querySelectorAll('[data-testid="context-jurisdiction-group"]').length || 0,
-        rows: Array.from(panel?.querySelectorAll('[data-testid="context-entity-row"]') || []).map(row => ({
-          runtimeId: row.getAttribute('data-runtime-id') || '',
-          text: String(row.textContent || '').toLowerCase(),
-        })),
-        runtimeId,
-      };
-    }, entry.runtimeId);
-    expect(focus.jurisdictionCount).toBeGreaterThan(0);
-    expect(
-      focus.rows.some(row => row.runtimeId === entry.runtimeId && row.text.includes(entry.entityLabel.toLowerCase())),
-    ).toBe(true);
+    const option = picker.locator(`option[value="${entry.runtimeId}"]`);
+    await expect(option, `runtime option ${entry.label}`).toHaveCount(1);
+    await expect(option).toContainText(entry.label);
   }
 
   const switchTarget = entries[1] ?? entries[0]!;
-  await clickRuntimeRow(switchTarget.runtimeId, switchTarget.entityLabel);
+  await picker.selectOption(switchTarget.runtimeId);
   await waitForRuntime(switchTarget);
+  await expect(picker.locator('option:checked')).toContainText(switchTarget.label);
+  await expect(page.getByTestId('wallet-accounts-overview')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('wallet-remote-test-assets-boundary')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('WALLET_EXTERNAL_RUNTIME_NOT_LOCAL');
 });
 
 test(
@@ -1814,10 +1717,7 @@ test(
 );
 
 test('health admin keeps QA evidence link-only and runtime adapter local', { tag: '@resilience' }, async ({ page }) => {
-  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
-  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
-  const wsUrl = h1Endpoint.wsUrl;
-  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
+  await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const qaApiRequests: string[] = [];
   const debugProjectionRequests: string[] = [];
   const consoleProblems: string[] = [];
@@ -1840,100 +1740,60 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
 
   await page.goto(`${APP_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'Health', exact: true })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.locator('body')).toContainText('Runtime Events', { timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.locator('body')).toContainText('Runtime Projection Entities', { timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.locator('body')).not.toContainText('Debug Events');
-  await expect(page.locator('body')).not.toContainText('Registered Gossip Entities');
   await expect(page.getByTestId('health-verdict-banner')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('health-verdict-status')).toContainText(/READY|DEGRADED|FAIL/);
   await expect(page.getByTestId('health-verdict-reason')).not.toHaveText('');
-  await expect(page.getByTestId('health-verdict-source-height')).toContainText(/source #[1-9]/, {
-    timeout: REMOTE_E2E_WAIT_MS,
-  });
-  await expect(page.getByTestId('health-verdict-code-hash')).toContainText(/code [0-9a-f]{8}/);
-  await expect(page.getByTestId('health-verdict-owner')).toContainText(/owner health/);
-  await expect(page.locator('#bootstrap')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.getByTestId('bootstrap-timeline')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.getByTestId('bootstrap-timeline-ready-hash')).not.toHaveText(/n\/a/i, {
-    timeout: REMOTE_E2E_WAIT_MS,
-  });
-  await expect(page.getByTestId('bootstrap-timeline-health-poll')).toContainText(/ms/);
-  await expect(page.getByTestId('bootstrap-timeline-backlog')).not.toHaveText('');
-  await expect(page.getByTestId('bootstrap-timeline-last-event')).not.toHaveText(/n\/a/i, {
-    timeout: REMOTE_E2E_WAIT_MS,
-  });
-  await expect(page.getByTestId('bootstrap-timeline-stage-preflight')).toContainText(/done|active|blocked|pending/i);
-  await expect(page.getByTestId('bootstrap-timeline-stage-hub-mesh')).toContainText(/done/i);
-  await expect(page.getByTestId('bootstrap-timeline-stage-health-poll')).toContainText(/actual/i);
-  const cockpitPanel = page.locator('#qa-cockpit');
-  await expect(cockpitPanel).toBeVisible();
-  await expect(cockpitPanel).toContainText('QA Evidence');
-  await expect(cockpitPanel.getByRole('link', { name: 'Open QA cockpit' })).toHaveAttribute('href', '/qa');
-  await expect(cockpitPanel.getByRole('link', { name: 'UX gallery' })).toHaveAttribute('href', '/qa');
-  await expect(page.locator('#qa-runs')).toHaveCount(0);
+  await expect(page.getByTestId('health-source-height')).toHaveText(/^[1-9]\d*$/);
+  await expect(page.getByTestId('health-code-hash')).toHaveText(/^[0-9a-f]{12}(?:-dirty)?$/i);
+  await expect(page.getByRole('region', { name: 'Health gates' })).toContainText('Runtime');
+  await expect(page.getByRole('region', { name: 'Health gates' })).toContainText('Direct mesh');
+  await expect(page.locator('.ops-panel').filter({ hasText: 'canonical hubs' })).toContainText(/H1/i);
+  await expect(page.locator('.ops-panel').filter({ hasText: 'process tree' })).not.toContainText('0/0 online');
+  await expect(page.getByTestId('health-runtime-entities')).toContainText('Runtime entities');
+  await expect(page.getByTestId('health-runtime-entities').locator('strong')).toHaveText('0');
+  await expect(page.getByTestId('health-runtime-events')).toContainText('activity window');
+  await expect(page.getByTestId('health-runtime-events').locator('strong')).toHaveText('0');
+  await expect(page.getByTestId('health-projection-status')).toContainText(
+    'OPS_RUNTIME_PROJECTION_UNAVAILABLE:disconnected',
+  );
+  await expect(page.locator('nav[aria-label="Operator routes"] a[href="/qa"]')).toContainText('QA');
   await expect(page.locator('iframe[title="QA Cockpit"]')).toHaveCount(0);
+  await expect(page.locator('#runtime-adapter')).toHaveCount(0);
+  await expect(page.locator('input[placeholder="read/admin token"]')).toHaveCount(0);
   expect(qaApiRequests, '/health must not read /api/qa; QA cockpit owns that surface').toEqual([]);
   expect(
     debugProjectionRequests,
     '/health must read runtime projections through RuntimeQueryClient, not legacy debug entity/event APIs',
   ).toEqual([]);
-  expect(
-    consoleProblems.filter(message =>
-      /Failed to fetch health|Runtime adapter is not connected|pageerror/i.test(message),
-    ),
-  ).toEqual([]);
-  await expect(page.locator('#runtime-adapter')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open app' })).toHaveAttribute('href', '/app');
+  expect(consoleProblems).toEqual([]);
 
-  const adapterPanel = page.locator('#runtime-adapter');
-  await adapterPanel.locator('input[placeholder="ws://127.0.0.1:8080/rpc"]').fill(wsUrl);
-  await adapterPanel.locator('input[placeholder="read/admin token"]').fill(adminKey);
-  await adapterPanel.getByRole('button', { name: 'Connect', exact: true }).click();
-  await expect(adapterPanel).toContainText('connected', { timeout: REMOTE_E2E_WAIT_MS });
-  await expect(adapterPanel).toContainText('admin', { timeout: REMOTE_E2E_WAIT_MS });
-  await page.waitForFunction(
-    () => {
-      const panel = document.querySelector('#runtime-adapter');
-      const text = panel?.textContent || '';
-      return /Entities\s+[1-9]/.test(text) && /Latest\s+[1-9]/.test(text);
-    },
-    null,
-    { timeout: REMOTE_E2E_WAIT_MS },
-  );
+  const healthStorage = await page.evaluate(() => ({
+    mode: localStorage.getItem('xln-runtime-adapter-mode'),
+    wsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
+    access: localStorage.getItem('xln-runtime-adapter-access'),
+    sessionKey: sessionStorage.getItem('xln-runtime-adapter-key'),
+  }));
+  expect(healthStorage).toEqual({ mode: null, wsUrl: null, access: null, sessionKey: null });
 
-  const rejected = await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=forbidden`, {
+  allowBrowserIssue({
+    type: 'http', severity: 'warning', method: 'GET', status: 400,
+    message: 'HTTP 400', url: '/radapter?',
+  });
+  allowBrowserIssue({
+    type: 'console', severity: 'warning',
+    message: 'Failed to load resource: the server responded with a status of 400', url: '/radapter?',
+  });
+  const rejected = await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent('ws://127.0.0.1:1/rpc')}&token=forbidden`, {
     waitUntil: 'domcontentloaded',
   });
   expect(rejected?.status()).toBe(400);
   await page.goto(`${APP_BASE_URL}/radapter`, { waitUntil: 'domcontentloaded' });
   await expect(page).toHaveURL(/\/app$/);
-  await page.waitForFunction(
-    () => {
-      const view = window as typeof window & {
-        __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
-      };
-      const status = (view as any).__xln?.adapter?.status();
-      return status?.connected === true && status.authLevel === 'admin';
-    },
-    null,
-    { timeout: REMOTE_E2E_WAIT_MS },
-  );
-  const appState = await page.evaluate(() => ({
-    url: window.location.href,
-    activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws') || '',
-    storedAccess: localStorage.getItem('xln-runtime-adapter-access') || '',
-    sessionKey: sessionStorage.getItem('xln-runtime-adapter-key') || '',
-  }));
-  expect(appState.url).not.toContain('runtime=remote');
-  expect(appState.url).not.toContain('ws=');
-  expect(appState.activeWsUrl).toBe(wsUrl);
-  expect(appState.storedAccess).toBe('admin');
-  expect(appState.sessionKey).toBe(adminKey);
-  await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('wallet-onboarding')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 
   await page.goto(`${APP_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
   await expect(page).toHaveURL(/\/health$/);
-  await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByRole('heading', { name: 'Health', exact: true })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 });
 
 test(

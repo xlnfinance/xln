@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { useExternalStore } from '../../../../../packages/react-adapters/use-external-store';
 import { runtimeCommandLatestReceiptExternalStore } from '$lib/stores/runtimeCommandBus';
+import { runtimeControllerHandleExternalStore } from '$lib/stores/runtimeControllerStore';
 import { WalletMoveCredit } from './WalletMoveCredit';
 import { WalletExternalMove } from './WalletExternalMove';
 import { WalletLending } from './WalletLending';
@@ -25,9 +26,17 @@ const shortId = (value: string): string => `${value.slice(0, 10)}…${value.slic
 const coverageTone = (coverage: number): string => coverage >= 100 ? 'cov-good' : coverage >= 50 ? 'cov-warn' : 'cov-risk';
 const coverageText = (coverage: number): string => `${Number.isInteger(coverage) ? coverage : coverage.toFixed(2)}%`;
 
+const RemoteTestAssetBoundary = () => (
+  <section className="wallet-test-assets" data-testid="wallet-remote-test-assets-boundary">
+    <div><p className="wallet-eyebrow">testnet ingress</p><h2>Local signer required</h2></div>
+    <p>Remote Runtime inspection stays read-only here. Open a local, signer-backed runtime to request test assets.</p>
+  </section>
+);
+
 export const WalletAccountsWorkspace = ({ section }: Readonly<{ section: WalletAccountSection }>) => {
   const state = useExternalStore(walletAccountExternalStore);
   const receipt = useExternalStore(runtimeCommandLatestReceiptExternalStore);
+  const runtime = useExternalStore(runtimeControllerHandleExternalStore);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   useEffect(() => {
     void walletAccountStoreController.refresh();
@@ -54,7 +63,7 @@ export const WalletAccountsWorkspace = ({ section }: Readonly<{ section: WalletA
       <div className="wallet-asset-strip">
         {entity.reserves.length === 0 ? <p>No committed reserve balances.</p> : entity.reserves.map(reserve => <article key={reserve.tokenId}><span>{reserve.symbol} reserve</span><strong>{reserve.formatted}</strong><small>{reserve.raw} raw</small></article>)}
       </div>
-      <WalletTestAssetFaucet entity={entity} />
+      {runtime.mode === 'remote' ? <RemoteTestAssetBoundary /> : <WalletTestAssetFaucet entity={entity} />}
       <WalletOpenAccount entity={entity} directory={state.directory} />
       <div className="wallet-account-layout">
         <div className="wallet-account-list" role="list">

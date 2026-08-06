@@ -508,6 +508,9 @@ export interface RuntimeInfrastructure {
   wakeRequested?: boolean;
   /** Ephemeral keys owned by the active storage writer; never persisted. */
   storageReplicaMetaKeys?: Set<string>;
+  /** Exact latest synced WAL frame linkage; rebuilt from WAL on process restart. */
+  storageLatestFrameHeight?: number;
+  storageLatestFrameHash?: string;
   /** Ephemeral, event-driven profile certification candidates; rebuilt by a full scan after restart. */
   pendingProfileCertificationEntityIds?: Set<string>;
   scheduledWakeIndex?: {

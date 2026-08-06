@@ -30,10 +30,12 @@ import {
   accountProposalOutputIdentity,
   assertReliableEvidenceCompatible,
   buildRouteOutputKey,
+  cacheRoutedOutputIdentity,
   carriesEntityCommitNotification,
   cloneRoutedOutputWithCachedIdentity,
   getEntityFrameIdentity,
   getReliableOutputIdentity,
+  invalidateReliableOutputIdentity,
   normalizeRouteText,
   splitRoutedOutputByDeliveryLane,
   type ReliableOutputIdentity,
@@ -196,6 +198,7 @@ export const groupAtomicCrossJAdmissionOutputs = <T extends RoutedEntityInput>(
 };
 
 const overwriteRoutedEntityOutput = <T extends RoutedEntityInput>(target: T, source: T): T => {
+  invalidateReliableOutputIdentity(target);
   for (const key of Reflect.ownKeys(target)) {
     if (!Reflect.deleteProperty(target, key)) {
       throw new Error(`ROUTE_RELIABLE_OUTPUT_FIELD_DELETE_FAILED:${String(key)}`);
@@ -262,6 +265,7 @@ const mergePrecommitBundles = (existing: RoutedEntityInput, incoming: RoutedEnti
       merged.set(signerId, [...signatures]);
     }
   }
+  invalidateReliableOutputIdentity(existing);
   existing.hashPrecommits = new Map([...merged.entries()].sort(([left], [right]) => compareStableText(left, right)));
 };
 
@@ -323,12 +327,14 @@ const mergeOrdinaryOutput = <T extends RoutedEntityInput>(existing: T, incoming:
     throw new Error(`ROUTE_LEADER_VOTE_EQUIVOCATION:${incoming.leaderTimeoutVote?.voterId ?? 'missing'}`);
   }
   if (incoming.entityTxs?.length) {
+    invalidateReliableOutputIdentity(existing);
     existing.entityTxs = [...(existing.entityTxs || []), ...incoming.entityTxs];
   }
   if (incoming.proposedFrame) {
     const existingIsCommit = carriesEntityCommitNotification(existing);
     const incomingIsCommit = carriesEntityCommitNotification(incoming);
     if (!existing.proposedFrame || (incomingIsCommit && !existingIsCommit)) {
+      invalidateReliableOutputIdentity(existing);
       existing.proposedFrame = incoming.proposedFrame;
     }
   }
@@ -765,9 +771,13 @@ export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): Routed
     else deduped.set(key, cloneRoutedOutputWithCachedIdentity(output));
   }
   const pending = [...deduped.values()]
-    .map(output =>
-      output.entityTxs ? { ...output, entityTxs: orderCertifiedOutputsBySequence(output.entityTxs) } : output,
-    )
+    .map(output => {
+      if (output.entityTxs) {
+        invalidateReliableOutputIdentity(output);
+        output.entityTxs = orderCertifiedOutputsBySequence(output.entityTxs);
+      }
+      return cacheRoutedOutputIdentity(output);
+    })
     .sort(compareOutputDelivery);
   const certifiedEntityFrames = new Set<string>();
   for (const output of pending) {

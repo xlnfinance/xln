@@ -1840,6 +1840,8 @@ describe('production startup wiring', () => {
     expect(bootstrapCrossBranch).toContain(
       'progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs, getPendingCrossRequestOrderIds)',
     );
+    expect(bootstrapCrossBranch).toContain('await submitCrossJurisdictionIntents(');
+    expect(bootstrapCrossBranch).not.toContain('await submitCrossJurisdictionIntent(');
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
     expect(mmNode).not.toContain("direction: 'bootstrap-batch'");
     expect(mmNode).not.toContain('deferredBootstrapCrossLastIndex');

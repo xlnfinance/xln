@@ -115,6 +115,13 @@ const canonicalRoutePlugin = (contract: ReactViteSurfaceContract, devServer: boo
     middlewares.use((request, response, next) => {
       const url = new URL(request.url ?? '/', 'http://xln.local');
       if (url.pathname === '/admin' || url.pathname === '/radapter') {
+        if (url.pathname === '/radapter' && url.search) {
+          response.statusCode = 400;
+          response.setHeader('cache-control', 'no-store, max-age=0');
+          response.setHeader('content-type', 'text/plain; charset=utf-8');
+          response.end('RADAPTER_QUERY_PARAMETERS_FORBIDDEN');
+          return;
+        }
         response.statusCode = 308;
         response.setHeader('location', url.pathname === '/admin' ? '/health' : '/app');
         response.end();

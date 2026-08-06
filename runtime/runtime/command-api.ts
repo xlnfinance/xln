@@ -9,6 +9,7 @@ import {
 import type { createRuntimeLoopApi } from './loop';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { RuntimeReplica } from './types';
+import type { EntityInput } from '../entity/types';
 import {
   buildCrossJurisdictionSwapSubmission,
   type CrossJurisdictionSwapSubmitParams,
@@ -16,6 +17,7 @@ import {
 } from './jurisdiction-api';
 import { assertRuntimeCommandReady } from './lifecycle';
 import { assertCrossJLocalOwnerCohort, requireCrossJRuntimeTopology } from './cross-j-topology';
+import { mergeEntityInputs } from '../entity/consensus';
 
 type RuntimeCommandDependencies = Pick<
   ReturnType<typeof createRuntimeLoopApi>,
@@ -33,42 +35,44 @@ export const getEntityDisplayInfoFromProfile = (entityId: string) =>
 
 /** Commands enter the owning Runtime through its normal ingress/WAL path. */
 export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies) => {
-  const submitCrossJurisdictionIntent = async (
+  const submitCrossJurisdictionIntents = async (
     env: RuntimeReplica,
-    route: CrossJurisdictionSwapRoute,
-  ): Promise<CrossJurisdictionSwapSubmitResult> => {
+    routes: readonly CrossJurisdictionSwapRoute[],
+  ): Promise<CrossJurisdictionSwapSubmitResult[]> => {
     assertRuntimeCommandReady(env);
-    const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
-    if (canonicalRoute.status !== 'intent' || canonicalRoute.sourcePull || canonicalRoute.targetPull) {
-      throw new Error(`CROSS_J_INTENT_STATE_INVALID:${canonicalRoute.orderId}`);
-    }
     const routing = dependencies.getRuntimeOutputRoutingDeps();
-    assertCrossJLocalOwnerCohort(env, canonicalRoute, 'user', routing);
-    assertCrossJurisdictionSwapTargetReadyInEnv(env, canonicalRoute);
     const sourceRuntimeId = normalizeRuntimeId(env.runtimeId);
     if (!sourceRuntimeId) throw new Error('CROSS_J_INTENT_SOURCE_RUNTIME_INVALID');
-    const topology = requireCrossJRuntimeTopology(
-      canonicalRoute,
-      (entityId, signerId) => routing.resolveRuntimeIdForCrossJurisdictionEntity(
-        env,
-        entityId,
-        signerId,
-      ),
-    );
-    if (topology.userRuntimeId !== sourceRuntimeId) {
-      throw new Error(`CROSS_J_RUNTIME_TOPOLOGY_INVALID:${canonicalRoute.orderId}:USER_RUNTIME_MISMATCH`);
-    }
-    const sourceSignerId = String(canonicalRoute.sourceSignerId || '').trim().toLowerCase();
-    const targetSignerId = String(canonicalRoute.targetSignerId || '').trim().toLowerCase();
-    if (!sourceSignerId || !targetSignerId) {
-      throw new Error(`CROSS_J_USER_SIGNERS_MISSING:${canonicalRoute.orderId}`);
-    }
-    // One RuntimeInput is the durable owner command for both user siblings.
-    // The target authorization is intentionally ordered first: the source
-    // authorization may emit the certified source-user -> source-hub command,
-    // but no money can pass the later Account boundary without both records.
-    dependencies.enqueueRuntimeInputs(env, [
-      {
+    const results: CrossJurisdictionSwapSubmitResult[] = [];
+    const inputs = routes.flatMap<EntityInput>(route => {
+      const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+      if (canonicalRoute.status !== 'intent' || canonicalRoute.sourcePull || canonicalRoute.targetPull) {
+        throw new Error(`CROSS_J_INTENT_STATE_INVALID:${canonicalRoute.orderId}`);
+      }
+      assertCrossJLocalOwnerCohort(env, canonicalRoute, 'user', routing);
+      assertCrossJurisdictionSwapTargetReadyInEnv(env, canonicalRoute);
+      const topology = requireCrossJRuntimeTopology(
+        canonicalRoute,
+        (entityId, signerId) => routing.resolveRuntimeIdForCrossJurisdictionEntity(
+          env,
+          entityId,
+          signerId,
+        ),
+      );
+      if (topology.userRuntimeId !== sourceRuntimeId) {
+        throw new Error(`CROSS_J_RUNTIME_TOPOLOGY_INVALID:${canonicalRoute.orderId}:USER_RUNTIME_MISMATCH`);
+      }
+      const sourceSignerId = String(canonicalRoute.sourceSignerId || '').trim().toLowerCase();
+      const targetSignerId = String(canonicalRoute.targetSignerId || '').trim().toLowerCase();
+      if (!sourceSignerId || !targetSignerId) {
+        throw new Error(`CROSS_J_USER_SIGNERS_MISSING:${canonicalRoute.orderId}`);
+      }
+      results.push({ route: canonicalRoute });
+      // Target authorization remains first for every route. Coalescing identical
+      // owners here is exactly the merge the Runtime reducer would perform, while
+      // allowing callers to choose a bounded Entity frame that does not expose
+      // per-offer scheduler timing as consensus boundaries.
+      return [{
         entityId: canonicalRoute.target.counterpartyEntityId,
         signerId: targetSignerId,
         entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route: structuredClone(canonicalRoute) } }],
@@ -77,9 +81,27 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
         entityId: canonicalRoute.source.entityId,
         signerId: sourceSignerId,
         entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route: structuredClone(canonicalRoute) } }],
-      },
-    ], undefined, undefined, env.state.timestamp);
-    return { route: canonicalRoute };
+      }];
+    });
+    if (inputs.length > 0) {
+      dependencies.enqueueRuntimeInputs(
+        env,
+        mergeEntityInputs(inputs),
+        undefined,
+        undefined,
+        env.state.timestamp,
+      );
+    }
+    return results;
+  };
+
+  const submitCrossJurisdictionIntent = async (
+    env: RuntimeReplica,
+    route: CrossJurisdictionSwapRoute,
+  ): Promise<CrossJurisdictionSwapSubmitResult> => {
+    const [result] = await submitCrossJurisdictionIntents(env, [route]);
+    if (!result) throw new Error('CROSS_J_INTENT_RESULT_MISSING');
+    return result;
   };
 
   const submitCrossJurisdictionSwap = async (
@@ -92,6 +114,7 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
 
   return {
     submitCrossJurisdictionIntent,
+    submitCrossJurisdictionIntents,
     submitCrossJurisdictionSwap,
   };
 };

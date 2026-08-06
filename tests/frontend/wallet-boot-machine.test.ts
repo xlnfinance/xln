@@ -7,6 +7,7 @@ import {
   type WalletAvailability,
   type WalletEnvironment,
 } from '../../frontend/packages/runtime-client/wallet-boot-machine';
+import { resolveRemoteWalletAvailability } from '../../frontend/packages/runtime-client/wallet-runtime-availability';
 
 const EMPTY: WalletAvailability = {
   activeRuntimeId: null,
@@ -36,6 +37,24 @@ const reachAvailability = (environment: WalletEnvironment, availability: WalletA
 };
 
 describe('wallet boot machine', () => {
+  test('remote availability stays connecting across initial boot and adapter hot-swap', () => {
+    expect(resolveRemoteWalletAvailability({
+      mode: 'embedded', runtimeId: 'embedded', pendingRuntimeId: '', status: 'disconnected',
+    }, true)).toEqual({
+      activeRuntimeId: null, runtimeCount: 1, activeRuntimeUnlocked: true, runtimeReady: false,
+    });
+    expect(resolveRemoteWalletAvailability({
+      mode: 'embedded', runtimeId: 'embedded', pendingRuntimeId: '0xh2', status: 'disconnected',
+    }, true)).toEqual({
+      activeRuntimeId: '0xh2', runtimeCount: 1, activeRuntimeUnlocked: true, runtimeReady: false,
+    });
+    expect(resolveRemoteWalletAvailability({
+      mode: 'remote', runtimeId: '0xh2', pendingRuntimeId: '0xh2', status: 'connected',
+    }, true)).toEqual({
+      activeRuntimeId: '0xh2', runtimeCount: 1, activeRuntimeUnlocked: true, runtimeReady: true,
+    });
+  });
+
   test.each(['browser', 'capacitor', 'electron'] as const)('reaches a ready runtime in %s', environment => {
     const snapshot = reachAvailability(environment, ready(true));
     expect(snapshot).toMatchObject({

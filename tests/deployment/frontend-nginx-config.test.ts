@@ -25,7 +25,7 @@ describe('frontend nginx release config', () => {
     expect(config).toContain('location / { return 404; }');
     expect(config).not.toContain('/index.html;\n    }\n\n    # No universal');
     expect(config).toContain('location = /admin { return 308 /health; }');
-    expect(config).toContain('location = /radapter { return 308 /app; }');
+    expect(config).toContain('location = /radapter {\n        if ($args != "") { return 400; }\n        return 308 /app;\n    }');
   });
 
   test('rejects unsafe release roots', () => {

@@ -28,9 +28,38 @@ export type ReliableOutputIdentity = ReliableDeliveryIdentity & {
   variantOrder: number;
 };
 
-export const cloneRoutedOutputWithCachedIdentity = <T extends RoutedEntityInput>(output: T): T => {
-  return structuredClone(output) as T;
+const RELIABLE_OUTPUT_IDENTITY_CACHE_LIMIT = 32;
+const reliableOutputIdentityCache = new Map<
+  RoutedEntityInput,
+  ReliableOutputIdentity | null
+>();
+
+const rememberReliableOutputIdentity = <T extends RoutedEntityInput>(
+  output: T,
+  identity: ReliableOutputIdentity | null,
+): T => {
+  if (reliableOutputIdentityCache.has(output)) {
+    reliableOutputIdentityCache.delete(output);
+  } else if (reliableOutputIdentityCache.size >= RELIABLE_OUTPUT_IDENTITY_CACHE_LIMIT) {
+    const oldest = reliableOutputIdentityCache.keys().next().value;
+    if (oldest) reliableOutputIdentityCache.delete(oldest);
+  }
+  reliableOutputIdentityCache.set(output, identity);
+  return output;
 };
+
+export const invalidateReliableOutputIdentity = (output: RoutedEntityInput): void => {
+  reliableOutputIdentityCache.delete(output);
+};
+
+export const cloneRoutedOutputWithCachedIdentity = <T extends RoutedEntityInput>(output: T): T => {
+  const identity = getReliableOutputIdentity(output);
+  const clone = structuredClone(output) as T;
+  return rememberReliableOutputIdentity(clone, identity);
+};
+
+export const cacheRoutedOutputIdentity = <T extends RoutedEntityInput>(output: T): T =>
+  rememberReliableOutputIdentity(output, computeReliableOutputIdentity(output));
 
 export const normalizeRouteText = (value: unknown): string =>
   String(value ?? '')
@@ -480,8 +509,12 @@ const computeReliableOutputIdentity = (output: RoutedEntityInput): ReliableOutpu
   return identities[0]!;
 };
 
-export const getReliableOutputIdentity = (output: RoutedEntityInput): ReliableOutputIdentity | null =>
-  computeReliableOutputIdentity(output);
+export const getReliableOutputIdentity = (output: RoutedEntityInput): ReliableOutputIdentity | null => {
+  if (reliableOutputIdentityCache.has(output)) {
+    return reliableOutputIdentityCache.get(output)!;
+  }
+  return computeReliableOutputIdentity(output);
+};
 
 export const assertReliableEvidenceCompatible = (
   existing: ReliableOutputIdentity,
@@ -545,6 +578,7 @@ export const assertReliableEvidenceCompatible = (
 };
 
 export const splitRoutedOutputByDeliveryLane = <T extends RoutedEntityInput>(output: T): T[] => {
+  if (reliableOutputIdentityCache.has(output)) return [output];
   const {
     entityTxs = [],
     proposedFrame,
@@ -557,24 +591,31 @@ export const splitRoutedOutputByDeliveryLane = <T extends RoutedEntityInput>(out
   const split: RoutedEntityInput[] = [];
   const routeInput = route as RoutedEntityInput;
 
-  const appendSplit = (candidate: RoutedEntityInput): void => {
-    split.push(candidate);
+  const appendSplit = (
+    candidate: RoutedEntityInput,
+    identity?: ReliableOutputIdentity | null,
+  ): void => {
+    split.push(
+      identity === undefined
+        ? cacheRoutedOutputIdentity(candidate)
+        : rememberReliableOutputIdentity(candidate, identity),
+    );
   };
 
   if (proposedFrame) {
     const candidate = { ...routeInput, proposedFrame };
-    appendSplit(candidate);
+    appendSplit(candidate, getEntityFrameReliableIdentity(candidate));
   }
   if (hashPrecommits && hashPrecommits.size > 0) {
     if (!hashPrecommitFrame) throw new Error('ROUTE_PRECOMMIT_FRAME_REFERENCE_MISSING');
     const candidate = { ...routeInput, hashPrecommitFrame, hashPrecommits };
-    appendSplit(candidate);
+    appendSplit(candidate, getHashPrecommitReliableIdentity(candidate));
   } else if (hashPrecommitFrame) {
     throw new Error('ROUTE_PRECOMMIT_FRAME_REFERENCE_WITHOUT_SIGNATURES');
   }
   if (leaderTimeoutVote) {
     const candidate = { ...routeInput, leaderTimeoutVote };
-    appendSplit(candidate);
+    appendSplit(candidate, getLeaderTimeoutVoteReliableIdentity(candidate));
   }
   if (jPrefixAttestations) {
     for (const [signerId, attestation] of jPrefixAttestations) {
@@ -582,18 +623,18 @@ export const splitRoutedOutputByDeliveryLane = <T extends RoutedEntityInput>(out
         ...routeInput,
         jPrefixAttestations: new Map([[signerId, structuredClone(attestation)]]),
       };
-      appendSplit(candidate);
+      appendSplit(candidate, getJPrefixAttestationReliableIdentity(candidate));
     }
   }
 
   const ordinaryTxs: EntityTx[] = [];
   for (const tx of entityTxs) {
     const identity = getReliableTxIdentity(output, tx);
-    if (identity) appendSplit({ ...routeInput, entityTxs: [tx] });
+    if (identity) appendSplit({ ...routeInput, entityTxs: [tx] }, identity);
     else ordinaryTxs.push(tx);
   }
-  if (ordinaryTxs.length > 0) appendSplit({ ...routeInput, entityTxs: ordinaryTxs });
-  if (split.length === 0) appendSplit({ ...routeInput, entityTxs: [] });
+  if (ordinaryTxs.length > 0) appendSplit({ ...routeInput, entityTxs: ordinaryTxs }, null);
+  if (split.length === 0) appendSplit({ ...routeInput, entityTxs: [] }, null);
 
   return split as T[];
 };

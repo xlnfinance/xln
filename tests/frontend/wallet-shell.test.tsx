@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from '../../frontend/node_modules/react-dom/server.browser.js';
 
 import { WalletBootError, WalletLoading } from '../../frontend/apps/wallet/src/WalletBootScreens';
-import { WalletSettings, WalletShell } from '../../frontend/apps/wallet/src/WalletShell';
+import { resolveWalletSectionFromHash, WalletSettings, WalletShell } from '../../frontend/apps/wallet/src/WalletShell';
 import type { WalletViewSnapshot } from '../../frontend/apps/wallet/src/wallet-view-store';
 import type { Settings } from '../../frontend/src/lib/types/ui';
 
@@ -10,10 +10,13 @@ const wallet: WalletViewSnapshot = {
   activeRuntimeId: '0x1234567890abcdef',
   runtimes: [{
     id: '0x1234567890abcdef',
+    type: 'local',
     label: 'Primary',
     createdAt: 1,
     signerCount: 2,
     unlocked: true,
+    entityId: null,
+    signerId: null,
   }],
 };
 
@@ -25,6 +28,13 @@ const settings = {
 } as Settings;
 
 const noAction = async (): Promise<void> => undefined;
+
+test('wallet hash navigation resolves canonical sections without accepting unknown state', () => {
+  expect(resolveWalletSectionFromHash('#accounts')).toBe('accounts');
+  expect(resolveWalletSectionFromHash('#activity')).toBe('activity');
+  expect(resolveWalletSectionFromHash('#pay/runtime=remote&ws=example')).toBe('pay');
+  expect(resolveWalletSectionFromHash('#runtime-import')).toBe('overview');
+});
 
 test('loading surface exposes the preserved behavior id and current boot evidence', () => {
   const html = renderToStaticMarkup(<WalletLoading phase="loading-vault" />);
@@ -58,6 +68,7 @@ test('ready shell has navigation, connection evidence, runtime selection, and no
       connected
       online
       onSelectRuntime={noAction}
+      onSelectEntity={noAction}
       onLockRuntime={noAction}
       onTheme={() => undefined}
       onLiteMode={() => undefined}
@@ -69,8 +80,31 @@ test('ready shell has navigation, connection evidence, runtime selection, and no
   expect(html).toContain('aria-label="Wallet navigation"');
   expect(html).toContain('Active runtime');
   expect(html).toContain('Runtime state');
+  expect(html).toContain('Available runtimes');
+  expect(html).toContain('Runtime access');
+  expect(html).not.toContain('Local runtimes');
   expect(html).toContain('Settlement');
   expect(html).not.toContain('coming soon');
+});
+
+test('remote overview labels capability access without claiming a local vault', () => {
+  const html = renderToStaticMarkup(
+    <WalletShell
+      wallet={{ ...wallet, runtimes: [{ ...wallet.runtimes[0]!, type: 'remote', unlocked: true }] }}
+      settings={settings}
+      connected
+      online
+      onSelectRuntime={noAction}
+      onSelectEntity={noAction}
+      onLockRuntime={noAction}
+      onTheme={() => undefined}
+      onLiteMode={() => undefined}
+      onTimeMachine={() => undefined}
+      onMascot={() => undefined}
+    />,
+  );
+  expect(html).toContain('Remote admin');
+  expect(html).not.toContain('<dt>Vault</dt>');
 });
 
 test('settings controls render from the canonical settings snapshot', () => {

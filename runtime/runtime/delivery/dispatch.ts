@@ -19,6 +19,7 @@ import {
 import { selectPotentialCrossJAccountInputPairs } from '../entity-routing';
 import {
   buildRouteOutputKey,
+  cloneRoutedOutputWithCachedIdentity,
   getReliableOutputIdentity,
   splitRoutedOutputByDeliveryLane,
   type ReliableOutputIdentity,
@@ -62,7 +63,7 @@ const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEnt
       mergeRoutedEntityOutput(existing, output);
       routeLog.debug('batch.merge', { key, txs: existing.entityTxs?.length || 0 });
     } else {
-      batched.set(key, validateDeliverableEntityInput(structuredClone(output)));
+      batched.set(key, validateDeliverableEntityInput(cloneRoutedOutputWithCachedIdentity(output)));
     }
   }
 

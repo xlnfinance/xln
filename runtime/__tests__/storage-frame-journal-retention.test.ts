@@ -679,6 +679,26 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
+  test('caches the exact synced WAL frame hash for the next append', async () => {
+    const env = await createSavedEmptyEnv('frame-link-cache');
+    const firstFrame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
+    expect(firstFrame?.frameHash).toBeTruthy();
+    expect(env.infrastructure?.storageLatestFrameHeight).toBe(1);
+    expect(env.infrastructure?.storageLatestFrameHash).toBe(firstFrame?.frameHash);
+
+    env.state.height = 2;
+    env.state.timestamp = 2_000;
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    const secondFrame = await readStorageFrameRecord(getRuntimeWalDb(env), 2);
+
+    expect(secondFrame?.prevFrameHash).toBe(firstFrame?.frameHash);
+    expect(env.infrastructure?.storageLatestFrameHeight).toBe(2);
+    expect(env.infrastructure?.storageLatestFrameHash).toBe(secondFrame?.frameHash);
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
   test('stale same-height writer stops when the frame is already persisted', async () => {
     const seed = `frame-stale-same-height ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();

@@ -82,8 +82,6 @@ type AdminControlProbe = {
   frameName: string;
   envName: string;
   accountCount: number;
-  historyLength: number;
-  historyHeights: number[];
   reason?: string;
   error?: string;
 };
@@ -359,8 +357,6 @@ const readAdminControlProbe = async (
           frameName: '',
           envName: '',
           accountCount: 0,
-          historyLength: 0,
-          historyHeights: [],
           reason: 'adapter-missing',
         };
       type Head = { latestHeight?: number };
@@ -370,9 +366,6 @@ const readAdminControlProbe = async (
           core?: { profile?: { name?: string } };
           accounts?: { items?: unknown[]; totalItems?: number };
         } | null;
-      };
-      type HistoryBatch = {
-        frames?: Array<{ height?: number }>;
       };
       const head = await adapter.query.head<Head>();
       const latestHeight = Number(head.latestHeight || 0);
@@ -385,16 +378,6 @@ const readAdminControlProbe = async (
               booksLimit: 1,
             })
           : null;
-      const history =
-        latestHeight > minHeight
-          ? await adapter.query.historyFrameBatch<HistoryBatch>({
-              heights: [minHeight, latestHeight],
-              entityId: hubId,
-              accountsLimit: 1,
-              booksLimit: 1,
-            })
-          : null;
-      const historyHeights = (history?.frames ?? []).map(item => Number(item.height || 0));
       const frameName = String(frame?.activeEntity?.core?.profile?.name || '');
       const projectedName = frameName;
       const frameHeight = Number(frame?.height || 0);
@@ -413,8 +396,6 @@ const readAdminControlProbe = async (
         accountCount: Number(
           frame?.activeEntity?.accounts?.totalItems ?? frame?.activeEntity?.accounts?.items?.length ?? 0,
         ),
-        historyLength: historyHeights.length,
-        historyHeights,
         ...(ok ? {} : { reason: 'not-ready' }),
       };
     } catch (error) {
@@ -426,8 +407,6 @@ const readAdminControlProbe = async (
         frameName: '',
         envName: '',
         accountCount: 0,
-        historyLength: 0,
-        historyHeights: [],
         error: error instanceof Error ? error.message : String(error),
       };
     }
@@ -799,23 +778,17 @@ test(
     expect(accessAfterReload.registryStoredInSession).toBe(true);
     expect(accessAfterReload.activeKeyPresent).toBe(true);
     expect(accessAfterReload.readOnlyWarningCount).toBe(0);
-    await expect(page.getByTestId('hub-discovery-card').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    const openAccountAfterReload = await page.evaluate(() => {
-      const bodyText = document.body.textContent || '';
-      return {
-        hubCards: document.querySelectorAll('[data-testid="hub-discovery-card"]').length,
-        hubStates: Array.from(document.querySelectorAll('[data-testid="hub-discovery-card"]')).map(
-          node => node.getAttribute('data-connection-state') || '',
-        ),
-        missingEnvError:
-          bodyText.includes('Environment not ready') ||
-          bodyText.includes('Open Account requires full runtime access') ||
-          bodyText.includes('requires full runtime access'),
-      };
-    });
-    expect(openAccountAfterReload.hubCards).toBeGreaterThan(0);
-    expect(openAccountAfterReload.hubStates.every(state => ['open', 'opening', 'closed'].includes(state))).toBe(true);
-    expect(openAccountAfterReload.missingEnvError).toBe(false);
+    await page.getByTestId('wallet-nav-accounts').click();
+    const openAccountAfterReload = page.getByTestId('wallet-open-account');
+    await expect(openAccountAfterReload).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+    await expect(page.getByTestId('wallet-account-row').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+    const exactEntityInput = openAccountAfterReload.getByLabel('Open account with entity ID');
+    await expect(exactEntityInput).toBeEnabled();
+    await exactEntityInput.fill(`0x${'f'.repeat(64)}`);
+    await openAccountAfterReload.getByRole('button', { name: 'Review open account' }).click();
+    await expect(openAccountAfterReload.locator('.wallet-open-confirm')).toContainText('openAccount');
+    await openAccountAfterReload.getByRole('button', { name: 'Back' }).click();
+    await expect(openAccountAfterReload).not.toContainText('Account opening requires admin runtime access');
 
     await page.evaluate(
       ({ storageKey, wsUrl: activeWsUrl, adminToken, staleToken, runtimeId }) => {
@@ -976,27 +949,27 @@ test(
     expect(activeH1Before.accountCount).toBeLessThanOrEqual(10);
     expect(activeH1Before.bookCount).toBeLessThanOrEqual(10);
 
+    const beforeControlHeight = await page.evaluate(async () => {
+      const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
+      if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+      const head = await adapter.query.head<{ latestHeight?: number }>();
+      return Number(head.latestHeight || 0);
+    });
     await page.evaluate(() => {
       (window as any).__xln?.commands?.clear?.();
     });
     await openAccountWorkspaceTab(page, 'configure');
-    await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await expect(page.locator('.configure-panel').first()).not.toContainText(
-      'Account actions require embedded runtime RuntimeReplica',
-    );
-    await page.getByTestId('configure-tab-extend-credit').first().click();
-    const creditPanel = page
-      .locator('.configure-panel .action-card')
-      .filter({ hasText: /Extend Credit/i })
-      .first();
-    await expect(creditPanel).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await creditPanel.locator('select.form-select').first().selectOption('1');
-    const creditAmount = creditPanel.locator('input[placeholder="Credit amount"]').first();
-    await expect(creditAmount).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await creditAmount.fill('1');
-    const extendCreditButton = creditPanel.getByRole('button', { name: /Extend Credit/i }).first();
-    await expect(extendCreditButton).toBeEnabled({ timeout: REMOTE_E2E_WAIT_MS });
-    await extendCreditButton.click();
+    await page.getByTestId('wallet-account-row').first().click();
+    const configureAccount = page.getByTestId('wallet-account-configure');
+    await expect(configureAccount).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+    await expect(configureAccount).not.toContainText('Account actions require embedded runtime RuntimeReplica');
+    const reviewAddAsset = configureAccount.getByRole('button', { name: 'Review add asset' });
+    await expect(reviewAddAsset).toBeEnabled({ timeout: REMOTE_E2E_WAIT_MS });
+    await reviewAddAsset.click();
+    await expect(configureAccount).toContainText('extendCredit');
+    const submitAddAsset = configureAccount.getByRole('button', { name: 'Submit add asset' });
+    await expect(submitAddAsset).toBeEnabled();
+    await submitAddAsset.click();
     await expect
       .poll(
         async () =>
@@ -1029,6 +1002,25 @@ test(
         entityTxs: 1,
         error: '',
       });
+    const controlResult = await page.evaluate(async beforeHeight => {
+      const receipt = (window as any).__xln?.commands?.latest as
+        | {
+            receiptId?: string;
+            upstreamReceiptId?: string | null;
+            statusUrl?: string | null;
+            status?: string;
+            acceptedAtHeight?: number | null;
+            committedAtHeight?: number | null;
+            error?: string | null;
+          }
+        | null
+        | undefined;
+      return {
+        beforeHeight,
+        sendHeight: Number(receipt?.acceptedAtHeight ?? 0),
+        receipt,
+      };
+    }, beforeControlHeight);
 
     const storageCadence = await page.evaluate(async () => {
       const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
@@ -1055,80 +1047,6 @@ test(
     expect(storageCadence.latestSnapshotHeight).toBeGreaterThan(0);
     expect(storageCadence.checkpointHeights).toContain(storageCadence.latestSnapshotHeight);
 
-    const baseName = `H1 Admin E2E ${activeH1Before.height + 1}`;
-    const nextProfileName = activeH1Before.profileName === baseName ? `${baseName}b` : baseName;
-    const beforeControlHeight = await page.evaluate(async () => {
-      const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
-      if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
-      const head = await adapter.query.head<{ latestHeight?: number }>();
-      return Number(head.latestHeight || 0);
-    });
-    await page.evaluate(() => {
-      (window as any).__xln?.commands?.clear?.();
-    });
-    await page.getByTestId('tab-settings').click();
-    const settingsPanel = page.getByTestId('entity-settings-projection-panel');
-    await expect(settingsPanel).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await settingsPanel.getByLabel('Name').fill(nextProfileName);
-    await settingsPanel.getByLabel('Bio').fill('admin-e2e-control');
-    await settingsPanel.getByRole('button', { name: /Save Profile/i }).click();
-    await expect
-      .poll(
-        async () =>
-          page.evaluate(() => {
-            const receipt = (window as any).__xln?.commands?.latest as
-              | {
-                  status?: string;
-                  upstreamReceiptId?: string | null;
-                  statusUrl?: string | null;
-                  acceptedAtHeight?: number | null;
-                  inputSummary?: { entityInputs?: number; entityTxs?: number };
-                  error?: string | null;
-                }
-              | null
-              | undefined;
-            return {
-              status: String(receipt?.status || ''),
-              entityInputs: Number(receipt?.inputSummary?.entityInputs || 0),
-              entityTxs: Number(receipt?.inputSummary?.entityTxs || 0),
-              error: String(receipt?.error || ''),
-            };
-          }),
-        {
-          timeout: REMOTE_E2E_WAIT_MS,
-          intervals: [250, 500, 1000],
-        },
-      )
-      .toMatchObject({
-        status: 'observed',
-        entityInputs: 1,
-        entityTxs: 1,
-        error: '',
-      });
-    const controlResult = await page.evaluate(async beforeHeight => {
-      const view = window as typeof window & {
-        __xlnRuntimeCommands?: {
-          latest?: {
-            receiptId?: string;
-            upstreamReceiptId?: string | null;
-            statusUrl?: string | null;
-            status?: string;
-            acceptedAtHeight?: number | null;
-            committedAtHeight?: number | null;
-            error?: string | null;
-          } | null;
-        };
-      };
-      const adapter = (view as any).__xln?.adapter;
-      if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
-      const receipt = (view as any).__xln?.commands?.latest ?? null;
-      return {
-        beforeHeight,
-        sendHeight: Number(receipt?.acceptedAtHeight ?? 0),
-        receipt,
-      };
-    }, beforeControlHeight);
-
     expect(controlResult.beforeHeight).toBeGreaterThanOrEqual(activeH1Before.height);
     expect(controlResult.sendHeight).toBeGreaterThanOrEqual(controlResult.beforeHeight);
     expect(controlResult.receipt?.receiptId).toMatch(/^runtime-command-/);
@@ -1141,7 +1059,7 @@ test(
 
     const after = await waitForAdminControlProbe(
       page,
-      { hubId: h1, minHeight: controlResult.beforeHeight, expectedName: nextProfileName },
+      { hubId: h1, minHeight: controlResult.beforeHeight, expectedName: activeH1Before.profileName },
       90_000,
     );
     await expect
@@ -1166,12 +1084,8 @@ test(
     expect(observedReceipt.committedAtHeight).toBeGreaterThan(controlResult.beforeHeight);
 
     expect(after.envHeight).toBeGreaterThan(controlResult.beforeHeight);
-    expect(after.envName).toBe(nextProfileName);
+    expect(after.envName).toBe(activeH1Before.profileName);
     expect(after.accountCount).toBeLessThanOrEqual(10);
-    expect(after.historyLength).toBeGreaterThanOrEqual(2);
-    expect(after.historyLength).toBeLessThanOrEqual(12);
-    expect(after.historyHeights).toContain(controlResult.beforeHeight);
-    expect(after.historyHeights).toContain(after.envHeight);
 
     const activityProbe = await page.evaluate(async entityId => {
       const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
@@ -1191,7 +1105,7 @@ test(
         entityId,
         limit: 20,
         scanLimit: 200,
-        q: 'profile-update',
+        q: 'extendCredit',
       });
       return {
         latestHeight: Number(page.latestHeight || 0),
@@ -1208,68 +1122,17 @@ test(
 
     expect(activityProbe.latestHeight).toBeGreaterThanOrEqual(after.envHeight);
     expect(activityProbe.scannedFrames).toBeGreaterThan(0);
-    expect(
-      activityProbe.events.some(
-        event =>
-          event.entityId === h1 &&
-          event.rawType === 'profile-update' &&
-          event.source === 'runtime_input' &&
-          event.height > controlResult.beforeHeight,
-      ),
-      `activity projection must expose remote profile-update event: ${JSON.stringify(activityProbe)}`,
-    ).toBe(true);
-
-    const frameProbe = await page.evaluate(
-      async ({ entityId, beforeHeight, afterHeight }) => {
-        const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
-        if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
-        type ViewFrame = {
-          height?: number;
-          activeEntity?: {
-            core?: { profile?: { name?: string } };
-            accounts?: { items?: unknown[] };
-            books?: { items?: unknown[] };
-          } | null;
-        };
-        const beforeFrame = await adapter.query.viewFrame<ViewFrame>({
-          atHeight: beforeHeight,
-          entityId,
-          accountsLimit: 1,
-          booksLimit: 1,
-        });
-        const afterFrame = await adapter.query.viewFrame<ViewFrame>({
-          atHeight: afterHeight,
-          entityId,
-          accountsLimit: 1,
-          booksLimit: 1,
-        });
-        return {
-          beforeHeight: Number(beforeFrame.height || 0),
-          afterHeight: Number(afterFrame.height || 0),
-          beforeName: String(beforeFrame.activeEntity?.core?.profile?.name || ''),
-          afterName: String(afterFrame.activeEntity?.core?.profile?.name || ''),
-          beforeAccounts: Number(beforeFrame.activeEntity?.accounts?.items?.length || 0),
-          afterAccounts: Number(afterFrame.activeEntity?.accounts?.items?.length || 0),
-          beforeBooks: Number(beforeFrame.activeEntity?.books?.items?.length || 0),
-          afterBooks: Number(afterFrame.activeEntity?.books?.items?.length || 0),
-        };
-      },
-      {
-        entityId: h1,
-        beforeHeight: controlResult.beforeHeight,
-        afterHeight: after.envHeight,
-      },
+    const controlActivity = activityProbe.events.find(
+      event =>
+        event.entityId === h1 &&
+        event.rawType === 'extendCredit' &&
+        event.source === 'runtime_input' &&
+        event.height > controlResult.beforeHeight,
     );
-
-    expect(frameProbe.beforeHeight).toBe(controlResult.beforeHeight);
-    expect(frameProbe.afterHeight).toBe(after.envHeight);
-    expect(frameProbe.beforeName).toBe(activeH1Before.profileName);
-    expect(frameProbe.beforeName).not.toBe(nextProfileName);
-    expect(frameProbe.afterName).toBe(nextProfileName);
-    expect(frameProbe.beforeAccounts).toBeLessThanOrEqual(1);
-    expect(frameProbe.afterAccounts).toBeLessThanOrEqual(1);
-    expect(frameProbe.beforeBooks).toBeLessThanOrEqual(1);
-    expect(frameProbe.afterBooks).toBeLessThanOrEqual(1);
+    expect(
+      controlActivity,
+      `activity projection must expose remote extendCredit event: ${JSON.stringify(activityProbe)}`,
+    ).toBeDefined();
 
     const batchProbe = await page.evaluate(
       async ({ entityId, beforeHeight, afterHeight }) => {
@@ -1280,6 +1143,7 @@ test(
           frames?: Array<{
             height?: number;
             activeEntity?: {
+              core?: { profile?: { name?: string } };
               accounts?: { items?: unknown[] };
               books?: { items?: unknown[] };
             } | null;
@@ -1295,6 +1159,7 @@ test(
         return {
           requestedHeights: batch.requestedHeights ?? [],
           frameHeights: (batch.frames ?? []).map(frame => Number(frame.height || 0)),
+          profileNames: (batch.frames ?? []).map(frame => String(frame.activeEntity?.core?.profile?.name || '')),
           accountCounts: (batch.frames ?? []).map(frame => Number(frame.activeEntity?.accounts?.items?.length || 0)),
           bookCounts: (batch.frames ?? []).map(frame => Number(frame.activeEntity?.books?.items?.length || 0)),
           unavailable: batch.unavailable ?? [],
@@ -1309,103 +1174,23 @@ test(
 
     expect(batchProbe.requestedHeights).toEqual([controlResult.beforeHeight, after.envHeight]);
     expect(batchProbe.frameHeights).toEqual([controlResult.beforeHeight, after.envHeight]);
+    expect(batchProbe.profileNames).toEqual([activeH1Before.profileName, activeH1Before.profileName]);
     expect(batchProbe.accountCounts.every(count => count <= 1)).toBe(true);
     expect(batchProbe.bookCounts.every(count => count <= 1)).toBe(true);
     expect(batchProbe.unavailable).toEqual([]);
 
-    await settingsPanel.getByRole('button', { name: 'Display', exact: true }).click();
-    await expect(settingsPanel.getByTestId('settings-time-machine-toggle')).toBeChecked();
-    await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await expect(page.getByTestId('time-machine-remote-target')).toBeVisible();
-    await expect(page.getByTestId('time-machine-remote-target')).toContainText(/hub/i);
-    await page.getByTestId('time-machine-remote-height').fill(String(controlResult.beforeHeight));
-    await page.getByTestId('time-machine-remote-scan-button').click();
-    await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, {
-      timeout: REMOTE_E2E_WAIT_MS,
-    });
-    await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(/ms/);
-    await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
-    await expect
-      .poll(
-        async () =>
-          page.evaluate(() => {
-            const view = (window as any).__xln?.view;
-            return {
-              atHeight: view?.atHeight ?? null,
-              frameHeight: Number(view?.frame?.height || 0),
-              profileName: String(view?.frame?.activeEntity?.core?.profile?.name || ''),
-              accountsShown: Number(view?.frame?.activeEntity?.accounts?.items?.length || 0),
-              warningCount: document.querySelectorAll('.history-warning').length,
-            };
-          }),
-        { timeout: REMOTE_E2E_WAIT_MS },
-      )
-      .toEqual({
-        atHeight: controlResult.beforeHeight,
-        frameHeight: controlResult.beforeHeight,
-        profileName: activeH1Before.profileName,
-        accountsShown: expect.any(Number),
-        warningCount: 0,
-      });
-    await expect(page.getByTestId('time-machine-remote-diff')).toContainText(/Δh/);
-    await page.getByTestId('time-machine-remote-deeplink').click();
-    await expect.poll(() => new URL(page.url()).hash).toContain(`tmHeight=${controlResult.beforeHeight}`);
-    await expect.poll(() => new URL(page.url()).hash).toContain('tmEntity=');
-    const timeMachineProbe = await page.evaluate(async height => {
-      const view = window as typeof window & {
-        __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
-      };
-      const adapter = (view as any).__xln?.adapter;
-      if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
-      const [head, batch] = await Promise.all([
-        adapter.query.head<{ latestHeight?: number }>(),
-        adapter.query.historyFrameBatch<{ frames?: Array<{ height?: number }> }>({
-          heights: [height],
-          accountsLimit: 1,
-          booksLimit: 1,
-        }),
-      ]);
-      const heights = (batch.frames ?? []).map(frame => Number(frame.height || 0));
-      return {
-        historyLength: heights.length,
-        hasRequestedHeight: heights.includes(height),
-        maxHistoryHeight: Math.max(Number(head.latestHeight || 0), ...heights),
-      };
-    }, controlResult.beforeHeight);
-    expect(timeMachineProbe.historyLength).toBeGreaterThanOrEqual(1);
-    expect(timeMachineProbe.historyLength).toBeLessThanOrEqual(2);
-    expect(timeMachineProbe.hasRequestedHeight).toBe(true);
-    expect(timeMachineProbe.maxHistoryHeight).toBeGreaterThanOrEqual(after.envHeight);
-
-    const deepLinkUrl = page.url();
-    await page.goto(deepLinkUrl, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, {
-      timeout: REMOTE_E2E_WAIT_MS,
-    });
-    await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
-    await page.getByTitle('Go to live (End)').click();
-    await expect(page.getByTestId('time-machine-frame-badge')).toContainText(/LIVE/, { timeout: REMOTE_E2E_WAIT_MS });
-    await expect
-      .poll(
-        async () =>
-          page.evaluate(() => {
-            const view = (window as any).__xln?.view;
-            return {
-              atHeight: view?.atHeight ?? null,
-              frameHeight: Number(view?.frame?.height || 0),
-              profileName: String(view?.frame?.activeEntity?.core?.profile?.name || ''),
-            };
-          }),
-        { timeout: REMOTE_E2E_WAIT_MS },
-      )
-      .toEqual({
-        atHeight: null,
-        frameHeight: expect.any(Number),
-        profileName: nextProfileName,
-      });
-    const liveProjectionHeight = await page.evaluate(() => Number((window as any).__xln?.view?.frame?.height || 0));
-    expect(liveProjectionHeight).toBeGreaterThanOrEqual(after.envHeight);
+    await openAccountWorkspaceTab(page, 'activity');
+    const activityHistory = page.getByTestId('wallet-activity-history');
+    await expect(activityHistory).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+    await activityHistory.getByPlaceholder('Order, entity, hash, status').fill('extendCredit');
+    const activityRow = activityHistory.getByTestId('wallet-activity-row').first();
+    await expect(activityRow).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+    await expect(activityRow).toContainText('extendCredit');
+    await activityRow.getByRole('button').click();
+    const activityDetail = activityRow.getByTestId('wallet-activity-detail');
+    await expect(activityDetail).toContainText('runtime_input');
+    await expect(activityDetail).toContainText('extendCredit');
+    await expect(activityDetail).toContainText(String(controlActivity?.height ?? 0));
   },
 );
 

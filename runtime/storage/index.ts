@@ -1068,6 +1068,19 @@ const resolveStorageAppendPosition = async (
       `${options.env.state.height} after persisted head ${head.latestHeight}`,
     );
   }
+  const infrastructure = options.env.infrastructure;
+  const cachedFrameHash = infrastructure?.storageLatestFrameHash;
+  if (
+    head.latestHeight > 0 &&
+    infrastructure?.storageLatestFrameHeight === head.latestHeight &&
+    typeof cachedFrameHash === 'string' &&
+    /^0x[0-9a-f]{64}$/i.test(cachedFrameHash)
+  ) {
+    return {
+      previousFrame: null,
+      prevFrameHash: cachedFrameHash.toLowerCase(),
+    };
+  }
   const previous =
     head.latestHeight > 0
       ? await readStorageFrameRecord(walDb, head.latestHeight)
@@ -1075,11 +1088,16 @@ const resolveStorageAppendPosition = async (
   if (head.latestHeight > 0 && !previous) {
     throw new Error(`STORAGE_PREV_FRAME_MISSING: height=${head.latestHeight}`);
   }
+  const prevFrameHash = previous
+    ? previous.frameHash ?? computeStorageFrameHash(previous)
+    : ZERO_FRAME_HASH;
+  if (previous && infrastructure) {
+    infrastructure.storageLatestFrameHeight = head.latestHeight;
+    infrastructure.storageLatestFrameHash = prevFrameHash;
+  }
   return {
     previousFrame: previous,
-    prevFrameHash: previous
-      ? previous.frameHash ?? computeStorageFrameHash(previous)
-      : ZERO_FRAME_HASH,
+    prevFrameHash,
   };
 };
 
@@ -1454,6 +1472,7 @@ const buildStorageFrameRecordPlan = (
     diffBuffer.byteLength +
     nodeBytes;
   return {
+    frameHash: frameRecord.frameHash,
     frameKey,
     diffKey,
     frameBuffer,
@@ -1643,6 +1662,8 @@ const commitStorageFrame = async (
   // This synced WAL batch is the only frame commit point. Everything before it
   // is discardable planning; everything after it must recover forward.
   await writeBatch(batches.walBatch, { sync: true });
+  prepared.state.storageLatestFrameHeight = options.env.state.height;
+  prepared.state.storageLatestFrameHash = frame.frameHash;
   const authoritativeWriteMs = options.getPerfMs() - prepareStartedAt;
   options.onPersistenceProgress?.('authoritative-write-done');
   await options.onPersistenceBoundary?.('after-authoritative-history-commit');

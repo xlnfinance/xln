@@ -15,7 +15,7 @@
 - **Priority:** P1
 - **Effort:** L
 - **Risk:** HIGH
-- **Status:** BLOCKED — canonical React cutover implemented; Account/Runtime protocol failures in L2 and CI require owner authority
+- **Status:** BLOCKED — frontend stabilization is green; connected responsive evidence is waiting on an out-of-scope Runtime/MM prerequisite
 - **Depends on:** Plans 001–010
 - **Category:** migration, release engineering
 - **Planned at:** commit `5749e283d`, 2026-08-03
@@ -164,6 +164,8 @@ bun run gate:release
 ```
 
 Run each broad gate once on the unchanged release candidate. If one fails, return to a focused L1/L2 test, change code, then rerun the affected broad gate on the new candidate.
+
+Current frontend-only stabilization evidence: the remote-admin browser flow uses only canonical React controls, and the focused React/deployment batch passes 28/28 tests with 139 expectations. The exact connected selector/Health batch passes 3/3 with strict browser health, while the dedicated connected desktop/mobile capture is blocked before Playwright by the isolated `reset_market_maker` prerequisite. `bun run check` passes; Runtime/MM diagnosis, `gate:ci`, `gate:release`, and commit creation are outside this handoff.
 
 ## Done criteria
 

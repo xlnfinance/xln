@@ -9,7 +9,7 @@ import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import { compareStableText,safeStringify } from '../protocol/serialization';
 import {
-submitCrossJurisdictionIntent
+submitCrossJurisdictionIntents
 } from '../runtime.ts';
 import { computeCanonicalEntityHashesFromEnv } from '../storage/canonical-hash';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
@@ -608,7 +608,6 @@ const maintainBootstrapCrossQuotes = async (
   let remainingSourceHubGroups = Math.max(1, Math.floor(maxSourceHubGroups));
   const sortedTargetHubs = [...targetHubs].sort((left, right) => compareStableText(left.entityId, right.entityId));
   const orderedSourceHubs = [...sourceHubs].sort((left, right) => compareStableText(left.entityId, right.entityId));
-
   emitMarketMakerCrossBootstrapWaveEvent('cross-wave-start', {
     direction,
     groupedSourceHubs: orderedSourceHubs.length,
@@ -639,6 +638,7 @@ const maintainBootstrapCrossQuotes = async (
     const existingOfferIds = collectOfferIdsForAccount(account);
     const perAccountLimit = Math.max(1, Math.floor(maxOffersPerAccount));
     let selectedForSourceHub = 0;
+    const selectedSourceHubSpecs: MarketMakerOfferSpec[] = [];
     let candidateCount = 0;
     const specsByTargetHub = new Map<string, MarketMakerOfferSpec[]>();
     for (const spec of sourceHubSpecs) {
@@ -673,10 +673,8 @@ const maintainBootstrapCrossQuotes = async (
       );
       candidateCount += candidates.length;
       for (const spec of candidates.slice(0, allowedNewOffers)) {
-        await submitCrossJurisdictionIntent(env, spec.crossJurisdiction!);
-        attemptedBootstrapIntentOrderIds.add(spec.offerId);
         existingOfferIds.add(spec.offerId);
-        submittedIntentCount += 1;
+        selectedSourceHubSpecs.push(spec);
         selectedForSourceHub += 1;
         remainingNewOffers -= 1;
       }
@@ -692,10 +690,19 @@ const maintainBootstrapCrossQuotes = async (
       selectedCount: selectedForSourceHub,
       durationMs: Date.now() - startedAt,
     };
-    emitMarketMakerCrossBootstrapWaveEvent('cross-wave-source-hub', wave);
     if (selectedForSourceHub > 0) {
-      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-select', wave);
+      await submitCrossJurisdictionIntents(
+        env,
+        selectedSourceHubSpecs.map(spec => spec.crossJurisdiction!),
+      );
+      for (const spec of selectedSourceHubSpecs) attemptedBootstrapIntentOrderIds.add(spec.offerId);
+      submittedIntentCount += selectedSourceHubSpecs.length;
       remainingSourceHubGroups -= 1;
+      await yieldMarketMakerApi();
+      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-source-hub', wave);
+      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-select', wave);
+    } else {
+      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-source-hub', wave);
     }
   }
   return desiredOffersSeen > 0 && submittedIntentCount > 0;
@@ -760,9 +767,13 @@ const maintainSteadyCrossQuotes = async (
       0,
       allowedNewOffers,
     );
-    for (const spec of selected) {
-      await submitCrossJurisdictionIntent(env, spec.crossJurisdiction!);
-      submittedIntentCount += 1;
+    if (selected.length > 0) {
+      await submitCrossJurisdictionIntents(
+        env,
+        selected.map(spec => spec.crossJurisdiction!),
+      );
+      submittedIntentCount += selected.length;
+      await yieldMarketMakerApi();
     }
     remainingNewOffers -= selected.length;
     if (selected.length > 0) remainingSourceHubGroups -= 1;

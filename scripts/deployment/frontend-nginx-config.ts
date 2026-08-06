@@ -34,7 +34,9 @@ const resourceLocation = (route: FrontendRoute, frontendRoot: string): string =>
 
 const edgeLocation = (route: FrontendRoute): string => {
   if (route.pattern === '/admin') return '    location = /admin { return 308 /health; }';
-  if (route.pattern === '/radapter') return '    location = /radapter { return 308 /app; }';
+  if (route.pattern === '/radapter') {
+    return '    location = /radapter {\n        if ($args != "") { return 400; }\n        return 308 /app;\n    }';
+  }
   return `    # ${route.id} ${route.pattern} remains runtime/edge-owned`;
 };
 

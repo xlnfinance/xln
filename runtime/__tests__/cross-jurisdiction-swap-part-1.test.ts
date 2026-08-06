@@ -24,8 +24,7 @@ import {
   createEmptyEnv,
   handleInboundP2PEntityInputs,
   admitAtomicCrossJAccountInputs,
-  submitCrossJurisdictionIntent,
-  submitCrossJurisdictionSwap,
+  submitCrossJurisdictionIntent, submitCrossJurisdictionIntents, submitCrossJurisdictionSwap,
 } from '../runtime';
 import { buildCrossJurisdictionSwapSubmission } from '../runtime/jurisdiction-api';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
@@ -2379,9 +2378,10 @@ describe('cross-jurisdiction hashledger swap', () => {
       bookHubSignerId: sourceHubSigner,
     } as const;
     const result = await submitCrossJurisdictionSwap(env, submitParams);
-    await submitCrossJurisdictionSwap(env, submitParams);
+    env.runtimeMempool!.entityInputs = [];
+    await submitCrossJurisdictionIntents(env, [result.route, result.route]);
     expect(hubEnv.runtimeMempool?.entityInputs).toEqual([]);
-    expect(env.runtimeMempool?.entityInputs).toHaveLength(4);
+    expect(env.runtimeMempool?.entityInputs.map(input => input.entityTxs.length)).toEqual([2, 2]);
     const attackerEnv = createEmptyEnv('cross-submit-relay-attacker');
     const attackerEnvelope = signRuntimeEntityInputsEnvelope(attackerEnv, hubEnv.runtimeId!, {
       sourceRuntimeId: attackerEnv.runtimeId!,
@@ -2423,12 +2423,12 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetRetry = await applyEntityTx(
       env,
       targetAuthorization.newState,
-      queuedUserAuthorizations[2]!.entityTxs![0]!,
+      queuedUserAuthorizations[0]!.entityTxs![1]!,
     );
     const sourceRetry = await applyEntityTx(
       env,
       sourceAuthorization.newState,
-      queuedUserAuthorizations[3]!.entityTxs![0]!,
+      queuedUserAuthorizations[1]!.entityTxs![1]!,
     );
     expect(targetRetry.outputs).toEqual([]);
     expect(sourceRetry.outputs).toEqual([]);
