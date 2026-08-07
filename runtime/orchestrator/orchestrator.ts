@@ -91,6 +91,10 @@ import {
   readManagedProcessTable,
   type ManagedProcessTableEntry,
 } from './managed-runtime-leases';
+import {
+  scheduleMarketMakerRecoverySpawn,
+  shouldAbortMarketMakerSpawn,
+} from './mm-recovery-spawn';
 import { buildPrometheusMetrics } from './prometheus';
 import { deriveResetHealthOk } from './health-model';
 import {
@@ -112,12 +116,7 @@ import {
   type MarketSnapshotOrderDepth,
 } from './market-maker-aggregated-health';
 import { buildPublicHubDiscoveryPayload } from './public-discovery';
-import {
-  assertOrchestratorResetAllowed,
-  ORCHESTRATOR_RESET_CONFIRMATION,
-  OrchestratorResetRejectedError,
-  type OrchestratorResetBody,
-} from './reset-guard';
+import { handleResetHttpRequest } from './reset-http';
 import {
   deployRpc2JurisdictionStack,
   hasShardRpc2Jurisdiction,
@@ -154,7 +153,10 @@ import {
 } from './market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
 import { createManagedRuntimeSecurityTelemetrySync } from './runtime-security-telemetry';
-import { createBootstrapTimelineTools } from './bootstrap-timeline';
+import {
+  createBootstrapTimelineTools,
+  projectCurrentBootstrapTimelineParams,
+} from './bootstrap-timeline';
 import { createProcessHealthBuilder } from './process-health';
 import {
   flushPrefixedLogChunk,
@@ -167,7 +169,7 @@ import {
   type HubBaselineProgressState,
 } from './hub-baseline-progress';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
-import { requiresLocalNodeOperator } from '../api/server/node-http-access';
+import { handleRuntimeImportHttpRequest } from './runtime-import-http';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
 import {
   attachManagedChildFatalIpc,
@@ -1432,29 +1434,28 @@ const handleUnexpectedMarketMakerFailure = (
   // Reset owns MM lifecycle — do not race a supervised respawn into stopAllChildren.
   if (resetState.inProgress) return;
 
-  marketMakerChild.recoveryInProgress = true;
-  marketMakerChild.restartTimer = setTimeout(() => {
-    marketMakerChild.restartTimer = null;
-    void (async () => {
-      // Match readiness-path fencing: a crashed writer may leave a valid lease
-      // until TTL expiry; respawning sooner fails closed and wastes the retry.
-      await scheduler.wait(MARKET_MAKER_RESTART_FENCING_GRACE_MS);
-      await spawnMarketMaker();
-      await waitForMarketMakerSelfReady();
-      marketMakerChild.recoveryInProgress = false;
+  scheduleMarketMakerRecoverySpawn({
+    marketMakerChild,
+    fencingGraceMs: MARKET_MAKER_RESTART_FENCING_GRACE_MS,
+    backoffMs: decision.backoffMs,
+    shouldAbortSpawn: () => shouldAbortMarketMakerSpawn({
+      fatalShutdown: fatalOrchestratorShutdownStarted,
+      orchestratorShutdown: orchestratorShutdownStarted,
+      resetInProgress: resetState.inProgress,
+    }),
+    spawnMarketMaker,
+    waitForMarketMakerSelfReady,
+    rememberControlledStop: (proc) => rememberControlledStop(proc ?? null),
+    stopProcess: async (proc) => stopProcess(proc ?? null),
+    onSpawned: () => {
       meshLog.info('child.respawned_from_checkpoint', {
         child: marketMakerChild.name,
         fingerprint: decision.fingerprint,
         identicalFailureCount: decision.count,
         receiptPath,
       });
-    })().catch(async (error) => {
-      if (marketMakerChild.recoveryInProgress && marketMakerChild.restartTimer) return;
-      const failedProc = marketMakerChild.proc;
-      marketMakerChild.proc = null;
-      rememberControlledStop(failedProc);
-      await stopProcess(failedProc);
-      marketMakerChild.recoveryInProgress = false;
+    },
+    onSpawnFailed: (error) => {
       handleUnexpectedMarketMakerFailure({
         role: 'market-maker',
         name: marketMakerChild.name,
@@ -1462,8 +1463,8 @@ const handleUnexpectedMarketMakerFailure = (
         signal: null,
         reason: `MM_RECOVERY_SPAWN_FAILED:${serializeError(error)}`,
       });
-    });
-  }, decision.backoffMs);
+    },
+  });
 };
 
 const buildSecondaryRpcArgs = (): string[] => {
@@ -1797,49 +1798,25 @@ const buildCurrentBootstrapTimeline = (input: {
   bootstrapReservesOk: boolean;
   bootstrapReserveTargetsMet: boolean;
   reserveEntityCount: number;
-}): AggregatedHealth['bootstrapTimeline'] => {
-  const mmHubs = input.marketMaker.hubs;
-  const mmCross = input.marketMaker.cross;
-  const mmOfferTotal = mmHubs.reduce(
-    (sum, hub) => sum + Number(hub.offers || 0),
-    0,
-  );
-  const mmExpectedTotal =
-    input.marketMaker.expectedOffersPerHub *
-    Math.max(1, mmHubs.length || HUB_NAMES.length);
-  const sameChainOk =
-    !input.capabilities.marketMakerEnabled ||
-    (mmHubs.length === HUB_NAMES.length &&
-      mmHubs.every(hub => hub.depthReady === true));
-  const crossOk =
-    !input.capabilities.marketMakerEnabled ||
-    !mmCross.applicable ||
-    mmCross.ok === true;
-  return buildBootstrapTimeline({
+}): AggregatedHealth['bootstrapTimeline'] =>
+  buildBootstrapTimeline(projectCurrentBootstrapTimelineParams({
     storageOk: input.storageOk,
     resetOk: input.resetOk,
+    hubs: input.hubs,
     hubsOnline: input.hubsOnline,
-    onlineHubs: input.hubs.filter(hub => hub.online).length,
-    totalHubs: input.hubs.length,
     hubMeshOk: input.hubMeshOk,
     directOpenLinks: input.directOpenLinks,
-    mmEnabled: input.capabilities.marketMakerEnabled,
+    marketMakerEnabled: input.capabilities.marketMakerEnabled,
     marketMakerActive: input.marketMakerActive,
-    sameChainOk,
-    crossOk,
-    mmOk: input.marketMaker.ok,
-    mmStartupPhase: input.marketMakerStartupPhase,
-    mmOfferTotal,
-    mmExpectedTotal,
-    crossRouteCount: Number(mmCross.routeCount || 0),
-    expectedCrossRoutes: mmCross.expectedRoutes,
+    marketMaker: input.marketMaker,
+    marketMakerStartupPhase: input.marketMakerStartupPhase,
+    hubNameCount: HUB_NAMES.length,
     custodyEnabled: input.capabilities.custodyEnabled,
     custodyOk: input.capabilities.custodyOk,
     bootstrapReservesOk: input.bootstrapReservesOk,
     bootstrapReserveTargetsMet: input.bootstrapReserveTargetsMet,
     reserveEntityCount: input.reserveEntityCount,
-  });
-};
+  }));
 
 const resolveCurrentCapabilityHealth = (): ReturnType<
   typeof resolveResetCapabilityHealth
@@ -2306,6 +2283,11 @@ const waitForMarketMakerReady = async (): Promise<void> => {
       );
     }
     if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null) {
+      // Supervised recovery already owns the respawn; do not race a second spawn.
+      if (marketMakerChild.recoveryInProgress) {
+        await scheduler.wait(250);
+        continue;
+      }
       if (restartAttempts < marketMakerReadyRestartLimit) {
         restartAttempts += 1;
         console.warn(
@@ -2317,6 +2299,13 @@ const waitForMarketMakerReady = async (): Promise<void> => {
         // expires. Reusing the namespace sooner would correctly fail closed and
         // waste the retry, so wait out the lease before spawning its successor.
         await scheduler.wait(MARKET_MAKER_RESTART_FENCING_GRACE_MS);
+        if (shouldAbortMarketMakerSpawn({
+          fatalShutdown: fatalOrchestratorShutdownStarted,
+          orchestratorShutdown: orchestratorShutdownStarted,
+          resetInProgress: resetState.inProgress,
+        })) {
+          return;
+        }
         await spawnMarketMaker();
         await scheduler.wait(500);
         continue;
@@ -2641,164 +2630,37 @@ const handleHealthRequest = async (
   return null;
 };
 
-const unavailableRuntimeImportManifest = {
-  issuedAt: 0,
-  expiresAt: 0,
-  entries: [],
-};
-
-const handleRuntimeImportRequest = async (
+const handleRuntimeImportRequest = (
   request: Request,
   url: URL,
   operatorAuthorized: boolean,
   headers: Record<string, string>,
-): Promise<Response | null> => {
-  if (
-    url.pathname !== '/api/runtime-import' ||
-    request.method !== 'GET'
-  ) {
-    return null;
-  }
-  if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
-    return new Response(
-      safeStringify({ error: 'Operator access required' }),
-      { status: 403, headers },
-    );
-  }
-  await getStorageHealth();
-  await refreshChildHealthForResponse();
-  const readiness = resolveRuntimeImportReadiness(
-    await buildAggregatedHealthResponse(),
-  );
-  if (!readiness.ok) {
-    const allowPartial =
-      url.searchParams.get('allowPartial') === '1' && operatorAuthorized;
-    const partialManifest = allowPartial
-      ? buildRuntimeImportManifest()
-      : null;
-    if (partialManifest) {
-      return new Response(
-        safeStringify({
-          ok: true,
-          ready: false,
-          partial: true,
-          error: readiness.error,
-          reason: readiness.reason,
-          category: readiness.category,
-          code: readiness.code,
-          retryable: readiness.retryable,
-          fatal: readiness.fatal,
-          failure: readiness.failure,
-          degraded: readiness.degraded,
-          importUrl: buildRuntimeImportUrl(),
-          manifest: partialManifest,
-        }),
-        { headers: { ...headers, 'Retry-After': '2' } },
-      );
-    }
-    return new Response(
-      safeStringify({
-        ok: false,
-        ready: false,
-        error: readiness.error,
-        reason: readiness.reason,
-        category: readiness.category,
-        code: readiness.code,
-        retryable: readiness.retryable,
-        fatal: readiness.fatal,
-        failure: readiness.failure,
-        degraded: readiness.degraded,
-        manifest: unavailableRuntimeImportManifest,
-      }),
-      { headers: { ...headers, 'Retry-After': '2' } },
-    );
-  }
-  const manifest = buildRuntimeImportManifest();
-  return manifest
-    ? new Response(
-        safeStringify({
-          ok: true,
-          ready: true,
-          importUrl: buildRuntimeImportUrl(),
-          manifest,
-        }),
-        { headers },
-      )
-    : new Response(
-        safeStringify({
-          ok: false,
-          ready: false,
-          error: 'RUNTIME_IMPORT_NOT_READY',
-          manifest: unavailableRuntimeImportManifest,
-        }),
-        { headers: { ...headers, 'Retry-After': '2' } },
-      );
-};
+): Promise<Response | null> =>
+  handleRuntimeImportHttpRequest(request, url, operatorAuthorized, headers, {
+    refreshChildHealthForResponse,
+    buildAggregatedHealthResponse,
+    buildRuntimeImportManifest,
+    buildRuntimeImportUrl,
+  });
 
-const handleResetRequest = async (
+const handleResetRequest = (
   request: Request,
   pathname: string,
   operatorAuthorized: boolean,
   headers: Record<string, string>,
-): Promise<Response | null> => {
-  if (pathname !== '/api/reset' || request.method !== 'POST') return null;
-  try {
-    const body = await request
-      .json()
-      .catch(() => null) as OrchestratorResetBody | null;
-    assertOrchestratorResetAllowed(request, body, {
-      resetAllowed: args.resetAllowed,
-      operatorAuthorized,
-      bindHost: args.host,
-      resetToken: args.resetToken,
-    });
-    const requestedMarketMaker =
-      body?.enableMarketMaker ?? body?.requireMarketMaker;
-    const enableMarketMaker =
-      typeof requestedMarketMaker === 'boolean'
-        ? requestedMarketMaker
-        : args.mmEnabled;
-    const requestedCustody = body?.enableCustody ?? body?.requireCustody;
-    const enableCustody =
-      typeof requestedCustody === 'boolean'
-        ? requestedCustody
-        : args.custodyEnabled;
-    await ensureResetWithOptions({ enableMarketMaker, enableCustody });
-    await pollAllHubHealth();
-    if (enableMarketMaker) await pollMarketMakerHealth();
-    return new Response(
-      safeStringify(await buildAggregatedHealthResponse()),
-      { headers },
-    );
-  } catch (error) {
-    if (error instanceof OrchestratorResetRejectedError) {
-      return new Response(
-        safeStringify({
-          error: error.code,
-          ...(error.code === 'RESET_CONFIRMATION_REQUIRED'
-            ? { requiredConfirmation: ORCHESTRATOR_RESET_CONFIRMATION }
-            : {}),
-        }),
-        { status: error.status, headers },
-      );
-    }
-    let health: AggregatedHealth | null = null;
-    let healthError: string | null = null;
-    try {
-      health = await buildAggregatedHealthResponse();
-    } catch (healthBuildError) {
-      healthError = serializeError(healthBuildError);
-    }
-    return new Response(
-      safeStringify({
-        error: serializeError(error),
-        ...(health ? { health } : {}),
-        ...(healthError ? { healthError } : {}),
-      }),
-      { status: 500, headers },
-    );
-  }
-};
+): Promise<Response | null> =>
+  handleResetHttpRequest(request, pathname, operatorAuthorized, headers, {
+    resetAllowed: args.resetAllowed,
+    bindHost: args.host,
+    resetToken: args.resetToken,
+    mmEnabled: args.mmEnabled,
+    custodyEnabled: args.custodyEnabled,
+    ensureResetWithOptions,
+    pollAllHubHealth,
+    pollMarketMakerHealth,
+    buildAggregatedHealthResponse,
+    serializeError,
+  });
 
 const handleMetadataRequest = (
   url: URL,

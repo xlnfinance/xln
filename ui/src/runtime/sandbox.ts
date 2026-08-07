@@ -50,9 +50,13 @@ function accountReady(env: RuntimeReplica, entityId: string, counterpartyId: str
 
 function creditApplied(env: RuntimeReplica, entityId: string, counterpartyId: string, minTotal: bigint): boolean {
 	const replica = findReplicaState(env, entityId);
-	const delta = replica?.state?.accounts?.get?.(counterpartyId)?.state?.deltas?.get?.(USDC);
-	if (!delta) return false;
-	return delta.leftCreditLimit + delta.rightCreditLimit >= minTotal;
+	const account = replica?.state?.accounts?.get?.(counterpartyId);
+	const delta = account?.state?.deltas?.get?.(USDC);
+	if (!delta || !replica) return false;
+	const xln = getXLN();
+	const isLeft = xln.isLeftEntity(entityId, counterpartyId);
+	const derived = xln.deriveDelta(delta, isLeft);
+	return derived.ownCreditLimit + derived.peerCreditLimit >= minTotal;
 }
 
 async function sendEntity(entityId: string, signerId: string, entityTxs: EntityTx[]): Promise<void> {

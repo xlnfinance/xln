@@ -27,7 +27,8 @@ import {
   resolveScenarioJurisdictionAddress,
 } from './boot';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
+import { snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, advanceScenarioPastDisputeTimeout, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from './helpers';
+import { readRpcUnixSeconds } from './rpc-block-mining';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta, isLeftEntity } from '../account/utils';
 import { createGossipLayer } from '../network/p2p/gossip';
@@ -72,6 +73,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     env.quietRuntimeLogs = false;
     env.scenarioLogLevel = 'info';
   }
+  // Puppet scenarios must not append onto a leftover durable Runtime head.
+  setScenarioStorageEnabled(env, false);
   const restoreStrict = enableStrictScenario(env, 'AHB');
 
   // Require real runtime seed and derive signer keys (no test keys)
@@ -1994,7 +1997,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   const [, bobAfterStart] = findReplica(env, bob.id);
   const bobAccountAfterStart = bobAfterStart.state.accounts.get(hub.id);
   assert(bobAccountAfterStart?.activeDispute, 'PHASE 7: Bob activeDispute not set after DisputeStarted');
-  console.log(`   Bob activeDispute: timeout=block ${bobAccountAfterStart.activeDispute.disputeTimeout}, nonce=${bobAccountAfterStart.activeDispute.initialNonce}`);
+  console.log(`   Bob activeDispute: timeout=unix ${bobAccountAfterStart.activeDispute.disputeTimeout}, nonce=${bobAccountAfterStart.activeDispute.initialNonce}`);
 
   const [, hubAfterStart] = findReplica(env, hub.id);
   const hubAccountAfterStart = hubAfterStart.state.accounts.get(bob.id);
@@ -2008,13 +2011,29 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 7 DISPUTE-ACTIVE');
   const bobReserveBeforeDispute = await jadapter.getReserves(bob.id, USDC_TOKEN_ID);
 
-  // 5) Wait for real block timeout
-  const targetBlock = bobAccountAfterStart.activeDispute.disputeTimeout;
-  console.log(`\n⏳ STEP 5: Waiting for block timeout (target: ${targetBlock})...`);
+  // 5) Wait for absolute unix dispute timeout (seconds, not block height).
+  // Local disputeStart latches timeout=0 until DisputeStarted is observed.
   const providerAny = jadapter.provider as { send?: (method: string, params: unknown[]) => Promise<unknown> };
   if (typeof providerAny.send !== 'function') {
-    throw new Error('AHB dispute timeout mining requires RPC provider with evm_mine support');
+    throw new Error('AHB dispute timeout advance requires RPC provider with evm_increaseTime support');
   }
+  let timeoutUnix = 0;
+  for (let round = 0; round < 40; round++) {
+    await syncChain(env, 1);
+    await processJEvents(env);
+    await process(env);
+    const runtimeTimeout = Number(
+      findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute?.disputeTimeout || 0,
+    );
+    const onChainTimeout = Number((await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout || 0);
+    timeoutUnix = onChainTimeout > 0 ? onChainTimeout : runtimeTimeout;
+    const observed = findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute?.observedOnChain === true;
+    if (timeoutUnix > 0 && observed) break;
+  }
+  if (!(timeoutUnix > 0)) {
+    throw new Error('AHB PHASE 7: disputeTimeout still 0 after DisputeStarted wait (runtime+on-chain)');
+  }
+  console.log(`\n⏳ STEP 5: Waiting for unix timeout (target: ${timeoutUnix})...`);
   const waitForRuntimeVisibleJBlock = async (
     target: bigint | number | (() => bigint | number | undefined | Promise<bigint | number | undefined>),
     label: string,
@@ -2025,7 +2044,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     };
     let targetBlockNumber = await readTarget();
     if (targetBlockNumber === undefined) {
-      throw new Error(`AHB ${label}: missing dispute timeout target`);
+      throw new Error(`AHB ${label}: missing J-height target`);
     }
     for (let i = 0; i < 40; i++) {
       await syncChain(env, 1);
@@ -2061,28 +2080,22 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     const providerBlock = BigInt(await jadapter.provider.getBlockNumber());
     throw new Error(
       `AHB ${label}: entity/authenticated/provider J-height ` +
-        `${entityVisibleBlock}/${authenticatedBlock}/${providerBlock} < timeout ${targetBlockNumber}`,
+        `${entityVisibleBlock}/${authenticatedBlock}/${providerBlock} < target ${targetBlockNumber}`,
     );
   };
 
-  while (true) {
-    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
-    console.log(`   Current block: ${currentBlock}, target: ${targetBlock}`);
-
-    if (currentBlock >= targetBlock) {
-      console.log(`✅ Timeout reached at block ${currentBlock}`);
-      break;
-    }
-
-    await providerAny.send('evm_mine', []);
-    await process(env);
-  }
+  const timeAdvance = await advanceScenarioPastDisputeTimeout(
+    env,
+    { send: providerAny.send.bind(providerAny) },
+    timeoutUnix,
+  );
+  console.log(
+    `✅ Timeout reached via unix advance ` +
+    `(${timeAdvance.startUnix}→${timeAdvance.finalUnix}, +${timeAdvance.advancedSeconds}s)`,
+  );
+  await process(env);
   await waitForRuntimeVisibleJBlock(
-    async () => {
-      const runtimeTimeout = findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute?.disputeTimeout ?? targetBlock;
-      const onChainTimeout = (await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout;
-      return onChainTimeout > 0n ? onChainTimeout : runtimeTimeout;
-    },
+    async () => BigInt(await jadapter.provider.getBlockNumber()),
     'phase7 dispute timeout',
   );
 
@@ -2093,7 +2106,10 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   const zeroHash = '0x' + '0'.repeat(64);
   const waitForDisputeFinality = async (label: string): Promise<void> => {
     for (let round = 0; round < 40; round++) {
-      await syncChain(env, 1);
+      // Deadline hook + j_broadcast are Entity txs; syncChain alone cannot draft them.
+      await process(env);
+      await syncChain(env, 2);
+      await processJEvents(env);
       const onChainInfo = await jadapter.getAccountInfo(bob.id, hub.id);
       const [, bobReplica] = findReplica(env, bob.id);
       const [, hubReplica] = findReplica(env, hub.id);
@@ -2106,7 +2122,24 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
         !hubReplica.state.jBatchState?.sentBatch
       ) return;
     }
-    throw new Error(`ASSERT: ${label}: scheduled dispute finalization did not converge on chain and both entities`);
+    const onChainInfo = await jadapter.getAccountInfo(bob.id, hub.id);
+    const [, bobReplica] = findReplica(env, bob.id);
+    const [, hubReplica] = findReplica(env, hub.id);
+    const bobAcc = bobReplica.state.accounts.get(hub.id);
+    const hubAcc = hubReplica.state.accounts.get(bob.id);
+    throw new Error(
+      `ASSERT: ${label}: scheduled dispute finalization did not converge on chain and both entities ` +
+      `onChainHash=${onChainInfo.disputeHash} onChainTimeout=${onChainInfo.disputeTimeout} ` +
+      `bobActive=${Boolean(bobAcc?.activeDispute)} hubActive=${Boolean(hubAcc?.activeDispute)} ` +
+      `bobFinalizeQueued=${String(bobAcc?.activeDispute?.finalizeQueued)} ` +
+      `hubFinalizeQueued=${String(hubAcc?.activeDispute?.finalizeQueued)} ` +
+      `bobDraft=${bobReplica.state.jBatchState?.batch.disputeFinalizations?.length ?? 0} ` +
+      `hubDraft=${hubReplica.state.jBatchState?.batch.disputeFinalizations?.length ?? 0} ` +
+      `bobSent=${Boolean(bobReplica.state.jBatchState?.sentBatch)} ` +
+      `hubSent=${Boolean(hubReplica.state.jBatchState?.sentBatch)} ` +
+      `runtimeTs=${env.state.timestamp} bobTs=${bobReplica.state.timestamp} hubTs=${hubReplica.state.timestamp} ` +
+      `timeout=${String(bobAcc?.activeDispute?.disputeTimeout ?? hubAcc?.activeDispute?.disputeTimeout ?? 'cleared')}`,
+    );
   };
   await waitForDisputeFinality('PHASE 7');
 
@@ -2266,7 +2299,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   if (!jRepEarly) {
     throw new Error('PHASE 8: J-Machine not found for early finalize check');
   }
-  const currentBlock = BigInt(jRepEarly.blockNumber);
   const activeDispute = bobEdgeAccount.activeDispute;
   if (!activeDispute) {
     throw new Error('PHASE 8: activeDispute missing before early finalize check');
@@ -2279,8 +2311,14 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     if (edgeInfoBeforeFail.disputeTimeout === 0n) {
       throw new Error('PHASE 8: disputeTimeout missing on-chain (early finalize check)');
     }
-    if (currentBlock >= edgeInfoBeforeFail.disputeTimeout) {
-      throw new Error(`PHASE 8: expected pre-timeout (block=${currentBlock}, timeout=${edgeInfoBeforeFail.disputeTimeout})`);
+    if (typeof providerAny.send !== 'function') {
+      throw new Error('PHASE 8: early finalize check requires RPC provider clock');
+    }
+    const currentUnix = await readRpcUnixSeconds({ send: providerAny.send.bind(providerAny) });
+    if (currentUnix >= Number(edgeInfoBeforeFail.disputeTimeout)) {
+      throw new Error(
+        `PHASE 8: expected pre-timeout (unix=${currentUnix}, timeout=${edgeInfoBeforeFail.disputeTimeout})`,
+      );
     }
   }
   console.log('✅ Early finalize blocked by preflight (pre-timeout, starter) — skipping broadcast');
@@ -2315,29 +2353,29 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   const disputeState = hubFrozenAccount.activeDispute ?? bobFrozenAccount.activeDispute;
   assert(disputeState, 'PHASE 8: activeDispute missing before timeout wait');
-  const targetCounterTimeout = disputeState.disputeTimeout;
-  console.log(`⏳ STEP 8b: Waiting dispute timeout (target block ${targetCounterTimeout})...`);
+  let targetCounterTimeoutUnix = Number(disputeState.disputeTimeout || 0);
+  if (!(targetCounterTimeoutUnix > 0)) {
+    targetCounterTimeoutUnix = Number((await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout || 0);
+  }
+  if (!(targetCounterTimeoutUnix > 0)) {
+    throw new Error('PHASE 8: disputeTimeout still 0 before counter-timeout wait');
+  }
+  console.log(`⏳ STEP 8b: Waiting dispute timeout (unix ${targetCounterTimeoutUnix})...`);
   if (typeof providerAny.send !== 'function') {
-    throw new Error('AHB counter-dispute timeout mining requires RPC provider with evm_mine support');
+    throw new Error('AHB counter-dispute timeout advance requires RPC provider with evm_increaseTime support');
   }
-  while (true) {
-    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
-    if (currentBlock >= targetCounterTimeout) {
-      console.log(`✅ Dispute timeout reached at block ${currentBlock}`);
-      break;
-    }
-    await providerAny.send('evm_mine', []);
-    await process(env);
-  }
+  const counterAdvance = await advanceScenarioPastDisputeTimeout(
+    env,
+    { send: providerAny.send.bind(providerAny) },
+    targetCounterTimeoutUnix,
+  );
+  console.log(
+    `✅ Dispute timeout reached via unix advance ` +
+    `(${counterAdvance.startUnix}→${counterAdvance.finalUnix}, +${counterAdvance.advancedSeconds}s)`,
+  );
+  await process(env);
   await waitForRuntimeVisibleJBlock(
-    async () => {
-      const runtimeTimeout =
-        findReplica(env, hub.id)[1].state.accounts.get(bob.id)?.activeDispute?.disputeTimeout ??
-        findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute?.disputeTimeout ??
-        targetCounterTimeout;
-      const onChainTimeout = (await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout;
-      return onChainTimeout > 0n ? onChainTimeout : runtimeTimeout;
-    },
+    async () => BigInt(await jadapter.provider.getBlockNumber()),
     'phase8 dispute timeout',
   );
 

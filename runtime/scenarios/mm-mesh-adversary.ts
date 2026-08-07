@@ -125,7 +125,8 @@ const runMmRestart = async (ctx: AdversaryContext, timeoutMs: number): Promise<v
       Number(child?.pid ?? 0) > 0 &&
       Number(child?.pid) !== oldPid &&
       Number(child?.restartCount ?? 0) > oldRestartCount &&
-      child?.online === true
+      child?.online === true &&
+      health.systemOk === true
     );
   }, timeoutMs);
   console.log('[OK] phase=ADVERSARY mm-restart replaced');

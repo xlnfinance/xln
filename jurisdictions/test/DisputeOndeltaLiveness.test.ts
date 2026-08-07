@@ -1,4 +1,4 @@
-import { loadFixture, mine } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
+import { loadFixture, mine, time} from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
@@ -161,7 +161,7 @@ describe('dispute ondelta liveness', function () {
     }));
     expect((await depository._accounts(accountKey)).nonce).to.equal(proofNonce);
 
-    await mine(Number(await depository.defaultDisputeDelay()));
+    await time.increase(Number(await depository.defaultDisputeDelay()));
     await expect(processBatch(depository, left, emptyBatch({
       disputeFinalizations: [{
         counterentity: right.entityId,
@@ -225,7 +225,7 @@ describe('dispute ondelta liveness', function () {
         starterIncrementedArguments: '0x',
       }],
     }));
-    await mine(Number(await depository.defaultDisputeDelay()));
+    await time.increase(Number(await depository.defaultDisputeDelay()));
 
     await expect(processBatch(depository, left, emptyBatch({
       disputeFinalizations: [{
@@ -300,7 +300,7 @@ describe('dispute ondelta liveness', function () {
         starterIncrementedArguments: '0x',
       })),
     }));
-    await mine(Number(await depository.defaultDisputeDelay()));
+    await time.increase(Number(await depository.defaultDisputeDelay()));
 
     for (let index = 0; index < disputes.length; index++) {
       const dispute = disputes[index]!;
@@ -385,7 +385,7 @@ describe('dispute ondelta liveness', function () {
         starterIncrementedArguments: '0x',
       }],
     }));
-    await mine(Number(await depository.defaultDisputeDelay()));
+    await time.increase(Number(await depository.defaultDisputeDelay()));
     await expect(processBatch(depository, debtor, emptyBatch({
       disputeFinalizations: [{
         counterentity: creditor.entityId,
@@ -438,7 +438,7 @@ describe('dispute ondelta liveness', function () {
           starterIncrementedArguments: '0x',
         }],
       }));
-      await mine(Number(await depository.defaultDisputeDelay()));
+      await time.increase(Number(await depository.defaultDisputeDelay()));
       await token.setMode(mode);
 
       await expect(processBatch(depository, debtor, emptyBatch({

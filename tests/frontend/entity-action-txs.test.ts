@@ -67,16 +67,11 @@ describe('entity action tx builders', () => {
       data: { counterpartyEntityId: hubId, workspaceHash },
     });
     expect(buildOpenAccountTx(hubId)).toEqual({ type: 'openAccount', data: { targetEntityId: hubId } });
-    expect(buildPrepareDisputeTx(hubId, 'prep', {
-      allowUnsafeCrossJTargetDispute: true,
-      acceptedCrossJTargetLossAmount: 10n,
-    })).toEqual({
+    expect(buildPrepareDisputeTx(hubId, 'prep')).toEqual({
       type: 'prepareDispute',
       data: {
         counterpartyEntityId: hubId,
         description: 'prep',
-        allowUnsafeCrossJTargetDispute: true,
-        acceptedCrossJTargetLossAmount: 10n,
       },
     });
     expect(buildDisputeFinalizeTx(hubId, 'final')).toEqual({ type: 'disputeFinalize', data: { counterpartyEntityId: hubId, description: 'final' } });

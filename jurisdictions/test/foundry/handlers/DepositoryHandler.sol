@@ -553,7 +553,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       }
     }
     DisputeGhost memory g = disputes[pi];
-    if (g.startBlock == 0) return; // never started
+    if (g.startTimestamp == 0) return; // never started
 
     bool byStarter = bySeed % 2 == 0;
     uint256 caller = byStarter ? g.starter : g.counter;
@@ -578,7 +578,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     });
 
     bool wasActive = g.active && _disputeHash(me, other) != bytes32(0);
-    bool wasEarly = vm.getBlockNumber() < g.startBlock + DISPUTE_DELAY;
+    bool wasEarly = vm.getBlockTimestamp() < g.startTimestamp + DISPUTE_DELAY;
     if (byStarter && wasEarly && wasActive) starterEarlyFinalizeAttempts++;
 
     if (_submit(caller, b)) {
@@ -685,7 +685,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     });
     if (!_submit(from, start)) return;
     _bump("disputeStart");
-    uint256 startBlock = vm.getBlockNumber();
+    uint256 startTs = vm.getBlockTimestamp();
 
     Batch memory fin = XlnHanko.emptyBatch();
     fin.disputeFinalizations = new FinalDisputeProof[](1);
@@ -710,9 +710,8 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       return;
     }
 
-    // Step 2: wait out the delay, then finalize legally.
-    vm.roll(startBlock + DISPUTE_DELAY);
-    vm.warp(vm.getBlockTimestamp() + DISPUTE_DELAY * 12);
+    // Step 2: wait out the delay (seconds), then finalize legally.
+    vm.warp(startTs + DISPUTE_DELAY);
     if (_submit(from, fin)) {
       _bump("disputeFullCycle");
       starterTimeoutFinalizes++;
@@ -724,7 +723,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
 
   // ── time ──
 
-  /// @notice Rolls exactly to a live dispute's timeout. Without this the
+  /// @notice Warps exactly to a live dispute's timeout. Without this the
   ///         *legal* starter finalization is statistically unreachable, and
   ///         invariant_disputeNotFinalizableEarly would be vacuously green.
   function advancePastDisputeDelay(uint256 pairSeed) external {
@@ -733,10 +732,9 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       uint256 pi = (startAt + k) % PAIRS;
       DisputeGhost memory g = disputes[pi];
       if (!g.active) continue;
-      uint256 target = g.startBlock + DISPUTE_DELAY;
-      if (vm.getBlockNumber() >= target) return;
-      vm.roll(target);
-      vm.warp(vm.getBlockTimestamp() + DISPUTE_DELAY * 12);
+      uint256 target = g.startTimestamp + DISPUTE_DELAY;
+      if (vm.getBlockTimestamp() >= target) return;
+      vm.warp(target);
       _bump("advancePastDisputeDelay");
       return;
     }

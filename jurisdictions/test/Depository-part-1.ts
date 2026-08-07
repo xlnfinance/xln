@@ -368,7 +368,7 @@ describe('Depository', () => {
       }),
     );
     await target.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
-    await mine(Number(await target.defaultDisputeDelay()));
+    await time.increase(Number(await target.defaultDisputeDelay()));
 
     const finalization = {
       counterentity: right.entityId,
@@ -1620,7 +1620,7 @@ describe('Depository', () => {
     {
       const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } =
         await setupStartedDispute();
-      await mine(Number(await depository.defaultDisputeDelay()));
+      await time.increase(Number(await depository.defaultDisputeDelay()));
       const finalization = {
         counterentity: right.entityId,
         initialNonce,
@@ -1643,7 +1643,7 @@ describe('Depository', () => {
     {
       const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } =
         await setupStartedDispute();
-      await mine(Number(await depository.defaultDisputeDelay()));
+      await time.increase(Number(await depository.defaultDisputeDelay()));
       const finalization = {
         counterentity: right.entityId,
         initialNonce,
@@ -1665,7 +1665,7 @@ describe('Depository', () => {
     {
       const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } =
         await setupStartedDispute();
-      await mine(Number(await depository.defaultDisputeDelay()));
+      await time.increase(Number(await depository.defaultDisputeDelay()));
       const finalization = {
         counterentity: right.entityId,
         initialNonce,
@@ -1687,7 +1687,7 @@ describe('Depository', () => {
     {
       const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } =
         await setupStartedDispute();
-      await mine(Number(await depository.defaultDisputeDelay()));
+      await time.increase(Number(await depository.defaultDisputeDelay()));
       const finalization = {
         counterentity: right.entityId,
         initialNonce,
@@ -1822,7 +1822,7 @@ describe('Depository', () => {
     });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
     await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
-    await mine(Number(await depository.defaultDisputeDelay()));
+    await time.increase(Number(await depository.defaultDisputeDelay()));
 
     const finalization = {
       counterentity: right.entityId,
@@ -1895,7 +1895,7 @@ describe('Depository', () => {
       return;
     }
 
-    await mine(Number(await depository.defaultDisputeDelay()));
+    await time.increase(Number(await depository.defaultDisputeDelay()));
     const final = await signDepositoryBatch(
       depository,
       left.entityId,

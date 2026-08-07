@@ -162,7 +162,7 @@ assertIncludes(depository, 'entityNonces[entityId] = nonce;', depositoryPath);
 assertIncludes(depository, 'if (account.disputeHash == bytes32(0)) revert E5();', depositoryPath);
 assertIncludes(depository, 'if (params.cooperative) revert E2();', depositoryPath);
 assertIncludes(depository, 'if (params.sig.length == 0) revert E2();', depositoryPath);
-assertIncludes(depository, 'if (block.number + lastResortWindowBlocks < account.disputeTimeout) revert E2();', depositoryPath);
+assertIncludes(depository, 'if (block.timestamp + lastResortWindowBlocks < account.disputeTimeout) revert E2();', depositoryPath);
 assertIncludes(depository, 'msg.sender,\n          entityId,', depositoryPath);
 assertIncludes(depository, 'if (!valid || recoveredEntity != entityId) revert E4();', depositoryPath);
 

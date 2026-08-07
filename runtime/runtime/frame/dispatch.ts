@@ -2,7 +2,7 @@ import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
-import { registerReliableReceiptIngress } from '../reliable-sender';
+import { applyReliableDeliveryReceipts, registerReliableReceiptIngress } from '../reliable-sender';
 import { announceCertifiedLocalProfiles } from '../../network/p2p/local-profile-lifecycle';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
@@ -144,8 +144,12 @@ export const dispatchCommittedReceipts = (env: RuntimeReplica, frame: FrameExecu
     // There is no transport to self: without this it is reported as
     // RELIABLE_RECEIPT_SEND_DEFERRED and dropped, the retained output never
     // retires, and its lane blocks forever. Apply it directly instead.
+    // registerReliableReceiptIngress only dedupes; applyReliableDeliveryReceipts
+    // installs sender ledgers and prunes the retained outbox.
     if (selfRuntimeId && normalizeRuntimeId(delivery.runtimeId) === selfRuntimeId) {
-      registerReliableReceiptIngress(env, delivery.receipt);
+      if (registerReliableReceiptIngress(env, delivery.receipt) === 'enqueue') {
+        applyReliableDeliveryReceipts(env, [delivery.receipt]);
+      }
       continue;
     }
     const direct = state.directReliableReceiptDispatch?.(delivery.runtimeId, delivery.receipt);

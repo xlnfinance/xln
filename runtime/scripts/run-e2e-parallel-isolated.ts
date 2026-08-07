@@ -1978,7 +1978,7 @@ const runShard = async (
           // ordinary callers rather than the local operator. The deployed cap
           // rations a public faucet against strangers; this stack is ephemeral
           // and loopback-only, and its scenarios fund positions far above it.
-          XLN_PUBLIC_FAUCET: '1',
+          XLN_PUBLIC_FAUCET: process.env['XLN_PUBLIC_FAUCET'] ?? '1',
           XLN_FAUCET_MAX_AMOUNT: '1000000000000000000000',
           XLN_FAUCET_MAX_GAS_AMOUNT: '1000',
           XLN_MESH_ROOT_SEED: `xln-e2e-mesh-root:${dbPath}`,
@@ -1994,7 +1994,6 @@ const runShard = async (
           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
           MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS:
             process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] ?? '15000',
-          XLN_PUBLIC_FAUCET: process.env['XLN_PUBLIC_FAUCET'] ?? '1',
           XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1',
           ...(process.env['XLN_MIN_DISK_FREE_BYTES']
             ? { XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] }

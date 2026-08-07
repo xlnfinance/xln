@@ -18,7 +18,7 @@
 import type { RuntimeReplica } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, processUntilWithoutLocalHtlcAdvance, withholdScenarioLocalHtlcAdvances } from './helpers';
+import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, advanceScenarioPastDisputeTimeout, processUntilWithoutLocalHtlcAdvance, withholdScenarioLocalHtlcAdvances } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from './boot';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { isLeftEntity } from '../account/utils';
@@ -27,7 +27,6 @@ import { createRngFromEnv } from './seeded-rng';
 import { generateLazyEntityId } from '../entity/factory';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
-import { mineRpcToBlockExact } from './rpc-block-mining';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { htlcRouteConvergenceCycleBudget } from './test-economy';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
@@ -1675,21 +1674,21 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     assert(!!bobHubAccountAfterStart?.activeDispute, 'Dispute started on Bob-Hub account');
     console.log(`✅ Dispute started (initialNonce: ${bobHubAccountAfterStart?.activeDispute?.initialNonce})\n`);
 
-    // STEP 4: Wait for dispute timeout (fast-forward blocks)
-    const targetBlock = bobHubAccountAfterStart.activeDispute!.disputeTimeout;
-    console.log(`⏳ STEP 4: Waiting for dispute timeout (target block: ${targetBlock})...`);
+    // STEP 4: Wait for dispute timeout (absolute unix seconds on L1)
+    const timeoutUnix = Number(bobHubAccountAfterStart.activeDispute!.disputeTimeout);
+    console.log(`⏳ STEP 4: Waiting for dispute timeout (unix ${timeoutUnix})...`);
     const providerAny = jadapter.provider as { send?: (method: string, params: unknown[]) => Promise<unknown> };
     if (typeof providerAny.send !== 'function') {
-      throw new Error('lock-ahb timeout mining requires RPC provider with evm_mine support');
+      throw new Error('lock-ahb timeout advance requires RPC provider with evm_increaseTime support');
     }
-    const timeoutBlock = BigInt(targetBlock);
-    const mining = await mineRpcToBlockExact(
+    const timeAdvance = await advanceScenarioPastDisputeTimeout(
+      env,
       { send: providerAny.send.bind(providerAny) },
-      timeoutBlock,
+      timeoutUnix,
     );
     console.log(
-      `✅ Mined ${mining.minedBlocks} blocks via ${mining.method ?? 'already-satisfied'} ` +
-      `(provider ${mining.startBlock}→${mining.finalBlock})`,
+      `✅ Advanced jurisdiction clock ${timeAdvance.advancedSeconds}s ` +
+      `(${timeAdvance.startUnix}→${timeAdvance.finalUnix})`,
     );
 
     const watcherStatuses = await drainJWatcherBacklog(
@@ -1716,26 +1715,26 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       throw new Error(`HOSTAGE_TIMEOUT_BOB_WATCHER_STATE_MISSING:replica=${bobReplicaKey}`);
     }
     // Header-only watcher progress is intentionally not an Entity heartbeat.
-    // Let the already-scheduled dispute hook consume the authenticated prefix;
-    // production reaches the same boundary on its next wall-clock wake.
+    // Wake Bob so the dispute-deadline hook sees runtimeTs >= timeoutUnix.
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const [, currentBobReplica] = findReplica(env, bob.id);
-      if (BigInt(currentBobReplica.state.lastFinalizedJHeight) >= timeoutBlock) break;
-      env.state.timestamp += 1_000;
+      if (Math.floor(Number(currentBobReplica.state.timestamp || 0) / 1000) >= timeoutUnix) break;
+      env.state.timestamp = Math.max(env.state.timestamp || 0, timeoutUnix * 1000 + attempt * 1000);
       await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
     }
     const [, bobReplicaAtTimeout] = findReplica(env, bob.id);
-    if (BigInt(bobReplicaAtTimeout.state.lastFinalizedJHeight) < timeoutBlock) {
+    const bobUnix = Math.floor(Number(bobReplicaAtTimeout.state.timestamp || 0) / 1000);
+    if (bobUnix < timeoutUnix) {
       throw new Error(
-        `HOSTAGE_TIMEOUT_BOB_J_FINALITY_LAG:` +
-        `replica=${bobReplicaKey}:finalized=${bobReplicaAtTimeout.state.lastFinalizedJHeight}:` +
-        `target=${timeoutBlock}`,
+        `HOSTAGE_TIMEOUT_BOB_CLOCK_LAG:` +
+        `replica=${bobReplicaKey}:entityUnix=${bobUnix}:target=${timeoutUnix}`,
       );
     }
+    const providerBlock = BigInt(await jadapter.provider.getBlockNumber());
     const authenticatedJHeight = BigInt(bobWatcherStatus?.authenticatedThrough ?? 0);
     assert(
-      mining.finalBlock >= timeoutBlock && authenticatedJHeight >= timeoutBlock,
-      `Dispute timeout visible to provider/watcher (${mining.finalBlock}/${authenticatedJHeight} >= ${timeoutBlock})`,
+      authenticatedJHeight > 0n && authenticatedJHeight <= providerBlock,
+      `Dispute timeout block visible to watcher (auth=${authenticatedJHeight}, provider=${providerBlock})`,
     );
 
     const [, bobRepBeforeFinalize] = findReplica(env, bob.id);

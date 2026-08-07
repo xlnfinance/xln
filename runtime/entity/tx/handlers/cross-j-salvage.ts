@@ -1,4 +1,3 @@
-import { isCrossJurisdictionPullExpired } from '../../../extensions/cross-j/index';
 import {
   decodeHashLadderBinary,
   verifyHashLadderBinary,
@@ -12,7 +11,6 @@ import type { EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { normalizeEntityRef } from '../account-key';
-import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
 
 type CrossJurisdictionSalvageTx = Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>;
 
@@ -72,7 +70,7 @@ const verifySalvageFillRatio = (
  * dispute-argument injection and no source-mirror commit anywhere in this path.
  */
 export const handleCrossJurisdictionSalvageEntityTx = async (
-  env: EntityRuntimeContext,
+  _env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: CrossJurisdictionSalvageTx,
   _storageChanges: RuntimeOverlayRecord[] = [],
@@ -102,12 +100,11 @@ export const handleCrossJurisdictionSalvageEntityTx = async (
   const verifiedFillRatio = verifySalvageFillRatio(newState, route, routeId, binary, claimedFillRatio);
   if (verifiedFillRatio === null) return { newState, outputs };
 
-  if (isCrossJurisdictionPullExpired(route, 'target', deterministicEntityTimestamp(newState, env))) {
-    // A registration after the target deadline settles as 0 on-chain anyway;
-    // spending gas on it is pointless. The barrier resolves the dispute at 0.
-    addMessage(newState, `🌉 Cross-j reveal port ${routeId} skipped: target pull window closed`);
-    return { newState, outputs };
-  }
+  // No sealed pull reveal deadline. L1 applyPull only credits registry rows
+  // with revealedAt <= disputeStartTimestamp + T/2 (unix seconds). Always
+  // queue via exact-once registry helper; disputeTimeout owns finalize.
+  // Event-driven sibling fanout starts the other leg's clock — no wall-clock
+  // market/route expiry for settlement.
 
   const decoded = decodeHashLadderBinary(binary);
   const queued = queueHashLadderRevealRegistration(newState, route.targetPull, decoded);

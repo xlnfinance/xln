@@ -110,7 +110,6 @@ export interface RuntimePull {
   deltaIndex: number;
   amount: bigint;
   claimedRatio: number;
-  revealedUntilTimestamp: number;
   fullHash: string;
   partialRoot: string;
 }
@@ -213,7 +212,6 @@ export const BATCH_ABI = {
         { name: 'deltaIndex', type: 'uint256' },
         { name: 'amount', type: 'int256' },
         { name: 'claimedRatio', type: 'uint16' },
-        { name: 'revealedUntilTimestamp', type: 'uint256' },
         { name: 'fullHash', type: 'bytes32' },
         { name: 'partialRoot', type: 'bytes32' },
       ],

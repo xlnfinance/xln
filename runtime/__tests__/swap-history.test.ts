@@ -112,7 +112,6 @@ describe('swap order history', () => {
         tokenId: 1,
         amount: 100n,
         signedAmount: 100n,
-        revealedUntilTimestamp: 1_700_000_000,
         fullHash: `0x${'22'.repeat(32)}`,
         partialRoot: `0x${'33'.repeat(32)}`,
       },

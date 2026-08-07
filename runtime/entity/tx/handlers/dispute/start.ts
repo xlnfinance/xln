@@ -17,6 +17,7 @@ import {
 import { disputeLog } from './shared';
 import {
   admitDisputeStart,
+  assertCrossJurisdictionDisputeProofHasPulls,
   validateCrossJurisdictionDisputeRoute,
 } from './start-admission';
 import {
@@ -116,6 +117,12 @@ export const handleDisputeStart = async (
   if (!account) return { newState, outputs };
   const proof = loadStartProof(entityState, newState, account, counterpartyId);
   if (!proof) return { newState, outputs };
+  if (entityTx.data.crossJurisdictionRouteId) {
+    assertCrossJurisdictionDisputeProofHasPulls(
+      proof.initialProofbody,
+      entityTx.data.crossJurisdictionRouteId,
+    );
+  }
   const nonce = resolveStartNonce(newState, account, counterpartyId, proof.proofBodyHash);
   if (!nonce) return { newState, outputs };
   const argumentsPair = buildStarterArguments(

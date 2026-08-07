@@ -469,18 +469,17 @@ describe('watchtower rpc last-resort integration', () => {
     expect((await depository._accounts(accountKey)).nonce).toBe(disputeNonce);
 
     const disputeTimeout = BigInt((await depository._accounts(accountKey)).disputeTimeout);
-    const currentBlock = BigInt(await provider.getBlockNumber());
-    const lastResortStartBlock = disputeTimeout - BigInt(lastResortWindowBlocks);
-    if (lastResortStartBlock > currentBlock) {
-      const blocksToMine = Number(lastResortStartBlock - currentBlock);
-      if (Number.isFinite(blocksToMine) && blocksToMine > 0) {
-        await provider.send('anvil_mine', [blocksToMine]);
-      } else {
-        for (let remaining = lastResortStartBlock - currentBlock; remaining > 0n; remaining -= 1n) {
-          await provider.send('evm_mine', []);
-        }
-      }
+    const readLatestTimestamp = async (): Promise<bigint> => {
+      const raw = await provider.send('eth_getBlockByNumber', ['latest', false]) as { timestamp?: string };
+      return BigInt(raw.timestamp || '0x0');
+    };
+    const currentTimestamp = await readLatestTimestamp();
+    const lastResortStartTimestamp = disputeTimeout - BigInt(lastResortWindowBlocks);
+    if (lastResortStartTimestamp > currentTimestamp) {
+      await provider.send('evm_increaseTime', [Number(lastResortStartTimestamp - currentTimestamp)]);
+      await provider.send('evm_mine', []);
     }
+    expect(await readLatestTimestamp() + BigInt(lastResortWindowBlocks) >= disputeTimeout).toBe(true);
 
     const liveSweepResult = await runWatchtowerSweep(towerServer.store, {
       ...liveSweepOptions,

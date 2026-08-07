@@ -14,7 +14,7 @@ import type { TowerAppointmentV1 } from '../storage/recovery/types';
 
 const makeLookupKey = (label: string): string => keccak256(toUtf8Bytes(label));
 const disputeStartedInterface = new Interface([
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout, uint256 disputeStartTimestamp)',
 ]);
 const abiCoder = AbiCoder.defaultAbiCoder();
 const proofBodyParam = ParamType.from(
@@ -293,6 +293,7 @@ describe('watchtower delayed last-resort sweep', () => {
       towerPrivateKey: towerWallet.privateKey,
       providerFactory: () => ({
         getBlockNumber: async () => 95,
+        getBlock: async () => ({ timestamp: 95 }),
         getLogs: async (filter) => {
           queriedFromBlocks.push(Number(filter['fromBlock']));
           queriedToBlocks.push(Number(filter['toBlock']));
@@ -307,6 +308,7 @@ describe('watchtower delayed last-resort sweep', () => {
               starterInitialArguments,
               starterIncrementedArguments,
               100n,
+              disputeStartTimestamp,
             ],
           );
           return [{ topics: event.topics, data: event.data }];
@@ -324,16 +326,15 @@ describe('watchtower delayed last-resort sweep', () => {
           starterIncrementedArgumentsCommitment: incrementedArgumentsCommitment,
           disputeStartedByLeft: true,
         }),
-        defaultDisputeDelay: async () => 95n,
-	        watchtowerCounterDispute: async (_entityId, finalization) => {
-	          submittedFinalization = finalization as unknown as Record<string, unknown>;
-	          return {
-	            hash: '0xtxhash',
-	            wait: async () => ({ blockNumber: 96 }),
-	          };
-	        },
-	      }),
-	    });
+        watchtowerCounterDispute: async (_entityId, finalization) => {
+          submittedFinalization = finalization as unknown as Record<string, unknown>;
+          return {
+            hash: '0xtxhash',
+            wait: async () => ({ blockNumber: 96 }),
+          };
+        },
+      }),
+    });
 
     expect(result).toEqual({
       scanned: 1,
@@ -343,11 +344,11 @@ describe('watchtower delayed last-resort sweep', () => {
     });
 
     const receipts = await store.listActionReceipts(lookupKey);
-	    expect(receipts.length).toBe(1);
-	    expect(receipts[0]?.status).toBe('submitted');
-	    expect(receipts[0]?.txHash).toBe('0xtxhash');
-	    expect(queriedFromBlocks).toEqual([5, 5]);
-	    expect(queriedToBlocks).toEqual([95, 95]);
+    expect(receipts.length).toBe(1);
+    expect(receipts[0]?.status).toBe('submitted');
+    expect(receipts[0]?.txHash).toBe('0xtxhash');
+    expect(queriedFromBlocks).toEqual([0, 0]);
+    expect(queriedToBlocks).toEqual([95, 95]);
 	    expect(submittedFinalization?.['starterArguments']).toBe(starterIncrementedArguments);
 	    expect(submittedFinalization?.['otherArguments']).toBe(finalizerRightArguments);
 	  });
@@ -435,6 +436,7 @@ describe('watchtower delayed last-resort sweep', () => {
       towerPrivateKey: towerWallet.privateKey,
       providerFactory: () => ({
         getBlockNumber: async () => 10,
+        getBlock: async () => ({ timestamp: 10 }),
         getLogs: async () => [],
       }),
       contractFactory: () => ({
@@ -662,6 +664,7 @@ describe('watchtower delayed last-resort sweep', () => {
       towerPrivateKey: towerWallet.privateKey,
       providerFactory: () => ({
         getBlockNumber: async () => 95,
+        getBlock: async () => ({ timestamp: 95 }),
         getLogs: async () => {
           const event = disputeStartedInterface.encodeEventLog(
             disputeStartedInterface.getEvent('DisputeStarted'),
@@ -674,6 +677,7 @@ describe('watchtower delayed last-resort sweep', () => {
               '0x',
               '0x',
               100n,
+              disputeStartTimestamp,
             ],
           );
           return [{ topics: event.topics, data: event.data }];

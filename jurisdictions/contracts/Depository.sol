@@ -52,6 +52,7 @@ contract Depository is ReentrancyGuardLite {
   error E9(); // HashMismatch
   error E10(); // BatchTooLarge
   error E11(); // UnsupportedToken
+  error E12(); // HashLadderAlreadyRevealed (single-shot slot)
   error TransformerGasBudgetUnavailable();
   error TransformerExecutionFailed();
 
@@ -76,8 +77,8 @@ contract Depository is ReentrancyGuardLite {
   // calling Depository) and never dispute calldata. Keyed by (revealing entity,
   // ladderHash): processBatch authentication makes the writer the caller, so no
   // one can register a ratio under a counterparty's key. Value packs
-  // (block.number << 16) | fillRatio into one slot — dispute T/2 validity is
-  // measured in the same block units as disputeTimeout.
+  // (block.timestamp << 16) | fillRatio — T/2 validity uses the same seconds
+  // clock as disputeTimeout / disputeStartTimestamp.
   mapping (bytes32 => mapping (bytes32 => uint256)) public hashLadderReveals;
 
   mapping (bytes32 => mapping (uint => Debt[])) public _debts;
@@ -157,7 +158,8 @@ contract Depository is ReentrancyGuardLite {
     bytes32 watchSeed,
     bytes starterInitialArguments,
     bytes starterIncrementedArguments,
-    uint256 disputeTimeout
+    uint256 disputeTimeout,
+    uint256 disputeStartTimestamp
   );
   event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce);
@@ -217,8 +219,10 @@ contract Depository is ReentrancyGuardLite {
   // Efficient token lookup: packedToken -> internalTokenId
   mapping(bytes32 => uint256) public tokenToId;
 
+  /// @param _defaultDisputeDelay Dispute period T in seconds (not blocks).
+  ///        Cap 30d: long enough for cross-j porting, short enough to bound grief.
   constructor(address _entityProvider, uint256 _defaultDisputeDelay) {
-    if (_entityProvider == address(0) || _defaultDisputeDelay == 0 || _defaultDisputeDelay > 65_535) revert E7();
+    if (_entityProvider == address(0) || _defaultDisputeDelay == 0 || _defaultDisputeDelay > 2_592_000) revert E7();
     entityProvider = _entityProvider;
     defaultDisputeDelay = _defaultDisputeDelay;
     admin = msg.sender;
@@ -232,10 +236,11 @@ contract Depository is ReentrancyGuardLite {
   /// @notice Read a registered hash-ladder reveal. Returns (0, 0) when absent.
   /// @dev Called by DeltaTransformer.applyPull with the pull beneficiary as
   /// `entity`; the transformer trusts only this registry, never calldata.
+  /// `revealedAt` is unix seconds (block.timestamp at registration).
   function getHashLadderReveal(bytes32 entity, bytes32 ladderHash)
     external
     view
-    returns (uint16 fillRatio, uint256 revealedBlock)
+    returns (uint16 fillRatio, uint256 revealedAt)
   {
     uint256 packed = hashLadderReveals[entity][ladderHash];
     return (uint16(packed), packed >> 16);
@@ -411,6 +416,8 @@ contract Depository is ReentrancyGuardLite {
     if (account.disputeHash == bytes32(0)) revert E5();
     if (params.cooperative) revert E2();
     if (params.sig.length == 0) revert E2();
+    // lastResortWindowBlocks keeps its historical name in the watchtower ABI;
+    // the unit is now seconds (same as defaultDisputeDelay / disputeTimeout).
     if (lastResortWindowBlocks == 0 || lastResortWindowBlocks > defaultDisputeDelay) revert E2();
     if (params.finalNonce <= account.nonce) revert E2();
     // A tower inherits its owner's side, not a free-standing right to close.
@@ -418,7 +425,7 @@ contract Depository is ReentrancyGuardLite {
     // starter-appointed tower could replay a stale peer signature immediately.
     bool ownerIsCounterparty = account.disputeStartedByLeft != (entityId < params.counterentity);
     if (!ownerIsCounterparty) revert E2();
-    if (block.number + lastResortWindowBlocks < account.disputeTimeout) revert E2();
+    if (block.timestamp + lastResortWindowBlocks < account.disputeTimeout) revert E2();
 
     bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
     (bytes32 recoveredEntity, bool valid) =
@@ -600,13 +607,22 @@ contract Depository is ReentrancyGuardLite {
       emit SecretRevealed(keccak256(abi.encode(reveal.secret)), entityId, reveal.secret);
     }
 
-    // Hash-ladder reveals: the only on-chain settlement evidence a cross-j
-    // pull will ever read. Registration is always permitted (even with no
-    // active dispute); validity against the dispute's T/2 reveal window is
-    // decided at finalization time. Overwrite is intentional: the record is
-    // keyed to the authenticated caller, so a later write can only replace
-    // this entity's own earlier evidence — never a counterparty's. A ratio-0
-    // registration is meaningless (absence already reads as 0) and reverts.
+    // Hash-ladder reveals — sole on-chain settlement authority for cross-j pulls
+    // (DeltaTransformer.applyPull reads getHashLadderReveal; never calldata).
+    //
+    // Invariants (owner):
+    //  1. Key = (authenticated caller entityId, ladderHash). Hub cannot write
+    //     under a user's key → cannot force a 1% reveal on the user's leg.
+    //  2. Single-shot: first write locks fillRatio AND revealedAt (unix seconds).
+    //     Same-ratio retry = no-op (idempotent txs). Any other overwrite = E12.
+    //     Counterexample rejected: dust before T/2 then raise to full after T/2
+    //     would settle full under sticky-time raises ("late reveal = 0" broken).
+    //  3. Validity vs disputeStart+T/2 is decided at finalize, not at write.
+    //     Late first registration is stored but applyPull treats it as ratio 0.
+    //  4. E12 reverts the whole processBatch on purpose (fail-loud). Runtime must
+    //     exact-once queue so a stale higher ratio never shares a batch with
+    //     disputeFinalizations. Soft-continue would hide programmer bugs.
+    //  5. Ratio 0 is meaningless (absence already reads 0) → E1.
     for (uint i = 0; i < batch.hashLadderReveals.length; i++) {
       HashLadderReveal memory reveal = batch.hashLadderReveals[i];
       if (reveal.fillRatio == 0) revert E1();
@@ -616,8 +632,13 @@ contract Depository is ReentrancyGuardLite {
         revert E9();
       }
       bytes32 ladderHash = keccak256(abi.encodePacked(reveal.fullHash, reveal.partialRoot));
+      uint256 existing = hashLadderReveals[entityId][ladderHash];
+      if (existing != 0) {
+        if (uint16(existing) == reveal.fillRatio) continue;
+        revert E12();
+      }
       hashLadderReveals[entityId][ladderHash] =
-        (uint256(block.number) << 16) | uint256(reveal.fillRatio);
+        (uint256(block.timestamp) << 16) | uint256(reveal.fillRatio);
       emit HashLadderRevealRegistered(
         entityId,
         ladderHash,
@@ -985,7 +1006,7 @@ contract Depository is ReentrancyGuardLite {
       uint256 rightArgumentsTimestamp,
       uint256 eventInitialNonce,
       bytes32 finalProofbodyHash,
-      uint256 disputeStartBlock,
+      uint256 disputeStartTimestamp,
       uint256 disputeTimeout
     ) = Account.prepareDisputeFinalization(_accounts, entityId, params, entityProvider);
 
@@ -997,7 +1018,7 @@ contract Depository is ReentrancyGuardLite {
       rightArguments,
       leftArgumentsTimestamp,
       rightArgumentsTimestamp,
-      disputeStartBlock,
+      disputeStartTimestamp,
       disputeTimeout
     );
     // Cooperative/counter-dispute adopts its signed nonce. A unilateral
@@ -1022,7 +1043,7 @@ contract Depository is ReentrancyGuardLite {
     bytes memory rightArguments,
     uint256 leftArgumentsTimestamp,
     uint256 rightArgumentsTimestamp,
-    uint256 disputeStartBlock,
+    uint256 disputeStartTimestamp,
     uint256 disputeTimeout
   ) private {
     if (proofbody.tokenIds.length != proofbody.offdeltas.length) revert E8();
@@ -1077,7 +1098,7 @@ contract Depository is ReentrancyGuardLite {
       rightArgsTimestamp,
       leftAddr,
       rightAddr,
-      disputeStartBlock,
+      disputeStartTimestamp,
       disputeTimeout
     );
 

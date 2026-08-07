@@ -53,27 +53,10 @@ const selectProposalWindow = (
   return [...source];
 };
 
-const validateProposalTimestamp = (
-  context: AccountProposalAdmissionContext,
-  account: AccountReplica,
-  timestamp: number,
-  myEntityId: string,
-  counterparty: string,
-): void => {
+const validateProposalTimestamp = (timestamp: number): void => {
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
     throw new Error(`ACCOUNT_PROPOSAL_ENTITY_TIMESTAMP_INVALID:${String(timestamp)}`);
   }
-  const previous = account.currentFrame?.timestamp ?? 0;
-  if (timestamp >= previous) return;
-  accountLog.warn('proposal.timestamp_regressed_accepted', {
-    accountHeight: account.currentHeight,
-    entityId: myEntityId,
-    counterpartyEntityId: counterparty,
-    previousTimestamp: previous,
-    proposedTimestamp: timestamp,
-    regressionMs: previous - timestamp,
-    runtimeTimestamp: context.runtimeTimestamp,
-  });
 };
 
 const rejectUnavailableProposal = (
@@ -140,11 +123,11 @@ export const prepareProposalAdmission = (
   }
   // Dual-Runtime peers advance Entity clocks independently. A lagging
   // proposer must not mint an Account frame behind the already-committed
-  // bilateral watermark — that only produces noisy regressions and wedges
-  // ACK paths when the counterparty Runtime is ahead.
+  // bilateral watermark — clamp to the watermark (receiver-side skew checks
+  // in incoming-preflight still reject hostile peer skew).
   const previousFrameTimestamp = account.currentFrame?.timestamp ?? 0;
   const frameTimestamp = Math.max(entityFrameTimestamp, previousFrameTimestamp);
-  validateProposalTimestamp(context, account, frameTimestamp, myEntityId, counterparty);
+  validateProposalTimestamp(frameTimestamp);
   return {
     success: true,
     myEntityId,

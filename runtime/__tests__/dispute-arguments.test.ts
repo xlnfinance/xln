@@ -285,7 +285,6 @@ describe('dispute argument snapshots', () => {
       pullId: 'pull',
       tokenId: 1,
       amount: 1n,
-      revealedUntilTimestamp: 100,
       fullHash: `0x${'cd'.repeat(32)}`,
       partialRoot: `0x${'ef'.repeat(32)}`,
       crossJurisdiction: {

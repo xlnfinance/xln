@@ -1,16 +1,23 @@
+import { ethers } from 'ethers';
+
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';
+import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { addMessage } from '../../../frame-events';
 import { initJBatch } from '../../../../jurisdiction/machine/batch';
 import { isCrossJurisdictionTerminalStatus } from '../../../../extensions/cross-j';
 import { freezeAccountForDispute } from '../../../../account/consensus/dispute-policy';
+import { BATCH_ABI } from '../../../../protocol/dispute/proof-body';
 import {
   collectDisputeEvidenceReadinessIssues,
   hasQueuedDisputeStart,
 } from './shared';
 
 type StartTx = Extract<EntityTx, { type: 'disputeStart' }>;
+
+const DELTA_BATCH_PARAM = ethers.ParamType.from(BATCH_ABI);
+const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
 
 export const validateCrossJurisdictionDisputeRoute = (
   state: EntityState,
@@ -33,8 +40,42 @@ export const validateCrossJurisdictionDisputeRoute = (
   if (!isSourceAccount && !isTargetAccount) {
     throw new Error(`DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH:${routeId}`);
   }
-  if (isCrossJurisdictionTerminalStatus(route.status) || !route.targetPull) {
+  if (isCrossJurisdictionTerminalStatus(route.status)) {
     throw new Error(`DISPUTE_START_CROSS_J_ROUTE_INACTIVE:${routeId}:${route.status}`);
+  }
+  // Owner invariant: a cross-j swap leg is defined by paired registry pulls.
+  // Without source+target pull commitments there is nothing for applyPull to
+  // settle from the reveal registry — reject before drafting disputeStart.
+  if (!route.sourcePull || !route.targetPull) {
+    throw new Error(`DISPUTE_START_CROSS_J_PULLS_MISSING:${routeId}`);
+  }
+};
+
+/**
+ * Cross-j ProofBody must encode ≥1 DeltaTransformer pull.
+ *
+ * Why: registry settlement only runs inside applyPull. A signed ProofBody that
+ * carries only payments/swaps on a route-bound disputeStart would finalize
+ * without consulting hashLadderReveals — silent wrong economics. Opaque custom
+ * transformers are ignored here; they are not the pull settlement path.
+ */
+export const assertCrossJurisdictionDisputeProofHasPulls = (
+  proofBody: ProofBodyStruct,
+  routeId: string,
+): void => {
+  let pullCount = 0;
+  for (const transformer of proofBody.transformers) {
+    try {
+      const decoded = ABI_CODER.decode([DELTA_BATCH_PARAM], transformer.encodedBatch)[0] as {
+        pull: readonly unknown[];
+      };
+      pullCount += decoded.pull.length;
+    } catch {
+      // Opaque / non-DeltaTransformer batches are not pull settlement authority.
+    }
+  }
+  if (pullCount === 0) {
+    throw new Error(`DISPUTE_START_CROSS_J_PROOF_PULLS_MISSING:${routeId}`);
   }
 };
 

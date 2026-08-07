@@ -276,7 +276,7 @@ contract BatchBoundsTest is XlnFixture {
     console.log("disputeStart 128 tokens ok:", startedOk);
     console.log("disputeStart 128 tokens gas:", startGas);
 
-    vm.roll(block.number + DISPUTE_DELAY);
+    vm.warp(block.timestamp + DISPUTE_DELAY);
 
     Batch memory fin = XlnHanko.emptyBatch();
     fin.disputeFinalizations = new FinalDisputeProof[](1);

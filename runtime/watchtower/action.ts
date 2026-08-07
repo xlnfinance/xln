@@ -16,10 +16,9 @@ import type { LastResortTowerAppointment, WatchtowerStore, StoredTowerActionRece
 
 const DEPOSITORY_MINIMAL_ABI = [
   'function accountKey(bytes32 e1, bytes32 e2) view returns (bytes)',
-  'function defaultDisputeDelay() view returns (uint256)',
   'function _accounts(bytes acctKey) view returns (uint256 nonce, bytes32 disputeHash, uint256 disputeTimeout, uint256 disputeStartTimestamp, bytes32 disputeInitialProofbodyHash, bytes32 starterInitialArgumentsCommitment, bytes32 starterIncrementedArgumentsCommitment, bool disputeStartedByLeft)',
   'function watchtowerCounterDispute(bytes32 entityId, (bytes32 counterentity,uint256 initialNonce,uint256 finalNonce,bytes32 initialProofbodyHash,(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,(address transformerAddress,bytes encodedBatch,(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers) finalProofbody,bytes starterArguments,bytes otherArguments,bytes sig,bool startedByLeft,bool cooperative) params, uint256 lastResortWindowBlocks, uint256 appointmentSequence, bytes ownerAuthorizationHanko) returns (bool)',
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout, uint256 disputeStartTimestamp)',
 ] as const;
 
 const DEPOSITORY_INTERFACE = new Interface(DEPOSITORY_MINIMAL_ABI);
@@ -32,6 +31,7 @@ const ZERO_HASH = ethers.ZeroHash.toLowerCase();
 type WatchtowerLog = { topics: readonly string[]; data: string };
 type WatchtowerSweepProvider = {
   getBlockNumber: () => Promise<number>;
+  getBlock?: (blockTag: string | number) => Promise<{ timestamp: number | bigint } | null>;
   getLogs?: (filter: Record<string, unknown>) => Promise<WatchtowerLog[]>;
 };
 
@@ -256,6 +256,7 @@ type WatchtowerSweepOptions = {
   txWaitTimeoutMs?: number;
   providerFactory?: (rpcUrl: string, chainId: number) => {
     getBlockNumber: () => Promise<number>;
+    getBlock?: (blockTag: string | number) => Promise<{ timestamp: number | bigint } | null>;
     getLogs?: (filter: Record<string, unknown>) => Promise<WatchtowerLog[]>;
   } | JsonRpcProvider;
   contractFactory?: (
@@ -274,7 +275,6 @@ type WatchtowerSweepOptions = {
       starterIncrementedArgumentsCommitment: string;
       disputeStartedByLeft: boolean;
     }>;
-    defaultDisputeDelay?: () => Promise<bigint>;
     watchtowerCounterDispute: (
       entityId: string,
       finalization: {
@@ -338,6 +338,51 @@ export const assertWatchtowerRpcUrlAllowed = (rpcUrl: string, allowedRpcUrls?: s
     throw new Error(`WATCHTOWER_RPC_URL_NOT_ALLOWED:${normalized}`);
   }
   return normalized;
+};
+
+type WatchtowerRpcSender = {
+  send?: (method: string, params: unknown[]) => Promise<unknown>;
+};
+
+const readProviderBlockNumber = async (
+  provider: WatchtowerSweepProvider | JsonRpcProvider,
+): Promise<number> => {
+  const sender = provider as WatchtowerRpcSender;
+  if (typeof sender.send === 'function') {
+    const hex = await sender.send('eth_blockNumber', []);
+    if (typeof hex === 'string' && hex.startsWith('0x')) {
+      return uint256ToSafeNumber(BigInt(hex), 'CURRENT_BLOCK');
+    }
+  }
+  return uint256ToSafeNumber(BigInt(await provider.getBlockNumber()), 'CURRENT_BLOCK');
+};
+
+const readProviderBlockTimestamp = async (
+  provider: WatchtowerSweepProvider | JsonRpcProvider,
+  blockNumber: number,
+): Promise<bigint> => {
+  // Prefer raw eth_getBlockByNumber so reused JsonRpcProvider clients cannot
+  // serve a cached getBlock('latest') after anvil time jumps / mines.
+  const sender = provider as WatchtowerRpcSender;
+  if (typeof sender.send === 'function') {
+    const raw = await sender.send('eth_getBlockByNumber', [
+      `0x${BigInt(blockNumber).toString(16)}`,
+      false,
+    ]) as { timestamp?: string } | null;
+    const hex = raw?.timestamp;
+    if (typeof hex === 'string' && hex.startsWith('0x')) {
+      return BigInt(hex);
+    }
+  }
+  if (typeof provider.getBlock === 'function') {
+    const block = await provider.getBlock(blockNumber);
+    const rawTimestamp = block?.timestamp;
+    if (typeof rawTimestamp === 'bigint' && rawTimestamp >= 0n) return rawTimestamp;
+    if (typeof rawTimestamp === 'number' && Number.isFinite(rawTimestamp) && rawTimestamp >= 0) {
+      return BigInt(Math.trunc(rawTimestamp));
+    }
+  }
+  throw new Error('WATCHTOWER_PROVIDER_BLOCK_TIMESTAMP_INVALID');
 };
 
 const waitForReceiptWithTimeout = async (
@@ -411,19 +456,18 @@ const findActiveDisputeContext = async (
   watch: TowerLastResortWatchV1,
   account: OnchainDisputeAccount,
   currentBlock: bigint,
-  fromBlockHint?: bigint,
 ): Promise<ActiveDisputeContext> => {
   if (typeof provider.getLogs !== 'function') {
     throw new Error('WATCHTOWER_PROVIDER_GET_LOGS_UNAVAILABLE');
   }
-  const latestBlock = Math.min(
-    uint256ToSafeNumber(currentBlock, 'CURRENT_BLOCK'),
-    uint256ToSafeNumber(account.disputeTimeout, 'DISPUTE_TIMEOUT'),
-  );
-  const hintedFromBlock = Number(fromBlockHint || 0n);
-  const fromBlock = Number.isFinite(hintedFromBlock) && hintedFromBlock > 0
-    ? Math.max(0, Math.floor(hintedFromBlock))
-    : Math.max(0, latestBlock - 20_000);
+  // disputeTimeout / disputeStartTimestamp are absolute unix seconds, not block
+  // numbers. Log scans stay block-ranged; AccountInfo already carries the start
+  // timestamp used for argument commitments and disputeHash checks below.
+  if (account.disputeStartTimestamp <= 0n) {
+    throw new Error('WATCHTOWER_DISPUTE_START_TIMESTAMP_MISSING');
+  }
+  const latestBlock = uint256ToSafeNumber(currentBlock, 'CURRENT_BLOCK');
+  const fromBlock = Math.max(0, latestBlock - 20_000);
   const topic0 = DEPOSITORY_INTERFACE.getEvent('DisputeStarted')!.topicHash;
   const watchedTopic = ethers.zeroPadValue(watch.watchedEntityId, 32).toLowerCase();
   const counterpartyTopic = ethers.zeroPadValue(watch.counterentity, 32).toLowerCase();
@@ -454,22 +498,28 @@ const findActiveDisputeContext = async (
       const starterInitialArguments = String(parsed.args[5] || '0x');
       const starterIncrementedArguments = String(parsed.args[6] || '0x');
       const eventDisputeTimeout = BigInt(parsed.args[7]);
+      const eventDisputeStartTimestamp = BigInt(parsed.args[8]);
       const startedByLeft = sender < counterentity;
+      // Prefer AccountInfo timestamps; event values must agree when present.
+      const disputeStartTimestamp = account.disputeStartTimestamp > 0n
+        ? account.disputeStartTimestamp
+        : eventDisputeStartTimestamp;
       if (
         initialNonce !== uint256ToSafeNumber(account.nonce, 'ACCOUNT_NONCE') ||
         initialProofbodyHash !== account.disputeInitialProofbodyHash.toLowerCase() ||
         eventDisputeTimeout !== account.disputeTimeout ||
+        eventDisputeStartTimestamp !== disputeStartTimestamp ||
         startedByLeft !== account.disputeStartedByLeft
       ) continue;
       const initialCommitment = disputeArgumentCommitment(
         starterInitialArguments,
         startedByLeft,
-        account.disputeStartTimestamp,
+        disputeStartTimestamp,
       );
       const incrementedCommitment = disputeArgumentCommitment(
         starterIncrementedArguments,
         startedByLeft,
-        account.disputeStartTimestamp,
+        disputeStartTimestamp,
       );
       if (
         initialCommitment.toLowerCase() !== account.starterInitialArgumentsCommitment.toLowerCase() ||
@@ -480,7 +530,7 @@ const findActiveDisputeContext = async (
         startedByLeft,
         account.disputeTimeout,
         initialProofbodyHash,
-        account.disputeStartTimestamp,
+        disputeStartTimestamp,
         initialCommitment,
         incrementedCommitment,
       ) !== account.disputeHash.toLowerCase()) {
@@ -627,30 +677,28 @@ const processLastResortAppointment = async (
   const depository = context.contractFactory(watch, context.towerWallet, provider);
   const acctKey = await depository.accountKey(watch.watchedEntityId, watch.counterentity);
   const account = await depository._accounts(acctKey);
-  const currentBlock = BigInt(await provider.getBlockNumber());
+  const currentBlockNumber = await readProviderBlockNumber(provider);
+  const currentBlock = BigInt(currentBlockNumber);
+  // Resolve timestamp by concrete block number. JsonRpcProvider can cache
+  // getBlock('latest') across mines/time jumps on a reused provider instance.
+  const currentTimestamp = await readProviderBlockTimestamp(provider, currentBlockNumber);
+  // Matches Depository.watchtowerCounterDispute: lastResortWindowBlocks is seconds
+  // on the same clock as absolute unix disputeTimeout.
   const disputeTimeout = BigInt(account.disputeTimeout || 0n);
   const activeDispute = String(account.disputeHash || '').toLowerCase() !== ZERO_HASH;
   const finalNonce = BigInt(appointment.lastResortPayload.proofNonce);
   const withinLastResort =
-    currentBlock + BigInt(appointment.lastResortPayload.lastResortWindowBlocks) >= disputeTimeout;
+    currentTimestamp + BigInt(appointment.lastResortPayload.lastResortWindowBlocks) >= disputeTimeout;
   if (!activeDispute || !withinLastResort || BigInt(account.nonce || 0n) >= finalNonce) {
     await appendAppointmentReceipt(context, appointment, createdAt, 'skipped');
     return 'skipped';
   }
 
-  let disputeStartBlock: bigint | undefined;
-  if (typeof depository.defaultDisputeDelay === 'function') {
-    const disputeDelay = BigInt(await depository.defaultDisputeDelay());
-    if (disputeDelay > 0n && disputeTimeout >= disputeDelay) {
-      disputeStartBlock = disputeTimeout - disputeDelay;
-    }
-  }
   const disputeContext = await findActiveDisputeContext(
     provider,
     watch,
     account,
     currentBlock,
-    disputeStartBlock,
   );
   const remedy = await decodeTowerCounterDisputeRemedy(
     appointment.lastResortPayload.encryptedRemedy,

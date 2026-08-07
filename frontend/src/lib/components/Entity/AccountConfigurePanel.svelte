@@ -14,11 +14,6 @@
     symbol: string;
   };
 
-  type CrossJTargetDisputeRisk = {
-    amount: bigint;
-    tokenId: number;
-  };
-
   export let replica: EntityReplica | null = null;
   export let tab: Tab;
   export let activeIsLive = false;
@@ -30,18 +25,14 @@
   export let configureWorkspaceTab: ConfigureWorkspaceTab = 'extend-credit';
   export let configureTokenId = 1;
   export let configureTokenOptions: ConfigureTokenOption[] = [];
-  export let unsafeCrossJTargetDisputeAccepted = false;
   export let handleWorkspaceAccountChange: (event: CustomEvent<{ value?: string }>) => void;
   export let selectConfigureTab: (tab: ConfigureWorkspaceTab) => void;
-  export let getCrossJTargetDisputeRisk: (counterpartyEntityId: string) => CrossJTargetDisputeRisk | null;
-  export let formatCrossJTargetDisputeRisk: (risk: CrossJTargetDisputeRisk) => string;
   export let confirmAndQueueDisputeFinalize: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
-  export let confirmAndQueueDisputePrepare: (counterpartyEntityId: string, reason: string, options?: Record<string, unknown>) => void | Promise<void>;
+  export let confirmAndQueueDisputePrepare: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
   export let addTokenToAccount: () => void | Promise<void>;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   $: configureAccount = replica?.state?.accounts?.get?.(workspaceAccountId);
-  $: crossJTargetRisk = getCrossJTargetDisputeRisk(workspaceAccountId);
   $: profiles = Array.from(profileByEntityId.values());
   $: remoteAdminReady = $runtimeControllerHandle.mode === 'remote' && $runtimeControllerHandle.authLevel === 'admin';
   $: commandReady = activeIsLive && Boolean(liveRuntimeEnv || remoteAdminReady);
@@ -130,32 +121,12 @@
         <p class="danger-note">
           This removes orders and stops normal account traffic before committing the on-chain dispute hash.
         </p>
-        {#if crossJTargetRisk}
-          <label class="danger-confirm-row">
-            <input
-              type="checkbox"
-              bind:checked={unsafeCrossJTargetDisputeAccepted}
-            />
-            <span>
-              I accept possible cross-jurisdiction loss up to {formatCrossJTargetDisputeRisk(crossJTargetRisk)}
-              if the hub pulls source funds before the target account has pull arguments.
-            </span>
-          </label>
-        {/if}
         <button
           class="btn-danger-batch"
           data-testid="configure-dispute-prepare"
           on:click={() => confirmAndQueueDisputePrepare(
             workspaceAccountId,
             'dispute-prepare-from-configure',
-            crossJTargetRisk
-              ? {
-                  allowUnsafeCrossJTargetDispute: unsafeCrossJTargetDisputeAccepted,
-                  acceptedCrossJTargetLossAmount: unsafeCrossJTargetDisputeAccepted
-                    ? crossJTargetRisk.amount
-                    : 0n,
-                }
-              : {},
           )}
           disabled={!activeIsLive}
         >
@@ -211,21 +182,6 @@
     color: #fecaca;
     font-size: 12px;
     line-height: 1.45;
-  }
-
-  .danger-confirm-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 10px 0 14px;
-    font-size: 12px;
-    line-height: 1.4;
-    color: #fee2e2;
-  }
-
-  .danger-confirm-row input {
-    margin-top: 2px;
-    flex: 0 0 auto;
   }
 
   .configure-token-row {

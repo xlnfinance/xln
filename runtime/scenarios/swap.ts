@@ -25,7 +25,19 @@ import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
 import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
-import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
+import {
+  advanceScenarioPastDisputeTimeout,
+  enableStrictScenario,
+  processUntil,
+  ensureSignerKeysFromSeed,
+  requireRuntimeSeed,
+  converge,
+  commitRuntimeInput,
+  findReplica,
+  processJEvents,
+  setScenarioStorageEnabled,
+  syncChain,
+} from './helpers';
 import { createGossipLayer } from '../network/p2p/gossip';
 import { getTokenInfo } from '../account/utils';
 import {
@@ -54,7 +66,7 @@ const getProcess = async () => {
   return _processWithStep;
 };
 
-async function processJEvents(env: RuntimeReplica): Promise<void> {
+async function drainPendingJEvents(env: RuntimeReplica): Promise<void> {
   // RPC watcher is polling-based; force immediate poll in scenarios to avoid
   // relying on wall-clock interval timing between submit and assertions.
   for (const { adapter } of getLiveJAdapterEntries(env)) {
@@ -213,6 +225,7 @@ function requireAccount(account: AccountReplica | undefined, label: string): Acc
 }
 
 export async function swap(env: RuntimeReplica): Promise<void> {
+  setScenarioStorageEnabled(env, false);
   const restoreFailFast = enableStrictScenario(env, 'SWAP');
   const prevScenarioMode = env.scenarioMode;
   try {
@@ -404,7 +417,8 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     }
   });
   const jadapter = getScenarioJAdapter(env);
-  const runDisputePhase = Boolean((env as RuntimeReplica & { scenarioSwapRunDisputePhase?: boolean }).scenarioSwapRunDisputePhase);
+  // Dispute fillRatio enforcement is part of the canonical swap puppet path.
+  // No opt-out flag: skipping it silently was a scenario completeness hole.
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('             PHASE 2: ORDERBOOK MATCHING (RJEA FLOW)            ');
   console.log('═══════════════════════════════════════════════════════════════\n');
@@ -712,14 +726,6 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     await converge(env);
   }
 
-  if (!runDisputePhase) {
-    console.log('⏭️ Phase 2B dispute branch skipped (scenarioSwapRunDisputePhase=false)');
-    console.log('\n═══════════════════════════════════════════════════════════════');
-    console.log('              PHASE 2: ORDERBOOK TEST COMPLETE                  ');
-    console.log('═══════════════════════════════════════════════════════════════\n');
-    return env;
-  }
-
   // ============================================================================
   // PHASE 2B: Dispute swap fillRatio (pending orderbook fill)
   // ============================================================================
@@ -784,17 +790,41 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   }
   assert(pendingRatio > 0, `Pending fillRatio recorded for ${disputeOfferId}`);
 
-  // Simulate offline counterparty: drop pending swap_resolve ONLY for Alice before commit
-  if (env.pendingOutputs) {
-    env.pendingOutputs = env.pendingOutputs.filter(output => output.entityId !== alice.id);
-  }
-  if (env.networkInbox) {
-    env.networkInbox = env.networkInbox.filter(output => output.entityId !== alice.id);
-  }
+  // Simulate offline Alice: continuously drop Entity ingress to her while Bob settles.
+  // A blunt converge() here used to evaporate Hub's alice swap_resolve evidence and
+  // produce empty (0x) disputeStart arguments — silent scenario rot.
+  const dropAliceIngress = (): void => {
+    if (env.pendingOutputs) {
+      env.pendingOutputs = env.pendingOutputs.filter(output => output.entityId !== alice.id);
+    }
+    if (env.networkInbox) {
+      env.networkInbox = env.networkInbox.filter(output => output.entityId !== alice.id);
+    }
+    if (env.pendingNetworkOutputs) {
+      env.pendingNetworkOutputs = env.pendingNetworkOutputs.filter(
+        output => output.entityId !== alice.id,
+      );
+    }
+    env.runtimeMempool.entityInputs = env.runtimeMempool.entityInputs.filter(
+      input => input.entityId !== alice.id,
+    );
+  };
+  dropAliceIngress();
   console.log('🚫 Dropped pending outputs to Alice to keep swap_resolve uncommitted (dispute path)');
 
-  // Allow Bob's swap_resolve to fully commit before dispute enforcement
-  await converge(env);
+  await processUntil(env, () => {
+    dropAliceIngress();
+    const bobAccount = findReplica(env, hub.id)[1].state.accounts.get(bob.id);
+    return Boolean(bobAccount) && !bobAccount!.state.swapOffers?.has(disputeCounterId);
+  }, 40, 'bob dispute fill settle while alice offline');
+  dropAliceIngress();
+
+  const evidenceStillPending = pendingAccountSwapFillRatio(env, hub.id, alice.id, disputeOfferId);
+  assert(
+    evidenceStillPending === pendingRatio,
+    `Alice fill evidence must survive Bob settle (had ${pendingRatio}, now ${evidenceStillPending})`,
+  );
+
   const [, hubAfterBobSettle] = findReplica(env, hub.id);
   const bobAfterSettle = hubAfterBobSettle.state.accounts.get(bob.id);
   const bobSettledEth = bobAfterSettle?.state.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
@@ -815,6 +845,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   assert(!bobAfterSettle?.state.swapOffers?.has(disputeCounterId), 'Dispute Bob offer fully resolved');
 
   console.log('⚔️ Hub starts dispute (will enforce fillRatio via calldata)');
+  dropAliceIngress();
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -828,9 +859,15 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   }]);
 
   const [, hubBeforeBroadcastStart] = findReplica(env, hub.id);
+  const draftedStart = hubBeforeBroadcastStart.state.jBatchState?.batch.disputeStarts[0];
   const startCount = hubBeforeBroadcastStart.state.jBatchState?.batch.disputeStarts.length || 0;
   console.log(`🧾 jBatch disputeStarts=${startCount} before broadcast`);
   assert(startCount > 0, 'jBatch has disputeStart before broadcast');
+  if (!draftedStart) throw new Error('SWAP_DISPUTE_START_DRAFT_MISSING');
+  assert(
+    draftedStart.starterInitialArguments !== '0x' && draftedStart.starterInitialArguments !== '',
+    `Dispute start must encode fill evidence (got ${draftedStart.starterInitialArguments})`,
+  );
 
   await process(env, [{
     entityId: hub.id,
@@ -844,7 +881,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     const jRep = env.state.jReplicas.get('Swap Demo');
     if (jRep && jRep.mempool.length === 0) break;
   }
-  await processJEvents(env);
+  await drainPendingJEvents(env);
 
   const [, hubAfterStart] = findReplica(env, hub.id);
   const hubAccountAfterStart = requireAccount(hubAfterStart.state.accounts.get(alice.id), 'hub/alice after dispute start');
@@ -866,56 +903,120 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     'Counterparty dispute proofBodyHash matches on-chain start hash'
   );
 
-  const targetBlock = hubActiveDispute.disputeTimeout;
-  console.log(`⏳ Waiting for dispute timeout (block ${targetBlock})...`);
-  while (true) {
-    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
-    if (currentBlock >= targetBlock) {
-      console.log(`✅ Timeout reached at block ${currentBlock}`);
-      break;
-    }
-    await jadapter.processBlock();
-    await process(env);
+  const providerAny = jadapter.provider as { send?: (method: string, params: unknown[]) => Promise<unknown> };
+  if (typeof providerAny.send !== 'function') {
+    throw new Error('swap dispute timeout requires RPC provider with evm_increaseTime support');
   }
+  // Local disputeStart latches timeout=0 until DisputeStarted is observed.
+  let timeoutUnix = 0;
+  for (let round = 0; round < 40; round++) {
+    await syncChain(env, 1);
+    await processJEvents(env);
+    await process(env);
+    const runtimeTimeout = Number(
+      findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.activeDispute?.disputeTimeout || 0,
+    );
+    const onChainTimeout = Number((await jadapter.getAccountInfo(hub.id, alice.id)).disputeTimeout || 0);
+    timeoutUnix = onChainTimeout > 0 ? onChainTimeout : runtimeTimeout;
+    const observed = findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.activeDispute?.observedOnChain === true;
+    if (timeoutUnix > 0 && observed) break;
+  }
+  if (!(timeoutUnix > 0)) {
+    throw new Error('SWAP_DISPUTE_TIMEOUT_MISSING_AFTER_START');
+  }
+  console.log(`⏳ Waiting for dispute timeout (unix ${timeoutUnix})...`);
+  const advanced = await advanceScenarioPastDisputeTimeout(
+    env,
+    { send: providerAny.send.bind(providerAny) },
+    timeoutUnix,
+  );
+  console.log(
+    `✅ Timeout reached via unix advance ` +
+    `(${advanced.startUnix}→${advanced.finalUnix}, +${advanced.advancedSeconds}s)`,
+  );
+  // Entity clocks move only inside a signed frame; wake once after the jump.
+  await process(env);
 
-  console.log('⚖️ Hub disputeFinalize (unilateral)');
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'disputeFinalize',
-      data: {
-        counterpartyEntityId: alice.id,
-        description: 'Finalize swap dispute',
-      },
-    }],
-  }]);
+  const readFinalize = (entityId: string) => {
+    const state = findReplica(env, entityId)[1].state;
+    return (
+      state.jBatchState?.batch.disputeFinalizations[0]
+      ?? state.jBatchState?.sentBatch?.batch.disputeFinalizations[0]
+    );
+  };
 
-  const [, hubBeforeBroadcast] = findReplica(env, hub.id);
-  const finalProof = hubBeforeBroadcast.state.jBatchState?.batch.disputeFinalizations?.[0];
-  const finalArgs = finalProof?.starterArguments || '0x';
-  assert(finalArgs !== '0x', 'Dispute caller-side arguments encoded');
+  // Timeout wake may auto-draft + broadcast finalize (either side).
+  let finalProof = readFinalize(hub.id) ?? readFinalize(alice.id);
+  if (!finalProof) {
+    console.log('⚖️ Hub disputeFinalize (unilateral)');
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'disputeFinalize',
+        data: {
+          counterpartyEntityId: alice.id,
+          description: 'Finalize swap dispute',
+        },
+      }],
+    }]);
+    finalProof = readFinalize(hub.id) ?? readFinalize(alice.id);
+  } else {
+    console.log('⚖️ Dispute finalize already drafted by timeout scheduler');
+  }
+  if (!finalProof) throw new Error('SWAP_DISPUTE_FINALIZATION_NOT_DRAFTED');
+
+  // Starter fill evidence is committed at disputeStart; finalize may put the
+  // complementary side in otherArguments. Accept either non-empty clause set.
+  const finalArgs = (
+    finalProof.starterArguments && finalProof.starterArguments !== '0x'
+      ? finalProof.starterArguments
+      : finalProof.otherArguments && finalProof.otherArguments !== '0x'
+        ? finalProof.otherArguments
+        : '0x'
+  );
+  if (finalArgs === '0x') {
+    throw new Error(
+      `SWAP_DISPUTE_ARGUMENTS_EMPTY:starter=${finalProof.starterArguments}:other=${finalProof.otherArguments}:` +
+      `initialNonce=${finalProof.initialNonce}:finalNonce=${finalProof.finalNonce}`,
+    );
+  }
 
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const [argArray] = abiCoder.decode(['bytes[]'], finalArgs) as unknown as [string[]];
   const ratioArgs = argArray[0];
   if (typeof ratioArgs !== 'string') throw new Error('SWAP_MISSING_FINAL_RATIO_ARGS');
-  const [ratios] = abiCoder.decode(['uint16[]', 'bytes32[]'], ratioArgs) as unknown as [Array<bigint>, Array<string>];
-  const ratioValue = Number(ratios[0] || 0n);
+  // Soft-decoded empty tuples are valid ABI; fail on missing fill instead of
+  // treating empty bytes as success.
+  const [decoded] = abiCoder.decode(
+    ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
+    ratioArgs,
+  ) as unknown as [{ fillRatios: readonly bigint[]; secrets: readonly string[] }];
+  const ratioValue = Number(decoded.fillRatios[0] || 0n);
   assert(ratioValue === pendingRatio, `fillRatio matches pending (${pendingRatio})`);
 
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{ type: 'j_broadcast', data: {} }],
-  }]);
+  const hubBatch = findReplica(env, hub.id)[1].state.jBatchState;
+  const aliceBatch = findReplica(env, alice.id)[1].state.jBatchState;
+  const finalizeAlreadySent = (
+    (hubBatch?.sentBatch?.batch.disputeFinalizations?.length ?? 0) > 0
+    || (aliceBatch?.sentBatch?.batch.disputeFinalizations?.length ?? 0) > 0
+  );
+  if (!finalizeAlreadySent) {
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{ type: 'j_broadcast', data: {} }],
+    }]);
+  }
 
   for (let i = 0; i < 20; i++) {
     await process(env);
-    const jRep = env.state.jReplicas.get('Swap Demo');
-    if (jRep && jRep.mempool.length === 0) break;
+    await syncChain(env, 1);
+    await drainPendingJEvents(env);
+    const hubClear = !findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.activeDispute;
+    const aliceClear = !findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.activeDispute;
+    if (hubClear && aliceClear) break;
   }
-  await processJEvents(env);
 
   console.log('✅ Dispute swap finalize broadcast complete');
   const [, hubAfterFinalize] = findReplica(env, hub.id);
@@ -1200,29 +1301,30 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
   }
 }
 
+/** Full swap puppet path used by `run.ts` and CLI (setup + orderbook + multi-party). */
+export async function runSwapScenario(env: RuntimeReplica): Promise<RuntimeReplica> {
+  setScenarioStorageEnabled(env, false);
+  await swap(env);
+  console.log('✅ PHASE 1 COMPLETE!');
+  await swapWithOrderbook(env);
+  console.log('✅ PHASE 2 COMPLETE!');
+  await multiPartyTrading(env);
+  console.log('✅ PHASE 3 COMPLETE!');
+  console.log('✅ ALL SWAP PHASES COMPLETE!');
+  return env;
+}
+
 // ===== CLI ENTRY POINT =====
 if (import.meta.main) {
   console.log('🚀 Running SWAP scenario from CLI...\n');
 
   const runtime = await import('../runtime');
-  const env = runtime.createEmptyEnv();
-  env.scenarioMode = true; // Deterministic time control
-  requireRuntimeSeed(env, 'SWAP CLI'); // Required for key derivation
+  const empty = runtime.createEmptyEnv();
+  empty.scenarioMode = true; // Deterministic time control
+  requireRuntimeSeed(empty, 'SWAP CLI'); // Required for key derivation
 
   try {
-    // Phase 1: Basic bilateral swaps
-    await swap(env);
-    console.log('✅ PHASE 1 COMPLETE!');
-
-    // Phase 2: Orderbook matching
-    await swapWithOrderbook(env);
-    console.log('✅ PHASE 2 COMPLETE!');
-
-    // Phase 3: Multi-party trading
-    await multiPartyTrading(env);
-    console.log('✅ PHASE 3 COMPLETE!');
-
-    console.log('✅ ALL SWAP PHASES COMPLETE!');
+    await runSwapScenario(empty);
     process.exit(0);
   } catch (error) {
     console.error('\n❌ SWAP scenario FAILED:', error);

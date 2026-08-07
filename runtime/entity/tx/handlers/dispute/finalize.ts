@@ -10,7 +10,6 @@ import {
   batchOpCount,
   J_BATCH_CONTRACT_LIMITS,
 } from '../../../../jurisdiction/machine/batch';
-import { getEntityCertifiedJurisdictionHeight } from '../../../../jurisdiction/machine/height';
 import { requireAccountDeltaTransformerAddress } from '../../../../account/consensus/helpers';
 import { collectKnownDisputeSecretsForSnapshot } from '../../../dispute-arguments';
 import { isUsableContractAddress } from '../../../../jurisdiction/machine/contract-address';
@@ -63,17 +62,19 @@ const isFinalizeTimingAllowed = (
   const callerIsLeft = account.state.leftEntity === state.entityId;
   const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
   if (!callerIsStarter) return true;
-  const currentJBlock = getEntityCertifiedJurisdictionHeight(state);
-  if (currentJBlock >= activeDispute.disputeTimeout) return true;
+  // disputeTimeout is absolute unix seconds on L1.
+  const timeoutSec = Number(activeDispute.disputeTimeout || 0);
+  const nowSec = Math.floor(Number(state.timestamp || 0) / 1000);
+  if (timeoutSec > 0 && nowSec >= timeoutSec) return true;
   addMessage(
     state,
-    `❌ disputeFinalize too early for starter: currentBlock=${currentJBlock}, ` +
-    `timeout=${activeDispute.disputeTimeout}`,
+    `❌ disputeFinalize too early for starter: nowSec=${nowSec}, ` +
+    `timeoutSec=${timeoutSec}`,
   );
   warnDisputeUnlessQuiet(env, 'finalize.too_early', {
     counterparty: shortId(counterpartyId),
-    currentJBlock,
-    timeout: activeDispute.disputeTimeout,
+    nowSec,
+    timeoutSec,
   });
   return false;
 };
@@ -134,12 +135,17 @@ const selectedCrossJurisdictionRecoveryIsReady = (
     (pullId) => !Object.hasOwn(plan.recovery.resultsByPullId, pullId),
   );
   if (missing.length === 0) return true;
-  // The on-chain barrier owns the timing truth: once the reveal window has
-  // closed, a missing port reads 0 on-chain and the finalize must proceed
-  // rather than stall the account forever.
-  const resolveBy = Number(plan.recovery.resolveByTimestamp ?? 0);
-  const now = Number(state.timestamp ?? 0);
-  if (resolveBy > 0 && now > resolveBy) return true;
+  // Missing ports read 0 after on-chain reveal cutoff (startTs + T/2 seconds).
+  const timeoutSec = Number(active.disputeTimeout || 0);
+  const startSec = Number(active.disputeStartTimestamp || 0);
+  const nowSec = Math.floor(Number(state.timestamp || 0) / 1000);
+  const revealDeadlineSec = startSec > 0 && timeoutSec > startSec
+    ? startSec + Math.floor((timeoutSec - startSec) / 2)
+    : 0;
+  const revealWindowClosed =
+    (revealDeadlineSec > 0 && nowSec > revealDeadlineSec) ||
+    (timeoutSec > 0 && nowSec >= timeoutSec);
+  if (revealWindowClosed) return true;
   if (state.crontabState) {
     scheduleHook(state.crontabState, {
       id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
@@ -151,7 +157,7 @@ const selectedCrossJurisdictionRecoveryIsReady = (
   addMessage(
     state,
     `⏳ disputeFinalize waiting for ${missing.length} cross-j source result(s) ` +
-      `required by the selected proof`,
+      `required by the selected proof (nowSec=${nowSec}, revealDeadlineSec=${revealDeadlineSec})`,
   );
   return false;
 };

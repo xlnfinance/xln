@@ -407,7 +407,7 @@ const makeCrossCase = (
       createdAt: 1_000,
       updatedAt: 1_000,
       expiresAt: 61_000,
-    }, { runtimeSeed: 'swap-hub-consensus-bench', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    }, { runtimeSeed: 'swap-hub-consensus-bench', now: 1_000 });
     const admittedRoute: CrossJurisdictionSwapRoute = {
       ...route,
       status: 'resting',
@@ -418,7 +418,6 @@ const makeCrossCase = (
       amount: admittedRoute.sourcePull!.signedAmount,
       claimedRatio: 0,
       claimedAmount: 0n,
-      revealedUntilTimestamp: admittedRoute.sourcePull!.revealedUntilTimestamp,
       fullHash: admittedRoute.sourcePull!.fullHash,
       partialRoot: admittedRoute.sourcePull!.partialRoot,
       crossJurisdiction: buildCrossJurisdictionPullBinding(admittedRoute, 'source'),

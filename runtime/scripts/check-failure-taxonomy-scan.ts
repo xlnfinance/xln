@@ -407,15 +407,23 @@ for (const marker of [
   assertIncludes(runtimeImportReadiness, marker, runtimeImportReadinessPath);
 }
 
-const orchestratorPath = 'runtime/orchestrator/orchestrator.ts';
-const orchestrator = readText(orchestratorPath);
+const runtimeImportHttpPath = 'runtime/orchestrator/runtime-import-http.ts';
+const runtimeImportHttp = readText(runtimeImportHttpPath);
 for (const marker of [
-  'const readiness = resolveRuntimeImportReadiness(health);',
+  'const readiness = resolveRuntimeImportReadiness(',
   'category: readiness.category',
   'code: readiness.code',
   'retryable: readiness.retryable',
   'fatal: readiness.fatal',
   'failure: readiness.failure',
+]) {
+  assertIncludes(runtimeImportHttp, marker, runtimeImportHttpPath);
+}
+
+const orchestratorPath = 'runtime/orchestrator/orchestrator.ts';
+const orchestrator = readText(orchestratorPath);
+for (const marker of [
+  'const readiness = resolveRuntimeImportReadiness(health);',
   "meshLog.warn('runtime_import_manifest.refresh_failed'",
   "meshLog.warn('market_snapshot.enrichment_unavailable'",
   "meshLog.warn('child.stop_timeout_sigkill'",

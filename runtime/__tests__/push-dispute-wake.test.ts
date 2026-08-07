@@ -303,7 +303,7 @@ describe('runDisputeWatchSweep', () => {
     // Build a real DisputeStarted log via the same interface the engine uses.
     const { Interface, id } = await import('ethers');
     const iface = new Interface([
-      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout, uint256 disputeStartTimestamp)',
     ]);
     const topicHash = iface.getEvent('DisputeStarted')!.topicHash;
     const encoded = iface.encodeEventLog('DisputeStarted', [
@@ -315,6 +315,7 @@ describe('runDisputeWatchSweep', () => {
       '0x',
       '0x',
       5_910,
+      5_000,
     ]);
     const log = { topics: [...encoded.topics] as string[], data: encoded.data, blockNumber: 150 };
 
@@ -344,10 +345,10 @@ describe('runDisputeWatchSweep', () => {
   test('does not advance the scan cursor past a failed wake', async () => {
     const { Interface, id } = await import('ethers');
     const iface = new Interface([
-      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout, uint256 disputeStartTimestamp)',
     ]);
     const encoded = iface.encodeEventLog('DisputeStarted', [
-      entityId(1), entityId(2), 6, id('proof-retry'), id('seed-retry'), '0x', '0x', 5_910,
+      entityId(1), entityId(2), 6, id('proof-retry'), id('seed-retry'), '0x', '0x', 5_910, 5_000,
     ]);
     const log = { topics: [...encoded.topics] as string[], data: encoded.data, blockNumber: 151 };
     let fail = true;
@@ -391,7 +392,7 @@ describe('runDisputeWatchSweep', () => {
   test('fails loud on a malformed matching event and does not advance its cursor', async () => {
     const { Interface } = await import('ethers');
     const iface = new Interface([
-      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout, uint256 disputeStartTimestamp)',
     ]);
     const { store, cursors } = buildFakeStore();
     const result = await runDisputeWatchSweep(store, {

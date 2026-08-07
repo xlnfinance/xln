@@ -1,4 +1,4 @@
-import { loadFixture, mine, time } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
+import { loadFixture, time } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
 import hre from 'hardhat';
 
@@ -147,7 +147,6 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
   async function openPullDispute(options: {
     label: string;
     fillRatio: number;
-    deadlineOffset?: number;
     pullAmount?: bigint;
   }) {
     const { depository, transformer } = await loadFixture(deployFixture);
@@ -163,7 +162,6 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     await depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
 
     const pullProof = buildHashLadderProof(options.label, options.fillRatio);
-    const deadline = (await time.latest()) + (options.deadlineOffset ?? 10_000);
     const pullAmount = options.pullAmount ?? -MAX_FILL_RATIO;
     const encodedPullBatch = await transformer.encodeBatch({
       payment: [],
@@ -173,7 +171,6 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
           deltaIndex: 0,
           amount: pullAmount,
           claimedRatio: 0,
-          revealedUntilTimestamp: deadline,
           fullHash: pullProof.fullHash,
           partialRoot: pullProof.partialRoot,
         },
@@ -221,7 +218,6 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       proofbody: body,
       proofbodyHash: bodyHash,
       disputeNonce: nonce,
-      deadline,
       pullProof,
       fillRatio: options.fillRatio,
       pullAmount,
@@ -267,7 +263,8 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
   }
 
   async function minePastTimeout(depository: Depository) {
-    await mine(Number(await depository.defaultDisputeDelay()) + 1);
+    // defaultDisputeDelay is seconds; advance wall-clock, not block count.
+    await time.increase(Number(await depository.defaultDisputeDelay()) + 1);
   }
 
   it('settles a partial fill from a verified registry record and emits the portable material', async function () {
@@ -333,11 +330,15 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.left.entityId, 1n)).to.equal(100_000n);
   });
 
-  it('lets the same entity overwrite only its own record', async function () {
+  it('single-shot: a higher ratio overwrite on the same ladder reverts', async function () {
     const dispute = await openPullDispute({ label: 'registry-overwrite', fillRatio: 0x0123 });
     await registerReveal(dispute, dispute.right, { fillRatio: 0x0123 });
-    // Same ladder, higher ratio, same writer: replaces. (The hub raising its own
-    // revealed floor is safe; lowering it would only cut its own claim.)
+    const ladder = ladderHashOf(dispute.pullProof);
+    const [firstRatio, firstAt] = await dispute.depository.getHashLadderReveal(
+      dispute.right.entityId,
+      ladder,
+    );
+    await time.increase(5);
     const higherProof = buildHashLadderProof('registry-overwrite', 0x0234);
     const overwriteBatch = emptyBatch({
       hashLadderReveals: [
@@ -350,10 +351,56 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         },
       ],
     });
-    const signed = await signDepositoryBatch(dispute.depository, dispute.right.entityId, dispute.right.privateKey, overwriteBatch);
-    await dispute.depository.connect(dispute.right.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
-    const [ratio] = await dispute.depository.getHashLadderReveal(dispute.right.entityId, ladderHashOf(higherProof));
-    expect(ratio).to.equal(0x0234);
+    const signed = await signDepositoryBatch(
+      dispute.depository,
+      dispute.right.entityId,
+      dispute.right.privateKey,
+      overwriteBatch,
+    );
+    await expect(
+      dispute.depository
+        .connect(dispute.right.signer)
+        .processBatch(signed.encodedBatch, signed.hankoData, signed.nonce),
+    ).to.be.revertedWithCustomError(dispute.depository, 'E12');
+    const [ratio, raisedAt] = await dispute.depository.getHashLadderReveal(
+      dispute.right.entityId,
+      ladder,
+    );
+    expect(ratio).to.equal(firstRatio);
+    expect(raisedAt).to.equal(firstAt);
+  });
+
+  it('single-shot: first timely reveal stays active; late first write on another ladder is 0', async function () {
+    const dispute = await openPullDispute({ label: 'registry-raise-past-half', fillRatio: 0x0123 });
+    await registerReveal(dispute, dispute.right, { fillRatio: 0x0123 });
+    const ladder = ladderHashOf(dispute.pullProof);
+    const [, firstAt] = await dispute.depository.getHashLadderReveal(dispute.right.entityId, ladder);
+    expect(firstAt).to.be.gt(0n);
+    const delay = Number(await dispute.depository.defaultDisputeDelay());
+    await time.increase(Math.floor(delay / 2) + 1);
+    // Same-ratio retry remains a no-op (idempotent), not a raise path.
+    await registerReveal(dispute, dispute.right, { fillRatio: 0x0123 });
+    const [ratio, secondAt] = await dispute.depository.getHashLadderReveal(
+      dispute.right.entityId,
+      ladder,
+    );
+    expect(ratio).to.equal(0x0123);
+    expect(secondAt).to.equal(firstAt);
+    await time.increase(Math.ceil(delay / 2) + 1);
+    await finalizeDispute(dispute, dispute.right);
+    expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0x0123n);
+  });
+
+  it('same-ratio re-registration preserves the original revealedAt', async function () {
+    const dispute = await openPullDispute({ label: 'registry-same-ratio', fillRatio: 0x0123 });
+    await registerReveal(dispute, dispute.right, { fillRatio: 0x0123 });
+    const ladder = ladderHashOf(dispute.pullProof);
+    const [, firstAt] = await dispute.depository.getHashLadderReveal(dispute.right.entityId, ladder);
+    await time.increase(5);
+    await registerReveal(dispute, dispute.right, { fillRatio: 0x0123 });
+    const [ratio, secondAt] = await dispute.depository.getHashLadderReveal(dispute.right.entityId, ladder);
+    expect(ratio).to.equal(0x0123);
+    expect(secondAt).to.equal(firstAt);
   });
 
   it('reads a missing record as a zero fill and releases the payer collateral', async function () {
@@ -364,13 +411,31 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.left.entityId, 1n)).to.equal(100_000n);
   });
 
+  it('cross-j residual model: reveal leg settles, silent sibling leg settles 0', async function () {
+    // Two independent Depository snapshots (= two Js). Legs are not atomic 2PC:
+    // a timely registry reveal credits the beneficiary; silence releases collateral
+    // at 0. Fanout only starts clocks — it does not couple settlement amounts.
+    const source = await openPullDispute({ label: 'residual-source', fillRatio: 0x0123 });
+    await registerReveal(source, source.right, {});
+    await minePastTimeout(source.depository);
+    await finalizeDispute(source, source.right);
+    expect(await source.depository._reserves(source.right.entityId, 1n)).to.equal(0x0123n);
+    expect(await source.depository._reserves(source.left.entityId, 1n)).to.equal(100_000n - 0x0123n);
+
+    const target = await openPullDispute({ label: 'residual-target', fillRatio: 0x0123 });
+    await minePastTimeout(target.depository);
+    await finalizeDispute(target, target.right);
+    expect(await target.depository._reserves(target.right.entityId, 1n)).to.equal(0n);
+    expect(await target.depository._reserves(target.left.entityId, 1n)).to.equal(100_000n);
+  });
+
   it('reads a registration written after dispute T/2 as zero', async function () {
     const dispute = await openPullDispute({ label: 'registry-late', fillRatio: 0x0123 });
     const delay = Number(await dispute.depository.defaultDisputeDelay());
-    // Pass the reveal half-window, then register — stored but settles as 0.
-    await mine(Math.floor(delay / 2) + 1);
+    // Pass the reveal half-window (seconds), then register — stored but settles as 0.
+    await time.increase(Math.floor(delay / 2) + 1);
     await registerReveal(dispute, dispute.right, {});
-    await mine(Math.ceil(delay / 2) + 1);
+    await time.increase(Math.ceil(delay / 2) + 1);
     await finalizeDispute(dispute, dispute.right);
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
   });
@@ -441,8 +506,8 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       payment: [],
       swap: [],
       pull: [
-        { deltaIndex: 0, amount: -MAX_FILL_RATIO, claimedRatio: 0, revealedUntilTimestamp: 0, fullHash: proofA.fullHash, partialRoot: proofA.partialRoot },
-        { deltaIndex: 0, amount: -MAX_FILL_RATIO, claimedRatio: 0, revealedUntilTimestamp: 0, fullHash: proofB.fullHash, partialRoot: proofB.partialRoot },
+        { deltaIndex: 0, amount: -MAX_FILL_RATIO, claimedRatio: 0, fullHash: proofA.fullHash, partialRoot: proofA.partialRoot },
+        { deltaIndex: 0, amount: -MAX_FILL_RATIO, claimedRatio: 0, fullHash: proofB.fullHash, partialRoot: proofB.partialRoot },
       ],
     });
     const body = proofBody(

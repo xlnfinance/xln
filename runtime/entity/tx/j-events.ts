@@ -447,6 +447,7 @@ type DisputeStartedEventData = {
   watchSeed?: unknown;
   batchNonce?: number;
   disputeTimeout?: number;
+  disputeStartTimestamp?: number;
   jNonce?: unknown;
 };
 
@@ -485,6 +486,7 @@ const initializeStartedDispute = async (
 
   const weAreStarter = senderStr === entityIdNorm;
   const disputeTimeout = Number(data.disputeTimeout);
+  const disputeStartTimestamp = Number(data.disputeStartTimestamp);
   const initialNonce = requireBoundaryUint(nonce, 'J_EVENT_DISPUTE_NONCE_INVALID');
   const jNonce = requireBoundaryUint(
     data.jNonce ?? nonce,
@@ -497,6 +499,7 @@ const initializeStartedDispute = async (
     initialProofbodyHash: String(proofbodyHash),
     initialNonce,
     disputeTimeout,
+    disputeStartTimestamp,
     jNonce,
     starterInitialArguments: data.starterInitialArguments || '0x',
     starterIncrementedArguments: data.starterIncrementedArguments || '0x',
@@ -602,7 +605,7 @@ const applyStartedDisputeFollowups = (
   addMessage(
     newState,
     `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ` +
-      `${counterpartyId.slice(-4)}, timeout: block ${disputeTimeout}`,
+      `${counterpartyId.slice(-4)}, timeout: unix ${disputeTimeout}`,
   );
   if (!newState.crontabState) return;
   const kickoffDelayMs = weAreStarter ? 1 : 5000;
@@ -817,9 +820,9 @@ type HashLadderRevealRegisteredEventData = {
 
 /**
  * Cross-j route mirrors over a finalized account terminate with the chain's
- * settlement. `claimedRatio` tracks the best registry reveal observed for the
- * route's ladder (recorded by the HashLadderRevealRegistered handler), which
- * is exactly the ratio the dispute just settled at.
+ * settlement. Prefer `registryFillRatio` (single-shot on-chain latch) when
+ * present; fall back to `claimedRatio` for older mirrors that only tracked
+ * observed/fill progress.
  */
 const terminalizeCrossJurisdictionRoutesOnFinality = (
   newState: EntityState,
@@ -837,10 +840,13 @@ const terminalizeCrossJurisdictionRoutesOnFinality = (
       String(route.target?.counterpartyEntityId || '').toLowerCase() === entityIdNorm &&
       String(route.target?.entityId || '').toLowerCase() === counterpartyNorm;
     if (!onSourceAccount && !onTargetAccount) continue;
+    const settledRatio = Math.floor(
+      Number(route.registryFillRatio ?? route.claimedRatio ?? 0),
+    );
     const terminal = transitionTargetLegTerminal(
       route,
       Number(newState.timestamp || 0),
-      Math.floor(Number(route.claimedRatio ?? 0)),
+      settledRatio,
     );
     newState.crossJurisdictionSwaps!.set(route.orderId, route);
     addMessage(newState, `🌉 Cross-j route ${route.orderId} terminal after dispute finality: ${terminal}`);
@@ -852,7 +858,11 @@ const terminalizeCrossJurisdictionRoutesOnFinality = (
  * Roles, self-selected per entity:
  *  1. source-user lane: emit the port instruction to the target user.
  *  2. registering entity: confirm a pending port result on its own dispute.
- *  3. every route mirror: record the best observed ratio for terminal picks.
+ *  3. every route mirror: latch registryFillRatio (single-shot) + claimedRatio.
+ *
+ * Invariant: registryFillRatio is set once and never raised — Depository E12
+ * already forbids a second on-chain write; the mirror must not invent a higher
+ * pending queue target after confirmation cleared sentBatch.
  */
 const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext): void => {
   const { newState, outputs, blockNumber, dirtyAccounts } = context;
@@ -882,13 +892,22 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
 
   for (const route of newState.crossJurisdictionSwaps?.values?.() ?? []) {
     if (isCrossJurisdictionTerminalStatus(route.status)) continue;
-    const pull = route.targetPull ?? route.sourcePull;
-    if (!pull || ladderHashForPull(pull) !== ladderHash) continue;
+    const matches =
+      (route.sourcePull && ladderHashForPull(route.sourcePull) === ladderHash) ||
+      (route.targetPull && ladderHashForPull(route.targetPull) === ladderHash);
+    if (!matches) continue;
     const observed = Math.floor(Number(data.fillRatio));
+    let dirty = false;
+    // First observed registry write wins — never bookmark a later higher ratio.
+    if (route.registryFillRatio === undefined) {
+      route.registryFillRatio = observed;
+      dirty = true;
+    }
     if (observed > Math.floor(Number(route.claimedRatio ?? 0))) {
       route.claimedRatio = observed;
-      newState.crossJurisdictionSwaps!.set(route.orderId, route);
+      dirty = true;
     }
+    if (dirty) newState.crossJurisdictionSwaps!.set(route.orderId, route);
   }
 };
 

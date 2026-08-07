@@ -63,7 +63,6 @@ import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections'
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/handlers/account-cross-j-followups';
 
 import {
-  CROSS_J_TARGET_REVEAL_SAFETY_MS,
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
@@ -93,7 +92,6 @@ import {
 
 import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
 
-import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
 
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -253,7 +251,7 @@ describe('cross-jurisdiction hashledger swap', () => {
             createdAt: env.state.timestamp,
             updatedAt: env.state.timestamp,
           },
-          { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+          { runtimeSeed: 'test-seed', now: env.state.timestamp },
         ),
         status: options.status ?? 'resting',
       };
@@ -303,7 +301,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: 1_000,
         expiresAt: 61_000,
       },
-      { runtimeSeed: 'cross-floor-scaled-source-progress-seed', sourceDisputeDelayMs: 5_000, now: 1_000 },
+      { runtimeSeed: 'cross-floor-scaled-source-progress-seed', now: 1_000 },
     );
     account.state.swapOffers.set(route.orderId, {
       offerId: route.orderId,
@@ -432,7 +430,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: 1_000,
         expiresAt: 61_000,
       },
-      { runtimeSeed: 'cross-terminal-cancel-binding-seed', sourceDisputeDelayMs: 5_000, now: 1_000 },
+      { runtimeSeed: 'cross-terminal-cancel-binding-seed', now: 1_000 },
     );
     const committedRoute = {
       ...route,
@@ -465,7 +463,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: route.sourcePull!.signedAmount,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(committedRoute, 'source'),
@@ -552,7 +549,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: env.runtimeSeed, now: env.state.timestamp },
     );
     const route = {
       ...prepared,
@@ -586,7 +583,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: route.sourcePull!.signedAmount,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(
@@ -616,7 +612,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: route.targetPull!.signedAmount,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
           fullHash: route.targetPull!.fullHash,
           partialRoot: route.targetPull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
@@ -748,7 +743,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: env.runtimeSeed, now: env.state.timestamp },
     );
     const highRatio = 0x8000;
     const lowRatio = 0x4000;
@@ -801,7 +796,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: highRoute.targetPull!.signedAmount,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: highRoute.targetPull!.revealedUntilTimestamp,
           fullHash: highRoute.targetPull!.fullHash,
           partialRoot: highRoute.targetPull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding({ ...highRoute, sourceCloseProof: highProof }, 'target'),
@@ -877,7 +871,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       {
         runtimeSeed: env.runtimeSeed,
-        sourceDisputeDelayMs: 5_000,
         now: env.state.timestamp,
       },
     );
@@ -917,7 +910,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: targetPull.signedAmount,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: targetPull.revealedUntilTimestamp,
           fullHash: targetPull.fullHash,
           partialRoot: targetPull.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(prepared, 'target'),
@@ -982,7 +974,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: env.runtimeSeed, now: env.state.timestamp },
     );
     const fillRatio = 0x8000;
     const privateSeed = deriveCrossJurisdictionPrivateSeed(env.runtimeSeed!, prepared);
@@ -1013,7 +1005,6 @@ describe('cross-jurisdiction hashledger swap', () => {
         amount: sourcePull.signedAmount,
         claimedRatio: 0,
         claimedAmount: 0n,
-        revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
         fullHash: sourcePull.fullHash,
         partialRoot: sourcePull.partialRoot,
         crossJurisdiction: buildCrossJurisdictionPullBinding(prepared, 'source'),
@@ -1125,7 +1116,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: env.runtimeSeed, now: env.state.timestamp },
     );
     const restingRoute = {
       ...prepared,
@@ -1230,7 +1221,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: 'cross-clear-offer-first', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'cross-clear-offer-first', now: env.state.timestamp },
     );
     const route = {
       ...prepared,
@@ -1268,7 +1259,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: route.sourcePull!.signedAmount,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
@@ -1333,7 +1323,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: 1_000,
         expiresAt: 61_000,
       },
-      { runtimeSeed: 'cross-cancel-no-swap-resolve', sourceDisputeDelayMs: 5_000, now: 1_000 },
+      { runtimeSeed: 'cross-cancel-no-swap-resolve', now: 1_000 },
     );
     const account = state.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {

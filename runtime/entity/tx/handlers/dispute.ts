@@ -166,12 +166,6 @@ const buildDisputeStartIntent = (
     ...(tx.data.starterInitialArguments !== undefined && !recovery
       ? { starterInitialArguments: tx.data.starterInitialArguments }
       : {}),
-    ...(tx.data.allowUnsafeCrossJTargetDispute === true
-      ? { allowUnsafeCrossJTargetDispute: true }
-      : {}),
-    ...(tx.data.acceptedCrossJTargetLossAmount !== undefined
-      ? { acceptedCrossJTargetLossAmount: tx.data.acceptedCrossJTargetLossAmount }
-      : {}),
   };
 };
 
@@ -222,12 +216,6 @@ export const draftPreparedDisputeStartIfReady = async (
           : {}),
         ...(intent?.starterInitialArguments !== undefined
           ? { starterInitialArguments: intent.starterInitialArguments }
-          : {}),
-        ...(intent?.allowUnsafeCrossJTargetDispute === true
-          ? { allowUnsafeCrossJTargetDispute: true }
-          : {}),
-        ...(intent?.acceptedCrossJTargetLossAmount !== undefined
-          ? { acceptedCrossJTargetLossAmount: intent.acceptedCrossJTargetLossAmount }
           : {}),
       },
     },

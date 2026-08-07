@@ -11,9 +11,12 @@ pragma solidity ^0.8.24;
 struct AccountInfo {
   uint nonce;              // Unified monotonic nonce: signed nonce must be strictly greater than stored nonce
   bytes32 disputeHash;
-  uint256 disputeTimeout;          // absolute block.number when the full dispute period T ends
-  uint256 disputeStartBlock;       // block.number at dispute start (T/2 reveal window anchor)
-  uint256 disputeStartTimestamp;   // wall-clock start (argument freezing / events); not the pull clock
+  // Absolute unix end of dispute period T (seconds). Challenge + pull clocks
+  // both use jurisdiction seconds from disputeStartTimestamp — not blocks.
+  // Different chains have different blockTimes; seconds compare without config
+  // conversion. Runtime mirrors these values in ms for scheduling only.
+  uint256 disputeTimeout;
+  uint256 disputeStartTimestamp;   // unix start; pull reveal cutoff = start + T/2
   bytes32 disputeInitialProofbodyHash;
   bytes32 starterInitialArgumentsCommitment;
   bytes32 starterIncrementedArgumentsCommitment;

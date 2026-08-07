@@ -25,9 +25,8 @@ export {
   type CanonicalCrossJurisdictionMarket,
 } from './market';
 
-export const CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS = 60_000;
-export const CROSS_J_TARGET_REVEAL_SAFETY_MS = 60_000;
-export const CROSS_J_MIN_TARGET_RESPONSE_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Book TTL default only — not a sealed pull/settlement reveal window. */
+export const CROSS_J_DEFAULT_BOOK_TTL_MS = 60_000;
 export const CROSS_J_MAX_FILL_RATIO = 65_535;
 
 const CROSS_J_STATUS_RANK: Record<CrossJurisdictionSwapStatus, number> = {
@@ -656,16 +655,6 @@ export function withCrossJurisdictionClaimProgress(
   };
 }
 
-export function isCrossJurisdictionPullExpired(
-  route: CrossJurisdictionSwapRoute,
-  leg: 'source' | 'target',
-  now: number,
-): boolean {
-  const pull = leg === 'source' ? route.sourcePull : route.targetPull;
-  const deadline = Number(pull?.revealedUntilTimestamp || 0);
-  return Number.isFinite(deadline) && deadline > 0 && deadline <= now;
-}
-
 const normalizeJurisdiction = (value: string): string => String(value || '').trim().toLowerCase();
 const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 const ROUTE_HASH_ABI_TYPES = [
@@ -766,7 +755,6 @@ const cloneCrossJurisdictionPullLeg = (value: CrossJurisdictionPullLeg | undefin
     tokenId: Number(value.tokenId),
     amount: BigInt(value.amount),
     signedAmount: BigInt(value.signedAmount),
-    revealedUntilTimestamp: Number(value.revealedUntilTimestamp),
     fullHash: String(value.fullHash || ''),
     partialRoot: String(value.partialRoot || ''),
   };
@@ -934,6 +922,7 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const settlementPolicy = cloneCrossJurisdictionSettlementPolicy(route.settlementPolicy);
   const timePolicy = cloneCrossJurisdictionTimePolicy(route.timePolicy);
   const claimedRatio = optionalNumber(route.claimedRatio);
+  const registryFillRatio = optionalNumber(route.registryFillRatio);
   const sourceClaimed = optionalBigInt(route.sourceClaimed);
   const targetClaimed = optionalBigInt(route.targetClaimed);
   const expiresAt = optionalNumber(route.expiresAt);
@@ -969,6 +958,7 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (route.priceImprovementMode) clone.priceImprovementMode = route.priceImprovementMode;
   if (route.riskMode) clone.riskMode = route.riskMode;
   if (claimedRatio !== undefined) clone.claimedRatio = claimedRatio;
+  if (registryFillRatio !== undefined) clone.registryFillRatio = registryFillRatio;
   if (sourceClaimed !== undefined) clone.sourceClaimed = sourceClaimed;
   if (targetClaimed !== undefined) clone.targetClaimed = targetClaimed;
   if (expiresAt !== undefined) clone.expiresAt = expiresAt;
@@ -1307,20 +1297,17 @@ export function buildPreparedCrossJurisdictionRoute(
   route: CrossJurisdictionSwapRoute,
   options: {
     runtimeSeed?: string | undefined;
-    sourceDisputeDelayMs: number;
     now: number;
   },
 ): CrossJurisdictionSwapRoute {
   const now = Math.floor(Number(options.now || 0));
   if (!Number.isFinite(now) || now <= 0) throw new Error(`CROSS_J_NOW_INVALID:${options.now}`);
-  const sourceDisputeDelayMs = Math.floor(Number(options.sourceDisputeDelayMs || 0));
-  if (!Number.isFinite(sourceDisputeDelayMs) || sourceDisputeDelayMs <= 0) {
-    throw new Error(`CROSS_J_SOURCE_DISPUTE_DELAY_MS_INVALID:${options.sourceDisputeDelayMs}`);
-  }
-  const marketExpiresAt = Math.floor(Number(route.expiresAt ?? (now + CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS)));
-  const sourceRevealUntilTimestamp = marketExpiresAt + CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS;
+  // Book TTL only. Settlement clock is dispute-relative seconds on L1
+  // (disputeStartTimestamp + T/2, unix seconds). No sealed route reveal deadline, no market expiry for
+  // swap finality, no cross-j margin — event-driven sibling fanout owns clocks.
+  const marketExpiresAt = Math.floor(Number(route.expiresAt ?? (now + CROSS_J_DEFAULT_BOOK_TTL_MS)));
   if (!Number.isFinite(marketExpiresAt) || marketExpiresAt <= now) {
-    throw new Error(`CROSS_J_SOURCE_REVEAL_TIMESTAMP_INVALID:${route.orderId}`);
+    throw new Error(`CROSS_J_EXPIRES_AT_INVALID:${route.orderId}`);
   }
   const canonicalRoute = withCanonicalCrossJurisdictionRouteHash({
     ...route,
@@ -1333,8 +1320,6 @@ export function buildPreparedCrossJurisdictionRoute(
   const targetAmount = BigInt(canonicalRoute.target.amount);
   const sourcePullId = deriveCrossJurisdictionPullId(canonicalRoute, 'source');
   const targetPullId = deriveCrossJurisdictionPullId(canonicalRoute, 'target');
-  const targetResponseWindowMs = Math.max(sourceDisputeDelayMs, CROSS_J_MIN_TARGET_RESPONSE_WINDOW_MS);
-  const targetRevealUntilTimestamp = sourceRevealUntilTimestamp + targetResponseWindowMs + CROSS_J_TARGET_REVEAL_SAFETY_MS;
   return {
     ...canonicalRoute,
     sourcePull: {
@@ -1346,7 +1331,6 @@ export function buildPreparedCrossJurisdictionRoute(
         route.source.entityId,
         sourceAmount,
       ),
-      revealedUntilTimestamp: sourceRevealUntilTimestamp,
       fullHash: proof.fullHash,
       partialRoot: proof.partialRoot,
     },
@@ -1359,13 +1343,12 @@ export function buildPreparedCrossJurisdictionRoute(
         route.target.entityId,
         targetAmount,
       ),
-      revealedUntilTimestamp: targetRevealUntilTimestamp,
       fullHash: proof.fullHash,
       partialRoot: proof.partialRoot,
     },
     status: 'target_prepared',
     updatedAt: now,
-    expiresAt: Number(canonicalRoute.expiresAt ?? sourceRevealUntilTimestamp),
+    expiresAt: marketExpiresAt,
   };
 }
 

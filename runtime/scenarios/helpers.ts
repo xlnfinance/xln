@@ -219,6 +219,30 @@ export async function waitScenario(env: RuntimeReplica, ms: number): Promise<voi
   advanceScenarioTime(env, ms, true);
 }
 
+/** Align runtime wake clock with an absolute L1 unix deadline (seconds → ms). */
+export const syncRuntimeToUnixSeconds = (env: RuntimeReplica, unixSeconds: number): void => {
+  if (!Number.isSafeInteger(unixSeconds) || unixSeconds < 0) {
+    throw new Error(`SCENARIO_UNIX_TARGET_INVALID:${unixSeconds}`);
+  }
+  env.state.timestamp = Math.max(env.state.timestamp || 0, unixSeconds * 1000);
+};
+
+type ScenarioRpcSendProvider = {
+  send: (method: string, params: unknown[]) => Promise<unknown>;
+};
+
+/** Jump chain + runtime clocks past an absolute disputeTimeout (unix seconds). */
+export const advanceScenarioPastDisputeTimeout = async (
+  env: RuntimeReplica,
+  provider: ScenarioRpcSendProvider,
+  timeoutUnixSeconds: number,
+) => {
+  const { advanceRpcToUnixSeconds } = await import('./rpc-block-mining');
+  const advanced = await advanceRpcToUnixSeconds(provider, timeoutUnixSeconds);
+  syncRuntimeToUnixSeconds(env, timeoutUnixSeconds);
+  return advanced;
+};
+
 function shouldEmitScenarioLog(level: ScenarioLogLevel): boolean {
   return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[strictScenarioLogLevel];
 }
@@ -498,10 +522,10 @@ export async function converge(env: RuntimeReplica, maxCycles = 10): Promise<voi
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
     }
-    // Retained reliable outputs are released by a retry deadline, not by more
-    // ticks. When they are the only thing left, a fixed time step just spins
-    // until the cycle budget runs out; jump to the deadline instead.
-    if (pendingNetwork > 0 && pendingOutputs === 0 && pendingInbox === 0 && pendingInputs === 0) {
+    // Retained reliable outputs release on a retry deadline, not on more ticks.
+    // Jump every cycle that still has network backlog: waiting for inputs/
+    // inbox to clear first deadlocks catch-up after offline restore.
+    if (pendingNetwork > 0) {
       advanceScenarioToNextNetworkRetry(env);
     }
     for (const [, replica] of env.state.eReplicas) {
@@ -578,6 +602,9 @@ export async function convergeWithOffline(
     const pendingInputs = env.runtimeMempool?.entityInputs?.length || 0;
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
+    }
+    if (pendingNetwork > 0) {
+      advanceScenarioToNextNetworkRetry(env);
     }
     for (const [, replica] of env.state.eReplicas) {
       // Check entity-level work (multi-signer consensus) - CRITICAL for multi-sig

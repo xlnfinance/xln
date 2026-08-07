@@ -29,8 +29,10 @@ import {
   processUntilWithoutLocalHtlcAdvance,
   withholdScenarioLocalHtlcAdvances,
   syncChain,
+  syncRuntimeToUnixSeconds,
   usd,
 } from './helpers';
+import { advanceRpcToUnixSeconds } from './rpc-block-mining';
 
 const USDC = 1;
 const WETH = 2;
@@ -259,14 +261,21 @@ const orderbookRowsByEntity = (
   ]),
 );
 
-const mineUntil = async (jadapter: JAdapter, target: number): Promise<void> => {
+const advancePastDisputeTimeout = async (
+  env: RuntimeReplica,
+  jadapter: JAdapter,
+  timeoutUnixSeconds: number,
+) => {
   const provider = jadapter.provider as unknown as Partial<MineableProvider>;
-  if (typeof provider.send !== 'function') throw new Error('DISPUTE_TRANSFORMER_EVM_MINE_REQUIRED');
-  let height = Number(await jadapter.provider.getBlockNumber());
-  while (height < target) {
-    await provider.send('evm_mine', []);
-    height = Number(await jadapter.provider.getBlockNumber());
+  if (typeof provider.send !== 'function') {
+    throw new Error('DISPUTE_TRANSFORMER_EVM_TIME_REQUIRED');
   }
+  const advanced = await advanceRpcToUnixSeconds(
+    { send: provider.send.bind(provider) },
+    timeoutUnixSeconds,
+  );
+  syncRuntimeToUnixSeconds(env, timeoutUnixSeconds);
+  return advanced;
 };
 
 const decodeArguments = (encoded: string, context: string): DecodedArguments => {
@@ -278,8 +287,13 @@ const decodeArguments = (encoded: string, context: string): DecodedArguments => 
   const [decoded] = coder.decode(
     ['tuple(uint16[] fillRatios,bytes32[] secrets)'],
     clause,
-  ) as unknown as [{ fillRatios: bigint[]; secrets: string[] }];
-  return decoded;
+  ) as unknown as [{ fillRatios: readonly bigint[]; secrets: readonly string[] }];
+  // ethers Result loses named keys under object-spread; copy fields explicitly.
+  return {
+    fillRatios: Array.from(decoded.fillRatios, (ratio) => BigInt(ratio)),
+    secrets: Array.from(decoded.secrets, String),
+    pulls: [],
+  };
 };
 
 const deltaByToken = (frame: AccountFrame, tokenId: number) => {
@@ -752,19 +766,62 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     await converge(env, 12);
     const aliceActive = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.activeDispute;
     if (!aliceActive) throw new Error('DISPUTE_TRANSFORMER_ACTIVE_DISPUTE_MISSING');
-    await mineUntil(jadapter, Number(aliceActive.disputeTimeout));
+    const timeoutUnix = Number(aliceActive.disputeTimeout || 0);
+    assert(timeoutUnix > 0, 'Active dispute missing absolute unix timeout', env);
+    const timeAdvance = await advancePastDisputeTimeout(env, jadapter, timeoutUnix);
+    // Entity clocks only move inside a signed frame; wake once after the jump.
+    await process(env);
+    console.log(`[DISPUTE_DEBUG:timeout-advance] ${safeStringify({
+      ...timeAdvance,
+      runtimeTs: env.state.timestamp,
+      aliceEntityTs: findReplica(env, alice.id)[1].state.timestamp,
+    })}`);
 
-    const aliceBeforeFinalize = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
+    const aliceBeforeFinalizeState = findReplica(env, alice.id)[1].state;
+    const aliceBeforeFinalize = aliceBeforeFinalizeState.accounts.get(hub.id);
     console.log(`[DISPUTE_DEBUG:finalizer-account] ${safeStringify({
       ...accountEvidenceSummary(aliceBeforeFinalize),
+      readyAfter: aliceBeforeFinalize?.disputePrepare?.readyAfter,
+      pendingOrderbookRemovalIds: aliceBeforeFinalize?.disputePrepare?.pendingOrderbookRemovalIds,
+      jBatch: {
+        draftFinalizations: aliceBeforeFinalizeState.jBatchState?.batch.disputeFinalizations?.length ?? 0,
+        sentFinalizations:
+          aliceBeforeFinalizeState.jBatchState?.sentBatch?.batch.disputeFinalizations?.length ?? 0,
+        hasSentBatch: Boolean(aliceBeforeFinalizeState.jBatchState?.sentBatch),
+        sentEntityNonce: aliceBeforeFinalizeState.jBatchState?.sentBatch?.entityNonce,
+      },
       activeDispute: aliceBeforeFinalize?.activeDispute,
     })}`);
 
-    await process(env, [{ entityId: alice.id, signerId: alice.signer, entityTxs: [{
-      type: 'disputeFinalize', data: { counterpartyEntityId: hub.id, description: 'mixed-transformer-finalize' },
-    }] }]);
-    const finalization = findReplica(env, alice.id)[1].state.jBatchState?.batch.disputeFinalizations[0];
-    if (!finalization) throw new Error('DISPUTE_TRANSFORMER_FINALIZATION_NOT_DRAFTED');
+    const readAliceFinalization = () => {
+      const state = findReplica(env, alice.id)[1].state;
+      return (
+        state.jBatchState?.batch.disputeFinalizations[0]
+        ?? state.jBatchState?.sentBatch?.batch.disputeFinalizations[0]
+      );
+    };
+
+    let finalization = readAliceFinalization();
+    if (!finalization) {
+      await process(env, [{ entityId: alice.id, signerId: alice.signer, entityTxs: [{
+        type: 'disputeFinalize', data: { counterpartyEntityId: hub.id, description: 'mixed-transformer-finalize' },
+      }] }]);
+      finalization = readAliceFinalization();
+    }
+    const aliceAfterFinalizeAttempt = findReplica(env, alice.id)[1].state;
+    if (!finalization) {
+      throw new Error(
+        `DISPUTE_TRANSFORMER_FINALIZATION_NOT_DRAFTED:` +
+        `runtimeTs=${env.state.timestamp}:entityTs=${aliceAfterFinalizeAttempt.timestamp}:` +
+        `timeout=${timeoutUnix}:finalizeQueued=${String(
+          aliceAfterFinalizeAttempt.accounts.get(hub.id)?.activeDispute?.finalizeQueued,
+        )}:jBatch=${safeStringify({
+          draft: aliceAfterFinalizeAttempt.jBatchState?.batch.disputeFinalizations?.length ?? 0,
+          sent: aliceAfterFinalizeAttempt.jBatchState?.sentBatch?.batch.disputeFinalizations?.length ?? 0,
+          hasSentBatch: Boolean(aliceAfterFinalizeAttempt.jBatchState?.sentBatch),
+        })}`,
+      );
+    }
     const finalizer = decodeArguments(finalization.otherArguments, 'finalizer.other');
     console.log(`[DISPUTE_DEBUG:finalize] ${safeStringify({
       initialNonce: finalization.initialNonce,
@@ -777,8 +834,13 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     assert(finalizer.fillRatios.some((ratio) => ratio > 0n), 'Finalizer swap fill argument missing', env);
     assert(finalizer.secrets.map((secret) => secret.toLowerCase()).includes(hubSecret.toLowerCase()), 'Finalizer HTLC secret missing', env);
 
-    await process(env, [{ entityId: alice.id, signerId: alice.signer, entityTxs: [{ type: 'j_broadcast', data: {} }] }]);
-    await syncChain(env, 5);
+    // Timeout wake may already auto-draft + broadcast finalize into sentBatch.
+    const aliceBatch = findReplica(env, alice.id)[1].state.jBatchState;
+    const finalizeAlreadySent = (aliceBatch?.sentBatch?.batch.disputeFinalizations?.length ?? 0) > 0;
+    if (!finalizeAlreadySent) {
+      await process(env, [{ entityId: alice.id, signerId: alice.signer, entityTxs: [{ type: 'j_broadcast', data: {} }] }]);
+    }
+    await syncChain(env, 8);
     await processJEvents(env);
     await converge(env, 12);
 

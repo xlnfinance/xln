@@ -91,10 +91,9 @@ import {
   buildReserveToReserveTx,
   buildSettlementApproveTx,
   encodeExternalEoaAsEntity,
-  type DisputeStartOptions,
   type MovePostSettleOp,
 } from "./entity-action-txs";
-import { buildDisputedAccountViews, formatCrossJTargetDisputeRiskLabel, getCrossJTargetDisputeRiskForState, type CrossJTargetDisputeRisk } from "./account-dispute-view";
+import { buildDisputedAccountViews } from "./account-dispute-view";
 export let tab: Tab;
 export let hideHeader: boolean = false;
 export let showJurisdiction: boolean = true;
@@ -2286,31 +2285,15 @@ function confirmDisputeAction(kind: "prepare" | "finalize", counterpartyEntityId
   }
   return confirm(`Finalize on-chain dispute with ${label}?\n\nThis adds Dispute Finalize to the pending batch. Only do this after the dispute timeout has passed.`);
 }
-let unsafeCrossJTargetDisputeAccepted = false;
-let unsafeCrossJTargetDisputeAccountId = "";
-$: if (workspaceAccountId !== unsafeCrossJTargetDisputeAccountId) {
-  unsafeCrossJTargetDisputeAccepted = false;
-  unsafeCrossJTargetDisputeAccountId = workspaceAccountId;
-}
-function getCrossJTargetDisputeRisk(counterpartyEntityId: string): CrossJTargetDisputeRisk | null {
-  return getCrossJTargetDisputeRiskForState(replica?.state, counterpartyEntityId);
-}
-function formatCrossJTargetDisputeRisk(risk: CrossJTargetDisputeRisk): string {
-  return formatCrossJTargetDisputeRiskLabel({
-    risk,
-    resolveToken: resolveReserveTokenMeta,
-    formatTokenInputAmount,
-  });
-}
-async function confirmAndQueueDisputePrepare(counterpartyEntityId: string, description = "dispute-prepare-from-configure", options: DisputeStartOptions = {}) {
+async function confirmAndQueueDisputePrepare(counterpartyEntityId: string, description = "dispute-prepare-from-configure") {
   if (!confirmDisputeAction("prepare", counterpartyEntityId)) return;
-  await queueDisputePrepare(counterpartyEntityId, description, options);
+  await queueDisputePrepare(counterpartyEntityId, description);
 }
 async function confirmAndQueueDisputeFinalize(counterpartyEntityId: string, description = "dispute-finalize-from-configure") {
   if (!confirmDisputeAction("finalize", counterpartyEntityId)) return;
   await queueDisputeFinalize(counterpartyEntityId, description);
 }
-async function queueDisputePrepare(counterpartyEntityId: string, description = "dispute-prepare-from-configure", options: DisputeStartOptions = {}) {
+async function queueDisputePrepare(counterpartyEntityId: string, description = "dispute-prepare-from-configure") {
   const entityId = replica?.state?.entityId || tab.entityId;
   const signerId = resolveEntitySigner(entityId, "dispute-prepare");
   if (!entityId) {
@@ -2326,7 +2309,7 @@ async function queueDisputePrepare(counterpartyEntityId: string, description = "
     return;
   }
   try {
-    await submitEntityInputs([buildEntityInput(entityId, signerId, [buildPrepareDisputeTx(counterpartyEntityId, description, options)])]);
+    await submitEntityInputs([buildEntityInput(entityId, signerId, [buildPrepareDisputeTx(counterpartyEntityId, description)])]);
     toasts.success("Dispute preparation queued — start will draft automatically when ready");
   } catch (err) {
     logEntityPanelDiagnostic("Dispute prepare failed", {
@@ -2901,7 +2884,6 @@ $: if (typeof window !== "undefined") {
             {selectedAccountId} {pendingOffchainFaucetKeys}
             bind:accountWorkspaceTab bind:configureWorkspaceTab bind:configureTokenId
             {configureTokenOptions}
-            bind:unsafeCrossJTargetDisputeAccepted
             {openOutgoingDebtSummary} {pendingBatchCount} {pendingBatchMode}
             {pendingBatchReserveIssueText} {pendingBatchPreview} {pendingBatchSubmitting}
             {hasSentBatch} canBroadcastPendingBatch={pendingBatchCanBroadcast}
@@ -2929,7 +2911,7 @@ $: if (typeof window !== "undefined") {
             {handleAccountSelect} {handleAccountFaucet} {handleQuickSettleApprove}
             {openAccountHistoryWorkspace} {openAccountMoveWorkspace} {clearPendingBatch}
             {rebroadcastPendingBatch} {broadcastPendingBatch} {handleWorkspaceAccountChange}
-            {getCrossJTargetDisputeRisk} {formatCrossJTargetDisputeRisk} {confirmAndQueueDisputeFinalize}
+            {confirmAndQueueDisputeFinalize}
             {confirmAndQueueDisputePrepare} {addTokenToAccount} {handleOpenAccountTargetChange}
             {openAccountWithFullId} {openDisputedAccount} {reopenDisputedAccount}
             {resolveSelfEntityId} {formatAmount} {formatApproxUsd}

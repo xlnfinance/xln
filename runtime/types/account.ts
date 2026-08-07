@@ -62,7 +62,8 @@ export interface PullCommitment {
   amount: bigint;
   claimedRatio?: number;
   claimedAmount?: bigint;
-  revealedUntilTimestamp: number;
+  // Settlement clock is on-chain dispute-relative (startTs + T/2). No sealed
+  // route/market deadline field — that was a second clock with no L1 force.
   fullHash: string;
   partialRoot: string;
   crossJurisdiction: CrossJurisdictionPullBinding;
@@ -263,12 +264,8 @@ export interface CrossJurisdictionDisputeRecovery {
   requiredPullIds: string[];
   /** Missing = pending; otherwise the decimal fillRatio confirmed registered on this chain. */
   resultsByPullId: Record<string, string>;
-  /**
-   * Wall-clock ms mirror of the on-chain finalization barrier (max target pull
-   * reveal deadline). After it, a missing port resolves to a zero claim instead
-   * of blocking the dispute forever — the registry is the truth.
-   */
-  resolveByTimestamp?: number;
+  // Settle-or-0 for missing ports is gated by L1 dispute-relative seconds
+  // (disputeStartTimestamp + T/2, unix seconds), not a wall-clock pull/route reveal deadline.
 }
 
 export interface AccountReplica {
@@ -372,9 +369,9 @@ export interface AccountReplica {
       crossJurisdictionRouteId?: string;
       starterInitialArguments?: string;
       description?: string;
-      allowUnsafeCrossJTargetDispute?: boolean;
-      acceptedCrossJTargetLossAmount?: bigint;
     };
+    /** Retained across prepare → DisputeStarted so j-finality can latch it. */
+    crossJurisdictionRecovery?: CrossJurisdictionDisputeRecovery;
   };
 
   // Active dispute state (set after disputeStart, needed for disputeFinalize)
@@ -382,12 +379,13 @@ export interface AccountReplica {
     startedByLeft: boolean;           // Who initiated dispute (from on-chain)
     initialProofbodyHash: string;     // Hash committed in disputeStart
     initialNonce: number;             // Unified nonce from disputeStart (replaces initialDisputeNonce)
-    disputeTimeout: number;           // Block number when timeout expires
+    disputeTimeout: number;           // Absolute unix end of challenge window (seconds)
+    disputeStartTimestamp?: number;   // Unix start; pull reveal cutoff = start + T/2
     jNonce: number;             // On-chain nonce at dispute start (replaces initialCooperativeNonce + onChainCooperativeNonce)
     starterInitialArguments: string;  // Starter-side args for initial proof
     starterIncrementedArguments: string;  // Starter-side args for the one known newer proof, or 0x
     observedOnChain?: boolean;        // false for local placeholder, true after DisputeStarted J-event
-    observedBlockNumber?: number;     // J block where DisputeStarted was observed
+    observedBlockNumber?: number;     // J block where DisputeStarted was observed (watcher metadata only)
     batchNonce?: number;              // Hanko batch nonce observed with DisputeStarted when available
     finalizeQueued?: boolean;         // Finalize op already queued locally (single-source lifecycle guard)
     /** Target-user (nonstarter) recovery after a target-hub initiated dispute. */
@@ -548,6 +546,7 @@ export type AccountExternalFinalityInput = AccountInputBase & {
         initialProofbodyHash: string;
         initialNonce: number;
         disputeTimeout: number;
+        disputeStartTimestamp: number;
         jNonce: number;
         starterInitialArguments: string;
         starterIncrementedArguments: string;
@@ -912,7 +911,6 @@ export type AccountTx =
         pullId: string;
         tokenId: number;
         amount: bigint;
-        revealedUntilTimestamp: number;
         fullHash: string;
         partialRoot: string;
         crossJurisdiction: CrossJurisdictionPullBinding;

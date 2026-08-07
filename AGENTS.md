@@ -113,13 +113,12 @@ Quick iteration signals (full autonomy):
 - "ugly/meh" → polish matching past aesthetic
 - "go/just try" → full send, zero questions
 
-## 🌳 GIT / WORKTREE WORKFLOW
+## 🌳 GIT WORKFLOW
 
-- `main` stays clean and green. New work uses a short `ai/<task>` branch in its own worktree.
-- Exactly one writer owns each worktree. Auditors use separate read-only worktrees pinned to an immutable commit SHA.
-- Checkpoint commits are encouraged after each coherent change and before long tests. They do not require `bun run check`; use `wip:` when the relevant L1/L2 evidence is not green yet.
-- Before push, merge into `main`, completion claims, or release: run the relevant L1/L2 evidence plus `bun run check`. Release additionally requires the documented full gates.
-- A worktree is not an archive. Remove it after merge/abandonment; delete the merged branch and use an annotated tag for audit/release snapshots.
+- Work and push on `main` only. Do not create feature/`ai/*` branches or extra worktrees unless the owner explicitly asks.
+- Checkpoint commits on `main` are fine after coherent changes; use `wip:` when L1/L2 evidence is not green yet.
+- Before completion claims or release: run the relevant L1/L2 evidence plus `bun run check`. Release additionally requires the documented full gates.
+- Auditors may use a separate read-only checkout pinned to an immutable commit SHA.
 
 ## 📋 RESPONSE FORMAT (ADHD-Optimized)
 
@@ -164,7 +163,7 @@ Before claiming anything works:
 2. Test the specific functionality (browser + F12 console)
 3. Show command output, not descriptions ("Fixed" → show passing tests)
 4. Reproduce user's error before fixing
-5. Never push, merge, release, or claim completion for untested code. Checkpoint commits on `ai/*` branches may record explicit WIP.
+5. Never push, release, or claim completion for untested code. Checkpoint commits on `main` may record explicit WIP with a `wip:` prefix.
 
 ## 🎯 TYPESCRIPT
 Validate at source. Fail fast. Trust at use. No defensive `?.` in UI if validated upstream.
@@ -259,6 +258,7 @@ xln.formatEntity(xln.getEnv().eReplicas.values().next().value.state)
 - Runtime memory is live state, not an archive: retain only the latest finalized R/E/A state plus an in-flight candidate needed by future inputs. Persist historical Runtime inputs and certified Entity/Account frames in their dedicated LevelDB history stores; inspection reads from disk on demand.
 - Never restart, reset, or replace a live durable Runtime because source, test, scenario, or tooling files changed. `bun run dev` starts each Runtime process once; applying new backend code requires an explicit operator restart. Agent edits and test runs must never mutate, stop, or hot-reload the user's active dev stack.
 - **Credit / Delta view invariant (Channel.ts):** Left proposer writes `rightCreditLimit`; right proposer writes `leftCreditLimit`. Never hand-read `leftCreditLimit`/`rightCreditLimit` and invent alternate viewer math in UI, scenarios, orchestrator, or tests. Always use `deriveDelta(delta, isLeft)` for the canonical layout: `ownCreditLimit` = peer granted us (we may owe peer); `peerCreditLimit` = we granted peer (peer may owe us). Credit granted *by* an entity = that entity's `peerCreditLimit`. Wrong field choice is a silent setup/invariant bug, not a cosmetic view issue.
+- **Hash-ladder reveal invariants:** `revealedAt > disputeStart + T/2` ⇒ settle fill 0 (late). Registry write is **single-shot** per `(entity, ladder)` (`E12`). Runtime queue is **exact-once** (no max-ratio replace; latch `route.registryFillRatio`) so a stale higher ratio cannot poison a batch that also carries disputeFinalizations. Sibling fanout is must-close. Cross-j ProofBody/route always includes source+target pulls. Symmetric T/2 on both legs is intentional (no admission margin).
 ## 🔍 EXTERNAL AUDIT RULE
 
 **Never blindly trust subagent or external audit findings.**

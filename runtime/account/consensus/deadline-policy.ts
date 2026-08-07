@@ -1,10 +1,8 @@
-import { HASHLADDER_MAX_FILL_RATIO } from '../../protocol/htlc/hash-ladder';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { hashEncryptedHtlcLayer } from '../../protocol/htlc/onion-layer';
-import type { AccountFrame, AccountState, HtlcLock, PullCommitment } from '../../types/account';
+import type { AccountFrame, AccountState, HtlcLock } from '../../types/account';
 import type { HankoString } from '../../types/hanko';
 import { isHtlcTimelockExpired } from '../htlc-deadline';
-import { isPullRevealExpired } from '../pull-deadline';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
 
 export const HTLC_ENFORCEMENT_RESERVE_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
@@ -41,9 +39,6 @@ export function isHtlcSecretEnforcementWindowClosed(
   return timestampTooLate || finalizedHeightTooLate;
 }
 
-const normalizedFillRatio = (value: unknown): number =>
-  Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(value) || 0)));
-
 const deadlineViolation = (reason: string): IncomingDeadlineViolation => ({ reason, evidenceSecrets: [] });
 
 // Deadline admission is speculative: a rejected frame must leave the live
@@ -51,10 +46,6 @@ const deadlineViolation = (reason: string): IncomingDeadlineViolation => ({ reas
 // simulating an `offer` would otherwise publish secretOffer before consensus.
 const cloneLocks = (account: AccountState): Map<string, HtlcLock> => new Map(
   Array.from(account.locks, ([lockId, lock]) => [lockId, { ...lock }]),
-);
-
-const clonePulls = (account: AccountState): Map<string, PullCommitment> => new Map(
-  Array.from(account.pulls?.entries() ?? [], ([pullId, pull]) => [pullId, { ...pull }]),
 );
 
 const validHtlcSecret = (lock: HtlcLock, secret: string | undefined): boolean => {
@@ -69,7 +60,6 @@ const validHtlcSecret = (lock: HtlcLock, secret: string | undefined): boolean =>
 type AccountFrameTx = AccountFrame['accountTxs'][number];
 type DeadlineScan = {
   locks: Map<string, HtlcLock>;
-  pulls: Map<string, PullCommitment>;
   proposerIsLeft: boolean;
   frame: AccountFrame;
   context: AccountInputSecurityContext;
@@ -150,51 +140,13 @@ const inspectHtlcDeadline = (
   return undefined;
 };
 
-const inspectPullDeadline = (
-  scan: DeadlineScan,
-  tx: AccountFrameTx,
-): IncomingDeadlineViolation | undefined => {
-  if (tx.type === 'cross_pull_lock') {
-    if (scan.pulls.has(tx.data.pullId)) return undefined;
-    if (tx.data.revealedUntilTimestamp <= scan.context.entityTimestamp + HTLC_ENFORCEMENT_RESERVE_MS) {
-      return deadlineViolation(
-        `CROSS_PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
-      );
-    }
-    scan.pulls.set(tx.data.pullId, {
-      ...tx.data,
-      claimedRatio: 0,
-      claimedAmount: 0n,
-      createdHeight: scan.frame.height,
-      createdTimestamp: scan.frame.timestamp,
-    });
-    return undefined;
-  }
-  if (tx.type === 'cross_pull_close') {
-    const pull = scan.pulls.get(tx.data.pullId);
-    if (!pull) return undefined;
-    let ratio: number | undefined;
-    try {
-      ratio = normalizedFillRatio(tx.data.proof.fillRatio);
-    } catch {
-      // Canonical Account transaction validation owns malformed proof errors.
-    }
-    if (ratio === undefined || ratio <= normalizedFillRatio(pull.claimedRatio)) return undefined;
-    if (isPullRevealExpired(pull.revealedUntilTimestamp, scan.context.entityTimestamp)) {
-      return deadlineViolation(
-        `CROSS_PULL_CLAIM_AFTER_LOCAL_EXPIRY: pull=${tx.data.pullId} localTimestamp=${scan.context.entityTimestamp}`,
-      );
-    }
-    scan.pulls.delete(tx.data.pullId);
-    return undefined;
-  }
-  return undefined;
-};
-
 /**
  * Peer frame time/J-height is consensus data, not a trusted local clock.
  * This pure admission guard prevents stale/future frames from creating an
  * unenforceable obligation or exercising a payer timeout prematurely.
+ *
+ * Cross-j pulls have no sealed wall-clock reveal deadline: settlement is
+ * dispute-relative seconds on L1. Payment HTLC timelocks still enforce here.
  */
 export function getIncomingAccountDeadlineViolation(
   account: AccountState,
@@ -206,7 +158,6 @@ export function getIncomingAccountDeadlineViolation(
   }
   const scan: DeadlineScan = {
     locks: cloneLocks(account),
-    pulls: clonePulls(account),
     proposerIsLeft: frame.byLeft,
     frame,
     context,
@@ -214,8 +165,6 @@ export function getIncomingAccountDeadlineViolation(
   for (const tx of frame.accountTxs) {
     const htlcViolation = inspectHtlcDeadline(scan, tx);
     if (htlcViolation) return htlcViolation;
-    const pullViolation = inspectPullDeadline(scan, tx);
-    if (pullViolation) return pullViolation;
   }
   return undefined;
 }

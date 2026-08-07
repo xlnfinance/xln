@@ -23,7 +23,6 @@ import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 
 import { applyAccountTx } from '../account/tx/apply';
 
-import { isPullRevealExpired } from '../account/pull-deadline';
 
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
 
@@ -633,7 +632,8 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   }
   account.activeDispute = {
     startedByLeft: true,
-    disputeTimeout: 123,
+    disputeTimeout: 1700000123,
+    disputeStartTimestamp: 1700000000,
     initialProofbodyHash: finalProofbodyHash,
     initialNonce: 7,
     finalizeQueued: true,
@@ -788,7 +788,8 @@ describe('audit fail-fast regressions', () => {
       startedByLeft: true,
       initialProofbodyHash: finalProofbodyHash,
       initialNonce: 7,
-      disputeTimeout: 22,
+      disputeTimeout: 1700000100,
+      disputeStartTimestamp: 1700000000,
       jNonce: 7,
       starterInitialArguments: '0x',
       starterIncrementedArguments: '0x',
@@ -943,7 +944,8 @@ describe('audit fail-fast regressions', () => {
     const account = makeProposalAccount([], entityId, counterpartyId);
     account.activeDispute = {
       startedByLeft: true,
-      disputeTimeout: 123,
+      disputeTimeout: 1700000123,
+      disputeStartTimestamp: 1700000000,
       initialProofbodyHash: `0x${'44'.repeat(32)}`,
       initialNonce: 5,
       finalizeQueued: true,

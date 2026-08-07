@@ -25,7 +25,7 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'rebalance': { file: './rebalance', fn: 'runRebalanceScenario' },
   'lock-ahb':  { file: './lock-ahb',  fn: 'lockAhb' },
   'ahb':       { file: './ahb',       fn: 'ahb' },
-  'swap':      { file: './swap',      fn: 'swap' },
+  'swap':      { file: './swap',      fn: 'runSwapScenario' },
   'settle':    { file: './settle',    fn: 'runSettleScenario' },
   'htlc-4hop': { file: './htlc-4hop', fn: 'htlc4hop' },
   'grid':              { file: './grid',              fn: 'grid' },

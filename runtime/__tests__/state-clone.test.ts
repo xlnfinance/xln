@@ -62,7 +62,6 @@ const makeCrossJurisdictionRoute = () => ({
     tokenId: 1,
     amount: 100n,
     signedAmount: 100n,
-    revealedUntilTimestamp: 1_700_000_000,
     fullHash: `0x${'bb'.repeat(32)}`,
     partialRoot: `0x${'cc'.repeat(32)}`,
   },

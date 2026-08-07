@@ -60,7 +60,7 @@ describe('cross-jurisdiction canonical market surface', () => {
         updatedAt: 1_000,
         expiresAt: 61_000,
         priceTicks: 1n,
-      }, { runtimeSeed: 'cross-same-token-market', sourceDisputeDelayMs: 5_000, now: 1_000 }),
+      }, { runtimeSeed: 'cross-same-token-market', now: 1_000 }),
       status: 'resting' as const,
     };
     const market = buildCrossJurisdictionMarketOffer({
@@ -179,7 +179,7 @@ describe('cross-jurisdiction canonical market surface', () => {
         updatedAt: 1_000,
         expiresAt: 61_000,
         priceTicks: 25_000_000n,
-      }, { runtimeSeed: `stable-quote-${sourceTokenId}-${targetTokenId}`, sourceDisputeDelayMs: 5_000, now: 1_000 }),
+      }, { runtimeSeed: `stable-quote-${sourceTokenId}-${targetTokenId}`, now: 1_000 }),
       status: 'resting' as const,
     };
     const market = buildCrossJurisdictionMarketOffer({
@@ -265,7 +265,6 @@ describe('cross-jurisdiction canonical market surface', () => {
       expiresAt: 61_000,
     }, {
       runtimeSeed: 'cross-same-chain-same-token-invalid',
-      sourceDisputeDelayMs: 5_000,
       now: 1_000,
     })).toThrow(/CROSS_J_REQUIRES_DISTINCT_STACKS/);
   });

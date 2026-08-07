@@ -41,7 +41,7 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
   cross_pull_lock: {
     required: {
       pullId: 'string', tokenId: 'integer', amount: 'bigint',
-      revealedUntilTimestamp: 'integer', fullHash: 'string', partialRoot: 'string',
+      fullHash: 'string', partialRoot: 'string',
       crossJurisdiction: 'record', crossJurisdictionRoute: 'record',
     },
   },

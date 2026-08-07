@@ -127,7 +127,7 @@ export interface MockRevealRegistry extends BaseContract {
       rightArgumentsTimestamp: BigNumberish,
       leftEntity: BytesLike,
       rightEntity: BytesLike,
-      disputeStartBlock: BigNumberish,
+      disputeStartTimestamp: BigNumberish,
       disputeTimeout: BigNumberish
     ],
     [bigint[]],
@@ -136,7 +136,7 @@ export interface MockRevealRegistry extends BaseContract {
 
   getHashLadderReveal: TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
 
@@ -151,7 +151,7 @@ export interface MockRevealRegistry extends BaseContract {
       entity: BytesLike,
       ladderHash: BytesLike,
       fillRatio: BigNumberish,
-      revealedBlock: BigNumberish
+      revealedAt: BigNumberish
     ],
     [void],
     "nonpayable"
@@ -175,7 +175,7 @@ export interface MockRevealRegistry extends BaseContract {
       rightArgumentsTimestamp: BigNumberish,
       leftEntity: BytesLike,
       rightEntity: BytesLike,
-      disputeStartBlock: BigNumberish,
+      disputeStartTimestamp: BigNumberish,
       disputeTimeout: BigNumberish
     ],
     [bigint[]],
@@ -185,7 +185,7 @@ export interface MockRevealRegistry extends BaseContract {
     nameOrSignature: "getHashLadderReveal"
   ): TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
   getFunction(
@@ -198,7 +198,7 @@ export interface MockRevealRegistry extends BaseContract {
       entity: BytesLike,
       ladderHash: BytesLike,
       fillRatio: BigNumberish,
-      revealedBlock: BigNumberish
+      revealedAt: BigNumberish
     ],
     [void],
     "nonpayable"

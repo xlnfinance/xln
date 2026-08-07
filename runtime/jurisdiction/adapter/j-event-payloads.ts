@@ -61,9 +61,17 @@ const expandAccountSettled = (
 const assertRawEventSpecificFields = (event: JEventIngress): void => {
   if (event.name === 'DisputeStarted') {
     const timeout = Number(event.args['disputeTimeout']);
+    const startTs = Number(event.args['disputeStartTimestamp']);
     if (!Number.isSafeInteger(timeout) || timeout <= 0) {
       throw new Error(
         `J_EVENT_DISPUTE_TIMEOUT_INVALID:block=${String(event.blockNumber)}` +
+          `:timeout=${String(event.args['disputeTimeout'])}`,
+      );
+    }
+    if (!Number.isSafeInteger(startTs) || startTs <= 0 || timeout <= startTs) {
+      throw new Error(
+        `J_EVENT_DISPUTE_START_TIMESTAMP_INVALID:block=${String(event.blockNumber)}` +
+          `:start=${String(event.args['disputeStartTimestamp'])}` +
           `:timeout=${String(event.args['disputeTimeout'])}`,
       );
     }

@@ -36,7 +36,9 @@ export const processDisputeDeadlineHook = (
   if (replica.state.hubRebalanceConfig?.disputeAutoFinalizeMode === 'ignore') return;
   const weAreLeft = account.state.leftEntity === replica.state.entityId;
   const weAreStarter = weAreLeft === account.activeDispute.startedByLeft;
-  const timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
+  // L1 disputeTimeout is absolute unix seconds (jurisdiction clock).
+  const timeoutSec = Number(account.activeDispute.disputeTimeout || 0);
+  const nowSec = Math.floor(Number(replica.state.timestamp || 0) / 1000);
   if (account.activeDispute.observedOnChain !== true) {
     retryDisputeDeadline(replica, hook, 5000);
     crontabLog.debug('dispute.wait_onchain_start', {
@@ -45,34 +47,23 @@ export const processDisputeDeadlineHook = (
     });
     return;
   }
-  const recovery = account.activeDispute.crossJurisdictionRecovery;
-  if (recovery) {
-    // Mirror of the on-chain barrier in DeltaTransformer.applyPull: a dispute
-    // with a live pull reveal window cannot finalize anyway, so wait out the
-    // window (retrying doubles as the port watch). Once it closes, finalize
-    // regardless of missing ports — a registration that never landed reads 0
-    // on-chain, and that is the deadline's truth, not a runtime stall.
-    const resolveBy = Number(recovery.resolveByTimestamp ?? 0);
-    const now = Number(replica.state.timestamp || 0);
-    if (resolveBy > 0 && now <= resolveBy) {
-      const missingRecoveryResults = recovery.requiredPullIds.filter(
+  // Wait until the on-chain challenge end (seconds). Event-driven fanout
+  // starts sibling legs; no sealed pull deadline and no cross-j margin.
+  if (!timeoutSec || nowSec < timeoutSec) {
+    const recovery = account.activeDispute.crossJurisdictionRecovery;
+    const missingRecoveryResults = recovery
+      ? recovery.requiredPullIds.filter(
         (pullId) => !Object.hasOwn(recovery.resultsByPullId, pullId),
-      ).length;
-      retryDisputeDeadline(replica, hook, Math.min(5000, Math.max(250, resolveBy - now + 250)));
-      crontabLog.debug('dispute.wait_cross_j_reveal_window', {
-        account: shortId(accountId),
-        missing: missingRecoveryResults,
-        resolveInMs: resolveBy - now,
-      });
-      return;
-    }
-  }
-  if (weAreStarter && (!timeoutBlock || currentJBlock < timeoutBlock)) {
+      ).length
+      : 0;
     retryDisputeDeadline(replica, hook, 1000);
     crontabLog.debug('dispute.retry_until_timeout', {
       account: shortId(accountId),
+      nowSec,
+      timeoutSec,
       currentJBlock,
-      timeoutBlock,
+      weAreStarter,
+      missingRecoveryResults,
       retryMs: 1000,
     });
     return;

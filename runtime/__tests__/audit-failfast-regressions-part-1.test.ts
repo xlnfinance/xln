@@ -25,7 +25,6 @@ import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 
 import { applyAccountTx } from '../account/tx/apply';
 
-import { isPullRevealExpired } from '../account/pull-deadline';
 
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
 
@@ -642,7 +641,8 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   }
   account.activeDispute = {
     startedByLeft: true,
-    disputeTimeout: 123,
+    disputeTimeout: 1700000123,
+    disputeStartTimestamp: 1700000000,
     initialProofbodyHash: finalProofbodyHash,
     initialNonce: 7,
     finalizeQueued: true,
@@ -1527,7 +1527,6 @@ describe('audit fail-fast regressions', () => {
       },
       {
         runtimeSeed: 'cross-j-salvage-route-signer',
-        sourceDisputeDelayMs: 5_000,
         now: env.state.timestamp,
       },
     );
@@ -2183,7 +2182,7 @@ describe('audit fail-fast regressions', () => {
         updatedAt: 1_000,
         expiresAt: 60_000,
       },
-      { runtimeSeed: 'cross-admit-atomic-route', sourceDisputeDelayMs: 5_000, now: 1_000 },
+      { runtimeSeed: 'cross-admit-atomic-route', now: 1_000 },
     );
     const restingRoute = { ...route, status: 'resting' as const };
     const state = makeEntityState(sourceHub);
@@ -2248,7 +2247,7 @@ describe('audit fail-fast regressions', () => {
         updatedAt: 10_000,
         expiresAt: 60_000,
       },
-      { runtimeSeed: 'cross-source-commit-resting', sourceDisputeDelayMs: 5_000, now: 10_000 },
+      { runtimeSeed: 'cross-source-commit-resting', now: 10_000 },
     );
     const sourceHubState = makeEntityState(sourceHub);
     sourceHubState.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
@@ -2270,7 +2269,6 @@ describe('audit fail-fast regressions', () => {
           pullId: route.sourcePull!.pullId,
           tokenId: route.sourcePull!.tokenId,
           amount: route.sourcePull!.signedAmount,
-          revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(committedRoute, 'source'),
@@ -2300,7 +2298,6 @@ describe('audit fail-fast regressions', () => {
       tokenId: 1,
       amount: 2_000_000_000_000n,
       signedAmount: 2_000_000_000_000n,
-      revealedUntilTimestamp: 60_000,
       fullHash: `0x${'ab'.repeat(32)}`,
       partialRoot: `0x${'bc'.repeat(32)}`,
     };
@@ -2309,7 +2306,6 @@ describe('audit fail-fast regressions', () => {
       tokenId: 1,
       amount: 1_000_000_000_000n,
       signedAmount: 1_000_000_000_000n,
-      revealedUntilTimestamp: 60_000,
       fullHash: `0x${'cd'.repeat(32)}`,
       partialRoot: `0x${'de'.repeat(32)}`,
     };
@@ -2442,7 +2438,7 @@ describe('audit fail-fast regressions', () => {
           updatedAt: 1_000,
           expiresAt: 61_000,
         },
-        { runtimeSeed: `mm-fit-roundtrip-${entry.label}`, sourceDisputeDelayMs: 5_000, now: 1_000 },
+        { runtimeSeed: `mm-fit-roundtrip-${entry.label}`, now: 1_000 },
       );
       const restingRoute = withCanonicalCrossJurisdictionRouteHash({
         ...route,
@@ -2459,7 +2455,6 @@ describe('audit fail-fast regressions', () => {
             amount: route.sourcePull!.signedAmount,
             claimedRatio: 0,
             claimedAmount: 0n,
-            revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
             fullHash: route.sourcePull!.fullHash,
             partialRoot: route.sourcePull!.partialRoot,
             crossJurisdiction: buildCrossJurisdictionPullBinding(restingRoute, 'source'),
@@ -2505,7 +2500,6 @@ describe('audit fail-fast regressions', () => {
       tokenId: 1,
       amount: 75_000_000_000_000_000_000n,
       signedAmount: 75_000_000_000_000_000_000n,
-      revealedUntilTimestamp: 60_000,
       fullHash: `0x${'ad'.repeat(32)}`,
       partialRoot: `0x${'be'.repeat(32)}`,
     };
@@ -2514,7 +2508,6 @@ describe('audit fail-fast regressions', () => {
       tokenId: 2,
       amount: 30_000_000_000_000_000n,
       signedAmount: 30_000_000_000_000_000n,
-      revealedUntilTimestamp: 60_000,
       fullHash: `0x${'ad'.repeat(32)}`,
       partialRoot: `0x${'be'.repeat(32)}`,
     };

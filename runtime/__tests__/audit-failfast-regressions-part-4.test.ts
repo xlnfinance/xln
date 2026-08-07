@@ -25,7 +25,6 @@ import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 
 import { applyAccountTx } from '../account/tx/apply';
 
-import { isPullRevealExpired } from '../account/pull-deadline';
 
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
 
@@ -634,7 +633,8 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   }
   account.activeDispute = {
     startedByLeft: true,
-    disputeTimeout: 123,
+    disputeTimeout: 1700000123,
+    disputeStartTimestamp: 1700000000,
     initialProofbodyHash: finalProofbodyHash,
     initialNonce: 7,
     finalizeQueued: true,

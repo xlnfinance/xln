@@ -9,7 +9,7 @@ interface IHashLadderRevealRegistry {
   function getHashLadderReveal(bytes32 entity, bytes32 ladderHash)
     external
     view
-    returns (uint16 fillRatio, uint256 revealedBlock);
+    returns (uint16 fillRatio, uint256 revealedAt);
 }
 
 /* 
@@ -68,11 +68,8 @@ contract DeltaTransformer {
     uint deltaIndex;
     int amount;
     uint16 claimedRatio;
-    // Legacy field: ignored by applyPull. Cross-j swaps are eternal; the
-    // dispute clock (disputeStartBlock + T/2, barrier at disputeTimeout) is
-    // the only reveal/finalize schedule. Kept so Batch ABI stays stable for
-    // already-signed tooling that still encodes a placeholder.
-    uint revealedUntilTimestamp;
+    // Settlement clock is dispute-relative (startTs + T/2), not a sealed route
+    // deadline. Market/route expiry is not settlement authority — deleted.
     bytes32 fullHash;
     bytes32 partialRoot;
   }
@@ -106,7 +103,7 @@ contract DeltaTransformer {
     uint rightArgumentsTimestamp,
     bytes32 leftEntity,
     bytes32 rightEntity,
-    uint256 disputeStartBlock,
+    uint256 disputeStartTimestamp,
     uint256 disputeTimeout
   ) external view returns (int[] memory) {
     if (tokenIds.length != deltas.length) revert ContextLengthMismatch();
@@ -119,7 +116,7 @@ contract DeltaTransformer {
       rightArgumentsTimestamp,
       leftEntity,
       rightEntity,
-      disputeStartBlock,
+      disputeStartTimestamp,
       disputeTimeout
     );
   }
@@ -133,7 +130,7 @@ contract DeltaTransformer {
     uint rightArgumentsTimestamp,
     bytes32 leftEntity,
     bytes32 rightEntity,
-    uint256 disputeStartBlock,
+    uint256 disputeStartTimestamp,
     uint256 disputeTimeout
   ) private view returns (int[] memory) {
     // A clause failure is fatal to the whole finalization: the ProofBody is
@@ -179,7 +176,7 @@ contract DeltaTransformer {
         decodedBatch.pull[i],
         leftEntity,
         rightEntity,
-        disputeStartBlock,
+        disputeStartTimestamp,
         disputeTimeout
       );
     }
@@ -274,31 +271,34 @@ contract DeltaTransformer {
     Pull memory pull,
     bytes32 leftEntity,
     bytes32 rightEntity,
-    uint256 disputeStartBlock,
+    uint256 disputeStartTimestamp,
     uint256 disputeTimeout
   ) private view {
     if (pull.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
 
-    // Cross-j finalization barrier. Swaps are eternal; the ONLY clock is the
-    // dispute period T = (disputeTimeout - disputeStartBlock). Finalizing
-    // before T lets a hub start the target dispute, withhold the seed, settle
-    // target at 0, then reveal r on source — asymmetric theft. Both timeout
-    // and counterparty-signed finalize paths hit this revert until T elapses.
-    // Half of T is the reveal window (hub publishes source; user ports the
-    // copy onto the target chain); the second half is the port/settle buffer.
-    if (disputeTimeout == 0 || disputeStartBlock == 0 || disputeTimeout <= disputeStartBlock) {
+    // Canon (owner 2026-08): dispute period T is jurisdiction SECONDS from the
+    // start of THIS dispute. Finalizing before T lets a hub settle one leg at 0
+    // then reveal on the other — asymmetric theft. Half of T is the reveal
+    // window; the second half is the port/settle buffer.
+    //
+    // Why not a sealed route deadline: that either kills honest late disputes or
+    // lets the hub pick when to open relative to a frozen clock. Why not blocks:
+    // chains have different/changing blockTimes; seconds sync without config
+    // conversion. Why no admission margin / asymmetric porter cutoff (owner):
+    // siblings share a runtime; DisputeStarted must-close force-starts the
+    // other leg. Symmetric start+T/2 is intentional — thin port window after a
+    // late reveal is accepted residual; margins would hide missing fanout.
+    if (disputeTimeout == 0 || disputeStartTimestamp == 0 || disputeTimeout <= disputeStartTimestamp) {
       revert PullRevealWindowActive(disputeTimeout);
     }
-    if (block.number < disputeTimeout) {
+    if (block.timestamp < disputeTimeout) {
       revert PullRevealWindowActive(disputeTimeout);
     }
 
     // Pulls settle exclusively from the Depository reveal registry, never
-    // from dispute calldata. The record is keyed by the pull's BENEFICIARY:
-    // a positive amount credits left, so left's own record governs left's
-    // claim. Silence costs only the silent party. There is no lower bound on
-    // revealedBlock: a pre-dispute registration by the same entity still
-    // counts if it falls at or before start + T/2.
+    // from dispute calldata. Keyed by BENEFICIARY: silence costs only the
+    // silent party. Pre-dispute registrations still count if revealedAt is
+    // at or before start + T/2.
     bytes32 beneficiary = pull.amount >= 0 ? leftEntity : rightEntity;
     bytes32 ladderHash = keccak256(abi.encodePacked(pull.fullHash, pull.partialRoot));
     (bool registryOk, bytes memory registryData) = msg.sender.staticcall(
@@ -311,10 +311,10 @@ contract DeltaTransformer {
     if (!registryOk || registryData.length != 64) {
       revert PullRevealRegistryUnavailable(msg.sender);
     }
-    (uint16 ratio, uint256 revealedBlock) = abi.decode(registryData, (uint16, uint256));
-    // T/2 reveal window: late registrations are stored but settle as 0.
-    uint256 revealDeadline = disputeStartBlock + (disputeTimeout - disputeStartBlock) / 2;
-    uint16 fillRatio = (revealedBlock != 0 && revealedBlock <= revealDeadline) ? ratio : 0;
+    (uint16 ratio, uint256 revealedAt) = abi.decode(registryData, (uint16, uint256));
+    uint256 revealDeadline =
+      disputeStartTimestamp + (disputeTimeout - disputeStartTimestamp) / 2;
+    uint16 fillRatio = (revealedAt != 0 && revealedAt <= revealDeadline) ? ratio : 0;
 
     if (fillRatio == 0 || fillRatio <= pull.claimedRatio) return;
 

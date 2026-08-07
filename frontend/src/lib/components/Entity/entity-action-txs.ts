@@ -15,11 +15,6 @@ export type SettlementContinuationPlan = NonNullable<
   EntityTxOf<'settle_propose'>['data']['continuation']
 >;
 
-export type DisputeStartOptions = {
-  allowUnsafeCrossJTargetDispute?: boolean;
-  acceptedCrossJTargetLossAmount?: bigint;
-};
-
 export function encodeExternalEoaAsEntity(recipientEoa: string): string {
   return zeroPadValue(recipientEoa, 32).toLowerCase();
 }
@@ -104,17 +99,12 @@ export function buildOpenAccountTx(targetEntityId: string, rebalancePolicy?: Ope
 export function buildPrepareDisputeTx(
   counterpartyEntityId: string,
   description?: string,
-  options: DisputeStartOptions = {},
 ): EntityTxOf<'prepareDispute'> {
   return {
     type: 'prepareDispute',
     data: {
       counterpartyEntityId,
       ...(description !== undefined ? { description } : {}),
-      ...(options.allowUnsafeCrossJTargetDispute ? { allowUnsafeCrossJTargetDispute: true } : {}),
-      ...(options.acceptedCrossJTargetLossAmount !== undefined
-        ? { acceptedCrossJTargetLossAmount: options.acceptedCrossJTargetLossAmount }
-        : {}),
     },
   };
 }

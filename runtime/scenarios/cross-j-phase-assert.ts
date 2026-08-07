@@ -70,6 +70,12 @@ export const assertCreditReadyPhase = (
       getAccountReplica(env, pair.hubEntityId, pair.userEntityId)
       ?? getAccountReplica(env, pair.userEntityId, pair.hubEntityId);
     assert(
+      account !== null,
+      `phase=CREDIT_READY role=${role} account missing ` +
+      `hub=${pair.hubEntityId.slice(-8)} user=${pair.userEntityId.slice(-8)}`,
+      env,
+    );
+    assert(
       isAccountWriteLaneIdle(account),
       `phase=CREDIT_READY role=${role} account not idle ` +
       `hub=${pair.hubEntityId.slice(-8)} user=${pair.userEntityId.slice(-8)}`,

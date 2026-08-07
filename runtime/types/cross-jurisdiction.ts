@@ -26,7 +26,6 @@ export interface CrossJurisdictionPullLeg {
   tokenId: number;
   amount: bigint;
   signedAmount: bigint;
-  revealedUntilTimestamp: number;
   fullHash: string;
   partialRoot: string;
 }
@@ -174,6 +173,12 @@ export interface CrossJurisdictionSwapRoute {
   priceImprovementMode?: 'source_savings';
   riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';
   claimedRatio?: number;
+  /**
+   * First on-chain HashLadderRevealRegistered fill for this route's ladder.
+   * Single-shot latch (mirrors Depository E12): once set, never raised. Distinct
+   * from `claimedRatio` / fill progress — those may move before any registry write.
+   */
+  registryFillRatio?: number;
   sourceClaimed?: bigint;
   targetClaimed?: bigint;
   status: CrossJurisdictionSwapStatus;

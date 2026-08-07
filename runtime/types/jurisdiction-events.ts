@@ -165,6 +165,7 @@ export type JurisdictionEvent =
         starterInitialArguments: string;
         starterIncrementedArguments: string;
         disputeTimeout: number;
+        disputeStartTimestamp: number;
         batchNonce?: number;
       };
     })

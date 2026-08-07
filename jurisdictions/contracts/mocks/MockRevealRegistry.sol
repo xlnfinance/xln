@@ -12,14 +12,14 @@ contract MockRevealRegistry is IHashLadderRevealRegistry {
   function getHashLadderReveal(bytes32 entity, bytes32 ladderHash)
     external
     view
-    returns (uint16 fillRatio, uint256 revealedBlock)
+    returns (uint16 fillRatio, uint256 revealedAt)
   {
     uint256 record = packed[entity][ladderHash];
     return (uint16(record), record >> 16);
   }
 
-  function setReveal(bytes32 entity, bytes32 ladderHash, uint16 fillRatio, uint256 revealedBlock) external {
-    packed[entity][ladderHash] = (revealedBlock << 16) | uint256(fillRatio);
+  function setReveal(bytes32 entity, bytes32 ladderHash, uint16 fillRatio, uint256 revealedAt) external {
+    packed[entity][ladderHash] = (revealedAt << 16) | uint256(fillRatio);
   }
 
   function applyBatchViaRegistry(
@@ -33,7 +33,7 @@ contract MockRevealRegistry is IHashLadderRevealRegistry {
     uint rightArgumentsTimestamp,
     bytes32 leftEntity,
     bytes32 rightEntity,
-    uint256 disputeStartBlock,
+    uint256 disputeStartTimestamp,
     uint256 disputeTimeout
   ) external view returns (int[] memory) {
     return transformer.applyBatch(
@@ -46,7 +46,7 @@ contract MockRevealRegistry is IHashLadderRevealRegistry {
       rightArgumentsTimestamp,
       leftEntity,
       rightEntity,
-      disputeStartBlock,
+      disputeStartTimestamp,
       disputeTimeout
     );
   }

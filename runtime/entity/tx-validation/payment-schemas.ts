@@ -32,8 +32,7 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
     required: { counterpartyEntityId: 'string' },
     optional: {
       description: 'string', minCooldownMs: 'integer', crossJurisdictionRouteId: 'string',
-      starterInitialArguments: 'string', allowUnsafeCrossJTargetDispute: 'boolean',
-      acceptedCrossJTargetLossAmount: 'bigint',
+      starterInitialArguments: 'string',
     },
   },
   disputeStart: {
@@ -41,7 +40,6 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
     optional: {
       crossJurisdictionRouteId: 'string', starterInitialArguments: 'string',
       starterIncrementedArguments: 'string', description: 'string',
-      allowUnsafeCrossJTargetDispute: 'boolean', acceptedCrossJTargetLossAmount: 'bigint',
     },
   },
   disputeFinalize: {

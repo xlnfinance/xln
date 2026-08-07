@@ -25,7 +25,6 @@ import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 
 import { applyAccountTx } from '../account/tx/apply';
 
-import { isPullRevealExpired } from '../account/pull-deadline';
 
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
 
@@ -640,7 +639,8 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   }
   account.activeDispute = {
     startedByLeft: true,
-    disputeTimeout: 123,
+    disputeTimeout: 1700000123,
+        disputeStartTimestamp: 1700000000,
     initialProofbodyHash: finalProofbodyHash,
     initialNonce: 7,
     finalizeQueued: true,
@@ -892,7 +892,8 @@ describe('audit fail-fast regressions', () => {
     };
     account.activeDispute = {
       startedByLeft: true,
-      disputeTimeout: 123,
+      disputeTimeout: 1700000123,
+        disputeStartTimestamp: 1700000000,
       initialProofbodyHash: finalProofbodyHash,
       initialNonce: 7,
       finalizeQueued: true,
@@ -1204,7 +1205,8 @@ describe('audit fail-fast regressions', () => {
       startedByLeft: true,
       initialProofbodyHash: initialProof.proofBodyHash,
       initialNonce: 1,
-      disputeTimeout: 100,
+      disputeTimeout: 1700000100,
+        disputeStartTimestamp: 1700000000,
       jNonce: 0,
       starterInitialArguments: '0x',
       starterIncrementedArguments: '0x',
@@ -1279,7 +1281,8 @@ describe('audit fail-fast regressions', () => {
       startedByLeft: true,
       initialProofbodyHash: initialProof.proofBodyHash,
       initialNonce: 1,
-      disputeTimeout: 100,
+      disputeTimeout: 1700000100,
+        disputeStartTimestamp: 1700000000,
       jNonce: 0,
       starterInitialArguments: '0x1111',
       starterIncrementedArguments: '0x2222',
@@ -1712,7 +1715,6 @@ describe('audit fail-fast regressions', () => {
             tokenId: 1,
             amount: 1_000n,
             signedAmount: 1_000n,
-            revealedUntilTimestamp: 60_000,
             fullHash: `0x${'aa'.repeat(32)}`,
             partialRoot: `0x${'bb'.repeat(32)}`,
           },
@@ -1721,7 +1723,6 @@ describe('audit fail-fast regressions', () => {
             tokenId: 1,
             amount: 1_000n,
             signedAmount: 1_000n,
-            revealedUntilTimestamp: 60_000,
             fullHash: `0x${'cc'.repeat(32)}`,
             partialRoot: `0x${'dd'.repeat(32)}`,
           },
@@ -1965,7 +1966,7 @@ describe('audit fail-fast regressions', () => {
           updatedAt: env.state.timestamp,
           expiresAt: env.state.timestamp + 60_000,
         },
-        { runtimeSeed: 'cross-book-owner-fill-notice', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+        { runtimeSeed: 'cross-book-owner-fill-notice', now: env.state.timestamp },
       );
       return { ...prepared, status: 'resting', updatedAt: env.state.timestamp };
     };
@@ -2229,7 +2230,7 @@ describe('audit fail-fast regressions', () => {
         updatedAt: env.state.timestamp,
         expiresAt: env.state.timestamp + 60_000,
       },
-      { runtimeSeed: 'cross-local-fill-ack-admission-collision', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'cross-local-fill-ack-admission-collision', now: env.state.timestamp },
     );
     const restingRoute = { ...route, status: 'resting' as const, updatedAt: env.state.timestamp };
     const sourceState = makeEntityState(sourceHub);
@@ -2283,7 +2284,6 @@ describe('audit fail-fast regressions', () => {
       },
       {
         runtimeSeed: 'cross-local-fill-ack-admission-collision-conflict',
-        sourceDisputeDelayMs: 5_000,
         now: env.state.timestamp,
       },
     );

@@ -81,33 +81,53 @@ export const ladderHashForPull = (pull: { fullHash: string; partialRoot: string 
 
 const ZERO_BYTES32 = `0x${'00'.repeat(32)}`;
 
+const pullMatchesLadder = (
+  pull: { fullHash: string; partialRoot: string } | undefined,
+  ladderHash: string,
+): boolean => Boolean(pull && ladderHashForPull(pull) === ladderHash);
+
 /**
- * Queue a registry write with max-ratio preference. On-chain the record is
- * last-write-wins per entity key, and a higher-digit reveal derives every lower
- * one, so the honest maximum is the only ratio worth spending gas on; a
- * lower-ratio replay (e.g. a griefer re-registering derived material) must
- * never downgrade a pending write.
+ * Queue at most one registry write per (entity, ladder) — mirrors Depository
+ * single-shot (E12).
+ *
+ * Why not max-ratio replace (old policy): on-chain the first write locks both
+ * fillRatio and revealedAt. Queuing a strictly higher ratio after the first
+ * landed reverts the *entire* processBatch (E12), poisoning sibling ops in the
+ * same batch (disputeFinalizations, C2R, settlements). Draft splice-to-max was
+ * that latent liveness mine after the contract latch landed.
+ *
+ * Exact-once layers:
+ *  1. route.registryFillRatio — durable mirror of HashLadderRevealRegistered
+ *  2. draft / sentBatch already contain this ladder — any ratio
+ * Then append once. Never splice a pending lower write for a higher one.
  */
 export const queueHashLadderRevealRegistration = (
   state: EntityState,
   pull: { fullHash: string; partialRoot: string },
   decoded: { fillRatio: number; fullSecret?: string; reveals?: [string, string, string, string] },
 ): 'queued' | 'already-queued' => {
+  const ladderHash = ladderHashForPull(pull);
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
+    if (route.registryFillRatio === undefined) continue;
+    if (
+      pullMatchesLadder(route.sourcePull, ladderHash) ||
+      pullMatchesLadder(route.targetPull, ladderHash)
+    ) {
+      return 'already-queued';
+    }
+  }
+
   const jBatchState = (state.jBatchState ??= initJBatch());
   const fullHash = pull.fullHash.toLowerCase();
   const partialRoot = pull.partialRoot.toLowerCase();
-  const sameLadder = (op: { fullHash: string; partialRoot: string; fillRatio: number }): boolean =>
+  const sameLadder = (op: { fullHash: string; partialRoot: string }): boolean =>
     op.fullHash.toLowerCase() === fullHash && op.partialRoot.toLowerCase() === partialRoot;
-  const sentBest = (jBatchState.sentBatch?.batch.hashLadderReveals ?? [])
-    .filter(sameLadder)
-    .reduce((best, op) => Math.max(best, op.fillRatio), 0);
-  if (sentBest >= decoded.fillRatio) return 'already-queued';
-  const draft = jBatchState.batch.hashLadderReveals;
-  const draftBest = draft.filter(sameLadder).reduce((best, op) => Math.max(best, op.fillRatio), 0);
-  if (draftBest >= decoded.fillRatio) return 'already-queued';
-  for (let index = draft.length - 1; index >= 0; index -= 1) {
-    if (sameLadder(draft[index]!)) draft.splice(index, 1);
-  }
+  const pending = [
+    ...(jBatchState.sentBatch?.batch.hashLadderReveals ?? []),
+    ...jBatchState.batch.hashLadderReveals,
+  ];
+  if (pending.some(sameLadder)) return 'already-queued';
+
   batchAddHashLadderReveal(jBatchState, {
     fullHash: pull.fullHash,
     partialRoot: pull.partialRoot,
@@ -307,22 +327,17 @@ export function planCrossJurisdictionTargetRecovery(
     }
     resultsByPullId[pullId] = String(result || '0').toLowerCase();
   }
-  // Finalization is bounded by the on-chain barrier anyway; this timestamp is
-  // the runtime-side mirror of it, after which a missing port resolves to a
-  // zero claim instead of blocking the dispute forever.
-  const resolveByTimestamp = routes.reduce(
-    (latest, route) => Math.max(latest, Number(route.targetPull!.revealedUntilTimestamp || 0)),
-    0,
-  );
   // Port-wait recovery stays local. Sibling dispute fanout is a separate
   // EntityTx path (`crossJurisdictionForceSiblingDispute`): observing any
-  // DisputeStarted on a route leg asks every sibling to start its own clock.
+  // DisputeStarted on a route leg asks every sibling to start its own clock
+  // (must-close — missing signer binder throws). Missing ports settle-or-0
+  // only after L1 reveal cutoff (disputeStartTimestamp + T/2, unix seconds);
+  // no sealed pull.revealedUntilTimestamp market gate.
   return {
     representativeRouteId: routes[0]!.orderId,
     recovery: {
       requiredPullIds: snapshotPullIds.filter((pullId) => requiredSet.has(pullId)),
       resultsByPullId,
-      resolveByTimestamp,
     },
   };
 }
@@ -383,10 +398,15 @@ const routeTouchesDisputedAccount = (
 };
 
 /**
- * Any DisputeStarted involving this entity on a live cross-j route asks the
- * intra-runtime sibling to prepareDispute on its leg. Different wall-clock T
- * across chains is fine; the point is to start every clock as soon as one
- * leg is under dispute so reveals/ports can land before either barrier.
+ * Must-close sibling clock fanout.
+ *
+ * Different wall-clock T across chains is fine; equal bilateral delay *config*
+ * is the prepare rule. What is not fine: soft-skipping a live route that lacks
+ * a signer binder — that left one leg's dispute unstarted while the other
+ * finalized (economic residual). Missing binder → throw SIGNER_MISSING.
+ *
+ * Delivery of the EntityTx is still best-effort inside the runtime; this
+ * function only guarantees we never *choose* to skip a required sibling.
  */
 export function queueCrossJurisdictionSiblingDisputeFanout(
   state: EntityState,
@@ -408,7 +428,13 @@ export function queueCrossJurisdictionSiblingDisputeFanout(
     if (!routeTouchesDisputedAccount(route, self, counterparty)) continue;
     const sibling = siblingDisputeTargetForRoute(route, self);
     if (!sibling) {
-      throw new Error(`CROSS_J_SIBLING_DISPUTE_TARGET_MISSING:${route.orderId}:${self}`);
+      // Must-close: a live non-terminal route with pulls that touches this
+      // disputed Account must always resolve a sibling binder. Soft-skip left
+      // the other leg's clock unstarted (silence→0 residual). Auth admission
+      // already requires four signers — absence here is state corruption.
+      throw new Error(
+        `CROSS_J_SIBLING_DISPUTE_SIGNER_MISSING:${route.orderId}:self=${self}`,
+      );
     }
     const key = `${sibling.entityId}\0${sibling.signerId}`;
     const batch = batches.get(key) ?? {

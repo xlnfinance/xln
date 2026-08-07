@@ -368,8 +368,6 @@ type EntityTxPayload =
         crossJurisdictionRouteId?: string;
         /** Dynamic evidence; a malformed wrapper becomes empty and the signed transformer decides. */
         starterInitialArguments?: string;
-        allowUnsafeCrossJTargetDispute?: boolean;
-        acceptedCrossJTargetLossAmount?: bigint;
       };
     }
   | {
@@ -381,8 +379,6 @@ type EntityTxPayload =
         starterInitialArguments?: string;
         starterIncrementedArguments?: string;
         description?: string;
-        allowUnsafeCrossJTargetDispute?: boolean;
-        acceptedCrossJTargetLossAmount?: bigint;
       };
     }
   | {

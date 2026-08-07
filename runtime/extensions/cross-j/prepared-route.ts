@@ -2,9 +2,6 @@ import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction'
 import type { EntityState } from '../../entity/types';
 import {
   cloneCrossJurisdictionRoute,
-  CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS,
-  CROSS_J_MIN_TARGET_RESPONSE_WINDOW_MS,
-  CROSS_J_TARGET_REVEAL_SAFETY_MS,
   deriveCrossJurisdictionPullId,
   signedCrossJurisdictionAmountForBeneficiary,
   withCanonicalCrossJurisdictionRouteHash,
@@ -40,6 +37,7 @@ export const committedCrossJSourceDisputeDelayMs = (
   const rightDelay = Number(disputeConfig.rightDisputeDelay);
   // Equal bilateral delay config is the prepare-time rule. Wall-clock T may
   // still differ across chains (different block times); that is intentional.
+  // Settlement uses dispute-relative seconds on L1 — not a sealed route deadline.
   if (!Number.isSafeInteger(leftDelay) || leftDelay <= 0) {
     throw new Error(`CROSS_J_PREPARED_DISPUTE_DELAY_INVALID:${route.orderId}:left`);
   }
@@ -109,17 +107,10 @@ export const validatePreparedCrossJurisdictionRoute = (
     ),
     'CROSS_J_PREPARED_TARGET_SIGNED_AMOUNT',
   );
-  const sourceDeadline = Number(route.expiresAt) + CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS;
-  assertEqual(sourcePull.revealedUntilTimestamp, sourceDeadline, 'CROSS_J_PREPARED_SOURCE_DEADLINE');
-  const responseWindow = Math.max(
-    committedCrossJSourceDisputeDelayMs(state, route),
-    CROSS_J_MIN_TARGET_RESPONSE_WINDOW_MS,
-  );
-  assertEqual(
-    targetPull.revealedUntilTimestamp,
-    sourceDeadline + responseWindow + CROSS_J_TARGET_REVEAL_SAFETY_MS,
-    'CROSS_J_PREPARED_TARGET_DEADLINE',
-  );
+  // No sealed pull reveal deadlines on prepared routes. Bilateral dispute delay
+  // is still checked at prepare/register so L1 T is coherent, but it is not
+  // baked into pull commitments.
+  committedCrossJSourceDisputeDelayMs(state, route);
   const fullHash = assertBytes32(sourcePull.fullHash, 'CROSS_J_PREPARED_FULL_HASH_INVALID');
   const partialRoot = assertBytes32(sourcePull.partialRoot, 'CROSS_J_PREPARED_PARTIAL_ROOT_INVALID');
   assertEqual(assertBytes32(targetPull.fullHash, 'CROSS_J_PREPARED_FULL_HASH_INVALID'), fullHash, 'CROSS_J_PREPARED_FULL_HASH_MISMATCH');

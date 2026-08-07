@@ -31,7 +31,7 @@ const _abi = [
       },
       {
         internalType: "uint256",
-        name: "revealedBlock",
+        name: "revealedAt",
         type: "uint256",
       },
     ],

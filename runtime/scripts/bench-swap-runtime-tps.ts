@@ -169,7 +169,7 @@ const seedCrossSwapAccount = (swaps: number): AccountReplica => {
     createdAt: 1_000,
     updatedAt: 1_000,
     expiresAt: 61_000,
-  }, { runtimeSeed: 'swap-runtime-bench', sourceDisputeDelayMs: 5_000, now: 1_000 });
+  }, { runtimeSeed: 'swap-runtime-bench', now: 1_000 });
   let templateRoute: CrossJurisdictionSwapRoute = {
     ...template,
     status: 'resting' as const,
@@ -180,7 +180,6 @@ const seedCrossSwapAccount = (swaps: number): AccountReplica => {
     amount: templateRoute.sourcePull!.signedAmount,
     claimedRatio: 0,
     claimedAmount: 0n,
-    revealedUntilTimestamp: templateRoute.sourcePull!.revealedUntilTimestamp,
     fullHash: templateRoute.sourcePull!.fullHash,
     partialRoot: templateRoute.sourcePull!.partialRoot,
     crossJurisdiction: buildCrossJurisdictionPullBinding(templateRoute, 'source'),

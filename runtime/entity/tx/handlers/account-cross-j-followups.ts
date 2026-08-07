@@ -296,8 +296,7 @@ const committedPullMatchesRoute = (
     accountTx.data.tokenId === pull.tokenId &&
     accountTx.data.amount === pull.signedAmount &&
     (accountTx.data.fullHash || '').toLowerCase() === pull.fullHash.toLowerCase() &&
-    (accountTx.data.partialRoot || '').toLowerCase() === pull.partialRoot.toLowerCase() &&
-    accountTx.data.revealedUntilTimestamp === pull.revealedUntilTimestamp
+    (accountTx.data.partialRoot || '').toLowerCase() === pull.partialRoot.toLowerCase()
   );
 };
 

@@ -1,14 +1,9 @@
-import type { AccountReplica, EntityState } from '@xln/runtime/api/public/runtime-module';
+import type { AccountReplica } from '@xln/runtime/api/public/runtime-module';
 import { compareEntityAssetText } from './entity-asset-catalog';
 
 export type DisputedAccountView = {
   counterpartyId: string;
   status: 'active' | 'finalized';
-};
-
-export type CrossJTargetDisputeRisk = {
-  amount: bigint;
-  tokenId: number;
 };
 
 export function buildDisputedAccountViews(accounts: Map<string, AccountReplica> | undefined): DisputedAccountView[] {
@@ -27,38 +22,4 @@ export function buildDisputedAccountViews(accounts: Map<string, AccountReplica> 
     if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
     return compareEntityAssetText(a.counterpartyId, b.counterpartyId);
   });
-}
-
-export function getCrossJTargetDisputeRiskForState(
-  state: EntityState | null | undefined,
-  counterpartyEntityId: string,
-): CrossJTargetDisputeRisk | null {
-  const account = state?.accounts?.get?.(counterpartyEntityId);
-  if (!state || !account) return null;
-  const self = String(state.entityId || '').toLowerCase();
-  const counterparty = String(counterpartyEntityId || '').toLowerCase();
-  let amount = 0n;
-  let tokenId = 0;
-  for (const route of state.crossJurisdictionSwaps?.values?.() || []) {
-    if (
-      String(route?.target?.counterpartyEntityId || '').toLowerCase() === self &&
-      String(route?.target?.entityId || '').toLowerCase() === counterparty &&
-      route?.targetPull?.pullId &&
-      account.state.pulls?.has?.(route.targetPull.pullId)
-    ) {
-      amount += BigInt(route.target.amount || 0n);
-      tokenId = Number(route.target.tokenId || tokenId);
-    }
-  }
-  return amount > 0n ? { amount, tokenId } : null;
-}
-
-export function formatCrossJTargetDisputeRiskLabel(input: {
-  risk: CrossJTargetDisputeRisk;
-  resolveToken: (tokenId: number) => { symbol: string; decimals: number };
-  formatTokenInputAmount: (amount: bigint, decimals: number) => string;
-}): string {
-  const token = input.resolveToken(input.risk.tokenId);
-  const amount = input.formatTokenInputAmount(input.risk.amount, token.decimals) || '0';
-  return `${amount} ${token.symbol}`;
 }

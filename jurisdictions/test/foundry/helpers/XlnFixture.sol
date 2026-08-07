@@ -11,7 +11,7 @@ import {XlnHanko} from "./XlnHanko.sol";
 /// @notice Deploys the J-layer under test with N lazy single-signer entities.
 abstract contract XlnFixture is Test {
   uint256 internal constant ACTORS = 4;
-  uint256 internal constant DISPUTE_DELAY = 100; // blocks
+  uint256 internal constant DISPUTE_DELAY = 100; // seconds (defaultDisputeDelay)
 
   Depository internal dep;
   EntityProvider internal ep;

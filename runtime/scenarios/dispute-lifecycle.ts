@@ -21,7 +21,9 @@ import {
   findReplica,
   usd,
   enableStrictScenario,
+  syncRuntimeToUnixSeconds,
 } from './helpers';
+import { advanceRpcToUnixSeconds, readRpcUnixSeconds } from './rpc-block-mining';
 
 const USDC = 1;
 
@@ -35,26 +37,24 @@ const requireRegistered = (entity: Registered | undefined, name: string): Regist
   return entity;
 };
 
-async function mineUntilHeight(jadapter: JAdapter, targetHeight: number): Promise<void> {
+async function advancePastDisputeTimeout(
+  env: RuntimeReplica,
+  jadapter: JAdapter,
+  timeoutUnixSeconds: number,
+): Promise<void> {
   const mineableProvider = jadapter.provider as unknown as Partial<MineableProvider>;
   if (typeof mineableProvider.send !== 'function') {
-    throw new Error('dispute-lifecycle requires RPC provider with evm_mine support');
+    throw new Error('dispute-lifecycle requires RPC provider with evm_increaseTime support');
   }
-  const readHeight = async (): Promise<number> => Number(
-    jadapter.getCurrentBlockNumber
-      ? await jadapter.getCurrentBlockNumber()
-      : await jadapter.provider.getBlockNumber(),
-  );
-  let current = await readHeight();
-  let guard = 0;
-  const maxMines = Math.max(2000, targetHeight - current + 32);
-  while (current < targetHeight) {
-    await mineableProvider.send('evm_mine', []);
-    current = await readHeight();
-    guard += 1;
-    if (guard > maxMines) {
-      throw new Error(`mineUntilHeight guard tripped: current=${current}, target=${targetHeight}`);
-    }
+  const send = mineableProvider.send.bind(mineableProvider);
+  const before = await readRpcUnixSeconds({ send });
+  await advanceRpcToUnixSeconds({ send }, timeoutUnixSeconds);
+  syncRuntimeToUnixSeconds(env, timeoutUnixSeconds);
+  const after = await readRpcUnixSeconds({ send });
+  if (after < timeoutUnixSeconds) {
+    throw new Error(
+      `dispute-lifecycle unix advance failed: before=${before} target=${timeoutUnixSeconds} after=${after}`,
+    );
   }
 }
 
@@ -284,19 +284,23 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       env,
     );
 
-    // Mine to challenge timeout and finalize dispute
-    const timeoutBlock = Number(aliceAfterStart?.activeDispute?.disputeTimeout || 0);
-    const currentBlock = Number(await jadapter.provider.getBlockNumber());
+    // Advance jurisdiction wall-clock past absolute unix challenge end.
+    const timeoutUnix = Number(aliceAfterStart?.activeDispute?.disputeTimeout || 0);
+    const provider = jadapter.provider as unknown as Partial<MineableProvider>;
+    if (typeof provider.send !== 'function') {
+      throw new Error('dispute-lifecycle requires RPC provider with eth_getBlockByNumber');
+    }
+    const currentUnix = await readRpcUnixSeconds({ send: provider.send.bind(provider) });
     assert(
-      timeoutBlock >= currentBlock,
-      `Expected present-or-future timeout block, got timeout=${timeoutBlock}, current=${currentBlock}`,
+      timeoutUnix >= currentUnix,
+      `Expected present-or-future unix timeout, got timeout=${timeoutUnix}, current=${currentUnix}`,
       env,
     );
     const reserveBeforeFinalize = await jadapter.getReserves(alice.id, USDC);
     const hubReserveBeforeFinalize = await jadapter.getReserves(hub.id, USDC);
     const aliceCollateralBeforeFinalize = aliceAfterStart?.state.deltas.get(USDC)?.collateral ?? 0n;
 
-    await mineUntilHeight(jadapter, timeoutBlock);
+    await advancePastDisputeTimeout(env, jadapter, timeoutUnix);
 
     let autoFinalizeObserved = false;
     for (let i = 0; i < 40; i++) {

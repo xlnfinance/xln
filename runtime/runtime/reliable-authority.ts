@@ -171,6 +171,11 @@ const assertPrecommitAuthority = (
   replica: EntityReplica,
   identity: ReliableDeliveryIdentity,
 ): void => {
+  // Offline catch-up retains loopback precommits after the Entity tip has already
+  // moved on. There is no active proposal for that historical height, and
+  // prevFrameHash names the tip rather than the stale round. height > identity
+  // is the same terminal post-state rule as terminalEntityFrame.
+  if (replica.state.height > identity.height) return;
   const active = [replica.proposal, replica.lockedFrame].find(frame =>
     frame?.height === identity.height && normalize(frame.hash) === identity.frameHash);
   const committed =

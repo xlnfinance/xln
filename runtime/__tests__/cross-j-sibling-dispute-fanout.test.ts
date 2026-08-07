@@ -54,7 +54,6 @@ const baseRoute = (
     tokenId: 1,
     amount: 100n,
     signedAmount: 100n,
-    revealedUntilTimestamp: 1_000_000,
     fullHash: `0x${'11'.repeat(32)}`,
     partialRoot: `0x${'22'.repeat(32)}`,
   },
@@ -63,7 +62,6 @@ const baseRoute = (
     tokenId: 1,
     amount: 90n,
     signedAmount: -90n,
-    revealedUntilTimestamp: 2_000_000,
     fullHash: `0x${'11'.repeat(32)}`,
     partialRoot: `0x${'22'.repeat(32)}`,
   },
@@ -108,7 +106,87 @@ describe('cross-j sibling dispute fanout', () => {
     });
   });
 
-  test('force-sibling handler prepares dispute against the local route counterparty', async () => {
+  test('missing sibling signer fails loud (must-close fanout)', () => {
+    const parties = {
+      sourceUser: entity('51'),
+      sourceHub: entity('52'),
+      targetHub: entity('53'),
+      targetUser: entity('54'),
+      sourceSigner: addr('81'),
+      targetSigner: '',
+      sourceHubSigner: addr('83'),
+      targetHubSigner: addr('84'),
+    };
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const state = makeState(parties.sourceUser, parties.sourceSigner, eth, parties.sourceHub);
+    const route = baseRoute('fanout-missing-signer', parties);
+    delete route.targetSignerId;
+    state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+    const outputs: EntityInput[] = [];
+    expect(() =>
+      queueCrossJurisdictionSiblingDisputeFanout(state, outputs, parties.sourceHub, 9),
+    ).toThrow(/CROSS_J_SIBLING_DISPUTE_SIGNER_MISSING/);
+  });
+
+  test('force-sibling handler fails loud when the route mirror is missing', async () => {
+    const env = createEmptyEnv('force-sibling-missing-route');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const sourceUser = entity('61');
+    const sourceHub = entity('62');
+    const sourceSigner = registerTestSigner(env, 'force-sibling-missing-route', 'source');
+    const state = makeState(sourceUser, sourceSigner, eth, sourceHub);
+    addReplica(env, state, sourceSigner);
+    await expect(
+      handleCrossJurisdictionForceSiblingDisputeEntityTx(env, state, {
+        type: 'crossJurisdictionForceSiblingDispute',
+        data: {
+          routeId: 'missing-route',
+          observedCounterpartyEntityId: entity('63'),
+          observedAt: 1,
+        },
+      }),
+    ).rejects.toThrow(/CROSS_J_SIBLING_DISPUTE_ROUTE_MISSING/);
+  });
+
+  test('force-sibling handler rejects observed peer that is not on the other leg', async () => {
+    const env = createEmptyEnv('force-sibling-mismatch');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const sourceUser = entity('61');
+    const sourceHub = entity('62');
+    const targetHub = entity('63');
+    const targetUser = entity('64');
+    const sourceSigner = registerTestSigner(env, 'force-sibling-mismatch', 'source');
+    const state = makeState(sourceUser, sourceSigner, eth, sourceHub);
+    addReplica(env, state, sourceSigner);
+    const route = baseRoute('force-sibling-mismatch', {
+      sourceUser,
+      sourceHub,
+      targetHub,
+      targetUser,
+      sourceSigner,
+      targetSigner: addr('92'),
+      sourceHubSigner: addr('93'),
+      targetHubSigner: addr('94'),
+    });
+    state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+    // Local peer is not other-leg evidence (what the broken equality check required).
+    await expect(
+      handleCrossJurisdictionForceSiblingDisputeEntityTx(env, state, {
+        type: 'crossJurisdictionForceSiblingDispute',
+        data: {
+          routeId: route.orderId,
+          observedCounterpartyEntityId: sourceHub,
+          observedAt: 1,
+        },
+      }),
+    ).rejects.toThrow(/CROSS_J_SIBLING_DISPUTE_OBSERVED_LEG_INVALID/);
+  });
+
+  test('force-sibling handler prepares local dispute from live fanout observed peer', async () => {
     const env = createEmptyEnv('force-sibling-prepare');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
@@ -134,6 +212,7 @@ describe('cross-j sibling dispute fanout', () => {
       targetHubSigner,
     });
     state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+    // Live fanout from target-user DisputeStarted vs targetHub sends observed=targetHub.
     const result = await handleCrossJurisdictionForceSiblingDisputeEntityTx(
       env,
       state,

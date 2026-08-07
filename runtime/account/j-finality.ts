@@ -40,13 +40,16 @@ export const applyAccountDisputeStarted = (
     finality.observedBlockNumber,
     'ACCOUNT_DISPUTE_OBSERVED_BLOCK_INVALID',
   );
+  // disputeTimeout / disputeStartTimestamp are absolute unix seconds on L1.
   if (
     !Number.isSafeInteger(finality.disputeTimeout) ||
-    finality.disputeTimeout <= finality.observedBlockNumber
+    !Number.isSafeInteger(finality.disputeStartTimestamp) ||
+    finality.disputeStartTimestamp <= 0 ||
+    finality.disputeTimeout <= finality.disputeStartTimestamp
   ) {
     throw new Error(
       `ACCOUNT_DISPUTE_TIMEOUT_INVALID:` +
-      `${finality.observedBlockNumber}:${finality.disputeTimeout}`,
+      `${finality.disputeStartTimestamp}:${finality.disputeTimeout}`,
     );
   }
 
@@ -57,11 +60,13 @@ export const applyAccountDisputeStarted = (
   );
   account.status = 'disputed';
   freezeAccountForDispute(account, true);
+  const preparedRecovery = account.disputePrepare?.crossJurisdictionRecovery;
   account.activeDispute = {
     startedByLeft,
     initialProofbodyHash: finality.initialProofbodyHash,
     initialNonce: finality.initialNonce,
     disputeTimeout: finality.disputeTimeout,
+    disputeStartTimestamp: finality.disputeStartTimestamp,
     jNonce: finality.jNonce,
     starterInitialArguments: finality.starterInitialArguments,
     starterIncrementedArguments: finality.starterIncrementedArguments,
@@ -69,6 +74,9 @@ export const applyAccountDisputeStarted = (
     observedBlockNumber: finality.observedBlockNumber,
     ...(finality.batchNonce !== undefined
       ? { batchNonce: finality.batchNonce }
+      : {}),
+    ...(preparedRecovery !== undefined
+      ? { crossJurisdictionRecovery: preparedRecovery }
       : {}),
     finalizeQueued: false,
   };

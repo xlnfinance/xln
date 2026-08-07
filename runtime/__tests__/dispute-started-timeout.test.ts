@@ -20,14 +20,15 @@ const jurisdiction = makeJurisdiction('Ethereum', 1, '11', '12');
 const entityId = entity('01');
 const counterpartyId = entity('02');
 
-const envAt = (scannedThroughHeight: number, disputeDelayBlocks: number): RuntimeReplica => {
-  const env = createEmptyEnv(`dispute-started-timeout:${scannedThroughHeight}:${disputeDelayBlocks}`);
-  env.state.timestamp = 1_000;
+const envAt = (scannedThroughHeight: number, disputeDelaySeconds: number): RuntimeReplica => {
+  const env = createEmptyEnv(`dispute-started-timeout:${scannedThroughHeight}:${disputeDelaySeconds}`);
+  env.state.timestamp = 1_700_000_000_000;
   env.quietRuntimeLogs = true;
   installJurisdictions(env, jurisdiction);
   const replica = env.state.jReplicas.get(jurisdiction.name)!;
   replica.blockNumber = BigInt(scannedThroughHeight);
-  replica.defaultDisputeDelayBlocks = disputeDelayBlocks;
+  // Field name still says Blocks in config; unit is now seconds on L1.
+  replica.defaultDisputeDelayBlocks = disputeDelaySeconds;
   return env;
 };
 
@@ -41,12 +42,16 @@ describe('canonical DisputeStarted timeout', () => {
       watchSeed: `0x${'66'.repeat(32)}`,
       starterInitialArguments: '0x',
       starterIncrementedArguments: '0x',
-      disputeTimeout: '5861',
+      disputeTimeout: '1700005861',
+      disputeStartTimestamp: '1700000000',
     };
     const normalized = normalizeJurisdictionEvent({ type: 'DisputeStarted', data: eventData });
-    expect(normalized?.data.disputeTimeout).toBe(5_861);
+    expect(normalized?.data.disputeTimeout).toBe(1_700_005_861);
+    expect(normalized?.data.disputeStartTimestamp).toBe(1_700_000_000);
     const { disputeTimeout: _, ...missingTimeout } = eventData;
     expect(normalizeJurisdictionEvent({ type: 'DisputeStarted', data: missingTimeout })).toBeNull();
+    const { disputeStartTimestamp: __, ...missingStart } = eventData;
+    expect(normalizeJurisdictionEvent({ type: 'DisputeStarted', data: missingStart })).toBeNull();
     for (const requiredField of [
       'watchSeed',
       'starterInitialArguments',
@@ -61,7 +66,7 @@ describe('canonical DisputeStarted timeout', () => {
     }
 
     const raw = { name: 'DisputeStarted', args: eventData, blockNumber: 101 };
-    expect(rawEventToJEvents(raw, entityId)[0]?.data.disputeTimeout).toBe(5_861);
+    expect(rawEventToJEvents(raw, entityId)[0]?.data.disputeTimeout).toBe(1_700_005_861);
     expect(() => rawEventToJEvents({ ...raw, args: missingTimeout }, entityId))
       .toThrow('J_EVENT_DISPUTE_TIMEOUT_INVALID');
   });
@@ -81,7 +86,8 @@ describe('canonical DisputeStarted timeout', () => {
         watchSeed: `0x${'66'.repeat(32)}`,
         starterInitialArguments: '0x',
         starterIncrementedArguments: '0x',
-        disputeTimeout: 5_761,
+        disputeTimeout: 1_700_005_761,
+        disputeStartTimestamp: 1_700_000_000,
       },
     })!;
     const applyWithConfig = async (height: number, delay: number) => {
@@ -100,7 +106,9 @@ describe('canonical DisputeStarted timeout', () => {
     const lagging = await applyWithConfig(110, 5);
     const leading = await applyWithConfig(130, 5_760);
 
-    expect(lagging.newState.accounts.get(counterpartyId)?.activeDispute?.disputeTimeout).toBe(5_761);
+    expect(lagging.newState.accounts.get(counterpartyId)?.activeDispute?.disputeTimeout).toBe(1_700_005_761);
+    expect(lagging.newState.accounts.get(counterpartyId)?.activeDispute?.disputeStartTimestamp)
+      .toBe(1_700_000_000);
     expect(computeCanonicalEntityConsensusStateHash(lagging.newState))
       .toBe(computeCanonicalEntityConsensusStateHash(leading.newState));
   });
@@ -121,7 +129,8 @@ describe('canonical DisputeStarted timeout', () => {
         watchSeed: `0x${'66'.repeat(32)}`,
         starterInitialArguments: '0x',
         starterIncrementedArguments: '0x',
-        disputeTimeout: 5_761,
+        disputeTimeout: 1_700_005_761,
+        disputeStartTimestamp: 1_700_000_000,
       },
     })!;
     const env = envAt(110, 5);

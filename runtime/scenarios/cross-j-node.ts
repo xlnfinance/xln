@@ -146,9 +146,6 @@ const findReplica = (env: RuntimeReplica, entityId: string): EntityReplica => {
   throw new Error(`CROSS_J_NODE_REPLICA_MISSING:${entityId}`);
 };
 
-const accountHas = (replica: EntityReplica, counterpartyId: string): boolean =>
-  [...replica.state.accounts.keys()].some(k => k.toLowerCase() === counterpartyId.toLowerCase());
-
 const getAccount = (
   replica: EntityReplica,
   counterpartyId: string,
@@ -418,13 +415,24 @@ const runHubs = async (): Promise<void> => {
     }
     return true;
   }, env);
-  // Pairs resolved after accounts exist (counterparty ids from hub state).
-  const hubPairs = (): ReturnType<typeof defaultCrossJCreditPairs> => {
-    const srcUser = [...findReplica(env, hubSrc.id).state.accounts.keys()][0];
-    const tgtUser = [...findReplica(env, hubTgt.id).state.accounts.keys()][0];
-    if (!srcUser || !tgtUser) throw new Error('CROSS_J_HUB_COUNTERPARTY_MISSING');
-    return defaultCrossJCreditPairs(hubSrc.id, srcUser, hubTgt.id, tgtUser, USDC, WETH);
+  // Pairs resolved after accounts exist. Fail loud if a hub has ≠1 account —
+  // keys()[0] would silently credit/assert the wrong counterparty.
+  const requireSingleHubCounterparty = (hub: Party): string => {
+    const keys = [...findReplica(env, hub.id).state.accounts.keys()];
+    if (keys.length !== 1) {
+      throw new Error(`CROSS_J_HUB_ACCOUNT_COUNT_UNEXPECTED:${hub.name}:${keys.length}`);
+    }
+    return keys[0]!;
   };
+  const hubPairs = (): ReturnType<typeof defaultCrossJCreditPairs> =>
+    defaultCrossJCreditPairs(
+      hubSrc.id,
+      requireSingleHubCounterparty(hubSrc),
+      hubTgt.id,
+      requireSingleHubCounterparty(hubTgt),
+      USDC,
+      WETH,
+    );
   assertAccountsOpenPhase(env, hubPairs(), 'hubs');
   phase('ACCOUNTS_OPEN', 'role=hubs');
 
@@ -721,9 +729,7 @@ const runUsers = async (): Promise<void> => {
       return true;
     }
     return false;
-  }, env, 60_000).catch(err => {
-    console.log(`CROSS_J_USER_ACCOUNT_DIAG orderId=${orderId} pulls=0 offers=0 (${err instanceof Error ? err.message : err})`);
-  });
+  }, env, 60_000);
 
   console.log(`CROSS_J_USERS_DONE orderId=${orderId}`);
   // Stay alive until the orchestrator SIGTERM — hub clear/cancel needs the

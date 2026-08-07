@@ -368,7 +368,7 @@ describe('Depository', () => {
       }),
     );
     await target.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
-    await mine(Number(await target.defaultDisputeDelay()));
+    await time.increase(Number(await target.defaultDisputeDelay()));
 
     const finalization = {
       counterentity: right.entityId,
@@ -620,7 +620,7 @@ describe('Depository', () => {
     const reveal = await signDepositoryBatch(depository, right.entityId, right.privateKey, revealBatch);
     await depository.connect(right.signer).processBatch(reveal.encodedBatch, reveal.hankoData, reveal.nonce);
 
-    await mine(Number(await depository.defaultDisputeDelay()));
+    await time.increase(Number(await depository.defaultDisputeDelay()));
 
     // The barrier: a live pull reveal window blocks finalization even after the
     // block-number dispute timeout. Finalize must wait for the wall-clock
@@ -894,7 +894,7 @@ describe('Depository', () => {
       depository.connect(left.signer).processBatch(tooEarly.encodedBatch, tooEarly.hankoData, tooEarly.nonce),
     ).to.be.revertedWithCustomError(depository, 'E2');
 
-    await mine(Number(await depository.defaultDisputeDelay()));
+    await time.increase(Number(await depository.defaultDisputeDelay()));
 
     const afterTimeout = await signDepositoryBatch(depository, left.entityId, left.privateKey, tooEarlyBatch);
     await depository

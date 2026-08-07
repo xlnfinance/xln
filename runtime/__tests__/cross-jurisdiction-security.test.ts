@@ -49,7 +49,7 @@ const buildRoute = (
     createdAt: 1_000,
     updatedAt: 1_000,
     expiresAt: 61_000,
-}, { runtimeSeed: seed, sourceDisputeDelayMs: 5_000, now: 1_000 });
+}, { runtimeSeed: seed, now: 1_000 });
 
 describe('cross-jurisdiction security invariants', () => {
   test('local binding rejects display-name stack ref collision with wrong local stack', () => {
@@ -143,7 +143,6 @@ describe('cross-jurisdiction security invariants', () => {
       amount: route.targetPull!.signedAmount,
       claimedRatio: 0,
       claimedAmount: 0n,
-      revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
       fullHash: route.targetPull!.fullHash,
       partialRoot: route.targetPull!.partialRoot,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
@@ -176,7 +175,6 @@ describe('cross-jurisdiction security invariants', () => {
       amount: route.targetPull!.signedAmount,
       claimedRatio: 0,
       claimedAmount: 0n,
-      revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
       fullHash: route.targetPull!.fullHash,
       partialRoot: route.targetPull!.partialRoot,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),

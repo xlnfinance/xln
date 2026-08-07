@@ -224,7 +224,6 @@ const buildProofPulls = (
           Math.floor(Number(pull.claimedRatio ?? 0)),
         ),
       ),
-      revealedUntilTimestamp: pull.revealedUntilTimestamp,
       fullHash: pull.fullHash,
       partialRoot: pull.partialRoot,
     }));
@@ -342,10 +341,6 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
         deltaIndex: BigInt(p.deltaIndex),
         amount: p.amount,
         claimedRatio: p.claimedRatio,
-        // Pull deadlines stay in runtime milliseconds until ABI conversion.
-        // Keep this separate from payment timestamps, which were normalized
-        // when the payment batch entries were built.
-        revealedUntilTimestamp: BigInt(Math.floor(p.revealedUntilTimestamp / 1000)),
         fullHash: p.fullHash,
         partialRoot: p.partialRoot,
       })),

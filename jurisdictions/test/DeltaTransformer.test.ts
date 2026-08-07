@@ -214,14 +214,12 @@ describe("DeltaTransformer", function () {
     leftArguments: string,
     rightArguments: string,
     tokenIds: Array<bigint | number> = deltas.map((_, index) => index + 1),
-    disputeClock?: { startBlock: number; timeoutBlock: number },
+    disputeClock?: { startTs: number; timeoutTs: number },
   ) {
     const currentTimestamp = await time.latest();
-    const latestBlock = await ethers.provider.getBlockNumber();
-    // Default: dispute already past full T so pull settlement can run in unit
-    // tests. Callers probing the barrier pass an open timeout explicitly.
-    const startBlock = disputeClock?.startBlock ?? Math.max(1, latestBlock - 200);
-    const timeoutBlock = disputeClock?.timeoutBlock ?? latestBlock;
+    // Default: dispute already past full T (seconds) so pull settlement can run.
+    const startTs = disputeClock?.startTs ?? Math.max(1, currentTimestamp - 200);
+    const timeoutTs = disputeClock?.timeoutTs ?? currentTimestamp;
     return registry.applyBatchViaRegistry.staticCall(
       await transformer.getAddress(),
       deltas,
@@ -233,8 +231,8 @@ describe("DeltaTransformer", function () {
       currentTimestamp,
       LEFT_ENTITY,
       RIGHT_ENTITY,
-      startBlock,
-      timeoutBlock,
+      startTs,
+      timeoutTs,
     );
   }
 
@@ -341,12 +339,12 @@ describe("DeltaTransformer", function () {
     const fullProof = buildPullProof("delta-full", 0xffff);
     const ladderHash = (proof: { fullHash: string; partialRoot: string }): string =>
       ethers.keccak256(ethers.solidityPacked(["bytes32", "bytes32"], [proof.fullHash, proof.partialRoot]));
-    const nowBlock = await ethers.provider.getBlockNumber();
-    const openStart = nowBlock;
-    const openTimeout = nowBlock + 100; // T=100 still open
-    const settledStart = Math.max(1, nowBlock - 200);
-    const settledTimeout = nowBlock; // T already elapsed at current block
-    const timelyRevealBlock = settledStart + 10; // well inside settled T/2
+    const nowTs = await time.latest();
+    const openStart = nowTs;
+    const openTimeout = nowTs + 100; // T=100s still open
+    const settledStart = Math.max(1, nowTs - 200);
+    const settledTimeout = nowTs; // T already elapsed
+    const timelyRevealAt = settledStart + 10; // well inside settled T/2
 
     const batch = {
       payment: [],
@@ -356,7 +354,6 @@ describe("DeltaTransformer", function () {
           deltaIndex: 0,
           amount: MAX_FILL_RATIO,
           claimedRatio: 0,
-          revealedUntilTimestamp: 0,
           fullHash: partialProof.fullHash,
           partialRoot: partialProof.partialRoot,
         },
@@ -364,7 +361,6 @@ describe("DeltaTransformer", function () {
           deltaIndex: 1,
           amount: -1234,
           claimedRatio: 0,
-          revealedUntilTimestamp: 0,
           fullHash: fullProof.fullHash,
           partialRoot: fullProof.partialRoot,
         },
@@ -373,19 +369,19 @@ describe("DeltaTransformer", function () {
     const encodedBatch = await transformer.encodeBatch(batch);
 
     // Timely registry writes but dispute still open → barrier.
-    await registry.setReveal(LEFT_ENTITY, ladderHash(partialProof), partialRatio, timelyRevealBlock);
-    await registry.setReveal(RIGHT_ENTITY, ladderHash(fullProof), 0xffff, timelyRevealBlock);
+    await registry.setReveal(LEFT_ENTITY, ladderHash(partialProof), partialRatio, timelyRevealAt);
+    await registry.setReveal(RIGHT_ENTITY, ladderHash(fullProof), 0xffff, timelyRevealAt);
     await expect(
       applyViaRegistry(registry, transformer, [0, 0], encodedBatch, "0x", "0x", [1, 2], {
-        startBlock: openStart,
-        timeoutBlock: openTimeout,
+        startTs: openStart,
+        timeoutTs: openTimeout,
       }),
     ).to.be.revertedWithCustomError(transformer, "PullRevealWindowActive");
 
     // Past full T: same timely records settle.
     const result = await applyViaRegistry(registry, transformer, [0, 0], encodedBatch, "0x", "0x", [1, 2], {
-      startBlock: settledStart,
-      timeoutBlock: settledTimeout,
+      startTs: settledStart,
+      timeoutTs: settledTimeout,
     });
     expect(result[0]).to.equal(BigInt(partialRatio));
     expect(result[1]).to.equal(-1234n);
@@ -399,7 +395,6 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: MAX_FILL_RATIO,
         claimedRatio: 0,
-        revealedUntilTimestamp: 0,
         fullHash: lateProof.fullHash,
         partialRoot: lateProof.partialRoot,
       }],
@@ -407,8 +402,8 @@ describe("DeltaTransformer", function () {
     const half = settledStart + Math.floor((settledTimeout - settledStart) / 2);
     await registry.setReveal(LEFT_ENTITY, ladderHash(lateProof), 0x0100, half + 1);
     const late = await applyViaRegistry(registry, transformer, [0], lateBatch, "0x", "0x", [1], {
-      startBlock: settledStart,
-      timeoutBlock: settledTimeout,
+      startTs: settledStart,
+      timeoutTs: settledTimeout,
     });
     expect(late[0]).to.equal(0n);
 
@@ -421,14 +416,13 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: MAX_FILL_RATIO,
         claimedRatio: 0,
-        revealedUntilTimestamp: 0,
         fullHash: noneProof.fullHash,
         partialRoot: noneProof.partialRoot,
       }],
     });
     const none = await applyViaRegistry(registry, transformer, [0], noneBatch, "0x", "0x", [1], {
-      startBlock: settledStart,
-      timeoutBlock: settledTimeout,
+      startTs: settledStart,
+      timeoutTs: settledTimeout,
     });
     expect(none[0]).to.equal(0n);
 
@@ -441,14 +435,13 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: MAX_FILL_RATIO,
         claimedRatio: previouslyClaimed,
-        revealedUntilTimestamp: 0,
         fullHash: partialProof.fullHash,
         partialRoot: partialProof.partialRoot,
       }],
     });
     const cumulative = await applyViaRegistry(registry, transformer, [0], cumulativeBatch, "0x", "0x", [1], {
-      startBlock: settledStart,
-      timeoutBlock: settledTimeout,
+      startTs: settledStart,
+      timeoutTs: settledTimeout,
     });
     expect(cumulative[0]).to.equal(BigInt(partialRatio - previouslyClaimed));
 

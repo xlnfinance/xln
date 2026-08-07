@@ -44,7 +44,8 @@ library Account {
     bytes32 watchSeed,
     bytes starterInitialArguments,
     bytes starterIncrementedArguments,
-    uint256 disputeTimeout
+    uint256 disputeTimeout,
+    uint256 disputeStartTimestamp
   );
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   // This signature intentionally matches Depository's public event ABI. The
@@ -421,7 +422,7 @@ library Account {
     uint256 rightArgumentsTimestamp,
     uint256 eventInitialNonce,
     bytes32 finalProofbodyHash,
-    uint256 disputeStartBlock,
+    uint256 disputeStartTimestamp,
     uint256 disputeTimeout
   ) {
     finalProofbodyHash = _validateProofBody(params.finalProofbody);
@@ -479,7 +480,8 @@ library Account {
         expectedStarterArgumentsCommitment = account.starterIncrementedArgumentsCommitment;
       } else {
         if (params.finalNonce != account.nonce) revert E2();
-        if (!senderIsCounterparty && block.number < account.disputeTimeout) revert E2();
+        // Challenge window is jurisdiction seconds (absolute disputeTimeout).
+        if (!senderIsCounterparty && block.timestamp < account.disputeTimeout) revert E2();
         if (finalProofbodyHash != account.disputeInitialProofbodyHash) revert E9();
         expectedStarterArgumentsCommitment = account.starterInitialArgumentsCommitment;
       }
@@ -505,18 +507,15 @@ library Account {
       rightArgumentsTimestamp = starterArgumentsTimestamp;
     }
 
-    // Capture the dispute clock BEFORE clearing: applyPull needs startBlock +
-    // timeout for the T/2 reveal window and the full-T finalize barrier. The
-    // clear below still runs first so a later transformer revert restores the
-    // live dispute atomically with these locals already bound into the call.
-    disputeStartBlock = account.disputeStartBlock;
+    // Capture the dispute clock BEFORE clearing: applyPull needs startTs +
+    // absolute endTs for the T/2 reveal window and the full-T finalize barrier.
+    disputeStartTimestamp = account.disputeStartTimestamp;
     disputeTimeout = account.disputeTimeout;
 
     // Publish no partially-cleared dispute state. Any later failure reverts the
     // entire processBatch transaction and restores these fields atomically.
     account.disputeHash = bytes32(0);
     account.disputeTimeout = 0;
-    account.disputeStartBlock = 0;
     account.disputeStartTimestamp = 0;
     account.disputeInitialProofbodyHash = bytes32(0);
     account.starterInitialArgumentsCommitment = bytes32(0);
@@ -539,7 +538,7 @@ library Account {
     uint256 rightArgumentsTimestamp,
     bytes32 leftEntity,
     bytes32 rightEntity,
-    uint256 disputeStartBlock,
+    uint256 disputeStartTimestamp,
     uint256 disputeTimeout
   ) private view returns (int[] memory newDeltas) {
     if (tc.transformerAddress.code.length == 0) revert TransformerExecutionFailed();
@@ -558,7 +557,7 @@ library Account {
       rightArgumentsTimestamp,
       leftEntity,
       rightEntity,
-      disputeStartBlock,
+      disputeStartTimestamp,
       disputeTimeout
     );
     uint256 remainingGas = gasleft();
@@ -636,7 +635,7 @@ library Account {
     uint256 rightArgumentsTimestamp,
     bytes32 leftEntity,
     bytes32 rightEntity,
-    uint256 disputeStartBlock,
+    uint256 disputeStartTimestamp,
     uint256 disputeTimeout
   ) external returns (int[] memory) {
     if (proofbody.transformers.length == 0) return deltas;
@@ -662,7 +661,7 @@ library Account {
         rightArgumentsTimestamp,
         leftEntity,
         rightEntity,
-        disputeStartBlock,
+        disputeStartTimestamp,
         disputeTimeout
       );
 
@@ -1144,9 +1143,10 @@ library Account {
 
     if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();
 
-    uint256 timeout = block.number + defaultDelay;
+    // defaultDelay is seconds (constructor-configured). End timestamp is the
+    // sole challenge/pull clock — see DeltaTransformer.applyPull canon comment.
     uint256 startTimestamp = block.timestamp;
-    uint256 startBlock = block.number;
+    uint256 timeout = startTimestamp + defaultDelay;
     bool startedByLeft = entityId < params.counterentity;
     bytes32 initialArgumentsCommitment = _argumentCommitment(
       params.starterInitialArguments,
@@ -1167,7 +1167,6 @@ library Account {
       incrementedArgumentsCommitment
     );
     _accounts[acct_key].disputeTimeout = timeout;
-    _accounts[acct_key].disputeStartBlock = startBlock;
     _accounts[acct_key].disputeStartTimestamp = startTimestamp;
     _accounts[acct_key].disputeInitialProofbodyHash = params.proofbodyHash;
     _accounts[acct_key].starterInitialArgumentsCommitment = initialArgumentsCommitment;
@@ -1185,7 +1184,8 @@ library Account {
       params.initialProofbody.watchSeed,
       params.starterInitialArguments,
       params.starterIncrementedArguments,
-      timeout
+      timeout,
+      startTimestamp
     );
     return true;
   }

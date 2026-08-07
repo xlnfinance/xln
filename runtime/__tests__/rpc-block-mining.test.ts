@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { mineRpcToBlockExact } from '../scenarios/rpc-block-mining';
+import {
+  advanceRpcToUnixSeconds,
+  mineRpcToBlockExact,
+  readRpcUnixSeconds,
+} from '../scenarios/rpc-block-mining';
 
 type FakeProvider = {
   block: bigint;
+  unix: number;
   calls: Array<{ method: string; params: unknown[] }>;
   send: (method: string, params: unknown[]) => Promise<unknown>;
 };
@@ -10,10 +15,24 @@ type FakeProvider = {
 const createProvider = (startBlock: bigint, unsupported = new Set<string>()): FakeProvider => {
   const provider: FakeProvider = {
     block: startBlock,
+    unix: 1_700_000_000,
     calls: [],
     async send(method, params) {
       provider.calls.push({ method, params });
       if (method === 'eth_blockNumber') return `0x${provider.block.toString(16)}`;
+      if (method === 'eth_getBlockByNumber') {
+        return { timestamp: `0x${provider.unix.toString(16)}` };
+      }
+      if (method === 'evm_increaseTime') {
+        const delta = params[0];
+        if (typeof delta !== 'number') throw new Error('increaseTime requires number');
+        provider.unix += delta;
+        return null;
+      }
+      if (method === 'evm_mine') {
+        provider.block += 1n;
+        return null;
+      }
       if (unsupported.has(method)) throw new Error(`unsupported:${method}`);
       if (method !== 'anvil_mine' && method !== 'hardhat_mine') throw new Error(`unexpected:${method}`);
       const quantity = params[0];
@@ -72,5 +91,38 @@ describe('exact RPC batch mining', () => {
     await expect(mineRpcToBlockExact(provider, 20n)).rejects.toThrow(
       'RPC_BATCH_MINE_COUNT_MISMATCH:anvil_mine:start=10:requested=10:final=11:target=20',
     );
+  });
+});
+
+describe('RPC unix dispute-clock advance', () => {
+  test('reads latest block.timestamp as unix seconds', async () => {
+    const provider = createProvider(1n);
+    provider.unix = 1_700_000_042;
+    expect(await readRpcUnixSeconds(provider)).toBe(1_700_000_042);
+  });
+
+  test('advances wall-clock to absolute disputeTimeout without mining thousands of blocks', async () => {
+    const provider = createProvider(3n);
+    const result = await advanceRpcToUnixSeconds(provider, 1_700_005_760);
+    expect(result).toEqual({
+      startUnix: 1_700_000_000,
+      finalUnix: 1_700_005_760,
+      advancedSeconds: 5_760,
+    });
+    expect(provider.block).toBe(4n);
+    expect(provider.calls.map(({ method }) => method)).toEqual([
+      'eth_getBlockByNumber',
+      'evm_increaseTime',
+      'evm_mine',
+      'eth_getBlockByNumber',
+    ]);
+  });
+
+  test('no-ops when the unix deadline is already satisfied', async () => {
+    const provider = createProvider(3n);
+    provider.unix = 1_700_009_999;
+    const result = await advanceRpcToUnixSeconds(provider, 1_700_005_760);
+    expect(result.advancedSeconds).toBe(0);
+    expect(provider.calls.map(({ method }) => method)).toEqual(['eth_getBlockByNumber']);
   });
 });

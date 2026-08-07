@@ -1,5 +1,4 @@
 import { prepareEntityTxState } from '../../state-clone';
-import { addMessage } from '../../frame-events';
 import { handlePrepareDispute } from './dispute';
 import { normalizeEntityRef } from '../account-key';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
@@ -39,9 +38,44 @@ const localDisputeCounterparty = (
 };
 
 /**
- * Sibling-leg dispute fanout. Seeing a dispute on any route leg is the signal
- * to start the sibling clock: each participant preparesDispute on its own
- * Account so reveals and ports can land before either chain's T expires.
+ * Fanout evidence names the peer on the *observed* (other) leg — never the
+ * local Account to dispute. User↔user / hub↔hub fanout always has
+ * observed ≠ localDisputeCounterparty by construction.
+ */
+const observedIsOtherLegParticipant = (
+  route: CrossJurisdictionSwapRoute,
+  self: string,
+  observed: string,
+): boolean => {
+  if (!observed || observed === self) return false;
+  const source = [
+    normalizeEntityRef(route.source.entityId),
+    normalizeEntityRef(route.source.counterpartyEntityId),
+  ];
+  const target = [
+    normalizeEntityRef(route.target.entityId),
+    normalizeEntityRef(route.target.counterpartyEntityId),
+  ];
+  const onSource = source.includes(self);
+  const onTarget = target.includes(self);
+  if (onSource && !onTarget) return target.includes(observed);
+  if (onTarget && !onSource) return source.includes(observed);
+  // Dual-leg participant is not a cross-j role; reject rather than guess.
+  return false;
+};
+
+/**
+ * Sibling-leg dispute fanout (must-close).
+ *
+ * Invariant: observing DisputeStarted on any live cross-j leg MUST start the
+ * sibling Account's dispute clock in the same runtime. Legs are not atomic
+ * 2PC — silence still settles 0 — but clocks must start together so the
+ * revealer can publish by start+T/2 and the porter can use the second half of T.
+ *
+ * Fail-loud (never soft-skip): missing route mirror, missing source+target
+ * pulls, non-participant self, or observed peer not on the other leg. Soft-skip
+ * previously left the sibling clock unstarted → economic residual disguised as
+ * "ops".
  */
 export const handleCrossJurisdictionForceSiblingDisputeEntityTx = async (
   env: EntityRuntimeContext,
@@ -50,18 +84,29 @@ export const handleCrossJurisdictionForceSiblingDisputeEntityTx = async (
   storageChanges: RuntimeOverlayRecord[] = [],
   mutableFrameState = false,
 ): Promise<ForceSiblingDisputeResult> => {
-  const { routeId } = entityTx.data;
+  const { routeId, observedCounterpartyEntityId } = entityTx.data;
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const self = normalizeEntityRef(newState.entityId);
   const route = newState.crossJurisdictionSwaps?.get(routeId);
   if (!route) {
-    addMessage(newState, `⚔️ Sibling dispute fanout ${routeId} skipped: route missing`);
-    return { newState, outputs: [] };
+    // Soft-skip here would break the paired-clock invariant (I1): one leg's
+    // DisputeStarted must force-start the sibling. Missing route mirror after
+    // a live observed dispute is a critical state-loss, not a no-op.
+    throw new Error(`CROSS_J_SIBLING_DISPUTE_ROUTE_MISSING:${routeId}`);
+  }
+  if (!route.sourcePull || !route.targetPull) {
+    throw new Error(`CROSS_J_SIBLING_DISPUTE_PULLS_MISSING:${routeId}`);
   }
   const counterpartyEntityId = localDisputeCounterparty(route, self);
   if (!counterpartyEntityId) {
-    addMessage(newState, `⚔️ Sibling dispute fanout ${routeId} skipped: not a participant`);
-    return { newState, outputs: [] };
+    throw new Error(`CROSS_J_SIBLING_DISPUTE_NOT_PARTICIPANT:${routeId}:self=${self}`);
+  }
+  const observed = normalizeEntityRef(observedCounterpartyEntityId || '');
+  if (!observedIsOtherLegParticipant(route, self, observed)) {
+    throw new Error(
+      `CROSS_J_SIBLING_DISPUTE_OBSERVED_LEG_INVALID:${routeId}:` +
+      `observed=${observed}:self=${self}:local=${counterpartyEntityId}`,
+    );
   }
   const prepared = await handlePrepareDispute(
     newState,

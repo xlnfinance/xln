@@ -4,6 +4,7 @@ import { log } from '../../infra/diagnostics';
 import { finalizeCommitNotification } from './commit-finalization';
 import { getEntityHashManifestMismatch } from './hanko-witness';
 import {
+  commitEntityConsensusInput,
   rejectEntityConsensusInput,
   type ApplyEntityInputContext,
   type ApplyEntityInputResult,
@@ -137,9 +138,14 @@ export const handleHashPrecommits = async (
   const hasIncoming = Boolean(entityInput.hashPrecommits?.size);
   const proposal = workingReplica.proposal ?? workingReplica.lockedFrame;
   if (!proposal) {
-    return hasIncoming
-      ? rejectEntityConsensusInput(context, 'PRECOMMIT_FRAME_NOT_ACTIVE')
-      : null;
+    if (!hasIncoming) return null;
+    const reference = entityInput.hashPrecommitFrame;
+    // Same catch-up shape as stale j-prefix: the Entity height already moved on,
+    // so commit as a no-op so reliable ingress can terminalize the delivery.
+    if (reference && workingReplica.state.height > reference.height) {
+      return commitEntityConsensusInput(context);
+    }
+    return rejectEntityConsensusInput(context, 'PRECOMMIT_FRAME_NOT_ACTIVE');
   }
   const mergeResult = mergeIncomingPrecommits(context);
   if (mergeResult) return mergeResult;

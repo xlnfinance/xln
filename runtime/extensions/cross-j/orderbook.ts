@@ -5,7 +5,6 @@ import {
   compareCrossJurisdictionRouteStatus,
   deriveCanonicalCrossJurisdictionMarket,
   getCrossJurisdictionCommittedFillAmounts,
-  isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from './index';
@@ -277,12 +276,6 @@ export const getCrossJurisdictionBookAdmissionError = (
   }
   if (isCrossJurisdictionRouteExpired(canonicalRoute, now)) {
     return `CROSS_J_ORDER_ROUTE_EXPIRED: order=${canonicalRoute.orderId}`;
-  }
-  if (isCrossJurisdictionPullExpired(canonicalRoute, 'source', now)) {
-    return `CROSS_J_ORDER_LOCK_EXPIRED: order=${canonicalRoute.orderId} leg=source`;
-  }
-  if (isCrossJurisdictionPullExpired(canonicalRoute, 'target', now)) {
-    return `CROSS_J_ORDER_LOCK_EXPIRED: order=${canonicalRoute.orderId} leg=target`;
   }
 
   const key = crossJurisdictionBookAdmissionKey(canonicalRoute);

@@ -18,7 +18,6 @@ import {
 } from '../../../protocol/htlc/hash-ladder';
 import { addHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
-import { isPullRevealExpired } from '../../pull-deadline';
 import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 
 type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;
@@ -135,7 +134,6 @@ const validateCrossPullCloseEvidence = (
   pull: PullCommitment,
   binding: CrossJurisdictionPullBinding,
   tx: CrossPullCloseTx,
-  currentTimestamp: number,
 ): Readonly<{ ok: true; ratio: number } | { ok: false; error: string }> => {
   const { binary, proof } = tx.data;
   const proofError = crossProofMatchesBinding(binding, proof, pull);
@@ -163,9 +161,8 @@ const validateCrossPullCloseEvidence = (
   if (decodedRatio !== ratio) {
     return { ok: false, error: `Cross-j close ratio mismatch: binary ${decodedRatio} != proof ${ratio}` };
   }
-  if (ratio > 0 && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp)) {
-    return { ok: false, error: 'Pull reveal deadline expired' };
-  }
+  // Settlement clock is dispute-relative unix seconds on L1 (start + T/2).
+  // No sealed route/pull reveal deadline gates cooperative close.
   return { ok: true, ratio };
 };
 
@@ -206,7 +203,6 @@ const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockT
   const leg = binding.leg === 'source' ? route.source : route.target;
   const pull = binding.leg === 'source' ? route.sourcePull : route.targetPull;
   if (!pull || tx.data.pullId !== pull.pullId || tx.data.tokenId !== pull.tokenId || tx.data.amount !== pull.signedAmount ||
-      tx.data.revealedUntilTimestamp !== pull.revealedUntilTimestamp ||
       tx.data.fullHash.toLowerCase() !== pull.fullHash.toLowerCase() ||
       tx.data.partialRoot.toLowerCase() !== pull.partialRoot.toLowerCase()) return 'Cross-j pull terms do not match route';
   const endpoints = new Set([account.leftEntity.toLowerCase(), account.rightEntity.toLowerCase()]);
@@ -225,7 +221,7 @@ export async function handlePullLock(
   currentHeight: number,
   currentTimestamp: number,
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
-  const { pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot, crossJurisdiction } = accountTx.data;
+  const { pullId, tokenId, amount, fullHash, partialRoot, crossJurisdiction } = accountTx.data;
   const events: string[] = [];
 
   const crossJurisdictionRouteError = validateCrossJurisdictionPullRoute(account, accountTx);
@@ -275,11 +271,6 @@ export async function handlePullLock(
   if (absAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || absAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     return { success: false, error: `Pull amount out of bounds: ${absAmount}`, events };
   }
-  // Pull deadlines are absolute wall-clock milliseconds. Cross-jurisdiction
-  // legs cannot compare local block numbers across chains with different block times.
-  if (!Number.isFinite(revealedUntilTimestamp) || revealedUntilTimestamp <= currentTimestamp) {
-    return { success: false, error: `Invalid pull reveal deadline`, events };
-  }
 
   const beneficiaryIsLeft = amount > 0n;
   const loserIsLeft = !beneficiaryIsLeft;
@@ -299,13 +290,14 @@ export async function handlePullLock(
   const holdError = addHold(delta, loserIsLeft ? 'left' : 'right', absAmount);
   if (holdError) return { success: false, error: holdError, events };
 
+  // No sealed pull reveal deadline. Settlement clock is dispute-relative
+  // seconds on L1; cooperative close is event-driven (hashladder reveal).
   account.pulls.set(pullId, {
     pullId,
     tokenId,
     amount,
     claimedRatio: 0,
     claimedAmount: 0n,
-    revealedUntilTimestamp,
     fullHash,
     partialRoot,
     crossJurisdiction: cloneCrossJurisdictionPullBinding(crossJurisdiction),
@@ -321,7 +313,7 @@ export async function handleCrossPullClose(
   account: AccountState,
   accountTx: CrossPullCloseTx,
   byLeft: boolean,
-  currentTimestamp: number,
+  _currentTimestamp: number,
 ): Promise<{
   success: boolean;
   events: string[];
@@ -338,7 +330,7 @@ export async function handleCrossPullClose(
   }
   const binding = pull.crossJurisdiction;
   if (!binding) return { success: false, error: `Cross-j close requires pull binding`, events };
-  const evidence = validateCrossPullCloseEvidence(pull, binding, accountTx, currentTimestamp);
+  const evidence = validateCrossPullCloseEvidence(pull, binding, accountTx);
   if (!evidence.ok) return { success: false, error: evidence.error, events };
   const ratio = evidence.ratio;
 

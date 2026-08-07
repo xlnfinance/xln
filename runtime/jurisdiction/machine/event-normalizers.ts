@@ -79,8 +79,9 @@ const disputeStarted = defineEventNormalizer('DisputeStarted', data => {
     starterInitialArguments: normalizeHexBytes,
     starterIncrementedArguments: normalizeHexBytes,
     disputeTimeout: normalizeInt,
+    disputeStartTimestamp: normalizeInt,
   });
-  if (!decoded || decoded.disputeTimeout <= 0) return null;
+  if (!decoded || decoded.disputeTimeout <= 0 || decoded.disputeStartTimestamp <= 0) return null;
   const batchNonce = normalizeInt(data['batchNonce']);
   return {
     ...decoded,

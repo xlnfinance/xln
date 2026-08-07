@@ -1484,6 +1484,7 @@ describe('production startup wiring', () => {
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
     const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/remoteRuntimeImportFlow.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const runtimeImportHttp = readFileSync(join(repoRoot, 'runtime/orchestrator/runtime-import-http.ts'), 'utf8');
     const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap-timeline-stages.ts'), 'utf8');
     const isolatedRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
 
@@ -1497,15 +1498,15 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('custodyBootstrapPending,');
     expect(orchestrator).toContain('const readiness = resolveRuntimeImportReadiness(health);');
     expect(orchestrator).toContain('if (!readiness.ok) {');
-    expect(orchestrator).toContain("url.searchParams.get('allowPartial') === '1'");
-    expect(orchestrator).toContain('&& operatorAuthorized;');
-    expect(orchestrator).toContain('partial: true,');
-    expect(orchestrator).toContain('ready: false,');
-    expect(orchestrator).toContain('category: readiness.category,');
-    expect(orchestrator).toContain('failure: readiness.failure,');
-    expect(orchestrator).toContain('entries: [],');
-    expect(orchestrator).toContain("'Retry-After': '2'");
-    expect(orchestrator).not.toContain('status: readiness.status, headers');
+    expect(runtimeImportHttp).toContain("url.searchParams.get('allowPartial') === '1'");
+    expect(runtimeImportHttp).toContain('&& operatorAuthorized;');
+    expect(runtimeImportHttp).toContain('partial: true,');
+    expect(runtimeImportHttp).toContain('ready: false,');
+    expect(runtimeImportHttp).toContain('category: readiness.category,');
+    expect(runtimeImportHttp).toContain('failure: readiness.failure,');
+    expect(runtimeImportHttp).toContain('entries: [],');
+    expect(runtimeImportHttp).toContain("'Retry-After': '2'");
+    expect(runtimeImportHttp).not.toContain('status: readiness.status, headers');
     expect(orchestrator).toContain('clearRuntimeImportManifestFile();');
     expect(orchestrator).toContain('scheduleRuntimeImportManifestRefresh(null);');
     expect(bootstrapTimeline).toContain(

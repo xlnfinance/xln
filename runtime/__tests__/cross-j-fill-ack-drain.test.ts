@@ -48,7 +48,7 @@ test('pending fill ack is retained (and its incident never resolves) when admiss
     status: 'resting',
     createdAt: env.state.timestamp,
     updatedAt: env.state.timestamp,
-  }, { runtimeSeed: 'cross-fill-ack-drain-retention', sourceDisputeDelayMs: 5_000, now: env.state.timestamp });
+  }, { runtimeSeed: 'cross-fill-ack-drain-retention', now: env.state.timestamp });
   // The offer exists (so the drain attempts admission), and the same ack is
   // already queued in the account mempool, so local admission dedups it and the
   // drain must retain the pending entry instead of deleting it silently.

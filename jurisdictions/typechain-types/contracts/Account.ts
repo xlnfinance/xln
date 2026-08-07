@@ -315,7 +315,8 @@ export namespace DisputeStartedEvent {
     watchSeed: BytesLike,
     starterInitialArguments: BytesLike,
     starterIncrementedArguments: BytesLike,
-    disputeTimeout: BigNumberish
+    disputeTimeout: BigNumberish,
+    disputeStartTimestamp: BigNumberish
   ];
   export type OutputTuple = [
     sender: string,
@@ -325,7 +326,8 @@ export namespace DisputeStartedEvent {
     watchSeed: string,
     starterInitialArguments: string,
     starterIncrementedArguments: string,
-    disputeTimeout: bigint
+    disputeTimeout: bigint,
+    disputeStartTimestamp: bigint
   ];
   export interface OutputObject {
     sender: string;
@@ -336,6 +338,7 @@ export namespace DisputeStartedEvent {
     starterInitialArguments: string;
     starterIncrementedArguments: string;
     disputeTimeout: bigint;
+    disputeStartTimestamp: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -637,7 +640,7 @@ export interface Account extends BaseContract {
       DebtCreatedEvent.OutputObject
     >;
 
-    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes32,bytes,bytes,uint256)": TypedContractEvent<
+    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes32,bytes,bytes,uint256,uint256)": TypedContractEvent<
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject

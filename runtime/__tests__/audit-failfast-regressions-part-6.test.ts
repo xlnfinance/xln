@@ -25,7 +25,6 @@ import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 
 import { applyAccountTx } from '../account/tx/apply';
 
-import { isPullRevealExpired } from '../account/pull-deadline';
 
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
 
@@ -640,7 +639,8 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   }
   account.activeDispute = {
     startedByLeft: true,
-    disputeTimeout: 123,
+    disputeTimeout: 1700000123,
+    disputeStartTimestamp: 1700000000,
     initialProofbodyHash: finalProofbodyHash,
     initialNonce: 7,
     finalizeQueued: true,
@@ -805,7 +805,7 @@ describe('audit fail-fast regressions', () => {
         updatedAt: env.state.timestamp,
         expiresAt: env.state.timestamp + 60_000,
       },
-      { runtimeSeed: 'cross-fill-notice-pending-source-offer', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'cross-fill-notice-pending-source-offer', now: env.state.timestamp },
     );
     route.status = 'resting';
 
@@ -958,7 +958,7 @@ describe('audit fail-fast regressions', () => {
         updatedAt: env.state.timestamp,
         expiresAt: env.state.timestamp + 60_000,
       },
-      { runtimeSeed: 'cross-fill-ack-admission-fallback', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'cross-fill-ack-admission-fallback', now: env.state.timestamp },
     );
     const state = makeEntityState(targetHub);
     const routeHash = route.routeHash || 'route-hash';
@@ -1104,7 +1104,7 @@ describe('audit fail-fast regressions', () => {
         updatedAt: env.state.timestamp,
         expiresAt: env.state.timestamp + 60_000,
       },
-      { runtimeSeed: 'dispute-start-cross-j-remote-book', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'dispute-start-cross-j-remote-book', now: env.state.timestamp },
     );
     account.state.swapOffers.set(offerId, {
       offerId,
@@ -1611,7 +1611,6 @@ describe('audit fail-fast regressions', () => {
       },
       {
         runtimeSeed: 'prepare-dispute-cross-close-evidence',
-        sourceDisputeDelayMs: 5_000,
         now: env.state.timestamp,
       },
     );
@@ -1638,7 +1637,6 @@ describe('audit fail-fast regressions', () => {
           amount: route.sourcePull!.signedAmount,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
@@ -1707,7 +1705,8 @@ describe('audit fail-fast regressions', () => {
       startedByLeft: false,
       initialProofbodyHash: initialProof.proofBodyHash,
       initialNonce: 1,
-      disputeTimeout: 100,
+      disputeTimeout: 1700000100,
+      disputeStartTimestamp: 1700000000,
       jNonce: 1,
       starterInitialArguments: '0x',
       starterIncrementedArguments: '0x',

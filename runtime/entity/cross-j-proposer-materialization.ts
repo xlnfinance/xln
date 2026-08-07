@@ -5,7 +5,6 @@ import {
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionPrivateSeed,
 } from '../extensions/cross-j/index';
-import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import { safeStringify } from '../protocol/serialization';
 import type { AccountReplica, AccountTx } from '../types/account';
@@ -371,7 +370,6 @@ export const appendDefaultProposerCrossJMaterializations = (
     ) continue;
     const preparedRoute = buildPreparedCrossJurisdictionRoute(route, {
       runtimeSeed: env.runtimeSeed,
-      sourceDisputeDelayMs: committedCrossJSourceDisputeDelayMs(replica.state, route),
       now: env.state.timestamp,
     });
     additions.push({

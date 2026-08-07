@@ -60,10 +60,8 @@ contract DebtChunkingTest is XlnFixture {
     assertTrue(_submit(0, start), "dispute start failed");
     (, , uint256 disputeTimeout,,,,,) =
       dep._accounts(XlnHanko.accountKey(entity[0], entity[1]));
-    // Read the contract's exact deadline. Optimized Solidity may common-subexpression
-    // eliminate repeated block.number reads around the vm.roll cheatcode, which made
-    // the second cycle roll back to the first cycle's cached height.
-    vm.roll(disputeTimeout);
+    // disputeTimeout is absolute unix end; warp past it (seconds clock).
+    vm.warp(disputeTimeout + 1);
 
     Batch memory fin = XlnHanko.emptyBatch();
     fin.disputeFinalizations = new FinalDisputeProof[](1);

@@ -19,7 +19,7 @@
   import SettlementPanel from './SettlementPanel.svelte';
   import SwapPanel from './SwapPanel.svelte';
   import type { SwapPanelRuntimeView } from './swap-panel-helpers';
-  import type { DisputedAccountView, CrossJTargetDisputeRisk } from './account-dispute-view';
+  import type { DisputedAccountView } from './account-dispute-view';
   import type { EntityActivityAccountOption, EntityActivityRow } from './entity-activity';
   import type { AccountWorkspaceTab, ConfigureWorkspaceTab } from './entity-panel-routing';
   import {
@@ -90,7 +90,6 @@
   export let configureWorkspaceTab: ConfigureWorkspaceTab = 'extend-credit';
   export let configureTokenId = 1;
   export let configureTokenOptions: ConfigureTokenOption[] = [];
-  export let unsafeCrossJTargetDisputeAccepted = false;
   export let openOutgoingDebtSummary: OpenOutgoingDebtSummary = { count: 0, usdTotal: 0 };
   export let pendingBatchCount = 0;
   export let pendingBatchMode: 'draft' | 'sent' | null = null;
@@ -175,13 +174,10 @@
   export let handleWorkspaceAccountChange: (event: CustomEvent<{ value?: string }>) => void;
 
   $: profiles = Array.from(profileByEntityId.values());
-  export let getCrossJTargetDisputeRisk: (counterpartyEntityId: string) => CrossJTargetDisputeRisk | null;
-  export let formatCrossJTargetDisputeRisk: (risk: CrossJTargetDisputeRisk) => string;
   export let confirmAndQueueDisputeFinalize: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
   export let confirmAndQueueDisputePrepare: (
     counterpartyEntityId: string,
     reason: string,
-    options?: Record<string, unknown>,
   ) => void | Promise<void>;
   export let addTokenToAccount: () => void | Promise<void>;
   export let handleOpenAccountTargetChange: (event: CustomEvent<{ value?: string }>) => void;
@@ -413,11 +409,8 @@
       bind:configureWorkspaceTab
       bind:configureTokenId
       {configureTokenOptions}
-      bind:unsafeCrossJTargetDisputeAccepted
       {handleWorkspaceAccountChange}
       selectConfigureTab={(nextTab) => configureWorkspaceTab = nextTab}
-      {getCrossJTargetDisputeRisk}
-      {formatCrossJTargetDisputeRisk}
       {confirmAndQueueDisputeFinalize}
       {confirmAndQueueDisputePrepare}
       {addTokenToAccount}

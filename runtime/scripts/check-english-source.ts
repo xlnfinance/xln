@@ -19,6 +19,13 @@ const MULTILINGUAL_FILES = new Set([
   'frontend/static/docs-static/guide-ru.md',
 ]);
 
+// Bundled browser runtime embeds compressed BIP39 tables whose opaque byte
+// strings decode as Cyrillic under a UTF-8 scan. Source of truth is
+// brainvault/; do not treat the artifact as editable prose.
+const BUNDLED_ARTIFACT_FILES = new Set([
+  'ui/public/runtime.js',
+]);
+
 const EXCLUDED_PREFIXES = ['.archive/', 'ai/'];
 
 const trackedFiles = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
@@ -34,6 +41,7 @@ for (const file of trackedFiles) {
   if (!fs.existsSync(file)) continue;
   if (EXCLUDED_PREFIXES.some(prefix => file.startsWith(prefix))) continue;
   if (MULTILINGUAL_FILES.has(file)) continue;
+  if (BUNDLED_ARTIFACT_FILES.has(file)) continue;
 
   const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/u);
   for (const [index, line] of lines.entries()) {

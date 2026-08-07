@@ -239,7 +239,7 @@ contract LifecycleTest is XlnFixture {
     vm.expectRevert();
     dep.processBatch(encoded, _hanko(0, bh), bn);
 
-    vm.roll(block.number + DISPUTE_DELAY);
+    vm.warp(block.timestamp + DISPUTE_DELAY);
     assertTrue(_submit(0, fin), "finalize after delay failed");
 
     assertEq(_disputeHashOf(entity[0], entity[1]), bytes32(0), "dispute not cleared");
@@ -254,7 +254,7 @@ contract LifecycleTest is XlnFixture {
     bool startedByLeft = entity[0] < entity[1];
     (uint256 nonce, bytes32 pbHash, bytes32 seed) = _startDispute(0, 1, int256(400));
 
-    vm.roll(block.number + DISPUTE_DELAY);
+    vm.warp(block.timestamp + DISPUTE_DELAY);
     Batch memory fin = _timeoutFinalize(1, nonce, pbHash, seed, 400, startedByLeft);
     assertTrue(_submit(0, fin));
 
@@ -313,7 +313,7 @@ contract LifecycleTest is XlnFixture {
     // No collateral, no reserves: delta -500 means LEFT owes RIGHT 500.
     (uint256 nonce, bytes32 pbHash, bytes32 seed) = _startDispute(0, 1, int256(-500));
     bool startedByLeft = entity[0] < entity[1];
-    vm.roll(block.number + DISPUTE_DELAY);
+    vm.warp(block.timestamp + DISPUTE_DELAY);
     assertTrue(_submit(0, _timeoutFinalize(1, nonce, pbHash, seed, -500, startedByLeft)));
 
     (bytes32 left,) = entity[0] < entity[1] ? (entity[0], entity[1]) : (entity[1], entity[0]);

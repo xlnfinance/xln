@@ -21,8 +21,7 @@ export const validateCrossJurisdictionSourceBinding = (
     pairedPull.tokenId !== tx.data.giveTokenId ||
     pairedPull.amount !== sourcePull.signedAmount ||
     (pairedPull.fullHash || '').toLowerCase() !== sourcePull.fullHash.toLowerCase() ||
-    (pairedPull.partialRoot || '').toLowerCase() !== sourcePull.partialRoot.toLowerCase() ||
-    pairedPull.revealedUntilTimestamp !== sourcePull.revealedUntilTimestamp
+    (pairedPull.partialRoot || '').toLowerCase() !== sourcePull.partialRoot.toLowerCase()
   ) {
     return 'Cross-j swap offer source pull mismatch';
   }

@@ -1,6 +1,5 @@
 import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
 import {
-  isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   isCrossJurisdictionTerminalStatus,
   withCanonicalCrossJurisdictionRouteHash,
@@ -64,10 +63,10 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
     const route = refreshSweepRoute(newState, orderId, storedRoute);
     if (isCrossJurisdictionTerminalStatus(route.status)) continue;
 
+    // Book TTL sweep only — pull reveal deadlines are not sealed into the route.
+    // Settlement finality is dispute-relative seconds on L1.
     const routeExpired = isCrossJurisdictionRouteExpired(route, now);
-    const sourceExpired = isCrossJurisdictionPullExpired(route, 'source', now);
-    const targetExpired = isCrossJurisdictionPullExpired(route, 'target', now);
-    if (!routeExpired && !sourceExpired && !targetExpired) {
+    if (!routeExpired) {
       waitingRoutes++;
       continue;
     }

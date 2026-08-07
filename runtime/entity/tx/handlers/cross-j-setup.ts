@@ -73,10 +73,17 @@ const authorizeCrossJurisdictionIntent = (
     throw new Error(`CROSS_J_USER_AUTH_EXPIRED:${route.orderId}`);
   }
   if (role === 'source') committedCrossJSourceDisputeDelayMs(state, route);
+  // Sibling-dispute fanout needs every participant's signer. Admitting a route
+  // with a blank targetSignerId (or hub signer) lets DisputeStarted throw inside
+  // j_event apply and permanently wedge the victim's watcher redelivery.
+  const sourceSignerId = normalizeEntityRef(route.sourceSignerId || '');
   const sourceHubSignerId = normalizeEntityRef(route.sourceHubSignerId || '');
-  if (role === 'source' && !sourceHubSignerId) {
-    throw new Error(`CROSS_J_SOURCE_HUB_SIGNER_MISSING:${route.orderId}`);
-  }
+  const targetHubSignerId = normalizeEntityRef(route.targetHubSignerId || '');
+  const targetSignerId = normalizeEntityRef(route.targetSignerId || '');
+  if (!sourceSignerId) throw new Error(`CROSS_J_SOURCE_SIGNER_MISSING:${route.orderId}`);
+  if (!sourceHubSignerId) throw new Error(`CROSS_J_SOURCE_HUB_SIGNER_MISSING:${route.orderId}`);
+  if (!targetHubSignerId) throw new Error(`CROSS_J_TARGET_HUB_SIGNER_MISSING:${route.orderId}`);
+  if (!targetSignerId) throw new Error(`CROSS_J_TARGET_SIGNER_MISSING:${route.orderId}`);
   state.crossJurisdictionAuthorizations ||= new Map();
   const existing = state.crossJurisdictionAuthorizations.get(route.orderId);
   if (existing) {
@@ -334,7 +341,6 @@ const buildSourceRegistrationTxs = (
           pullId: sourcePull.pullId,
           tokenId: sourcePull.tokenId,
           amount: sourcePull.signedAmount,
-          revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
           fullHash: sourcePull.fullHash,
           partialRoot: sourcePull.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
@@ -377,7 +383,6 @@ const buildTargetRegistrationTxs = (
         pullId: targetPull.pullId,
         tokenId: targetPull.tokenId,
         amount: targetPull.signedAmount,
-        revealedUntilTimestamp: targetPull.revealedUntilTimestamp,
         fullHash: targetPull.fullHash,
         partialRoot: targetPull.partialRoot,
         crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),

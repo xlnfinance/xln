@@ -84,3 +84,69 @@ export const createBootstrapTimelineTools = (deps: BootstrapTimelineDeps) => {
     readLastMarketMakerBootstrapEvent: () => readLastMarketMakerBootstrapEvent(deps, bootstrapEventsPath),
   };
 };
+
+export type CurrentBootstrapTimelineInput = {
+  storageOk: boolean;
+  resetOk: boolean;
+  hubs: AggregatedHealth['hubs'];
+  hubsOnline: boolean;
+  hubMeshOk: boolean;
+  directOpenLinks: number;
+  marketMakerEnabled: boolean;
+  marketMakerActive: boolean;
+  marketMaker: AggregatedHealth['marketMaker'];
+  marketMakerStartupPhase: string | null;
+  hubNameCount: number;
+  custodyEnabled: boolean;
+  custodyOk: boolean;
+  bootstrapReservesOk: boolean;
+  bootstrapReserveTargetsMet: boolean;
+  reserveEntityCount: number;
+};
+
+/** Project AggregatedHealth-ish fields into the stage timeline params. */
+export const projectCurrentBootstrapTimelineParams = (
+  input: CurrentBootstrapTimelineInput,
+): BootstrapTimelineParams => {
+  const mmHubs = input.marketMaker.hubs;
+  const mmCross = input.marketMaker.cross;
+  const mmOfferTotal = mmHubs.reduce(
+    (sum, hub) => sum + Number(hub.offers || 0),
+    0,
+  );
+  const mmExpectedTotal =
+    input.marketMaker.expectedOffersPerHub *
+    Math.max(1, mmHubs.length || input.hubNameCount);
+  const sameChainOk =
+    !input.marketMakerEnabled ||
+    (mmHubs.length === input.hubNameCount &&
+      mmHubs.every(hub => hub.depthReady === true));
+  const crossOk =
+    !input.marketMakerEnabled ||
+    !mmCross.applicable ||
+    mmCross.ok === true;
+  return {
+    storageOk: input.storageOk,
+    resetOk: input.resetOk,
+    hubsOnline: input.hubsOnline,
+    onlineHubs: input.hubs.filter(hub => hub.online).length,
+    totalHubs: input.hubs.length,
+    hubMeshOk: input.hubMeshOk,
+    directOpenLinks: input.directOpenLinks,
+    mmEnabled: input.marketMakerEnabled,
+    marketMakerActive: input.marketMakerActive,
+    sameChainOk,
+    crossOk,
+    mmOk: input.marketMaker.ok,
+    mmStartupPhase: input.marketMakerStartupPhase,
+    mmOfferTotal,
+    mmExpectedTotal,
+    crossRouteCount: Number(mmCross.routeCount || 0),
+    expectedCrossRoutes: mmCross.expectedRoutes,
+    custodyEnabled: input.custodyEnabled,
+    custodyOk: input.custodyOk,
+    bootstrapReservesOk: input.bootstrapReservesOk,
+    bootstrapReserveTargetsMet: input.bootstrapReserveTargetsMet,
+    reserveEntityCount: input.reserveEntityCount,
+  };
+};

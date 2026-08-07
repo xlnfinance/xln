@@ -76,7 +76,6 @@ export declare namespace DeltaTransformer {
     deltaIndex: BigNumberish;
     amount: BigNumberish;
     claimedRatio: BigNumberish;
-    revealedUntilTimestamp: BigNumberish;
     fullHash: BytesLike;
     partialRoot: BytesLike;
   };
@@ -85,14 +84,12 @@ export declare namespace DeltaTransformer {
     deltaIndex: bigint,
     amount: bigint,
     claimedRatio: bigint,
-    revealedUntilTimestamp: bigint,
     fullHash: string,
     partialRoot: string
   ] & {
     deltaIndex: bigint;
     amount: bigint;
     claimedRatio: bigint;
-    revealedUntilTimestamp: bigint;
     fullHash: string;
     partialRoot: string;
   };
@@ -257,7 +254,7 @@ export interface DeltaTransformer extends BaseContract {
       rightArgumentsTimestamp: BigNumberish,
       leftEntity: BytesLike,
       rightEntity: BytesLike,
-      disputeStartBlock: BigNumberish,
+      disputeStartTimestamp: BigNumberish,
       disputeTimeout: BigNumberish
     ],
     [bigint[]],
@@ -303,7 +300,7 @@ export interface DeltaTransformer extends BaseContract {
       rightArgumentsTimestamp: BigNumberish,
       leftEntity: BytesLike,
       rightEntity: BytesLike,
-      disputeStartBlock: BigNumberish,
+      disputeStartTimestamp: BigNumberish,
       disputeTimeout: BigNumberish
     ],
     [bigint[]],

@@ -25,7 +25,6 @@ import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 
 import { applyAccountTx } from '../account/tx/apply';
 
-import { isPullRevealExpired } from '../account/pull-deadline';
 
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
 
@@ -634,7 +633,8 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   }
   account.activeDispute = {
     startedByLeft: true,
-    disputeTimeout: 123,
+    disputeTimeout: 1700000123,
+    disputeStartTimestamp: 1700000000,
     initialProofbodyHash: finalProofbodyHash,
     initialNonce: 7,
     finalizeQueued: true,
@@ -1195,7 +1195,7 @@ describe('audit fail-fast regressions', () => {
     expect(applied.newState.jBatchState?.batch.disputeStarts ?? []).toHaveLength(0);
   });
 
-  test('receiver-local preflight rejects stale creation of unenforceable HTLC and pull locks', () => {
+  test('receiver-local preflight rejects stale creation of unenforceable HTLC locks', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const context = { entityTimestamp: 100_000, finalizedJHeight: 50 };
     const htlcTx: AccountTx = {
@@ -1209,70 +1209,13 @@ describe('audit fail-fast regressions', () => {
         tokenId: 1,
       },
     };
-    const pullProof = buildHashLadderProof('stale-pull-lock');
-    const pullRoute = withCanonicalCrossJurisdictionRouteHash({
-      orderId: 'stale-pull-order',
-      makerEntityId: 'alice',
-      hubEntityId: 'hub',
-      source: {
-        jurisdiction: `stack:1:0x${'11'.repeat(20)}`,
-        entityId: 'alice',
-        counterpartyEntityId: 'hub',
-        tokenId: 1,
-        amount: 1n,
-      },
-      target: {
-        jurisdiction: `stack:2:0x${'22'.repeat(20)}`,
-        entityId: 'target-hub',
-        counterpartyEntityId: 'target-user',
-        tokenId: 2,
-        amount: 1n,
-      },
-      sourcePull: {
-        pullId: 'stale-pull',
-        tokenId: 1,
-        amount: 1n,
-        signedAmount: -1n,
-        revealedUntilTimestamp: 120_000,
-        fullHash: pullProof.fullHash,
-        partialRoot: pullProof.partialRoot,
-      },
-      targetPull: {
-        pullId: 'stale-target-pull',
-        tokenId: 2,
-        amount: 1n,
-        signedAmount: 1n,
-        revealedUntilTimestamp: 180_000,
-        fullHash: pullProof.fullHash,
-        partialRoot: pullProof.partialRoot,
-      },
-      status: 'resting',
-      createdAt: 1,
-      updatedAt: 1,
-    });
-    const pullTx: AccountTx = {
-      type: 'cross_pull_lock',
-      data: {
-        pullId: 'stale-pull',
-        tokenId: 1,
-        amount: -1n,
-        revealedUntilTimestamp: 120_000,
-        fullHash: pullProof.fullHash,
-        partialRoot: pullProof.partialRoot,
-        crossJurisdiction: buildCrossJurisdictionPullBinding(pullRoute, 'source'),
-        crossJurisdictionRoute: pullRoute,
-      },
-    };
 
     expect(
       getIncomingAccountDeadlineViolation(account.state, makeIncomingAccountFrame(account, htlcTx, true), context)?.reason,
     ).toContain('HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
-    expect(
-      getIncomingAccountDeadlineViolation(account.state, makeIncomingAccountFrame(account, pullTx, true), context)?.reason,
-    ).toContain('CROSS_PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
   });
 
-  test('receiver-local preflight matches Solidity cross-j close deadline seconds exactly', () => {
+  test('receiver-local preflight does not wall-clock-gate cross-j pull close', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const proof = buildHashLadderProof('stale-pull-resolve');
     const reveal = revealHashLadder(proof, 32_768);
@@ -1285,7 +1228,6 @@ describe('audit fail-fast regressions', () => {
           amount: -100n,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: 20_000,
           fullHash: proof.fullHash,
           partialRoot: proof.partialRoot,
           crossJurisdiction: {
@@ -1325,16 +1267,10 @@ describe('audit fail-fast regressions', () => {
       false,
     );
 
-    expect(isPullRevealExpired(20_000, 20_999)).toBe(false);
-    expect(isPullRevealExpired(20_000, 21_000)).toBe(true);
+    // Settlement clock is dispute-relative on L1; no sealed pull reveal deadline.
     expect(
-      getIncomingAccountDeadlineViolation(account.state, closeFrame, { entityTimestamp: 20_999, finalizedJHeight: 1 }),
+      getIncomingAccountDeadlineViolation(account.state, closeFrame, { entityTimestamp: 21_000, finalizedJHeight: 1 }),
     ).toBeUndefined();
-
-    expect(
-      getIncomingAccountDeadlineViolation(account.state, closeFrame, { entityTimestamp: 21_000, finalizedJHeight: 1 })
-        ?.reason,
-    ).toContain('CROSS_PULL_CLAIM_AFTER_LOCAL_EXPIRY');
   });
 
   test('receiver-local preflight blocks payer HTLC timeout using future peer J-height', () => {
@@ -1553,7 +1489,6 @@ describe('audit fail-fast regressions', () => {
         tokenId: 1,
         amount: 100n,
         signedAmount: -100n,
-        revealedUntilTimestamp: 10_000,
         fullHash: `0x${'a1'.repeat(32)}`,
         partialRoot: `0x${'b2'.repeat(32)}`,
       },
@@ -1562,7 +1497,6 @@ describe('audit fail-fast regressions', () => {
         tokenId: 2,
         amount: 100n,
         signedAmount: 100n,
-        revealedUntilTimestamp: 20_000,
         fullHash: `0x${'a1'.repeat(32)}`,
         partialRoot: `0x${'b2'.repeat(32)}`,
       },
@@ -1576,7 +1510,6 @@ describe('audit fail-fast regressions', () => {
         pullId: 'timestamp-parity-pull',
         tokenId: 1,
         amount: -100n,
-        revealedUntilTimestamp: 10_000,
         fullHash: `0x${'a1'.repeat(32)}`,
         partialRoot: `0x${'b2'.repeat(32)}`,
         crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
@@ -1822,7 +1755,6 @@ describe('audit fail-fast regressions', () => {
           amount: 1_000n,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: 60_000,
           fullHash: `0x${'aa'.repeat(32)}`,
           partialRoot: `0x${'bb'.repeat(32)}`,
           crossJurisdiction: {
@@ -1876,7 +1808,6 @@ describe('audit fail-fast regressions', () => {
         tokenId: 1,
         amount: -amount,
         signedAmount: -amount,
-        revealedUntilTimestamp: 60_000,
         fullHash: `0x${'aa'.repeat(32)}`,
         partialRoot: `0x${'bb'.repeat(32)}`,
       },
@@ -1885,7 +1816,6 @@ describe('audit fail-fast regressions', () => {
         tokenId: 2,
         amount,
         signedAmount: amount,
-        revealedUntilTimestamp: 60_000,
         fullHash: `0x${'dd'.repeat(32)}`,
         partialRoot: `0x${'ee'.repeat(32)}`,
       },

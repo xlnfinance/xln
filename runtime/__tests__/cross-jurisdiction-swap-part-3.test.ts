@@ -62,7 +62,6 @@ import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections'
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/handlers/account-cross-j-followups';
 
 import {
-  CROSS_J_TARGET_REVEAL_SAFETY_MS,
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
@@ -92,7 +91,6 @@ import {
 
 import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
 
-import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
 
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -276,7 +274,7 @@ describe('cross-jurisdiction hashledger swap', () => {
             createdAt: env.state.timestamp,
             updatedAt: env.state.timestamp,
           },
-          { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+          { runtimeSeed: 'test-seed', now: env.state.timestamp },
         ),
         status: options.status ?? 'resting',
         ...(options.status === undefined || options.status === 'resting'
@@ -303,7 +301,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           pullId: route.targetPull.pullId,
           tokenId: route.targetPull.tokenId,
           amount: route.targetPull.signedAmount,
-          revealedUntilTimestamp: route.targetPull.revealedUntilTimestamp,
           fullHash: route.targetPull.fullHash,
           partialRoot: route.targetPull.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
@@ -366,7 +363,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdAt: env.state.timestamp,
         updatedAt: env.state.timestamp,
       },
-      { runtimeSeed: scenario, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: scenario, now: env.state.timestamp },
     );
     const fillRatio = 0x1234;
     route.cumulativeFillRatio = fillRatio;
@@ -392,7 +389,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       pullId: route.sourcePull!.pullId,
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
-      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
       fullHash: route.sourcePull!.fullHash,
       partialRoot: route.sourcePull!.partialRoot,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
@@ -418,7 +414,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
-      revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
       fullHash: route.targetPull!.fullHash,
       partialRoot: route.targetPull!.partialRoot,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
@@ -537,7 +532,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: 1_000,
         expiresAt: 61_000,
       },
-      { runtimeSeed: 'cross-cancel-after-accepted-fill', sourceDisputeDelayMs: 5_000, now: 1_000 },
+      { runtimeSeed: 'cross-cancel-after-accepted-fill', now: 1_000 },
     );
     const account = state.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {
@@ -648,7 +643,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: env.runtimeSeed, now: env.state.timestamp },
     );
     const account = sourceHubState.accounts.get(sourceUser)!;
     account.state.swapOffers.set(route.orderId, {
@@ -784,7 +779,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: 'cross-cancel-no-orderbook-ext', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'cross-cancel-no-orderbook-ext', now: env.state.timestamp },
     );
     const account = state.accounts.get(sourceHub)!;
     account.currentFrame.prevFrameHash = 'genesis';
@@ -863,7 +858,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: 'cross-fill-invalid-target', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'cross-fill-invalid-target', now: env.state.timestamp },
     );
     const route = { ...prepared, status: 'resting' as const };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
@@ -924,7 +919,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           updatedAt: env.state.timestamp,
           expiresAt: 70_000,
         },
-        { runtimeSeed: 'cross-fill-delayed-commit', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+        { runtimeSeed: 'cross-fill-delayed-commit', now: env.state.timestamp },
       ),
       status: 'resting' as const,
     };
@@ -996,7 +991,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           updatedAt: env.state.timestamp,
           expiresAt: 70_000,
         },
-        { runtimeSeed: 'cross-fill-cancel-zero-sentinel', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+        { runtimeSeed: 'cross-fill-cancel-zero-sentinel', now: env.state.timestamp },
       ),
       status: 'resting' as const,
     };
@@ -1067,7 +1062,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           updatedAt: env.state.timestamp,
           expiresAt: 70_000,
         },
-        { runtimeSeed: 'cross-fill-notice-idempotent', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+        { runtimeSeed: 'cross-fill-notice-idempotent', now: env.state.timestamp },
       ),
       status: 'partially_filled' as const,
       fillSeq: 1,
@@ -1179,7 +1174,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           updatedAt: env.state.timestamp,
           expiresAt: 70_000,
         },
-        { runtimeSeed: 'cross-fill-book-owner-reject', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+        { runtimeSeed: 'cross-fill-book-owner-reject', now: env.state.timestamp },
       ),
       status: 'resting' as const,
     };
@@ -1190,7 +1185,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
-      revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
       fullHash: route.targetPull!.fullHash,
       partialRoot: route.targetPull!.partialRoot,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
@@ -1278,7 +1272,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: seed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: seed, now: env.state.timestamp },
     );
 
     for (const state of [sourceUserState, sourceHubState]) {
@@ -1416,7 +1410,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: seed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: seed, now: env.state.timestamp },
     );
 
     for (const state of [sourceUserState, sourceHubState]) {
@@ -1539,7 +1533,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           updatedAt: 1_000,
           expiresAt: 70_000,
         },
-        { runtimeSeed: 'cross-sweep-expired', sourceDisputeDelayMs: 5_000, now: 1_000 },
+        { runtimeSeed: 'cross-sweep-expired', now: 1_000 },
       ),
       status: 'resting' as const,
     };
@@ -1566,7 +1560,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: route.sourcePull!.signedAmount,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
@@ -1654,7 +1647,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           updatedAt: 1_000,
           expiresAt: 70_000,
         },
-        { runtimeSeed: 'cross-sweep-filled-expired-clear', sourceDisputeDelayMs: 5_000, now: 1_000 },
+        { runtimeSeed: 'cross-sweep-filled-expired-clear', now: 1_000 },
       ),
       status: 'partially_filled' as const,
       fillSeq: 1,
@@ -1684,7 +1677,6 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: route.sourcePull!.signedAmount,
           claimedRatio: 0,
           claimedAmount: 0n,
-          revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
@@ -1820,7 +1812,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         proofbodyHash,
         starterInitialArguments,
         starterIncrementedArguments: '0x',
-        disputeTimeout: 100,
+        disputeTimeout: 1700000100,
+        disputeStartTimestamp: 1700000000,
         watchSeed: state.accounts.get(hub)!.state.watchSeed,
       },
     };
@@ -2027,7 +2020,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdAt: env.state.timestamp,
         updatedAt: env.state.timestamp,
       },
-      { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'test-seed', now: env.state.timestamp },
     );
     applyExactTestFill(route, 0x2345);
     state.crossJurisdictionSwaps?.set(route.orderId, route);
@@ -2120,7 +2113,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdAt: env.state.timestamp,
         updatedAt: env.state.timestamp,
       },
-      { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'test-seed', now: env.state.timestamp },
     );
     route.cumulativeFillRatio = 0x1234;
     state.crossJurisdictionSwaps?.set(route.orderId, route);
@@ -2220,7 +2213,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       updatedAt: env.state.timestamp,
     }, {
       runtimeSeed: 'route-seed-cross-no-pull-args',
-      sourceDisputeDelayMs: 5_000,
       now: env.state.timestamp,
     });
     const account = state.accounts.get(sourceHub)!;
@@ -2228,7 +2220,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       pullId: route.sourcePull!.pullId,
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
-      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
       fullHash: route.sourcePull!.fullHash,
       partialRoot: route.sourcePull!.partialRoot,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
@@ -2292,7 +2283,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdAt: env.state.timestamp,
         updatedAt: env.state.timestamp,
       },
-      { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'test-seed', now: env.state.timestamp },
     );
     applyExactTestFill(route, 0x1234);
     state.crossJurisdictionSwaps?.set(route.orderId, route);
@@ -2346,6 +2337,72 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(replay.newState.jBatchState?.batch.hashLadderReveals).toHaveLength(1);
   });
 
+  test('crossJurisdictionSalvage still queues after off-chain target deadline', async () => {
+    const env = createEmptyEnv('cross-salvage-past-wallclock');
+    env.scenarioMode = true;
+    env.state.timestamp = 40_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('41');
+    const sourceHub = entity('42');
+    const sourceSigner = addr('70');
+    const targetHubSigner = registerTestSigner(env, 'cross-salvage-past-wallclock-hub', '1');
+    const targetHub = generateLazyEntityId([targetHubSigner], 1n).toLowerCase();
+    const targetUser = entity('44');
+    const signer = addr('71');
+    const state = makeState(targetUser, signer, base, targetHub);
+    const route = buildPreparedCrossJurisdictionRoute(
+      {
+        orderId: 'cross-salvage-past-wallclock',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        sourceSignerId: sourceSigner,
+        source: {
+          jurisdiction: jref(eth),
+          entityId: sourceUser,
+          counterpartyEntityId: sourceHub,
+          tokenId: 1,
+          amount: 100n,
+        },
+        target: {
+          jurisdiction: jref(base),
+          entityId: targetHub,
+          counterpartyEntityId: targetUser,
+          tokenId: 1,
+          amount: 90n,
+        },
+        status: 'resting' as const,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
+      },
+      { runtimeSeed: 'test-seed', now: env.state.timestamp },
+    );
+    applyExactTestFill(route, 0x1234);
+    // Wall-clock advance must not gate reveal port — L1 dispute T/2 owns settle.
+    env.state.timestamp = 10_000_000;
+    state.timestamp = env.state.timestamp;
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+    const binary = buildCrossJurisdictionPullReveal(
+      route,
+      0x1234,
+      deriveCrossJurisdictionPrivateSeed('test-seed', route),
+    ).binary;
+
+    const result = await applyEntityTx(env, state, {
+      type: 'crossJurisdictionSalvage',
+      data: {
+        routeId: route.orderId,
+        binary,
+        fillRatio: 0x1234,
+        sourceEntityId: sourceUser,
+        sourceCounterpartyEntityId: sourceHub,
+        observedAt: env.state.timestamp,
+      },
+    });
+    expect(result.newState.jBatchState?.batch.hashLadderReveals ?? []).toHaveLength(1);
+  });
+
   test('a self-registered reveal confirms the pending port result', async () => {
     const env = createEmptyEnv('cross-port-confirm');
     env.scenarioMode = true;
@@ -2382,7 +2439,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdAt: env.state.timestamp,
         updatedAt: env.state.timestamp,
       },
-      { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'test-seed', now: env.state.timestamp },
     );
     applyExactTestFill(route, 0x1234);
     state.crossJurisdictionSwaps?.set(route.orderId, route);
@@ -2392,7 +2449,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       startedByLeft: account.state.leftEntity !== targetUser,
       initialProofbodyHash: '0x',
       initialNonce: 1,
-      disputeTimeout: 100,
+      disputeTimeout: 1700000100,
+        disputeStartTimestamp: 1700000000,
       jNonce: 0,
       starterInitialArguments: '0x',
       starterIncrementedArguments: '0x',
@@ -2402,7 +2460,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       crossJurisdictionRecovery: {
         requiredPullIds: [route.targetPull!.pullId],
         resultsByPullId: {},
-        resolveByTimestamp: route.targetPull!.revealedUntilTimestamp,
       },
     };
 
@@ -2487,7 +2544,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdAt: env.state.timestamp,
         updatedAt: env.state.timestamp,
       },
-      { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'test-seed', now: env.state.timestamp },
     );
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const forgedBinary = partialBinary(0x1234);
@@ -2522,7 +2579,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(plan).not.toBeNull();
     expect(plan?.representativeRouteId).toBe(active.orderId);
     expect(plan?.recovery.requiredPullIds).toEqual([active.targetPull!.pullId]);
-    expect(plan?.recovery.resolveByTimestamp).toBe(active.targetPull!.revealedUntilTimestamp);
+    expect(plan?.recovery).not.toHaveProperty('resolveByTimestamp');
   });
 
   test('target dispute ignores routes in every terminal status', () => {
@@ -2553,7 +2610,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       pullId: selected.targetPull!.pullId,
       tokenId: selected.targetPull!.tokenId,
       amount: selected.targetPull!.signedAmount,
-      revealedUntilTimestamp: selected.targetPull!.revealedUntilTimestamp,
       fullHash: selected.targetPull!.fullHash,
       partialRoot: selected.targetPull!.partialRoot,
       crossJurisdiction: buildCrossJurisdictionPullBinding(selected, 'target'),
@@ -2592,13 +2648,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       earlier.targetPull!.pullId,
       later.targetPull!.pullId,
     ]));
-    // The barrier mirror tracks the latest target deadline across the set.
-    expect(plan?.recovery.resolveByTimestamp).toBe(
-      Math.max(
-        earlier.targetPull!.revealedUntilTimestamp,
-        later.targetPull!.revealedUntilTimestamp,
-      ),
-    );
+    // Settle-or-0 is L1 dispute-relative (start + T/2, unix seconds), not a wall-clock pull deadline.
+    expect(plan?.recovery).not.toHaveProperty('resolveByTimestamp');
   });
 
   test('target dispute recovery keeps supplied port results while others stay pending', () => {
@@ -2675,7 +2726,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdAt: env.state.timestamp,
         updatedAt: env.state.timestamp,
       },
-      { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      { runtimeSeed: 'test-seed', now: env.state.timestamp },
     );
     applyExactTestFill(route, 0x1234);
     targetState.crossJurisdictionSwaps?.set(route.orderId, { ...route });
@@ -2686,7 +2737,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       pullId: route.targetPull!.pullId,
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
-      revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
       fullHash: route.targetPull!.fullHash,
       partialRoot: route.targetPull!.partialRoot,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
@@ -2717,7 +2767,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         proofbodyHash: targetProof.proofBodyHash,
         starterInitialArguments: '0x',
         starterIncrementedArguments: '0x',
-        disputeTimeout: 100,
+        disputeTimeout: 1700000100,
+        disputeStartTimestamp: 1700000000,
         watchSeed: targetState.accounts.get(targetHub)!.state.watchSeed,
       },
     };
@@ -2783,7 +2834,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ?.activeDispute?.crossJurisdictionRecovery;
     expect(recovery?.requiredPullIds).toEqual([route.targetPull!.pullId]);
     expect(recovery?.resultsByPullId).toEqual({});
-    expect(recovery?.resolveByTimestamp).toBe(route.targetPull!.revealedUntilTimestamp);
+    expect(recovery).not.toHaveProperty('resolveByTimestamp');
   });
 
   test('route-bound disputeStart fails loudly before touching an unknown route', async () => {
@@ -2819,6 +2870,21 @@ describe('cross-jurisdiction hashledger swap', () => {
         },
       }),
     ).rejects.toThrow(`DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH:${route.orderId}`);
+  });
+
+  test('route-bound disputeStart requires source and target pulls', async () => {
+    const fixture = makeTargetDisputeRouteSelectionFixture('cross-route-bound-pulls-missing');
+    const route = fixture.buildRoute('no-target-pull', { withoutTargetPull: true });
+    fixture.state.crossJurisdictionSwaps?.set(route.orderId, route);
+    await expect(
+      applyEntityTx(fixture.env, fixture.state, {
+        type: 'disputeStart',
+        data: {
+          counterpartyEntityId: fixture.targetHub,
+          crossJurisdictionRouteId: route.orderId,
+        },
+      }),
+    ).rejects.toThrow(`DISPUTE_START_CROSS_J_PULLS_MISSING:${route.orderId}`);
   });
 
 });

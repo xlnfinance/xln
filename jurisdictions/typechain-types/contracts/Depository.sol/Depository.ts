@@ -611,7 +611,8 @@ export namespace DisputeStartedEvent {
     watchSeed: BytesLike,
     starterInitialArguments: BytesLike,
     starterIncrementedArguments: BytesLike,
-    disputeTimeout: BigNumberish
+    disputeTimeout: BigNumberish,
+    disputeStartTimestamp: BigNumberish
   ];
   export type OutputTuple = [
     sender: string,
@@ -621,7 +622,8 @@ export namespace DisputeStartedEvent {
     watchSeed: string,
     starterInitialArguments: string,
     starterIncrementedArguments: string,
-    disputeTimeout: bigint
+    disputeTimeout: bigint,
+    disputeStartTimestamp: bigint
   ];
   export interface OutputObject {
     sender: string;
@@ -632,6 +634,7 @@ export namespace DisputeStartedEvent {
     starterInitialArguments: string;
     starterIncrementedArguments: string;
     disputeTimeout: bigint;
+    disputeStartTimestamp: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -871,21 +874,10 @@ export interface Depository extends BaseContract {
   _accounts: TypedContractMethod<
     [arg0: BytesLike],
     [
-      [
-        bigint,
-        string,
-        bigint,
-        bigint,
-        bigint,
-        string,
-        string,
-        string,
-        boolean
-      ] & {
+      [bigint, string, bigint, bigint, string, string, string, boolean] & {
         nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
-        disputeStartBlock: bigint;
         disputeStartTimestamp: bigint;
         disputeInitialProofbodyHash: string;
         starterInitialArgumentsCommitment: string;
@@ -992,7 +984,7 @@ export interface Depository extends BaseContract {
 
   getHashLadderReveal: TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
 
@@ -1079,21 +1071,10 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<
     [arg0: BytesLike],
     [
-      [
-        bigint,
-        string,
-        bigint,
-        bigint,
-        bigint,
-        string,
-        string,
-        string,
-        boolean
-      ] & {
+      [bigint, string, bigint, bigint, string, string, string, boolean] & {
         nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
-        disputeStartBlock: bigint;
         disputeStartTimestamp: bigint;
         disputeInitialProofbodyHash: string;
         starterInitialArgumentsCommitment: string;
@@ -1209,7 +1190,7 @@ export interface Depository extends BaseContract {
     nameOrSignature: "getHashLadderReveal"
   ): TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
   getFunction(
@@ -1452,7 +1433,7 @@ export interface Depository extends BaseContract {
       DisputeFinalizedEvent.OutputObject
     >;
 
-    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes32,bytes,bytes,uint256)": TypedContractEvent<
+    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes32,bytes,bytes,uint256,uint256)": TypedContractEvent<
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject

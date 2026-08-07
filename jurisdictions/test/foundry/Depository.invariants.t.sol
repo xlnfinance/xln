@@ -221,15 +221,9 @@ contract DepositoryInvariants is XlnFixture {
     for (uint256 i = 0; i < ACTORS; i++) {
       for (uint256 j = i + 1; j < ACTORS; j++) {
         bytes memory key = XlnHanko.accountKey(entity[i], entity[j]);
-        (
-          ,
-          bytes32 disputeHash,
-          uint256 timeout,
-          uint256 startTs,
-          bytes32 initialPbHash,
-          ,
-          ,
-        ) = dep._accounts(key);
+        // AccountInfo: nonce, hash, timeout, startTs, pbHash, c1, c2, byLeft.
+        (, bytes32 disputeHash, uint256 timeout, uint256 startTs, bytes32 initialPbHash, , , ) =
+          dep._accounts(key);
         if (disputeHash == bytes32(0)) {
           assertEq(timeout, 0, "stale timeout on a cleared dispute");
           assertEq(startTs, 0, "stale start timestamp on a cleared dispute");

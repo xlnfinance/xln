@@ -168,7 +168,6 @@ describe('proof-builder dispute hash', () => {
           tokenId: 2,
           amount: 23n,
           claimedRatio: 0,
-          revealedUntilTimestamp: 123_000,
           fullHash: '0x' + '33'.repeat(32),
           partialRoot: '0x' + '44'.repeat(32),
         }],
@@ -219,14 +218,12 @@ describe('proof-builder dispute hash', () => {
         ['pull-positive', {
           tokenId: 3,
           amount: 23n,
-          revealedUntilTimestamp: 183_000,
           fullHash: '0x' + '33'.repeat(32),
           partialRoot: '0x' + '44'.repeat(32),
         }],
         ['pull-negative', {
           tokenId: 1,
           amount: -29n,
-          revealedUntilTimestamp: 183_000,
           fullHash: '0x' + '55'.repeat(32),
           partialRoot: '0x' + '66'.repeat(32),
         }],

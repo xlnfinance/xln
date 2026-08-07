@@ -1152,11 +1152,11 @@ describe('signed Entity command admission', () => {
       },
       sourcePull: {
         pullId: 'source-pull', tokenId: 1, amount: 10n, signedAmount: 10n,
-        revealedUntilTimestamp: 10_000, fullHash: entityId('18'), partialRoot: entityId('19'),
+        fullHash: entityId('18'), partialRoot: entityId('19'),
       },
       targetPull: {
         pullId: 'target-pull', tokenId: 2, amount: 20n, signedAmount: 20n,
-        revealedUntilTimestamp: 10_000, fullHash: entityId('1a'), partialRoot: entityId('1b'),
+        fullHash: entityId('1a'), partialRoot: entityId('1b'),
       },
       status: 'resting',
       createdAt: 1,

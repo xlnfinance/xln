@@ -51,7 +51,6 @@ const makeFixture = async (): Promise<ValidationContext> => {
     pullId: 'pull-1',
     tokenId: 1,
     amount: 5n,
-    revealedUntilTimestamp: 3_000,
     fullHash: digest('32'),
     partialRoot: digest('33'),
     createdHeight: 1,
@@ -105,7 +104,6 @@ const makeFixture = async (): Promise<ValidationContext> => {
     htlcLocks: [{
       deltaIndex: 0,
       amount: 7n,
-      revealedUntilTimestamp: 2_000,
       hash: digest('31'),
     }],
   };
