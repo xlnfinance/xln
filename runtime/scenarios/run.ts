@@ -38,6 +38,7 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'dispute-lifecycle': { file: './dispute-lifecycle', fn: 'runDisputeLifecycle' },
   'dispute-transformer': { file: './dispute-transformer', fn: 'runDisputeTransformer' },
   'cross-j':           { file: './cross-j',           fn: 'crossJ' },
+  'mm-mesh':           { file: './mm-mesh',           fn: 'mmMesh' },
 };
 
 const DEFAULT_PARALLEL_SET = [

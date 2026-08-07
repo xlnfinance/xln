@@ -68,6 +68,10 @@ textarea {
 	color: var(--ink);
 }
 
+input[type='range'] {
+	accent-color: var(--champagne);
+}
+
 ::selection {
 	background: var(--champagne-dim);
 }

@@ -871,10 +871,21 @@ export interface Depository extends BaseContract {
   _accounts: TypedContractMethod<
     [arg0: BytesLike],
     [
-      [bigint, string, bigint, bigint, string, string, string, boolean] & {
+      [
+        bigint,
+        string,
+        bigint,
+        bigint,
+        bigint,
+        string,
+        string,
+        string,
+        boolean
+      ] & {
         nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
+        disputeStartBlock: bigint;
         disputeStartTimestamp: bigint;
         disputeInitialProofbodyHash: string;
         starterInitialArgumentsCommitment: string;
@@ -981,7 +992,7 @@ export interface Depository extends BaseContract {
 
   getHashLadderReveal: TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
     "view"
   >;
 
@@ -1068,10 +1079,21 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<
     [arg0: BytesLike],
     [
-      [bigint, string, bigint, bigint, string, string, string, boolean] & {
+      [
+        bigint,
+        string,
+        bigint,
+        bigint,
+        bigint,
+        string,
+        string,
+        string,
+        boolean
+      ] & {
         nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
+        disputeStartBlock: bigint;
         disputeStartTimestamp: bigint;
         disputeInitialProofbodyHash: string;
         starterInitialArgumentsCommitment: string;
@@ -1187,7 +1209,7 @@ export interface Depository extends BaseContract {
     nameOrSignature: "getHashLadderReveal"
   ): TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
     "view"
   >;
   getFunction(

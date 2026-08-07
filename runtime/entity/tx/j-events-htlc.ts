@@ -314,9 +314,9 @@ export function planCrossJurisdictionTargetRecovery(
     (latest, route) => Math.max(latest, Number(route.targetPull!.revealedUntilTimestamp || 0)),
     0,
   );
-  // No source-dispute forcing anywhere: the hub's claim on the source leg is
-  // only possible through a public registry write, which the port path then
-  // carries here. Incentive, not instruction.
+  // Port-wait recovery stays local. Sibling dispute fanout is a separate
+  // EntityTx path (`crossJurisdictionForceSiblingDispute`): observing any
+  // DisputeStarted on a route leg asks every sibling to start its own clock.
   return {
     representativeRouteId: routes[0]!.orderId,
     recovery: {
@@ -325,6 +325,119 @@ export function planCrossJurisdictionTargetRecovery(
       resolveByTimestamp,
     },
   };
+}
+
+type SiblingDisputeTarget = {
+  entityId: string;
+  signerId: string;
+  routeId: string;
+};
+
+/**
+ * Map this entity's role on a route to the intra-runtime sibling that must
+ * start its own dispute clock. Users fan out user↔user; hubs fan out hub↔hub.
+ */
+const siblingDisputeTargetForRoute = (
+  route: CrossJurisdictionSwapRoute,
+  self: string,
+): SiblingDisputeTarget | null => {
+  const sourceUser = String(route.source?.entityId || '').toLowerCase();
+  const sourceHub = String(route.source?.counterpartyEntityId || '').toLowerCase();
+  const targetHub = String(route.target?.entityId || '').toLowerCase();
+  const targetUser = String(route.target?.counterpartyEntityId || '').toLowerCase();
+  if (self === sourceUser) {
+    const signerId = String(route.targetSignerId || '').toLowerCase();
+    return signerId && targetUser ? { entityId: targetUser, signerId, routeId: route.orderId } : null;
+  }
+  if (self === targetUser) {
+    const signerId = String(route.sourceSignerId || '').toLowerCase();
+    return signerId && sourceUser ? { entityId: sourceUser, signerId, routeId: route.orderId } : null;
+  }
+  if (self === sourceHub) {
+    const signerId = String(route.targetHubSignerId || '').toLowerCase();
+    return signerId && targetHub ? { entityId: targetHub, signerId, routeId: route.orderId } : null;
+  }
+  if (self === targetHub) {
+    const signerId = String(route.sourceHubSignerId || '').toLowerCase();
+    return signerId && sourceHub ? { entityId: sourceHub, signerId, routeId: route.orderId } : null;
+  }
+  return null;
+};
+
+const routeTouchesDisputedAccount = (
+  route: CrossJurisdictionSwapRoute,
+  self: string,
+  counterparty: string,
+): boolean => {
+  const sourceUser = String(route.source?.entityId || '').toLowerCase();
+  const sourceHub = String(route.source?.counterpartyEntityId || '').toLowerCase();
+  const targetHub = String(route.target?.entityId || '').toLowerCase();
+  const targetUser = String(route.target?.counterpartyEntityId || '').toLowerCase();
+  const sourceLeg =
+    (self === sourceUser && counterparty === sourceHub) ||
+    (self === sourceHub && counterparty === sourceUser);
+  const targetLeg =
+    (self === targetUser && counterparty === targetHub) ||
+    (self === targetHub && counterparty === targetUser);
+  return sourceLeg || targetLeg;
+};
+
+/**
+ * Any DisputeStarted involving this entity on a live cross-j route asks the
+ * intra-runtime sibling to prepareDispute on its leg. Different wall-clock T
+ * across chains is fine; the point is to start every clock as soon as one
+ * leg is under dispute so reveals/ports can land before either barrier.
+ */
+export function queueCrossJurisdictionSiblingDisputeFanout(
+  state: EntityState,
+  outputs: EntityInput[],
+  counterpartyId: string,
+  observedAt?: number,
+): number {
+  const self = String(state.entityId || '').toLowerCase();
+  const counterparty = String(counterpartyId || '').toLowerCase();
+  if (!self || !counterparty) return 0;
+  const batches = new Map<string, {
+    entityId: string;
+    signerId: string;
+    txs: NonNullable<EntityInput['entityTxs']>;
+  }>();
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
+    if (isCrossJurisdictionTerminalStatus(route.status)) continue;
+    if (!route.sourcePull || !route.targetPull) continue;
+    if (!routeTouchesDisputedAccount(route, self, counterparty)) continue;
+    const sibling = siblingDisputeTargetForRoute(route, self);
+    if (!sibling) {
+      throw new Error(`CROSS_J_SIBLING_DISPUTE_TARGET_MISSING:${route.orderId}:${self}`);
+    }
+    const key = `${sibling.entityId}\0${sibling.signerId}`;
+    const batch = batches.get(key) ?? {
+      entityId: sibling.entityId,
+      signerId: sibling.signerId,
+      txs: [],
+    };
+    batch.txs.push({
+      type: 'crossJurisdictionForceSiblingDispute',
+      data: {
+        routeId: sibling.routeId,
+        observedCounterpartyEntityId: counterparty,
+        ...(observedAt !== undefined ? { observedAt } : {}),
+      },
+    });
+    batches.set(key, batch);
+  }
+  for (const batch of [...batches.values()].sort((left, right) =>
+    `${left.entityId}\0${left.signerId}`.localeCompare(`${right.entityId}\0${right.signerId}`),
+  )) {
+    outputs.push(buildCrossJurisdictionEntityOutput(batch.entityId, batch.signerId, batch.txs));
+  }
+  if (batches.size > 0) {
+    addMessage(
+      state,
+      `⚔️ Cross-j dispute observed vs ${counterparty.slice(-4)}: fanning out to ${batches.size} sibling lane(s)`,
+    );
+  }
+  return batches.size;
 }
 
 export function refreshCrossJurisdictionTargetRecovery(

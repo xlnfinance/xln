@@ -190,6 +190,7 @@ describe("DeltaTransformer", function () {
     tokenIds: Array<bigint | number> = deltas.map((_, index) => index + 1),
   ) {
     const currentTimestamp = await time.latest();
+    const latestBlock = await ethers.provider.getBlockNumber();
     return transformer.applyBatch.staticCall(
       deltas,
       tokenIds,
@@ -200,6 +201,8 @@ describe("DeltaTransformer", function () {
       rightArgumentsTimestamp ?? currentTimestamp,
       LEFT_ENTITY,
       RIGHT_ENTITY,
+      Math.max(1, latestBlock - 200),
+      latestBlock,
     );
   }
 
@@ -211,8 +214,14 @@ describe("DeltaTransformer", function () {
     leftArguments: string,
     rightArguments: string,
     tokenIds: Array<bigint | number> = deltas.map((_, index) => index + 1),
+    disputeClock?: { startBlock: number; timeoutBlock: number },
   ) {
     const currentTimestamp = await time.latest();
+    const latestBlock = await ethers.provider.getBlockNumber();
+    // Default: dispute already past full T so pull settlement can run in unit
+    // tests. Callers probing the barrier pass an open timeout explicitly.
+    const startBlock = disputeClock?.startBlock ?? Math.max(1, latestBlock - 200);
+    const timeoutBlock = disputeClock?.timeoutBlock ?? latestBlock;
     return registry.applyBatchViaRegistry.staticCall(
       await transformer.getAddress(),
       deltas,
@@ -224,6 +233,8 @@ describe("DeltaTransformer", function () {
       currentTimestamp,
       LEFT_ENTITY,
       RIGHT_ENTITY,
+      startBlock,
+      timeoutBlock,
     );
   }
 
@@ -280,9 +291,22 @@ describe("DeltaTransformer", function () {
     const { transformer } = await loadFixture(deployFixture);
     const encodedBatch = await transformer.encodeBatch({ payment: [], swap: [], pull: [] });
     const timestamp = await time.latest();
+    const latestBlock = await ethers.provider.getBlockNumber();
 
     await expect(
-      transformer.applyBatch.staticCall([0n, 0n], [1n], encodedBatch, "0x", "0x", timestamp, timestamp, LEFT_ENTITY, RIGHT_ENTITY),
+      transformer.applyBatch.staticCall(
+        [0n, 0n],
+        [1n],
+        encodedBatch,
+        "0x",
+        "0x",
+        timestamp,
+        timestamp,
+        LEFT_ENTITY,
+        RIGHT_ENTITY,
+        Math.max(1, latestBlock - 200),
+        latestBlock,
+      ),
     ).to.be.revertedWithCustomError(transformer, "ContextLengthMismatch");
   });
 
@@ -310,14 +334,19 @@ describe("DeltaTransformer", function () {
     ).to.be.reverted;
   });
 
-  it("settles pulls only from the reveal registry after the reveal deadline", async function () {
+  it("settles pulls only from the reveal registry after dispute T; T/2 bounds registration", async function () {
     const { transformer, registry } = await loadFixture(deployFixture);
     const partialRatio = 0x1234;
     const partialProof = buildPullProof("delta-partial", partialRatio);
     const fullProof = buildPullProof("delta-full", 0xffff);
-    const deadline = (await time.latest()) + 10;
     const ladderHash = (proof: { fullHash: string; partialRoot: string }): string =>
       ethers.keccak256(ethers.solidityPacked(["bytes32", "bytes32"], [proof.fullHash, proof.partialRoot]));
+    const nowBlock = await ethers.provider.getBlockNumber();
+    const openStart = nowBlock;
+    const openTimeout = nowBlock + 100; // T=100 still open
+    const settledStart = Math.max(1, nowBlock - 200);
+    const settledTimeout = nowBlock; // T already elapsed at current block
+    const timelyRevealBlock = settledStart + 10; // well inside settled T/2
 
     const batch = {
       payment: [],
@@ -327,7 +356,7 @@ describe("DeltaTransformer", function () {
           deltaIndex: 0,
           amount: MAX_FILL_RATIO,
           claimedRatio: 0,
-          revealedUntilTimestamp: deadline,
+          revealedUntilTimestamp: 0,
           fullHash: partialProof.fullHash,
           partialRoot: partialProof.partialRoot,
         },
@@ -335,7 +364,7 @@ describe("DeltaTransformer", function () {
           deltaIndex: 1,
           amount: -1234,
           claimedRatio: 0,
-          revealedUntilTimestamp: deadline,
+          revealedUntilTimestamp: 0,
           fullHash: fullProof.fullHash,
           partialRoot: fullProof.partialRoot,
         },
@@ -343,21 +372,26 @@ describe("DeltaTransformer", function () {
     };
     const encodedBatch = await transformer.encodeBatch(batch);
 
-    // Records exist but the reveal window is still open: finalization must wait.
-    await registry.setReveal(LEFT_ENTITY, ladderHash(partialProof), partialRatio, deadline - 1);
-    await registry.setReveal(RIGHT_ENTITY, ladderHash(fullProof), 0xffff, deadline - 1);
+    // Timely registry writes but dispute still open → barrier.
+    await registry.setReveal(LEFT_ENTITY, ladderHash(partialProof), partialRatio, timelyRevealBlock);
+    await registry.setReveal(RIGHT_ENTITY, ladderHash(fullProof), 0xffff, timelyRevealBlock);
     await expect(
-      applyViaRegistry(registry, transformer, [0, 0], encodedBatch, "0x", "0x"),
+      applyViaRegistry(registry, transformer, [0, 0], encodedBatch, "0x", "0x", [1, 2], {
+        startBlock: openStart,
+        timeoutBlock: openTimeout,
+      }),
     ).to.be.revertedWithCustomError(transformer, "PullRevealWindowActive");
 
-    await time.increaseTo(deadline + 1);
-    const result = await applyViaRegistry(registry, transformer, [0, 0], encodedBatch, "0x", "0x");
+    // Past full T: same timely records settle.
+    const result = await applyViaRegistry(registry, transformer, [0, 0], encodedBatch, "0x", "0x", [1, 2], {
+      startBlock: settledStart,
+      timeoutBlock: settledTimeout,
+    });
     expect(result[0]).to.equal(BigInt(partialRatio));
     expect(result[1]).to.equal(-1234n);
 
-    // A registration written after the pull deadline settles as 0.
+    // Registration after T/2 settles as 0 even when finalize is allowed.
     const lateProof = buildPullProof("delta-late", 0x0100);
-    const lateDeadline = (await time.latest()) + 5;
     const lateBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
@@ -365,17 +399,20 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: MAX_FILL_RATIO,
         claimedRatio: 0,
-        revealedUntilTimestamp: lateDeadline,
+        revealedUntilTimestamp: 0,
         fullHash: lateProof.fullHash,
         partialRoot: lateProof.partialRoot,
       }],
     });
-    await registry.setReveal(LEFT_ENTITY, ladderHash(lateProof), 0x0100, lateDeadline + 1);
-    await time.increaseTo(lateDeadline + 2);
-    const late = await applyViaRegistry(registry, transformer, [0], lateBatch, "0x", "0x");
+    const half = settledStart + Math.floor((settledTimeout - settledStart) / 2);
+    await registry.setReveal(LEFT_ENTITY, ladderHash(lateProof), 0x0100, half + 1);
+    const late = await applyViaRegistry(registry, transformer, [0], lateBatch, "0x", "0x", [1], {
+      startBlock: settledStart,
+      timeoutBlock: settledTimeout,
+    });
     expect(late[0]).to.equal(0n);
 
-    // No record at all also settles as 0 once the window has closed.
+    // No record at all settles as 0 once the barrier has cleared.
     const noneProof = buildPullProof("delta-none", 0x0100);
     const noneBatch = await transformer.encodeBatch({
       payment: [],
@@ -384,12 +421,15 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: MAX_FILL_RATIO,
         claimedRatio: 0,
-        revealedUntilTimestamp: lateDeadline,
+        revealedUntilTimestamp: 0,
         fullHash: noneProof.fullHash,
         partialRoot: noneProof.partialRoot,
       }],
     });
-    const none = await applyViaRegistry(registry, transformer, [0], noneBatch, "0x", "0x");
+    const none = await applyViaRegistry(registry, transformer, [0], noneBatch, "0x", "0x", [1], {
+      startBlock: settledStart,
+      timeoutBlock: settledTimeout,
+    });
     expect(none[0]).to.equal(0n);
 
     // Telescoping: a partially claimed pull applies only the increment.
@@ -401,12 +441,15 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: MAX_FILL_RATIO,
         claimedRatio: previouslyClaimed,
-        revealedUntilTimestamp: deadline,
+        revealedUntilTimestamp: 0,
         fullHash: partialProof.fullHash,
         partialRoot: partialProof.partialRoot,
       }],
     });
-    const cumulative = await applyViaRegistry(registry, transformer, [0], cumulativeBatch, "0x", "0x");
+    const cumulative = await applyViaRegistry(registry, transformer, [0], cumulativeBatch, "0x", "0x", [1], {
+      startBlock: settledStart,
+      timeoutBlock: settledTimeout,
+    });
     expect(cumulative[0]).to.equal(BigInt(partialRatio - previouslyClaimed));
 
     // Pulls without a registry behind msg.sender fail loud, never silent-zero.
@@ -643,6 +686,7 @@ describe("DeltaTransformer", function () {
     });
     const rightArguments = encodeTransformerArguments(Array.from({ length: 1_000 }, () => 65_535));
     const timestamp = await time.latest();
+    const latestBlock = await ethers.provider.getBlockNumber();
     const gas = await transformer.applyBatch.estimateGas(
       [0n, 0n],
       [1n, 2n],
@@ -653,6 +697,8 @@ describe("DeltaTransformer", function () {
       timestamp,
       LEFT_ENTITY,
       RIGHT_ENTITY,
+      Math.max(1, latestBlock - 200),
+      latestBlock,
     );
     expect(gas).to.be.lessThanOrEqual(4_000_000n);
   });

@@ -83,12 +83,14 @@ const authorizeCrossJurisdictionIntent = (
     if (exactRouteBytes(existing) !== exactRouteBytes(route)) {
       throw new Error(`CROSS_J_USER_AUTH_CONFLICT:${route.orderId}`);
     }
-    return { newState: state, outputs };
+    // Identical auth is an honest retry (lost certified command / late hub).
+    // Re-emit the source→hub prepare; do not absorb as a silent no-op.
+  } else {
+    state.crossJurisdictionAuthorizations.set(
+      route.orderId,
+      cloneCrossJurisdictionRoute(route),
+    );
   }
-  state.crossJurisdictionAuthorizations.set(
-    route.orderId,
-    cloneCrossJurisdictionRoute(route),
-  );
   if (role === 'source') {
     outputs.push(buildCertifiedEntityOutput(
       route.source.counterpartyEntityId,
@@ -96,7 +98,12 @@ const authorizeCrossJurisdictionIntent = (
       [{ type: 'prepareCrossJurisdictionSwap', data: { route: cloneCrossJurisdictionRoute(route) } }],
     ));
   }
-  addMessage(state, `🌉 Cross-j swap ${route.orderId} authorized by ${role} user`);
+  addMessage(
+    state,
+    existing
+      ? `🌉 Cross-j swap ${route.orderId} auth retry re-emitted by ${role} user`
+      : `🌉 Cross-j swap ${route.orderId} authorized by ${role} user`,
+  );
   return { newState: state, outputs };
 };
 

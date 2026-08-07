@@ -2,9 +2,32 @@ import {
 	combineShards,
 	deriveKey,
 	entropyToMnemonic,
+	factorForShardCount,
 	getShardCount,
 	validateInputs,
 } from '../../../brainvault/core.ts';
+
+export type BrainvaultWork = {
+	factor: number;
+	shardCount: number;
+	tier: string;
+};
+
+export const FACTOR_PRESETS: readonly BrainvaultWork[] = [
+	{ factor: 1, shardCount: 1, tier: 'Test' },
+	{ factor: 2, shardCount: 10, tier: 'Basic' },
+	{ factor: 3, shardCount: 100, tier: 'Standard' },
+	{ factor: 4, shardCount: 1000, tier: 'Strong' },
+	{ factor: 5, shardCount: 10000, tier: 'Maximum' },
+];
+
+/** Custom shard counts (≥6) map to a factor exactly like the canonical CLI. */
+export function customWork(shardCount: number): BrainvaultWork {
+	if (!Number.isSafeInteger(shardCount) || shardCount < 6) {
+		throw new Error('Custom work needs at least 6 shards');
+	}
+	return { factor: factorForShardCount(shardCount), shardCount, tier: 'Custom' };
+}
 
 export type BrainvaultProgress = {
 	completed: number;
@@ -49,14 +72,16 @@ function createBrainvaultWorker(): Worker {
 export async function deriveBrainvaultMnemonic(
 	name: string,
 	passphrase: string,
-	factor: number,
+	work: BrainvaultWork,
 	onProgress?: (progress: BrainvaultProgress) => void,
 	signal?: AbortSignal,
 ): Promise<BrainvaultResult> {
+	const { factor, shardCount } = work;
 	const validation = validateInputs(name, passphrase, factor);
 	if (!validation.valid) throw new Error(validation.errors.join('; '));
-
-	const shardCount = getShardCount(factor);
+	if (work.tier !== 'Custom' && shardCount !== getShardCount(factor)) {
+		throw new Error(`BRAINVAULT_PRESET_SHARDS_MISMATCH:${factor}:${shardCount}`);
+	}
 	const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency ? navigator.hardwareConcurrency - 1 : 2, shardCount, 4));
 	const startedAt = performance.now();
 

@@ -139,6 +139,28 @@ test('an unchecked asset reports no verdict rather than a green one', () => {
   }
 });
 
+test('partial on-chain totals never produce a green aggregate verdict', () => {
+  const env = makeEnv();
+  const state = env.state.eReplicas.values().next().value!.state;
+  state.reserves = new Map([[1, 3n], [2, 2n]]);
+  state.accounts.get(ENTITY_B)!.state.deltas = new Map([
+    [1, { collateral: 3n }],
+    [2, { collateral: 1n }],
+  ] as never);
+  const tokenOneKey = `31337:${DEPOSITORY}:1`;
+  const tokenTwoKey = `31337:${DEPOSITORY}:2`;
+  const totals = onChain([[tokenOneKey, 6n]]);
+
+  const solvency = calculateSolvency(env, undefined, totals);
+
+  expect(solvency.byAsset.get(tokenOneKey)?.isValid).toBe(true);
+  expect(solvency.byAsset.get(tokenTwoKey)?.isValid).toBeNull();
+  expect(solvency.isValid).toBeNull();
+  expect(() => verifySolvency(env, 'partial', totals)).toThrow(
+    `incomplete on-chain totals; missing ${tokenTwoKey}`,
+  );
+});
+
 test('a surplus in one token never covers a deficit in another token', () => {
   const env = makeEnv();
   const state = env.state.eReplicas.values().next().value!.state;

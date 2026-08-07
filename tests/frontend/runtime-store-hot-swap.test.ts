@@ -206,6 +206,7 @@ test('direct remote runtime URL reuses saved capability before showing paste pro
   expect(readSource).not.toContain("params.get('token')");
   expect(readSource).toContain('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()');
   expect(readSource).toContain('const requiresAuthPaste = !authKey');
+  expect(readSource).not.toContain('if (keyParam) stripRemoteRuntimeParamsFromHistory()');
   expect(readSource.indexOf('resolveStoredRemoteRuntimeAuthKey(wsUrl).trim()'))
     .toBeLessThan(readSource.indexOf('const requiresAuthPaste = !authKey'));
 });

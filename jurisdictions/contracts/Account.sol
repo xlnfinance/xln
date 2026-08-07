@@ -170,7 +170,7 @@ library Account {
   // registry keyed by the pull beneficiary, and a transformer must never derive
   // them from untrusted argument bytes.
   bytes4 private constant APPLY_TRANSFORMER_BATCH_SELECTOR =
-    bytes4(keccak256("applyBatch(int256[],uint256[],bytes,bytes,bytes,uint256,uint256,bytes32,bytes32)"));
+    bytes4(keccak256("applyBatch(int256[],uint256[],bytes,bytes,bytes,uint256,uint256,bytes32,bytes32,uint256,uint256)"));
   bytes4 private constant DECODE_TRANSFORMER_ARGUMENT_LIST_SELECTOR =
     bytes4(keccak256("decodeTransformerArgumentListStrict(bytes)"));
   uint256 private constant TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000;
@@ -420,7 +420,9 @@ library Account {
     uint256 leftArgumentsTimestamp,
     uint256 rightArgumentsTimestamp,
     uint256 eventInitialNonce,
-    bytes32 finalProofbodyHash
+    bytes32 finalProofbodyHash,
+    uint256 disputeStartBlock,
+    uint256 disputeTimeout
   ) {
     finalProofbodyHash = _validateProofBody(params.finalProofbody);
     if (
@@ -503,10 +505,18 @@ library Account {
       rightArgumentsTimestamp = starterArgumentsTimestamp;
     }
 
+    // Capture the dispute clock BEFORE clearing: applyPull needs startBlock +
+    // timeout for the T/2 reveal window and the full-T finalize barrier. The
+    // clear below still runs first so a later transformer revert restores the
+    // live dispute atomically with these locals already bound into the call.
+    disputeStartBlock = account.disputeStartBlock;
+    disputeTimeout = account.disputeTimeout;
+
     // Publish no partially-cleared dispute state. Any later failure reverts the
     // entire processBatch transaction and restores these fields atomically.
     account.disputeHash = bytes32(0);
     account.disputeTimeout = 0;
+    account.disputeStartBlock = 0;
     account.disputeStartTimestamp = 0;
     account.disputeInitialProofbodyHash = bytes32(0);
     account.starterInitialArgumentsCommitment = bytes32(0);
@@ -528,7 +538,9 @@ library Account {
     uint256 leftArgumentsTimestamp,
     uint256 rightArgumentsTimestamp,
     bytes32 leftEntity,
-    bytes32 rightEntity
+    bytes32 rightEntity,
+    uint256 disputeStartBlock,
+    uint256 disputeTimeout
   ) private view returns (int[] memory newDeltas) {
     if (tc.transformerAddress.code.length == 0) revert TransformerExecutionFailed();
     if (tc.encodedBatch.length + leftArguments.length + rightArguments.length >> 18 != 0) {
@@ -545,7 +557,9 @@ library Account {
       leftArgumentsTimestamp,
       rightArgumentsTimestamp,
       leftEntity,
-      rightEntity
+      rightEntity,
+      disputeStartBlock,
+      disputeTimeout
     );
     uint256 remainingGas = gasleft();
     if (remainingGas <= TRANSFORMER_POST_CALL_GAS_RESERVE) revert TransformerGasBudgetUnavailable();
@@ -621,7 +635,9 @@ library Account {
     uint256 leftArgumentsTimestamp,
     uint256 rightArgumentsTimestamp,
     bytes32 leftEntity,
-    bytes32 rightEntity
+    bytes32 rightEntity,
+    uint256 disputeStartBlock,
+    uint256 disputeTimeout
   ) external returns (int[] memory) {
     if (proofbody.transformers.length == 0) return deltas;
     // The transformer ABI is int256[]. A wide signed-magnitude base delta has
@@ -645,7 +661,9 @@ library Account {
         leftArgumentsTimestamp,
         rightArgumentsTimestamp,
         leftEntity,
-        rightEntity
+        rightEntity,
+        disputeStartBlock,
+        disputeTimeout
       );
 
       for (uint256 j = 0; j < deltas.length; j++) {
@@ -1128,6 +1146,7 @@ library Account {
 
     uint256 timeout = block.number + defaultDelay;
     uint256 startTimestamp = block.timestamp;
+    uint256 startBlock = block.number;
     bool startedByLeft = entityId < params.counterentity;
     bytes32 initialArgumentsCommitment = _argumentCommitment(
       params.starterInitialArguments,
@@ -1148,6 +1167,7 @@ library Account {
       incrementedArgumentsCommitment
     );
     _accounts[acct_key].disputeTimeout = timeout;
+    _accounts[acct_key].disputeStartBlock = startBlock;
     _accounts[acct_key].disputeStartTimestamp = startTimestamp;
     _accounts[acct_key].disputeInitialProofbodyHash = params.proofbodyHash;
     _accounts[acct_key].starterInitialArgumentsCommitment = initialArgumentsCommitment;

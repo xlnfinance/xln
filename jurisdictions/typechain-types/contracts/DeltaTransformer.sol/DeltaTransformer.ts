@@ -138,7 +138,9 @@ export interface DeltaTransformerInterface extends Interface {
       BigNumberish,
       BigNumberish,
       BytesLike,
-      BytesLike
+      BytesLike,
+      BigNumberish,
+      BigNumberish
     ]
   ): string;
   encodeFunctionData(
@@ -254,7 +256,9 @@ export interface DeltaTransformer extends BaseContract {
       leftArgumentsTimestamp: BigNumberish,
       rightArgumentsTimestamp: BigNumberish,
       leftEntity: BytesLike,
-      rightEntity: BytesLike
+      rightEntity: BytesLike,
+      disputeStartBlock: BigNumberish,
+      disputeTimeout: BigNumberish
     ],
     [bigint[]],
     "view"
@@ -298,7 +302,9 @@ export interface DeltaTransformer extends BaseContract {
       leftArgumentsTimestamp: BigNumberish,
       rightArgumentsTimestamp: BigNumberish,
       leftEntity: BytesLike,
-      rightEntity: BytesLike
+      rightEntity: BytesLike,
+      disputeStartBlock: BigNumberish,
+      disputeTimeout: BigNumberish
     ],
     [bigint[]],
     "view"

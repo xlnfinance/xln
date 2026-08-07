@@ -78,7 +78,7 @@ export interface IHashLadderRevealRegistry extends BaseContract {
 
   getHashLadderReveal: TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
     "view"
   >;
 
@@ -90,7 +90,7 @@ export interface IHashLadderRevealRegistry extends BaseContract {
     nameOrSignature: "getHashLadderReveal"
   ): TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
     "view"
   >;
 

@@ -66,7 +66,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     blockTimeMs: 12_000,
     explorer: 'https://sepolia.etherscan.io',
     testnet: true,
-    disabledReason: 'XLN contracts are not configured on Sepolia yet',
+    disabledReason: 'Sepolia disabled — use local anvil (31337) / Tron (31338) for debug',
   },
   {
     chainId: 84532,

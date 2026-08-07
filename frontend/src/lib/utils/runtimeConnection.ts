@@ -118,7 +118,6 @@ export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
   const keyParam = String(
     hash.get('token') || hash.get('authKey') || hash.get('key') || hash.get('auth') || '',
   ).trim();
-  if (keyParam) stripRemoteRuntimeParamsFromHistory();
   const wsUrl = normalizeRuntimeWsUrl(wsParam);
   const authKey = keyParam.startsWith('xlnra1.')
     ? keyParam

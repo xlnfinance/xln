@@ -42,7 +42,9 @@ export interface MockRevealRegistryInterface extends Interface {
       BigNumberish,
       BigNumberish,
       BytesLike,
-      BytesLike
+      BytesLike,
+      BigNumberish,
+      BigNumberish
     ]
   ): string;
   encodeFunctionData(
@@ -124,7 +126,9 @@ export interface MockRevealRegistry extends BaseContract {
       leftArgumentsTimestamp: BigNumberish,
       rightArgumentsTimestamp: BigNumberish,
       leftEntity: BytesLike,
-      rightEntity: BytesLike
+      rightEntity: BytesLike,
+      disputeStartBlock: BigNumberish,
+      disputeTimeout: BigNumberish
     ],
     [bigint[]],
     "view"
@@ -132,7 +136,7 @@ export interface MockRevealRegistry extends BaseContract {
 
   getHashLadderReveal: TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
     "view"
   >;
 
@@ -147,7 +151,7 @@ export interface MockRevealRegistry extends BaseContract {
       entity: BytesLike,
       ladderHash: BytesLike,
       fillRatio: BigNumberish,
-      revealedAt: BigNumberish
+      revealedBlock: BigNumberish
     ],
     [void],
     "nonpayable"
@@ -170,7 +174,9 @@ export interface MockRevealRegistry extends BaseContract {
       leftArgumentsTimestamp: BigNumberish,
       rightArgumentsTimestamp: BigNumberish,
       leftEntity: BytesLike,
-      rightEntity: BytesLike
+      rightEntity: BytesLike,
+      disputeStartBlock: BigNumberish,
+      disputeTimeout: BigNumberish
     ],
     [bigint[]],
     "view"
@@ -179,7 +185,7 @@ export interface MockRevealRegistry extends BaseContract {
     nameOrSignature: "getHashLadderReveal"
   ): TypedContractMethod<
     [entity: BytesLike, ladderHash: BytesLike],
-    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
+    [[bigint, bigint] & { fillRatio: bigint; revealedBlock: bigint }],
     "view"
   >;
   getFunction(
@@ -192,7 +198,7 @@ export interface MockRevealRegistry extends BaseContract {
       entity: BytesLike,
       ladderHash: BytesLike,
       fillRatio: BigNumberish,
-      revealedAt: BigNumberish
+      revealedBlock: BigNumberish
     ],
     [void],
     "nonpayable"

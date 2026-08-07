@@ -13,8 +13,9 @@ import { SettingsScreen } from './screens/Settings';
 
 export default function App() {
 	const status = useApp(s => s.adapterStatus);
+	const booting = useApp(s => s.booting);
 
-	if (status !== 'connected') {
+	if (status !== 'connected' || booting) {
 		return (
 			<>
 				<Gate />

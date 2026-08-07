@@ -36,14 +36,22 @@ export const committedCrossJSourceDisputeDelayMs = (
     throw new Error(`CROSS_J_PREPARED_BLOCK_TIME_MISSING:${route.orderId}`);
   }
   const disputeConfig = sourceAccount(state, route).state.disputeConfig;
-  const delayUnits = Math.max(
-    Number(disputeConfig.leftDisputeDelay),
-    Number(disputeConfig.rightDisputeDelay),
-  );
-  if (!Number.isSafeInteger(delayUnits) || delayUnits <= 0) {
-    throw new Error(`CROSS_J_PREPARED_DISPUTE_DELAY_INVALID:${route.orderId}`);
+  const leftDelay = Number(disputeConfig.leftDisputeDelay);
+  const rightDelay = Number(disputeConfig.rightDisputeDelay);
+  // Equal bilateral delay config is the prepare-time rule. Wall-clock T may
+  // still differ across chains (different block times); that is intentional.
+  if (!Number.isSafeInteger(leftDelay) || leftDelay <= 0) {
+    throw new Error(`CROSS_J_PREPARED_DISPUTE_DELAY_INVALID:${route.orderId}:left`);
   }
-  return delayUnits * 10 * blockTimeMs;
+  if (!Number.isSafeInteger(rightDelay) || rightDelay <= 0) {
+    throw new Error(`CROSS_J_PREPARED_DISPUTE_DELAY_INVALID:${route.orderId}:right`);
+  }
+  if (leftDelay !== rightDelay) {
+    throw new Error(
+      `CROSS_J_PREPARED_DISPUTE_DELAY_MISMATCH:${route.orderId}:left=${leftDelay}:right=${rightDelay}`,
+    );
+  }
+  return leftDelay * 10 * blockTimeMs;
 };
 
 const assertBytes32 = (value: unknown, code: string): string => {

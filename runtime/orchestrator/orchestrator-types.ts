@@ -540,6 +540,7 @@ export type MarketMakerChild = {
   exitSignal: NodeJS.Signals | null;
   restartTimer: ReturnType<typeof setTimeout> | null;
   restartCount: number;
+  recoveryInProgress: boolean;
   failureCounts: Record<string, number>;
   lastHealth: MarketMakerHealthPayload | null;
   lastInfo: MarketMakerInfoPayload | null;

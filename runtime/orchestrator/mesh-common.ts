@@ -315,6 +315,11 @@ export const serializeAccountDelta = (delta: Delta | null | undefined): Record<s
       }
     : null;
 
+/**
+ * Credit `ownerEntityId` granted to their counterparty.
+ * Canonical only via deriveDelta: left writes rightCreditLimit, right writes
+ * leftCreditLimit; from the granter's perspective that is peerCreditLimit.
+ */
 export const getCreditGrantedByEntity = (
   account: AccountReplica,
   ownerEntityId: string,
@@ -324,8 +329,10 @@ export const getCreditGrantedByEntity = (
   if (!delta) return 0n;
   const owner = String(ownerEntityId || '').toLowerCase();
   const left = String(account.state.leftEntity || '').toLowerCase();
-  const isOwnerLeft = owner.length > 0 && owner === left;
-  return BigInt(isOwnerLeft ? (delta.rightCreditLimit ?? 0n) : (delta.leftCreditLimit ?? 0n));
+  if (!owner || (owner !== left && owner !== String(account.state.rightEntity || '').toLowerCase())) {
+    throw new Error(`CREDIT_GRANTER_NOT_ACCOUNT_PARTY:${ownerEntityId.slice(-8)}`);
+  }
+  return deriveDelta(delta, owner === left).peerCreditLimit;
 };
 
 export const getEntityOutCapacity = (

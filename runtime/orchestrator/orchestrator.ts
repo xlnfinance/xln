@@ -72,6 +72,7 @@ import {
   HEALTH_RESPONSE_REFRESH_TIMEOUT_MS,
   HUB_BASELINE_TIMEOUT_MS,
   HUB_BASELINE_STALL_TIMEOUT_MS,
+  HUB_BASELINE_STATUS_LOG_INTERVAL_MS,
   HUB_DIRECT_LINK_BASELINE_GRACE_MS,
   HUB_NAMES,
   HUB_PROFILES_READY_TIMEOUT_MS,
@@ -387,6 +388,7 @@ const marketMakerChild: MarketMakerChild = {
   exitSignal: null,
   restartTimer: null,
   restartCount: 0,
+  recoveryInProgress: false,
   failureCounts: {},
   lastHealth: null,
   lastInfo: null,
@@ -1177,22 +1179,45 @@ const persistManagedChildFatalReport = (
   return incident.fingerprint;
 };
 
+const MANAGED_CHILD_ERROR_LINE_MAX = 8_192;
+const MANAGED_CHILD_ERROR_MESSAGE_MAX = 2_000;
+
 const captureManagedChildErrorLine = (child: RecoverableChild, line: string): void => {
-  const match = line.match(/^\[ERROR\]\[([^\]]+)\]\s+([^\s{]+)/);
+  // One oversized child stderr record must not crash the orchestrator: the
+  // previous path threw DEBUG_EVENT_TOO_LARGE out of the stream handler and
+  // took down the whole mesh mid-E2E.
+  const boundedLine = line.length > MANAGED_CHILD_ERROR_LINE_MAX
+    ? line.slice(0, MANAGED_CHILD_ERROR_LINE_MAX)
+    : line;
+  const match = boundedLine.match(/^\[ERROR\]\[([^\]]+)\]\s+([^\s{]+)/);
   if (!match) return;
   const [, scope = 'runtime', phase = 'MANAGED_CHILD_ERROR'] = match;
-  const jsonStart = line.indexOf('{', match[0].length);
+  const jsonStart = boundedLine.indexOf('{', match[0].length);
   let structuredError = '';
   if (jsonStart >= 0) {
     try {
-      const parsed = JSON.parse(line.slice(jsonStart)) as { error?: unknown; message?: unknown };
+      const parsed = JSON.parse(boundedLine.slice(jsonStart)) as { error?: unknown; message?: unknown };
       structuredError = String(parsed.error || parsed.message || '').trim();
     } catch {
       structuredError = '';
     }
   }
-  const message = structuredError || phase;
-  pushManagedChildIncident(child, normalizeRuntimeFailureCode(message), message, { scope, phase });
+  const message = (structuredError || phase).slice(0, MANAGED_CHILD_ERROR_MESSAGE_MAX);
+  try {
+    pushManagedChildIncident(child, normalizeRuntimeFailureCode(message), message, {
+      scope,
+      phase,
+      truncated: line.length > MANAGED_CHILD_ERROR_LINE_MAX,
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    meshLog.warn('managed_child.error_line_incident_dropped', {
+      child: child.name,
+      scope,
+      phase,
+      reason: reason.slice(0, 500),
+    });
+  }
 };
 
 const observeManagedRuntimeHalt = (
@@ -1326,6 +1351,116 @@ const handleUnexpectedHubFailure = (
         code: null,
         signal: null,
         reason: `HUB_RECOVERY_SPAWN_FAILED:${serializeError(error)}`,
+      });
+    });
+  }, decision.backoffMs);
+};
+
+const waitForMarketMakerSelfReady = async (): Promise<void> => {
+  const startedAt = Date.now();
+  while (true) {
+    await pollMarketMakerHealth();
+    if (marketMakerChild.lastInfo !== null || marketMakerChild.lastHealth !== null) {
+      return;
+    }
+    if (marketMakerChild.proc?.exitCode !== null || marketMakerChild.proc?.signalCode !== null) {
+      throw new Error(
+        `MM_SELF_READY_EXITED_EARLY code=${String(marketMakerChild.proc?.exitCode)} ` +
+        `stderr=${safeStringify(marketMakerChild.recentStderr.slice(-8))}`,
+      );
+    }
+    if (Date.now() - startedAt > STARTUP_TIMEOUT_MS) {
+      throw new Error('MM_SELF_READY_TIMEOUT');
+    }
+    await scheduler.wait(250);
+  }
+};
+
+const handleUnexpectedMarketMakerFailure = (
+  observation: ChildFailureObservation,
+): void => {
+  if (fatalOrchestratorShutdownStarted) return;
+  const decision = decideChildFailure(marketMakerChild.failureCounts, observation);
+  marketMakerChild.failureCounts = decision.counts;
+  let receiptPath: string;
+  try {
+    receiptPath = persistManagedChildFailure(
+      marketMakerChild,
+      observation,
+      decision,
+      resetState.inProgress && decision.action === 'recover' ? 'recover' : undefined,
+    );
+  } catch (error) {
+    const diagnosticError = serializeError(error);
+    meshLog.error('child.failure_receipt_write_failed', {
+      child: marketMakerChild.name,
+      error: diagnosticError,
+      originalFailure: observation.reason,
+    });
+    failFastUnexpectedChildExit(`MM diagnostics persistence failed: ${diagnosticError}`);
+    return;
+  }
+  meshLog.error('child.unexpected_exit', {
+    child: marketMakerChild.name,
+    code: observation.code,
+    signal: observation.signal,
+    reasonCode: decision.reasonCode,
+    fingerprint: decision.fingerprint,
+    identicalFailureCount: decision.count,
+    action: decision.action,
+    receiptPath,
+  });
+  pushManagedChildIncident(
+    marketMakerChild,
+    decision.reasonCode,
+    observation.reason,
+    {
+      code: observation.code,
+      signal: observation.signal,
+      fingerprint: decision.fingerprint,
+      identicalFailureCount: decision.count,
+      action: decision.action,
+      receiptPath,
+    },
+  );
+  if (decision.action === 'fail-stop') {
+    failFastUnexpectedChildExit(
+      `MM repeated ${decision.reasonCode} ${decision.count} times; receipt=${receiptPath}`,
+    );
+    return;
+  }
+  // Reset owns MM lifecycle — do not race a supervised respawn into stopAllChildren.
+  if (resetState.inProgress) return;
+
+  marketMakerChild.recoveryInProgress = true;
+  marketMakerChild.restartTimer = setTimeout(() => {
+    marketMakerChild.restartTimer = null;
+    void (async () => {
+      // Match readiness-path fencing: a crashed writer may leave a valid lease
+      // until TTL expiry; respawning sooner fails closed and wastes the retry.
+      await scheduler.wait(MARKET_MAKER_RESTART_FENCING_GRACE_MS);
+      await spawnMarketMaker();
+      await waitForMarketMakerSelfReady();
+      marketMakerChild.recoveryInProgress = false;
+      meshLog.info('child.respawned_from_checkpoint', {
+        child: marketMakerChild.name,
+        fingerprint: decision.fingerprint,
+        identicalFailureCount: decision.count,
+        receiptPath,
+      });
+    })().catch(async (error) => {
+      if (marketMakerChild.recoveryInProgress && marketMakerChild.restartTimer) return;
+      const failedProc = marketMakerChild.proc;
+      marketMakerChild.proc = null;
+      rememberControlledStop(failedProc);
+      await stopProcess(failedProc);
+      marketMakerChild.recoveryInProgress = false;
+      handleUnexpectedMarketMakerFailure({
+        role: 'market-maker',
+        name: marketMakerChild.name,
+        code: null,
+        signal: null,
+        reason: `MM_RECOVERY_SPAWN_FAILED:${serializeError(error)}`,
       });
     });
   }, decision.backoffMs);
@@ -1553,7 +1688,7 @@ const spawnMarketMaker = async (): Promise<void> => {
       orchestratorShutdownStarted,
       isCurrentProc,
     )) {
-      const observation: ChildFailureObservation = {
+      handleUnexpectedMarketMakerFailure({
         role: 'market-maker',
         name: marketMakerChild.name,
         code: code ?? null,
@@ -1563,51 +1698,7 @@ const spawnMarketMaker = async (): Promise<void> => {
           marketMakerChild.recentStdout,
           `MM_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
         ),
-      };
-      const decision = decideChildFailure(marketMakerChild.failureCounts, observation);
-      marketMakerChild.failureCounts = decision.counts;
-      let receiptPath: string;
-      try {
-        receiptPath = persistManagedChildFailure(
-          marketMakerChild,
-          observation,
-          decision,
-          resetState.inProgress && decision.action === 'recover' ? 'recover' : 'fail-stop',
-        );
-      } catch (error) {
-        const diagnosticError = serializeError(error);
-        meshLog.error('child.failure_receipt_write_failed', {
-          child: marketMakerChild.name,
-          error: diagnosticError,
-          originalFailure: observation.reason,
-        });
-        failFastUnexpectedChildExit(`MM diagnostics persistence failed: ${diagnosticError}`);
-        return;
-      }
-      meshLog.error('child.failure_captured', {
-        child: marketMakerChild.name,
-        reasonCode: decision.reasonCode,
-        identicalFailureCount: decision.count,
-        receiptPath,
       });
-      pushManagedChildIncident(
-        marketMakerChild,
-        decision.reasonCode,
-        observation.reason,
-        {
-          code: observation.code,
-          signal: observation.signal,
-          fingerprint: decision.fingerprint,
-          identicalFailureCount: decision.count,
-          action: decision.action,
-          receiptPath,
-        },
-      );
-      if (!resetState.inProgress || decision.action === 'fail-stop') {
-        failFastUnexpectedChildExit(
-          `MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)} receipt=${receiptPath}`,
-        );
-      }
     }
   });
   await writeInheritedChildSecrets(proc, {
@@ -1622,6 +1713,7 @@ const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<vo
     child.recoveryInProgress = false;
   }
   clearChildRestartTimer(marketMakerChild);
+  marketMakerChild.recoveryInProgress = false;
   const ownedLiveChildren = hubChildren.filter((child) =>
     child.proc && child.proc.exitCode === null && child.proc.signalCode === null
   );
@@ -2072,9 +2164,40 @@ const buildAggregatedHealthResponse = async (
   return recomputeHealthWithMarketMaker(nextHealth, nextHealth.marketMaker);
 };
 
+const reportBaselineWait = (
+  startedAt: number,
+  lastReportedAt: number,
+  now: number,
+  status: Record<string, unknown>,
+): number => {
+  if (now - lastReportedAt < HUB_BASELINE_STATUS_LOG_INTERVAL_MS) return lastReportedAt;
+  console.warn(
+    `[MESH] baseline still waiting: waitedMs=${now - startedAt} status=${safeStringify(status)}`,
+  );
+  return now;
+};
+
+/**
+ * A direct link is one WebSocket, and only the dialing side registers it: a
+ * peer this runtime never dialed is served over its inbound socket and never
+ * appears in `directPeers`. Mesh bootstrap dials from the left side of each
+ * account pair, so a fully connected mesh of n hubs settles at n*(n-1)/2 open
+ * links, not n*(n-1). Counting directed edges made the requirement unreachable
+ * and, under XLN_REQUIRE_DIRECT_BASELINE=1, made the baseline wait forever.
+ * Count unordered pairs so the gate asks for connectivity, not for both sides
+ * to have happened to dial.
+ */
+const openDirectHubPairCount = (health: AggregatedHealth): number => new Set(
+  health.hubMesh.direct.links.map(link =>
+    [link.fromRuntimeId, link.toRuntimeId].sort(compareStableText).join(':')),
+).size;
+
 const waitForHubBaseline = async (): Promise<void> => {
-  const directRequired = HUB_NAMES.length * Math.max(0, HUB_NAMES.length - 1);
+  const hubCount = HUB_NAMES.length;
+  const directRequired = (hubCount * Math.max(0, hubCount - 1)) / 2;
   const requireDirectLinks = process.env['XLN_REQUIRE_DIRECT_BASELINE'] === '1';
+  const baselineStartedAt = Date.now();
+  let lastReportedAt = baselineStartedAt;
   let directGraceStartedAt = 0;
   let lastStatus: Record<string, unknown> | null = null;
   let warnedDirectGrace = false;
@@ -2092,17 +2215,19 @@ const waitForHubBaseline = async (): Promise<void> => {
       health.hubMesh.ok &&
       health.bootstrapReserves.ok &&
       health.hubs.every(hub => hub.online);
-    const directReady = health.hubMesh.direct.openLinkCount >= directRequired;
+    const directOpen = openDirectHubPairCount(health);
+    const directReady = directOpen >= directRequired;
     lastStatus = {
       coreReady,
       directReady,
-      directOpen: health.hubMesh.direct.openLinkCount,
+      directOpen,
       directRequired,
       requireDirectLinks,
       bootstrapReserves: health.bootstrapReserves.ok,
       hubsOnline: health.hubs.map(hub => ({ name: hub.name, online: hub.online, selfRelayPresence: hub.selfRelayPresence })),
       degraded: health.degraded,
     };
+    lastReportedAt = reportBaselineWait(baselineStartedAt, lastReportedAt, now, lastStatus);
     if (coreReady) {
       if (directReady || !requireDirectLinks) {
         if (!directReady) {
@@ -2115,7 +2240,7 @@ const waitForHubBaseline = async (): Promise<void> => {
           if (!warnedDirectGrace) {
             warnedDirectGrace = true;
             console.warn(
-              `[MESH] baseline proceeding after direct-link grace: open=${health.hubMesh.direct.openLinkCount}/${directRequired} graceMs=${HUB_DIRECT_LINK_BASELINE_GRACE_MS}`,
+              `[MESH] baseline proceeding after direct-link grace: open=${directOpen}/${directRequired} graceMs=${HUB_DIRECT_LINK_BASELINE_GRACE_MS}`,
             );
           }
         }

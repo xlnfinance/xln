@@ -30,6 +30,10 @@ export const ENTITY_TX_CROSS_J_SCHEMAS = {
     },
     optional: { observedAt: 'integer' },
   },
+  crossJurisdictionForceSiblingDispute: {
+    required: { routeId: 'string', observedCounterpartyEntityId: 'string' },
+    optional: { observedAt: 'integer' },
+  },
   orderbookSweepCrossJurisdiction: { optional: { reason: 'string' } },
   admitCrossJurisdictionBookOrder: {
     required: { route: 'record' },

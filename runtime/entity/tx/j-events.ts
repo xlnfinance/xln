@@ -29,6 +29,7 @@ import {
   ladderHashForPull,
   planCrossJurisdictionTargetRecovery,
   queueCrossJurisdictionRevealPorts,
+  queueCrossJurisdictionSiblingDisputeFanout,
   queueHashLadderRevealRegistration,
 } from './j-events-htlc';
 import {
@@ -590,6 +591,13 @@ const applyStartedDisputeFollowups = (
   // The source hub's claim requires publishing the reveal; queue it the moment
   // a dispute touching one of our source pulls is observed.
   queueSourceHubClaimRegistration(context, counterpartyId);
+  // Any local dispute on a live cross-j leg starts the sibling clock too.
+  queueCrossJurisdictionSiblingDisputeFanout(
+    newState,
+    outputs,
+    counterpartyId,
+    blockNumber,
+  );
 
   addMessage(
     newState,

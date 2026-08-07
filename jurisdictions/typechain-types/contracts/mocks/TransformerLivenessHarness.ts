@@ -34,7 +34,9 @@ export interface TransformerLivenessHarnessInterface extends Interface {
       BigNumberish,
       BigNumberish,
       BytesLike,
-      BytesLike
+      BytesLike,
+      BigNumberish,
+      BigNumberish
     ]
   ): string;
   encodeFunctionData(
@@ -99,7 +101,9 @@ export interface TransformerLivenessHarness extends BaseContract {
       arg5: BigNumberish,
       arg6: BigNumberish,
       arg7: BytesLike,
-      arg8: BytesLike
+      arg8: BytesLike,
+      arg9: BigNumberish,
+      arg10: BigNumberish
     ],
     [bigint[]],
     "view"
@@ -132,7 +136,9 @@ export interface TransformerLivenessHarness extends BaseContract {
       arg5: BigNumberish,
       arg6: BigNumberish,
       arg7: BytesLike,
-      arg8: BytesLike
+      arg8: BytesLike,
+      arg9: BigNumberish,
+      arg10: BigNumberish
     ],
     [bigint[]],
     "view"

@@ -13,6 +13,7 @@ export const ENTITY_TX_TYPES = [
   'accountInput', 'admitCrossJurisdictionBookOrder', 'applyCrossJurisdictionBookProgress',
   'certifyProfile', 'chat', 'chatMessage',
   'consensusOutput', 'crossJurisdictionBookOrderRemoved', 'crossJurisdictionFillNotice',
+  'crossJurisdictionForceSiblingDispute',
   'crossJurisdictionSalvage',
   'crossPullClose', 'directPayment', 'disputeFinalize', 'disputeStart', 'e2r',
   'entityCommand', 'entityProviderCancelAction', 'entityProviderReleaseControlShares',

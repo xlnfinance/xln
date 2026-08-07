@@ -130,8 +130,8 @@
       },
       "explorer": "https://sepolia.etherscan.io",
       "currency": "ETH",
-      "status": "active",
-      "description": "Ethereum Sepolia XLN deployment",
+      "status": "pending",
+      "description": "Ethereum Sepolia XLN deployment (disabled for local anvil/Tron debug; re-enable when public testnet is needed)",
       "tokens": {
         "USDT": {
           "symbol": "USDT",

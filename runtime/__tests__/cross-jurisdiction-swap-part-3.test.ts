@@ -957,6 +957,80 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(canonical?.cumulativeFillRatio).toBeUndefined();
   });
 
+  test('never-filled cancel notice with 0/1 sentinel is not STALE_CONFLICT', async () => {
+    // buildCrossJurisdictionCancelAck must send bigint fillNumerator/Denominator;
+    // for fillSeq=0 it uses 0n/1n while the resting route has no exact fields.
+    const env = createEmptyEnv('cross-fill-cancel-zero-sentinel');
+    env.state.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('d1');
+    const sourceHub = entity('d2');
+    const targetHub = entity('d3');
+    const targetUser = entity('d4');
+    const state = makeState(targetHub, addr('d3'), base, targetUser);
+    const route = {
+      ...buildPreparedCrossJurisdictionRoute(
+        {
+          orderId: 'cross-fill-cancel-zero-sentinel',
+          makerEntityId: sourceUser,
+          hubEntityId: sourceHub,
+          targetHubSignerId: addr('d3'),
+          source: {
+            jurisdiction: jref(eth),
+            entityId: sourceUser,
+            counterpartyEntityId: sourceHub,
+            tokenId: 1,
+            amount: 1_000n,
+          },
+          target: {
+            jurisdiction: jref(base),
+            entityId: targetHub,
+            counterpartyEntityId: targetUser,
+            tokenId: 1,
+            amount: 900n,
+          },
+          status: 'resting',
+          createdAt: env.state.timestamp,
+          updatedAt: env.state.timestamp,
+          expiresAt: 70_000,
+        },
+        { runtimeSeed: 'cross-fill-cancel-zero-sentinel', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
+      ),
+      status: 'resting' as const,
+    };
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+    const cancelAck = buildCrossJurisdictionCancelAck(route.orderId, route);
+    expect(cancelAck.data.fillSeq).toBe(0);
+    expect(cancelAck.data.fillNumerator).toBe(0n);
+    expect(cancelAck.data.fillDenominator).toBe(1n);
+
+    const result = await applyEntityTx(env, state, {
+      type: 'crossJurisdictionFillNotice',
+      data: {
+        orderId: route.orderId,
+        ...(route.routeHash ? { routeHash: route.routeHash } : {}),
+        previousFillSeq: 0,
+        fillSeq: 0,
+        incrementalSourceAmount: 0n,
+        incrementalTargetAmount: 0n,
+        cumulativeSourceAmount: 0n,
+        cumulativeTargetAmount: 0n,
+        cumulativeFillRatio: 0,
+        fillNumerator: 0n,
+        fillDenominator: 1n,
+        cancelRemainder: true,
+        pairId: route.venueId || '',
+      },
+    });
+    expect(result.accountTxs?.map(op => op.tx.type)).toEqual(['cross_pull_progress']);
+    expect(result.accountTxs?.[0]?.tx).toMatchObject({
+      type: 'cross_pull_progress',
+      data: { fill: { ackKind: 'cancel', fillSeq: 0, cancelRemainder: true } },
+    });
+  });
+
   test('duplicate fill notice is idempotent but same-seq divergent notice fails fast', async () => {
     const env = createEmptyEnv('cross-fill-notice-idempotent');
     env.state.timestamp = 10_000;
@@ -2559,7 +2633,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(fixture.plan()).toBeNull();
   });
 
-  test('target DisputeStarted attaches the port-wait recovery and forces no source dispute', async () => {
+  test('target DisputeStarted attaches port-wait recovery and fans out sibling dispute', async () => {
     const env = createEmptyEnv('cross-target-dispute-forces-source');
     env.scenarioMode = true;
     env.state.timestamp = 50_000;
@@ -2687,14 +2761,23 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(errors).toEqual([]);
     expect(warnings).toEqual([]);
 
-    // The recovery is a port-wait, not a source dispute: the hub's claim on
-    // the source leg is only possible through a public registry write, which
-    // the reveal-port path then carries to this chain.
-    expect(
-      result!.outputs.filter(output =>
-        output.entityTxs?.some(tx => tx.type === 'prepareDispute'),
-      ),
-    ).toEqual([]);
+    // Local recovery stays a port-wait on the target account. Sibling fanout
+    // asks the source-user lane to start its own dispute clock so both legs
+    // can reveal/port before either chain's T expires.
+    const fanout = result!.outputs.filter(output =>
+      output.entityTxs?.some(tx => tx.type === 'crossJurisdictionForceSiblingDispute'),
+    );
+    expect(fanout).toHaveLength(1);
+    expect(fanout[0]?.entityId.toLowerCase()).toBe(sourceUser.toLowerCase());
+    expect(fanout[0]?.signerId.toLowerCase()).toBe(sourceSigner.toLowerCase());
+    expect(fanout[0]?.entityTxs).toEqual([{
+      type: 'crossJurisdictionForceSiblingDispute',
+      data: {
+        routeId: route.orderId,
+        observedCounterpartyEntityId: targetHub.toLowerCase(),
+        observedAt: 2,
+      },
+    }]);
     const recovery = result!.newState.accounts
       .get(targetHub)
       ?.activeDispute?.crossJurisdictionRecovery;

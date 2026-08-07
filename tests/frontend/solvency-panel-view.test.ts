@@ -23,7 +23,9 @@ test('solvency projection derives reserves and collateral from an injected runti
           config,
           reserves: new Map([[1, 150n]]),
           accounts: new Map([[right, {
-            deltas: new Map([[1, { collateral: 100n }]]),
+            state: {
+              deltas: new Map([[1, { collateral: 100n }]]),
+            },
             pendingFrame: {
               deltas: [{ tokenId: 1, collateral: 50n }],
             },
@@ -37,7 +39,9 @@ test('solvency projection derives reserves and collateral from an injected runti
           config,
           reserves: new Map(),
           accounts: new Map([[left, {
-            deltas: new Map([[1, { collateral: 100n }]]),
+            state: {
+              deltas: new Map([[1, { collateral: 100n }]]),
+            },
             pendingFrame: {
               deltas: [{ tokenId: 1, collateral: 50n }],
             },
@@ -56,10 +60,12 @@ test('solvency projection derives reserves and collateral from an injected runti
       reserves: 150n,
       confirmedCollateral: 100n,
       pendingCollateral: 50n,
-      delta: 50n,
-      isValid: false,
+      internalValue: 250n,
+      expectedInternalValue: null,
+      delta: null,
+      isValid: null,
     }],
-    isValid: false,
+    isValid: null,
   });
 });
 

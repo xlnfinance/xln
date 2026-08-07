@@ -62,15 +62,18 @@ at registration would leave the §5.3 hole — a hub registers early against an
 account with no active dispute and the global record then counts inside the
 disputed one.
 
-Valid iff:
+The dispute clock is measured in **blocks**, not wall timestamps. `pull.revealedUntilTimestamp`
+is ABI legacy and ignored for pull settlement. Valid iff:
 
 ```
-disputeStart <= revealedAt <= min(pull.revealedUntilTimestamp, disputeStart + T/2)
+revealedBlock != 0 && revealedBlock <= disputeStartBlock + (disputeTimeout - disputeStartBlock) / 2
 ```
 
-`T` is the **full** dispute period, and the hub must reveal by its half-way
-point; the remaining half is the user's window to carry the secrets from the
-source chain to the target chain and register them there under its own key.
+`T` is the **full** dispute period (`disputeTimeout - disputeStartBlock` blocks).
+The beneficiary must register by `T/2`; the remaining half is the port/settle
+buffer. Different wall-clock T across chains is allowed (different block times);
+equal bilateral delay *config* is the prepare-time rule. Seeing a dispute on any
+sibling leg auto-starts disputes on all siblings so every clock starts in time.
 
 There is deliberately **no lower bound** on `revealedAt`. It was considered and
 rejected by the owner: because the key includes the revealing entity and each
@@ -84,9 +87,9 @@ A late reveal is not rejected at write time — it is recorded and read as
 
 ## Barrier
 
-Finalization is impossible before `disputeStart + REVEAL_WINDOW + PORT_WINDOW`,
-on **both** paths. The counterparty can finalize immediately today
-(`Account.sol:476`), and that early finalize makes every other mitigation moot.
+Finalization is impossible while `block.number < disputeTimeout` on **both**
+paths (timeout and counterparty-signed). `applyPull` reverts with
+`PullRevealWindowActive` until full T elapses.
 
 ## Attack catalog — tests before Solidity
 

@@ -37,7 +37,7 @@ export interface Solvency {
   byAsset: Map<string, AssetSolvency>;
   entityCount: number;
   accountViews: number;
-  /** null when no authoritative on-chain totals were supplied. */
+  /** null until every asset has an authoritative on-chain total. */
   isValid: boolean | null;
 }
 
@@ -167,9 +167,11 @@ export const calculateSolvency = (
     byAsset,
     entityCount: states.length,
     accountViews,
-    isValid: checked === 0
-      ? null
-      : Array.from(byAsset.values()).every(asset => asset.isValid !== false),
+    isValid: Array.from(byAsset.values()).some(asset => asset.isValid === false)
+      ? false
+      : checked > 0 && checked === byAsset.size
+        ? true
+        : null,
   };
 };
 
@@ -189,9 +191,15 @@ export const verifySolvency = (
   onChainTotals?: OnChainTokenTotals,
 ): boolean => {
   const solvency = calculateSolvency(env, undefined, onChainTotals);
+  const unchecked = Array.from(solvency.byAsset.entries())
+    .filter(([, asset]) => asset.isValid === null)
+    .map(([key]) => key);
   if (solvency.isValid === null) {
+    const reason = unchecked.length === solvency.byAsset.size
+      ? `no on-chain totals supplied for ${solvency.byAsset.size} asset(s)`
+      : `incomplete on-chain totals; missing ${unchecked.join(',')}`;
     throw new Error(
-      `Solvency check failed: no on-chain totals supplied for ${solvency.byAsset.size} asset(s)`,
+      `Solvency check failed: ${reason}`,
     );
   }
   const invalid = Array.from(solvency.byAsset.values()).filter(asset => asset.isValid === false);

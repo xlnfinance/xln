@@ -29,8 +29,10 @@ export function getDemoTopology(): DemoTopology | null {
 	return topology;
 }
 
+let usdcScale = 10n ** 6n;
+
 function usd(amount: number): bigint {
-	return BigInt(amount) * 10n ** 18n;
+	return BigInt(amount) * usdcScale;
 }
 
 function findReplicaState(env: RuntimeReplica, entityId: string) {
@@ -75,12 +77,35 @@ export type VaultRuntimeOptions = {
  * lane the rest of the UI uses.
  */
 export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOptions): Promise<DemoTopology> {
+	useApp.getState().setBooting(true);
+	try {
+		return await bootEmbeddedDemoInner(seed, options);
+	} catch (error) {
+		// A halted mid-seed sandbox is not worth preserving: wipe it so the
+		// next attempt starts deterministic instead of replaying a wedged WAL.
+		if (options.kind === 'sandbox') {
+			try {
+				const xln = await getXLN();
+				const env = getEmbeddedEnv();
+				if (env) await xln.clearDB(env);
+			} catch {
+				// Reset is best-effort; surface the original failure.
+			}
+		}
+		throw error;
+	} finally {
+		useApp.getState().setBooting(false);
+	}
+}
+
+async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions): Promise<DemoTopology> {
 	const step = (text: string): void => {
 		options.onStep?.(text);
 	};
 
 	step('Starting local runtime');
 	const xln = await getXLN();
+	usdcScale = 10n ** BigInt(xln.getTokenInfo(USDC).decimals);
 	await connectEmbedded(seed);
 	const env = getEmbeddedEnv();
 	if (!env) throw new Error('EMBEDDED_ENV_MISSING');
@@ -178,29 +203,10 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
 		]);
 	}
 
-	step('Funding reserves');
-	const reserveTargets: Array<[DemoActor, bigint]> = [
-		[self, usd(25_000)],
-		[hub, usd(250_000)],
-		[merchant, usd(10_000)],
-	];
-	for (const [actor, amount] of reserveTargets) {
-		const replica = findReplicaState(env, actor.entityId);
-		const current = replica?.state?.reserves?.get?.(USDC) ?? 0n;
-		if (current >= amount) continue;
-		await sendEntity(actor.entityId, actor.signerId, [
-			{ type: 'mintReserves', data: { tokenId: USDC, amount: amount - current } },
-		]);
-	}
-	await waitFor(
-		() =>
-			reserveTargets.every(([actor, amount]) => {
-				const replica = findReplicaState(env, actor.entityId);
-				return (replica?.state?.reserves?.get?.(USDC) ?? 0n) >= amount;
-			}),
-		'demo reserves',
-		60_000,
-	);
+	// No mintReserves here: a mint's J event reproducibly halts the live loop
+	// with J_PREFIX_LOCAL_PREFIX_MISMATCH on the receiving entity (runtime
+	// prefix-consensus issue, reported upstream). The demo runs entirely on
+	// bilateral credit lines, which payments do not need reserves for.
 
 	step('Opening accounts');
 	const spokes: Array<[DemoActor, DemoActor]> = [
@@ -208,20 +214,18 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
 		[merchant, hub],
 	];
 	for (const [spoke, target] of spokes) {
-		if (accountReady(env, spoke.entityId, target.entityId)) continue;
+		if (accountReady(env, spoke.entityId, target.entityId) && accountReady(env, target.entityId, spoke.entityId)) {
+			continue;
+		}
 		await sendEntity(spoke.entityId, spoke.signerId, [
 			{ type: 'openAccount', data: { targetEntityId: target.entityId, creditAmount: 0n, tokenId: USDC } },
 		]);
+		await waitFor(
+			() => accountReady(env, spoke.entityId, target.entityId) && accountReady(env, target.entityId, spoke.entityId),
+			`demo account ${spoke.label}↔${target.label}`,
+			45_000,
+		);
 	}
-	await waitFor(
-		() =>
-			spokes.every(
-				([spoke, target]) =>
-					accountReady(env, spoke.entityId, target.entityId) && accountReady(env, target.entityId, spoke.entityId),
-			),
-		'demo accounts',
-		45_000,
-	);
 
 	step('Extending credit lines');
 	const creditLine = usd(50_000);
@@ -231,19 +235,54 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
 		[hub, merchant],
 		[merchant, hub],
 	];
-	for (const [creditor, debtor] of creditPairs) {
-		if (creditApplied(env, creditor.entityId, debtor.entityId, creditLine * 2n)) continue;
+	for (const [index, [creditor, debtor]] of creditPairs.entries()) {
+		// Both directions on one account raise the combined limit; check the
+		// running total so an idempotent re-run does not double-extend.
+		const minTotal = creditLine * BigInt((index % 2) + 1);
+		if (creditApplied(env, creditor.entityId, debtor.entityId, minTotal)) continue;
 		await sendEntity(creditor.entityId, creditor.signerId, [
 			{ type: 'extendCredit', data: { counterpartyEntityId: debtor.entityId, tokenId: USDC, amount: creditLine } },
 		]);
+		await waitFor(
+			() => creditApplied(env, creditor.entityId, debtor.entityId, minTotal),
+			`demo credit ${creditor.label}→${debtor.label}`,
+			45_000,
+		);
 	}
-	await waitFor(
-		() =>
-			creditApplied(env, self.entityId, hub.entityId, creditLine * 2n) &&
-			creditApplied(env, merchant.entityId, hub.entityId, creditLine * 2n),
-		'demo credit lines',
-		45_000,
-	);
+
+	step('Placing opening balances');
+	// Hub pays the spokes their starting balances over the fresh credit lines —
+	// an off-chain money source that works while on-chain minting is blocked
+	// by the reported J-prefix runtime bug.
+	const openingBalances: Array<[DemoActor, bigint]> = [
+		[self, usd(10_000)],
+		[merchant, usd(5_000)],
+	];
+	for (const [recipient, amount] of openingBalances) {
+		const received = (): bigint => {
+			const replica = findReplicaState(env, recipient.entityId);
+			const delta = replica?.state?.accounts?.get?.(hub.entityId)?.state?.deltas?.get?.(USDC);
+			if (!delta) return 0n;
+			const total = delta.ondelta + delta.offdelta;
+			const isLeft = recipient.entityId.toLowerCase() < hub.entityId.toLowerCase();
+			return isLeft ? total : -total;
+		};
+		if (received() >= amount) continue;
+		await sendEntity(hub.entityId, hub.signerId, [
+			{
+				type: 'directPayment',
+				data: {
+					targetEntityId: recipient.entityId,
+					tokenId: USDC,
+					amount: amount - received(),
+					route: [hub.entityId, recipient.entityId],
+					deliveryMode: 'direct',
+					description: 'Opening balance',
+				},
+			},
+		]);
+		await waitFor(() => received() >= amount, `demo opening balance ${recipient.label}`, 45_000);
+	}
 
 	step('Ready');
 	const app = useApp.getState();
@@ -254,6 +293,30 @@ export async function bootEmbeddedDemo(seed: string, options: VaultRuntimeOption
 	}
 	app.unlockSeed(options.vaultId, seed);
 	return topology;
+}
+
+/**
+ * Off-chain faucet for demo runtimes: Hub One pays the recipient over the
+ * bilateral credit line. Available whenever the local demo topology exists.
+ */
+export async function demoFaucet(recipientEntityId: string, amount: bigint): Promise<void> {
+	const demo = topology;
+	if (!demo) throw new Error('Faucet is available only on a local demo runtime');
+	const recipient = recipientEntityId.trim().toLowerCase();
+	if (recipient === demo.hub.entityId) throw new Error('The hub funds others, not itself');
+	await sendEntity(demo.hub.entityId, demo.hub.signerId, [
+		{
+			type: 'directPayment',
+			data: {
+				targetEntityId: recipient,
+				tokenId: USDC,
+				amount,
+				route: [demo.hub.entityId, recipient],
+				deliveryMode: 'direct',
+				description: 'Faucet top-up',
+			},
+		},
+	]);
 }
 
 export async function connectSandbox(onStep?: (step: string) => void): Promise<DemoTopology> {

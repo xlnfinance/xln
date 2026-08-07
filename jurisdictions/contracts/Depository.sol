@@ -76,7 +76,8 @@ contract Depository is ReentrancyGuardLite {
   // calling Depository) and never dispute calldata. Keyed by (revealing entity,
   // ladderHash): processBatch authentication makes the writer the caller, so no
   // one can register a ratio under a counterparty's key. Value packs
-  // (block.timestamp << 16) | fillRatio into one slot.
+  // (block.number << 16) | fillRatio into one slot — dispute T/2 validity is
+  // measured in the same block units as disputeTimeout.
   mapping (bytes32 => mapping (bytes32 => uint256)) public hashLadderReveals;
 
   mapping (bytes32 => mapping (uint => Debt[])) public _debts;
@@ -234,7 +235,7 @@ contract Depository is ReentrancyGuardLite {
   function getHashLadderReveal(bytes32 entity, bytes32 ladderHash)
     external
     view
-    returns (uint16 fillRatio, uint256 revealedAt)
+    returns (uint16 fillRatio, uint256 revealedBlock)
   {
     uint256 packed = hashLadderReveals[entity][ladderHash];
     return (uint16(packed), packed >> 16);
@@ -601,11 +602,11 @@ contract Depository is ReentrancyGuardLite {
 
     // Hash-ladder reveals: the only on-chain settlement evidence a cross-j
     // pull will ever read. Registration is always permitted (even with no
-    // active dispute); validity against the pull's deadline is decided at
-    // finalization time. Overwrite is intentional: the record is keyed to the
-    // authenticated caller, so a later write can only replace this entity's
-    // own earlier evidence — never a counterparty's. A ratio-0 registration
-    // is meaningless (absence already reads as 0) and reverts.
+    // active dispute); validity against the dispute's T/2 reveal window is
+    // decided at finalization time. Overwrite is intentional: the record is
+    // keyed to the authenticated caller, so a later write can only replace
+    // this entity's own earlier evidence — never a counterparty's. A ratio-0
+    // registration is meaningless (absence already reads as 0) and reverts.
     for (uint i = 0; i < batch.hashLadderReveals.length; i++) {
       HashLadderReveal memory reveal = batch.hashLadderReveals[i];
       if (reveal.fillRatio == 0) revert E1();
@@ -616,7 +617,7 @@ contract Depository is ReentrancyGuardLite {
       }
       bytes32 ladderHash = keccak256(abi.encodePacked(reveal.fullHash, reveal.partialRoot));
       hashLadderReveals[entityId][ladderHash] =
-        (uint256(block.timestamp) << 16) | uint256(reveal.fillRatio);
+        (uint256(block.number) << 16) | uint256(reveal.fillRatio);
       emit HashLadderRevealRegistered(
         entityId,
         ladderHash,
@@ -983,7 +984,9 @@ contract Depository is ReentrancyGuardLite {
       uint256 leftArgumentsTimestamp,
       uint256 rightArgumentsTimestamp,
       uint256 eventInitialNonce,
-      bytes32 finalProofbodyHash
+      bytes32 finalProofbodyHash,
+      uint256 disputeStartBlock,
+      uint256 disputeTimeout
     ) = Account.prepareDisputeFinalization(_accounts, entityId, params, entityProvider);
 
     _finalizeAccount(
@@ -993,7 +996,9 @@ contract Depository is ReentrancyGuardLite {
       leftArguments,
       rightArguments,
       leftArgumentsTimestamp,
-      rightArgumentsTimestamp
+      rightArgumentsTimestamp,
+      disputeStartBlock,
+      disputeTimeout
     );
     // Cooperative/counter-dispute adopts its signed nonce. A unilateral
     // timeout has no newer signature, so it consumes exactly one nonce.
@@ -1016,7 +1021,9 @@ contract Depository is ReentrancyGuardLite {
     bytes memory leftArguments,
     bytes memory rightArguments,
     uint256 leftArgumentsTimestamp,
-    uint256 rightArgumentsTimestamp
+    uint256 rightArgumentsTimestamp,
+    uint256 disputeStartBlock,
+    uint256 disputeTimeout
   ) private {
     if (proofbody.tokenIds.length != proofbody.offdeltas.length) revert E8();
 
@@ -1069,7 +1076,9 @@ contract Depository is ReentrancyGuardLite {
       leftArgsTimestamp,
       rightArgsTimestamp,
       leftAddr,
-      rightAddr
+      rightAddr,
+      disputeStartBlock,
+      disputeTimeout
     );
 
     // A transformer can run only on exact int256 inputs. Account reverts before

@@ -37,7 +37,9 @@ contract TransformerLivenessHarness {
     uint256,
     uint256,
     bytes32,
-    bytes32
+    bytes32,
+    uint256,
+    uint256
   ) external pure returns (int256[] memory result) {
     (Mode mode, uint256 deltaIndex, int256 value, uint256 expectedTokenId) =
       abi.decode(encodedBatch, (Mode, uint256, int256, uint256));

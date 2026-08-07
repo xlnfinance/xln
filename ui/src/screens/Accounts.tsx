@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
-import { CapacityBar } from '../components/CapacityBar';
+import { DeltaBar } from '../components/DeltaBar';
 import { Sheet } from '../components/Sheet';
 import { useAdapterRead } from '../runtime/hooks';
 import { useApp } from '../runtime/store';
 import { sendEntityTxs } from '../runtime/tx';
-import { formatAmount, getTokenMeta, parseAmount, shortId } from '../runtime/format';
+import { formatAmount, getTokenMeta, parseAmount } from '../runtime/format';
 import { useAccounts, useEntityCore } from '../runtime/views';
 
 export function Accounts() {
@@ -80,24 +80,23 @@ export function Accounts() {
 							key={account.counterpartyId}
 							type="button"
 							className="row row-tappable"
+							style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}
 							onClick={() => navigate(`/accounts/${account.counterpartyId}`)}
 						>
-							<span style={{ minWidth: 140 }}>
-								<span style={{ display: 'block', fontSize: 13.5 }}>
-									{names.get(account.counterpartyId) || shortId(account.counterpartyId)}
-								</span>
-								<span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
-									{shortId(account.counterpartyId)}
+							<span style={{ flex: '1 1 100%', display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+								<span style={{ fontSize: 14 }}>{names.get(account.counterpartyId) || 'Account'}</span>
+								<span className="display num" style={{ fontSize: 16 }}>
+									{token ? formatAmount(token.signed, tokenMeta.decimals, 2) : '0'}{' '}
+									<span className="faint" style={{ fontSize: 11, fontFamily: 'var(--font-ui)' }}>{tokenMeta.symbol}</span>
 								</span>
 							</span>
-							<span style={{ flex: 1, margin: '0 12px' }}>
+							<span className="hash" style={{ flex: '1 1 100%', marginTop: 2 }}>
+								{account.counterpartyId}
+							</span>
+							<span style={{ flex: '1 1 100%', marginTop: 10 }}>
 								{token ? (
 									<>
-										<CapacityBar
-											collateral={token.derived.collateral}
-											creditUsed={token.derived.outOwnCredit}
-											free={token.derived.outCapacity}
-										/>
+										<DeltaBar derived={token.derived} signed={token.signed} height={6} />
 										<span className="faint" style={{ display: 'block', fontSize: 11, marginTop: 6 }}>
 											{formatAmount(token.derived.outCapacity, tokenMeta.decimals, 2)} spendable ·{' '}
 											{formatAmount(token.derived.inCapacity, tokenMeta.decimals, 2)} receivable · {tokenMeta.symbol}
@@ -108,9 +107,6 @@ export function Accounts() {
 										No tokens yet
 									</span>
 								)}
-							</span>
-							<span className="display num" style={{ fontSize: 15 }}>
-								{token ? formatAmount(token.signed, tokenMeta.decimals, 2) : '0'}
 							</span>
 						</button>
 					);
@@ -131,14 +127,16 @@ export function Accounts() {
 								key={id}
 								type="button"
 								className="row row-tappable"
-								style={{ padding: '12px 0', borderColor: targetId === id ? 'var(--hairline-2)' : undefined }}
+								style={{ padding: '12px 0', flexWrap: 'wrap', borderColor: targetId === id ? 'var(--hairline-2)' : undefined }}
 								onClick={() => setTargetId(id)}
 							>
-								<span style={{ fontSize: 13.5 }}>
+								<span style={{ fontSize: 13.5, flex: '1 1 100%' }}>
 									{targetId === id ? <span className="dot" style={{ display: 'inline-block', marginRight: 10 }} /> : null}
-									{names.get(id) || shortId(id)}
+									{names.get(id) || 'Entity'}
 								</span>
-								<span className="mono">{shortId(id)}</span>
+								<span className="hash" style={{ flex: '1 1 100%', marginTop: 2 }}>
+									{id}
+								</span>
 							</button>
 						))}
 						<input

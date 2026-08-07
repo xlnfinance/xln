@@ -988,9 +988,9 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
         reserves?: bigint;
         confirmedCollateral?: bigint;
         pendingCollateral?: bigint;
-        delta?: bigint;
+        delta?: bigint | null;
       }>;
-      isValid?: boolean;
+      isValid?: boolean | null;
       eReplicas?: unknown;
       accounts?: unknown;
     };
@@ -1012,9 +1012,9 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
         asset =>
           typeof asset.reserves === 'bigint' &&
           typeof asset.confirmedCollateral === 'bigint' &&
-          typeof asset.pendingCollateral === 'bigint' &&
-          typeof asset.delta === 'bigint',
+          typeof asset.pendingCollateral === 'bigint',
       ),
+      assetDeltasUnchecked: (summary.assets ?? []).every(asset => asset.delta === null),
       assetIdentitiesAreScoped: (summary.assets ?? []).every(
         asset => typeof asset.stackId === 'string' && Number.isSafeInteger(asset.tokenId),
       ),
@@ -1030,10 +1030,11 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
   expect(probe.hasFullAccounts).toBe(false);
   expect(probe.assetCount).toBeGreaterThan(0);
   expect(probe.assetAmountsAreBigInt).toBe(true);
+  expect(probe.assetDeltasUnchecked).toBe(true);
   expect(probe.assetIdentitiesAreScoped).toBe(true);
-  expect(probe.isValidType).toBe('boolean');
+  expect(probe.isValidType).toBe('object');
 
-  await expect(page.getByTestId('solvency-status')).toContainText(/ASSET CONSERVATION OK|ASSET IMBALANCE DETECTED/, {
+  await expect(page.getByTestId('solvency-status')).toContainText('ASSET CONSERVATION NOT VERIFIED', {
     timeout: REMOTE_E2E_WAIT_MS,
   });
   await expect(page.getByTestId('solvency-reserves').first()).toContainText(/\d/);

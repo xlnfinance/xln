@@ -138,7 +138,13 @@ export const prepareProposalAdmission = (
       frameMax: MAX_ACCOUNT_FRAME_TXS,
     });
   }
-  validateProposalTimestamp(context, account, entityFrameTimestamp, myEntityId, counterparty);
+  // Dual-Runtime peers advance Entity clocks independently. A lagging
+  // proposer must not mint an Account frame behind the already-committed
+  // bilateral watermark — that only produces noisy regressions and wedges
+  // ACK paths when the counterparty Runtime is ahead.
+  const previousFrameTimestamp = account.currentFrame?.timestamp ?? 0;
+  const frameTimestamp = Math.max(entityFrameTimestamp, previousFrameTimestamp);
+  validateProposalTimestamp(context, account, frameTimestamp, myEntityId, counterparty);
   return {
     success: true,
     myEntityId,
@@ -146,7 +152,7 @@ export const prepareProposalAdmission = (
     quiet,
     events,
     proposalWindow,
-    frameTimestamp: entityFrameTimestamp,
+    frameTimestamp,
     frameJHeight: entityJHeight ?? account.state.lastFinalizedJHeight ?? 0,
   };
 };
