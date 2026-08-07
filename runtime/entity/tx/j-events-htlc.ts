@@ -92,7 +92,6 @@ export const queueHashLadderRevealRegistration = (
   state: EntityState,
   pull: { fullHash: string; partialRoot: string },
   decoded: { fillRatio: number; fullSecret?: string; reveals?: [string, string, string, string] },
-  context: string,
 ): 'queued' | 'already-queued' => {
   const jBatchState = (state.jBatchState ??= initJBatch());
   const fullHash = pull.fullHash.toLowerCase();

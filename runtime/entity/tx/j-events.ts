@@ -911,7 +911,6 @@ const queueSourceHubClaimRegistration = (context: FinalizedJEventContext, counte
       newState,
       route.sourcePull,
       decoded,
-      route.orderId,
     );
     if (queued !== 'queued') continue;
     const firstValidator = newState.config.validators?.[0];

@@ -86,7 +86,7 @@ function decodeFirstRatio(wrapped: string): number {
   const abi = ethers.AbiCoder.defaultAbiCoder();
   const [items] = abi.decode(['bytes[]'], wrapped) as unknown as [string[]];
   const [decoded] = abi.decode(
-    ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+    ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
     items[0]!,
   ) as unknown as [{ fillRatios: bigint[] }];
   return Number(decoded.fillRatios[0] || 0n);
@@ -263,7 +263,7 @@ describe('dispute argument snapshots', () => {
     const abi = ethers.AbiCoder.defaultAbiCoder();
     const [wrapped] = abi.decode(['bytes[]'], args.rightArguments) as unknown as [string[]];
     const [decoded] = abi.decode(
-      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
       wrapped[0]!,
     ) as unknown as [{ fillRatios: bigint[] }];
     expect(Array.from(decoded.fillRatios, Number)).toEqual([0, 32_768]);

@@ -1732,8 +1732,8 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
     const paymentArgs = abiCoder.encode(
-      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
-      [{ fillRatios: [], secrets: [revealedSecret], pulls: [] }],
+      ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
+      [{ fillRatios: [], secrets: [revealedSecret] }],
     );
     const starterInitialArguments = abiCoder.encode(['bytes[]'], [[paymentArgs]]);
     const proofbodyHash = buildAccountProofBody(state.accounts.get(hub)!, '').proofBodyHash;
@@ -2057,8 +2057,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       deriveCrossJurisdictionPrivateSeed('test-seed', route),
     ).binary;
     const crossPullArgs = ethers.AbiCoder.defaultAbiCoder().encode(
-      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
-      [{ fillRatios: [], secrets: [], pulls: [binary] }],
+      ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
+      [{ fillRatios: [], secrets: [] }],
     );
     const disputeFinalizationEvidence = [
       {

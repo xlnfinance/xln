@@ -110,7 +110,7 @@ export const handleCrossJurisdictionSalvageEntityTx = async (
   }
 
   const decoded = decodeHashLadderBinary(binary);
-  const queued = queueHashLadderRevealRegistration(newState, route.targetPull, decoded, routeId);
+  const queued = queueHashLadderRevealRegistration(newState, route.targetPull, decoded);
   if (queued === 'queued') {
     const firstValidator = newState.config.validators?.[0];
     if (!firstValidator) throw new Error(`CROSS_J_REVEAL_PORT_SIGNER_MISSING:${routeId}`);

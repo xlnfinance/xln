@@ -21,7 +21,7 @@ export type {
 
 export type {
   DeltaTransformer,
-} from '../../../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
+} from '../../../jurisdictions/typechain-types/contracts/DeltaTransformer.sol/DeltaTransformer.ts';
 
 // Import for internal use
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
