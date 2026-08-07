@@ -821,8 +821,10 @@ type HashLadderRevealRegisteredEventData = {
 /**
  * Cross-j route mirrors over a finalized account terminate with the chain's
  * settlement. Prefer `registryFillRatio` (single-shot on-chain latch) when
- * present; fall back to `claimedRatio` for older mirrors that only tracked
- * observed/fill progress.
+ * present. A route can finalize without any registry write — signed-path
+ * finality after a cooperative close never reads the registry — and there
+ * `claimedRatio` is the committed close-proof fill (pull.ts sets it from
+ * `proof.fillRatio`), i.e. exactly the ratio the account settled at.
  */
 const terminalizeCrossJurisdictionRoutesOnFinality = (
   newState: EntityState,

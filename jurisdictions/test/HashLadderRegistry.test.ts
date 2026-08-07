@@ -478,7 +478,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(BigInt(dispute.fillRatio));
   });
 
-  it('counts a registration written after the dispute started (no lower bound on revealedBlock)', async function () {
+  it('counts a registration written after the dispute started (no lower bound on revealedAt)', async function () {
     const dispute = await openPullDispute({ label: 'registry-late-start', fillRatio: 0x0123 });
     // Dispute already active; register now — still inside T/2.
     await registerReveal(dispute, dispute.right, {});
