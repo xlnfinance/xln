@@ -96,8 +96,7 @@ const assertCrossPullCloseAllowed = (
     route.status !== 'resting' &&
     route.status !== 'partially_filled' &&
     route.status !== 'clear_requested' &&
-    route.status !== 'clearing' &&
-    route.status !== 'source_claimed'
+    route.status !== 'clearing'
   ) {
     throw new Error(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
   }
@@ -117,16 +116,12 @@ const assertCrossPullCloseAllowed = (
   }
 };
 
-const transitionTargetLegTerminal = (
+export const transitionTargetLegTerminal = (
   route: CrossJurisdictionSwapRoute,
   updatedAt: number,
   fillRatio: number,
 ): 'settled' | 'cancelled' | 'expired' => {
-  if (
-    route.status !== 'clearing' &&
-    route.status !== 'source_claimed' &&
-    route.status !== 'target_claimed'
-  ) {
+  if (route.status !== 'clearing') {
     // The Hub-authored atomic Account close is the authoritative transition.
     // Either bilateral participant may still have a resting route projection
     // when that same frame commits, so materialize clearing before settlement.
@@ -525,7 +520,7 @@ const applyCrossPullCloseFollowup = (
       if (isSourceHubClose) {
         removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, terminal, storageChanges);
       }
-      crossJFollowupLog.debug('pull.close.source_committed', {
+      crossJFollowupLog.debug('pull.close.source_hub_committed', {
         route: shortOrder(route.orderId, 12),
         ratio: fillRatio,
       });

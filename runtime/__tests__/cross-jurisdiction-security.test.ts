@@ -185,8 +185,8 @@ describe('cross-jurisdiction security invariants', () => {
     });
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const pullArgs = ethers.AbiCoder.defaultAbiCoder().encode(
-      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
-      [{ fillRatios: [], secrets: [], pulls: [partialBinary(0x1234)] }],
+      ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
+      [{ fillRatios: [], secrets: [] }],
     );
     const starterInitialArguments = ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[pullArgs]]);
 
@@ -196,5 +196,30 @@ describe('cross-jurisdiction security invariants', () => {
     });
 
     expect(readEntityFrameEventMessages(result.newState).at(-1)).toContain('Missing counterparty dispute hanko');
+  });
+
+  test('hub rejects a pulls-attached prepare arriving outside the proposer lane', async () => {
+    // The certified user lane may carry prepareCrossJurisdictionSwap, but a
+    // route with pulls attached is proposer-only material: accepting it would
+    // lock hub-collateral pulls whose ladder secrets the hub runtime never
+    // derived. The rejection is soft (mesh survives an attacker replaying it),
+    // stores nothing, and emits no register outputs.
+    const env = createEmptyEnv('cross-user-lane-injection');
+    env.state.timestamp = 2_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const tron = makeJurisdiction('Tron', 2, '21', '22');
+    installJurisdictions(env, eth, tron);
+    const route = buildRoute('cross-user-lane-injection', 'cross-user-lane-injection');
+    const state = makeState(route.source.counterpartyEntityId, addr('55'), eth, route.source.entityId);
+
+    const result = await applyEntityTx(env, state, {
+      type: 'prepareCrossJurisdictionSwap',
+      data: { route },
+    });
+
+    expect(result.newState.crossJurisdictionSwaps?.has(route.orderId) ?? false).toBe(false);
+    expect(result.outputs).toEqual([]);
+    expect(readEntityFrameEventMessages(result.newState).at(-1)).toContain('proposer lane');
   });
 });

@@ -139,7 +139,7 @@ import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
 import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
 
-import { queueCrossJurisdictionSalvageFromFinalizedArguments } from '../entity/tx/j-events-htlc';
+import { queueCrossJurisdictionRevealPorts } from '../entity/tx/j-events-htlc';
 
 import {
   canonicalDisputeFinalizationEvidenceHash,
@@ -1543,34 +1543,46 @@ describe('audit fail-fast regressions', () => {
     route.status = 'partially_filled';
     sourceState.crossJurisdictionSwaps.set(route.orderId, route);
 
-    const binary = buildCrossJurisdictionPullReveal(
+    const reveal = buildCrossJurisdictionPullReveal(
       route,
       0x1234,
       deriveCrossJurisdictionPrivateSeed('cross-j-salvage-route-signer', route),
-    ).binary;
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    const crossPullArgs = abiCoder.encode(
-      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
-      [{ fillRatios: [], secrets: [], pulls: [binary] }],
     );
-    const starterInitialArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
+    const binary = reveal.binary;
+    const revealEvent = {
+      entity: sourceHub,
+      ladderHash: ethers.keccak256(ethers.solidityPacked(
+        ['bytes32', 'bytes32'],
+        [route.sourcePull!.fullHash, route.sourcePull!.partialRoot],
+      )),
+      fillRatio: 0x1234,
+      fullSecret: reveal.fullSecret ?? `0x${'00'.repeat(32)}`,
+      reveals: reveal.reveals ?? [
+        `0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`,
+        `0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`,
+      ] as [string, string, string, string],
+    };
     const outputs: EntityInput[] = [];
 
+    // The registry event is the only trigger: the source-user lane emits one
+    // port instruction to the target lane named by the route, never to a stale
+    // gossip-hinted signer.
     expect(
-      queueCrossJurisdictionSalvageFromFinalizedArguments(
+      queueCrossJurisdictionRevealPorts(
         sourceState,
         outputs,
-        sourceHub,
-        { leftArguments: starterInitialArguments, rightArguments: '0x' },
-        { leftPullIds: [route.sourcePull!.pullId], rightPullIds: [] },
+        revealEvent,
         123,
       ),
-    ).toBe(true);
+    ).toBe(1);
 
     const salvageOutput = outputs.find(output => output.entityTxs?.some(tx => tx.type === 'crossJurisdictionSalvage'));
     expect(salvageOutput?.entityId).toBe(targetUser);
     expect(salvageOutput?.signerId).toBe(targetSigner);
     expect(salvageOutput?.signerId).not.toBe(staleGossipSigner);
+    expect(
+      (salvageOutput?.entityTxs?.[0]?.data as { binary?: string }).binary,
+    ).toBe(binary);
 
     const observerWarnings: string[] = [];
     const unregisterSink = registerStructuredLogSink(event => {
@@ -1580,15 +1592,13 @@ describe('audit fail-fast regressions', () => {
       const peerObserver = makeEntityState(sourceHub);
       const peerOutputs: EntityInput[] = [];
       expect(
-        queueCrossJurisdictionSalvageFromFinalizedArguments(
+        queueCrossJurisdictionRevealPorts(
           peerObserver,
           peerOutputs,
-          sourceUser,
-          { leftArguments: starterInitialArguments, rightArguments: '0x' },
-          { leftPullIds: [route.sourcePull!.pullId], rightPullIds: [] },
+          revealEvent,
           123,
         ),
-      ).toBe(false);
+      ).toBe(0);
       expect(peerOutputs).toEqual([]);
     } finally {
       unregisterSink();

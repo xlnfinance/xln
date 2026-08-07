@@ -75,7 +75,7 @@ export function validateJBatch(
   requireExactBoundaryKeys(batch, [
     'reserveToExternalToken', 'externalTokenToReserve', 'reserveToReserve',
     'reserveToCollateral', 'collateralToReserve', 'settlements', 'disputeStarts',
-    'disputeFinalizations', 'flashloans', 'revealSecrets',
+    'disputeFinalizations', 'flashloans', 'revealSecrets', 'hashLadderReveals',
   ], [], `${code}_FIELDS`);
   validateRecordArray(batch['reserveToExternalToken'], `${code}_R2E`, {
     receivingEntity: string, tokenId: integer, amount: bigint,
@@ -118,4 +118,15 @@ export function validateJBatch(
   });
   validateRecordArray(batch['flashloans'], `${code}_FLASHLOANS`, { tokenId: integer, amount: bigint });
   validateRecordArray(batch['revealSecrets'], `${code}_REVEAL_SECRETS`, { transformer: string, secret: string });
+  validateRecordArray(batch['hashLadderReveals'], `${code}_HASH_LADDER_REVEALS`, {
+    fullHash: string,
+    partialRoot: string,
+    fillRatio: integer,
+    fullSecret: string,
+    reveals: (reveals, revealsCode) => {
+      const items = requireArray(reveals, revealsCode);
+      if (items.length !== 4) throw new Error(`${revealsCode}_LENGTH:${items.length}`);
+      return items.map((reveal, index) => requireString(reveal, `${revealsCode}_${index}`));
+    },
+  });
 }

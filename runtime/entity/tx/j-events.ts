@@ -1,7 +1,6 @@
 import type { EntityCandidateEffect, EntityInput, EntityState, HashToSign } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { AccountReplica } from '../../types/account';
-import type { DisputeArgumentSnapshot } from '../../protocol/dispute/argument-snapshot';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
@@ -27,9 +26,19 @@ import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
   applyKnownHtlcSecret,
   decodeDisputeStarterInitialSecrets,
+  ladderHashForPull,
   planCrossJurisdictionTargetRecovery,
-  queueCrossJurisdictionSalvageFromFinalizedArguments,
+  queueCrossJurisdictionRevealPorts,
+  queueHashLadderRevealRegistration,
 } from './j-events-htlc';
+import {
+  buildCrossJurisdictionPullReveal,
+  deriveCrossJurisdictionPrivateSeed,
+  getCrossJurisdictionCommittedProofRatio,
+  isCrossJurisdictionTerminalStatus,
+} from '../../extensions/cross-j';
+import { transitionTargetLegTerminal } from './handlers/account-cross-j-followups';
+import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { mergeJEventClaimOps } from './j-events-account';
 import type { JEventApplyResult, JEventAccountTx } from './j-events-types';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
@@ -575,10 +584,12 @@ const applyStartedDisputeFollowups = (
       counterpartyId,
       [active.initialProofbodyHash],
       active.crossJurisdictionRecovery?.resultsByPullId ?? {},
-      outputs,
     );
     if (plan) active.crossJurisdictionRecovery = plan.recovery;
   }
+  // The source hub's claim requires publishing the reveal; queue it the moment
+  // a dispute touching one of our source pulls is observed.
+  queueSourceHubClaimRegistration(context, counterpartyId);
 
   addMessage(
     newState,
@@ -674,10 +685,8 @@ const retireFinalizedDisputeState = (
   candidateCounterpartyId: string,
   senderStr: string,
   entityIdNorm: string,
-  evidence: DisputeFinalizationEvidence[],
-  finalSnapshot: DisputeArgumentSnapshot | undefined,
 ): void => {
-  const { newState, blockNumber, outputs } = context;
+  const { newState, blockNumber } = context;
   const weAreFinalizer = senderStr === entityIdNorm;
   const removedDraft = scrubDisputeFinalizationsForCounterparty(
     newState.jBatchState?.batch,
@@ -699,16 +708,6 @@ const retireFinalizedDisputeState = (
     addMessage(
       newState,
       `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`,
-    );
-  }
-  if (finalSnapshot) {
-    queueCrossJurisdictionSalvageFromFinalizedArguments(
-      newState,
-      outputs,
-      counterpartyId,
-      evidence[0],
-      finalSnapshot.plan,
-      blockNumber,
     );
   }
 };
@@ -745,7 +744,6 @@ async function applyDisputeFinalizedJEvent(
     data.finalProofbodyHash,
     counterpartyId,
   );
-  const finalSnapshot = account.disputeArgumentSnapshotsByHash?.[finalizedProof.finalProofbodyHash];
   const resolved = resolveFinalizationEvidence(
     account,
     data,
@@ -797,10 +795,138 @@ async function applyDisputeFinalizedJEvent(
     candidateCounterpartyId,
     senderStr,
     entityIdNorm,
-    resolved.evidence,
-    finalSnapshot,
   );
+  terminalizeCrossJurisdictionRoutesOnFinality(newState, entityIdNorm, counterpartyId);
 }
+
+type HashLadderRevealRegisteredEventData = {
+  entity: string;
+  ladderHash: string;
+  fillRatio: number;
+  fullSecret: string;
+  reveals: [string, string, string, string];
+};
+
+/**
+ * Cross-j route mirrors over a finalized account terminate with the chain's
+ * settlement. `claimedRatio` tracks the best registry reveal observed for the
+ * route's ladder (recorded by the HashLadderRevealRegistered handler), which
+ * is exactly the ratio the dispute just settled at.
+ */
+const terminalizeCrossJurisdictionRoutesOnFinality = (
+  newState: EntityState,
+  entityIdNorm: string,
+  counterpartyId: string,
+): void => {
+  const counterpartyNorm = String(counterpartyId || '').toLowerCase();
+  const routes = [...(newState.crossJurisdictionSwaps?.values?.() ?? [])];
+  for (const route of routes) {
+    if (isCrossJurisdictionTerminalStatus(route.status)) continue;
+    const onSourceAccount =
+      String(route.source?.entityId || '').toLowerCase() === entityIdNorm &&
+      String(route.source?.counterpartyEntityId || '').toLowerCase() === counterpartyNorm;
+    const onTargetAccount =
+      String(route.target?.counterpartyEntityId || '').toLowerCase() === entityIdNorm &&
+      String(route.target?.entityId || '').toLowerCase() === counterpartyNorm;
+    if (!onSourceAccount && !onTargetAccount) continue;
+    const terminal = transitionTargetLegTerminal(
+      route,
+      Number(newState.timestamp || 0),
+      Math.floor(Number(route.claimedRatio ?? 0)),
+    );
+    newState.crossJurisdictionSwaps!.set(route.orderId, route);
+    addMessage(newState, `🌉 Cross-j route ${route.orderId} terminal after dispute finality: ${terminal}`);
+  }
+};
+
+/**
+ * The hash-ladder reveal registry event — the only cross-j settlement trigger.
+ * Roles, self-selected per entity:
+ *  1. source-user lane: emit the port instruction to the target user.
+ *  2. registering entity: confirm a pending port result on its own dispute.
+ *  3. every route mirror: record the best observed ratio for terminal picks.
+ */
+const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext): void => {
+  const { newState, outputs, blockNumber, dirtyAccounts } = context;
+  const data = context.event.data as HashLadderRevealRegisteredEventData;
+  queueCrossJurisdictionRevealPorts(newState, outputs, data, Number(blockNumber || 0));
+
+  const self = String(newState.entityId || '').toLowerCase();
+  const ladderHash = String(data.ladderHash || '').toLowerCase();
+  if (String(data.entity || '').toLowerCase() === self) {
+    for (const [accountId, account] of newState.accounts.entries()) {
+      const recovery = account.activeDispute?.crossJurisdictionRecovery;
+      if (!recovery) continue;
+      for (const pullId of recovery.requiredPullIds) {
+        if (Object.hasOwn(recovery.resultsByPullId, pullId)) continue;
+        const route = [...(newState.crossJurisdictionSwaps?.values?.() ?? [])]
+          .find(candidate =>
+            candidate.targetPull?.pullId === pullId || candidate.sourcePull?.pullId === pullId,
+          );
+        if (!route) continue;
+        const pull = route.targetPull?.pullId === pullId ? route.targetPull : route.sourcePull;
+        if (!pull || ladderHashForPull(pull) !== ladderHash) continue;
+        recovery.resultsByPullId = { ...recovery.resultsByPullId, [pullId]: String(data.fillRatio) };
+        dirtyAccounts.add(String(accountId).toLowerCase());
+      }
+    }
+  }
+
+  for (const route of newState.crossJurisdictionSwaps?.values?.() ?? []) {
+    if (isCrossJurisdictionTerminalStatus(route.status)) continue;
+    const pull = route.targetPull ?? route.sourcePull;
+    if (!pull || ladderHashForPull(pull) !== ladderHash) continue;
+    const observed = Math.floor(Number(data.fillRatio));
+    if (observed > Math.floor(Number(route.claimedRatio ?? 0))) {
+      route.claimedRatio = observed;
+      newState.crossJurisdictionSwaps!.set(route.orderId, route);
+    }
+  }
+};
+
+/**
+ * A source hub can claim the source pull on-chain only by publishing the
+ * reveal: the registry write is the claim's precondition and simultaneously
+ * the user-side port source. Queue it as soon as a dispute touching the pull
+ * is observed, at exactly the committed fill ratio.
+ */
+const queueSourceHubClaimRegistration = (context: FinalizedJEventContext, counterpartyId: string): void => {
+  const { newState, env, outputs } = context;
+  const self = String(newState.entityId || '').toLowerCase();
+  const counterpartyNorm = String(counterpartyId || '').toLowerCase();
+  for (const route of newState.crossJurisdictionSwaps?.values?.() ?? []) {
+    if (isCrossJurisdictionTerminalStatus(route.status)) continue;
+    if (!route.sourcePull) continue;
+    if (String(route.source?.counterpartyEntityId || '').toLowerCase() !== self) continue;
+    if (String(route.source?.entityId || '').toLowerCase() !== counterpartyNorm) continue;
+    const ratio = getCrossJurisdictionCommittedProofRatio(route);
+    if (ratio <= 0) continue;
+    const reveal = buildCrossJurisdictionPullReveal(
+      route,
+      ratio,
+      deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route),
+    );
+    const decoded = decodeHashLadderBinary(reveal.binary);
+    const queued = queueHashLadderRevealRegistration(
+      newState,
+      route.sourcePull,
+      decoded,
+      route.orderId,
+    );
+    if (queued !== 'queued') continue;
+    const firstValidator = newState.config.validators?.[0];
+    if (!firstValidator) throw new Error(`CROSS_J_CLAIM_SIGNER_MISSING:${route.orderId}`);
+    outputs.push({
+      entityId: newState.entityId,
+      signerId: firstValidator,
+      entityTxs: [{ type: 'j_broadcast', data: {} }],
+    });
+    addMessage(
+      newState,
+      `🌉 Cross-j claim ${route.orderId}: registering source reveal ratio ${ratio}`,
+    );
+  }
+};
 
 async function applyFinalizedJEvent(
   entityState: EntityState,
@@ -867,6 +993,9 @@ async function applyFinalizedJEvent(
       break;
     case 'DisputeFinalized':
       await applyDisputeFinalizedJEvent(context, disputeFinalizationEvidence);
+      break;
+    case 'HashLadderRevealRegistered':
+      applyHashLadderRevealRegisteredJEvent(context);
       break;
     case 'HankoBatchProcessed':
       await applyHankoBatchProcessedEvent({

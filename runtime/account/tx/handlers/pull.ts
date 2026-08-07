@@ -88,8 +88,21 @@ const crossProofMatchesBinding = (
     if (expectedSourceAmount !== undefined && proof.cumulativeSourceAmount !== expectedSourceAmount) {
       return `source amount ${proof.cumulativeSourceAmount} != committed ${expectedSourceAmount}`;
     }
-    if (bindingTargetAmount !== undefined && proof.cumulativeTargetAmount !== bindingTargetAmount) {
-      return `target amount ${proof.cumulativeTargetAmount} != ${bindingTargetAmount}`;
+    // The target leg mirrors the same binding: without it, a zero-progress
+    // binding would leave cumulativeTargetAmount unchecked and the cooperative
+    // path could settle what the dispute path would not.
+    const expectedTargetAmount = bindingTargetAmount ?? (
+      binding.leg === 'target'
+        ? projectCrossJurisdictionQuantizedClaim(absBigInt(pull.amount), {
+            cumulativeFillRatio: bindingRatio,
+            ...(binding.fillNumerator !== undefined ? { fillNumerator: binding.fillNumerator } : {}),
+            ...(binding.fillDenominator !== undefined ? { fillDenominator: binding.fillDenominator } : {}),
+            orderId: binding.orderId,
+          }).exactClaim
+        : undefined
+    );
+    if (expectedTargetAmount !== undefined && proof.cumulativeTargetAmount !== expectedTargetAmount) {
+      return `target amount ${proof.cumulativeTargetAmount} != committed ${expectedTargetAmount}`;
     }
   } else {
     const expectedLegAmount = chainProportional(absBigInt(pull.amount));

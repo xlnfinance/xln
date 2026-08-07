@@ -1043,6 +1043,11 @@ const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => 
       ...op,
       secret: op.secret ? '[redacted]' : '',
     })),
+    hashLadderReveals: (compactArrayTail(batch.hashLadderReveals, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
+      ...op,
+      fullSecret: op.fullSecret ? '[redacted]' : '',
+      reveals: op.reveals.map(() => '[redacted]') as unknown as [string, string, string, string],
+    })),
   };
 };
 

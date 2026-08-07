@@ -754,7 +754,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const lowRatio = 0x4000;
     const highRoute = {
       ...prepared,
-      status: 'source_claimed' as const,
+      status: 'clearing' as const,
       fillSeq: 1,
       cumulativeFillRatio: highRatio,
       claimedRatio: highRatio,
@@ -884,7 +884,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const fillRatio = 0x8000;
     const filledRoute = {
       ...prepared,
-      status: 'source_claimed' as const,
+      status: 'clearing' as const,
       cumulativeFillRatio: fillRatio,
       claimedRatio: fillRatio,
       fillNumerator: 1n,
@@ -897,11 +897,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     };
     const privateSeed = deriveCrossJurisdictionPrivateSeed(env.runtimeSeed!, prepared);
     const binary = buildCrossJurisdictionPullReveal(prepared, fillRatio, privateSeed).binary;
-    const honestProof = buildCrossJurisdictionCloseProof(filledRoute, binary);
-    const forgedProof = {
-      ...honestProof,
-      cumulativeTargetAmount: 899n,
-    };
+    // The proof is economically consistent (chain-proportional for the
+    // revealed ratio), so the rejection must come from the authorization gate:
+    // a close authored by the user side is never accepted, whatever it pays.
+    const forgedProof = buildCrossJurisdictionCloseProof(filledRoute, binary);
     const account = makeAccount(targetUser, targetHub);
     const targetPull = prepared.targetPull!;
     const targetDelta = account.state.deltas.get(targetPull.tokenId) ?? createDefaultDelta(targetPull.tokenId);
@@ -1039,7 +1038,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
 
     expect(uncommittedResult.success).toBe(false);
-    expect(uncommittedResult.error).toContain('ratio');
+    expect(uncommittedResult.error).toContain('chain-proportional');
     expect(computeAccountStateRoot(account.state)).toBe(initialRoot);
     expect(account.state.pulls?.has(sourcePull.pullId)).toBe(true);
 

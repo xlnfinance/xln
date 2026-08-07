@@ -684,7 +684,7 @@ export async function readCrossState(
         const orderId = String(route?.orderId || '');
         const filledTargetAmount = BigInt(route?.filledTargetAmount ?? route?.targetClaimed ?? 0n);
         if (status === 'settled') settledRoutes += 1;
-        if (status === 'source_claimed' || status === 'target_claimed' || status === 'settled') claimedRoutes += 1;
+        if (status === 'settled') claimedRoutes += 1;
         routeSummaries.push({
           orderId,
           status,
@@ -883,7 +883,7 @@ export async function waitForCrossPullFlow(
                 route =>
                   route.sourcePull ||
                   route.targetPull ||
-                  ['source_claimed', 'target_claimed', 'settled'].includes(route.status),
+                  ['settled'].includes(route.status),
               );
           const targetRoute = options.targetRouteId
             ? targetState.routeSummaries.find(route => route.orderId === options.targetRouteId)
@@ -891,18 +891,16 @@ export async function waitForCrossPullFlow(
                 route =>
                   route.sourcePull ||
                   route.targetPull ||
-                  ['source_claimed', 'target_claimed', 'settled'].includes(route.status),
+                  ['settled'].includes(route.status),
               );
           const routeHasProgress = (route: typeof sourceRoute): boolean =>
             Boolean(route) &&
-            (route.cumulativeFillRatio > 0 || ['source_claimed', 'target_claimed', 'settled'].includes(route.status));
+            (route.cumulativeFillRatio > 0 || ['settled'].includes(route.status));
           const targetHasDurablePreparedPull = Boolean(
             targetRoute?.targetPullId &&
             targetState.pullIds.includes(targetRoute.targetPullId) &&
             [
               'target_prepared',
-              'source_committed',
-              'target_locked',
               'resting',
               'partially_filled',
               'clear_requested',

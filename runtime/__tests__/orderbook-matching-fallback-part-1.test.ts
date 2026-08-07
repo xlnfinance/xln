@@ -2445,7 +2445,7 @@ describe('orderbook matching fallback execution mapping', () => {
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
-      status: 'source_claimed',
+      status: 'clearing',
       createdAt: 1,
       updatedAt: 2,
     };

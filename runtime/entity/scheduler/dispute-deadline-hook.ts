@@ -46,17 +46,26 @@ export const processDisputeDeadlineHook = (
     return;
   }
   const recovery = account.activeDispute.crossJurisdictionRecovery;
-  const missingRecoveryResults = (recovery?.requiredPullIds ?? []).filter(
-    (pullId) => !Object.hasOwn(recovery?.resultsByPullId ?? {}, pullId),
-  ).length;
-  if (missingRecoveryResults > 0) {
-    retryDisputeDeadline(replica, hook, 1000);
-    crontabLog.debug('dispute.wait_cross_j_source_finality', {
-      account: shortId(accountId),
-      missing: missingRecoveryResults,
-      retryMs: 1000,
-    });
-    return;
+  if (recovery) {
+    // Mirror of the on-chain barrier in DeltaTransformer.applyPull: a dispute
+    // with a live pull reveal window cannot finalize anyway, so wait out the
+    // window (retrying doubles as the port watch). Once it closes, finalize
+    // regardless of missing ports — a registration that never landed reads 0
+    // on-chain, and that is the deadline's truth, not a runtime stall.
+    const resolveBy = Number(recovery.resolveByTimestamp ?? 0);
+    const now = Number(replica.state.timestamp || 0);
+    if (resolveBy > 0 && now <= resolveBy) {
+      const missingRecoveryResults = recovery.requiredPullIds.filter(
+        (pullId) => !Object.hasOwn(recovery.resultsByPullId, pullId),
+      ).length;
+      retryDisputeDeadline(replica, hook, Math.min(5000, Math.max(250, resolveBy - now + 250)));
+      crontabLog.debug('dispute.wait_cross_j_reveal_window', {
+        account: shortId(accountId),
+        missing: missingRecoveryResults,
+        resolveInMs: resolveBy - now,
+      });
+      return;
+    }
   }
   if (weAreStarter && (!timeoutBlock || currentJBlock < timeoutBlock)) {
     retryDisputeDeadline(replica, hook, 1000);

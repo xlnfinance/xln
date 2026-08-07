@@ -335,7 +335,6 @@ export const handlePrepareDispute = async (
     counterpartyEntityId,
     targetStartSnapshotHashes(newState, account, counterpartyEntityId),
     suppliedCrossJurisdictionResults,
-    outputs,
   );
   const recovery = recoveryPlan?.recovery ?? null;
   const removal = removeDisputedAccountOrdersFromBook(

@@ -259,10 +259,16 @@ export interface AccountState {
  * but Account-root helpers must accept `AccountState`, never the envelope.
  */
 export interface CrossJurisdictionDisputeRecovery {
-  /** Snapshot-positioned pull IDs that need one terminal source result. */
+  /** Snapshot-positioned pull IDs whose reveal port must resolve before finalize. */
   requiredPullIds: string[];
-  /** Missing = pending, `0x` = no source pull, otherwise a verified binary. */
+  /** Missing = pending; otherwise the decimal fillRatio confirmed registered on this chain. */
   resultsByPullId: Record<string, string>;
+  /**
+   * Wall-clock ms mirror of the on-chain finalization barrier (max target pull
+   * reveal deadline). After it, a missing port resolves to a zero claim instead
+   * of blocking the dispute forever — the registry is the truth.
+   */
+  resolveByTimestamp?: number;
 }
 
 export interface AccountReplica {
@@ -361,8 +367,6 @@ export interface AccountReplica {
     reason: string;
     /** Cross-Entity book rows that must confirm removal before disputeStart. */
     pendingOrderbookRemovalIds?: string[];
-    /** Source-first barrier for a target-side cross-j dispute. */
-    crossJurisdictionRecovery?: CrossJurisdictionDisputeRecovery;
     /** Exact start request retained until every asynchronous cleanup ACK commits. */
     startIntent?: {
       crossJurisdictionRouteId?: string;

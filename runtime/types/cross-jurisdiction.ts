@@ -1,19 +1,17 @@
+// Only statuses with a live production writer belong here. The pre-book lock
+// states and the per-leg claimed states were vestigial: every real terminal
+// transition is driven by the Hub-authored atomic Account close or by dispute
+// finality, never by a per-leg claim flag.
 export type CrossJurisdictionSwapStatus =
   | 'intent'
   | 'target_prepared'
-  | 'source_committed'
   | 'resting'
   | 'partially_filled'
   | 'clear_requested'
   | 'clearing'
-  | 'target_locked'
-  | 'source_locked'
-  | 'source_claimed'
-  | 'target_claimed'
   | 'settled'
   | 'cancelled'
-  | 'expired'
-  | 'failed';
+  | 'expired';
 
 export interface CrossJurisdictionSwapLeg {
   jurisdiction: string;

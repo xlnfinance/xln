@@ -218,6 +218,13 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'prepareCrossJurisdictionSwap'>,
   options?: ApplyEntityTxOptions,
+  // The only legitimate pulls-attached prepare is the source hub's own
+  // default-proposer materialization command, which passes through the
+  // proposer gate + intent byte-identity check first. A pulls-attached prepare
+  // arriving over the certified user lane is an authority bypass: it would
+  // commit hub-collateral pulls whose ladder secrets the hub runtime never
+  // derived.
+  viaProposerMaterialization = false,
 ): CrossJSetupResult => {
   let route: CrossJurisdictionSwapRoute;
   const newState = stateForEntityTx(entityState, options);
@@ -258,6 +265,20 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
       localEntityId === sourceUserId ? 'source' : 'target',
     );
   }
+  if (hasSourcePull && !viaProposerMaterialization) {
+    // Soft-reject, never throw: this branch is reachable through the certified
+    // user lane, and a throw here would fail the whole Runtime input and halt
+    // the hub on an attacker-supplied payload (that failure mode killed the
+    // mesh once already — see the duplicate-intent absorb above). The
+    // proposer's materializeCrossJurisdictionSwap command is the only
+    // legitimate prepared-route source; it is an individual command and can
+    // never arrive over the certified cross-entity lane.
+    addMessage(
+      newState,
+      `❌ Cross-j prepare ${route.orderId} rejected: prepared payloads require the hub proposer lane`,
+    );
+    return { newState, outputs };
+  }
   return hasSourcePull
     ? prepareMaterializedCrossJurisdictionRoute(newState, route, outputs)
     : prepareRawCrossJurisdictionIntent(env, newState, route, outputs);
@@ -286,7 +307,7 @@ export const handleMaterializeCrossJurisdictionSwapEntityTx = (
   return handlePrepareCrossJurisdictionSwapEntityTx(env, entityState, {
     type: 'prepareCrossJurisdictionSwap',
     data: { route: entityTx.data.route },
-  }, options);
+  }, options, true);
 };
 
 const buildSourceRegistrationTxs = (

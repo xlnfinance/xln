@@ -1038,7 +1038,7 @@ describe('audit fail-fast regressions', () => {
     );
     const [wrapped] = ethers.AbiCoder.defaultAbiCoder().decode(['bytes[]'], leftArguments);
     const [transformerArguments] = ethers.AbiCoder.defaultAbiCoder().decode(
-      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
       wrapped[0],
     );
     expect(Array.from(transformerArguments.secrets)).toEqual([secret]);

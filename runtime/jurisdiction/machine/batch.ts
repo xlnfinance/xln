@@ -119,6 +119,17 @@ export interface JBatch {
     transformer: string;
     secret: string;
   }>;
+
+  // Cross-j hash-ladder reveals: the only on-chain settlement evidence pulls
+  // ever read. Verified against the ladder commitment by the contract and
+  // recorded under the authenticated batch caller's entity key.
+  hashLadderReveals: Array<{
+    fullHash: string;
+    partialRoot: string;
+    fillRatio: number;
+    fullSecret: string;
+    reveals: [string, string, string, string];
+  }>;
 }
 
 /** Batch lifecycle: current accumulates, sentBatch tracks one in-flight submission */
@@ -176,6 +187,7 @@ export interface BatchOpBreakdown {
   externalTokenToReserve: number;
   reserveToExternalToken: number;
   revealSecrets: number;
+  hashLadderReveals: number;
 }
 
 export const J_BATCH_CONTRACT_LIMITS = {
@@ -191,6 +203,7 @@ export const J_BATCH_CONTRACT_LIMITS = {
   maxReserveToCollateralPairs: 64,
   maxReserveToCollateralPairsTotal: 256,
   maxSecretReveals: 32,
+  maxHashLadderReveals: 32,
   maxEncodedBatchBytes: 256 * 1024,
   maxDisputeProofBodyBytes: 176 * 1024,
   maxDisputeStarterArgumentsBytes: 64 * 1024,
@@ -243,6 +256,9 @@ export function getJBatchContractLimitIssue(batch: JBatch): string | null {
   }
   if (batch.revealSecrets.length > J_BATCH_CONTRACT_LIMITS.maxSecretReveals) {
     return `revealSecrets ${batch.revealSecrets.length}/${J_BATCH_CONTRACT_LIMITS.maxSecretReveals}`;
+  }
+  if (batch.hashLadderReveals.length > J_BATCH_CONTRACT_LIMITS.maxHashLadderReveals) {
+    return `hashLadderReveals ${batch.hashLadderReveals.length}/${J_BATCH_CONTRACT_LIMITS.maxHashLadderReveals}`;
   }
   for (const [index, op] of batch.reserveToCollateral.entries()) {
     if (op.tokenId <= 0 || !Number.isSafeInteger(op.tokenId)) {
@@ -327,6 +343,7 @@ export function createEmptyBatch(): JBatch {
     externalTokenToReserve: [],
     reserveToExternalToken: [],
     revealSecrets: [],
+    hashLadderReveals: [],
   };
 }
 
@@ -351,7 +368,8 @@ const DEPOSITORY_BATCH_ABI =
     'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
     'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
-    'tuple(address transformer, bytes32 secret)[] revealSecrets' +
+    'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
+    'tuple(bytes32 fullHash, bytes32 partialRoot, uint16 fillRatio, bytes32 fullSecret, bytes32[4] reveals)[] hashLadderReveals' +
   ')';
 const DEPOSITORY_BATCH_PARAM = ethers.ParamType.from(DEPOSITORY_BATCH_ABI);
 
@@ -575,6 +593,7 @@ export function summarizeBatch(batch: JBatch): Record<string, unknown> {
     externalTokenToReserve: { count: batch.externalTokenToReserve.length, sample: sample(batch.externalTokenToReserve) },
     reserveToExternalToken: { count: batch.reserveToExternalToken.length, sample: sample(batch.reserveToExternalToken) },
     revealSecrets: { count: batch.revealSecrets.length, sample: sample(batch.revealSecrets) },
+    hashLadderReveals: { count: batch.hashLadderReveals.length, sample: sample(batch.hashLadderReveals) },
   };
 }
 
@@ -770,7 +789,8 @@ export function isBatchEmpty(batch: JBatch): boolean {
     batch.disputeFinalizations.length === 0 &&
     batch.externalTokenToReserve.length === 0 &&
     batch.reserveToExternalToken.length === 0 &&
-    batch.revealSecrets.length === 0
+    batch.revealSecrets.length === 0 &&
+    batch.hashLadderReveals.length === 0
   );
 }
 
@@ -786,7 +806,8 @@ export function batchOpCount(batch: JBatch): number {
     batch.disputeFinalizations.length +
     batch.externalTokenToReserve.length +
     batch.reserveToExternalToken.length +
-    batch.revealSecrets.length
+    batch.revealSecrets.length +
+    batch.hashLadderReveals.length
   );
 }
 
@@ -806,6 +827,7 @@ export function mergeBatchOps(target: JBatch, source: JBatch): void {
   merged.externalTokenToReserve.push(...source.externalTokenToReserve);
   merged.reserveToExternalToken.push(...source.reserveToExternalToken);
   merged.revealSecrets.push(...source.revealSecrets);
+  merged.hashLadderReveals.push(...source.hashLadderReveals);
   assertJBatchWithinContractLimits(merged, 'mergeBatchOps');
   target.flashloans = merged.flashloans;
   target.reserveToReserve = merged.reserveToReserve;
@@ -817,6 +839,7 @@ export function mergeBatchOps(target: JBatch, source: JBatch): void {
   target.externalTokenToReserve = merged.externalTokenToReserve;
   target.reserveToExternalToken = merged.reserveToExternalToken;
   target.revealSecrets = merged.revealSecrets;
+  target.hashLadderReveals = merged.hashLadderReveals;
 }
 
 /**
@@ -1242,5 +1265,54 @@ export function batchAddRevealSecret(
   jBatchLog.debug('secret_reveal.added', {
     secret: shortHash(secret),
     transformer: shortHash(transformer),
+  });
+}
+
+/**
+ * Queue a cross-j hash-ladder reveal registration (idempotent per ladder+ratio).
+ *
+ * The contract verifies the material against the ladder commitment and records
+ * the ratio under the signing entity's key. Registration is the ONLY on-chain
+ * settlement evidence a pull ever reads; dispute calldata carries no pull
+ * binaries anymore.
+ */
+export function batchAddHashLadderReveal(
+  jBatchState: JBatchState,
+  reveal: {
+    fullHash: string;
+    partialRoot: string;
+    fillRatio: number;
+    fullSecret: string;
+    reveals: [string, string, string, string];
+  },
+): void {
+  assertBatchNotPending(jBatchState, 'hash-ladder reveal');
+  const fullHash = reveal.fullHash.toLowerCase();
+  const partialRoot = reveal.partialRoot.toLowerCase();
+  const exists = jBatchState.batch.hashLadderReveals.find(
+    existing =>
+      existing.fullHash.toLowerCase() === fullHash &&
+      existing.partialRoot.toLowerCase() === partialRoot &&
+      existing.fillRatio === reveal.fillRatio,
+  );
+  if (exists) return;
+  requireBatchRoom(jBatchState.batch, 'hashLadderReveal');
+  requireArrayRoom(
+    'hashLadderReveals',
+    jBatchState.batch.hashLadderReveals.length,
+    1,
+    J_BATCH_CONTRACT_LIMITS.maxHashLadderReveals,
+  );
+  jBatchState.batch.hashLadderReveals.push({
+    fullHash: reveal.fullHash,
+    partialRoot: reveal.partialRoot,
+    fillRatio: reveal.fillRatio,
+    fullSecret: reveal.fullSecret,
+    reveals: [...reveal.reveals] as [string, string, string, string],
+  });
+  if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
+  jBatchLog.debug('hash_ladder_reveal.added', {
+    fullHash: shortHash(reveal.fullHash),
+    fillRatio: reveal.fillRatio,
   });
 }

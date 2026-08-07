@@ -51,7 +51,7 @@ const route: CrossJurisdictionSwapRoute = {
     tokenId: 2,
     amount: 20n,
   },
-  status: 'source_claimed',
+  status: 'resting',
   createdAt: 1,
   updatedAt: 2,
 };

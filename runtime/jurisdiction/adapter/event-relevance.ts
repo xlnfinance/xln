@@ -51,6 +51,10 @@ export const isEventRelevantToEntity = (
     case 'EntityRegistered':
     case 'BoardActivated':
     case 'SecretRevealed':
+    // A reveal can matter to any entity holding a route over the ladder; the
+    // per-entity handler self-selects by route ownership. Reveals are rare, so
+    // broadcast beats a second route index here.
+    case 'HashLadderRevealRegistered':
       return true;
     case 'ReserveUpdated':
       return normalizedId(args['entity']) === normalizedEntity;
