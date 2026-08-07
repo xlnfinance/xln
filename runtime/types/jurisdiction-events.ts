@@ -180,6 +180,19 @@ export type JurisdictionEvent =
       };
     })
   | (JEventMetadata & {
+      // Cross-j pull settlement evidence. The full reveal material rides the
+      // event so the sibling-chain counterparty runtime can port the
+      // registration without tracing the source transaction.
+      type: 'HashLadderRevealRegistered';
+      data: {
+        entity: string;
+        ladderHash: string;
+        fillRatio: number;
+        fullSecret: string;
+        reveals: [string, string, string, string];
+      };
+    })
+  | (JEventMetadata & {
       type: 'DebtEnforced';
       data: {
         debtor: string;

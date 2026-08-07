@@ -18,20 +18,18 @@ import type {
   TypedEventLog,
   TypedListener,
   TypedContractMethod,
-} from "../common";
+} from "../../common";
 
 export declare namespace DeltaTransformer {
   export type ArgumentsStruct = {
     fillRatios: BigNumberish[];
     secrets: BytesLike[];
-    pulls: BytesLike[];
   };
 
   export type ArgumentsStructOutput = [
     fillRatios: bigint[],
-    secrets: string[],
-    pulls: string[]
-  ] & { fillRatios: bigint[]; secrets: string[]; pulls: string[] };
+    secrets: string[]
+  ] & { fillRatios: bigint[]; secrets: string[] };
 
   export type PaymentStruct = {
     deltaIndex: BigNumberish;
@@ -135,6 +133,10 @@ export interface DeltaTransformerInterface extends Interface {
       BigNumberish[],
       BigNumberish[],
       BytesLike,
+      BytesLike,
+      BytesLike,
+      BigNumberish,
+      BigNumberish,
       BytesLike,
       BytesLike,
       BigNumberish,
@@ -252,7 +254,11 @@ export interface DeltaTransformer extends BaseContract {
       leftArguments: BytesLike,
       rightArguments: BytesLike,
       leftArgumentsTimestamp: BigNumberish,
-      rightArgumentsTimestamp: BigNumberish
+      rightArgumentsTimestamp: BigNumberish,
+      leftEntity: BytesLike,
+      rightEntity: BytesLike,
+      disputeStartBlock: BigNumberish,
+      disputeTimeout: BigNumberish
     ],
     [bigint[]],
     "view"
@@ -294,7 +300,11 @@ export interface DeltaTransformer extends BaseContract {
       leftArguments: BytesLike,
       rightArguments: BytesLike,
       leftArgumentsTimestamp: BigNumberish,
-      rightArgumentsTimestamp: BigNumberish
+      rightArgumentsTimestamp: BigNumberish,
+      leftEntity: BytesLike,
+      rightEntity: BytesLike,
+      disputeStartBlock: BigNumberish,
+      disputeTimeout: BigNumberish
     ],
     [bigint[]],
     "view"

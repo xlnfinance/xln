@@ -101,6 +101,25 @@ const disputeFinalized = defineEventNormalizer('DisputeFinalized', data => {
   return { ...decoded, ...(batchNonce !== null ? { batchNonce } : {}) };
 });
 
+const normalizeBytes32Quartet = (value: unknown): [string, string, string, string] | null => {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const reveals = value.map(normalizeBytes32);
+  if (reveals.some(reveal => reveal === null)) return null;
+  return reveals as [string, string, string, string];
+};
+
+const hashLadderRevealRegistered = defineEventNormalizer('HashLadderRevealRegistered', data => {
+  const decoded = decodeFields(data, {
+    entity: normalizeEntity,
+    ladderHash: normalizeBytes32,
+    fillRatio: normalizeInt,
+    fullSecret: normalizeBytes32,
+    reveals: normalizeBytes32Quartet,
+  });
+  if (!decoded || decoded.fillRatio <= 0) return null;
+  return decoded;
+});
+
 const debtCreated = defineEventNormalizer('DebtCreated', data =>
   decodeFields(data, {
     debtor: normalizeEntity,
@@ -181,6 +200,7 @@ export const EVENT_NORMALIZERS: Readonly<
   AccountSettled: accountSettled,
   DisputeStarted: disputeStarted,
   DisputeFinalized: disputeFinalized,
+  HashLadderRevealRegistered: hashLadderRevealRegistered,
   DebtCreated: debtCreated,
   DebtEnforced: debtEnforced,
   DebtForgiven: debtForgiven,

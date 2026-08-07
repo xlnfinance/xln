@@ -1510,13 +1510,13 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         });
 
         await Promise.all([
-          timedStep('cross_j_swap.partial.alice_source_claimed', () =>
+          timedStep('cross_j_swap.partial.alice_source_settled', () =>
             waitForCrossRouteStatus(
               alicePage,
               alice,
               hubId,
               aliceSecondPartial.routeId,
-              ['source_claimed', 'settled'],
+              ['settled'],
               'Alice source clear',
             ),
           ),

@@ -33,25 +33,17 @@ export const CROSS_J_MAX_FILL_RATIO = 65_535;
 const CROSS_J_STATUS_RANK: Record<CrossJurisdictionSwapStatus, number> = {
   intent: 10,
   target_prepared: 20,
-  source_committed: 30,
-  // Pull locks are pre-book safety states. They must rank below `resting`,
-  // otherwise admission merges can keep a non-working route inside the matcher.
-  target_locked: 35,
-  source_locked: 36,
   resting: 40,
   partially_filled: 50,
   clear_requested: 60,
   clearing: 70,
-  source_claimed: 100,
-  target_claimed: 110,
   settled: 120,
   cancelled: 120,
   expired: 120,
-  failed: 120,
 };
 
 export function isCrossJurisdictionTerminalStatus(status: CrossJurisdictionSwapStatus | undefined): boolean {
-  return status === 'settled' || status === 'cancelled' || status === 'expired' || status === 'failed';
+  return status === 'settled' || status === 'cancelled' || status === 'expired';
 }
 
 export function compareCrossJurisdictionRouteStatus(
@@ -62,21 +54,15 @@ export function compareCrossJurisdictionRouteStatus(
 }
 
 const CROSS_J_ALLOWED_TRANSITIONS: Record<CrossJurisdictionSwapStatus, ReadonlySet<CrossJurisdictionSwapStatus>> = {
-  intent: new Set(['intent', 'target_prepared', 'target_locked', 'resting', 'cancelled', 'expired', 'failed']),
-  target_prepared: new Set(['target_prepared', 'source_committed', 'target_locked', 'resting', 'clearing', 'cancelled', 'expired', 'failed']),
-  source_committed: new Set(['source_committed', 'source_locked', 'resting', 'cancelled', 'expired', 'failed']),
-  target_locked: new Set(['target_locked', 'source_locked', 'resting', 'clearing', 'cancelled', 'expired', 'failed']),
-  source_locked: new Set(['source_locked', 'resting', 'cancelled', 'expired', 'failed']),
-  resting: new Set(['resting', 'partially_filled', 'clear_requested', 'clearing', 'cancelled', 'expired', 'failed']),
-  partially_filled: new Set(['partially_filled', 'clear_requested', 'clearing', 'cancelled', 'expired', 'failed']),
-  clear_requested: new Set(['clear_requested', 'clearing', 'source_claimed', 'cancelled', 'expired', 'failed']),
-  clearing: new Set(['clearing', 'source_claimed', 'target_claimed', 'settled', 'cancelled', 'expired', 'failed']),
-  source_claimed: new Set(['source_claimed', 'target_claimed', 'settled', 'failed']),
-  target_claimed: new Set(['target_claimed', 'settled', 'failed']),
+  intent: new Set(['intent', 'target_prepared', 'resting', 'cancelled', 'expired']),
+  target_prepared: new Set(['target_prepared', 'resting', 'clearing', 'cancelled', 'expired']),
+  resting: new Set(['resting', 'partially_filled', 'clear_requested', 'clearing', 'cancelled', 'expired']),
+  partially_filled: new Set(['partially_filled', 'clear_requested', 'clearing', 'cancelled', 'expired']),
+  clear_requested: new Set(['clear_requested', 'clearing', 'cancelled', 'expired']),
+  clearing: new Set(['clearing', 'settled', 'cancelled', 'expired']),
   settled: new Set(['settled']),
   cancelled: new Set(['cancelled']),
   expired: new Set(['expired']),
-  failed: new Set(['failed']),
 };
 
 export function isCrossJurisdictionRouteTransitionAllowed(

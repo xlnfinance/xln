@@ -36,8 +36,6 @@ export const CROSS_J_SOURCE_COMMITTED_OR_ADVANCED_STATUSES = new Set([
   'partially_filled',
   'clear_requested',
   'clearing',
-  'source_claimed',
-  'target_claimed',
   'settled',
 ]);
 

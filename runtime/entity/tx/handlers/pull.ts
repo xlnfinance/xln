@@ -143,6 +143,12 @@ export const handleCrossPullCloseEntityTx = (env: EntityRuntimeContext, state: E
   }
   const proofError = proofRouteError(route, proof, binary, leg, commandRoute);
   if (proofError) return fail(result, `❌ Cross-j ${leg} pull close ${pullId.slice(0, 8)} blocked: ${proofError}`);
+  // Every gate runs before any mutation: a soft-fail return must not leak
+  // route economics into the committed mirror while the Account tx was never
+  // queued.
+  if (leg === 'target' && !isCrossJurisdictionRouteTransitionAllowed(route.status, 'clearing')) {
+    return fail(result, `❌ Cross-j target pull close ${pullId.slice(0, 8)} blocked: route ${route.status}->clearing`);
+  }
   route.sourceCloseProof = cloneCrossJurisdictionCloseProof(proof);
   if (leg === 'target') {
     route.cumulativeFillRatio = proof.fillRatio;
@@ -153,9 +159,6 @@ export const handleCrossPullCloseEntityTx = (env: EntityRuntimeContext, state: E
     route.targetClaimed = proof.cumulativeTargetAmount;
     route.clearingPolicy = 'cancel_and_clear';
     route.pendingClearRequestedAt ||= now(result.newState, env);
-    if (!isCrossJurisdictionRouteTransitionAllowed(route.status, 'clearing')) {
-      return fail(result, `❌ Cross-j target pull close ${pullId.slice(0, 8)} blocked: route ${route.status}->clearing`);
-    }
     transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.state.timestamp);
   }
   result.newState.crossJurisdictionSwaps?.set(route.orderId, route);

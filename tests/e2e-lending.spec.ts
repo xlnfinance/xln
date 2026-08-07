@@ -218,7 +218,9 @@ test.describe('E2E Lending Flow', () => {
       [TOKEN_ID],
       { requireOnline: true },
     );
-    await faucetOffchain(page, identity!.entityId, hubId, TOKEN_ID, '2000');
+    for (let request = 0; request < 20; request += 1) {
+      await faucetOffchain(page, identity!.entityId, hubId, TOKEN_ID, '100');
+    }
     await expect
       .poll(
         async () => (await accountOutCapacity(page, identity!.entityId, hubId, TOKEN_ID)) >= BigInt(tokenAmount(1000n)),

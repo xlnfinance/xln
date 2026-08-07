@@ -1,8 +1,14 @@
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Icon } from '../components/Icons';
 import { useApp } from '../runtime/store';
 import { bootEmbeddedDemo, connectSandbox } from '../runtime/sandbox';
-import { deriveBrainvaultMnemonic, type BrainvaultProgress } from '../runtime/brainvault';
+import {
+	FACTOR_PRESETS,
+	customWork,
+	deriveBrainvaultMnemonic,
+	type BrainvaultProgress,
+	type BrainvaultWork,
+} from '../runtime/brainvault';
 import { isValidMnemonic, runtimeIdForSeed } from '../runtime/keys';
 import { connectRemote } from '../runtime/adapter';
 
@@ -18,10 +24,24 @@ export function Gate() {
 
 	const [name, setName] = useState('');
 	const [passphrase, setPassphrase] = useState('');
-	const [factor, setFactor] = useState(1);
+	const [factor, setFactor] = useState(3);
+	const [customShards, setCustomShards] = useState('');
 	const [phrase, setPhrase] = useState('');
 	const [wsUrl, setWsUrl] = useState('wss://xln.finance/rpc');
 	const [authKey, setAuthKey] = useState('');
+	const deriveAbort = useRef<AbortController | null>(null);
+
+	const work: BrainvaultWork | null = useMemo(() => {
+		const custom = customShards.trim();
+		if (custom) {
+			try {
+				return customWork(Number(custom));
+			} catch {
+				return null;
+			}
+		}
+		return FACTOR_PRESETS.find(p => p.factor === factor) ?? null;
+	}, [factor, customShards]);
 
 	const run = async (work: () => Promise<void>): Promise<void> => {
 		setError(null);
@@ -42,9 +62,29 @@ export function Gate() {
 	};
 
 	const createVault = (): void => {
+		if (!work) return;
 		void run(async () => {
 			setBusyStep('Deriving your vault');
-			const result = await deriveBrainvaultMnemonic(name.trim(), passphrase, factor, p => setProgress(p));
+			deriveAbort.current = new AbortController();
+			let result;
+			try {
+				result = await deriveBrainvaultMnemonic(
+					name.trim(),
+					passphrase,
+					work,
+					p => setProgress(p),
+					deriveAbort.current.signal,
+				);
+			} catch (deriveError) {
+				if (deriveError instanceof Error && deriveError.message === 'BRAINVAULT_ABORTED') {
+					setBusyStep(null);
+					setProgress(null);
+					return;
+				}
+				throw deriveError;
+			} finally {
+				deriveAbort.current = null;
+			}
 			setProgress(null);
 			const vaultId = runtimeIdForSeed(result.mnemonic).toLowerCase();
 			await bootEmbeddedDemo(result.mnemonic, {
@@ -91,6 +131,10 @@ export function Gate() {
 	};
 
 	if (busyStep) {
+		const etaSeconds =
+			progress && progress.completed > 0
+				? Math.max(0, Math.round(((progress.elapsedMs / progress.completed) * (progress.total - progress.completed)) / 1000))
+				: null;
 		return (
 			<div className="gate">
 				<GateMark />
@@ -102,8 +146,19 @@ export function Gate() {
 								<span style={{ width: `${Math.round((progress.completed / Math.max(1, progress.total)) * 100)}%` }} />
 							</div>
 							<p className="faint" style={{ fontSize: 12 }}>
-								Shard {progress.completed} of {progress.total} · {(progress.elapsedMs / 1000).toFixed(0)}s
+								Shard {progress.completed.toLocaleString('en-US')} of {progress.total.toLocaleString('en-US')} ·{' '}
+								{(progress.elapsedMs / 1000).toFixed(0)}s elapsed
+								{etaSeconds !== null ? ` · ~${etaSeconds >= 90 ? `${Math.round(etaSeconds / 60)} min` : `${etaSeconds}s`} left` : ''}
 							</p>
+							<button
+								type="button"
+								className="btn btn-ghost"
+								onClick={() => {
+									deriveAbort.current?.abort();
+								}}
+							>
+								Cancel
+							</button>
 						</>
 					) : (
 						<div className="gate-progress gate-progress-indeterminate">
@@ -205,18 +260,58 @@ export function Gate() {
 							placeholder="Long and memorable"
 						/>
 					</label>
-					<label className="field">
-						<span className="field-label">Difficulty · factor {factor}</span>
-						<input type="range" min={1} max={4} step={1} value={factor} onChange={e => setFactor(Number(e.target.value))} />
+					<div className="field">
+						<span className="field-label">Security work factor</span>
+						<div className="gate-factors">
+							{FACTOR_PRESETS.map(preset => {
+								const active = !customShards.trim() && preset.factor === factor;
+								return (
+									<button
+										key={preset.factor}
+										type="button"
+										className={`gate-factor${active ? ' active' : ''}`}
+										onClick={() => {
+											setFactor(preset.factor);
+											setCustomShards('');
+										}}
+									>
+										<span className="gate-factor-tier">{preset.tier}</span>
+										<span className="gate-factor-shards">
+											{preset.shardCount.toLocaleString('en-US')} {preset.shardCount === 1 ? 'shard' : 'shards'}
+										</span>
+									</button>
+								);
+							})}
+						</div>
+						<div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+							<input
+								className="input num"
+								style={{ maxWidth: 200 }}
+								placeholder="custom shards · 6+"
+								inputMode="numeric"
+								value={customShards}
+								onChange={e => setCustomShards(e.target.value.replace(/[^\d]/g, ''))}
+							/>
+							<span className="faint" style={{ fontSize: 12 }}>
+								{work
+									? `${work.tier} · ${work.shardCount.toLocaleString('en-US')} shards · factor ${work.factor}`
+									: 'At least 6 shards'}
+							</span>
+						</div>
 						<span className="faint" style={{ fontSize: 12 }}>
-							Higher factors take longer to derive — and longer to attack.
+							Each shard is one unit of Argon2 memory-hard work. The same name, passphrase, and work reopen this vault
+							on any device — cancel any time.
 						</span>
-					</label>
+					</div>
 					<div className="gate-form-actions">
 						<button type="button" className="btn btn-quiet" onClick={() => setMode('landing')}>
 							Back
 						</button>
-						<button type="submit" className="btn btn-primary" disabled={name.trim().length < 2 || passphrase.length < 8}>
+						<button
+							type="submit"
+							className="btn btn-primary"
+							disabled={name.trim().length < 2 || passphrase.length < 8 || !work}
+						>
 							Derive vault
 						</button>
 					</div>

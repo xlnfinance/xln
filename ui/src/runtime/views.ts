@@ -61,11 +61,13 @@ export function useAccounts(entityId: string | null): { accounts: AccountView[];
 				try {
 					const derived = xln.deriveDelta(delta, isLeft);
 					const total = delta.ondelta + delta.offdelta;
+					// Negative total = LEFT pays, so LEFT's own position is +total
+					// and RIGHT's is -total. Verified against a live routed payment.
 					tokens.push({
 						tokenId: Number(tokenId),
 						delta,
 						derived,
-						signed: isLeft ? -total : total,
+						signed: isLeft ? total : -total,
 					});
 				} catch {
 					// Skip malformed deltas rather than blanking the whole account list.

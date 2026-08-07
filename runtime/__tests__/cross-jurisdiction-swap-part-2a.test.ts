@@ -401,14 +401,21 @@ describe('cross-jurisdiction hashledger swap', () => {
     const before = account.state.deltas.get(route.source.tokenId)!.offdelta;
     const privateSeed = deriveCrossJurisdictionPrivateSeed('cross-early-source-reveal', route);
     const binary = buildCrossJurisdictionPullReveal(route, 65_535, privateSeed).binary;
-    const forgedProof = buildCrossJurisdictionCloseProof({
-      ...route,
-      cumulativeFillRatio: 65_535,
-      fillNumerator: 1n,
-      fillDenominator: 1n,
-      filledSourceAmount: route.source.amount,
-      filledTargetAmount: route.target.amount,
-    }, binary);
+    // A valid 100% reveal on a resting route is the settlement authority, not
+    // an "invented fill": the hub holding the seed may legally close at 100%.
+    // What stays rejected is a close whose amounts deviate from the
+    // chain-proportional formula the dispute path would apply at this ratio.
+    const forgedProof = {
+      orderId: route.orderId,
+      routeHash: route.routeHash!,
+      sourcePullId: route.sourcePull!.pullId,
+      targetPullId: route.targetPull!.pullId,
+      fillRatio: 65_535,
+      cumulativeSourceAmount: route.source.amount - 1n,
+      cumulativeTargetAmount: route.target.amount,
+      binaryHash: hashCrossJurisdictionCloseBinary(binary),
+      closeMode: 'full' as const,
+    };
     const result = await applyAccountTx(
       account,
       {
@@ -421,7 +428,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Cross-j close proof mismatch');
+    expect(result.error).toContain('chain-proportional');
     expect(account.state.deltas.get(route.source.tokenId)!.offdelta).toBe(before);
 
     const forgedOpeningRoute = {

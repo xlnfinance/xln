@@ -6,5 +6,6 @@ export { EntityProviderSupplyHarness__factory } from "./EntityProviderSupplyHarn
 export { FeeOnTransferERC20__factory } from "./FeeOnTransferERC20__factory";
 export { HashLadderHarness__factory } from "./HashLadderHarness__factory";
 export { MockEntityProvider__factory } from "./MockEntityProvider__factory";
+export { MockRevealRegistry__factory } from "./MockRevealRegistry__factory";
 export { SupplyLivenessHarness__factory } from "./SupplyLivenessHarness__factory";
 export { TransformerLivenessHarness__factory } from "./TransformerLivenessHarness__factory";

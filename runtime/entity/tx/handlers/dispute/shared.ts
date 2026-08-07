@@ -171,18 +171,5 @@ export const collectDisputeEvidenceReadinessIssues = (
   if (pendingOrderbookRemovals > 0) {
     issues.push(`orderbookRemovals:${pendingOrderbookRemovals}`);
   }
-  if (
-    account.disputePrepare?.crossJurisdictionRecovery &&
-    account.activeDispute?.crossJurisdictionRecovery
-  ) {
-    throw new Error('DISPUTE_CROSS_J_RECOVERY_PHASE_CONFLICT');
-  }
-  const recovery =
-    account.disputePrepare?.crossJurisdictionRecovery ??
-    account.activeDispute?.crossJurisdictionRecovery;
-  const missingPulls = (recovery?.requiredPullIds ?? []).filter(
-    (pullId) => !Object.hasOwn(recovery?.resultsByPullId ?? {}, pullId),
-  );
-  if (missingPulls.length > 0) issues.push(`crossJPulls:${missingPulls.length}`);
   return issues;
 };

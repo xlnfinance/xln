@@ -493,3 +493,339 @@
 	align-items: baseline;
 	margin: 36px 0 4px;
 }
+
+/* ---------- brainvault work factor picker ---------- */
+
+.gate-factors {
+	display: grid;
+	grid-template-columns: repeat(5, 1fr);
+	gap: 6px;
+}
+
+@media (max-width: 520px) {
+	.gate-factors {
+		grid-template-columns: repeat(3, 1fr);
+	}
+}
+
+.gate-factor {
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-m);
+	padding: 10px 6px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 3px;
+	color: var(--ink-2);
+	transition:
+		border-color var(--dur-fast) var(--ease),
+		color var(--dur-fast) var(--ease);
+}
+
+.gate-factor:hover {
+	border-color: var(--hairline-2);
+}
+
+.gate-factor.active {
+	border-color: var(--champagne);
+	color: var(--ink);
+}
+
+.gate-factor-tier {
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.gate-factor-shards {
+	font-size: 10.5px;
+	color: var(--ink-3);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ---------- full-width identifiers ---------- */
+
+.hash {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--ink-2);
+	overflow-wrap: anywhere;
+	word-break: break-all;
+	line-height: 1.5;
+}
+
+/* ---------- canonical delta bar: [own credit][collateral][peer credit] + Δ marker ---------- */
+
+.dbar {
+	position: relative;
+	display: flex;
+	width: 100%;
+	border-radius: 4px;
+	overflow: visible;
+}
+
+.dbar-zone {
+	height: 100%;
+}
+
+.dbar-zone:first-child {
+	border-radius: 4px 0 0 4px;
+}
+
+.dbar-zone:nth-last-child(2) {
+	border-radius: 0 4px 4px 0;
+}
+
+.dbar-own {
+	background: color-mix(in srgb, var(--champagne) 42%, transparent);
+}
+
+.dbar-coll {
+	background: #7fae8e;
+}
+
+.dbar-peer {
+	background: var(--hairline-2);
+}
+
+.dbar-marker {
+	position: absolute;
+	top: -4px;
+	bottom: -4px;
+	width: 2px;
+	margin-left: -1px;
+	background: var(--ink);
+	border-radius: 1px;
+	box-shadow: 0 0 6px color-mix(in srgb, var(--ink) 50%, transparent);
+}
+
+.dbar-marker-chip {
+	width: 2px !important;
+	height: 12px !important;
+	border-radius: 1px !important;
+	background: var(--ink);
+}
+
+.delta-legend {
+	display: flex;
+	gap: 14px;
+	flex-wrap: wrap;
+	font-size: 11px;
+	color: var(--ink-3);
+}
+
+.delta-legend span {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.delta-legend i {
+	width: 10px;
+	height: 8px;
+	border-radius: 2px;
+	display: inline-block;
+}
+
+/* ---------- testnet faucet chip ---------- */
+
+.faucet-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	border: 1px solid color-mix(in srgb, #7fae8e 55%, transparent);
+	color: #7fae8e;
+	border-radius: var(--radius-pill);
+	padding: 5px 12px;
+	font-size: 11.5px;
+	font-weight: 500;
+	white-space: nowrap;
+	transition: background var(--dur-fast) var(--ease);
+}
+
+.faucet-chip:hover:not(:disabled) {
+	background: color-mix(in srgb, #7fae8e 12%, transparent);
+}
+
+/* ---------- pay form: recipient picker ---------- */
+
+.picker {
+	position: relative;
+}
+
+.picker-control {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	background: var(--glass);
+	border: 1px solid var(--glass-border);
+	border-radius: var(--radius-m);
+	padding: 13px 16px;
+	font-size: 14.5px;
+	color: var(--ink);
+	transition: border-color var(--dur-fast) var(--ease);
+}
+
+.picker-control:hover {
+	border-color: var(--hairline-2);
+}
+
+.picker-menu {
+	position: absolute;
+	inset: calc(100% + 6px) 0 auto 0;
+	z-index: 50;
+	border-radius: var(--radius-m);
+	background: var(--bg-elevated);
+	box-shadow: var(--shadow-sheet);
+	overflow: hidden;
+	max-height: 320px;
+	overflow-y: auto;
+}
+
+.picker-option {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 3px;
+	width: 100%;
+	text-align: left;
+	padding: 12px 16px;
+	color: var(--ink);
+	border-top: 1px solid var(--hairline);
+	transition: background var(--dur-fast) var(--ease);
+}
+
+.picker-option:first-child {
+	border-top: none;
+}
+
+.picker-option:hover {
+	background: var(--glass-2);
+}
+
+/* ---------- pay form: delivery modes ---------- */
+
+.mode-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.mode-card {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 5px;
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-m);
+	padding: 12px 14px;
+	text-align: left;
+	color: var(--ink-2);
+	transition:
+		border-color var(--dur-fast) var(--ease),
+		color var(--dur-fast) var(--ease);
+}
+
+.mode-card:hover {
+	border-color: var(--hairline-2);
+}
+
+.mode-card.active {
+	border-color: var(--champagne);
+	color: var(--ink);
+}
+
+.mode-card-name {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.mode-radio {
+	width: 10px;
+	height: 10px;
+	border: 1px solid currentColor;
+	border-radius: 50%;
+	flex: none;
+}
+
+.mode-card.active .mode-radio {
+	border: 3px solid var(--champagne);
+}
+
+.mode-default {
+	margin-left: auto;
+	font-size: 9.5px;
+	letter-spacing: 0.8px;
+	text-transform: uppercase;
+	color: var(--champagne);
+}
+
+.mode-card-desc {
+	font-size: 11.5px;
+	color: var(--ink-3);
+}
+
+/* ---------- pay form: route options ---------- */
+
+.route-card {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-m);
+	padding: 13px 15px;
+	text-align: left;
+	color: var(--ink);
+	transition: border-color var(--dur-fast) var(--ease);
+}
+
+.route-card:hover {
+	border-color: var(--hairline-2);
+}
+
+.route-card.active {
+	border-color: var(--champagne);
+}
+
+.route-hops {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.hop-chip {
+	border: 1px solid var(--hairline-2);
+	border-radius: var(--radius-pill);
+	padding: 4px 12px;
+	font-size: 12.5px;
+	white-space: nowrap;
+}
+
+.route-card.active .hop-chip {
+	border-color: color-mix(in srgb, var(--champagne) 55%, transparent);
+}
+
+.route-meta {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+	font-size: 11.5px;
+	color: var(--ink-2);
+	font-variant-numeric: tabular-nums;
+}
+
+.route-hop-fees {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}

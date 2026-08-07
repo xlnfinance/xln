@@ -4,8 +4,6 @@ import type {
   AccountReplica,
   CrossJurisdictionDisputeRecovery,
 } from '../../types/account';
-import type { DisputeArgumentPlan } from '../../protocol/dispute/argument-snapshot';
-import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
 import type { EntityInput, EntityState } from '../types';
 import { addMessage } from '../frame-events';
 import { verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
@@ -15,13 +13,13 @@ import {
 } from '../../extensions/cross-j/index';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
 import { buildCrossJurisdictionEntityOutput, pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
+import { batchAddHashLadderReveal, initJBatch } from '../../jurisdiction/machine/batch';
 import type { JEventAccountTx } from './j-events-types';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
 
 type DisputeTransformerArgs = {
   secrets?: Array<string>;
-  pulls?: Array<string>;
 };
 
 const decodeStringArray = (value: unknown): string[] | undefined => {
@@ -44,20 +42,18 @@ function decodeDeltaTransformerArgs(starterInitialArgumentsRaw: unknown): Disput
   }
   // The built-in DeltaTransformer is the first proof-body transformer. Keep
   // this position: compacting away an empty first slot would reinterpret a
-  // subcontract's arguments as payment/pull evidence.
+  // subcontract's arguments as payment evidence.
   const deltaArgs = argArray[0];
   if (!deltaArgs || deltaArgs === '0x') return undefined;
   try {
     const decoded = abiCoder.decode(
-      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
       deltaArgs,
     )[0];
     if (typeof decoded !== 'object' || decoded === null) return undefined;
     const secrets = decodeStringArray(Reflect.get(decoded, 'secrets'));
-    const pulls = decodeStringArray(Reflect.get(decoded, 'pulls'));
     return {
       ...(secrets === undefined ? {} : { secrets }),
-      ...(pulls === undefined ? {} : { pulls }),
     };
   } catch {
     // Optional dispute evidence is adversarial. Solidity treats malformed
@@ -77,61 +73,143 @@ export function decodeDisputeStarterInitialSecrets(starterInitialArgumentsRaw: u
   return Array.from(secrets);
 }
 
-function findCrossJurisdictionRoutesForSourceDispute(
+
+export const ladderHashForPull = (pull: { fullHash: string; partialRoot: string }): string =>
+  ethers.keccak256(
+    ethers.solidityPacked(['bytes32', 'bytes32'], [pull.fullHash, pull.partialRoot]),
+  ).toLowerCase();
+
+const ZERO_BYTES32 = `0x${'00'.repeat(32)}`;
+
+/**
+ * Queue a registry write with max-ratio preference. On-chain the record is
+ * last-write-wins per entity key, and a higher-digit reveal derives every lower
+ * one, so the honest maximum is the only ratio worth spending gas on; a
+ * lower-ratio replay (e.g. a griefer re-registering derived material) must
+ * never downgrade a pending write.
+ */
+export const queueHashLadderRevealRegistration = (
   state: EntityState,
-  counterpartyId: string,
-): CrossJurisdictionSwapRoute[] {
+  pull: { fullHash: string; partialRoot: string },
+  decoded: { fillRatio: number; fullSecret?: string; reveals?: [string, string, string, string] },
+): 'queued' | 'already-queued' => {
+  const jBatchState = (state.jBatchState ??= initJBatch());
+  const fullHash = pull.fullHash.toLowerCase();
+  const partialRoot = pull.partialRoot.toLowerCase();
+  const sameLadder = (op: { fullHash: string; partialRoot: string; fillRatio: number }): boolean =>
+    op.fullHash.toLowerCase() === fullHash && op.partialRoot.toLowerCase() === partialRoot;
+  const sentBest = (jBatchState.sentBatch?.batch.hashLadderReveals ?? [])
+    .filter(sameLadder)
+    .reduce((best, op) => Math.max(best, op.fillRatio), 0);
+  if (sentBest >= decoded.fillRatio) return 'already-queued';
+  const draft = jBatchState.batch.hashLadderReveals;
+  const draftBest = draft.filter(sameLadder).reduce((best, op) => Math.max(best, op.fillRatio), 0);
+  if (draftBest >= decoded.fillRatio) return 'already-queued';
+  for (let index = draft.length - 1; index >= 0; index -= 1) {
+    if (sameLadder(draft[index]!)) draft.splice(index, 1);
+  }
+  batchAddHashLadderReveal(jBatchState, {
+    fullHash: pull.fullHash,
+    partialRoot: pull.partialRoot,
+    fillRatio: decoded.fillRatio,
+    fullSecret: decoded.fullSecret ?? ZERO_BYTES32,
+    reveals: decoded.reveals ?? [ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32],
+  });
+  return 'queued';
+};
+
+/**
+ * The compact off-chain reveal encoding shared with the account close path:
+ * 32-byte full secret for a 100% fill, otherwise 2-byte big-endian uint16
+ * ratio followed by the four nibble reveal nodes.
+ */
+const revealBinaryFromRegistryEvent = (event: {
+  fillRatio: number;
+  fullSecret: string;
+  reveals: readonly string[];
+}): string => {
+  if (event.fillRatio >= CROSS_J_MAX_FILL_RATIO) return event.fullSecret.toLowerCase();
+  const ratioHex = event.fillRatio.toString(16).padStart(4, '0');
+  return `0x${ratioHex}${event.reveals.map(reveal => reveal.slice(2)).join('')}`.toLowerCase();
+};
+
+/**
+ * Registry-event driven cross-j recovery. A HashLadderRevealRegistered event on
+ * the source chain is the ONLY recovery trigger: the hub cannot claim the
+ * source pull on-chain without making the reveal publicly portable, so the
+ * target user simply registers the same verified material on the target chain
+ * under its own key. Exactly one local entity owns the source-user lane per
+ * route, so exactly one port instruction is emitted per reveal.
+ */
+export function queueCrossJurisdictionRevealPorts(
+  state: EntityState,
+  outputs: EntityInput[],
+  event: {
+    entity: string;
+    ladderHash: string;
+    fillRatio: number;
+    fullSecret: string;
+    reveals: [string, string, string, string];
+  },
+  blockNumber: number,
+): number {
   const self = String(state.entityId || '').toLowerCase();
-  const counterparty = String(counterpartyId || '').toLowerCase();
-  const candidates = Array.from(state.crossJurisdictionSwaps?.values() ?? [])
-    .filter((route) =>
-      String(route.source.entityId || '').toLowerCase() === self &&
-      String(route.source.counterpartyEntityId || '').toLowerCase() === counterparty &&
-      Boolean(route.targetPull) &&
-      // Informational fill progress must not gate dispute recovery: a valid
-      // on-chain reveal governs even when no local fill info ever arrived.
-      !isCrossJurisdictionTerminalStatus(route.status),
-    )
-    .sort((left, right) => String(left.orderId).localeCompare(String(right.orderId)));
-  return candidates;
-}
-
-const positionalPullArguments = (
-  plan: Pick<DisputeArgumentPlan, 'leftPullIds' | 'rightPullIds'>,
-  evidence: Pick<DisputeFinalizationEvidence, 'leftArguments' | 'rightArguments'> | undefined,
-): Map<string, string> => {
-  const result = new Map<string, string>();
-  const sides = [
-    [plan.leftPullIds, decodeDeltaTransformerArgs(evidence?.leftArguments)?.pulls ?? []],
-    [plan.rightPullIds, decodeDeltaTransformerArgs(evidence?.rightArguments)?.pulls ?? []],
-  ] as const;
-  for (const [pullIds, binaries] of sides) {
-    for (let index = 0; index < pullIds.length; index++) {
-      const pullId = pullIds[index]!;
-      if (result.has(pullId)) throw new Error(`CROSS_J_SOURCE_PULL_PLAN_DUPLICATE:${pullId}`);
-      result.set(pullId, binaries[index] ?? '0x');
-    }
-  }
-  return result;
-};
-
-const verifyPositionalSourcePull = (
-  route: CrossJurisdictionSwapRoute,
-  binary: string,
-): { binary: string; fillRatio: number } => {
-  if (!binary || binary === '0x') return { binary: '0x', fillRatio: 0 };
-  try {
+  const ladderHash = String(event.ladderHash || '').toLowerCase();
+  if (!self || !ladderHash || event.fillRatio <= 0) return 0;
+  const binary = revealBinaryFromRegistryEvent(event);
+  const batches = new Map<string, {
+    entityId: string;
+    signerId: string;
+    txs: NonNullable<EntityInput['entityTxs']>;
+  }>();
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
+    if (String(route.source?.entityId || '').toLowerCase() !== self) continue;
+    if (!route.sourcePull || !route.targetPull) continue;
+    if (isCrossJurisdictionTerminalStatus(route.status)) continue;
+    if (ladderHashForPull(route.sourcePull) !== ladderHash) continue;
+    // The source chain already verified this material at registration; a
+    // mismatch against the target commitment here means the local route mirror
+    // is corrupt, and that must stay loud rather than silently dropped.
     const verified = verifyHashLadderBinary({
-      fullHash: route.targetPull!.fullHash,
-      partialRoot: route.targetPull!.partialRoot,
+      fullHash: route.targetPull.fullHash,
+      partialRoot: route.targetPull.partialRoot,
     }, binary);
-    return verified.fillRatio > 0
-      ? { binary, fillRatio: verified.fillRatio }
-      : { binary: '0x', fillRatio: 0 };
-  } catch {
-    return { binary: '0x', fillRatio: 0 };
+    if (verified.fillRatio !== event.fillRatio) {
+      throw new Error(
+        `CROSS_J_REVEAL_PORT_RATIO_MISMATCH:${route.orderId}:` +
+        `event=${event.fillRatio}:verified=${verified.fillRatio}`,
+      );
+    }
+    const entityId = String(route.target.counterpartyEntityId || '').toLowerCase();
+    const signerId = String(route.targetSignerId || '').toLowerCase();
+    if (!entityId || !signerId) {
+      throw new Error(`CROSS_J_REVEAL_PORT_LANE_MISSING:${route.orderId}`);
+    }
+    const key = `${entityId}\0${signerId}`;
+    const batch = batches.get(key) ?? { entityId, signerId, txs: [] };
+    batch.txs.push({
+      type: 'crossJurisdictionSalvage',
+      data: {
+        routeId: route.orderId,
+        binary,
+        fillRatio: event.fillRatio,
+        sourceEntityId: route.source.entityId,
+        sourceCounterpartyEntityId: route.source.counterpartyEntityId,
+        observedAt: blockNumber,
+      },
+    });
+    batches.set(key, batch);
   }
-};
+  for (const batch of [...batches.values()].sort((left, right) =>
+    `${left.entityId}\0${left.signerId}`.localeCompare(`${right.entityId}\0${right.signerId}`),
+  )) {
+    outputs.push(buildCrossJurisdictionEntityOutput(batch.entityId, batch.signerId, batch.txs));
+  }
+  if (batches.size > 0) {
+    addMessage(state, `🌉 Cross-j reveal observed: porting ratio ${event.fillRatio} to ${batches.size} target lane(s)`);
+  }
+  return batches.size;
+}
 
 function findCrossJurisdictionRoutesForTargetDispute(
   state: EntityState,
@@ -154,36 +232,6 @@ function findCrossJurisdictionRoutesForTargetDispute(
       return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
     });
 }
-
-type SourceDisputeGroup = { route: CrossJurisdictionSwapRoute; routes: CrossJurisdictionSwapRoute[] };
-
-const groupTargetDisputeRoutesBySourceAccount = (
-  routes: readonly CrossJurisdictionSwapRoute[],
-): SourceDisputeGroup[] => {
-  const seenRouteIds = new Set<string>();
-  const groups = new Map<string, SourceDisputeGroup>();
-  for (const route of routes) {
-    if (!route.orderId || seenRouteIds.has(route.orderId)) {
-      throw new Error(`CROSS_J_SOURCE_DISPUTE_ROUTE_ID_CONFLICT:${route.orderId || 'missing'}`);
-    }
-    seenRouteIds.add(route.orderId);
-    const lane = [route.source.entityId, route.source.counterpartyEntityId]
-      .map(value => String(value || '').toLowerCase());
-    const signerId = String(route.sourceSignerId || '').toLowerCase();
-    if (lane.some(value => !value) || !signerId) {
-      throw new Error(`CROSS_J_SOURCE_DISPUTE_LANE_MISSING:${route.orderId}`);
-    }
-    const key = lane.join('\0');
-    const group = groups.get(key);
-    if (group) {
-      if (String(group.route.sourceSignerId).toLowerCase() !== signerId) {
-        throw new Error(`CROSS_J_SOURCE_DISPUTE_SIGNER_CONFLICT:${route.orderId}`);
-      }
-      group.routes.push(route);
-    } else groups.set(key, { route, routes: [route] });
-  }
-  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, group]) => group);
-};
 
 const targetUserSnapshotPullIds = (
   state: EntityState,
@@ -243,7 +291,6 @@ export function planCrossJurisdictionTargetRecovery(
   counterpartyId: string,
   proofbodyHashes: readonly string[],
   suppliedResults: Readonly<Record<string, string>>,
-  outputs: EntityInput[],
 ): CrossJurisdictionTargetRecoveryPlan | null {
   const { routes, snapshotPullIds } = selectTargetRecoveryRoutes(
     state,
@@ -258,35 +305,139 @@ export function planCrossJurisdictionTargetRecovery(
     if (!requiredSet.has(pullId)) {
       throw new Error(`CROSS_J_TARGET_RECOVERY_RESULT_UNBOUND:${pullId}`);
     }
-    resultsByPullId[pullId] = String(result || '0x').toLowerCase();
+    resultsByPullId[pullId] = String(result || '0').toLowerCase();
   }
-  const missingRouteIds = new Set(
-    routes
-      .filter((route) => !Object.hasOwn(resultsByPullId, route.targetPull!.pullId))
-      .map((route) => route.orderId),
+  // Finalization is bounded by the on-chain barrier anyway; this timestamp is
+  // the runtime-side mirror of it, after which a missing port resolves to a
+  // zero claim instead of blocking the dispute forever.
+  const resolveByTimestamp = routes.reduce(
+    (latest, route) => Math.max(latest, Number(route.targetPull!.revealedUntilTimestamp || 0)),
+    0,
   );
-  const groups = groupTargetDisputeRoutesBySourceAccount(routes)
-    .filter((group) => group.routes.some((route) => missingRouteIds.has(route.orderId)));
-  const queued = groups.map(({ route }) => buildCrossJurisdictionEntityOutput(
-    route.source.entityId,
-    route.sourceSignerId,
-    [{
-      type: 'prepareDispute',
-      data: {
-        counterpartyEntityId: route.source.counterpartyEntityId,
-        description: `Cross-j source dispute prepare ${route.orderId}`,
-        crossJurisdictionRouteId: route.orderId,
-      },
-    }],
-  ));
-  outputs.push(...queued);
+  // Port-wait recovery stays local. Sibling dispute fanout is a separate
+  // EntityTx path (`crossJurisdictionForceSiblingDispute`): observing any
+  // DisputeStarted on a route leg asks every sibling to start its own clock.
   return {
     representativeRouteId: routes[0]!.orderId,
     recovery: {
       requiredPullIds: snapshotPullIds.filter((pullId) => requiredSet.has(pullId)),
       resultsByPullId,
+      resolveByTimestamp,
     },
   };
+}
+
+type SiblingDisputeTarget = {
+  entityId: string;
+  signerId: string;
+  routeId: string;
+};
+
+/**
+ * Map this entity's role on a route to the intra-runtime sibling that must
+ * start its own dispute clock. Users fan out user↔user; hubs fan out hub↔hub.
+ */
+const siblingDisputeTargetForRoute = (
+  route: CrossJurisdictionSwapRoute,
+  self: string,
+): SiblingDisputeTarget | null => {
+  const sourceUser = String(route.source?.entityId || '').toLowerCase();
+  const sourceHub = String(route.source?.counterpartyEntityId || '').toLowerCase();
+  const targetHub = String(route.target?.entityId || '').toLowerCase();
+  const targetUser = String(route.target?.counterpartyEntityId || '').toLowerCase();
+  if (self === sourceUser) {
+    const signerId = String(route.targetSignerId || '').toLowerCase();
+    return signerId && targetUser ? { entityId: targetUser, signerId, routeId: route.orderId } : null;
+  }
+  if (self === targetUser) {
+    const signerId = String(route.sourceSignerId || '').toLowerCase();
+    return signerId && sourceUser ? { entityId: sourceUser, signerId, routeId: route.orderId } : null;
+  }
+  if (self === sourceHub) {
+    const signerId = String(route.targetHubSignerId || '').toLowerCase();
+    return signerId && targetHub ? { entityId: targetHub, signerId, routeId: route.orderId } : null;
+  }
+  if (self === targetHub) {
+    const signerId = String(route.sourceHubSignerId || '').toLowerCase();
+    return signerId && sourceHub ? { entityId: sourceHub, signerId, routeId: route.orderId } : null;
+  }
+  return null;
+};
+
+const routeTouchesDisputedAccount = (
+  route: CrossJurisdictionSwapRoute,
+  self: string,
+  counterparty: string,
+): boolean => {
+  const sourceUser = String(route.source?.entityId || '').toLowerCase();
+  const sourceHub = String(route.source?.counterpartyEntityId || '').toLowerCase();
+  const targetHub = String(route.target?.entityId || '').toLowerCase();
+  const targetUser = String(route.target?.counterpartyEntityId || '').toLowerCase();
+  const sourceLeg =
+    (self === sourceUser && counterparty === sourceHub) ||
+    (self === sourceHub && counterparty === sourceUser);
+  const targetLeg =
+    (self === targetUser && counterparty === targetHub) ||
+    (self === targetHub && counterparty === targetUser);
+  return sourceLeg || targetLeg;
+};
+
+/**
+ * Any DisputeStarted involving this entity on a live cross-j route asks the
+ * intra-runtime sibling to prepareDispute on its leg. Different wall-clock T
+ * across chains is fine; the point is to start every clock as soon as one
+ * leg is under dispute so reveals/ports can land before either barrier.
+ */
+export function queueCrossJurisdictionSiblingDisputeFanout(
+  state: EntityState,
+  outputs: EntityInput[],
+  counterpartyId: string,
+  observedAt?: number,
+): number {
+  const self = String(state.entityId || '').toLowerCase();
+  const counterparty = String(counterpartyId || '').toLowerCase();
+  if (!self || !counterparty) return 0;
+  const batches = new Map<string, {
+    entityId: string;
+    signerId: string;
+    txs: NonNullable<EntityInput['entityTxs']>;
+  }>();
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
+    if (isCrossJurisdictionTerminalStatus(route.status)) continue;
+    if (!route.sourcePull || !route.targetPull) continue;
+    if (!routeTouchesDisputedAccount(route, self, counterparty)) continue;
+    const sibling = siblingDisputeTargetForRoute(route, self);
+    if (!sibling) {
+      throw new Error(`CROSS_J_SIBLING_DISPUTE_TARGET_MISSING:${route.orderId}:${self}`);
+    }
+    const key = `${sibling.entityId}\0${sibling.signerId}`;
+    const batch = batches.get(key) ?? {
+      entityId: sibling.entityId,
+      signerId: sibling.signerId,
+      txs: [],
+    };
+    batch.txs.push({
+      type: 'crossJurisdictionForceSiblingDispute',
+      data: {
+        routeId: sibling.routeId,
+        observedCounterpartyEntityId: counterparty,
+        ...(observedAt !== undefined ? { observedAt } : {}),
+      },
+    });
+    batches.set(key, batch);
+  }
+  for (const batch of [...batches.values()].sort((left, right) =>
+    `${left.entityId}\0${left.signerId}`.localeCompare(`${right.entityId}\0${right.signerId}`),
+  )) {
+    outputs.push(buildCrossJurisdictionEntityOutput(batch.entityId, batch.signerId, batch.txs));
+  }
+  if (batches.size > 0) {
+    addMessage(
+      state,
+      `⚔️ Cross-j dispute observed vs ${counterparty.slice(-4)}: fanning out to ${batches.size} sibling lane(s)`,
+    );
+  }
+  return batches.size;
 }
 
 export function refreshCrossJurisdictionTargetRecovery(
@@ -295,7 +446,6 @@ export function refreshCrossJurisdictionTargetRecovery(
   counterpartyId: string,
   proofbodyHashes: readonly string[],
   current: CrossJurisdictionDisputeRecovery,
-  outputs: EntityInput[],
 ): CrossJurisdictionTargetRecoveryPlan | null {
   const { routes } = selectTargetRecoveryRoutes(
     state,
@@ -314,58 +464,7 @@ export function refreshCrossJurisdictionTargetRecovery(
     counterpartyId,
     proofbodyHashes,
     retainedResults,
-    outputs,
   );
-}
-
-export function queueCrossJurisdictionSalvageFromFinalizedArguments(
-  state: EntityState,
-  outputs: EntityInput[],
-  counterpartyId: string,
-  evidence: Pick<DisputeFinalizationEvidence, 'leftArguments' | 'rightArguments'> | undefined,
-  plan: Pick<DisputeArgumentPlan, 'leftPullIds' | 'rightPullIds'>,
-  blockNumber: number,
-): boolean {
-  const argumentsByPullId = positionalPullArguments(plan, evidence);
-  const routes = findCrossJurisdictionRoutesForSourceDispute(state, counterpartyId)
-    .filter(route => Boolean(route.sourcePull?.pullId && argumentsByPullId.has(route.sourcePull.pullId)));
-  // Both peers see source finality. Only the source-user Entity owns these
-  // route rows, so exactly one observer emits the Runtime-private result.
-  if (routes.length === 0) return false;
-  const batches = new Map<string, {
-    entityId: string;
-    signerId: string;
-    txs: NonNullable<EntityInput['entityTxs']>;
-  }>();
-  for (const route of routes) {
-    const result = verifyPositionalSourcePull(
-      route,
-      argumentsByPullId.get(route.sourcePull!.pullId)!,
-    );
-    const entityId = String(route.target.counterpartyEntityId || '').toLowerCase();
-    const signerId = String(route.targetSignerId || '').toLowerCase();
-    const key = `${entityId}\0${signerId}`;
-    const batch = batches.get(key) ?? { entityId, signerId, txs: [] };
-    batch.txs.push({
-      type: 'crossJurisdictionSalvage',
-      data: {
-        routeId: route.orderId,
-        binary: result.binary,
-        fillRatio: result.fillRatio,
-        sourceEntityId: route.source.entityId,
-        sourceCounterpartyEntityId: route.source.counterpartyEntityId,
-        observedAt: blockNumber,
-      },
-    });
-    batches.set(key, batch);
-  }
-  for (const batch of [...batches.values()].sort((left, right) =>
-    `${left.entityId}\0${left.signerId}`.localeCompare(`${right.entityId}\0${right.signerId}`)
-  )) {
-    outputs.push(buildCrossJurisdictionEntityOutput(batch.entityId, batch.signerId, batch.txs));
-  }
-  addMessage(state, `🌉 Cross-j source finality returned ${routes.length} target pull result(s)`);
-  return true;
 }
 
 function queueInboundResolvesByHashlock(

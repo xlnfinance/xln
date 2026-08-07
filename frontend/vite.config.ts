@@ -120,7 +120,7 @@ const proxyConfig = {
 		target: API_PROXY_TARGET,
 		agent: API_PROXY_AGENT,
 		ws: true,
-		changeOrigin: true,
+		changeOrigin: false,
 		configure: configureWsProxyLifecycle,
 	},
 };

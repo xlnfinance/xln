@@ -756,11 +756,21 @@ async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 2
           error instanceof Error ? error.message : String(error),
         );
         const refreshedProfile = getProfile();
+        const diagnosticP2P = p2p as typeof p2p & {
+          relayUrls?: string[];
+          clients?: unknown[];
+          isConnecting?: () => boolean;
+          getReconnectState?: () => unknown;
+        };
         return {
           ok: Boolean(String(refreshedProfile?.runtimeId || '').trim()),
           reason: refreshedProfile ? 'profile-without-runtime' : 'missing-profile',
           connectedBefore,
           connectedAfter: typeof p2p.isConnected === 'function' ? p2p.isConnected() : null,
+          connecting: diagnosticP2P.isConnecting?.() ?? null,
+          relayUrls: diagnosticP2P.relayUrls ?? [],
+          clientCount: diagnosticP2P.clients?.length ?? null,
+          reconnectState: diagnosticP2P.getReconnectState?.() ?? null,
           ensureResult,
           profileCount: env?.gossip?.getProfiles?.().length || 0,
           targetRuntimeId: String(refreshedProfile?.runtimeId || '').trim(),

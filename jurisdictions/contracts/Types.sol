@@ -11,8 +11,9 @@ pragma solidity ^0.8.24;
 struct AccountInfo {
   uint nonce;              // Unified monotonic nonce: signed nonce must be strictly greater than stored nonce
   bytes32 disputeHash;
-  uint256 disputeTimeout;
-  uint256 disputeStartTimestamp;
+  uint256 disputeTimeout;          // absolute block.number when the full dispute period T ends
+  uint256 disputeStartBlock;       // block.number at dispute start (T/2 reveal window anchor)
+  uint256 disputeStartTimestamp;   // wall-clock start (argument freezing / events); not the pull clock
   bytes32 disputeInitialProofbodyHash;
   bytes32 starterInitialArgumentsCommitment;
   bytes32 starterIncrementedArgumentsCommitment;
@@ -182,6 +183,20 @@ struct SecretReveal {
   bytes32 secret;
 }
 
+// Cross-j hash-ladder reveal: the ONLY on-chain settlement evidence for pulls.
+// Written exclusively through processBatch, so the Depository key is always the
+// authenticated caller: a hub cannot register a ratio under a user's key.
+// The contract verifies the secret material against the ladder commitment and
+// stores only the verified ratio; a caller can assert any ratio, but an
+// unverifiable one reverts the whole batch.
+struct HashLadderReveal {
+  bytes32 fullHash;      // ladder commitment: keccak256(fullSecret)
+  bytes32 partialRoot;   // ladder commitment: keccak256(packed 4 nibble roots)
+  uint16 fillRatio;      // asserted ratio, verified against the commitment
+  bytes32 fullSecret;    // used iff fillRatio == 65535
+  bytes32[4] reveals;    // nibble reveal nodes, used iff 0 < fillRatio < 65535
+}
+
 // C2R shortcut - expands to Settlement on-chain (saves calldata)
 // Pure C2R: withdraw `amount` from my share of collateral to my reserve
 struct CollateralToReserve {
@@ -203,6 +218,7 @@ struct Batch {
   ExternalTokenToReserve[] externalTokenToReserve;
   ReserveToExternalToken[] reserveToExternalToken;
   SecretReveal[] revealSecrets;
+  HashLadderReveal[] hashLadderReveals;
 }
 
 // ========== ENUMS ==========

@@ -3,7 +3,6 @@ import type { AccountReplica } from '../../types/account';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
 import { sortTransformerEntries } from '../transformer-ordering';
-import { decodeHashLadderBinary } from '../htlc/hash-ladder';
 import {
   sanitizeOptionalDisputeArgument,
   type OptionalDisputeArgumentWarning,
@@ -22,28 +21,27 @@ export type {
 
 const MAX_FILL_RATIO = 0xffff;
 
-type PullArgumentBuckets = { binaries: string[] };
-
-const emptyPullArgumentBuckets = (): PullArgumentBuckets => ({ binaries: [] });
-
 const clampFillRatio = (value: number): number => {
   if (!Number.isFinite(value) || value <= 0) return 0;
   if (value >= MAX_FILL_RATIO) return MAX_FILL_RATIO;
   return Math.floor(value);
 };
 
+// Dispute arguments carry only same-jurisdiction evidence (swap fill ratios,
+// payment secrets). Cross-j pulls are absent by design: their settlement reads
+// the Depository hash-ladder reveal registry, so no dispute calldata may assert
+// a cross-j fill ratio. Keep this tuple in byte parity with
+// DeltaTransformer.Arguments — the dispute ABI gate rejects drift.
 const encodeDeltaTransformerArgs = (
   fillRatios: number[],
   secrets: string[],
-  pulls: PullArgumentBuckets = emptyPullArgumentBuckets(),
 ): string => {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   return abiCoder.encode(
-    ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+    ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
     [{
       fillRatios: fillRatios.map((ratio) => BigInt(clampFillRatio(ratio))),
       secrets,
-      pulls: pulls.binaries,
     }],
   );
 };
@@ -77,57 +75,8 @@ const buildPendingSwapFillRatios = (
   return ratios;
 };
 
-const collectPullCloseEvidence = (account: AccountReplica): Map<string, string> => {
-  if (
-    account.disputePrepare?.crossJurisdictionRecovery &&
-    account.activeDispute?.crossJurisdictionRecovery
-  ) {
-    throw new Error('DISPUTE_PULL_EVIDENCE_PHASE_CONFLICT');
-  }
-  const certifiedResults =
-    account.disputePrepare?.crossJurisdictionRecovery?.resultsByPullId ??
-    account.activeDispute?.crossJurisdictionRecovery?.resultsByPullId ??
-    {};
-  const resolves = new Map<string, string>(Object.entries(certifiedResults));
-  for (const tx of [...(account.pendingFrame?.accountTxs ?? []), ...(account.mempool ?? [])]) {
-    if (tx.type !== 'cross_pull_close') continue;
-    // Source-final recovery is independently verified and Entity-root
-    // committed. Older retained mempool evidence cannot erase it.
-    if (Object.hasOwn(certifiedResults, tx.data.pullId)) continue;
-    if (resolves.has(tx.data.pullId)) {
-      if (resolves.get(tx.data.pullId)?.toLowerCase() !== String(tx.data.binary || '0x').toLowerCase()) {
-        resolves.set(tx.data.pullId, '0x');
-      }
-      continue;
-    }
-    resolves.set(tx.data.pullId, typeof tx.data.binary === 'string' ? tx.data.binary : '0x');
-  }
-  return resolves;
-};
-
-const buildPullBuckets = (pullIds: string[], resolves: Map<string, string>): PullArgumentBuckets => {
-  const binaries: string[] = [];
-  for (const pullId of pullIds) {
-    const binary = resolves.get(pullId) || '0x';
-    try {
-      binaries.push(decodeHashLadderBinary(binary).fillRatio > 0 ? binary : '0x');
-    } catch {
-      // Pull arguments are adversarial evidence. Bad reveal bytes are not an
-      // account-state error; they simply prove nothing. This mirrors Solidity:
-      // malformed args must not prevent the honest side from finalizing the rest
-      // of the dispute.
-      binaries.push('0x');
-    }
-  }
-  return { binaries };
-};
-
-const hasArgumentData = (fillRatios: number[], secrets: string[], pulls: PullArgumentBuckets): boolean => {
-  return (
-    fillRatios.some((ratio) => ratio > 0) ||
-    secrets.length > 0 ||
-    pulls.binaries.some((binary) => binary !== '0x')
-  );
+const hasArgumentData = (fillRatios: number[], secrets: string[]): boolean => {
+  return fillRatios.some((ratio) => ratio > 0) || secrets.length > 0;
 };
 
 export function captureDisputeArgumentSnapshot(
@@ -208,21 +157,18 @@ export function buildDisputeArgumentsFromSnapshot(
   // decides whether empty evidence satisfies the parties' dispute program.
   const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'build');
   const fillRatios = buildPendingSwapFillRatios(account, snapshot);
-  const resolves = collectPullCloseEvidence(account);
   const leftFillRatios = snapshot.plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const rightFillRatios = snapshot.plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const leftSecrets = options.secretsSide === 'left' ? [...secrets] : [];
   const rightSecrets = options.secretsSide === 'right' ? [...secrets] : [];
-  const leftPulls = buildPullBuckets(snapshot.plan.leftPullIds, resolves);
-  const rightPulls = buildPullBuckets(snapshot.plan.rightPullIds, resolves);
-  const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets, leftPulls);
-  const rightArgs = encodeDeltaTransformerArgs(rightFillRatios, rightSecrets, rightPulls);
+  const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets);
+  const rightArgs = encodeDeltaTransformerArgs(rightFillRatios, rightSecrets);
   const left = sanitizeOptionalDisputeArgument(
-    hasArgumentData(leftFillRatios, leftSecrets, leftPulls) ? wrapTransformerArgs(leftArgs) : '0x',
+    hasArgumentData(leftFillRatios, leftSecrets) ? wrapTransformerArgs(leftArgs) : '0x',
     'dispute.snapshot.left',
   );
   const right = sanitizeOptionalDisputeArgument(
-    hasArgumentData(rightFillRatios, rightSecrets, rightPulls) ? wrapTransformerArgs(rightArgs) : '0x',
+    hasArgumentData(rightFillRatios, rightSecrets) ? wrapTransformerArgs(rightArgs) : '0x',
     'dispute.snapshot.right',
   );
   return {

@@ -457,6 +457,20 @@ type EntityTxPayload =
 	      };
 	    }
   | {
+      /**
+       * Sibling fanout: any dispute observed on one cross-j leg instructs the
+       * other sibling to prepareDispute on its leg so both clocks start and
+       * reveals/ports can land before either T expires. Wall-clock T may
+       * differ across chains; equal delay *config* is the prepare-time rule.
+       */
+      type: 'crossJurisdictionForceSiblingDispute';
+      data: {
+        routeId: string;
+        observedCounterpartyEntityId: string;
+        observedAt?: number;
+      };
+    }
+  | {
       type: 'orderbookSweepCrossJurisdiction';
       data: {
         reason?: string;

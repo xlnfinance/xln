@@ -152,6 +152,10 @@ export const drainPendingCrossJurisdictionFillAcks = async (
           offerId: pendingAck.tx.data.offerId,
           ...(pendingAck.tx.data.fillSeq !== undefined ? { fillSeq: pendingAck.tx.data.fillSeq } : {}),
           cumulativeFillRatio: pendingAck.tx.data.cumulativeFillRatio,
+          // The exact ratio fields are mandatory for a nonzero fill; dropping
+          // them here turned a TTL incident report into a thrown frame.
+          fillNumerator: pendingAck.tx.data.fillNumerator,
+          fillDenominator: pendingAck.tx.data.fillDenominator,
           ...(pendingAck.tx.data.cumulativeSourceAmount !== undefined
             ? { cumulativeSourceAmount: pendingAck.tx.data.cumulativeSourceAmount }
             : {}),
@@ -184,15 +188,20 @@ export const drainPendingCrossJurisdictionFillAcks = async (
     }
     const account = currentEntityState.accounts.get(pendingAck.accountId);
     if (!account?.state.swapOffers?.has(pendingAck.tx.data.offerId)) continue;
-    if (await admitGeneratedAccountTx(accountConsensusContext, currentEntityState, account, pendingAck.tx)) {
-      appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, pendingAck.tx, outputs);
-      proposableAccounts.add(pendingAck.accountId);
-      storageChanges.push({
-        family: 'account',
-        entityId: currentEntityState.entityId,
-        counterpartyId: pendingAck.accountId,
-      });
+    // An ack whose admission fails must stay pending: deleting it silently
+    // loses target-side informational progress, and the later cooperative
+    // close then wedges against the stale mirror. The TTL incident resolves
+    // only when the ack actually entered an Account frame.
+    if (!(await admitGeneratedAccountTx(accountConsensusContext, currentEntityState, account, pendingAck.tx))) {
+      continue;
     }
+    appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, pendingAck.tx, outputs);
+    proposableAccounts.add(pendingAck.accountId);
+    storageChanges.push({
+      family: 'account',
+      entityId: currentEntityState.entityId,
+      counterpartyId: pendingAck.accountId,
+    });
     if (pendingAck.ttlExpiredAt !== undefined) {
       queueCrossJFillAckIncidentEffect(candidateEffects, 'securityIncidentResolve', currentEntityState, pendingAck);
     }

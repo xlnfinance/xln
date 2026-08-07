@@ -15,7 +15,8 @@ export const BATCH_ABI = [
     'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
     'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
-    'tuple(address transformer, bytes32 secret)[] revealSecrets' +
+    'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
+    'tuple(bytes32 fullHash, bytes32 partialRoot, uint16 fillRatio, bytes32 fullSecret, bytes32[4] reveals)[] hashLadderReveals' +
   ')'
 ];
 
@@ -72,6 +73,7 @@ export const emptyBatch = (overrides: Record<string, unknown> = {}): Record<stri
   externalTokenToReserve: [],
   reserveToExternalToken: [],
   revealSecrets: [],
+  hashLadderReveals: [],
   ...overrides,
 });
 

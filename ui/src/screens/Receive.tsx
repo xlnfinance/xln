@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import { useApp } from '../runtime/store';
-import { getTokenMeta, shortId } from '../runtime/format';
+import { getTokenMeta } from '../runtime/format';
 import { Icon } from '../components/Icons';
 
 export function Receive() {
@@ -75,9 +75,16 @@ export function Receive() {
 					</div>
 				</div>
 
+				<div style={{ width: '100%' }}>
+					<span className="field-label" style={{ display: 'block', marginBottom: 6 }}>
+						Your entity id
+					</span>
+					<p className="hash">{entityId}</p>
+				</div>
+
 				<div style={{ display: 'flex', gap: 10, width: '100%' }}>
 					<button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => void copy(entityId, 'Entity id')}>
-						<Icon name="copy" size={14} /> {shortId(entityId)}
+						<Icon name="copy" size={14} /> Copy id
 					</button>
 					<button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => void copy(link, 'Invoice link')}>
 						<Icon name="copy" size={14} /> Copy invoice

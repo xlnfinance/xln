@@ -23,7 +23,7 @@ import type {
   ProofBodyResult,
 } from './proof-body.ts';
 import type { ProofBodyStruct, TransformerClauseStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
-import type { DeltaTransformer } from '../../../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
+import type { DeltaTransformer } from '../../../jurisdictions/typechain-types/contracts/DeltaTransformer.sol/DeltaTransformer.ts';
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body.ts';
 import { sortTransformerEntries } from '../transformer-ordering.ts';
 import { normalizeAccountWatchSeed } from '../account-watch-seed.ts';

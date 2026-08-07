@@ -276,9 +276,9 @@ const decodeArguments = (encoded: string, context: string): DecodedArguments => 
   const clause = clauses[0];
   if (!clause) throw new Error(`DISPUTE_TRANSFORMER_CLAUSE_MISSING:${context}`);
   const [decoded] = coder.decode(
-    ['tuple(uint16[] fillRatios,bytes32[] secrets,bytes[] pulls)'],
+    ['tuple(uint16[] fillRatios,bytes32[] secrets)'],
     clause,
-  ) as unknown as [{ fillRatios: bigint[]; secrets: string[]; pulls: string[] }];
+  ) as unknown as [{ fillRatios: bigint[]; secrets: string[] }];
   return decoded;
 };
 

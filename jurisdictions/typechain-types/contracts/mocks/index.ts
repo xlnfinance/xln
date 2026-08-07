@@ -7,5 +7,6 @@ export type { EntityProviderSupplyHarness } from "./EntityProviderSupplyHarness"
 export type { FeeOnTransferERC20 } from "./FeeOnTransferERC20";
 export type { HashLadderHarness } from "./HashLadderHarness";
 export type { MockEntityProvider } from "./MockEntityProvider";
+export type { MockRevealRegistry } from "./MockRevealRegistry";
 export type { SupplyLivenessHarness } from "./SupplyLivenessHarness";
 export type { TransformerLivenessHarness } from "./TransformerLivenessHarness";

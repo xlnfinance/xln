@@ -1,276 +1,225 @@
 /**
- * Cross-Jurisdiction Swap Scenario
+ * Cross-Jurisdiction Swap Scenario (P2P dual-Runtime topology probe)
  *
- * The repo had no cross-jurisdiction scenario at all, which is why this area
- * only ever failed in the e2e mesh — where hub-side logs are not captured and
- * every defect had to be excavated from artifacts one at a time.
+ * Topology contract (`resolveCrossJurisdictionRuntimeTopology`):
+ *   - both users share one Runtime
+ *   - both hubs share another Runtime
+ *   - those two Runtimes must differ
  *
- * Mirrors the e2e cross-swap topology in one process, on two local anvils:
+ * Shape copied from `p2p-relay.ts` / `p2p-node.ts` — no in-process bridge.
  *
- *   CrossJ Source            CrossJ Target
- *   ─────────────            ─────────────
- *   MM  <-> HubSrc           HubTgt <-> MMt
- *
- * A cross-j route moves value from (MM, HubSrc) on the source stack to
- * (HubTgt, MMt) on the target stack. The scenario asserts the route actually
- * materialises into account-level offers rather than merely being accepted.
- *
- * INCOMPLETE — deliberately not in any parallel set yet. It reaches the real
- * submission path and stops at the topology contract, which
- * `resolveCrossJurisdictionRuntimeTopology` states exactly:
- *
- *   - both users must share one Runtime,
- *   - both hubs must share one Runtime,
- *   - and those two Runtimes must differ.
- *
- * So the finished form needs two Runtimes in the process (a user Runtime
- * holding MM + MMt and a hub Runtime holding HubSrc + HubTgt), each spanning
- * both jurisdictions — the mesh's shape. Everything up to that point works and
- * has already paid for itself: it surfaced the ambiguous-jurisdiction watcher
- * failure, the single-slot anvil that killed the first chain, and the fact that
- * numbered entity ids collide across EntityProviders.
+ * For full MM same-j + cross-j books + adversary recovery, use
+ * `bun runtime/scenarios/run.ts mm-mesh` (real orchestrator --mm path).
+ * This scenario only covers thin dual-Runtime P2P topology.
  */
 
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+
 import type { RuntimeReplica } from '../runtime/types';
-import { generateLazyEntityId } from '../entity/factory';
-import {
-  bootScenario,
-  fundEntities,
-  ensureJAdapter,
-  createJReplica,
-  bindScenarioJReplica,
-  createJurisdictionConfig,
-  resolveScenarioBoardSigner,
-} from './boot';
-import {
-  getProcess,
-  converge,
-  commitRuntimeInput,
-  processJEvents,
-  assert,
-  findReplica,
-  usd,
-} from './helpers';
 
-const USDC = 1;
-const WETH = 2;
-
-type Registered = { id: string; signer: string; name: string };
-
-/** A second jurisdiction needs its own endpoint; the boot path autostarts anvil there. */
-const reserveFreeLocalPort = async (): Promise<number> => {
-  const { createServer } = await import('node:net');
-  return await new Promise<number>((resolvePort, rejectPort) => {
-    const server = createServer();
-    server.once('error', rejectPort);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        server.close(() => rejectPort(new Error('CROSS_J_SCENARIO_PORT_RESERVE_FAILED')));
-        return;
-      }
-      const { port } = address;
-      server.close(() => resolvePort(port));
-    });
-  });
+type ProcInfo = {
+  role: string;
+  proc: ReturnType<typeof spawn>;
+  stdoutBuffer: string[];
 };
 
-export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
-  const process = await getProcess();
-
-  console.log('\n🌉 Cross-jurisdiction swap scenario\n');
-
-  // ── Source stack ──────────────────────────────────────────────────────────
-  const { env, jadapter: sourceAdapter, jurisdiction: sourceJurisdiction } = await bootScenario({
-    name: 'cross-j',
-    signerIds: ['1', '2', '3', '4'],
-    seed: 'cross-j-deterministic',
-    jurisdictionName: 'CrossJ Source',
-    ...(_existingEnv?.scenarioJAdapterMode ? { mode: _existingEnv.scenarioJAdapterMode } : {}),
-  });
-  env.quietRuntimeLogs = true;
-
-  // ── Target stack, in the SAME env ─────────────────────────────────────────
-  // One Runtime owning entities in two jurisdictions is exactly the mesh's MM
-  // shape (an entity per jurisdiction, one process). `sameJurisdiction` is
-  // decided on jurisdiction NAME, so both stacks may share a chain id.
-  const targetPort = await reserveFreeLocalPort();
-  const targetRpcUrl = `http://127.0.0.1:${targetPort}`;
-  // Distinct chain id is mandatory, not cosmetic: a jurisdiction is identified
-  // by (chainId, depository), and two fresh anvils deploy identical addresses.
-  const TARGET_CHAIN_ID = 31338;
-  const targetAdapter = await ensureJAdapter(env, sourceAdapter.mode, {
-    deployStack: true,
-    rpcUrl: targetRpcUrl,
-    chainId: TARGET_CHAIN_ID,
-  });
-  bindScenarioJReplica(
-    env,
-    createJReplica(env, 'CrossJ Target', targetAdapter.addresses.depository, { x: 400, y: 600, z: 0 }),
-    targetAdapter,
-  );
-  targetAdapter.startWatching(env);
-  const targetJurisdiction = createJurisdictionConfig(
-    'CrossJ Target',
-    targetAdapter.addresses.depository,
-    targetAdapter.addresses.entityProvider,
-    targetRpcUrl,
-    Number(targetAdapter.chainId || 31337),
-  );
-  console.log(`  ✅ Two jurisdictions up: source + target (${targetRpcUrl})\n`);
-
-  // ── Entities ──────────────────────────────────────────────────────────────
-  // Lazy (board-hash) ids, not numbered ones. A numbered id is only unique
-  // inside one EntityProvider: both chains hand out 2, 3, … so the target
-  // entities would land on the exact bytes32 already bound to the source
-  // jurisdiction and the Runtime rejects it with ENTITY_JURISDICTION_CONFLICT.
-  // The mesh's hub entities are hashes for the same reason.
-  const createEntity = async (
-    signerSeed: string,
-    name: string,
-    jurisdiction: typeof sourceJurisdiction,
-    position: { x: number; y: number; z: number },
-  ): Promise<Registered> => {
-    const signer = resolveScenarioBoardSigner(env, signerSeed);
-    const id = generateLazyEntityId([signer], 1n, env).toLowerCase();
-    await commitRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica' as const,
-        entityId: id,
-        signerId: signer,
-        data: {
-          isProposer: true,
-          position,
-          config: {
-            mode: 'proposer-based' as const,
-            threshold: 1n,
-            validators: [signer],
-            shares: { [signer]: 1n },
-            jurisdiction,
-          },
-        },
-      }],
-      entityInputs: [],
+const getFreePort = async (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close(() => {
+        if (address && typeof address === 'object') resolve(address.port);
+        else reject(new Error('CROSS_J_FREE_PORT_UNAVAILABLE'));
+      });
     });
-    console.log(`  ✅ ${name} ${id.slice(-6)} on ${jurisdiction.name}`);
-    return { id, signer, name };
-  };
-
-  const mm = await createEntity('1', 'MM', sourceJurisdiction, { x: -40, y: -30, z: 0 });
-  const hubSrc = await createEntity('2', 'HubSrc', sourceJurisdiction, { x: -10, y: -30, z: 0 });
-  const hubTgt = await createEntity('3', 'HubTgt', targetJurisdiction, { x: 10, y: -30, z: 0 });
-  const mmt = await createEntity('4', 'MMt', targetJurisdiction, { x: 40, y: -30, z: 0 });
-  await processJEvents(env);
-  await converge(env);
-
-  await fundEntities(env, sourceAdapter, [
-    { id: mm.id, tokenId: USDC, amount: usd(2_000_000) },
-    { id: hubSrc.id, tokenId: USDC, amount: usd(2_000_000) },
-  ]);
-  await fundEntities(env, targetAdapter, [
-    { id: hubTgt.id, tokenId: WETH, amount: usd(2_000_000) },
-    { id: mmt.id, tokenId: WETH, amount: usd(2_000_000) },
-  ]);
-
-  // ── Bilateral accounts, one per stack ─────────────────────────────────────
-  await process(env, [{
-    entityId: mm.id,
-    signerId: mm.signer,
-    entityTxs: [{
-      type: 'openAccount',
-      data: { targetEntityId: hubSrc.id, tokenId: USDC, creditAmount: usd(100_000) },
-    }],
-  }]);
-  await converge(env);
-  await process(env, [{
-    entityId: mmt.id,
-    signerId: mmt.signer,
-    entityTxs: [{
-      type: 'openAccount',
-      data: { targetEntityId: hubTgt.id, tokenId: WETH, creditAmount: usd(100_000) },
-    }],
-  }]);
-  await converge(env);
-
-  const [, mmReplica] = findReplica(env, mm.id);
-  const [, mmtReplica] = findReplica(env, mmt.id);
-  assert(mmReplica.state.accounts.has(hubSrc.id), 'MM-HubSrc account exists', env);
-  assert(mmtReplica.state.accounts.has(hubTgt.id), 'MMt-HubTgt account exists', env);
-  console.log('  ✅ Bilateral accounts open on both stacks\n');
-
-  // ── The cross-jurisdiction swap ───────────────────────────────────────────
-  // Driven through the Runtime with `process`, exactly like every other
-  // scenario. The command API (`submitCrossJurisdictionSwap`) is the entry
-  // point for a live node running the event loop; it is fenced on lifecycle
-  // phase and persistence, and forcing those flags by hand would only prove the
-  // forcing worked. What it actually does is build the route and enqueue one
-  // `prepareCrossJurisdictionSwap` per user sibling — so the scenario builds
-  // the same route and enqueues the same two entity txs, and the Runtime
-  // applies them through the real path.
-  const { buildCrossJurisdictionSwapSubmission } = await import('../runtime/jurisdiction-api');
-  const orderId = 'cross-j-scenario-1';
-  const { route } = buildCrossJurisdictionSwapSubmission(env, {
-    orderId,
-    sourceUserEntityId: mm.id,
-    sourceHubEntityId: hubSrc.id,
-    targetHubEntityId: hubTgt.id,
-    targetUserEntityId: mmt.id,
-    sourceTokenId: USDC,
-    sourceAmount: usd(1_000),
-    targetTokenId: WETH,
-    targetAmount: usd(1_000),
-    sourceUserSignerId: mm.signer,
-    sourceHubSignerId: hubSrc.signer,
-    targetHubSignerId: hubTgt.signer,
-    targetUserSignerId: mmt.signer,
   });
-  // Target sibling first, mirroring the command API: the source authorization
-  // may emit the certified source-user -> source-hub command, and no value may
-  // cross the later Account boundary unless both records exist.
-  await process(env, [
-    {
-      entityId: mmt.id,
-      signerId: mmt.signer,
-      entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
+
+const waitForLineOrError = (
+  procInfo: ProcInfo,
+  success: RegExp,
+  errors: RegExp[] = [],
+  timeoutMs = 180_000,
+): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = () => {
+      const text = procInfo.stdoutBuffer.join('');
+      for (const err of errors) {
+        if (err.test(text)) {
+          clearInterval(timer);
+          reject(new Error(`CROSS_J_${procInfo.role.toUpperCase()}_ERROR: ${text.slice(-2_000)}`));
+          return;
+        }
+      }
+      const match = text.match(success);
+      if (match) {
+        clearInterval(timer);
+        resolve(match[0]!);
+        return;
+      }
+      if (Date.now() - started > timeoutMs) {
+        clearInterval(timer);
+        reject(new Error(
+          `CROSS_J_${procInfo.role.toUpperCase()}_TIMEOUT waiting ${success}: ${text.slice(-2_000)}`,
+        ));
+      }
+    };
+    const timer = setInterval(check, 100);
+    procInfo.proc.once('exit', code => {
+      clearInterval(timer);
+      if (code !== 0 && code !== null) {
+        reject(new Error(
+          `CROSS_J_${procInfo.role.toUpperCase()}_EXIT:${code}: ${procInfo.stdoutBuffer.join('').slice(-2_000)}`,
+        ));
+      }
+    });
+    check();
+  });
+
+const spawnNode = (role: 'hubs' | 'users', extraArgs: string[]): ProcInfo => {
+  const dbRoot = path.join(process.cwd(), 'db-tmp');
+  const dbPath = path.join(dbRoot, `cross-j-${role}-${Date.now()}`);
+  fs.rmSync(dbPath, { recursive: true, force: true });
+  fs.mkdirSync(dbPath, { recursive: true });
+  const args = [
+    'run',
+    'runtime/scenarios/cross-j-node.ts',
+    '--role',
+    role,
+    '--seed',
+    `cross-j-${role}-seed`,
+    ...extraArgs,
+  ];
+  const proc = spawn('bun', args, {
+    env: {
+      ...process.env,
+      XLN_DB_PATH: dbPath,
+      XLN_RUNTIME_SEED: process.env['XLN_RUNTIME_SEED'] || 'dev-scenario-seed',
     },
-    {
-      entityId: mm.id,
-      signerId: mm.signer,
-      entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
-    },
-  ]);
-  console.log(`  → submitted cross-j intent ${orderId}`);
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const stdoutBuffer: string[] = [];
+  proc.stdout?.on('data', chunk => {
+    const text = chunk.toString();
+    stdoutBuffer.push(text);
+    process.stdout.write(`[${role}] ${text}`);
+  });
+  proc.stderr?.on('data', chunk => {
+    const text = chunk.toString();
+    stdoutBuffer.push(text);
+    process.stderr.write(`[${role}] ${text}`);
+  });
+  return { role, proc, stdoutBuffer };
+};
 
-  await converge(env, 40);
-  await processJEvents(env);
-  await converge(env, 40);
+const killAll = (procs: ProcInfo[]) => {
+  for (const { proc } of procs) {
+    if (!proc.killed) proc.kill('SIGTERM');
+  }
+};
 
-  // ── Assertions: the route must MATERIALISE, not merely be accepted ────────
-  const [, hubSrcReplica] = findReplica(env, hubSrc.id);
-  const [, hubTgtReplica] = findReplica(env, hubTgt.id);
-  const sourceRoute = hubSrcReplica.state.crossJurisdictionSwaps?.get(orderId);
-  const targetRoute = hubTgtReplica.state.crossJurisdictionSwaps?.get(orderId);
+const extractJsonAfter = (buffer: string[], marker: string): unknown => {
+  const text = buffer.join('');
+  const idx = text.lastIndexOf(marker);
+  if (idx < 0) throw new Error(`CROSS_J_MARKER_MISSING:${marker}`);
+  const after = text.slice(idx + marker.length).trimStart();
+  const line = after.split('\n')[0] ?? '';
+  return JSON.parse(line);
+};
 
-  console.log(`  source hub route: ${sourceRoute ? sourceRoute.status : 'ABSENT'}`);
-  console.log(`  target hub route: ${targetRoute ? targetRoute.status : 'ABSENT'}`);
-  console.log(
-    `  MM authorizations: ${mmReplica.state.crossJurisdictionAuthorizations?.size ?? 0}, ` +
-    `MMt authorizations: ${mmtReplica.state.crossJurisdictionAuthorizations?.size ?? 0}`,
-  );
+/**
+ * Orchestrator entry used by `bun runtime/scenarios/run.ts cross-j`.
+ * The unused env argument is the CLI shell Runtime; real work happens in children.
+ */
+export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
+  console.log('\n🌉 Cross-jurisdiction swap scenario (dual-Runtime P2P)\n');
+  const procs: ProcInfo[] = [];
+  const relayPort = await getFreePort();
+  const relayUrl = `ws://127.0.0.1:${relayPort}`;
+  // Parent-owned phase barriers: children must not race credit/orders ahead of
+  // bilateral readiness on BOTH runtimes.
+  const barrierRoot = path.join(process.cwd(), 'db-tmp');
+  fs.mkdirSync(barrierRoot, { recursive: true });
+  const barrierDir = fs.mkdtempSync(path.join(barrierRoot, 'cross-j-barrier-'));
+  console.log(`[cross-j] relay ${relayUrl}`);
+  console.log(`[cross-j] barrierDir ${barrierDir}`);
 
-  assert(sourceRoute, 'source hub registered the cross-j route', env);
-  assert(targetRoute, 'target hub registered the cross-j route', env);
-  assert(
-    Boolean(sourceRoute?.sourcePull),
-    'source leg materialised a pull rather than staying at intent',
-    env,
-  );
-  assert(
-    Boolean(targetRoute?.targetPull),
-    'target leg materialised a pull rather than staying at intent',
-    env,
-  );
+  try {
+    const hubs = spawnNode('hubs', [
+      '--relay-url', relayUrl,
+      '--relay-port', String(relayPort),
+      '--relay-host', '127.0.0.1',
+      '--barrier-dir', barrierDir,
+    ]);
+    procs.push(hubs);
 
-  console.log('\n✅ cross-j scenario complete\n');
-  return env;
+    await waitForLineOrError(hubs, /CROSS_J_STACKS_READY/, [/CROSS_J_NODE_FATAL/i]);
+    await waitForLineOrError(hubs, /P2P_RELAY_READY/, [/CROSS_J_NODE_FATAL/i, /RELAY_PORT/i]);
+    const hubsReadyLine = await waitForLineOrError(
+      hubs,
+      /CROSS_J_HUBS_READY/,
+      [/CROSS_J_NODE_FATAL/i],
+    );
+    void hubsReadyLine;
+    const stacks = extractJsonAfter(hubs.stdoutBuffer, 'CROSS_J_STACKS_READY') as {
+      source: unknown;
+      target: unknown;
+    };
+    const hubsMeta = extractJsonAfter(hubs.stdoutBuffer, 'CROSS_J_HUBS_READY') as {
+      runtimeId: string;
+      hubSrc: unknown;
+      hubTgt: unknown;
+    };
+
+    const usersPayload = JSON.stringify({
+      source: stacks.source,
+      target: stacks.target,
+      hubSrc: hubsMeta.hubSrc,
+      hubTgt: hubsMeta.hubTgt,
+    });
+    const users = spawnNode('users', [
+      '--relay-url', relayUrl,
+      '--seed-runtime-id', hubsMeta.runtimeId,
+      '--stacks', usersPayload,
+      '--barrier-dir', barrierDir,
+    ]);
+    procs.push(users);
+
+    await waitForLineOrError(users, /P2P_NODE_READY role=users/, [/CROSS_J_NODE_FATAL/i]);
+    // Setup contract:
+    //   1) both sides accounts open+idle
+    //   2) both sides hub↔user credit committed+idle  (= setup finalized)
+    //   3) only then same/cross swap creation / settle / invariants
+    await waitForLineOrError(hubs, /CROSS_J_PHASE_ACCOUNTS_OPEN/, [/CROSS_J_NODE_FATAL/i, /TIMEOUT/i], 180_000);
+    await waitForLineOrError(users, /CROSS_J_PHASE_ACCOUNTS_OPEN/, [/CROSS_J_NODE_FATAL/i, /TIMEOUT/i], 180_000);
+    fs.writeFileSync(path.join(barrierDir, 'accounts-open.ready'), '1');
+    console.log('[cross-j] BARRIER accounts-open.ready (both runtimes) → credit may start');
+
+    await waitForLineOrError(hubs, /CROSS_J_PHASE_CREDIT_READY/, [/CROSS_J_NODE_FATAL/i, /TIMEOUT/i], 180_000);
+    await waitForLineOrError(users, /CROSS_J_PHASE_CREDIT_READY/, [/CROSS_J_NODE_FATAL/i, /TIMEOUT/i], 180_000);
+    fs.writeFileSync(path.join(barrierDir, 'setup-ready'), '1');
+    console.log('[cross-j] BARRIER setup-ready (mutual credits idle) → swaps may start');
+
+    await waitForLineOrError(users, /CROSS_J_PHASE_ORDERS/, [/CROSS_J_NODE_FATAL/i, /TIMEOUT/i, /ASSERTION FAILED/i]);
+    await waitForLineOrError(users, /CROSS_J_INTENT_SUBMITTED/, [/CROSS_J_NODE_FATAL/i, /ASSERTION FAILED/i]);
+    await waitForLineOrError(hubs, /CROSS_J_MATERIALIZED/, [/CROSS_J_NODE_FATAL/i, /TIMEOUT/i, /ASSERTION FAILED/i], 180_000);
+    await waitForLineOrError(hubs, /CROSS_J_PHASE_ORDERBOOK/, [/CROSS_J_NODE_FATAL/i, /TIMEOUT/i, /ASSERTION FAILED/i], 180_000);
+    await waitForLineOrError(
+      hubs,
+      /CROSS_J_PHASE_SETTLED|CROSS_J_SETTLED/,
+      [/CROSS_J_NODE_FATAL/i, /TIMEOUT/i, /ASSERTION FAILED/i],
+      180_000,
+    );
+    console.log('\n✅ cross-j dual-Runtime scenario complete (settled)\n');
+    return _existingEnv ?? ({} as RuntimeReplica);
+  } finally {
+    killAll(procs);
+    fs.rmSync(barrierDir, { recursive: true, force: true });
+  }
 }

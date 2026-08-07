@@ -22,6 +22,26 @@ type CrossJurisdictionFillResult = {
   accountTxs?: AccountTxTarget[];
 };
 
+const sameExactFillFields = (
+  route: CrossJurisdictionSwapRoute,
+  data: CrossJurisdictionFillNoticeTx['data'],
+): boolean => {
+  const routeHasExact = route.fillNumerator !== undefined || route.fillDenominator !== undefined;
+  const dataHasExact = data.fillNumerator !== undefined || data.fillDenominator !== undefined;
+  if (!routeHasExact && !dataHasExact) return true;
+  // buildCrossJurisdictionCancelAck must send bigint fields; for never-filled
+  // routes it uses the 0/1 sentinel. That is absent exact ratio, not progress.
+  if (
+    !routeHasExact &&
+    data.fillNumerator === 0n &&
+    data.fillDenominator === 1n &&
+    Math.floor(Number(data.fillSeq)) === 0
+  ) {
+    return true;
+  }
+  return route.fillNumerator === data.fillNumerator && route.fillDenominator === data.fillDenominator;
+};
+
 const sameCommittedFillNotice = (
   route: CrossJurisdictionSwapRoute,
   data: CrossJurisdictionFillNoticeTx['data'],
@@ -38,8 +58,7 @@ const sameCommittedFillNotice = (
     committed.fillRatio === noticeRatio &&
     committed.filledSourceAmount === data.cumulativeSourceAmount &&
     committed.filledTargetAmount === data.cumulativeTargetAmount &&
-    (route.fillNumerator ?? undefined) === (data.fillNumerator ?? undefined) &&
-    (route.fillDenominator ?? undefined) === (data.fillDenominator ?? undefined)
+    sameExactFillFields(route, data)
   );
 };
 

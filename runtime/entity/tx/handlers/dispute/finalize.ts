@@ -114,7 +114,6 @@ const selectedCrossJurisdictionRecoveryIsReady = (
   account: AccountReplica,
   counterpartyId: string,
   finalProofbodyHash: string,
-  outputs: EntityInput[],
 ): boolean => {
   const active = account.activeDispute!;
   const current = active.crossJurisdictionRecovery;
@@ -125,7 +124,6 @@ const selectedCrossJurisdictionRecoveryIsReady = (
     counterpartyId,
     [finalProofbodyHash],
     current,
-    outputs,
   );
   if (!plan) {
     delete active.crossJurisdictionRecovery;
@@ -136,6 +134,12 @@ const selectedCrossJurisdictionRecoveryIsReady = (
     (pullId) => !Object.hasOwn(plan.recovery.resultsByPullId, pullId),
   );
   if (missing.length === 0) return true;
+  // The on-chain barrier owns the timing truth: once the reveal window has
+  // closed, a missing port reads 0 on-chain and the finalize must proceed
+  // rather than stall the account forever.
+  const resolveBy = Number(plan.recovery.resolveByTimestamp ?? 0);
+  const now = Number(state.timestamp ?? 0);
+  if (resolveBy > 0 && now > resolveBy) return true;
   if (state.crontabState) {
     scheduleHook(state.crontabState, {
       id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
@@ -180,7 +184,6 @@ export const handleDisputeFinalize = async (
     account,
     counterpartyId,
     selection.finalProofbodyHash,
-    outputs,
   )) {
     return { newState, outputs };
   }

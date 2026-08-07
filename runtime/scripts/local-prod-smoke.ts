@@ -28,6 +28,11 @@ import {
   buildInheritedLocalTestLeaseEnv,
   stripLocalTestLeaseEnv,
 } from './local-test-port-lease';
+import {
+  parseAdversaryProfile,
+  runAdversaryProfile,
+  type MeshHealthPayload,
+} from '../scenarios/mm-mesh-adversary';
 
 type ManagedProcess = {
   name: string;
@@ -1087,6 +1092,77 @@ const main = async (): Promise<void> => {
       );
     }
     recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));
+  }
+
+  // Optional adversary branch AFTER same+cross books are green. Profiles only
+  // exercise orchestrator recovery — they never alter MM quote formulas.
+  const adversaryProfile = parseAdversaryProfile(
+    process.env['XLN_ADVERSARY_PROFILE'] || process.env['XLN_LOCAL_PROD_SMOKE_ADVERSARY'],
+  );
+  if (adversaryProfile !== 'none') {
+    recordStage('adversary:start', { profile: adversaryProfile });
+    console.log(`CROSS_J_PHASE_BOOKS_READY adversary=${adversaryProfile}`);
+    await runAdversaryProfile(adversaryProfile, {
+      apiBaseUrl: `http://127.0.0.1:${apiPort}`,
+      fetchHealth: async () => {
+        // Soft polls only: SIGKILL of MM (or brief control-plane bounce during
+        // child replace) can make /api/health and MM /api/health unresponsive.
+        // Returning a degraded snapshot keeps the adversary wait loop alive so
+        // orchestrator restart/replace remains observable.
+        try {
+          const raw = await fetchHealth();
+          const probe = fetchMarketMakerHealthProbe(raw);
+          return healthWithDirectMarketMaker(raw, probe.payload) as MeshHealthPayload;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.log(`[mm-mesh-adversary] health soft-fail: ${message}`);
+          return {
+            systemOk: false,
+            marketMaker: { ok: false, startupPhase: null, cross: { ok: false } },
+            process: { children: [] },
+            hubs: [],
+          };
+        }
+      },
+      booksReady: (health) => {
+        const mmChild = (health.process?.children ?? []).find(
+          (child) => child.role === 'market-maker' && String(child.name || '').toUpperCase() === 'MM',
+        );
+        return mmChild?.online === true && marketMakerFullDepthReady(health as HealthPayload);
+      },
+      timeoutMs: 180_000,
+    });
+    // Post-adversary: hard fail — stack must be fully responsive again.
+    let afterAdversary: HealthPayload | null = null;
+    const afterDeadline = Date.now() + 60_000;
+    while (Date.now() < afterDeadline) {
+      try {
+        const rawAfter = await fetchHealth();
+        const afterProbe = fetchMarketMakerHealthProbe(rawAfter);
+        if (afterProbe.transientError !== null) {
+          throw new Error(afterProbe.transientError);
+        }
+        const candidate = healthWithDirectMarketMaker(rawAfter, afterProbe.payload);
+        if (marketMakerFullDepthReady(candidate)) {
+          afterAdversary = candidate;
+          break;
+        }
+      } catch (error) {
+        console.log(
+          `[mm-mesh-adversary] post-check soft-fail: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (!afterAdversary) {
+      throw new Error(
+        `LOCAL_PROD_SMOKE_ADVERSARY_BOOKS_NOT_READY profile=${adversaryProfile}`,
+      );
+    }
+    recordStage('adversary:done', { profile: adversaryProfile, ...summarizeHealth(afterAdversary) });
+    console.log(`[OK] phase=ADVERSARY profile=${adversaryProfile} books=ready`);
   }
   let epochRotations: EpochRotationEvidence[] | undefined;
   if (requireEpochRotation) {

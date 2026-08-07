@@ -1,18 +1,19 @@
 import { useNavigate } from 'react-router-dom';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Amount } from '../components/Amount';
-import { CapacityBar } from '../components/CapacityBar';
+import { DeltaBar } from '../components/DeltaBar';
 import { Icon } from '../components/Icons';
 import { useAdapterRead } from '../runtime/hooks';
 import { useApp } from '../runtime/store';
-import { formatAmount, getTokenMeta, shortId, timeAgo } from '../runtime/format';
+import { demoFaucet, getDemoTopology } from '../runtime/sandbox';
+import { formatAmount, getTokenMeta, parseAmount, timeAgo } from '../runtime/format';
 import { displayEntityName, useAccounts, useEntityCore, usePortfolio } from '../runtime/views';
 import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-adapter/types';
 
+import { formatEventAmount, USER_ACTIVITY_TYPES, type ActivityEventView } from './Activity';
+
 type HeadView = { latestHeight?: number; frameHash?: string; stateHash?: string } & Record<string, unknown>;
-type ActivityView = {
-	events?: Array<{ type?: string; kind?: string; timestamp?: number; height?: number; description?: string }>;
-};
+type ActivityView = { events?: ActivityEventView[] };
 
 export function Home() {
 	const navigate = useNavigate();
@@ -21,12 +22,35 @@ export function Home() {
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const setSelectedTokenId = useApp(s => s.setSelectedTokenId);
 
+	const toast = useApp(s => s.toast);
 	const core = useEntityCore(entityId);
 	const { accounts } = useAccounts(entityId);
 	const portfolio = usePortfolio(core.data, accounts);
+	const [faucetBusy, setFaucetBusy] = useState(false);
+	const demo = getDemoTopology();
+
+	const requestFaucet = (): void => {
+		void (async () => {
+			if (!entityId || faucetBusy) return;
+			setFaucetBusy(true);
+			try {
+				const amount = parseAmount('100', getTokenMeta(1).decimals);
+				await demoFaucet(entityId, amount);
+				toast('+100 USDC from Hub One');
+			} catch (error) {
+				toast(error instanceof Error ? error.message : String(error), 'danger');
+			} finally {
+				setFaucetBusy(false);
+			}
+		})();
+	};
 	const entities = useAdapterRead<RuntimeAdapterEntitySummary[]>('entities');
 	const head = useAdapterRead<HeadView>('head');
-	const activity = useAdapterRead<ActivityView>('activity', { limit: 4 });
+	const activity = useAdapterRead<ActivityView>('activity', {
+		limit: 4,
+		types: USER_ACTIVITY_TYPES,
+		...(entityId ? { entityId } : {}),
+	});
 
 	const names = useMemo(() => {
 		const map = new Map<string, string>();
@@ -103,31 +127,52 @@ export function Home() {
 						{accounts.map(account => {
 							const token = account.tokens.find(t => t.tokenId === activeTokenId) ?? account.tokens[0];
 							const tokenMeta = getTokenMeta(token?.tokenId ?? activeTokenId);
-							const label = names.get(account.counterpartyId) ?? shortId(account.counterpartyId);
+							const label = names.get(account.counterpartyId) ?? 'Account';
+							const isDemoHub = demo?.hub.entityId === account.counterpartyId;
 							return (
-								<button
+								<div
 									key={account.counterpartyId}
-									type="button"
 									className="row row-tappable"
+									role="link"
+									tabIndex={0}
+									style={{ alignItems: 'flex-start', flexWrap: 'wrap', cursor: 'pointer' }}
 									onClick={() => navigate(`/accounts/${account.counterpartyId}`)}
+									onKeyDown={e => {
+										if (e.key === 'Enter') navigate(`/accounts/${account.counterpartyId}`);
+									}}
 								>
-									<span style={{ minWidth: 120 }}>
-										<span style={{ display: 'block', fontSize: 13.5 }}>{label}</span>
-										<span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
-											bilateral · {shortId(account.counterpartyId)}
+									<span style={{ flex: '1 1 100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+										<span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 14 }}>
+											{label}
+											{isDemoHub && (
+												<button
+													type="button"
+													className="faucet-chip"
+													disabled={faucetBusy}
+													onClick={e => {
+														e.stopPropagation();
+														requestFaucet();
+													}}
+												>
+													{faucetBusy ? '…' : '+100 USDC · testnet'}
+												</button>
+											)}
+										</span>
+										<span className="display num" style={{ fontSize: 16 }}>
+											{token ? formatAmount(token.signed, tokenMeta.decimals, 2) : '0'}{' '}
+											<span className="faint" style={{ fontSize: 11, fontFamily: 'var(--font-ui)' }}>{tokenMeta.symbol}</span>
 										</span>
 									</span>
-									<span style={{ flex: 1, margin: '0 12px' }}>
+									<span className="hash" style={{ flex: '1 1 100%', marginTop: 2 }}>
+										{account.counterpartyId}
+									</span>
+									<span style={{ flex: '1 1 100%', marginTop: 12 }}>
 										{token ? (
 											<>
-												<CapacityBar
-													collateral={token.derived.collateral}
-													creditUsed={token.derived.outOwnCredit}
-													free={token.derived.outCapacity}
-												/>
-												<span className="faint" style={{ display: 'block', fontSize: 11, marginTop: 6 }}>
-													{formatAmount(token.derived.outCapacity, tokenMeta.decimals, 2)} {tokenMeta.symbol} spendable ·{' '}
-													{formatAmount(token.derived.inCapacity, tokenMeta.decimals, 2)} receivable
+												<DeltaBar derived={token.derived} signed={token.signed} height={6} />
+												<span className="faint" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 7 }}>
+													<span>← send {formatAmount(token.derived.outCapacity, tokenMeta.decimals, 2)}</span>
+													<span>receive {formatAmount(token.derived.inCapacity, tokenMeta.decimals, 2)} →</span>
 												</span>
 											</>
 										) : (
@@ -136,10 +181,7 @@ export function Home() {
 											</span>
 										)}
 									</span>
-									<span className="display num" style={{ fontSize: 15 }}>
-										{token ? formatAmount(token.signed, tokenMeta.decimals, 2) : '0'}
-									</span>
-								</button>
+								</div>
 							);
 						})}
 						{accounts.length === 0 && !core.loading && (
@@ -168,13 +210,17 @@ export function Home() {
 							<span className="muted">Frame</span>
 							<span className="mono">#{height.toLocaleString('en-US')}</span>
 						</div>
-						<div className="proof-row">
+						<div className="proof-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
 							<span className="muted">State hash</span>
-							<span className="mono">{frameHash ? shortId(frameHash, 8, 4) : '—'}</span>
+							<span className="hash">{frameHash || '—'}</span>
 						</div>
-						<div className="proof-row">
+						<div className="proof-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
 							<span className="muted">Signer</span>
-							<span className="mono">{core.data?.signerId ? shortId(core.data.signerId, 6, 4) : '—'}</span>
+							<span className="hash">{core.data?.signerId || '—'}</span>
+						</div>
+						<div className="proof-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+							<span className="muted">Entity</span>
+							<span className="hash">{entityId || '—'}</span>
 						</div>
 					</div>
 
@@ -183,12 +229,12 @@ export function Home() {
 							Activity
 						</span>
 						{(activity.data?.events ?? []).slice(0, 4).map((event, index) => (
-							<div key={index} className="proof-row">
-								<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-									{String(event.description || event.type || event.kind || 'Frame')}
+							<div key={event.id ?? index} className="proof-row">
+								<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+									{String(event.title || event.type || 'Frame')}
 								</span>
 								<span className="faint" style={{ whiteSpace: 'nowrap' }}>
-									{event.timestamp ? timeAgo(Number(event.timestamp)) : `#${event.height ?? ''}`}
+									{formatEventAmount(event) ?? (event.timestamp ? timeAgo(Number(event.timestamp)) : `#${event.height ?? ''}`)}
 								</span>
 							</div>
 						))}
@@ -200,6 +246,7 @@ export function Home() {
 					</div>
 				</div>
 			</div>
+
 		</div>
 	);
 }

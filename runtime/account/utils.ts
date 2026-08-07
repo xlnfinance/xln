@@ -121,7 +121,12 @@ const formatDeltaAscii = (
  *
  * [---.*∆--][NO-ALTERNATE-MATH]
  * If you need new semantics, add a helper that wraps deriveDelta fields.
- * Do not introduce parallel balance models.
+ * Do not introduce parallel balance models. Never hand-read
+ * leftCreditLimit/rightCreditLimit for viewer semantics.
+ *
+ * Credit (Channel.ts): left writes rightCreditLimit, right writes leftCreditLimit.
+ * From viewer isLeft: ownCreditLimit = peer granted us; peerCreditLimit = we granted peer.
+ * Credit granted *by* an entity = that entity's peerCreditLimit.
  *
  * @param delta - The delta structure for this token
  * @param isLeft - Whether we are the left party in this account

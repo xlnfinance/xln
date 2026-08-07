@@ -69,6 +69,9 @@ type AppState = {
 	adapterStatus: RuntimeAdapterStatus;
 	height: number;
 	commandReady: boolean;
+	/** True while an embedded runtime is booting/seeding — keep the gate up. */
+	booting: boolean;
+	setBooting: (booting: boolean) => void;
 	setAdapterState: (state: { status?: RuntimeAdapterStatus; height?: number; commandReady?: boolean }) => void;
 
 	activeEntityId: string | null;
@@ -121,6 +124,8 @@ export const useApp = create<AppState>((set, get) => ({
 	adapterStatus: 'disconnected',
 	height: 0,
 	commandReady: false,
+	booting: false,
+	setBooting: booting => set({ booting }),
 	setAdapterState: state =>
 		set({
 			...(state.status !== undefined ? { adapterStatus: state.status } : {}),

@@ -43,31 +43,75 @@ const crossProofMatchesBinding = (
   }
   const expectedPullId = binding.leg === 'source' ? proof.sourcePullId : proof.targetPullId;
   if (expectedPullId !== pullId) return `${binding.leg} pull ${expectedPullId} != ${pullId}`;
+  // CANON (owner, 2026-08-07): off-chain fill progress is INFORMATIONAL only -
+  // the hub saying "matched X%" without secrets - and must never gate a close.
+  // The settlement authority is the hash-ladder reveal, which
+  // validateCrossPullCloseEvidence verifies against fullHash/partialRoot at
+  // exactly proof.fillRatio. The hub's actual fill legally runs ahead of its
+  // last progress message, so a close ABOVE the informed ratio is normal
+  // (lagging delivery, or the hub matched more since). Only a close BELOW the
+  // informed ratio is rejected: informed fill is monotonic and a rollback
+  // would let the hub un-match what both sides were already told.
+  // (The hub holding every secret can always choose the final ratio up to
+  // 100% until reveal time - that is inherent to any matcher-holds-the-proof
+  // design and is accepted, not a bug to guard against here.)
   const bindingRatio = committedCrossJurisdictionRatio(binding);
-  if ((binding.leg === 'source' || bindingRatio > 0) && proof.fillRatio !== bindingRatio) {
-    return `ratio ${proof.fillRatio} != committed ${bindingRatio}`;
+  if (proof.fillRatio < bindingRatio) {
+    return `ratio ${proof.fillRatio} rolls back informed ${bindingRatio}`;
   }
+  const bindingIsCurrent = proof.fillRatio === bindingRatio;
   const bindingSourceAmount = binding.filledSourceAmount ?? binding.sourceClaimed;
   const bindingTargetAmount = binding.filledTargetAmount ?? binding.targetClaimed;
   // The source Hub is the source-pull beneficiary, so its signed Account frame
-  // must never choose the payer's debit. An initial binding intentionally has
-  // no filledSourceAmount; in that case the pull total plus the committed
-  // exact/coarse ratio is the only canonical amount (ratio zero means zero).
-  const expectedSourceAmount = bindingSourceAmount ?? (
-    binding.leg === 'source'
-      ? projectCrossJurisdictionQuantizedClaim(absBigInt(pull.amount), {
-          cumulativeFillRatio: bindingRatio,
-          ...(binding.fillNumerator !== undefined ? { fillNumerator: binding.fillNumerator } : {}),
-          ...(binding.fillDenominator !== undefined ? { fillDenominator: binding.fillDenominator } : {}),
-          orderId: binding.orderId,
-        }).exactClaim
-      : undefined
-  );
-  if (expectedSourceAmount !== undefined && proof.cumulativeSourceAmount !== expectedSourceAmount) {
-    return `source amount ${proof.cumulativeSourceAmount} != committed ${expectedSourceAmount}`;
-  }
-  if (bindingTargetAmount !== undefined && proof.cumulativeTargetAmount !== bindingTargetAmount) {
-    return `target amount ${proof.cumulativeTargetAmount} != ${bindingTargetAmount}`;
+  // must never choose the payer's debit. When informational progress is
+  // current, exact rational economics from the binding are the canonical
+  // amounts (price improvement rides only this path - it is a best-effort
+  // gift from the hub, absent by design when info lags). When the close ratio
+  // runs AHEAD of the informed binding, the stale binding amounts cannot bind
+  // it; the amounts are then validated exactly as the chain would settle a
+  // dispute at this ratio: proportional amount*ratio/65535.
+  const chainProportional = (total: bigint): bigint =>
+    proof.fillRatio >= HASHLADDER_MAX_FILL_RATIO
+      ? total
+      : (total * BigInt(proof.fillRatio)) / BigInt(HASHLADDER_MAX_FILL_RATIO);
+  if (bindingIsCurrent) {
+    const expectedSourceAmount = bindingSourceAmount ?? (
+      binding.leg === 'source'
+        ? projectCrossJurisdictionQuantizedClaim(absBigInt(pull.amount), {
+            cumulativeFillRatio: bindingRatio,
+            ...(binding.fillNumerator !== undefined ? { fillNumerator: binding.fillNumerator } : {}),
+            ...(binding.fillDenominator !== undefined ? { fillDenominator: binding.fillDenominator } : {}),
+            orderId: binding.orderId,
+          }).exactClaim
+        : undefined
+    );
+    if (expectedSourceAmount !== undefined && proof.cumulativeSourceAmount !== expectedSourceAmount) {
+      return `source amount ${proof.cumulativeSourceAmount} != committed ${expectedSourceAmount}`;
+    }
+    // The target leg mirrors the same binding: without it, a zero-progress
+    // binding would leave cumulativeTargetAmount unchecked and the cooperative
+    // path could settle what the dispute path would not.
+    const expectedTargetAmount = bindingTargetAmount ?? (
+      binding.leg === 'target'
+        ? projectCrossJurisdictionQuantizedClaim(absBigInt(pull.amount), {
+            cumulativeFillRatio: bindingRatio,
+            ...(binding.fillNumerator !== undefined ? { fillNumerator: binding.fillNumerator } : {}),
+            ...(binding.fillDenominator !== undefined ? { fillDenominator: binding.fillDenominator } : {}),
+            orderId: binding.orderId,
+          }).exactClaim
+        : undefined
+    );
+    if (expectedTargetAmount !== undefined && proof.cumulativeTargetAmount !== expectedTargetAmount) {
+      return `target amount ${proof.cumulativeTargetAmount} != committed ${expectedTargetAmount}`;
+    }
+  } else {
+    const expectedLegAmount = chainProportional(absBigInt(pull.amount));
+    const proofLegAmount = binding.leg === 'source'
+      ? proof.cumulativeSourceAmount
+      : proof.cumulativeTargetAmount;
+    if (proofLegAmount !== expectedLegAmount) {
+      return `${binding.leg} amount ${proofLegAmount} != chain-proportional ${expectedLegAmount}`;
+    }
   }
   if (binding.sourceCloseProof) {
     const sourceProof = binding.sourceCloseProof;

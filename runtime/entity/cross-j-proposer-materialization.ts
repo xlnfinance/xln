@@ -295,7 +295,13 @@ export const selectCrossJOpeningAccountProposalTxs = (
     const siblingAccountKey = findAccountKey(replica.state, sibling.accountId);
     const siblingAccount = siblingAccountKey ? replica.state.accounts.get(siblingAccountKey) : undefined;
     if (!siblingAccount) throw new Error(`CROSS_J_OPENING_SIBLING_ACCOUNT_MISSING:${siblingKey(sibling)}`);
-    const siblingTxs = siblingAccount.pendingFrame?.accountTxs ?? siblingAccount.mempool;
+    // Only a pending OPENING freezes the cohort. An unrelated pending frame
+    // (credit, rebalance, …) must not hide opening legs already queued in
+    // the sibling mempool — otherwise dual-Runtime credit ACKs permanently
+    // wedge cross-j bootstrap.
+    const siblingPendingTxs = siblingAccount.pendingFrame?.accountTxs ?? [];
+    const siblingPendingOpening = crossJOpeningLegs(siblingPendingTxs);
+    const siblingTxs = siblingPendingOpening.length > 0 ? siblingPendingTxs : siblingAccount.mempool;
     const reciprocalOrderIds = reciprocalOpeningOrderIds(
       siblingTxs,
       replica.state.entityId,
@@ -309,7 +315,7 @@ export const selectCrossJOpeningAccountProposalTxs = (
       .sort((left, right) => left.localeCompare(right));
     if (commonOrderIds.length === 0) continue;
 
-    if (siblingAccount.pendingFrame) {
+    if (siblingPendingOpening.length > 0) {
       if (reciprocalOrderIds.size !== commonOrderIds.length) continue;
       const selectedOrderIds = new Set(commonOrderIds);
       const selected = selectOpeningTxs(account.mempool, selectedOrderIds);

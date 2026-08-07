@@ -22,6 +22,16 @@ export const HUB_BASELINE_STALL_TIMEOUT_MS = Math.max(
   readPositiveIntegerEnv('XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS', 60_000),
 );
 export const HUB_DIRECT_LINK_BASELINE_GRACE_MS = readPositiveIntegerEnv('XLN_HUB_DIRECT_LINK_BASELINE_GRACE_MS', 5_000);
+/**
+ * The baseline wait has no deadline of its own: the stall detector is the only
+ * exit, and it stays silent while hubs still report causal progress. A reset
+ * that waits minutes therefore looks identical to one that hung. Name the
+ * unmet condition on an interval so silence is never the diagnosis.
+ */
+export const HUB_BASELINE_STATUS_LOG_INTERVAL_MS = Math.max(
+  1_000,
+  readPositiveIntegerEnv('XLN_HUB_BASELINE_STATUS_LOG_INTERVAL_MS', 10_000),
+);
 export const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
   readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000),

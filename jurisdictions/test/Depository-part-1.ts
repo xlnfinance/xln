@@ -232,13 +232,8 @@ function buildHashLadderProof(
 function encodeDeltaTransformerArguments(
   fillRatios: number[] = [],
   secrets: string[] = [],
-  pulls: string[] = [],
 ): string {
-  return abi.encode(['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'], [{ fillRatios, secrets, pulls }]);
-}
-
-function encodePartialPullBinary(fillRatio: number, reveals: string[]): string {
-  return `0x${fillRatio.toString(16).padStart(4, '0')}${reveals.map(reveal => reveal.slice(2)).join('')}`;
+  return abi.encode(['tuple(uint16[] fillRatios, bytes32[] secrets)'], [{ fillRatios, secrets }]);
 }
 
 describe('Depository', () => {

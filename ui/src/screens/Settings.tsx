@@ -3,7 +3,6 @@ import { Sheet } from '../components/Sheet';
 import { Icon } from '../components/Icons';
 import { useApp } from '../runtime/store';
 import { disconnectAdapter, getAdapter } from '../runtime/adapter';
-import { shortId } from '../runtime/format';
 
 export function SettingsScreen() {
 	const theme = useApp(s => s.theme);
@@ -56,11 +55,11 @@ export function SettingsScreen() {
 				</span>
 				<span style={{ fontSize: 13 }}>{adapter?.mode ?? '—'}</span>
 			</div>
-			<div className="row">
+			<div className="row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
 				<span className="muted" style={{ fontSize: 13 }}>
 					Runtime id
 				</span>
-				<span className="mono">{adapter ? shortId(adapter.runtimeId, 10, 6) : '—'}</span>
+				<span className="hash">{adapter ? adapter.runtimeId : '—'}</span>
 			</div>
 			<div className="row">
 				<span className="muted" style={{ fontSize: 13 }}>
