@@ -97,7 +97,8 @@ const pullMatchesLadder = (
  * that latent liveness mine after the contract latch landed.
  *
  * Exact-once layers:
- *  1. route.registryFillRatio — durable mirror of HashLadderRevealRegistered
+ *  1. route.registryFillRatio — set only when *this* entity wrote on-chain
+ *     (foreign hub reveals share ladderHash and must not trip this guard)
  *  2. draft / sentBatch already contain this ladder — any ratio
  * Then append once. Never splice a pending lower write for a higher one.
  */

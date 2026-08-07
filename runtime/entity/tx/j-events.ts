@@ -860,11 +860,15 @@ const terminalizeCrossJurisdictionRoutesOnFinality = (
  * Roles, self-selected per entity:
  *  1. source-user lane: emit the port instruction to the target user.
  *  2. registering entity: confirm a pending port result on its own dispute.
- *  3. every route mirror: latch registryFillRatio (single-shot) + claimedRatio.
+ *  3. every route mirror: bump claimedRatio from observed fills; latch
+ *     registryFillRatio only when *this* entity was the on-chain writer.
  *
- * Invariant: registryFillRatio is set once and never raised — Depository E12
- * already forbids a second on-chain write; the mirror must not invent a higher
- * pending queue target after confirmation cleared sentBatch.
+ * Invariant: registryFillRatio means "my Depository slot for this ladder is
+ * already written" (exact-once queue guard). Source and target pulls share the
+ * same ladderHash — latching from a *foreign* entity's reveal (e.g. hub) would
+ * make the target-user salvage return already-queued and skip the port write,
+ * settling the target leg at 0 on the honest path. claimedRatio still tracks
+ * any observed ratio for terminal picks; it is not the own-slot latch.
  */
 const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext): void => {
   const { newState, outputs, blockNumber, dirtyAccounts } = context;
@@ -873,7 +877,8 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
 
   const self = String(newState.entityId || '').toLowerCase();
   const ladderHash = String(data.ladderHash || '').toLowerCase();
-  if (String(data.entity || '').toLowerCase() === self) {
+  const writerIsSelf = String(data.entity || '').toLowerCase() === self;
+  if (writerIsSelf) {
     for (const [accountId, account] of newState.accounts.entries()) {
       const recovery = account.activeDispute?.crossJurisdictionRecovery;
       if (!recovery) continue;
@@ -900,8 +905,8 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
     if (!matches) continue;
     const observed = Math.floor(Number(data.fillRatio));
     let dirty = false;
-    // First observed registry write wins — never bookmark a later higher ratio.
-    if (route.registryFillRatio === undefined) {
+    // Own-slot latch only — foreign reveals must not block our port/claim queue.
+    if (writerIsSelf && route.registryFillRatio === undefined) {
       route.registryFillRatio = observed;
       dirty = true;
     }

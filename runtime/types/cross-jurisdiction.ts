@@ -174,9 +174,10 @@ export interface CrossJurisdictionSwapRoute {
   riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';
   claimedRatio?: number;
   /**
-   * First on-chain HashLadderRevealRegistered fill for this route's ladder.
-   * Single-shot latch (mirrors Depository E12): once set, never raised. Distinct
-   * from `claimedRatio` / fill progress — those may move before any registry write.
+   * Fill ratio from *this entity's* on-chain HashLadderRevealRegistered for the
+   * route ladder. Own-slot single-shot latch for exact-once queue (≠ claimedRatio
+   * / fill progress). Never set from a foreign writer's reveal — source/target
+   * pulls share ladderHash, so a hub event must not block the user port write.
    */
   registryFillRatio?: number;
   sourceClaimed?: bigint;

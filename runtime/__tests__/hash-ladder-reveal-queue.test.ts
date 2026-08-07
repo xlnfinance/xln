@@ -108,4 +108,63 @@ describe('hash-ladder reveal queue (exact-once / single-shot)', () => {
     expect(queueHashLadderRevealRegistration(state, pull, reveal(0x2000))).toBe('already-queued');
     expect(state.jBatchState?.batch.hashLadderReveals ?? []).toHaveLength(0);
   });
+
+  test('own-slot latch blocks queue; foreign-looking claimedRatio alone does not', () => {
+    // claimedRatio may track a hub reveal we observed; registryFillRatio is the
+    // own-slot latch. Confusing them is the silent target-leg-zero bug.
+    const env = createEmptyEnv('reveal-queue-foreign-vs-own');
+    env.scenarioMode = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const user = entity('91');
+    const hub = entity('92');
+    const signer = addr('93');
+    const state = makeState(user, signer, eth, hub);
+    const route: CrossJurisdictionSwapRoute = {
+      orderId: 'foreign-vs-own',
+      makerEntityId: user,
+      hubEntityId: hub,
+      source: {
+        jurisdiction: 'eth',
+        entityId: user,
+        counterpartyEntityId: hub,
+        tokenId: 1,
+        amount: 100n,
+      },
+      target: {
+        jurisdiction: 'base',
+        entityId: entity('94'),
+        counterpartyEntityId: user,
+        tokenId: 1,
+        amount: 90n,
+      },
+      sourcePull: {
+        pullId: 'source-pull',
+        tokenId: 1,
+        amount: 100n,
+        signedAmount: 100n,
+        fullHash: pull.fullHash,
+        partialRoot: pull.partialRoot,
+      },
+      targetPull: {
+        pullId: 'target-pull',
+        tokenId: 1,
+        amount: 90n,
+        signedAmount: -90n,
+        fullHash: pull.fullHash,
+        partialRoot: pull.partialRoot,
+      },
+      claimedRatio: 0x1000,
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+
+    expect(queueHashLadderRevealRegistration(state, pull, reveal(0x1000))).toBe('queued');
+    expect(state.jBatchState?.batch.hashLadderReveals).toHaveLength(1);
+
+    route.registryFillRatio = 0x1000;
+    state.jBatchState!.batch.hashLadderReveals = [];
+    expect(queueHashLadderRevealRegistration(state, pull, reveal(0x1000))).toBe('already-queued');
+  });
 });

@@ -1891,8 +1891,13 @@ describe('cross-jurisdiction hashledger swap', () => {
       partialRoot: route.targetPull!.partialRoot,
       fillRatio,
     });
+    // Hub wrote on-chain — observer must NOT latch own-slot registryFillRatio
+    // (shared ladderHash would make target salvage return already-queued).
+    const sourceRoute = committedSource.crossJurisdictionSwaps?.get(route.orderId);
+    expect(sourceRoute?.registryFillRatio).toBeUndefined();
+    expect(sourceRoute?.claimedRatio).toBe(fillRatio);
     // The source mirror is not touched by a port at all.
-    expect(committedSource.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('target_prepared');
+    expect(sourceRoute?.status).toBe('target_prepared');
     expect(env.state.eReplicas.get(`${targetUser}:${alternateTargetSigner}`)!.state).toEqual(alternateBefore);
 
     const replay = makeBidirectionalSalvageRuntimeFixture('cross-dispute-salvage');
