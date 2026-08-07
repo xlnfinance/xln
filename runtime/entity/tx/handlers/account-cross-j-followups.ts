@@ -101,11 +101,18 @@ const assertCrossPullCloseAllowed = (
   ) {
     throw new Error(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
   }
+  // CANON (owner, 2026-08-07): informational fill progress never gates a
+  // close. The Account layer already verified the ladder reveal against
+  // partialRoot at exactly this ratio, and the hub's real fill legally runs
+  // AHEAD of its last "matched X%" message, so a close above the informed
+  // ratio is normal. Only a rollback BELOW informed fill is invalid: informed
+  // progress is monotonic, and un-matching what both sides were told would be
+  // the hub rewriting history, not lagging delivery.
   const committedRatio = committedCrossJurisdictionRatio(route);
-  if (committedRatio > 0 && fillRatio > committedRatio) {
+  if (fillRatio < committedRatio) {
     throw new Error(
-      `CROSS_J_PULL_CLOSE_OVER_COMMITTED: route=${route.orderId} ` +
-      `ratio=${fillRatio} committed=${committedRatio}`,
+      `CROSS_J_PULL_CLOSE_ROLLBACK: route=${route.orderId} ` +
+      `ratio=${fillRatio} informed=${committedRatio}`,
     );
   }
 };
