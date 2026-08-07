@@ -137,5 +137,6 @@ library XlnHanko {
     batch.externalTokenToReserve = new ExternalTokenToReserve[](0);
     batch.reserveToExternalToken = new ReserveToExternalToken[](0);
     batch.revealSecrets = new SecretReveal[](0);
+    batch.hashLadderReveals = new HashLadderReveal[](0);
   }
 }

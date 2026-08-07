@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
-import "./HashLadder.sol";
+
+/// @notice The Depository's hash-ladder reveal registry. The transformer reads
+/// it through msg.sender: applyBatch only ever runs (via Account's DELEGATECALL
+/// chain) with the settling Depository as the immediate caller, so the registry
+/// read is always scoped to the jurisdiction that owns the disputed account.
+interface IHashLadderRevealRegistry {
+  function getHashLadderReveal(bytes32 entity, bytes32 ladderHash)
+    external
+    view
+    returns (uint16 fillRatio, uint256 revealedAt);
+}
 
 /* 
 Subcontracts - Programmable Delta Transformers
@@ -23,6 +33,8 @@ Subcontracts - Programmable Delta Transformers
 contract DeltaTransformer {
   error InvalidDeltaIndex();
   error ContextLengthMismatch();
+  error PullRevealWindowActive(uint256 revealedUntilTimestamp);
+  error PullRevealRegistryUnavailable(address caller);
   mapping(bytes32 => uint) public hashToBlock;
   mapping(bytes32 => uint) public hashToTimestamp;
   mapping(bytes32 => bool) public hashRevealed;
@@ -61,10 +73,12 @@ contract DeltaTransformer {
     bytes32 partialRoot;
   }
 
+  // Dispute arguments carry only same-jurisdiction evidence. Pulls (cross-j)
+  // are deliberately absent: their settlement reads the Depository reveal
+  // registry, so no calldata can assert a cross-j fill ratio.
   struct Arguments {
     uint16[] fillRatios;
     bytes32[] secrets;
-    bytes[] pulls;
   }
 
   function encodeBatch (Batch memory b) public pure returns (bytes memory) {
@@ -85,10 +99,12 @@ contract DeltaTransformer {
     bytes calldata leftArguments,
     bytes calldata rightArguments,
     uint leftArgumentsTimestamp,
-    uint rightArgumentsTimestamp
+    uint rightArgumentsTimestamp,
+    bytes32 leftEntity,
+    bytes32 rightEntity
   ) external view returns (int[] memory) {
     if (tokenIds.length != deltas.length) revert ContextLengthMismatch();
-    return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, leftArgumentsTimestamp, rightArgumentsTimestamp);
+    return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, leftArgumentsTimestamp, rightArgumentsTimestamp, leftEntity, rightEntity);
   }
 
   function _applyBatch(
@@ -97,11 +113,14 @@ contract DeltaTransformer {
     bytes calldata leftArguments,
     bytes calldata rightArguments,
     uint leftArgumentsTimestamp,
-    uint rightArgumentsTimestamp
+    uint rightArgumentsTimestamp,
+    bytes32 leftEntity,
+    bytes32 rightEntity
   ) private view returns (int[] memory) {
-    // This implementation rejects malformed signed clause data locally. The
-    // Depository catches that clause failure, emits forensic evidence, and
-    // continues finalization with the pre-clause deltas.
+    // A clause failure is fatal to the whole finalization: the ProofBody is
+    // signed executable state, so malformed data, a revert, OOG, or malformed
+    // output must roll back the processBatch transaction and keep the dispute
+    // active. Only the dynamic argument WRAPPER soft-decodes to empty.
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
     Arguments memory left = _decodeArguments(leftArguments);
@@ -135,24 +154,8 @@ contract DeltaTransformer {
       //logDeltas("Deltas after swap", deltas);
     }
 
-    uint leftPulls = 0;
-    uint rightPulls = 0;
     for (uint i = 0; i < decodedBatch.pull.length; i++) {
-      Pull memory pull = decodedBatch.pull[i];
-
-      // Pull args must come from the beneficiary side:
-      // positive amount credits left; negative amount credits right.
-      // Invalid pull evidence is treated as no reveal. This is intentional:
-      // arguments are adversarial evidence, while ProofBody is signed state.
-      if (pull.amount >= 0) {
-        bytes memory pullArg = leftPulls < left.pulls.length ? left.pulls[leftPulls] : bytes("");
-        applyPull(deltas, pull, pullArg, leftArgumentsTimestamp);
-        leftPulls++;
-      } else {
-        bytes memory pullArg = rightPulls < right.pulls.length ? right.pulls[rightPulls] : bytes("");
-        applyPull(deltas, pull, pullArg, rightArgumentsTimestamp);
-        rightPulls++;
-      }
+      applyPull(deltas, decodedBatch.pull[i], leftEntity, rightEntity);
     }
 
     return deltas;
@@ -165,7 +168,6 @@ contract DeltaTransformer {
   function _emptyArguments() private pure returns (Arguments memory args) {
     args.fillRatios = new uint16[](0);
     args.secrets = new bytes32[](0);
-    args.pulls = new bytes[](0);
     return args;
   }
 
@@ -244,12 +246,52 @@ contract DeltaTransformer {
   function applyPull(
     int[] memory deltas,
     Pull memory pull,
-    bytes memory pullArg,
-    uint argumentsTimestamp
-  ) private pure {
+    bytes32 leftEntity,
+    bytes32 rightEntity
+  ) private view {
     if (pull.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
 
-    uint16 fillRatio = verifiedPullFillRatio(pull, pullArg, argumentsTimestamp);
+    // Cross-j finalization barrier. A live pull's reveal window runs to its
+    // wall-clock deadline; finalizing earlier would let a fast-closing side
+    // settle "no reveal" here while the sibling jurisdiction still accepts
+    // one. Counterexample this rejects: a hub starts the target-side dispute
+    // at route opening, reveals on the source chain one second before the
+    // source deadline and immediately finalizes the target leg at 0 — the
+    // source leg pays the hub r while the target user gets nothing. Reverting
+    // keeps the dispute active until the deadline; after it, the registered
+    // record (or its absence) is final on both chains symmetrically.
+    if (block.timestamp <= pull.revealedUntilTimestamp) {
+      revert PullRevealWindowActive(pull.revealedUntilTimestamp);
+    }
+
+    // Pulls settle exclusively from the Depository reveal registry, never
+    // from dispute calldata. The record is keyed by the pull's BENEFICIARY:
+    // a positive amount credits left, so left's own record governs left's
+    // claim. Silence costs only the silent party — a hub that never reveals
+    // reads 0 on its own claim leg, and the user ports the hub's public
+    // source-chain registration under the user's own key on this chain.
+    // There is no lower bound on revealedAt: the (entity, ladderHash) key
+    // makes a stale record unusable against anyone but its own writer.
+    bytes32 beneficiary = pull.amount >= 0 ? leftEntity : rightEntity;
+    bytes32 ladderHash = keccak256(abi.encodePacked(pull.fullHash, pull.partialRoot));
+    // A low-level call keeps return-decode failures in our hands: an EOA or a
+    // foreign contract behind msg.sender yields ok=true with empty data, which
+    // must fail loud rather than decode-panic or silently settle at 0.
+    (bool registryOk, bytes memory registryData) = msg.sender.staticcall(
+      abi.encodeWithSelector(
+        IHashLadderRevealRegistry.getHashLadderReveal.selector,
+        beneficiary,
+        ladderHash
+      )
+    );
+    if (!registryOk || registryData.length != 64) {
+      revert PullRevealRegistryUnavailable(msg.sender);
+    }
+    (uint16 ratio, uint256 revealedAt) = abi.decode(registryData, (uint16, uint256));
+    // A registration after the deadline is recorded but settles as 0: the
+    // deadline, not registration order, is the truth boundary.
+    uint16 fillRatio = (revealedAt != 0 && revealedAt <= pull.revealedUntilTimestamp) ? ratio : 0;
+
     if (fillRatio == 0 || fillRatio <= pull.claimedRatio) return;
 
     uint absAmount = pull.amount >= 0 ? uint(pull.amount) : uint(-pull.amount);
@@ -262,39 +304,6 @@ contract DeltaTransformer {
     } else {
       deltas[pull.deltaIndex] -= applied;
     }
-  }
-
-  function verifiedPullFillRatio(
-    Pull memory pull,
-    bytes memory pullArg,
-    uint argumentsTimestamp
-  ) private pure returns (uint16) {
-    if (pullArg.length == 0) return 0;
-    if (argumentsTimestamp > pull.revealedUntilTimestamp) return 0;
-
-    if (pullArg.length == 32) {
-      bytes32 fullSecret;
-      assembly ("memory-safe") {
-        fullSecret := mload(add(pullArg, 0x20))
-      }
-      if (!HashLadder.verifyFull(pull.fullHash, fullSecret)) return 0;
-      return type(uint16).max;
-    }
-
-    if (pullArg.length != 130) return 0;
-    uint16 fillRatio = (uint16(uint8(pullArg[0])) << 8) | uint16(uint8(pullArg[1]));
-    if (fillRatio == 0 || fillRatio == type(uint16).max) return 0;
-
-    bytes32[4] memory reveals;
-    assembly ("memory-safe") {
-      let data := add(pullArg, 0x22)
-      mstore(reveals, mload(data))
-      mstore(add(reveals, 0x20), mload(add(data, 0x20)))
-      mstore(add(reveals, 0x40), mload(add(data, 0x40)))
-      mstore(add(reveals, 0x60), mload(add(data, 0x60)))
-    }
-    if (!HashLadder.verifyPartial(pull.partialRoot, fillRatio, reveals)) return 0;
-    return fillRatio;
   }
 
 

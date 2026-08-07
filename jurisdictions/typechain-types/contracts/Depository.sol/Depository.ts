@@ -195,7 +195,9 @@ export interface DepositoryInterface extends Interface {
       | "enforceDebts"
       | "entityNonces"
       | "entityProvider"
+      | "getHashLadderReveal"
       | "getTokensLength"
+      | "hashLadderReveals"
       | "mintToReserve"
       | "onERC1155BatchReceived"
       | "onERC1155Received"
@@ -215,6 +217,7 @@ export interface DepositoryInterface extends Interface {
       | "DisputeFinalized"
       | "DisputeStarted"
       | "HankoBatchProcessed"
+      | "HashLadderRevealRegistered"
       | "ReserveUpdated"
       | "SecretRevealed"
       | "TokenRegistered"
@@ -304,8 +307,16 @@ export interface DepositoryInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
+    functionFragment: "getHashLadderReveal",
+    values: [BytesLike, BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "getTokensLength",
     values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "hashLadderReveals",
+    values: [BytesLike, BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "mintToReserve",
@@ -404,7 +415,15 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "getHashLadderReveal",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "getTokensLength",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "hashLadderReveals",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -635,6 +654,34 @@ export namespace HankoBatchProcessedEvent {
     entityId: string;
     batchHash: string;
     nonce: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace HashLadderRevealRegisteredEvent {
+  export type InputTuple = [
+    entity: BytesLike,
+    ladderHash: BytesLike,
+    fillRatio: BigNumberish,
+    fullSecret: BytesLike,
+    reveals: [BytesLike, BytesLike, BytesLike, BytesLike]
+  ];
+  export type OutputTuple = [
+    entity: string,
+    ladderHash: string,
+    fillRatio: bigint,
+    fullSecret: string,
+    reveals: [string, string, string, string]
+  ];
+  export interface OutputObject {
+    entity: string;
+    ladderHash: string;
+    fillRatio: bigint;
+    fullSecret: string;
+    reveals: [string, string, string, string];
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -932,7 +979,19 @@ export interface Depository extends BaseContract {
 
   entityProvider: TypedContractMethod<[], [string], "view">;
 
+  getHashLadderReveal: TypedContractMethod<
+    [entity: BytesLike, ladderHash: BytesLike],
+    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
+    "view"
+  >;
+
   getTokensLength: TypedContractMethod<[], [bigint], "view">;
+
+  hashLadderReveals: TypedContractMethod<
+    [arg0: BytesLike, arg1: BytesLike],
+    [bigint],
+    "view"
+  >;
 
   mintToReserve: TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
@@ -1125,8 +1184,18 @@ export interface Depository extends BaseContract {
     nameOrSignature: "entityProvider"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "getHashLadderReveal"
+  ): TypedContractMethod<
+    [entity: BytesLike, ladderHash: BytesLike],
+    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
+    "view"
+  >;
+  getFunction(
     nameOrSignature: "getTokensLength"
   ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "hashLadderReveals"
+  ): TypedContractMethod<[arg0: BytesLike, arg1: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "mintToReserve"
   ): TypedContractMethod<
@@ -1252,6 +1321,13 @@ export interface Depository extends BaseContract {
     HankoBatchProcessedEvent.OutputObject
   >;
   getEvent(
+    key: "HashLadderRevealRegistered"
+  ): TypedContractEvent<
+    HashLadderRevealRegisteredEvent.InputTuple,
+    HashLadderRevealRegisteredEvent.OutputTuple,
+    HashLadderRevealRegisteredEvent.OutputObject
+  >;
+  getEvent(
     key: "ReserveUpdated"
   ): TypedContractEvent<
     ReserveUpdatedEvent.InputTuple,
@@ -1374,6 +1450,17 @@ export interface Depository extends BaseContract {
       HankoBatchProcessedEvent.InputTuple,
       HankoBatchProcessedEvent.OutputTuple,
       HankoBatchProcessedEvent.OutputObject
+    >;
+
+    "HashLadderRevealRegistered(bytes32,bytes32,uint16,bytes32,bytes32[4])": TypedContractEvent<
+      HashLadderRevealRegisteredEvent.InputTuple,
+      HashLadderRevealRegisteredEvent.OutputTuple,
+      HashLadderRevealRegisteredEvent.OutputObject
+    >;
+    HashLadderRevealRegistered: TypedContractEvent<
+      HashLadderRevealRegisteredEvent.InputTuple,
+      HashLadderRevealRegisteredEvent.OutputTuple,
+      HashLadderRevealRegisteredEvent.OutputObject
     >;
 
     "ReserveUpdated(bytes32,uint256,uint256)": TypedContractEvent<

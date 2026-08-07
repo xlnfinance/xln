@@ -3,7 +3,6 @@
 /* eslint-disable */
 import type {
   BaseContract,
-  BigNumberish,
   BytesLike,
   FunctionFragment,
   Result,
@@ -20,37 +19,25 @@ import type {
   TypedContractMethod,
 } from "../../common";
 
-export interface TransformerLivenessHarnessInterface extends Interface {
-  getFunction(nameOrSignature: "applyBatch" | "encode"): FunctionFragment;
+export interface IHashLadderRevealRegistryInterface extends Interface {
+  getFunction(nameOrSignature: "getHashLadderReveal"): FunctionFragment;
 
   encodeFunctionData(
-    functionFragment: "applyBatch",
-    values: [
-      BigNumberish[],
-      BigNumberish[],
-      BytesLike,
-      BytesLike,
-      BytesLike,
-      BigNumberish,
-      BigNumberish,
-      BytesLike,
-      BytesLike
-    ]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "encode",
-    values: [BigNumberish, BigNumberish, BigNumberish, BigNumberish]
+    functionFragment: "getHashLadderReveal",
+    values: [BytesLike, BytesLike]
   ): string;
 
-  decodeFunctionResult(functionFragment: "applyBatch", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "encode", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "getHashLadderReveal",
+    data: BytesLike
+  ): Result;
 }
 
-export interface TransformerLivenessHarness extends BaseContract {
-  connect(runner?: ContractRunner | null): TransformerLivenessHarness;
+export interface IHashLadderRevealRegistry extends BaseContract {
+  connect(runner?: ContractRunner | null): IHashLadderRevealRegistry;
   waitForDeployment(): Promise<this>;
 
-  interface: TransformerLivenessHarnessInterface;
+  interface: IHashLadderRevealRegistryInterface;
 
   queryFilter<TCEvent extends TypedContractEvent>(
     event: TCEvent,
@@ -89,30 +76,9 @@ export interface TransformerLivenessHarness extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  applyBatch: TypedContractMethod<
-    [
-      deltas: BigNumberish[],
-      tokenIds: BigNumberish[],
-      encodedBatch: BytesLike,
-      arg3: BytesLike,
-      arg4: BytesLike,
-      arg5: BigNumberish,
-      arg6: BigNumberish,
-      arg7: BytesLike,
-      arg8: BytesLike
-    ],
-    [bigint[]],
-    "view"
-  >;
-
-  encode: TypedContractMethod<
-    [
-      mode: BigNumberish,
-      deltaIndex: BigNumberish,
-      value: BigNumberish,
-      expectedTokenId: BigNumberish
-    ],
-    [string],
+  getHashLadderReveal: TypedContractMethod<
+    [entity: BytesLike, ladderHash: BytesLike],
+    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
 
@@ -121,32 +87,10 @@ export interface TransformerLivenessHarness extends BaseContract {
   ): T;
 
   getFunction(
-    nameOrSignature: "applyBatch"
+    nameOrSignature: "getHashLadderReveal"
   ): TypedContractMethod<
-    [
-      deltas: BigNumberish[],
-      tokenIds: BigNumberish[],
-      encodedBatch: BytesLike,
-      arg3: BytesLike,
-      arg4: BytesLike,
-      arg5: BigNumberish,
-      arg6: BigNumberish,
-      arg7: BytesLike,
-      arg8: BytesLike
-    ],
-    [bigint[]],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "encode"
-  ): TypedContractMethod<
-    [
-      mode: BigNumberish,
-      deltaIndex: BigNumberish,
-      value: BigNumberish,
-      expectedTokenId: BigNumberish
-    ],
-    [string],
+    [entity: BytesLike, ladderHash: BytesLike],
+    [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
 

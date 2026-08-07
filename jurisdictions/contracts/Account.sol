@@ -165,8 +165,12 @@ library Account {
   uint256 private constant MAX_DISPUTE_STARTER_ARGUMENT_BYTES = 64 * 1024;
   uint256 private constant MAX_DISPUTE_PROOF_TOKENS = 128;
   uint256 private constant MAX_DISPUTE_TRANSFORMERS = 32;
+  // The account's left/right entity ids ride every transformer call: the stock
+  // DeltaTransformer resolves cross-j pull ratios from the Depository reveal
+  // registry keyed by the pull beneficiary, and a transformer must never derive
+  // them from untrusted argument bytes.
   bytes4 private constant APPLY_TRANSFORMER_BATCH_SELECTOR =
-    bytes4(keccak256("applyBatch(int256[],uint256[],bytes,bytes,bytes,uint256,uint256)"));
+    bytes4(keccak256("applyBatch(int256[],uint256[],bytes,bytes,bytes,uint256,uint256,bytes32,bytes32)"));
   bytes4 private constant DECODE_TRANSFORMER_ARGUMENT_LIST_SELECTOR =
     bytes4(keccak256("decodeTransformerArgumentListStrict(bytes)"));
   uint256 private constant TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000;
@@ -522,7 +526,9 @@ library Account {
     bytes memory leftArguments,
     bytes memory rightArguments,
     uint256 leftArgumentsTimestamp,
-    uint256 rightArgumentsTimestamp
+    uint256 rightArgumentsTimestamp,
+    bytes32 leftEntity,
+    bytes32 rightEntity
   ) private view returns (int[] memory newDeltas) {
     if (tc.transformerAddress.code.length == 0) revert TransformerExecutionFailed();
     if (tc.encodedBatch.length + leftArguments.length + rightArguments.length >> 18 != 0) {
@@ -537,7 +543,9 @@ library Account {
       leftArguments,
       rightArguments,
       leftArgumentsTimestamp,
-      rightArgumentsTimestamp
+      rightArgumentsTimestamp,
+      leftEntity,
+      rightEntity
     );
     uint256 remainingGas = gasleft();
     if (remainingGas <= TRANSFORMER_POST_CALL_GAS_RESERVE) revert TransformerGasBudgetUnavailable();
@@ -550,7 +558,32 @@ library Account {
       callOk := staticcall(callGas, transformer, add(callData, 0x20), mload(callData), 0, 0)
       returnSize := returndatasize()
     }
-    if (!callOk) revert TransformerExecutionFailed();
+    if (!callOk) {
+      // The cross-j reveal-window barrier and a missing registry are scheduling
+      // and evidence conditions, not transformer faults. Bubble them verbatim
+      // so operators and the runtime's finalize scheduler see the true reason
+      // instead of a generic execution failure. Every other transformer
+      // failure still collapses to TransformerExecutionFailed.
+      if (returnSize >= 4) {
+        bytes memory reason = new bytes(returnSize);
+        assembly ("memory-safe") {
+          returndatacopy(add(reason, 0x20), 0, returnSize)
+        }
+        bytes4 reasonSelector;
+        assembly ("memory-safe") {
+          reasonSelector := mload(add(reason, 0x20))
+        }
+        if (
+          reasonSelector == DeltaTransformer.PullRevealWindowActive.selector ||
+          reasonSelector == DeltaTransformer.PullRevealRegistryUnavailable.selector
+        ) {
+          assembly ("memory-safe") {
+            revert(add(reason, 0x20), returnSize)
+          }
+        }
+      }
+      revert TransformerExecutionFailed();
+    }
 
     uint256 expectedReturnSize = 0x40 + deltas.length * 0x20;
     if (returnSize != expectedReturnSize) revert TransformerExecutionFailed();
@@ -586,7 +619,9 @@ library Account {
     bytes memory leftArguments,
     bytes memory rightArguments,
     uint256 leftArgumentsTimestamp,
-    uint256 rightArgumentsTimestamp
+    uint256 rightArgumentsTimestamp,
+    bytes32 leftEntity,
+    bytes32 rightEntity
   ) external returns (int[] memory) {
     if (proofbody.transformers.length == 0) return deltas;
     // The transformer ABI is int256[]. A wide signed-magnitude base delta has
@@ -608,7 +643,9 @@ library Account {
         i < decodedLeft.length ? decodedLeft[i] : bytes(""),
         i < decodedRight.length ? decodedRight[i] : bytes(""),
         leftArgumentsTimestamp,
-        rightArgumentsTimestamp
+        rightArgumentsTimestamp,
+        leftEntity,
+        rightEntity
       );
 
       for (uint256 j = 0; j < deltas.length; j++) {

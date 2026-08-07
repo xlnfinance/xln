@@ -98,6 +98,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.DeltaTransformer__factory>;
     getContractFactory(
+      name: "IHashLadderRevealRegistry",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.IHashLadderRevealRegistry__factory>;
+    getContractFactory(
       name: "Depository",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Depository__factory>;
@@ -161,6 +165,10 @@ declare module "hardhat/types/runtime" {
       name: "MockEntityProvider",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.MockEntityProvider__factory>;
+    getContractFactory(
+      name: "MockRevealRegistry",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.MockRevealRegistry__factory>;
     getContractFactory(
       name: "FalseReturnERC20Mock",
       signerOrOptions?: ethers.Signer | FactoryOptions
@@ -284,6 +292,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.DeltaTransformer>;
     getContractAt(
+      name: "IHashLadderRevealRegistry",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.IHashLadderRevealRegistry>;
+    getContractAt(
       name: "Depository",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -363,6 +376,11 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.MockEntityProvider>;
+    getContractAt(
+      name: "MockRevealRegistry",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.MockRevealRegistry>;
     getContractAt(
       name: "FalseReturnERC20Mock",
       address: string | ethers.Addressable,
@@ -469,6 +487,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.DeltaTransformer>;
     deployContract(
+      name: "IHashLadderRevealRegistry",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IHashLadderRevealRegistry>;
+    deployContract(
       name: "Depository",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Depository>;
@@ -532,6 +554,10 @@ declare module "hardhat/types/runtime" {
       name: "MockEntityProvider",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockEntityProvider>;
+    deployContract(
+      name: "MockRevealRegistry",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.MockRevealRegistry>;
     deployContract(
       name: "FalseReturnERC20Mock",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -655,6 +681,11 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.DeltaTransformer>;
     deployContract(
+      name: "IHashLadderRevealRegistry",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IHashLadderRevealRegistry>;
+    deployContract(
       name: "Depository",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -734,6 +765,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockEntityProvider>;
+    deployContract(
+      name: "MockRevealRegistry",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.MockRevealRegistry>;
     deployContract(
       name: "FalseReturnERC20Mock",
       args: any[],

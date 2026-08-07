@@ -232,13 +232,8 @@ function buildHashLadderProof(
 function encodeDeltaTransformerArguments(
   fillRatios: number[] = [],
   secrets: string[] = [],
-  pulls: string[] = [],
 ): string {
-  return abi.encode(['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'], [{ fillRatios, secrets, pulls }]);
-}
-
-function encodePartialPullBinary(fillRatio: number, reveals: string[]): string {
-  return `0x${fillRatio.toString(16).padStart(4, '0')}${reveals.map(reveal => reveal.slice(2)).join('')}`;
+  return abi.encode(['tuple(uint16[] fillRatios, bytes32[] secrets)'], [{ fillRatios, secrets }]);
 }
 
 describe('Depository', () => {
@@ -519,7 +514,7 @@ describe('Depository', () => {
     ).to.be.revertedWithCustomError(depository, 'E2');
   });
 
-  it('passes dispute argument timestamps into DeltaTransformer pull without storing secrets', async function () {
+  it('settles a pull dispute from the hash-ladder reveal registry, never calldata', async function () {
     const { depository } = await loadFixture(deployFixture);
     const DeltaTransformer = await ethers.getContractFactory('DeltaTransformer');
     const transformer = await DeltaTransformer.deploy();
@@ -557,7 +552,12 @@ describe('Depository', () => {
 
     const fillRatio = 0x0123;
     const pullProof = buildHashLadderProof('depository-cross-pull', fillRatio);
-    const revealDeadline = (await time.latest()) + 10;
+    // Far enough ahead that mining the block-number dispute timeout below
+    // cannot pass the wall-clock reveal deadline: the barrier test needs
+    // "blocks elapsed" and "reveal window open" to hold simultaneously.
+    const revealDeadline = (await time.latest()) + 100_000;
+    // Negative amount: the pull credits the RIGHT side, so only RIGHT's own
+    // registry record may settle it.
     const encodedPullBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
@@ -584,12 +584,6 @@ describe('Depository', () => {
       ],
     );
     const proofbodyHash = proofBodyHash(proofbody);
-    const rightTransformerArgs = encodeDeltaTransformerArguments(
-      [],
-      [],
-      [encodePartialPullBinary(fillRatio, pullProof.reveals)],
-    );
-    const starterInitialArguments = abi.encode(['bytes[]'], [[rightTransformerArgs]]);
     const disputeNonce = 1n;
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const startHash = await disputeProofHash(depository, acctKey, disputeNonce, proofbodyHash);
@@ -603,7 +597,7 @@ describe('Depository', () => {
           initialProofbody: proofbody,
           watchSeed: TEST_WATCH_SEED,
           sig: startSig,
-          starterInitialArguments,
+          starterInitialArguments: '0x',
           starterIncrementedArguments: '0x',
         },
       ],
@@ -611,26 +605,51 @@ describe('Depository', () => {
     const start = await signDepositoryBatch(depository, right.entityId, right.privateKey, startBatch);
     await depository.connect(right.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
 
-    const startedAccount = await depository._accounts(acctKey);
-    expect(startedAccount.disputeStartTimestamp).to.be.lessThanOrEqual(BigInt(revealDeadline));
+    // The beneficiary registers the verified reveal on-chain under its own key.
+    const revealBatch = emptyBatch({
+      hashLadderReveals: [
+        {
+          fullHash: pullProof.fullHash,
+          partialRoot: pullProof.partialRoot,
+          fillRatio,
+          fullSecret: ethers.ZeroHash,
+          reveals: pullProof.reveals,
+        },
+      ],
+    });
+    const reveal = await signDepositoryBatch(depository, right.entityId, right.privateKey, revealBatch);
+    await depository.connect(right.signer).processBatch(reveal.encodedBatch, reveal.hankoData, reveal.nonce);
+
     await mine(Number(await depository.defaultDisputeDelay()));
 
+    // The barrier: a live pull reveal window blocks finalization even after the
+    // block-number dispute timeout. Finalize must wait for the wall-clock
+    // deadline so the sibling chain's reveal can always be ported in time.
     const finalization = {
       counterentity: left.entityId,
       initialNonce: disputeNonce,
       finalNonce: disputeNonce,
       initialProofbodyHash: proofbodyHash,
       finalProofbody: proofbody,
-      starterArguments: starterInitialArguments,
+      starterArguments: '0x',
       otherArguments: '0x',
       sig: '0x',
       startedByLeft: false,
       cooperative: false,
     };
+    const earlyBatch = emptyBatch({ disputeFinalizations: [finalization] });
+    const early = await signDepositoryBatch(depository, right.entityId, right.privateKey, earlyBatch);
+    await expect(
+      depository.connect(right.signer).processBatch(early.encodedBatch, early.hankoData, early.nonce),
+    ).to.be.revertedWithCustomError(transformer, 'PullRevealWindowActive');
+
+    await time.increaseTo(revealDeadline + 1);
+
     const finalBatch = emptyBatch({ disputeFinalizations: [finalization] });
     const final = await signDepositoryBatch(depository, right.entityId, right.privateKey, finalBatch);
     await depository.connect(right.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
 
+    // No payment-secret storage was touched: the registry path is disjoint.
     expect(await transformer.hashToBlock(hashNode(pullProof.reveals[3]))).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenB)).to.equal(1_000n - BigInt(fillRatio));
     expect(await depository._reserves(right.entityId, tokenB)).to.equal(BigInt(fillRatio));
