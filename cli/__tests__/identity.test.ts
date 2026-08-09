@@ -11,6 +11,7 @@ import {
 } from '../lib/identity';
 import type { CliSettings } from '../lib/settings';
 import { resolveJurisdictionRpc } from '../lib/api';
+import { resolveCliRelayUrl } from '../lib/session';
 
 const tempSettings = async (): Promise<CliSettings> => {
   const homeDir = await mkdtemp(join(tmpdir(), 'xln-cli-id-'));
@@ -65,5 +66,18 @@ describe('resolveJurisdictionRpc', () => {
     expect(resolveJurisdictionRpc({ rpc: '/rpc2' }, 'http://127.0.0.1:8080')).toBe(
       'http://127.0.0.1:8080/rpc2',
     );
+  });
+});
+
+describe('resolveCliRelayUrl', () => {
+  test('binds P2P to the same API origin without carrying credentials', () => {
+    expect(resolveCliRelayUrl('http://127.0.0.1:8080')).toBe('ws://127.0.0.1:8080/relay');
+    expect(resolveCliRelayUrl('https://user:secret@xln.finance/api?token=x#frag')).toBe(
+      'wss://xln.finance/relay',
+    );
+  });
+
+  test('rejects a non-HTTP API origin', () => {
+    expect(() => resolveCliRelayUrl('ftp://xln.finance')).toThrow('CLI_API_PROTOCOL_INVALID:ftp:');
   });
 });

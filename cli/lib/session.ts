@@ -1,4 +1,6 @@
 import {
+  closeInfraDb,
+  closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
   generateLazyEntityId,
@@ -27,6 +29,30 @@ export type CliSession = {
   entityId: string;
   signerId: string;
   jurisdictionName: string;
+};
+
+export const resolveCliRelayUrl = (apiBase: string): string => {
+  const relay = new URL('/relay', apiBase);
+  if (relay.protocol === 'http:') relay.protocol = 'ws:';
+  else if (relay.protocol === 'https:') relay.protocol = 'wss:';
+  else throw new Error(`CLI_API_PROTOCOL_INVALID:${relay.protocol}`);
+  relay.username = '';
+  relay.password = '';
+  relay.search = '';
+  relay.hash = '';
+  return relay.toString();
+};
+
+export const closeSession = async (session: CliSession): Promise<void> => {
+  const results = await Promise.allSettled([
+    closeRuntimeDb(session.env),
+    closeInfraDb(session.env),
+  ]);
+  const errors = results
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, 'CLI_SESSION_CLOSE_FAILED');
 };
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -293,6 +319,7 @@ export const openSession = async (
   if (options.startNetwork !== false && typeof startP2P === 'function') {
     try {
       startP2P(env, {
+        relayUrls: [resolveCliRelayUrl(settings.apiBase)],
         signerId: runtimeId,
         gossipPollMs: 5_000,
       });

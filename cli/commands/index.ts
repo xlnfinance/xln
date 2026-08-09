@@ -9,7 +9,7 @@ import {
   walletExists,
 } from '../lib/identity';
 import { ask } from '../lib/prompt';
-import { openSession, logSessionBanner } from '../lib/session';
+import { closeSession, openSession, logSessionBanner } from '../lib/session';
 import { formatAccountsPanel } from '../lib/accounts';
 import { listDiscoverableHubs, formatHubList, openHubAccount } from '../lib/actions/open-account';
 import { buildReceiveInvoice, sendPayment, type DeliveryMode } from '../lib/actions/pay';
@@ -45,11 +45,20 @@ const withSession = async (
   const passphrase = await requirePassphrase(flags);
   const session = await openSession(settings, passphrase);
   logSessionBanner(session);
+  let runError: unknown;
   try {
     await run(session);
+  } catch (error) {
+    runError = error;
   } finally {
-    // Leave loop running only for daemon/TUI; one-shot commands exit process.
+    try {
+      await closeSession(session);
+    } catch (closeError) {
+      if (runError) throw new AggregateError([runError, closeError], 'CLI_COMMAND_AND_CLOSE_FAILED');
+      throw closeError;
+    }
   }
+  if (runError) throw runError;
 };
 
 const runViaDaemonOrLocal = async (
@@ -338,6 +347,10 @@ const runOnboard = async (flags: Record<string, string | boolean>): Promise<void
   console.log(paint('ok', `Wallet saved under ${settings.homeDir}`));
   console.log(paint('muted', 'Bootstrapping runtime (importJ + entity)…'));
   const session = await openSession(settings, passphrase);
-  logSessionBanner(session);
-  console.log(paint('ok', 'Ready. Run `xln` for the wallet TUI.'));
+  try {
+    logSessionBanner(session);
+    console.log(paint('ok', 'Ready. Run `xln` for the wallet TUI.'));
+  } finally {
+    await closeSession(session);
+  }
 };
