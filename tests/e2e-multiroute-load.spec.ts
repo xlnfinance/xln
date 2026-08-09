@@ -258,6 +258,7 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
       tokenId: 1,
       amount,
       route,
+      deliveryMode: 'instant',
     },
   }]);
 }
@@ -710,6 +711,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 18 test cases', () => {
         tokenId: 1,
         amount: overAmount,
         route: [users.alice!.entityId, h1!, users.dave!.entityId],
+        deliveryMode: 'instant',
       },
     }]);
 

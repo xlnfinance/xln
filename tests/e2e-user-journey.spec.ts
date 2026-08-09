@@ -335,7 +335,7 @@ async function readEntityIdleSnapshot(
 }
 
 async function mineEmptyJurisdictionBlock(page: Page): Promise<void> {
-  const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+  const response = await page.request.post(`${API_BASE_URL}/rpc`, {
     data: { jsonrpc: '2.0', id: 1, method: 'evm_mine', params: [] },
   });
   const body = await response.json().catch(async () => ({ error: (await response.text()).slice(0, 500) }));

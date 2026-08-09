@@ -199,7 +199,14 @@ describe('runtime activity history', () => {
   test('projects HTLC truth only from certified lifecycle logs', () => {
     const rawPayment = {
       type: 'htlcPayment',
-      data: { targetEntityId: hub, tokenId: 1, amount: 7n, hashlock: '0xhash' },
+      data: {
+        targetEntityId: hub,
+        tokenId: 1,
+        amount: 7n,
+        route: [alice, hub],
+        deliveryMode: 'instant' as const,
+        hashlock: '0xhash',
+      },
     };
     const activity = (message: 'HtlcInitiated' | 'HtlcFailed') => buildRuntimeActivityEvents({
       height: 23,

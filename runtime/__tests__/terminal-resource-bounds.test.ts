@@ -269,7 +269,7 @@ test('HTLC note insertion rejects atomically at the Entity cap', () => {
     type: 'htlcPayment',
     data: {
       targetEntityId: rightEntity, tokenId: 1, amount: 1n, route: [leftEntity, rightEntity],
-      hashlock, preparedLockId: lockId, description: 'new note',
+      deliveryMode: 'instant', hashlock, preparedLockId: lockId, description: 'new note',
     },
   }] })).toThrow(
     'ENTITY_HTLC_NOTE_LIMIT_EXCEEDED',
@@ -290,6 +290,7 @@ test('HTLC note text validation rejects before adding either lookup key', () => 
       tokenId: 1,
       amount: 1n,
       route: [leftEntity, rightEntity],
+      deliveryMode: 'instant',
       hashlock,
       preparedLockId: lockId,
       description: 'x'.repeat(LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH + 1),
@@ -308,6 +309,7 @@ test('certified proposal and executed vote frames index nested HTLC descriptions
       tokenId: 1,
       amount: 1n,
       route: [leftEntity, rightEntity],
+      deliveryMode: 'instant',
       hashlock,
       preparedLockId: lockId,
       description: 'nested invoice',

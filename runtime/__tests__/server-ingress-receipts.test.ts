@@ -158,6 +158,7 @@ describe('runtime ingress receipts', () => {
         tokenId: 1,
         amount: 7n,
         route: [`0x${'44'.repeat(32)}`, `0x${'33'.repeat(32)}`],
+        deliveryMode: 'instant',
       },
     };
     const sealedPayment = {

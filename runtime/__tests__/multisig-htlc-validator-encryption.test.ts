@@ -1681,11 +1681,24 @@ describe('multisig HTLC validator encryption', () => {
           tokenId: 1,
           amount: 1n,
           route: [SENDER_ID, ENTITY_ID],
+          deliveryMode: 'instant',
           secret: `0x${'ac'.repeat(32)}`,
           preparedLockId: `0x${'12'.repeat(32)}`,
         },
       }],
     }])).rejects.toThrow('HTLC_PAYMENT_PREPARED_PAYLOAD_PARTIAL');
+  });
+
+  test('rejects a raw payment without an explicit delivery mode before route or state access', async () => {
+    await expect(prepareHtlcPaymentEntityTx({} as never, {} as never, {
+      type: 'htlcPayment',
+      data: {
+        targetEntityId: ENTITY_ID,
+        tokenId: 1,
+        amount: 1n,
+        route: [SENDER_ID, ENTITY_ID],
+      },
+    } as never)).rejects.toThrow('HTLC_PAYMENT_RAW_FIELDS_INVALID');
   });
 
   test('seals raw process ingress and lets two cold restores replay the prepared frame without gossip', async () => {

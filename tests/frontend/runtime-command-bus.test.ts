@@ -630,13 +630,17 @@ test('embedded command completion is multiset-exact and accepts only derived HTL
 
   const rawPayment = {
     type: 'htlcPayment',
-    data: { targetEntityId: '0xtarget', tokenId: 1, amount: 7n, description: 'rent' },
+    data: {
+      targetEntityId: '0xtarget', tokenId: 1, amount: 7n, description: 'rent',
+      route: ['0xentity-a', '0xtarget'], deliveryMode: 'instant',
+    },
   } as never;
   const preparedPayment = {
     type: 'htlcPayment',
     data: {
       targetEntityId: '0xtarget', tokenId: 1, amount: 7n, description: 'rent',
-      hashlock: '0xhash', route: ['0xhop'], envelope: { version: 1 },
+      hashlock: '0xhash', route: ['0xentity-a', '0xtarget'], deliveryMode: 'instant',
+      envelope: { version: 1 },
     },
   } as never;
   const input = (tx: typeof rawPayment): RuntimeInput => ({
