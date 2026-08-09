@@ -41,25 +41,21 @@ export const resolveStoredDisputeStartNonce = (
   account: AccountReplica,
   proofBodyHash: string,
 ): { signedNonce: number; nonceSource: string } => {
-  let signedNonce = account.disputeProofNoncesByHash?.[proofBodyHash]
-    ?? account.proofHeader.nextProofNonce;
-  let nonceSource = account.disputeProofNoncesByHash?.[proofBodyHash] !== undefined
-    ? 'hashMap'
-    : 'proofHeader';
-  if (
-    account.counterpartyDisputeProofNonce !== undefined &&
-    account.counterpartyDisputeProofNonce > signedNonce
-  ) {
-    signedNonce = account.counterpartyDisputeProofNonce;
-    nonceSource = 'counterpartySig(fresher)';
-  } else if (
-    account.disputeProofNoncesByHash?.[proofBodyHash] === undefined &&
-    account.counterpartyDisputeProofNonce !== undefined
-  ) {
-    signedNonce = account.counterpartyDisputeProofNonce;
-    nonceSource = 'counterpartySig';
+  const sealedProofBodyHash = account.counterpartyDisputeProofBodyHash;
+  if (!sealedProofBodyHash || sealedProofBodyHash.toLowerCase() !== proofBodyHash.toLowerCase()) {
+    throw new Error(
+      `DISPUTE_START_SEAL_PROOFBODY_MISMATCH:${String(sealedProofBodyHash)}:${proofBodyHash}`,
+    );
   }
-  return { signedNonce, nonceSource };
+  const signedNonce = account.counterpartyDisputeProofNonce;
+  if (!Number.isSafeInteger(signedNonce) || signedNonce === undefined || signedNonce <= 0) {
+    throw new Error(`DISPUTE_START_SEAL_NONCE_INVALID:${String(signedNonce)}`);
+  }
+  // The hash map can contain a newer local signature for the same ProofBody.
+  // A Hanko is bound to the nonce stored alongside that exact counterparty
+  // seal; mixing the local nonce with the peer Hanko makes valid evidence
+  // unverifiable and can halt dispute preparation.
+  return { signedNonce, nonceSource: 'counterpartySeal' };
 };
 
 export const selectCounterDisputeSnapshots = (

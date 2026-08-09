@@ -11,6 +11,10 @@ const DEFAULT_CREDIT_AMOUNT_DISPLAY = '10000';
 
 type ConnectRuntimeOptions = {
   requireOnline?: boolean;
+  disputeConfig?: {
+    leftResponseSeconds: number;
+    rightResponseSeconds: number;
+  };
 };
 
 const stringifyDebug = (value: unknown): string =>
@@ -955,15 +959,18 @@ async function enqueueOpenAccount(
   entityId: string,
   signerId: string,
   hubId: string,
+  disputeConfig?: ConnectRuntimeOptions['disputeConfig'],
 ): Promise<void> {
   await waitForHubRuntimeTransportReady(page, hubId);
   await enqueueEntityTxs(page, entityId, signerId, [{
     type: 'openAccount',
     data: {
       targetEntityId: hubId,
-      disputeConfig: entityId.toLowerCase() < hubId.toLowerCase()
-        ? { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 }
-        : { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 },
+      disputeConfig: disputeConfig ?? (
+        entityId.toLowerCase() < hubId.toLowerCase()
+          ? { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 }
+          : { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 }
+      ),
       creditAmount: 10_000n * 10n ** BigInt(getTokenInfo(1).decimals),
       tokenId: 1,
     },
@@ -1545,7 +1552,8 @@ export async function connectRuntimeToHubWithCredit(
   }
   const canUseDefaultUiConnect =
     creditAmountDisplay === DEFAULT_CREDIT_AMOUNT_DISPLAY
-    && tokenIds.includes(1);
+    && tokenIds.includes(1)
+    && options.disputeConfig === undefined;
   const hasRuntimeEnv = await hasExportedRuntimeEnv(page);
   const hasRuntimeP2P = hasRuntimeEnv ? await hasExportedRuntimeP2P(page) : false;
   if (!hasRuntimeEnv || !hasRuntimeP2P) {
@@ -1595,7 +1603,7 @@ export async function connectRuntimeToHubWithCredit(
     if (canUseDefaultUiConnect) {
       await connectHubThroughUi(page, hubId);
     } else {
-      await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
+      await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId, options.disputeConfig);
     }
   }
 
@@ -1617,7 +1625,7 @@ export async function connectRuntimeToHubWithCredit(
           if (canUseDefaultUiConnect) {
             await connectHubThroughUi(page, hubId);
           } else {
-            await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
+            await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId, options.disputeConfig);
           }
           return false;
         }
@@ -1658,8 +1666,12 @@ export async function connectRuntimeToHubWithCredit(
   await waitForRenderedCommittedAccountCard(page, hubId, 'connectRuntimeToHub final UI path');
 }
 
-export async function connectHub(page: Page, hubId: string): Promise<void> {
+export async function connectHub(
+  page: Page,
+  hubId: string,
+  options: ConnectRuntimeOptions = {},
+): Promise<void> {
   await ensureRuntimeOnline(page, 'connect-hub');
   const identity = await readSelectedUiRuntimeIdentity(page);
-  await connectRuntimeToHub(page, identity, hubId);
+  await connectRuntimeToHub(page, identity, hubId, options);
 }

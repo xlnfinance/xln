@@ -27,6 +27,7 @@ const LONG_E2E = process.env.E2E_LONG === '1';
 const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
 const MAX_BATCH_MINE_BLOCKS = 100;
 const MINE_BLOCKS_TIMEOUT_MS = 90_000;
+const E2E_DISPUTE_RESPONSE_SECONDS = 5;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -109,7 +110,14 @@ async function ensureHubAccountOpen(
     `${disputeMode} dispute hub must be available`,
   ).toBe(true);
 
-  await connectHub(page, hubId!);
+  await connectHub(page, hubId!, disputeMode === 'manual'
+    ? {
+        disputeConfig: {
+          leftResponseSeconds: E2E_DISPUTE_RESPONSE_SECONDS,
+          rightResponseSeconds: E2E_DISPUTE_RESPONSE_SECONDS,
+        },
+      }
+    : {});
 
   const identity = await page.evaluate(() => {
     const env = (window as typeof window & {
@@ -1510,9 +1518,9 @@ test.describe('E2E Dispute Flow', () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
         return snap.batchHistoryCount;
-      // The authenticated watcher deliberately advances at most 256 headers per
-      // poll. A production 5,760-block dispute window therefore needs multiple
-      // verified ranges before the starter can queue its timeout finalization.
+      // The signed test Account uses a short seconds-based response policy so
+      // the real scheduler clock reaches the deadline without weakening the
+      // production defaults exercised by ordinary hub connections.
       }, { timeout: 180_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(finalizeBatchBefore.batchHistoryCount);
     });
     await timedStep('dispute.wait_finalize_applied', async () => {
