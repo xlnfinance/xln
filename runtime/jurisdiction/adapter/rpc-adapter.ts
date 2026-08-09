@@ -16,7 +16,10 @@ import { createRpcSubmitTx } from './rpc-submission';
 import { createRpcTransactionSequencer } from './rpc-transaction-sequencer';
 import { createRpcWalletWriteMethods } from './rpc-wallet-writes';
 import { createRpcWatcherController } from './rpc-watcher-controller';
-import { createTxFinalizationEvidenceReader } from './rpc-watcher-inputs';
+import {
+  createTxDisputeProofBodyReader,
+  createTxFinalizationEvidenceReader,
+} from './rpc-watcher-inputs';
 import { createRpcWriteMethods } from './rpc-write-methods';
 import { asRpcTxResponse } from './rpc-boundary';
 import { prepareDurableEvmTransaction } from './evm-durable-transaction';
@@ -58,6 +61,7 @@ export async function createRpcAdapter(
     isQuiet: () => quietLogs,
   });
   const readTxFinalizationEvidence = createTxFinalizationEvidenceReader(provider);
+  const readTxDisputeProofBody = createTxDisputeProofBodyReader(provider);
   const watcher = createRpcWatcherController({
     provider,
     chainId: config.chainId,
@@ -78,8 +82,9 @@ export async function createRpcAdapter(
     readBlockHeaders: chainIo.readBlockHeaders,
     sendAuthenticatedBatch: chainIo.sendAuthenticatedBatch,
     resolveFinalityDepth: chainIo.resolveFinalityDepth,
-    resolveDisputeFinalizationEvidence: async (txHash, args) =>
-      resolveDisputeFinalizationEvidence(await readTxFinalizationEvidence(txHash), txHash, args),
+    resolveDisputeFinalizationEvidence: async (txHash, args, location) =>
+      resolveDisputeFinalizationEvidence(await readTxFinalizationEvidence(txHash, location), txHash, args),
+    resolveDisputeProofBody: readTxDisputeProofBody,
     isTransientRpcUnavailable: isTransientRpcUnavailableError,
   });
   const lifecycle = createRpcLifecycleMethods({

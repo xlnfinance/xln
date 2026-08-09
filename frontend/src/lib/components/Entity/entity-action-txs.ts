@@ -4,6 +4,7 @@ import type { EntityTx } from '@xln/runtime/api/public/runtime-module';
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
 export type OpenAccountRebalancePolicy = EntityTxOf<'openAccount'>['data']['rebalancePolicy'];
+export type OpenAccountDisputeConfig = EntityTxOf<'openAccount'>['data']['disputeConfig'];
 
 export type MovePostSettleOp =
   | { type: 'none' }
@@ -86,11 +87,16 @@ export function buildSettlementApproveTx(
   };
 }
 
-export function buildOpenAccountTx(targetEntityId: string, rebalancePolicy?: OpenAccountRebalancePolicy | null): EntityTxOf<'openAccount'> {
+export function buildOpenAccountTx(
+  targetEntityId: string,
+  disputeConfig: OpenAccountDisputeConfig,
+  rebalancePolicy?: OpenAccountRebalancePolicy | null,
+): EntityTxOf<'openAccount'> {
   return {
     type: 'openAccount',
     data: {
       targetEntityId,
+      disputeConfig,
       ...(rebalancePolicy ? { rebalancePolicy } : {}),
     },
   };

@@ -49,7 +49,9 @@ const hasAnyDisputeSealEvidence = (account: AccountReplica): boolean => Boolean(
   account.currentDisputeProofBodyHash ||
   account.counterpartyDisputeProofBodyHash ||
   account.currentDisputeProofNonce !== undefined ||
-  account.counterpartyDisputeProofNonce !== undefined
+  account.counterpartyDisputeProofNonce !== undefined ||
+  account.currentDisputeProofProposerIsLeft !== undefined ||
+  account.counterpartyDisputeProofProposerIsLeft !== undefined
 );
 
 type DisputeSealDraft = {
@@ -65,6 +67,8 @@ const exactBilateralDisputeSeal = (account: AccountReplica): DisputeSealDraft =>
   const remoteBody = account.counterpartyDisputeProofBodyHash?.toLowerCase();
   const localNonce = account.currentDisputeProofNonce;
   const remoteNonce = account.counterpartyDisputeProofNonce;
+  const localProposerIsLeft = account.currentDisputeProofProposerIsLeft;
+  const remoteProposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
   if (
     !account.currentDisputeProofHanko ||
     !account.counterpartyDisputeProofHanko ||
@@ -72,12 +76,21 @@ const exactBilateralDisputeSeal = (account: AccountReplica): DisputeSealDraft =>
     !localBody ||
     localHash !== remoteHash ||
     localBody !== remoteBody ||
-    localNonce !== remoteNonce
+    localNonce !== remoteNonce ||
+    localProposerIsLeft !== remoteProposerIsLeft ||
+    typeof localProposerIsLeft !== 'boolean'
   ) return { issue: 'bilateral-dispute-uncertified' };
   if (!bytes32(localHash) || !bytes32(localBody) || !Number.isSafeInteger(localNonce) || localNonce! < 0) {
     return { issue: 'certified-dispute-invalid' };
   }
-  return { seal: { hash: localHash, proofBodyHash: localBody, proofNonce: localNonce! } };
+  return {
+    seal: {
+      hash: localHash,
+      proofBodyHash: localBody,
+      proofNonce: localNonce!,
+      proposerIsLeft: localProposerIsLeft,
+    },
+  };
 };
 
 const accountFrameIssue = (
@@ -215,6 +228,7 @@ const buildCertifiedAccountResealDraft = (
       fromEntityId: state.entityId,
       toEntityId: counterpartyId,
       domain: structuredClone(account.state.domain),
+      disputeConfig: structuredClone(account.state.disputeConfig),
       reseal,
     },
   }]);

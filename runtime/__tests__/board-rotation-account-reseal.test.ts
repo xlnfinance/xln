@@ -70,6 +70,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
     fromEntityId: sourceEntityId,
     toEntityId: receiverEntityId,
     domain: { ...account.state.domain },
+    disputeConfig: { ...account.state.disputeConfig },
     reseal: {
       height: 7,
       frameHash,
@@ -162,6 +163,7 @@ test('ACK commit retains the counterparty Hanko needed for later board reseal', 
     fromEntityId: peerEntityId,
     toEntityId: localEntityId,
     domain: { ...account.state.domain },
+    disputeConfig: { ...account.state.disputeConfig },
     ack: { height: 1, frameHash, frameHanko: peerHanko },
   });
 
@@ -199,6 +201,7 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
     fromEntityId: sourceEntityId,
     toEntityId: receiverEntityId,
     domain: { ...account.state.domain },
+    disputeConfig: { ...account.state.disputeConfig },
     reseal: {
       height: 4,
       frameHash,

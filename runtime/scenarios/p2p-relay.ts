@@ -261,7 +261,7 @@ const spawnNode = (
       ...process.env,
       XLN_DB_PATH: dbPath,
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
 
   const stdoutBuffer: string[] = [];
@@ -351,9 +351,16 @@ const run = async () => {
   console.log('[P2P] Hub relay ready - spawning alice/bob NOW');
 
   // Spawn alice/bob IMMEDIATELY (before hub starts waiting for them)
-  bob = spawnNode('bob', bobSeed, relayUrl, hubRuntimeId, [...nodeRpcArgs]);
+  bob = spawnNode('bob', bobSeed, relayUrl, hubRuntimeId, [
+    ...nodeRpcArgs,
+    '--stay-alive-after-payment',
+  ]);
   procs.push(bob);
-  alice = spawnNode('alice', aliceSeed, relayUrl, hubRuntimeId, [...nodeRpcArgs]);
+  alice = spawnNode('alice', aliceSeed, relayUrl, hubRuntimeId, [
+    ...nodeRpcArgs,
+    '--wait-for-bob-ready',
+    '--stay-alive-after-payment',
+  ]);
   procs.push(alice);
 
   console.log('[P2P] Waiting for all nodes ready...');
@@ -399,6 +406,10 @@ const run = async () => {
 
   await waitForLineOrError(bob, /P2P_BOB_READY/, errorMatchers);
   console.log('[P2P] Bob credit ready');
+  if (!alice.proc.stdin?.writable) {
+    throw new Error('P2P_ALICE_STDIN_UNAVAILABLE');
+  }
+  alice.proc.stdin.write('P2P_BOB_READY\n');
   if (useRpc) {
     await waitForLineOrError(alice, /P2P_R2R_SENT/, errorMatchers);
     await waitForLineOrError(bob, /P2P_R2R_RECEIVED/, errorMatchers);
@@ -407,6 +418,7 @@ const run = async () => {
   await waitForLineOrError(alice, /P2P_HTLC_SENT|P2P_PAYMENT_SENT/, errorMatchers);
   console.log('[P2P] Alice HTLC sent');
   await waitForLineOrError(bob, /P2P_HTLC_RECEIVED|P2P_PAYMENT_RECEIVED/, errorMatchers);
+  await waitForLineOrError(hub, /P2P_END_TO_END_SETTLED/, errorMatchers);
   console.log('✅ P2P relay test passed');
 
   killAll(procs);

@@ -78,6 +78,8 @@ export type TowerActionKindV1 = 'counter_dispute_only';
 
 export type TowerProofBody = {
   watchSeed: string;
+  leftResponseSeconds: bigint;
+  rightResponseSeconds: bigint;
   offdeltas: bigint[];
   tokenIds: bigint[];
   transformers: Array<{
@@ -94,6 +96,7 @@ export type TowerProofBody = {
 export type TowerFinalDisputeProof = {
   counterentity: string;
   finalNonce: number;
+  proposerIsLeft: boolean;
   finalProofbody: TowerProofBody;
   leftArguments: string;
   rightArguments: string;
@@ -108,7 +111,7 @@ export type TowerCounterDisputeRemedy = {
   depositoryAddress: string;
   watchedEntityId: string;
   towerAddress: string;
-  lastResortWindowBlocks: number;
+  lastResortWindowSeconds: number;
   appointmentSequence: number;
   ownerAuthorizationHanko: string;
   latestProof: TowerFinalDisputeProof;
@@ -139,8 +142,7 @@ export type TowerLastResortPayloadV1 = {
   proofNonce: number;
   proofBodyHash: string;
   responseMode: 'last_resort';
-  lastResortWindowBlocks: number;
-  safetyMarginBlocks: number;
+  lastResortWindowSeconds: number;
   maxFeeToken?: string;
   feeBudget?: string;
 };

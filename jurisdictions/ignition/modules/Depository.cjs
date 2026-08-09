@@ -3,7 +3,6 @@ const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 const DepositoryModule = buildModule("DepositoryModule", (m) => {
   console.log("🔍 IGNITION: Starting deployment...");
   const foundationRecipient = m.getParameter("foundationRecipient", m.getAccount(0));
-  const disputeDelayBlocks = m.getParameter("defaultDisputeDelayBlocks", 5760);
 
   // 1. Deploy the verifier library and linked EntityProvider first
   const hankoVerifier = m.library('HankoVerifier');
@@ -14,12 +13,17 @@ const DepositoryModule = buildModule("DepositoryModule", (m) => {
 
   // 2. Deploy Account library
   const accountLibrary = m.library('Account');
+  const depositoryBounds = m.library('DepositoryBounds');
+  const hashLadderRegistry = m.library('HashLadderRegistry');
+  const deltaTransformer = m.contract('DeltaTransformer');
 
-  // 3. Deploy Depository with immutable EP address
-  const depository = m.contract('Depository', [entityProvider, disputeDelayBlocks], {
+  // 3. Deploy Depository with immutable EP + canonical transformer addresses.
+  const depository = m.contract('Depository', [entityProvider, deltaTransformer], {
     id: 'Depository',
     libraries: {
-      Account: accountLibrary
+      Account: accountLibrary,
+      DepositoryBounds: depositoryBounds,
+      HashLadderRegistry: hashLadderRegistry,
     }
   });
   console.log("🔍 IGNITION: Depository deployed with immutable EP");
@@ -32,7 +36,7 @@ const DepositoryModule = buildModule("DepositoryModule", (m) => {
   // Depository constructor already registers the EntityProvider.
   // Do not call addEntityProvider again (reverts with "exists").
 
-  return { depository, entityProvider, erc20Mock, erc721Mock, erc1155Mock  };
+  return { depository, entityProvider, deltaTransformer, erc20Mock, erc721Mock, erc1155Mock };
 });
 
 module.exports = DepositoryModule;

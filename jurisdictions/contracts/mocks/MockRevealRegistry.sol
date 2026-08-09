@@ -5,21 +5,35 @@ import "../DeltaTransformer.sol";
 
 /// @notice Test stand-in for the Depository reveal registry. Forwards
 /// applyBatch so msg.sender inside the transformer is a registry-backed
-/// contract, and lets tests set arbitrary (entity, ladderHash) records.
+/// contract, and lets tests set arbitrary Account-scoped records.
 contract MockRevealRegistry is IHashLadderRevealRegistry {
-  mapping(bytes32 => mapping(bytes32 => uint256)) public packed;
+  mapping(bytes32 => mapping(bytes32 => mapping(bytes32 => mapping(bool => uint256)))) public packed;
 
-  function getHashLadderReveal(bytes32 entity, bytes32 ladderHash)
+  function getHashLadderReveal(
+    bytes32 ownerEntity,
+    bytes32 counterpartyEntity,
+    bytes32 ladderHash,
+    bool targetRole
+  )
     external
     view
     returns (uint16 fillRatio, uint256 revealedAt)
   {
-    uint256 record = packed[entity][ladderHash];
+    uint256 record = packed[ownerEntity][counterpartyEntity][ladderHash][targetRole];
+    if (record == 0) return (0, 0);
     return (uint16(record), record >> 16);
   }
 
-  function setReveal(bytes32 entity, bytes32 ladderHash, uint16 fillRatio, uint256 revealedAt) external {
-    packed[entity][ladderHash] = (revealedAt << 16) | uint256(fillRatio);
+  function setReveal(
+    bytes32 ownerEntity,
+    bytes32 counterpartyEntity,
+    bytes32 ladderHash,
+    bool targetRole,
+    uint16 fillRatio,
+    uint256 revealedAt
+  ) external {
+    packed[ownerEntity][counterpartyEntity][ladderHash][targetRole] =
+      (revealedAt << 16) | uint256(fillRatio);
   }
 
   function applyBatchViaRegistry(
@@ -34,7 +48,9 @@ contract MockRevealRegistry is IHashLadderRevealRegistry {
     bytes32 leftEntity,
     bytes32 rightEntity,
     uint256 disputeStartTimestamp,
-    uint256 disputeTimeout
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
   ) external view returns (int[] memory) {
     return transformer.applyBatch(
       deltas,
@@ -47,7 +63,9 @@ contract MockRevealRegistry is IHashLadderRevealRegistry {
       leftEntity,
       rightEntity,
       disputeStartTimestamp,
-      disputeTimeout
+      disputeTimeout,
+      leftResponseSeconds,
+      rightResponseSeconds
     );
   }
 }

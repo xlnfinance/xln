@@ -4,7 +4,11 @@ import type { JInput } from '../../../jurisdiction/machine/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import { createEmptyBatch, batchOpCount, mergeBatchOps } from '../../../jurisdiction/machine/batch';
+import {
+  batchOpCount,
+  hasJBatchWork,
+  prependRecoveryBatch,
+} from '../../../jurisdiction/machine/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
@@ -99,16 +103,13 @@ export async function handleJAbortSentBatch(
   }
 
   if (requeue) {
-    if (!newState.jBatchState.batch) {
-      newState.jBatchState.batch = createEmptyBatch();
-    }
     dropDisputeFinalizations(newState, droppedFinalizeCounterparties);
     dropStaleCollateralToReserve(newState);
-    mergeBatchOps(newState.jBatchState.batch, sent.batch);
+    prependRecoveryBatch(newState.jBatchState, sent.batch);
   }
 
   delete newState.jBatchState.sentBatch;
-  newState.jBatchState.status = batchOpCount(newState.jBatchState.batch) > 0 ? 'accumulating' : 'empty';
+  newState.jBatchState.status = hasJBatchWork(newState.jBatchState) ? 'accumulating' : 'empty';
 
   releaseAbortedBatchLatches(newState, droppedFinalizeCounterparties);
 

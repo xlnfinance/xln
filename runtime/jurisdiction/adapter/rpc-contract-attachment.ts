@@ -26,35 +26,54 @@ const assertEntityProviderDeploymentOrigin = async (
   provider: ethers.JsonRpcProvider,
   address: string,
   deploymentBlock: number,
-  currentCode: string,
 ): Promise<void> => {
-  // The watcher begins at deploymentBlock - 1. Trusting a configured number
-  // would let an importer skip earlier board-registration history. Prove the
-  // exact state transition on the chain: no code immediately before B, the
-  // same runtime code at B and today. RPCs without historical state must fail
-  // loud; silently starting later is not a safe compatibility option.
-  let deploymentCode: string;
-  let precedingCode: string;
+  // The watcher begins at deploymentBlock - 1, so a caller must not be able to
+  // claim a later block and skip earlier board registrations. Prove the exact
+  // contract-creation receipt instead of reading historical account state:
+  // production RPCs commonly retain blocks and receipts while pruning old
+  // state tries. Requiring archive state here made a valid durable replica
+  // impossible to restore even though the immutable creation evidence still
+  // existed. Current bytecode is verified separately by readiness binding.
+  let block: unknown;
   try {
-    [deploymentCode, precedingCode] = await Promise.all([
-      provider.getCode(address, deploymentBlock),
-      provider.getCode(address, deploymentBlock - 1),
-    ]);
+    block = await provider.send('eth_getBlockByNumber', [ethers.toQuantity(deploymentBlock), true]);
   } catch (error) {
     throw new Error(
       `RPC_ENTITY_PROVIDER_DEPLOYMENT_ORIGIN_UNAVAILABLE:${deploymentBlock}`,
       { cause: error },
     );
   }
-  if (deploymentCode === '0x') {
-    throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_CODE_MISSING:${deploymentBlock}`);
+  if (typeof block !== 'object' || block === null) {
+    throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_MISSING:${deploymentBlock}`);
   }
-  if (precedingCode !== '0x') {
-    throw new Error(`RPC_ENTITY_PROVIDER_PREDEPLOY_CODE_PRESENT:${deploymentBlock - 1}`);
+  const transactions = (block as { transactions?: unknown }).transactions;
+  if (!Array.isArray(transactions)) {
+    throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${deploymentBlock}`);
   }
-  if (deploymentCode.toLowerCase() !== currentCode.toLowerCase()) {
-    throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_CODE_CHANGED:${deploymentBlock}`);
+  const normalizedAddress = address.toLowerCase();
+  for (const transaction of transactions) {
+    const hash = typeof transaction === 'string'
+      ? transaction
+      : typeof transaction === 'object' && transaction !== null
+        ? (transaction as { hash?: unknown }).hash
+        : undefined;
+    if (typeof hash !== 'string') continue;
+    const receipt = await provider.send('eth_getTransactionReceipt', [hash]) as {
+      blockNumber?: unknown;
+      contractAddress?: unknown;
+      status?: unknown;
+    } | null;
+    if (
+      receipt !== null &&
+      typeof receipt.contractAddress === 'string' &&
+      receipt.contractAddress.toLowerCase() === normalizedAddress &&
+      Number(BigInt(String(receipt.blockNumber))) === deploymentBlock &&
+      BigInt(String(receipt.status)) === 1n
+    ) {
+      return;
+    }
   }
+  throw new Error(`RPC_ENTITY_PROVIDER_DEPLOYMENT_RECEIPT_MISSING:${deploymentBlock}`);
 };
 
 export const attachRpcReplicaContracts = async (
@@ -93,7 +112,6 @@ export const attachRpcReplicaContracts = async (
     provider,
     addresses.entityProvider,
     state.entityProviderDeploymentBlock,
-    codes[2]!,
   );
   state.account = Account__factory.connect(addresses.account, signer);
   state.depository = Depository__factory.connect(addresses.depository, signer);

@@ -263,6 +263,52 @@ test('orchestrator provisions exact primary contracts before RPC import', async 
     );
 
     await rpcCall(rpcUrl, 'anvil_setCode', [deltaTransformer, canonicalDeltaCode]);
+    const depositoryCode = String(await rpcCall(
+      rpcUrl,
+      'eth_getCode',
+      [first.contracts.depository, 'latest'],
+    ));
+    const depositoryArtifact = JSON.parse(await readFile(
+      join(process.cwd(), 'frontend/static/contracts/Depository.json'),
+      'utf8',
+    )) as {
+      deployedLinkReferences: Record<string, Record<string, Array<{ start: number; length: number }>>>;
+    };
+    const registryLink = depositoryArtifact
+      .deployedLinkReferences['contracts/HashLadderRegistry.sol']?.['HashLadderRegistry']?.[0];
+    if (!registryLink || registryLink.length !== 20) {
+      throw new Error('TEST_HASH_LADDER_REGISTRY_LINK_REFERENCE_MISSING');
+    }
+    const registryAddress = `0x${depositoryCode.slice(
+      2 + registryLink.start * 2,
+      2 + (registryLink.start + registryLink.length) * 2,
+    )}`;
+    const canonicalRegistryCode = String(await rpcCall(
+      rpcUrl,
+      'eth_getCode',
+      [registryAddress, 'latest'],
+    ));
+    const registryArtifact = JSON.parse(await readFile(
+      join(process.cwd(), 'frontend/static/contracts/HashLadderRegistry.json'),
+      'utf8',
+    )) as {
+      immutableReferences: Record<string, Array<{ start: number; length: number }>>;
+    };
+    let misboundRegistryCode = canonicalRegistryCode.slice(2);
+    const wrongSelfWord = `${'0'.repeat(24)}${'97'.repeat(20)}`;
+    for (const references of Object.values(registryArtifact.immutableReferences)) {
+      for (const reference of references) {
+        const offset = reference.start * 2;
+        misboundRegistryCode = `${misboundRegistryCode.slice(0, offset)}`
+          + `${wrongSelfWord}${misboundRegistryCode.slice(offset + reference.length * 2)}`;
+      }
+    }
+    await rpcCall(rpcUrl, 'anvil_setCode', [registryAddress, `0x${misboundRegistryCode}`]);
+    await expect(provisionPrimaryRpcJurisdictionStack(config)).rejects.toThrow(
+      'PRIMARY_RPC_IMMUTABLE_BINDING_MISMATCH:hashLadderRegistry',
+    );
+    await rpcCall(rpcUrl, 'anvil_setCode', [registryAddress, canonicalRegistryCode]);
+
     const canonicalPayloadText = await readFile(jurisdictionsPath, 'utf8');
     const misboundPayload = JSON.parse(canonicalPayloadText) as
       { jurisdictions: { primary: { contracts: Record<string, string> } } };
@@ -273,6 +319,16 @@ test('orchestrator provisions exact primary contracts before RPC import', async 
     await writeFile(jurisdictionsPath, `${JSON.stringify(misboundPayload, null, 2)}\n`, 'utf8');
     await expect(provisionPrimaryRpcJurisdictionStack(config)).rejects.toThrow(
       'PRIMARY_RPC_ENTITY_PROVIDER_BINDING_MISMATCH',
+    );
+
+    const alternateDeltaTransformer = `0x${'98'.repeat(20)}`;
+    await rpcCall(rpcUrl, 'anvil_setCode', [alternateDeltaTransformer, canonicalDeltaCode]);
+    const deltaMisboundPayload = JSON.parse(canonicalPayloadText) as
+      { jurisdictions: { primary: { contracts: Record<string, string> } } };
+    deltaMisboundPayload.jurisdictions.primary.contracts.deltaTransformer = alternateDeltaTransformer;
+    await writeFile(jurisdictionsPath, `${JSON.stringify(deltaMisboundPayload, null, 2)}\n`, 'utf8');
+    await expect(provisionPrimaryRpcJurisdictionStack(config)).rejects.toThrow(
+      'PRIMARY_RPC_DELTA_TRANSFORMER_BINDING_MISMATCH',
     );
 
     await writeFile(jurisdictionsPath, canonicalPayloadText, 'utf8');
@@ -292,7 +348,7 @@ test('orchestrator provisions exact primary contracts before RPC import', async 
   }
 }, 120_000);
 
-test('fresh RPC import rejects a pruned endpoint that cannot prove deployment origin', async () => {
+test('fresh RPC import proves deployment origin from receipts after historical state is pruned', async () => {
   const port = await reservePort();
   const root = await mkdtemp(join(tmpdir(), 'xln-pruned-rpc-import-'));
   const rpcUrl = `http://127.0.0.1:${port}`;
@@ -351,11 +407,10 @@ test('fresh RPC import rejects a pruned endpoint that cannot prove deployment or
       }],
       entityInputs: [],
     });
-    await expect(processRuntime(env)).rejects.toThrow(
-      `RPC_ENTITY_PROVIDER_DEPLOYMENT_ORIGIN_UNAVAILABLE:${deploymentBlock}`,
-    );
-    expect(env.state.jReplicas.has('Primary')).toBe(false);
-    expect(getLiveJAdapter(env, 'Primary')).toBeUndefined();
+    await processRuntime(env);
+    await processRuntime(env);
+    expect(env.state.jReplicas.has('Primary')).toBe(true);
+    expect(getLiveJAdapter(env, 'Primary')).toBeDefined();
   } finally {
     await stopProcess(child, 3_000);
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });

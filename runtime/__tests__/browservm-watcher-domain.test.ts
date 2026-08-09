@@ -67,7 +67,6 @@ test('jurisdiction import rejects a duplicate watcher domain before publication'
       rpcs: request.rpcs,
       blockNumber: '0',
       stateRoot: null,
-      defaultDisputeDelayBlocks: 1,
       watcherConfirmationDepth: 0,
       entityProviderDeploymentBlock: 1,
       contracts,

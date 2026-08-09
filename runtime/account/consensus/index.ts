@@ -494,6 +494,7 @@ type IncomingFrameAckMaterial = {
   ackDisputeHash?: string;
   ackProofBodyHash: string;
   ackSignedNonce: number;
+  ackProposerIsLeft: boolean;
   proofChanged: boolean;
 };
 
@@ -504,6 +505,7 @@ const storeAckProofSnapshot = (
   account: AccountReplica,
   proofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>,
   signedNonce: number,
+  proposerIsLeft: boolean,
 ): void => {
   account.disputeProofNoncesByHash ??= {};
   account.disputeProofNoncesByHash[proofResult.proofBodyHash] = signedNonce;
@@ -511,7 +513,13 @@ const storeAckProofSnapshot = (
   account.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
   storeDisputeArgumentSnapshot(
     account,
-    captureDisputeArgumentSnapshot(account, proofResult.proofBodyHash, signedNonce, proofResult.proofBodyStruct),
+    captureDisputeArgumentSnapshot(
+      account,
+      proofResult.proofBodyHash,
+      signedNonce,
+      proposerIsLeft,
+      proofResult.proofBodyStruct,
+    ),
   );
 };
 
@@ -521,18 +529,21 @@ const selectAckDisputeSeal = (
   signedNonce: number,
   proofChanged: boolean,
   disputeHash: string | undefined,
+  proposerIsLeft: boolean,
 ): AccountDisputeSeal | undefined => {
   if (proofChanged && disputeHash) {
     return {
       hash: disputeHash,
       proofBodyHash,
       proofNonce: signedNonce,
+      proposerIsLeft,
     };
   }
   const reusable =
     account.currentDisputeProofHanko &&
     account.currentDisputeHash &&
     account.currentDisputeProofBodyHash?.toLowerCase() === proofBodyHash.toLowerCase() &&
+    account.currentDisputeProofProposerIsLeft === proposerIsLeft &&
     Number(account.currentDisputeProofNonce ?? 0) > Number(account.state.jNonce ?? 0);
   if (!reusable) return undefined;
   return {
@@ -540,6 +551,7 @@ const selectAckDisputeSeal = (
     hash: account.currentDisputeHash!,
     proofBodyHash: account.currentDisputeProofBodyHash!,
     proofNonce: account.currentDisputeProofNonce!,
+    proposerIsLeft,
   };
 };
 
@@ -559,16 +571,23 @@ async function buildIncomingFrameAckMaterial(
   const ackHankoDomain = getAccountStateDomain(account.state);
   const proofChanged =
     ackProofResult.proofBodyHash.toLowerCase() !== account.currentDisputeProofBodyHash?.toLowerCase() ||
+    account.currentDisputeProofProposerIsLeft !== receivedFrame.byLeft ||
     Number(account.currentDisputeProofNonce ?? 0) <= Number(account.state.jNonce ?? 0);
   const ackSignedNonce = Math.max(Number(account.proofHeader.nextProofNonce ?? 0), Number(account.state.jNonce ?? 0) + 1);
   const ackDisputeHash = proofChanged
-    ? createDisputeProofHashWithNonce(account.state, ackProofResult.proofBodyHash, ackHankoDomain, ackSignedNonce)
+    ? createDisputeProofHashWithNonce(
+        account.state,
+        ackProofResult.proofBodyHash,
+        ackHankoDomain,
+        ackSignedNonce,
+        receivedFrame.byLeft,
+      )
     : undefined;
   if (proofChanged) {
     if (!ackDisputeHash) {
       return { kind: 'return', result: { success: false, error: 'Failed to build ACK dispute hanko', events } };
     }
-    storeAckProofSnapshot(account, ackProofResult, ackSignedNonce);
+    storeAckProofSnapshot(account, ackProofResult, ackSignedNonce, receivedFrame.byLeft);
   }
 
   const ackDisputeSeal = selectAckDisputeSeal(
@@ -577,6 +596,7 @@ async function buildIncomingFrameAckMaterial(
     ackSignedNonce,
     proofChanged,
     ackDisputeHash,
+    receivedFrame.byLeft,
   );
 
   const response: Extract<AccountInput, { kind: 'ack' }> = {
@@ -584,6 +604,7 @@ async function buildIncomingFrameAckMaterial(
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: input.fromEntityId,
     domain: structuredClone(account.state.domain),
+    disputeConfig: structuredClone(account.state.disputeConfig),
     watchSeed: account.state.watchSeed,
     ack: {
       height: receivedFrame.height,
@@ -604,6 +625,7 @@ async function buildIncomingFrameAckMaterial(
       ...(ackDisputeHash ? { ackDisputeHash } : {}),
       ackProofBodyHash: ackProofResult.proofBodyHash,
       ackSignedNonce,
+      ackProposerIsLeft: receivedFrame.byLeft,
       proofChanged,
     },
   };
@@ -615,6 +637,7 @@ function storeAckDisputeState(account: AccountReplica, material: IncomingFrameAc
       hash: material.ackDisputeHash,
       nonce: material.ackSignedNonce,
       proofBodyHash: material.ackProofBodyHash,
+      proposerIsLeft: material.ackProposerIsLeft,
     });
   }
 }

@@ -19,12 +19,14 @@ const batch = (input: Partial<JBatch>): JBatch => ({
   externalTokenToReserve: [],
   reserveToExternalToken: [],
   revealSecrets: [],
+  hashLadderRegistrations: [],
   ...input,
 } as JBatch);
 
 describe('pending batch helpers', () => {
   test('counts every visible batch operation bucket', () => {
     expect(countBatchOps(batch({
+      flashloans: [{}] as any,
       reserveToCollateral: [{ tokenId: 1, pairs: [] }] as any,
       collateralToReserve: [{ tokenId: 1, amount: 1n }] as any,
       settlements: [{}] as any,
@@ -34,7 +36,31 @@ describe('pending batch helpers', () => {
       externalTokenToReserve: [{}] as any,
       reserveToExternalToken: [{}] as any,
       revealSecrets: [{}] as any,
-    }))).toBe(9);
+      hashLadderRegistrations: [{}] as any,
+    }))).toBe(11);
+  });
+
+  test('keeps registration-only draft and sent batches actionable', () => {
+    const registration = {
+      counterpartyEntity: '0x03',
+      targetRole: true,
+      fullHash: '0x01',
+      partialRoot: '0x02',
+      witness: { fillRatio: 1 },
+    };
+    const draft = batch({ hashLadderRegistrations: [registration] as any });
+    const sent = batch({ hashLadderRegistrations: [registration] as any });
+
+    expect(buildPendingBatchState({ batch: draft })).toMatchObject({
+      draftCount: 1,
+      mode: 'draft',
+      hasDraftBatch: true,
+    });
+    expect(buildPendingBatchState({ sentBatch: { batch: sent } })).toMatchObject({
+      sentCount: 1,
+      mode: 'sent',
+      hasSentBatch: true,
+    });
   });
 
   test('derives draft-first state and preview batch', () => {

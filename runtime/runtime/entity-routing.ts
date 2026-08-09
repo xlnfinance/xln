@@ -821,29 +821,30 @@ type OpeningPullLock = Extract<AccountTx, { type: 'cross_pull_lock' }>;
 const normalizeOpeningHash = (value: string): string => String(value || '').trim().toLowerCase();
 
 /**
- * INVARIANT: unique hashladder root per orderId — globally, forever in live
- * Runtime state. Distinct orderIds must never share `partialRoot` or `fullHash`
+ * INVARIANT: unique hashladder root per canonical routeHash — globally in live
+ * Runtime state. Distinct routes must never share `partialRoot` or `fullHash`
  * anywhere (any Entity, any Account, any retained swap/authorization). One
- * reveal would otherwise close an opposing swap. Same-order source/target legs
- * intentionally share one ladder (keyed by orderId first).
+ * reveal would otherwise close an opposing swap. Source/target legs of the
+ * same route intentionally share one ladder. `orderId` is only book-scoped and
+ * cannot authorize reuse across unrelated Entities.
  */
 const rememberHashLadderOwner = (
   byFullHash: Map<string, string>,
   byPartialRoot: Map<string, string>,
-  orderId: string,
+  routeHash: string,
   fullHash: string,
   partialRoot: string,
 ): string | null => {
   const conflictFull = byFullHash.get(fullHash);
-  if (conflictFull && conflictFull !== orderId) {
-    return `opening-shared-hash-material:${conflictFull}/${orderId}:fullHash`;
+  if (conflictFull && conflictFull !== routeHash) {
+    return `opening-shared-hash-material:${conflictFull}/${routeHash}:fullHash`;
   }
   const conflictPartial = byPartialRoot.get(partialRoot);
-  if (conflictPartial && conflictPartial !== orderId) {
-    return `opening-shared-hash-material:${conflictPartial}/${orderId}:partialRoot`;
+  if (conflictPartial && conflictPartial !== routeHash) {
+    return `opening-shared-hash-material:${conflictPartial}/${routeHash}:partialRoot`;
   }
-  byFullHash.set(fullHash, orderId);
-  byPartialRoot.set(partialRoot, orderId);
+  byFullHash.set(fullHash, routeHash);
+  byPartialRoot.set(partialRoot, routeHash);
   return null;
 };
 
@@ -853,7 +854,7 @@ const collectRuntimeHashLadderOwners = (
   const byFullHash = new Map<string, string>();
   const byPartialRoot = new Map<string, string>();
   const rememberRoutePulls = (
-    orderId: string,
+    routeHash: string,
     pulls: ReadonlyArray<{ fullHash?: string; partialRoot?: string } | undefined>,
   ): void => {
     for (const pull of pulls) {
@@ -861,28 +862,28 @@ const collectRuntimeHashLadderOwners = (
       const fullHash = normalizeOpeningHash(pull.fullHash || '');
       const partialRoot = normalizeOpeningHash(pull.partialRoot || '');
       if (!fullHash || !partialRoot) continue;
-      rememberHashLadderOwner(byFullHash, byPartialRoot, orderId, fullHash, partialRoot);
+      rememberHashLadderOwner(byFullHash, byPartialRoot, routeHash, fullHash, partialRoot);
     }
   };
   for (const replica of env.state.eReplicas.values()) {
     for (const account of replica.state.accounts.values()) {
       for (const pull of account.state.pulls?.values() ?? []) {
-        const orderId = String(pull.crossJurisdiction?.orderId || '').trim();
-        if (!orderId) continue;
+        const routeHash = normalizeOpeningHash(pull.crossJurisdiction?.routeHash || '');
+        if (!routeHash) continue;
         rememberHashLadderOwner(
           byFullHash,
           byPartialRoot,
-          orderId,
+          routeHash,
           normalizeOpeningHash(pull.fullHash),
           normalizeOpeningHash(pull.partialRoot),
         );
       }
     }
-    for (const [orderId, route] of replica.state.crossJurisdictionSwaps?.entries() ?? []) {
-      rememberRoutePulls(String(orderId || '').trim(), [route.sourcePull, route.targetPull]);
+    for (const route of replica.state.crossJurisdictionSwaps?.values() ?? []) {
+      rememberRoutePulls(normalizeOpeningHash(route.routeHash || ''), [route.sourcePull, route.targetPull]);
     }
-    for (const [orderId, route] of replica.state.crossJurisdictionAuthorizations?.entries() ?? []) {
-      rememberRoutePulls(String(orderId || '').trim(), [route.sourcePull, route.targetPull]);
+    for (const route of replica.state.crossJurisdictionAuthorizations?.values() ?? []) {
+      rememberRoutePulls(normalizeOpeningHash(route.routeHash || ''), [route.sourcePull, route.targetPull]);
     }
   }
   return { byFullHash, byPartialRoot };
@@ -892,30 +893,32 @@ const openingSharedHashMaterialFailure = (
   env: RuntimeReplica,
   group: readonly CrossJAdmissionFrameCandidate[],
 ): string | null => {
-  const byOrder = new Map<string, { fullHash: string; partialRoot: string }>();
+  const byRoute = new Map<string, { fullHash: string; partialRoot: string }>();
   const { byFullHash, byPartialRoot } = collectRuntimeHashLadderOwners(env);
   for (const candidate of group) {
     for (const pull of [...candidate.sourcePulls, ...candidate.targetPulls]) {
       const orderId = String(pull.data.crossJurisdiction?.orderId || '').trim();
       if (!orderId) return 'opening-order-id-missing';
+      const routeHash = normalizeOpeningHash(pull.data.crossJurisdiction?.routeHash || '');
+      if (!routeHash) return `opening-route-hash-missing:${orderId}`;
       const fullHash = normalizeOpeningHash(pull.data.fullHash);
       const partialRoot = normalizeOpeningHash(pull.data.partialRoot);
-      const existing = byOrder.get(orderId);
+      const existing = byRoute.get(routeHash);
       if (existing) {
         if (existing.fullHash !== fullHash || existing.partialRoot !== partialRoot) {
-          return `opening-intra-order-hash-divergent:${orderId}`;
+          return `opening-intra-route-hash-divergent:${routeHash}`;
         }
         continue;
       }
       const conflict = rememberHashLadderOwner(
         byFullHash,
         byPartialRoot,
-        orderId,
+        routeHash,
         fullHash,
         partialRoot,
       );
       if (conflict) return conflict;
-      byOrder.set(orderId, { fullHash, partialRoot });
+      byRoute.set(routeHash, { fullHash, partialRoot });
     }
   }
   return null;

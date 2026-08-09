@@ -262,7 +262,7 @@ describe('overlapping finalized J-range consensus', () => {
       signerId: validatorId,
       proposedFrame: observedAtMismatch,
     });
-    expect(mismatchResult.outcome).toEqual({ kind: 'rejected', code: 'PROPOSAL_J_RANGE_MISMATCH' });
+    expect(mismatchResult.outcome).toEqual({ kind: 'rejected', code: 'PROPOSAL_FRAME_HASH_MISMATCH' });
     expect(mismatchResult.outputs).toEqual([]);
     expect(mismatchResult.workingReplica.state.lastFinalizedJHeight).toBe(7);
     expect(mismatchResult.workingReplica.lockedFrame).toBeUndefined();
@@ -278,7 +278,7 @@ describe('overlapping finalized J-range consensus', () => {
       signerId: validatorId,
       proposedFrame: conflictingProposal,
     });
-    expect(conflictResult.outcome).toEqual({ kind: 'rejected', code: 'PROPOSAL_J_RANGE_MISMATCH' });
+    expect(conflictResult.outcome).toEqual({ kind: 'rejected', code: 'PROPOSAL_FRAME_HASH_MISMATCH' });
     expect(conflictResult.outputs).toEqual([]);
     expect(conflictResult.workingReplica.state.lastFinalizedJHeight).toBe(7);
     expect(conflictResult.workingReplica.state.reserves.get(1)).toBe(7n);

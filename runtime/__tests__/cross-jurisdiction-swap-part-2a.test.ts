@@ -65,7 +65,7 @@ import {
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
-  buildPreparedCrossJurisdictionRoute,
+  buildPreparedCrossJurisdictionRoute as buildPreparedCrossJurisdictionRouteCanonical,
   deriveCrossJurisdictionPrivateSeed,
   deriveCrossJurisdictionRouteHash,
   hasCrossJurisdictionCommittedFill,
@@ -74,11 +74,33 @@ import {
   projectCrossJurisdictionQuantizedClaim,
   validateCrossJurisdictionFillProgress,
   validateCrossJurisdictionQuantization,
-  withCanonicalCrossJurisdictionRouteHash,
+  withCanonicalCrossJurisdictionRouteHash as withCanonicalCrossJurisdictionRouteHashCanonical,
   withCrossJurisdictionClaimProgress,
   withCrossJurisdictionCloseProofProgress,
   cloneCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
+
+const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
+type TestRouteInput = Omit<CrossJurisdictionSwapRoute, 'sourceDisputeConfig' | 'targetDisputeConfig'>;
+// Explicit fixture policy; production rejects a route that omits either
+// bilateral Account clock instead of supplying compatibility defaults.
+const withFixtureDisputeConfig = (route: TestRouteInput): CrossJurisdictionSwapRoute => ({
+  ...route,
+  sourceDisputeConfig: TEST_DISPUTE_CONFIG,
+  targetDisputeConfig: TEST_DISPUTE_CONFIG,
+} as CrossJurisdictionSwapRoute);
+const buildPreparedCrossJurisdictionRoute = (
+  route: TestRouteInput,
+  options: { runtimeSeed?: string; now: number },
+): CrossJurisdictionSwapRoute => buildPreparedCrossJurisdictionRouteCanonical(
+  withFixtureDisputeConfig(route),
+  options,
+);
+const withCanonicalCrossJurisdictionRouteHash = (
+  route: TestRouteInput,
+): CrossJurisdictionSwapRoute => withCanonicalCrossJurisdictionRouteHashCanonical(
+  withFixtureDisputeConfig(route),
+);
 
 import {
   buildCrossJurisdictionCancelAck,

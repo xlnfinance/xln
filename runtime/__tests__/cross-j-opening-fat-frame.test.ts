@@ -29,6 +29,7 @@ const targetHub = entityId('a3');
 const targetUser = entityId('a4');
 const sourceSigner = addr('b1');
 const targetSigner = addr('b2');
+const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
 
 const buildRoute = (
   orderId: string,
@@ -42,6 +43,10 @@ const buildRoute = (
   hubEntityId: sourceHub,
   sourceSignerId: sourceSigner,
   targetSignerId: targetSigner,
+  // Response clocks are signed route economics. Fixtures must state them
+  // explicitly so tests cannot normalize a route production would reject.
+  sourceDisputeConfig: TEST_DISPUTE_CONFIG,
+  targetDisputeConfig: TEST_DISPUTE_CONFIG,
   source: {
     jurisdiction: 'stack:1:source',
     entityId: sourceUser,

@@ -129,13 +129,13 @@ describe('graph3d helpers', () => {
 
   test('formats dual account tooltip text', () => {
     const tokenDelta = { tokenId: 2 };
-    const accountData = { deltas: new Map<number, unknown>([[2, tokenDelta]]) };
+    const accountData = { state: { deltas: new Map<number, unknown>([[2, tokenDelta]]) } };
     const info = formatGraphDualConnectionAccountInfo({
       leftId: 'alice',
       rightId: 'bob',
       accountData,
       selectedTokenId: 1,
-      getAccountTokenDelta: (account, tokenId) => (account as typeof accountData).deltas.get(tokenId) ?? null,
+      getAccountTokenDelta: (account, tokenId) => (account as typeof accountData).state.deltas.get(tokenId) ?? null,
       deriveEntry: (_delta, isLeft) => ({
         delta: isLeft ? 2_000_000 : -2_000_000,
         ownCreditLimit: isLeft ? 5_000_000 : 6_000_000,
@@ -167,7 +167,7 @@ describe('graph3d helpers', () => {
         signerId: 'alice',
         state: {
           accounts: new Map([
-            ['bob', { deltas: new Map<number, unknown>([[1, tokenDelta]]) }],
+            ['bob', { state: { deltas: new Map<number, unknown>([[1, tokenDelta]]) } }],
           ]),
         },
       }],
@@ -191,7 +191,7 @@ describe('graph3d helpers', () => {
       entityB: 'alice',
       replicas,
       selectedTokenId: 1,
-      getAccountTokenDelta: (account, tokenId) => (account as { deltas: Map<number, unknown> }).deltas.get(tokenId) ?? null,
+      getAccountTokenDelta: (account, tokenId) => (account as { state: { deltas: Map<number, unknown> } }).state.deltas.get(tokenId) ?? null,
       deriveEntry: (_delta, isLeft) => ({
         delta: isLeft ? 10_000_000 : -10_000_000,
         ownCreditLimit: isLeft ? 20_000_000 : 30_000_000,

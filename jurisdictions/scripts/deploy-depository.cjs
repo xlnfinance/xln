@@ -15,14 +15,6 @@ const requiredAddress = (name) => {
   return hre.ethers.getAddress(value);
 };
 
-const requiredPositiveInteger = (name) => {
-  const value = Number(process.env[name]);
-  if (!Number.isSafeInteger(value) || value <= 0 || value > 65_535) {
-    throw new Error(`${name}_INVALID`);
-  }
-  return value;
-};
-
 const requireContract = async (name, address) => {
   if (await hre.ethers.provider.getCode(address) === "0x") {
     throw new Error(`${name}_CODE_MISSING:${address}`);
@@ -31,14 +23,19 @@ const requireContract = async (name, address) => {
 
 async function main() {
   const accountAddress = requiredAddress("XLN_ACCOUNT_ADDRESS");
+  const depositoryBoundsAddress = requiredAddress("XLN_DEPOSITORY_BOUNDS_ADDRESS");
+  const hashLadderRegistryAddress = requiredAddress("XLN_HASH_LADDER_REGISTRY_ADDRESS");
+  const deltaTransformerAddress = requiredAddress("XLN_DELTA_TRANSFORMER_ADDRESS");
   const entityProviderAddress = requiredAddress("XLN_ENTITY_PROVIDER_ADDRESS");
   const stablecoinAddress = requiredAddress("XLN_STABLECOIN_ADDRESS");
-  const disputeDelayBlocks = requiredPositiveInteger("XLN_DISPUTE_DELAY_BLOCKS");
   const outputPath = String(process.env.XLN_DEPLOY_OUTPUT || "").trim();
   if (!outputPath) throw new Error("XLN_DEPLOY_OUTPUT_REQUIRED");
 
   await Promise.all([
     requireContract("ACCOUNT", accountAddress),
+    requireContract("DEPOSITORY_BOUNDS", depositoryBoundsAddress),
+    requireContract("HASH_LADDER_REGISTRY", hashLadderRegistryAddress),
+    requireContract("DELTA_TRANSFORMER", deltaTransformerAddress),
     requireContract("ENTITY_PROVIDER", entityProviderAddress),
     requireContract("STABLECOIN", stablecoinAddress),
   ]);
@@ -46,9 +43,13 @@ async function main() {
   const [deployer] = await hre.ethers.getSigners();
   const network = await hre.ethers.provider.getNetwork();
   const Depository = await hre.ethers.getContractFactory("Depository", {
-    libraries: { Account: accountAddress },
+    libraries: {
+      Account: accountAddress,
+      DepositoryBounds: depositoryBoundsAddress,
+      HashLadderRegistry: hashLadderRegistryAddress,
+    },
   });
-  const depository = await Depository.deploy(entityProviderAddress, disputeDelayBlocks);
+  const depository = await Depository.deploy(entityProviderAddress, deltaTransformerAddress);
   await depository.waitForDeployment();
   const address = await depository.getAddress();
   const deploymentTransaction = depository.deploymentTransaction();
@@ -78,6 +79,9 @@ async function main() {
     deployer: deployer.address,
     reused: {
       account: accountAddress,
+      depositoryBounds: depositoryBoundsAddress,
+      hashLadderRegistry: hashLadderRegistryAddress,
+      deltaTransformer: deltaTransformerAddress,
       entityProvider: entityProviderAddress,
       stablecoin: stablecoinAddress,
     },
@@ -90,7 +94,6 @@ async function main() {
       transactionHash: registration.hash,
       blockNumber: registrationReceipt.blockNumber,
     },
-    disputeDelayBlocks,
   };
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, JSON.stringify(result, null, 2));

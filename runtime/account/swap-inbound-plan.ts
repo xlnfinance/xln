@@ -2,6 +2,7 @@ import type { AccountState } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
 import { isLeftEntity } from '../protocol/entity-id';
 import { deriveDelta } from './utils';
+import { canonicalAccountDisputeConfig, type AccountDisputeConfig } from './dispute-config';
 
 export type SwapInboundCapacityPlan = Readonly<{
   accountExists: boolean;
@@ -21,6 +22,7 @@ export type SwapInboundCapacityPlanInput = Readonly<{
   tokenId: number;
   requiredInboundAmount: bigint;
   allowOpenAccount: boolean;
+  newAccountDisputeConfig?: AccountDisputeConfig;
 }>;
 
 export type SwapAccountCapacityView = Readonly<{
@@ -119,6 +121,10 @@ const planMissingAccount = (
   if (!input.allowOpenAccount) {
     throw new Error(`SWAP_INBOUND_ACCOUNT_MISSING:${input.ownerEntityId}:${counterpartyEntityId}`);
   }
+  if (!input.newAccountDisputeConfig) {
+    throw new Error(`SWAP_INBOUND_DISPUTE_CONFIG_REQUIRED:${input.ownerEntityId}:${counterpartyEntityId}`);
+  }
+  const disputeConfig = canonicalAccountDisputeConfig(input.newAccountDisputeConfig);
   return buildPlan(input, {
     accountExists: false,
     tokenActive: false,
@@ -131,6 +137,7 @@ const planMissingAccount = (
         type: 'openAccount',
         data: {
           targetEntityId: counterpartyEntityId,
+          disputeConfig,
           tokenId: input.tokenId,
           creditAmount: input.requiredInboundAmount,
         },

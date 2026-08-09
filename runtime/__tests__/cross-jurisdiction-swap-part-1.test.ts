@@ -66,7 +66,7 @@ import {
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
-  buildPreparedCrossJurisdictionRoute,
+  buildPreparedCrossJurisdictionRoute as buildPreparedCrossJurisdictionRouteCanonical,
   deriveCrossJurisdictionPrivateSeed,
   deriveCrossJurisdictionRouteHash,
   hasCrossJurisdictionCommittedFill,
@@ -75,11 +75,33 @@ import {
   projectCrossJurisdictionQuantizedClaim,
   validateCrossJurisdictionFillProgress,
   validateCrossJurisdictionQuantization,
-  withCanonicalCrossJurisdictionRouteHash,
+  withCanonicalCrossJurisdictionRouteHash as withCanonicalCrossJurisdictionRouteHashCanonical,
   withCrossJurisdictionClaimProgress,
   withCrossJurisdictionCloseProofProgress,
   cloneCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
+
+const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
+type TestRouteInput = Omit<CrossJurisdictionSwapRoute, 'sourceDisputeConfig' | 'targetDisputeConfig'>;
+// These historical fixtures all model the same bilateral response policy. The
+// explicit test adapter avoids reintroducing a production default/fallback.
+const withFixtureDisputeConfig = (route: TestRouteInput): CrossJurisdictionSwapRoute => ({
+  ...route,
+  sourceDisputeConfig: TEST_DISPUTE_CONFIG,
+  targetDisputeConfig: TEST_DISPUTE_CONFIG,
+} as CrossJurisdictionSwapRoute);
+const buildPreparedCrossJurisdictionRoute = (
+  route: TestRouteInput,
+  options: { runtimeSeed?: string; now: number },
+): CrossJurisdictionSwapRoute => buildPreparedCrossJurisdictionRouteCanonical(
+  withFixtureDisputeConfig(route),
+  options,
+);
+const withCanonicalCrossJurisdictionRouteHash = (
+  route: TestRouteInput,
+): CrossJurisdictionSwapRoute => withCanonicalCrossJurisdictionRouteHashCanonical(
+  withFixtureDisputeConfig(route),
+);
 
 import {
   buildCrossJurisdictionCancelAck,
@@ -103,6 +125,7 @@ import { normalizeEntitySwapTradingPairs } from '../runtime/swap-pairs';
 
 import { verifyHashLadderBinary } from '../protocol/htlc/hash-ladder';
 
+import { createBook, recordAcceptedUsdAskPrice } from '../orderbook/core';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../orderbook/types';
 
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../protocol/dispute/proof-builder';
@@ -649,6 +672,31 @@ describe('cross-jurisdiction hashledger swap', () => {
         data: { route: conflictingIntent },
       }),
     ).rejects.toThrow('CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION');
+
+    // An authoritative Account dispute may cancel the raw intent after input
+    // admission already appended its exact proposer materialization. Both that
+    // command and a delayed certified raw retry are strict no-ops; mismatched
+    // payloads below remain loud.
+    const cancelledIntentState = cloneEntityState(proposerRaw.newState);
+    const cancelledIntent = cancelledIntentState.crossJurisdictionSwaps!.get(baseRoute.orderId)!;
+    cancelledIntent.status = 'cancelled';
+    cancelledIntent.updatedAt = 12_345;
+    const materializeAfterCancellation = await applyEntityTx(
+      proposerEnv,
+      cancelledIntentState,
+      materialized[0]!,
+    );
+    expect(materializeAfterCancellation.outputs).toEqual([]);
+    expect(materializeAfterCancellation.newState.crossJurisdictionSwaps
+      ?.get(baseRoute.orderId)?.status).toBe('cancelled');
+    const rawRetryAfterCancellation = await applyEntityTx(
+      proposerEnv,
+      materializeAfterCancellation.newState,
+      rawTx,
+    );
+    expect(rawRetryAfterCancellation.outputs).toEqual([]);
+    expect(rawRetryAfterCancellation.newState.crossJurisdictionSwaps
+      ?.get(baseRoute.orderId)?.status).toBe('cancelled');
 
     const mismatchedMaterialization = cloneCrossJurisdictionRoute(preparedRoute);
     mismatchedMaterialization.targetSignerId = addr('99');
@@ -2135,7 +2183,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       rpcs: [eth.address],
       contracts: { depository: eth.depositoryAddress, entityProvider: eth.entityProviderAddress },
       blockTimeMs: eth.blockTimeMs,
-      defaultDisputeDelayBlocks: 5,
     } as any);
     env.state.jReplicas.set(base.name, {
       name: base.name,
@@ -2143,7 +2190,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       rpcs: [base.address],
       contracts: { depository: base.depositoryAddress, entityProvider: base.entityProviderAddress },
       blockTimeMs: 200,
-      defaultDisputeDelayBlocks: 7,
     } as any);
 
     const sourceUser = entity('01');
@@ -2346,7 +2392,6 @@ describe('cross-jurisdiction hashledger swap', () => {
         rpcs: [jurisdiction.address],
         contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
         blockTimeMs: jurisdiction.blockTimeMs,
-        defaultDisputeDelayBlocks: 5,
       } as any);
     }
     const sourceUser = entity('aa');
@@ -2357,6 +2402,23 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceUserState = makeState(sourceUser, addr('af'), sourceUserAliasJurisdiction, sourceHub);
     const targetHubState = makeState(targetHub, addr('b0'), targetJurisdiction, targetUser);
     const targetUserState = makeState(targetUser, addr('b1'), targetJurisdiction, targetHub);
+    const volatileDelta = createDefaultDelta(2);
+    volatileDelta.leftCreditLimit = 10n ** 30n;
+    volatileDelta.rightCreditLimit = 10n ** 30n;
+    sourceHubState.accounts.get(sourceUser)!.state.deltas.set(2, volatileDelta);
+    // This case intentionally uses a volatile source token. Seed the signed
+    // Hub-local USD authority price that production MM bootstrap publishes
+    // before a Hub is allowed to lock a cross-j Account route.
+    sourceHubState.orderbookExt = {
+      books: new Map([[
+        '1/2',
+        recordAcceptedUsdAskPrice(
+          createBook({ bucketWidthTicks: 10_000n, maxOrders: 16, stpPolicy: 0 }),
+          ORDERBOOK_PRICE_SCALE,
+        ),
+      ]]),
+      hubProfile: { referenceTokenId: 1 },
+    } as never;
     sourceHubState.timestamp = env.state.timestamp;
     sourceUserState.timestamp = env.state.timestamp;
     addReplica(env, sourceHubState, addr('ae'));

@@ -28,9 +28,11 @@ test('payment panel view projects only payment routing state from replicas', () 
         lockBook: new Map([['lock-1', { accountId: HUB, tokenId: 1, direction: 'outgoing' }]]),
         accounts: new Map([
           [HUB, {
-            leftEntity: SOURCE,
-            rightEntity: HUB,
-            deltas: new Map([[1, delta]]),
+            state: {
+              leftEntity: SOURCE,
+              rightEntity: HUB,
+              deltas: new Map([[1, delta]]),
+            },
             activeDispute: { reason: 'test' },
           }],
         ]),
@@ -82,9 +84,11 @@ test('payment panel view projects payment routing state from runtime adapter fra
       accounts: {
         items: [
           {
-            leftEntity: SOURCE,
-            rightEntity: HUB,
-            deltas: new Map([[1, delta]]),
+            state: {
+              leftEntity: SOURCE,
+              rightEntity: HUB,
+              deltas: new Map([[1, delta]]),
+            },
             status: 'disputed',
           },
         ],

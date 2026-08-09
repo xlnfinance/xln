@@ -101,7 +101,6 @@ const transferPayload = (tx: TransferTx): EntityProviderActionPayload => ({
 
 const releasePayload = (
   tx: ReleaseTx,
-  depositoryAddress: string,
 ): EntityProviderActionPayload => {
   const controlAmount = requireUint(tx.data.controlAmount, 'CONTROL_AMOUNT');
   const dividendAmount = requireUint(tx.data.dividendAmount, 'DIVIDEND_AMOUNT');
@@ -118,7 +117,7 @@ const releasePayload = (
   return {
     kind: 'releaseControlShares',
     release: {
-      depositoryAddress,
+      recipientAddress: requireAddress(tx.data.recipientAddress, 'RECIPIENT'),
       controlAmount,
       dividendAmount,
       purpose: tx.data.purpose,
@@ -156,8 +155,7 @@ const handleAction = (
   env: EntityRuntimeContext,
   mutableFrameState: boolean,
 ): EntityTxReducerResult => {
-  const { jurisdiction, chainId, entityProviderAddress, depositoryAddress } =
-    resolveActionDomain(entityState, env);
+  const { jurisdiction, chainId, entityProviderAddress } = resolveActionDomain(entityState, env);
   const current = currentActionState(entityState);
   if (current.pending) {
     throw new Error(
@@ -177,7 +175,7 @@ const handleAction = (
   const generation = current.generation + 1;
   const payload = entityTx.type === 'entityProviderTransfer'
     ? transferPayload(entityTx)
-    : releasePayload(entityTx, depositoryAddress);
+    : releasePayload(entityTx);
   const unsignedIntent = {
     version: 1 as const,
     entityId: entityState.entityId.toLowerCase(),

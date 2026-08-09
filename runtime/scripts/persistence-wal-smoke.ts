@@ -12,6 +12,7 @@ import {
   closeRuntimeDb,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import { generateLazyEntityId } from '../entity/factory';
 import { createJAdapter } from '../jurisdiction/adapter';
 import type { JReplica } from '../types/jurisdiction-runtime';
@@ -125,6 +126,7 @@ async function main() {
             type: 'openAccount',
             data: {
               targetEntityId: entityB,
+              disputeConfig: defaultAccountDisputeConfigForParties(entityA, false, entityB, false),
               creditAmount: 1000n,
               tokenId: 1,
             },

@@ -44,20 +44,29 @@ export interface MockRevealRegistryInterface extends Interface {
       BytesLike,
       BytesLike,
       BigNumberish,
+      BigNumberish,
+      BigNumberish,
       BigNumberish
     ]
   ): string;
   encodeFunctionData(
     functionFragment: "getHashLadderReveal",
-    values: [BytesLike, BytesLike]
+    values: [BytesLike, BytesLike, BytesLike, boolean]
   ): string;
   encodeFunctionData(
     functionFragment: "packed",
-    values: [BytesLike, BytesLike]
+    values: [BytesLike, BytesLike, BytesLike, boolean]
   ): string;
   encodeFunctionData(
     functionFragment: "setReveal",
-    values: [BytesLike, BytesLike, BigNumberish, BigNumberish]
+    values: [
+      BytesLike,
+      BytesLike,
+      BytesLike,
+      boolean,
+      BigNumberish,
+      BigNumberish
+    ]
   ): string;
 
   decodeFunctionResult(
@@ -128,28 +137,37 @@ export interface MockRevealRegistry extends BaseContract {
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       disputeStartTimestamp: BigNumberish,
-      disputeTimeout: BigNumberish
+      disputeTimeout: BigNumberish,
+      leftResponseSeconds: BigNumberish,
+      rightResponseSeconds: BigNumberish
     ],
     [bigint[]],
     "view"
   >;
 
   getHashLadderReveal: TypedContractMethod<
-    [entity: BytesLike, ladderHash: BytesLike],
+    [
+      ownerEntity: BytesLike,
+      counterpartyEntity: BytesLike,
+      ladderHash: BytesLike,
+      targetRole: boolean
+    ],
     [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
 
   packed: TypedContractMethod<
-    [arg0: BytesLike, arg1: BytesLike],
+    [arg0: BytesLike, arg1: BytesLike, arg2: BytesLike, arg3: boolean],
     [bigint],
     "view"
   >;
 
   setReveal: TypedContractMethod<
     [
-      entity: BytesLike,
+      ownerEntity: BytesLike,
+      counterpartyEntity: BytesLike,
       ladderHash: BytesLike,
+      targetRole: boolean,
       fillRatio: BigNumberish,
       revealedAt: BigNumberish
     ],
@@ -176,7 +194,9 @@ export interface MockRevealRegistry extends BaseContract {
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       disputeStartTimestamp: BigNumberish,
-      disputeTimeout: BigNumberish
+      disputeTimeout: BigNumberish,
+      leftResponseSeconds: BigNumberish,
+      rightResponseSeconds: BigNumberish
     ],
     [bigint[]],
     "view"
@@ -184,19 +204,30 @@ export interface MockRevealRegistry extends BaseContract {
   getFunction(
     nameOrSignature: "getHashLadderReveal"
   ): TypedContractMethod<
-    [entity: BytesLike, ladderHash: BytesLike],
+    [
+      ownerEntity: BytesLike,
+      counterpartyEntity: BytesLike,
+      ladderHash: BytesLike,
+      targetRole: boolean
+    ],
     [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
   getFunction(
     nameOrSignature: "packed"
-  ): TypedContractMethod<[arg0: BytesLike, arg1: BytesLike], [bigint], "view">;
+  ): TypedContractMethod<
+    [arg0: BytesLike, arg1: BytesLike, arg2: BytesLike, arg3: boolean],
+    [bigint],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "setReveal"
   ): TypedContractMethod<
     [
-      entity: BytesLike,
+      ownerEntity: BytesLike,
+      counterpartyEntity: BytesLike,
       ladderHash: BytesLike,
+      targetRole: boolean,
       fillRatio: BigNumberish,
       revealedAt: BigNumberish
     ],

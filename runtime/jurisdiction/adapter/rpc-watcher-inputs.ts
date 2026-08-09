@@ -5,7 +5,10 @@ import { compareStableText } from '../../protocol/serialization';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
   decodeDisputeFinalizationEvidenceCalldata,
+  decodeDisputeProofBodyEvidenceCalldata,
+  resolveDisputeProofBodyEvidence,
   type ExternalWalletTrackedOwnerCursor,
+  type TxDisputeProofBodyEvidence,
   type TxFinalizationEvidence,
 } from './rpc-public';
 import { watcherErrorDetails } from './rpc-boundary';
@@ -13,6 +16,45 @@ import { watcherErrorDetails } from './rpc-boundary';
 export type WatchedErc20Token = {
   tokenId: number;
   address: string;
+};
+
+export type AuthenticatedTxLocation = Readonly<{
+  blockHash: string;
+  blockNumber: number;
+}>;
+
+const readAuthenticatedTransactionCalldata = async (
+  provider: Provider,
+  txHash: string,
+  location: AuthenticatedTxLocation,
+): Promise<string> => {
+  const normalizedHash = txHash.toLowerCase();
+  const tx = await provider.getTransaction(txHash);
+  if (!tx) throw new Error(`J_DISPUTE_TX_MISSING:${normalizedHash}`);
+  const claimedHash = String(tx.hash || '').toLowerCase();
+  if (claimedHash !== normalizedHash) {
+    throw new Error(`J_DISPUTE_TX_HASH_CLAIM_MISMATCH:${normalizedHash}:${claimedHash || 'missing'}`);
+  }
+  let computedHash: string | undefined;
+  try {
+    computedHash = ethers.Transaction.from(tx).hash?.toLowerCase();
+  } catch (error) {
+    throw new Error(`J_DISPUTE_TX_HASH_INVALID:${normalizedHash}`, { cause: error });
+  }
+  if (computedHash !== normalizedHash) {
+    throw new Error(`J_DISPUTE_TX_HASH_INVALID:${normalizedHash}:${computedHash || 'missing'}`);
+  }
+  if (!ethers.isHexString(location.blockHash, 32) || !Number.isSafeInteger(location.blockNumber)) {
+    throw new Error(`J_DISPUTE_TX_LOCATION_INVALID:${normalizedHash}`);
+  }
+  // Receipt-trie membership already proves that this exact transaction hash
+  // occupied the authenticated block. Recomputing the signed transaction hash
+  // binds calldata cryptographically; comparing the RPC's mutable location
+  // metadata is redundant and breaks across honest local reorg/replay where an
+  // identical signed tx is re-mined under the same hash in a different block.
+  const data = typeof tx.data === 'string' ? tx.data : '';
+  if (!data || data === '0x') throw new Error(`J_DISPUTE_TX_CALLDATA_MISSING:${normalizedHash}`);
+  return data;
 };
 
 export const normalizeEvmAddress = (value: unknown): string => {
@@ -98,9 +140,9 @@ export const buildTrackedExternalOwners = (
 
 export const createTxFinalizationEvidenceReader = (
   provider: Provider,
-): ((txHash: string) => Promise<TxFinalizationEvidence[]>) => {
+): ((txHash: string, location: AuthenticatedTxLocation) => Promise<TxFinalizationEvidence[]>) => {
   const cache = new Map<string, Promise<TxFinalizationEvidence[]>>();
-  return async (txHash: string): Promise<TxFinalizationEvidence[]> => {
+  return async (txHash: string, location: AuthenticatedTxLocation): Promise<TxFinalizationEvidence[]> => {
     const normalizedHash = String(txHash || '').toLowerCase();
     if (!normalizedHash || normalizedHash === '0x') throw new Error('J_DISPUTE_FINALIZATION_TX_HASH_MISSING');
     const cached = cache.get(normalizedHash);
@@ -109,11 +151,7 @@ export const createTxFinalizationEvidenceReader = (
       throw new Error('J_DISPUTE_FINALIZATION_TX_LOOKUP_UNAVAILABLE');
     }
     const pending = (async (): Promise<TxFinalizationEvidence[]> => {
-      const tx = await provider.getTransaction(txHash);
-      const data = typeof tx?.data === 'string' ? tx.data : '';
-      if (!data || data === '0x') {
-        throw new Error(`J_DISPUTE_FINALIZATION_TX_CALLDATA_MISSING:${normalizedHash}`);
-      }
+      const data = await readAuthenticatedTransactionCalldata(provider, txHash, location);
       return decodeDisputeFinalizationEvidenceCalldata(data);
     })();
     cache.set(normalizedHash, pending);
@@ -126,6 +164,44 @@ export const createTxFinalizationEvidenceReader = (
     } catch (error) {
       // Rejected promises are never cached: a transient RPC failure must be
       // retryable on the next poll for the same transaction.
+      if (cache.get(normalizedHash) === pending) cache.delete(normalizedHash);
+      throw error;
+    }
+  };
+};
+
+export const createTxDisputeProofBodyReader = (
+  provider: Provider,
+): ((
+  txHash: string,
+  eventName: TxDisputeProofBodyEvidence['eventName'],
+  args: Record<string, unknown>,
+  location: AuthenticatedTxLocation,
+) => Promise<TxDisputeProofBodyEvidence['proofbody']>) => {
+  const cache = new Map<string, Promise<TxDisputeProofBodyEvidence[]>>();
+  return async (txHash, eventName, args, location) => {
+    const normalizedHash = String(txHash || '').toLowerCase();
+    if (!normalizedHash || normalizedHash === '0x') throw new Error('J_DISPUTE_PROOFBODY_TX_HASH_MISSING');
+    let pending = cache.get(normalizedHash);
+    if (!pending) {
+      if (typeof provider.getTransaction !== 'function') {
+        throw new Error('J_DISPUTE_PROOFBODY_TX_LOOKUP_UNAVAILABLE');
+      }
+      pending = (async () => {
+        const data = await readAuthenticatedTransactionCalldata(provider, txHash, location);
+        return decodeDisputeProofBodyEvidenceCalldata(data);
+      })();
+      cache.set(normalizedHash, pending);
+      if (cache.size > 2_000) {
+        const oldest = cache.keys().next().value;
+        if (oldest) cache.delete(oldest);
+      }
+    }
+    try {
+      return resolveDisputeProofBodyEvidence(await pending, eventName, args);
+    } catch (error) {
+      // Never memoize rejection: provider timeouts/429s and evidence lookup
+      // failures must both be retryable on the next canonical poll.
       if (cache.get(normalizedHash) === pending) cache.delete(normalizedHash);
       throw error;
     }

@@ -12,9 +12,15 @@ import type {
   AccountStateDomain,
 } from '../types/account';
 import { decodeAccountFrame } from './frame-validation';
+import { canonicalAccountDisputeConfig } from './dispute-config';
 
 const requireString = (value: unknown, code: string): string => {
   if (typeof value !== 'string' || value.length === 0) throw new Error(code);
+  return value;
+};
+
+const requireBoolean = (value: unknown, code: string): boolean => {
+  if (typeof value !== 'boolean') throw new Error(code);
   return value;
 };
 
@@ -27,11 +33,36 @@ const decodeAccountDomain = (value: unknown, code: string): AccountStateDomain =
   };
 };
 
+const decodeAccountDisputeConfig = (
+  value: unknown,
+  code: string,
+): AccountPeerInput['disputeConfig'] => {
+  const config = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(
+    config,
+    ['leftResponseSeconds', 'rightResponseSeconds'],
+    [],
+    `${code}_FIELDS`,
+  );
+  return canonicalAccountDisputeConfig({
+    leftResponseSeconds: requireBoundaryInteger(
+      config['leftResponseSeconds'],
+      `${code}_LEFT_RESPONSE_SECONDS`,
+      0,
+    ),
+    rightResponseSeconds: requireBoundaryInteger(
+      config['rightResponseSeconds'],
+      `${code}_RIGHT_RESPONSE_SECONDS`,
+      0,
+    ),
+  });
+};
+
 const decodeDisputeSeal = (value: unknown, code: string): AccountDisputeSeal => {
   const seal = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
     seal,
-    ['hash', 'proofBodyHash', 'proofNonce'],
+    ['hash', 'proofBodyHash', 'proofNonce', 'proposerIsLeft'],
     ['hanko'],
     `${code}_FIELDS`,
   );
@@ -42,6 +73,7 @@ const decodeDisputeSeal = (value: unknown, code: string): AccountDisputeSeal => 
     hash: requireString(seal['hash'], `${code}_HASH`),
     proofBodyHash: requireString(seal['proofBodyHash'], `${code}_PROOF_BODY_HASH`),
     proofNonce: requireBoundaryInteger(seal['proofNonce'], `${code}_PROOF_NONCE`),
+    proposerIsLeft: requireBoolean(seal['proposerIsLeft'], `${code}_PROPOSER_IS_LEFT`),
   };
 };
 
@@ -127,17 +159,19 @@ const decodeBoardReseal = (value: unknown, code: string): AccountBoardReseal => 
 export const decodeAccountPeerInput = (value: unknown, code: string): AccountPeerInput => {
   const input = requireBoundaryRecord(value, code);
   const kind = requireString(input['kind'], `${code}_KIND`);
-  const baseKeys = ['kind', 'fromEntityId', 'toEntityId', 'domain'] as const;
+  const baseKeys = ['kind', 'fromEntityId', 'toEntityId', 'domain', 'disputeConfig'] as const;
   const optionalBaseKeys = ['watchSeed'] as const;
   const fromEntityId = requireString(input['fromEntityId'], `${code}_FROM_ENTITY_ID`);
   const toEntityId = requireString(input['toEntityId'], `${code}_TO_ENTITY_ID`);
   const domain = decodeAccountDomain(input['domain'], `${code}_DOMAIN`);
+  const disputeConfig = decodeAccountDisputeConfig(input['disputeConfig'], `${code}_DISPUTE_CONFIG`);
   const watchSeed = input['watchSeed'];
   if (watchSeed !== undefined && typeof watchSeed !== 'string') throw new Error(`${code}_WATCH_SEED`);
   const base = {
     fromEntityId,
     toEntityId,
     domain,
+    disputeConfig,
     ...(watchSeed === undefined ? {} : { watchSeed }),
   };
 

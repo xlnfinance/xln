@@ -6,6 +6,31 @@ pragma solidity ^0.8.24;
  * Both contracts import this to ensure type compatibility
  */
 
+// ========== SHARED ERRORS ==========
+// Selectors are name-derived. Declared once so Account (library) and Depository
+// cannot drift. Depository-only codes (E1/E11/E12) stay on Depository.
+// Account-only errors bubble through Depository's DELEGATECALL boundary. The
+// ABI-only interface below exposes those same zero-argument selectors without
+// unreachable constructor branches.
+
+error E2(); // Unauthorized / StaleNonce
+error E3(); // InsufficientBalance
+error E4(); // InvalidSigner
+error E7(); // InvalidParty
+error E8(); // LengthMismatch / Int256Overflow
+error E10(); // BatchTooLarge
+
+interface IDepositoryDelegateErrorAbi {
+  // E5 is emitted only inside the linked Account library. Keeping the same
+  // selector in Depository's inherited ABI lets operators and tests decode a
+  // bubbled NoActiveDispute failure without a duplicate unreachable branch.
+  error E5(); // NoActiveDispute / VirginAccount
+  error E6(); // DisputeInProgress
+  error E9(); // HashMismatch
+  error TransformerGasBudgetUnavailable();
+  error TransformerExecutionFailed();
+}
+
 // ========== ACCOUNT STATE ==========
 
 struct AccountInfo {
@@ -16,10 +41,28 @@ struct AccountInfo {
   // Different chains have different blockTimes; seconds compare without config
   // conversion. Runtime mirrors these values in ms for scheduling only.
   uint256 disputeTimeout;
-  uint256 disputeStartTimestamp;   // unix start; pull reveal cutoff = start + T/2
+  // Unix start of this exact dispute. A reveal before this timestamp belongs
+  // to an older/no dispute and must never satisfy the newly opened one.
+  uint256 disputeStartTimestamp;
+  // Bilaterally signed response windows frozen from the initial ProofBody.
+  // Protocol unit is always jurisdiction unix seconds. Their sum is the sole
+  // finalization barrier; a newer counter-proof cannot retune an active clock.
+  uint32 leftResponseSeconds;
+  uint32 rightResponseSeconds;
   bytes32 disputeInitialProofbodyHash;
+  bool disputeInitialProposerIsLeft;
+  // Highest mutually signed counter-proof registered before T. Keeping only
+  // nonce+hash prevents the starter from racing an older finalization at T
+  // without storing a potentially 176 KiB ProofBody in contract storage.
+  uint256 disputeCounterNonce;
+  bytes32 disputeCounterProofbodyHash;
+  bool disputeCounterProposerIsLeft;
   bytes32 starterInitialArgumentsCommitment;
-  bytes32 starterIncrementedArgumentsCommitment;
+  bytes32 starterCounterArgumentsCommitment;
+  // Commits the only newer signed branch whose starter-owned positional
+  // arguments were supplied at dispute start. Without this binding, a
+  // non-starter could pair those arguments with a different historical proof.
+  bytes32 starterCounterProofCommitment;
   bool disputeStartedByLeft;
 }
 
@@ -78,6 +121,10 @@ struct TransformerClause {
 
 struct ProofBody {
   bytes32 watchSeed;
+  // Account-level response policy committed by every bilateral Hanko.
+  // Zero is intentional same-block policy; the sum may not exceed 365 days.
+  uint32 leftResponseSeconds;
+  uint32 rightResponseSeconds;
   int[] offdeltas;
   uint[] tokenIds;
   TransformerClause[] transformers;
@@ -88,6 +135,7 @@ struct ProofBody {
 struct InitialDisputeProof {
   bytes32 counterentity;
   uint nonce;              // Unified nonce at time of signing
+  bool proposerIsLeft;     // Signed branch author; LEFT wins equal-nonce collisions
   bytes32 proofbodyHash;
   // Reveal the exact signed body at start. A hash-only start can otherwise
   // commit an arbitrarily large body that no block can later carry to finalize.
@@ -104,21 +152,26 @@ struct InitialDisputeProof {
   bytes starterInitialArguments;
   // Starter-side transformer args for exactly one newer proof body already
   // signed/sent by the starter before opening the dispute. These are not
-  // counterparty args; they are the starter's own args for the incremented
+  // counterparty args; they are the starter's own args for the counter
   // state that the counterparty may reveal in a counter-dispute.
   //
   // Example this prevents: hub signs state N with a 50% fill, then signs N+1
   // with total 75%, user stays offline, hub opens dispute. The initial args
   // must settle N, but if user reveals N+1 the starter side must switch to the
-  // incremented args for N+1. Reusing initial args would underclaim; rebuilding
+  // counter args for N+1. Reusing initial args would underclaim; rebuilding
   // live args would let deleted/reordered off-chain state drift into old proof.
-  bytes starterIncrementedArguments;
+  bytes starterCounterArguments;
+  // Exact identity commitment of the one newer branch paired with
+  // starterCounterArguments: H(nonce, proposerIsLeft, proofbodyHash).
+  // bytes32(0) means no counter branch was admitted at dispute start.
+  bytes32 starterCounterProofCommitment;
 }
 
 struct FinalDisputeProof {
   bytes32 counterentity;
   uint initialNonce;       // Nonce when dispute was started
   uint finalNonce;         // Used for signed finalize paths; unilateral timeout path may keep this equal to initialNonce
+  bool proposerIsLeft;     // Exact author of finalProofbody in the signed proof
   bytes32 initialProofbodyHash;
   ProofBody finalProofbody;
   // Exactly one precommitted starter blob plus the finalizer's optional side.
@@ -131,6 +184,19 @@ struct FinalDisputeProof {
   bytes sig;
   bool startedByLeft;
   bool cooperative;        // if true, skip timeout (mutual agreement)
+}
+
+/// @notice Locks a newer mutually signed state before the execution deadline.
+/// @dev The exact ProofBody is validated and hashed but not stored. At/after T
+///      finalization must resubmit the selected body and matching Hanko.
+struct CounterDisputeProof {
+  bytes32 counterentity;
+  uint initialNonce;
+  bytes32 initialProofbodyHash;
+  uint counterNonce;
+  bool proposerIsLeft;
+  ProofBody counterProofbody;
+  bytes sig;
 }
 
 // ========== BATCH OPERATIONS ==========
@@ -186,18 +252,27 @@ struct SecretReveal {
   bytes32 secret;
 }
 
-// Cross-j hash-ladder reveal: the ONLY on-chain settlement evidence for pulls.
-// Written exclusively through processBatch, so the Depository key is always the
-// authenticated caller: a hub cannot register a ratio under a user's key.
-// The contract verifies the secret material against the ladder commitment and
-// stores only the verified ratio; a caller can assert any ratio, but an
-// unverifiable one reverts the whole batch.
-struct HashLadderReveal {
-  bytes32 fullHash;      // ladder commitment: keccak256(fullSecret)
-  bytes32 partialRoot;   // ladder commitment: keccak256(packed 4 nibble roots)
+// One hash-ladder witness. Commitments and semantic role are never supplied by
+// this wrapper: Depository derives them from the indexed Pull in the exact
+// active, bilaterally signed initial ProofBody.
+struct HashLadderWitness {
   uint16 fillRatio;      // asserted ratio, verified against the commitment
   bytes32 fullSecret;    // used iff fillRatio == 65535
   bytes32[4] reveals;    // nibble reveal nodes, used iff 0 < fillRatio < 65535
+}
+
+struct HashLadderRegistration {
+  // The outer processBatch Hanko authenticates the writing Entity. The other
+  // participant selects the exact ordered Account namespace that
+  // DeltaTransformer later derives from its signed left/right entities. A
+  // false counterparty creates an inert record; it cannot settle the real Account.
+  bytes32 counterpartyEntity;
+  // Role selects an independent write-policy namespace. Financial role,
+  // beneficiary and ladder commitments remain signed inside DeltaTransformer.Pull.
+  bool targetRole;
+  bytes32 fullHash;
+  bytes32 partialRoot;
+  HashLadderWitness witness;
 }
 
 // C2R shortcut - expands to Settlement on-chain (saves calldata)
@@ -217,11 +292,12 @@ struct Batch {
   CollateralToReserve[] collateralToReserve;  // C2R shortcut (expands to Settlement)
   Settlement[] settlements;
   InitialDisputeProof[] disputeStarts;
+  CounterDisputeProof[] counterDisputes;
   FinalDisputeProof[] disputeFinalizations;
   ExternalTokenToReserve[] externalTokenToReserve;
   ReserveToExternalToken[] reserveToExternalToken;
   SecretReveal[] revealSecrets;
-  HashLadderReveal[] hashLadderReveals;
+  HashLadderRegistration[] hashLadderRegistrations;
 }
 
 // ========== ENUMS ==========

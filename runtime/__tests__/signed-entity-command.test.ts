@@ -1150,6 +1150,8 @@ describe('signed Entity command admission', () => {
         tokenId: 2,
         amount: 20n,
       },
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       sourcePull: {
         pullId: 'source-pull', tokenId: 1, amount: 10n, signedAmount: 10n,
         fullHash: entityId('18'), partialRoot: entityId('19'),
@@ -1346,7 +1348,7 @@ describe('signed Entity command admission', () => {
       targetUser,
       [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
       stateFor(targetUser),
-    )).toThrow('RUNTIME_OUTPUT_CROSS_J_INTENT_MUST_USE_ACCOUNT');
+    )).toThrow('CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH:prepareCrossJurisdictionSwap');
     expect(() => assertRuntimeOutputAuthorization(
       sourceUser,
       targetUser,

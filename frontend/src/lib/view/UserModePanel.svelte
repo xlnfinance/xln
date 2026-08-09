@@ -519,15 +519,22 @@
     const targets: OnboardingRuntimeTarget[] = [];
     const targetKeys = new Set<string>();
     const accountCounterpartiesByEntityId: Record<string, string[]> = {};
+    const committedRolesByEntityId: Record<string, boolean> = {};
     const addTarget = (
       rawEntityId: unknown,
       rawSignerId: unknown,
+      isHub: unknown,
       rawJurisdiction: unknown = '',
       rawJurisdictionKey: unknown = '',
     ): void => {
       const entityId = normalizeProjectionId(rawEntityId);
       const signerId = normalizeProjectionId(rawSignerId);
-      if (!entityId || !signerId) return;
+      // Account dispute clocks are signed financial state. An absent profile
+      // role is not evidence that the Entity is a user: coercing `undefined`
+      // to false would permanently bind the 24h user default while a Hub
+      // profile is still in flight. Keep the target unavailable until the
+      // committed profile supplies an exact boolean role.
+      if (!entityId || !signerId || typeof isHub !== 'boolean') return;
       const key = `${entityId}:${signerId}`;
       if (targetKeys.has(key)) return;
       targetKeys.add(key);
@@ -536,6 +543,8 @@
       targets.push({
         entityId,
         signerId,
+        isHub,
+        roleSource: 'committed-profile',
         ...(jurisdiction ? { jurisdiction } : {}),
         ...(jurisdictionKey ? { jurisdictionKey } : {}),
       });
@@ -546,15 +555,26 @@
       const signerId = replicaProjectionSignerId(key, replica);
       if (!entityId) continue;
       accountCounterpartiesByEntityId[entityId] = collectProjectionCounterparties(entityId, replica);
-      addTarget(entityId, signerId, replicaProjectionJurisdictionName(replica), replicaProjectionJurisdictionKey(replica));
+      const committedRole = replica?.state?.profile?.isHub;
+      if (typeof committedRole === 'boolean') committedRolesByEntityId[entityId] = committedRole;
+      addTarget(
+        entityId,
+        signerId,
+        committedRole,
+        replicaProjectionJurisdictionName(replica),
+        replicaProjectionJurisdictionKey(replica),
+      );
     }
 
-    addTarget(
-      selectedEntityId,
-      selectedSignerId,
-      selectedReplicaJurisdiction,
-      replicaProjectionJurisdictionKey(selectedReplica),
-    );
+    if (selectedReplica) {
+      addTarget(
+        selectedEntityId,
+        selectedSignerId,
+        selectedReplica.state.profile?.isHub,
+        selectedReplicaJurisdiction,
+        replicaProjectionJurisdictionKey(selectedReplica),
+      );
+    }
 
     for (const runtimeSigner of $activeRuntimeStore?.signers || []) {
       const signerEntityId = normalizeProjectionId(runtimeSigner.entityId);
@@ -564,12 +584,15 @@
         : signerAddress
           ? findReplicaBySigner(currentFrame, signerAddress, runtimeSigner.jurisdiction)
           : null;
-      addTarget(
-        signerEntityId || matchingReplica?.entityId,
-        signerAddress || matchingReplica?.signerId,
-        runtimeSigner.jurisdiction || replicaProjectionJurisdictionName(matchingReplica),
-        replicaProjectionJurisdictionKey(matchingReplica),
-      );
+      if (matchingReplica) {
+        addTarget(
+          signerEntityId || matchingReplica.entityId,
+          signerAddress || matchingReplica.signerId,
+          matchingReplica.state.profile?.isHub,
+          runtimeSigner.jurisdiction || replicaProjectionJurisdictionName(matchingReplica),
+          replicaProjectionJurisdictionKey(matchingReplica),
+        );
+      }
     }
 
     const hubCandidates: OnboardingHubCandidate[] = [];
@@ -583,6 +606,7 @@
       hubCandidates.push({
         entityId,
         isHub: true,
+        roleSource: 'committed-profile',
         jurisdiction: replicaProjectionJurisdictionName(replica),
         jurisdictionKey: replicaProjectionJurisdictionKey(replica),
         runtimeId: String(currentFrame?.runtimeId || ''),
@@ -595,6 +619,7 @@
       activeJurisdictionName: getFrameActiveJurisdiction(currentFrame) || selectedReplicaJurisdiction,
       hubCandidates,
       accountCounterpartiesByEntityId,
+      committedRolesByEntityId,
     };
   });
 
@@ -893,7 +918,6 @@
     <!-- Onboarding Screen 2: configure account only; wallet/seed state already exists. -->
     <OnboardingPanel
       entityId={selectedEntityId}
-      signerId={selectedSignerId}
       runtimeProjection={onboardingRuntimeProjection}
       on:complete={handleOnboardingComplete}
     />

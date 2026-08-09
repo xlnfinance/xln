@@ -119,6 +119,8 @@ export type TransformerClauseStructOutput = [
 
 export type ProofBodyStruct = {
   watchSeed: BytesLike;
+  leftResponseSeconds: BigNumberish;
+  rightResponseSeconds: BigNumberish;
   offdeltas: BigNumberish[];
   tokenIds: BigNumberish[];
   transformers: TransformerClauseStruct[];
@@ -126,11 +128,15 @@ export type ProofBodyStruct = {
 
 export type ProofBodyStructOutput = [
   watchSeed: string,
+  leftResponseSeconds: bigint,
+  rightResponseSeconds: bigint,
   offdeltas: bigint[],
   tokenIds: bigint[],
   transformers: TransformerClauseStructOutput[]
 ] & {
   watchSeed: string;
+  leftResponseSeconds: bigint;
+  rightResponseSeconds: bigint;
   offdeltas: bigint[];
   tokenIds: bigint[];
   transformers: TransformerClauseStructOutput[];
@@ -140,6 +146,7 @@ export type FinalDisputeProofStruct = {
   counterentity: BytesLike;
   initialNonce: BigNumberish;
   finalNonce: BigNumberish;
+  proposerIsLeft: boolean;
   initialProofbodyHash: BytesLike;
   finalProofbody: ProofBodyStruct;
   starterArguments: BytesLike;
@@ -153,6 +160,7 @@ export type FinalDisputeProofStructOutput = [
   counterentity: string,
   initialNonce: bigint,
   finalNonce: bigint,
+  proposerIsLeft: boolean,
   initialProofbodyHash: string,
   finalProofbody: ProofBodyStructOutput,
   starterArguments: string,
@@ -164,6 +172,7 @@ export type FinalDisputeProofStructOutput = [
   counterentity: string;
   initialNonce: bigint;
   finalNonce: bigint;
+  proposerIsLeft: boolean;
   initialProofbodyHash: string;
   finalProofbody: ProofBodyStructOutput;
   starterArguments: string;
@@ -186,20 +195,16 @@ export interface DepositoryInterface extends Interface {
       | "_reserves"
       | "_tokens"
       | "accountKey"
-      | "admin"
       | "adminRegisterExternalToken"
       | "computeWatchtowerCounterDisputeHash"
       | "debtOutstanding"
-      | "decodeTransformerArgumentListStrict"
-      | "defaultDisputeDelay"
+      | "deltaTransformer"
       | "enforceDebts"
       | "entityNonces"
       | "entityProvider"
       | "getHashLadderReveal"
       | "getTokensLength"
-      | "hashLadderReveals"
       | "mintToReserve"
-      | "onERC1155BatchReceived"
       | "onERC1155Received"
       | "processBatch"
       | "registerExternalToken"
@@ -211,6 +216,7 @@ export interface DepositoryInterface extends Interface {
     nameOrSignatureOrTopic:
       | "AccountSettled"
       | "CooperativeClose"
+      | "CounterDisputeRegistered"
       | "DebtCreated"
       | "DebtEnforced"
       | "DebtForgiven"
@@ -265,7 +271,6 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "accountKey",
     values: [BytesLike, BytesLike]
   ): string;
-  encodeFunctionData(functionFragment: "admin", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "adminRegisterExternalToken",
     values: [ExternalTokenToReserveStruct]
@@ -287,11 +292,7 @@ export interface DepositoryInterface extends Interface {
     values: [BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "decodeTransformerArgumentListStrict",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "defaultDisputeDelay",
+    functionFragment: "deltaTransformer",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -308,29 +309,15 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "getHashLadderReveal",
-    values: [BytesLike, BytesLike]
+    values: [BytesLike, BytesLike, BytesLike, boolean]
   ): string;
   encodeFunctionData(
     functionFragment: "getTokensLength",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "hashLadderReveals",
-    values: [BytesLike, BytesLike]
-  ): string;
-  encodeFunctionData(
     functionFragment: "mintToReserve",
     values: [BytesLike, BigNumberish, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "onERC1155BatchReceived",
-    values: [
-      AddressLike,
-      AddressLike,
-      BigNumberish[],
-      BigNumberish[],
-      BytesLike
-    ]
   ): string;
   encodeFunctionData(
     functionFragment: "onERC1155Received",
@@ -381,7 +368,6 @@ export interface DepositoryInterface extends Interface {
   decodeFunctionResult(functionFragment: "_reserves", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "_tokens", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "accountKey", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "admin", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "adminRegisterExternalToken",
     data: BytesLike
@@ -395,11 +381,7 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "decodeTransformerArgumentListStrict",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "defaultDisputeDelay",
+    functionFragment: "deltaTransformer",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -423,15 +405,7 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "hashLadderReveals",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "mintToReserve",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "onERC1155BatchReceived",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -480,6 +454,34 @@ export namespace CooperativeCloseEvent {
     sender: string;
     counterentity: string;
     nonce: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace CounterDisputeRegisteredEvent {
+  export type InputTuple = [
+    sender: BytesLike,
+    counterentity: BytesLike,
+    nonce: BigNumberish,
+    proposerIsLeft: boolean,
+    proofbodyHash: BytesLike
+  ];
+  export type OutputTuple = [
+    sender: string,
+    counterentity: string,
+    nonce: bigint,
+    proposerIsLeft: boolean,
+    proofbodyHash: string
+  ];
+  export interface OutputObject {
+    sender: string;
+    counterentity: string;
+    nonce: bigint;
+    proposerIsLeft: boolean;
+    proofbodyHash: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -579,22 +581,22 @@ export namespace DisputeFinalizedEvent {
     sender: BytesLike,
     counterentity: BytesLike,
     nonce: BigNumberish,
-    initialProofbodyHash: BytesLike,
-    finalProofbodyHash: BytesLike
+    finalProofbodyHash: BytesLike,
+    finalizationEvidenceHash: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
     nonce: bigint,
-    initialProofbodyHash: string,
-    finalProofbodyHash: string
+    finalProofbodyHash: string,
+    finalizationEvidenceHash: string
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
     nonce: bigint;
-    initialProofbodyHash: string;
     finalProofbodyHash: string;
+    finalizationEvidenceHash: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -607,34 +609,46 @@ export namespace DisputeStartedEvent {
     sender: BytesLike,
     counterentity: BytesLike,
     nonce: BigNumberish,
+    proposerIsLeft: boolean,
     proofbodyHash: BytesLike,
     watchSeed: BytesLike,
     starterInitialArguments: BytesLike,
-    starterIncrementedArguments: BytesLike,
+    starterCounterArguments: BytesLike,
+    starterCounterProofCommitment: BytesLike,
     disputeTimeout: BigNumberish,
-    disputeStartTimestamp: BigNumberish
+    disputeStartTimestamp: BigNumberish,
+    leftResponseSeconds: BigNumberish,
+    rightResponseSeconds: BigNumberish
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
     nonce: bigint,
+    proposerIsLeft: boolean,
     proofbodyHash: string,
     watchSeed: string,
     starterInitialArguments: string,
-    starterIncrementedArguments: string,
+    starterCounterArguments: string,
+    starterCounterProofCommitment: string,
     disputeTimeout: bigint,
-    disputeStartTimestamp: bigint
+    disputeStartTimestamp: bigint,
+    leftResponseSeconds: bigint,
+    rightResponseSeconds: bigint
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
     nonce: bigint;
+    proposerIsLeft: boolean;
     proofbodyHash: string;
     watchSeed: string;
     starterInitialArguments: string;
-    starterIncrementedArguments: string;
+    starterCounterArguments: string;
+    starterCounterProofCommitment: string;
     disputeTimeout: bigint;
     disputeStartTimestamp: bigint;
+    leftResponseSeconds: bigint;
+    rightResponseSeconds: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -667,24 +681,33 @@ export namespace HankoBatchProcessedEvent {
 export namespace HashLadderRevealRegisteredEvent {
   export type InputTuple = [
     entity: BytesLike,
+    counterpartyEntity: BytesLike,
     ladderHash: BytesLike,
     fillRatio: BigNumberish,
     fullSecret: BytesLike,
-    reveals: [BytesLike, BytesLike, BytesLike, BytesLike]
+    reveals: [BytesLike, BytesLike, BytesLike, BytesLike],
+    targetRole: boolean,
+    revealedAt: BigNumberish
   ];
   export type OutputTuple = [
     entity: string,
+    counterpartyEntity: string,
     ladderHash: string,
     fillRatio: bigint,
     fullSecret: string,
-    reveals: [string, string, string, string]
+    reveals: [string, string, string, string],
+    targetRole: boolean,
+    revealedAt: bigint
   ];
   export interface OutputObject {
     entity: string;
+    counterpartyEntity: string;
     ladderHash: string;
     fillRatio: bigint;
     fullSecret: string;
     reveals: [string, string, string, string];
+    targetRole: boolean;
+    revealedAt: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -874,14 +897,37 @@ export interface Depository extends BaseContract {
   _accounts: TypedContractMethod<
     [arg0: BytesLike],
     [
-      [bigint, string, bigint, bigint, string, string, string, boolean] & {
+      [
+        bigint,
+        string,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        string,
+        boolean,
+        bigint,
+        string,
+        boolean,
+        string,
+        string,
+        string,
+        boolean
+      ] & {
         nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
         disputeStartTimestamp: bigint;
+        leftResponseSeconds: bigint;
+        rightResponseSeconds: bigint;
         disputeInitialProofbodyHash: string;
+        disputeInitialProposerIsLeft: boolean;
+        disputeCounterNonce: bigint;
+        disputeCounterProofbodyHash: string;
+        disputeCounterProposerIsLeft: boolean;
         starterInitialArgumentsCommitment: string;
-        starterIncrementedArgumentsCommitment: string;
+        starterCounterArgumentsCommitment: string;
+        starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
       }
     ],
@@ -936,8 +982,6 @@ export interface Depository extends BaseContract {
     "view"
   >;
 
-  admin: TypedContractMethod<[], [string], "view">;
-
   adminRegisterExternalToken: TypedContractMethod<
     [params: ExternalTokenToReserveStruct],
     [void],
@@ -951,7 +995,7 @@ export interface Depository extends BaseContract {
       counterentity: BytesLike,
       finalNonce: BigNumberish,
       finalProofbodyHash: BytesLike,
-      lastResortWindowBlocks: BigNumberish,
+      lastResortWindowSeconds: BigNumberish,
       appointmentSequence: BigNumberish
     ],
     [string],
@@ -964,13 +1008,7 @@ export interface Depository extends BaseContract {
     "view"
   >;
 
-  decodeTransformerArgumentListStrict: TypedContractMethod<
-    [encoded: BytesLike],
-    [string[]],
-    "view"
-  >;
-
-  defaultDisputeDelay: TypedContractMethod<[], [bigint], "view">;
+  deltaTransformer: TypedContractMethod<[], [string], "view">;
 
   enforceDebts: TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, maxIterations: BigNumberish],
@@ -983,35 +1021,22 @@ export interface Depository extends BaseContract {
   entityProvider: TypedContractMethod<[], [string], "view">;
 
   getHashLadderReveal: TypedContractMethod<
-    [entity: BytesLike, ladderHash: BytesLike],
+    [
+      ownerEntity: BytesLike,
+      counterpartyEntity: BytesLike,
+      ladderHash: BytesLike,
+      targetRole: boolean
+    ],
     [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
 
   getTokensLength: TypedContractMethod<[], [bigint], "view">;
 
-  hashLadderReveals: TypedContractMethod<
-    [arg0: BytesLike, arg1: BytesLike],
-    [bigint],
-    "view"
-  >;
-
   mintToReserve: TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
     [void],
     "nonpayable"
-  >;
-
-  onERC1155BatchReceived: TypedContractMethod<
-    [
-      arg0: AddressLike,
-      arg1: AddressLike,
-      arg2: BigNumberish[],
-      arg3: BigNumberish[],
-      arg4: BytesLike
-    ],
-    [string],
-    "view"
   >;
 
   onERC1155Received: TypedContractMethod<
@@ -1048,7 +1073,7 @@ export interface Depository extends BaseContract {
     [
       entityId: BytesLike,
       params: FinalDisputeProofStruct,
-      lastResortWindowBlocks: BigNumberish,
+      lastResortWindowSeconds: BigNumberish,
       appointmentSequence: BigNumberish,
       ownerAuthorizationHanko: BytesLike
     ],
@@ -1071,14 +1096,37 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<
     [arg0: BytesLike],
     [
-      [bigint, string, bigint, bigint, string, string, string, boolean] & {
+      [
+        bigint,
+        string,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        string,
+        boolean,
+        bigint,
+        string,
+        boolean,
+        string,
+        string,
+        string,
+        boolean
+      ] & {
         nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
         disputeStartTimestamp: bigint;
+        leftResponseSeconds: bigint;
+        rightResponseSeconds: bigint;
         disputeInitialProofbodyHash: string;
+        disputeInitialProposerIsLeft: boolean;
+        disputeCounterNonce: bigint;
+        disputeCounterProofbodyHash: string;
+        disputeCounterProposerIsLeft: boolean;
         starterInitialArgumentsCommitment: string;
-        starterIncrementedArgumentsCommitment: string;
+        starterCounterArgumentsCommitment: string;
+        starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
       }
     ],
@@ -1136,9 +1184,6 @@ export interface Depository extends BaseContract {
     nameOrSignature: "accountKey"
   ): TypedContractMethod<[e1: BytesLike, e2: BytesLike], [string], "view">;
   getFunction(
-    nameOrSignature: "admin"
-  ): TypedContractMethod<[], [string], "view">;
-  getFunction(
     nameOrSignature: "adminRegisterExternalToken"
   ): TypedContractMethod<
     [params: ExternalTokenToReserveStruct],
@@ -1154,7 +1199,7 @@ export interface Depository extends BaseContract {
       counterentity: BytesLike,
       finalNonce: BigNumberish,
       finalProofbodyHash: BytesLike,
-      lastResortWindowBlocks: BigNumberish,
+      lastResortWindowSeconds: BigNumberish,
       appointmentSequence: BigNumberish
     ],
     [string],
@@ -1168,11 +1213,8 @@ export interface Depository extends BaseContract {
     "view"
   >;
   getFunction(
-    nameOrSignature: "decodeTransformerArgumentListStrict"
-  ): TypedContractMethod<[encoded: BytesLike], [string[]], "view">;
-  getFunction(
-    nameOrSignature: "defaultDisputeDelay"
-  ): TypedContractMethod<[], [bigint], "view">;
+    nameOrSignature: "deltaTransformer"
+  ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "enforceDebts"
   ): TypedContractMethod<
@@ -1189,7 +1231,12 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "getHashLadderReveal"
   ): TypedContractMethod<
-    [entity: BytesLike, ladderHash: BytesLike],
+    [
+      ownerEntity: BytesLike,
+      counterpartyEntity: BytesLike,
+      ladderHash: BytesLike,
+      targetRole: boolean
+    ],
     [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
@@ -1197,27 +1244,11 @@ export interface Depository extends BaseContract {
     nameOrSignature: "getTokensLength"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
-    nameOrSignature: "hashLadderReveals"
-  ): TypedContractMethod<[arg0: BytesLike, arg1: BytesLike], [bigint], "view">;
-  getFunction(
     nameOrSignature: "mintToReserve"
   ): TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
     [void],
     "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "onERC1155BatchReceived"
-  ): TypedContractMethod<
-    [
-      arg0: AddressLike,
-      arg1: AddressLike,
-      arg2: BigNumberish[],
-      arg3: BigNumberish[],
-      arg4: BytesLike
-    ],
-    [string],
-    "view"
   >;
   getFunction(
     nameOrSignature: "onERC1155Received"
@@ -1259,7 +1290,7 @@ export interface Depository extends BaseContract {
     [
       entityId: BytesLike,
       params: FinalDisputeProofStruct,
-      lastResortWindowBlocks: BigNumberish,
+      lastResortWindowSeconds: BigNumberish,
       appointmentSequence: BigNumberish,
       ownerAuthorizationHanko: BytesLike
     ],
@@ -1280,6 +1311,13 @@ export interface Depository extends BaseContract {
     CooperativeCloseEvent.InputTuple,
     CooperativeCloseEvent.OutputTuple,
     CooperativeCloseEvent.OutputObject
+  >;
+  getEvent(
+    key: "CounterDisputeRegistered"
+  ): TypedContractEvent<
+    CounterDisputeRegisteredEvent.InputTuple,
+    CounterDisputeRegisteredEvent.OutputTuple,
+    CounterDisputeRegisteredEvent.OutputObject
   >;
   getEvent(
     key: "DebtCreated"
@@ -1389,6 +1427,17 @@ export interface Depository extends BaseContract {
       CooperativeCloseEvent.OutputObject
     >;
 
+    "CounterDisputeRegistered(bytes32,bytes32,uint256,bool,bytes32)": TypedContractEvent<
+      CounterDisputeRegisteredEvent.InputTuple,
+      CounterDisputeRegisteredEvent.OutputTuple,
+      CounterDisputeRegisteredEvent.OutputObject
+    >;
+    CounterDisputeRegistered: TypedContractEvent<
+      CounterDisputeRegisteredEvent.InputTuple,
+      CounterDisputeRegisteredEvent.OutputTuple,
+      CounterDisputeRegisteredEvent.OutputObject
+    >;
+
     "DebtCreated(bytes32,bytes32,uint256,uint256,uint256)": TypedContractEvent<
       DebtCreatedEvent.InputTuple,
       DebtCreatedEvent.OutputTuple,
@@ -1433,7 +1482,7 @@ export interface Depository extends BaseContract {
       DisputeFinalizedEvent.OutputObject
     >;
 
-    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes32,bytes,bytes,uint256,uint256)": TypedContractEvent<
+    "DisputeStarted(bytes32,bytes32,uint256,bool,bytes32,bytes32,bytes,bytes,bytes32,uint256,uint256,uint32,uint32)": TypedContractEvent<
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject
@@ -1455,7 +1504,7 @@ export interface Depository extends BaseContract {
       HankoBatchProcessedEvent.OutputObject
     >;
 
-    "HashLadderRevealRegistered(bytes32,bytes32,uint16,bytes32,bytes32[4])": TypedContractEvent<
+    "HashLadderRevealRegistered(bytes32,bytes32,bytes32,uint16,bytes32,bytes32[4],bool,uint256)": TypedContractEvent<
       HashLadderRevealRegisteredEvent.InputTuple,
       HashLadderRevealRegisteredEvent.OutputTuple,
       HashLadderRevealRegisteredEvent.OutputObject

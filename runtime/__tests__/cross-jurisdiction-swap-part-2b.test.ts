@@ -66,7 +66,7 @@ import {
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
-  buildPreparedCrossJurisdictionRoute,
+  buildPreparedCrossJurisdictionRoute as buildPreparedCrossJurisdictionRouteCanonical,
   deriveCrossJurisdictionPrivateSeed,
   deriveCrossJurisdictionRouteHash,
   hasCrossJurisdictionCommittedFill,
@@ -75,11 +75,34 @@ import {
   projectCrossJurisdictionQuantizedClaim,
   validateCrossJurisdictionFillProgress,
   validateCrossJurisdictionQuantization,
-  withCanonicalCrossJurisdictionRouteHash,
+  withCanonicalCrossJurisdictionRouteHash as withCanonicalCrossJurisdictionRouteHashCanonical,
   withCrossJurisdictionClaimProgress,
   withCrossJurisdictionCloseProofProgress,
+  cloneCrossJurisdictionCloseProof,
   cloneCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
+
+const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
+type TestRouteInput = Omit<CrossJurisdictionSwapRoute, 'sourceDisputeConfig' | 'targetDisputeConfig'>;
+// Explicit fixture policy; production rejects a route that omits either
+// bilateral Account clock instead of supplying compatibility defaults.
+const withFixtureDisputeConfig = (route: TestRouteInput): CrossJurisdictionSwapRoute => ({
+  ...route,
+  sourceDisputeConfig: TEST_DISPUTE_CONFIG,
+  targetDisputeConfig: TEST_DISPUTE_CONFIG,
+} as CrossJurisdictionSwapRoute);
+const buildPreparedCrossJurisdictionRoute = (
+  route: TestRouteInput,
+  options: { runtimeSeed?: string; now: number },
+): CrossJurisdictionSwapRoute => buildPreparedCrossJurisdictionRouteCanonical(
+  withFixtureDisputeConfig(route),
+  options,
+);
+const withCanonicalCrossJurisdictionRouteHash = (
+  route: TestRouteInput,
+): CrossJurisdictionSwapRoute => withCanonicalCrossJurisdictionRouteHashCanonical(
+  withFixtureDisputeConfig(route),
+);
 
 import {
   buildCrossJurisdictionCancelAck,
@@ -201,6 +224,29 @@ const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
 });
 
 describe('cross-jurisdiction hashledger swap', () => {
+  test('close-proof cloning rejects non-canonical ratio and mode instead of rewriting evidence', () => {
+    const valid = {
+      orderId: 'clone-proof',
+      routeHash: `0x${'11'.repeat(32)}`,
+      sourcePullId: 'source-pull',
+      targetPullId: 'target-pull',
+      fillRatio: 1,
+      cumulativeSourceAmount: 1n,
+      cumulativeTargetAmount: 1n,
+      binaryHash: `0x${'22'.repeat(32)}`,
+      closeMode: 'partial_cancel_remainder' as const,
+    };
+    expect(cloneCrossJurisdictionCloseProof(valid)).toEqual(valid);
+    expect(() => cloneCrossJurisdictionCloseProof({ ...valid, fillRatio: 65_536 }))
+      .toThrow('CROSS_J_CLOSE_PROOF_FILL_RATIO_INVALID');
+    expect(() => cloneCrossJurisdictionCloseProof({ ...valid, fillRatio: 1.5 }))
+      .toThrow('CROSS_J_CLOSE_PROOF_FILL_RATIO_INVALID');
+    expect(() => cloneCrossJurisdictionCloseProof({
+      ...valid,
+      closeMode: 'legacy_cancel' as never,
+    })).toThrow('CROSS_J_CLOSE_PROOF_MODE_INVALID');
+  });
+
   const makeTargetDisputeRouteSelectionFixture = (scenario: string) => {
     const env = createEmptyEnv(scenario);
     env.scenarioMode = true;

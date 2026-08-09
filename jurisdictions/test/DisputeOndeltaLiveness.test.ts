@@ -7,6 +7,7 @@ import {
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
   deriveHardhatPrivateKey,
+  deployDepositoryStack,
   deployEntityProvider,
   emptyBatch,
   encodeBatch,
@@ -19,7 +20,7 @@ const DISPUTE_PROOF = 1;
 const INT256_MAX = (1n << 255n) - 1n;
 const WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('xln:ondelta-liveness'));
 const PROOF_BODY_ABI =
-  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
+  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
 type Actor = Readonly<{
   signer: HardhatEthersSigner;
@@ -39,15 +40,13 @@ const orderedActors = (first: Actor, second: Actor): [Actor, Actor] =>
 const deployFixture = async () => {
   const [signer0, signer1] = await ethers.getSigners();
   const entityProvider = await deployEntityProvider(signer0.address);
-  const accountFactory = await ethers.getContractFactory('Account');
-  const account = await accountFactory.deploy();
-  await account.waitForDeployment();
-  const depositoryFactory = await ethers.getContractFactory('Depository', {
-    libraries: { Account: await account.getAddress() },
-  });
-  const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), 5760) as Depository;
-  await depository.waitForDeployment();
+  const { depository } = await deployDepositoryStack(await entityProvider.getAddress());
   return { depository, signer0, signer1 };
+};
+
+const advancePastTimeout = async (depository: Depository, left: string, right: string): Promise<void> => {
+  const timeout = (await depository._accounts(await depository.accountKey(left, right))).disputeTimeout;
+  if (BigInt(await time.latest()) <= timeout) await time.increaseTo(Number(timeout + 1n));
 };
 
 const registerFixedErc20 = async (depository: Depository, supply: bigint) => {
@@ -82,11 +81,12 @@ const disputeProofHash = async (
   accountKey: string,
   nonce: bigint,
   proofbodyHash: string,
+  proposerIsLeft = false,
 ): Promise<string> => {
   const chainId = (await ethers.provider.getNetwork()).chainId;
   return ethers.keccak256(abi.encode(
-    ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-    [DISPUTE_PROOF, chainId, await depository.getAddress(), accountKey, nonce, proofbodyHash, WATCH_SEED],
+    ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
+    [DISPUTE_PROOF, chainId, await depository.getAddress(), accountKey, nonce, proposerIsLeft, proofbodyHash, WATCH_SEED],
   ));
 };
 
@@ -129,6 +129,8 @@ describe('dispute ondelta liveness', function () {
     const transformer = right.signer.address;
     const proofbody = {
       watchSeed: WATCH_SEED,
+      leftResponseSeconds: 2,
+      rightResponseSeconds: 3,
       offdeltas: [signedOffdelta],
       tokenIds: [tokenId],
       transformers: [{ transformerAddress: transformer, encodedBatch: '0x', allowances: [] }],
@@ -145,7 +147,8 @@ describe('dispute ondelta liveness', function () {
         watchSeed: WATCH_SEED,
         sig: innerHanko,
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     }));
 
@@ -161,7 +164,7 @@ describe('dispute ondelta liveness', function () {
     }));
     expect((await depository._accounts(accountKey)).nonce).to.equal(proofNonce);
 
-    await time.increase(Number(await depository.defaultDisputeDelay()));
+    await advancePastTimeout(depository, left.entityId, right.entityId);
     await expect(processBatch(depository, left, emptyBatch({
       disputeFinalizations: [{
         counterentity: right.entityId,
@@ -206,6 +209,8 @@ describe('dispute ondelta liveness', function () {
 
     const proofbody = {
       watchSeed: WATCH_SEED,
+      leftResponseSeconds: 2,
+      rightResponseSeconds: 3,
       offdeltas: [signedOffdelta],
       tokenIds: [tokenId],
       transformers: [],
@@ -222,10 +227,11 @@ describe('dispute ondelta liveness', function () {
         watchSeed: WATCH_SEED,
         sig: innerHanko,
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     }));
-    await time.increase(Number(await depository.defaultDisputeDelay()));
+    await advancePastTimeout(depository, left.entityId, right.entityId);
 
     await expect(processBatch(depository, left, emptyBatch({
       disputeFinalizations: [{
@@ -272,6 +278,8 @@ describe('dispute ondelta liveness', function () {
       const debtorIsLeft = BigInt(debtor.entityId) < BigInt(creditor.entityId);
       const proofbody = {
         watchSeed: WATCH_SEED,
+        leftResponseSeconds: 2,
+        rightResponseSeconds: 3,
         offdeltas: [debtorIsLeft ? -requestedDebts[index]! : requestedDebts[index]!],
         tokenIds: [tokenId],
         transformers: [],
@@ -297,10 +305,13 @@ describe('dispute ondelta liveness', function () {
         watchSeed: WATCH_SEED,
         sig: dispute.innerHanko,
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       })),
     }));
-    await time.increase(Number(await depository.defaultDisputeDelay()));
+    for (const dispute of disputes) {
+      await advancePastTimeout(depository, debtor.entityId, dispute.creditor.entityId);
+    }
 
     for (let index = 0; index < disputes.length; index++) {
       const dispute = disputes[index]!;
@@ -365,6 +376,8 @@ describe('dispute ondelta liveness', function () {
     const debtorIsLeft = BigInt(debtor.entityId) < BigInt(creditor.entityId);
     const proofbody = {
       watchSeed: WATCH_SEED,
+      leftResponseSeconds: 2,
+      rightResponseSeconds: 3,
       offdeltas: [debtorIsLeft ? -requested : requested],
       tokenIds: [tokenId],
       transformers: [],
@@ -382,10 +395,11 @@ describe('dispute ondelta liveness', function () {
         watchSeed: WATCH_SEED,
         sig: innerHanko,
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     }));
-    await time.increase(Number(await depository.defaultDisputeDelay()));
+    await advancePastTimeout(depository, debtor.entityId, creditor.entityId);
     await expect(processBatch(depository, debtor, emptyBatch({
       disputeFinalizations: [{
         counterentity: creditor.entityId,
@@ -420,6 +434,8 @@ describe('dispute ondelta liveness', function () {
       const debtorIsLeft = BigInt(debtor.entityId) < BigInt(creditor.entityId);
       const proofbody = {
         watchSeed: WATCH_SEED,
+        leftResponseSeconds: 2,
+        rightResponseSeconds: 3,
         offdeltas: [debtorIsLeft ? -60n : 60n],
         tokenIds: [tokenId],
         transformers: [],
@@ -435,10 +451,11 @@ describe('dispute ondelta liveness', function () {
           watchSeed: WATCH_SEED,
           sig: buildSingleSignerHanko(creditor.entityId, innerHash, creditor.privateKey),
           starterInitialArguments: '0x',
-          starterIncrementedArguments: '0x',
+          starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         }],
       }));
-      await time.increase(Number(await depository.defaultDisputeDelay()));
+      await advancePastTimeout(depository, debtor.entityId, creditor.entityId);
       await token.setMode(mode);
 
       await expect(processBatch(depository, debtor, emptyBatch({

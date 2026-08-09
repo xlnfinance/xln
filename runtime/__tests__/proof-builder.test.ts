@@ -5,6 +5,7 @@ import {
   createDisputeProofHash,
   createDisputeProofHashWithNonce,
 } from '../protocol/dispute/proof-builder';
+import { proofBodyHasPulls } from '../entity/tx/handlers/dispute/start-admission';
 
 const DEPOSITORY = '0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1';
 const HANKO_DOMAIN = { chainId: 31337, depositoryAddress: DEPOSITORY } as const;
@@ -22,6 +23,7 @@ describe('proof-builder dispute hash', () => {
       swapOffers: new Map(),
       pulls: new Map(),
       watchSeed: TEST_WATCH_SEED,
+      disputeConfig: { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 },
       ...(input instanceof Map ? { deltas: input } : input),
     },
     proofHeader: { nextProofNonce: 1 },
@@ -48,15 +50,15 @@ describe('proof-builder dispute hash', () => {
     );
     const expected = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
-        ['uint256', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-        [1, HANKO_DOMAIN.chainId, DEPOSITORY, sortedKey, 1, PROOF_BODY_HASH, TEST_WATCH_SEED],
+        ['uint256', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
+        [1, HANKO_DOMAIN.chainId, DEPOSITORY, sortedKey, 1, true, PROOF_BODY_HASH, TEST_WATCH_SEED],
       ),
     );
 
-    expect(createDisputeProofHash(leftOriented, PROOF_BODY_HASH, HANKO_DOMAIN)).toBe(expected);
-    expect(createDisputeProofHash(rightOriented, PROOF_BODY_HASH, HANKO_DOMAIN)).toBe(expected);
-    expect(createDisputeProofHashWithNonce(leftOriented.state, PROOF_BODY_HASH, HANKO_DOMAIN, 1)).toBe(expected);
-    expect(createDisputeProofHashWithNonce(rightOriented.state, PROOF_BODY_HASH, HANKO_DOMAIN, 1)).toBe(expected);
+    expect(createDisputeProofHash(leftOriented, PROOF_BODY_HASH, HANKO_DOMAIN, true)).toBe(expected);
+    expect(createDisputeProofHash(rightOriented, PROOF_BODY_HASH, HANKO_DOMAIN, true)).toBe(expected);
+    expect(createDisputeProofHashWithNonce(leftOriented.state, PROOF_BODY_HASH, HANKO_DOMAIN, 1, true)).toBe(expected);
+    expect(createDisputeProofHashWithNonce(rightOriented.state, PROOF_BODY_HASH, HANKO_DOMAIN, 1, true)).toBe(expected);
   });
 
   test('fails fast when depository address is missing', () => {
@@ -65,8 +67,8 @@ describe('proof-builder dispute hash', () => {
       '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
     );
     const missingAddress = { chainId: 31337, depositoryAddress: '' };
-    expect(() => createDisputeProofHash(account, PROOF_BODY_HASH, missingAddress)).toThrow('INVALID_HANKO_DEPOSITORY_ADDRESS:missing');
-    expect(() => createDisputeProofHashWithNonce(account.state, PROOF_BODY_HASH, missingAddress, 1)).toThrow(
+    expect(() => createDisputeProofHash(account, PROOF_BODY_HASH, missingAddress, true)).toThrow('INVALID_HANKO_DEPOSITORY_ADDRESS:missing');
+    expect(() => createDisputeProofHashWithNonce(account.state, PROOF_BODY_HASH, missingAddress, 1, true)).toThrow(
       'INVALID_HANKO_DEPOSITORY_ADDRESS:missing',
     );
   });
@@ -80,6 +82,7 @@ describe('proof-builder dispute hash', () => {
       account,
       PROOF_BODY_HASH,
       { chainId: 0, depositoryAddress: DEPOSITORY },
+      true,
     )).toThrow('INVALID_HANKO_DOMAIN_CHAIN_ID:0');
   });
 
@@ -241,6 +244,88 @@ describe('proof-builder dispute hash', () => {
       { deltaIndex: 1, rightAllowance: 0n, leftAllowance: 32n },
       { deltaIndex: 2, rightAllowance: 0n, leftAllowance: 23n },
     ]);
+  });
+
+  test('encodes source vs target registry roles on pulls', () => {
+    const accountMachine = proofAccount({
+      deltas: new Map([[1, { offdelta: 0n }]]),
+      locks: new Map(),
+      swapOffers: new Map(),
+      pulls: new Map([
+        ['source-pull', {
+          tokenId: 1,
+          amount: 11n,
+          claimedRatio: 0,
+          fullHash: '0x' + '11'.repeat(32),
+          partialRoot: '0x' + '22'.repeat(32),
+          crossJurisdiction: {
+            orderId: 'order-1',
+            routeHash: '0x' + 'aa'.repeat(32),
+            leg: 'source',
+          },
+        }],
+        ['target-pull', {
+          tokenId: 1,
+          amount: -13n,
+          claimedRatio: 0,
+          fullHash: '0x' + '33'.repeat(32),
+          partialRoot: '0x' + '44'.repeat(32),
+          crossJurisdiction: {
+            orderId: 'order-1',
+            routeHash: '0x' + 'aa'.repeat(32),
+            leg: 'target',
+          },
+        }],
+      ]),
+      watchSeed: TEST_WATCH_SEED,
+    });
+
+    const proof = buildAccountProofBody(accountMachine, DEPOSITORY);
+    const pulls = proof.runtimeProofBody.transformers[0]?.batch?.pulls ?? [];
+    const byHash = new Map(pulls.map(pull => [pull.fullHash.toLowerCase(), pull]));
+    expect(byHash.get(('0x' + '11'.repeat(32)).toLowerCase())?.targetRole).toBe(false);
+    expect(byHash.get(('0x' + '33'.repeat(32)).toLowerCase())?.targetRole).toBe(true);
+    expect(proof.proofBodyStruct.leftResponseSeconds).toBe(3_600);
+    expect(proof.proofBodyStruct.rightResponseSeconds).toBe(86_400);
+  });
+
+  test('classifies pulls only for the canonical DeltaTransformer and fails loud on malformed canonical bytes', () => {
+    const accountMachine = proofAccount({
+      deltas: new Map([[1, { offdelta: 0n }]]),
+      locks: new Map(),
+      swapOffers: new Map(),
+      pulls: new Map([['pull', {
+        tokenId: 1,
+        amount: 11n,
+        claimedRatio: 0,
+        fullHash: `0x${'77'.repeat(32)}`,
+        partialRoot: `0x${'88'.repeat(32)}`,
+      }]]),
+      watchSeed: TEST_WATCH_SEED,
+    });
+    const proof = buildAccountProofBody(accountMachine, DEPOSITORY).proofBodyStruct;
+    expect(proofBodyHasPulls(proof, DEPOSITORY)).toBe(true);
+
+    const customAddress = `0x${'99'.repeat(20)}`;
+    const customOnly = {
+      ...proof,
+      transformers: proof.transformers.map((transformer) => ({
+        ...transformer,
+        transformerAddress: customAddress,
+      })),
+    };
+    expect(proofBodyHasPulls(customOnly, DEPOSITORY)).toBe(false);
+
+    const malformedCanonical = {
+      ...proof,
+      transformers: [{
+        ...proof.transformers[0]!,
+        encodedBatch: '0x1234',
+      }],
+    };
+    expect(() => proofBodyHasPulls(malformedCanonical, DEPOSITORY)).toThrow(
+      'DISPUTE_CANONICAL_DELTA_BATCH_INVALID:0',
+    );
   });
 
   test('rejects 129-token proof bodies before their hash can be signed', () => {

@@ -24,6 +24,8 @@ import {
   DeltaTransformer__factory,
   ERC20Mock__factory,
   Depository__factory,
+  DepositoryBounds__factory,
+  HashLadderRegistry__factory,
 } from '../../../jurisdictions/typechain-types/index.ts';
 import { safeStringify } from '../../protocol/serialization.js';
 import { createStructuredLogger } from '../../infra/logger';
@@ -211,6 +213,8 @@ export class BrowserVMProvider {
   private hankoVerifierAddress: Address | null = null;
   private entityProviderDeploymentBlock = 0;
   private deltaTransformerAddress: Address | null = null;
+  private depositoryBoundsAddress: Address | null = null;
+  private hashLadderRegistryAddress: Address | null = null;
   private deployerPrivKey: Uint8Array;
   private deployerAddress: Address;
   private nonce = 0n;
@@ -331,8 +335,10 @@ export class BrowserVMProvider {
     await this.deployAccount();
     await this.deployHankoVerifier();
     await this.deployEntityProvider();
-    await this.deployDepository();  // Now requires EntityProvider address
     await this.deployDeltaTransformer();
+    await this.deployDepositoryBounds();
+    await this.deployHashLadderRegistry();
+    await this.deployDepository();
     await this.deployDefaultTokens();
 
     this.initialized = true;
@@ -349,6 +355,8 @@ export class BrowserVMProvider {
     this.hankoVerifierAddress = null;
     this.entityProviderDeploymentBlock = 0;
     this.deltaTransformerAddress = null;
+    this.depositoryBoundsAddress = null;
+    this.hashLadderRegistryAddress = null;
     this.nonce = 0n;
     this.blockHeight = 0;
     this.blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000';
@@ -386,9 +394,9 @@ export class BrowserVMProvider {
     console.log(`[BrowserVM] Account library deployed at: ${this.accountAddress?.toString() ?? 'null'}`);
   }
 
-  /** Deploy Depository contract with Account library linking and EntityProvider */
+  /** Deploy Depository with its three linked libraries and immutable transformer. */
   private async deployDepository(): Promise<void> {
-    console.log('[BrowserVM] Deploying Depository with Account library linking + EntityProvider...');
+    console.log('[BrowserVM] Deploying Depository with canonical linked libraries...');
 
     if (!this.accountAddress) {
       throw new Error('Account library must be deployed first');
@@ -396,28 +404,17 @@ export class BrowserVMProvider {
     if (!this.entityProviderAddress) {
       throw new Error('EntityProvider must be deployed before Depository');
     }
-
-    // Link Account library address into Depository bytecode
-    // Replace placeholder __$...$__ with actual library address
-    let linkedBytecode = this.depositoryArtifact!.bytecode;
-    const accountAddrHex = this.accountAddress.toString().slice(2).toLowerCase(); // Remove 0x prefix
-
-    // Find and replace library placeholder (format: __$<hash>$__)
-    const placeholderRegex = /__\$[a-f0-9]{34}\$__/g;
-    const placeholders = linkedBytecode.match(placeholderRegex);
-
-    if (placeholders && placeholders.length > 0) {
-      console.log(`[BrowserVM] Found ${placeholders.length} library placeholders, linking Account at ${accountAddrHex}`);
-      linkedBytecode = linkedBytecode.replace(placeholderRegex, accountAddrHex);
-    } else {
-      console.warn('[BrowserVM] No library placeholders found in Depository bytecode');
+    if (!this.deltaTransformerAddress || !this.depositoryBoundsAddress || !this.hashLadderRegistryAddress) {
+      throw new Error('Depository dependencies must be deployed first');
     }
-
-    // BrowserVM uses the local deterministic policy; live jurisdictions pass
-    // their block-time-specific immutable value from the deployment profile.
+    const linkedBytecode = Depository__factory.linkBytecode({
+      'contracts/Account.sol:Account': this.accountAddress.toString(),
+      'contracts/DepositoryBounds.sol:DepositoryBounds': this.depositoryBoundsAddress.toString(),
+      'contracts/HashLadderRegistry.sol:HashLadderRegistry': this.hashLadderRegistryAddress.toString(),
+    });
     const constructorArgs = ethers.AbiCoder.defaultAbiCoder().encode(
-      ['address', 'uint256'],
-      [this.entityProviderAddress.toString(), 5_760]
+      ['address', 'address'],
+      [this.entityProviderAddress.toString(), this.deltaTransformerAddress.toString()]
     );
     const deployData = linkedBytecode + constructorArgs.slice(2); // Remove 0x from args
 
@@ -521,6 +518,34 @@ export class BrowserVMProvider {
     console.log(`[BrowserVM] DeltaTransformer deployed at: ${this.deltaTransformerAddress?.toString() ?? 'null'}`);
 
     // Update proof-builder with deployed address
+  }
+
+  private async deployLibrary(label: string, bytecode: string): Promise<Address> {
+    const { result } = await this.runTxWithNonce(this.deployerAddress, (currentNonce) =>
+      createLegacyTx({
+        gasLimit: 100000000n,
+        gasPrice: 10n,
+        data: bytecode as `0x${string}`,
+        nonce: currentNonce,
+      }, { common: this.common }).sign(this.deployerPrivKey));
+    if (result.execResult.exceptionError || !result.createdAddress) {
+      throw new Error(`${label} deployment failed: ${String(result.execResult.exceptionError)}`);
+    }
+    return result.createdAddress;
+  }
+
+  private async deployDepositoryBounds(): Promise<void> {
+    this.depositoryBoundsAddress = await this.deployLibrary(
+      'DepositoryBounds',
+      DepositoryBounds__factory.bytecode,
+    );
+  }
+
+  private async deployHashLadderRegistry(): Promise<void> {
+    this.hashLadderRegistryAddress = await this.deployLibrary(
+      'HashLadderRegistry',
+      HashLadderRegistry__factory.bytecode,
+    );
   }
 
   /** Get DeltaTransformer contract address */
@@ -1261,6 +1286,7 @@ export class BrowserVMProvider {
     entityId: string,
     counterpartyEntityId: string,
     nonce: bigint,
+    proposerIsLeft: boolean,
     proofbodyHash: string,
     watchSeed: string,
   ): Promise<string> {
@@ -1271,6 +1297,7 @@ export class BrowserVMProvider {
       { chainId: this.getChainId(), depositoryAddress: this.depositoryAddress.toString() },
       accountKey,
       nonce,
+      proposerIsLeft,
       proofbodyHash,
       watchSeed,
     );
@@ -1581,7 +1608,7 @@ export class BrowserVMProvider {
       : intent.payload.kind === 'releaseControlShares'
         ? this.entityProviderInterface.encodeFunctionData('releaseControlShares', [
             intent.entityNumber,
-            intent.payload.release.depositoryAddress,
+            intent.payload.release.recipientAddress,
             intent.payload.release.controlAmount,
             intent.payload.release.dividendAmount,
             intent.payload.release.purpose,
@@ -2213,7 +2240,7 @@ export class BrowserVMProvider {
     return collaterals;
   }
 
-  /** Get current block height (incremented per J-block) */
+  /** Get current block height (counter per J-block) */
   getBlockHeight(): number {
     return this.blockHeight;
   }

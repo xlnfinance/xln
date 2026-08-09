@@ -122,7 +122,6 @@ export const linkArtifactBytecode = (
   libraries: Record<string, string>,
 ): string => {
   let linked = bytecode.startsWith('0x') ? bytecode.slice(2) : bytecode;
-  const unresolvedLibraryRef = /__\$[0-9a-fA-F]{34}\$__/g;
 
   for (const [libraryName, address] of Object.entries(libraries)) {
     if (!address) {
@@ -132,7 +131,17 @@ export const linkArtifactBytecode = (
     if (!/^[0-9a-f]{40}$/.test(normalizedAddress)) {
       throw new Error(`Invalid linked library address for ${libraryName}: ${address}`);
     }
-    linked = linked.replace(unresolvedLibraryRef, normalizedAddress);
+    // solc identifies each linked library by the first 34 hex characters of
+    // keccak256("source.sol:Library"). Replacing the generic placeholder regex
+    // would silently point *every* library at the first supplied address. That
+    // happened to work while Depository linked only Account, then became a
+    // mainnet deployment failure as soon as Bounds and Registry were split out.
+    const placeholderHash = ethers.id(libraryName).slice(2, 36);
+    const placeholder = `__$${placeholderHash}$__`;
+    if (!linked.includes(placeholder)) {
+      throw new Error(`Linked library placeholder not found for ${libraryName}`);
+    }
+    linked = linked.split(placeholder).join(normalizedAddress);
   }
 
   if (/__\$[0-9a-fA-F]{34}\$__/.test(linked)) {

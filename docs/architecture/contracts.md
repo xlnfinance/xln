@@ -38,7 +38,9 @@ controlTokenId = entityNumber
 dividendTokenId = entityNumber | 0x8000000000000000000000000000000000000000000000000000000000000000
 ```
 
-First bit determines control vs dividend token. `getEntityFromToken()` extracts entityNumber from either token ID.
+The first bit determines control vs dividend token. Integrators derive the
+entity number locally by clearing that bit; EntityProvider deliberately has no
+parallel on-chain reverse-lookup API.
 
 ### Foundation Entity (#1)
 
@@ -181,12 +183,6 @@ getTokenIds(entityNumber) → (controlTokenId, dividendTokenId)
 ```solidity
 proposeQuorumReplacement(entityNumber, newQuorum, proposerType, articles)
 executeQuorumReplacement(entityNumber, supporters[], articles)
-```
-
-### View Functions
-```solidity
-getGovernanceInfo(entityNumber) → (controlTokenId, dividendTokenId, supplies, hasProposal, articlesHash)
-getEntityFromToken(tokenId) → entityNumber
 ```
 
 ---

@@ -139,7 +139,7 @@ function summaryReplica(summary: RuntimeAdapterEntitySummary): EntityReplica {
       height: Math.max(0, Math.floor(Number(summary.height || 0))),
       profile: {
         name: String(summary.label || entityId),
-        ...(summary.isHub === true ? { isHub: true } : {}),
+        isHub: summary.isHub,
       },
       config: summary.jurisdiction ? { jurisdiction: summary.jurisdiction } : {},
       accounts: new Map(),
@@ -182,7 +182,7 @@ function activeEntityProjectionReplica(activeEntity: RuntimeProjectionActiveEnti
     height: Math.max(0, Math.floor(Number(activeEntity.core.height ?? activeEntity.summary.height ?? 0))),
     profile: activeEntity.core.profile ?? {
       name: activeEntity.summary.label || entityId,
-      ...(activeEntity.summary.isHub === true ? { isHub: true } : {}),
+      isHub: activeEntity.summary.isHub,
     },
     config: activeEntity.core.config ?? (
       activeEntity.summary.jurisdiction ? { jurisdiction: activeEntity.summary.jurisdiction } : {}

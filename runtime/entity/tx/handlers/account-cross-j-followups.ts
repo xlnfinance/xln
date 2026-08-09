@@ -458,6 +458,13 @@ const queueBookAdmissionOnCommittedPull = (
   return handled;
 };
 
+const requireCrossPullCloseFillRatio = (fillRatio: number): number => {
+  if (!Number.isSafeInteger(fillRatio) || fillRatio < 0 || fillRatio > CROSS_J_MAX_FILL_RATIO) {
+    throw new Error(`CROSS_J_CLOSE_PROOF_RATIO_INVALID:${fillRatio}`);
+  }
+  return fillRatio;
+};
+
 const applyCrossPullCloseFollowup = (
   env: EntityRuntimeContext,
   newState: EntityState,
@@ -467,7 +474,7 @@ const applyCrossPullCloseFollowup = (
   storageChanges: RuntimeOverlayRecord[],
 ): boolean => {
   if (!newState.crossJurisdictionSwaps?.size) return true;
-  const fillRatio = Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(accountTx.data.proof.fillRatio) || 0)));
+  const fillRatio = requireCrossPullCloseFillRatio(accountTx.data.proof.fillRatio);
   const decoded = decodeHashLadderBinary(accountTx.data.binary);
   if (decoded.fillRatio !== fillRatio) {
     throw new Error(

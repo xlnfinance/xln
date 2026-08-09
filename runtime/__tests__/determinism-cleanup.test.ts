@@ -34,11 +34,11 @@ describe('determinism cleanup lifecycle', () => {
     const source = readSource('runtime/scenarios/boot.ts');
 
     expect(source).toContain('export const stopManagedScenarioAnvil');
-    expect(source).toContain('managedAnvil = null;');
-    expect(source).toContain('managedAnvilRpc = null;');
+    expect(source).toContain('const managedAnvils = new Map<string, ManagedAnvilProcess>()');
+    expect(source).toContain('managedAnvils.delete(url)');
     expect(source).toContain("child.kill('SIGTERM')");
     expect(source).toContain("child.kill('SIGKILL')");
-    expect(source).toContain('await stopManagedScenarioAnvil();');
+    expect(source).toContain('await stopManagedScenarioAnvil(3_000, rpcUrl)');
     expect(source).toContain('getLiveJAdapterEntries(env)');
   });
 

@@ -7,6 +7,7 @@ import { Level } from 'level';
 import type { ServerWebSocket } from 'bun';
 import { ethers } from 'ethers';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { createFrameHash } from '../account/consensus/frame';
 import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 
 import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
@@ -46,7 +47,6 @@ import {
 } from '../storage/read';
 import type {
   RuntimeDbLike,
-  StorageAccountDoc,
   StorageDoc,
   StorageEntityHashDoc,
   StorageHead,
@@ -227,12 +227,17 @@ const randomEntityId = (seed: string, index: number): string =>
 const hubEntityId = (seed: string): string =>
   `0x${createHash('sha256').update(seed).update(':hub').digest('hex')}`;
 
-const makeAccount = (firstEntity: string, secondEntity: string, height: number, timestamp: number): AccountReplica => {
+const makeAccount = async (
+  firstEntity: string,
+  secondEntity: string,
+  height: number,
+  timestamp: number,
+): Promise<AccountReplica> => {
   if (firstEntity === secondEntity) throw new Error(`BENCH_SELF_ACCOUNT_FORBIDDEN:${firstEntity}`);
   const [leftEntity, rightEntity] = firstEntity < secondEntity
     ? [firstEntity, secondEntity]
     : [secondEntity, firstEntity];
-  return {
+  const account: AccountReplica = {
     state: {
       leftEntity,
       rightEntity,
@@ -245,7 +250,7 @@ const makeAccount = (firstEntity: string, secondEntity: string, height: number, 
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -257,24 +262,26 @@ const makeAccount = (firstEntity: string, secondEntity: string, height: number, 
       timestamp,
       jHeight: 0,
       accountTxs: [],
-      prevFrameHash: 'genesis',
+      prevFrameHash: height === 0 ? 'genesis' : `0x${'00'.repeat(32)}`,
       accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: `0x${'00'.repeat(32)}`,
-      byLeft: true,
+      byLeft: firstEntity === leftEntity,
       deltas: [],
     },
     currentHeight: height,
     pendingSignatures: [],
     rollbackCount: 0,
-    proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: height },
+    proofHeader: { fromEntity: firstEntity, toEntity: secondEntity, nextProofNonce: height },
     proofBody: { tokenIds: [], deltas: [] },
     pendingWithdrawals: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
+  // Storage admission validates the same canonical frame commitment used by
+  // live Account consensus. Bench fixtures must never invent placeholder or
+  // SHA-256 hashes, because that benchmarks an impossible persisted state.
+  account.currentFrame.stateHash = await createFrameHash(account.currentFrame);
+  return account;
 };
-
-const makeAccountDoc = (leftEntity: string, rightEntity: string, height: number, timestamp: number): StorageAccountDoc =>
-  makeAccount(leftEntity, rightEntity, height, timestamp);
 
 const makeHubState = (entityId: string, height: number, timestamp: number): EntityState => ({
   entityId,
@@ -303,6 +310,7 @@ const seedBooks = (state: EntityState, count: number): void => {
     name: state.profile.name,
     spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
     referenceTokenId: 1,
+    usdQuoteAuthorityEntityId: state.entityId,
     minTradeSize: 1n,
     supportedPairs,
   });
@@ -466,7 +474,7 @@ const seedHubBulk = async (
       const counterpartyId = normalizeEntityId(randomEntityId(cli.seed, index));
       const accountHeight = 2;
       const timestamp = 1_000 + accountHeight;
-      const account = makeAccount(entityId, counterpartyId, accountHeight, timestamp);
+      const account = await makeAccount(entityId, counterpartyId, accountHeight, timestamp);
       appendDoc({ family: 'account', entityId, counterpartyId, value: account });
       if (cli.memory === 'all' || (cli.memory === 'hot' && index < cli.hotAccounts)) {
         state.accounts.set(counterpartyId, account);
@@ -559,14 +567,15 @@ const seedHub = async (
       const counterpartyId = normalizeEntityId(randomEntityId(cli.seed, index));
       const accountHeight = height + 1;
       const timestamp = 1_000 + accountHeight;
+      const account = await makeAccount(entityId, counterpartyId, accountHeight, timestamp);
       docs.push({
         family: 'account',
         entityId,
         counterpartyId,
-        value: makeAccountDoc(entityId, counterpartyId, accountHeight, timestamp),
+        value: account,
       });
       if (cli.memory === 'all' || (cli.memory === 'hot' && index < cli.hotAccounts)) {
-        state.accounts.set(counterpartyId, makeAccount(entityId, counterpartyId, accountHeight, timestamp));
+        state.accounts.set(counterpartyId, account);
       }
     }
     height += 1;
@@ -605,9 +614,7 @@ const touchAccounts = async (
   state.timestamp = env.state.timestamp;
   for (let index = startIndex; index < limit; index += 1) {
     const counterpartyId = normalizeEntityId(randomEntityId(cli.seed, index));
-    const account = makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
-    account.currentFrame.prevFrameHash = `bench-${env.state.height - 1}`;
-    account.currentFrame.stateHash = `0x${createHash('sha256').update(`${env.state.height}:${counterpartyId}`).digest('hex')}`;
+    const account = await makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
     if (state.accounts.has(counterpartyId)) state.accounts.set(counterpartyId, account);
     docs.push({ family: 'account', entityId, counterpartyId, value: account });
   }
@@ -639,9 +646,7 @@ const insertNewAccountsAfterRead = async (
   state.timestamp = env.state.timestamp;
   for (let index = startIndex; index < startIndex + count; index += 1) {
     const counterpartyId = normalizeEntityId(randomEntityId(`${cli.seed}:new-after-read`, index));
-    const account = makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
-    account.currentFrame.prevFrameHash = `bench-${env.state.height - 1}`;
-    account.currentFrame.stateHash = `0x${createHash('sha256').update(`${env.state.height}:${counterpartyId}`).digest('hex')}`;
+    const account = await makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
     if (cli.memory !== 'none') state.accounts.set(counterpartyId, account);
     docs.push({ family: 'account', entityId, counterpartyId, value: account });
   }
@@ -1000,7 +1005,10 @@ async function main() {
     }
     readStarted = nowMs();
     const coldAccount = await adapter.read<{
-      items: Array<{ leftEntity: string; rightEntity: string; currentHeight: number }>;
+      items: Array<{
+        state: { leftEntity: string; rightEntity: string };
+        currentHeight: number;
+      }>;
       totalItems?: number;
     }>(`entity/${entityId}/accounts`, {
       accountId: coldAccountId,
@@ -1010,7 +1018,7 @@ async function main() {
     readLatencyMs.push(nowMs() - readStarted);
     const coldStoredAccount = coldAccount.items[0];
     const coldParticipants = coldStoredAccount
-      ? new Set([coldStoredAccount.leftEntity, coldStoredAccount.rightEntity])
+      ? new Set([coldStoredAccount.state.leftEntity, coldStoredAccount.state.rightEntity])
       : new Set<string>();
     if (!coldParticipants.has(entityId) || !coldParticipants.has(coldAccountId)) {
       throw new Error(`COLD_ACCOUNT_LOOKUP_MISSING: ${coldAccountId}`);

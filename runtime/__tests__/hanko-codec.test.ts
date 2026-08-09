@@ -98,4 +98,34 @@ describe('canonical Hanko wire codec', () => {
     });
     expect(() => decodeHankoEnvelope(`${encoded}00`)).toThrow('HANKO_ABI_NON_CANONICAL');
   });
+
+  test('mirrors HankoVerifier entity and per-claim member caps before signing', () => {
+    const baseClaim = {
+      entityId: ethers.zeroPadValue('0x2a', 32),
+      entityIndexes: [0n],
+      weights: [1n],
+      threshold: 1n,
+      boardChangeDelay: 0n,
+      controlChangeDelay: 0n,
+      dividendChangeDelay: 0n,
+    };
+    expect(() => encodeHankoEnvelope({
+      placeholders: Array.from(
+        { length: 257 },
+        (_, index) => ethers.toBeHex(index + 1, 32),
+      ),
+      packedSignatures: packHankoSignatures([signature(0)]),
+      claims: [baseClaim],
+    })).toThrow('HANKO_PROOF_TOO_LARGE');
+
+    expect(() => encodeHankoEnvelope({
+      placeholders: [],
+      packedSignatures: packHankoSignatures([signature(0)]),
+      claims: [{
+        ...baseClaim,
+        entityIndexes: Array.from({ length: 257 }, () => 0n),
+        weights: Array.from({ length: 257 }, () => 1n),
+      }],
+    })).toThrow('HANKO_CLAIM_SHAPE_INVALID:0');
+  });
 });

@@ -94,6 +94,8 @@ export type TransformerClauseStructOutput = [
 
 export type ProofBodyStruct = {
   watchSeed: BytesLike;
+  leftResponseSeconds: BigNumberish;
+  rightResponseSeconds: BigNumberish;
   offdeltas: BigNumberish[];
   tokenIds: BigNumberish[];
   transformers: TransformerClauseStruct[];
@@ -101,11 +103,15 @@ export type ProofBodyStruct = {
 
 export type ProofBodyStructOutput = [
   watchSeed: string,
+  leftResponseSeconds: bigint,
+  rightResponseSeconds: bigint,
   offdeltas: bigint[],
   tokenIds: bigint[],
   transformers: TransformerClauseStructOutput[]
 ] & {
   watchSeed: string;
+  leftResponseSeconds: bigint;
+  rightResponseSeconds: bigint;
   offdeltas: bigint[];
   tokenIds: bigint[];
   transformers: TransformerClauseStructOutput[];
@@ -114,38 +120,73 @@ export type ProofBodyStructOutput = [
 export type InitialDisputeProofStruct = {
   counterentity: BytesLike;
   nonce: BigNumberish;
+  proposerIsLeft: boolean;
   proofbodyHash: BytesLike;
   initialProofbody: ProofBodyStruct;
   watchSeed: BytesLike;
   sig: BytesLike;
   starterInitialArguments: BytesLike;
-  starterIncrementedArguments: BytesLike;
+  starterCounterArguments: BytesLike;
+  starterCounterProofCommitment: BytesLike;
 };
 
 export type InitialDisputeProofStructOutput = [
   counterentity: string,
   nonce: bigint,
+  proposerIsLeft: boolean,
   proofbodyHash: string,
   initialProofbody: ProofBodyStructOutput,
   watchSeed: string,
   sig: string,
   starterInitialArguments: string,
-  starterIncrementedArguments: string
+  starterCounterArguments: string,
+  starterCounterProofCommitment: string
 ] & {
   counterentity: string;
   nonce: bigint;
+  proposerIsLeft: boolean;
   proofbodyHash: string;
   initialProofbody: ProofBodyStructOutput;
   watchSeed: string;
   sig: string;
   starterInitialArguments: string;
-  starterIncrementedArguments: string;
+  starterCounterArguments: string;
+  starterCounterProofCommitment: string;
+};
+
+export type CounterDisputeProofStruct = {
+  counterentity: BytesLike;
+  initialNonce: BigNumberish;
+  initialProofbodyHash: BytesLike;
+  counterNonce: BigNumberish;
+  proposerIsLeft: boolean;
+  counterProofbody: ProofBodyStruct;
+  sig: BytesLike;
+};
+
+export type CounterDisputeProofStructOutput = [
+  counterentity: string,
+  initialNonce: bigint,
+  initialProofbodyHash: string,
+  counterNonce: bigint,
+  proposerIsLeft: boolean,
+  counterProofbody: ProofBodyStructOutput,
+  sig: string
+] & {
+  counterentity: string;
+  initialNonce: bigint;
+  initialProofbodyHash: string;
+  counterNonce: bigint;
+  proposerIsLeft: boolean;
+  counterProofbody: ProofBodyStructOutput;
+  sig: string;
 };
 
 export type FinalDisputeProofStruct = {
   counterentity: BytesLike;
   initialNonce: BigNumberish;
   finalNonce: BigNumberish;
+  proposerIsLeft: boolean;
   initialProofbodyHash: BytesLike;
   finalProofbody: ProofBodyStruct;
   starterArguments: BytesLike;
@@ -159,6 +200,7 @@ export type FinalDisputeProofStructOutput = [
   counterentity: string,
   initialNonce: bigint,
   finalNonce: bigint,
+  proposerIsLeft: boolean,
   initialProofbodyHash: string,
   finalProofbody: ProofBodyStructOutput,
   starterArguments: string,
@@ -170,6 +212,7 @@ export type FinalDisputeProofStructOutput = [
   counterentity: string;
   initialNonce: bigint;
   finalNonce: bigint;
+  proposerIsLeft: boolean;
   initialProofbodyHash: string;
   finalProofbody: ProofBodyStructOutput;
   starterArguments: string;
@@ -184,16 +227,16 @@ export interface AccountInterface extends Interface {
     nameOrSignature:
       | "computeBatchHankoHash"
       | "encodeDisputeHash"
-      | "encodeDisputeHashFromCommitments"
       | "readFixedTokenSupply"
-      | "requireStarterArgumentCommitment"
       | "validateDisputeProofs"
   ): FunctionFragment;
 
   getEvent(
     nameOrSignatureOrTopic:
       | "AccountSettled"
+      | "CounterDisputeRegistered"
       | "DebtCreated"
+      | "DebtEnforced"
       | "DisputeStarted"
       | "ReserveUpdated"
       | "TransformerDeltaClamped"
@@ -208,21 +251,13 @@ export interface AccountInterface extends Interface {
     values: [
       BigNumberish,
       boolean,
-      BigNumberish,
-      BytesLike,
-      BigNumberish,
-      BytesLike,
-      BytesLike
-    ]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "encodeDisputeHashFromCommitments",
-    values: [
-      BigNumberish,
       boolean,
       BigNumberish,
+      BigNumberish,
+      BigNumberish,
       BytesLike,
       BigNumberish,
+      BytesLike,
       BytesLike,
       BytesLike
     ]
@@ -232,12 +267,12 @@ export interface AccountInterface extends Interface {
     values: [BigNumberish, AddressLike, BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "requireStarterArgumentCommitment",
-    values: [BytesLike, boolean, BigNumberish, BytesLike]
-  ): string;
-  encodeFunctionData(
     functionFragment: "validateDisputeProofs",
-    values: [InitialDisputeProofStruct[], FinalDisputeProofStruct[]]
+    values: [
+      InitialDisputeProofStruct[],
+      CounterDisputeProofStruct[],
+      FinalDisputeProofStruct[]
+    ]
   ): string;
 
   decodeFunctionResult(
@@ -249,15 +284,7 @@ export interface AccountInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "encodeDisputeHashFromCommitments",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "readFixedTokenSupply",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "requireStarterArgumentCommitment",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -271,6 +298,34 @@ export namespace AccountSettledEvent {
   export type OutputTuple = [settled: AccountSettlementStructOutput[]];
   export interface OutputObject {
     settled: AccountSettlementStructOutput[];
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace CounterDisputeRegisteredEvent {
+  export type InputTuple = [
+    sender: BytesLike,
+    counterentity: BytesLike,
+    nonce: BigNumberish,
+    proposerIsLeft: boolean,
+    proofbodyHash: BytesLike
+  ];
+  export type OutputTuple = [
+    sender: string,
+    counterentity: string,
+    nonce: bigint,
+    proposerIsLeft: boolean,
+    proofbodyHash: string
+  ];
+  export interface OutputObject {
+    sender: string;
+    counterentity: string;
+    nonce: bigint;
+    proposerIsLeft: boolean;
+    proofbodyHash: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -306,39 +361,82 @@ export namespace DebtCreatedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace DebtEnforcedEvent {
+  export type InputTuple = [
+    debtor: BytesLike,
+    creditor: BytesLike,
+    tokenId: BigNumberish,
+    amountPaid: BigNumberish,
+    remainingAmount: BigNumberish,
+    newDebtIndex: BigNumberish
+  ];
+  export type OutputTuple = [
+    debtor: string,
+    creditor: string,
+    tokenId: bigint,
+    amountPaid: bigint,
+    remainingAmount: bigint,
+    newDebtIndex: bigint
+  ];
+  export interface OutputObject {
+    debtor: string;
+    creditor: string;
+    tokenId: bigint;
+    amountPaid: bigint;
+    remainingAmount: bigint;
+    newDebtIndex: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export namespace DisputeStartedEvent {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
     nonce: BigNumberish,
+    proposerIsLeft: boolean,
     proofbodyHash: BytesLike,
     watchSeed: BytesLike,
     starterInitialArguments: BytesLike,
-    starterIncrementedArguments: BytesLike,
+    starterCounterArguments: BytesLike,
+    starterCounterProofCommitment: BytesLike,
     disputeTimeout: BigNumberish,
-    disputeStartTimestamp: BigNumberish
+    disputeStartTimestamp: BigNumberish,
+    leftResponseSeconds: BigNumberish,
+    rightResponseSeconds: BigNumberish
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
     nonce: bigint,
+    proposerIsLeft: boolean,
     proofbodyHash: string,
     watchSeed: string,
     starterInitialArguments: string,
-    starterIncrementedArguments: string,
+    starterCounterArguments: string,
+    starterCounterProofCommitment: string,
     disputeTimeout: bigint,
-    disputeStartTimestamp: bigint
+    disputeStartTimestamp: bigint,
+    leftResponseSeconds: bigint,
+    rightResponseSeconds: bigint
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
     nonce: bigint;
+    proposerIsLeft: boolean;
     proofbodyHash: string;
     watchSeed: string;
     starterInitialArguments: string;
-    starterIncrementedArguments: string;
+    starterCounterArguments: string;
+    starterCounterProofCommitment: string;
     disputeTimeout: bigint;
     disputeStartTimestamp: bigint;
+    leftResponseSeconds: bigint;
+    rightResponseSeconds: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -452,25 +550,15 @@ export interface Account extends BaseContract {
     [
       nonce: BigNumberish,
       startedByLeft: boolean,
+      initialProposerIsLeft: boolean,
       timeout: BigNumberish,
+      leftResponseSeconds: BigNumberish,
+      rightResponseSeconds: BigNumberish,
       proofbodyHash: BytesLike,
       disputeStartTimestamp: BigNumberish,
       starterInitialArguments: BytesLike,
-      starterIncrementedArguments: BytesLike
-    ],
-    [string],
-    "view"
-  >;
-
-  encodeDisputeHashFromCommitments: TypedContractMethod<
-    [
-      nonce: BigNumberish,
-      startedByLeft: boolean,
-      timeout: BigNumberish,
-      proofbodyHash: BytesLike,
-      disputeStartTimestamp: BigNumberish,
-      starterInitialArgumentsCommitment: BytesLike,
-      starterIncrementedArgumentsCommitment: BytesLike
+      starterCounterArguments: BytesLike,
+      starterCounterProofCommitment: BytesLike
     ],
     [string],
     "view"
@@ -486,20 +574,10 @@ export interface Account extends BaseContract {
     "view"
   >;
 
-  requireStarterArgumentCommitment: TypedContractMethod<
-    [
-      starterArguments: BytesLike,
-      startedByLeft: boolean,
-      disputeStartTimestamp: BigNumberish,
-      expectedCommitment: BytesLike
-    ],
-    [void],
-    "view"
-  >;
-
   validateDisputeProofs: TypedContractMethod<
     [
       disputeStarts: InitialDisputeProofStruct[],
+      counterDisputes: CounterDisputeProofStruct[],
       disputeFinalizations: FinalDisputeProofStruct[]
     ],
     [void],
@@ -523,26 +601,15 @@ export interface Account extends BaseContract {
     [
       nonce: BigNumberish,
       startedByLeft: boolean,
+      initialProposerIsLeft: boolean,
       timeout: BigNumberish,
+      leftResponseSeconds: BigNumberish,
+      rightResponseSeconds: BigNumberish,
       proofbodyHash: BytesLike,
       disputeStartTimestamp: BigNumberish,
       starterInitialArguments: BytesLike,
-      starterIncrementedArguments: BytesLike
-    ],
-    [string],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "encodeDisputeHashFromCommitments"
-  ): TypedContractMethod<
-    [
-      nonce: BigNumberish,
-      startedByLeft: boolean,
-      timeout: BigNumberish,
-      proofbodyHash: BytesLike,
-      disputeStartTimestamp: BigNumberish,
-      starterInitialArgumentsCommitment: BytesLike,
-      starterIncrementedArgumentsCommitment: BytesLike
+      starterCounterArguments: BytesLike,
+      starterCounterProofCommitment: BytesLike
     ],
     [string],
     "view"
@@ -559,22 +626,11 @@ export interface Account extends BaseContract {
     "view"
   >;
   getFunction(
-    nameOrSignature: "requireStarterArgumentCommitment"
-  ): TypedContractMethod<
-    [
-      starterArguments: BytesLike,
-      startedByLeft: boolean,
-      disputeStartTimestamp: BigNumberish,
-      expectedCommitment: BytesLike
-    ],
-    [void],
-    "view"
-  >;
-  getFunction(
     nameOrSignature: "validateDisputeProofs"
   ): TypedContractMethod<
     [
       disputeStarts: InitialDisputeProofStruct[],
+      counterDisputes: CounterDisputeProofStruct[],
       disputeFinalizations: FinalDisputeProofStruct[]
     ],
     [void],
@@ -589,11 +645,25 @@ export interface Account extends BaseContract {
     AccountSettledEvent.OutputObject
   >;
   getEvent(
+    key: "CounterDisputeRegistered"
+  ): TypedContractEvent<
+    CounterDisputeRegisteredEvent.InputTuple,
+    CounterDisputeRegisteredEvent.OutputTuple,
+    CounterDisputeRegisteredEvent.OutputObject
+  >;
+  getEvent(
     key: "DebtCreated"
   ): TypedContractEvent<
     DebtCreatedEvent.InputTuple,
     DebtCreatedEvent.OutputTuple,
     DebtCreatedEvent.OutputObject
+  >;
+  getEvent(
+    key: "DebtEnforced"
+  ): TypedContractEvent<
+    DebtEnforcedEvent.InputTuple,
+    DebtEnforcedEvent.OutputTuple,
+    DebtEnforcedEvent.OutputObject
   >;
   getEvent(
     key: "DisputeStarted"
@@ -629,6 +699,17 @@ export interface Account extends BaseContract {
       AccountSettledEvent.OutputObject
     >;
 
+    "CounterDisputeRegistered(bytes32,bytes32,uint256,bool,bytes32)": TypedContractEvent<
+      CounterDisputeRegisteredEvent.InputTuple,
+      CounterDisputeRegisteredEvent.OutputTuple,
+      CounterDisputeRegisteredEvent.OutputObject
+    >;
+    CounterDisputeRegistered: TypedContractEvent<
+      CounterDisputeRegisteredEvent.InputTuple,
+      CounterDisputeRegisteredEvent.OutputTuple,
+      CounterDisputeRegisteredEvent.OutputObject
+    >;
+
     "DebtCreated(bytes32,bytes32,uint256,uint256,uint256)": TypedContractEvent<
       DebtCreatedEvent.InputTuple,
       DebtCreatedEvent.OutputTuple,
@@ -640,7 +721,18 @@ export interface Account extends BaseContract {
       DebtCreatedEvent.OutputObject
     >;
 
-    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes32,bytes,bytes,uint256,uint256)": TypedContractEvent<
+    "DebtEnforced(bytes32,bytes32,uint256,uint256,uint256,uint256)": TypedContractEvent<
+      DebtEnforcedEvent.InputTuple,
+      DebtEnforcedEvent.OutputTuple,
+      DebtEnforcedEvent.OutputObject
+    >;
+    DebtEnforced: TypedContractEvent<
+      DebtEnforcedEvent.InputTuple,
+      DebtEnforcedEvent.OutputTuple,
+      DebtEnforcedEvent.OutputObject
+    >;
+
+    "DisputeStarted(bytes32,bytes32,uint256,bool,bytes32,bytes32,bytes,bytes,bytes32,uint256,uint256,uint32,uint32)": TypedContractEvent<
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject

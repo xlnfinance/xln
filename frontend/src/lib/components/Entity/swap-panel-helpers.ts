@@ -39,6 +39,7 @@ export type SwapPanelRuntimeView = {
   localReplicas: EntityReplica[];
   localReplicaEntries: SwapPanelReplicaView[];
   getHubProfile: (entityIdValue: string) => GossipProfile | null;
+  committedRoles: ReadonlyMap<string, boolean>;
   isHubEntity: HubCandidatePredicate;
   getPairBook: (hubEntityId: string, pairIdValue: string) => BookState | null;
 };
@@ -175,9 +176,29 @@ function buildSwapProjectionEntityNames(frame: SwapPanelFrame, profiles: GossipP
 }
 
 export function buildSwapPanelRuntimeView(frame: SwapPanelFrame): SwapPanelRuntimeView {
-  const profiles = readSwapGossipProfiles(frame);
-  const entityNames = buildSwapProjectionEntityNames(frame, profiles);
+  const rawProfiles = readSwapGossipProfiles(frame);
   const localReplicaEntries = buildSwapReplicaViews(frame);
+  const committedRoles = new Map<string, boolean>();
+  for (const entry of localReplicaEntries) {
+    const role = entry.replica.state?.profile?.isHub;
+    // A signer-backed replica is committed local state. Remote gossip
+    // summaries intentionally have no signer and therefore cannot masquerade
+    // as committed authority for Account response clocks.
+    if (entry.signerId && typeof role === 'boolean') committedRoles.set(entry.entityId, role);
+  }
+  const profiles = rawProfiles.map((profile) => {
+    const entityId = normalizeEntityId(profile.entityId);
+    const committedRole = committedRoles.get(entityId);
+    if (committedRole === undefined) return profile;
+    // Live signed gossip owns mutable transport endpoints, but the committed
+    // Entity role owns financial clock selection. Preserve both authorities
+    // without letting a stale advertisement override explicit `false`.
+    return {
+      ...profile,
+      metadata: { ...profile.metadata, isHub: committedRole },
+    };
+  });
+  const entityNames = buildSwapProjectionEntityNames(frame, profiles);
   const replicaMap = readSwapReplicaMap(frame);
 
   const getHubProfile = (entityIdValue: string): GossipProfile | null => {
@@ -208,6 +229,7 @@ export function buildSwapPanelRuntimeView(frame: SwapPanelFrame): SwapPanelRunti
     localReplicas: localReplicaEntries.map((entry) => entry.replica),
     localReplicaEntries,
     getHubProfile,
+    committedRoles,
     isHubEntity: (entityIdValue: string) => getHubProfile(entityIdValue) !== null,
     getPairBook,
   };

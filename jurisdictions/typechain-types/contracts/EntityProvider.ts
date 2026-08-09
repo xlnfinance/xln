@@ -75,9 +75,7 @@ export interface EntityProviderInterface extends Interface {
       | "entityIdToNumber"
       | "entityTransferTokens"
       | "foundationRegisterEntity"
-      | "getEntityFromToken"
       | "getEntityInfo"
-      | "getGovernanceInfo"
       | "getTokenIds"
       | "isApprovedForAll"
       | "nameQuota"
@@ -89,7 +87,6 @@ export interface EntityProviderInterface extends Interface {
       | "registerNumberedEntity"
       | "releaseControlShares"
       | "reservedNames"
-      | "resolveEntityId"
       | "safeBatchTransferFrom"
       | "safeTransferFrom"
       | "setApprovalForAll"
@@ -294,16 +291,8 @@ export interface EntityProviderInterface extends Interface {
     values: [BytesLike, EntityArticlesStruct, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "getEntityFromToken",
-    values: [BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "getEntityInfo",
     values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "getGovernanceInfo",
-    values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "getTokenIds",
@@ -354,10 +343,6 @@ export interface EntityProviderInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "reservedNames",
-    values: [string]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "resolveEntityId",
     values: [string]
   ): string;
   encodeFunctionData(
@@ -544,15 +529,7 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "getEntityFromToken",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "getEntityInfo",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "getGovernanceInfo",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -591,10 +568,6 @@ export interface EntityProviderInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "reservedNames",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "resolveEntityId",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -1319,12 +1292,6 @@ export interface EntityProvider extends BaseContract {
     "nonpayable"
   >;
 
-  getEntityFromToken: TypedContractMethod<
-    [tokenId: BigNumberish],
-    [bigint],
-    "view"
-  >;
-
   getEntityInfo: TypedContractMethod<
     [entityId: BytesLike],
     [
@@ -1334,21 +1301,6 @@ export interface EntityProvider extends BaseContract {
         proposedBoardHash: string;
         registrationBlock: bigint;
         name: string;
-      }
-    ],
-    "view"
-  >;
-
-  getGovernanceInfo: TypedContractMethod<
-    [entityNumber: BigNumberish],
-    [
-      [bigint, bigint, bigint, bigint, boolean, string] & {
-        controlTokenId: bigint;
-        dividendTokenId: bigint;
-        controlSupply: bigint;
-        dividendSupply: bigint;
-        hasActiveProposal: boolean;
-        articlesHash: string;
       }
     ],
     "view"
@@ -1400,7 +1352,7 @@ export interface EntityProvider extends BaseContract {
   releaseControlShares: TypedContractMethod<
     [
       entityNumber: BigNumberish,
-      depository: AddressLike,
+      recipient: AddressLike,
       controlAmount: BigNumberish,
       dividendAmount: BigNumberish,
       purpose: string,
@@ -1411,8 +1363,6 @@ export interface EntityProvider extends BaseContract {
   >;
 
   reservedNames: TypedContractMethod<[arg0: string], [boolean], "view">;
-
-  resolveEntityId: TypedContractMethod<[identifier: string], [string], "view">;
 
   safeBatchTransferFrom: TypedContractMethod<
     [
@@ -1796,9 +1746,6 @@ export interface EntityProvider extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "getEntityFromToken"
-  ): TypedContractMethod<[tokenId: BigNumberish], [bigint], "view">;
-  getFunction(
     nameOrSignature: "getEntityInfo"
   ): TypedContractMethod<
     [entityId: BytesLike],
@@ -1809,22 +1756,6 @@ export interface EntityProvider extends BaseContract {
         proposedBoardHash: string;
         registrationBlock: bigint;
         name: string;
-      }
-    ],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "getGovernanceInfo"
-  ): TypedContractMethod<
-    [entityNumber: BigNumberish],
-    [
-      [bigint, bigint, bigint, bigint, boolean, string] & {
-        controlTokenId: bigint;
-        dividendTokenId: bigint;
-        controlSupply: bigint;
-        dividendSupply: bigint;
-        hasActiveProposal: boolean;
-        articlesHash: string;
       }
     ],
     "view"
@@ -1878,7 +1809,7 @@ export interface EntityProvider extends BaseContract {
   ): TypedContractMethod<
     [
       entityNumber: BigNumberish,
-      depository: AddressLike,
+      recipient: AddressLike,
       controlAmount: BigNumberish,
       dividendAmount: BigNumberish,
       purpose: string,
@@ -1890,9 +1821,6 @@ export interface EntityProvider extends BaseContract {
   getFunction(
     nameOrSignature: "reservedNames"
   ): TypedContractMethod<[arg0: string], [boolean], "view">;
-  getFunction(
-    nameOrSignature: "resolveEntityId"
-  ): TypedContractMethod<[identifier: string], [string], "view">;
   getFunction(
     nameOrSignature: "safeBatchTransferFrom"
   ): TypedContractMethod<

@@ -105,22 +105,26 @@ const activatePostSettlementProof = (
   if (localNonce === proof.nonce) {
     if (
       account.currentDisputeProofBodyHash?.toLowerCase() !== proof.proofBodyHash.toLowerCase() ||
+      account.currentDisputeProofProposerIsLeft !== proof.proposerIsLeft ||
       account.currentDisputeHash?.toLowerCase() !== proof.disputeHash.toLowerCase()
     ) throw new Error(`POST_SETTLEMENT_LOCAL_PROOF_EQUIVOCATION:${proof.nonce}`);
   } else if (localNonce < proof.nonce) {
     account.currentDisputeProofHanko = localHanko;
     account.currentDisputeProofNonce = proof.nonce;
+    account.currentDisputeProofProposerIsLeft = proof.proposerIsLeft;
     account.currentDisputeProofBodyHash = proof.proofBodyHash;
     account.currentDisputeHash = proof.disputeHash;
   }
   if (counterpartyNonce === proof.nonce) {
     if (
       account.counterpartyDisputeProofBodyHash?.toLowerCase() !== proof.proofBodyHash.toLowerCase() ||
+      account.counterpartyDisputeProofProposerIsLeft !== proof.proposerIsLeft ||
       account.counterpartyDisputeHash?.toLowerCase() !== proof.disputeHash.toLowerCase()
     ) throw new Error(`POST_SETTLEMENT_COUNTERPARTY_PROOF_EQUIVOCATION:${proof.nonce}`);
   } else if (counterpartyNonce < proof.nonce) {
     account.counterpartyDisputeProofHanko = counterpartyHanko;
     account.counterpartyDisputeProofNonce = proof.nonce;
+    account.counterpartyDisputeProofProposerIsLeft = proof.proposerIsLeft;
     account.counterpartyDisputeProofBodyHash = proof.proofBodyHash;
     account.counterpartyDisputeHash = proof.disputeHash;
   }

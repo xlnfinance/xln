@@ -191,7 +191,7 @@ const makeEnv = (): RuntimeReplica =>
                       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
                       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
                       lastFinalizedJHeight: 0,
-                      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+                      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
                       jNonce: 0,
                     },
                     status: 'active',
@@ -247,6 +247,8 @@ const makeBook = (_price: bigint): BookState => ({
   nextSeq: 1,
   tradeCount: 0,
   tradeQtySum: 0n,
+  lastTradePriceTicks: 0n,
+  lastAcceptedUsdAskPriceTicks: 0n,
   eventHash: 0n,
 });
 
@@ -658,6 +660,7 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
       signerId: 'signer',
       label: 'Adapter Test',
       height: 7,
+      isHub: false,
       jurisdiction: {
         address: '0x0000000000000000000000000000000000000002',
         name: 'Testnet',
@@ -725,7 +728,8 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
         watchSeed: `0x${'34'.repeat(32)}`,
         sig: `0x${'56'.repeat(64)}`,
         starterInitialArguments: `0x${'78'.repeat(1024)}`,
-        starterIncrementedArguments: `0x${'90'.repeat(1024)}`,
+        starterCounterArguments: `0x${'90'.repeat(1024)}`,
+        starterCounterProofCommitment: `0x${'00'.repeat(32)}`,
       })),
       notes: 'y'.repeat(100_000),
     },
@@ -745,7 +749,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
           watchSeed?: string;
           sig?: string;
           starterInitialArguments?: string;
-          starterIncrementedArguments?: string;
+          starterCounterArguments?: string;
         }>;
         notes?: string;
       };
@@ -800,7 +804,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     expect(core.jBatchState?.batch?.disputeStarts?.[0]?.watchSeed).toBe('');
     expect(core.jBatchState?.batch?.disputeStarts?.[0]?.sig).toBe('[redacted]');
     expect(core.jBatchState?.batch?.disputeStarts?.[0]?.starterInitialArguments).toBe('[redacted]');
-    expect(core.jBatchState?.batch?.disputeStarts?.[0]?.starterIncrementedArguments).toBe('[redacted]');
+    expect(core.jBatchState?.batch?.disputeStarts?.[0]?.starterCounterArguments).toBe('[redacted]');
     expect(core.jBatchState?.batch?.notes).toBeUndefined();
   }
   for (const doc of [liveAccount, historicalAccount]) {
@@ -1334,6 +1338,23 @@ test('runtime adapter entity summaries preserve gossip jurisdiction for live hub
   expect(hub?.jurisdiction?.depositoryAddress).toBe('0x0000000000000000000000000000000000000002');
 });
 
+test('runtime adapter keeps the committed user role when gossip advertises the entity as a Hub', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
+  // Publishing an orderbook and a gossip Hub profile are capabilities and
+  // advertisements. Neither may override the signer-backed Entity role.
+  replica.state.orderbookExt = makeOrderbookExt(new Map());
+  env.gossip = createGossipLayer();
+  env.gossip.announce(makeHubProfile(entityId, 'Spoofed Hub'));
+
+  const entities = await resolveRuntimeAdapterRead<Array<{ entityId: string; isHub?: boolean }>>(
+    { env },
+    'entities',
+  );
+
+  expect(entities.find(entry => entry.entityId === entityId)?.isHub).toBe(false);
+});
+
 test('runtime adapter view-frame exposes compact pending j-batch operations for cockpit actions', async () => {
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
@@ -1352,7 +1373,8 @@ test('runtime adapter view-frame exposes compact pending j-batch operations for 
           watchSeed: `0x${'34'.repeat(32)}`,
           sig: `0x${'56'.repeat(64)}`,
           starterInitialArguments: `0x${'78'.repeat(64)}`,
-          starterIncrementedArguments: `0x${'90'.repeat(64)}`,
+          starterCounterArguments: `0x${'90'.repeat(64)}`,
+          starterCounterProofCommitment: `0x${'00'.repeat(32)}`,
         },
       ],
       disputeFinalizations: [],
@@ -1378,7 +1400,7 @@ test('runtime adapter view-frame exposes compact pending j-batch operations for 
               watchSeed: string;
               sig: string;
               starterInitialArguments: string;
-              starterIncrementedArguments: string;
+              starterCounterArguments: string;
             }>;
           };
         };
@@ -1393,7 +1415,7 @@ test('runtime adapter view-frame exposes compact pending j-batch operations for 
   expect(disputeStarts[0]?.watchSeed).toBe('');
   expect(disputeStarts[0]?.sig).toBe('[redacted]');
   expect(disputeStarts[0]?.starterInitialArguments).toBe('[redacted]');
-  expect(disputeStarts[0]?.starterIncrementedArguments).toBe('[redacted]');
+  expect(disputeStarts[0]?.starterCounterArguments).toBe('[redacted]');
 });
 
 test('runtime adapter view frame defaults to the live entity with real relationships', async () => {
@@ -2674,6 +2696,8 @@ test('runtime adapter view-frame caps route-heavy core maps under wire budget', 
       orderId: id,
       makerEntityId: entityId,
       hubEntityId: counterpartyId,
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       source: {
         jurisdiction: 'Testnet',
         entityId,

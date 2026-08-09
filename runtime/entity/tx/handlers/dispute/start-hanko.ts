@@ -30,6 +30,7 @@ export const verifyStartHanko = async (
     evidence.proofBodyHash,
     domain,
     evidence.signedNonce,
+    evidence.proposerIsLeft,
   );
   if (
     evidence.storedDisputeHash?.startsWith('0x') &&

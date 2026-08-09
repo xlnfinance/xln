@@ -206,15 +206,6 @@ export const RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 export const RECOVERY_TOWER_INFO_TTL_MS = 60_000;
 
-export // Keep this aligned with Depository.defaultDisputeDelay. Towers are not meant to
-// intervene for most of the dispute window; they only become eligible in the final
-// last-resort slice after the user had ample time to answer personally.
-const DEFAULT_DISPUTE_WINDOW_BLOCKS = 5760;
-
-export const WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS = Math.max(1, Math.ceil(DEFAULT_DISPUTE_WINDOW_BLOCKS * 0.2));
-
-export const WATCHTOWER_SAFETY_MARGIN_BLOCKS = 12;
-
 export const RECOVERY_TOWER_STATUS_LIMIT = 16;
 
 export const shouldSkipRuntimeRecoveryUploadAtHeight = (

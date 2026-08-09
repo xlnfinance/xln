@@ -351,6 +351,8 @@ const signedHankoForTest = (
 
 const makeEmptyProofBody = () => ({
   watchSeed: `0x${'f1'.repeat(32)}`,
+  leftResponseSeconds: 10,
+  rightResponseSeconds: 10,
   offdeltas: [],
   tokenIds: [],
   transformers: [],
@@ -374,7 +376,7 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -421,6 +423,7 @@ const setSyntheticPendingAccountProposal = (
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
+    disputeConfig: structuredClone(account.state.disputeConfig),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
@@ -660,6 +663,7 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
         initialNonce: 7,
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
+        finalizationEvidenceHash: ethers.ZeroHash,
       },
     } satisfies JurisdictionEvent,
     finalProofbodyHash,
@@ -779,22 +783,18 @@ describe('audit fail-fast regressions', () => {
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
     const remoteRuntime = `0x${'99'.repeat(20)}`;
+    const crossJEntityId = `0x${'11'.repeat(32)}`;
+    const crossJSignerId = `0x${'01'.repeat(20)}`;
 
-    await expect(
-      processRuntime(env, [
-        {
-          from: remoteRuntime,
-          entityId: `0x${'11'.repeat(32)}`,
-          signerId: `0x${'01'.repeat(20)}`,
-          entityTxs: [
-            {
-              type: 'prepareCrossJurisdictionSwap',
-              data: { route: {} },
-            } as any,
-          ],
-        },
-      ]),
-    ).rejects.toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
+    expect(() => assertExternalEntityInputAllowed({
+      from: remoteRuntime,
+      entityId: crossJEntityId,
+      signerId: crossJSignerId,
+      entityTxs: [{
+        type: 'registerCrossJurisdictionSwap',
+        data: { route: {} },
+      } as any],
+    })).toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
 
     for (const entityId of [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`]) {
       expect(() => assertExternalEntityInputAllowed({
@@ -813,39 +813,16 @@ describe('audit fail-fast regressions', () => {
       })).toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
     }
 
-    await expect(
-      processRuntime(env, [
-        {
-          from: remoteRuntime,
-          entityId: `0x${'11'.repeat(32)}`,
-          signerId: `0x${'01'.repeat(20)}`,
-          entityTxs: [
-            {
-              type: 'consensusOutput',
-              data: {
-                origin: {
-                  sourceEntityId: `0x${'33'.repeat(32)}`,
-                  lane: 'generic',
-                  sequence: 1n,
-                  semanticHash: `0x${'44'.repeat(32)}`,
-                  height: 1,
-                  frameHash: `0x${'55'.repeat(32)}`,
-                  outputIndex: 0,
-                },
-                outputHanko: '0x01',
-                targetEntityId: `0x${'11'.repeat(32)}`,
-                entityTxs: [
-                  {
-                    type: 'prepareCrossJurisdictionSwap',
-                    data: { route: {} },
-                  },
-                ],
-              },
-            } as any,
-          ],
-        },
-      ]),
-    ).rejects.toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
+    expect(() => assertExternalEntityInputAllowed({
+      from: remoteRuntime,
+      entityId: crossJEntityId,
+      signerId: crossJSignerId,
+      localRuntimeProtocol: 'cross-j',
+      entityTxs: [{
+        type: 'prepareCrossJurisdictionSwap',
+        data: { route: {} },
+      } as any],
+    })).toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
 
     expect(() =>
       sendEntityInput(env, {
@@ -1501,6 +1478,8 @@ describe('audit fail-fast regressions', () => {
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId: 'salvage-route-signer',
+        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
         sourceSignerId: sourceSigner,
@@ -1550,6 +1529,7 @@ describe('audit fail-fast regressions', () => {
     const binary = reveal.binary;
     const revealEvent = {
       entity: sourceHub,
+      counterpartyEntity: sourceUser,
       ladderHash: ethers.keccak256(ethers.solidityPacked(
         ['bytes32', 'bytes32'],
         [route.sourcePull!.fullHash, route.sourcePull!.partialRoot],
@@ -1560,6 +1540,7 @@ describe('audit fail-fast regressions', () => {
         `0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`,
         `0x${'00'.repeat(32)}`, `0x${'00'.repeat(32)}`,
       ] as [string, string, string, string],
+      targetRole: false,
     };
     const outputs: EntityInput[] = [];
 
@@ -2160,6 +2141,8 @@ describe('audit fail-fast regressions', () => {
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId: 'cross-admit-atomic-route',
+        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
         bookOwnerEntityId: sourceHub,
@@ -2186,6 +2169,15 @@ describe('audit fail-fast regressions', () => {
     );
     const restingRoute = { ...route, status: 'resting' as const };
     const state = makeEntityState(sourceHub);
+    state.config = {
+      ...state.config,
+      jurisdiction: {
+        ...state.config.jurisdiction,
+        name: 'Source admission stack',
+        chainId: 31337,
+        depositoryAddress: `0x${'11'.repeat(20)}`,
+      },
+    };
     const env = createEmptyEnv('cross-admit-atomic-route');
     env.state.timestamp = 1_000;
 
@@ -2221,6 +2213,8 @@ describe('audit fail-fast regressions', () => {
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId: 'cross-source-commit-resting',
+        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
         bookOwnerEntityId: sourceHub,
@@ -2229,14 +2223,14 @@ describe('audit fail-fast regressions', () => {
         bookHubSignerId: '1',
         venueId: 'cross:test:1/target:2',
         source: {
-          jurisdiction: 'test',
+          jurisdiction: `stack:31337:0x${'dd'.repeat(20)}`,
           entityId: sourceUser,
           counterpartyEntityId: sourceHub,
           tokenId: 1,
           amount: 1_000n,
         },
         target: {
-          jurisdiction: 'target',
+          jurisdiction: `stack:31338:0x${'de'.repeat(20)}`,
           entityId: targetHub,
           counterpartyEntityId: targetUser,
           tokenId: 2,
@@ -2312,6 +2306,8 @@ describe('audit fail-fast regressions', () => {
     const route = {
       orderId: 'cross-same-token-offer',
       makerEntityId: sourceUser,
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       hubEntityId: targetHub,
       bookOwnerEntityId: targetHub,
       venueId:
@@ -2416,6 +2412,8 @@ describe('audit fail-fast regressions', () => {
       const route = buildPreparedCrossJurisdictionRoute(
         {
           orderId: `mm-fit-roundtrip-${entry.label}`,
+          sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+          targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
           makerEntityId: sourceMm,
           hubEntityId: sourceHub,
           source: {
@@ -2514,18 +2512,20 @@ describe('audit fail-fast regressions', () => {
     const route = {
       orderId: 'remote-source-admit',
       makerEntityId: sourceUser,
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       hubEntityId: targetHub,
       bookOwnerEntityId: targetHub,
       venueId: 'cross:base:2/tron:1',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: `stack:31338:0x${'de'.repeat(20)}`,
         entityId: sourceUser,
         counterpartyEntityId: sourceHub,
         tokenId: 1,
         amount: sourcePull.amount,
       },
       target: {
-        jurisdiction: 'base',
+        jurisdiction: `stack:31337:0x${'dd'.repeat(20)}`,
         entityId: targetHub,
         counterpartyEntityId: targetUser,
         tokenId: 2,

@@ -230,7 +230,6 @@ const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConf
       deltaTransformer,
     },
     blockTimeMs: jurisdiction.blockTimeMs,
-    defaultDisputeDelayBlocks: 5,
   } as never);
 };
 
@@ -260,7 +259,7 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountReplica => 
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -388,6 +387,8 @@ const makeCrossCase = (
       hubEntityId: hubId,
       bookOwnerEntityId: hubId,
       venueId: 'cross:bench-source:1/bench-target:1',
+      sourceDisputeConfig: { ...base.state.disputeConfig },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       source: {
         jurisdiction: `stack:1:${addr('11')}`,
         entityId: sourceUser,

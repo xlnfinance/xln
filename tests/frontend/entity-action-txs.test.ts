@@ -66,7 +66,13 @@ describe('entity action tx builders', () => {
       type: 'settle_approve',
       data: { counterpartyEntityId: hubId, workspaceHash },
     });
-    expect(buildOpenAccountTx(hubId)).toEqual({ type: 'openAccount', data: { targetEntityId: hubId } });
+    expect(buildOpenAccountTx(hubId, { leftResponseSeconds: 1, rightResponseSeconds: 2 })).toEqual({
+      type: 'openAccount',
+      data: {
+        targetEntityId: hubId,
+        disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 2 },
+      },
+    });
     expect(buildPrepareDisputeTx(hubId, 'prep')).toEqual({
       type: 'prepareDispute',
       data: {

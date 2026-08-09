@@ -231,6 +231,9 @@ async function readAccountState(
   status: string;
   activeDispute: boolean;
   disputeTimeout: number;
+  disputeStartTimestamp: number;
+  leftResponseSeconds: number;
+  rightResponseSeconds: number;
   block: number;
   jBatchDisputeStarts: number;
   jBatchDisputeFinalizations: number;
@@ -243,6 +246,9 @@ async function readAccountState(
         status: '',
         activeDispute: false,
         disputeTimeout: 0,
+        disputeStartTimestamp: 0,
+        leftResponseSeconds: 0,
+        rightResponseSeconds: 0,
         block: 0,
         jBatchDisputeStarts: 0,
         jBatchDisputeFinalizations: 0,
@@ -261,6 +267,9 @@ async function readAccountState(
       status: String(account?.status || ''),
       activeDispute: !!account?.activeDispute,
       disputeTimeout: Number(account?.activeDispute?.disputeTimeout || 0),
+      disputeStartTimestamp: Number(account?.activeDispute?.disputeStartTimestamp || 0),
+      leftResponseSeconds: Number(account?.state?.disputeConfig?.leftResponseSeconds || 0),
+      rightResponseSeconds: Number(account?.state?.disputeConfig?.rightResponseSeconds || 0),
       block: 0,
       jBatchDisputeStarts: Number(batch?.disputeStarts?.length || 0),
       jBatchDisputeFinalizations: Number(batch?.disputeFinalizations?.length || 0),
@@ -281,6 +290,15 @@ async function readCurrentChainBlock(page: Page): Promise<number> {
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function readCurrentChainTimestamp(page: Page): Promise<number> {
+  const body = await postRpc(page, 'eth_getBlockByNumber', ['latest', false]);
+  const timestamp = (body.result as { timestamp?: unknown } | undefined)?.timestamp;
+  if (typeof timestamp !== 'string') {
+    throw new Error(`unexpected latest block timestamp: ${JSON.stringify(body)}`);
+  }
+  return Number.parseInt(timestamp, 16);
 }
 
 async function postRpc(page: Page, method: string, params: unknown[]): Promise<{ result?: unknown; error?: unknown }> {
@@ -361,15 +379,17 @@ async function mineBlockChunk(page: Page, blocks: number): Promise<void> {
   throw new Error(`batch block mining unavailable for ${blocks} blocks: ${errors.join(' | ')}`);
 }
 
-async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
-  const deadline = Date.now() + 90_000;
-  for (;;) {
-    const current = await readCurrentChainBlock(page);
-    if (current >= targetBlock) return;
-    if (Date.now() >= deadline) {
-      throw new Error(`timed out waiting for block ${targetBlock} (chain=${current})`);
-    }
-    await mineBlocks(page, targetBlock - current);
+/** Advance the deterministic E2E chain to the contract's unix-second deadline. */
+async function waitForUnixSeconds(page: Page, targetTimestamp: number): Promise<void> {
+  const current = await readCurrentChainTimestamp(page);
+  if (current >= targetTimestamp) return;
+  // Account response policies are seconds on L1. Mining N blocks would quietly
+  // reintroduce the retired block-delay model and make the test chain-specific.
+  await postRpc(page, 'evm_setNextBlockTimestamp', [targetTimestamp]);
+  await mineOneBlock(page);
+  const advanced = await readCurrentChainTimestamp(page);
+  if (advanced < targetTimestamp) {
+    throw new Error(`failed to advance chain time: target=${targetTimestamp} actual=${advanced}`);
   }
 }
 
@@ -1464,16 +1484,18 @@ test.describe('E2E Dispute Flow', () => {
       },
     });
 
-    const currentChainBlock = await readCurrentChainBlock(page);
-    expect(disputedState.disputeTimeout, 'disputeTimeout should be set after disputeStart').toBeGreaterThan(currentChainBlock);
-    const disputeWindowBlocks = disputedState.disputeTimeout - currentChainBlock;
-    expect(
-      disputeWindowBlocks <= 5_760 && disputeWindowBlocks >= 5_700,
-      `expected production dispute delay around 5760 blocks, got ${disputeWindowBlocks}`,
-    ).toBe(true);
+    const currentChainTimestamp = await readCurrentChainTimestamp(page);
+    expect(disputedState.disputeStartTimestamp, 'disputeStartTimestamp should be set').toBeGreaterThan(0);
+    expect(disputedState.disputeTimeout, 'disputeTimeout should be a future unix timestamp')
+      .toBeGreaterThan(currentChainTimestamp);
+    expect(disputedState.disputeTimeout).toBe(
+      disputedState.disputeStartTimestamp
+      + disputedState.leftResponseSeconds
+      + disputedState.rightResponseSeconds,
+    );
 
     const finalizeBatchBefore = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-    await timedStep('dispute.wait_timeout_block', () => waitForBlock(page, disputedState.disputeTimeout));
+    await timedStep('dispute.wait_timeout_seconds', () => waitForUnixSeconds(page, disputedState.disputeTimeout));
     await timedStep('dispute.wait_auto_finalize_history_confirmed', async () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);

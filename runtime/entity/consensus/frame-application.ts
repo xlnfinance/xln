@@ -88,6 +88,7 @@ import { assertEntityFrameTxByteBudget } from './frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from './output-certification';
 import { invalidateEntityAccountCommitment } from './state-root';
 import type { ApplyEntityTxsInOrderContext } from './frame-application-types';
+import { filterEntityFrameBroadcastContinuations } from './j-broadcast-continuation';
 import { applyEntityTxReturnedEffects } from './frame-tx-effects';
 import { selectSettlementContinuation } from './settlement-continuation';
 
@@ -283,7 +284,13 @@ const collectEntityTxResult = (
       structuredClone(result.requiredAccountResponse),
     );
   }
-  context.allOutputs.push(...result.outputs);
+  context.allOutputs.push(...filterEntityFrameBroadcastContinuations(
+    context.allOutputs,
+    result.outputs,
+    result.newState.entityId,
+    context.entityTxs.some(tx => tx.type === 'j_broadcast'),
+    result.newState.jBatchState?.sentBatch !== undefined,
+  ));
   if (result.jOutputs) context.allJOutputs.push(...result.jOutputs);
   if (result.hashesToSign?.length) {
     context.collectedHashes.push(...result.hashesToSign);
@@ -330,9 +337,24 @@ const applyRegularEntityTx = async (
   return nextState;
 };
 
+export const assertEntityJBroadcastOrder = (entityTxs: readonly EntityTx[]): boolean => {
+  const broadcastIndex = entityTxs.findIndex(tx => tx.type === 'j_broadcast');
+  const manualBroadcastInInput = broadcastIndex >= 0;
+  if (manualBroadcastInInput) {
+    const broadcastCount = entityTxs.filter(tx => tx.type === 'j_broadcast').length;
+    if (broadcastCount !== 1) {
+      throw new MalformedEntityFrameInputError('j_broadcast', 'ENTITY_J_BROADCAST_DUPLICATE');
+    }
+    if (broadcastIndex !== entityTxs.length - 1) {
+      throw new MalformedEntityFrameInputError('j_broadcast', 'ENTITY_J_BROADCAST_MUST_BE_LAST');
+    }
+  }
+  return manualBroadcastInInput;
+};
+
 async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Promise<EntityState> {
   let currentEntityState = context.currentEntityState;
-  const manualBroadcastInInput = context.entityTxs.some(tx => tx.type === 'j_broadcast');
+  const manualBroadcastInInput = assertEntityJBroadcastOrder(context.entityTxs);
 
   // Preserve WAL transaction order exactly during live processing and replay.
   // Reordering batched txs can change bilateral account state transitions

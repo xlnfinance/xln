@@ -29,6 +29,11 @@ const REBALANCE_POLICY = {
   hardLimit: 200n,
   maxAcceptableFee: 3n,
 };
+const roleInputs = (sourceIsHub: boolean, hubIsHub = true) => ({
+  sourceRoleEvidence: { entityId: SOURCE, isHub: sourceIsHub, source: 'committed-profile' as const },
+  hubRoleEvidence: { entityId: HUB, isHub: hubIsHub, source: 'verified-gossip-profile' as const },
+  committedRoles: new Map([[SOURCE, sourceIsHub]]),
+});
 
 const sourceEnv = () => ({
   state: { eReplicas: new Map([
@@ -121,6 +126,7 @@ test('hub open-account command builds an explicit RuntimeInput batch', () => {
     sourceEntityId: SOURCE.toUpperCase(),
     signerId: SIGNER,
     hubEntityId: HUB.toUpperCase(),
+    ...roleInputs(false),
     creditAmount: 10_000n,
     tokenId: 7,
     rebalancePolicy: REBALANCE_POLICY,
@@ -135,6 +141,7 @@ test('hub open-account command builds an explicit RuntimeInput batch', () => {
       type: 'openAccount',
       data: {
         targetEntityId: HUB.toLowerCase(),
+        disputeConfig: { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 },
         creditAmount: 10_000n,
         tokenId: 7,
         rebalancePolicy: REBALANCE_POLICY,
@@ -143,11 +150,33 @@ test('hub open-account command builds an explicit RuntimeInput batch', () => {
   ]);
 });
 
+test('hub open-account command signs one-hour defaults for a Hub source too', () => {
+  const input = buildHubOpenAccountRuntimeInput({
+    sourceEntityId: SOURCE,
+    signerId: SIGNER,
+    hubEntityId: HUB,
+    ...roleInputs(true),
+    creditAmount: 1n,
+  });
+  expect(input.entityInputs[0]?.entityTxs[0]).toEqual({
+    type: 'openAccount',
+    data: {
+      targetEntityId: HUB,
+      disputeConfig: { leftResponseSeconds: 3_600, rightResponseSeconds: 3_600 },
+      creditAmount: 1n,
+      tokenId: 1,
+    },
+  });
+});
+
 test('direct open-account command builds an explicit RuntimeInput batch', () => {
   const input = buildDirectOpenAccountRuntimeInput({
     sourceEntityId: SOURCE.toUpperCase(),
     signerId: SIGNER,
     targetEntityId: HUB.toUpperCase(),
+    sourceRoleEvidence: { entityId: SOURCE, isHub: false, source: 'committed-profile' },
+    targetRoleEvidence: { entityId: HUB, isHub: true, source: 'committed-profile' },
+    committedRoles: new Map([[SOURCE, false], [HUB, true]]),
     rebalancePolicy: REBALANCE_POLICY,
   });
 
@@ -160,6 +189,7 @@ test('direct open-account command builds an explicit RuntimeInput batch', () => 
       type: 'openAccount',
       data: {
         targetEntityId: HUB.toLowerCase(),
+        disputeConfig: { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 },
         rebalancePolicy: REBALANCE_POLICY,
       },
     },
@@ -172,6 +202,7 @@ test('direct open-account command rejects malformed command targets', () => {
       sourceEntityId: SOURCE,
       signerId: SIGNER,
       targetEntityId: SOURCE,
+      ...roleInputs(false),
     }),
   ).toThrow('Cannot open an account with the same entity');
   expect(() =>
@@ -179,6 +210,7 @@ test('direct open-account command rejects malformed command targets', () => {
       sourceEntityId: SOURCE,
       signerId: '',
       targetEntityId: HUB,
+      ...roleInputs(false),
     }),
   ).toThrow('Signer is required');
   expect(() =>
@@ -186,6 +218,7 @@ test('direct open-account command rejects malformed command targets', () => {
       sourceEntityId: SOURCE,
       signerId: SIGNER,
       targetEntityId: '',
+      ...roleInputs(false),
     }),
   ).toThrow('Target entity is required');
 });
@@ -196,6 +229,7 @@ test('hub open-account command rejects malformed command targets', () => {
       sourceEntityId: SOURCE,
       signerId: SIGNER,
       hubEntityId: SOURCE,
+      ...roleInputs(false),
       creditAmount: 1n,
     }),
   ).toThrow('Cannot open an account with the same entity');
@@ -204,6 +238,7 @@ test('hub open-account command rejects malformed command targets', () => {
       sourceEntityId: SOURCE,
       signerId: '',
       hubEntityId: HUB,
+      ...roleInputs(false),
       creditAmount: 1n,
     }),
   ).toThrow('Signer is required');
@@ -212,15 +247,27 @@ test('hub open-account command rejects malformed command targets', () => {
       sourceEntityId: SOURCE,
       signerId: SIGNER,
       hubEntityId: HUB,
+      ...roleInputs(false),
       creditAmount: 0n,
     }),
   ).toThrow('credit amount must be positive');
+  expect(() =>
+    buildHubOpenAccountRuntimeInput({
+      sourceEntityId: SOURCE,
+      signerId: SIGNER,
+      hubEntityId: HUB,
+      ...roleInputs(false, false),
+      creditAmount: 1n,
+    }),
+  ).toThrow(`ACCOUNT_DISPUTE_PARTY_ROLE_UNAVAILABLE:${SOURCE}:${HUB}`);
 });
 
 test('hub discovery projection exposes same-jurisdiction hubs and account status', () => {
   const account = {
-    leftEntity: SOURCE,
-    rightEntity: HUB,
+    state: {
+      leftEntity: SOURCE,
+      rightEntity: HUB,
+    },
     currentFrame: { height: 7 },
     currentHeight: 7,
   };
@@ -356,6 +403,68 @@ test('hub discovery projection exposes same-jurisdiction hub profiles without fu
   expect(projection.localHubs[0]?.raw).toBe('raw-profile');
 });
 
+test('hub discovery committed user role vetoes Hub profile and remote runtime advertisements', () => {
+  const replicas = new Map([
+    [`${SOURCE}:${SIGNER}`, {
+      entityId: SOURCE,
+      signerId: SIGNER,
+      state: {
+        entityId: SOURCE,
+        config: { jurisdiction: JURISDICTION },
+        accounts: new Map(),
+      },
+    }],
+    [`${HUB}:0xHubSigner`, {
+      entityId: HUB,
+      signerId: '0xHubSigner',
+      state: {
+        entityId: HUB,
+        profile: { name: 'Committed User', isHub: false },
+        config: { jurisdiction: JURISDICTION },
+        accounts: new Map(),
+      },
+    }],
+  ]);
+  const advertisedHub = {
+    entityId: HUB,
+    name: 'Stale Hub',
+    avatar: '',
+    bio: '',
+    website: '',
+    lastUpdated: 99,
+    runtimeId: RUNTIME,
+    runtimeEncPubKey: '',
+    publicAccounts: [],
+    wsUrl: 'ws://127.0.0.1:3333',
+    relays: [],
+    metadata: {
+      isHub: true,
+      routingFeePPM: 0,
+      baseFee: 0n,
+      board: { threshold: 1, validators: [] },
+      jurisdiction: JURISDICTION,
+    },
+    accounts: [],
+  };
+
+  const projection = buildHubDiscoveryProjection({
+    entityId: SOURCE,
+    runtimeId: RUNTIME,
+    replicas: replicas as never,
+    profiles: [advertisedHub as never],
+    remoteHubs: [{
+      entityId: HUB,
+      name: 'Remote Stale Hub',
+      runtimeId: RUNTIME,
+      wsUrl: 'ws://127.0.0.1:8092/rpc',
+      jurisdiction: JURISDICTION,
+      height: 123,
+    }],
+  });
+
+  expect(projection.localHubs).toEqual([]);
+});
+
 test('hub discovery projection exposes same-jurisdiction remote runtime hubs without full hub replicas', () => {
   const replicas = new Map([
     [
@@ -463,8 +572,10 @@ test('hub discovery remote hubs are projected from runtime registry outside Enti
 
 test('hub discovery projection tracks connected fetched hubs without local hub replicas', () => {
   const account = {
-    leftEntity: SOURCE,
-    rightEntity: HUB,
+    state: {
+      leftEntity: SOURCE,
+      rightEntity: HUB,
+    },
     currentFrame: { height: 3 },
   };
   const replicas = new Map([
@@ -501,7 +612,7 @@ test('hub discovery projection marks uncommitted account as opening', () => {
         state: {
           entityId: SOURCE,
           config: { jurisdiction: JURISDICTION },
-          accounts: new Map([[HUB, { leftEntity: SOURCE, rightEntity: HUB }]]),
+          accounts: new Map([[HUB, { state: { leftEntity: SOURCE, rightEntity: HUB } }]]),
         },
       },
     ],
@@ -544,13 +655,16 @@ test('HubDiscoveryPanel renders a supplied projection instead of scanning eRepli
   expect(source).toContain('adapterMode: $runtimeControllerHandle.mode');
   expect(source).toContain('authLevel: $runtimeControllerHandle.authLevel');
   expect(source).toContain('hubDiscoveryProjection.localHubs');
-  expect(source).toContain('projectedHubs = mergeHubs(hubDiscoveryProjection.localHubs, hubs)');
+  expect(source).toContain('projectedHubs = hubDiscoveryProjection.localHubs');
+  expect(source).not.toContain('mergeHubs(');
+  expect(source).not.toContain('let hubs:');
   expect(profile).toContain('profiles?: readonly GossipProfile[]');
   expect(profile).toContain('remoteHubs?: readonly HubDiscoveryRemoteHub[]');
   expect(profile).toContain('for (const profile of input.profiles ?? [])');
   expect(profile).toContain('for (const remoteHub of input.remoteHubs ?? [])');
   expect(source).toContain('projectedConnection?.isConnected || projectedConnection?.isOpening');
   expect(source).toContain('buildHubOpenAccountRuntimeInput');
+  expect(source).toContain('hubDiscoveryProjection.localHubs.find');
   expect(source).toContain('await submitRuntimeInput(buildHubOpenAccountRuntimeInput');
   expect(source).toContain('{:else if entityId && canOpenHubAccount}');
   expect(source).not.toContain("throw new Error('Environment not ready')");

@@ -18,7 +18,6 @@ import { Depository__factory } from '../typechain-types/factories/contracts/Depo
 type PublicJurisdiction = Readonly<{
   chainId: number;
   rpc: string;
-  defaultDisputeDelayBlocks: number;
   contracts: Readonly<{ depository: string }>;
   tokens: Readonly<{ USDT: Readonly<{ address: string; tokenId: number }> }>;
 }>;
@@ -82,6 +81,8 @@ const watchSeed = ethers.keccak256(
 );
 const proofBody = {
   watchSeed,
+  leftResponseSeconds: 5,
+  rightResponseSeconds: 5,
   offdeltas: [] as bigint[],
   tokenIds: [] as bigint[],
   transformers: [],
@@ -141,8 +142,11 @@ const assertCustomError = async (
   throw new Error(`PUBLIC_PROOF_EXPECTED_REVERT_MISSING:${expectedName}`);
 };
 
-const waitForBlock = async (targetBlock: number): Promise<void> => {
-  while (await provider.getBlockNumber() < targetBlock) {
+const waitForUnixTimestamp = async (targetTimestamp: number): Promise<void> => {
+  for (;;) {
+    const block = await provider.getBlock('latest');
+    if (!block) throw new Error('PUBLIC_PROOF_LATEST_BLOCK_MISSING');
+    if (block.timestamp >= targetTimestamp) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 4_000));
   }
 };
@@ -152,11 +156,6 @@ try {
   if (network.chainId !== BigInt(jurisdiction.chainId)) {
     throw new Error(`PUBLIC_PROOF_CHAIN_ID_MISMATCH:${network.chainId}:${jurisdiction.chainId}`);
   }
-  const onchainDelay = Number(await depository.defaultDisputeDelay());
-  if (onchainDelay !== jurisdiction.defaultDisputeDelayBlocks) {
-    throw new Error(`PUBLIC_PROOF_DELAY_MISMATCH:${onchainDelay}:${jurisdiction.defaultDisputeDelayBlocks}`);
-  }
-
   const accountKey = await depository.accountKey(ownerEntityId, counterpartyEntityId);
   const accountBefore = await depository._accounts(accountKey);
   const ownerReserveBefore = await depository._reserves(ownerEntityId, 1) as bigint;
@@ -296,7 +295,7 @@ try {
     watchSeed,
     sig: buildSingleSignerHanko(counterpartyEntityId, disputeHash, counterpartyPrivateKey),
     starterInitialArguments: '0x',
-    starterIncrementedArguments: '0x',
+    starterCounterArguments: '0x',
   });
   const disputeStartReceipt = await sendBatch(disputeStart);
   const startedAccount = await depository._accounts(accountKey);
@@ -333,8 +332,8 @@ try {
     'E2',
   );
 
-  const targetBlock = Number(startedAccount.disputeTimeout);
-  await waitForBlock(targetBlock);
+  const targetTimestamp = Number(startedAccount.disputeTimeout);
+  await waitForUnixTimestamp(targetTimestamp);
   const finalizationReceipt = await sendBatch(finalization);
   const finalizedAccount = await depository._accounts(accountKey);
   if (finalizedAccount.disputeHash !== ethers.ZeroHash || finalizedAccount.disputeTimeout !== 0n) {
@@ -382,7 +381,7 @@ try {
     disputeStartTransactionHash: disputeStartReceipt.hash,
     disputeFinalizeTransactionHash: finalizationReceipt.hash,
     withdrawalTransactionHash: withdrawalReceipt.hash,
-    disputeDelayBlocks: onchainDelay,
+    disputeWindowSeconds: proofBody.leftResponseSeconds + proofBody.rightResponseSeconds,
     ownerReserve: ownerReserve.toString(),
     counterpartyReserve: counterpartyReserve.toString(),
   }));

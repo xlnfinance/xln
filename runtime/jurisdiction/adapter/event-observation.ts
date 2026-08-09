@@ -134,7 +134,7 @@ const collectDeliveries = (
     const entityId = String(replica.entityId || keyEntityId || '').toLowerCase();
     const signerId = String(replica.signerId || keySignerId || '');
     if (!entityId || !signerId || blockNumber <= Number(replica.state.lastFinalizedJHeight || 0)) continue;
-    const relevant = events.filter(event => isEventRelevantToEntity(event, entityId));
+    const relevant = events.filter(event => isEventRelevantToEntity(event, entityId, replica.state));
     if (relevant.length > 0) {
       deliveries.push({ entityId, signerId, jurisdictionRef, events: relevant });
     }

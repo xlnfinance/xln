@@ -131,6 +131,7 @@ const opened = await handleOpenAccountEntityTx(replica.state, {
   data: {
     targetEntityId: counterpartyId,
     accountDomain: accountStateDomainFromJurisdiction(jurisdiction),
+    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     watchSeed: `0x${'33'.repeat(32)}`,
   },
 }, createAccountConsensusContext(env));
@@ -144,6 +145,7 @@ const counterpartyOpened = await handleOpenAccountEntityTx(counterpartyReplica.s
   data: {
     targetEntityId: entityId,
     accountDomain: accountStateDomainFromJurisdiction(jurisdiction),
+    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     watchSeed: `0x${'33'.repeat(32)}`,
   },
 }, createAccountConsensusContext(env));

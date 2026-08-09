@@ -18,7 +18,9 @@
   import { shortAddress } from '$lib/utils/format';
   import { getXLN, submitRuntimeInput } from '$lib/stores/xlnStore';
   import type { RuntimeInput, XLNModule } from '@xln/runtime/api/public/runtime-module';
+  import type { EntityReplica } from '@xln/runtime/entity/types';
   import type { JAdapter } from '@xln/runtime/jurisdiction/adapter';
+  import { defaultAccountDisputeConfigForRoleEvidence } from '@xln/runtime/account/dispute-config';
   import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
   import { activeRuntime as activeVaultRuntime } from '$lib/stores/vaultStore';
   import SolvencyPanel from './SolvencyPanel.svelte';
@@ -80,6 +82,33 @@
   $: isLiveActionFrame = Boolean($runtimeFrameIsLive) && $runtimeFrameTimeIndex === -1;
 
   let cachedXLN: XLNModule | null = null;
+
+  /**
+   * Materialize the bilateral response clocks before signing openAccount.
+   * The clocks depend on both committed entity roles, so guessing a missing role
+   * here would silently sign a different dispute agreement on the two replicas.
+   */
+  function openAccountData(sourceEntityId: string, targetEntityId: string) {
+    const replicas: EntityReplica[] = Array.from(
+      $runtimeFrameEnv?.state?.eReplicas?.values?.() ?? [],
+    );
+    const source = replicas.find(replica => replica?.state?.entityId === sourceEntityId);
+    const target = replicas.find(replica => replica?.state?.entityId === targetEntityId);
+    if (typeof source?.state?.profile?.isHub !== 'boolean' || typeof target?.state?.profile?.isHub !== 'boolean') {
+      throw new Error(`ACCOUNT_DISPUTE_PARTY_ROLE_UNAVAILABLE:${sourceEntityId}:${targetEntityId}`);
+    }
+    return {
+      targetEntityId,
+      disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+        { entityId: sourceEntityId, isHub: source.state.profile.isHub, source: 'committed-profile' },
+        { entityId: targetEntityId, isHub: target.state.profile.isHub, source: 'committed-profile' },
+        new Map([
+          [sourceEntityId.toLowerCase(), source.state.profile.isHub],
+          [targetEntityId.toLowerCase(), target.state.profile.isHub],
+        ]),
+      ),
+    };
+  }
 
   async function getJAdapterFromEnv(): Promise<JAdapter | null> {
     if (!$runtimeFrameEnv) return null;
@@ -811,7 +840,7 @@
           signerId: fromReplica.signerId,
           entityTxs: [{
             type: 'openAccount',
-            data: { targetEntityId: to }
+            data: openAccountData(from, to)
           }]
         }] }, 'send payment');
       }
@@ -895,7 +924,7 @@
         attempts++;
       }
 
-      if (to === from) {
+      if (!from || !to || to === from) {
         lastAction = ' Could not find different entity';
         loading = false;
         return;
@@ -908,7 +937,7 @@
         txBatch.push({
           entityId: from,
           signerId: fromReplica.signerId,
-          entityTxs: [{ type: 'openAccount', data: { targetEntityId: to } }]
+          entityTxs: [{ type: 'openAccount', data: openAccountData(from, to) }]
         });
       }
 
@@ -1309,7 +1338,7 @@
               signerId: fromReplica.signerId,
               entityTxs: [{
                 type: 'openAccount',
-                data: { targetEntityId: hub.id }
+                data: openAccountData(fromId, hub.id)
               }]
             });
           }
@@ -1443,7 +1472,7 @@
           signerId: fromReplica.signerId,
           entityTxs: [{
             type: 'openAccount',
-            data: { targetEntityId: toId }
+            data: openAccountData(fromId, toId)
           }]
         }] }, 'smart payment loop');
       }
@@ -1616,7 +1645,7 @@
                 signerId: fromReplica.signerId,
                 entityTxs: [{
                   type: 'openAccount',
-                  data: { targetEntityId: to }
+                  data: openAccountData(from, to)
                 }]
               }] }, 'Fed payment loop');
             }

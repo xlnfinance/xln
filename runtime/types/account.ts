@@ -62,8 +62,9 @@ export interface PullCommitment {
   amount: bigint;
   claimedRatio?: number;
   claimedAmount?: bigint;
-  // Settlement clock is on-chain dispute-relative (startTs + T/2). No sealed
-  // route/market deadline field — that was a second clock with no L1 force.
+  // Settlement clock is on-chain dispute-relative. Both signed roles use this
+  // Pull beneficiary's side window from their own Account dispute start.
+  // No sealed route/market deadline field — that was a second clock with no L1 force.
   fullHash: string;
   partialRoot: string;
   crossJurisdiction: CrossJurisdictionPullBinding;
@@ -241,8 +242,8 @@ export interface AccountState {
   rightPendingJClaims: AccountJClaimAccumulatorState;
   lastFinalizedJHeight: number;
   disputeConfig: {
-    leftDisputeDelay: number;
-    rightDisputeDelay: number;
+    leftResponseSeconds: number;
+    rightResponseSeconds: number;
   };
   jNonce: number;
   settlementWorkspace?: SettlementWorkspace;
@@ -264,8 +265,8 @@ export interface CrossJurisdictionDisputeRecovery {
   requiredPullIds: string[];
   /** Missing = pending; otherwise the decimal fillRatio confirmed registered on this chain. */
   resultsByPullId: Record<string, string>;
-  // Settle-or-0 for missing ports is gated by L1 dispute-relative seconds
-  // (disputeStartTimestamp + T/2, unix seconds), not a wall-clock pull/route reveal deadline.
+  // Settle-or-0 for missing ports: abandon after the Source beneficiary's
+  // signed deadline. Target may still register until the signed sum timeout.
 }
 
 export interface AccountReplica {
@@ -340,10 +341,12 @@ export interface AccountReplica {
 
   currentDisputeProofHanko?: HankoString;              // My hanko on dispute proof (for J-machine enforcement)
   currentDisputeProofNonce?: number;                    // Nonce used in currentDisputeProofHanko
+  currentDisputeProofProposerIsLeft?: boolean;
   currentDisputeProofBodyHash?: string;                // ProofBodyHash used in currentDisputeProofHanko
   currentDisputeHash?: string;                         // Exact dispute hash signed in currentDisputeProofHanko
   counterpartyDisputeProofHanko?: HankoString;         // Their hanko on dispute proof (ready for disputes)
   counterpartyDisputeProofNonce?: number;               // Nonce used in counterpartyDisputeProofHanko
+  counterpartyDisputeProofProposerIsLeft?: boolean;
   counterpartyDisputeProofBodyHash?: string;           // ProofBodyHash that counterparty signed (MUST match dispute)
   counterpartyDisputeHash?: string;                    // Exact dispute hash signed in counterpartyDisputeProofHanko
   counterpartySettlementHanko?: HankoString;           // Their hanko on settlement operations
@@ -378,15 +381,20 @@ export interface AccountReplica {
   activeDispute?: {
     startedByLeft: boolean;           // Who initiated dispute (from on-chain)
     initialProofbodyHash: string;     // Hash committed in disputeStart
-    initialNonce: number;             // Unified nonce from disputeStart (replaces initialDisputeNonce)
+    initialNonce: number;             // Unified nonce committed by DisputeStarted
+    initialProposerIsLeft: boolean;   // Signed branch author; LEFT wins equal-nonce collisions
     disputeTimeout: number;           // Absolute unix end of challenge window (seconds)
-    disputeStartTimestamp?: number;   // Unix start; pull reveal cutoff = start + T/2
+    disputeStartTimestamp?: number;   // Unix start; role deadlines derive from signed Account config
     jNonce: number;             // On-chain nonce at dispute start (replaces initialCooperativeNonce + onChainCooperativeNonce)
     starterInitialArguments: string;  // Starter-side args for initial proof
-    starterIncrementedArguments: string;  // Starter-side args for the one known newer proof, or 0x
+    starterCounterArguments: string;  // Starter-side args for the one known newer proof, or 0x
+    starterCounterProofCommitment: string; // H(nonce, proposer role, ProofBody hash) for that exact newer proof
     observedOnChain?: boolean;        // false for local placeholder, true after DisputeStarted J-event
     observedBlockNumber?: number;     // J block where DisputeStarted was observed (watcher metadata only)
     batchNonce?: number;              // Hanko batch nonce observed with DisputeStarted when available
+    selectedCounterNonce?: number;    // Highest counter-proof locked on-chain before T
+    selectedCounterProofbodyHash?: string;
+    selectedCounterProposerIsLeft?: boolean;
     finalizeQueued?: boolean;         // Finalize op already queued locally (single-source lifecycle guard)
     /** Target-user (nonstarter) recovery after a target-hub initiated dispute. */
     crossJurisdictionRecovery?: CrossJurisdictionDisputeRecovery;
@@ -475,6 +483,8 @@ type AccountInputBase = {
   fromEntityId: string;
   toEntityId: string;
   domain: AccountStateDomain;
+  /** Exact bilateral seconds clock; required on every peer envelope. */
+  disputeConfig: AccountState['disputeConfig'];
   watchSeed?: string;
 };
 
@@ -488,6 +498,7 @@ export type AccountDisputeSeal = {
   hash: string;
   proofBodyHash: string;
   proofNonce: number;
+  proposerIsLeft: boolean;
 };
 
 export type AccountFrameAck = {
@@ -545,11 +556,15 @@ export type AccountExternalFinalityInput = AccountInputBase & {
         starterEntityId: string;
         initialProofbodyHash: string;
         initialNonce: number;
+        initialProposerIsLeft: boolean;
         disputeTimeout: number;
         disputeStartTimestamp: number;
+        leftResponseSeconds: number;
+        rightResponseSeconds: number;
         jNonce: number;
         starterInitialArguments: string;
-        starterIncrementedArguments: string;
+        starterCounterArguments: string;
+        starterCounterProofCommitment: string;
         observedBlockNumber: number;
         batchNonce?: number;
       }
@@ -705,6 +720,7 @@ export interface SettlementWorkspace {
     disputeHash: string;                      // Exact hash signed by both post-settlement hankos
     proofBodyHash: string;                    // Same as pre-settlement (offdelta unchanged)
     nonce: number;                            // = nonceAtSign + 1 (replaces cooperativeNonce)
+    proposerIsLeft: boolean;                  // Signed branch author for equal-nonce ordering
   };
 }
 
@@ -1020,6 +1036,7 @@ export type AccountTx =
             settlementHanko?: HankoString;
             postProof: {
               nonce: number;
+              proposerIsLeft: boolean;
               proofBodyHash: string;
               disputeHash: string;
               hanko?: HankoString;

@@ -17,6 +17,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/machine/batch';
 import {
@@ -76,7 +77,15 @@ async function openGridAccount(env: RuntimeReplica, fromEntityId: string, toEnti
     signerId: replica.signerId,
     entityTxs: [{
       type: 'openAccount',
-      data: { targetEntityId: toEntityId },
+      data: {
+        targetEntityId: toEntityId,
+        disputeConfig: defaultAccountDisputeConfigForParties(
+          replica.state.entityId,
+          replica.state.profile.isHub,
+          toEntityId,
+          false,
+        ),
+      },
     }],
   }]);
 }

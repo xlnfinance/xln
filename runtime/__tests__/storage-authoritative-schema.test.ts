@@ -318,6 +318,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
           chainId: 31_337,
           depositoryAddress: `0x${'11'.repeat(20)}`,
         },
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         watchSeed: hash,
         txs: [],
       },
@@ -333,6 +334,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
         chainId: 31_337,
         depositoryAddress: `0x${'11'.repeat(20)}`,
       },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       watchSeed: hash,
     };
     const validAck = {
@@ -344,6 +346,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
           hash,
           proofBodyHash: hash,
           proofNonce: 1,
+          proposerIsLeft: true,
         },
       },
     };

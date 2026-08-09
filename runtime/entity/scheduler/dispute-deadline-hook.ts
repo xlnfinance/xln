@@ -71,10 +71,15 @@ export const processDisputeDeadlineHook = (
   const accountIdNorm = accountId.toLowerCase();
   const draft = replica.state.jBatchState?.batch?.disputeFinalizations || [];
   const sent = replica.state.jBatchState?.sentBatch?.batch?.disputeFinalizations || [];
+  const recovered = (replica.state.jBatchState?.recoveryBatches ?? [])
+    .flatMap(batch => batch.disputeFinalizations);
   const draftHasFinalize = draft.some(
     entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
   );
   const sentHasFinalize = sent.some(
+    entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
+  );
+  const recoveryHasFinalize = recovered.some(
     entry => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
   );
   if (sentHasFinalize || replica.state.jBatchState?.sentBatch) {
@@ -88,7 +93,7 @@ export const processDisputeDeadlineHook = (
     });
     return;
   }
-  if (draftHasFinalize) {
+  if (draftHasFinalize || recoveryHasFinalize) {
     account.activeDispute.finalizeQueued = true;
     context.accountChanges.add(accountId);
     plan.shouldBroadcastQueuedDisputeFinalizations = true;
@@ -98,6 +103,17 @@ export const processDisputeDeadlineHook = (
     // An abort/drop may remove the draft while leaving this local latch.
     account.activeDispute.finalizeQueued = false;
     context.accountChanges.add(accountId);
+  }
+  if (plan.disputeFinalizeCounterparties.size > 0) {
+    // Depository intentionally accepts one defensive finalization per batch.
+    // Retain every additional same-tick deadline instead of creating one
+    // unprocessable Entity output that would roll back the whole frame.
+    retryDisputeDeadline(replica, hook, 1);
+    crontabLog.debug('dispute.deferred_finalize_slot', {
+      account: shortId(accountId),
+      retryMs: 1,
+    });
+    return;
   }
   plan.disputeFinalizeCounterparties.add(accountId);
 };

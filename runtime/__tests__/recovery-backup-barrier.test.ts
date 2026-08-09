@@ -5,7 +5,6 @@ import { deliveryAccepted } from '../protocol/payments/delivery-result';
 
 test('persisted pending network outputs retry after backup recovery', async () => {
   const env = createEmptyEnv('recovery-barrier-seed');
-  env.runtimeId = '0x1111111111111111111111111111111111111111';
   env.dbNamespace = `recovery-barrier-${Date.now()}`;
   env.quietRuntimeLogs = true;
   env.state.timestamp = 1_000;
@@ -39,7 +38,6 @@ test('persisted pending network outputs retry after backup recovery', async () =
 
 test('direct remote sends fail closed while recovery backup barrier is active', () => {
   const env = createEmptyEnv('recovery-barrier-direct-send');
-  env.runtimeId = '0x1111111111111111111111111111111111111111';
   env.dbNamespace = `recovery-barrier-direct-${Date.now()}`;
   env.quietRuntimeLogs = true;
   env.state.timestamp = 1_000;

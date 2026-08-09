@@ -14,6 +14,10 @@ import {
   buildCrossJurisdictionSwapIntent,
   buildDeterministicSwapOfferId,
 } from '../account/swap-command-route';
+import {
+  defaultAccountDisputeConfigForRoleEvidence,
+  type AccountRoleEvidence,
+} from '../account/dispute-config';
 export { buildDeterministicSwapOfferId } from '../account/swap-command-route';
 
 type SwapCommandParty = Readonly<{
@@ -22,6 +26,9 @@ type SwapCommandParty = Readonly<{
   hubEntityId: string;
   hubSignerId: string;
   jurisdiction: string;
+  entityRoleEvidence: AccountRoleEvidence;
+  hubRoleEvidence: AccountRoleEvidence;
+  committedRoles: ReadonlyMap<string, boolean>;
   account: AccountState | null;
 }>;
 
@@ -93,6 +100,9 @@ const requireParty = (party: SwapCommandParty, label: string): SwapCommandParty 
     !normalized.hubEntityId ||
     !normalized.hubSignerId ||
     !normalized.jurisdiction ||
+    normalizeId(normalized.entityRoleEvidence?.entityId) !== normalized.entityId ||
+    normalizeId(normalized.hubRoleEvidence?.entityId) !== normalized.hubEntityId ||
+    normalized.hubRoleEvidence?.isHub !== true ||
     normalized.entityId === normalized.hubEntityId
   ) {
     throw new Error(`SWAP_COMMAND_${label}_PARTY_INVALID`);
@@ -152,6 +162,15 @@ const inboundPlan = (
   tokenId,
   requiredInboundAmount: amount,
   allowOpenAccount,
+  ...(party.account
+    ? {}
+    : {
+        newAccountDisputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+          party.entityRoleEvidence,
+          party.hubRoleEvidence,
+          party.committedRoles,
+        ),
+      }),
 });
 
 const runtimeInputFor = (
@@ -164,6 +183,37 @@ const runtimeInputFor = (
     signerId: party.signerId,
     entityTxs: [...entityTxs],
   }],
+});
+
+const buildCrossIntent = (
+  input: SwapCommandPlanInput,
+  source: SwapCommandParty,
+  target: SwapCommandParty,
+  offerId: string,
+  preparedOrder: SwapCommandPreparedOrder,
+): CrossJurisdictionSwapRoute => buildCrossJurisdictionSwapIntent({
+  offerId,
+  logicalTimestamp: input.logicalTimestamp,
+  expiresInMs: input.expiresInMs ?? 24 * 60 * 60 * 1_000,
+  giveTokenId: input.giveTokenId,
+  wantTokenId: input.wantTokenId,
+  giveAmount: preparedOrder.effectiveGive,
+  wantAmount: preparedOrder.effectiveWant,
+  priceTicks: preparedOrder.priceTicks,
+  source: {
+    ...source,
+    disputeConfig: { ...source.account!.disputeConfig },
+  },
+  target: {
+    ...target,
+    disputeConfig: target.account
+      ? { ...target.account.disputeConfig }
+      : defaultAccountDisputeConfigForRoleEvidence(
+          target.entityRoleEvidence,
+          target.hubRoleEvidence,
+          target.committedRoles,
+        ),
+  },
 });
 
 export const planSwapCommand = (input: SwapCommandPlanInput): SwapCommandPlan => {
@@ -233,18 +283,13 @@ export const planSwapCommand = (input: SwapCommandPlanInput): SwapCommandPlan =>
     preparedOrder.effectiveWant,
     input.allowOpenTargetAccount === true,
   );
-  const crossJurisdictionIntent = buildCrossJurisdictionSwapIntent({
-    offerId,
-    logicalTimestamp: input.logicalTimestamp,
-    expiresInMs: input.expiresInMs ?? 24 * 60 * 60 * 1_000,
-    giveTokenId: input.giveTokenId,
-    wantTokenId: input.wantTokenId,
-    giveAmount: preparedOrder.effectiveGive,
-    wantAmount: preparedOrder.effectiveWant,
-    priceTicks: preparedOrder.priceTicks,
+  const crossJurisdictionIntent = buildCrossIntent(
+    input,
     source,
     target,
-  });
+    offerId,
+    preparedOrder,
+  );
   return {
     mode: 'cross',
     offerId,

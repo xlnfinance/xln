@@ -41,21 +41,28 @@ describe('scenario convergence timeout diagnostics', () => {
   });
 
   test('regular convergence never silently returns with queued work', async () => {
-    await expect(converge(envWithBacklog('regular'), 0)).rejects.toThrow(
-      'converge: not converged after 0 cycles; outputs=0,network=0,inbox=0,inputs=1',
-    );
+    const rejection = converge(envWithBacklog('regular'), 0).catch((error: unknown) => error);
+    const error = await rejection;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('converge: not converged after 0 cycles;');
+    expect((error as Error).message).toContain('outputs=0,network=0,inbox=0,inputs=1');
+    expect((error as Error).message).toContain('networkLanes=[]');
+    expect((error as Error).message).toContain('self=0x');
   });
 
   test('offline convergence reports its reason and exact queued work', async () => {
-    await expect(convergeWithOffline(
+    const rejection = convergeWithOffline(
       envWithBacklog('offline'),
       new Set(['4']),
       0,
       'validator-failover',
-    )).rejects.toThrow(
-      'convergeWithOffline:validator-failover: not converged after 0 cycles; ' +
-      'outputs=0,network=0,inbox=0,inputs=1',
-    );
+    ).catch((error: unknown) => error);
+    const error = await rejection;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('convergeWithOffline:validator-failover: not converged after 0 cycles;');
+    expect((error as Error).message).toContain('outputs=0,network=0,inbox=0,inputs=1');
+    expect((error as Error).message).toContain('networkLanes=[]');
+    expect((error as Error).message).toContain('self=0x');
   });
 
   test('offline-only durable network backlog does not block simulated convergence', async () => {
@@ -72,9 +79,16 @@ describe('scenario convergence timeout diagnostics', () => {
     env.scenarioMode = true;
     env.pendingNetworkOutputs = [networkOutput('4'), networkOutput('3')];
 
-    await expect(convergeWithOffline(env, new Set(['4']), 1, 'mixed-network')).rejects.toThrow(
-      'networkLanes=[trigger@signer=3,runtime=0x2222222222222222222222222222222222222222;' +
-      'trigger@signer=4,runtime=0x2222222222222222222222222222222222222222]',
+    const rejection = convergeWithOffline(env, new Set(['4']), 1, 'mixed-network').catch((error: unknown) => error);
+    const error = await rejection;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('convergeWithOffline:mixed-network: not converged after 1 cycles;');
+    expect((error as Error).message).toContain('network=2');
+    expect((error as Error).message).toContain(
+      'networkLanes=[trigger@entity=0x1111111111111111111111111111111111111111111111111111111111111111,signer=3,runtime=0x2222222222222222222222222222222222222222,hasReplica=n;',
+    );
+    expect((error as Error).message).toContain(
+      'trigger@entity=0x1111111111111111111111111111111111111111111111111111111111111111,signer=4,runtime=0x2222222222222222222222222222222222222222,hasReplica=n]',
     );
   });
 
@@ -100,7 +114,7 @@ describe('scenario convergence timeout diagnostics', () => {
     const error = await rejection;
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain(
-      'networkLanes=[leader-timeout-vote@signer=3,runtime=0x2222222222222222222222222222222222222222]',
+      'networkLanes=[leader-timeout-vote@entity=0x1111111111111111111111111111111111111111111111111111111111111111,signer=3,runtime=0x2222222222222222222222222222222222222222,hasReplica=n]',
     );
     expect((error as Error).message).not.toContain('secret-signature-must-not-leak');
   });

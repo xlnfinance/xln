@@ -98,20 +98,6 @@ library HashLadder {
     return partialRootFromRoots(roots);
   }
 
-  function buildCommitment(
-    bytes32 fullSecret,
-    bytes32[4] memory nibbleBases
-  ) internal pure returns (Commitment memory commitment) {
-    bytes32[4] memory roots;
-    unchecked {
-      for (uint8 i = 0; i < NIBBLE_COUNT; i++) {
-        roots[i] = rootFromBase(nibbleBases[i]);
-      }
-    }
-    commitment.fullHash = hashFullSecret(fullSecret);
-    commitment.partialRoot = partialRootFromRoots(roots);
-  }
-
   function buildCommitmentCalldata(
     bytes32 fullSecret,
     bytes32[4] calldata nibbleBases
@@ -146,18 +132,6 @@ library HashLadder {
   ) internal pure returns (bool) {
     if (fillRatio == FULL_FILL_RATIO) return false;
     return partialRootFromRevealsCalldata(fillRatio, reveals) == expectedPartialRoot;
-  }
-
-  function verify(
-    Commitment memory commitment,
-    uint16 fillRatio,
-    bytes32 fullSecret,
-    bytes32[4] memory reveals
-  ) internal pure returns (bool) {
-    if (fillRatio == FULL_FILL_RATIO) {
-      return verifyFull(commitment.fullHash, fullSecret);
-    }
-    return verifyPartial(commitment.partialRoot, fillRatio, reveals);
   }
 
   function verifyCalldata(

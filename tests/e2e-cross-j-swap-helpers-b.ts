@@ -21,6 +21,7 @@ import {
 } from './e2e-cross-j-swap-helpers-a';
 import { expect, type Page } from './global-setup.mts';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
+export { transferFeeAmount } from './utils/e2e-cross-j-fee-observation';
 
 export async function expectCrossOrderbookReady(
   page: Page,
@@ -266,7 +267,7 @@ export async function placeCrossOrder(
     expectedClickToTokenId?: number;
     checkMultihopDeferred?: boolean;
     expectSetupConsent?: boolean;
-    expectedBookDepth?: number;
+    expectedBookDepth?: { expectedBidOffers: number; expectedAskOffers: number };
     expectedAutoAmount?: number;
     screenshotPath?: string;
   },
@@ -289,8 +290,12 @@ export async function placeCrossOrder(
   await expectCrossOrderbookReady(page);
   if (params.expectedBookDepth) {
     const orderbook = page.getByTestId('swap-orderbook').first();
-    await expect(orderbook.getByTestId('orderbook-ask-row')).toHaveCount(params.expectedBookDepth, { timeout: 30_000 });
-    await expect(orderbook.getByTestId('orderbook-bid-row')).toHaveCount(params.expectedBookDepth, { timeout: 30_000 });
+    await expect(orderbook.getByTestId('orderbook-ask-row')).toHaveCount(params.expectedBookDepth.expectedAskOffers, {
+      timeout: 30_000,
+    });
+    await expect(orderbook.getByTestId('orderbook-bid-row')).toHaveCount(params.expectedBookDepth.expectedBidOffers, {
+      timeout: 30_000,
+    });
     const displayedSizes = await orderbook.locator('.size').allTextContents();
     expect(displayedSizes, 'stable cross MM depth should be visibly sized in thousands of tokens').toEqual(
       expect.arrayContaining([expect.stringMatching(/K$/)]),
@@ -324,6 +329,14 @@ export async function placeCrossOrder(
   const amountInput = page.getByTestId('swap-ticket-amount').first();
   const priceInput = page.getByTestId('swap-ticket-rate').first();
   const submit = page.getByTestId('swap-ticket-submit').first();
+  const safetyBanner = page.getByTestId('cross-j-safety-banner').first();
+  await expect(
+    safetyBanner,
+    'every cross-network order must disclose its online secret-relay and manual-close obligations',
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(safetyBanner).toContainText('Stay online');
+  await expect(safetyBanner).toContainText('cancel the remaining order manually');
+  await expect(safetyBanner).toContainText('65,535 steps');
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
   const beforeSubmit = await readCrossState(page, params.source, params.hubId);
@@ -634,6 +647,8 @@ export async function readCrossState(
   ownerIsLeft: boolean;
   deltas: Record<string, CrossDeltaSnapshot>;
   currentFrameFees: Record<string, string>;
+  /** Cumulative prepaid rebalance fees by tokenId (feePaidUpfront). */
+  rebalanceFeesPaid: Record<string, string>;
 }> {
   return await page.evaluate(
     ({ identity, hubId }) => {
@@ -722,12 +737,14 @@ export async function readCrossState(
         accountKeys: Array.from(state?.accounts?.keys?.() || []).map((key: unknown) => String(key)),
         messages: Array.from(state?.messages || []).map((message: unknown) => String(message)),
         routeSummaries,
-        offerSummaries: Array.from(account?.state?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
-          offerId: String(offerId),
-          status: String(offer?.crossJurisdiction?.status || ''),
-          amount: String(offer?.amount ?? '0'),
-          cross: Boolean(offer?.crossJurisdiction),
-        })),
+        offerSummaries: Array.from(account?.state?.swapOffers?.entries?.() || []).map(
+          ([offerId, offer]: [string, any]) => ({
+            offerId: String(offerId),
+            status: String(offer?.crossJurisdiction?.status || ''),
+            amount: String(offer?.amount ?? '0'),
+            cross: Boolean(offer?.crossJurisdiction),
+          }),
+        ),
         pullIds: Array.from(account?.state?.pulls?.keys?.() || []).map((pullId: unknown) => String(pullId)),
         pendingOutputs: Array.from(env?.pendingOutputs || []).map((input: any) => ({
           entityId: String(input?.entityId || ''),
@@ -771,6 +788,11 @@ export async function readCrossState(
             return fees;
           },
           {},
+        ),
+        rebalanceFeesPaid: Object.fromEntries(
+          Array.from(account?.state?.requestedRebalanceFeeState?.entries?.() || []).map(
+            ([tokenId, feeState]: [unknown, any]) => [String(tokenId), String(feeState?.feePaidUpfront ?? 0n)],
+          ),
         ),
         deltas: Object.fromEntries(
           Array.from(account?.state?.deltas?.entries?.() || []).map(([tokenId, delta]: [unknown, any]) => [
@@ -880,32 +902,21 @@ export async function waitForCrossPullFlow(
           const sourceRoute = options.sourceRouteId
             ? sourceState.routeSummaries.find(route => route.orderId === options.sourceRouteId)
             : sourceState.routeSummaries.find(
-                route =>
-                  route.sourcePull ||
-                  route.targetPull ||
-                  ['settled'].includes(route.status),
+                route => route.sourcePull || route.targetPull || ['settled'].includes(route.status),
               );
           const targetRoute = options.targetRouteId
             ? targetState.routeSummaries.find(route => route.orderId === options.targetRouteId)
             : targetState.routeSummaries.find(
-                route =>
-                  route.sourcePull ||
-                  route.targetPull ||
-                  ['settled'].includes(route.status),
+                route => route.sourcePull || route.targetPull || ['settled'].includes(route.status),
               );
           const routeHasProgress = (route: typeof sourceRoute): boolean =>
-            Boolean(route) &&
-            (route.cumulativeFillRatio > 0 || ['settled'].includes(route.status));
+            Boolean(route) && (route.cumulativeFillRatio > 0 || ['settled'].includes(route.status));
           const targetHasDurablePreparedPull = Boolean(
             targetRoute?.targetPullId &&
             targetState.pullIds.includes(targetRoute.targetPullId) &&
-            [
-              'target_prepared',
-              'resting',
-              'partially_filled',
-              'clear_requested',
-              'clearing',
-            ].includes(targetRoute.status),
+            ['target_prepared', 'resting', 'partially_filled', 'clear_requested', 'clearing'].includes(
+              targetRoute.status,
+            ),
           );
           const sourceHasCommittedFill = routeHasProgress(sourceRoute);
           const targetHasClaimedFill = routeHasProgress(targetRoute);
@@ -965,11 +976,13 @@ export async function waitForCrossPullFlow(
             currentHeight: Number(account?.currentHeight || 0),
             mempool: Array.from(account?.mempool || []).map((tx: any) => String(tx?.type || '')),
             pendingFrame: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
-            offers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
-              offerId: String(offerId || ''),
-              cross: Boolean(offer?.crossJurisdiction),
-              status: String(offer?.crossJurisdiction?.status || ''),
-            })),
+            offers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(
+              ([offerId, offer]: [string, any]) => ({
+                offerId: String(offerId || ''),
+                cross: Boolean(offer?.crossJurisdiction),
+                status: String(offer?.crossJurisdiction?.status || ''),
+              }),
+            ),
             pulls: Array.from(account?.state?.pulls?.keys?.() || []).map(String),
           })),
           routes: Array.from(state?.crossJurisdictionSwaps?.entries?.() || []).map(
@@ -1165,13 +1178,15 @@ export async function waitForLatestCrossResolveSnapshot(
               mempoolTxs: Array.from(account?.mempool || []).map(
                 (tx: any) => `${String(tx?.type || '')}:${String(tx?.data?.offerId || '').slice(-8)}`,
               ),
-              openOffers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
-                offerId,
-                cross: Boolean(offer?.crossJurisdiction),
-                status: String(offer?.crossJurisdiction?.status || ''),
-                fillSeq: Number(offer?.crossJurisdiction?.fillSeq || 0),
-                ratio: Number(offer?.crossJurisdiction?.cumulativeFillRatio || 0),
-              })),
+              openOffers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(
+                ([offerId, offer]: [string, any]) => ({
+                  offerId,
+                  cross: Boolean(offer?.crossJurisdiction),
+                  status: String(offer?.crossJurisdiction?.status || ''),
+                  fillSeq: Number(offer?.crossJurisdiction?.fillSeq || 0),
+                  ratio: Number(offer?.crossJurisdiction?.cumulativeFillRatio || 0),
+                }),
+              ),
               history: Array.from(account?.swapOrderHistory?.entries?.() || []).map(
                 ([offerId, entry]: [string, any]) => ({
                   offerId,
@@ -1285,11 +1300,13 @@ export async function waitForCrossOffersCleared(
               pendingFrame: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) =>
                 String(tx?.type || ''),
               ),
-              offers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
-                offerId,
-                cross: Boolean(offer?.crossJurisdiction),
-                status: String(offer?.crossJurisdiction?.status || ''),
-              })),
+              offers: Array.from(account?.state?.swapOffers?.entries?.() || []).map(
+                ([offerId, offer]: [string, any]) => ({
+                  offerId,
+                  cross: Boolean(offer?.crossJurisdiction),
+                  status: String(offer?.crossJurisdiction?.status || ''),
+                }),
+              ),
               pulls: Array.from(account?.state?.pulls?.keys?.() || []),
             })),
           });
@@ -1509,4 +1526,3 @@ export async function waitForCrossRouteMaterialized(
     throw error;
   }
 }
-

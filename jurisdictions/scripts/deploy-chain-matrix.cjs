@@ -31,7 +31,6 @@ const profiles = {
       rpcEnv: 'ETH_SEPOLIA_RPC',
       currency: 'ETH',
       explorer: 'https://sepolia.etherscan.io',
-      disputeDelayBlocks: 25,
       usdtEnv: 'ETH_SEPOLIA_USDT',
     },
     tron: {
@@ -45,7 +44,6 @@ const profiles = {
       defaultFullHost: 'https://nile.trongrid.io',
       currency: 'TRX',
       explorer: 'https://nile.tronscan.org',
-      disputeDelayBlocks: 28_800,
       usdtAddress: TRON_NILE_USDT,
     },
   },
@@ -59,7 +57,6 @@ const profiles = {
       rpcEnv: 'ETH_MAINNET_RPC',
       currency: 'ETH',
       explorer: 'https://etherscan.io',
-      disputeDelayBlocks: 7_200,
       usdtAddress: ETH_MAINNET_USDT,
     },
     tron: {
@@ -73,7 +70,6 @@ const profiles = {
       defaultFullHost: 'https://api.trongrid.io',
       currency: 'TRX',
       explorer: 'https://tronscan.org',
-      disputeDelayBlocks: 28_800,
       usdtAddress: TRON_MAINNET_USDT,
     },
   },
@@ -182,7 +178,6 @@ const deployEvm = async (chain, options) => {
   run('bunx', ['--bun', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', chain.hardhatNetwork], {
     env: {
       XLN_DEPLOY_OUTPUT: outputPath,
-      XLN_DISPUTE_DELAY_BLOCKS: String(chain.disputeDelayBlocks),
       XLN_STABLECOIN_ADDRESS: String(chain.usdtEnv ? process.env[chain.usdtEnv] || '' : ''),
       XLN_DEPLOY_TEST_STABLECOIN: chain.id === 'ethereum-sepolia' && !process.env[chain.usdtEnv] ? '1' : '0',
     },
@@ -326,6 +321,9 @@ const deployTron = async (chain, options) => {
   }
 
   const account = await deployTronContract(tronWeb, 'Account');
+  const depositoryBounds = await deployTronContract(tronWeb, 'DepositoryBounds');
+  const hashLadderRegistry = await deployTronContract(tronWeb, 'HashLadderRegistry');
+  const deltaTransformer = await deployTronContract(tronWeb, 'DeltaTransformer');
   const foundationRecipient = tronWeb.defaultAddress.base58;
   const hankoVerifier = await deployTronContract(tronWeb, 'HankoVerifier');
   const entityProvider = await deployTronContract(
@@ -337,10 +335,13 @@ const deployTron = async (chain, options) => {
   const depository = await deployTronContract(
     tronWeb,
     'Depository',
-    [entityProvider.base58, chain.disputeDelayBlocks],
-    { Account: account },
+    [entityProvider.base58, deltaTransformer.base58],
+    {
+      Account: account,
+      DepositoryBounds: depositoryBounds,
+      HashLadderRegistry: hashLadderRegistry,
+    },
   );
-  const deltaTransformer = await deployTronContract(tronWeb, 'DeltaTransformer');
   const depositoryArtifact = loadTronArtifact('Depository');
   const depositoryContract = await tronWeb.contract(depositoryArtifact.abi, depository.base58);
   await depositoryContract.registerExternalToken(0, usdt.base58, 0).send({
@@ -348,17 +349,11 @@ const deployTron = async (chain, options) => {
     shouldPollResponse: true,
   });
   const tokenCount = BigInt((await depositoryContract.getTokensLength().call()).toString());
-  const disputeDelayBlocks = Number((await depositoryContract.defaultDisputeDelay().call()).toString());
   const token = await depositoryContract._tokens(1).call();
   const registeredAddress = tronAddressInfo(tronWeb, token.contractAddress ?? token[0]);
   if (tokenCount !== 2n || registeredAddress.evm.toLowerCase() !== usdt.evm.toLowerCase()) {
     throw new Error(
       `TRON_USDT_REGISTRATION_MISMATCH:count=${tokenCount}:expected=${usdt.evm}:actual=${registeredAddress.evm}`,
-    );
-  }
-  if (disputeDelayBlocks !== chain.disputeDelayBlocks) {
-    throw new Error(
-      `TRON_DISPUTE_DELAY_MISMATCH:expected=${chain.disputeDelayBlocks}:actual=${disputeDelayBlocks}`,
     );
   }
 
@@ -367,10 +362,11 @@ const deployTron = async (chain, options) => {
     preflight,
     network: chain.id,
     chainId: chain.chainId,
-    defaultDisputeDelayBlocks: disputeDelayBlocks,
     entityProviderDeploymentBlock: entityProvider.deploymentBlock,
     contracts: {
       account: account.evm,
+      depositoryBounds: depositoryBounds.evm,
+      hashLadderRegistry: hashLadderRegistry.evm,
       hankoVerifier: hankoVerifier.evm,
       entityProvider: entityProvider.evm,
       depository: depository.evm,
@@ -378,6 +374,8 @@ const deployTron = async (chain, options) => {
     },
     tronContracts: {
       account,
+      depositoryBounds,
+      hashLadderRegistry,
       hankoVerifier,
       entityProvider,
       depository,
@@ -423,7 +421,6 @@ const jurisdictionEntry = (result) => ({
   chainId: result.chain.chainId,
   rpc: result.preflight.url,
   blockTimeMs: result.chain.kind === 'tron' ? 3000 : 12000,
-  defaultDisputeDelayBlocks: result.defaultDisputeDelayBlocks ?? result.chain.disputeDelayBlocks,
   entityProviderDeploymentBlock: result.entityProviderDeploymentBlock,
   contracts: result.contracts,
   explorer: result.chain.explorer,
@@ -509,6 +506,14 @@ const main = async () => {
       : await deployEvm(chain, options);
     results.push(result);
     console.log(`[deploy-chains] ${chain.id} ${options.dryRun ? 'dry-run ok' : 'deployed'}`);
+    if (!options.dryRun) {
+      // A multi-chain broadcast cannot be transactionally atomic. Persist each
+      // completed immutable graph before touching the next chain so a process
+      // crash never turns a paid deployment into an unknown target that gets
+      // redeployed by accident. Jurisdiction activation still happens only
+      // after the whole selected matrix succeeds below.
+      writeDeploymentOutputs(options.profile, [result], false);
+    }
   }
 
   if (options.dryRun) {

@@ -79,7 +79,7 @@ describe('on-chain Hanko domain golden vectors', () => {
   test('pins exact bytes for active payloads and the reserved FinalDisputeProof vector', () => {
     expect({
       settlement: encodeCooperativeUpdateHankoPayload(DOMAIN, ACCOUNT_KEY, 7, DIFFS, [12]),
-      dispute: encodeDisputeProofHankoPayload(DOMAIN, ACCOUNT_KEY, 7, PROOF_BODY_HASH, WATCH_SEED),
+      dispute: encodeDisputeProofHankoPayload(DOMAIN, ACCOUNT_KEY, 7, true, PROOF_BODY_HASH, WATCH_SEED),
       final: encodeFinalDisputeProofHankoPayload(DOMAIN, ACCOUNT_KEY, 7),
       cooperative: encodeCooperativeDisputeProofHankoPayload(
         DOMAIN,
@@ -95,7 +95,7 @@ describe('on-chain Hanko domain golden vectors', () => {
         counterentity: RIGHT,
         finalNonce: 9,
         finalProofbodyHash: PROOF_BODY_HASH,
-        lastResortWindowBlocks: 16,
+        lastResortWindowSeconds: 16,
         appointmentSequence: 3,
       }),
       entityTransfer: encodeEntityTransferHankoPayload(ENTITY_PROVIDER_DOMAIN, {
@@ -107,7 +107,7 @@ describe('on-chain Hanko domain golden vectors', () => {
       }),
       releaseControlShares: encodeReleaseControlSharesHankoPayload(ENTITY_PROVIDER_DOMAIN, {
         entityNumber: 42,
-        depositoryAddress: DEPOSITORY,
+        recipientAddress: DEPOSITORY,
         controlAmount: 100,
         dividendAmount: 200,
         purpose: 'Series A',
@@ -142,7 +142,7 @@ describe('on-chain Hanko domain golden vectors', () => {
     expect(createSettlementHashWithNonce(ACCOUNT_STATE, DIFFS, [12], DOMAIN, 7)).toBe(
       ONCHAIN_HANKO_GOLDEN_HASHES.settlement,
     );
-    expect(createDisputeProofHash(ACCOUNT_REPLICA, PROOF_BODY_HASH, DOMAIN)).toBe(
+    expect(createDisputeProofHash(ACCOUNT_REPLICA, PROOF_BODY_HASH, DOMAIN, true)).toBe(
       ONCHAIN_HANKO_GOLDEN_HASHES.dispute,
     );
     expect(hashFinalDisputeProofHankoPayload(DOMAIN, ACCOUNT_KEY, 7)).toBe(
@@ -184,7 +184,7 @@ describe('on-chain Hanko domain golden vectors', () => {
     })).toBe(ONCHAIN_HANKO_GOLDEN_HASHES.entityTransfer);
     expect(hashReleaseControlSharesHankoPayload(ENTITY_PROVIDER_DOMAIN, {
       entityNumber: 42,
-      depositoryAddress: DEPOSITORY,
+      recipientAddress: DEPOSITORY,
       controlAmount: 100,
       dividendAmount: 200,
       purpose: 'Series A',
@@ -235,8 +235,8 @@ describe('on-chain Hanko domain golden vectors', () => {
     expect(createSettlementHashWithNonce(ACCOUNT_STATE, DIFFS, [12], otherDomain, 7)).not.toBe(
       createSettlementHashWithNonce(ACCOUNT_STATE, DIFFS, [12], DOMAIN, 7),
     );
-    expect(createDisputeProofHash(ACCOUNT_REPLICA, PROOF_BODY_HASH, otherDomain)).not.toBe(
-      createDisputeProofHash(ACCOUNT_REPLICA, PROOF_BODY_HASH, DOMAIN),
+    expect(createDisputeProofHash(ACCOUNT_REPLICA, PROOF_BODY_HASH, otherDomain, true)).not.toBe(
+      createDisputeProofHash(ACCOUNT_REPLICA, PROOF_BODY_HASH, DOMAIN, true),
     );
     expect(hashEntityTransferHankoPayload(
       { ...ENTITY_PROVIDER_DOMAIN, chainId: 1 },

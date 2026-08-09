@@ -5,6 +5,7 @@ import {
   isExactMarketSnapshotOrderDepth,
   mergeMarketSnapshotOrderDepth,
 } from '../orchestrator/market-maker-aggregated-health';
+import { buildPublicMarketMakerHealth } from '../orchestrator/market-maker-public-health';
 import type { MarketMakerHealthPayload } from '../orchestrator/orchestrator-types';
 
 describe('aggregated market maker health', () => {
@@ -82,6 +83,7 @@ describe('aggregated market maker health', () => {
             blockers: [{ reason: 'depth-short', expectedOffers: 3, offers: 2 }],
             pairs: [{
               pairId: 'cross-1',
+              bookOwnerEntityId: '0xhub1',
               offers: 2,
               ready: true,
               depthReady: false,
@@ -187,5 +189,198 @@ describe('aggregated market maker health', () => {
       retryable: true,
       fatal: false,
     });
+  });
+
+  test('rejects split public depth even when child accounts report complete offers', async () => {
+    const health: MarketMakerHealthPayload = {
+      marketMaker: {
+        enabled: true,
+        ok: true,
+        entityId: '0xmm',
+        expectedOffersPerHub: 20,
+        hubs: ['0xhub1', '0xhub2'].map(hubEntityId => ({
+          hubEntityId,
+          offers: 20,
+          ready: true,
+          depthReady: true,
+          pairs: [{ pairId: '1/2', offers: 20, ready: true, depthReady: true, expectedOffers: 20 }],
+        })),
+        cross: {
+          applicable: true,
+          ok: true,
+          expectedRoutes: 1,
+          expectedOffersPerRoute: 10,
+          expectedOffersPerPair: 10,
+          routeCount: 1,
+          routes: [{
+            sourceJurisdiction: 'Testnet',
+            targetJurisdiction: 'Tron',
+            sourceHubEntityId: '0xhub1',
+            targetHubEntityId: '0xhub2',
+            offers: 10,
+            ready: true,
+            depthReady: true,
+            pairs: [{
+              pairId: 'cross:a:1/b:2',
+              bookOwnerEntityId: '0xhub1',
+              offers: 10,
+              ready: true,
+              depthReady: true,
+              expectedOffers: 10,
+              expectedBidOffers: 0,
+              expectedAskOffers: 10,
+            }],
+          }],
+        },
+      },
+    };
+    const internal = buildAggregatedMarketMakerHealth({
+      mmEnabled: true,
+      marketMakerActive: true,
+      marketMakerHealth: health,
+      hubEntityIds: ['0xhub1', '0xhub2'],
+      expectedHubCount: 2,
+      entityId: '0xmm',
+      startupPhase: 'offers-ready',
+    });
+    const publicHealth = await buildPublicMarketMakerHealth(internal, async (hubEntityId, pairIds) =>
+      new Map(pairIds.map(pairId => [
+        pairId,
+        pairId === '1/2'
+          ? { bidOffers: 10, askOffers: hubEntityId === '0xhub1' ? 10 : 0 }
+          : { bidOffers: 0, askOffers: 10 },
+      ])),
+    );
+
+    expect(publicHealth.ok).toBe(false);
+    expect(publicHealth.hubs[1]?.pairs[0]).toMatchObject({
+      bidOffers: 10,
+      askOffers: 0,
+      snapshotDepthExact: false,
+      depthReady: false,
+    });
+    expect(publicHealth.failure).toMatchObject({ code: 'MARKET_MAKER_PUBLIC_DEPTH_NOT_READY' });
+  });
+
+  test('reads each Hub once and accepts cross depth only from its canonical book owner', async () => {
+    const internal = buildAggregatedMarketMakerHealth({
+      mmEnabled: true,
+      marketMakerActive: true,
+      marketMakerHealth: {
+        marketMaker: {
+          enabled: true,
+          ok: true,
+          entityId: '0xmm',
+          expectedOffersPerHub: 20,
+          hubs: ['0xhub1', '0xhub2'].map(hubEntityId => ({
+            hubEntityId,
+            offers: 20,
+            ready: true,
+            depthReady: true,
+            pairs: [{ pairId: '1/2', offers: 20, ready: true, depthReady: true, expectedOffers: 20 }],
+          })),
+          cross: {
+            applicable: true,
+            ok: true,
+            expectedRoutes: 1,
+            expectedOffersPerRoute: 10,
+            expectedOffersPerPair: 10,
+            routes: [{
+              sourceJurisdiction: 'Testnet',
+              targetJurisdiction: 'Tron',
+              sourceHubEntityId: '0xhub1',
+              targetHubEntityId: '0xhub2',
+              offers: 10,
+              ready: true,
+              depthReady: true,
+              pairs: [{
+                pairId: 'cross:a:1/b:2',
+                bookOwnerEntityId: '0xhub1',
+                offers: 10,
+                ready: true,
+                depthReady: true,
+                expectedOffers: 10,
+                expectedBidOffers: 0,
+                expectedAskOffers: 10,
+              }],
+            }],
+          },
+        },
+      },
+      hubEntityIds: ['0xhub1', '0xhub2'],
+      expectedHubCount: 2,
+      entityId: '0xmm',
+      startupPhase: 'offers-ready',
+    });
+    const requests = new Map<string, string[]>();
+    const publicHealth = await buildPublicMarketMakerHealth(internal, async (hubEntityId, pairIds) => {
+      requests.set(hubEntityId, pairIds);
+      return new Map(pairIds.map(pairId => [pairId,
+        pairId !== 'cross:a:1/b:2'
+          ? { bidOffers: 10, askOffers: 10 }
+          : hubEntityId === '0xhub1'
+            ? { bidOffers: 0, askOffers: 10 }
+          : { bidOffers: 0, askOffers: 0 },
+      ]));
+    });
+
+    expect(publicHealth.ok).toBe(true);
+    expect(publicHealth.hubs.every(hub => hub.depthReady)).toBe(true);
+    expect(publicHealth.cross.ok).toBe(true);
+    expect(requests).toEqual(new Map([
+      ['0xhub1', ['1/2', 'cross:a:1/b:2']],
+      ['0xhub2', ['1/2']],
+    ]));
+
+    const unexpectedBid = await buildPublicMarketMakerHealth(internal, async (_hubEntityId, pairIds) =>
+      new Map(pairIds.map(pairId => [pairId,
+        pairId === 'cross:a:1/b:2'
+          ? { bidOffers: 1, askOffers: 10 }
+          : { bidOffers: 10, askOffers: 10 },
+      ])),
+    );
+    expect(unexpectedBid.cross.ok).toBe(false);
+    expect(unexpectedBid.cross.routes[0]?.pairs?.[0]).toMatchObject({ snapshotDepthExact: false });
+
+    const malformedDirectionCounts = {
+      ...internal,
+      cross: {
+        ...internal.cross,
+        routes: internal.cross.routes.map(route => ({
+          ...route,
+          pairs: route.pairs?.map(pair => ({ ...pair, expectedBidOffers: 0, expectedAskOffers: 9 })),
+        })),
+      },
+    };
+    const malformed = await buildPublicMarketMakerHealth(malformedDirectionCounts, async (_hubEntityId, pairIds) =>
+      new Map(pairIds.map(pairId => [pairId, { bidOffers: 0, askOffers: 9 }])),
+    );
+    expect(malformed.cross.ok).toBe(false);
+
+    const forwardRoute = internal.cross.routes[0]!;
+    const reverseRoute = {
+      ...forwardRoute,
+      sourceJurisdiction: forwardRoute.targetJurisdiction,
+      targetJurisdiction: forwardRoute.sourceJurisdiction,
+      pairs: forwardRoute.pairs?.map(pair => ({
+        ...pair,
+        expectedBidOffers: 10,
+        expectedAskOffers: 0,
+      })),
+    };
+    const bidirectional = {
+      ...internal,
+      cross: {
+        ...internal.cross,
+        expectedRoutes: 2,
+        routeCount: 2,
+        routes: [forwardRoute, reverseRoute],
+      },
+    };
+    const mergedDirections = await buildPublicMarketMakerHealth(bidirectional, async (_hubEntityId, pairIds) =>
+      new Map(pairIds.map(pairId => [pairId, { bidOffers: 10, askOffers: 10 }])),
+    );
+    expect(mergedDirections.ok).toBe(true);
+    expect(mergedDirections.cross.routes.every(route => route.depthReady)).toBe(true);
   });
 });

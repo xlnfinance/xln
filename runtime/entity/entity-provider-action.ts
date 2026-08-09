@@ -114,15 +114,8 @@ const assertIntentEnvelope = (
 
 const assertReleaseControlShares = (
   intent: Extract<EntityProviderActionIntent['payload'], { kind: 'releaseControlShares' }>,
-  trustedDepository: string,
 ): void => {
-  const depository = requireIntentAddress(
-    intent.release?.depositoryAddress,
-    'ENTITY_PROVIDER_ACTION_DEPOSITORY_INVALID',
-  );
-  if (depository !== trustedDepository) {
-    throw new Error(`ENTITY_PROVIDER_ACTION_DEPOSITORY_MISMATCH:${depository}:${trustedDepository}`);
-  }
+  requireIntentAddress(intent.release?.recipientAddress, 'ENTITY_PROVIDER_ACTION_RECIPIENT_INVALID');
   const control = requireIntentUint(
     intent.release?.controlAmount,
     'ENTITY_PROVIDER_ACTION_CONTROL_AMOUNT_INVALID',
@@ -143,10 +136,7 @@ const assertReleaseControlShares = (
   }
 };
 
-const assertIntentPayload = (
-  intent: EntityProviderActionIntent,
-  trustedDepository: string,
-): void => {
+const assertIntentPayload = (intent: EntityProviderActionIntent): void => {
   if (intent.payload.kind === 'entityTransferTokens') {
     requireIntentAddress(intent.payload.transfer?.to, 'ENTITY_PROVIDER_ACTION_RECIPIENT_INVALID');
     requireIntentUint(intent.payload.transfer?.tokenId, 'ENTITY_PROVIDER_ACTION_TOKEN_ID_INVALID');
@@ -154,7 +144,7 @@ const assertIntentPayload = (
     return;
   }
   if (intent.payload.kind === 'releaseControlShares') {
-    assertReleaseControlShares(intent.payload, trustedDepository);
+    assertReleaseControlShares(intent.payload);
     return;
   }
   if (intent.payload.kind === 'cancelPendingAction') {
@@ -219,7 +209,7 @@ export const assertEntityProviderActionIntent = (
       `ENTITY_PROVIDER_ACTION_KIND_MISMATCH:${intent.payload.kind}:${trusted.expectedKind}`,
     );
   }
-  assertIntentPayload(intent, domain.depository);
+  assertIntentPayload(intent);
   const recomputed = recomputeEntityProviderActionHash(intent);
   if (recomputed !== intent.actionHash.toLowerCase()) {
     throw new Error(`ENTITY_PROVIDER_ACTION_HASH_MISMATCH:${intent.actionHash}:${recomputed}`);

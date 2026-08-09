@@ -14,14 +14,17 @@ import type { TowerAppointmentV1 } from '../storage/recovery/types';
 
 const makeLookupKey = (label: string): string => keccak256(toUtf8Bytes(label));
 const disputeStartedInterface = new Interface([
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout, uint256 disputeStartTimestamp)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
 ]);
 const abiCoder = AbiCoder.defaultAbiCoder();
+const emptyCounterProofCommitment = `0x${'00'.repeat(32)}`;
 const proofBodyParam = ParamType.from(
-  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)',
+  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)',
 );
 const makeProofBody = (watchSeed: string, offdeltas: bigint[] = [-1n]): Record<string, unknown> => ({
   watchSeed,
+  leftResponseSeconds: 4n,
+  rightResponseSeconds: 6n,
   offdeltas,
   tokenIds: [1n],
   transformers: [],
@@ -42,22 +45,36 @@ afterEach(async () => {
 const encodeDisputeHash = (
   initialNonce: number,
   startedByLeft: boolean,
+  initialProposerIsLeft: boolean,
   disputeTimeout: bigint,
+  leftResponseSeconds: bigint,
+  rightResponseSeconds: bigint,
   initialProofbodyHash: string,
   disputeStartTimestamp: bigint,
   starterInitialArguments: string,
-  starterIncrementedArguments: string,
+  starterCounterArguments: string,
+  starterCounterProofCommitment = emptyCounterProofCommitment,
+  counterNonce = 0n,
+  counterProofbodyHash = `0x${'00'.repeat(32)}`,
+  counterProposerIsLeft = false,
 ): string => keccak256(
   solidityPacked(
-    ['uint256', 'bool', 'uint256', 'bytes32', 'uint256', 'bytes32', 'bytes32'],
+    ['uint256', 'bool', 'bool', 'uint256', 'uint32', 'uint32', 'bytes32', 'uint256', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'bytes32', 'bool'],
     [
       BigInt(initialNonce),
       startedByLeft,
+      initialProposerIsLeft,
       disputeTimeout,
+      leftResponseSeconds,
+      rightResponseSeconds,
       initialProofbodyHash,
       disputeStartTimestamp,
       keccak256(abiCoder.encode(['bytes', 'bool', 'uint256'], [starterInitialArguments, startedByLeft, disputeStartTimestamp])),
-      keccak256(abiCoder.encode(['bytes', 'bool', 'uint256'], [starterIncrementedArguments, startedByLeft, disputeStartTimestamp])),
+      keccak256(abiCoder.encode(['bytes', 'bool', 'uint256'], [starterCounterArguments, startedByLeft, disputeStartTimestamp])),
+      starterCounterProofCommitment,
+      counterNonce,
+      counterProofbodyHash,
+      counterProposerIsLeft,
     ],
   ),
 );
@@ -72,12 +89,13 @@ describe('watchtower delayed last-resort sweep', () => {
       depositoryAddress: `0x${'11'.repeat(20)}`,
       watchedEntityId: `0x${'22'.repeat(32)}`,
       towerAddress: `0x${'33'.repeat(20)}`,
-      lastResortWindowBlocks: 8,
+      lastResortWindowSeconds: 8,
       appointmentSequence: 1,
       ownerAuthorizationHanko: '0xbeef',
       latestProof: {
         counterentity: `0x${'44'.repeat(32)}`,
         finalNonce: 2,
+        proposerIsLeft: false,
         finalProofbody: makeProofBody(`0x${'55'.repeat(32)}`),
         leftArguments: '0x',
         rightArguments: '0x',
@@ -144,12 +162,13 @@ describe('watchtower delayed last-resort sweep', () => {
           depositoryAddress: '0x1111111111111111111111111111111111111111',
           watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           towerAddress: towerWallet.address.toLowerCase(),
-          lastResortWindowBlocks: 8,
+          lastResortWindowSeconds: 8,
           appointmentSequence: 1,
           ownerAuthorizationHanko: '0xbeef',
           latestProof: {
             counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
             finalNonce: 2,
+            proposerIsLeft: false,
             finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
             leftArguments: '0x',
             rightArguments: '0x',
@@ -168,8 +187,7 @@ describe('watchtower delayed last-resort sweep', () => {
         proofNonce: 2,
         proofBodyHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
         responseMode: 'last_resort',
-        lastResortWindowBlocks: 8,
-        safetyMarginBlocks: 2,
+        lastResortWindowSeconds: 8,
       },
       ownerProof: {
         runtimeId: runtimeWallet.address.toLowerCase(),
@@ -187,31 +205,40 @@ describe('watchtower delayed last-resort sweep', () => {
     const counterentity = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     const initialProofbodyHash = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     const starterInitialArguments = '0x1234';
-    const starterIncrementedArguments = '0xabcd';
+    const starterCounterArguments = '0xabcd';
     const finalizerRightArguments = '0xbeef';
     const watchSeed = `0x${'ee'.repeat(32)}`;
     const finalProofbody = makeProofBody(watchSeed);
     const finalProofbodyHash = proofBodyHashOf(finalProofbody);
+    const starterCounterProofCommitment = keccak256(abiCoder.encode(
+      ['uint256', 'bool', 'bytes32'],
+      [2n, false, finalProofbodyHash],
+    ));
     const disputeStartTimestamp = 90n;
     const initialArgumentsCommitment = keccak256(abiCoder.encode(
       ['bytes', 'bool', 'uint256'],
       [starterInitialArguments, true, disputeStartTimestamp],
     ));
-    const incrementedArgumentsCommitment = keccak256(abiCoder.encode(
+    const counterArgumentsCommitment = keccak256(abiCoder.encode(
       ['bytes', 'bool', 'uint256'],
-      [starterIncrementedArguments, true, disputeStartTimestamp],
+      [starterCounterArguments, true, disputeStartTimestamp],
     ));
     const disputeHash = encodeDisputeHash(
       1,
       true,
+      true,
       100n,
+      4n,
+      6n,
       initialProofbodyHash,
       disputeStartTimestamp,
       starterInitialArguments,
-      starterIncrementedArguments,
+      starterCounterArguments,
+      starterCounterProofCommitment,
     );
     const queriedFromBlocks: number[] = [];
     const queriedToBlocks: number[] = [];
+    const successfulLogRanges: Array<[number, number]> = [];
     let submittedFinalization: Record<string, unknown> | null = null;
     const tempRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-${Date.now()}`);
     tempRoots.push(tempRoot);
@@ -232,12 +259,13 @@ describe('watchtower delayed last-resort sweep', () => {
         depositoryAddress: '0x1111111111111111111111111111111111111111',
         watchedEntityId,
         towerAddress: towerWallet.address.toLowerCase(),
-        lastResortWindowBlocks: 8,
+        lastResortWindowSeconds: 8,
         appointmentSequence: 5,
         ownerAuthorizationHanko: '0xbeef',
 	        latestProof: {
 	          counterentity,
 	          finalNonce: 2,
+	          proposerIsLeft: false,
 	          finalProofbody,
 	          leftArguments: '0x',
 	          rightArguments: finalizerRightArguments,
@@ -278,8 +306,7 @@ describe('watchtower delayed last-resort sweep', () => {
         proofNonce: 2,
         proofBodyHash: finalProofbodyHash,
         responseMode: 'last_resort',
-        lastResortWindowBlocks: 8,
-        safetyMarginBlocks: 2,
+        lastResortWindowSeconds: 8,
       },
       ownerProof: {
         runtimeId: runtimeWallet.address.toLowerCase(),
@@ -292,23 +319,37 @@ describe('watchtower delayed last-resort sweep', () => {
     const result = await runWatchtowerSweep(store, {
       towerPrivateKey: towerWallet.privateKey,
       providerFactory: () => ({
-        getBlockNumber: async () => 95,
-        getBlock: async () => ({ timestamp: 95 }),
+        // The active start is 49,900 blocks old. A fixed recent-log window
+        // would lose the signed dynamic arguments even though the 365-day
+        // Account clock still makes the dispute actionable.
+        getBlockNumber: async () => 50_000,
+        getBlock: async (blockTag) => ({ timestamp: Number(blockTag) < 100 ? 89 : 95 }),
         getLogs: async (filter) => {
-          queriedFromBlocks.push(Number(filter['fromBlock']));
-          queriedToBlocks.push(Number(filter['toBlock']));
+          const fromBlock = Number(filter['fromBlock']);
+          const toBlock = Number(filter['toBlock']);
+          queriedFromBlocks.push(fromBlock);
+          queriedToBlocks.push(toBlock);
+          if (toBlock - fromBlock + 1 > 5_000) {
+            throw new Error('provider block range limit exceeded');
+          }
+          successfulLogRanges.push([fromBlock, toBlock]);
+          if (fromBlock > 100 || toBlock < 100) return [];
           const event = disputeStartedInterface.encodeEventLog(
             disputeStartedInterface.getEvent('DisputeStarted'),
             [
               watchedEntityId,
               counterentity,
               1n,
+              true,
               initialProofbodyHash,
               watchSeed,
               starterInitialArguments,
-              starterIncrementedArguments,
+              starterCounterArguments,
+              starterCounterProofCommitment,
               100n,
               disputeStartTimestamp,
+              4,
+              6,
             ],
           );
           return [{ topics: event.topics, data: event.data }];
@@ -321,9 +362,16 @@ describe('watchtower delayed last-resort sweep', () => {
           disputeHash,
           disputeTimeout: 100n,
           disputeStartTimestamp,
+          leftResponseSeconds: 4n,
+          rightResponseSeconds: 6n,
           disputeInitialProofbodyHash: initialProofbodyHash,
+          disputeInitialProposerIsLeft: true,
+          disputeCounterNonce: 0n,
+          disputeCounterProofbodyHash: `0x${'00'.repeat(32)}`,
+          disputeCounterProposerIsLeft: false,
           starterInitialArgumentsCommitment: initialArgumentsCommitment,
-          starterIncrementedArgumentsCommitment: incrementedArgumentsCommitment,
+          starterCounterArgumentsCommitment: counterArgumentsCommitment,
+          starterCounterProofCommitment,
           disputeStartedByLeft: true,
         }),
         watchtowerCounterDispute: async (_entityId, finalization) => {
@@ -347,11 +395,12 @@ describe('watchtower delayed last-resort sweep', () => {
     expect(receipts.length).toBe(1);
     expect(receipts[0]?.status).toBe('submitted');
     expect(receipts[0]?.txHash).toBe('0xtxhash');
-    expect(queriedFromBlocks).toEqual([0, 0]);
-    expect(queriedToBlocks).toEqual([95, 95]);
-	    expect(submittedFinalization?.['starterArguments']).toBe(starterIncrementedArguments);
-	    expect(submittedFinalization?.['otherArguments']).toBe(finalizerRightArguments);
-	  });
+    expect(queriedFromBlocks.length).toBeGreaterThan(successfulLogRanges.length);
+    expect(Math.max(...successfulLogRanges.map(([from, to]) => to - from + 1))).toBeLessThanOrEqual(5_000);
+    expect(successfulLogRanges.some(([from, to]) => from <= 100 && to >= 100)).toBe(true);
+    expect(submittedFinalization?.['starterArguments']).toBe(starterCounterArguments);
+    expect(submittedFinalization?.['otherArguments']).toBe(finalizerRightArguments);
+  });
 
   test('skips when dispute is inactive or still outside the last-resort window', async () => {
     const runtimeWallet = Wallet.createRandom();
@@ -376,12 +425,13 @@ describe('watchtower delayed last-resort sweep', () => {
         depositoryAddress: '0x1111111111111111111111111111111111111111',
         watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         towerAddress: towerWallet.address.toLowerCase(),
-        lastResortWindowBlocks: 8,
+        lastResortWindowSeconds: 8,
         appointmentSequence: 9,
         ownerAuthorizationHanko: '0xbeef',
         latestProof: {
           counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
           finalNonce: 2,
+          proposerIsLeft: false,
           finalProofbody: makeProofBody(watchSeed),
           leftArguments: '0x',
           rightArguments: '0x',
@@ -422,8 +472,7 @@ describe('watchtower delayed last-resort sweep', () => {
         proofNonce: 2,
         proofBodyHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
         responseMode: 'last_resort',
-        lastResortWindowBlocks: 8,
-        safetyMarginBlocks: 2,
+        lastResortWindowSeconds: 8,
       },
       ownerProof: {
         runtimeId: runtimeWallet.address.toLowerCase(),
@@ -446,9 +495,16 @@ describe('watchtower delayed last-resort sweep', () => {
           disputeHash: '0x9999999999999999999999999999999999999999999999999999999999999999',
           disputeTimeout: 100n,
           disputeStartTimestamp: 1n,
+          leftResponseSeconds: 4n,
+          rightResponseSeconds: 6n,
           disputeInitialProofbodyHash: `0x${'88'.repeat(32)}`,
+          disputeInitialProposerIsLeft: true,
+          disputeCounterNonce: 0n,
+          disputeCounterProofbodyHash: `0x${'00'.repeat(32)}`,
+          disputeCounterProposerIsLeft: false,
           starterInitialArgumentsCommitment: `0x${'77'.repeat(32)}`,
-          starterIncrementedArgumentsCommitment: `0x${'66'.repeat(32)}`,
+          starterCounterArgumentsCommitment: `0x${'66'.repeat(32)}`,
+          starterCounterProofCommitment: emptyCounterProofCommitment,
           disputeStartedByLeft: true,
         }),
         watchtowerCounterDispute: async () => {
@@ -492,12 +548,13 @@ describe('watchtower delayed last-resort sweep', () => {
         depositoryAddress: '0x1111111111111111111111111111111111111111',
         watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         towerAddress: towerWallet.address.toLowerCase(),
-        lastResortWindowBlocks: 8,
+        lastResortWindowSeconds: 8,
         appointmentSequence: 10,
         ownerAuthorizationHanko: '0xbeef',
         latestProof: {
           counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
           finalNonce: 2,
+          proposerIsLeft: false,
           finalProofbody: makeProofBody(watchSeed),
           leftArguments: '0x',
           rightArguments: '0x',
@@ -538,8 +595,7 @@ describe('watchtower delayed last-resort sweep', () => {
         proofNonce: 2,
         proofBodyHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
         responseMode: 'last_resort',
-        lastResortWindowBlocks: 8,
-        safetyMarginBlocks: 2,
+        lastResortWindowSeconds: 8,
       },
       ownerProof: {
         runtimeId: runtimeWallet.address.toLowerCase(),
@@ -589,12 +645,13 @@ describe('watchtower delayed last-resort sweep', () => {
         depositoryAddress: '0x1111111111111111111111111111111111111111',
         watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         towerAddress: towerWallet.address.toLowerCase(),
-        lastResortWindowBlocks: 8,
+        lastResortWindowSeconds: 8,
         appointmentSequence: 12,
         ownerAuthorizationHanko: '0xbeef',
         latestProof: {
           counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
           finalNonce: 6,
+          proposerIsLeft: false,
           finalProofbody: remedyProofbody,
           leftArguments: '0x',
           rightArguments: '0x',
@@ -612,7 +669,10 @@ describe('watchtower delayed last-resort sweep', () => {
     const disputeHash = encodeDisputeHash(
       1,
       true,
+      true,
       100n,
+      4n,
+      6n,
       initialProofbodyHash,
       disputeStartTimestamp,
       '0x',
@@ -650,8 +710,7 @@ describe('watchtower delayed last-resort sweep', () => {
         proofNonce: 6,
         proofBodyHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
         responseMode: 'last_resort',
-        lastResortWindowBlocks: 8,
-        safetyMarginBlocks: 2,
+        lastResortWindowSeconds: 8,
       },
       ownerProof: {
         runtimeId: runtimeWallet.address.toLowerCase(),
@@ -672,12 +731,16 @@ describe('watchtower delayed last-resort sweep', () => {
               '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
               '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
               1n,
+              true,
               initialProofbodyHash,
               watchSeed,
               '0x',
               '0x',
+              emptyCounterProofCommitment,
               100n,
               disputeStartTimestamp,
+              4,
+              6,
             ],
           );
           return [{ topics: event.topics, data: event.data }];
@@ -690,9 +753,16 @@ describe('watchtower delayed last-resort sweep', () => {
           disputeHash,
           disputeTimeout: 100n,
           disputeStartTimestamp,
+          leftResponseSeconds: 4n,
+          rightResponseSeconds: 6n,
           disputeInitialProofbodyHash: initialProofbodyHash,
+          disputeInitialProposerIsLeft: true,
+          disputeCounterNonce: 0n,
+          disputeCounterProofbodyHash: `0x${'00'.repeat(32)}`,
+          disputeCounterProposerIsLeft: false,
           starterInitialArgumentsCommitment: emptyArgumentsCommitment,
-          starterIncrementedArgumentsCommitment: emptyArgumentsCommitment,
+          starterCounterArgumentsCommitment: emptyArgumentsCommitment,
+          starterCounterProofCommitment: emptyCounterProofCommitment,
           disputeStartedByLeft: true,
         }),
         watchtowerCounterDispute: async () => {
@@ -732,12 +802,13 @@ describe('watchtower delayed last-resort sweep', () => {
         depositoryAddress: '0x1111111111111111111111111111111111111111',
         watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         towerAddress: Wallet.createRandom().address.toLowerCase(),
-        lastResortWindowBlocks: 8,
+        lastResortWindowSeconds: 8,
         appointmentSequence: 4,
         ownerAuthorizationHanko: '0xbeef',
         latestProof: {
           counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
           finalNonce: 4,
+          proposerIsLeft: false,
           finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
           leftArguments: '0x',
           rightArguments: '0x',
@@ -778,8 +849,7 @@ describe('watchtower delayed last-resort sweep', () => {
         proofNonce: 4,
         proofBodyHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
         responseMode: 'last_resort' as const,
-        lastResortWindowBlocks: 8,
-        safetyMarginBlocks: 2,
+        lastResortWindowSeconds: 8,
       },
       ownerProof: {
         runtimeId: runtimeWallet.address.toLowerCase(),

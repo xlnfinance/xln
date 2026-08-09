@@ -34,7 +34,7 @@ const accountDoc = (large: boolean, status = 'active'): StorageAccountDoc => ({
     leftPendingJClaims: { root: '', count: 0n },
     rightPendingJClaims: { root: '', count: 0n },
     lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 0, rightDisputeDelay: 0 },
+    disputeConfig: { leftResponseSeconds: 0, rightResponseSeconds: 0 },
     jNonce: 0,
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),

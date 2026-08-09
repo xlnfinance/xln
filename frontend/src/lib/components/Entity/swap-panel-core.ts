@@ -2,6 +2,10 @@ import type { EntityReplica } from '$lib/types/ui';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import { amountToUsd } from '$lib/utils/assetPricing';
 import type { SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/public/runtime-module';
+import {
+  defaultAccountDisputeConfigForRoleEvidence,
+  type AccountRoleEvidence,
+} from '@xln/runtime/account/dispute-config';
 import { compareStableText } from './swap-formatting';
 import { type PreparedSwapOrderLike } from './swap-order-math';
 import './SwapPanel.css';
@@ -25,6 +29,8 @@ export type CrossTargetOption = {
   targetEntityId: string;
   targetSignerId: string;
   targetHubEntityId: string;
+  targetIsHub: boolean;
+  targetHubIsHub: boolean;
   targetJurisdiction: string;
   targetJurisdictionRef: string;
   hasTargetAccount: boolean;
@@ -282,6 +288,9 @@ export const createSwapPanelCore = (deps: SwapPanelCoreDeps) => {
     tokenIdValue: number,
     desiredInboundAmount: bigint,
     allowOpenAccount: boolean,
+    ownerRoleEvidence?: AccountRoleEvidence,
+    counterpartyRoleEvidence?: AccountRoleEvidence,
+    committedRoles?: ReadonlyMap<string, boolean>,
   ): SwapInboundCapacityPlan | null {
     const runtime = deps.getRuntime();
     if (!runtime?.planSwapInboundCapacity) return null;
@@ -307,6 +316,13 @@ export const createSwapPanelCore = (deps: SwapPanelCoreDeps) => {
     // The submit path fetches a fresh detailed projection before it may plan
     // an openAccount command.
     if (!account && !allowOpenAccount) return null;
+    if (
+      !account &&
+      allowOpenAccount &&
+      (!ownerRoleEvidence || !counterpartyRoleEvidence)
+    ) {
+      throw new Error(`SWAP_INBOUND_DISPUTE_PARTY_ROLE_UNAVAILABLE:${owner}:${counterparty}`);
+    }
     return runtime.planSwapInboundCapacity({
       account: account?.state ?? null,
       ownerEntityId: owner,
@@ -314,6 +330,15 @@ export const createSwapPanelCore = (deps: SwapPanelCoreDeps) => {
       tokenId: tokenIdValue,
       requiredInboundAmount: desiredInboundAmount,
       allowOpenAccount,
+      ...(!account
+        ? {
+            newAccountDisputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+              ownerRoleEvidence!,
+              counterpartyRoleEvidence!,
+              committedRoles,
+            ),
+          }
+        : {}),
     });
   }
 

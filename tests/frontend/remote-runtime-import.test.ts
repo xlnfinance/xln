@@ -711,7 +711,7 @@ describe('remote runtime import manager utilities', () => {
     const mountStart = appLayout.indexOf('onMount(() => {');
     const mountSource = appLayout.slice(mountStart);
     const inactiveCheck = mountSource.indexOf('if (isInactiveTabStandby())');
-    const importBootstrap = mountSource.indexOf('const bootstrapResult = await processRemoteRuntimeBootstrapFromLocation()');
+    const importBootstrap = mountSource.indexOf('const bootstrapResult = await processRemoteRuntimeBootstrapFromLocation(remoteRequest)');
     const claimStart = appLayout.indexOf('async function claimActiveTabLockInPlace');
     const claimEnd = appLayout.indexOf('async function acceptRemoteRuntime', claimStart);
     const claimSource = appLayout.slice(claimStart, claimEnd);
@@ -720,7 +720,8 @@ describe('remote runtime import manager utilities', () => {
     expect(inactiveCheck).toBeGreaterThan(0);
     expect(importBootstrap).toBeGreaterThan(inactiveCheck);
     expect(claimSource).toContain('processLocationRemoteBootstrap: true');
-    expect(appLayout).toContain('async function processRemoteRuntimeBootstrapFromLocation()');
+    expect(appLayout).toContain('async function processRemoteRuntimeBootstrapFromLocation(');
+    expect(appLayout).toContain('parsedRemoteRequest?: ReturnType<typeof readRemoteRuntimeRequestFromUrl>');
     expect(appLayout).toContain('showInactiveTabStandby()');
   });
 

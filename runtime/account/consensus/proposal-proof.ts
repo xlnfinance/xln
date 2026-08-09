@@ -17,6 +17,7 @@ type DisputeProjection = {
   proof: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
   hash?: string;
   nonce: number;
+  proposerIsLeft: boolean;
 };
 
 export type PreparedProposalProof = {
@@ -24,6 +25,7 @@ export type PreparedProposalProof = {
   signingEntityId: string;
   disputeHash?: string;
   signedProofNonce: number;
+  proposerIsLeft: boolean;
   proof: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
 };
 
@@ -43,7 +45,9 @@ const buildDisputeProjection = (
       account.currentDisputeProofBodyHash?.toLowerCase();
     const nonceConsumed =
       Number(account.currentDisputeProofNonce ?? 0) <= Number(candidate.state.jNonce ?? 0);
-    if (!bodyChanged && !nonceConsumed) return { proof, nonce: 0 };
+    const proposerIsLeft =
+      account.proofHeader.fromEntity.toLowerCase() === candidate.state.leftEntity.toLowerCase();
+    if (!bodyChanged && !nonceConsumed) return { proof, nonce: 0, proposerIsLeft };
     const nonce = Math.max(
       Number(candidate.proofHeader.nextProofNonce ?? 0),
       Number(candidate.state.jNonce ?? 0) + 1,
@@ -51,11 +55,13 @@ const buildDisputeProjection = (
     return {
       proof,
       nonce,
+      proposerIsLeft,
       hash: createDisputeProofHashWithNonce(
         candidate.state,
         proof.proofBodyHash,
         getAccountStateDomain(account.state),
         nonce,
+        proposerIsLeft,
       ),
     };
   } catch (error) {
@@ -75,6 +81,7 @@ const persistDisputeProjection = (
     hash: projection.hash,
     nonce: projection.nonce,
     proofBodyHash: projection.proof.proofBodyHash,
+    proposerIsLeft: projection.proposerIsLeft,
   });
   account.disputeProofNoncesByHash ??= {};
   account.disputeProofNoncesByHash[projection.proof.proofBodyHash] = projection.nonce;
@@ -87,6 +94,7 @@ const persistDisputeProjection = (
       candidate,
       projection.proof.proofBodyHash,
       projection.nonce,
+      projection.proposerIsLeft,
       projection.proof.proofBodyStruct,
     ),
   );
@@ -126,6 +134,7 @@ export const prepareProposalProof = async (
     signingEntityId,
     ...(projection.hash ? { disputeHash: projection.hash } : {}),
     signedProofNonce: projection.nonce,
+    proposerIsLeft: projection.proposerIsLeft,
     proof: projection.proof,
   };
 };

@@ -16,6 +16,7 @@ import { Depository__factory } from '../../../jurisdictions/typechain-types/inde
 import { BLOCKCHAIN } from '../../config/constants';
 import { createStructuredLogger } from '../../infra/logger';
 import { decodeJBatch, type JBatch } from '../machine/batch';
+import { PROOF_BODY_ABI } from '../../protocol/dispute/proof-body';
 import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
 import { type AuthenticatedReceiptRange, type ReceiptReadProfile } from './receipt-root';
 import { type RpcBatchResponse } from './rpc-utils';
@@ -54,6 +55,17 @@ export const rpcLog = createStructuredLogger('jadapter.rpc');
 
 export type TxFinalizationEvidence = Omit<DisputeFinalizationEvidence, 'sender' | 'finalProofbodyHash'>;
 
+export type TxDisputeProofBodyEvidence = Readonly<{
+  eventName: 'DisputeStarted' | 'CounterDisputeRegistered' | 'DisputeFinalized';
+  counterentity: string;
+  nonce: string;
+  proposerIsLeft: boolean;
+  proofbodyHash: string;
+  initialNonce?: string;
+  initialProofbodyHash?: string;
+  proofbody: JBatch['disputeStarts'][number]['initialProofbody'];
+}>;
+
 export const toFinalizationDecimal = (value: unknown): string => {
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value.toString();
@@ -67,6 +79,113 @@ export const toFinalizationHex = (value: unknown): string => {
 };
 
 export const depositoryTransactionInterface = Depository__factory.createInterface();
+const DISPUTE_PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
+const FINALIZATION_EVIDENCE_TYPES = [
+  'bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32',
+] as const;
+const hashCalldataProofBody = (proofbody: TxDisputeProofBodyEvidence['proofbody']): string =>
+  ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode([DISPUTE_PROOF_BODY_PARAM], [proofbody]));
+const hashFinalizationEvidence = (candidate: TxFinalizationEvidence): string => {
+  const starterArguments = candidate.startedByLeft ? candidate.leftArguments : candidate.rightArguments;
+  const otherArguments = candidate.startedByLeft ? candidate.rightArguments : candidate.leftArguments;
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    FINALIZATION_EVIDENCE_TYPES,
+    [candidate.initialProofbodyHash, candidate.finalNonce, candidate.proposerIsLeft, candidate.startedByLeft,
+      ethers.keccak256(starterArguments), ethers.keccak256(otherArguments), ethers.keccak256(candidate.sig)],
+  )).toLowerCase();
+};
+
+/** Decode the exact signed ProofBody carried by every dispute transaction. */
+export const decodeDisputeProofBodyEvidenceCalldata = (
+  data: string,
+): TxDisputeProofBodyEvidence[] => {
+  try {
+    const parsed = depositoryTransactionInterface.parseTransaction({ data });
+    if (!parsed) throw new Error('J_DISPUTE_PROOFBODY_CALLDATA_UNKNOWN');
+    if (parsed.name === 'processBatch') {
+      const encodedBatch = toFinalizationHex(parsed.args[0]);
+      if (encodedBatch === '0x') throw new Error('J_DISPUTE_PROOFBODY_BATCH_CALLDATA_MISSING');
+      const batch = decodeJBatch(encodedBatch);
+      return [
+        ...batch.disputeStarts.map(start => ({
+          eventName: 'DisputeStarted' as const,
+          counterentity: toFinalizationHex(start.counterentity),
+          nonce: toFinalizationDecimal(start.nonce),
+          proposerIsLeft: start.proposerIsLeft,
+          proofbodyHash: toFinalizationHex(start.proofbodyHash),
+          proofbody: start.initialProofbody,
+        })),
+        ...batch.counterDisputes.map(counter => ({
+          eventName: 'CounterDisputeRegistered' as const,
+          counterentity: toFinalizationHex(counter.counterentity),
+          nonce: toFinalizationDecimal(counter.counterNonce),
+          proposerIsLeft: counter.proposerIsLeft,
+          proofbodyHash: hashCalldataProofBody(counter.counterProofbody),
+          proofbody: counter.counterProofbody,
+        })),
+        ...batch.disputeFinalizations.map(finalization => ({
+          eventName: 'DisputeFinalized' as const,
+          counterentity: toFinalizationHex(finalization.counterentity),
+          nonce: toFinalizationDecimal(finalization.finalNonce),
+          proposerIsLeft: finalization.proposerIsLeft,
+          proofbodyHash: hashCalldataProofBody(finalization.finalProofbody),
+          initialNonce: toFinalizationDecimal(finalization.initialNonce),
+          initialProofbodyHash: toFinalizationHex(finalization.initialProofbodyHash),
+          proofbody: finalization.finalProofbody,
+        })),
+      ];
+    }
+    if (parsed.name === 'watchtowerCounterDispute') {
+      const proof = parsed.args[1];
+      if (typeof proof !== 'object' || proof === null) {
+        throw new Error('J_DISPUTE_PROOFBODY_WATCHTOWER_PROOF_INVALID');
+      }
+      const finalProofbody = Reflect.get(proof, 'finalProofbody') as TxDisputeProofBodyEvidence['proofbody'];
+      const evidence = {
+        counterentity: toFinalizationHex(Reflect.get(proof, 'counterentity')),
+        nonce: toFinalizationDecimal(Reflect.get(proof, 'finalNonce')),
+        proposerIsLeft: Boolean(Reflect.get(proof, 'proposerIsLeft')),
+        proofbodyHash: hashCalldataProofBody(finalProofbody),
+        initialNonce: toFinalizationDecimal(Reflect.get(proof, 'initialNonce')),
+        initialProofbodyHash: toFinalizationHex(Reflect.get(proof, 'initialProofbodyHash')),
+        proofbody: finalProofbody,
+      };
+      return [
+        { ...evidence, eventName: 'CounterDisputeRegistered' },
+        { ...evidence, eventName: 'DisputeFinalized' },
+      ];
+    }
+    throw new Error(`J_DISPUTE_PROOFBODY_CALLDATA_UNSUPPORTED:${parsed.name}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('J_DISPUTE_PROOFBODY_')) throw error;
+    throw new Error(
+      `J_DISPUTE_PROOFBODY_CALLDATA_DECODE_FAILED:${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+};
+
+export const resolveDisputeProofBodyEvidence = (
+  candidates: readonly TxDisputeProofBodyEvidence[],
+  eventName: TxDisputeProofBodyEvidence['eventName'],
+  args: Record<string, unknown>,
+): TxDisputeProofBodyEvidence['proofbody'] => {
+  const counterentity = toFinalizationHex(args['counterentity']);
+  const nonce = toFinalizationDecimal(
+    eventName === 'DisputeFinalized' ? args['initialNonce'] : args['nonce'],
+  );
+  const proofbodyHash = toFinalizationHex(
+    eventName === 'DisputeFinalized' ? args['finalProofbodyHash'] : args['proofbodyHash'],
+  );
+  const matched = candidates.find(candidate =>
+    candidate.eventName === eventName &&
+    candidate.counterentity === counterentity &&
+    (eventName === 'DisputeFinalized' ? candidate.initialNonce : candidate.nonce) === nonce &&
+    candidate.proofbodyHash.toLowerCase() === proofbodyHash.toLowerCase() &&
+    (eventName === 'DisputeFinalized' || candidate.proposerIsLeft === Boolean(args['proposerIsLeft']))
+  );
+  if (!matched) throw new Error(`J_DISPUTE_PROOFBODY_EVIDENCE_NOT_FOUND:${eventName}:${nonce}`);
+  return matched.proofbody;
+};
 
 /** Decode reducer sidecar data from a transaction that emitted DisputeFinalized. */
 export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinalizationEvidence[] => {
@@ -86,6 +205,7 @@ export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinal
           initialNonce: toFinalizationDecimal(finalization.initialNonce),
           finalNonce: toFinalizationDecimal(finalization.finalNonce),
           initialProofbodyHash: toFinalizationHex(finalization.initialProofbodyHash),
+          proposerIsLeft: Boolean(finalization.proposerIsLeft),
           leftArguments: startedByLeft ? starterArguments : otherArguments,
           rightArguments: startedByLeft ? otherArguments : starterArguments,
           startedByLeft,
@@ -107,6 +227,7 @@ export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinal
           initialNonce: toFinalizationDecimal(Reflect.get(proof, 'initialNonce')),
           finalNonce: toFinalizationDecimal(Reflect.get(proof, 'finalNonce')),
           initialProofbodyHash: toFinalizationHex(Reflect.get(proof, 'initialProofbodyHash')),
+          proposerIsLeft: Boolean(Reflect.get(proof, 'proposerIsLeft')),
           leftArguments: startedByLeft ? starterArguments : otherArguments,
           rightArguments: startedByLeft ? otherArguments : starterArguments,
           startedByLeft,
@@ -134,25 +255,18 @@ export const resolveDisputeFinalizationEvidence = (
   }
   const counterentity = String(args['counterentity'] ?? '').toLowerCase();
   const initialNonce = toFinalizationDecimal(args['initialNonce']);
-  const initialProofbodyHash = String(args['initialProofbodyHash'] ?? '').toLowerCase();
+  const finalizationEvidenceHash = toFinalizationHex(args['finalizationEvidenceHash']);
   const matched = candidates.find(candidate =>
     candidate.counterentity.toLowerCase() === counterentity &&
     candidate.initialNonce === initialNonce &&
-    candidate.initialProofbodyHash.toLowerCase() === initialProofbodyHash);
+    hashFinalizationEvidence(candidate) === finalizationEvidenceHash);
   if (!matched) {
     throw new Error(`J_DISPUTE_FINALIZATION_EVIDENCE_NOT_FOUND:${normalizedHash}`);
   }
   return {
     sender: toFinalizationHex(args['sender']),
-    counterentity: matched.counterentity,
-    initialNonce: matched.initialNonce,
-    finalNonce: matched.finalNonce,
-    initialProofbodyHash: matched.initialProofbodyHash,
+    ...matched,
     finalProofbodyHash: toFinalizationHex(args['finalProofbodyHash']),
-    leftArguments: matched.leftArguments,
-    rightArguments: matched.rightArguments,
-    startedByLeft: matched.startedByLeft,
-    sig: matched.sig,
   };
 };
 
@@ -201,12 +315,17 @@ export const assertAuthenticatedWatcherLogHeaders = (
   return authenticatedHeaders;
 };
 
+export type PreparedAuthenticatedWatcherLog = AuthenticatedReceiptRange['logs'][number] & {
+  /** Fresh canonical hash used only to authenticate external transaction I/O. */
+  authenticatedBlockHash: string;
+};
+
 export const prepareAuthenticatedWatcherIngress = (
   authenticatedRange: AuthenticatedReceiptRange,
   expectedParent?: NonNullable<ReceiptReadProfile['expectedParent']>,
 ): {
   headers: Array<{ jHeight: number; jBlockHash: string }>;
-  logs: AuthenticatedReceiptRange['logs'];
+  logs: PreparedAuthenticatedWatcherLog[];
   tipBlockHash: string;
 } => {
   const authenticatedHeaders = assertAuthenticatedWatcherLogHeaders(authenticatedRange);
@@ -238,7 +357,10 @@ export const prepareAuthenticatedWatcherIngress = (
   const logs = authenticatedRange.logs.map(log => {
     const blockHash = replayHashByHeight.get(log.blockNumber);
     if (!blockHash) throw new Error(`J_AUTHENTICATED_LOG_REPLAY_HEADER_MISSING:${log.blockNumber}`);
-    return { ...log, blockHash };
+    // Replay replaces deterministic ingress identity only after the fresh
+    // receipt/header pair was authenticated. Calldata lookup still binds the
+    // transaction to this original canonical block, never the replay alias.
+    return { ...log, authenticatedBlockHash: log.blockHash, blockHash };
   });
   const tipBlockHash = headers.at(-1)?.jBlockHash;
   if (!tipBlockHash) throw new Error('J_AUTHENTICATED_RANGE_TIP_UNAVAILABLE');

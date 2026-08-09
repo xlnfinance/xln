@@ -77,6 +77,7 @@ import {
   HUB_NAMES,
   HUB_PROFILES_READY_TIMEOUT_MS,
   HUB_REQUIRED_TOKEN_COUNT,
+  MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
   RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
   RELAY_MARKET_MAX_SUBSCRIPTIONS,
   RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
@@ -111,10 +112,9 @@ import {
 import {
   buildAggregatedMarketMakerHealth,
   countMarketSnapshotOrderDepth,
-  isExactMarketSnapshotOrderDepth,
-  mergeMarketSnapshotOrderDepth,
   type MarketSnapshotOrderDepth,
 } from './market-maker-aggregated-health';
+import { buildPublicMarketMakerHealth } from './market-maker-public-health';
 import { buildPublicHubDiscoveryPayload } from './public-discovery';
 import { handleResetHttpRequest } from './reset-http';
 import {
@@ -2045,50 +2045,12 @@ const recomputeHealthWithMarketMaker = (
   };
 };
 
-const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth): Promise<AggregatedHealth> => {
-  const cross = health.marketMaker.cross;
-  if (!health.marketMaker.enabled || cross.routes.length === 0) return health;
-
-  const routes = await Promise.all(cross.routes.map(async (route) => {
-    const pairIds = Array.from(new Set((route.pairs ?? []).map(pair => String(pair.pairId || '')).filter(Boolean)));
-    const [sourceSnapshots, targetSnapshots] = await Promise.all([
-      fetchRouteMarketSnapshots(route.sourceHubEntityId, pairIds),
-      fetchRouteMarketSnapshots(route.targetHubEntityId, pairIds),
-    ]);
-    const pairs = (route.pairs ?? []).map((pair) => {
-      const pairId = String(pair.pairId || '');
-      const expectedOffers = Math.max(1, Number(pair.expectedOffers || health.marketMaker.cross.expectedOffersPerPair || 1));
-      const sourceObserved = sourceSnapshots.get(pairId);
-      const targetObserved = targetSnapshots.get(pairId);
-      const observations = [sourceObserved, targetObserved]
-        .filter((depth): depth is MarketSnapshotOrderDepth => depth !== undefined);
-      const observed = mergeMarketSnapshotOrderDepth(
-        ...observations,
-      );
-      return {
-        ...pair,
-        expectedOffers,
-        bidOffers: observed.bidOffers,
-        askOffers: observed.askOffers,
-        snapshotDepthExact: isExactMarketSnapshotOrderDepth(observed, expectedOffers),
-      };
-    });
-    return {
-      ...route,
-      pairs,
-    };
-  }));
-  const enrichedCross = {
-    ...cross,
-    routes,
-  };
-  return {
-    ...health,
-    marketMaker: {
-      ...health.marketMaker,
-      cross: enrichedCross,
-    },
-  };
+const enrichMarketMakerFromHubSnapshots = async (health: AggregatedHealth): Promise<AggregatedHealth> => {
+  const marketMaker = await buildPublicMarketMakerHealth(
+    health.marketMaker,
+    fetchRouteMarketSnapshots,
+  );
+  return recomputeHealthWithMarketMaker({ ...health, marketMaker }, marketMaker);
 };
 
 type CustodyMePayload = {
@@ -2107,7 +2069,7 @@ const buildAggregatedHealthResponse = async (
     marketMakerHealthOverride: options.marketMakerHealthOverride,
   });
   const health = options.includeMarketSnapshots
-    ? await enrichMarketMakerCrossFromHubSnapshots(baseHealth)
+    ? await enrichMarketMakerFromHubSnapshots(baseHealth)
     : baseHealth;
   if (!health.custody.enabled || health.custody.ok || !health.custody.servicePort) {
     return health;
@@ -2269,12 +2231,17 @@ const waitForHubProfilesReady = async (): Promise<void> => {
 
 const waitForMarketMakerReady = async (): Promise<void> => {
   let restartAttempts = 0;
+  let publicDepthSignature = '';
+  let publicDepthLastProgressAt = Date.now();
   // The MM child owns the progress-aware bootstrap watchdog. A second absolute
   // deadline here used to kill healthy bootstraps that were still advancing,
   // discard their in-memory work, and restart the same phase from zero.
   while (true) {
     await pollMarketMakerHealth();
-    const health = computeAggregatedHealth();
+    const internalHealth = computeAggregatedHealth();
+    const health = internalHealth.marketMaker.ok
+      ? await enrichMarketMakerFromHubSnapshots(internalHealth)
+      : internalHealth;
     const exitedHub = getExitedHubChild();
     if (exitedHub) {
       throw new Error(
@@ -2319,6 +2286,38 @@ const waitForMarketMakerReady = async (): Promise<void> => {
       health.marketMaker.ok
     ) {
       return;
+    }
+    if (internalHealth.marketMaker.ok) {
+      const publicDepth = {
+        hubs: health.marketMaker.hubs.map(hub => ({
+          hubEntityId: hub.hubEntityId,
+          pairs: hub.pairs.map(pair => ({
+            pairId: pair.pairId,
+            bids: pair.bidOffers ?? 0,
+            asks: pair.askOffers ?? 0,
+          })),
+        })),
+        cross: health.marketMaker.cross.routes.map(route => ({
+          sourceHubEntityId: route.sourceHubEntityId,
+          targetHubEntityId: route.targetHubEntityId,
+          pairs: (route.pairs ?? []).map(pair => ({
+            pairId: pair.pairId,
+            bids: pair.bidOffers ?? 0,
+            asks: pair.askOffers ?? 0,
+          })),
+        })),
+      };
+      const nextSignature = safeStringify(publicDepth);
+      const now = Date.now();
+      if (nextSignature !== publicDepthSignature) {
+        publicDepthSignature = nextSignature;
+        publicDepthLastProgressAt = now;
+      } else if (now - publicDepthLastProgressAt >= MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS) {
+        throw new Error(
+          `MARKET_MAKER_PUBLICATION_STALLED:idleMs=${now - publicDepthLastProgressAt}:` +
+          `depth=${nextSignature}:health=${safeStringify(health.marketMaker)}`,
+        );
+      }
     }
     await scheduler.wait(250);
   }

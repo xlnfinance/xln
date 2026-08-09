@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'path';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import { generateLazyEntityId } from '../entity/factory';
 import {
   createEntityFrameHashFromStateRoot,
@@ -659,6 +660,12 @@ async function main() {
             type: 'openAccount' as const,
             data: {
               targetEntityId: hub.entityId,
+              disputeConfig: defaultAccountDisputeConfigForParties(
+                user.entityId,
+                false,
+                hub.entityId,
+                true,
+              ),
               tokenId,
               creditAmount,
               watchSeed: requireWatchSeed(watchSeeds, user.entityId),
@@ -673,6 +680,12 @@ async function main() {
           type: 'openAccount' as const,
           data: {
             targetEntityId: user.entityId,
+            disputeConfig: defaultAccountDisputeConfigForParties(
+              hub.entityId,
+              true,
+              user.entityId,
+              false,
+            ),
             tokenId,
             creditAmount,
             watchSeed: requireWatchSeed(watchSeeds, user.entityId),

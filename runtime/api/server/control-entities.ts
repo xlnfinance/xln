@@ -7,6 +7,8 @@ export type ControlEntitySummary = {
   signerId: string;
   name: string;
   isRoutingEnabled: boolean;
+  /** Exact role committed in the local Entity state root. */
+  isHub: boolean;
   runtimeId: string | null;
   accountCount: number;
   publicAccountCount: number;
@@ -43,6 +45,7 @@ export const listLocalControlEntities = (
       signerId,
       name: getProfileNameForEntity(env, entityId, getRelayProfileName),
       isRoutingEnabled: !!replica?.state?.hubRebalanceConfig,
+      isHub: replica?.state?.profile?.isHub === true,
       runtimeId: typeof env.runtimeId === 'string' && env.runtimeId.trim().length > 0 ? env.runtimeId : null,
       accountCount: replica?.state?.accounts instanceof Map ? replica.state.accounts.size : 0,
       publicAccountCount: Array.isArray(profile?.publicAccounts) ? profile.publicAccounts.length : 0,

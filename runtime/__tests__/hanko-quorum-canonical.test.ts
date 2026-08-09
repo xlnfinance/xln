@@ -261,7 +261,13 @@ describe('canonical quorum Hanko construction', () => {
     const claim = envelope.claims[0]!;
     const unsafe = encodeHankoEnvelope({
       ...envelope,
-      claims: [{ ...claim, entityIndexes: [BigInt(Number.MAX_SAFE_INTEGER) + 1n] }],
+      claims: [{
+        ...claim,
+        entityIndexes: [
+          BigInt(Number.MAX_SAFE_INTEGER) + 1n,
+          ...claim.entityIndexes.slice(1),
+        ],
+      }],
     });
 
     await expect(inspectHankoForHash(unsafe, fixture.digest)).rejects.toThrow(/INDEX.*OOB/i);

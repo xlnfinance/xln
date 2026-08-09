@@ -25,13 +25,13 @@ describe('mainnet chain deployment wiring', () => {
     expect(pkg.scripts['deploy:mainnets']).toBe('bun run deploy:chains:mainnet');
   });
 
-  test('Base deploy pins configured USDC to tokenId 1 before publishing the stack', () => {
-    const script = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-base.cjs'), 'utf8');
+  test('canonical EVM deploy pins the configured stablecoin to tokenId 1 before publishing', () => {
+    const script = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-stack.cjs'), 'utf8');
     expect(script).not.toContain('ID will be assigned on first use');
     expect(script).toMatch(/tokenToId\s*\(/);
-    expect(script).toMatch(/(?:usdc|token).*Id\s*!==\s*1n/i);
-    expect(script).toContain('await usdc.decimals()');
-    expect(script).toContain('USDC_DECIMALS_MISMATCH');
+    expect(script).toMatch(/stablecoinTokenId\s*!==\s*1n/);
+    expect(script).toContain('await stablecoin.decimals()');
+    expect(script).toContain('STABLECOIN_DECIMALS_MISMATCH');
   });
 
   test('EVM deployment evidence retains every linked contract receipt and watcher start block', () => {
@@ -95,9 +95,9 @@ describe('mainnet chain deployment wiring', () => {
     expect(script).toContain('{ HankoVerifier: hankoVerifier }');
     expect(script).toContain('hankoVerifier: hankoVerifier.evm');
     expect(script).toContain('hankoVerifier,');
-    expect(script).toContain('[entityProvider.base58, chain.disputeDelayBlocks]');
-    expect(script).toContain('disputeDelayBlocks: 28_800');
-    expect(script).toContain('TRON_DISPUTE_DELAY_MISMATCH');
+    expect(script).toContain('[entityProvider.base58, deltaTransformer.base58]');
+    expect(script).not.toContain('disputeDelayBlocks');
+    expect(script).not.toContain('TRON_DISPUTE_DELAY_MISMATCH');
     expect(script).toContain('registerExternalToken(0, usdt.base58, 0)');
     expect(script).toContain('TRON_USDT_REGISTRATION_MISMATCH');
     expect(script).toContain('Mainnet deployment requires --yes');

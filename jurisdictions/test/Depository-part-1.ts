@@ -16,6 +16,7 @@ import {
   addressEntityId,
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
+  deployDepositoryStack,
   deployEntityProvider,
   deriveHardhatPrivateKey,
   emptyBatch,
@@ -37,7 +38,7 @@ const SETTLEMENT_DIFFS_ABI =
   'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
 
 const PROOF_BODY_ABI =
-  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
+  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
 const TEST_WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('xln:test-watch-seed'));
 
@@ -96,6 +97,18 @@ async function accountKeyFor(depository: Depository, left: string, right: string
   return depository.accountKey(left, right);
 }
 
+async function advancePastDisputeTimeout(
+  target: Depository,
+  left: string,
+  right: string,
+): Promise<void> {
+  const key = await target.accountKey(left, right);
+  const timeout = (await target._accounts(key)).disputeTimeout;
+  // disputeTimeout is an absolute unix second. Mining a number of blocks would
+  // silently reintroduce chain-specific block-time policy into the test.
+  await time.increaseTo(Number(timeout + 1n));
+}
+
 async function cooperativeUpdateHash(
   depository: Depository,
   accountKey: string,
@@ -118,12 +131,13 @@ async function disputeProofHash(
   nonce: bigint,
   proofbodyHash: string,
   watchSeed: string = TEST_WATCH_SEED,
+  proposerIsLeft = false,
 ): Promise<string> {
   const chainId = (await ethers.provider.getNetwork()).chainId;
   return ethers.keccak256(
     abi.encode(
-      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-      [DISPUTE_PROOF, chainId, await depository.getAddress(), accountKey, nonce, proofbodyHash, watchSeed],
+      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
+      [DISPUTE_PROOF, chainId, await depository.getAddress(), accountKey, nonce, proposerIsLeft, proofbodyHash, watchSeed],
     ),
   );
 }
@@ -159,7 +173,7 @@ async function watchtowerCounterDisputeHash(
   counterentity: string,
   finalNonce: bigint,
   finalProofbodyHash: string,
-  lastResortWindowBlocks: bigint,
+  lastResortWindowSeconds: bigint,
   appointmentSequence: bigint,
 ): Promise<string> {
   return depository.computeWatchtowerCounterDisputeHash(
@@ -168,7 +182,7 @@ async function watchtowerCounterDisputeHash(
     counterentity,
     finalNonce,
     finalProofbodyHash,
-    lastResortWindowBlocks,
+    lastResortWindowSeconds,
     appointmentSequence,
   );
 }
@@ -180,6 +194,10 @@ function proofBodyHash(proofbody: Record<string, unknown>): string {
 function proofBody(offdeltas: bigint[], tokenIds: bigint[], transformers: unknown[] = []): Record<string, unknown> {
   return {
     watchSeed: TEST_WATCH_SEED,
+    // Short signed bilateral windows keep timeout tests fast. They are proof
+    // policy, not a deployment-wide contract setting.
+    leftResponseSeconds: 50,
+    rightResponseSeconds: 50,
     offdeltas,
     tokenIds,
     transformers,
@@ -255,19 +273,7 @@ describe('Depository', () => {
     // Deploy EntityProvider
     const entityProvider = await deployEntityProvider(user0.address);
 
-    // Deploy Account library first
-    const AccountFactory = await hre.ethers.getContractFactory('Account');
-    const account = await AccountFactory.deploy();
-    await account.waitForDeployment();
-
-    // Deploy Depository with Account library linked
-    const DepositoryFactory = await hre.ethers.getContractFactory('Depository', {
-      libraries: {
-        Account: await account.getAddress(),
-      },
-    });
-    depository = await DepositoryFactory.deploy(await entityProvider.getAddress(), 5760);
-    await depository.waitForDeployment();
+    ({ depository } = await deployDepositoryStack(await entityProvider.getAddress()));
 
     // Deploy ERC20 mock contract
     const ERC20Mock = await hre.ethers.getContractFactory('ERC20Mock');
@@ -357,23 +363,26 @@ describe('Depository', () => {
           {
             counterentity: right.entityId,
             nonce: disputeNonce,
+            proposerIsLeft: false,
             proofbodyHash: finalProofbodyHash,
             initialProofbody: finalProofbody,
             watchSeed: TEST_WATCH_SEED,
             sig: signEntityHash(right.entityId, startHash, right.privateKey),
             starterInitialArguments: leftArguments,
-            starterIncrementedArguments: '0x',
+            starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
           },
         ],
       }),
     );
     await target.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
-    await time.increase(Number(await target.defaultDisputeDelay()));
+    await advancePastDisputeTimeout(target, left.entityId, right.entityId);
 
     const finalization = {
       counterentity: right.entityId,
       initialNonce: disputeNonce,
       finalNonce: disputeNonce,
+      proposerIsLeft: false,
       initialProofbodyHash: finalProofbodyHash,
       finalProofbody,
       starterArguments: leftArguments,
@@ -913,6 +922,7 @@ describe('Depository', () => {
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
+    const forgiveOnlyTokenId = 2n;
     await depository.mintToReserve(left.entityId, tokenId, 1_000n);
 
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
@@ -926,13 +936,21 @@ describe('Depository', () => {
         ondeltaDiff: 0n,
       },
     ];
-    const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, diffs);
+    // Overlap + duplicate forgiveness ids must not duplicate AccountSettled tokens.
+    const forgiveDebtsInTokenIds = [tokenId, forgiveOnlyTokenId, forgiveOnlyTokenId];
+    const settlementHash = await cooperativeUpdateHash(
+      depository,
+      acctKey,
+      settlementNonce,
+      diffs,
+      forgiveDebtsInTokenIds,
+    );
     const settlementSig = signEntityHash(right.entityId, settlementHash, right.privateKey);
     const settlement = {
       leftEntity: left.entityId,
       rightEntity: right.entityId,
       diffs,
-      forgiveDebtsInTokenIds: [],
+      forgiveDebtsInTokenIds,
       sig: settlementSig,
       nonce: settlementNonce,
     };
@@ -940,9 +958,57 @@ describe('Depository', () => {
     const batch = emptyBatch({ settlements: [settlement] });
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
 
-    await expect(
-      depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.emit(depository, 'AccountSettled');
+    const settleResponse = await depository
+      .connect(left.signer)
+      .processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
+    await expect(settleResponse).to.emit(depository, 'AccountSettled');
+    // Exactly one ReserveUpdated per mutated reserve side (left decrease + right increase).
+    await expect(settleResponse)
+      .to.emit(depository, 'ReserveUpdated')
+      .withArgs(left.entityId, tokenId, 875n);
+    await expect(settleResponse)
+      .to.emit(depository, 'ReserveUpdated')
+      .withArgs(right.entityId, tokenId, 125n);
+
+    const receipt = await settleResponse.wait();
+    const settledEvents = receipt!.logs
+      .map((log) => {
+        try {
+          return depository.interface.parseLog(log);
+        } catch {
+          return null;
+        }
+      })
+      .filter((parsed) => parsed?.name === 'AccountSettled');
+    expect(settledEvents).to.have.length(1);
+    const settledAccounts = settledEvents[0]!.args[0] as Array<{
+      left: string;
+      right: string;
+      nonce: bigint;
+      tokens: Array<{
+        tokenId: bigint;
+        leftReserve: bigint;
+        rightReserve: bigint;
+        collateral: bigint;
+        ondelta: bigint;
+      }>;
+    }>;
+    expect(settledAccounts).to.have.length(1);
+    expect(settledAccounts[0]!.left).to.equal(left.entityId);
+    expect(settledAccounts[0]!.right).to.equal(right.entityId);
+    expect(settledAccounts[0]!.nonce).to.equal(settlementNonce);
+    const tokens = settledAccounts[0]!.tokens;
+    expect(tokens.map((t) => t.tokenId)).to.deep.equal([tokenId, forgiveOnlyTokenId]);
+    expect(tokens[0]!.tokenId).to.equal(tokenId);
+    expect(tokens[0]!.leftReserve).to.equal(875n);
+    expect(tokens[0]!.rightReserve).to.equal(125n);
+    expect(tokens[0]!.collateral).to.equal(0n);
+    expect(tokens[0]!.ondelta).to.equal(0n);
+    expect(tokens[1]!.tokenId).to.equal(forgiveOnlyTokenId);
+    expect(tokens[1]!.leftReserve).to.equal(0n);
+    expect(tokens[1]!.rightReserve).to.equal(0n);
+    expect(tokens[1]!.collateral).to.equal(0n);
+    expect(tokens[1]!.ondelta).to.equal(0n);
 
     const account = await depository._accounts(acctKey);
     expect(account.nonce).to.equal(settlementNonce);
@@ -956,6 +1022,141 @@ describe('Depository', () => {
 
     expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
     expect(await depository.entityNonces(left.entityId)).to.equal(1n);
+  });
+
+  it('reverts settlement with E8 when a reserve would exceed int256.max and leaves no partial diff', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const INT256_MAX = (1n << 255n) - 1n;
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+
+    await depository.mintToReserve(left.entityId, tokenId, INT256_MAX);
+    await depository.mintToReserve(right.entityId, tokenId, 1n);
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const settlementNonce = 1n;
+    const diffs = [
+      {
+        tokenId,
+        leftDiff: 1n,
+        rightDiff: -1n,
+        collateralDiff: 0n,
+        ondeltaDiff: 0n,
+      },
+    ];
+    const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, diffs);
+    const settlement = {
+      leftEntity: left.entityId,
+      rightEntity: right.entityId,
+      diffs,
+      forgiveDebtsInTokenIds: [] as bigint[],
+      sig: signEntityHash(right.entityId, settlementHash, right.privateKey),
+      nonce: settlementNonce,
+    };
+    const signed = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({ settlements: [settlement] }),
+    );
+
+    await expect(
+      depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E8');
+
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(INT256_MAX);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(1n);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
+    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+  });
+
+  it('reverts settlement and R2C with E8 when collateral would exceed int256.max', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const INT256_MAX = (1n << 255n) - 1n;
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+
+    await depository.mintToReserve(left.entityId, tokenId, INT256_MAX);
+    await depository.mintToReserve(right.entityId, tokenId, 2n);
+
+    // Fund collateral to INT256_MAX via R2C from left.
+    const fundMax = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({
+        reserveToCollateral: [
+          {
+            tokenId,
+            receivingEntity: left.entityId,
+            pairs: [{ entity: right.entityId, amount: INT256_MAX }],
+          },
+        ],
+      }),
+    );
+    await depository
+      .connect(left.signer)
+      .processBatch(fundMax.encodedBatch, fundMax.hankoData, fundMax.nonce);
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX);
+
+    // Further R2C into the same collateral bucket must hit E8 (accumulation).
+    const overflowR2c = await signDepositoryBatch(
+      depository,
+      right.entityId,
+      right.privateKey,
+      emptyBatch({
+        reserveToCollateral: [
+          {
+            tokenId,
+            receivingEntity: left.entityId,
+            pairs: [{ entity: right.entityId, amount: 1n }],
+          },
+        ],
+      }),
+    );
+    await expect(
+      depository
+        .connect(right.signer)
+        .processBatch(overflowR2c.encodedBatch, overflowR2c.hankoData, overflowR2c.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E8');
+    expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(2n);
+
+    // Settlement path: move 1 from right reserve into already-max collateral.
+    const settlementNonce = 1n;
+    const diffs = [
+      {
+        tokenId,
+        leftDiff: 0n,
+        rightDiff: -1n,
+        collateralDiff: 1n,
+        ondeltaDiff: 0n,
+      },
+    ];
+    const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, diffs);
+    const settlement = {
+      leftEntity: left.entityId,
+      rightEntity: right.entityId,
+      diffs,
+      forgiveDebtsInTokenIds: [] as bigint[],
+      sig: signEntityHash(right.entityId, settlementHash, right.privateKey),
+      nonce: settlementNonce,
+    };
+    const signed = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({ settlements: [settlement] }),
+    );
+    await expect(
+      depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E8');
+
+    expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(2n);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
   });
 
   it('requires counterparty hanko for empty settlements too', async function () {
@@ -1040,7 +1241,8 @@ describe('Depository', () => {
           watchSeed: TEST_WATCH_SEED,
           sig: startSig,
           starterInitialArguments: '0x',
-          starterIncrementedArguments: '0x',
+          starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
     });
@@ -1356,34 +1558,51 @@ describe('Depository', () => {
     const disputeStart = {
       counterentity: right.entityId,
       nonce: disputeNonce,
+      proposerIsLeft: false,
       proofbodyHash: initialProofbodyHash,
       initialProofbody,
       watchSeed: TEST_WATCH_SEED,
       sig: startSig,
       starterInitialArguments,
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     };
     const startBatch = emptyBatch({ disputeStarts: [disputeStart] });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
-    const expectedDisputeTimeout =
-      BigInt((await ethers.provider.getBlockNumber()) + 1) + (await depository.defaultDisputeDelay());
+    const startResponse = await depository
+      .connect(left.signer)
+      .processBatch(start.encodedBatch, start.hankoData, start.nonce);
+    await expect(startResponse).to.emit(depository, 'DisputeStarted');
 
-    await expect(depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce))
-      .to.emit(depository, 'DisputeStarted')
-      .withArgs(
-        left.entityId,
-        right.entityId,
-        disputeNonce,
-        initialProofbodyHash,
-        TEST_WATCH_SEED,
-        starterInitialArguments,
-        '0x',
-        expectedDisputeTimeout,
-      );
+    const startReceipt = await startResponse.wait();
+    const disputeStarted = startReceipt!.logs
+      .map((log) => {
+        try {
+          return depository.interface.parseLog(log);
+        } catch {
+          return null;
+        }
+      })
+      .find((parsed) => parsed?.name === 'DisputeStarted');
+    expect(disputeStarted).to.not.equal(undefined);
+    expect(disputeStarted!.args[0]).to.equal(left.entityId);
+    expect(disputeStarted!.args[1]).to.equal(right.entityId);
+    expect(disputeStarted!.args[2]).to.equal(disputeNonce);
+    expect(disputeStarted!.args[3]).to.equal(false);
+    expect(disputeStarted!.args[4]).to.equal(initialProofbodyHash);
+    expect(disputeStarted!.args[5]).to.equal(TEST_WATCH_SEED);
+    expect(disputeStarted!.args[6]).to.equal(starterInitialArguments);
+    expect(disputeStarted!.args[7]).to.equal('0x');
+    expect(disputeStarted!.args[8]).to.equal(ethers.ZeroHash);
+    const disputeTimeout = disputeStarted!.args[9] as bigint;
+    const disputeStartTimestamp = disputeStarted!.args[10] as bigint;
+    expect(disputeTimeout).to.equal(disputeStartTimestamp + 100n);
 
     const startedAccount = await depository._accounts(acctKey);
     expect(startedAccount.nonce).to.equal(disputeNonce);
     expect(startedAccount.disputeHash).to.not.equal(ethers.ZeroHash);
+    expect(startedAccount.disputeTimeout).to.equal(disputeTimeout);
+    expect(startedAccount.disputeStartTimestamp).to.equal(disputeStartTimestamp);
 
     const finalNonce = 2n;
     const finalProofbody = proofBody([-200n], [tokenId]);
@@ -1394,6 +1613,7 @@ describe('Depository', () => {
       counterentity: right.entityId,
       initialNonce: disputeNonce,
       finalNonce,
+      proposerIsLeft: false,
       initialProofbodyHash,
       finalProofbody,
       starterArguments: '0x',
@@ -1417,7 +1637,12 @@ describe('Depository', () => {
     const counterpartyFinalization = {
       ...starterFinalization,
       counterentity: left.entityId,
-      sig: signEntityHash(left.entityId, finalHash, left.privateKey),
+      proposerIsLeft: true,
+      sig: signEntityHash(
+        left.entityId,
+        await disputeProofHash(depository, acctKey, finalNonce, finalProofbodyHash, TEST_WATCH_SEED, true),
+        left.privateKey,
+      ),
     };
     const final = await signDepositoryBatch(
       depository,
@@ -1426,9 +1651,24 @@ describe('Depository', () => {
       emptyBatch({ disputeFinalizations: [counterpartyFinalization] }),
     );
 
+    // This newer signed state has no Pull. Prove the success below is truly
+    // before timeout: waiting would add no evidence and would only let the
+    // starter delay adoption of a state it already signed.
+    expect(BigInt(await time.latest())).to.be.lessThan(disputeTimeout);
+
     await expect(depository.connect(right.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce))
       .to.emit(depository, 'DisputeFinalized')
-      .withArgs(right.entityId, left.entityId, disputeNonce, initialProofbodyHash, finalProofbodyHash);
+      .withArgs(
+        right.entityId,
+        left.entityId,
+        disputeNonce,
+        finalProofbodyHash,
+        ethers.keccak256(abi.encode(
+          ['bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32'],
+          [initialProofbodyHash, finalNonce, true, true, ethers.keccak256('0x'), ethers.keccak256('0x'),
+            ethers.keccak256(counterpartyFinalization.sig)],
+        )),
+      );
 
     const finalizedAccount = await depository._accounts(acctKey);
     const collateralAfter = await depository._collaterals(acctKey, tokenId);
@@ -1521,7 +1761,8 @@ describe('Depository', () => {
       watchSeed: TEST_WATCH_SEED,
       sig: startSig,
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     };
     const start = await signDepositoryBatch(
       depository,
@@ -1574,11 +1815,11 @@ describe('Depository', () => {
     ).to.be.revertedWithCustomError(depository, 'E2');
   });
 
-  it('binds starter initial and incremented dispute arguments independently', async function () {
+  it('binds starter initial and counter dispute arguments independently', async function () {
     const starterInitialArguments = abi.encode(['bytes[]'], [[encodeDeltaTransformerArguments([1])]]);
-    const starterIncrementedArguments = abi.encode(['bytes[]'], [[encodeDeltaTransformerArguments([2])]]);
+    const starterCounterArguments = abi.encode(['bytes[]'], [[encodeDeltaTransformerArguments([2])]]);
     const wrongInitialArguments = abi.encode(['bytes[]'], [[encodeDeltaTransformerArguments([3])]]);
-    const wrongIncrementedArguments = abi.encode(['bytes[]'], [[encodeDeltaTransformerArguments([4])]]);
+    const wrongCounterArguments = abi.encode(['bytes[]'], [[encodeDeltaTransformerArguments([4])]]);
 
     async function setupStartedDispute() {
       const { depository } = await loadFixture(deployFixture);
@@ -1586,6 +1827,10 @@ describe('Depository', () => {
       const initialNonce = 1n;
       const initialProofbody = proofBody([], []);
       const initialProofbodyHash = proofBodyHash(initialProofbody);
+      const starterCounterProofCommitment = ethers.keccak256(abi.encode(
+        ['uint256', 'bool', 'bytes32'],
+        [2n, false, initialProofbodyHash],
+      ));
       const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
       const startHash = await disputeProofHash(depository, acctKey, initialNonce, initialProofbodyHash);
       const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
@@ -1599,7 +1844,8 @@ describe('Depository', () => {
             watchSeed: TEST_WATCH_SEED,
             sig: startSig,
             starterInitialArguments,
-            starterIncrementedArguments,
+            starterCounterArguments,
+            starterCounterProofCommitment,
           },
         ],
       });
@@ -1620,7 +1866,7 @@ describe('Depository', () => {
     {
       const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } =
         await setupStartedDispute();
-      await time.increase(Number(await depository.defaultDisputeDelay()));
+      await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
       const finalization = {
         counterentity: right.entityId,
         initialNonce,
@@ -1643,14 +1889,14 @@ describe('Depository', () => {
     {
       const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } =
         await setupStartedDispute();
-      await time.increase(Number(await depository.defaultDisputeDelay()));
+      await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
       const finalization = {
         counterentity: right.entityId,
         initialNonce,
         finalNonce: initialNonce,
         initialProofbodyHash,
         finalProofbody: initialProofbody,
-        starterArguments: starterIncrementedArguments,
+        starterArguments: starterCounterArguments,
         otherArguments: '0x',
         sig: '0x',
         startedByLeft: true,
@@ -1665,7 +1911,7 @@ describe('Depository', () => {
     {
       const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } =
         await setupStartedDispute();
-      await time.increase(Number(await depository.defaultDisputeDelay()));
+      await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
       const finalization = {
         counterentity: right.entityId,
         initialNonce,
@@ -1687,7 +1933,7 @@ describe('Depository', () => {
     {
       const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } =
         await setupStartedDispute();
-      await time.increase(Number(await depository.defaultDisputeDelay()));
+      await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
       const finalization = {
         counterentity: right.entityId,
         initialNonce,
@@ -1723,7 +1969,7 @@ describe('Depository', () => {
         finalNonce,
         initialProofbodyHash,
         finalProofbody,
-        starterArguments: starterIncrementedArguments,
+        starterArguments: starterCounterArguments,
         otherArguments: '0x',
         sig: signEntityHash(left.entityId, finalHash, left.privateKey),
         startedByLeft: true,
@@ -1753,7 +1999,7 @@ describe('Depository', () => {
         finalNonce,
         initialProofbodyHash,
         finalProofbody,
-        starterArguments: wrongIncrementedArguments,
+        starterArguments: wrongCounterArguments,
         otherArguments: '0x',
         sig: signEntityHash(left.entityId, finalHash, left.privateKey),
         startedByLeft: true,
@@ -1811,18 +2057,20 @@ describe('Depository', () => {
         {
           counterentity: right.entityId,
           nonce: disputeNonce,
+          proposerIsLeft: false,
           proofbodyHash,
           initialProofbody: proofbody,
           watchSeed: TEST_WATCH_SEED,
           sig: startSig,
           starterInitialArguments,
-          starterIncrementedArguments: '0x',
+          starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
     });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
     await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
-    await time.increase(Number(await depository.defaultDisputeDelay()));
+    await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
 
     const finalization = {
       counterentity: right.entityId,
@@ -1863,7 +2111,7 @@ describe('Depository', () => {
     // must therefore either be rejected by the argument budget or remain
     // executable within the jurisdiction's 15M-gas liveness envelope.
     const starterInitialArguments = `0x${'ff'.repeat(168 * 1024)}`;
-    const starterIncrementedArguments = `0x${'ee'.repeat(168 * 1024)}`;
+    const starterCounterArguments = `0x${'ee'.repeat(168 * 1024)}`;
     const startHash = await disputeProofHash(depository, acctKey, disputeNonce, finalProofbodyHash);
     const start = await signDepositoryBatch(
       depository,
@@ -1879,7 +2127,8 @@ describe('Depository', () => {
             watchSeed: TEST_WATCH_SEED,
             sig: signEntityHash(right.entityId, startHash, right.privateKey),
             starterInitialArguments,
-            starterIncrementedArguments,
+            starterCounterArguments,
+            starterCounterProofCommitment: ethers.ZeroHash,
           },
         ],
       }),
@@ -1895,7 +2144,7 @@ describe('Depository', () => {
       return;
     }
 
-    await time.increase(Number(await depository.defaultDisputeDelay()));
+    await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
     const final = await signDepositoryBatch(
       depository,
       left.entityId,
@@ -1959,7 +2208,8 @@ describe('Depository', () => {
             watchSeed: TEST_WATCH_SEED,
             sig: signEntityHash(right.entityId, startHash, right.privateKey),
             starterInitialArguments: '0x',
-            starterIncrementedArguments: '0x',
+            starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
           },
         ],
       }),
@@ -2385,9 +2635,24 @@ describe('Depository', () => {
       { rightArguments },
     );
 
+    // Dynamic right-side fill evidence belongs to the non-starter. Rebuild
+    // only the outer batch orientation so Bob submits his own arguments;
+    // Alice must never impersonate them even after timeout.
+    const nonstarterFinal = await signDepositoryBatch(
+      depository,
+      dispute.right.entityId,
+      dispute.right.privateKey,
+      emptyBatch({
+        disputeFinalizations: [{
+          ...dispute.finalization,
+          counterentity: dispute.left.entityId,
+        }],
+      }),
+    );
+
     const tx = await depository
-      .connect(dispute.left.signer)
-      .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
+      .connect(dispute.right.signer)
+      .processBatch(nonstarterFinal.encodedBatch, nonstarterFinal.hankoData, nonstarterFinal.nonce, {
         gasLimit: 15_000_000n,
       });
     const receipt = await tx.wait();
@@ -2417,7 +2682,8 @@ describe('Depository', () => {
             watchSeed: TEST_WATCH_SEED,
             sig: signEntityHash(right.entityId, innerHash, right.privateKey),
             starterInitialArguments: '0x',
-            starterIncrementedArguments: '0x',
+            starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
           },
         ],
       }),
@@ -2438,7 +2704,7 @@ describe('Depository', () => {
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
     const appointmentSequence = 7n;
-    const lastResortWindowBlocks = 16n;
+    const lastResortWindowSeconds = 16n;
     await depository.mintToReserve(left.entityId, tokenId, 1_000n);
 
     const fundCollateralBatch = emptyBatch({
@@ -2472,7 +2738,8 @@ describe('Depository', () => {
           watchSeed: TEST_WATCH_SEED,
           sig: startSig,
           starterInitialArguments,
-          starterIncrementedArguments: '0x',
+          starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
     });
@@ -2482,7 +2749,14 @@ describe('Depository', () => {
     const finalNonce = 2n;
     const finalProofbody = proofBody([-200n], [tokenId]);
     const finalProofbodyHash = proofBodyHash(finalProofbody);
-    const finalHash = await disputeProofHash(depository, acctKey, finalNonce, finalProofbodyHash);
+    const finalHash = await disputeProofHash(
+      depository,
+      acctKey,
+      finalNonce,
+      finalProofbodyHash,
+      TEST_WATCH_SEED,
+      true,
+    );
     const finalSig = signEntityHash(left.entityId, finalHash, left.privateKey);
     const ownerAuthHash = await watchtowerCounterDisputeHash(
       depository,
@@ -2491,7 +2765,7 @@ describe('Depository', () => {
       left.entityId,
       finalNonce,
       finalProofbodyHash,
-      lastResortWindowBlocks,
+      lastResortWindowSeconds,
       appointmentSequence,
     );
     const ownerAuthorization = signEntityHash(right.entityId, ownerAuthHash, right.privateKey);
@@ -2499,6 +2773,7 @@ describe('Depository', () => {
       counterentity: left.entityId,
       initialNonce: disputeNonce,
       finalNonce,
+      proposerIsLeft: true,
       initialProofbodyHash,
       finalProofbody,
       starterArguments: '0x',
@@ -2514,17 +2789,17 @@ describe('Depository', () => {
         .watchtowerCounterDispute(
           right.entityId,
           finalization,
-          lastResortWindowBlocks,
+          lastResortWindowSeconds,
           appointmentSequence,
           ownerAuthorization,
         ),
     ).to.be.revertedWithCustomError(depository, 'E2');
 
-    const currentBlock = BigInt(await time.latestBlock());
-    const timeoutBlock = (await depository._accounts(acctKey)).disputeTimeout;
-    const lastResortStartBlock = timeoutBlock - lastResortWindowBlocks;
-    if (lastResortStartBlock > currentBlock) {
-      await mine(Number(lastResortStartBlock - currentBlock));
+    const currentTimestamp = BigInt(await time.latest());
+    const timeoutTimestamp = (await depository._accounts(acctKey)).disputeTimeout;
+    const lastResortStartTimestamp = timeoutTimestamp - lastResortWindowSeconds;
+    if (lastResortStartTimestamp > currentTimestamp) {
+      await time.increaseTo(Number(lastResortStartTimestamp));
     }
 
     await expect(
@@ -2533,7 +2808,25 @@ describe('Depository', () => {
         .watchtowerCounterDispute(
           right.entityId,
           finalization,
-          lastResortWindowBlocks,
+          lastResortWindowSeconds,
+          appointmentSequence,
+          ownerAuthorization,
+        ),
+    )
+      .to.emit(depository, 'CounterDisputeRegistered')
+      .withArgs(right.entityId, left.entityId, finalNonce, true, finalProofbodyHash);
+
+    // The tower may lock the newer signed branch during the last-resort
+    // window, but the same finalization barrier T applies to everyone. A
+    // second submission at T executes the already-selected proof.
+    await time.increaseTo(Number(timeoutTimestamp));
+    await expect(
+      depository
+        .connect(tower)
+        .watchtowerCounterDispute(
+          right.entityId,
+          finalization,
+          lastResortWindowSeconds,
           appointmentSequence,
           ownerAuthorization,
         ),
@@ -2558,7 +2851,7 @@ describe('Depository', () => {
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
     const appointmentSequence = 9n;
-    const lastResortWindowBlocks = 16n;
+    const lastResortWindowSeconds = 16n;
 
     const finalNonce = 2n;
     const finalProofbody = proofBody([-200n], [tokenId]);
@@ -2567,6 +2860,7 @@ describe('Depository', () => {
       counterentity: right.entityId,
       initialNonce: 1n,
       finalNonce,
+      proposerIsLeft: false,
       initialProofbodyHash: proofBodyHash(proofBody([0n], [tokenId])),
       finalProofbody,
       starterArguments: '0x',
@@ -2591,7 +2885,7 @@ describe('Depository', () => {
       right.entityId,
       finalNonce,
       finalProofbodyHash,
-      lastResortWindowBlocks,
+      lastResortWindowSeconds,
       appointmentSequence,
     );
     const ownerAuthorization = signEntityHash(left.entityId, ownerAuthHash, left.privateKey);
@@ -2602,7 +2896,7 @@ describe('Depository', () => {
         .watchtowerCounterDispute(
           left.entityId,
           finalization,
-          lastResortWindowBlocks,
+          lastResortWindowSeconds,
           appointmentSequence,
           ownerAuthorization,
         ),

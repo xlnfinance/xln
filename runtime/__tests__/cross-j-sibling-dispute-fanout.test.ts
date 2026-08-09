@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
+import { committedCrossJSourceResponseWindowMs } from '../extensions/cross-j/prepared-route';
 import { queueCrossJurisdictionSiblingDisputeFanout } from '../entity/tx/j-events-htlc';
 import { handleCrossJurisdictionForceSiblingDisputeEntityTx } from '../entity/tx/handlers/cross-j-force-sibling-dispute';
 import { createEmptyEnv } from '../runtime';
@@ -42,6 +42,7 @@ const baseRoute = (
     tokenId: 1,
     amount: 100n,
   },
+  sourceDisputeConfig: { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 },
   target: {
     jurisdiction: 'base',
     entityId: parties.targetHub,
@@ -49,6 +50,7 @@ const baseRoute = (
     tokenId: 1,
     amount: 90n,
   },
+  targetDisputeConfig: { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 },
   sourcePull: {
     pullId: `${orderId}:source`,
     tokenId: 1,
@@ -71,6 +73,40 @@ const baseRoute = (
 });
 
 describe('cross-j sibling dispute fanout', () => {
+  test('dispute start cancels a touching raw intent before either Pull is locked', () => {
+    const parties = {
+      sourceUser: entity('41'),
+      sourceHub: entity('42'),
+      targetHub: entity('43'),
+      targetUser: entity('44'),
+      sourceSigner: addr('71'),
+      targetSigner: addr('72'),
+      sourceHubSigner: addr('73'),
+      targetHubSigner: addr('74'),
+    };
+    const state = makeState(
+      parties.sourceHub,
+      parties.sourceHubSigner,
+      makeJurisdiction('Ethereum', 1, '11', '12'),
+      parties.sourceUser,
+    );
+    const route = baseRoute('raw-intent-dispute-start', parties);
+    delete route.sourcePull;
+    delete route.targetPull;
+    route.status = 'intent';
+    state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+    const outputs: EntityInput[] = [];
+
+    expect(queueCrossJurisdictionSiblingDisputeFanout(
+      state,
+      outputs,
+      parties.sourceUser,
+      9,
+    )).toBe(0);
+    expect(route.status).toBe('cancelled');
+    expect(outputs).toEqual([]);
+  });
+
   test('target-user DisputeStarted fans out to the source-user sibling lane', () => {
     const parties = {
       sourceUser: entity('51'),
@@ -229,13 +265,56 @@ describe('cross-j sibling dispute fanout', () => {
     expect(account?.status === 'dispute_preparing' || account?.status === 'disputed').toBe(true);
   });
 
-  test('prepare rejects unequal left/right dispute delays', () => {
+  test('online target Hub may force-start its target Account for an offline user', async () => {
+    const env = createEmptyEnv('force-sibling-hub-receiver');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const targetJ = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('61');
+    const sourceHub = entity('62');
+    const targetHub = entity('63');
+    const targetUser = entity('64');
+    const targetHubSigner = registerTestSigner(env, 'force-sibling-hub-receiver', 'target-hub');
+    const state = makeState(targetHub, targetHubSigner, targetJ, targetUser);
+    addReplica(env, state, targetHubSigner);
+    const route = baseRoute('force-sibling-hub-route', {
+      sourceUser,
+      sourceHub,
+      targetHub,
+      targetUser,
+      sourceSigner: addr('91'),
+      targetSigner: addr('92'),
+      sourceHubSigner: addr('93'),
+      targetHubSigner,
+    });
+    state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+
+    const result = await handleCrossJurisdictionForceSiblingDisputeEntityTx(
+      env,
+      state,
+      {
+        type: 'crossJurisdictionForceSiblingDispute',
+        data: {
+          routeId: route.orderId,
+          // The source-side Hub observed on the other leg authenticates why
+          // this target-side Hub must start its own bilateral clock now.
+          observedCounterpartyEntityId: sourceHub,
+          observedAt: 1,
+        },
+      },
+    );
+
+    const account = result.newState.accounts.get(targetUser);
+    expect(account?.status === 'dispute_preparing' || account?.status === 'disputed').toBe(true);
+  });
+
+  test('prepare rejects a route clock that differs from the signed Account clock', () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const sourceUser = entity('71');
     const sourceHub = entity('72');
     const state = makeState(sourceUser, addr('a1'), eth, sourceHub);
     const account = state.accounts.get(sourceHub)!;
-    account.state.disputeConfig = { leftDisputeDelay: 10, rightDisputeDelay: 11 };
+    account.state.disputeConfig = { leftResponseSeconds: 10, rightResponseSeconds: 11 };
     const route = baseRoute('delay-mismatch', {
       sourceUser,
       sourceHub,
@@ -246,8 +325,8 @@ describe('cross-j sibling dispute fanout', () => {
       sourceHubSigner: addr('a3'),
       targetHubSigner: addr('a4'),
     });
-    expect(() => committedCrossJSourceDisputeDelayMs(state, route)).toThrow(
-      /CROSS_J_PREPARED_DISPUTE_DELAY_MISMATCH/,
+    expect(() => committedCrossJSourceResponseWindowMs(state, route)).toThrow(
+      /CROSS_J_PREPARED_SOURCE_ACCOUNT_CLOCK_MISMATCH/,
     );
   });
 });

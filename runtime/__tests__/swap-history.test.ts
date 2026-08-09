@@ -21,7 +21,7 @@ const makeAccount = (): AccountReplica => ({
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     jNonce: 0,
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
@@ -93,6 +93,8 @@ describe('swap order history', () => {
       routeHash: `0x${'11'.repeat(32)}`,
       makerEntityId: 'maker',
       hubEntityId: 'hub',
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       source: {
         jurisdiction: 'source-j',
         entityId: 'maker',

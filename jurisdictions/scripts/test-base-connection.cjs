@@ -26,7 +26,7 @@ async function main() {
     console.log("  1. Generate a wallet: node -e \"console.log(require('ethers').Wallet.createRandom().privateKey)\"");
     console.log("  2. Export: export DEPLOYER_PRIVATE_KEY=0x...");
     console.log("  3. Get testnet ETH: https://www.alchemy.com/faucets/base-sepolia");
-    console.log("  4. Deploy: npx hardhat run scripts/deploy-base.cjs --network base-sepolia");
+    console.log("  4. Deploy only through: bun run deploy:chains:testnet");
     return;
   }
 
@@ -42,7 +42,7 @@ async function main() {
     console.log("   https://faucets.chain.link/base-sepolia");
   } else {
     console.log("\n✅ Ready to deploy! Run:");
-    console.log("   npx hardhat run scripts/deploy-base.cjs --network base-sepolia");
+    console.log("   bun run deploy:chains:testnet");
   }
 }
 

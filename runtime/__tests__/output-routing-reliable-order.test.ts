@@ -128,6 +128,8 @@ const crossJProposalOutput = (
     routeHash,
     makerEntityId: sourceEntityId,
     hubEntityId: sourceHubEntityId,
+    sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+    targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     source: {
       jurisdiction: 'stack:1:source',
       entityId: sourceEntityId,
@@ -207,6 +209,7 @@ const crossJProposalOutput = (
           fromEntityId,
           toEntityId,
           domain: { chainId: leg === 'source' ? 1 : 2, depositoryAddress: runtimeId('a5') },
+          disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
           proposal: {
             frame: {
               height: 1,
@@ -321,6 +324,28 @@ const routingDeps = (
   resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
 });
 
+const signingEnv = (
+  seed: string,
+  patch: {
+    scenarioMode?: boolean;
+    state?: Partial<RuntimeReplica['state']>;
+    pendingNetworkOutputs?: RuntimeReplica['pendingNetworkOutputs'];
+    infrastructure?: RuntimeReplica['infrastructure'];
+  } = {},
+): RuntimeReplica => {
+  const env = createEmptyEnv(seed);
+  env.quietRuntimeLogs = true;
+  env.warn = () => {};
+  env.error = () => {};
+  if (patch.scenarioMode !== undefined) env.scenarioMode = patch.scenarioMode;
+  if (patch.state) Object.assign(env.state, patch.state);
+  if (patch.pendingNetworkOutputs !== undefined) env.pendingNetworkOutputs = patch.pendingNetworkOutputs;
+  if (patch.infrastructure !== undefined) {
+    env.infrastructure = { ...(env.infrastructure ?? {}), ...patch.infrastructure };
+  }
+  return env;
+};
+
 const orderedCases = [
   ['entity frame', entityFrameOutput],
   ['hash precommit', hashPrecommitOutput],
@@ -433,16 +458,14 @@ describe('ordered reliable output lanes', () => {
     const pair = { phase: 'ack' as const, pairKey: 'atomic-ack-pair-77' };
     const sourceAck = { ...accountAckOutput(3), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
     const targetAck = { ...accountAckOutput(4), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-atomic-cross-j-retry', {
       scenarioMode: true,
       state: {
         height: 77,
         timestamp: 1_000,
       },
-      infrastructure: {},
       pendingNetworkOutputs: [],
-    } as unknown as RuntimeReplica;
+    });
     const delivered: RuntimeEntityInputsEnvelope[] = [];
     const deps = routingDeps(() => ({
       enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
@@ -518,16 +541,12 @@ describe('ordered reliable output lanes', () => {
     const sourceProposal = crossJProposalOutput('source', { height: 48, timestamp: 1_000 });
     const targetProposal = crossJProposalOutput('target', { height: 49, timestamp: 1_001 });
     const envelopes: RuntimeEntityInputsEnvelope[] = [];
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-adjacent-cross-j-pair', {
       state: {
-  height: 50,
-  timestamp: 1_002,
+        height: 50,
+        timestamp: 1_002,
       },
-      infrastructure: {},
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
 
     dispatchEntityOutputs(
       env,
@@ -656,15 +675,11 @@ describe('ordered reliable output lanes', () => {
       { ...accountAckOutput(6), atomicCrossJurisdictionPair: secondPair },
     ];
     const envelopes: RuntimeEntityInputsEnvelope[] = [];
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-sequential-cross-j-cohorts', {
       state: {
-  timestamp: 1_000,
+        timestamp: 1_000,
       },
-      infrastructure: {},
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
 
     dispatchEntityOutputs(
       env,
@@ -736,15 +751,11 @@ describe('ordered reliable output lanes', () => {
   for (const [label, createOutput] of receiptGatedCases) {
     test(`${label}: a transient lower-height failure blocks higher output in the same dispatch`, () => {
       const attempted: number[] = [];
-      const env = {
-        runtimeId: runtimeId('90'),
+      const env = signingEnv(`output-routing-${label}-same-dispatch-block`, {
         state: {
-  timestamp: 1_000,
+          timestamp: 1_000,
         },
-        infrastructure: {},
-        warn: () => {},
-        error: () => {},
-      } as unknown as RuntimeReplica;
+      });
       const outputs = [createOutput(2), createOutput(1)];
       const deferred = dispatchEntityOutputs(
         env,
@@ -772,16 +783,12 @@ describe('ordered reliable output lanes', () => {
     test(`${label}: a lower-height retry window blocks a newly produced higher output`, () => {
       let transportAvailable = false;
       const attempted: number[] = [];
-      const env = {
-        runtimeId: runtimeId('90'),
+      const env = signingEnv(`output-routing-${label}-retry-window-block`, {
         state: {
-  timestamp: 1_000,
+          timestamp: 1_000,
         },
-        infrastructure: {},
         pendingNetworkOutputs: [],
-        warn: () => {},
-        error: () => {},
-      } as unknown as RuntimeReplica;
+      });
       const deps = routingDeps(() => transportAvailable
         ? {
             enqueueEntityInputsDelivery: (_runtimeId, output) => {
@@ -820,16 +827,12 @@ describe('ordered reliable output lanes', () => {
     );
     const h5 = { ...accountAckOutput(5), runtimeId: receiver.runtimeId };
     const h8 = { ...accountAckOutput(8), runtimeId: receiver.runtimeId };
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-sparse-account-ack', {
       state: {
-  timestamp: 1_000,
+        timestamp: 1_000,
       },
-      infrastructure: {},
       pendingNetworkOutputs: [],
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
     const deps = routingDeps(() => transportAvailable
       ? {
           enqueueEntityInputsDelivery: (_runtimeId, output) => {
@@ -879,16 +882,12 @@ describe('ordered reliable output lanes', () => {
     const h11Identity = getReliableOutputIdentity(h11);
     if (!h11Identity) throw new Error('TEST_ACCOUNT_ACK_H11_IDENTITY_MISSING');
     const receipt = createReliableDeliveryReceipt(receiver, h11Identity, 'terminal');
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-receipted-account-ack-reissue', {
       state: {
-  timestamp: 1_000,
+        timestamp: 1_000,
       },
-      infrastructure: {},
       pendingNetworkOutputs: [h11],
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
     expect(applyReliableDeliveryReceipts(env, [receipt])).toEqual({ removed: 1 });
 
     // Entity replay can reproduce an already-ACKed output after the receipt
@@ -942,15 +941,11 @@ describe('ordered reliable output lanes', () => {
 
   test('a delayed Account ACK H9 does not receipt-gate the causally proven H10 ACK', () => {
     const attempted: number[] = [];
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-delayed-account-ack', {
       state: {
-  timestamp: 1_000,
+        timestamp: 1_000,
       },
-      infrastructure: {},
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
 
     const deferred = dispatchEntityOutputs(
       env,
@@ -978,15 +973,11 @@ describe('ordered reliable output lanes', () => {
     const entityA = entityId('82');
     const entityB = entityId('83');
     const attempted: string[] = [];
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-blocked-entity-a-lane', {
       state: {
-  timestamp: 1_000,
+        timestamp: 1_000,
       },
-      infrastructure: {},
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
     const outputs = [
       entityFrameOutput(2, entityA),
       entityFrameOutput(1, entityB),
@@ -1019,15 +1010,11 @@ describe('ordered reliable output lanes', () => {
 
   test('a blocked reliable lane does not block ordinary output', () => {
     const attempted: Array<number | 'ordinary'> = [];
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-blocked-reliable-lane', {
       state: {
-  timestamp: 1_000,
+        timestamp: 1_000,
       },
-      infrastructure: {},
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
     const ordinary = {
       runtimeId: targetRuntimeId,
       entityId: targetEntityId,
@@ -1057,15 +1044,11 @@ describe('ordered reliable output lanes', () => {
 
   test('HOL is scoped to a comparable protocol lane, not every message for one Entity', () => {
     const attempted: string[] = [];
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-hol-protocol-lane', {
       state: {
-  timestamp: 1_000,
+        timestamp: 1_000,
       },
-      infrastructure: {},
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
     const outputs = [entityFrameOutput(1), accountAckOutput(1)];
 
     const deferred = dispatchEntityOutputs(
@@ -1103,17 +1086,14 @@ describe('ordered reliable output lanes', () => {
       },
       signature: '0xtest-receipt-signature',
     });
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-entity-h-plus-one-receipt', {
       state: {
-  timestamp: 1_000,
+        timestamp: 1_000,
       },
       infrastructure: {
         receivedReliableReceiptLedger: new Map([['proposal', receipt(proposalIdentity)]]),
       },
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
     const attempted: number[] = [];
     const deliver = () => dispatchEntityOutputs(
       env,
@@ -1137,15 +1117,11 @@ describe('ordered reliable output lanes', () => {
   });
 
   test('transport handoff does not GC a reliable output before durable application receipt', () => {
-    const env = {
-      runtimeId: runtimeId('90'),
+    const env = signingEnv('output-routing-transport-handoff-gc', {
       state: {
-  timestamp: 1_000,
+        timestamp: 1_000,
       },
-      infrastructure: {},
-      warn: () => {},
-      error: () => {},
-    } as unknown as RuntimeReplica;
+    });
     const output = entityFrameOutput(1);
 
     const deferred = dispatchEntityOutputs(

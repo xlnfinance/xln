@@ -643,6 +643,7 @@ describe('durable scoped reliable delivery receipts', () => {
       fromEntityId: account.proofHeader.fromEntity,
       toEntityId: account.proofHeader.toEntity,
       domain: structuredClone(account.state.domain),
+      disputeConfig: structuredClone(account.state.disputeConfig),
       proposal: {
         frame: structuredClone(pendingFrame),
         frameHanko: `0x${'33'.repeat(65)}`,
@@ -732,6 +733,7 @@ describe('durable scoped reliable delivery receipts', () => {
         fromEntityId: sourceEntityId,
         toEntityId: targetEntityId,
         domain: structuredClone(account.state.domain),
+        disputeConfig: structuredClone(account.state.disputeConfig),
         watchSeed: account.state.watchSeed,
         ack: {
           height: 10,

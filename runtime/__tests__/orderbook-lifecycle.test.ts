@@ -48,6 +48,7 @@ describe('orderbook lifecycle cleanup', () => {
     book = fill.state;
 
     expect(fill.events.some((event) => event.type === 'TRADE' && event.makerOrderId === 'ask-1')).toBe(true);
+    expect(book.lastTradePriceTicks).toBe(110n);
     expect(getBookOrder(book, 'ask-1')).toBeNull();
     expect(activeOrderIds(book)).toEqual(['bid-1', 'bid-2']);
     expect(book.orders.size).toBe(2);

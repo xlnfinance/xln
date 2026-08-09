@@ -425,6 +425,8 @@ test('Entity consensus root binds incremental book commitments but not the deriv
             nextSeq: 1,
             tradeCount: 0,
             tradeQtySum: 0n,
+            lastTradePriceTicks: 0n,
+            lastAcceptedUsdAskPriceTicks: 0n,
             eventHash: 0n,
           },
         ],
@@ -434,6 +436,7 @@ test('Entity consensus root binds incremental book commitments but not the deriv
       hubProfile: {
         entityId,
         name: 'hub',
+        usdQuoteAuthorityEntityId: entityId,
         spreadDistribution: {
           makerBps: 0,
           takerBps: 10_000,

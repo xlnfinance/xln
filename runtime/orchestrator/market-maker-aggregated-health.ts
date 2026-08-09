@@ -161,12 +161,15 @@ export const buildAggregatedMarketMakerHealth = ({
           depthReady: route.depthReady === true,
           blockers: Array.isArray(route.blockers) ? route.blockers : [],
           pairs: Array.isArray(route.pairs)
-            ? route.pairs.map((pair) => ({
+              ? route.pairs.map((pair) => ({
                 pairId: String(pair.pairId || ''),
+                bookOwnerEntityId: String(pair.bookOwnerEntityId || '').toLowerCase(),
                 offers: Number(pair.offers || 0),
                 ready: pair.ready === true,
                 depthReady: pair.depthReady === true,
                 expectedOffers: Number(pair.expectedOffers || 0),
+                expectedBidOffers: Number(pair.expectedBidOffers || 0),
+                expectedAskOffers: Number(pair.expectedAskOffers || 0),
                 sourceTokenIds: Array.isArray(pair.sourceTokenIds)
                   ? pair.sourceTokenIds.map(Number).filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
                   : [],

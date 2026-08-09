@@ -266,10 +266,13 @@ export type MarketMakerCrossRouteHealthPayload = {
   blockers?: unknown[];
   pairs?: Array<{
     pairId: string;
+    bookOwnerEntityId?: string;
     offers: number;
     ready: boolean;
     depthReady?: boolean;
     expectedOffers?: number;
+    expectedBidOffers?: number;
+    expectedAskOffers?: number;
     bidOffers?: number;
     askOffers?: number;
     snapshotDepthExact?: boolean;
@@ -460,10 +463,13 @@ export type AggregatedHealth = {
       blockers?: unknown[];
       pairs: Array<{
         pairId: string;
+        bookOwnerEntityId?: string;
         offers: number;
         ready: boolean;
         depthReady?: boolean;
         expectedOffers?: number;
+        expectedBidOffers?: number;
+        expectedAskOffers?: number;
         bidOffers?: number;
         askOffers?: number;
         snapshotDepthExact?: boolean;

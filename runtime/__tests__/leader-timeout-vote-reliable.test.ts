@@ -43,10 +43,6 @@ import type { EntityLeaderTimeoutVote, EntityReplica, EntityState } from '../ent
 
 const runtime = (seed: string): RuntimeReplica => {
   const env = createEmptyEnv(seed);
-  const runtimeId = deriveSignerAddressSync(seed, 'runtime').toLowerCase();
-  registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, 'runtime'));
-  env.runtimeId = runtimeId;
-  env.runtimeSeed = seed;
   env.infrastructure ??= {};
   env.quietRuntimeLogs = true;
   env.warn = () => {};

@@ -16,7 +16,7 @@ contract LifecycleTest is XlnFixture {
   }
 
   function _accountNonce(bytes32 a, bytes32 b) internal view returns (uint256 n) {
-    (n,,,,,,,) = dep._accounts(XlnHanko.accountKey(a, b));
+    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(a, b));
   }
 
   function _collateralOf(bytes32 a, bytes32 b, uint256 t) internal view returns (uint256 c) {
@@ -24,13 +24,15 @@ contract LifecycleTest is XlnFixture {
   }
 
   function _disputeHashOf(bytes32 a, bytes32 b) internal view returns (bytes32 h) {
-    (, h,,,,,,) = dep._accounts(XlnHanko.accountKey(a, b));
+    (, h, , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(a, b));
   }
 
   function _proofBody(bytes32 seed, uint256 tokenId, int256 offdelta)
     internal pure returns (ProofBody memory pb)
   {
     pb.watchSeed = seed;
+    pb.leftResponseSeconds = LEFT_RESPONSE_SECONDS;
+    pb.rightResponseSeconds = RIGHT_RESPONSE_SECONDS;
     pb.offdeltas = new int256[](1);
     pb.offdeltas[0] = offdelta;
     pb.tokenIds = new uint256[](1);
@@ -185,8 +187,9 @@ contract LifecycleTest is XlnFixture {
     ProofBody memory pb = _proofBody(seed, T, offdelta);
     pbHash = keccak256(abi.encode(pb));
     nonce = _accountNonce(me, other) + 1;
+    bool proposerIsLeft = other < me;
     bytes32 h = XlnHanko.disputeProofHash(
-      address(dep), XlnHanko.accountKey(me, other), nonce, pbHash, seed
+      address(dep), XlnHanko.accountKey(me, other), nonce, proposerIsLeft, pbHash, seed
     );
 
     Batch memory b = XlnHanko.emptyBatch();
@@ -194,12 +197,14 @@ contract LifecycleTest is XlnFixture {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
       watchSeed: seed,
       sig: _hanko(cp, h),
       starterInitialArguments: "",
-      starterIncrementedArguments: ""
+      starterCounterArguments: "",
+      starterCounterProofCommitment: bytes32(0)
     });
     assertTrue(_submit(starter, b));
   }
@@ -213,6 +218,7 @@ contract LifecycleTest is XlnFixture {
       counterentity: entity[other],
       initialNonce: nonce,
       finalNonce: nonce,
+      proposerIsLeft: !startedByLeft,
       initialProofbodyHash: pbHash,
       finalProofbody: _proofBody(seed, T, offdelta),
       starterArguments: "",
@@ -232,14 +238,15 @@ contract LifecycleTest is XlnFixture {
 
     Batch memory fin = _timeoutFinalize(1, nonce, pbHash, seed, 400, startedByLeft);
 
-    // Too early: the starter must wait out defaultDisputeDelay.
+    // Too early: the starter must leave the full signed response sum for the
+    // counterparty to reveal a newer state.
     bytes memory encoded = abi.encode(fin);
     uint256 bn = dep.entityNonces(entity[0]) + 1;
     bytes32 bh = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, bn);
     vm.expectRevert();
     dep.processBatch(encoded, _hanko(0, bh), bn);
 
-    vm.warp(block.timestamp + DISPUTE_DELAY);
+    vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS);
     assertTrue(_submit(0, fin), "finalize after delay failed");
 
     assertEq(_disputeHashOf(entity[0], entity[1]), bytes32(0), "dispute not cleared");
@@ -254,7 +261,7 @@ contract LifecycleTest is XlnFixture {
     bool startedByLeft = entity[0] < entity[1];
     (uint256 nonce, bytes32 pbHash, bytes32 seed) = _startDispute(0, 1, int256(400));
 
-    vm.warp(block.timestamp + DISPUTE_DELAY);
+    vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS);
     Batch memory fin = _timeoutFinalize(1, nonce, pbHash, seed, 400, startedByLeft);
     assertTrue(_submit(0, fin));
 
@@ -275,16 +282,18 @@ contract LifecycleTest is XlnFixture {
     ProofBody memory pb = _proofBody(seed2, T, 500);
     bytes32 pbHash2 = keccak256(abi.encode(pb));
     uint256 nonce2 = _accountNonce(me, other) + 1;
+    bool proposerIsLeft = other < me;
     bytes32 h = XlnHanko.disputeProofHash(
-      address(dep), XlnHanko.accountKey(me, other), nonce2, pbHash2, seed2
+      address(dep), XlnHanko.accountKey(me, other), nonce2, proposerIsLeft, pbHash2, seed2
     );
 
     Batch memory b = XlnHanko.emptyBatch();
     b.disputeStarts = new InitialDisputeProof[](1);
     b.disputeStarts[0] = InitialDisputeProof({
-      counterentity: other, nonce: nonce2, proofbodyHash: pbHash2,
+      counterentity: other, nonce: nonce2, proposerIsLeft: proposerIsLeft, proofbodyHash: pbHash2,
       initialProofbody: pb, watchSeed: seed2, sig: _hanko(1, h),
-      starterInitialArguments: "", starterIncrementedArguments: ""
+      starterInitialArguments: "", starterCounterArguments: "",
+      starterCounterProofCommitment: bytes32(0)
     });
 
     bytes memory encoded = abi.encode(b);
@@ -313,7 +322,7 @@ contract LifecycleTest is XlnFixture {
     // No collateral, no reserves: delta -500 means LEFT owes RIGHT 500.
     (uint256 nonce, bytes32 pbHash, bytes32 seed) = _startDispute(0, 1, int256(-500));
     bool startedByLeft = entity[0] < entity[1];
-    vm.warp(block.timestamp + DISPUTE_DELAY);
+    vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS);
     assertTrue(_submit(0, _timeoutFinalize(1, nonce, pbHash, seed, -500, startedByLeft)));
 
     (bytes32 left,) = entity[0] < entity[1] ? (entity[0], entity[1]) : (entity[1], entity[0]);

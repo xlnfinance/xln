@@ -10,11 +10,14 @@ import {
   USDT,
   WETH,
   attachBrowserConsoleGuard,
+  aggregateExpectedCrossBookDepth,
   configurePair,
   configureTokens,
   createRuntimeIdentityViaStore,
+  dismissSwapCompletionModal,
   ensureDirectHubAccount,
   expectBrowserConsoleClean,
+  expectExactConfiguredDepth,
   expectExactTenByTen,
   expectMarketMakerSameAndCrossBooksHealthy,
   faucetOffchain,
@@ -53,6 +56,7 @@ import {
   placeCrossOrder,
   readCrossState,
   readHubCrossDeltas,
+  transferFeeAmount,
   visibleOrderbookRow,
   waitForCrossOffersCleared,
   waitForCrossPendingFill,
@@ -73,6 +77,21 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
   test.setTimeout(360_000);
 
   test(
+    'completion modal dismissal fails loud when the overlay remains visible',
+    { tag: '@functional' },
+    async ({ page }) => {
+      await page.setContent('<button data-testid="swap-completion-close" type="button">Close</button>');
+      let rejection: unknown;
+      try {
+        await dismissSwapCompletionModal(page);
+      } catch (error) {
+        rejection = error;
+      }
+      expect(rejection).toBeInstanceOf(Error);
+    },
+  );
+
+  test(
     'market maker prepublishes same-chain and ETH/TRON cross-chain books before user swaps',
     { tag: '@functional' },
     async ({ page }) => {
@@ -89,7 +108,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
   );
 
   test(
-    'H2 process replacement restores authoritative health and exact 10x10 public book',
+    'H2 process replacement restores authoritative health and exact configured public books',
     { tag: '@resilience' },
     async ({ page }) => {
       allowDebugIncident({
@@ -124,12 +143,16 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       const oldRestartCount = Number(h2Process!.restartCount ?? 0);
       const beforeSnapshot = await readHubPairSnapshot(page, h2Hub!, '1/2');
       expectExactTenByTen(beforeSnapshot, 'H2 pre-restart USDC/WETH book');
-      const h2CrossPairId = before.marketMaker?.cross?.routes
-        ?.find(route => normalizeId(route.sourceHubEntityId) === normalizeId(h2Hub!.entityId))
-        ?.pairs?.find(pair => Number(pair.expectedOffers ?? 0) === 10)?.pairId;
+      const h2CrossPairs =
+        before.marketMaker?.cross?.routes
+          ?.flatMap(route => route.pairs ?? [])
+          .filter(pair => normalizeId(pair.bookOwnerEntityId) === normalizeId(h2Hub!.entityId)) ?? [];
+      const h2CrossPair = h2CrossPairs.find(pair => Number(pair.expectedOffers ?? 0) > 0);
+      const h2CrossPairId = h2CrossPair?.pairId;
       expect(h2CrossPairId, 'H2 must publish a configured cross-j pair before restart').toBeTruthy();
+      const h2CrossBookDepth = aggregateExpectedCrossBookDepth(h2CrossPairs, h2CrossPairId!);
       const beforeCrossSnapshot = await readHubPairSnapshot(page, h2Hub!, h2CrossPairId!);
-      expectExactTenByTen(beforeCrossSnapshot, 'H2 pre-restart cross-j book');
+      expectExactConfiguredDepth(beforeCrossSnapshot, h2CrossBookDepth, 'H2 pre-restart cross-j book');
 
       process.kill(oldPid, 'SIGKILL');
 
@@ -209,7 +232,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       expectExactTenByTen(restoredSnapshot, 'H2 restored USDC/WETH book');
       expect(restoredSnapshot.entityHeight).toBeGreaterThanOrEqual(beforeSnapshot.entityHeight);
       const restoredCrossSnapshot = await readHubPairSnapshot(page, restoredH2!, h2CrossPairId!);
-      expectExactTenByTen(restoredCrossSnapshot, 'H2 restored cross-j book');
+      expectExactConfiguredDepth(restoredCrossSnapshot, h2CrossBookDepth, 'H2 restored cross-j book');
       expect(restoredCrossSnapshot.entityHeight).toBeGreaterThanOrEqual(beforeCrossSnapshot.entityHeight);
     },
   );
@@ -231,6 +254,15 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       const primaryHubApiBaseUrl = getPrimaryHubApiBaseUrl(baseline, hubId);
       const primaryHubName = getPrimaryHubName(baseline, hubId);
       const targetHub = await getSecondaryHubInfo(page, hubId, primaryHubName, primaryHubApiBaseUrl);
+      const primaryHubCrossPairs =
+        baseline.marketMaker?.cross?.routes
+          ?.flatMap(route => route.pairs ?? [])
+          .filter(pair => normalizeId(pair.bookOwnerEntityId) === normalizeId(hubId)) ?? [];
+      const usdcCrossPair = primaryHubCrossPairs.find(
+        pair => pair.sourceTokenIds?.includes(USDC) && pair.targetTokenIds?.includes(USDC),
+      );
+      expect(usdcCrossPair?.pairId, 'primary hub must publish a configured USDC/USDC cross-j book').toBeTruthy();
+      const usdcCrossBookDepth = aggregateExpectedCrossBookDepth(primaryHubCrossPairs, usdcCrossPair!.pairId);
 
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
       const mnemonic = Wallet.createRandom().mnemonic!.phrase;
@@ -258,13 +290,15 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         clickBookSide: 'bid',
         expectedClickFromTokenId: USDC,
         expectedClickToTokenId: USDC,
-        expectedBookDepth: 10,
+        expectedBookDepth: usdcCrossBookDepth,
         expectedAutoAmount: 300,
-        screenshotPath: testInfo.outputPath('cross-j-mm-10x10-hub-first.png'),
+        screenshotPath: testInfo.outputPath('cross-j-mm-configured-depth-hub-first.png'),
       });
       await expect(page.getByTestId('swap-ticket-from-token').first().locator('option:checked')).toHaveText('USDC');
       await expect(page.getByTestId('swap-ticket-to-token').first().locator('option:checked')).toHaveText('USDC');
-      await expect(page.getByTestId('swap-ticket-from-network').first().locator('option:checked')).toContainText('Testnet');
+      await expect(page.getByTestId('swap-ticket-from-network').first().locator('option:checked')).toContainText(
+        'Testnet',
+      );
       await expect(page.getByTestId('swap-ticket-to-network').first().locator('option:checked')).toContainText('Tron');
 
       await waitForCrossPullFlow(page, source, target, hubId, targetHub.entityId, {
@@ -360,7 +394,11 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         fullTargetBefore.ownerIsLeft,
         'receive',
         'full target Account',
-        BigInt(filledTargetState.currentFrameFees[String(USDC)] ?? '0'),
+        transferFeeAmount(
+          BigInt(filledTargetState.currentFrameFees[String(USDC)] ?? '0'),
+          BigInt(filledTargetState.rebalanceFeesPaid[String(USDC)] ?? '0') -
+            BigInt(fullTargetBefore.rebalanceFeesPaid[String(USDC)] ?? '0'),
+        ),
       );
       await expect(page.getByTestId('swap-open-order-row')).toHaveCount(0, { timeout: 15_000 });
 
@@ -515,7 +553,11 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         partialTargetBefore.ownerIsLeft,
         'receive',
         'partial target Account',
-        BigInt(partialTargetAfter.currentFrameFees[String(USDC)] ?? '0'),
+        transferFeeAmount(
+          BigInt(partialTargetAfter.currentFrameFees[String(USDC)] ?? '0'),
+          BigInt(partialTargetAfter.rebalanceFeesPaid[String(USDC)] ?? '0') -
+            BigInt(partialTargetBefore.rebalanceFeesPaid[String(USDC)] ?? '0'),
+        ),
       );
     },
   );
@@ -1472,6 +1514,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           ),
         ]);
 
+        await timedStep('cross_j_swap.partial.dismiss_bob_fill_modal', () => dismissSwapCompletionModal(bobPage));
         const bobPartialSecondOrderId = await timedStep('cross_j_swap.partial.bob_second_offer', () =>
           placeCrossOrder(bobPage, {
             source: bobRpc2,

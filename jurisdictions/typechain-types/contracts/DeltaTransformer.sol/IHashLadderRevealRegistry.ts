@@ -24,7 +24,7 @@ export interface IHashLadderRevealRegistryInterface extends Interface {
 
   encodeFunctionData(
     functionFragment: "getHashLadderReveal",
-    values: [BytesLike, BytesLike]
+    values: [BytesLike, BytesLike, BytesLike, boolean]
   ): string;
 
   decodeFunctionResult(
@@ -77,7 +77,12 @@ export interface IHashLadderRevealRegistry extends BaseContract {
   ): Promise<this>;
 
   getHashLadderReveal: TypedContractMethod<
-    [entity: BytesLike, ladderHash: BytesLike],
+    [
+      ownerEntity: BytesLike,
+      counterpartyEntity: BytesLike,
+      ladderHash: BytesLike,
+      targetRole: boolean
+    ],
     [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;
@@ -89,7 +94,12 @@ export interface IHashLadderRevealRegistry extends BaseContract {
   getFunction(
     nameOrSignature: "getHashLadderReveal"
   ): TypedContractMethod<
-    [entity: BytesLike, ladderHash: BytesLike],
+    [
+      ownerEntity: BytesLike,
+      counterpartyEntity: BytesLike,
+      ladderHash: BytesLike,
+      targetRole: boolean
+    ],
     [[bigint, bigint] & { fillRatio: bigint; revealedAt: bigint }],
     "view"
   >;

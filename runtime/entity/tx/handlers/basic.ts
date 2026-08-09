@@ -22,6 +22,7 @@ import { validateMessage } from '../validation';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 import { buildCertifiedEntityOutput } from '../cross-j-outputs';
 import { hashCertifiedEntityOutputSemantic } from '../../consensus/output-certification';
+import { normalizeEntityRef } from '../account-key';
 
 const basicLog = createStructuredLogger('entity.basic');
 
@@ -301,12 +302,17 @@ export const handleInitOrderbookExtEntityTx = (
     log.error(`❌ Invalid spread distribution for initOrderbookExt on ${entityState.entityId}`);
     return { newState: entityState, outputs: [] };
   }
+  const usdQuoteAuthorityEntityId = normalizeEntityRef(entityTx.data.usdQuoteAuthorityEntityId);
+  if (!/^0x[0-9a-f]{64}$/.test(usdQuoteAuthorityEntityId)) {
+    throw new Error(`ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID:${usdQuoteAuthorityEntityId}`);
+  }
 
   const hubProfile = {
     entityId: entityState.entityId,
     name: entityTx.data.name,
     spreadDistribution: entityTx.data.spreadDistribution,
     referenceTokenId: entityTx.data.referenceTokenId,
+    usdQuoteAuthorityEntityId,
     minTradeSize: entityTx.data.minTradeSize,
     supportedPairs: [...entityTx.data.supportedPairs],
   };

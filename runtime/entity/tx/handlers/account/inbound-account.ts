@@ -24,6 +24,7 @@ import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { addMessage } from '../../../frame-events';
 import { getEntityAccountInsertionCapacityError } from '../../../account-capacity';
 import { isLeftEntity } from '../../../id';
+import { canonicalAccountDisputeConfig } from '../../../../account/dispute-config';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
 const rejectPeerInput = (code: AccountPeerRejectionCode, reason: string): never => {
@@ -136,6 +137,7 @@ const createInboundAccountState = (
   counterpartyId: string,
   domain: AccountReplica['state']['domain'],
   watchSeed: string,
+  disputeConfig: AccountReplica['state']['disputeConfig'],
 ): AccountReplica => {
   const leftEntity = isLeftEntity(state.entityId, counterpartyId)
     ? state.entityId
@@ -157,7 +159,7 @@ const createInboundAccountState = (
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+      disputeConfig: canonicalAccountDisputeConfig(disputeConfig),
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -234,7 +236,13 @@ export const resolveInboundAccount = (
     return rejectPeerInput('ACCOUNT_PEER_CAPACITY_EXCEEDED', capacityError);
   }
   accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
-  const account = createInboundAccountState(state, counterpartyId, domain, watchSeed);
+  const account = createInboundAccountState(
+    state,
+    counterpartyId,
+    domain,
+    watchSeed,
+    canonicalAccountDisputeConfig(input.disputeConfig),
+  );
   accountHandlerLog.debug('machine.candidate_created', { counterparty: shortId(counterpartyId) });
   return { account, counterpartyId, createdAccount: true };
 };

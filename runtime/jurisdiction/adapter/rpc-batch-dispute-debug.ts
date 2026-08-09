@@ -21,6 +21,7 @@ export const buildDisputeStartDebug = async (
         domain,
         accountKey,
         start.nonce,
+        start.proposerIsLeft,
         start.proofbodyHash,
         start.watchSeed,
       );
@@ -35,7 +36,7 @@ export const buildDisputeStartDebug = async (
         nonce: start.nonce,
         proofbodyHash: start.proofbodyHash,
         starterInitialArgumentsBytes: Math.max(start.starterInitialArguments.length - 2, 0) / 2,
-        starterIncrementedArgumentsBytes: Math.max(start.starterIncrementedArguments.length - 2, 0) / 2,
+        starterCounterArgumentsBytes: Math.max(start.starterCounterArguments.length - 2, 0) / 2,
         disputeHash,
         accountKey,
         sigBytes: Math.max(start.sig.length - 2, 0) / 2,

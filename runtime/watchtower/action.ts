@@ -16,15 +16,15 @@ import type { LastResortTowerAppointment, WatchtowerStore, StoredTowerActionRece
 
 const DEPOSITORY_MINIMAL_ABI = [
   'function accountKey(bytes32 e1, bytes32 e2) view returns (bytes)',
-  'function _accounts(bytes acctKey) view returns (uint256 nonce, bytes32 disputeHash, uint256 disputeTimeout, uint256 disputeStartTimestamp, bytes32 disputeInitialProofbodyHash, bytes32 starterInitialArgumentsCommitment, bytes32 starterIncrementedArgumentsCommitment, bool disputeStartedByLeft)',
-  'function watchtowerCounterDispute(bytes32 entityId, (bytes32 counterentity,uint256 initialNonce,uint256 finalNonce,bytes32 initialProofbodyHash,(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,(address transformerAddress,bytes encodedBatch,(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers) finalProofbody,bytes starterArguments,bytes otherArguments,bytes sig,bool startedByLeft,bool cooperative) params, uint256 lastResortWindowBlocks, uint256 appointmentSequence, bytes ownerAuthorizationHanko) returns (bool)',
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout, uint256 disputeStartTimestamp)',
+  'function _accounts(bytes acctKey) view returns (uint256 nonce, bytes32 disputeHash, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds, bytes32 disputeInitialProofbodyHash, bool disputeInitialProposerIsLeft, uint256 disputeCounterNonce, bytes32 disputeCounterProofbodyHash, bool disputeCounterProposerIsLeft, bytes32 starterInitialArgumentsCommitment, bytes32 starterCounterArgumentsCommitment, bytes32 starterCounterProofCommitment, bool disputeStartedByLeft)',
+  'function watchtowerCounterDispute(bytes32 entityId, (bytes32 counterentity,uint256 initialNonce,uint256 finalNonce,bool proposerIsLeft,bytes32 initialProofbodyHash,(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,(address transformerAddress,bytes encodedBatch,(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers) finalProofbody,bytes starterArguments,bytes otherArguments,bytes sig,bool startedByLeft,bool cooperative) params, uint256 lastResortWindowSeconds, uint256 appointmentSequence, bytes ownerAuthorizationHanko) returns (bool)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment, uint256 disputeTimeout, uint256 disputeStartTimestamp, uint32 leftResponseSeconds, uint32 rightResponseSeconds)',
 ] as const;
 
 const DEPOSITORY_INTERFACE = new Interface(DEPOSITORY_MINIMAL_ABI);
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
 const PROOF_BODY_PARAM = ethers.ParamType.from(
-  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)',
+  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)',
 );
 const ZERO_HASH = ethers.ZeroHash.toLowerCase();
 
@@ -33,6 +33,56 @@ type WatchtowerSweepProvider = {
   getBlockNumber: () => Promise<number>;
   getBlock?: (blockTag: string | number) => Promise<{ timestamp: number | bigint } | null>;
   getLogs?: (filter: Record<string, unknown>) => Promise<WatchtowerLog[]>;
+};
+
+const WATCHTOWER_RPC_READ_TIMEOUT_MS = 10_000;
+
+const withWatchtowerRpcTimeout = async <T>(
+  promise: Promise<T>,
+  label: string,
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label}_TIMEOUT:${WATCHTOWER_RPC_READ_TIMEOUT_MS}`)),
+          WATCHTOWER_RPC_READ_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+};
+
+const isRpcLogRangeLimitError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /block range|range.{0,32}(too large|limit|exceed)|query returned more than|too many results|response size|please limit|-32005/i.test(message);
+};
+
+const readAdaptiveWatchtowerLogs = async (
+  provider: Pick<WatchtowerSweepProvider, 'getLogs'>,
+  filter: Record<string, unknown> & { fromBlock: number; toBlock: number },
+): Promise<WatchtowerLog[]> => {
+  if (typeof provider.getLogs !== 'function') {
+    throw new Error('WATCHTOWER_PROVIDER_GET_LOGS_UNAVAILABLE');
+  }
+  try {
+    return await withWatchtowerRpcTimeout(
+      provider.getLogs(filter),
+      `WATCHTOWER_ACTIVE_DISPUTE_LOGS:${filter.fromBlock}:${filter.toBlock}`,
+    );
+  } catch (error) {
+    if (!isRpcLogRangeLimitError(error) || filter.fromBlock >= filter.toBlock) throw error;
+    const middle = filter.fromBlock + Math.floor((filter.toBlock - filter.fromBlock) / 2);
+    const [left, right] = await Promise.all([
+      readAdaptiveWatchtowerLogs(provider, { ...filter, toBlock: middle }),
+      readAdaptiveWatchtowerLogs(provider, { ...filter, fromBlock: middle + 1 }),
+    ]);
+    return [...left, ...right];
+  }
 };
 
 const isHexLike = (value: unknown, length?: number): value is string => {
@@ -57,6 +107,11 @@ const toInt = (value: unknown, label: string): number => {
   return Number(value);
 };
 
+const requireBool = (value: unknown, label: string): boolean => {
+  if (typeof value !== 'boolean') throw new Error(`WATCHTOWER_REMEDY_${label}_INVALID`);
+  return value;
+};
+
 const uint256ToSafeNumber = (value: unknown, label: string): number => {
   if (typeof value !== 'bigint' || value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new Error(`WATCHTOWER_REMEDY_${label}_INVALID`);
@@ -75,13 +130,26 @@ const normalizeFinalProofbody = (
   const proof = requireBoundaryRecord(value, 'WATCHTOWER_REMEDY_FINAL_PROOFBODY_INVALID');
   requireExactBoundaryKeys(
     proof,
-    ['watchSeed', 'offdeltas', 'tokenIds', 'transformers'],
+    ['watchSeed', 'leftResponseSeconds', 'rightResponseSeconds', 'offdeltas', 'tokenIds', 'transformers'],
     [],
     'WATCHTOWER_REMEDY_FINAL_PROOFBODY_FIELDS_INVALID',
   );
   const offdeltas = proof['offdeltas'];
   const tokenIds = proof['tokenIds'];
   const transformers = proof['transformers'];
+  const leftResponseSeconds = proof['leftResponseSeconds'];
+  const rightResponseSeconds = proof['rightResponseSeconds'];
+  if (
+    typeof leftResponseSeconds !== 'bigint'
+    || typeof rightResponseSeconds !== 'bigint'
+    || leftResponseSeconds < 0n
+    || rightResponseSeconds < 0n
+    || leftResponseSeconds > 0xffff_ffffn
+    || rightResponseSeconds > 0xffff_ffffn
+    || leftResponseSeconds + rightResponseSeconds > 365n * 24n * 60n * 60n
+  ) {
+    throw new Error('WATCHTOWER_REMEDY_FINAL_PROOFBODY_RESPONSE_SECONDS_INVALID');
+  }
   if (!Array.isArray(offdeltas) || offdeltas.some(delta => typeof delta !== 'bigint')) {
     throw new Error('WATCHTOWER_REMEDY_FINAL_PROOFBODY_OFFDELTAS_INVALID');
   }
@@ -135,6 +203,8 @@ const normalizeFinalProofbody = (
   });
   return {
     watchSeed: normalizeHex32(proof['watchSeed'], 'FINAL_PROOFBODY_WATCH_SEED'),
+    leftResponseSeconds,
+    rightResponseSeconds,
     offdeltas: [...offdeltas],
     tokenIds: [...tokenIds],
     transformers: decodedTransformers,
@@ -145,13 +215,14 @@ const normalizeFinalDisputeProof = (value: unknown): TowerFinalDisputeProof => {
   const candidate = requireBoundaryRecord(value, 'WATCHTOWER_REMEDY_FINALIZATION_INVALID');
   requireExactBoundaryKeys(
     candidate,
-    ['counterentity', 'finalNonce', 'finalProofbody', 'leftArguments', 'rightArguments', 'sig'],
+    ['counterentity', 'finalNonce', 'proposerIsLeft', 'finalProofbody', 'leftArguments', 'rightArguments', 'sig'],
     [],
     'WATCHTOWER_REMEDY_FINALIZATION_FIELDS_INVALID',
   );
   return {
     counterentity: normalizeHex32(candidate['counterentity'], 'COUNTERENTITY'),
     finalNonce: toInt(candidate['finalNonce'], 'FINAL_NONCE'),
+    proposerIsLeft: requireBool(candidate['proposerIsLeft'], 'PROPOSER_IS_LEFT'),
     finalProofbody: normalizeFinalProofbody(candidate['finalProofbody']),
     // Arguments are optional adversarial evidence and may be empty. The signed
     // proof and Hanko below are authority, so they never receive defaults.
@@ -182,7 +253,7 @@ export const decodeTowerCounterDisputeRemedy = async (
     parsed,
     [
       'version', 'type', 'rpcUrl', 'chainId', 'depositoryAddress',
-      'watchedEntityId', 'towerAddress', 'lastResortWindowBlocks',
+      'watchedEntityId', 'towerAddress', 'lastResortWindowSeconds',
       'appointmentSequence', 'ownerAuthorizationHanko', 'latestProof',
     ],
     [],
@@ -199,7 +270,7 @@ export const decodeTowerCounterDisputeRemedy = async (
     depositoryAddress: normalizeAddress(parsed['depositoryAddress'], 'DEPOSITORY'),
     watchedEntityId: normalizeHex32(parsed['watchedEntityId'], 'WATCHED_ENTITY'),
     towerAddress: normalizeAddress(parsed['towerAddress'], 'TOWER'),
-    lastResortWindowBlocks: toInt(parsed['lastResortWindowBlocks'], 'LAST_RESORT_WINDOW_BLOCKS'),
+    lastResortWindowSeconds: toInt(parsed['lastResortWindowSeconds'], 'LAST_RESORT_WINDOW_SECONDS'),
     appointmentSequence: toInt(parsed['appointmentSequence'], 'APPOINTMENT_SEQUENCE'),
     ownerAuthorizationHanko: requireHex(
       parsed['ownerAuthorizationHanko'],
@@ -241,8 +312,8 @@ const assertLastResortPayloadBasics = (appointment: LastResortTowerAppointment):
   }
   normalizeHex32(payload.proofBodyHash, 'PROOF_BODY_HASH');
   if (
-    !Number.isSafeInteger(payload.lastResortWindowBlocks)
-    || payload.lastResortWindowBlocks <= 0
+    !Number.isSafeInteger(payload.lastResortWindowSeconds)
+    || payload.lastResortWindowSeconds <= 0
   ) {
     throw new Error('WATCHTOWER_LAST_RESORT_WINDOW_INVALID');
   }
@@ -270,9 +341,16 @@ type WatchtowerSweepOptions = {
       disputeHash: string;
       disputeTimeout: bigint;
       disputeStartTimestamp: bigint;
+      leftResponseSeconds: bigint;
+      rightResponseSeconds: bigint;
       disputeInitialProofbodyHash: string;
+      disputeInitialProposerIsLeft: boolean;
+      disputeCounterNonce: bigint;
+      disputeCounterProofbodyHash: string;
+      disputeCounterProposerIsLeft: boolean;
       starterInitialArgumentsCommitment: string;
-      starterIncrementedArgumentsCommitment: string;
+      starterCounterArgumentsCommitment: string;
+      starterCounterProofCommitment: string;
       disputeStartedByLeft: boolean;
     }>;
     watchtowerCounterDispute: (
@@ -281,6 +359,7 @@ type WatchtowerSweepOptions = {
         counterentity: string;
         initialNonce: number;
         finalNonce: number;
+        proposerIsLeft: boolean;
         initialProofbodyHash: string;
         finalProofbody: TowerFinalDisputeProof['finalProofbody'];
         starterArguments: string;
@@ -289,7 +368,7 @@ type WatchtowerSweepOptions = {
         startedByLeft: boolean;
         cooperative: boolean;
       },
-      lastResortWindowBlocks: number,
+      lastResortWindowSeconds: number,
       appointmentSequence: number,
       ownerAuthorizationHanko: string,
     ) => Promise<{ hash?: string; wait?: () => Promise<{ blockNumber?: number } | null> }>;
@@ -404,8 +483,10 @@ type ActiveDisputeContext = {
   initialProofbodyHash: string;
   watchSeed: string;
   starterInitialArguments: string;
-  starterIncrementedArguments: string;
+  starterCounterArguments: string;
+  starterCounterProofCommitment: string;
   startedByLeft: boolean;
+  initialProposerIsLeft: boolean;
 };
 
 type OnchainDisputeAccount = {
@@ -413,9 +494,16 @@ type OnchainDisputeAccount = {
   disputeHash: string;
   disputeTimeout: bigint;
   disputeStartTimestamp: bigint;
+  leftResponseSeconds: bigint;
+  rightResponseSeconds: bigint;
   disputeInitialProofbodyHash: string;
+  disputeInitialProposerIsLeft: boolean;
+  disputeCounterNonce: bigint;
+  disputeCounterProofbodyHash: string;
+  disputeCounterProposerIsLeft: boolean;
   starterInitialArgumentsCommitment: string;
-  starterIncrementedArgumentsCommitment: string;
+  starterCounterArgumentsCommitment: string;
+  starterCounterProofCommitment: string;
   disputeStartedByLeft: boolean;
 };
 
@@ -431,28 +519,62 @@ const disputeArgumentCommitment = (
 const encodeDisputeHash = (
   initialNonce: number,
   startedByLeft: boolean,
+  initialProposerIsLeft: boolean,
   disputeTimeout: bigint,
+  leftResponseSeconds: bigint,
+  rightResponseSeconds: bigint,
   initialProofbodyHash: string,
   disputeStartTimestamp: bigint,
   starterInitialArgumentsCommitment: string,
-  starterIncrementedArgumentsCommitment: string,
+  starterCounterArgumentsCommitment: string,
+  starterCounterProofCommitment: string,
+  counterNonce: bigint,
+  counterProofbodyHash: string,
+  counterProposerIsLeft: boolean,
 ): string => ethers.keccak256(
   ethers.solidityPacked(
-    ['uint256', 'bool', 'uint256', 'bytes32', 'uint256', 'bytes32', 'bytes32'],
+    ['uint256', 'bool', 'bool', 'uint256', 'uint32', 'uint32', 'bytes32', 'uint256', 'bytes32', 'bytes32', 'bytes32', 'uint256', 'bytes32', 'bool'],
     [
       BigInt(initialNonce),
       startedByLeft,
+      initialProposerIsLeft,
       disputeTimeout,
+      leftResponseSeconds,
+      rightResponseSeconds,
       initialProofbodyHash,
       disputeStartTimestamp,
       starterInitialArgumentsCommitment,
-      starterIncrementedArgumentsCommitment,
+      starterCounterArgumentsCommitment,
+      starterCounterProofCommitment,
+      counterNonce,
+      counterProofbodyHash,
+      counterProposerIsLeft,
     ],
   ),
 );
 
+const findFirstBlockAtOrAfterTimestamp = async (
+  provider: Pick<WatchtowerSweepProvider, 'getBlock'>,
+  latestBlock: number,
+  timestamp: bigint,
+): Promise<number> => {
+  if (typeof provider.getBlock !== 'function') {
+    throw new Error('WATCHTOWER_PROVIDER_GET_BLOCK_UNAVAILABLE');
+  }
+  let low = 0;
+  let high = latestBlock;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    const block = await provider.getBlock(middle);
+    if (!block) throw new Error(`WATCHTOWER_BLOCK_NOT_FOUND:${middle}`);
+    if (BigInt(block.timestamp) < timestamp) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+};
+
 const findActiveDisputeContext = async (
-  provider: Pick<WatchtowerSweepProvider, 'getLogs'>,
+  provider: Pick<WatchtowerSweepProvider, 'getBlock' | 'getLogs'>,
   watch: TowerLastResortWatchV1,
   account: OnchainDisputeAccount,
   currentBlock: bigint,
@@ -467,83 +589,119 @@ const findActiveDisputeContext = async (
     throw new Error('WATCHTOWER_DISPUTE_START_TIMESTAMP_MISSING');
   }
   const latestBlock = uint256ToSafeNumber(currentBlock, 'CURRENT_BLOCK');
-  const fromBlock = Math.max(0, latestBlock - 20_000);
+  // A bilateral response clock may be as long as 365 days. A fixed recent-log
+  // window therefore loses the only authenticated argument bytes while the
+  // dispute is still live. Locate the first possible block by the signed
+  // start timestamp, then query bounded chunks so public RPC range limits and
+  // old-but-valid disputes are both handled deterministically.
+  const firstPossibleBlock = await findFirstBlockAtOrAfterTimestamp(
+    provider,
+    latestBlock,
+    account.disputeStartTimestamp,
+  );
   const topic0 = DEPOSITORY_INTERFACE.getEvent('DisputeStarted')!.topicHash;
   const watchedTopic = ethers.zeroPadValue(watch.watchedEntityId, 32).toLowerCase();
   const counterpartyTopic = ethers.zeroPadValue(watch.counterentity, 32).toLowerCase();
-  const queries = [
-    { fromBlock, toBlock: latestBlock, address: watch.depositoryAddress, topics: [topic0, watchedTopic, counterpartyTopic] },
-    { fromBlock, toBlock: latestBlock, address: watch.depositoryAddress, topics: [topic0, counterpartyTopic, watchedTopic] },
-  ];
   const matching: ActiveDisputeContext[] = [];
-  for (const query of queries) {
-    const logs = await provider.getLogs(query);
-    for (const entry of logs) {
-      const parsed = DEPOSITORY_INTERFACE.parseLog({
-        topics: (entry['topics'] || []) as string[],
-        data: String(entry['data'] || '0x'),
+  const logChunkBlocks = 20_000;
+  for (
+    let fromBlock = firstPossibleBlock;
+    fromBlock <= latestBlock && matching.length === 0;
+    fromBlock += logChunkBlocks
+  ) {
+    const toBlock = Math.min(latestBlock, fromBlock + logChunkBlocks - 1);
+    const topicPairs = [
+      [watchedTopic, counterpartyTopic],
+      [counterpartyTopic, watchedTopic],
+    ] as const;
+    for (const [senderTopic, counterentityTopic] of topicPairs) {
+      const logs = await readAdaptiveWatchtowerLogs(provider, {
+        fromBlock,
+        toBlock,
+        address: watch.depositoryAddress,
+        topics: [topic0, senderTopic, counterentityTopic],
       });
-      if (!parsed || parsed.name !== 'DisputeStarted') continue;
-      const sender = String(parsed.args[0]).toLowerCase();
-      const counterentity = String(parsed.args[1]).toLowerCase();
-      if (!(
-        (sender === watch.watchedEntityId.toLowerCase() && counterentity === watch.counterentity.toLowerCase())
-        || (sender === watch.counterentity.toLowerCase() && counterentity === watch.watchedEntityId.toLowerCase())
-      )) {
-        continue;
+      for (const entry of logs) {
+        const parsed = DEPOSITORY_INTERFACE.parseLog({
+          topics: (entry['topics'] || []) as string[],
+          data: String(entry['data'] || '0x'),
+        });
+        if (!parsed || parsed.name !== 'DisputeStarted') continue;
+        const sender = String(parsed.args[0]).toLowerCase();
+        const counterentity = String(parsed.args[1]).toLowerCase();
+        if (!(
+          (sender === watch.watchedEntityId.toLowerCase() && counterentity === watch.counterentity.toLowerCase())
+          || (sender === watch.counterentity.toLowerCase() && counterentity === watch.watchedEntityId.toLowerCase())
+        )) {
+          continue;
+        }
+        const initialNonce = uint256ToSafeNumber(parsed.args[2], 'EVENT_NONCE');
+        const initialProposerIsLeft = Boolean(parsed.args[3]);
+        const initialProofbodyHash = String(parsed.args[4]).toLowerCase();
+        const watchSeed = normalizeHex32(parsed.args[5], 'EVENT_WATCH_SEED');
+        const starterInitialArguments = String(parsed.args[6] || '0x');
+        const starterCounterArguments = String(parsed.args[7] || '0x');
+        const starterCounterProofCommitment = String(parsed.args[8]).toLowerCase();
+        const eventDisputeTimeout = BigInt(parsed.args[9]);
+        const eventDisputeStartTimestamp = BigInt(parsed.args[10]);
+        const eventLeftResponseSeconds = BigInt(parsed.args[11]);
+        const eventRightResponseSeconds = BigInt(parsed.args[12]);
+        const startedByLeft = sender < counterentity;
+        const disputeStartTimestamp = account.disputeStartTimestamp;
+        if (
+          initialNonce !== uint256ToSafeNumber(account.nonce, 'ACCOUNT_NONCE') ||
+          initialProofbodyHash !== account.disputeInitialProofbodyHash.toLowerCase() ||
+          initialProposerIsLeft !== account.disputeInitialProposerIsLeft ||
+          eventDisputeTimeout !== account.disputeTimeout ||
+          eventDisputeStartTimestamp !== disputeStartTimestamp ||
+          eventLeftResponseSeconds !== account.leftResponseSeconds ||
+          eventRightResponseSeconds !== account.rightResponseSeconds ||
+          startedByLeft !== account.disputeStartedByLeft
+        ) continue;
+        const initialCommitment = disputeArgumentCommitment(
+          starterInitialArguments,
+          startedByLeft,
+          disputeStartTimestamp,
+        );
+        const counterCommitment = disputeArgumentCommitment(
+          starterCounterArguments,
+          startedByLeft,
+          disputeStartTimestamp,
+        );
+        if (
+          initialCommitment.toLowerCase() !== account.starterInitialArgumentsCommitment.toLowerCase() ||
+          counterCommitment.toLowerCase() !== account.starterCounterArgumentsCommitment.toLowerCase()
+          || starterCounterProofCommitment !== account.starterCounterProofCommitment.toLowerCase()
+        ) continue;
+        if (encodeDisputeHash(
+          initialNonce,
+          startedByLeft,
+          initialProposerIsLeft,
+          account.disputeTimeout,
+          account.leftResponseSeconds,
+          account.rightResponseSeconds,
+          initialProofbodyHash,
+          disputeStartTimestamp,
+          initialCommitment,
+          counterCommitment,
+          account.starterCounterProofCommitment,
+          account.disputeCounterNonce,
+          account.disputeCounterProofbodyHash,
+          account.disputeCounterProposerIsLeft,
+        ) !== account.disputeHash.toLowerCase()) {
+          continue;
+        }
+        matching.push({
+          initialNonce,
+          initialProofbodyHash,
+          watchSeed,
+          starterInitialArguments,
+          starterCounterArguments,
+          starterCounterProofCommitment,
+          startedByLeft,
+          initialProposerIsLeft,
+        });
       }
-      const initialNonce = uint256ToSafeNumber(parsed.args[2], 'EVENT_NONCE');
-      const initialProofbodyHash = String(parsed.args[3]).toLowerCase();
-      const watchSeed = normalizeHex32(parsed.args[4], 'EVENT_WATCH_SEED');
-      const starterInitialArguments = String(parsed.args[5] || '0x');
-      const starterIncrementedArguments = String(parsed.args[6] || '0x');
-      const eventDisputeTimeout = BigInt(parsed.args[7]);
-      const eventDisputeStartTimestamp = BigInt(parsed.args[8]);
-      const startedByLeft = sender < counterentity;
-      // Prefer AccountInfo timestamps; event values must agree when present.
-      const disputeStartTimestamp = account.disputeStartTimestamp > 0n
-        ? account.disputeStartTimestamp
-        : eventDisputeStartTimestamp;
-      if (
-        initialNonce !== uint256ToSafeNumber(account.nonce, 'ACCOUNT_NONCE') ||
-        initialProofbodyHash !== account.disputeInitialProofbodyHash.toLowerCase() ||
-        eventDisputeTimeout !== account.disputeTimeout ||
-        eventDisputeStartTimestamp !== disputeStartTimestamp ||
-        startedByLeft !== account.disputeStartedByLeft
-      ) continue;
-      const initialCommitment = disputeArgumentCommitment(
-        starterInitialArguments,
-        startedByLeft,
-        disputeStartTimestamp,
-      );
-      const incrementedCommitment = disputeArgumentCommitment(
-        starterIncrementedArguments,
-        startedByLeft,
-        disputeStartTimestamp,
-      );
-      if (
-        initialCommitment.toLowerCase() !== account.starterInitialArgumentsCommitment.toLowerCase() ||
-        incrementedCommitment.toLowerCase() !== account.starterIncrementedArgumentsCommitment.toLowerCase()
-      ) continue;
-      if (encodeDisputeHash(
-        initialNonce,
-        startedByLeft,
-        account.disputeTimeout,
-        initialProofbodyHash,
-        disputeStartTimestamp,
-        initialCommitment,
-        incrementedCommitment,
-      ) !== account.disputeHash.toLowerCase()) {
-        continue;
-      }
-      matching.push({
-        initialNonce,
-        initialProofbodyHash,
-        watchSeed,
-        starterInitialArguments,
-        starterIncrementedArguments,
-        startedByLeft,
-      });
     }
   }
   const latest = matching.sort((left, right) => right.initialNonce - left.initialNonce)[0];
@@ -569,9 +727,9 @@ const assertAppointmentMatchesRemedy = (
       `WATCHTOWER_PROOF_NONCE_MISMATCH:${appointment.lastResortPayload.proofNonce}:${remedy.latestProof.finalNonce}`,
     );
   }
-  if (appointment.lastResortPayload.lastResortWindowBlocks !== remedy.lastResortWindowBlocks) {
+  if (appointment.lastResortPayload.lastResortWindowSeconds !== remedy.lastResortWindowSeconds) {
     throw new Error(
-      `WATCHTOWER_LAST_RESORT_WINDOW_MISMATCH:${appointment.lastResortPayload.lastResortWindowBlocks}:${remedy.lastResortWindowBlocks}`,
+      `WATCHTOWER_LAST_RESORT_WINDOW_MISMATCH:${appointment.lastResortPayload.lastResortWindowSeconds}:${remedy.lastResortWindowSeconds}`,
     );
   }
   if (normalizeRpcUrl(remedy.rpcUrl) !== watch.rpcUrl) {
@@ -682,14 +840,14 @@ const processLastResortAppointment = async (
   // Resolve timestamp by concrete block number. JsonRpcProvider can cache
   // getBlock('latest') across mines/time jumps on a reused provider instance.
   const currentTimestamp = await readProviderBlockTimestamp(provider, currentBlockNumber);
-  // Matches Depository.watchtowerCounterDispute: lastResortWindowBlocks is seconds
+  // Matches Depository.watchtowerCounterDispute: lastResortWindowSeconds is seconds
   // on the same clock as absolute unix disputeTimeout.
   const disputeTimeout = BigInt(account.disputeTimeout || 0n);
   const activeDispute = String(account.disputeHash || '').toLowerCase() !== ZERO_HASH;
   const finalNonce = BigInt(appointment.lastResortPayload.proofNonce);
   const withinLastResort =
-    currentTimestamp + BigInt(appointment.lastResortPayload.lastResortWindowBlocks) >= disputeTimeout;
-  if (!activeDispute || !withinLastResort || BigInt(account.nonce || 0n) >= finalNonce) {
+    currentTimestamp + BigInt(appointment.lastResortPayload.lastResortWindowSeconds) >= disputeTimeout;
+  if (!activeDispute || !withinLastResort) {
     await appendAppointmentReceipt(context, appointment, createdAt, 'skipped');
     return 'skipped';
   }
@@ -706,6 +864,18 @@ const processLastResortAppointment = async (
   );
   assertAppointmentMatchesRemedy(appointment, watch, remedy);
   assertDisputeContextMatchesRemedy(disputeContext, remedy);
+  const accountNonce = BigInt(account.nonce || 0n);
+  const equalNonceLeftOverride =
+    finalNonce === accountNonce
+    && remedy.latestProof.proposerIsLeft
+    && !Boolean(account.disputeInitialProposerIsLeft);
+  // Mirror Account._registerCounterDispute exactly: a higher nonce wins, and
+  // at equal nonce the signed LEFT branch beats an active RIGHT branch. The
+  // old >= shortcut silently skipped the one equal-nonce remedy that matters.
+  if (finalNonce < accountNonce || (finalNonce === accountNonce && !equalNonceLeftOverride)) {
+    await appendAppointmentReceipt(context, appointment, createdAt, 'skipped');
+    return 'skipped';
+  }
   if (remedy.towerAddress.toLowerCase() !== context.towerWallet.address.toLowerCase()) {
     throw new Error(
       `WATCHTOWER_ADDRESS_MISMATCH:${remedy.towerAddress}:${context.towerWallet.address.toLowerCase()}`,
@@ -718,21 +888,34 @@ const processLastResortAppointment = async (
   const otherArguments = disputeContext.startedByLeft
     ? remedy.latestProof.rightArguments
     : remedy.latestProof.leftArguments;
+  const remedyProofCommitment = ethers.keccak256(ABI_CODER.encode(
+    ['uint256', 'bool', 'bytes32'],
+    [
+      remedy.latestProof.finalNonce,
+      remedy.latestProof.proposerIsLeft,
+      computeProofBodyHash(remedy.latestProof.finalProofbody),
+    ],
+  ));
+  const starterArguments = remedyProofCommitment.toLowerCase() ===
+    disputeContext.starterCounterProofCommitment.toLowerCase()
+    ? disputeContext.starterCounterArguments
+    : '0x';
   const tx = await depository.watchtowerCounterDispute(
     remedy.watchedEntityId,
     {
       counterentity: remedy.latestProof.counterentity,
       initialNonce: disputeContext.initialNonce,
       finalNonce: remedy.latestProof.finalNonce,
+      proposerIsLeft: remedy.latestProof.proposerIsLeft,
       initialProofbodyHash: disputeContext.initialProofbodyHash,
       finalProofbody: remedy.latestProof.finalProofbody,
-      starterArguments: disputeContext.starterIncrementedArguments,
+      starterArguments,
       otherArguments,
       sig: remedy.latestProof.sig,
       startedByLeft: disputeContext.startedByLeft,
       cooperative: false,
     },
-    remedy.lastResortWindowBlocks,
+    remedy.lastResortWindowSeconds,
     remedy.appointmentSequence,
     remedy.ownerAuthorizationHanko,
   );

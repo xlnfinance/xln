@@ -358,6 +358,8 @@ export interface HubProfile {
   name: string;
   spreadDistribution: SpreadDistribution;
   referenceTokenId: number;  // Token for fee payments (e.g., USDC = 2)
+  /** Only this signed Entity may update volatile/USD admission references. */
+  usdQuoteAuthorityEntityId: string;
   minTradeSize: bigint;      // Minimum trade size in reference token
   supportedPairs: string[];  // e.g., ["1/2", "1/3"]
 }

@@ -181,6 +181,31 @@ describe('swap panel helpers', () => {
     expect(view.localReplicas).toEqual([committedReplica]);
   });
 
+  test('committed user role vetoes a stale live Hub advertisement', () => {
+    const entityId = '0xRoleBoundEntity';
+    const view = buildSwapPanelRuntimeView({
+      profiles: [],
+      networkProfiles: [{
+        entityId,
+        name: 'Stale Hub',
+        relays: ['ws://127.0.0.1:20262/relay'],
+        metadata: { isHub: true, jurisdiction: { name: 'Testnet' } },
+      }],
+      replicas: new Map([[`${entityId}:0xSigner`, {
+        entityId,
+        signerId: '0xSigner',
+        state: {
+          entityId,
+          profile: { name: 'Committed User', isHub: false },
+          accounts: new Map(),
+        },
+      }]]),
+    });
+
+    expect(view.getHubProfile(entityId)).toBe(null);
+    expect(view.profiles[0]?.metadata.isHub).toBe(false);
+  });
+
   test('preserves jurisdiction labels and strips repeated suffixes', () => {
     expect(normalizeJurisdictionDisplayName('arrakis')).toBe('arrakis');
     expect(normalizeJurisdictionDisplayName('Arrakis (shared anvil)')).toBe('Arrakis (shared anvil)');
@@ -359,7 +384,8 @@ describe('swap panel helpers', () => {
     expect(resolverSlice).toContain('sourceReplica?.state?.height ?? runtimeEnv?.state.height');
     expect(resolverSlice).toContain('resolveProjectedSignerId(entityId)');
     expect(resolverSlice).not.toContain("throw new Error('XLN environment not ready')");
-    expect(placeSlice).toContain('resolveSwapLogicalClock(currentReplica)');
+    expect(placeSlice).toContain('resolveSwapLogicalClock(committedSourceReplica)');
+    expect(placeSlice).toContain('readCommittedEntityReplica(sourceEntityId)');
     expect(placeSlice).toContain('activeXlnFunctions.planSwapCommand({');
     expect(placeSlice).toContain('await submitRuntimeInput(commandPlan.targetSetupInput)');
     expect(placeSlice).toContain('await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent, {');
@@ -394,6 +420,15 @@ describe('swap panel helpers', () => {
     expect(panel).not.toContain('orderAmountInputElement');
     expect(ticket).toContain('value={orderAmountInput}');
     expect(ticket).not.toContain('bind:value={orderAmountInput}');
+  });
+
+  test('SwapTicket makes cross-network online and manual-close risk impossible to omit', async () => {
+    const ticket = await Bun.file('frontend/src/lib/components/Entity/SwapTicket.svelte').text();
+    expect(ticket).toContain("{#if swapRouteMode === 'cross'}");
+    expect(ticket).toContain('data-testid="cross-j-safety-banner"');
+    expect(ticket).toContain('Stay online for this cross-network swap');
+    expect(ticket).toContain('cancel the remaining order manually');
+    expect(ticket).toContain('65,535 steps');
   });
 
   test('SwapPanel preserves a pinned orderbook level when token sync is idempotent', () => {

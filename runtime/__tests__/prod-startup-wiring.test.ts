@@ -91,13 +91,13 @@ describe('production startup wiring', () => {
   });
 
   test('runtime import rejects public callers before minting admin capabilities', () => {
-    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
-    const handler = orchestrator.indexOf('const handleRuntimeImportRequest = async');
-    const operatorGate = orchestrator.indexOf(
+    const runtimeImportHttp = readFileSync(join(repoRoot, 'runtime/orchestrator/runtime-import-http.ts'), 'utf8');
+    const handler = runtimeImportHttp.indexOf('export const handleRuntimeImportHttpRequest');
+    const operatorGate = runtimeImportHttp.indexOf(
       'if (requiresLocalNodeOperator(url) && !operatorAuthorized)',
       handler,
     );
-    const manifestMint = orchestrator.indexOf('const manifest = buildRuntimeImportManifest();', handler);
+    const manifestMint = runtimeImportHttp.indexOf('deps.buildRuntimeImportManifest()', handler);
 
     expect(handler).toBeGreaterThanOrEqual(0);
     expect(operatorGate).toBeGreaterThan(handler);
@@ -142,7 +142,7 @@ describe('production startup wiring', () => {
     ]) {
       expect(releaseGate).toContain(crashTest);
     }
-    expect(coreE2e).toContain('H2 process replacement restores authoritative health and exact 10x10 public book');
+    expect(coreE2e).toContain('H2 process replacement restores authoritative health and exact configured public books');
   });
 
   test('bounded soak stays separate from the release gate', () => {
@@ -621,7 +621,8 @@ describe('production startup wiring', () => {
     );
     expect(waitForMarketMakerReadyEnd).toBeGreaterThan(0);
     const waitForMarketMakerReadyBody = waitForMarketMakerReady.slice(0, waitForMarketMakerReadyEnd);
-    expect(waitForMarketMakerReadyBody).toContain('const health = computeAggregatedHealth();');
+    expect(waitForMarketMakerReadyBody).toContain('const internalHealth = computeAggregatedHealth();');
+    expect(waitForMarketMakerReadyBody).toContain('await enrichMarketMakerFromHubSnapshots(internalHealth)');
     expect(waitForMarketMakerReadyBody).not.toContain('buildAggregatedHealthResponse()');
     expect(waitForMarketMakerReadyBody).toContain('while (true)');
     expect(waitForMarketMakerReadyBody).not.toContain('const deadline =');
@@ -650,12 +651,13 @@ describe('production startup wiring', () => {
     expect(marketMakerAggregation).toContain('MARKET_MAKER_HUB_DEPTH_NOT_READY');
     expect(marketMakerAggregation).toContain('depthReady: route.depthReady === true');
     expect(marketMakerAggregation).toContain('expectedOffers: Number(pair.expectedOffers || 0)');
-    const snapshotEnrichment = orchestrator.slice(
-      orchestrator.indexOf('const enrichMarketMakerCrossFromHubSnapshots = async'),
-      orchestrator.indexOf('type CustodyMePayload ='),
+    const snapshotEnrichment = readFileSync(
+      join(repoRoot, 'runtime/orchestrator/market-maker-public-health.ts'),
+      'utf8',
     );
-    expect(snapshotEnrichment).toContain('snapshotDepthExact: isExactMarketSnapshotOrderDepth');
-    expect(snapshotEnrichment).not.toContain('recomputeHealthWithMarketMaker');
+    expect(snapshotEnrichment).toContain('const snapshotDepthExact = isExactMarketSnapshotOrderDepth');
+    expect(snapshotEnrichment).toContain('const crossExpectedDepth = buildCrossExpectedDepth');
+    expect(snapshotEnrichment).toContain('expectedBidOffers + expectedAskOffers === expectedOffers');
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
     expect(orchestrator).toContain(
       'const primaryJurisdiction = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);',
@@ -719,6 +721,10 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('hubsOnline &&');
 
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const hubVisibleProfiles = readFileSync(
+      join(repoRoot, 'runtime/orchestrator/hub-visible-profiles.ts'),
+      'utf8',
+    );
     const bootstrapHub = readFileSync(join(repoRoot, 'scripts/bootstrap-hub.ts'), 'utf8');
     const serverJurisdictions = readFileSync(join(repoRoot, 'runtime/api/server/jurisdictions.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
@@ -787,7 +793,9 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });');
     expect(hubNode).toContain('!identity.jurisdictionRef');
     expect(mmNode).toContain('.filter(profile => profile.jurisdictionRef.length > 0)');
-    expect(hubNode).toContain('return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;');
+    expect(hubVisibleProfiles).toContain(
+      'getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef',
+    );
     expect(hubNode).toContain('const peerJurisdiction = profile.metadata?.jurisdiction || identity;');
     expect(hubNode).toContain('if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;');
     expect(hubNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');
@@ -1162,7 +1170,7 @@ describe('production startup wiring', () => {
     const recompute = extractSourceBlock(
       orchestrator,
       'const recomputeHealthWithMarketMaker = (',
-      'const enrichMarketMakerCrossFromHubSnapshots = async',
+      'const enrichMarketMakerFromHubSnapshots = async',
     );
     expect(recompute).toContain('const resetOk = deriveResetHealthOk(health.reset);');
     expect(recompute).toContain('health.coreOk &&\n    resetOk &&');
@@ -1179,7 +1187,7 @@ describe('production startup wiring', () => {
     expect(runner).toContain(
       'assertLocalTestPortsFree([apiPort, apiPort + 10, apiPort + 11, apiPort + 12, apiPort + 13]);',
     );
-    expect(runner).toContain('const E2E_ANVIL_HISTORY_STATES = 256;');
+    expect(runner).toContain('const E2E_ANVIL_HISTORY_STATES = 8192;');
     expect(runner.match(/'--prune-history'/g)).toHaveLength(2);
     expect(runner.match(/String\(E2E_ANVIL_HISTORY_STATES\)/g)).toHaveLength(2);
     expect(runner).not.toContain("'--max-persisted-states'");
@@ -1740,7 +1748,7 @@ describe('production startup wiring', () => {
       '"prod:bootstrap:hydrate": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-hydrate --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"',
     );
     expect(packageJson).toContain(
-      '"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=33554432 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1',
+      '"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=4194304 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1',
     );
     expect(smoke).toContain('await commitPostRotationProofFrames();');
     expect(smoke).toContain("recordStage('storage-epoch:post-rotation-wal-committed');");
@@ -2047,16 +2055,16 @@ describe('production startup wiring', () => {
       '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only',
     );
     expect(packageJson).toContain(
-      '"test:e2e:full": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=8 --workers-per-shard=1 --max-mm-concurrency=2',
+      '"test:e2e:full": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
     );
     expect(packageJson).toContain(
-      '"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker --strict-browser-health --shards=8',
+      '"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker --strict-browser-health --shards=7',
     );
     expect(packageJson).toContain(
-      '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only --strict-browser-health --shards=8 --workers-per-shard=1 --max-mm-concurrency=2',
+      '"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
     );
     expect(packageJson).toContain(
-      '"test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=8 --workers-per-shard=1 --max-mm-concurrency=2',
+      '"test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=7 --workers-per-shard=1 --max-mm-concurrency=2',
     );
     expect(packageJson).toContain(
       '"test:p2p:relay": "bun runtime/scripts/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/p2p-relay.ts"',
@@ -2206,7 +2214,7 @@ describe('production startup wiring', () => {
     expect(buildHealth).toContain('const baseHealth = computeAggregatedHealth({');
     expect(buildHealth).toContain('marketMakerHealthOverride: options.marketMakerHealthOverride,');
     expect(buildHealth).toContain('const health = options.includeMarketSnapshots');
-    expect(buildHealth).toContain('? await enrichMarketMakerCrossFromHubSnapshots(baseHealth)');
+    expect(buildHealth).toContain('? await enrichMarketMakerFromHubSnapshots(baseHealth)');
     expect(buildHealth).toContain(': baseHealth;');
     expect(orchestrator).toContain("meshLog.warn('market_snapshot.enrichment_unavailable'");
     expect(orchestrator).not.toContain('[MESH] market snapshot enrichment unavailable');
@@ -2474,6 +2482,26 @@ describe('production startup wiring', () => {
     expect(daemonControl).toContain('CUSTODY_HUB_PROFILES_NOT_VISIBLE');
     expect(setupCustody).toContain('CUSTODY_CONNECTIVITY_ACCOUNTS_NOT_OPEN');
     expect(setupCustody).not.toContain('await enableRouting(client, config);');
+  });
+
+  test('production account openers bind one explicit role authority per party', () => {
+    const sources = [
+      'runtime/orchestrator/daemon-control.ts',
+      'runtime/orchestrator/hub-node.ts',
+      'runtime/orchestrator/mm-node-core.ts',
+      'runtime/runtime/swap-command-plan.ts',
+      'frontend/src/lib/components/Entity/onboarding-runtime-input.ts',
+      'frontend/src/lib/components/Entity/hub-discovery-profile.ts',
+      'frontend/src/lib/components/Entity/swap-panel-core.ts',
+      'frontend/src/lib/view/panels/ArchitectPanel.svelte',
+    ].map(file => readFileSync(join(repoRoot, file), 'utf8'));
+    for (const source of sources) {
+      expect(source).toContain('defaultAccountDisputeConfigForRoleEvidence');
+      expect(source).not.toContain('defaultAccountDisputeConfigForParties');
+    }
+    expect(sources.join('\n')).toContain("source: 'committed-profile'");
+    expect(sources.join('\n')).toContain("source: 'verified-gossip-profile'");
+    expect(sources.join('\n')).toContain("source: 'operator-config'");
   });
 
   test('custody hub discovery filters hubs by jurisdiction stack identity', async () => {

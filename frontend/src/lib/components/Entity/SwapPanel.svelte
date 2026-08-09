@@ -12,6 +12,7 @@ import {
 } from '@xln/runtime/api/public/runtime-module';
 import type { Profile } from '@xln/runtime/api/public/runtime-module';
 import type { SwapBookEntry } from '@xln/runtime/api/public/runtime-module';
+import type { AccountRoleEvidence } from '@xln/runtime/account/dispute-config';
 import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
 import {
   readRuntimeAccountProjection,
@@ -626,9 +627,10 @@ $: routeSummaryAssetsLabel =
     : `${giveTokenSymbol} -> ${wantTokenSymbol}`;
 $: swapTokenPairLabel = `${giveTokenSymbol} -> ${wantTokenSymbol}`;
 $: selectedCrossTargetReplica =
-  selectedCrossTarget &&
-  detailedTargetReplica?.entityId === selectedCrossTarget.targetEntityId
-    ? detailedTargetReplica
+  selectedCrossTarget
+    ? detailedTargetReplica?.entityId === selectedCrossTarget.targetEntityId
+      ? detailedTargetReplica
+      : findReplicaByEntityId(selectedCrossTarget.targetEntityId)
     : null;
 $: crossTargetHasAccount = Boolean(
   swapRouteMode === 'cross' &&
@@ -714,6 +716,36 @@ function getProfileJurisdictionName(profile: Profile | undefined | null): string
 function getHubProfile(entityIdValue: string): Profile | null {
   return swapRuntimeView.getHubProfile(entityIdValue);
 }
+function requireSwapPartyRoles(
+  candidate: EntityReplica | null | undefined,
+  hubEntityId: string,
+  label: 'SOURCE' | 'TARGET',
+): {
+  entityRoleEvidence: AccountRoleEvidence;
+  hubRoleEvidence: AccountRoleEvidence;
+  committedRoles: ReadonlyMap<string, boolean>;
+} {
+  const entityId = String(candidate?.entityId || candidate?.state?.entityId || '').trim().toLowerCase();
+  const normalizedHubEntityId = String(hubEntityId || '').trim().toLowerCase();
+  const entityIsHub = swapRuntimeView.committedRoles.get(entityId);
+  const hubIsHub = getHubProfile(normalizedHubEntityId)?.metadata?.isHub;
+  // These booleans choose the signed response clocks for a newly opened
+  // Account. Missing gossip or a partial replica must stop the command rather
+  // than silently treating either party as a 24-hour user.
+  if (!entityId || !normalizedHubEntityId || typeof entityIsHub !== 'boolean' || hubIsHub !== true) {
+    throw new Error(`SWAP_${label}_PARTY_ROLE_UNAVAILABLE:${entityId}:${normalizedHubEntityId}`);
+  }
+  const committedHubRole = swapRuntimeView.committedRoles.get(normalizedHubEntityId);
+  return {
+    entityRoleEvidence: { entityId, isHub: entityIsHub, source: 'committed-profile' },
+    hubRoleEvidence: {
+      entityId: normalizedHubEntityId,
+      isHub: true,
+      source: committedHubRole === true ? 'committed-profile' : 'verified-gossip-profile',
+    },
+    committedRoles: swapRuntimeView.committedRoles,
+  };
+}
 function orderbookRelayUrlForHub(entityIdValue: string): string {
   const profile = getHubProfile(entityIdValue);
   const relays = Array.isArray(profile?.relays) ? profile.relays : [];
@@ -791,6 +823,10 @@ function buildCrossTargetOptions(
       .trim()
       .toLowerCase();
     if (!targetEntityId || targetEntityId === sourceEntityId) continue;
+    const targetIsHub = candidate.state?.profile?.isHub;
+    // Account response clocks are signed state. A partial replica without its
+    // committed role cannot be offered as a cross-j recipient.
+    if (typeof targetIsHub !== 'boolean') continue;
     const targetJurisdiction = getReplicaJurisdictionName(candidate);
     const targetJurisdictionRef = getReplicaJurisdictionRef(candidate);
     if (!targetJurisdiction || !targetJurisdictionRef || targetJurisdictionRef === sourceJurisdictionRef) continue;
@@ -815,6 +851,8 @@ function buildCrossTargetOptions(
       ),
     ).sort(compareStableText);
     for (const targetHubEntityId of targetHubIds) {
+      const targetHubProfile = getHubProfile(targetHubEntityId);
+      if (targetHubProfile?.metadata?.isHub !== true) continue;
       const hasTargetAccount = accountHubIds.some((id) => id.toLowerCase() === targetHubEntityId.toLowerCase());
       options.push({
         value: `${targetEntityId}:${targetHubEntityId}`,
@@ -822,6 +860,8 @@ function buildCrossTargetOptions(
         targetEntityId,
         targetSignerId,
         targetHubEntityId,
+        targetIsHub,
+        targetHubIsHub: true,
         targetJurisdiction,
         targetJurisdictionRef,
         hasTargetAccount,
@@ -961,16 +1001,26 @@ function buildCommittedRouteSelectionFromDom(
       formatEntityNetworkLabel(accountLabel(targetEntityId), targetJurisdiction),
   ).trim();
   const hasTargetAccount = existingTarget?.hasTargetAccount ?? hasReplicaAccount(targetReplica, targetHubEntityId);
-  const target: CrossTargetOption = existingTarget || {
-    value: cleanValue,
-    label,
-    targetEntityId,
-    targetSignerId: String(targetReplica?.signerId || '').trim(),
-    targetHubEntityId,
-    targetJurisdiction,
-    targetJurisdictionRef,
-    hasTargetAccount,
-  };
+  const targetIsHub = targetReplica?.state?.profile?.isHub;
+  const targetHubIsHub = getHubProfile(targetHubEntityId)?.metadata?.isHub;
+  // A DOM selection is only presentation state. Never turn missing committed
+  // party roles into `false`: those roles choose signed dispute clocks.
+  let target = existingTarget;
+  if (!target) {
+    if (typeof targetIsHub !== 'boolean' || targetHubIsHub !== true) return null;
+    target = {
+      value: cleanValue,
+      label,
+      targetEntityId,
+      targetSignerId: String(targetReplica?.signerId || '').trim(),
+      targetHubEntityId,
+      targetIsHub,
+      targetHubIsHub: true,
+      targetJurisdiction,
+      targetJurisdictionRef,
+      hasTargetAccount,
+    };
+  }
   const route: SwapRouteOption = {
     value: cleanValue,
     label: formatEntityNetworkLabel(accountLabel(targetEntityId), targetJurisdiction),
@@ -1326,12 +1376,20 @@ function buildReverseCrossRouteSelection(): {
     return null;
   }
   const hasTargetAccount = hasReplicaAccount(targetReplica, targetHubEntityId);
+  const targetIsHub = targetReplica.state.profile.isHub;
+  const targetHubIsHub = getHubProfile(targetHubEntityId)?.metadata?.isHub;
+  if (typeof targetIsHub !== 'boolean' || targetHubIsHub !== true) {
+    submitError = 'Cannot reverse cross route: committed party roles are unavailable.';
+    return null;
+  }
   const reverseTarget: CrossTargetOption = {
     value: `${targetEntityId}:${targetHubEntityId}`,
     label: `${targetJurisdiction} · ${accountLabel(targetHubEntityId)}${hasTargetAccount ? '' : ' · setup required'}`,
     targetEntityId,
     targetSignerId,
     targetHubEntityId,
+    targetIsHub,
+    targetHubIsHub,
     targetJurisdiction,
     targetJurisdictionRef,
     hasTargetAccount,
@@ -1656,12 +1714,13 @@ function handlePriceRatioInput(event: Event): void {
   priceRatioInput = normalized;
 }
 $: {
-  try {
-    const nextOffers = currentReplica && activeXlnFunctions?.listOpenSwapOffers ? activeXlnFunctions.listOpenSwapOffers(currentReplica.state) : [];
-    activeOffers = Array.isArray(nextOffers) ? nextOffers : [];
-  } catch {
-    activeOffers = [];
-  }
+  // This is a financial projection, not optional UI decoration. Corrupt
+  // Account state must reach the global browser-health guard instead of being
+  // rendered as a false empty orderbook.
+  const nextOffers = currentReplica && activeXlnFunctions?.listOpenSwapOffers
+    ? activeXlnFunctions.listOpenSwapOffers(currentReplica.state)
+    : [];
+  activeOffers = Array.isArray(nextOffers) ? nextOffers : [];
 }
 function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
   return readAccountCapacityForReplica(currentReplica, sourceEntityIdValue, resolveCounterpartyId(counterpartyEntityId), tokenIdValue)?.outCapacity ?? 0n;
@@ -1719,6 +1778,9 @@ $: {
 }
 $: {
   crossDesiredInboundAmount = canonicalWantAmount;
+  const targetPartyRoles = selectedCrossTarget
+    ? requireSwapPartyRoles(selectedCrossTargetReplica, selectedCrossTarget.targetHubEntityId, 'TARGET')
+    : null;
   const crossInboundPlan =
     selectedCrossTarget && crossDesiredInboundAmount > 0n && (crossTargetHasAccount || canAutoOpenCrossTargetAccount)
       ? planInboundCapacityForReplica(
@@ -1728,6 +1790,9 @@ $: {
           wantToken,
           crossDesiredInboundAmount,
           canAutoOpenCrossTargetAccount,
+          targetPartyRoles?.entityRoleEvidence,
+          targetPartyRoles?.hubRoleEvidence,
+          targetPartyRoles?.committedRoles,
         )
       : null;
   crossTargetInCapacity = crossInboundPlan?.currentInboundCapacity ?? 0n;
@@ -2588,6 +2653,18 @@ async function placeSwapOffer() {
       throw new Error('Select target jurisdiction account.');
     }
     const sourceHubSignerId = resolveSignerId(resolvedCounterparty);
+    const sourcePartyRoles = requireSwapPartyRoles(committedSourceReplica, resolvedCounterparty, 'SOURCE');
+    const targetCommandParty = targetRoute
+      ? {
+          entityId: targetRoute.targetEntityId,
+          signerId: targetRoute.targetSignerId,
+          hubEntityId: targetRoute.targetHubEntityId,
+          hubSignerId: resolveSignerId(targetRoute.targetHubEntityId),
+          jurisdiction: targetRoute.targetJurisdictionRef,
+          ...requireSwapPartyRoles(targetReplica, targetRoute.targetHubEntityId, 'TARGET'),
+          account: targetReplica?.state?.accounts?.get?.(targetRoute.targetHubEntityId)?.state ?? null,
+        }
+      : null;
     const commandPlan = activeXlnFunctions.planSwapCommand({
       mode: placementMode,
       logicalTimestamp: logicalNow,
@@ -2603,18 +2680,14 @@ async function placeSwapOffer() {
         hubEntityId: resolvedCounterparty,
         hubSignerId: sourceHubSignerId,
         jurisdiction: sourceJurisdictionRef,
+        entityRoleEvidence: sourcePartyRoles.entityRoleEvidence,
+        hubRoleEvidence: sourcePartyRoles.hubRoleEvidence,
+        committedRoles: sourcePartyRoles.committedRoles,
         account: committedSourceReplica?.state.accounts.get(resolvedCounterparty)?.state ?? null,
       },
-      ...(targetRoute
+      ...(targetCommandParty
         ? {
-            target: {
-              entityId: targetRoute.targetEntityId,
-              signerId: targetRoute.targetSignerId,
-              hubEntityId: targetRoute.targetHubEntityId,
-              hubSignerId: resolveSignerId(targetRoute.targetHubEntityId),
-              jurisdiction: targetRoute.targetJurisdictionRef,
-              account: targetReplica?.state?.accounts?.get?.(targetRoute.targetHubEntityId)?.state ?? null,
-            },
+            target: targetCommandParty,
             allowOpenTargetAccount: !targetAccountExists,
           }
         : {}),

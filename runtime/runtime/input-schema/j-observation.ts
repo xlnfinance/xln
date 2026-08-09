@@ -16,12 +16,14 @@ const validateDisputeEvidence = (value: unknown, code: string): void => {
   const evidence = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(evidence, [
     'sender', 'counterentity', 'initialNonce', 'finalNonce', 'initialProofbodyHash',
-    'finalProofbodyHash', 'leftArguments', 'rightArguments', 'startedByLeft', 'sig',
+    'finalProofbodyHash', 'proposerIsLeft', 'leftArguments', 'rightArguments',
+    'startedByLeft', 'sig',
   ], [], `${code}_FIELDS`);
   for (const field of [
     'sender', 'counterentity', 'initialNonce', 'finalNonce', 'initialProofbodyHash',
     'finalProofbodyHash', 'leftArguments', 'rightArguments', 'sig',
   ]) requireString(evidence[field], `${code}_${field.toUpperCase()}`);
+  requireBoolean(evidence['proposerIsLeft'], `${code}_PROPOSER_IS_LEFT`);
   requireBoolean(evidence['startedByLeft'], `${code}_STARTED_BY_LEFT`);
 };
 

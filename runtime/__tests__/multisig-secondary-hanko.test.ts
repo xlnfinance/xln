@@ -42,7 +42,10 @@ import {
   projectAccountDoc,
   projectEntityCoreDoc,
 } from '../storage/projections';
-import { getConsumptionNodeStore } from '../entity/consumption-store';
+import {
+  cacheCommittedConsumptionNodeChanges,
+  getConsumptionNodeStore,
+} from '../entity/consumption-store';
 import {
   createConsumptionProof,
   getConsumptionKey,
@@ -178,7 +181,7 @@ const createMultisigAccountState = (
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       watchSeed: `0x${'f1'.repeat(32)}`,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
     },
     status: 'active',
@@ -321,6 +324,7 @@ const buildCertifiedBoardResealTx = async (
       fromEntityId: source.entityId,
       toEntityId: targetEntityId,
       domain: account.state.domain,
+      disputeConfig: { ...account.state.disputeConfig },
       reseal: {
         height: account.currentHeight,
         frameHash,
@@ -376,6 +380,8 @@ describe('multisig secondary Hanko production', () => {
         tokenId: 2,
         amount: 20n,
       },
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       status: 'intent',
       createdAt: 1,
       updatedAt: 1,
@@ -484,6 +490,7 @@ describe('multisig secondary Hanko production', () => {
     const accepted = await applyEntityInput(source.env, target, structuredClone(outbound));
     expect(accepted.outcome.kind).toBe('committed');
     expect(accepted.workingReplica.state.consumptionAccumulator?.count).toBe(1n);
+    cacheCommittedConsumptionNodeChanges(source.env, accepted.consumptionNodeChanges);
     expect(getConsumptionNodeStore(source.env).size).toBe(1);
   });
 
@@ -582,6 +589,7 @@ describe('multisig secondary Hanko production', () => {
     expect(gapFilled.workingReplica.mempool).toHaveLength(0);
     const accumulator = gapFilled.workingReplica.state.consumptionAccumulator;
     if (!accumulator) throw new Error('TEST_CONSUMPTION_ACCUMULATOR_MISSING');
+    cacheCommittedConsumptionNodeChanges(source.env, gapFilled.consumptionNodeChanges);
     const key = getConsumptionKey({
       sourceEntityId: source.entityId,
       targetEntityId: source.counterpartyId,
@@ -983,6 +991,7 @@ describe('multisig secondary Hanko production', () => {
     if (!targetReplica) throw new Error('TEST_TARGET_REPLICA_MISSING');
     registerOnly(proposer.env, counterpartySigner);
     const firstDelivery = await applyEntityInput(proposer.env, targetReplica, structuredClone(certifiedInput));
+    cacheCommittedConsumptionNodeChanges(proposer.env, firstDelivery.consumptionNodeChanges);
     const accountAfterFirst = new Map(Array.from(firstDelivery.workingReplica.state.accounts.entries())
       .map(([counterpartyId, account]) => [counterpartyId, projectAccountDoc(account)]));
     expect(readEntityFrameEventMessages(firstDelivery.workingReplica.state))
@@ -1001,6 +1010,7 @@ describe('multisig secondary Hanko production', () => {
       { ...firstDelivery.workingReplica, state: restoredState },
       structuredClone(certifiedInput),
     );
+    cacheCommittedConsumptionNodeChanges(proposer.env, duplicateDelivery.consumptionNodeChanges);
     expect(duplicateDelivery.workingReplica.state.consumptionAccumulator?.count).toBe(1n);
     const accountAfterDuplicate = new Map(Array.from(duplicateDelivery.workingReplica.state.accounts.entries())
       .map(([counterpartyId, account]) => [counterpartyId, projectAccountDoc(account)]));
@@ -1021,6 +1031,7 @@ describe('multisig secondary Hanko production', () => {
     expect(quarantinedDelivery.outcome.kind).toBe('committed');
     expect(safeStringify(quarantinedDelivery.workingReplica.state.accounts)).toBe(safeStringify(accountAfterFirst));
     expect(readEntityFrameEventMessages(quarantinedDelivery.workingReplica.state)).toEqual([]);
+    cacheCommittedConsumptionNodeChanges(proposer.env, quarantinedDelivery.consumptionNodeChanges);
     expect(quarantinedDelivery.workingReplica.state.consumptionAccumulator?.count).toBe(1n);
     const quarantinedAccumulator = quarantinedDelivery.workingReplica.state.consumptionAccumulator;
     if (!quarantinedAccumulator) throw new Error('TEST_QUARANTINED_ACCUMULATOR_MISSING');

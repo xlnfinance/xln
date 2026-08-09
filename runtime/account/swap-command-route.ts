@@ -51,6 +51,7 @@ type RouteParty = Readonly<{
   hubEntityId: string;
   hubSignerId: string;
   jurisdiction: string;
+  disputeConfig: CrossJurisdictionSwapRoute['sourceDisputeConfig'];
 }>;
 
 export const buildCrossJurisdictionSwapIntent = (input: Readonly<{
@@ -102,6 +103,7 @@ export const buildCrossJurisdictionSwapIntent = (input: Readonly<{
       tokenId: input.giveTokenId,
       amount: input.giveAmount,
     },
+    sourceDisputeConfig: { ...input.source.disputeConfig },
     target: {
       jurisdiction: input.target.jurisdiction,
       entityId: input.target.hubEntityId,
@@ -109,6 +111,7 @@ export const buildCrossJurisdictionSwapIntent = (input: Readonly<{
       tokenId: input.wantTokenId,
       amount: input.wantAmount,
     },
+    targetDisputeConfig: { ...input.target.disputeConfig },
     priceTicks: input.priceTicks,
     priceImprovementMode: 'source_savings',
     status: 'intent',

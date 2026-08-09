@@ -39,7 +39,7 @@ const makeAccount = (offerId: string, offer: SwapOffer): AccountReplica =>
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
     },
     status: 'active',
@@ -76,6 +76,7 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
       takerReferrerBps: 0,
     },
     referenceTokenId: 2,
+    usdQuoteAuthorityEntityId: 'alice',
     minTradeSize: 0n,
     supportedPairs: ['1/2'],
   });

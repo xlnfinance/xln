@@ -18,6 +18,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { EntityInput } from '../entity/types';
 import { getPerfMs } from '../infra/time';
 import {
@@ -114,8 +115,14 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   console.log('🔗 Opening bilateral accounts...');
 
   await process(env, [
-    { entityId: alice.id, signerId: alice.signer, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }] },
-    { entityId: bob.id, signerId: bob.signer, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }] },
+    { entityId: alice.id, signerId: alice.signer, entityTxs: [{ type: 'openAccount', data: {
+      targetEntityId: hub.id,
+      disputeConfig: defaultAccountDisputeConfigForParties(alice.id, false, hub.id, true),
+    } }] },
+    { entityId: bob.id, signerId: bob.signer, entityTxs: [{ type: 'openAccount', data: {
+      targetEntityId: hub.id,
+      disputeConfig: defaultAccountDisputeConfigForParties(bob.id, false, hub.id, true),
+    } }] },
   ]);
 
   await converge(env);

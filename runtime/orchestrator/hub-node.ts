@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -10,6 +9,19 @@ import { readBooleanEnv } from '../config/environment';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/machine/default-tokens';
+import {
+  defaultAccountDisputeConfigForRoleEvidence,
+  type AccountRoleEvidence,
+} from '../account/dispute-config';
+import {
+  committedAccountRoleEvidence,
+  verifiedGossipAccountRoleEvidence,
+} from '../account/role-evidence';
+import {
+  normalizeJurisdictionDisplayName,
+  readVisibleHubProfiles,
+  type VisibleHubProfile,
+} from './hub-visible-profiles';
 import { deployMissingDefaultTokens } from '../jurisdiction/adapter/dev-token-deployment';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import { assertJStackAddressMatch } from '../jurisdiction/adapter/stack-binding';
@@ -181,19 +193,9 @@ type HubPairHealth = {
   ready: boolean;
 };
 
-type VisibleHubProfile = {
-  name: string;
-  hubName?: string;
-  entityId: string;
-  runtimeId: string;
-  jurisdictionName: string;
-  chainId?: number;
-  depositoryAddress?: string;
-  jurisdictionRef: string;
-};
-
 type VisibleSupportPeer = SupportPeerIdentity & {
   runtimeId: string;
+  roleEvidence: AccountRoleEvidence;
 };
 
 type StageTiming = {
@@ -325,9 +327,6 @@ type JurisdictionsFile = {
   }>;
   defaults?: Record<string, unknown>;
 };
-
-const normalizeJurisdictionDisplayName = (value: unknown): string =>
-  String(value || '').trim();
 
 const normalizeJurisdictionName = (value: unknown): string =>
   normalizeJurisdictionDisplayName(value).trim().toLowerCase();
@@ -980,6 +979,12 @@ const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTo
 const ensureOrderbook = async (env: RuntimeReplica, entityId: string, signerId: string): Promise<void> => {
   const replica = getEntityReplicaById(env, entityId);
   if (replica?.state?.orderbookExt) return;
+  if (!replica) throw new Error(`ORDERBOOK_HUB_REPLICA_MISSING:${entityId}`);
+  const jurisdictionRef = getJurisdictionIdentityRef(replica.state.config.jurisdiction);
+  const quoteAuthority = supportPeerIdentities.find(peer => peer.jurisdictionRef === jurisdictionRef);
+  if (!quoteAuthority) {
+    throw new Error(`ORDERBOOK_USD_QUOTE_AUTHORITY_MISSING:${jurisdictionRef}`);
+  }
 
   const startedAt = startTiming('orderbook_init');
   enqueueRuntimeInput(env, {
@@ -995,6 +1000,7 @@ const ensureOrderbook = async (env: RuntimeReplica, entityId: string, signerId: 
               name: resolvedArgs.name,
               spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
               referenceTokenId: 1,
+              usdQuoteAuthorityEntityId: quoteAuthority.entityId,
               minTradeSize: HUB_DEFAULT_MIN_TRADE_SIZE,
               supportedPairs: [...HUB_DEFAULT_SUPPORTED_PAIRS],
             },
@@ -1541,39 +1547,6 @@ const ensureHubBootstrapReserves = async (
   return buildAggregateReserveHealth(primaryHealth, entities);
 };
 
-const readVisibleHubProfiles = (env: RuntimeReplica, jurisdiction: unknown): VisibleHubProfile[] => {
-  const profiles = env.gossip?.getProfiles?.() || [];
-  return profiles
-    .filter(profile => profile.metadata?.isHub === true)
-    .filter(profile => {
-      const targetRef = getJurisdictionIdentityRef(jurisdiction);
-      if (!targetRef) return true;
-      return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;
-    })
-    .map(profile => {
-      const chainId = Number(profile.metadata?.jurisdiction?.chainId || 0);
-      const depositoryAddress = String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim();
-      const jurisdictionRef = getJurisdictionIdentityRef(profile.metadata?.jurisdiction);
-      return {
-        name: String(profile.name || '').trim(),
-        hubName: typeof profile.metadata?.hubName === 'string' ? profile.metadata.hubName.trim() : '',
-        entityId: String(profile.entityId || '').toLowerCase(),
-        runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
-        jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name || ''),
-        ...(Number.isFinite(chainId) && chainId > 0 ? { chainId: Math.floor(chainId) } : {}),
-        ...(depositoryAddress ? { depositoryAddress } : {}),
-        jurisdictionRef,
-      };
-    })
-    .filter(profile =>
-      profile.name.length > 0 &&
-      profile.entityId.length > 0 &&
-      profile.runtimeId.length > 0 &&
-      profile.jurisdictionName.length > 0 &&
-      profile.jurisdictionRef.length > 0,
-    );
-};
-
 const openDirectRuntimeIds = (env: RuntimeReplica): Set<string> => new Set(
   (getP2PState(env).directPeers || [])
     .filter(peer => peer.open === true)
@@ -1608,7 +1581,12 @@ const visibleDirectSupportPeers = (
       if (!runtimeId) return null;
       const peerJurisdiction = profile.metadata?.jurisdiction || identity;
       if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;
-      return { ...identity, runtimeId };
+      if (typeof profile.metadata?.isHub !== 'boolean') return null;
+      return {
+        ...identity,
+        runtimeId,
+        roleEvidence: verifiedGossipAccountRoleEvidence(entityId, profile.metadata.isHub),
+      };
     })
     .filter((peer): peer is VisibleSupportPeer => peer !== null);
 };
@@ -1632,6 +1610,12 @@ const planSupportPeerInputs = (
   const openInputs: EntityInput[] = [];
   const creditInputs: EntityInput[] = [];
   const tokenIds = tokenIdsForHubJurisdiction(owner);
+  const ownerReplica = getEntityReplicaById(env, owner.entityId);
+  if (!ownerReplica) throw new Error(`HUB_MESH_OWNER_ROLE_COMMITTED_MISSING:${owner.entityId}`);
+  const ownerRole = committedAccountRoleEvidence(
+    owner.entityId,
+    ownerReplica.state.profile.isHub === true,
+  );
   const [openTokenId = HUB_MESH_TOKEN_ID, ...extraTokenIds] = tokenIds;
   const peers = visibleDirectSupportPeers(
     supportPeerIdentities,
@@ -1640,6 +1624,12 @@ const planSupportPeerInputs = (
     owner,
   );
   for (const peer of peers) {
+    const peerReplica = getEntityReplicaById(env, peer.entityId);
+    const peerRole = verifiedGossipAccountRoleEvidence(
+      peer.entityId,
+      peer.roleEvidence.isHub,
+      peerReplica ? peerReplica.state.profile.isHub === true : undefined,
+    );
     const account = getAccountReplica(env, owner.entityId, peer.entityId);
     const canWrite =
       !account?.pendingFrame && Number(account?.mempool?.length || 0) === 0;
@@ -1657,6 +1647,11 @@ const planSupportPeerInputs = (
             type: 'openAccount',
             data: {
               targetEntityId: peer.entityId,
+              disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+                ownerRole,
+                peerRole,
+                new Map([[ownerRole.entityId, ownerRole.isHub]]),
+              ),
               tokenId: openTokenId,
               creditAmount: getBootstrapCreditAmount(openTokenId),
             },
@@ -1703,6 +1698,12 @@ const planHubPeerInputs = (
 ): HubMeshInputPlan => {
   const openInputs: EntityInput[] = [];
   const creditInputs: EntityInput[] = [];
+  const ownerReplica = getEntityReplicaById(env, bootstrap.entityId);
+  if (!ownerReplica) throw new Error(`HUB_PEER_OWNER_ROLE_COMMITTED_MISSING:${bootstrap.entityId}`);
+  const ownerRole = committedAccountRoleEvidence(
+    bootstrap.entityId,
+    ownerReplica.state.profile.isHub === true,
+  );
   for (const peer of peers) {
     const account = getAccountReplica(env, bootstrap.entityId, peer.entityId);
     const canWrite =
@@ -1721,6 +1722,11 @@ const planHubPeerInputs = (
             type: 'openAccount',
             data: {
               targetEntityId: peer.entityId,
+              disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+                ownerRole,
+                peer.roleEvidence,
+                new Map([[ownerRole.entityId, ownerRole.isHub]]),
+              ),
               tokenId: HUB_MESH_TOKEN_ID,
               creditAmount: getBootstrapCreditAmount(HUB_MESH_TOKEN_ID),
             },

@@ -17,19 +17,22 @@ import {
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
   type ExternalWalletTrackedOwnerCursor,
+  type PreparedAuthenticatedWatcherLog,
 } from './rpc-public';
 import {
   normalizeEvmAddress,
+  type AuthenticatedTxLocation,
   type WatchedErc20Token,
 } from './rpc-watcher-inputs';
 import type { JEvent } from './types';
+import type { TxDisputeProofBodyEvidence } from './rpc-public';
 
 type WatcherLogKind = 'depository' | 'entityProvider' | 'erc20';
 
 type WatcherEventDecodeInput = {
   env: RuntimeReplica;
   watcherReplica: JReplica;
-  logs: readonly AuthenticatedRpcLog[];
+  logs: readonly PreparedAuthenticatedWatcherLog[];
   depositoryAddress: string;
   entityProviderAddress: string;
   tokenByAddress: ReadonlyMap<string, WatchedErc20Token>;
@@ -41,7 +44,14 @@ type WatcherEventDecodeInput = {
   findDisputeFinalizationEvidence(
     txHash: string,
     args: Record<string, unknown>,
+    location: AuthenticatedTxLocation,
   ): Promise<DisputeFinalizationEvidence | undefined>;
+  findDisputeProofBody(
+    txHash: string,
+    eventName: TxDisputeProofBodyEvidence['eventName'],
+    args: Record<string, unknown>,
+    location: AuthenticatedTxLocation,
+  ): Promise<TxDisputeProofBodyEvidence['proofbody']>;
 };
 
 export type WatcherEventDecodeResult = {
@@ -160,9 +170,10 @@ const decodeExternalWalletEvents = (
 };
 
 const decodeCanonicalContractEvent = async (
-  log: AuthenticatedRpcLog,
+  log: PreparedAuthenticatedWatcherLog,
   carrierInterface: ethers.Interface,
   findEvidence: WatcherEventDecodeInput['findDisputeFinalizationEvidence'],
+  findProofBody: WatcherEventDecodeInput['findDisputeProofBody'],
 ): Promise<JEvent | null> => {
   const event = decodeJEventLog(
     log,
@@ -176,10 +187,34 @@ const decodeCanonicalContractEvent = async (
     'J_WATCHER_CANONICAL_EVENT_DECODE_FAILED',
   );
   if (!CANONICAL_J_EVENTS.some(name => name === event.name)) return null;
+  if (
+    event.name === 'DisputeStarted' ||
+    event.name === 'CounterDisputeRegistered' ||
+    event.name === 'DisputeFinalized'
+  ) {
+    const location = {
+      blockHash: log.authenticatedBlockHash,
+      blockNumber: log.blockNumber,
+    };
+    const proofbody = await findProofBody(log.transactionHash, event.name, event.args, location);
+    event.args[
+      event.name === 'DisputeStarted'
+        ? 'initialProofbody'
+        : event.name === 'CounterDisputeRegistered'
+          ? 'counterProofbody'
+          : 'finalProofbody'
+    ] = proofbody;
+  }
   const disputeFinalizationEvidence =
     event.name === 'DisputeFinalized'
-      ? await findEvidence(log.transactionHash, event.args)
+      ? await findEvidence(log.transactionHash, event.args, {
+          blockHash: log.authenticatedBlockHash,
+          blockNumber: log.blockNumber,
+        })
       : undefined;
+  if (disputeFinalizationEvidence) {
+    event.args['initialProofbodyHash'] = disputeFinalizationEvidence.initialProofbodyHash;
+  }
   return {
     ...event,
     ...(disputeFinalizationEvidence ? { disputeFinalizationEvidence } : {}),
@@ -188,7 +223,7 @@ const decodeCanonicalContractEvent = async (
 
 const decodeWatcherLog = async (
   input: WatcherEventDecodeInput,
-  log: AuthenticatedRpcLog,
+  log: PreparedAuthenticatedWatcherLog,
   result: WatcherEventDecodeResult,
 ): Promise<void> => {
   const kind = classifyWatcherLog(log, input);
@@ -221,6 +256,7 @@ const decodeWatcherLog = async (
     log,
     kind === 'depository' ? depositoryInterface : entityProviderInterface,
     input.findDisputeFinalizationEvidence,
+    input.findDisputeProofBody,
   );
   if (!event) return;
   if (

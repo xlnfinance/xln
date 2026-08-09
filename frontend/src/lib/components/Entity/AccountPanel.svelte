@@ -47,12 +47,13 @@
 
   $: iAmLeft = isAccountLeftPerspective(entityId, account.state);
   $: activeDispute = account.activeDispute ?? null;
-  $: disputeTimeoutBlock = Number(activeDispute?.disputeTimeout ?? 0);
-  $: currentJHeight = Math.max(
-    Number(account.state.lastFinalizedJHeight ?? 0),
-    Number(replica?.state?.lastFinalizedJHeight ?? 0),
-  );
-  $: disputeBlocksLeft = activeDispute ? Math.max(0, disputeTimeoutBlock - currentJHeight) : 0;
+  // Contract deadlines are absolute unix seconds. J height is observation
+  // metadata and must never enter deadline arithmetic.
+  $: disputeTimeoutSeconds = Number(activeDispute?.disputeTimeout ?? 0);
+  $: hasObservedDisputeDeadline = activeDispute?.observedOnChain === true && disputeTimeoutSeconds > 0;
+  $: disputeSecondsLeft = hasObservedDisputeDeadline
+    ? Math.max(0, Math.ceil((disputeTimeoutSeconds * 1000 - nowMs) / 1000))
+    : 0;
   $: pendingSecretAckInfo = (() => {
     const routes = replica?.state?.htlcRoutes;
     if (!(routes instanceof Map)) return null;
@@ -461,8 +462,7 @@
     }
   }
 
-  function syncLiveTimers(): void {
-    const needNowTimer = Boolean(activeDispute || pendingSecretAckInfo || $p2pState.reconnect);
+  function syncLiveTimers(needNowTimer: boolean): void {
     if (needNowTimer) {
       if (!nowTimer) {
         nowMs = Date.now();
@@ -476,12 +476,12 @@
   }
 
   $: if (mounted) {
-    syncLiveTimers();
+    syncLiveTimers(Boolean(hasObservedDisputeDeadline || pendingSecretAckInfo || $p2pState.reconnect));
   }
 
   onMount(() => {
     mounted = true;
-    syncLiveTimers();
+    syncLiveTimers(Boolean(hasObservedDisputeDeadline || pendingSecretAckInfo || $p2pState.reconnect));
   });
 
   onDestroy(() => {
@@ -566,7 +566,12 @@
       {/if}
       {#if activeDispute}
         <p class="dispute-status">
-          Dispute active: {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left (until J#{disputeTimeoutBlock}).
+          {#if hasObservedDisputeDeadline}
+            Dispute active: {disputeSecondsLeft}s left
+            (until {new Date(disputeTimeoutSeconds * 1000).toLocaleString()}).
+          {:else}
+            Dispute queued: awaiting on-chain inclusion and authoritative deadline.
+          {/if}
         </p>
       {:else if account.status === 'dispute_preparing'}
         <p class="dispute-status queued">

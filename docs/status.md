@@ -94,8 +94,9 @@ When docs disagree, use this order:
 
 ## Recently Closed On Current `main`
 
-- Ethereum Sepolia was proven with solc `0.8.36`, chain ID `11155111`, a
-  25-block dispute delay, and authenticated `status=1` receipts for deposit,
+- Historical pre-seconds Ethereum Sepolia evidence used solc `0.8.36`, chain ID
+  `11155111`, and a 25-block dispute delay. That archived deployment is not the
+  current protocol configuration. Its authenticated `status=1` receipts cover deposit,
   settlement, replay rejection, cooperative close, dispute start, unilateral
   finalize, and withdrawal. The proof script is
   `jurisdictions/scripts/public-proof-smoke.ts` at `53e8e1259`; reserve parity

@@ -18,6 +18,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountReplica, Delta } from '../types/account';
 import type { EntityInput, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import { getLiveJAdapter } from '../runtime/live-jadapters';
 import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import type { Profile } from '../entity/profile';
@@ -44,6 +45,8 @@ const useRpc = hasFlag('--rpc');
 const jurisdictionName = getArgOr('--jurisdiction', 'arrakis');
 const rpcUrlOverride = getArg('--rpc-url');
 const skipWalletFunding = hasFlag('--skip-wallet-funding');
+const waitForBobReady = hasFlag('--wait-for-bob-ready');
+const stayAliveAfterPayment = hasFlag('--stay-alive-after-payment');
 
 let USDC = 1;
 const DECIMALS = 18n;
@@ -288,6 +291,11 @@ const describeAccount = (account: AccountReplica | undefined) => {
     pendingFrameTxs: summarizeTxs(account.pendingFrame?.accountTxs),
     mempoolTxs: summarizeTxs(account.mempool),
     pendingSignatures: account.pendingSignatures?.length ?? 0,
+    locks: Array.from(account.state.locks.values()).map(lock => ({
+      hashlock: lock.hashlock.slice(0, 10),
+      amount: lock.amount.toString(),
+      senderIsLeft: lock.senderIsLeft,
+    })),
   };
 };
 
@@ -446,12 +454,25 @@ const waitForPayment = async (
   counterpartyId: string,
   maxRounds = 40
 ) => {
+  const baselineAccount = getAccount(env, entityId, signerId, counterpartyId);
+  const baselineDelta = baselineAccount?.state.deltas.get(USDC);
+  if (!baselineAccount || !baselineDelta) {
+    throw new Error(`PAYMENT_BASELINE_ACCOUNT_DELTA_MISSING:${counterpartyId}`);
+  }
+  const { weAreLeft } = resolveSides(baselineAccount, entityId, counterpartyId);
+  const baselineOutCapacity = deriveDelta(baselineDelta, weAreLeft).outCapacity;
   await processUntil(
     env,
     () => {
       const account = getAccount(env, entityId, signerId, counterpartyId);
       const delta = account?.state.deltas?.get(USDC);
-      return !!delta && delta.offdelta !== 0n;
+      return Boolean(
+        account
+        && delta
+        && !account.pendingFrame
+        && account.state.locks.size === 0
+        && deriveDelta(delta, weAreLeft).outCapacity > baselineOutCapacity,
+      );
     },
     maxRounds,
     'payment',
@@ -543,12 +564,11 @@ const waitForCreditLimit = async (
     () => {
       const account = getAccount(env, entityId, signerId, counterpartyId);
       const delta = account?.state.deltas?.get(USDC);
-      if (!delta) return false;
-      // We are waiting for the COUNTERPARTY to extend credit to us.
-      // Credit is stored on OUR side of the account (leftCreditLimit if we are left).
+      if (!account || !delta) return false;
       const { weAreLeft } = resolveSides(account, entityId, counterpartyId);
-      const expectedField = weAreLeft ? 'leftCreditLimit' : 'rightCreditLimit';
-      return delta[expectedField] === amount;
+      // Canonical viewer semantics: ownCreditLimit is credit granted to us by
+      // the peer, independent of lexicographic LEFT/RIGHT storage layout.
+      return !account.pendingFrame && deriveDelta(delta, weAreLeft).ownCreditLimit === amount;
     },
     maxRounds,
     `credit-limit ${counterpartyId.slice(-4)}`,
@@ -578,12 +598,11 @@ const waitForOwnCreditLimit = async (
     () => {
       const account = getAccount(env, entityId, signerId, counterpartyId);
       const delta = account?.state.deltas?.get(USDC);
-      if (!delta) return false;
-      // We are waiting for OUR credit extension to be acknowledged.
-      // Our extension is stored on the counterparty's side of the account.
+      if (!account || !delta) return false;
       const { weAreLeft } = resolveSides(account, entityId, counterpartyId);
-      const expectedField = weAreLeft ? 'rightCreditLimit' : 'leftCreditLimit';
-      return delta[expectedField] === amount;
+      // peerCreditLimit is credit we granted the peer. Never inspect the raw
+      // left/right fields in a behavioral gate.
+      return !account.pendingFrame && deriveDelta(delta, weAreLeft).peerCreditLimit === amount;
     },
     maxRounds,
     `own-credit ${counterpartyId.slice(-4)}`,
@@ -598,6 +617,29 @@ const waitForOwnCreditLimit = async (
       logQueues(env, 'wait-own-credit timeout');
     }
   );
+};
+
+const waitForOrchestratorSignal = async (expected: string): Promise<void> => {
+  await new Promise<void>((resolve, reject) => {
+    let buffered = '';
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`P2P_ORCHESTRATOR_SIGNAL_TIMEOUT:${expected}`));
+    }, 30_000);
+    const onData = (chunk: Buffer | string): void => {
+      buffered += chunk.toString();
+      if (buffered.split(/\r?\n/).includes(expected)) {
+        cleanup();
+        resolve();
+      }
+    };
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      globalThis.process.stdin.off('data', onData);
+    };
+    globalThis.process.stdin.on('data', onData);
+    globalThis.process.stdin.resume();
+  });
 };
 
 const run = async () => {
@@ -825,7 +867,7 @@ const run = async () => {
     console.log('HUB: Waiting for Alice/Bob to acknowledge credit extension...');
 
     // Helper to wait for specific account to have no pending frames
-    const waitForHubAccountReady = async (counterpartyId: string, label: string, maxRounds = 60) => {
+    const waitForHubAccountReady = async (counterpartyId: string, label: string, maxRounds = 300) => {
       await processUntil(
         env,
         () => {
@@ -863,9 +905,28 @@ const run = async () => {
 
     console.log('P2P_HUB_READY');
 
-    // Hub stays alive processing messages (don't exit, keep processing networkInbox)
+    let observedHtlcRoute = false;
+    let reportedEndToEndSettlement = false;
+    // Hub stays alive until the orchestrator observes bilateral convergence.
     while (true) {
       await processRuntime(env);
+      const hubReplica = env.state.eReplicas.get(`${entityId}:${signerId}`);
+      observedHtlcRoute ||= (hubReplica?.state.htlcRoutes.size ?? 0) > 0;
+      const accountsSettled = hubReplica
+        ? Array.from(hubReplica.state.accounts.values()).every(account =>
+            !account.pendingFrame
+            && account.mempool.length === 0
+            && account.state.locks.size === 0)
+        : false;
+      if (
+        observedHtlcRoute
+        && !reportedEndToEndSettlement
+        && hubReplica?.state.htlcRoutes.size === 0
+        && accountsSettled
+      ) {
+        reportedEndToEndSettlement = true;
+        console.log('P2P_END_TO_END_SETTLED');
+      }
       await new Promise(resolve => setTimeout(resolve, 100));  // Process every 100ms
     }
   }
@@ -882,7 +943,10 @@ const run = async () => {
   await waitForHubToHaveOurProfile(env, entityId, refreshGossip);
 
   await processRuntime(env, [
-    { entityId, signerId, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubProfile.entityId } }] },
+    { entityId, signerId, entityTxs: [{ type: 'openAccount', data: {
+      targetEntityId: hubProfile.entityId,
+      disputeConfig: defaultAccountDisputeConfigForParties(entityId, false, hubProfile.entityId, true),
+    } }] },
   ]);
 
   await waitForAccount(env, entityId, signerId, hubProfile.entityId);
@@ -929,6 +993,12 @@ const run = async () => {
   console.log(`✅ ${role.toUpperCase()}: Bilateral capacity verified`);
 
   if (role === 'alice') {
+    // The recipient must finish its bilateral credit frame before Alice sends.
+    // Without this explicit scenario rendezvous, process scheduling decides
+    // whether the Hub forwards the HTLC or correctly returns NoCapacity.
+    if (waitForBobReady) {
+      await waitForOrchestratorSignal('P2P_BOB_READY');
+    }
     await waitForProfile(env, 'bob', 40, refreshGossip, true, true, true);
     const bobProfile = getProfileByName(env, 'bob');
     if (!bobProfile) throw new Error('BOB_PROFILE_MISSING');
@@ -1004,6 +1074,17 @@ const run = async () => {
 
     const secret = ethers.keccak256(ethers.toUtf8Bytes(`htlc-${entityId}-${bobProfile.entityId}`));
     const hashlock = hashHtlcSecret(secret);
+    const aliceHubBefore = getAccount(env, entityId, signerId, hubProfile.entityId);
+    const aliceHubDeltaBefore = aliceHubBefore?.state.deltas.get(USDC);
+    if (!aliceHubBefore || !aliceHubDeltaBefore) {
+      throw new Error('ALICE_HTLC_BASELINE_ACCOUNT_DELTA_MISSING');
+    }
+    const { weAreLeft: aliceIsLeft } = resolveSides(
+      aliceHubBefore,
+      entityId,
+      hubProfile.entityId,
+    );
+    const outCapacityBefore = deriveDelta(aliceHubDeltaBefore, aliceIsLeft).outCapacity;
 
     await processRuntime(env, [
       {
@@ -1030,15 +1111,23 @@ const run = async () => {
     logEntityState(env, entityId, signerId, 'alice after HTLC submit');
     logAccountState(env, entityId, signerId, hubProfile.entityId, 'alice-hub account after HTLC');
 
-    // Wait for Hub to ACK our payment frame (bilateral consensus complete)
-    // This ensures Hub has processed the payment and forwarded to Bob
+    // Require the complete payer-side lifecycle, not a raw offdelta sign. The
+    // signed delta is negative for LEFT payers and positive for RIGHT payers,
+    // so `offdelta < 0` silently made this gate depend on deterministic entity
+    // ordering. A completed payment has no pending frame, no unresolved lock
+    // for this hashlock, and lower canonical outbound capacity than baseline.
     await processUntil(
       env,
       () => {
         const account = getAccount(env, entityId, signerId, hubProfile.entityId);
-        // Payment is done when our account shows the offdelta change and no pending frame
         const delta = account?.state.deltas?.get(USDC);
-        return !!account && !account.pendingFrame && !!delta && delta.offdelta < 0n;
+        const lockStillActive = Array.from(account?.state.locks.values() ?? [])
+          .some(lock => lock.hashlock.toLowerCase() === hashlock.toLowerCase());
+        return !!account
+          && !account.pendingFrame
+          && !!delta
+          && !lockStillActive
+          && deriveDelta(delta, aliceIsLeft).outCapacity < outCapacityBefore;
       },
       240,
       'alice-htlc-ack',
@@ -1056,7 +1145,16 @@ const run = async () => {
 
     console.log('P2P_HTLC_SENT');
     console.log('P2P_PAYMENT_SENT');
-    globalThis.process.exit(0);
+    // A participant cannot prove global completion from its local Account
+    // alone. Keep servicing the real transport until the parent orchestrator
+    // observes Hub-side route removal plus bilateral quiescence and terminates
+    // every child together. Exiting here can drop the final ACK after the
+    // recipient has committed locally but before the sender learns the secret.
+    while (stayAliveAfterPayment) {
+      await processRuntime(env);
+      await sleep(25);
+    }
+    return;
   }
 
   if (role === 'bob') {
@@ -1107,7 +1205,15 @@ const run = async () => {
     await waitForPayment(env, entityId, signerId, hubProfile.entityId, 240);
     console.log('P2P_HTLC_RECEIVED');
     console.log('P2P_PAYMENT_RECEIVED');
-    globalThis.process.exit(0);
+    // Receiving the downstream frame is not end-to-end completion. Keep the
+    // real recipient runtime alive so its ACK reaches the Hub and the Hub can
+    // propagate the preimage into Alice's upstream Account. The orchestrator
+    // terminates all nodes only after Alice proves that final resolution.
+    while (stayAliveAfterPayment) {
+      await processRuntime(env);
+      await sleep(25);
+    }
+    return;
   }
 };
 

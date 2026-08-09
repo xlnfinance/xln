@@ -53,7 +53,8 @@ const buildPostSettlementDisputeProof = (
   settlementNonce: number,
   diffs: readonly SettlementDiff[],
   forgiveTokenIds: readonly number[],
-): { proofBodyHash: string; disputeHash: string; nonce: number } => {
+  proposerIsLeft: boolean,
+): { proofBodyHash: string; disputeHash: string; nonce: number; proposerIsLeft: boolean } => {
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction?.depositoryAddress) throw new Error('POST_SETTLEMENT_JURISDICTION_MISSING');
   const nonce = settlementNonce + 1;
@@ -64,8 +65,9 @@ const buildPostSettlementDisputeProof = (
     proofBodyHash,
     { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
     nonce,
+    proposerIsLeft,
   );
-  return { proofBodyHash, disputeHash, nonce };
+  return { proofBodyHash, disputeHash, nonce, proposerIsLeft };
 };
 
 type SettlementSealTx = Extract<
@@ -120,6 +122,7 @@ export const buildSettlementSealDraft = (
     settlementNonce,
     diffs,
     forgiveTokenIds,
+    workspace.lastModifiedByLeft,
   );
   const pinnedPostProof = workspace.postSettlementDisputeProof;
   if (
@@ -467,10 +470,12 @@ const prepareSettlementExecution = (
     signedNonce,
     diffs,
     forgiveTokenIds,
+    postProof.proposerIsLeft,
   );
   if (
     postProof.proofBodyHash.toLowerCase() !== expectedPostProof.proofBodyHash.toLowerCase() ||
-    postProof.disputeHash.toLowerCase() !== expectedPostProof.disputeHash.toLowerCase()
+    postProof.disputeHash.toLowerCase() !== expectedPostProof.disputeHash.toLowerCase() ||
+    postProof.proposerIsLeft !== expectedPostProof.proposerIsLeft
   ) {
     throw new Error('POST_SETTLEMENT_PROOF_HASH_MISMATCH');
   }

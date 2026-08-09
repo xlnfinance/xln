@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Profile as GossipProfile } from '@xln/runtime/api/public/runtime-module';
   import type { AccountReplica, DerivedDelta } from '$lib/types/ui';
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
   import { settings } from '$lib/stores/settingsStore';
   import { p2pState } from '../../stores/xlnStore';
@@ -23,6 +23,9 @@
   export let counterpartyProfile: GossipProfile | null = null;
   export let isSelected: boolean = false;
   export let entityHeight: number = 0;
+  let wallClockMs = Date.now();
+  let mounted = false;
+  let disputeClockTimer: ReturnType<typeof setInterval> | null = null;
   export let runtimeHeight: number = 0;
   export let isDevnet = false;
   export let lockSummary: {
@@ -230,10 +233,32 @@
   $: pendingLeftJClaim = BigInt(account.state.leftPendingJClaims?.count ?? 0) > 0n;
   $: pendingRightJClaim = BigInt(account.state.rightPendingJClaims?.count ?? 0) > 0n;
   $: jPendingSideSuffix = `${pendingLeftJClaim ? '+L' : ''}${pendingRightJClaim ? '+R' : ''}`;
-  $: disputeTimeoutBlock = Number(account.activeDispute?.disputeTimeout || 0);
-  $: disputeBlocksLeft = hasActiveDispute
-    ? Math.max(0, disputeTimeoutBlock - Number(account.state.lastFinalizedJHeight || 0))
+  $: disputeTimeoutSeconds = Number(account.activeDispute?.disputeTimeout || 0);
+  $: hasObservedDisputeDeadline = account.activeDispute?.observedOnChain === true
+    && disputeTimeoutSeconds > 0;
+  $: disputeSecondsLeft = hasObservedDisputeDeadline
+    ? Math.max(0, Math.ceil((disputeTimeoutSeconds * 1000 - wallClockMs) / 1000))
     : 0;
+  function syncDisputeClock(shouldRun: boolean): void {
+    if (mounted && shouldRun && !disputeClockTimer) {
+      wallClockMs = Date.now();
+      disputeClockTimer = setInterval(() => {
+        wallClockMs = Date.now();
+      }, 1000);
+    } else if ((!mounted || !shouldRun) && disputeClockTimer) {
+      clearInterval(disputeClockTimer);
+      disputeClockTimer = null;
+    }
+  }
+  $: if (mounted) syncDisputeClock(hasObservedDisputeDeadline);
+  onMount(() => {
+    mounted = true;
+    syncDisputeClock(hasObservedDisputeDeadline);
+  });
+  onDestroy(() => {
+    mounted = false;
+    if (disputeClockTimer) clearInterval(disputeClockTimer);
+  });
   $: compactConsensusLabel = `${statusLabel} · A#${accountHeight} · J#${jFinalizedHeight}${jPendingSideSuffix}`;
   $: consensusUpdatedAt = Number(account.currentFrame?.timestamp ?? account.pendingFrame?.timestamp ?? 0);
   function formatDetailTimestamp(ms: number): string {
@@ -443,7 +468,10 @@
           {#if hasActiveDispute}
             <div class="consensus-popover-row dispute">
               <span>Dispute</span>
-              <strong>{disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left · {disputeRole}</strong>
+              <strong>
+                {hasObservedDisputeDeadline ? `${disputeSecondsLeft}s left` : 'awaiting on-chain deadline'}
+                · {disputeRole}
+              </strong>
             </div>
           {/if}
           <button class="popover-explore-btn" on:click={handleClick}>

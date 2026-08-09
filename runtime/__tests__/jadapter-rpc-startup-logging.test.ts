@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const readMarketMakerNodeSource = (): string => [
@@ -58,7 +58,7 @@ test('runtime dev startup status logs stay structured', () => {
   const orchestrator = readFileSync(join(process.cwd(), 'runtime/orchestrator/orchestrator.ts'), 'utf8');
   const wsClient = readFileSync(join(process.cwd(), 'runtime/network/p2p/ws-client.ts'), 'utf8');
   const bootstrapHub = readFileSync(join(process.cwd(), 'scripts/bootstrap-hub.ts'), 'utf8');
-  const localConfig = readFileSync(join(process.cwd(), 'runtime/jurisdiction/adapter/local-config.ts'), 'utf8');
+  const retiredLocalConfigPath = join(process.cwd(), 'runtime/jurisdiction/adapter/local-config.ts');
   const logger = readFileSync(join(process.cwd(), 'runtime/infra/logger.ts'), 'utf8');
   const devRunner = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
   const runtimeConsoleLines = runtimeFrameStart
@@ -104,9 +104,9 @@ test('runtime dev startup status logs stay structured', () => {
   expect(wsClient).not.toContain('console.log(`[WS] Connected to ${this.options.url}`)');
   expect(wsClient).toContain("const wsLog = createStructuredLogger('runtime.wsClient');");
   expect(wsClient).toContain("wsLog.debug('connected'");
-  expect(localConfig).not.toContain('console.log(');
-  expect(localConfig).toContain("const localConfigLog = createStructuredLogger('jadapter.localConfig');");
-  expect(localConfig).toContain("localConfigLog.debug('default_dispute_delay.ready'");
+  // Keep the retired delay-config path deleted: dispute clocks now come only
+  // from the bilateral signed account agreement, never from a local reader.
+  expect(existsSync(retiredLocalConfigPath)).toBe(false);
   expect(logger).toContain("process.env['XLN_LOG_WARN_STDOUT'] === '1' ? console.log : console.warn");
   expect(devRunner).toContain('XLN_LOG_WARN_STDOUT="${XLN_LOG_WARN_STDOUT:-1}"');
   expect(devRunner).toContain('RUNTIME_VERBOSE_LOGS XLN_LOG_WARN_STDOUT');

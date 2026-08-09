@@ -43,6 +43,7 @@ import {
 } from '../jurisdiction/machine/local-history';
 import type { EntityReplica, EntityState } from '../entity/types';
 import type { JurisdictionEvent, ValidatorJEventBlock } from '../types/jurisdiction-events';
+import { hashProofBodyStruct } from '../protocol/dispute/proof-builder';
 
 const depositoryAddress = `0x${'dd'.repeat(20)}`;
 const jurisdictionRef = `stack:31337:${depositoryAddress}`;
@@ -51,6 +52,15 @@ const leaderId = `0x${'11'.repeat(20)}`;
 const validatorId = `0x${'22'.repeat(20)}`;
 const previousFrameHash = `0x${'ab'.repeat(32)}`;
 const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+const disputeProofbody = {
+  watchSeed: `0x${'32'.repeat(32)}`,
+  leftResponseSeconds: 10,
+  rightResponseSeconds: 10,
+  offdeltas: [],
+  tokenIds: [],
+  transformers: [],
+};
+const disputeProofbodyHash = hashProofBodyStruct(disputeProofbody);
 
 const reserveEvent = (height: number, amount: string): JurisdictionEvent => ({
   blockNumber: height,
@@ -305,8 +315,10 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         sender: entityId,
         counterentity: `0x${'cc'.repeat(32)}`,
         initialNonce: '1',
-        initialProofbodyHash: `0x${'31'.repeat(32)}`,
-        finalProofbodyHash: `0x${'32'.repeat(32)}`,
+        initialProofbodyHash: disputeProofbodyHash,
+        finalProofbodyHash: disputeProofbodyHash,
+        finalizationEvidenceHash: disputeProofbodyHash,
+        finalProofbody: disputeProofbody,
       },
     };
     const localEvidence = [{
@@ -314,12 +326,12 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       counterentity: `0x${'cc'.repeat(32)}`,
       initialNonce: '1',
       finalNonce: '2',
-      initialProofbodyHash: `0x${'31'.repeat(32)}`,
-      finalProofbodyHash: `0x${'32'.repeat(32)}`,
+      initialProofbodyHash: disputeProofbodyHash,
+      finalProofbodyHash: disputeProofbodyHash,
+      proposerIsLeft: true,
       leftArguments: '0x',
       rightArguments: '0x',
-      starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      startedByLeft: false,
       sig: '0x01',
     }];
     const localBlock: ValidatorJEventBlock = {
@@ -413,8 +425,10 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         sender: entityId,
         counterentity: `0x${'cc'.repeat(32)}`,
         initialNonce: '1',
-        initialProofbodyHash: `0x${'41'.repeat(32)}`,
-        finalProofbodyHash: `0x${'42'.repeat(32)}`,
+        initialProofbodyHash: disputeProofbodyHash,
+        finalProofbodyHash: disputeProofbodyHash,
+        finalizationEvidenceHash: disputeProofbodyHash,
+        finalProofbody: disputeProofbody,
       },
     };
     const evidence = ['2', '999999'].map((finalNonce) => ({
@@ -422,12 +436,12 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       counterentity: `0x${'cc'.repeat(32)}`,
       initialNonce: '1',
       finalNonce,
-      initialProofbodyHash: `0x${'41'.repeat(32)}`,
-      finalProofbodyHash: `0x${'42'.repeat(32)}`,
+      initialProofbodyHash: disputeProofbodyHash,
+      finalProofbodyHash: disputeProofbodyHash,
+      proposerIsLeft: true,
       leftArguments: finalNonce === '2' ? '0x12' : '0x99',
       rightArguments: '0x',
-      starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      startedByLeft: false,
       sig: '0x01',
     }));
     const makeHistory = (orderedEvidence: typeof evidence) => recordValidatorJHistory(undefined, {
@@ -448,6 +462,12 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const forward = makeHistory(evidence).eventBlocks.get(7)?.disputeFinalizationEvidence;
     const reversed = makeHistory([...evidence].reverse()).eventBlocks.get(7)?.disputeFinalizationEvidence;
     expect(reversed).toEqual(forward);
+    expect(canonicalDisputeFinalizationEvidenceHash(evidence)).not.toBe(
+      canonicalDisputeFinalizationEvidenceHash([
+        { ...evidence[0]!, proposerIsLeft: false },
+        evidence[1]!,
+      ]),
+    );
   });
 
   test('validator rejects a validly signed proposal that omits a local DisputeStarted before precommit', async () => {
@@ -467,11 +487,17 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         sender: entityId,
         counterentity: `0x${'cc'.repeat(32)}`,
         nonce: '1',
-        proofbodyHash: `0x${'31'.repeat(32)}`,
+        proposerIsLeft: true,
+        proofbodyHash: disputeProofbodyHash,
+        initialProofbody: disputeProofbody,
         watchSeed: `0x${'32'.repeat(32)}`,
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
-        disputeTimeout: 5_760,
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        disputeTimeout: 1_700_000_020,
+        disputeStartTimestamp: 1_700_000_000,
+        leftResponseSeconds: 10,
+        rightResponseSeconds: 10,
       },
     };
     const disputeBlock: ValidatorJEventBlock = {

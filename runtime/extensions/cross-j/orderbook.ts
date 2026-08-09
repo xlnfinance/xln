@@ -11,8 +11,10 @@ import {
 import {
   baseAmountFromLots,
   computePriceTicksForBaseQuote,
+  ORDERBOOK_PRICE_SCALE,
   quoteAmountFromWeightedLots,
 } from '../../orderbook';
+import { getSwapPairOrientation, getTokenInfo, isLiquidSwapToken } from '../../account/utils';
 import {
   deriveExactSwapFillRatio,
   exactFillRatioToUint16,
@@ -21,6 +23,99 @@ import {
 import type { AccountTx } from '../../types/account';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../../entity/types';
+import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-stack';
+
+/** Hub-local notional ceiling; it bounds one uint16 projection step to < $100. */
+export const CROSS_J_BOOK_MAX_USD_MICROS = 6_500_000n * 1_000_000n;
+
+const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
+  if (numerator < 0n || denominator <= 0n) throw new Error('CROSS_J_USD_DIVISION_INVALID');
+  return numerator === 0n ? 0n : (numerator + denominator - 1n) / denominator;
+};
+
+const internalUsdPrice = (
+  state: EntityState,
+  tokenId: number,
+): bigint | null => {
+  if (isLiquidSwapToken(tokenId)) return ORDERBOOK_PRICE_SCALE;
+  const ext = state.orderbookExt;
+  if (!ext) return null;
+  const referenceTokenId = Number(ext.hubProfile.referenceTokenId);
+  if (!isLiquidSwapToken(referenceTokenId)) {
+    throw new Error(`CROSS_J_BOOK_USD_REFERENCE_INVALID:token=${referenceTokenId}`);
+  }
+  const pair = getSwapPairOrientation(tokenId, referenceTokenId);
+  const priceTicks = ext.books.get(pair.pairId)?.lastAcceptedUsdAskPriceTicks ?? 0n;
+  return priceTicks > 0n ? priceTicks : null;
+};
+
+const usdMicrosAtPrice = (tokenId: number, amount: bigint, priceTicks: bigint): bigint => {
+  if (amount <= 0n) throw new Error(`CROSS_J_BOOK_USD_AMOUNT_INVALID:token=${tokenId}`);
+  const decimals = getTokenInfo(tokenId).decimals;
+  return ceilDiv(
+    amount * priceTicks * 1_000_000n,
+    (10n ** BigInt(decimals)) * ORDERBOOK_PRICE_SCALE,
+  );
+};
+
+export const crossJurisdictionLegUsdMicros = (
+  state: EntityState,
+  tokenId: number,
+  amount: bigint,
+): bigint => {
+  const priceTicks = internalUsdPrice(state, tokenId);
+  if (priceTicks === null) throw new Error(`CROSS_J_USD_PRICE_UNAVAILABLE:token=${tokenId}`);
+  return usdMicrosAtPrice(tokenId, amount, priceTicks);
+};
+
+export const getCrossJurisdictionLegUsdCapError = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  role: 'source' | 'target',
+): string | null => {
+  // tokenId is jurisdiction-local. Reading both route legs through one
+  // EntityState silently interprets the remote token catalog as the local one
+  // (or invents a missing price). Each Hub therefore checks only the leg on
+  // which it bears uint16 rounding risk, using its own persisted authority ask.
+  // Once a local authority price exists, the atomic opening makes both Hub
+  // Account legs enforce their own cap without an oracle or cross-state read.
+  // Before the first price, admission remains intentionally permissionless:
+  // price discovery must not become an availability dependency for swaps.
+  const leg = role === 'source' ? route.source : route.target;
+  const tokenId = Number(leg.tokenId);
+  const priceTicks = internalUsdPrice(state, tokenId);
+  if (priceTicks === null) return null;
+  const usdMicros = usdMicrosAtPrice(tokenId, BigInt(leg.amount), priceTicks);
+  if (usdMicros > CROSS_J_BOOK_MAX_USD_MICROS) {
+    return `CROSS_J_BOOK_USD_CAP_EXCEEDED:order=${route.orderId}:leg=${role}:usdMicros=${usdMicros}:cap=${CROSS_J_BOOK_MAX_USD_MICROS}`;
+  }
+  return null;
+};
+
+export const getCrossJurisdictionLocalUsdCapError = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): string | null => {
+  const entityId = normalizeEntityRef(state.entityId);
+  const localStack = getJurisdictionStackId(state.config.jurisdiction).toLowerCase();
+  const roles: Array<'source' | 'target'> = [];
+  if (
+    entityId === normalizeEntityRef(route.source.counterpartyEntityId)
+    && localStack === String(route.source.jurisdiction).toLowerCase()
+  ) roles.push('source');
+  if (
+    entityId === normalizeEntityRef(route.target.entityId)
+    && localStack === String(route.target.jurisdiction).toLowerCase()
+  ) roles.push('target');
+  if (roles.length === 1) {
+    return getCrossJurisdictionLegUsdCapError(state, route, roles[0]!);
+  }
+  return `CROSS_J_BOOK_USD_VALIDATOR_LEG_INVALID:order=${route.orderId}:entity=${entityId}:stack=${localStack}:matches=${roles.length}`;
+};
+
+/** Expected Hub business rejection, never a deterministic Runtime fault. */
+export const isCrossJurisdictionBookRiskRejection = (error: string | null): boolean =>
+  Boolean(error?.startsWith('CROSS_J_BOOK_USD_CAP_EXCEEDED:'));
 
 const mergeAdmissionRoute = (
   existing: CrossJurisdictionSwapRoute | undefined,
@@ -295,6 +390,10 @@ export const getCrossJurisdictionBookAdmissionError = (
     return `CROSS_J_BOOK_ADMISSION_ROUTE_MISMATCH: order=${canonicalRoute.orderId}`;
   }
 
+  // USD risk is checked exactly once by the source/book Hub before either
+  // bilateral Pull registration is emitted. Rechecking a mutable latest price
+  // after both Account locks commit could close a fully collateralized route
+  // solely because the authority ask moved between frames.
   return null;
 };
 

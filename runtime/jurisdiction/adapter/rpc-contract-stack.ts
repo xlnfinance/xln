@@ -10,9 +10,11 @@ import {
   Account__factory,
   DeltaTransformer__factory,
   Depository__factory,
+  DepositoryBounds__factory,
   ERC20Mock__factory,
   EntityProvider__factory,
   HankoVerifier__factory,
+  HashLadderRegistry__factory,
 } from '../../../jurisdictions/typechain-types/index.ts';
 import {
   TOKEN_REGISTRATION_AMOUNT,
@@ -62,14 +64,6 @@ export type RpcContractStack = {
 const requireContract = <T>(label: string, contract: T | undefined): T => {
   if (!contract) throw new Error(`RPC_${label.toUpperCase()}_UNAVAILABLE`);
   return contract;
-};
-
-const resolveDeploymentDisputeDelayBlocks = (config: JAdapterConfig): number => {
-  const raw = config.defaultDisputeDelayBlocks ?? (DEV_CHAIN_IDS.has(config.chainId) ? 5_760 : NaN);
-  if (!Number.isSafeInteger(raw) || raw <= 0 || raw > 65_535) {
-    throw new Error(`JADAPTER_DEPLOY_DISPUTE_DELAY_INVALID:${String(raw)}`);
-  }
-  return raw;
 };
 
 const deployAccount = async (
@@ -145,8 +139,14 @@ const deployDepository = async (
   addresses: JAdapterAddresses,
   state: RpcContractStackState,
 ): Promise<void> => {
+  const bounds = await new DepositoryBounds__factory(signer).deploy();
+  await bounds.waitForDeployment();
+  const registry = await new HashLadderRegistry__factory(signer).deploy();
+  await registry.waitForDeployment();
   const bytecode = linkArtifactBytecode(Depository__factory.bytecode, {
     'contracts/Account.sol:Account': addresses.account,
+    'contracts/DepositoryBounds.sol:DepositoryBounds': await bounds.getAddress(),
+    'contracts/HashLadderRegistry.sol:HashLadderRegistry': await registry.getAddress(),
   });
   const factory = new ethers.ContractFactory(
     Depository__factory.abi,
@@ -155,7 +155,7 @@ const deployDepository = async (
   );
   const contract = await factory.deploy(
     addresses.entityProvider,
-    resolveDeploymentDisputeDelayBlocks(config),
+    addresses.deltaTransformer,
     { gasLimit: await resolveDepositoryDeployGas(config, provider) },
   );
   await contract.waitForDeployment();
@@ -244,9 +244,9 @@ export const createRpcContractStack = async (
     rpcLog.info('contracts.deploy.start', { chainId: config.chainId });
     await deployAccount(signer, addresses, state);
     await deployEntityProvider(config, signer, addresses, state);
+    await deployDeltaTransformer(signer, addresses, state);
     await deployDepository(config, provider, signer, addresses, state);
     await verifyBinding('rpc_deploy');
-    await deployDeltaTransformer(signer, addresses, state);
     const tokens = await deployBootstrapTokens(
       config,
       signer,

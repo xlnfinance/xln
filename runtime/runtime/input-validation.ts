@@ -1,10 +1,15 @@
 import { safeStringify } from '../protocol/serialization';
+import { MAX_ENTITY_FRAME_J_RANGE_BYTES } from '../jurisdiction/machine/range-budget';
 import type { RuntimeReplica, RuntimeInput } from './types';
 
 export const MAX_RUNTIME_J_INPUTS = 256;
 export const MAX_RUNTIME_J_TXS = 1_024;
 export const MAX_RUNTIME_J_TXS_PER_JURISDICTION = 512;
-export const MAX_RUNTIME_J_INPUT_BYTES = 1024 * 1024;
+// Runtime must be able to ingest any one atomic Entity J-range. ProofBody
+// calldata enrichment can legitimately make a single EVM block several MiB;
+// a smaller independent cap would wedge that canonical height forever. The
+// extra MiB bounds the Runtime/JInput envelope for the existing count limits.
+export const MAX_RUNTIME_J_INPUT_BYTES = MAX_ENTITY_FRAME_J_RANGE_BYTES + 1024 * 1024;
 export const MAX_RUNTIME_TXS = 1_000;
 export const MAX_RUNTIME_ENTITY_INPUTS = 10_000;
 export const MAX_RUNTIME_RELIABLE_RECEIPTS = 10_000;

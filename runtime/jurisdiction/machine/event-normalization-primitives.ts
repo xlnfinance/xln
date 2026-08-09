@@ -72,6 +72,14 @@ export const normalizeInt = (value: unknown): number | null => {
   return Number.isSafeInteger(number) ? number : null;
 };
 
+/**
+ * Event booleans are already ABI-decoded values. Do not accept 0/1 or text:
+ * coercion here would let a malformed adapter payload change the signed Pull
+ * role, which selects a different registry slot and deadline.
+ */
+export const normalizeBoolean = (value: unknown): boolean | null =>
+  typeof value === 'boolean' ? value : null;
+
 export const normalizeMetadata = (
   raw: UnknownRecord,
 ): Pick<

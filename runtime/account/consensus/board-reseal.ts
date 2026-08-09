@@ -153,13 +153,16 @@ const verifyBoardResealWitnesses = async (
   const expectedHash = account.counterpartyDisputeHash?.toLowerCase();
   const expectedBodyHash = account.counterpartyDisputeProofBodyHash?.toLowerCase();
   const expectedNonce = account.counterpartyDisputeProofNonce;
+  const expectedProposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
   if (
     !expectedHash
     || !expectedBodyHash
     || expectedNonce === undefined
+    || expectedProposerIsLeft === undefined
     || reseal.disputeSeal.hash.toLowerCase() !== expectedHash
     || reseal.disputeSeal.proofBodyHash.toLowerCase() !== expectedBodyHash
     || reseal.disputeSeal.proofNonce !== expectedNonce
+    || reseal.disputeSeal.proposerIsLeft !== expectedProposerIsLeft
   ) {
     return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_DISPUTE_MISMATCH', events);
   }

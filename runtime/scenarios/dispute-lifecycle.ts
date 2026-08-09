@@ -9,6 +9,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { bootScenario, registerEntities, fundEntities } from './boot';
@@ -26,6 +27,7 @@ import {
 import { advanceRpcToUnixSeconds, readRpcUnixSeconds } from './rpc-block-mining';
 
 const USDC = 1;
+const DETERMINISTIC_DISPUTE_START_UNIX = 4_102_500_000;
 
 type Registered = { id: string; signer: string; name: string };
 type MineableProvider = { send(method: string, params: unknown[]): Promise<unknown> };
@@ -136,7 +138,12 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       signerId: alice.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: hub.id, tokenId: USDC, creditAmount: usd(10_000) },
+        data: {
+          targetEntityId: hub.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(alice.id, false, hub.id, true),
+          tokenId: USDC,
+          creditAmount: usd(10_000),
+        },
       }],
     }]);
     for (let i = 0; i < 4; i++) await process(env);
@@ -192,6 +199,15 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       'disputeStart was not added to jBatch',
       env,
     );
+
+    // Anvil automining derives a block timestamp from elapsed host time even
+    // when genesis is fixed. Pin the economically relevant dispute-start block
+    // so repeated runs exercise identical challenge windows and J-event bytes.
+    const disputeProvider = jadapter.provider as unknown as Partial<MineableProvider>;
+    if (typeof disputeProvider.send !== 'function') {
+      throw new Error('dispute-lifecycle requires RPC provider timestamp control');
+    }
+    await disputeProvider.send('evm_setNextBlockTimestamp', [DETERMINISTIC_DISPUTE_START_UNIX]);
 
     // Broadcast disputeStart and process unilateral j-events
     await process(env, [{

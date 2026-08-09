@@ -343,6 +343,8 @@ const signedHankoForTest = (
 
 const makeEmptyProofBody = () => ({
   watchSeed: `0x${'f1'.repeat(32)}`,
+  leftResponseSeconds: 10,
+  rightResponseSeconds: 10,
   offdeltas: [],
   tokenIds: [],
   transformers: [],
@@ -366,7 +368,7 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -413,6 +415,7 @@ const setSyntheticPendingAccountProposal = (
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
+    disputeConfig: structuredClone(account.state.disputeConfig),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
@@ -452,6 +455,7 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
       mempool: [],
       blockDelayMs: 0,
       lastBlockTimestamp: 0,
+      watcherConfirmationDepth: 0,
       position: { x: 0, y: 0, z: 0 },
     });
   }
@@ -493,8 +497,10 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeReplica, state: 
   let replica = Array.from(env.state.jReplicas.values()).find(
     candidate =>
       candidate.chainId === jurisdiction.chainId &&
-      candidate.depositoryAddress?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
-      candidate.entityProviderAddress?.toLowerCase() === jurisdiction.entityProviderAddress.toLowerCase(),
+      (candidate.contracts?.depository?.toLowerCase()
+        || candidate.depositoryAddress?.toLowerCase()) === jurisdiction.depositoryAddress.toLowerCase() &&
+      (candidate.contracts?.entityProvider?.toLowerCase()
+        || candidate.entityProviderAddress?.toLowerCase()) === jurisdiction.entityProviderAddress.toLowerCase(),
   );
   if (!replica) {
     replica = createJReplica(env, jurisdiction.name, jurisdiction.depositoryAddress);
@@ -658,6 +664,7 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
         initialNonce: 7,
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
+        finalizationEvidenceHash: ethers.ZeroHash,
       },
     } satisfies JurisdictionEvent,
     finalProofbodyHash,
@@ -777,6 +784,8 @@ describe('audit fail-fast regressions', () => {
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId,
+        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         makerEntityId: sourceUser,
         hubEntityId: targetHub,
         bookOwnerEntityId: targetHub,
@@ -847,6 +856,8 @@ describe('audit fail-fast regressions', () => {
           cumulativeSourceAmount: 30n * lot,
           cumulativeTargetAmount: 75_000n * lot,
           cumulativeFillRatio: 65_535,
+          fillNumerator: 1n,
+          fillDenominator: 1n,
           pairId,
         },
       },
@@ -930,6 +941,8 @@ describe('audit fail-fast regressions', () => {
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId,
+        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         makerEntityId: sourceUser,
         hubEntityId: targetHub,
         bookOwnerEntityId: targetHub,
@@ -1077,6 +1090,8 @@ describe('audit fail-fast regressions', () => {
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId: offerId,
+        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         makerEntityId: sourceUser,
         hubEntityId: targetHub,
         bookOwnerEntityId: targetHub,
@@ -1586,6 +1601,8 @@ describe('audit fail-fast regressions', () => {
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId: 'cross-close-evidence',
+        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         makerEntityId: userId,
         hubEntityId: hubId,
         source: {
@@ -1603,6 +1620,8 @@ describe('audit fail-fast regressions', () => {
           amount: 200n,
         },
         cumulativeFillRatio: 0x4000,
+        fillNumerator: 1n,
+        fillDenominator: 4n,
         filledSourceAmount: 25n,
         filledTargetAmount: 50n,
         status: 'clearing',
@@ -1695,7 +1714,7 @@ describe('audit fail-fast regressions', () => {
     const initialProof = buildAccountProofBody(account, hex20('99'));
     storeDisputeArgumentSnapshot(
       account,
-      captureDisputeArgumentSnapshot(account, initialProof.proofBodyHash, 1, initialProof.proofBodyStruct),
+      captureDisputeArgumentSnapshot(account, initialProof.proofBodyHash, 1, true, initialProof.proofBodyStruct),
     );
     account.disputeProofBodiesByHash = {
       [initialProof.proofBodyHash]: initialProof.proofBodyStruct,
@@ -1709,7 +1728,8 @@ describe('audit fail-fast regressions', () => {
       disputeStartTimestamp: 1700000000,
       jNonce: 1,
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       observedOnChain: true,
       finalizeQueued: false,
     };
@@ -1763,7 +1783,11 @@ describe('audit fail-fast regressions', () => {
     const nextAccount = result.newState.accounts.get(userId)!;
     expect(finalization).toBeDefined();
     expect(finalization?.initialProofbodyHash).toBe(initialProof.proofBodyHash);
-    expect(finalization?.finalProofbody).toEqual(initialProof.proofBodyStruct);
+    expect(finalization?.finalProofbody).toEqual({
+      ...initialProof.proofBodyStruct,
+      leftResponseSeconds: 10n,
+      rightResponseSeconds: 10n,
+    });
     expect(finalization?.starterArguments).toBe('0x');
     expect(finalization?.otherArguments).toBe('0x');
     expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('htlcAwaitingSecret'))).toBe(false);

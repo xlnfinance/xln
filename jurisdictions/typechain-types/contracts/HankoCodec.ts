@@ -142,6 +142,7 @@ export interface HankoCodecInterface extends Interface {
       AddressLike,
       BytesLike,
       BigNumberish,
+      boolean,
       BytesLike,
       BytesLike
     ]
@@ -264,6 +265,7 @@ export interface HankoCodecInterface extends Interface {
       AddressLike,
       BytesLike,
       BigNumberish,
+      boolean,
       BytesLike,
       BytesLike
     ]
@@ -537,6 +539,7 @@ export interface HankoCodec extends BaseContract {
       contractAddress: AddressLike,
       accountKey: BytesLike,
       nonce: BigNumberish,
+      proposerIsLeft: boolean,
       proofbodyHash: BytesLike,
       watchSeed: BytesLike
     ],
@@ -596,7 +599,7 @@ export interface HankoCodec extends BaseContract {
       counterentity: BytesLike,
       finalNonce: BigNumberish,
       finalProofbodyHash: BytesLike,
-      lastResortWindowBlocks: BigNumberish,
+      lastResortWindowSeconds: BigNumberish,
       appointmentSequence: BigNumberish
     ],
     [string],
@@ -692,6 +695,7 @@ export interface HankoCodec extends BaseContract {
       contractAddress: AddressLike,
       accountKey: BytesLike,
       nonce: BigNumberish,
+      proposerIsLeft: boolean,
       proofbodyHash: BytesLike,
       watchSeed: BytesLike
     ],
@@ -751,7 +755,7 @@ export interface HankoCodec extends BaseContract {
       counterentity: BytesLike,
       finalNonce: BigNumberish,
       finalProofbodyHash: BytesLike,
-      lastResortWindowBlocks: BigNumberish,
+      lastResortWindowSeconds: BigNumberish,
       appointmentSequence: BigNumberish
     ],
     [string],
@@ -859,6 +863,7 @@ export interface HankoCodec extends BaseContract {
       contractAddress: AddressLike,
       accountKey: BytesLike,
       nonce: BigNumberish,
+      proposerIsLeft: boolean,
       proofbodyHash: BytesLike,
       watchSeed: BytesLike
     ],
@@ -922,7 +927,7 @@ export interface HankoCodec extends BaseContract {
       counterentity: BytesLike,
       finalNonce: BigNumberish,
       finalProofbodyHash: BytesLike,
-      lastResortWindowBlocks: BigNumberish,
+      lastResortWindowSeconds: BigNumberish,
       appointmentSequence: BigNumberish
     ],
     [string],
@@ -1025,6 +1030,7 @@ export interface HankoCodec extends BaseContract {
       contractAddress: AddressLike,
       accountKey: BytesLike,
       nonce: BigNumberish,
+      proposerIsLeft: boolean,
       proofbodyHash: BytesLike,
       watchSeed: BytesLike
     ],
@@ -1088,7 +1094,7 @@ export interface HankoCodec extends BaseContract {
       counterentity: BytesLike,
       finalNonce: BigNumberish,
       finalProofbodyHash: BytesLike,
-      lastResortWindowBlocks: BigNumberish,
+      lastResortWindowSeconds: BigNumberish,
       appointmentSequence: BigNumberish
     ],
     [string],

@@ -314,7 +314,7 @@ const mutations: Mutation[] = [
   {
     name: 'out-of-range disputeConfig',
     expected: 'reject',
-    mutate: ({ doc }) => { doc.state.disputeConfig.leftDisputeDelay = 65_536; },
+    mutate: ({ doc }) => { doc.state.disputeConfig.leftResponseSeconds = 365 * 24 * 60 * 60 + 1; },
   },
   {
     name: 'proofBody token/delta length mismatch',
@@ -364,6 +364,18 @@ describe('persisted AccountReplica semantic boundary', () => {
   test('accepts a canonical baseline through codec, binding, and hydration', async () => {
     const fixture = await makeFixture();
     expect(admit(fixture).currentHeight).toBe(1);
+  });
+
+  test('accepts the signed 24-hour user clock after authoritative serialization', async () => {
+    const fixture = await makeFixture();
+    fixture.doc.state.disputeConfig = {
+      leftResponseSeconds: 24 * 60 * 60,
+      rightResponseSeconds: 60 * 60,
+    };
+    expect(admit(fixture).state.disputeConfig).toEqual({
+      leftResponseSeconds: 86_400,
+      rightResponseSeconds: 3_600,
+    });
   });
 
   for (const mutation of mutations) {

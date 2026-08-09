@@ -57,7 +57,7 @@ const installObservedDispute = (state: ReturnType<typeof makeState>): string => 
   const proof = buildAccountProofBody(account, transformerAddress);
   storeDisputeArgumentSnapshot(
     account,
-    captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+    captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
   );
   account.disputeProofBodiesByHash = { [proof.proofBodyHash]: proof.proofBodyStruct };
   account.status = 'disputed';
@@ -68,7 +68,8 @@ const installObservedDispute = (state: ReturnType<typeof makeState>): string => 
     disputeTimeout: 2_000,
     jNonce: 1,
     starterInitialArguments: '0x',
-    starterIncrementedArguments: '0x',
+    starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     observedOnChain: true,
     finalizeQueued: false,
   };
@@ -90,7 +91,7 @@ describe('HTLC dispute secret publication liveness', () => {
     installTrustedJurisdiction(env);
     env.quietRuntimeLogs = true;
     const state = makeState(entityId, signerId, jurisdiction, counterpartyId);
-    state.timestamp = 3_000;
+    state.timestamp = 2_001_000;
     state.crontabState = initCrontab();
     for (const task of state.crontabState.tasks.values()) task.enabled = false;
     installObservedDispute(state);

@@ -71,7 +71,7 @@ test('hierarchical navigation projects runtime state into breadcrumb items', () 
         activeEntity: {
           summary: { entityId: entityA },
           accounts: {
-            items: [{ leftEntity: entityA, rightEntity: accountA }],
+            items: [{ state: { leftEntity: entityA, rightEntity: accountA } }],
             totalItems: 1,
           },
         },

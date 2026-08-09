@@ -93,11 +93,12 @@ library XlnHanko {
     address depository,
     bytes memory acctKey,
     uint256 nonce,
+    bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed
   ) internal view returns (bytes32) {
     return keccak256(HankoEncoding.encodeDisputeProof(
-      block.chainid, depository, acctKey, nonce, proofbodyHash, watchSeed
+      block.chainid, depository, acctKey, nonce, proposerIsLeft, proofbodyHash, watchSeed
     ));
   }
 
@@ -133,10 +134,11 @@ library XlnHanko {
     batch.collateralToReserve = new CollateralToReserve[](0);
     batch.settlements = new Settlement[](0);
     batch.disputeStarts = new InitialDisputeProof[](0);
+    batch.counterDisputes = new CounterDisputeProof[](0);
     batch.disputeFinalizations = new FinalDisputeProof[](0);
     batch.externalTokenToReserve = new ExternalTokenToReserve[](0);
     batch.reserveToExternalToken = new ReserveToExternalToken[](0);
     batch.revealSecrets = new SecretReveal[](0);
-    batch.hashLadderReveals = new HashLadderReveal[](0);
+    batch.hashLadderRegistrations = new HashLadderRegistration[](0);
   }
 }

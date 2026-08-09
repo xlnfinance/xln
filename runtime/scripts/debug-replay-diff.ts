@@ -16,6 +16,7 @@ import { serializeTaggedJson } from '../protocol/serialization';
 import type { BrowserVMState } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import { accountInputProposal } from '../account/consensus/flush';
 
 type RuntimeCheckpointSnapshot = {
@@ -69,7 +70,6 @@ const readJReplicaEntries = (value: unknown): Array<[string, JReplica]> =>
   readReplicaEntries<Partial<JReplica>>(value).map(([key, replica]) => {
     const contracts = asRecord(replica.contracts);
     const blockTimeMs = readNumber(replica.blockTimeMs);
-    const defaultDisputeDelayBlocks = readNumber(replica.defaultDisputeDelayBlocks);
     const chainId = readNumber(replica.chainId);
     const depositoryContract = readString(contracts['depository']);
     const entityProviderContract = readString(contracts['entityProvider']);
@@ -85,7 +85,6 @@ const readJReplicaEntries = (value: unknown): Array<[string, JReplica]> =>
         blockDelayMs: readNumber(replica.blockDelayMs) ?? 0,
         lastBlockTimestamp: readNumber(replica.lastBlockTimestamp) ?? 0,
         ...(blockTimeMs !== undefined ? { blockTimeMs } : {}),
-        ...(defaultDisputeDelayBlocks !== undefined ? { defaultDisputeDelayBlocks } : {}),
         ...(typeof replica.blockReady === 'boolean' ? { blockReady: replica.blockReady } : {}),
         ...(Array.isArray(replica.rpcs) ? { rpcs: replica.rpcs.filter((rpc): rpc is string => typeof rpc === 'string') } : {}),
         ...(chainId !== undefined ? { chainId } : {}),
@@ -296,6 +295,7 @@ async function main() {
             type: 'openAccount',
             data: {
               targetEntityId: entityB,
+              disputeConfig: defaultAccountDisputeConfigForParties(entityA, false, entityB, false),
               creditAmount: 1000n,
               tokenId: 1,
             },

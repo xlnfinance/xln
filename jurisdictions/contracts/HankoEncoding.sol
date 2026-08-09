@@ -38,6 +38,7 @@ library HankoEncoding {
     address contractAddress,
     bytes memory accountKey,
     uint256 nonce,
+    bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed
   ) internal pure returns (bytes memory) {
@@ -47,6 +48,7 @@ library HankoEncoding {
       contractAddress,
       accountKey,
       nonce,
+      proposerIsLeft,
       proofbodyHash,
       watchSeed
     );
@@ -95,7 +97,7 @@ library HankoEncoding {
     bytes32 counterentity,
     uint256 finalNonce,
     bytes32 finalProofbodyHash,
-    uint256 lastResortWindowBlocks,
+    uint256 lastResortWindowSeconds,
     uint256 appointmentSequence
   ) internal pure returns (bytes memory) {
     return abi.encode(
@@ -107,7 +109,7 @@ library HankoEncoding {
       counterentity,
       finalNonce,
       finalProofbodyHash,
-      lastResortWindowBlocks,
+      lastResortWindowSeconds,
       appointmentSequence
     );
   }

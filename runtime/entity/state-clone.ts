@@ -43,6 +43,9 @@ const cloneJBatchState = (state: JBatchState): JBatchState => {
       batch: cloneJBatch(state.sentBatch.batch),
     };
   }
+  if (state.recoveryBatches) {
+    cloned.recoveryBatches = state.recoveryBatches.map(cloneJBatch);
+  }
   if (state.entityNonce !== undefined) cloned.entityNonce = state.entityNonce;
   if (state.autoBroadcastDraft !== undefined) {
     cloned.autoBroadcastDraft = state.autoBroadcastDraft;

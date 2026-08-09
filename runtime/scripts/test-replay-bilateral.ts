@@ -11,6 +11,7 @@ import {
   closeRuntimeDb,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import { generateLazyEntityId } from '../entity/factory';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -68,7 +69,12 @@ async function main() {
     runtimeTxs: [],
     entityInputs: [{
       entityId: entityA, signerId: signer1,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityB, creditAmount: 1000n, tokenId: 1 } }],
+      entityTxs: [{ type: 'openAccount', data: {
+        targetEntityId: entityB,
+        disputeConfig: defaultAccountDisputeConfigForParties(entityA, false, entityB, false),
+        creditAmount: 1000n,
+        tokenId: 1,
+      } }],
     }],
   });
   await processRuntime(env, []);

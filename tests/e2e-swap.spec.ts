@@ -515,7 +515,14 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
           signerId,
           entityTxs: [{
             type: 'openAccount',
-            data: { targetEntityId: hubId, creditAmount: 10_000n * TOKEN_SCALE, tokenId: 1 },
+            data: {
+              targetEntityId: hubId,
+              disputeConfig: entityId.toLowerCase() < hubId.toLowerCase()
+                ? { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 }
+                : { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 },
+              creditAmount: 10_000n * TOKEN_SCALE,
+              tokenId: 1,
+            },
           }],
         }],
       });

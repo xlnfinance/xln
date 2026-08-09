@@ -12,7 +12,6 @@ import { createEmptyBatch } from '../jurisdiction/machine/batch';
 type JurisdictionConfig = {
   chainId?: number;
   rpc?: string;
-  defaultDisputeDelayBlocks?: number;
   entityProviderDeploymentBlock?: number;
   contracts?: Record<string, string>;
   tokens?: Record<string, { address?: string; tokenId?: number }>;
@@ -66,10 +65,6 @@ const isTron = jurisdictionId.startsWith('tron-');
 const keyBytes = ethers.getBytes(privateKey);
 const walletAddress = new ethers.Wallet(privateKey).address;
 const foundationEntityId = ethers.zeroPadValue('0x01', 32);
-const configuredDisputeDelayBlocks = jurisdiction.defaultDisputeDelayBlocks;
-if (!Number.isSafeInteger(configuredDisputeDelayBlocks) || configuredDisputeDelayBlocks! <= 0) {
-  throw new Error(`PUBLIC_SMOKE_DISPUTE_DELAY_INVALID:${String(configuredDisputeDelayBlocks)}`);
-}
 const accountAddress = contracts['account'];
 const depositoryAddress = contracts['depository'];
 const entityProviderAddress = contracts['entityProvider'];
@@ -80,7 +75,6 @@ const adapter = await createJAdapter({
   chainId,
   rpcUrl,
   privateKey,
-  defaultDisputeDelayBlocks: configuredDisputeDelayBlocks!,
   txWaitConfirms: 1,
   txWaitTimeoutMs: 180_000,
   ...(isTron ? { tronFullHost: rpcUrl.replace(/\/jsonrpc\/?$/i, '') } : {}),
@@ -121,12 +115,6 @@ try {
   if (!registered || registered.address.toLowerCase() !== tokenAddress.toLowerCase()) {
     throw new Error(`PUBLIC_SMOKE_USDT_REGISTRY_MISMATCH:${jurisdictionId}`);
   }
-  const configuredDelay = Number(configuredDisputeDelayBlocks);
-  const onchainDelay = Number(await adapter.depository.defaultDisputeDelay());
-  if (!Number.isSafeInteger(configuredDelay) || configuredDelay !== onchainDelay) {
-    throw new Error(`PUBLIC_SMOKE_DISPUTE_DELAY_MISMATCH:${configuredDelay}:${onchainDelay}`);
-  }
-
   const reserveBefore = await adapter.getReserves(foundationEntityId, 1);
   const tokenBefore = await adapter.getErc20Balance(tokenAddress, walletAddress);
   const depositEvents = await adapter.externalTokenToReserve(
@@ -203,7 +191,6 @@ try {
     withdrawalTransactionHash: withdrawal.txHash,
     depositAuthenticatedLogs,
     withdrawalAuthenticatedLogs,
-    defaultDisputeDelayBlocks: onchainDelay,
   }));
 } finally {
   await adapter.close();

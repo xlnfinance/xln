@@ -144,4 +144,9 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
       deleted: this.#deleted.size,
     };
   }
+
+  /** Keys whose visible value can no longer use a certified-base commitment. */
+  dirtyKeys(): ReadonlySet<K> {
+    return new Set([...this.#changes.keys(), ...this.#deleted]);
+  }
 }

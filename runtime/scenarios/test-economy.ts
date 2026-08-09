@@ -4,6 +4,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { EntityInput } from '../entity/types';
 import {
   createJurisdictionConfig,
@@ -156,6 +157,7 @@ export async function openAccount(
       type: 'openAccount',
       data: {
         targetEntityId: entityB.id,
+        disputeConfig: defaultAccountDisputeConfigForParties(entityA.id, false, entityB.id, false),
         rebalancePolicy: {
           r2cRequestSoftLimit: creditLimit,
           hardLimit: creditLimit,

@@ -25,7 +25,7 @@ export type WatchtowerCounterDisputeAuthorization = Readonly<{
   counterentity: string;
   finalNonce: number | bigint;
   finalProofbodyHash: string;
-  lastResortWindowBlocks: number | bigint;
+  lastResortWindowSeconds: number | bigint;
   appointmentSequence: number | bigint;
 }>;
 
@@ -39,7 +39,7 @@ export type EntityTransferAuthorization = Readonly<{
 
 export type ReleaseControlSharesAuthorization = Readonly<{
   entityNumber: number | bigint;
-  depositoryAddress: string;
+  recipientAddress: string;
   controlAmount: number | bigint;
   dividendAmount: number | bigint;
   purpose: string;
@@ -166,13 +166,14 @@ export const encodeDisputeProofHankoPayload = (
   domain: DepositoryHankoDomain,
   accountKey: string,
   nonce: number | bigint,
+  proposerIsLeft: boolean,
   proofbodyHash: string,
   watchSeed: string,
 ): string => {
   const [chainId, depositoryAddress] = requireDepositoryDomain(domain);
   return ABI_CODER.encode(
-    ['uint256', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-    [1, chainId, depositoryAddress, accountKey, requireUint(nonce, 'NONCE'), proofbodyHash, watchSeed],
+    ['uint256', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
+    [1, chainId, depositoryAddress, accountKey, requireUint(nonce, 'NONCE'), proposerIsLeft, proofbodyHash, watchSeed],
   );
 };
 
@@ -238,7 +239,7 @@ export const encodeWatchtowerCounterDisputeHankoPayload = (
       authorization.counterentity,
       requireUint(authorization.finalNonce, 'FINAL_NONCE'),
       authorization.finalProofbodyHash,
-      requireUint(authorization.lastResortWindowBlocks, 'LAST_RESORT_WINDOW'),
+      requireUint(authorization.lastResortWindowSeconds, 'LAST_RESORT_WINDOW'),
       requireUint(authorization.appointmentSequence, 'APPOINTMENT_SEQUENCE'),
     ],
   );
@@ -278,7 +279,7 @@ export const encodeReleaseControlSharesHankoPayload = (
       entityProviderAddress,
       requireUint(authorization.entityNumber, 'ENTITY_NUMBER'),
       boardEpoch,
-      requireAddress(authorization.depositoryAddress, 'RELEASE_DEPOSITORY_ADDRESS'),
+      requireAddress(authorization.recipientAddress, 'RELEASE_RECIPIENT_ADDRESS'),
       requireUint(authorization.controlAmount, 'CONTROL_AMOUNT'),
       requireUint(authorization.dividendAmount, 'DIVIDEND_AMOUNT'),
       ethers.keccak256(ethers.toUtf8Bytes(authorization.purpose)),

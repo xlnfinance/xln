@@ -92,6 +92,7 @@ describe('public discovery', () => {
       [TESTNET_HUB_ID, 'Testnet'],
       [TRON_HUB_ID, 'Tron'],
     ]);
+    expect(publicPayload.hubs.every((hub) => hub.roleSource === 'operator-config')).toBe(true);
     expect(debugEntries.map((entry) => [entry.entityId, jurisdictionNameOf(entry)]).sort()).toEqual([
       [TESTNET_HUB_ID, 'Testnet'],
       [TRON_HUB_ID, 'Tron'],

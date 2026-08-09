@@ -62,17 +62,36 @@ const assertRawEventSpecificFields = (event: JEventIngress): void => {
   if (event.name === 'DisputeStarted') {
     const timeout = Number(event.args['disputeTimeout']);
     const startTs = Number(event.args['disputeStartTimestamp']);
+    const leftResponseSeconds = Number(event.args['leftResponseSeconds']);
+    const rightResponseSeconds = Number(event.args['rightResponseSeconds']);
     if (!Number.isSafeInteger(timeout) || timeout <= 0) {
       throw new Error(
         `J_EVENT_DISPUTE_TIMEOUT_INVALID:block=${String(event.blockNumber)}` +
           `:timeout=${String(event.args['disputeTimeout'])}`,
       );
     }
-    if (!Number.isSafeInteger(startTs) || startTs <= 0 || timeout <= startTs) {
+    if (!Number.isSafeInteger(startTs) || startTs <= 0 || timeout < startTs) {
       throw new Error(
         `J_EVENT_DISPUTE_START_TIMESTAMP_INVALID:block=${String(event.blockNumber)}` +
           `:start=${String(event.args['disputeStartTimestamp'])}` +
           `:timeout=${String(event.args['disputeTimeout'])}`,
+      );
+    }
+    if (
+      !Number.isSafeInteger(leftResponseSeconds) ||
+      !Number.isSafeInteger(rightResponseSeconds) ||
+      leftResponseSeconds < 0 ||
+      rightResponseSeconds < 0 ||
+      leftResponseSeconds > 0xffff_ffff ||
+      rightResponseSeconds > 0xffff_ffff ||
+      timeout !== startTs + leftResponseSeconds + rightResponseSeconds
+    ) {
+      throw new Error(
+        `J_EVENT_DISPUTE_CLOCK_INVALID:block=${String(event.blockNumber)}` +
+          `:start=${String(event.args['disputeStartTimestamp'])}` +
+          `:timeout=${String(event.args['disputeTimeout'])}` +
+          `:left=${String(event.args['leftResponseSeconds'])}` +
+          `:right=${String(event.args['rightResponseSeconds'])}`,
       );
     }
   }

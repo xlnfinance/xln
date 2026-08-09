@@ -1,5 +1,5 @@
 import type { JurisdictionEventData } from './jurisdiction-events';
-import type { AccountPeerInput, AccountStateDomain, SettlementOp } from './account';
+import type { AccountPeerInput, AccountState, AccountStateDomain, SettlementOp } from './account';
 import type { CrossJurisdictionCloseProof, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './lending';
 import type { ProposalAction } from '../entity/types';
@@ -218,6 +218,8 @@ type EntityTxPayload =
       type: 'openAccount';
       data: {
         targetEntityId: string;
+        /** Bilaterally agreed seconds clock, ordered by canonical left/right entity id. */
+        disputeConfig: AccountState['disputeConfig'];
         accountDomain?: AccountStateDomain; // Materialized from committed Entity jurisdiction before signing
         watchSeed?: string;    // Generated at runtime ingress; fixed for this bilateral account
         creditAmount?: bigint;  // Optional: extend credit in same frame as add_delta
@@ -377,7 +379,7 @@ type EntityTxPayload =
         /** Exact committed route authorizing a target user to force its source-side dispute. */
         crossJurisdictionRouteId?: string;
         starterInitialArguments?: string;
-        starterIncrementedArguments?: string;
+        starterCounterArguments?: string;
         description?: string;
       };
     }
@@ -595,9 +597,10 @@ type EntityTxPayload =
       };
     }
   | {
-      /** Collective-only release to the exact Depository in trusted stack config. */
+      /** Collective-only release to an explicit quorum-selected custodian. */
       type: 'entityProviderReleaseControlShares';
       data: {
+        recipientAddress: string;
         controlAmount: bigint;
         dividendAmount: bigint;
         purpose: string;
@@ -686,7 +689,7 @@ type EntityTxPayload =
       data: {
         hubName?: string;                   // Stable mesh hub identity; display profile name can change
         matchingStrategy?: 'amount' | 'time' | 'fee'; // Default: 'amount'
-        policyVersion?: number;             // Fee-policy version (auto-incremented if omitted)
+        policyVersion?: number;             // Fee-policy version (auto-counter if omitted)
         routingFeePPM?: number;             // Default: 1 (0.0001%)
         baseFee?: bigint;                   // Default: 0n
         swapTakerFeeBps?: number;           // Default: 0 (testnet hubs may set 1)
@@ -747,6 +750,7 @@ type EntityTxPayload =
           takerReferrerBps: number;
         };
         referenceTokenId: number;
+        usdQuoteAuthorityEntityId: string;
         minTradeSize: bigint;
         supportedPairs: string[];
       };

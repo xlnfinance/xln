@@ -342,6 +342,8 @@ const signedHankoForTest = (
 
 const makeEmptyProofBody = () => ({
   watchSeed: `0x${'f1'.repeat(32)}`,
+  leftResponseSeconds: 10,
+  rightResponseSeconds: 10,
   offdeltas: [],
   tokenIds: [],
   transformers: [],
@@ -365,7 +367,7 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -412,6 +414,7 @@ const setSyntheticPendingAccountProposal = (
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
+    disputeConfig: structuredClone(account.state.disputeConfig),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
@@ -651,6 +654,7 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
         initialNonce: 7,
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
+        finalizationEvidenceHash: ethers.ZeroHash,
       },
     } satisfies JurisdictionEvent,
     finalProofbodyHash,
@@ -775,6 +779,22 @@ describe('audit fail-fast regressions', () => {
     const counterpartyId = `0x${'34'.repeat(32)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(signerId);
+    env.state.jReplicas.set('AuditTestnet', {
+      name: 'AuditTestnet',
+      blockNumber: 0n,
+      stateRoot: null,
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      chainId: 31337,
+      position: { x: 0, y: 0, z: 0 },
+      contracts: {
+        depository: `0x${'dd'.repeat(20)}`,
+        entityProvider: `0x${'ee'.repeat(20)}`,
+        account: `0x${'aa'.repeat(20)}`,
+        deltaTransformer: `0x${'bb'.repeat(20)}`,
+      },
+    });
     const entityIsLeft = isLeftEntity(entityId, counterpartyId);
     const account = makeProposalAccount(
       [],
@@ -792,7 +812,8 @@ describe('audit fail-fast regressions', () => {
       disputeStartTimestamp: 1700000000,
       jNonce: 7,
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+      starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       finalizeQueued: true,
     };
     state.accounts.set(counterpartyId, account);
@@ -812,6 +833,8 @@ describe('audit fail-fast regressions', () => {
         initialNonce: 7,
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
+        finalizationEvidenceHash: ethers.ZeroHash,
+        finalProofbody,
       },
     };
     const signed = prepareJEventInput(env, entityId, signerId, {

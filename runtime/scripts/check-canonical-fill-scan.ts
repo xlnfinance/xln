@@ -223,7 +223,9 @@ for (const [path, markers] of [
     'getCrossJurisdictionCommittedProofRatio',
   ]],
   ['runtime/entity/tx/handlers/cross-j-salvage.ts', [
-    'getCrossJurisdictionCommittedProofRatio',
+    'verifyHashLadderBinary',
+    'verifiedFillRatio !== claimedFillRatio',
+    'Off-chain fill progress is informational only',
   ]],
   ['runtime/__tests__/audit-failfast-regressions-part-6.test.ts', [
     'MAX_PENDING_CROSS_J_FILL_ACKS',

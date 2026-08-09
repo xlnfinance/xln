@@ -51,11 +51,7 @@ export const scenarios = {
     return await runDisputeLifecycle(env);
   },
   fullMechanics: async (env: RuntimeReplica): Promise<RuntimeReplica> => {
-    const { getScenario } = await import('./index');
-    const scenario = getScenario('ahb');
-    if (!scenario) throw new Error('FULL_MECHANICS_SCENARIO_MISSING');
-    await scenario.run(env);
-    return env;
+    return scenarios.ahb(env);
   },
 };
 
@@ -110,4 +106,4 @@ export {
   getScenario,
   getScenariosByTag,
   type ScenarioMetadata,
-} from './index';
+} from './catalog';

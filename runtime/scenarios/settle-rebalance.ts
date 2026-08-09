@@ -18,6 +18,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { SettlementDiff, SettlementOp } from '../types/account';
 import {
   getProcess, advanceScenarioTime, enableStrictScenario, converge, syncChain,
@@ -142,7 +143,12 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   for (const user of users) {
     await process(env, [{
       entityId: user.id, signerId: user.signer,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id, tokenId: USDC, creditAmount: 0n } }]
+      entityTxs: [{ type: 'openAccount', data: {
+        targetEntityId: hub.id,
+        disputeConfig: defaultAccountDisputeConfigForParties(user.id, false, hub.id, true),
+        tokenId: USDC,
+        creditAmount: 0n,
+      } }]
     }]);
     await process(env);
   }
@@ -279,7 +285,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
   const aliceAccAfterSettle = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
   assert(!aliceAccAfterSettle?.state.settlementWorkspace, 'Workspace should be cleared after execute', env);
 
-  // Check nonce incremented
+  // Check nonce counter
   const aliceNonce1 = aliceAccAfterSettle?.state.jNonce || 0;
   assert(aliceNonce1 >= 1, `Alice nonce should be >= 1 after settlement, got ${aliceNonce1}`, env);
 

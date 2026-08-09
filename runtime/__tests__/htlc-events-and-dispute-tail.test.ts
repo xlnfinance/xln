@@ -34,7 +34,7 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       watchSeed: `0x${'f1'.repeat(32)}`,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
     },
     status: 'active',

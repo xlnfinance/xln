@@ -2,6 +2,7 @@ import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import { ethers } from 'ethers';
 import { addMessage } from '../../../frame-events';
 import {
   assertDisputeArgumentsWithinContractLimits,
@@ -28,10 +29,12 @@ export type StartEvidence = {
   counterpartyHanko: string;
   storedDisputeHash?: string;
   signedNonce: number;
+  proposerIsLeft: boolean;
   nonceSource: string;
   jNonce: number;
   starterInitialArguments: string;
-  starterIncrementedArguments: string;
+  starterCounterArguments: string;
+  starterCounterProofCommitment: string;
 };
 
 export const resolveStoredDisputeStartNonce = (
@@ -59,22 +62,41 @@ export const resolveStoredDisputeStartNonce = (
   return { signedNonce, nonceSource };
 };
 
-export const selectIncrementedDisputeSnapshots = (
+export const selectCounterDisputeSnapshots = (
   account: AccountReplica,
   starterSide: DisputeArgumentSide,
   signedNonce: number,
+  initialProposerIsLeft: boolean,
   counterpartyId: string,
 ) => {
-  const candidates = Object.values(account.disputeArgumentSnapshotsByHash ?? {})
-    .filter((snapshot) => snapshot.side === starterSide && snapshot.nonce > signedNonce)
-    .sort((left, right) => left.nonce - right.nonce);
-  if (candidates.length > 1) {
-    throw new Error(
-      `DISPUTE_START_IMPOSSIBLE_MULTIPLE_INCREMENTED_SNAPSHOTS:${counterpartyId}:` +
-      candidates.map((snapshot) => `${snapshot.nonce}:${snapshot.proofbodyHash}`).join(','),
+  const counterHash = account.currentDisputeProofBodyHash;
+  const counterNonce = account.currentDisputeProofNonce;
+  const counterProposerIsLeft = account.currentDisputeProofProposerIsLeft;
+  if (
+    !counterHash ||
+    counterNonce === undefined ||
+    typeof counterProposerIsLeft !== 'boolean'
+  ) return [];
+  const outranksInitial =
+    counterNonce > signedNonce ||
+    (
+      counterNonce === signedNonce &&
+      counterProposerIsLeft &&
+      !initialProposerIsLeft
     );
+  if (!outranksInitial) return [];
+  const snapshot = account.disputeArgumentSnapshotsByHash?.[counterHash];
+  if (!snapshot) {
+    throw new Error(`DISPUTE_START_COUNTER_ARGUMENT_SNAPSHOT_MISSING:${counterpartyId}:${counterHash}`);
   }
-  return candidates;
+  if (
+    snapshot.side !== starterSide ||
+    snapshot.nonce !== counterNonce ||
+    snapshot.proposerIsLeft !== counterProposerIsLeft
+  ) {
+    throw new Error(`DISPUTE_START_COUNTER_ARGUMENT_SNAPSHOT_MISMATCH:${counterpartyId}:${counterHash}`);
+  }
+  return [snapshot];
 };
 
 export const loadStartProof = (
@@ -82,7 +104,15 @@ export const loadStartProof = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
-): Omit<StartEvidence, 'signedNonce' | 'nonceSource' | 'jNonce' | 'starterInitialArguments' | 'starterIncrementedArguments'> | null => {
+): Omit<
+  StartEvidence,
+  | 'signedNonce'
+  | 'nonceSource'
+  | 'jNonce'
+  | 'starterInitialArguments'
+  | 'starterCounterArguments'
+  | 'starterCounterProofCommitment'
+> | null => {
   const counterpartyHanko = account.counterpartyDisputeProofHanko;
   if (!counterpartyHanko || counterpartyHanko === '0x' || counterpartyHanko.length <= 2) {
     addMessage(state, '❌ Missing counterparty dispute hanko - cannot start dispute');
@@ -96,6 +126,10 @@ export const loadStartProof = (
     sigBytes: Math.max(counterpartyHanko.length - 2, 0) / 2,
   });
   const proofBodyHash = account.counterpartyDisputeProofBodyHash;
+  const proposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
+  if (typeof proposerIsLeft !== 'boolean') {
+    throw new Error(`DISPUTE_START_PROPOSER_ROLE_MISSING:${counterpartyId}`);
+  }
   if (!proofBodyHash) {
     addMessage(
       state,
@@ -127,6 +161,7 @@ export const loadStartProof = (
     initialProofbody,
     proofBodyHash,
     counterpartyHanko,
+    proposerIsLeft,
     ...(account.counterpartyDisputeHash
       ? { storedDisputeHash: account.counterpartyDisputeHash }
       : {}),
@@ -179,7 +214,12 @@ export const buildStarterArguments = (
   signedNonce: number,
   overrideInitial: string | undefined,
   env: EntityRuntimeContext,
-): Pick<StartEvidence, 'starterInitialArguments' | 'starterIncrementedArguments'> => {
+): Pick<
+  StartEvidence,
+  | 'starterInitialArguments'
+  | 'starterCounterArguments'
+  | 'starterCounterProofCommitment'
+> => {
   const starterIsLeft = account.state.leftEntity === state.entityId;
   const starterSide: DisputeArgumentSide = starterIsLeft ? 'left' : 'right';
   const initial = buildDisputeArgumentsForSnapshot(
@@ -195,41 +235,54 @@ export const buildStarterArguments = (
       : starterIsLeft
         ? initial.leftArguments
         : initial.rightArguments;
-  const candidates = selectIncrementedDisputeSnapshots(
+  const initialProposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
+  if (typeof initialProposerIsLeft !== 'boolean') {
+    throw new Error(`DISPUTE_START_PROPOSER_ROLE_MISSING:${counterpartyId}`);
+  }
+  const candidates = selectCounterDisputeSnapshots(
     account,
     starterSide,
     signedNonce,
+    initialProposerIsLeft,
     counterpartyId,
   );
   const warnings = [...initial.warnings];
-  let rawIncremented = '0x';
+  let rawCounter = '0x';
+  let starterCounterProofCommitment = ethers.ZeroHash;
   if (candidates.length === 1) {
     const candidate = candidates[0]!;
-    const incremented = buildDisputeArgumentsForSnapshot(
+    const counter = buildDisputeArgumentsForSnapshot(
       account,
       state,
       counterpartyId,
       candidate.proofbodyHash,
       { secretsSide: starterSide },
     );
-    rawIncremented = starterIsLeft
-      ? incremented.leftArguments
-      : incremented.rightArguments;
-    warnings.push(...incremented.warnings);
+    rawCounter = starterIsLeft
+      ? counter.leftArguments
+      : counter.rightArguments;
+    starterCounterProofCommitment = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'bool', 'bytes32'],
+        [candidate.nonce, candidate.proposerIsLeft, candidate.proofbodyHash],
+      ),
+    );
+    warnings.push(...counter.warnings);
   }
   const sanitized = sanitizeOptionalDisputeStarterArgumentPair(
     rawInitial,
-    rawIncremented,
+    rawCounter,
     'disputeStart.starterArguments',
   );
   warnings.push(...sanitized.warnings);
   reportOptionalArgumentWarnings(env, counterpartyId, warnings);
   assertDisputeArgumentsWithinContractLimits(
-    [sanitized.initial, sanitized.incremented],
+    [sanitized.initial, sanitized.counter],
     'disputeStart.starterArguments',
   );
   return {
     starterInitialArguments: sanitized.initial,
-    starterIncrementedArguments: sanitized.incremented,
+    starterCounterArguments: sanitized.counter,
+    starterCounterProofCommitment,
   };
 };

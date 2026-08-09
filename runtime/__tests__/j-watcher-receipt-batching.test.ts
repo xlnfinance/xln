@@ -43,9 +43,9 @@ describe('authenticated J watcher RPC batching', () => {
     expect(result.headers).toHaveLength(256);
     expect(result.logs).toEqual([]);
     expect(scalarCalls).toBe(0);
-    expect(batches).toHaveLength(2);
-    expect(batches[0]).toHaveLength(257);
-    expect(batches[1]).toHaveLength(257);
+    expect(batches.length).toBe(6);
+    expect(batches.every((batch) => batch.length <= 128)).toBe(true);
+    expect(batches.reduce((total, batch) => total + batch.length, 0)).toBe(514);
     expect(batches.every((batch) => batch.every((call) => call.method === 'eth_getBlockByNumber'))).toBe(true);
   });
 });

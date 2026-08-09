@@ -263,6 +263,7 @@ import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../types/ju
 import type { EntityTx } from '../types/entity-tx';
 
 import { installCanonicalRegisteredBoardAuthority } from './helpers/registration-evidence';
+import { exactFillRatioToUint16 } from '../orderbook/swap-execution';
 
 import { ethers } from 'ethers';
 
@@ -343,6 +344,8 @@ const signedHankoForTest = (
 
 const makeEmptyProofBody = () => ({
   watchSeed: `0x${'f1'.repeat(32)}`,
+  leftResponseSeconds: 10,
+  rightResponseSeconds: 10,
   offdeltas: [],
   tokenIds: [],
   transformers: [],
@@ -366,7 +369,7 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -413,6 +416,7 @@ const setSyntheticPendingAccountProposal = (
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
+    disputeConfig: structuredClone(account.state.disputeConfig),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
@@ -452,6 +456,7 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
       mempool: [],
       blockDelayMs: 0,
       lastBlockTimestamp: 0,
+      watcherConfirmationDepth: 0,
       position: { x: 0, y: 0, z: 0 },
     });
   }
@@ -493,8 +498,10 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeReplica, state: 
   let replica = Array.from(env.state.jReplicas.values()).find(
     candidate =>
       candidate.chainId === jurisdiction.chainId &&
-      candidate.depositoryAddress?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
-      candidate.entityProviderAddress?.toLowerCase() === jurisdiction.entityProviderAddress.toLowerCase(),
+      (candidate.contracts?.depository?.toLowerCase()
+        || candidate.depositoryAddress?.toLowerCase()) === jurisdiction.depositoryAddress.toLowerCase() &&
+      (candidate.contracts?.entityProvider?.toLowerCase()
+        || candidate.entityProviderAddress?.toLowerCase()) === jurisdiction.entityProviderAddress.toLowerCase(),
   );
   if (!replica) {
     replica = createJReplica(env, jurisdiction.name, jurisdiction.depositoryAddress);
@@ -639,6 +646,7 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   }
   account.activeDispute = {
     startedByLeft: true,
+    initialProposerIsLeft: true,
     disputeTimeout: 1700000123,
         disputeStartTimestamp: 1700000000,
     initialProofbodyHash: finalProofbodyHash,
@@ -649,7 +657,11 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   return {
     account,
     counterpartyId,
-    env: createEmptyEnv(seed),
+    env: (() => {
+      const env = createEmptyEnv(seed);
+      attachSigningReplica(env, entityId, '1');
+      return env;
+    })(),
     event: {
       type: 'DisputeFinalized',
       data: {
@@ -658,6 +670,8 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
         initialNonce: '7',
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
+        finalizationEvidenceHash: ethers.ZeroHash,
+        finalProofbody,
       },
     } satisfies JurisdictionEvent,
     finalProofbodyHash,
@@ -665,7 +679,10 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
   };
 };
 
-const applyDisputeFinalizedFixture = async (fixture: ReturnType<typeof makeDisputeFinalizedFixture>) =>
+const applyDisputeFinalizedFixture = async (
+  fixture: ReturnType<typeof makeDisputeFinalizedFixture>,
+  evidence: DisputeFinalizationEvidence[] = [],
+) =>
   applyJEventRange(
     fixture.state,
     {
@@ -676,6 +693,12 @@ const applyDisputeFinalizedFixture = async (fixture: ReturnType<typeof makeDispu
       transactionHash: `0x${'88'.repeat(32)}`,
       event: fixture.event,
       jurisdictionRef: getJEventJurisdictionRef(fixture.state.config.jurisdiction),
+      ...(evidence.length > 0
+        ? {
+            disputeFinalizationEvidence: evidence,
+            disputeFinalizationEvidenceHash: canonicalDisputeFinalizationEvidenceHash(evidence),
+          }
+        : {}),
     },
     fixture.env,
   );
@@ -870,6 +893,8 @@ describe('audit fail-fast regressions', () => {
     const account = makeProposalAccount([], entityId, counterpartyId);
     const finalProofbody: ProofBodyStruct = {
       watchSeed: account.state.watchSeed,
+      leftResponseSeconds: account.state.disputeConfig.leftResponseSeconds,
+      rightResponseSeconds: account.state.disputeConfig.rightResponseSeconds,
       offdeltas: [50n],
       tokenIds: [1n],
       transformers: [],
@@ -892,6 +917,7 @@ describe('audit fail-fast regressions', () => {
     };
     account.activeDispute = {
       startedByLeft: true,
+      initialProposerIsLeft: true,
       disputeTimeout: 1700000123,
         disputeStartTimestamp: 1700000000,
       initialProofbodyHash: finalProofbodyHash,
@@ -905,11 +931,35 @@ describe('audit fail-fast regressions', () => {
     state.jBatchState = {
       batch: {
         ...createEmptyBatch(),
+        // Fill the editable draft to the 50-op contract limit. The sealed
+        // batch below still has two valid operations after finality scrubs its
+        // stale finalize; recovery must preserve both batches separately.
+        reserveToReserve: Array.from({ length: 16 }, (_, index) => ({
+          receivingEntity: `0x${'55'.repeat(31)}${index.toString(16).padStart(2, '0')}`,
+          tokenId: 1,
+          amount: 1n,
+        })),
+        revealSecrets: Array.from({ length: 32 }, (_, index) => ({
+          transformer: `0x${'66'.repeat(20)}`,
+          secret: `0x${index.toString(16).padStart(64, '0')}`,
+        })),
+        hashLadderRegistrations: [{
+          counterpartyEntity: counterpartyId,
+          targetRole: true,
+          fullHash: `0x${'01'.repeat(32)}`,
+          partialRoot: `0x${'02'.repeat(32)}`,
+          witness: {
+            fillRatio: 1,
+            fullSecret: `0x${'00'.repeat(32)}`,
+            reveals: Array(4).fill(`0x${'00'.repeat(32)}`) as [string, string, string, string],
+          },
+        }],
         disputeFinalizations: [
           {
             counterentity: counterpartyId,
             initialNonce: 7,
             finalNonce: 7,
+            proposerIsLeft: true,
             initialProofbodyHash: finalProofbodyHash,
             finalProofbody,
             starterArguments: '0x',
@@ -935,11 +985,23 @@ describe('audit fail-fast regressions', () => {
               amount: 25n,
             },
           ],
+          hashLadderRegistrations: [{
+            counterpartyEntity: counterpartyId,
+            targetRole: true,
+            fullHash: `0x${'01'.repeat(32)}`,
+            partialRoot: `0x${'02'.repeat(32)}`,
+            witness: {
+              fillRatio: 1,
+              fullSecret: `0x${'00'.repeat(32)}`,
+              reveals: Array(4).fill(`0x${'00'.repeat(32)}`) as [string, string, string, string],
+            },
+          }],
           disputeFinalizations: [
             {
               counterentity: counterpartyId,
               initialNonce: 7,
               finalNonce: 7,
+              proposerIsLeft: true,
               initialProofbodyHash: finalProofbodyHash,
               finalProofbody,
               starterArguments: '0x',
@@ -961,6 +1023,7 @@ describe('audit fail-fast regressions', () => {
     } as EntityState['jBatchState'];
 
     const env = createEmptyEnv('dispute-finalize-scrub-seed');
+    attachSigningReplica(env, entityId, '1');
     const disputeFinalizedEvent: JurisdictionEvent = {
       type: 'DisputeFinalized',
       data: {
@@ -969,6 +1032,8 @@ describe('audit fail-fast regressions', () => {
         initialNonce: 7,
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
+        finalizationEvidenceHash: ethers.ZeroHash,
+        finalProofbody,
       },
     };
     const disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [
@@ -979,10 +1044,13 @@ describe('audit fail-fast regressions', () => {
         finalNonce: '7',
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
+        proposerIsLeft: true,
         leftArguments: '0x',
         rightArguments: '0x',
+        startedByLeft: true,
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         sig: '0x',
       },
     ];
@@ -1015,15 +1083,24 @@ describe('audit fail-fast regressions', () => {
 
     expect(finalized.newState.accounts.get(counterpartyId)?.activeDispute).toBeUndefined();
     expect(finalized.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
-    expect(finalized.newState.jBatchState?.batch.reserveToReserve).toEqual([
+    // Registry publication is independent of dispute lifetime. Recovery keeps
+    // one exact reveal while deduping the copy present in both draft and sent.
+    expect(finalized.newState.jBatchState?.batch.hashLadderRegistrations).toHaveLength(1);
+    expect(finalized.newState.jBatchState?.batch.reserveToReserve).toHaveLength(16);
+    expect(finalized.newState.jBatchState?.recoveryBatches?.[0]?.reserveToReserve).toEqual([
       {
         receivingEntity: `0x${'56'.repeat(32)}`,
         tokenId: 1,
         amount: 25n,
       },
     ]);
+    expect(finalized.newState.jBatchState?.recoveryBatches?.[0]?.hashLadderRegistrations).toHaveLength(1);
     expect(finalized.newState.jBatchState?.sentBatch).toBeUndefined();
     expect(finalized.newState.jBatchState?.status).toBe('accumulating');
+    expect(finalized.outputs.filter(output =>
+      output.entityId.toLowerCase() === entityId.toLowerCase()
+      && output.entityTxs?.some(tx => tx.type === 'j_broadcast'),
+    )).toHaveLength(1);
     expect(state.jBatchState?.sentBatch?.encodedBatch).toBe(sealedBatchBefore);
     expect(encodeJBatch(state.jBatchState!.sentBatch!.batch)).toBe(sealedBatchBefore);
     const finalizedDelta = finalized.newState.accounts.get(counterpartyId)?.state.deltas.get(1);
@@ -1041,21 +1118,26 @@ describe('audit fail-fast regressions', () => {
   test('DisputeFinalized rejects missing signed final body before mutating account state', async () => {
     const finalProofbody: ProofBodyStruct = {
       watchSeed: `0x${'f1'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
       offdeltas: [50n],
       tokenIds: [1n],
       transformers: [],
     };
     const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-missing', finalProofbody, false);
+    delete (fixture.event.data as { finalProofbody?: ProofBodyStruct }).finalProofbody;
     fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
     const stateBefore = safeStringify(fixture.state);
 
-    await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_EVENT_DISPUTE_FINAL_PROOFBODY_MISSING');
+    await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_EVENT_PROOFBODY');
     expect(safeStringify(fixture.state)).toBe(stateBefore);
   });
 
   test('DisputeFinalized rejects an oversized nonce before mutating account state', async () => {
     const finalProofbody: ProofBodyStruct = {
       watchSeed: `0x${'f1'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
       offdeltas: [50n],
       tokenIds: [1n],
       transformers: [],
@@ -1074,9 +1156,11 @@ describe('audit fail-fast regressions', () => {
     expect(safeStringify(fixture.state)).toBe(stateBefore);
   });
 
-  test('DisputeFinalized rejects a stored body whose hash does not match its key', async () => {
+  test('DisputeFinalized replaces stale local proof cache with authenticated calldata evidence', async () => {
     const finalProofbody: ProofBodyStruct = {
       watchSeed: `0x${'f1'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
       offdeltas: [50n],
       tokenIds: [1n],
       transformers: [],
@@ -1087,14 +1171,46 @@ describe('audit fail-fast regressions', () => {
       offdeltas: [51n],
     };
 
-    await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow(
-      'J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_MISMATCH',
-    );
+    await expect(applyDisputeFinalizedFixture(fixture)).resolves.toBeDefined();
+  });
+
+  test('selected equal-nonce LEFT finality adopts N instead of inventing N+1', async () => {
+    const finalProofbody: ProofBodyStruct = {
+      watchSeed: `0x${'f1'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
+      offdeltas: [50n],
+      tokenIds: [1n],
+      transformers: [],
+    };
+    const fixture = makeDisputeFinalizedFixture('selected-equal-nonce-left-finality', finalProofbody, false);
+    fixture.account.activeDispute!.initialProposerIsLeft = false;
+    fixture.account.activeDispute!.selectedCounterNonce = 7;
+    fixture.account.activeDispute!.selectedCounterProposerIsLeft = true;
+    fixture.account.activeDispute!.selectedCounterProofbodyHash = fixture.finalProofbodyHash;
+    const evidence: DisputeFinalizationEvidence[] = [{
+      sender: fixture.state.entityId,
+      counterentity: fixture.counterpartyId,
+      initialNonce: '7',
+      finalNonce: '7',
+      proposerIsLeft: true,
+      initialProofbodyHash: fixture.finalProofbodyHash,
+      finalProofbodyHash: fixture.finalProofbodyHash,
+      leftArguments: '0x',
+      rightArguments: '0x',
+      startedByLeft: true,
+      sig: '0x',
+    }];
+
+    const finalized = await applyDisputeFinalizedFixture(fixture, evidence);
+    expect(finalized.newState.accounts.get(fixture.counterpartyId)!.state.jNonce).toBe(7);
   });
 
   test('DisputeFinalized rejects malformed token/offdelta shape instead of clearing every delta', async () => {
     const malformedProofbody: ProofBodyStruct = {
       watchSeed: `0x${'f1'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
       offdeltas: [],
       tokenIds: [1n],
       transformers: [],
@@ -1105,9 +1221,11 @@ describe('audit fail-fast regressions', () => {
     await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_DISPUTE_PROOFBODY_LENGTH_MISMATCH');
   });
 
-  test('DisputeFinalized clears only exact proof tokens and retires the consumed evidence epoch', async () => {
+  test('DisputeFinalized clears proof tokens and retires omitted offchain fields', async () => {
     const finalProofbody: ProofBodyStruct = {
       watchSeed: `0x${'f1'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
       offdeltas: [50n],
       tokenIds: [1n],
       transformers: [],
@@ -1121,17 +1239,35 @@ describe('audit fail-fast regressions', () => {
         fixture.account,
         fixture.finalProofbodyHash,
         7,
+        true,
         finalProofbody,
       ),
-      [staleHash]: captureDisputeArgumentSnapshot(fixture.account, staleHash, 6, makeEmptyProofBody()),
+      [staleHash]: captureDisputeArgumentSnapshot(fixture.account, staleHash, 6, true, makeEmptyProofBody()),
     };
     fixture.account.state.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
-    fixture.account.state.deltas.set(2, { ...createDefaultDelta(2), collateral: 200n, offdelta: 75n });
+    fixture.account.state.deltas.set(2, {
+      ...createDefaultDelta(2),
+      collateral: 200n,
+      ondelta: -9n,
+      offdelta: 75n,
+      leftHold: 3n,
+      rightHold: 5n,
+      leftAllowance: 7n,
+      rightAllowance: 11n,
+    });
 
     const finalized = await applyDisputeFinalizedFixture(fixture);
     const account = finalized.newState.accounts.get(fixture.counterpartyId)!;
     expect(account.state.deltas.get(1)).toMatchObject({ collateral: 0n, ondelta: 0n, offdelta: 0n });
-    expect(account.state.deltas.get(2)).toMatchObject({ collateral: 200n, offdelta: 75n });
+    expect(account.state.deltas.get(2)).toMatchObject({
+      collateral: 200n,
+      ondelta: -9n,
+      offdelta: 0n,
+      leftHold: 0n,
+      rightHold: 0n,
+      leftAllowance: 0n,
+      rightAllowance: 0n,
+    });
     expect(account.disputeProofBodiesByHash).toBeUndefined();
     expect(account.disputeProofNoncesByHash).toBeUndefined();
     expect(account.disputeArgumentSnapshotsByHash).toBeUndefined();
@@ -1143,7 +1279,7 @@ describe('audit fail-fast regressions', () => {
     const nextHash = hashProofBodyStruct(nextProofbody);
     account.disputeProofBodiesByHash = { [nextHash]: nextProofbody };
     account.disputeProofNoncesByHash = { [nextHash]: 8 };
-    storeDisputeArgumentSnapshot(account, captureDisputeArgumentSnapshot(account, nextHash, 8, nextProofbody));
+    storeDisputeArgumentSnapshot(account, captureDisputeArgumentSnapshot(account, nextHash, 8, true, nextProofbody));
     const persisted = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(account)));
     expect(Object.keys(persisted.disputeProofBodiesByHash ?? {})).toEqual([nextHash]);
     expect(Object.keys(persisted.disputeProofNoncesByHash ?? {})).toEqual([nextHash]);
@@ -1153,6 +1289,8 @@ describe('audit fail-fast regressions', () => {
   test('DisputeFinalized invalidates a competing settlement workspace and its deferred retry', async () => {
     const finalProofbody: ProofBodyStruct = {
       watchSeed: `0x${'f2'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
       offdeltas: [50n],
       tokenIds: [1n],
       transformers: [],
@@ -1209,7 +1347,8 @@ describe('audit fail-fast regressions', () => {
         disputeStartTimestamp: 1700000000,
       jNonce: 0,
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       observedOnChain: false,
       finalizeQueued: false,
     };
@@ -1233,7 +1372,7 @@ describe('audit fail-fast regressions', () => {
       .toContain('blocked until DisputeStarted is observed on-chain');
   });
 
-  test('disputeFinalize uses signed counter-proof and incremented starter arguments when a newer proof is available', async () => {
+  test('disputeFinalize uses signed counter-proof and counter starter arguments when a newer proof is available', async () => {
     const starterId = `0x${'21'.repeat(32)}`;
     const finalizerId = `0x${'22'.repeat(32)}`;
     const depositoryAddress = hex20('1');
@@ -1255,14 +1394,14 @@ describe('audit fail-fast regressions', () => {
     const initialProof = buildAccountProofBody(account, '');
     storeDisputeArgumentSnapshot(
       account,
-      captureDisputeArgumentSnapshot(account, initialProof.proofBodyHash, 1, initialProof.proofBodyStruct),
+      captureDisputeArgumentSnapshot(account, initialProof.proofBodyHash, 1, true, initialProof.proofBodyStruct),
     );
 
     account.state.deltas.set(1, { ...createDefaultDelta(1), offdelta: 75n });
     const counterProof = buildAccountProofBody(account, '');
     storeDisputeArgumentSnapshot(
       account,
-      captureDisputeArgumentSnapshot(account, counterProof.proofBodyHash, 2, counterProof.proofBodyStruct),
+      captureDisputeArgumentSnapshot(account, counterProof.proofBodyHash, 2, true, counterProof.proofBodyStruct),
     );
     account.disputeProofBodiesByHash = {
       [initialProof.proofBodyHash]: initialProof.proofBodyStruct,
@@ -1270,22 +1409,31 @@ describe('audit fail-fast regressions', () => {
     };
     account.counterpartyDisputeProofBodyHash = counterProof.proofBodyHash;
     account.counterpartyDisputeProofNonce = 2;
+    account.counterpartyDisputeProofProposerIsLeft = true;
     account.counterpartyDisputeProofHanko = '0x1234';
     account.counterpartyDisputeHash = createDisputeProofHashWithNonce(
       account.state,
       counterProof.proofBodyHash,
       { chainId: 31337, depositoryAddress },
       2,
+      true,
     );
     account.activeDispute = {
       startedByLeft: true,
+      initialProposerIsLeft: true,
       initialProofbodyHash: initialProof.proofBodyHash,
       initialNonce: 1,
       disputeTimeout: 1700000100,
         disputeStartTimestamp: 1700000000,
       jNonce: 0,
       starterInitialArguments: '0x1111',
-      starterIncrementedArguments: '0x2222',
+      starterCounterArguments: '0x2222',
+      starterCounterProofCommitment: ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ['uint256', 'bool', 'bytes32'],
+          [2, true, counterProof.proofBodyHash],
+        ),
+      ),
       observedOnChain: true,
       finalizeQueued: false,
     };
@@ -1301,6 +1449,7 @@ describe('audit fail-fast regressions', () => {
       mempool: [],
       blockDelayMs: 0,
       lastBlockTimestamp: 0,
+      watcherConfirmationDepth: 0,
       position: { x: 0, y: 0, z: 0 },
       depositoryAddress,
       entityProviderAddress: hex20('2'),
@@ -1417,6 +1566,7 @@ describe('audit fail-fast regressions', () => {
       postProof.proofBodyHash,
       { chainId: 31337, depositoryAddress },
       2,
+      true,
     );
     account.counterpartyDisputeHash = `0x${'aa'.repeat(32)}`;
     account.state.settlementWorkspace = {
@@ -1466,10 +1616,10 @@ describe('audit fail-fast regressions', () => {
     expect(account.state.jNonce).toBe(1);
   });
 
-  test('disputeStart rejects unsupported incremented argument override instead of silently ignoring it', async () => {
+  test('disputeStart rejects unsupported counter argument override instead of silently ignoring it', async () => {
     const entityId = `0x${'31'.repeat(32)}`;
     const counterpartyId = `0x${'32'.repeat(32)}`;
-    const env = createEmptyEnv('dispute-start-incremented-override');
+    const env = createEmptyEnv('dispute-start-counter-override');
     const state = makeEntityState(entityId);
 
     await expect(
@@ -1479,7 +1629,8 @@ describe('audit fail-fast regressions', () => {
           type: 'disputeStart',
           data: {
             counterpartyEntityId: counterpartyId,
-            starterIncrementedArguments: '0x1234',
+            starterCounterArguments: '0x1234',
+            starterCounterProofCommitment: ethers.ZeroHash,
           },
         },
         env,
@@ -1551,6 +1702,7 @@ describe('audit fail-fast regressions', () => {
       mempool: [],
       blockDelayMs: 0,
       lastBlockTimestamp: 0,
+      watcherConfirmationDepth: 0,
       position: { x: 0, y: 0, z: 0 },
       depositoryAddress: hex20('1'),
       entityProviderAddress: hex20('2'),
@@ -1778,6 +1930,8 @@ describe('audit fail-fast regressions', () => {
       venueId: pairId,
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       targetHubSignerId: targetSigner,
       bookHubSignerId: targetSigner,
       source: {
@@ -1796,7 +1950,9 @@ describe('audit fail-fast regressions', () => {
       },
       status: 'partially_filled',
       fillSeq: 1,
-      cumulativeFillRatio: 100,
+      fillNumerator: 1n,
+      fillDenominator: 1_000n,
+      cumulativeFillRatio: exactFillRatioToUint16({ numerator: 1n, denominator: 1_000n }),
       filledSourceAmount: 1n,
       filledTargetAmount: 1n,
       createdAt: 1,
@@ -1856,7 +2012,9 @@ describe('audit fail-fast regressions', () => {
         incrementalTargetAmount: 0n,
         cumulativeSourceAmount: 1n,
         cumulativeTargetAmount: 1n,
-        cumulativeFillRatio: 100,
+        cumulativeFillRatio: exactFillRatioToUint16({ numerator: 1n, denominator: 1_000n }),
+        fillNumerator: 1n,
+        fillDenominator: 1_000n,
         cancelRemainder: true,
       },
     };
@@ -1887,6 +2045,8 @@ describe('audit fail-fast regressions', () => {
     env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const lot = SWAP_LOT_SCALE;
+    const wethAmount = 30n * 10n ** 18n;
+    const usdcAmount = 75_000n * 10n ** 6n;
     const sourceHubIdentity = registerLazySigner('cross-book-owner-fill-notice', '1');
     const bookOwnerIdentity = registerLazySigner('cross-book-owner-fill-notice', '2');
     const sourceHub = sourceHubIdentity.entityId;
@@ -1947,6 +2107,8 @@ describe('audit fail-fast regressions', () => {
           targetHubSignerId: targetHubId === bookOwnerHub ? bookOwnerSigner : 'target-hub-signer',
           targetSignerId: `${orderId}-target-signer`,
           bookHubSignerId: bookOwnerSigner,
+          sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+          targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
           source: {
             jurisdiction: sourceJurisdiction,
             entityId: sourceEntityId,
@@ -1971,32 +2133,39 @@ describe('audit fail-fast regressions', () => {
       return { ...prepared, status: 'resting', updatedAt: env.state.timestamp };
     };
 
-    const makerRoute = buildRoute(
-      'remote-maker-cross',
-      sourceJurisdiction,
-      remoteMaker,
-      sourceHub,
-      2,
-      30n * lot,
-      bookOwnerJurisdiction,
-      bookOwnerHub,
-      remoteTargetUser,
-      1,
-      75_000n * lot,
-    );
-    const takerRoute = buildRoute(
-      'local-taker-cross',
-      bookOwnerJurisdiction,
-      localTaker,
-      bookOwnerHub,
-      1,
-      75_000n * lot,
-      sourceJurisdiction,
-      bookOwnerHub,
-      localTargetUser,
-      2,
-      30n * lot,
-    );
+    const makerRoute = withCanonicalCrossJurisdictionRouteHash({
+      ...buildRoute(
+        'remote-maker-cross',
+        sourceJurisdiction,
+        remoteMaker,
+        sourceHub,
+        2,
+        wethAmount,
+        bookOwnerJurisdiction,
+        bookOwnerHub,
+        remoteTargetUser,
+        1,
+        usdcAmount,
+      ),
+      sourceHubSignerId: 'committed-source-hub-route',
+      routeHash: undefined,
+    });
+    const takerRoute = withCanonicalCrossJurisdictionRouteHash({
+      ...buildRoute(
+        'local-taker-cross',
+        bookOwnerJurisdiction,
+        localTaker,
+        bookOwnerHub,
+        1,
+        usdcAmount,
+        sourceJurisdiction,
+        sourceHub,
+        localTargetUser,
+        2,
+        wethAmount,
+      ),
+      routeHash: undefined,
+    });
 
     const sourceState = makeEntityState(sourceHub);
     sourceState.config = makeSingleSignerConfigFor(sourceHubSigner);
@@ -2004,6 +2173,12 @@ describe('audit fail-fast regressions', () => {
       ...sourceState.config,
       validators: [sourceHubSigner],
       shares: { [sourceHubSigner]: 1n },
+      jurisdiction: {
+        ...sourceState.config.jurisdiction,
+        name: 'Source book stack',
+        chainId: 31338,
+        depositoryAddress: `0x${'22'.repeat(20)}`,
+      },
     };
     sourceState.crossJurisdictionSwaps = new Map([[makerRoute.orderId, makerRoute]]);
     const makerSourceAccount = makeCanonicalAccount(sourceHub, remoteMaker);
@@ -2011,8 +2186,10 @@ describe('audit fail-fast regressions', () => {
       offerId: makerRoute.orderId,
       giveTokenId: makerRoute.source.tokenId,
       giveAmount: makerRoute.source.amount,
+      quantizedGive: makerRoute.source.amount,
       wantTokenId: makerRoute.target.tokenId,
       wantAmount: makerRoute.target.amount,
+      quantizedWant: makerRoute.target.amount,
       makerIsLeft: makerSourceAccount.state.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
       timeInForce: 0,
       createdHeight: 1,
@@ -2023,6 +2200,15 @@ describe('audit fail-fast regressions', () => {
 
     const bookOwnerState = makeEntityState(bookOwnerHub);
     bookOwnerState.config = makeSingleSignerConfigFor(bookOwnerSigner);
+    bookOwnerState.config = {
+      ...bookOwnerState.config,
+      jurisdiction: {
+        ...bookOwnerState.config.jurisdiction,
+        name: 'Book owner stack',
+        chainId: 31337,
+        depositoryAddress: `0x${'11'.repeat(20)}`,
+      },
+    };
     const makerAdmission = mergeCrossJurisdictionBookAdmission(bookOwnerState, makerRoute, env.state.timestamp);
     makerAdmission.status = 'admitted';
     makerAdmission.admittedAt = env.state.timestamp;
@@ -2048,6 +2234,30 @@ describe('audit fail-fast regressions', () => {
     );
     expect(makerMeta).not.toBeNull();
     let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10_000, stpPolicy: 1 });
+    // USD admission intentionally has no oracle/static fallback. Seed the
+    // canonical local price through a real crossed trade, then place the test
+    // liquidity; assigning lastTradePriceTicks directly would bypass the path
+    // this regression is supposed to exercise.
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'price-maker',
+      orderId: 'price-ask',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 25_000_000n,
+      qtyLots: 1n,
+    }).state;
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'price-taker',
+      orderId: 'price-buy',
+      side: 0,
+      tif: 1,
+      postOnly: false,
+      priceTicks: 25_000_000n,
+      qtyLots: 1n,
+    }).state;
     book = applyCommand(book, {
       kind: 0,
       ownerId: makerMeta!.makerId,
@@ -2059,7 +2269,9 @@ describe('audit fail-fast regressions', () => {
       qtyLots: makerMeta!.baseAmount / lot,
     }).state;
     bookOwnerState.orderbookExt = {
-      books: new Map([[pairId, book]]),
+      // Cross-j venue identity and local USD reference identity are separate
+      // keys even though this fixture uses the same executed WETH/USDC book.
+      books: new Map([[pairId, book], ['1/2', book]]),
       orderPairs: new Map([[`${remoteMaker}:${makerRoute.orderId}`, [pairId]]]),
       referrals: new Map(),
       hubProfile: {
@@ -2077,8 +2289,10 @@ describe('audit fail-fast regressions', () => {
       offerId: takerRoute.orderId,
       giveTokenId: takerRoute.source.tokenId,
       giveAmount: takerRoute.source.amount,
+      quantizedGive: takerRoute.source.amount,
       wantTokenId: takerRoute.target.tokenId,
       wantAmount: takerRoute.target.amount,
+      quantizedWant: takerRoute.target.amount,
       makerIsLeft: takerAccount.state.leftEntity.toLowerCase() === localTaker.toLowerCase(),
       timeInForce: 0,
       createdHeight: 2,
@@ -2095,8 +2309,10 @@ describe('audit fail-fast regressions', () => {
       offerId: makerRoute.orderId,
       giveTokenId: makerRoute.source.tokenId,
       giveAmount: makerRoute.source.amount,
+      quantizedGive: makerRoute.source.amount,
       wantTokenId: makerRoute.target.tokenId,
       wantAmount: makerRoute.target.amount,
+      quantizedWant: makerRoute.target.amount,
       makerIsLeft: collisionAccount.state.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
       timeInForce: 0,
       createdHeight: 1,
@@ -2135,7 +2351,6 @@ describe('audit fail-fast regressions', () => {
         data: { route: takerRoute, reason: 'atomic_account_pair_committed' },
       },
     ];
-    makerAdmission.route.sourceHubSignerId = 'committed-source-hub-route';
 
     const matched = await applyEntityFrame(
       env,
@@ -2211,6 +2426,8 @@ describe('audit fail-fast regressions', () => {
         targetHubSignerId: 'target-hub-signer',
         targetSignerId: 'target-user-signer',
         bookHubSignerId: 'source-hub-signer',
+        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         source: {
           jurisdiction: 'base',
           entityId: user,
@@ -2241,8 +2458,10 @@ describe('audit fail-fast regressions', () => {
       offerId: orderId,
       giveTokenId: restingRoute.source.tokenId,
       giveAmount: restingRoute.source.amount,
+      quantizedGive: restingRoute.source.amount,
       wantTokenId: restingRoute.target.tokenId,
       wantAmount: restingRoute.target.amount,
+      quantizedWant: restingRoute.target.amount,
       makerIsLeft: account.state.leftEntity.toLowerCase() === user.toLowerCase(),
       timeInForce: 0,
       createdHeight: 1,
@@ -2263,6 +2482,8 @@ describe('audit fail-fast regressions', () => {
         targetHubSignerId: 'target-hub-signer',
         targetSignerId: 'target-user-signer',
         bookHubSignerId: 'wrong-hub-signer',
+        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         source: {
           jurisdiction: 'base',
           entityId: user,
@@ -2302,6 +2523,8 @@ describe('audit fail-fast regressions', () => {
           cumulativeSourceAmount: restingRoute.source.amount,
           cumulativeTargetAmount: restingRoute.target.amount,
           cumulativeFillRatio: 65_535,
+          fillNumerator: 1n,
+          fillDenominator: 1n,
           pairId,
         },
       },

@@ -89,6 +89,12 @@ export const hydrateEntityStateFromStorage = (options: {
         'storage.entity.jBatchState.sentBatch.batch',
       );
     }
+    for (const [index, recoveryBatch] of (core.jBatchState.recoveryBatches ?? []).entries()) {
+      assertJBatchWithinContractLimits(
+        recoveryBatch,
+        `storage.entity.jBatchState.recoveryBatches[${index}]`,
+      );
+    }
   }
 
   return {

@@ -16,12 +16,14 @@ export type ValidatedCounterpartyDisputeSeal = {
   nonce: number;
   hash: string;
   proofBodyHash: string;
+  proposerIsLeft: boolean;
 };
 
 export type LocalDisputeDraft = {
   hash: string;
   nonce: number;
   proofBodyHash: string;
+  proposerIsLeft: boolean;
 };
 
 /**
@@ -40,6 +42,7 @@ export const replaceLocalDisputeDraft = (
   account.currentDisputeHash = draft.hash;
   account.currentDisputeProofBodyHash = draft.proofBodyHash;
   account.currentDisputeProofNonce = draft.nonce;
+  account.currentDisputeProofProposerIsLeft = draft.proposerIsLeft;
 };
 
 /**
@@ -82,6 +85,7 @@ export const validateCounterpartyDisputeSeal = async (
     seal.proofBodyHash,
     getAccountStateDomain(account.state),
     seal.proofNonce,
+    seal.proposerIsLeft,
   );
   if (String(seal.hash).toLowerCase() !== expectedHash.toLowerCase()) {
     throw new AccountPeerEvidenceError(
@@ -126,6 +130,7 @@ export const validateCounterpartyDisputeSeal = async (
     nonce: seal.proofNonce,
     hash: expectedHash,
     proofBodyHash: seal.proofBodyHash,
+    proposerIsLeft: seal.proposerIsLeft,
   };
 };
 
@@ -136,6 +141,7 @@ export const storeCounterpartyDisputeSeal = (
   if (!seal) return;
   account.counterpartyDisputeProofHanko = seal.hanko;
   account.counterpartyDisputeProofNonce = seal.nonce;
+  account.counterpartyDisputeProofProposerIsLeft = seal.proposerIsLeft;
   account.counterpartyDisputeHash = seal.hash;
   account.counterpartyDisputeProofBodyHash = seal.proofBodyHash;
   account.disputeProofNoncesByHash ??= {};

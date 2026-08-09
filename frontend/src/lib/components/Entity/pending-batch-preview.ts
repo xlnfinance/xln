@@ -52,15 +52,18 @@ type OpenDebtTotalsOptions = {
 
 export function countBatchOps(batch: JBatch | null | undefined): number {
   if (!batch) return 0;
-  return (batch.reserveToCollateral?.length || 0) +
+  return (batch.flashloans?.length || 0) +
+    (batch.reserveToCollateral?.length || 0) +
     (batch.collateralToReserve?.length || 0) +
     (batch.settlements?.length || 0) +
     (batch.reserveToReserve?.length || 0) +
     (batch.disputeStarts?.length || 0) +
+    (batch.counterDisputes?.length || 0) +
     (batch.disputeFinalizations?.length || 0) +
     (batch.externalTokenToReserve?.length || 0) +
     (batch.reserveToExternalToken?.length || 0) +
-    (batch.revealSecrets?.length || 0);
+    (batch.revealSecrets?.length || 0) +
+    (batch.hashLadderRegistrations?.length || 0);
 }
 
 export function buildPendingBatchState(jBatchState: {
@@ -265,6 +268,14 @@ export function buildPendingBatchPreview(
     });
   }
 
+  for (const [index, op] of (batch.counterDisputes || []).entries()) {
+    pushItem('neutral', {
+      key: `dcounter-${index}`,
+      title: 'Counter-proof lock',
+      subtitle: `Select N${op.counterNonce} against ${pendingBatchEntityLabel(String(op.counterentity || ''), options)}`,
+    });
+  }
+
   for (const [index, op] of (batch.disputeFinalizations || []).entries()) {
     pushItem('neutral', {
       key: `dfinal-${index}`,
@@ -278,6 +289,14 @@ export function buildPendingBatchPreview(
       key: `secret-${index}`,
       title: 'Reveal Secret',
       subtitle: pendingBatchShortHex(op.secret),
+    });
+  }
+
+  for (const [index, registration] of (batch.hashLadderRegistrations || []).entries()) {
+    pushItem('neutral', {
+      key: `hash-ladder-${index}`,
+      title: 'Hash-ladder reveal',
+      subtitle: `${registration.targetRole ? 'Target' : 'Source'} ${registration.witness.fillRatio}/65535 · Account peer ${pendingBatchShortHex(registration.counterpartyEntity)}`,
     });
   }
 

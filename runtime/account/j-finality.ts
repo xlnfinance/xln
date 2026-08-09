@@ -45,11 +45,27 @@ export const applyAccountDisputeStarted = (
     !Number.isSafeInteger(finality.disputeTimeout) ||
     !Number.isSafeInteger(finality.disputeStartTimestamp) ||
     finality.disputeStartTimestamp <= 0 ||
-    finality.disputeTimeout <= finality.disputeStartTimestamp
+    finality.disputeTimeout < finality.disputeStartTimestamp
   ) {
     throw new Error(
       `ACCOUNT_DISPUTE_TIMEOUT_INVALID:` +
       `${finality.disputeStartTimestamp}:${finality.disputeTimeout}`,
+    );
+  }
+  const accountClock = account.state.disputeConfig;
+  if (
+    finality.leftResponseSeconds !== accountClock.leftResponseSeconds ||
+    finality.rightResponseSeconds !== accountClock.rightResponseSeconds ||
+    finality.disputeTimeout !==
+      finality.disputeStartTimestamp +
+        finality.leftResponseSeconds +
+        finality.rightResponseSeconds
+  ) {
+    throw new Error(
+      `ACCOUNT_DISPUTE_CLOCK_MISMATCH:` +
+        `${finality.disputeStartTimestamp}:${finality.disputeTimeout}:` +
+        `${finality.leftResponseSeconds}:${finality.rightResponseSeconds}:` +
+        `${accountClock.leftResponseSeconds}:${accountClock.rightResponseSeconds}`,
     );
   }
 
@@ -65,11 +81,13 @@ export const applyAccountDisputeStarted = (
     startedByLeft,
     initialProofbodyHash: finality.initialProofbodyHash,
     initialNonce: finality.initialNonce,
+    initialProposerIsLeft: finality.initialProposerIsLeft,
     disputeTimeout: finality.disputeTimeout,
     disputeStartTimestamp: finality.disputeStartTimestamp,
     jNonce: finality.jNonce,
     starterInitialArguments: finality.starterInitialArguments,
-    starterIncrementedArguments: finality.starterIncrementedArguments,
+    starterCounterArguments: finality.starterCounterArguments,
+    starterCounterProofCommitment: finality.starterCounterProofCommitment,
     observedOnChain: true,
     observedBlockNumber: finality.observedBlockNumber,
     ...(finality.batchNonce !== undefined
@@ -84,23 +102,27 @@ export const applyAccountDisputeStarted = (
   account.state.jNonce = Math.max(account.state.jNonce, finality.jNonce);
 };
 
-const clearFinalizedDeltas = (
+const reconcileFinalizedDeltas = (
   account: AccountReplica,
   finalizedTokenIds: readonly number[],
 ): void => {
-  for (const tokenId of finalizedTokenIds) {
-    const delta = account.state.deltas.get(tokenId);
-    if (!delta) continue;
+  const finalized = new Set(finalizedTokenIds);
+  for (const [tokenId, delta] of account.state.deltas) {
+    const tokenWasFinalized = finalized.has(tokenId);
+    // Solidity touches collateral/ondelta only for tokenIds in the winning
+    // ProofBody. A valid older proof can omit a row added later, so preserve
+    // those on-chain balances while discarding every newer off-chain field.
     const changed =
-      delta.collateral !== 0n ||
-      delta.ondelta !== 0n ||
+      (tokenWasFinalized && (delta.collateral !== 0n || delta.ondelta !== 0n)) ||
       delta.offdelta !== 0n ||
       delta.leftHold !== 0n ||
       delta.rightHold !== 0n ||
       delta.leftAllowance !== 0n ||
       delta.rightAllowance !== 0n;
-    delta.collateral = 0n;
-    delta.ondelta = 0n;
+    if (tokenWasFinalized) {
+      delta.collateral = 0n;
+      delta.ondelta = 0n;
+    }
     delta.offdelta = 0n;
     delta.leftHold = 0n;
     delta.rightHold = 0n;
@@ -159,7 +181,7 @@ export const applyAccountDisputeFinality = (
   delete account.counterpartyDisputeProofHanko;
   delete account.counterpartyDisputeProofNonce;
   delete account.counterpartyDisputeProofBodyHash;
-  clearFinalizedDeltas(account, finalizedTokenIds);
+  reconcileFinalizedDeltas(account, finalizedTokenIds);
   clearFinalizedCollections(account);
 
   return {

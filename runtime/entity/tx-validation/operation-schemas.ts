@@ -15,7 +15,7 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
     },
   },
   openAccount: {
-    required: { targetEntityId: 'string' },
+    required: { targetEntityId: 'string', disputeConfig: 'record' },
     optional: {
       accountDomain: 'record', watchSeed: 'string', creditAmount: 'bigint',
       tokenId: 'integer', rebalancePolicy: 'record',
@@ -97,7 +97,7 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
   initOrderbookExt: {
     required: {
       name: 'string', spreadDistribution: 'record', referenceTokenId: 'integer',
-      minTradeSize: 'bigint', supportedPairs: 'stringArray',
+      usdQuoteAuthorityEntityId: 'string', minTradeSize: 'bigint', supportedPairs: 'stringArray',
     },
   },
   mintReserves: { required: { tokenId: 'integer', amount: 'bigint' } },

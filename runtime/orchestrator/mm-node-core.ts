@@ -13,6 +13,11 @@ import {
   isLiquidSwapToken,
 } from '../account/utils';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
+import {
+  canonicalAccountRoleEvidence,
+  defaultAccountDisputeConfigForRoleEvidence,
+  type AccountRoleEvidence,
+} from '../account/dispute-config';
 import { LIMITS, SWAP_CONSTANTS } from '../config/constants';
 import { readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';
@@ -115,6 +120,7 @@ export type HubProfile = {
   chainId?: number;
   depositoryAddress?: string;
   jurisdictionRef: string;
+  roleEvidence: AccountRoleEvidence;
 };
 
 export type MarketMakerOfferSpec = {
@@ -140,6 +146,7 @@ export type MarketMakerEntityContext = {
   chainId: number;
   depositoryAddress?: string;
   jurisdictionRef: string;
+  roleEvidence: AccountRoleEvidence;
 };
 
 export type MarketMakerTokenIdsByContext = ReadonlyMap<string, number[]>;
@@ -201,6 +208,8 @@ type MarketMakerCrossRouteHealth = {
     ready: boolean;
     depthReady: boolean;
     expectedOffers: number;
+    expectedBidOffers: number;
+    expectedAskOffers: number;
     sourceTokenIds: number[];
     targetTokenIds: number[];
   }>;
@@ -685,6 +694,13 @@ export const createMarketMakerEntityContext = async (
     await settleRuntimeFor(env, 35);
     await waitForReplicaReady(env, entityId);
   }
+  const committedReplica = getEntityReplicaById(env, entityId);
+  if (!committedReplica) throw new Error(`MM_ROLE_COMMITTED_REPLICA_MISSING:${entityId}`);
+  const roleEvidence: AccountRoleEvidence = {
+    entityId,
+    isHub: committedReplica.state.profile.isHub === true,
+    source: 'committed-profile',
+  };
   return {
     entityId,
     signerId,
@@ -695,6 +711,7 @@ export const createMarketMakerEntityContext = async (
       chainId: jurisdiction.chainId,
       depositoryAddress: jurisdiction.contracts.depository,
     }),
+    roleEvidence,
   };
 };
 
@@ -826,10 +843,18 @@ export const readVisibleHubProfiles = (env: RuntimeReplica, includeSiblings = fa
       if (required.has(roleName)) return true;
       return includeSiblings && roleName.length > 0;
     })
-    .map(profile => ({
+    .map(profile => {
+      const entityId = String(profile.entityId || '').toLowerCase();
+      const committed = getEntityReplicaById(env, entityId);
+      const roleEvidence = canonicalAccountRoleEvidence(
+        { entityId, isHub: true, source: 'verified-gossip-profile' },
+        entityId,
+        committed ? committed.state.profile.isHub === true : undefined,
+      );
+      return {
       name: String(profile.name || '').trim(),
       hubName: readHubRoleName(profile),
-      entityId: String(profile.entityId || '').toLowerCase(),
+      entityId,
       signerId: readHubSignerId(profile),
       runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
       jurisdictionName: String(profile.metadata?.jurisdiction?.name || '').trim(),
@@ -839,7 +864,8 @@ export const readVisibleHubProfiles = (env: RuntimeReplica, includeSiblings = fa
         chainId: Number(profile.metadata?.jurisdiction?.chainId || 0),
         depositoryAddress: String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim(),
       }),
-    }))
+      roleEvidence,
+    }})
     .filter(profile => profile.jurisdictionRef.length > 0)
     .sort(
       (left, right) =>
@@ -1119,6 +1145,15 @@ export const getMarketMakerOfferLevel = (spec: Pick<MarketMakerOfferSpec, 'offer
   return Number.isFinite(level) && level > 0 ? Math.floor(level) : Number.MAX_SAFE_INTEGER;
 };
 
+// Each cross-j offer installs one pull in both sibling Accounts. The MM quotes
+// both jurisdiction directions over the same bilateral Account, so each
+// directed route owns exactly half of the Account-wide pull budget. Giving
+// either direction the full 32 slots lets the reciprocal route propose pull 33
+// and fail the Runtime frame instead of producing symmetric executable depth.
+export const MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE = Math.floor(
+  LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS / 2,
+);
+
 const selectByteBudgetedCrossSpecs = (specs: readonly MarketMakerOfferSpec[]): MarketMakerOfferSpec[] => {
   const routes = specs
     .map(spec => spec.crossJurisdiction)
@@ -1148,10 +1183,10 @@ const selectByteBudgetedCrossSpecs = (specs: readonly MarketMakerOfferSpec[]): M
   take(route => route.source.tokenId === maxSource);
   take(route => route.target.tokenId === maxTarget);
   for (const spec of ordered) {
-    if (selected.length >= LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS) break;
+    if (selected.length >= MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE) break;
     if (!selected.includes(spec)) selected.push(spec);
   }
-  return selected.slice(0, LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS);
+  return selected.slice(0, MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE);
 };
 
 export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]): MarketMakerOfferSpec[] => {
@@ -1370,6 +1405,16 @@ const buildMarketMakerCrossRouteBase = (
     ...(targetHub.signerId ? { targetHubSignerId: targetHub.signerId } : {}),
     targetSignerId: targetContext.signerId,
     ...(bookHubSignerId ? { bookHubSignerId } : {}),
+    sourceDisputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+      sourceContext.roleEvidence,
+      sourceHub.roleEvidence,
+      new Map([[sourceContext.entityId, sourceContext.roleEvidence.isHub]]),
+    ),
+    targetDisputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+      targetContext.roleEvidence,
+      targetHub.roleEvidence,
+      new Map([[targetContext.entityId, targetContext.roleEvidence.isHub]]),
+    ),
     status: 'intent' as const,
     createdAt,
     updatedAt: createdAt,
@@ -1671,6 +1716,38 @@ export const countCrossPairCoverageGaps = (env: RuntimeReplica, specs: MarketMak
   return crossSpecPairIds(specs).filter(pairId => (finalizedByPair.get(pairId) || 0) === 0).length;
 };
 
+const requireCommittedMarketMakerRole = (
+  env: RuntimeReplica,
+  entityId: string,
+): AccountRoleEvidence => {
+  const replica = getEntityReplicaById(env, entityId);
+  if (!replica) throw new Error(`MM_ROLE_COMMITTED_REPLICA_MISSING:${entityId}`);
+  return {
+    entityId: entityId.toLowerCase(),
+    isHub: replica.state.profile.isHub === true,
+    source: 'committed-profile',
+  };
+};
+
+const requireVerifiedMarketMakerHubRole = (
+  env: RuntimeReplica,
+  entityId: string,
+): AccountRoleEvidence => {
+  const normalized = entityId.toLowerCase();
+  const profile = (env.gossip?.getProfiles?.() || []).find(
+    candidate => String(candidate.entityId || '').toLowerCase() === normalized,
+  );
+  if (!profile || typeof profile.metadata?.isHub !== 'boolean') {
+    throw new Error(`MM_HUB_ROLE_VERIFIED_PROFILE_MISSING:${normalized}`);
+  }
+  const committed = getEntityReplicaById(env, normalized);
+  return canonicalAccountRoleEvidence(
+    { entityId: normalized, isHub: profile.metadata.isHub, source: 'verified-gossip-profile' },
+    normalized,
+    committed ? committed.state.profile.isHub === true : undefined,
+  );
+};
+
 export const ensureMarketMakerHubConnectivity = async (
   env: RuntimeReplica,
   mmEntityId: string,
@@ -1680,6 +1757,7 @@ export const ensureMarketMakerHubConnectivity = async (
   budget: MarketMakerConnectivityBudget,
 ): Promise<boolean> => {
   const localCreditInputsByEntity = new Map<string, EntityInput>();
+  const marketMakerRole = requireCommittedMarketMakerRole(env, mmEntityId);
   const deriveMarketMakerAccountWatchSeed = (counterpartyId: string): string =>
     deriveAccountWatchSeed({
       runtimeSeed: env.runtimeSeed ?? '',
@@ -1699,6 +1777,7 @@ export const ensureMarketMakerHubConnectivity = async (
   };
 
   collectOpenAccountInputs: for (const hubEntityId of hubEntityIds) {
+    const hubRole = requireVerifiedMarketMakerHubRole(env, hubEntityId);
     const mmAccount = getAccountReplica(env, mmEntityId, hubEntityId);
     const hasPendingConsensus = Boolean(mmAccount?.pendingFrame) || Number(mmAccount?.mempool?.length || 0) > 0;
     if (
@@ -1713,6 +1792,11 @@ export const ensureMarketMakerHubConnectivity = async (
           type: 'openAccount' as const,
           data: {
             targetEntityId: hubEntityId,
+            disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+              marketMakerRole,
+              hubRole,
+              new Map([[marketMakerRole.entityId, marketMakerRole.isHub]]),
+            ),
             watchSeed: deriveMarketMakerAccountWatchSeed(hubEntityId),
             tokenId: openTokenId,
             creditAmount: getBootstrapCreditAmount(openTokenId),

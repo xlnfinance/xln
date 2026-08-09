@@ -6,6 +6,7 @@ import {
   buildClaimsHanko,
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
+  deployDepositoryStack,
   deployEntityProvider,
   deriveHardhatPrivateKey,
   emptyBatch,
@@ -28,7 +29,7 @@ const WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('board-rotation-watch-see
 const SETTLEMENT_DIFFS_ABI =
   'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
 const PROOF_BODY_ABI =
-  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
+  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
 const entityAddress = (entityNumber: bigint): string =>
   ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
@@ -41,6 +42,8 @@ const anchoredEntityMemberBoardHash = (anchor: string, memberEntityId: string): 
 
 const emptyProofBody = () => ({
   watchSeed: WATCH_SEED,
+  leftResponseSeconds: 2,
+  rightResponseSeconds: 3,
   offdeltas: [] as bigint[],
   tokenIds: [] as bigint[],
   transformers: [],
@@ -54,14 +57,16 @@ const disputeProofHash = async (
   accountKey: string,
   nonce: bigint,
   bodyHash: string,
+  proposerIsLeft = false,
 ): Promise<string> => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-  ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
+  ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
   [
     DISPUTE_PROOF,
     (await ethers.provider.getNetwork()).chainId,
     await depository.getAddress(),
     accountKey,
     nonce,
+    proposerIsLeft,
     bodyHash,
     WATCH_SEED,
   ],
@@ -319,14 +324,7 @@ describe('EntityProvider board rotation grace', function () {
     await mine(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
-    const AccountFactory = await ethers.getContractFactory('Account');
-    const account = await AccountFactory.deploy();
-    await account.waitForDeployment();
-    const DepositoryFactory = await ethers.getContractFactory('Depository', {
-      libraries: { Account: await account.getAddress() },
-    });
-    const depository = await DepositoryFactory.deploy(await provider.getAddress(), 5_760);
-    await depository.waitForDeployment();
+    const { depository } = await deployDepositoryStack(await provider.getAddress());
 
     const encodedBatch = encodeBatch(emptyBatch());
     const nonce = 1n;
@@ -366,14 +364,7 @@ describe('EntityProvider board rotation grace', function () {
     await mine(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
-    const AccountFactory = await ethers.getContractFactory('Account');
-    const account = await AccountFactory.deploy();
-    await account.waitForDeployment();
-    const DepositoryFactory = await ethers.getContractFactory('Depository', {
-      libraries: { Account: await account.getAddress() },
-    });
-    const depository = await DepositoryFactory.deploy(await provider.getAddress(), 5_760);
-    await depository.waitForDeployment();
+    const { depository } = await deployDepositoryStack(await provider.getAddress());
 
     const initiator = singleSignerLazyEntityId(outsider.address);
     const initiatorKey = deriveHardhatPrivateKey(4);
@@ -492,7 +483,8 @@ describe('EntityProvider board rotation grace', function () {
         watchSeed: WATCH_SEED,
         sig,
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     });
     const oldStart = await signOuterBatch(
@@ -529,7 +521,8 @@ describe('EntityProvider board rotation grace', function () {
           watchSeed: WATCH_SEED,
           sig: buildSingleSignerHanko(peer, historicalStartHash, peerKey),
           starterInitialArguments: '0x',
-          starterIncrementedArguments: '0x',
+          starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         }],
       }),
       1n,
@@ -588,32 +581,28 @@ describe('EntityProvider board rotation grace', function () {
     await mine(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
-    const AccountFactory = await ethers.getContractFactory('Account');
-    const account = await AccountFactory.deploy();
-    await account.waitForDeployment();
-    const DepositoryFactory = await ethers.getContractFactory('Depository', {
-      libraries: { Account: await account.getAddress() },
-    });
-    const disputeDelay = 5_760n;
-    const depository = await DepositoryFactory.deploy(await provider.getAddress(), disputeDelay);
-    await depository.waitForDeployment();
+    const { depository } = await deployDepositoryStack(await provider.getAddress());
+    const disputeDelay = 5n;
 
     const counterentity = singleSignerLazyEntityId(outsider.address);
     const accountKey = await depository.accountKey(entityId, counterentity);
     const initialNonce = 1n;
     const initialProofbody = emptyProofBody();
     const initialProofbodyHash = proofBodyHash(initialProofbody);
+    const initialProposerIsLeft = BigInt(entityId) < BigInt(counterentity);
     const chainId = (await ethers.provider.getNetwork()).chainId;
     const startHash = await disputeProofHash(
       depository,
       accountKey,
       initialNonce,
       initialProofbodyHash,
+      initialProposerIsLeft,
     );
     const startBatch = encodeBatch(emptyBatch({
       disputeStarts: [{
         counterentity: entityId,
         nonce: initialNonce,
+        proposerIsLeft: initialProposerIsLeft,
         proofbodyHash: initialProofbodyHash,
         initialProofbody,
         watchSeed: WATCH_SEED,
@@ -623,7 +612,8 @@ describe('EntityProvider board rotation grace', function () {
           deriveHardhatPrivateKey(2),
         ),
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     }));
     const startBatchHash = await computeDepositoryBatchHash(depository, startBatch, 1n);
@@ -636,14 +626,16 @@ describe('EntityProvider board rotation grace', function () {
     const finalNonce = 2n;
     const finalProofbody = emptyProofBody();
     const finalProofbodyHash = proofBodyHash(finalProofbody);
+    const finalProposerIsLeft = BigInt(counterentity) < BigInt(entityId);
     const finalHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
+      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
       [
         DISPUTE_PROOF,
         chainId,
         await depository.getAddress(),
         accountKey,
         finalNonce,
+        finalProposerIsLeft,
         finalProofbodyHash,
         WATCH_SEED,
       ],
@@ -652,6 +644,7 @@ describe('EntityProvider board rotation grace', function () {
       counterentity,
       initialNonce,
       finalNonce,
+      proposerIsLeft: finalProposerIsLeft,
       initialProofbodyHash,
       finalProofbody,
       starterArguments: '0x',
@@ -682,6 +675,17 @@ describe('EntityProvider board rotation grace', function () {
       buildSingleSignerHanko(entityId, towerHash, deriveHardhatPrivateKey(1)),
     )).to.be.revertedWithCustomError(depository, 'E4');
 
+    await expect(depository.connect(newSigner).watchtowerCounterDispute(
+      entityId,
+      finalization,
+      disputeDelay,
+      1n,
+      buildSingleSignerHanko(entityId, towerHash, deriveHardhatPrivateKey(2)),
+    )).to.emit(depository, 'CounterDisputeRegistered')
+      .withArgs(entityId, counterentity, finalNonce, finalProposerIsLeft, finalProofbodyHash);
+
+    const timeout = (await depository._accounts(accountKey)).disputeTimeout;
+    await time.increaseTo(Number(timeout));
     await expect(depository.connect(newSigner).watchtowerCounterDispute(
       entityId,
       finalization,

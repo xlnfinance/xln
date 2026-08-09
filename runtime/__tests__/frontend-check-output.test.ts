@@ -50,7 +50,16 @@ describe('frontend check output', () => {
       mkdirSync(join(fixtureFrontend, 'static', 'contracts'), { recursive: true });
       writeFileSync(join(fixtureFrontend, 'copy-static-files.js'), readFileSync(join(repoRoot, 'frontend/copy-static-files.js')));
       writeFileSync(join(fixtureFrontend, 'docs-catalog.js'), readFileSync(join(repoRoot, 'frontend/docs-catalog.js')));
-      for (const contract of ['Account', 'Depository', 'EntityProvider', 'HankoVerifier', 'DeltaTransformer', 'ERC20Mock']) {
+      for (const contract of [
+        'Account',
+        'Depository',
+        'DepositoryBounds',
+        'EntityProvider',
+        'HankoVerifier',
+        'HashLadderRegistry',
+        'DeltaTransformer',
+        'ERC20Mock',
+      ]) {
         writeFileSync(join(fixtureFrontend, 'static', 'contracts', `${contract}.json`), '{}\n');
       }
 

@@ -79,6 +79,7 @@ import { buildCollectiveEntityProposalTx } from '../entity/authorization';
 import { generateProposalId } from '../entity/tx/proposals';
 
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
+import { buildCertifiedEntityOutputHashes } from '../entity/consensus/output-certification';
 
 import {
   buildEntityFrameAuthority,
@@ -343,6 +344,8 @@ const signedHankoForTest = (
 
 const makeEmptyProofBody = () => ({
   watchSeed: `0x${'f1'.repeat(32)}`,
+  leftResponseSeconds: 10,
+  rightResponseSeconds: 10,
   offdeltas: [],
   tokenIds: [],
   transformers: [],
@@ -366,7 +369,7 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -413,6 +416,7 @@ const setSyntheticPendingAccountProposal = (
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
+    disputeConfig: structuredClone(account.state.disputeConfig),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
@@ -652,6 +656,7 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
         initialNonce: 7,
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
+        finalizationEvidenceHash: ethers.ZeroHash,
       },
     } satisfies JurisdictionEvent,
     finalProofbodyHash,
@@ -760,6 +765,8 @@ describe('audit fail-fast regressions', () => {
     env.state.timestamp = 42_500;
     const first = registerLazySigner(seed, '1');
     const second = registerLazySigner(seed, '2');
+    registerSignerKey(env, first.signerId, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, second.signerId, deriveSignerKeySync(seed, '2'));
     const entityId = generateLazyEntityId([first.signerId, second.signerId], 2n).toLowerCase();
     const config: ConsensusConfig = {
       ...makeSingleSignerConfigFor(first.signerId),
@@ -776,7 +783,7 @@ describe('audit fail-fast regressions', () => {
     const baseState = makeEntityState(entityId);
     baseState.config = config;
     const frameTxs = await buildQuorumAuthorizedFrameTxs(env, baseState, collectiveTxs);
-    const { newState: replayedState, collectedHashes = [] } = await applyEntityFrame(
+    const { newState: replayedState, collectedHashes = [], outputs, events } = await applyEntityFrame(
       env,
       baseState,
       frameTxs,
@@ -790,7 +797,15 @@ describe('audit fail-fast regressions', () => {
       timestamp: env.state.timestamp,
       leaderState,
     });
-    const localManifest = buildEntityHashesToSign(entityId, 1, frameHash, collectedHashes);
+    const localManifest = buildEntityHashesToSign(
+      entityId,
+      1,
+      frameHash,
+      [
+        ...collectedHashes,
+        ...buildCertifiedEntityOutputHashes(replayedState, env, 1, frameHash, outputs),
+      ],
+    );
     const stateRoot = computeCanonicalEntityConsensusStateHash({
       ...replayedState,
       entityId,
@@ -858,6 +873,7 @@ describe('audit fail-fast regressions', () => {
     expect(forgedProposalResult.outputs).toEqual([]);
     expect(forgedProposalResult.workingReplica.lockedFrame).toBeUndefined();
 
+    const proposerFrameSignature = signAccountFrame(env, first.signerId, frameHash);
     const honestProposal = {
       height: 1,
       parentFrameHash: 'genesis',
@@ -865,17 +881,32 @@ describe('audit fail-fast regressions', () => {
       authorityRoot,
       timestamp: env.state.timestamp,
       txs: frameTxs,
-      events: [],
+      events,
       hash: frameHash,
       leader: { proposerSignerId: first.signerId, view: 0 },
       hashesToSign: localManifest,
+      collectedSigs: new Map([[first.signerId, [proposerFrameSignature]]]),
     };
     const precommitResult = await applyEntityInput(env, validatorReplica, {
       entityId,
       signerId: second.signerId,
       proposedFrame: honestProposal,
     });
-    expect(precommitResult.workingReplica.lockedFrame?.hash).toBe(frameHash);
+    expect(precommitResult.outcome).toEqual({ kind: 'committed' });
+    expect(precommitResult.outputs.some(
+      output => output.hashPrecommitFrame?.frameHash === frameHash,
+    )).toBe(true);
+    const validatorPrecommitSignatures = localManifest.map(({ hash }) =>
+      signAccountFrame(env, second.signerId, hash),
+    );
+    const precommitReplica: EntityReplica = {
+      ...validatorReplica,
+      lockedFrame: {
+        ...honestProposal,
+        hashesToSign: localManifest,
+        collectedSigs: new Map([[second.signerId, validatorPrecommitSignatures]]),
+      },
+    };
 
     const signaturesBySigner = new Map([
       [first.signerId, localManifest.map(({ hash }) => signAccountFrame(env, first.signerId, hash))],
@@ -884,7 +915,7 @@ describe('audit fail-fast regressions', () => {
     const relabeledManifest = localManifest.map((entry, index) =>
       index === 0 ? { ...entry, type: 'accountFrame' as const, context: 'relabeled-after-precommit' } : entry,
     );
-    const mutatedCommitResult = await applyEntityInput(env, precommitResult.workingReplica, {
+    const mutatedCommitResult = await applyEntityInput(env, precommitReplica, {
       entityId,
       signerId: second.signerId,
       proposedFrame: {
@@ -900,9 +931,9 @@ describe('audit fail-fast regressions', () => {
     env.runtimeId = `0x${'71'.repeat(20)}`;
     env.infrastructure ??= {};
     env.infrastructure.entityRuntimeHints = new Map();
-    env.state.eReplicas.set(`${entityId}:${second.signerId}`, precommitResult.workingReplica);
+    env.state.eReplicas.set(`${entityId}:${second.signerId}`, precommitReplica);
     const remoteEntityId = `0x${'72'.repeat(32)}`;
-    const lockedMempoolSize = precommitResult.workingReplica.mempool.length;
+    const lockedMempoolSize = precommitReplica.mempool.length;
     const mergedResult = await applyMergedEntityInputs(
       env,
       [
@@ -1091,6 +1122,7 @@ describe('audit fail-fast regressions', () => {
         fromEntityId: left.entityId,
         toEntityId: right.entityId,
         domain: { ...accountMachine.state.domain },
+        disputeConfig: { ...accountMachine.state.disputeConfig },
         ack: {
           height: 10,
           frameHash: accountMachine.currentFrame.stateHash,
@@ -1127,12 +1159,14 @@ describe('audit fail-fast regressions', () => {
     accountMachine.state.deltas.set(1, createDefaultDelta(1));
     accountMachine.currentDisputeProofBodyHash = buildAccountProofBody(accountMachine, '').proofBodyHash;
     accountMachine.currentDisputeProofNonce = 1;
+    accountMachine.currentDisputeProofProposerIsLeft = true;
     accountMachine.state.jNonce = 0;
     accountMachine.currentDisputeHash = createDisputeProofHashWithNonce(
       accountMachine.state,
       accountMachine.currentDisputeProofBodyHash,
       { chainId: 31337, depositoryAddress: hex20('dd') },
       1,
+      true,
     );
     accountMachine.currentDisputeProofHanko = '0xcafe';
     const nonceBefore = accountMachine.proofHeader.nextProofNonce;
@@ -1146,6 +1180,7 @@ describe('audit fail-fast regressions', () => {
       hash: accountMachine.currentDisputeHash,
       proofBodyHash: accountMachine.currentDisputeProofBodyHash,
       proofNonce: 1,
+      proposerIsLeft: true,
     });
     expect(accountMachine.proofHeader.nextProofNonce).toBe(nonceBefore);
   });
@@ -1471,13 +1506,26 @@ describe('audit fail-fast regressions', () => {
       timestamp: replica.state.timestamp - ACCOUNT_PENDING_RESEND_AFTER_MS - 1,
       jHeight: 0,
       accountTxs: [{ type: 'add_delta' as const, data: { tokenId: 1 } }],
-      prevFrameHash: `0x${'ab'.repeat(32)}`,
+      prevFrameHash: '',
       accountStateRoot: `0x${'00'.repeat(32)}`,
       deltas: [],
-      stateHash: `0x${'cd'.repeat(32)}`,
+      stateHash: '',
       byLeft: true,
     };
     const accountMachine = makeProposalAccount([], replica.entityId, counterpartyId);
+    accountMachine.currentHeight = 10;
+    const committedFrame = {
+      ...accountMachine.currentFrame,
+      height: 10,
+      timestamp: pendingFrame.timestamp - 1,
+      prevFrameHash: `0x${'aa'.repeat(32)}`,
+      stateHash: '',
+      byLeft: true,
+    };
+    committedFrame.stateHash = await createFrameHash(committedFrame);
+    pendingFrame.prevFrameHash = committedFrame.stateHash;
+    pendingFrame.stateHash = await createFrameHash(pendingFrame);
+    accountMachine.currentFrame = committedFrame;
     accountMachine.pendingFrame = pendingFrame;
     accountMachine.pendingAccountInput = {
       kind: 'frame',
@@ -1601,6 +1649,7 @@ describe('audit fail-fast regressions', () => {
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
       domain: { ...accountMachine.state.domain },
+      disputeConfig: { ...accountMachine.state.disputeConfig },
       signerId: right.signerId,
       proposal: {
         frame: {
@@ -1749,6 +1798,7 @@ describe('audit fail-fast regressions', () => {
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: { ...accountMachine.state.domain },
+      disputeConfig: { ...accountMachine.state.disputeConfig },
       ack: {
         height: 10,
         frameHash: accountMachine.currentFrame.stateHash,
@@ -1764,6 +1814,7 @@ describe('audit fail-fast regressions', () => {
       toEntityId: left.entityId,
       domain: { ...accountMachine.state.domain },
       signerId: right.signerId,
+      disputeConfig: { ...accountMachine.state.disputeConfig },
       proposal: {
         frame: {
           ...accountMachine.currentFrame,
@@ -1803,6 +1854,7 @@ describe('audit fail-fast regressions', () => {
       toEntityId: left.entityId,
       domain: { ...accountMachine.state.domain },
       signerId: right.signerId,
+      disputeConfig: { ...accountMachine.state.disputeConfig },
       proposal: {
         frame: {
           ...accountMachine.currentFrame,
@@ -1840,6 +1892,7 @@ describe('audit fail-fast regressions', () => {
       toEntityId: left.entityId,
       domain: { ...accountMachine.state.domain },
       ack: { height: 9, frameHash: `0x${'09'.repeat(32)}`, frameHanko: `0x${'12'.repeat(65)}` },
+      disputeConfig: { ...accountMachine.state.disputeConfig },
     });
 
     expect(result.success).toBe(true);
@@ -1871,6 +1924,7 @@ describe('audit fail-fast regressions', () => {
       toEntityId: left.entityId,
       domain: { ...accountMachine.state.domain },
       ack: { height: 20, frameHash: `0x${'20'.repeat(32)}`, frameHanko: `0x${'12'.repeat(65)}` },
+      disputeConfig: { ...accountMachine.state.disputeConfig },
     });
 
     expect(result.success).toBe(true);
@@ -1932,6 +1986,7 @@ describe('audit fail-fast regressions', () => {
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: { ...receiverAccount.state.domain },
+      disputeConfig: { ...receiverAccount.state.disputeConfig },
       proposal: { frame: maliciousFrame, frameHanko: newHanko! },
     });
 
@@ -1993,6 +2048,7 @@ describe('audit fail-fast regressions', () => {
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: { ...receiverAccount.state.domain },
+      disputeConfig: { ...receiverAccount.state.disputeConfig },
       proposal: {
         frame,
         frameHanko: newHanko!,
@@ -2251,6 +2307,7 @@ describe('audit fail-fast regressions', () => {
         fromEntityId: left.entityId,
         toEntityId: right.entityId,
         domain: { ...receiver.state.domain },
+        disputeConfig: { ...receiver.state.disputeConfig },
         proposal: { frame, frameHanko: frameHanko! },
       },
       {

@@ -59,8 +59,6 @@ export interface JReplica {
   rpcs?: string[];
   // Canonical chain id. Active providers must match it before attachment.
   chainId?: number;
-  // Persisted local view of depository.defaultDisputeDelay for deterministic handlers.
-  defaultDisputeDelayBlocks?: number;
   /** Trusted watcher finality policy persisted with validator-local receipt evidence. */
   watcherConfirmationDepth?: number;
 

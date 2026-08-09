@@ -40,14 +40,26 @@ library Account {
     bytes32 indexed sender,
     bytes32 indexed counterentity,
     uint indexed nonce,
+    bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed,
     bytes starterInitialArguments,
-    bytes starterIncrementedArguments,
+    bytes starterCounterArguments,
+    bytes32 starterCounterProofCommitment,
     uint256 disputeTimeout,
-    uint256 disputeStartTimestamp
+    uint256 disputeStartTimestamp,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
+  );
+  event CounterDisputeRegistered(
+    bytes32 indexed sender,
+    bytes32 indexed counterentity,
+    uint256 indexed nonce,
+    bool proposerIsLeft,
+    bytes32 proofbodyHash
   );
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
+  event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   // This signature intentionally matches Depository's public event ABI. The
   // library executes by DELEGATECALL, so logs are emitted from Depository.
   event TransformerDeltaClamped(
@@ -59,18 +71,7 @@ library Account {
     int256 appliedValue
   );
 
-  // ========== ERRORS ==========
-  error E2(); // Unauthorized / StaleNonce
-  error E3(); // InsufficientBalance
-  error E4(); // InvalidSigner
-  error E5(); // NoActiveDispute / VirginAccount
-  error E6(); // DisputeInProgress
-  error E7(); // InvalidParty
-  error E8(); // LengthMismatch
-  error E9(); // HashMismatch
-  error E10(); // BatchTooLarge
-  error TransformerGasBudgetUnavailable();
-  error TransformerExecutionFailed();
+  // Shared errors (E2..E10, transformer) live in Types.sol.
 
   uint256 private constant MAX_SETTLEMENT_DIFFS = 32;
   uint256 private constant MAX_SETTLEMENT_FORGIVENESS_IDS = 32;
@@ -127,6 +128,80 @@ library Account {
     emit DebtCreated(debtor, creditor, tokenId, amount, index);
   }
 
+  /// @notice Enforce one debtor/token FIFO without exposing Depository internals.
+  /// @dev This is account-owned queue logic. The mappings remain in Depository
+  ///      storage and are reached through DELEGATECALL, preserving the layout.
+  function enforceDebts(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    mapping(bytes32 => mapping(uint256 => Debt[])) storage debts,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage debtIndex,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage debtOutstanding,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage activeDebtsByToken,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 maxIterations
+  ) external {
+    Debt[] storage queue = debts[entity][tokenId];
+    uint256 length = queue.length;
+    if (length == 0) {
+      debtIndex[entity][tokenId] = 0;
+      return;
+    }
+
+    uint256 cursor = debtIndex[entity][tokenId];
+    if (cursor >= length) cursor = 0;
+    uint256 available = reserves[entity][tokenId];
+    uint256 iterationCap = maxIterations == 0 ? type(uint256).max : maxIterations;
+    uint256 steps;
+
+    while (cursor < length && steps < iterationCap) {
+      steps++;
+      Debt storage debt = queue[cursor];
+      uint256 amount = debt.amount;
+      if (amount == 0) {
+        cursor++;
+        continue;
+      }
+      if (available == 0) break;
+
+      bytes32 creditor = debt.creditor;
+      uint256 payableAmount = available < amount ? available : amount;
+      _decreaseReserve(reserves, entity, tokenId, payableAmount);
+      _increaseReserve(reserves, creditor, tokenId, payableAmount);
+      uint256 outstanding = debtOutstanding[entity][tokenId];
+      if (outstanding < payableAmount) revert E3();
+      unchecked {
+        debtOutstanding[entity][tokenId] = outstanding - payableAmount;
+      }
+      available -= payableAmount;
+      amount -= payableAmount;
+
+      uint256 totalPaid = debt.amount - amount;
+      if (amount == 0) {
+        debt.amount = 0;
+        emit DebtEnforced(entity, creditor, tokenId, totalPaid, 0, cursor + 1);
+        uint256 active = activeDebtsByToken[entity][tokenId];
+        if (active > 0) {
+          unchecked {
+            activeDebtsByToken[entity][tokenId] = active - 1;
+          }
+        }
+        delete queue[cursor];
+        cursor++;
+      } else {
+        debt.amount = amount;
+        emit DebtEnforced(entity, creditor, tokenId, totalPaid, amount, cursor);
+      }
+    }
+
+    if (cursor >= length) {
+      debtIndex[entity][tokenId] = 0;
+      delete debts[entity][tokenId];
+    } else {
+      debtIndex[entity][tokenId] = cursor;
+    }
+  }
+
   function increaseReserve(
     mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
     bytes32 entity,
@@ -156,24 +231,83 @@ library Account {
     uint256 tokenId,
     uint256 amount
   ) external {
+    _decreaseReserve(reserves, entity, tokenId, amount);
+  }
+
+  /// @notice Exact int256 + int256 as a 257-bit sign/magnitude result.
+  /// @dev Account owns signed delta arithmetic; Depository only applies the
+  ///      resulting financial effects to collateral/reserve storage.
+  function _addSignedInt256(int256 left, int256 right)
+    private pure returns (bool negative, uint256 rawSum, bool transformerRepresentable)
+  {
+    int256 signedSum;
+    assembly ("memory-safe") {
+      rawSum := add(left, right)
+      signedSum := rawSum
+    }
+    bool leftNegative = left < 0;
+    bool rightNegative = right < 0;
+    bool sumNegative = signedSum < 0;
+    if (leftNegative == rightNegative && leftNegative != sumNegative) {
+      if (!leftNegative) return (false, rawSum, false);
+      if (rawSum == 0) revert E8();
+      return (true, rawSum, false);
+    }
+    if (!sumNegative) return (false, rawSum, true);
+    return (true, rawSum, signedSum != type(int256).min);
+  }
+
+  function _decreaseReserve(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 amount
+  ) private {
     if (amount == 0) return;
     uint256 current = reserves[entity][tokenId];
     if (current < amount) revert E3();
     reserves[entity][tokenId] = current - amount;
     emit ReserveUpdated(entity, tokenId, current - amount);
   }
+
+  /// @dev Same int256.max ceiling as `_increaseReserve`: collateral feeds RCPAN
+  ///      and off-chain signed mirrors, so it must stay representable as int256.
+  function _increaseCollateral(AccountCollateral storage col, uint256 amount) private {
+    if (amount == 0) return;
+    uint256 current = col.collateral;
+    uint256 limit = uint256(type(int256).max);
+    if (current > limit || amount > limit - current) revert E8();
+    col.collateral = current + amount;
+  }
+
+  /// @dev Canonical collateral ceiling shared with Depository's direct R2C path.
+  function increaseCollateral(AccountCollateral storage col, uint256 amount) external {
+    _increaseCollateral(col, amount);
+  }
+
+  function _decreaseCollateral(AccountCollateral storage col, uint256 amount) private {
+    if (amount == 0) return;
+    uint256 current = col.collateral;
+    if (current < amount) revert E3();
+    col.collateral = current - amount;
+  }
   uint256 private constant MAX_DISPUTE_PROOF_BODY_BYTES = 176 * 1024;
   uint256 private constant MAX_DISPUTE_STARTER_ARGUMENT_BYTES = 64 * 1024;
   uint256 private constant MAX_DISPUTE_PROOF_TOKENS = 128;
   uint256 private constant MAX_DISPUTE_TRANSFORMERS = 32;
+  // A bilateral pair may intentionally choose zero or a very long response
+  // policy. The sole technical guard rejects only an obviously accidental
+  // lock longer than one year; there is deliberately no minimum.
+  uint256 private constant MAX_DISPUTE_SECONDS = 365 days;
   // The account's left/right entity ids ride every transformer call: the stock
   // DeltaTransformer resolves cross-j pull ratios from the Depository reveal
   // registry keyed by the pull beneficiary, and a transformer must never derive
   // them from untrusted argument bytes.
   bytes4 private constant APPLY_TRANSFORMER_BATCH_SELECTOR =
-    bytes4(keccak256("applyBatch(int256[],uint256[],bytes,bytes,bytes,uint256,uint256,bytes32,bytes32,uint256,uint256)"));
+    bytes4(keccak256("applyBatch(int256[],uint256[],bytes,bytes,bytes,uint256,uint256,bytes32,bytes32,uint256,uint256,uint32,uint32)"));
   bytes4 private constant DECODE_TRANSFORMER_ARGUMENT_LIST_SELECTOR =
     bytes4(keccak256("decodeTransformerArgumentListStrict(bytes)"));
+  bytes4 private constant CONTAINS_PULL_SELECTOR = bytes4(keccak256("containsPull(bytes)"));
   uint256 private constant TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000;
   uint256 private constant TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT = 500_000;
   uint256 private constant INT256_SIGN_BIT = 1 << 255;
@@ -186,68 +320,74 @@ library Account {
 
   function encodeDisputeHash(
     uint nonce, bool startedByLeft,
+    bool initialProposerIsLeft,
     uint256 timeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds,
     bytes32 proofbodyHash,
     uint256 disputeStartTimestamp,
     bytes memory starterInitialArguments,
-    bytes memory starterIncrementedArguments
+    bytes memory starterCounterArguments,
+    bytes32 starterCounterProofCommitment
   ) external pure returns (bytes32) {
     bytes32 initialCommitment = _argumentCommitment(
       starterInitialArguments,
       startedByLeft,
       disputeStartTimestamp
     );
-    bytes32 incrementedCommitment = _argumentCommitment(
-      starterIncrementedArguments,
+    bytes32 counterCommitment = _argumentCommitment(
+      starterCounterArguments,
       startedByLeft,
       disputeStartTimestamp
     );
     return _encodeDisputeHash(
       nonce,
       startedByLeft,
+      initialProposerIsLeft,
       timeout,
+      leftResponseSeconds,
+      rightResponseSeconds,
       proofbodyHash,
       disputeStartTimestamp,
       initialCommitment,
-      incrementedCommitment
-    );
-  }
-
-  function encodeDisputeHashFromCommitments(
-    uint nonce, bool startedByLeft,
-    uint256 timeout,
-    bytes32 proofbodyHash,
-    uint256 disputeStartTimestamp,
-    bytes32 starterInitialArgumentsCommitment,
-    bytes32 starterIncrementedArgumentsCommitment
-  ) external pure returns (bytes32) {
-    return _encodeDisputeHash(
-      nonce,
-      startedByLeft,
-      timeout,
-      proofbodyHash,
-      disputeStartTimestamp,
-      starterInitialArgumentsCommitment,
-      starterIncrementedArgumentsCommitment
+      counterCommitment,
+      starterCounterProofCommitment,
+      0,
+      bytes32(0),
+      false
     );
   }
 
   function _encodeDisputeHash(
     uint nonce, bool startedByLeft,
+    bool initialProposerIsLeft,
     uint256 timeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds,
     bytes32 proofbodyHash,
     uint256 disputeStartTimestamp,
     bytes32 starterInitialArgumentsCommitment,
-    bytes32 starterIncrementedArgumentsCommitment
+    bytes32 starterCounterArgumentsCommitment,
+    bytes32 starterCounterProofCommitment,
+    uint256 counterNonce,
+    bytes32 counterProofbodyHash,
+    bool counterProposerIsLeft
   ) internal pure returns (bytes32) {
     return keccak256(abi.encodePacked(
       nonce,
       startedByLeft,
+      initialProposerIsLeft,
       timeout,
+      leftResponseSeconds,
+      rightResponseSeconds,
       proofbodyHash,
       disputeStartTimestamp,
       starterInitialArgumentsCommitment,
-      starterIncrementedArgumentsCommitment
+      starterCounterArgumentsCommitment,
+      starterCounterProofCommitment,
+      counterNonce,
+      counterProofbodyHash,
+      counterProposerIsLeft
     ));
   }
 
@@ -259,18 +399,37 @@ library Account {
     return keccak256(abi.encode(arguments, startedByLeft, disputeStartTimestamp));
   }
 
-  function requireStarterArgumentCommitment(
-    bytes memory starterArguments,
-    bool startedByLeft,
-    uint256 disputeStartTimestamp,
-    bytes32 expectedCommitment
-  ) external pure {
-    if (_argumentCommitment(starterArguments, startedByLeft, disputeStartTimestamp) != expectedCommitment) {
-      revert E9();
-    }
+  function _counterProofCommitment(
+    uint256 counterNonce,
+    bool counterProposerIsLeft,
+    bytes32 counterProofbodyHash
+  ) internal pure returns (bytes32) {
+    return keccak256(abi.encode(counterNonce, counterProposerIsLeft, counterProofbodyHash));
+  }
+
+  function _counterStarterArgumentsCommitment(
+    AccountInfo storage account,
+    uint256 counterNonce,
+    bool counterProposerIsLeft,
+    bytes32 counterProofbodyHash
+  ) private view returns (bytes32) {
+    // The starter can precommit positional evidence for exactly one known
+    // newer branch, but must never gain veto power over another valid newer
+    // bilateral proof. A different selected branch therefore receives empty
+    // starter-side evidence instead of mismatched positional arguments.
+    return _counterProofCommitment(
+      counterNonce,
+      counterProposerIsLeft,
+      counterProofbodyHash
+    ) == account.starterCounterProofCommitment
+      ? account.starterCounterArgumentsCommitment
+      : _argumentCommitment("", account.disputeStartedByLeft, account.disputeStartTimestamp);
   }
 
   function _validateProofBody(ProofBody memory proofbody) private pure returns (bytes32 bodyHash) {
+    if (uint256(proofbody.leftResponseSeconds) + uint256(proofbody.rightResponseSeconds) > MAX_DISPUTE_SECONDS) {
+      revert E10();
+    }
     if (proofbody.tokenIds.length != proofbody.offdeltas.length) revert E8();
     if (proofbody.tokenIds.length > MAX_DISPUTE_PROOF_TOKENS) revert E10();
     if (proofbody.transformers.length > MAX_DISPUTE_TRANSFORMERS) revert E10();
@@ -283,20 +442,24 @@ library Account {
   }
 
   function _validateInitialDisputeProof(InitialDisputeProof memory params) private pure {
-    if (_validateProofBody(params.initialProofbody) != params.proofbodyHash) revert E9();
-    if (params.initialProofbody.watchSeed != params.watchSeed) revert E9();
+    if (_validateProofBody(params.initialProofbody) != params.proofbodyHash) revert IDepositoryDelegateErrorAbi.E9();
+    if (params.initialProofbody.watchSeed != params.watchSeed) revert IDepositoryDelegateErrorAbi.E9();
     if (
-      params.starterInitialArguments.length + params.starterIncrementedArguments.length
+      params.starterInitialArguments.length + params.starterCounterArguments.length
         > MAX_DISPUTE_STARTER_ARGUMENT_BYTES
     ) revert E10();
   }
 
   function validateDisputeProofs(
     InitialDisputeProof[] memory disputeStarts,
+    CounterDisputeProof[] memory counterDisputes,
     FinalDisputeProof[] memory disputeFinalizations
   ) external pure {
     for (uint256 i = 0; i < disputeStarts.length; i++) {
       _validateInitialDisputeProof(disputeStarts[i]);
+    }
+    for (uint256 i = 0; i < counterDisputes.length; i++) {
+      _validateProofBody(counterDisputes[i].counterProofbody);
     }
     for (uint256 i = 0; i < disputeFinalizations.length; i++) {
       _validateProofBody(disputeFinalizations[i].finalProofbody);
@@ -361,6 +524,7 @@ library Account {
   function _encodeDisputeProofHankoPayload(
     bytes memory acct_key,
     uint nonce,
+    bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed
   ) private view returns (bytes memory) {
@@ -369,6 +533,7 @@ library Account {
       address(this),
       acct_key,
       nonce,
+      proposerIsLeft,
       proofbodyHash,
       watchSeed
     );
@@ -377,10 +542,17 @@ library Account {
   function _disputeProofHankoHash(
     bytes memory acct_key,
     uint nonce,
+    bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed
   ) private view returns (bytes32) {
-    return keccak256(_encodeDisputeProofHankoPayload(acct_key, nonce, proofbodyHash, watchSeed));
+    return keccak256(_encodeDisputeProofHankoPayload(
+      acct_key,
+      nonce,
+      proposerIsLeft,
+      proofbodyHash,
+      watchSeed
+    ));
   }
 
   // ========== HANKO VERIFICATION ==========
@@ -390,12 +562,19 @@ library Account {
     address entityProvider,
     bytes memory acct_key,
     uint nonce,
+    bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed,
     bytes memory hanko,
     bytes32 expectedEntity
   ) private view returns (bool success) {
-    bytes32 hash = _disputeProofHankoHash(acct_key, nonce, proofbodyHash, watchSeed);
+    bytes32 hash = _disputeProofHankoHash(
+      acct_key,
+      nonce,
+      proposerIsLeft,
+      proofbodyHash,
+      watchSeed
+    );
     // This verifies historical bilateral evidence. Previous-board signatures
     // must remain valid during the grace window or a board rotation could erase
     // an already signed account state before either side can enforce it.
@@ -414,7 +593,8 @@ library Account {
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
     FinalDisputeProof memory params,
-    address entityProvider
+    address entityProvider,
+    address canonicalDeltaTransformer
   ) external returns (
     bytes memory leftArguments,
     bytes memory rightArguments,
@@ -423,7 +603,9 @@ library Account {
     uint256 eventInitialNonce,
     bytes32 finalProofbodyHash,
     uint256 disputeStartTimestamp,
-    uint256 disputeTimeout
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
   ) {
     finalProofbodyHash = _validateProofBody(params.finalProofbody);
     if (
@@ -442,47 +624,115 @@ library Account {
     if (params.cooperative) revert E2();
     {
       bytes32 storedHash = account.disputeHash;
-      if (storedHash == bytes32(0)) revert E5();
+      if (storedHash == bytes32(0)) revert IDepositoryDelegateErrorAbi.E5();
       if (params.initialNonce != account.nonce) revert E2();
-      if (params.initialProofbodyHash != account.disputeInitialProofbodyHash) revert E9();
-      if (params.startedByLeft != account.disputeStartedByLeft) revert E9();
+      if (params.initialProofbodyHash != account.disputeInitialProofbodyHash) revert IDepositoryDelegateErrorAbi.E9();
+      if (params.startedByLeft != account.disputeStartedByLeft) revert IDepositoryDelegateErrorAbi.E9();
 
       bytes32 expectedHash = _encodeDisputeHash(
         account.nonce,
         account.disputeStartedByLeft,
+        account.disputeInitialProposerIsLeft,
         account.disputeTimeout,
+        account.leftResponseSeconds,
+        account.rightResponseSeconds,
         account.disputeInitialProofbodyHash,
         account.disputeStartTimestamp,
         account.starterInitialArgumentsCommitment,
-        account.starterIncrementedArgumentsCommitment
+        account.starterCounterArgumentsCommitment,
+        account.starterCounterProofCommitment,
+        account.disputeCounterNonce,
+        account.disputeCounterProofbodyHash,
+        account.disputeCounterProposerIsLeft
       );
-      if (storedHash != expectedHash) revert E9();
-
+      if (storedHash != expectedHash) revert IDepositoryDelegateErrorAbi.E9();
+      if (
+        params.finalProofbody.leftResponseSeconds != account.leftResponseSeconds ||
+        params.finalProofbody.rightResponseSeconds != account.rightResponseSeconds
+      ) revert IDepositoryDelegateErrorAbi.E9();
       bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
+      // Dynamic `otherArguments` belong exclusively to the non-starter. A
+      // starter timing out its own dispute may execute signed logic, but may
+      // never impersonate the peer's live fill/secret choices. A delegated
+      // watchtower acts under the non-starter Entity and remains authorized.
+      if (!senderIsCounterparty && params.otherArguments.length != 0) revert E2();
       bytes32 expectedStarterArgumentsCommitment;
-      if (params.sig.length > 0) {
+      bool hasSelectedCounterProof = account.disputeCounterNonce != 0;
+      if (hasSelectedCounterProof) {
+        // A registered response wins state selection before T. At T either
+        // party may execute it, but neither may race the obsolete initial body
+        // or substitute another newer body at the mining boundary.
+        if (block.timestamp < account.disputeTimeout) revert E2();
+        if (params.finalNonce != account.disputeCounterNonce) revert E2();
+        if (params.proposerIsLeft != account.disputeCounterProposerIsLeft) {
+          revert IDepositoryDelegateErrorAbi.E9();
+        }
+        if (finalProofbodyHash != account.disputeCounterProofbodyHash) {
+          revert IDepositoryDelegateErrorAbi.E9();
+        }
+        // Counter registration already verified the exact body identity under
+        // the starter's inner Hanko and the non-starter's fresh outer Hanko.
+        // Requiring that inner signature again against the *finalizer's*
+        // counterentity would let the registering non-starter disappear and
+        // lock the Account forever. After T either current-board outer caller
+        // may execute the stored identity; no second inner authority exists.
+        // `sig` is deliberately ignored here: one watchtower transaction can
+        // land on either side of T and must carry it for pre-T registration,
+        // while the post-T selected path has already authenticated it.
+        expectedStarterArgumentsCommitment = _counterStarterArgumentsCommitment(
+          account,
+          params.finalNonce,
+          params.proposerIsLeft,
+          finalProofbodyHash
+        );
+      } else if (params.sig.length > 0) {
         // The starter necessarily holds older counterparty signatures. Letting
         // the starter submit one here would turn any stale N+1 into an immediate
         // close and deny the counterparty its window to reveal N+2. The outer
         // batch signature therefore must belong to the non-starter.
         if (!senderIsCounterparty) revert E2();
-        if (params.finalNonce <= account.nonce) revert E2();
-        if (params.finalNonce <= params.initialNonce) revert E2();
+        if (params.finalNonce < account.nonce) revert E2();
+        if (
+          params.finalNonce == account.nonce &&
+          (!params.proposerIsLeft || account.disputeInitialProposerIsLeft)
+        ) revert E2();
         if (!verifyDisputeProofHanko(
           entityProvider,
           acct_key,
           params.finalNonce,
+          params.proposerIsLeft,
           finalProofbodyHash,
           params.finalProofbody.watchSeed,
           params.sig,
           params.counterentity
         )) revert E4();
-        expectedStarterArgumentsCommitment = account.starterIncrementedArgumentsCommitment;
+        // Pull-free mutual consent still closes immediately. A newer state
+        // containing Pulls must have been locked by processCounterDisputes
+        // before T; accepting it for the first time at T would recreate the
+        // exact miner-ordering race this lock exists to remove.
+        if (_proofBodyContainsPull(params.finalProofbody, canonicalDeltaTransformer)) revert E2();
+        expectedStarterArgumentsCommitment = _counterStarterArgumentsCommitment(
+          account,
+          params.finalNonce,
+          params.proposerIsLeft,
+          finalProofbodyHash
+        );
       } else {
         if (params.finalNonce != account.nonce) revert E2();
-        // Challenge window is jurisdiction seconds (absolute disputeTimeout).
-        if (!senderIsCounterparty && block.timestamp < account.disputeTimeout) revert E2();
-        if (finalProofbodyHash != account.disputeInitialProofbodyHash) revert E9();
+        if (params.proposerIsLeft != account.disputeInitialProposerIsLeft) {
+          revert IDepositoryDelegateErrorAbi.E9();
+        }
+        if (finalProofbodyHash != account.disputeInitialProofbodyHash) revert IDepositoryDelegateErrorAbi.E9();
+        // The starter has no fresh response from the non-starter and must wait.
+        // The non-starter may immediately accept the exact state the starter
+        // chose. Pull still forces both callers to wait for reveal publication.
+        if (
+          block.timestamp < account.disputeTimeout &&
+          (
+            !senderIsCounterparty ||
+            _proofBodyContainsPull(params.finalProofbody, canonicalDeltaTransformer)
+          )
+        ) revert E2();
         expectedStarterArgumentsCommitment = account.starterInitialArgumentsCommitment;
       }
 
@@ -492,7 +742,7 @@ library Account {
           account.disputeStartedByLeft,
           account.disputeStartTimestamp
         ) != expectedStarterArgumentsCommitment
-      ) revert E9();
+      ) revert IDepositoryDelegateErrorAbi.E9();
       starterArgumentsTimestamp = account.disputeStartTimestamp;
       eventInitialNonce = account.nonce;
     }
@@ -507,20 +757,55 @@ library Account {
       rightArgumentsTimestamp = starterArgumentsTimestamp;
     }
 
-    // Capture the dispute clock BEFORE clearing: applyPull needs startTs +
-    // absolute endTs for the T/2 reveal window and the full-T finalize barrier.
+    // Capture the dispute clock BEFORE clearing. applyPull validates both the
+    // lower bound (this dispute's start) and the signed role-specific upper
+    // bound; finalization uses the signed sum of the two response windows.
     disputeStartTimestamp = account.disputeStartTimestamp;
     disputeTimeout = account.disputeTimeout;
+    leftResponseSeconds = account.leftResponseSeconds;
+    rightResponseSeconds = account.rightResponseSeconds;
 
     // Publish no partially-cleared dispute state. Any later failure reverts the
     // entire processBatch transaction and restores these fields atomically.
     account.disputeHash = bytes32(0);
     account.disputeTimeout = 0;
     account.disputeStartTimestamp = 0;
+    account.leftResponseSeconds = 0;
+    account.rightResponseSeconds = 0;
     account.disputeInitialProofbodyHash = bytes32(0);
+    account.disputeInitialProposerIsLeft = false;
+    account.disputeCounterNonce = 0;
+    account.disputeCounterProofbodyHash = bytes32(0);
+    account.disputeCounterProposerIsLeft = false;
     account.starterInitialArgumentsCommitment = bytes32(0);
-    account.starterIncrementedArgumentsCommitment = bytes32(0);
+    account.starterCounterArgumentsCommitment = bytes32(0);
+    account.starterCounterProofCommitment = bytes32(0);
     account.disputeStartedByLeft = false;
+  }
+
+  /// @dev Pull is a protocol semantic of the immutable canonical
+  /// DeltaTransformer only. Arbitrary signed transformers do not gain an
+  /// implicit delay merely by using a similar private ABI. Conversely, a
+  /// malformed canonical batch cannot masquerade as pull-free: the strict
+  /// decoder failure is converted into the same fatal transformer error used
+  /// during execution, leaving the active dispute untouched.
+  function _proofBodyContainsPull(ProofBody memory proofbody, address canonicalDeltaTransformer)
+    private
+    view
+    returns (bool)
+  {
+    for (uint256 i = 0; i < proofbody.transformers.length; i++) {
+      TransformerClause memory clause = proofbody.transformers[i];
+      if (clause.transformerAddress != canonicalDeltaTransformer) continue;
+      (bool ok, bytes memory result) = canonicalDeltaTransformer.staticcall(
+        abi.encodeWithSelector(CONTAINS_PULL_SELECTOR, clause.encodedBatch)
+      );
+      if (!ok || result.length != 32) {
+        revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+      }
+      if (abi.decode(result, (bool))) return true;
+    }
+    return false;
   }
 
   /// @notice Execute one user-signed transformer clause.
@@ -539,11 +824,13 @@ library Account {
     bytes32 leftEntity,
     bytes32 rightEntity,
     uint256 disputeStartTimestamp,
-    uint256 disputeTimeout
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
   ) private view returns (int[] memory newDeltas) {
-    if (tc.transformerAddress.code.length == 0) revert TransformerExecutionFailed();
+    if (tc.transformerAddress.code.length == 0) revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
     if (tc.encodedBatch.length + leftArguments.length + rightArguments.length >> 18 != 0) {
-      revert TransformerExecutionFailed();
+      revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
     }
 
     bytes memory callData = abi.encodeWithSelector(
@@ -558,10 +845,12 @@ library Account {
       leftEntity,
       rightEntity,
       disputeStartTimestamp,
-      disputeTimeout
+      disputeTimeout,
+      leftResponseSeconds,
+      rightResponseSeconds
     );
     uint256 remainingGas = gasleft();
-    if (remainingGas <= TRANSFORMER_POST_CALL_GAS_RESERVE) revert TransformerGasBudgetUnavailable();
+    if (remainingGas <= TRANSFORMER_POST_CALL_GAS_RESERVE) revert IDepositoryDelegateErrorAbi.TransformerGasBudgetUnavailable();
     uint256 callGas = remainingGas - TRANSFORMER_POST_CALL_GAS_RESERVE;
 
     bool callOk;
@@ -595,11 +884,11 @@ library Account {
           }
         }
       }
-      revert TransformerExecutionFailed();
+      revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
     }
 
     uint256 expectedReturnSize = 0x40 + deltas.length * 0x20;
-    if (returnSize != expectedReturnSize) revert TransformerExecutionFailed();
+    if (returnSize != expectedReturnSize) revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
 
     bytes memory returnData = new bytes(returnSize);
     assembly ("memory-safe") {
@@ -611,7 +900,7 @@ library Account {
       arrayOffset := mload(add(returnData, 0x20))
       arrayLength := mload(add(returnData, 0x40))
     }
-    if (arrayOffset != 0x20 || arrayLength != deltas.length) revert TransformerExecutionFailed();
+    if (arrayOffset != 0x20 || arrayLength != deltas.length) revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
 
     newDeltas = new int[](arrayLength);
     for (uint256 i = 0; i < arrayLength; i++) {
@@ -624,7 +913,7 @@ library Account {
     return newDeltas;
   }
 
-  function applyTransformers(
+  function _applyTransformers(
     bytes32 accountKeyHash,
     ProofBody memory proofbody,
     int[] memory deltas,
@@ -635,20 +924,23 @@ library Account {
     uint256 rightArgumentsTimestamp,
     bytes32 leftEntity,
     bytes32 rightEntity,
+    address argumentDecoder,
     uint256 disputeStartTimestamp,
-    uint256 disputeTimeout
-  ) external returns (int[] memory) {
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
+  ) private returns (int[] memory) {
     if (proofbody.transformers.length == 0) return deltas;
     // The transformer ABI is int256[]. A wide signed-magnitude base delta has
     // no truthful ABI value; substituting zero or saturation would execute a
     // different contract than the parties signed.
-    if (!exactTransformerInputs) revert TransformerExecutionFailed();
-    bytes[] memory decodedLeft = _decodeTransformerArgumentList(leftArguments);
-    bytes[] memory decodedRight = _decodeTransformerArgumentList(rightArguments);
+    if (!exactTransformerInputs) revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
+    bytes[] memory decodedLeft = _decodeTransformerArgumentList(leftArguments, argumentDecoder);
+    bytes[] memory decodedRight = _decodeTransformerArgumentList(rightArguments, argumentDecoder);
     for (uint256 i = 0; i < proofbody.transformers.length; i++) {
       TransformerClause memory tc = proofbody.transformers[i];
       if (!_validTransformerAllowances(tc.allowances, deltas.length)) {
-        revert TransformerExecutionFailed();
+        revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
       }
 
       int[] memory newDeltas = _applyTransformer(
@@ -662,12 +954,14 @@ library Account {
         leftEntity,
         rightEntity,
         disputeStartTimestamp,
-        disputeTimeout
+        disputeTimeout,
+        leftResponseSeconds,
+        rightResponseSeconds
       );
 
       for (uint256 j = 0; j < deltas.length; j++) {
         if (newDeltas[j] != deltas[j] && !_hasTransformerAllowance(tc.allowances, j)) {
-          revert TransformerExecutionFailed();
+          revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
         }
       }
 
@@ -698,16 +992,83 @@ library Account {
     return deltas;
   }
 
-  function _decodeTransformerArgumentList(bytes memory encoded) private view returns (bytes[] memory) {
+  /// @notice Derive the exact bilateral settlement deltas before custody effects.
+  /// @dev Account owns signed delta arithmetic and execution of every transformer
+  ///      clause signed in ProofBody. Depository consumes only the resulting
+  ///      signed-magnitude values when moving collateral, reserves, and debt.
+  function prepareSettlementDeltas(
+    mapping(bytes => mapping(uint256 => AccountCollateral)) storage collaterals,
+    bytes memory acctKey,
+    ProofBody memory proofbody,
+    bytes memory leftArguments,
+    bytes memory rightArguments,
+    uint256 leftArgumentsTimestamp,
+    uint256 rightArgumentsTimestamp,
+    bytes32 leftEntity,
+    bytes32 rightEntity,
+    address argumentDecoder,
+    uint256 disputeStartTimestamp,
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
+  ) external returns (int[] memory deltas, uint256 negativeDeltaBitmap) {
+    uint256 tokenCount = proofbody.tokenIds.length;
+    deltas = new int[](tokenCount);
+    bool exactTransformerInputs = true;
+    for (uint256 i = 0; i < tokenCount; i++) {
+      uint256 tokenId = proofbody.tokenIds[i];
+      if (i > 0 && proofbody.tokenIds[i - 1] >= tokenId) revert E8();
+      (bool negative, uint256 rawDelta, bool representable) = _addSignedInt256(
+        collaterals[acctKey][tokenId].ondelta,
+        proofbody.offdeltas[i]
+      );
+      assembly ("memory-safe") {
+        mstore(add(add(deltas, 0x20), mul(i, 0x20)), rawDelta)
+      }
+      if (negative) negativeDeltaBitmap |= 1 << i;
+      if (!representable) exactTransformerInputs = false;
+    }
+
+    // Every signed clause must execute. Missing code, revert/OOG, malformed
+    // output, or invalid allowances revert the entire dispute finalization.
+    deltas = _applyTransformers(
+      keccak256(acctKey),
+      proofbody,
+      deltas,
+      exactTransformerInputs,
+      leftArguments,
+      rightArguments,
+      leftArgumentsTimestamp,
+      rightArgumentsTimestamp,
+      leftEntity,
+      rightEntity,
+      argumentDecoder,
+      disputeStartTimestamp,
+      disputeTimeout,
+      leftResponseSeconds,
+      rightResponseSeconds
+    );
+
+    // A transformer requires exact int256 inputs, so after successful execution
+    // every returned value can be classified directly by its sign.
+    if (exactTransformerInputs) {
+      negativeDeltaBitmap = 0;
+      for (uint256 i = 0; i < tokenCount; i++) {
+        if (deltas[i] < 0) negativeDeltaBitmap |= 1 << i;
+      }
+    }
+  }
+
+  function _decodeTransformerArgumentList(bytes memory encoded, address argumentDecoder) private view returns (bytes[] memory) {
     if (encoded.length == 0) return new bytes[](0);
     if (encoded.length >> 18 != 0) return new bytes[](0);
     // Malformed evidence is optional and decodes to an empty list. Insufficient
     // caller gas is different: it must never silently erase otherwise valid
     // evidence and thereby change the settlement result.
     if (gasleft() <= TRANSFORMER_POST_CALL_GAS_RESERVE + TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT) {
-      revert TransformerGasBudgetUnavailable();
+      revert IDepositoryDelegateErrorAbi.TransformerGasBudgetUnavailable();
     }
-    (bool ok, bytes memory result) = address(this).staticcall{
+    (bool ok, bytes memory result) = argumentDecoder.staticcall{
       gas: TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT
     }(abi.encodeWithSelector(DECODE_TRANSFORMER_ARGUMENT_LIST_SELECTOR, encoded));
     if (!ok) return new bytes[](0);
@@ -810,7 +1171,7 @@ library Account {
     bytes32 rightEntity = isLeft ? c2r.counterparty : entityId;
     bytes memory acct_key = _accountKey(leftEntity, rightEntity);
 
-    if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();
+    if (_accounts[acct_key].disputeHash != bytes32(0)) revert IDepositoryDelegateErrorAbi.E6();
 
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (c2r.nonce <= _accounts[acct_key].nonce) revert E2();
@@ -847,7 +1208,7 @@ library Account {
     if (col.collateral < amount) return BatchItemResult.InsufficientBalance;
 
     _increaseReserve(_reserves, entityId, tokenId, amount);
-    col.collateral -= amount;
+    _decreaseCollateral(col, amount);
     if (isLeft) {
       col.ondelta -= signedAmount;
     }
@@ -881,15 +1242,177 @@ library Account {
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
     InitialDisputeProof[] memory disputeStarts,
-    uint256 defaultDisputeDelay,
     address entityProvider
   ) external returns (bool completeSuccess) {
     completeSuccess = true;
     for (uint i = 0; i < disputeStarts.length; i++) {
-      if (!_disputeStart(_accounts, entityId, disputeStarts[i], defaultDisputeDelay, entityProvider)) {
+      if (!_disputeStart(_accounts, entityId, disputeStarts[i], entityProvider)) {
         completeSuccess = false;
       }
     }
+  }
+
+  /// @notice Lock the highest mutually signed counter-proof before T.
+  /// @dev This is deliberately separate from finalization. Pull settlement
+  /// cannot execute before its reveal window closes, but rejecting the newer
+  /// proof until T would let the starter race an obsolete proof at T. The
+  /// compact nonce+hash lock removes that race without extending the dispute.
+  function processCounterDisputes(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 entityId,
+    CounterDisputeProof[] memory counterDisputes,
+    address entityProvider
+  ) external {
+    for (uint256 i = 0; i < counterDisputes.length; i++) {
+      _registerCounterDispute(_accounts, entityId, counterDisputes[i], entityProvider);
+    }
+  }
+
+  /// @dev Compact tower adapter kept in the linked library so Depository stays
+  /// below EIP-170. Returns false at/after T, when Depository must execute the
+  /// already-selected proof instead of registering it.
+  function registerWatchtowerCounterDispute(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 watchtowerDomainSeparator,
+    address tower,
+    bytes32 entityId,
+    FinalDisputeProof memory params,
+    uint256 lastResortWindowSeconds,
+    uint256 appointmentSequence,
+    bytes memory ownerAuthorizationHanko,
+    address entityProvider
+  ) external returns (bool) {
+    bytes memory acctKey = _accountKey(entityId, params.counterentity);
+    AccountInfo storage account = _accounts[acctKey];
+    if (account.disputeHash == bytes32(0)) revert IDepositoryDelegateErrorAbi.E5();
+    if (params.cooperative || params.sig.length == 0) revert E2();
+    if (
+      lastResortWindowSeconds == 0 ||
+      lastResortWindowSeconds > account.disputeTimeout - account.disputeStartTimestamp ||
+      block.timestamp + lastResortWindowSeconds < account.disputeTimeout
+    ) revert E2();
+    bool ownerIsNonstarter = account.disputeStartedByLeft != (entityId < params.counterentity);
+    if (!ownerIsNonstarter) revert E2();
+    if (
+      params.finalNonce < account.nonce ||
+      (
+        params.finalNonce == account.nonce &&
+        (!params.proposerIsLeft || account.disputeInitialProposerIsLeft)
+      )
+    ) revert E2();
+    bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
+    bytes32 ownerHash = keccak256(HankoEncoding.encodeWatchtowerCounterDispute(
+      watchtowerDomainSeparator,
+      block.chainid,
+      address(this),
+      tower,
+      entityId,
+      params.counterentity,
+      params.finalNonce,
+      finalProofbodyHash,
+      lastResortWindowSeconds,
+      appointmentSequence
+    ));
+    (bytes32 recoveredEntity, bool valid) =
+      IEntityProvider(entityProvider).verifyCurrentHankoSignature(ownerAuthorizationHanko, ownerHash);
+    if (!valid || recoveredEntity != entityId) revert E4();
+    if (block.timestamp >= account.disputeTimeout) return false;
+    _registerCounterDispute(
+      _accounts,
+      entityId,
+      CounterDisputeProof({
+        counterentity: params.counterentity,
+        initialNonce: params.initialNonce,
+        initialProofbodyHash: params.initialProofbodyHash,
+        counterNonce: params.finalNonce,
+        proposerIsLeft: params.proposerIsLeft,
+        counterProofbody: params.finalProofbody,
+        sig: params.sig
+      }),
+      entityProvider
+    );
+    return true;
+  }
+
+  function _registerCounterDispute(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 entityId,
+    CounterDisputeProof memory params,
+    address entityProvider
+  ) private {
+    bytes32 bodyHash = _validateProofBody(params.counterProofbody);
+    bytes memory acctKey = _accountKey(entityId, params.counterentity);
+    AccountInfo storage account = _accounts[acctKey];
+    if (account.disputeHash == bytes32(0)) revert IDepositoryDelegateErrorAbi.E5();
+    if (block.timestamp >= account.disputeTimeout) revert E2();
+    if (params.initialNonce != account.nonce) revert E2();
+    if (params.initialProofbodyHash != account.disputeInitialProofbodyHash) {
+      revert IDepositoryDelegateErrorAbi.E9();
+    }
+    if (
+      params.counterProofbody.leftResponseSeconds != account.leftResponseSeconds ||
+      params.counterProofbody.rightResponseSeconds != account.rightResponseSeconds
+    ) revert IDepositoryDelegateErrorAbi.E9();
+    bool senderIsNonstarter = account.disputeStartedByLeft != (entityId < params.counterentity);
+    if (!senderIsNonstarter) revert E2();
+    if (params.counterNonce < account.nonce) revert E2();
+    if (params.counterNonce == account.nonce) {
+      // Equal nonce is not automatically stale: bilateral consensus resolves
+      // simultaneous branches by LEFT proposer priority. Only a LEFT proof may
+      // replace a RIGHT initial proof at the same nonce.
+      if (!params.proposerIsLeft || account.disputeInitialProposerIsLeft) revert E2();
+    }
+    if (!verifyDisputeProofHanko(
+      entityProvider,
+      acctKey,
+      params.counterNonce,
+      params.proposerIsLeft,
+      bodyHash,
+      params.counterProofbody.watchSeed,
+      params.sig,
+      params.counterentity
+    )) revert E4();
+
+    uint256 selectedNonce = account.disputeCounterNonce;
+    if (selectedNonce != 0) {
+      if (params.counterNonce < selectedNonce) revert E2();
+      if (params.counterNonce == selectedNonce) {
+        if (params.proposerIsLeft != account.disputeCounterProposerIsLeft) {
+          if (!params.proposerIsLeft) revert E2();
+          // LEFT replaces RIGHT at equal nonce; continue to the atomic update.
+        } else if (bodyHash != account.disputeCounterProofbodyHash) {
+          revert IDepositoryDelegateErrorAbi.E9();
+        } else {
+          return;
+        }
+      }
+    }
+    account.disputeCounterNonce = params.counterNonce;
+    account.disputeCounterProofbodyHash = bodyHash;
+    account.disputeCounterProposerIsLeft = params.proposerIsLeft;
+    account.disputeHash = _encodeDisputeHash(
+      account.nonce,
+      account.disputeStartedByLeft,
+      account.disputeInitialProposerIsLeft,
+      account.disputeTimeout,
+      account.leftResponseSeconds,
+      account.rightResponseSeconds,
+      account.disputeInitialProofbodyHash,
+      account.disputeStartTimestamp,
+      account.starterInitialArgumentsCommitment,
+      account.starterCounterArgumentsCommitment,
+      account.starterCounterProofCommitment,
+      params.counterNonce,
+      bodyHash,
+      params.proposerIsLeft
+    );
+    emit CounterDisputeRegistered(
+      entityId,
+      params.counterentity,
+      params.counterNonce,
+      params.proposerIsLeft,
+      bodyHash
+    );
   }
 
   // ========== SETTLEMENT (diffs only - debt handled by Depository) ==========
@@ -911,7 +1434,7 @@ library Account {
     bytes memory acct_key = _accountKey(leftEntity, rightEntity);
     bytes32 counterparty = (initiator == leftEntity) ? rightEntity : leftEntity;
 
-    if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();
+    if (_accounts[acct_key].disputeHash != bytes32(0)) revert IDepositoryDelegateErrorAbi.E6();
 
     if (s.diffs.length > MAX_SETTLEMENT_DIFFS) revert E10();
     if (s.forgiveDebtsInTokenIds.length > MAX_SETTLEMENT_FORGIVENESS_IDS) revert E10();
@@ -969,32 +1492,32 @@ library Account {
       ) return BatchItemResult.InsufficientBalance;
     }
 
-    // Apply diffs
+    // Apply diffs through the same int256.max-capped reserve helpers used by
+    // mint/deposit/R2R/C2R. Raw `+=` here used to let a settlement drain two
+    // buckets into one and push the target above int256.max (pragma 0.8 still
+    // panics at 2^256, but the off-chain signed model would already disagree).
+    // Helpers emit ReserveUpdated once — do not re-emit around these calls.
     for (uint j = 0; j < s.diffs.length; j++) {
       SettlementDiff memory diff = s.diffs[j];
       uint tokenId = diff.tokenId;
 
       if (diff.leftDiff < 0) {
-        _reserves[leftEntity][tokenId] -= uint(-diff.leftDiff);
-        emit ReserveUpdated(leftEntity, tokenId, _reserves[leftEntity][tokenId]);
+        _decreaseReserve(_reserves, leftEntity, tokenId, uint(-diff.leftDiff));
       } else if (diff.leftDiff > 0) {
-        _reserves[leftEntity][tokenId] += uint(diff.leftDiff);
-        emit ReserveUpdated(leftEntity, tokenId, _reserves[leftEntity][tokenId]);
+        _increaseReserve(_reserves, leftEntity, tokenId, uint(diff.leftDiff));
       }
 
       if (diff.rightDiff < 0) {
-        _reserves[rightEntity][tokenId] -= uint(-diff.rightDiff);
-        emit ReserveUpdated(rightEntity, tokenId, _reserves[rightEntity][tokenId]);
+        _decreaseReserve(_reserves, rightEntity, tokenId, uint(-diff.rightDiff));
       } else if (diff.rightDiff > 0) {
-        _reserves[rightEntity][tokenId] += uint(diff.rightDiff);
-        emit ReserveUpdated(rightEntity, tokenId, _reserves[rightEntity][tokenId]);
+        _increaseReserve(_reserves, rightEntity, tokenId, uint(diff.rightDiff));
       }
 
       AccountCollateral storage col = _collaterals[acct_key][tokenId];
       if (diff.collateralDiff < 0) {
-        col.collateral -= uint(-diff.collateralDiff);
+        _decreaseCollateral(col, uint(-diff.collateralDiff));
       } else if (diff.collateralDiff > 0) {
-        col.collateral += uint(diff.collateralDiff);
+        _increaseCollateral(col, uint(diff.collateralDiff));
       }
       col.ondelta += diff.ondeltaDiff;
     }
@@ -1005,17 +1528,21 @@ library Account {
     // Every successful nonce transition must be observable. A pure debt
     // forgiveness has no diffs, but it still invalidates old proofs and must
     // therefore publish AccountSettled with snapshots for the forgiven tokens.
+    // Compute forgiveness dedup once; the emission pass must reuse it so the
+    // AccountSettled payload stays byte-identical to the previous dual-scan.
     uint tokenCount = s.diffs.length;
+    bool[] memory alreadyIncluded = new bool[](s.forgiveDebtsInTokenIds.length);
     for (uint i = 0; i < s.forgiveDebtsInTokenIds.length; i++) {
       uint forgiveTokenId = s.forgiveDebtsInTokenIds[i];
-      bool alreadyIncluded = false;
+      bool included = false;
       for (uint j = 0; j < s.diffs.length; j++) {
-        if (s.diffs[j].tokenId == forgiveTokenId) alreadyIncluded = true;
+        if (s.diffs[j].tokenId == forgiveTokenId) included = true;
       }
       for (uint j = 0; j < i; j++) {
-        if (s.forgiveDebtsInTokenIds[j] == forgiveTokenId) alreadyIncluded = true;
+        if (s.forgiveDebtsInTokenIds[j] == forgiveTokenId) included = true;
       }
-      if (!alreadyIncluded) tokenCount++;
+      alreadyIncluded[i] = included;
+      if (!included) tokenCount++;
     }
 
     TokenSettlement[] memory tokens = new TokenSettlement[](tokenCount);
@@ -1032,15 +1559,8 @@ library Account {
       });
     }
     for (uint i = 0; i < s.forgiveDebtsInTokenIds.length; i++) {
+      if (alreadyIncluded[i]) continue;
       uint tokenId = s.forgiveDebtsInTokenIds[i];
-      bool alreadyIncluded = false;
-      for (uint j = 0; j < s.diffs.length; j++) {
-        if (s.diffs[j].tokenId == tokenId) alreadyIncluded = true;
-      }
-      for (uint j = 0; j < i; j++) {
-        if (s.forgiveDebtsInTokenIds[j] == tokenId) alreadyIncluded = true;
-      }
-      if (alreadyIncluded) continue;
       AccountCollateral storage col = _collaterals[acct_key][tokenId];
       tokens[tokenIndex++] = TokenSettlement({
         tokenId: tokenId,
@@ -1079,7 +1599,6 @@ library Account {
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
     InitialDisputeProof memory params,
-    uint256 defaultDelay,
     address entityProvider
   ) internal returns (bool) {
     // Validate the full signed body and every gas-bound before touching nonce
@@ -1097,11 +1616,18 @@ library Account {
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (params.nonce <= _accounts[acct_key].nonce) revert E2();
 
+    bool startedByLeft = entityId < params.counterentity;
+    // The proof author is consensus data, not a caller hint. The current
+    // processBatch Hanko authenticates entityId, while the inner historical
+    // Hanko binds this bit into the bilateral proof. Both must identify the
+    // same proposer or equal-nonce LEFT priority could be forged.
+
     require(params.sig.length > 0, "Signature required for dispute");
 
     bytes32 hash = _disputeProofHankoHash(
       acct_key,
       params.nonce,
+      params.proposerIsLeft,
       params.proofbodyHash,
       params.initialProofbody.watchSeed
     );
@@ -1141,36 +1667,49 @@ library Account {
       IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();
 
-    if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();
+    if (_accounts[acct_key].disputeHash != bytes32(0)) revert IDepositoryDelegateErrorAbi.E6();
 
-    // defaultDelay is seconds (constructor-configured). End timestamp is the
-    // sole challenge/pull clock — see DeltaTransformer.applyPull canon comment.
     uint256 startTimestamp = block.timestamp;
-    uint256 timeout = startTimestamp + defaultDelay;
-    bool startedByLeft = entityId < params.counterentity;
+    uint32 leftResponseSeconds = params.initialProofbody.leftResponseSeconds;
+    uint32 rightResponseSeconds = params.initialProofbody.rightResponseSeconds;
+    uint256 timeout = startTimestamp + uint256(leftResponseSeconds) + uint256(rightResponseSeconds);
     bytes32 initialArgumentsCommitment = _argumentCommitment(
       params.starterInitialArguments,
       startedByLeft,
       startTimestamp
     );
-    bytes32 incrementedArgumentsCommitment = _argumentCommitment(
-      params.starterIncrementedArguments,
+    bytes32 counterArgumentsCommitment = _argumentCommitment(
+      params.starterCounterArguments,
       startedByLeft,
       startTimestamp
     );
     _accounts[acct_key].disputeHash = _encodeDisputeHash(
       params.nonce, startedByLeft,
+      params.proposerIsLeft,
       timeout,
+      leftResponseSeconds,
+      rightResponseSeconds,
       params.proofbodyHash,
       startTimestamp,
       initialArgumentsCommitment,
-      incrementedArgumentsCommitment
+      counterArgumentsCommitment,
+      params.starterCounterProofCommitment,
+      0,
+      bytes32(0),
+      false
     );
     _accounts[acct_key].disputeTimeout = timeout;
     _accounts[acct_key].disputeStartTimestamp = startTimestamp;
+    _accounts[acct_key].leftResponseSeconds = leftResponseSeconds;
+    _accounts[acct_key].rightResponseSeconds = rightResponseSeconds;
     _accounts[acct_key].disputeInitialProofbodyHash = params.proofbodyHash;
+    _accounts[acct_key].disputeInitialProposerIsLeft = params.proposerIsLeft;
+    _accounts[acct_key].disputeCounterNonce = 0;
+    _accounts[acct_key].disputeCounterProofbodyHash = bytes32(0);
+    _accounts[acct_key].disputeCounterProposerIsLeft = false;
     _accounts[acct_key].starterInitialArgumentsCommitment = initialArgumentsCommitment;
-    _accounts[acct_key].starterIncrementedArgumentsCommitment = incrementedArgumentsCommitment;
+    _accounts[acct_key].starterCounterArgumentsCommitment = counterArgumentsCommitment;
+    _accounts[acct_key].starterCounterProofCommitment = params.starterCounterProofCommitment;
     _accounts[acct_key].disputeStartedByLeft = startedByLeft;
 
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
@@ -1180,12 +1719,16 @@ library Account {
       entityId,
       params.counterentity,
       params.nonce,
+      params.proposerIsLeft,
       params.proofbodyHash,
       params.initialProofbody.watchSeed,
       params.starterInitialArguments,
-      params.starterIncrementedArguments,
+      params.starterCounterArguments,
+      params.starterCounterProofCommitment,
       timeout,
-      startTimestamp
+      startTimestamp,
+      leftResponseSeconds,
+      rightResponseSeconds
     );
     return true;
   }

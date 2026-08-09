@@ -33,6 +33,7 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
     fromEntityId: input.fromEntityId,
     toEntityId: input.toEntityId,
     domain: structuredClone(input.domain),
+    disputeConfig: structuredClone(input.disputeConfig),
     ...(input.watchSeed !== undefined ? { watchSeed: input.watchSeed } : {}),
   };
   switch (input.kind) {

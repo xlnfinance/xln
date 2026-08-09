@@ -19,7 +19,7 @@ import {
   putEntityAccountCommitment,
   type EntityAccountCommitment,
 } from './account-commitment-tree';
-import { entityAccountCommitmentEntries } from '../account-candidate-map';
+import { EntityAccountCandidateMap, entityAccountCommitmentEntries } from '../account-candidate-map';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
@@ -170,9 +170,11 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
   'boardResealMigration',
   'counterpartyBoardReseal',
   'currentDisputeProofNonce',
+  'currentDisputeProofProposerIsLeft',
   'currentDisputeProofBodyHash',
   'currentDisputeHash',
   'counterpartyDisputeProofNonce',
+  'counterpartyDisputeProofProposerIsLeft',
   'counterpartyDisputeProofBodyHash',
   'counterpartyDisputeHash',
   'disputeProofNoncesByHash',
@@ -430,12 +432,28 @@ export const forkEntityAccountCommitmentCache = (source: EntityState, target: En
 };
 
 const encodeEntityAccountsSection = (state: EntityState, cold: boolean): string => {
-  const commitment = cold
+  let commitment = cold
     ? buildEntityAccountsCommitmentFromState(state)
     : (readEntityAccountCommitmentCache(state) ?? buildEntityAccountsCommitmentFromState(state));
-  if (!cold && !readEntityAccountCommitmentCache(state)) {
-    writeEntityAccountCommitmentCache(state, commitment);
+  if (!cold && state.accounts instanceof EntityAccountCandidateMap) {
+    // Merely reading an Account from the frame overlay materializes a mutable
+    // clone. Its nested State can then change without another Map.set(), so a
+    // cached certified leaf is no longer authoritative for every dirty key.
+    // Refresh only those radix paths before hashing; a full million-account
+    // rebuild would defeat the overlay, while trusting the old leaf can make
+    // incremental and cold Entity roots diverge.
+    for (const rawCounterpartyId of state.accounts.dirtyKeys()) {
+      const counterpartyId = rawCounterpartyId.trim().toLowerCase();
+      if (rawCounterpartyId !== counterpartyId) {
+        throw new Error(`ENTITY_ACCOUNT_COMMITMENT_NON_CANONICAL_ID:${rawCounterpartyId}`);
+      }
+      const account = state.accounts.get(counterpartyId);
+      commitment = account
+        ? putEntityAccountCommitment(commitment, counterpartyId, accountCommitmentValueHash(account))
+        : deleteEntityAccountCommitment(commitment, counterpartyId);
+    }
   }
+  if (!cold) writeEntityAccountCommitmentCache(state, commitment);
   return encodeCanonicalConsensusValue({
     domain: 'xln.entity.accounts.radix-merkle',
     radix: ENTITY_ACCOUNT_COMMITMENT_RADIX,

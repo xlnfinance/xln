@@ -179,7 +179,7 @@ test('RPC fromReplica proves the exact EntityProvider deployment block', async (
 
     expect(result).toBeInstanceOf(Error);
     expect(result instanceof Error ? result.message : '').toContain(
-      `RPC_ENTITY_PROVIDER_PREDEPLOY_CODE_PRESENT:${claimedLaterBlock - 1}`,
+      `RPC_ENTITY_PROVIDER_DEPLOYMENT_RECEIPT_MISSING:${claimedLaterBlock}`,
     );
   } finally {
     await deployed?.close();

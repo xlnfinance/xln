@@ -6,6 +6,7 @@ import {
   createAccountDisputeStartedInput,
 } from '../account/input';
 import { cloneIsolatedAccountInput } from '../protocol/account-input-clone';
+import { createDefaultDelta } from '../account/delta';
 import { createEmptyEnv } from '../runtime';
 import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { addr, makeAccount } from './helpers/cross-j';
@@ -22,6 +23,15 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
   delta.ondelta = 3n;
   delta.offdelta = -2n;
   delta.leftHold = 1n;
+  const omitted = createDefaultDelta(2);
+  account.state.deltas.set(2, omitted);
+  omitted.collateral = 11n;
+  omitted.ondelta = -4n;
+  omitted.offdelta = 9n;
+  omitted.leftHold = 3n;
+  omitted.rightHold = 5n;
+  omitted.leftAllowance = 6n;
+  omitted.rightAllowance = 7n;
   account.state.pulls = new Map([
     ['stale-after-finality', {
       pullId: 'stale-after-finality',
@@ -71,6 +81,15 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     offdelta: 0n,
     leftHold: 0n,
   });
+  expect(account.state.deltas.get(2)).toMatchObject({
+    collateral: 11n,
+    ondelta: -4n,
+    offdelta: 0n,
+    leftHold: 0n,
+    rightHold: 0n,
+    leftAllowance: 0n,
+    rightAllowance: 0n,
+  });
   expect(account.state.pulls?.size).toBe(0);
 });
 
@@ -98,11 +117,14 @@ test('DisputeStarted enters Account through the same external-finality boundary'
     starterEntityId: leftEntity,
     initialProofbodyHash: `0x${'44'.repeat(32)}`,
     initialNonce: 7,
-    disputeTimeout: 1700000120,
+    disputeTimeout: 1700000020,
     disputeStartTimestamp: 1700000000,
+    leftResponseSeconds: 10,
+    rightResponseSeconds: 10,
     jNonce: 9,
     starterInitialArguments: '0x1234',
-    starterIncrementedArguments: '0x5678',
+    starterCounterArguments: '0x5678',
+    starterCounterProofCommitment: `0x${'00'.repeat(32)}`,
     observedBlockNumber: 100,
     batchNonce: 3,
   });
@@ -127,11 +149,12 @@ test('DisputeStarted enters Account through the same external-finality boundary'
     startedByLeft: true,
     initialProofbodyHash: `0x${'44'.repeat(32)}`,
     initialNonce: 7,
-    disputeTimeout: 1700000120,
+    disputeTimeout: 1700000020,
     disputeStartTimestamp: 1700000000,
     jNonce: 9,
     starterInitialArguments: '0x1234',
-    starterIncrementedArguments: '0x5678',
+    starterCounterArguments: '0x5678',
+    starterCounterProofCommitment: `0x${'00'.repeat(32)}`,
     observedOnChain: true,
     observedBlockNumber: 100,
     batchNonce: 3,
@@ -150,10 +173,13 @@ test('invalid DisputeStarted finality leaves Account byte-identical', async () =
     initialProofbodyHash: `0x${'44'.repeat(32)}`,
     initialNonce: 1,
     disputeTimeout: 100,
-    disputeStartTimestamp: 100, // must be strictly before timeout
+    disputeStartTimestamp: 100,
+    leftResponseSeconds: 10,
+    rightResponseSeconds: 10,
     jNonce: 1,
     starterInitialArguments: '0x',
-    starterIncrementedArguments: '0x',
+    starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     observedBlockNumber: 100,
   });
 
@@ -163,8 +189,38 @@ test('invalid DisputeStarted finality leaves Account byte-identical', async () =
       account,
       input,
     ),
-  ).rejects.toThrow('ACCOUNT_DISPUTE_TIMEOUT_INVALID:100:100');
+  ).rejects.toThrow('ACCOUNT_DISPUTE_CLOCK_MISMATCH:100:100:10:10:10:10');
   expect(account).toEqual(before);
+});
+
+test('zero-window DisputeStarted accepts the exact same-second deadline', async () => {
+  const leftEntity = `0x${'11'.repeat(32)}`;
+  const rightEntity = `0x${'22'.repeat(32)}`;
+  const account = makeAccount(leftEntity, rightEntity);
+  account.state.disputeConfig = { leftResponseSeconds: 0, rightResponseSeconds: 0 };
+  const input = createAccountDisputeStartedInput(account.state, leftEntity, {
+    kind: 'dispute_started',
+    starterEntityId: leftEntity,
+    initialProofbodyHash: `0x${'44'.repeat(32)}`,
+    initialNonce: 1,
+    disputeTimeout: 100,
+    disputeStartTimestamp: 100,
+    leftResponseSeconds: 0,
+    rightResponseSeconds: 0,
+    jNonce: 1,
+    starterInitialArguments: '0x',
+    starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+    observedBlockNumber: 100,
+  });
+
+  const result = await applyAccountInput(
+    createAccountConsensusContext(createEmptyEnv('zero-window-dispute-started')),
+    account,
+    input,
+  );
+  expect(result.success).toBe(true);
+  expect(account.activeDispute?.disputeTimeout).toBe(100);
 });
 
 test('DisputeStarted atomically moves cross-j recovery into the active phase', async () => {
@@ -187,11 +243,14 @@ test('DisputeStarted atomically moves cross-j recovery into the active phase', a
     starterEntityId: leftEntity,
     initialProofbodyHash: `0x${'55'.repeat(32)}`,
     initialNonce: 7,
-    disputeTimeout: 1700000120,
+    disputeTimeout: 1700000020,
     disputeStartTimestamp: 1700000000,
+    leftResponseSeconds: 10,
+    rightResponseSeconds: 10,
     jNonce: 9,
     starterInitialArguments: '0x',
-    starterIncrementedArguments: '0x',
+    starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     observedBlockNumber: 100,
   });
 

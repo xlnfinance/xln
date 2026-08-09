@@ -5,6 +5,7 @@
  */
 
 import { ethers } from 'ethers';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 
 import type { AccountFrame, AccountInput, AccountReplica } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
@@ -278,12 +279,18 @@ const advancePastDisputeTimeout = async (
   return advanced;
 };
 
-const decodeArguments = (encoded: string, context: string): DecodedArguments => {
+const transformerClauseArguments = (encoded: string, context: string): string => {
   if (encoded === '0x') throw new Error(`DISPUTE_TRANSFORMER_ARGUMENTS_EMPTY:${context}`);
   const coder = ethers.AbiCoder.defaultAbiCoder();
   const [clauses] = coder.decode(['bytes[]'], encoded) as unknown as [string[]];
   const clause = clauses[0];
   if (!clause) throw new Error(`DISPUTE_TRANSFORMER_CLAUSE_MISSING:${context}`);
+  return clause;
+};
+
+const decodeArguments = (encoded: string, context: string): DecodedArguments => {
+  const clause = transformerClauseArguments(encoded, context);
+  const coder = ethers.AbiCoder.defaultAbiCoder();
   const [decoded] = coder.decode(
     ['tuple(uint16[] fillRatios,bytes32[] secrets)'],
     clause,
@@ -361,17 +368,26 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       {
         entityId: alice.id,
         signerId: alice.signer,
-        entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+        entityTxs: [{ type: 'openAccount', data: {
+          targetEntityId: hub.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(alice.id, false, hub.id, true),
+        } }],
       },
       {
         entityId: bob.id,
         signerId: bob.signer,
-        entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+        entityTxs: [{ type: 'openAccount', data: {
+          targetEntityId: hub.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(bob.id, false, hub.id, true),
+        } }],
       },
       {
         entityId: carol.id,
         signerId: carol.signer,
-        entityTxs: [{ type: 'openAccount', data: { targetEntityId: alice.id } }],
+        entityTxs: [{ type: 'openAccount', data: {
+          targetEntityId: alice.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(carol.id, false, alice.id, false),
+        } }],
       },
     ]);
     await converge(env, 12);
@@ -425,6 +441,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
           name: 'Dispute matcher hub',
           spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
           referenceTokenId: USDC,
+          usdQuoteAuthorityEntityId: alice.id,
           minTradeSize: 0n,
           supportedPairs: ['1/2'],
         },
@@ -526,6 +543,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
           name: 'Dispute matcher alice',
           spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
           referenceTokenId: USDC,
+          usdQuoteAuthorityEntityId: hub.id,
           minTradeSize: 0n,
           supportedPairs: ['1/2'],
         },
@@ -719,7 +737,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       proofBodyStruct: signedSnapshot?.proofBodyStruct,
       argumentPlan: signedSnapshot?.plan,
       starterInitialArguments: start.starterInitialArguments,
-      starterIncrementedArguments: start.starterIncrementedArguments,
+      starterCounterArguments: start.starterCounterArguments,
       decoded: starter,
     })}`);
     assert(starter.fillRatios.some((ratio) => ratio > 0n), 'Starter swap fill argument missing', env);
@@ -766,8 +784,9 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     await converge(env, 12);
     const aliceActive = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.activeDispute;
     if (!aliceActive) throw new Error('DISPUTE_TRANSFORMER_ACTIVE_DISPUTE_MISSING');
+    const disputeStartUnix = Number(aliceActive.disputeStartTimestamp || 0);
     const timeoutUnix = Number(aliceActive.disputeTimeout || 0);
-    assert(timeoutUnix > 0, 'Active dispute missing absolute unix timeout', env);
+    assert(disputeStartUnix > 0 && timeoutUnix > disputeStartUnix, 'Active dispute missing absolute unix clock', env);
     const timeAdvance = await advancePastDisputeTimeout(env, jadapter, timeoutUnix);
     // Entity clocks only move inside a signed frame; wake once after the jump.
     await process(env);
@@ -852,8 +871,50 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     })}`);
     assert(clampedDeltas.length === 0, `Transformer clamped ${clampedDeltas.length} delta(s)`, env);
 
+    // Derive the Account input from the exact signed executable program, not
+    // from optimistic pending frames. Pending frames describe candidate RJEA
+    // state; dispute finality executes finalProofbody + side-timestamped args,
+    // including HTLC payments that never became a bilateral frame.
+    const finalProofbody = finalization.finalProofbody;
+    const transformer = finalProofbody.transformers[0];
+    if (!transformer || finalProofbody.transformers.length !== 1) {
+      throw new Error(`DISPUTE_TRANSFORMER_CANONICAL_CLAUSE_COUNT:${finalProofbody.transformers.length}`);
+    }
+    const finalizedBlock = await jadapter.provider.getBlock('latest');
+    if (!finalizedBlock) throw new Error('DISPUTE_TRANSFORMER_FINALIZED_BLOCK_MISSING');
+    const startedByLeft = finalization.startedByLeft;
+    const transformed = await jadapter.deltaTransformer.applyBatch.staticCall(
+      finalProofbody.offdeltas,
+      finalProofbody.tokenIds,
+      transformer.encodedBatch,
+      transformerClauseArguments(
+        startedByLeft ? finalization.starterArguments : finalization.otherArguments,
+        'expected.left',
+      ),
+      transformerClauseArguments(
+        startedByLeft ? finalization.otherArguments : finalization.starterArguments,
+        'expected.right',
+      ),
+      startedByLeft ? disputeStartUnix : finalizedBlock.timestamp,
+      startedByLeft ? finalizedBlock.timestamp : disputeStartUnix,
+      alice.id,
+      hub.id,
+      disputeStartUnix,
+      timeoutUnix,
+      finalProofbody.leftResponseSeconds,
+      finalProofbody.rightResponseSeconds,
+    );
+    const transformedByToken = new Map(
+      finalProofbody.tokenIds.map((tokenId, index) => [Number(tokenId), transformed[index]!] as const),
+    );
+
     for (const tokenId of [USDC, WETH]) {
-      const input = before.get(tokenId)!;
+      const baseInput = before.get(tokenId)!;
+      const transformedOffdelta = transformedByToken.get(tokenId);
+      if (transformedOffdelta === undefined) {
+        throw new Error(`DISPUTE_TRANSFORMER_FINAL_DELTA_MISSING:${tokenId}`);
+      }
+      const input = { ...baseInput, offdelta: transformedOffdelta };
       const expected = deriveDisputeTokenFinalization({ tokenId, ...input });
       const actual = {
         leftReserve: await jadapter.getReserves(alice.id, tokenId),

@@ -1,4 +1,4 @@
-import type { BookState } from '../../../../orderbook';
+import { recordAcceptedUsdAskPrice, type BookState } from '../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../infra/logger';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import {
@@ -15,8 +15,22 @@ import {
 } from './orderbook-queue';
 import type { SameOrderbookPass } from './orderbook-matching-same-pass';
 import type { PreparedSameOffer } from './orderbook-matching-same-offer-types';
+import { normalizeEntityRef } from '../../account-key';
 
 const orderbookSameLog = createStructuredLogger('orderbook.same');
+
+export const isAuthorizedUsdReferenceAsk = (
+  profile: Pick<SameOrderbookPass['ext']['hubProfile'], 'referenceTokenId' | 'usdQuoteAuthorityEntityId'>,
+  offer: {
+    side: 0 | 1;
+    makerId: string;
+    offer: { giveTokenId: number; wantTokenId: number };
+  },
+): boolean =>
+  offer.side === 1 &&
+  offer.offer.giveTokenId !== profile.referenceTokenId &&
+  offer.offer.wantTokenId === profile.referenceTokenId &&
+  normalizeEntityRef(offer.makerId) === normalizeEntityRef(profile.usdQuoteAuthorityEntityId);
 
 const queueSameTradeFills = (
   pass: SameOrderbookPass,
@@ -155,6 +169,13 @@ export const processSameCommandEvents = (
     return;
   }
   if (!pass.debugRebuildProjectionOnly) {
+    const profile = pass.ext.hubProfile;
+    if (isAuthorizedUsdReferenceAsk(profile, offer)) {
+      // The accepted command and price reference commit in the same Entity
+      // frame. User/cross quotes and trades never enter this branch, so a tiny
+      // wash trade cannot move the $6.5m cross-j risk boundary.
+      recordAcceptedUsdAskPrice(result.state, offer.priceTicks);
+    }
     queueSameTradeFills(pass, offer, result.state, trades, resolveComment);
   }
 };

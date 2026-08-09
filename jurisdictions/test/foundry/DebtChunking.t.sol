@@ -22,11 +22,13 @@ contract DebtChunkingTest is XlnFixture {
   }
 
   function _accountNonce() internal view returns (uint256 n) {
-    (n,,,,,,,) = dep._accounts(XlnHanko.accountKey(entity[0], entity[1]));
+    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(entity[0], entity[1]));
   }
 
   function _proofBody(int256 offdelta) internal pure returns (ProofBody memory pb) {
     pb.watchSeed = keccak256("chunk");
+    pb.leftResponseSeconds = LEFT_RESPONSE_SECONDS;
+    pb.rightResponseSeconds = RIGHT_RESPONSE_SECONDS;
     pb.offdeltas = new int256[](1);
     pb.offdeltas[0] = offdelta;
     pb.tokenIds = new uint256[](1);
@@ -42,23 +44,26 @@ contract DebtChunkingTest is XlnFixture {
     bytes32 pbHash = keccak256(abi.encode(pb));
     uint256 nonce = _accountNonce() + 1;
     bool startedByLeft = entity[0] < entity[1];
+    bool proposerIsLeft = entity[1] < entity[0];
 
     Batch memory start = XlnHanko.emptyBatch();
     start.disputeStarts = new InitialDisputeProof[](1);
     start.disputeStarts[0] = InitialDisputeProof({
       counterentity: entity[1],
       nonce: nonce,
+      proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
       watchSeed: pb.watchSeed,
       sig: _hanko(1, XlnHanko.disputeProofHash(
-        address(dep), XlnHanko.accountKey(entity[0], entity[1]), nonce, pbHash, pb.watchSeed
+        address(dep), XlnHanko.accountKey(entity[0], entity[1]), nonce, proposerIsLeft, pbHash, pb.watchSeed
       )),
       starterInitialArguments: "",
-      starterIncrementedArguments: ""
+      starterCounterArguments: "",
+      starterCounterProofCommitment: bytes32(0)
     });
     assertTrue(_submit(0, start), "dispute start failed");
-    (, , uint256 disputeTimeout,,,,,) =
+    (, , uint256 disputeTimeout, , , , , , , , , , , , ) =
       dep._accounts(XlnHanko.accountKey(entity[0], entity[1]));
     // disputeTimeout is absolute unix end; warp past it (seconds clock).
     vm.warp(disputeTimeout + 1);
@@ -69,6 +74,7 @@ contract DebtChunkingTest is XlnFixture {
       counterentity: entity[1],
       initialNonce: nonce,
       finalNonce: nonce,
+      proposerIsLeft: proposerIsLeft,
       initialProofbodyHash: pbHash,
       finalProofbody: pb,
       starterArguments: "",

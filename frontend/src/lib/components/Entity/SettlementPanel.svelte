@@ -29,7 +29,6 @@
   type RuntimeEnv = RuntimeReplica;
   type JBatchState = NonNullable<EntityState['jBatchState']>;
   type BatchShape = JBatchState['batch'];
-  type ActiveDispute = NonNullable<AccountReplica['activeDispute']>;
   type FeeOverrides = { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string };
   type PendingSettleEntityTx = Extract<EntityTx, { type: 'r2r' }>;
   type SettlementLike = {
@@ -404,7 +403,23 @@
             { label: 'Nonce', value: String(Number(op?.nonce || 0)) },
             { label: 'Proof Body Hash', value: shortHex(op?.proofbodyHash) },
             { label: 'Starter Args', value: shortHex(op?.starterInitialArguments) },
-            { label: 'Incremented Args', value: shortHex(op?.starterIncrementedArguments) },
+            { label: 'Counter Args', value: shortHex(op?.starterCounterArguments) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, op] of (Array.isArray(batch.counterDisputes) ? batch.counterDisputes : []).entries()) {
+      pushOp(
+        'neutral',
+        makeBatchDetailOp(
+          `counterDisputes-${index}`,
+          'CounterDispute',
+          [entityId, op?.counterentity],
+          [
+            { label: 'Counterparty', value: entityName(String(op?.counterentity || '')) },
+            { label: 'Selected nonce', value: String(op?.counterNonce || 0) },
+            { label: 'Proof hash', value: shortHex(op?.initialProofbodyHash) },
           ],
         ),
       );
@@ -455,6 +470,22 @@
           [
             { label: 'Transformer', value: shortHex(op?.transformer) },
             { label: 'Secret', value: shortHex(op?.secret) },
+          ],
+        ),
+      );
+    }
+
+    for (const [index, registration] of (Array.isArray(batch.hashLadderRegistrations) ? batch.hashLadderRegistrations : []).entries()) {
+      pushOp(
+        'neutral',
+        makeBatchDetailOp(
+          `hashLadderRegistrations-${index}`,
+          'HashLadderRegistration',
+          [entityId, String(registration?.counterpartyEntity || '')],
+          [
+            { label: 'Account peer', value: shortHex(String(registration?.counterpartyEntity || '')) },
+            { label: 'Role', value: registration?.targetRole ? 'Target' : 'Source' },
+            { label: 'Fill ratio', value: String(registration?.witness?.fillRatio || 0) },
           ],
         ),
       );
@@ -519,10 +550,12 @@
       (batch.settlements?.length || 0) +
       (batch.reserveToReserve?.length || 0) +
       (batch.disputeStarts?.length || 0) +
+      (batch.counterDisputes?.length || 0) +
       (batch.disputeFinalizations?.length || 0) +
       (batch.externalTokenToReserve?.length || 0) +
       (batch.reserveToExternalToken?.length || 0) +
-      (batch.revealSecrets?.length || 0)
+      (batch.revealSecrets?.length || 0) +
+      (batch.hashLadderRegistrations?.length || 0)
     );
   }
 
@@ -536,8 +569,10 @@
       { label: 'ReserveToCollateral', count: Number(batch?.reserveToCollateral?.length || 0) },
       { label: 'ReserveToExternalToken', count: Number(batch?.reserveToExternalToken?.length || 0) },
       { label: 'DisputeStart', count: Number(batch?.disputeStarts?.length || 0) },
+      { label: 'CounterDispute', count: Number(batch?.counterDisputes?.length || 0) },
       { label: 'DisputeFinalize', count: Number(batch?.disputeFinalizations?.length || 0) },
       { label: 'RevealSecret', count: Number(batch?.revealSecrets?.length || 0) },
+      { label: 'HashLadderRegistration', count: Number(batch?.hashLadderRegistrations?.length || 0) },
     ].filter((entry) => entry.count > 0);
   }
 
@@ -557,18 +592,6 @@
     ...(selectedAccount?.mempool ?? []),
     ...(selectedAccount?.pendingFrame?.accountTxs ?? []),
   ].find((tx) => tx.type === 'settle_transition');
-  $: selectedAccountActiveDispute = selectedAccount?.activeDispute ?? null;
-  $: selectedAccountStatus = String(selectedAccount?.status || '');
-  $: selectedDisputeTimeout = Number(selectedAccountActiveDispute?.disputeTimeout || 0);
-  $: selectedDisputeBlocksLeft = selectedAccountActiveDispute
-    ? Math.max(
-        0,
-        selectedDisputeTimeout - Math.max(
-          Number(selectedAccount?.state.lastFinalizedJHeight || 0),
-          Number(currentReplica?.state?.lastFinalizedJHeight || 0),
-        ),
-      )
-    : 0;
 
   function requireCurrentReplica(): EntityReplica {
     if (!currentReplica) throw new Error('Current entity replica is not available');

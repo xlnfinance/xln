@@ -267,6 +267,7 @@ describe('multi-jurisdiction entity binding', () => {
       type: 'openAccount',
       data: {
         targetEntityId: entityB,
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         accountDomain: accountStateDomainFromJurisdiction(j1),
         watchSeed: `0x${'51'.repeat(32)}`,
       },
@@ -290,6 +291,7 @@ describe('multi-jurisdiction entity binding', () => {
       type: 'openAccount' as const,
       data: {
         targetEntityId: entityB,
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         accountDomain: accountStateDomainFromJurisdiction(j1),
         watchSeed: `0x${'63'.repeat(32)}`,
       },
@@ -322,6 +324,7 @@ describe('multi-jurisdiction entity binding', () => {
       type: 'openAccount',
       data: {
         targetEntityId: entityB,
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         accountDomain: accountStateDomainFromJurisdiction(j1),
         watchSeed: `0x${'52'.repeat(32)}`,
         tokenId: 1,
@@ -375,7 +378,12 @@ describe('multi-jurisdiction entity binding', () => {
         signerId: signerA,
         entityTxs: [{
           type: 'openAccount',
-          data: { targetEntityId: entityB, tokenId: 1, creditAmount: 1_000n },
+          data: {
+            targetEntityId: entityB,
+            disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+            tokenId: 1,
+            creditAmount: 1_000n,
+          },
         }],
       }],
     });
@@ -432,7 +440,14 @@ describe('multi-jurisdiction entity binding', () => {
       entityInputs: [{
         entityId: userId,
         signerId: signerUser,
-        entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubId, tokenId: 1 } }],
+        entityTxs: [{
+          type: 'openAccount',
+          data: {
+            targetEntityId: hubId,
+            disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+            tokenId: 1,
+          },
+        }],
       }],
     });
 
@@ -483,6 +498,7 @@ describe('multi-jurisdiction entity binding', () => {
         fromEntityId: entityA,
         toEntityId: entityB,
         domain: accountStateDomainFromJurisdiction(j1),
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         watchSeed: `0x${'73'.repeat(32)}`,
         proposal: {
           frameHanko: '0x',
@@ -501,7 +517,7 @@ describe('multi-jurisdiction entity binding', () => {
       },
     } as never);
 
-    expect(result.skippedError).toContain('ACCOUNT_INPUT_DOMAIN_MISMATCH');
+    expect(readEntityFrameEventMessages(result.newState).some((message) => message.includes('ACCOUNT_INPUT_DOMAIN_MISMATCH'))).toBe(true);
     expect(result.newState.accounts.has(entityA.toLowerCase())).toBe(false);
   });
 
@@ -523,6 +539,7 @@ describe('multi-jurisdiction entity binding', () => {
         fromEntityId: entityB,
         toEntityId: entityA,
         domain: accountStateDomainFromJurisdiction(j1),
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         proposal: {
           frameHanko: '0x',
           frame: {
@@ -540,7 +557,6 @@ describe('multi-jurisdiction entity binding', () => {
       },
     } as never);
 
-    expect(result.skippedError).toContain('ACCOUNT_SYNC_REQUIRED');
     expect(readEntityFrameEventMessages(result.newState).some((message) => message.includes('ACCOUNT_SYNC_REQUIRED'))).toBe(true);
     expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(false);
     expect((env.overlay ?? []).slice(overlayStart).some((record) => record.family === 'account')).toBe(false);

@@ -43,6 +43,7 @@ import type { EntityProvider } from '../typechain-types/contracts/EntityProvider
 import {
   buildSingleSignerHanko,
   deriveHardhatPrivateKey,
+  deployDepositoryStack,
   deployEntityProvider,
   emptyBatch,
   encodeBatch,
@@ -95,19 +96,11 @@ describe('canonical on-chain Hanko domains', function () {
     const entityProvider = await deployEntityProvider(admin.address);
     const otherEntityProvider = await deployEntityProvider(admin.address);
 
-    const accountFactory = await ethers.getContractFactory('Account');
-    const account = await accountFactory.deploy();
-    await account.waitForDeployment();
-
     const hankoCodecFactory = await ethers.getContractFactory('HankoCodec');
     const hankoCodec = await hankoCodecFactory.deploy();
     await hankoCodec.waitForDeployment();
 
-    const depositoryFactory = await ethers.getContractFactory('Depository', {
-      libraries: { Account: await account.getAddress() },
-    });
-    const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), 5760);
-    await depository.waitForDeployment();
+    const { account, depository } = await deployDepositoryStack(await entityProvider.getAddress());
 
     const encodedBoard = encodeSingleSignerBoard(entitySigner.address);
     const boardHash = ethers.keccak256(encodedBoard);
@@ -148,11 +141,11 @@ describe('canonical on-chain Hanko domains', function () {
       {
         bytes: await hankoCodec.encodeDisputeProofHankoPayloadForDomain(
           vector.chainId, vector.depositoryAddress, accountKey, vector.accountNonce,
-          vector.proofBodyHash, vector.watchSeed,
+          true, vector.proofBodyHash, vector.watchSeed,
         ),
         hash: await hankoCodec.computeDisputeProofHankoHashForDomain(
           vector.chainId, vector.depositoryAddress, accountKey, vector.accountNonce,
-          vector.proofBodyHash, vector.watchSeed,
+          true, vector.proofBodyHash, vector.watchSeed,
         ),
         expectedBytes: ONCHAIN_HANKO_GOLDEN_PAYLOADS.dispute,
         expectedHash: ONCHAIN_HANKO_GOLDEN_HASHES.dispute,
@@ -201,7 +194,7 @@ describe('canonical on-chain Hanko domains', function () {
           vector.rightEntity,
           vector.watchtower.finalNonce,
           vector.proofBodyHash,
-          vector.watchtower.lastResortWindowBlocks,
+          vector.watchtower.lastResortWindowSeconds,
           vector.watchtower.appointmentSequence,
         ),
         hash: await hankoCodec.computeWatchtowerCounterDisputeHankoHashForDomain(
@@ -213,7 +206,7 @@ describe('canonical on-chain Hanko domains', function () {
           vector.rightEntity,
           vector.watchtower.finalNonce,
           vector.proofBodyHash,
-          vector.watchtower.lastResortWindowBlocks,
+          vector.watchtower.lastResortWindowSeconds,
           vector.watchtower.appointmentSequence,
         ),
         expectedBytes: ONCHAIN_HANKO_GOLDEN_PAYLOADS.watchtower,
@@ -376,13 +369,13 @@ describe('canonical on-chain Hanko domains', function () {
       },
       {
         solidityBytes: await hankoCodec.encodeDisputeProofHankoPayloadForDomain(
-          chainId, depositoryAddress, accountKey, 7, proofbodyHash, watchSeed,
+          chainId, depositoryAddress, accountKey, 7, true, proofbodyHash, watchSeed,
         ),
         solidityHash: await hankoCodec.computeDisputeProofHankoHashForDomain(
-          chainId, depositoryAddress, accountKey, 7, proofbodyHash, watchSeed,
+          chainId, depositoryAddress, accountKey, 7, true, proofbodyHash, watchSeed,
         ),
-        tsBytes: encodeDisputeProofHankoPayload(depositoryDomain, accountKey, 7, proofbodyHash, watchSeed),
-        tsHash: hashDisputeProofHankoPayload(depositoryDomain, accountKey, 7, proofbodyHash, watchSeed),
+        tsBytes: encodeDisputeProofHankoPayload(depositoryDomain, accountKey, 7, true, proofbodyHash, watchSeed),
+        tsHash: hashDisputeProofHankoPayload(depositoryDomain, accountKey, 7, true, proofbodyHash, watchSeed),
       },
       {
         // FinalDisputeProof is deliberately pinned but has no Depository caller today.
@@ -432,7 +425,7 @@ describe('canonical on-chain Hanko domains', function () {
       counterentity: right,
       finalNonce: 9,
       finalProofbodyHash: proofbodyHash,
-      lastResortWindowBlocks: 16,
+      lastResortWindowSeconds: 16,
       appointmentSequence: 3,
     };
     const watchtowerBytes = encodeWatchtowerCounterDisputeHankoPayload(
@@ -452,7 +445,7 @@ describe('canonical on-chain Hanko domains', function () {
       watchtowerAuthorization.counterentity,
       watchtowerAuthorization.finalNonce,
       watchtowerAuthorization.finalProofbodyHash,
-      watchtowerAuthorization.lastResortWindowBlocks,
+      watchtowerAuthorization.lastResortWindowSeconds,
       watchtowerAuthorization.appointmentSequence,
     )).to.equal(watchtowerBytes);
     expect(await hankoCodec.computeWatchtowerCounterDisputeHankoHashForDomain(
@@ -464,7 +457,7 @@ describe('canonical on-chain Hanko domains', function () {
       watchtowerAuthorization.counterentity,
       watchtowerAuthorization.finalNonce,
       watchtowerAuthorization.finalProofbodyHash,
-      watchtowerAuthorization.lastResortWindowBlocks,
+      watchtowerAuthorization.lastResortWindowSeconds,
       watchtowerAuthorization.appointmentSequence,
     )).to.equal(watchtowerHash);
     expect(await depository.computeWatchtowerCounterDisputeHash(
@@ -473,7 +466,7 @@ describe('canonical on-chain Hanko domains', function () {
       watchtowerAuthorization.counterentity,
       watchtowerAuthorization.finalNonce,
       watchtowerAuthorization.finalProofbodyHash,
-      watchtowerAuthorization.lastResortWindowBlocks,
+      watchtowerAuthorization.lastResortWindowSeconds,
       watchtowerAuthorization.appointmentSequence,
     )).to.equal(watchtowerHash);
 
@@ -486,7 +479,7 @@ describe('canonical on-chain Hanko domains', function () {
     };
     const releaseAuthorization = {
       entityNumber: 2,
-      depositoryAddress,
+      recipientAddress: depositoryAddress,
       controlAmount: 100,
       dividendAmount: 200,
       purpose: 'Series A',
@@ -732,7 +725,7 @@ describe('canonical on-chain Hanko domains', function () {
     };
     const releaseAuthorization = {
       entityNumber,
-      depositoryAddress,
+      recipientAddress: depositoryAddress,
       controlAmount: 1n,
       dividendAmount: 0n,
       purpose: 'nonce-lane',
@@ -974,7 +967,7 @@ describe('canonical on-chain Hanko domains', function () {
     const domain = { chainId, entityProviderAddress: await entityProvider.getAddress(), boardEpoch: 0n };
     const authorization = {
       entityNumber,
-      depositoryAddress,
+      recipientAddress: depositoryAddress,
       controlAmount,
       dividendAmount,
       purpose,

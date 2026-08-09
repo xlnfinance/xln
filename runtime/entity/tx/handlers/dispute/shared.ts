@@ -80,15 +80,36 @@ const requireAddressLike = (value: unknown, label: string): string => {
   return value;
 };
 
+const requireResponseSeconds = (value: unknown, label: string): bigint => {
+  const seconds = toBigIntStrict(value, label);
+  if (seconds < 0n || seconds > 0xffff_ffffn) {
+    throw new Error(`DISPUTE_FINALIZE_PROOFBODY_RESPONSE_SECONDS_INVALID:${label}`);
+  }
+  return seconds;
+};
+
 export const canonicalizeProofBodyStruct = (
-  value: ProofBodyStruct,
+  value: unknown,
   entityId: string,
   counterpartyEntityId: string,
   source: string,
 ): ProofBodyStruct => {
   const proofBody = requireProofBodyStruct(value, entityId, counterpartyEntityId, source);
+  const leftResponseSeconds = requireResponseSeconds(
+    proofBody.leftResponseSeconds,
+    `${source}.leftResponseSeconds`,
+  );
+  const rightResponseSeconds = requireResponseSeconds(
+    proofBody.rightResponseSeconds,
+    `${source}.rightResponseSeconds`,
+  );
+  if (leftResponseSeconds + rightResponseSeconds > 365n * 24n * 60n * 60n) {
+    throw new Error(`DISPUTE_FINALIZE_PROOFBODY_RESPONSE_TOTAL_INVALID:${source}`);
+  }
   return {
     watchSeed: requireBytesLike(proofBody.watchSeed, `${source}.watchSeed`),
+    leftResponseSeconds,
+    rightResponseSeconds,
     offdeltas: proofBody.offdeltas.map(
       (entry, index) => toBigIntStrict(entry, `${source}.offdeltas[${index}]`),
     ),
@@ -144,9 +165,12 @@ const hasQueuedDisputeOperation = (
   if (!target) return false;
   const draft = state.jBatchState?.batch?.[kind] || [];
   const sent = state.jBatchState?.sentBatch?.batch?.[kind] || [];
-  return [...draft, ...sent].some(
-    operation => String(operation?.counterentity || '').toLowerCase() === target,
-  );
+  const matches = (operation: { counterentity: string }): boolean =>
+    String(operation.counterentity || '').toLowerCase() === target;
+  return draft.some(matches)
+    || sent.some(matches)
+    || (state.jBatchState?.recoveryBatches ?? [])
+      .some(batch => batch[kind].some(matches));
 };
 
 export const hasQueuedDisputeStart = (

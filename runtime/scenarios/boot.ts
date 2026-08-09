@@ -10,7 +10,6 @@ import type { JAdapter, JAdapterMode } from '../jurisdiction/adapter/types';
 import { ethers } from 'ethers';
 import { createXlnJsonRpcProvider } from '../jurisdiction/adapter';
 import { getSignerPrivateKey, registerSignerKey } from '../account/crypto';
-import { ensureLocalDisputeDelayConfigured } from '../jurisdiction/adapter/local-config';
 import { isLoopbackUrl } from '../network/p2p/loopback-url';
 import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge, setScenarioStorageEnabled } from './helpers';
 import { getCertifiedBoardStackKey } from '../jurisdiction/machine/board-registry';
@@ -370,18 +369,14 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
     deployStack: true,
     ...(config.rpcUrl ? { rpcUrl: config.rpcUrl } : {}),
   });
-  const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, jReplicaName);
 
   // 4. Create jReplica
   const position = config.position ?? { x: 0, y: 600, z: 0 };
-  const jReplica = bindScenarioJReplica(
+  bindScenarioJReplica(
     env,
     createJReplica(env, jReplicaName, jadapter.addresses.depository, position),
     jadapter,
   );
-  if (defaultDisputeDelayBlocks) {
-    jReplica.defaultDisputeDelayBlocks = defaultDisputeDelayBlocks;
-  }
 
   // 5. Attach jadapter to jReplica (all 4 contract addresses)
   // 6. Start watching (feeds events into env.runtimeMempool.entityInputs)
@@ -649,7 +644,7 @@ export function createJurisdictionConfig(
   address: string = 'browservm://',
   chainId: number = 31337,
   // Cross-j derives wall-clock dispute deadlines from the settlement chain's
-  // block time (`committedCrossJSourceDisputeDelayMs`), and the real
+  // signed account clock (`committedCrossJSourceResponseWindowMs`), and the real
   // jurisdiction loader requires the field. Omitting it here left scenario
   // jurisdictions incomplete in a way only cross-j could notice, as
   // CROSS_J_PREPARED_BLOCK_TIME_MISSING.

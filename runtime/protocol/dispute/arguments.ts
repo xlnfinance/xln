@@ -83,6 +83,7 @@ export function captureDisputeArgumentSnapshot(
   account: AccountReplica,
   proofbodyHash: string,
   nonce: number,
+  proposerIsLeft: boolean,
   proofBodyStruct: ProofBodyStruct,
 ): DisputeArgumentSnapshot {
   // Capture the positional argument plan at the same moment the proof body is
@@ -113,6 +114,7 @@ export function captureDisputeArgumentSnapshot(
   return {
     proofbodyHash,
     nonce,
+    proposerIsLeft,
     side: account.state.leftEntity === account.proofHeader.fromEntity ? 'left' : 'right',
     proofBodyStruct,
     plan: { paymentHashlocks, leftSwapOfferIds, rightSwapOfferIds, leftPullIds, rightPullIds },

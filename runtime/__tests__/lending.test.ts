@@ -56,7 +56,7 @@ const makeAccount = (counterparty: string): AccountReplica => {
       watchSeed: `0x${'99'.repeat(32)}`,
       deltas: new Map([[1, delta]]),
       globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
-      disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+      disputeConfig: { leftResponseSeconds: 576, rightResponseSeconds: 576 },
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
       locks: new Map(),

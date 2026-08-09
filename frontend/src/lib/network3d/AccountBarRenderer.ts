@@ -30,7 +30,7 @@ export interface AccountBarVisual {
 export interface DisputeInfo {
   startedByLeft: boolean;
   disputeTimeout: number;
-  initialDisputeNonce: number;
+  initialNonce: number;
 }
 
 export interface AccountBarSettings {

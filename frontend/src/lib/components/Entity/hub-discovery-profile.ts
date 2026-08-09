@@ -1,6 +1,11 @@
 import type { AccountReplica, EntityReplica, RuntimeReplica, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/public/runtime-module';
 import { getJurisdictionStackId } from '@xln/runtime/jurisdiction/machine/jurisdiction-stack';
 import {
+  defaultAccountDisputeConfigForRoleEvidence,
+  type AccountRoleEvidence,
+  type AccountRoleEvidenceSource,
+} from '@xln/runtime/account/dispute-config';
+import {
   buildOpenAccountTx,
   type OpenAccountRebalancePolicy,
 } from './entity-action-txs';
@@ -45,6 +50,9 @@ export type HubOpenAccountRuntimeInputRequest = {
   sourceEntityId: string;
   signerId: string;
   hubEntityId: string;
+  sourceRoleEvidence: AccountRoleEvidence;
+  hubRoleEvidence: AccountRoleEvidence;
+  committedRoles: ReadonlyMap<string, boolean>;
   creditAmount: bigint;
   tokenId?: number;
   rebalancePolicy?: HubOpenAccountRebalancePolicy | null;
@@ -54,6 +62,9 @@ export type DirectOpenAccountRuntimeInputRequest = {
   sourceEntityId: string;
   signerId: string;
   targetEntityId: string;
+  sourceRoleEvidence: AccountRoleEvidence;
+  targetRoleEvidence: AccountRoleEvidence;
+  committedRoles: ReadonlyMap<string, boolean>;
   rebalancePolicy?: OpenAccountRebalancePolicy | null;
 };
 
@@ -81,6 +92,7 @@ export type HubDiscoveryHub = {
   avatar: string;
   isConnected: boolean;
   isOpening: boolean;
+  roleSource: AccountRoleEvidenceSource;
 };
 
 export type HubDiscoveryRemoteHub = {
@@ -131,6 +143,7 @@ export type HubDiscoveryProjection = {
   sourceSignerId: string;
   localHubs: HubDiscoveryHub[];
   connectionByHubId: Map<string, HubDiscoveryConnectionState>;
+  committedRoles: ReadonlyMap<string, boolean>;
 };
 
 export const HUB_OPEN_ACCOUNT_REQUIRES_ADMIN =
@@ -166,6 +179,13 @@ export function buildHubOpenAccountRuntimeInput(request: HubOpenAccountRuntimeIn
   if (!signerId) throw new Error('Signer is required for hub account setup.');
   if (!hubEntityId) throw new Error('Hub entity is required for hub account setup.');
   if (sourceEntityId === hubEntityId) throw new Error('Cannot open an account with the same entity.');
+  if (
+    normalizeHubEntityId(request.sourceRoleEvidence?.entityId) !== sourceEntityId
+    || normalizeHubEntityId(request.hubRoleEvidence?.entityId) !== hubEntityId
+    || request.hubRoleEvidence?.isHub !== true
+  ) {
+    throw new Error(`ACCOUNT_DISPUTE_PARTY_ROLE_UNAVAILABLE:${sourceEntityId}:${hubEntityId}`);
+  }
   if (creditAmount <= 0n) throw new Error('Hub account credit amount must be positive.');
   if (!Number.isFinite(tokenId) || tokenId <= 0) throw new Error('Hub account token id must be positive.');
 
@@ -178,6 +198,11 @@ export function buildHubOpenAccountRuntimeInput(request: HubOpenAccountRuntimeIn
         type: 'openAccount',
         data: {
           targetEntityId: hubEntityId,
+          disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+            request.sourceRoleEvidence,
+            request.hubRoleEvidence,
+            request.committedRoles,
+          ),
           creditAmount,
           tokenId,
           ...(request.rebalancePolicy ? { rebalancePolicy: request.rebalancePolicy } : {}),
@@ -195,6 +220,12 @@ export function buildDirectOpenAccountRuntimeInput(request: DirectOpenAccountRun
   if (!signerId) throw new Error('Signer is required for account setup.');
   if (!targetEntityId) throw new Error('Target entity is required for account setup.');
   if (sourceEntityId === targetEntityId) throw new Error('Cannot open an account with the same entity.');
+  if (
+    normalizeHubEntityId(request.sourceRoleEvidence?.entityId) !== sourceEntityId
+    || normalizeHubEntityId(request.targetRoleEvidence?.entityId) !== targetEntityId
+  ) {
+    throw new Error(`ACCOUNT_DISPUTE_PARTY_ROLE_UNAVAILABLE:${sourceEntityId}:${targetEntityId}`);
+  }
 
   return {
     runtimeTxs: [],
@@ -202,7 +233,15 @@ export function buildDirectOpenAccountRuntimeInput(request: DirectOpenAccountRun
       entityId: sourceEntityId,
       signerId,
       entityTxs: [
-        buildOpenAccountTx(targetEntityId, request.rebalancePolicy ?? null),
+        buildOpenAccountTx(
+          targetEntityId,
+          defaultAccountDisputeConfigForRoleEvidence(
+            request.sourceRoleEvidence,
+            request.targetRoleEvidence,
+            request.committedRoles,
+          ),
+          request.rebalancePolicy ?? null,
+        ),
       ],
     }],
   };
@@ -214,6 +253,7 @@ export const emptyHubDiscoveryProjection = (): HubDiscoveryProjection => ({
   sourceSignerId: '',
   localHubs: [],
   connectionByHubId: new Map(),
+  committedRoles: new Map(),
 });
 
 export const hubDiscoveryJurisdictionKey = (value: unknown): string => {
@@ -352,13 +392,26 @@ export function buildHubDiscoveryProjection(input: BuildHubDiscoveryProjectionIn
   const sourceSignerId = findReplicaSignerId(input.replicas, entityId, ownerReplica);
   const connectionByHubId = buildAccountConnectionStates(ownerReplica, entityId);
   const localHubById = new Map<string, HubDiscoveryHub>();
+  const committedRoleByEntityId = new Map<string, boolean>();
+  for (const replica of input.replicas.values()) {
+    const replicaEntityId = normalizeHubEntityId(replica?.entityId || replica?.state?.entityId);
+    const role = replica?.state?.profile?.isHub;
+    if (replicaEntityId && typeof role === 'boolean') committedRoleByEntityId.set(replicaEntityId, role);
+  }
 
   const addHub = (hub: HubDiscoveryHub): void => {
     const hubId = normalizeHubEntityId(hub.entityId);
     if (!hubId || hubId === entityId) return;
+    // A loaded committed `false` vetoes profile and remote-runtime
+    // advertisements. Otherwise a User could advertise itself as a Hub and
+    // make Account opening sign a one-hour response clock instead of 24 hours.
+    const committedRole = committedRoleByEntityId.get(hubId);
+    if (committedRole === false) return;
     localHubById.set(hubId, {
       ...(localHubById.get(hubId) ?? {}),
       ...hub,
+      // A local Entity state root is stronger than any remote advertisement.
+      ...(committedRole === true ? { roleSource: 'committed-profile' as const } : {}),
     });
   };
 
@@ -393,6 +446,7 @@ export function buildHubDiscoveryProjection(input: BuildHubDiscoveryProjectionIn
       raw: input.formatRawProfile ? input.formatRawProfile(profile) : '',
       avatar: input.avatarForEntity ? input.avatarForEntity(fullEntityId) : '',
       ...connection,
+      roleSource: 'committed-profile',
     });
   }
 
@@ -428,6 +482,7 @@ export function buildHubDiscoveryProjection(input: BuildHubDiscoveryProjectionIn
       raw: input.formatRawProfile ? input.formatRawProfile(profile) : '',
       avatar: profile.avatar || (input.avatarForEntity ? input.avatarForEntity(fullEntityId) : ''),
       ...connection,
+      roleSource: 'verified-gossip-profile',
     });
   }
 
@@ -458,6 +513,7 @@ export function buildHubDiscoveryProjection(input: BuildHubDiscoveryProjectionIn
       raw: '',
       avatar: input.avatarForEntity ? input.avatarForEntity(fullEntityId) : '',
       ...connection,
+      roleSource: 'operator-config',
     });
   }
 
@@ -467,6 +523,7 @@ export function buildHubDiscoveryProjection(input: BuildHubDiscoveryProjectionIn
     sourceSignerId,
     localHubs: Array.from(localHubById.values()),
     connectionByHubId,
+    committedRoles: committedRoleByEntityId,
   };
 }
 

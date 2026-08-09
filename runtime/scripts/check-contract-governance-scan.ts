@@ -78,12 +78,14 @@ const depositoryPath = 'jurisdictions/contracts/Depository.sol';
 const entityProviderPath = 'jurisdictions/contracts/EntityProvider.sol';
 const hankoVerifierPath = 'jurisdictions/contracts/HankoVerifier.sol';
 const accountPath = 'jurisdictions/contracts/Account.sol';
+const deltaTransformerPath = 'jurisdictions/contracts/DeltaTransformer.sol';
 const auditDocPath = 'docs/security/contract-governance-scan.md';
 
 const depository = readText(depositoryPath);
 const entityProvider = readText(entityProviderPath);
 const hankoVerifier = readText(hankoVerifierPath);
 const account = readText(accountPath);
+const deltaTransformer = readText(deltaTransformerPath);
 const auditDoc = readText(auditDocPath);
 
 for (const [path, source] of [
@@ -91,6 +93,7 @@ for (const [path, source] of [
   [entityProviderPath, entityProvider],
   [hankoVerifierPath, hankoVerifier],
   [accountPath, account],
+  [deltaTransformerPath, deltaTransformer],
 ] as const) {
   for (const forbidden of ['tx.origin', 'selfdestruct', 'onlyOwner', 'Ownable']) {
     assertNotIncludes(source, forbidden, path);
@@ -101,15 +104,23 @@ assertFunctionAllowlist(depository, depositoryPath, [
   'accountKey',
   'adminRegisterExternalToken',
   'computeWatchtowerCounterDisputeHash',
-  'decodeTransformerArgumentListStrict',
   'enforceDebts',
+  'getHashLadderReveal',
   'getTokensLength',
   'mintToReserve',
-  'onERC1155BatchReceived',
   'onERC1155Received',
   'processBatch',
   'registerExternalToken',
   'watchtowerCounterDispute',
+]);
+
+assertFunctionAllowlist(deltaTransformer, deltaTransformerPath, [
+  'applyBatch',
+  'containsPull',
+  'decodeArgumentsStrict',
+  'decodeTransformerArgumentListStrict',
+  'encodeBatch',
+  'revealSecret',
 ]);
 
 assertFunctionAllowlist(entityProvider, entityProviderPath, [
@@ -130,23 +141,24 @@ assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'encodeReleaseControlSharesHankoPayload',
   'computeReleaseControlSharesHankoHash',
   'foundationRegisterEntity',
-  'getEntityFromToken',
   'getEntityInfo',
-  'getGovernanceInfo',
   'getTokenIds',
   'proposeBoard',
   'registerNumberedEntitiesBatch',
   'registerNumberedEntity',
   'releaseControlShares',
-  'resolveEntityId',
   'setNameQuota',
   'setReservedName',
   'transferName',
   'verifyHankoSignature',
   'verifyCurrentHankoSignature',
 ]);
+// Removed dead surface (zero production callers): resolveEntityId,
+// getGovernanceInfo, getEntityFromToken. Do not reintroduce without callers.
 
-assertIncludes(depository, 'address public immutable admin;', depositoryPath);
+// Deployment authority is deliberately not a public protocol surface. It is
+// used only by chain-gated local-dev helpers and must remain immutable.
+assertIncludes(depository, 'address private immutable admin;', depositoryPath);
 assertIncludes(depository, 'uint256 private constant LOCAL_DEV_CHAIN_ID = 31337;', depositoryPath);
 assertIncludes(depository, 'uint256 private constant SECONDARY_LOCAL_DEV_CHAIN_ID = 31338;', depositoryPath);
 assertIncludes(depository, 'msg.sender != admin', depositoryPath);
@@ -159,12 +171,31 @@ assertFunctionHeaderIncludes(depository, depositoryPath, 'adminRegisterExternalT
 assertIncludes(depository, 'Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce)', depositoryPath);
 assertIncludes(depository, 'if (nonce != entityNonces[entityId] + 1) revert E2();', depositoryPath);
 assertIncludes(depository, 'entityNonces[entityId] = nonce;', depositoryPath);
-assertIncludes(depository, 'if (account.disputeHash == bytes32(0)) revert E5();', depositoryPath);
-assertIncludes(depository, 'if (params.cooperative) revert E2();', depositoryPath);
-assertIncludes(depository, 'if (params.sig.length == 0) revert E2();', depositoryPath);
-assertIncludes(depository, 'if (block.timestamp + lastResortWindowBlocks < account.disputeTimeout) revert E2();', depositoryPath);
-assertIncludes(depository, 'msg.sender,\n          entityId,', depositoryPath);
-assertIncludes(depository, 'if (!valid || recoveredEntity != entityId) revert E4();', depositoryPath);
+const watchtowerRegistration = getFunctionBody(account, 'registerWatchtowerCounterDispute', accountPath);
+assertIncludes(
+  watchtowerRegistration,
+  'if (account.disputeHash == bytes32(0)) revert IDepositoryDelegateErrorAbi.E5();',
+  `${accountPath}:registerWatchtowerCounterDispute`,
+);
+assertIncludes(
+  watchtowerRegistration,
+  'if (params.cooperative || params.sig.length == 0) revert E2();',
+  `${accountPath}:registerWatchtowerCounterDispute`,
+);
+assertIncludes(
+  watchtowerRegistration,
+  'block.timestamp + lastResortWindowSeconds < account.disputeTimeout',
+  `${accountPath}:registerWatchtowerCounterDispute`,
+);
+const watchtowerEntry = getFunctionBody(depository, 'watchtowerCounterDispute', depositoryPath);
+assertIncludes(watchtowerEntry, 'Account.registerWatchtowerCounterDispute(', `${depositoryPath}:watchtowerCounterDispute`);
+assertIncludes(watchtowerEntry, 'msg.sender,', `${depositoryPath}:watchtowerCounterDispute`);
+assertIncludes(watchtowerEntry, 'entityId,', `${depositoryPath}:watchtowerCounterDispute`);
+assertIncludes(
+  watchtowerRegistration,
+  'if (!valid || recoveredEntity != entityId) revert E4();',
+  `${accountPath}:registerWatchtowerCounterDispute`,
+);
 
 // Historical board authority exists only for bilateral dispute evidence. Every
 // direct money/governance action must keep using the current-board verifier.
@@ -219,7 +250,7 @@ assertNotIncludes(entityProvider, 'function recoverEntity(', entityProviderPath)
 
 for (const marker of [
   '# Contract Governance And Access-Control Scan',
-  'Last refreshed: 2026-07-09',
+  'Last refreshed: 2026-08-09',
   'bun run security:contract-governance',
   'Depository production write path is `processBatch()`',
   'Local-dev helpers are chain-gated',

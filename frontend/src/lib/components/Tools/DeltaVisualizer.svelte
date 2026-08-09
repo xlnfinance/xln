@@ -1,89 +1,12 @@
 <script lang="ts">
+  import { deriveDelta } from '@xln/runtime/account/utils';
+  import type { Delta } from '@xln/runtime/types/account';
+
   interface Props {
     onClose: () => void;
   }
 
   let { onClose }: Props = $props();
-
-  // Local deriveDelta implementation (matches runtime/account-utils.ts exactly)
-  function deriveDelta(delta: any, isLeftPerspective: boolean) {
-    const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
-
-    const totalDelta = delta.ondelta + delta.offdelta;
-    const collateral = nonNegative(delta.collateral);
-
-    let ownCreditLimit = delta.leftCreditLimit;
-    let peerCreditLimit = delta.rightCreditLimit;
-
-    let inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
-    let outCollateral = totalDelta > 0n ? (totalDelta > collateral ? collateral : totalDelta) : 0n;
-
-    let inOwnCredit = nonNegative(0n - totalDelta);
-    if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
-
-    let outPeerCredit = nonNegative(totalDelta - collateral);
-    if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
-
-    let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
-    let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
-
-    let inAllowance: bigint = delta.rightAllowance ?? 0n;
-    let outAllowance: bigint = delta.leftAllowance ?? 0n;
-    const leftHold: bigint = delta.leftHold ?? 0n;
-    const rightHold: bigint = delta.rightHold ?? 0n;
-    let outTotalHold: bigint = leftHold;
-    let inTotalHold: bigint = rightHold;
-
-    const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
-
-    let inCapacity = nonNegative((inOwnCredit + inCollateral + inPeerCredit) - inAllowance);
-    let outCapacity = nonNegative((outPeerCredit + outCollateral + outOwnCredit) - outAllowance);
-    outCapacity = nonNegative(outCapacity - outTotalHold);
-    inCapacity = nonNegative(inCapacity - inTotalHold);
-
-    if (!isLeftPerspective) {
-      [inCollateral, inAllowance, inCapacity, outCollateral, outAllowance, outCapacity] =
-      [outCollateral, outAllowance, outCapacity, inCollateral, inAllowance, inCapacity];
-
-      [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
-      [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
-      [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
-      [outTotalHold, inTotalHold] = [inTotalHold, outTotalHold];
-    }
-
-    const totalWidth = Number(totalCapacity) || 1;
-    const leftCreditWidth = Math.floor((Number(delta.leftCreditLimit) / totalWidth) * 50);
-    const collateralWidth = Math.floor((Number(collateral) / totalWidth) * 50);
-    const rightCreditWidth = 50 - leftCreditWidth - collateralWidth;
-    const deltaPosition = Math.floor(((Number(totalDelta) + Number(delta.leftCreditLimit)) / totalWidth) * 50);
-
-    const fullBar = '-'.repeat(Math.max(0, leftCreditWidth)) +
-                    '='.repeat(Math.max(0, collateralWidth)) +
-                    '-'.repeat(Math.max(0, rightCreditWidth));
-    const clampedPosition = Math.max(0, Math.min(deltaPosition, fullBar.length));
-    const ascii = '[' + fullBar.substring(0, clampedPosition) + '|' + fullBar.substring(clampedPosition) + ']';
-
-    return {
-      delta: totalDelta,
-      collateral,
-      inCollateral,
-      outCollateral,
-      inOwnCredit,
-      outPeerCredit,
-      inAllowance,
-      outAllowance,
-      totalCapacity,
-      ownCreditLimit,
-      peerCreditLimit,
-      inCapacity,
-      outCapacity,
-      outOwnCredit,
-      inPeerCredit,
-      outTotalHold,
-      inTotalHold,
-      ascii,
-    };
-  }
 
   // Input state with sensible defaults (scaled to 18 decimals)
   let collateral = $state(500000n * 10n**18n);
@@ -98,7 +21,7 @@
   let perspective = $state<'left' | 'right'>('left');
 
   // Build delta object
-  let deltaInput = $derived({
+  let deltaInput: Delta = $derived({
     tokenId: 1,
     collateral,
     ondelta,
@@ -116,14 +39,14 @@
 
   // Calculate bar segments for visualization
   let barSegments = $derived.by(() => {
-    const total = Number(derivedOutput.totalCapacity) || 1;
-    const leftCredit = (Number(deltaInput.leftCreditLimit) / total) * 100;
-    const coll = (Number(derivedOutput.collateral) / total) * 100;
-    const rightCredit = (Number(deltaInput.rightCreditLimit) / total) * 100;
-
-    const totalDelta = Number(derivedOutput.delta);
-    const leftLimit = Number(deltaInput.leftCreditLimit);
-    const position = ((totalDelta + leftLimit) / total) * 100;
+    const canonicalLeft = deriveDelta(deltaInput, true);
+    const total = Number(canonicalLeft.totalCapacity) || 1;
+    const leftWindow = canonicalLeft.inOwnCredit + canonicalLeft.outOwnCredit;
+    const rightWindow = canonicalLeft.outPeerCredit + canonicalLeft.inPeerCredit;
+    const leftCredit = (Number(leftWindow) / total) * 100;
+    const coll = (Number(canonicalLeft.collateral) / total) * 100;
+    const rightCredit = (Number(rightWindow) / total) * 100;
+    const position = ((Number(canonicalLeft.delta) + Number(leftWindow)) / total) * 100;
 
     return {
       leftCredit: Math.max(0, leftCredit),
@@ -262,10 +185,10 @@
       <div class="explanation">
         <h4>Semantics</h4>
         <ul>
-          <li><b>leftCreditLimit</b>: Credit LEFT extends to RIGHT (RIGHT can owe LEFT)</li>
-          <li><b>rightCreditLimit</b>: Credit RIGHT extends to LEFT (LEFT can owe RIGHT)</li>
+          <li><b>leftCreditLimit</b>: Credit RIGHT grants LEFT (LEFT can owe RIGHT)</li>
+          <li><b>rightCreditLimit</b>: Credit LEFT grants RIGHT (RIGHT can owe LEFT)</li>
           <li><b>totalDelta &gt; 0</b>: LEFT has given more → RIGHT owes LEFT</li>
-          <li><b>totalDelta &lt; 0</b>: LEFT owes RIGHT (using rightCreditLimit)</li>
+          <li><b>totalDelta &lt; 0</b>: LEFT owes RIGHT (using leftCreditLimit)</li>
           <li><b>outCapacity</b>: How much {perspective.toUpperCase()} can SEND</li>
           <li><b>inCapacity</b>: How much {perspective.toUpperCase()} can RECEIVE</li>
         </ul>

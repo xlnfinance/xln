@@ -8,6 +8,12 @@ import type { RuntimeIngressReceipt } from '../runtime/ingress-receipts';
 import type { ConsensusConfig } from '../entity/types';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import { scaleWholeTokenAmount } from '../types/rebalance';
+import { defaultAccountDisputeConfigForRoleEvidence } from '../account/dispute-config';
+import {
+  requireBoundaryInteger,
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-validation';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
@@ -27,6 +33,7 @@ export type ControlEntitySummary = {
   signerId: string;
   name: string;
   isRoutingEnabled: boolean;
+  isHub: boolean;
   runtimeId: string | null;
   accountCount: number;
   publicAccountCount: number;
@@ -43,6 +50,48 @@ export type ControlQueueResponse = {
   receipt?: RuntimeIngressReceipt;
   statusUrl?: string;
   error?: string;
+};
+
+const decodeControlEntitySummary = (value: unknown): ControlEntitySummary => {
+  const summary = requireBoundaryRecord(value, 'CONTROL_ENTITY_SUMMARY_INVALID');
+  requireExactBoundaryKeys(
+    summary,
+    [
+      'entityId', 'signerId', 'name', 'isRoutingEnabled', 'isHub', 'runtimeId',
+      'accountCount', 'publicAccountCount', 'accountEntityIds',
+    ],
+    [],
+    'CONTROL_ENTITY_SUMMARY_FIELDS_INVALID',
+  );
+  const requiredText = (key: 'entityId' | 'signerId' | 'name'): string => {
+    const text = String(summary[key] || '').trim();
+    if (!text || typeof summary[key] !== 'string') {
+      throw new Error(`CONTROL_ENTITY_SUMMARY_${key.toUpperCase()}_INVALID`);
+    }
+    return text;
+  };
+  if (typeof summary['isRoutingEnabled'] !== 'boolean' || typeof summary['isHub'] !== 'boolean') {
+    throw new Error('CONTROL_ENTITY_SUMMARY_ROLE_INVALID');
+  }
+  const runtimeId = summary['runtimeId'];
+  if (runtimeId !== null && (typeof runtimeId !== 'string' || !runtimeId.trim())) {
+    throw new Error('CONTROL_ENTITY_SUMMARY_RUNTIME_ID_INVALID');
+  }
+  const accountEntityIds = summary['accountEntityIds'];
+  if (!Array.isArray(accountEntityIds) || accountEntityIds.some(value => typeof value !== 'string' || !value.trim())) {
+    throw new Error('CONTROL_ENTITY_SUMMARY_ACCOUNT_IDS_INVALID');
+  }
+  return {
+    entityId: requiredText('entityId').toLowerCase(),
+    signerId: requiredText('signerId').toLowerCase(),
+    name: requiredText('name'),
+    isRoutingEnabled: summary['isRoutingEnabled'],
+    isHub: summary['isHub'],
+    runtimeId: runtimeId === null ? null : runtimeId.trim().toLowerCase(),
+    accountCount: requireBoundaryInteger(summary['accountCount'], 'CONTROL_ENTITY_SUMMARY_ACCOUNT_COUNT_INVALID'),
+    publicAccountCount: requireBoundaryInteger(summary['publicAccountCount'], 'CONTROL_ENTITY_SUMMARY_PUBLIC_ACCOUNT_COUNT_INVALID'),
+    accountEntityIds: accountEntityIds.map(value => value.trim().toLowerCase()),
+  };
 };
 
 type ControlRuntimeStatusResponse = {
@@ -70,6 +119,7 @@ export type ManagedEntityConfig = {
 };
 
 export type EnableRoutingConfig = ManagedEntityConfig & {
+  usdQuoteAuthorityEntityId: string;
   relayUrl?: string;
   routingFeePPM?: number;
   baseFee?: bigint;
@@ -85,6 +135,7 @@ export type SetupCustodyConfig = ManagedEntityConfig & {
   creditTokenIds?: number[];
   gossipPollMs?: number;
   routingEnabled?: boolean;
+  usdQuoteAuthorityEntityId?: string;
   routingFeePPM?: number;
   baseFee?: bigint;
   swapTakerFeeBps?: number;
@@ -213,8 +264,30 @@ export class DaemonControlClient {
   }
 
   async listEntities(): Promise<ControlEntitySummary[]> {
-    const response = await this.get<{ ok: boolean; entities: ControlEntitySummary[] }>('/api/control/entities');
-    return Array.isArray(response.entities) ? response.entities : [];
+    const raw = await this.get<unknown>('/api/control/entities');
+    const response = requireBoundaryRecord(raw, 'CONTROL_ENTITIES_RESPONSE_INVALID');
+    requireExactBoundaryKeys(
+      response,
+      ['ok', 'runtimeId', 'entities'],
+      [],
+      'CONTROL_ENTITIES_RESPONSE_FIELDS_INVALID',
+    );
+    if (response['ok'] !== true || !Array.isArray(response['entities'])) {
+      throw new Error('CONTROL_ENTITIES_RESPONSE_INVALID');
+    }
+    const runtimeId = response['runtimeId'];
+    if (runtimeId !== null && (typeof runtimeId !== 'string' || !runtimeId.trim())) {
+      throw new Error('CONTROL_ENTITIES_RESPONSE_RUNTIME_ID_INVALID');
+    }
+    const normalizedRuntimeId = runtimeId === null ? null : runtimeId.trim().toLowerCase();
+    const entities = response['entities'].map(decodeControlEntitySummary);
+    if (entities.some(entity => entity.runtimeId !== normalizedRuntimeId)) {
+      // Every row comes from this exact authenticated Runtime. A mismatched
+      // provenance would let an operator bind a committed role from one
+      // Runtime while opening the Account on another.
+      throw new Error('CONTROL_ENTITIES_RESPONSE_RUNTIME_ID_MISMATCH');
+    }
+    return entities;
   }
 
   async registerSigner(signerId: string, privateKeyHex: string): Promise<void> {
@@ -373,6 +446,7 @@ const buildEnableRoutingEntityInput = (
             name: config.name,
             spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
             referenceTokenId: 1,
+            usdQuoteAuthorityEntityId: config.usdQuoteAuthorityEntityId,
             minTradeSize: DEFAULT_ORDERBOOK_MIN_TRADE_SIZE,
             supportedPairs: [...DEFAULT_ORDERBOOK_SUPPORTED_PAIRS],
           },
@@ -384,6 +458,7 @@ const buildCustodyConnectivityInput = (
   identity: ManagedEntityIdentity,
   config: SetupCustodyConfig,
   missingHubEntityIds: readonly string[],
+  committedRoles: ReadonlyMap<string, boolean>,
 ): RuntimeInput | null => {
   const hubEntityIds = (config.hubEntityIds || []).map(id => id.trim().toLowerCase()).filter(Boolean);
   if (hubEntityIds.length === 0) return null;
@@ -397,7 +472,14 @@ const buildCustodyConnectivityInput = (
   for (const hubEntityId of missingHubEntityIds) {
     entityTxs.push({
       type: 'openAccount',
-      data: { targetEntityId: hubEntityId },
+      data: {
+        targetEntityId: hubEntityId,
+        disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+          { entityId: identity.entityId, isHub: false, source: 'operator-config' },
+          { entityId: hubEntityId, isHub: true, source: 'operator-config' },
+          committedRoles,
+        ),
+      },
     });
   }
   for (const hubEntityId of hubEntityIds) {
@@ -502,13 +584,25 @@ export const setupCustody = async (
     await waitForGossipProfiles(client, hubEntityIds);
     const entities = await client.listEntities();
     const custodySummary = entities.find(entity => entity.entityId.toLowerCase() === identity.entityId.toLowerCase());
+    if (!custodySummary) throw new Error(`CUSTODY_COMMITTED_ENTITY_MISSING:${identity.entityId}`);
+    const committedRoles = new Map(
+      entities.map(entity => [entity.entityId.toLowerCase(), entity.isHub] as const),
+    );
     const existingAccountEntityIds = new Set(
       Array.isArray(custodySummary?.accountEntityIds)
         ? custodySummary.accountEntityIds.map(value => String(value).toLowerCase())
         : [],
     );
     const missingHubEntityIds = hubEntityIds.filter(hubEntityId => !existingAccountEntityIds.has(hubEntityId));
-    const connectivityInput = buildCustodyConnectivityInput(identity, config, missingHubEntityIds);
+    // Operator policy says custody is a User, but an already-imported Entity is
+    // authoritative. Refuse a role conflict instead of silently signing 24h
+    // clocks for a committed Hub identity.
+    const connectivityInput = buildCustodyConnectivityInput(
+      identity,
+      config,
+      missingHubEntityIds,
+      committedRoles,
+    );
     if (connectivityInput) {
       const response = await client.queueRuntimeInput(connectivityInput);
       await waitForQueuedRuntimeInputObserved(client, response, `custodyConnectivity:${identity.entityId}`);
@@ -540,9 +634,16 @@ export const setupCustody = async (
     }
   }
   if (config.routingEnabled) {
+    const usdQuoteAuthorityEntityId = String(config.usdQuoteAuthorityEntityId || '').trim().toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(usdQuoteAuthorityEntityId)) {
+      throw new Error('CUSTODY_USD_QUOTE_AUTHORITY_ENTITY_ID_REQUIRED');
+    }
     const response = await client.queueRuntimeInput({
       runtimeTxs: [],
-      entityInputs: [buildEnableRoutingEntityInput(identity, config)],
+      entityInputs: [buildEnableRoutingEntityInput(identity, {
+        ...config,
+        usdQuoteAuthorityEntityId,
+      })],
     });
     await waitForQueuedRuntimeInputObserved(client, response, `custodyRouting:${identity.entityId}`);
   }

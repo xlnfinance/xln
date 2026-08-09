@@ -17,7 +17,15 @@ test('portable contract artifacts carry bounded immutable metadata without build
   const root = join(import.meta.dir, '..', '..');
   const immutableGroupCounts = new Map<string, number>();
 
-  for (const contractName of ['Account', 'Depository', 'EntityProvider', 'HankoVerifier', 'DeltaTransformer']) {
+  for (const contractName of [
+    'Account',
+    'Depository',
+    'DepositoryBounds',
+    'EntityProvider',
+    'HankoVerifier',
+    'HashLadderRegistry',
+    'DeltaTransformer',
+  ]) {
     const artifact = JSON.parse(readFileSync(
       join(root, 'frontend', 'static', 'contracts', `${contractName}.json`),
       'utf8',
@@ -39,6 +47,10 @@ test('portable contract artifacts carry bounded immutable metadata without build
 
   expect(immutableGroupCounts.get('Account')).toBe(1);
   expect(immutableGroupCounts.get('Depository')).toBeGreaterThan(0);
+  // Solidity libraries embed their own deployment address as a synthetic
+  // immutable. Readiness must materialize it from actual code, not compare the
+  // zero placeholder or trust an extra configuration field.
+  expect(immutableGroupCounts.get('HashLadderRegistry')).toBe(1);
 });
 
 test('contract readiness checks every required address in one bounded RPC batch', async () => {

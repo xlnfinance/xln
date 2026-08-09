@@ -2,6 +2,7 @@ import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import { ethers } from 'ethers';
 import { addMessage } from '../../../frame-events';
 import {
   assertDisputeArgumentsWithinContractLimits,
@@ -32,6 +33,7 @@ export type FinalProofSelection = {
   finalProofbody: ProofBodyStruct;
   finalProofbodyHash: string;
   shouldUseCounterProof: boolean;
+  proposerIsLeft: boolean;
   callerSide: DisputeArgumentSide;
 };
 
@@ -39,6 +41,7 @@ export type FinalProofPayload = {
   counterentity: string;
   initialNonce: number;
   finalNonce: number;
+  proposerIsLeft: boolean;
   initialProofbodyHash: string;
   finalProofbody: ProofBodyStruct;
   starterArguments: string;
@@ -46,6 +49,70 @@ export type FinalProofPayload = {
   sig: string;
   startedByLeft: boolean;
   cooperative: false;
+};
+
+type CounterProofCandidate = Readonly<{
+  usable: boolean;
+  blocked: boolean;
+  nonce?: number;
+  proposerIsLeft?: boolean;
+  hash?: string;
+  hanko?: string;
+  body?: ProofBodyStruct;
+}>;
+
+const resolveCounterProofCandidate = (
+  state: EntityState,
+  account: AccountReplica,
+): CounterProofCandidate => {
+  const active = account.activeDispute!;
+  const selectedNonce = active.selectedCounterNonce;
+  if (selectedNonce !== undefined) {
+    const hash = active.selectedCounterProofbodyHash;
+    const proposerIsLeft = active.selectedCounterProposerIsLeft;
+    const rawBody = hash ? account.disputeProofBodiesByHash?.[hash] : undefined;
+    const usable =
+      typeof proposerIsLeft === 'boolean' &&
+      Boolean(hash) &&
+      isProofBodyStruct(rawBody);
+    if (!usable) {
+      addMessage(state, `⏳ Selected counter-proof N${selectedNonce} body is not locally available yet`);
+    }
+    return {
+      usable,
+      blocked: !usable,
+      nonce: selectedNonce,
+      ...(typeof proposerIsLeft === 'boolean' ? { proposerIsLeft } : {}),
+      ...(hash ? { hash } : {}),
+      hanko: '0x',
+      ...(isProofBodyStruct(rawBody) ? { body: rawBody } : {}),
+    };
+  }
+  const nonce = account.counterpartyDisputeProofNonce;
+  const proposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
+  const hash = account.counterpartyDisputeProofBodyHash;
+  const hanko = account.counterpartyDisputeProofHanko;
+  const rawBody = hash ? account.disputeProofBodiesByHash?.[hash] : undefined;
+  const callerIsStarter = (account.state.leftEntity === state.entityId) === active.startedByLeft;
+  const usable =
+    !callerIsStarter &&
+    Boolean(hanko && hanko !== '0x') &&
+    nonce !== undefined &&
+    typeof proposerIsLeft === 'boolean' &&
+    (nonce > active.initialNonce || (
+      nonce === active.initialNonce && proposerIsLeft && !active.initialProposerIsLeft
+    )) &&
+    Boolean(hash) &&
+    isProofBodyStruct(rawBody);
+  return {
+    usable,
+    blocked: false,
+    ...(nonce !== undefined ? { nonce } : {}),
+    ...(typeof proposerIsLeft === 'boolean' ? { proposerIsLeft } : {}),
+    ...(hash ? { hash } : {}),
+    ...(hanko ? { hanko } : {}),
+    ...(isProofBodyStruct(rawBody) ? { body: rawBody } : {}),
+  };
 };
 
 export const selectFinalProof = (
@@ -57,23 +124,13 @@ export const selectFinalProof = (
 ): FinalProofSelection | null => {
   const activeDispute = account.activeDispute!;
   const currentProof = buildAccountProofBodyFromJurisdictions(env.state, account);
-  const counterHash = account.counterpartyDisputeProofBodyHash;
-  const counterNonce = account.counterpartyDisputeProofNonce;
-  const counterHanko = account.counterpartyDisputeProofHanko;
-  const counterBodyRaw = counterHash
-    ? account.disputeProofBodiesByHash?.[counterHash]
-    : undefined;
-  const callerIsLeft = account.state.leftEntity === state.entityId;
-  const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
-  const hasCounterProof =
-    !callerIsStarter &&
-    Boolean(counterHanko && counterHanko !== '0x') &&
-    counterNonce !== undefined &&
-    counterNonce > activeDispute.initialNonce &&
-    Boolean(counterHash) &&
-    isProofBodyStruct(counterBodyRaw);
-  const finalNonce = hasCounterProof ? counterNonce! : activeDispute.initialNonce;
-  const finalNonceSource = hasCounterProof
+  const counter = resolveCounterProofCandidate(state, account);
+  if (counter.blocked) return null;
+  const finalNonce = counter.usable ? counter.nonce! : activeDispute.initialNonce;
+  const proposerIsLeft = counter.usable
+    ? counter.proposerIsLeft!
+    : activeDispute.initialProposerIsLeft;
+  const finalNonceSource = counter.usable
     ? 'counterpartyDisputeProof'
     : 'initialNonce (unilateral)';
   if (finalNonce <= 0) {
@@ -97,15 +154,15 @@ export const selectFinalProof = (
   const storedBody = isProofBodyStruct(storedBodyRaw)
     ? canonicalizeProofBodyStruct(storedBodyRaw, sourceState.entityId, counterpartyId, 'stored')
     : null;
-  const counterBody = hasCounterProof
+  const counterBody = counter.usable
     ? canonicalizeProofBodyStruct(
-        counterBodyRaw as ProofBodyStruct,
+        counter.body!,
         sourceState.entityId,
         counterpartyId,
         'counter',
       )
     : null;
-  const shouldUseCounterProof = counterBody !== null && counterHash !== undefined;
+  const shouldUseCounterProof = counterBody !== null && counter.hash !== undefined;
   if (!shouldUseCounterProof && currentProof.proofBodyHash !== activeDispute.initialProofbodyHash) {
     disputeLog.warn('finalize.proof_body_hash_mismatch', {
       counterparty: shortId(counterpartyId),
@@ -119,12 +176,13 @@ export const selectFinalProof = (
   return {
     finalNonce,
     finalNonceSource,
-    finalizeSig: hasCounterProof ? counterHanko! : '0x',
+    finalizeSig: counter.usable ? counter.hanko! : '0x',
     finalProofbody: (shouldUseCounterProof ? counterBody : storedBody ?? currentBody)!,
     finalProofbodyHash: shouldUseCounterProof
-      ? counterHash!
+      ? counter.hash!
       : activeDispute.initialProofbodyHash,
     shouldUseCounterProof,
+    proposerIsLeft,
     callerSide: account.state.leftEntity === state.entityId ? 'left' : 'right',
   };
 };
@@ -143,6 +201,7 @@ export const verifyCounterProofIdentity = (
     selection.finalProofbodyHash,
     domain,
     selection.finalNonce,
+    selection.proposerIsLeft,
   );
   if (account.counterpartyDisputeHash.toLowerCase() !== expectedHash.toLowerCase()) {
     throw new Error(
@@ -160,20 +219,39 @@ export const buildFinalProofPayload = (
   env: EntityRuntimeContext,
 ): FinalProofPayload => {
   const activeDispute = account.activeDispute!;
-  const builtArguments = buildDisputeArgumentsForSnapshot(
-    account,
-    state,
-    counterpartyId,
-    selection.finalProofbodyHash,
-    { secretsSide: selection.callerSide },
-  );
+  const callerIsStarter = selection.callerSide ===
+    (activeDispute.startedByLeft ? 'left' : 'right');
+  const builtArguments = callerIsStarter
+    ? { leftArguments: '0x', rightArguments: '0x', warnings: [] }
+    : buildDisputeArgumentsForSnapshot(
+        account,
+        state,
+        counterpartyId,
+        selection.finalProofbodyHash,
+        { secretsSide: selection.callerSide },
+      );
   reportOptionalArgumentWarnings(env, counterpartyId, builtArguments.warnings);
+  const selectedCounterCommitment = selection.shouldUseCounterProof
+    ? ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+        ['uint256', 'bool', 'bytes32'],
+        [selection.finalNonce, selection.proposerIsLeft, selection.finalProofbodyHash],
+      ))
+    : ethers.ZeroHash;
+  // Contract parity: the starter precommits positional evidence for one exact
+  // newer branch. Another valid newer bilateral proof still wins, but receives
+  // empty starter-side evidence so unrelated positional arguments cannot be
+  // paired with it and the starter cannot veto state progression.
   const starterArguments = selection.shouldUseCounterProof
-    ? activeDispute.starterIncrementedArguments
+    ? selectedCounterCommitment.toLowerCase() ===
+        activeDispute.starterCounterProofCommitment.toLowerCase()
+      ? activeDispute.starterCounterArguments
+      : '0x'
     : activeDispute.starterInitialArguments;
-  const otherArguments = activeDispute.startedByLeft
-    ? builtArguments.rightArguments
-    : builtArguments.leftArguments;
+  const otherArguments = callerIsStarter
+    ? '0x'
+    : activeDispute.startedByLeft
+      ? builtArguments.rightArguments
+      : builtArguments.leftArguments;
   assertDisputeProofBodyWithinContractLimits(
     selection.finalProofbody,
     'disputeFinalize.final',
@@ -197,6 +275,7 @@ export const buildFinalProofPayload = (
     counterentity: counterpartyId,
     initialNonce: activeDispute.initialNonce,
     finalNonce: selection.finalNonce,
+    proposerIsLeft: selection.proposerIsLeft,
     initialProofbodyHash: activeDispute.initialProofbodyHash,
     finalProofbody: selection.finalProofbody,
     starterArguments,

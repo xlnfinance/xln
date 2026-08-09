@@ -16,6 +16,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { EntityInput } from '../entity/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, advanceScenarioPastDisputeTimeout, processUntilWithoutLocalHtlcAdvance, withholdScenarioLocalHtlcAdvances } from './helpers';
@@ -427,6 +428,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
         type: 'openAccount',
         data: {
           targetEntityId: hub.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(alice.id, false, hub.id, true),
           tokenId: USDC_TOKEN_ID,
           creditAmount: usd(10_000),
         }
@@ -471,6 +473,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
         type: 'openAccount',
         data: {
           targetEntityId: hub.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(bob.id, false, hub.id, true),
           tokenId: USDC_TOKEN_ID,
           creditAmount: usd(10_000),
         }
@@ -816,13 +819,14 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // owes the same routing fee on top. Recipient-exact delivery means Bob still
     // receives payment2 while Alice is debited the gross.
     const payment2SenderGross = calculateRequiredInboundForDesiredForward(payment2, hubFeePpm, 0n);
+    const htlc2 = rng.nextHashlock();
     console.log('\n🏃 FRAME 14: Alice initiates second A→H→B $125K');
 
     // Frame 14: Alice sends again
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
-      entityTxs: [{
+      entityTxs: [withDeterministicHtlcTestSecret({
         type: 'htlcPayment',
         data: {
           targetEntityId: bob.id,
@@ -832,7 +836,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           deliveryMode: 'instant',
           description: 'Payment 2 of 2'
         }
-      }]
+      }, htlc2.secret)]
     }]);
     logPending();
 
@@ -935,13 +939,14 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // The reverse leg is routed too, so Bob is debited the gross while Alice is
     // credited the net; the Hub keeps the difference on the B-H side.
     const reverseSenderGross = calculateRequiredInboundForDesiredForward(reversePayment, hubFeePpm, 0n);
+    const reverseHtlc = rng.nextHashlock();
 
     // Frame 18: Bob initiates B→H→A
     console.log('🏃 FRAME 18: Bob initiates B→H→A $50K');
     await process(env, [{
       entityId: bob.id,
       signerId: bob.signer,
-      entityTxs: [{
+      entityTxs: [withDeterministicHtlcTestSecret({
         type: 'htlcPayment',
         data: {
           targetEntityId: alice.id,
@@ -951,7 +956,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           deliveryMode: 'instant',
           description: 'Reverse payment: Bob pays Alice'
         }
-      }]
+      }, reverseHtlc.secret)]
     }]);
     logPending();
 
@@ -1243,7 +1248,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       signerId: hub.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: charlie.id }
+        data: {
+          targetEntityId: charlie.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(hub.id, true, charlie.id, false),
+        }
       }]
     }]);
     await converge(env);
@@ -1416,7 +1424,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       signerId: hub.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: hub2.id }
+        data: {
+          targetEntityId: hub2.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(hub.id, true, hub2.id, true),
+        }
       }]
     }]);
     await converge(env);
@@ -1427,7 +1438,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
       signerId: hub2.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: bob.id }
+        data: {
+          targetEntityId: bob.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(hub2.id, true, bob.id, false),
+        }
       }]
     }]);
     await converge(env);
@@ -1648,6 +1662,17 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
     // STEP 2: Broadcast batch to J-machine (submit disputeStart to blockchain)
     console.log(`📡 STEP 2: Bob broadcasts jBatch to J-machine...`);
+    const deterministicDisputeStartUnix = 4_102_500_000;
+    const disputeProvider = jadapter.provider as {
+      send?: (method: string, params: unknown[]) => Promise<unknown>;
+    };
+    if (typeof disputeProvider.send !== 'function') {
+      throw new Error('lock-ahb deterministic dispute start requires RPC provider timestamp control');
+    }
+    // Anvil automining derives a block timestamp from elapsed host time even
+    // when genesis is fixed. Pin the economically relevant dispute-start block
+    // so repeated runs exercise identical signed windows and J-event bytes.
+    await disputeProvider.send('evm_setNextBlockTimestamp', [deterministicDisputeStartUnix]);
     await processWithOffline(env, [{
       entityId: bob.id,
       signerId: bob.signer,
@@ -1677,7 +1702,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // STEP 4: Wait for dispute timeout (absolute unix seconds on L1)
     const timeoutUnix = Number(bobHubAccountAfterStart.activeDispute!.disputeTimeout);
     console.log(`⏳ STEP 4: Waiting for dispute timeout (unix ${timeoutUnix})...`);
-    const providerAny = jadapter.provider as { send?: (method: string, params: unknown[]) => Promise<unknown> };
+    const providerAny = disputeProvider;
     if (typeof providerAny.send !== 'function') {
       throw new Error('lock-ahb timeout advance requires RPC provider with evm_increaseTime support');
     }
@@ -1741,23 +1766,30 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     assert(!!bobRepBeforeFinalize.state.jBatchState, 'Dispute flow initialized Bob jBatch state');
     const secretsBefore = bobRepBeforeFinalize.state.jBatchState!.batch.revealSecrets.length;
 
-    // Bob finalizes dispute WITH useOnchainRegistry: true
-    console.log(`📤 Bob calls disputeFinalize with useOnchainRegistry: true...`);
-    await processWithOffline(env, [{
-      entityId: bob.id,
-      signerId: bob.signer,
-      entityTxs: [{
-        type: 'disputeFinalize',
-        data: {
-          counterpartyEntityId: hub.id,
-          useOnchainRegistry: true, // KEY: This triggers on-chain secret reveal!
-          description: 'Hostage reveal: secret goes to on-chain registry'
-        }
-      }, {
-        type: 'j_broadcast',
-        data: {},
-      }]
-    }], hostageOfflineSigners, 'hostage-hub-offline');
+    // The Hub/watchtower may have finalized first. External finality preserves
+    // Bob's unrelated secret publication in the durable sent slot and owns its
+    // ACK continuation. Never inject a second broadcast while that immutable
+    // slot is occupied: production intentionally fails loud on this collision.
+    const bobCanFinalize = Boolean(bobRepBeforeFinalize.state.accounts.get(hub.id)?.activeDispute);
+    const bobHasSentBatch = Boolean(bobRepBeforeFinalize.state.jBatchState?.sentBatch);
+    if (bobCanFinalize && !bobHasSentBatch) {
+      console.log(`📤 Bob calls disputeFinalize with useOnchainRegistry: true...`);
+      await processWithOffline(env, [{
+        entityId: bob.id,
+        signerId: bob.signer,
+        entityTxs: [{
+          type: 'disputeFinalize',
+          data: {
+            counterpartyEntityId: hub.id,
+            useOnchainRegistry: true,
+            description: 'Hostage reveal: secret goes to on-chain registry'
+          }
+        }, {
+          type: 'j_broadcast',
+          data: {},
+        }]
+      }], hostageOfflineSigners, 'hostage-hub-offline');
+    }
     await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
 
     // The certified Entity frame may immediately move the batch from the

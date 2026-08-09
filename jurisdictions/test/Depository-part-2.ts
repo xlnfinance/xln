@@ -16,6 +16,7 @@ import {
   addressEntityId,
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
+  deployDepositoryStack,
   deployEntityProvider,
   deriveHardhatPrivateKey,
   emptyBatch,
@@ -37,7 +38,7 @@ const SETTLEMENT_DIFFS_ABI =
   'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
 
 const PROOF_BODY_ABI =
-  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
+  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
 const TEST_WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('xln:test-watch-seed'));
 
@@ -96,6 +97,16 @@ async function accountKeyFor(depository: Depository, left: string, right: string
   return depository.accountKey(left, right);
 }
 
+async function advancePastDisputeTimeout(
+  target: Depository,
+  left: string,
+  right: string,
+): Promise<void> {
+  const key = await target.accountKey(left, right);
+  const timeout = (await target._accounts(key)).disputeTimeout;
+  await time.increaseTo(Number(timeout + 1n));
+}
+
 async function cooperativeUpdateHash(
   depository: Depository,
   accountKey: string,
@@ -118,12 +129,13 @@ async function disputeProofHash(
   nonce: bigint,
   proofbodyHash: string,
   watchSeed: string = TEST_WATCH_SEED,
+  proposerIsLeft = false,
 ): Promise<string> {
   const chainId = (await ethers.provider.getNetwork()).chainId;
   return ethers.keccak256(
     abi.encode(
-      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-      [DISPUTE_PROOF, chainId, await depository.getAddress(), accountKey, nonce, proofbodyHash, watchSeed],
+      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
+      [DISPUTE_PROOF, chainId, await depository.getAddress(), accountKey, nonce, proposerIsLeft, proofbodyHash, watchSeed],
     ),
   );
 }
@@ -159,7 +171,7 @@ async function watchtowerCounterDisputeHash(
   counterentity: string,
   finalNonce: bigint,
   finalProofbodyHash: string,
-  lastResortWindowBlocks: bigint,
+  lastResortWindowSeconds: bigint,
   appointmentSequence: bigint,
 ): Promise<string> {
   return depository.computeWatchtowerCounterDisputeHash(
@@ -168,7 +180,7 @@ async function watchtowerCounterDisputeHash(
     counterentity,
     finalNonce,
     finalProofbodyHash,
-    lastResortWindowBlocks,
+    lastResortWindowSeconds,
     appointmentSequence,
   );
 }
@@ -180,6 +192,8 @@ function proofBodyHash(proofbody: Record<string, unknown>): string {
 function proofBody(offdeltas: bigint[], tokenIds: bigint[], transformers: unknown[] = []): Record<string, unknown> {
   return {
     watchSeed: TEST_WATCH_SEED,
+    leftResponseSeconds: 50,
+    rightResponseSeconds: 50,
     offdeltas,
     tokenIds,
     transformers,
@@ -255,19 +269,8 @@ describe('Depository', () => {
     // Deploy EntityProvider
     const entityProvider = await deployEntityProvider(user0.address);
 
-    // Deploy Account library first
-    const AccountFactory = await hre.ethers.getContractFactory('Account');
-    const account = await AccountFactory.deploy();
-    await account.waitForDeployment();
-
-    // Deploy Depository with Account library linked
-    const DepositoryFactory = await hre.ethers.getContractFactory('Depository', {
-      libraries: {
-        Account: await account.getAddress(),
-      },
-    });
-    depository = await DepositoryFactory.deploy(await entityProvider.getAddress(), 5760);
-    await depository.waitForDeployment();
+    const stack = await deployDepositoryStack(await entityProvider.getAddress());
+    depository = stack.depository;
 
     // Deploy ERC20 mock contract
     const ERC20Mock = await hre.ethers.getContractFactory('ERC20Mock');
@@ -286,7 +289,15 @@ describe('Depository', () => {
     await erc1155.waitForDeployment();
     await erc1155.mint(user0.address, 0, 100, '0x');
 
-    return { depository, erc20, erc721, erc1155, user0, user1 };
+    return {
+      depository,
+      deltaTransformer: stack.deltaTransformer,
+      erc20,
+      erc721,
+      erc1155,
+      user0,
+      user1,
+    };
   }
 
   async function registerFixedSupplyErc20(target: Depository, supply: bigint): Promise<bigint> {
@@ -362,13 +373,14 @@ describe('Depository', () => {
             watchSeed: TEST_WATCH_SEED,
             sig: signEntityHash(right.entityId, startHash, right.privateKey),
             starterInitialArguments: leftArguments,
-            starterIncrementedArguments: '0x',
+            starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
           },
         ],
       }),
     );
     await target.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
-    await time.increase(Number(await target.defaultDisputeDelay()));
+    await advancePastDisputeTimeout(target, left.entityId, right.entityId);
 
     const finalization = {
       counterentity: right.entityId,
@@ -407,7 +419,7 @@ describe('Depository', () => {
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
     const appointmentSequence = 3n;
-    const lastResortWindowBlocks = 12n;
+    const lastResortWindowSeconds = 12n;
     await depository.mintToReserve(left.entityId, tokenId, 1_000n);
 
     const fundCollateralBatch = emptyBatch({
@@ -436,12 +448,14 @@ describe('Depository', () => {
         {
           counterentity: right.entityId,
           nonce: disputeNonce,
+          proposerIsLeft: false,
           proofbodyHash: initialProofbodyHash,
           initialProofbody,
           watchSeed: TEST_WATCH_SEED,
           sig: startSig,
           starterInitialArguments,
-          starterIncrementedArguments: '0x',
+          starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
     });
@@ -451,7 +465,14 @@ describe('Depository', () => {
     const finalNonce = 2n;
     const finalProofbody = proofBody([-200n], [tokenId]);
     const finalProofbodyHash = proofBodyHash(finalProofbody);
-    const finalHash = await disputeProofHash(depository, acctKey, finalNonce, finalProofbodyHash);
+    const finalHash = await disputeProofHash(
+      depository,
+      acctKey,
+      finalNonce,
+      finalProofbodyHash,
+      TEST_WATCH_SEED,
+      true,
+    );
     const finalSig = signEntityHash(left.entityId, finalHash, left.privateKey);
     const ownerAuthHash = await watchtowerCounterDisputeHash(
       depository,
@@ -460,7 +481,7 @@ describe('Depository', () => {
       left.entityId,
       finalNonce,
       finalProofbodyHash,
-      lastResortWindowBlocks,
+      lastResortWindowSeconds,
       appointmentSequence,
     );
     const ownerAuthorization = signEntityHash(right.entityId, ownerAuthHash, right.privateKey);
@@ -468,6 +489,7 @@ describe('Depository', () => {
       counterentity: left.entityId,
       initialNonce: disputeNonce,
       finalNonce,
+      proposerIsLeft: true,
       initialProofbodyHash,
       finalProofbody,
       starterArguments: '0x',
@@ -477,11 +499,11 @@ describe('Depository', () => {
       cooperative: false,
     };
 
-    const currentBlock = BigInt(await time.latestBlock());
-    const timeoutBlock = (await depository._accounts(acctKey)).disputeTimeout;
-    const lastResortStartBlock = timeoutBlock - lastResortWindowBlocks;
-    if (lastResortStartBlock > currentBlock) {
-      await mine(Number(lastResortStartBlock - currentBlock));
+    const currentTimestamp = BigInt(await time.latest());
+    const timeoutTimestamp = (await depository._accounts(acctKey)).disputeTimeout;
+    const lastResortStartTimestamp = timeoutTimestamp - lastResortWindowSeconds;
+    if (lastResortStartTimestamp > currentTimestamp) {
+      await time.increaseTo(Number(lastResortStartTimestamp));
     }
 
     await expect(
@@ -490,7 +512,7 @@ describe('Depository', () => {
         .watchtowerCounterDispute(
           right.entityId,
           finalization,
-          lastResortWindowBlocks,
+          lastResortWindowSeconds,
           appointmentSequence,
           ownerAuthorization,
         ),
@@ -507,18 +529,15 @@ describe('Depository', () => {
         .watchtowerCounterDispute(
           right.entityId,
           sameProof,
-          lastResortWindowBlocks,
+          lastResortWindowSeconds,
           appointmentSequence,
           ownerAuthorization,
         ),
     ).to.be.revertedWithCustomError(depository, 'E2');
   });
 
-  it('settles a pull dispute from the hash-ladder reveal registry, never calldata', async function () {
-    const { depository } = await loadFixture(deployFixture);
-    const DeltaTransformer = await ethers.getContractFactory('DeltaTransformer');
-    const transformer = await DeltaTransformer.deploy();
-    await transformer.waitForDeployment();
+  it('waits the signed window for a newer Pull proof and settles only registry evidence', async function () {
+    const { depository, deltaTransformer: transformer } = await loadFixture(deployFixture);
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenA = 1n;
@@ -552,10 +571,6 @@ describe('Depository', () => {
 
     const fillRatio = 0x0123;
     const pullProof = buildHashLadderProof('depository-cross-pull', fillRatio);
-    // Far enough ahead that mining the block-number dispute timeout below
-    // cannot pass the wall-clock reveal deadline: the barrier test needs
-    // "blocks elapsed" and "reveal window open" to hold simultaneously.
-    const revealDeadline = (await time.latest()) + 100_000;
     // Negative amount: the pull credits the RIGHT side, so only RIGHT's own
     // registry record may settle it.
     const encodedPullBatch = await transformer.encodeBatch({
@@ -566,9 +581,9 @@ describe('Depository', () => {
           deltaIndex: 1,
           amount: -MAX_FILL_RATIO,
           claimedRatio: 0,
-          revealedUntilTimestamp: revealDeadline,
           fullHash: pullProof.fullHash,
           partialRoot: pullProof.partialRoot,
+          targetRole: false,
         },
       ],
     });
@@ -598,59 +613,81 @@ describe('Depository', () => {
           watchSeed: TEST_WATCH_SEED,
           sig: startSig,
           starterInitialArguments: '0x',
-          starterIncrementedArguments: '0x',
+          starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
     });
     const start = await signDepositoryBatch(depository, right.entityId, right.privateKey, startBatch);
     await depository.connect(right.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
 
-    // The beneficiary registers the verified reveal on-chain under its own key.
+    // The beneficiary publishes independent Sprites-like evidence. The outer
+    // batch authenticates the writer; the signed Pull later assigns meaning.
     const revealBatch = emptyBatch({
-      hashLadderReveals: [
+      hashLadderRegistrations: [
         {
+          counterpartyEntity: left.entityId,
+          targetRole: false,
           fullHash: pullProof.fullHash,
           partialRoot: pullProof.partialRoot,
-          fillRatio,
-          fullSecret: ethers.ZeroHash,
-          reveals: pullProof.reveals,
+          witness: {
+            fillRatio,
+            fullSecret: ethers.ZeroHash,
+            reveals: pullProof.reveals,
+          },
         },
       ],
     });
     const reveal = await signDepositoryBatch(depository, right.entityId, right.privateKey, revealBatch);
     await depository.connect(right.signer).processBatch(reveal.encodedBatch, reveal.hankoData, reveal.nonce);
 
-    await time.increase(Number(await depository.defaultDisputeDelay()));
-
-    // The barrier: a live pull reveal window blocks finalization even after the
-    // block-number dispute timeout. Finalize must wait for the wall-clock
-    // deadline so the sibling chain's reveal can always be ported in time.
+    // Finalization waits for the exact sum signed by both account parties. The
+    // target role owns the second response window; neither role can shorten it.
     const finalization = {
-      counterentity: left.entityId,
+      counterentity: right.entityId,
       initialNonce: disputeNonce,
-      finalNonce: disputeNonce,
+      finalNonce: disputeNonce + 1n,
       initialProofbodyHash: proofbodyHash,
       finalProofbody: proofbody,
       starterArguments: '0x',
       otherArguments: '0x',
-      sig: '0x',
+      // Left is the non-starter and holds Right's newer signed state. Unlike a
+      // pull-free counter-proof, this cannot close until both reveal phases end.
+      sig: signEntityHash(
+        right.entityId,
+        await disputeProofHash(depository, acctKey, disputeNonce + 1n, proofbodyHash),
+        right.privateKey,
+      ),
       startedByLeft: false,
       cooperative: false,
     };
     const earlyBatch = emptyBatch({ disputeFinalizations: [finalization] });
-    const early = await signDepositoryBatch(depository, right.entityId, right.privateKey, earlyBatch);
+    const early = await signDepositoryBatch(depository, left.entityId, left.privateKey, earlyBatch);
     await expect(
-      depository.connect(right.signer).processBatch(early.encodedBatch, early.hankoData, early.nonce),
-    ).to.be.revertedWithCustomError(transformer, 'PullRevealWindowActive');
+      depository.connect(left.signer).processBatch(early.encodedBatch, early.hankoData, early.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E2');
 
-    await time.increaseTo(revealDeadline + 1);
+    const counterBatch = emptyBatch({
+      counterDisputes: [{
+        counterentity: right.entityId,
+        initialNonce: disputeNonce,
+        initialProofbodyHash: proofbodyHash,
+        counterNonce: disputeNonce + 1n,
+        counterProofbody: proofbody,
+        sig: finalization.sig,
+      }],
+    });
+    const counter = await signDepositoryBatch(depository, left.entityId, left.privateKey, counterBatch);
+    await depository.connect(left.signer).processBatch(counter.encodedBatch, counter.hankoData, counter.nonce);
+
+    await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
 
     const finalBatch = emptyBatch({ disputeFinalizations: [finalization] });
-    const final = await signDepositoryBatch(depository, right.entityId, right.privateKey, finalBatch);
-    await depository.connect(right.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
+    const final = await signDepositoryBatch(depository, left.entityId, left.privateKey, finalBatch);
+    await depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
 
     // No payment-secret storage was touched: the registry path is disjoint.
-    expect(await transformer.hashToBlock(hashNode(pullProof.reveals[3]))).to.equal(0n);
+    expect(await transformer.hashToTimestamp(hashNode(pullProof.reveals[3]))).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenB)).to.equal(1_000n - BigInt(fillRatio));
     expect(await depository._reserves(right.entityId, tokenB)).to.equal(BigInt(fillRatio));
   });
@@ -694,7 +731,8 @@ describe('Depository', () => {
           watchSeed: TEST_WATCH_SEED,
           sig: startSig,
           starterInitialArguments,
-          starterIncrementedArguments: '0x',
+          starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
     });
@@ -868,7 +906,8 @@ describe('Depository', () => {
           watchSeed: TEST_WATCH_SEED,
           sig: startSig,
           starterInitialArguments,
-          starterIncrementedArguments: '0x',
+          starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
     });
@@ -894,7 +933,7 @@ describe('Depository', () => {
       depository.connect(left.signer).processBatch(tooEarly.encodedBatch, tooEarly.hankoData, tooEarly.nonce),
     ).to.be.revertedWithCustomError(depository, 'E2');
 
-    await time.increase(Number(await depository.defaultDisputeDelay()));
+    await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
 
     const afterTimeout = await signDepositoryBatch(depository, left.entityId, left.privateKey, tooEarlyBatch);
     await depository

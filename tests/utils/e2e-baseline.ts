@@ -37,10 +37,13 @@ export type E2EMarketMakerHubHealth = {
   depthReady?: boolean;
   pairs?: Array<{
     pairId: string;
+    bookOwnerEntityId?: string;
     offers: number;
     ready: boolean;
     depthReady?: boolean;
     expectedOffers?: number;
+    expectedBidOffers?: number;
+    expectedAskOffers?: number;
     bidOffers?: number;
     askOffers?: number;
     snapshotDepthExact?: boolean;
@@ -59,13 +62,18 @@ export type E2EMarketMakerCrossRouteHealth = {
   depthReady?: boolean;
   pairs?: Array<{
     pairId: string;
+    bookOwnerEntityId?: string;
     offers: number;
     ready: boolean;
     depthReady?: boolean;
     expectedOffers?: number;
+    expectedBidOffers?: number;
+    expectedAskOffers?: number;
     bidOffers?: number;
     askOffers?: number;
     snapshotDepthExact?: boolean;
+    sourceTokenIds?: number[];
+    targetTokenIds?: number[];
   }>;
 };
 
@@ -219,7 +227,7 @@ const withApiContext = async <T>(run: (api: APIRequestContext) => Promise<T>): P
 
 const readJson = async <T>(response: APIResponse): Promise<T | null> => {
   try {
-    return await response.json() as T;
+    return (await response.json()) as T;
   } catch {
     return null;
   }
@@ -234,11 +242,10 @@ const readText = async (response: APIResponse): Promise<string> => {
 };
 
 const hasFatalFailure = (failures: unknown): boolean =>
-  Array.isArray(failures) && failures.some((failure) => (
-    typeof failure === 'object' &&
-    failure !== null &&
-    (failure as { fatal?: unknown }).fatal === true
-  ));
+  Array.isArray(failures) &&
+  failures.some(
+    failure => typeof failure === 'object' && failure !== null && (failure as { fatal?: unknown }).fatal === true,
+  );
 
 const getHealthWithApi = async (
   api: APIRequestContext,
@@ -264,7 +271,7 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
       timestamp: health.timestamp ?? null,
       systemOk: health.systemOk ?? null,
       degraded: health.degraded ?? health.degradedComponents ?? [],
-      failures: (health.failures ?? []).map((failure) => ({
+      failures: (health.failures ?? []).map(failure => ({
         category: failure.category ?? null,
         code: failure.code ?? null,
         retryable: failure.retryable === true,
@@ -277,7 +284,7 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
         pairCount: health.hubMesh?.pairCount ?? null,
         directOpenLinkCount: health.hubMesh?.directOpenLinkCount ?? null,
         hubIds: health.hubMesh?.hubIds ?? [],
-        pairs: (health.hubMesh?.pairs ?? []).map((pair) => ({
+        pairs: (health.hubMesh?.pairs ?? []).map(pair => ({
           left: pair.left ?? null,
           right: pair.right ?? null,
           ok: pair.ok ?? false,
@@ -307,14 +314,14 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
           expectedOffersPerRoute: health.marketMaker?.cross?.expectedOffersPerRoute ?? 0,
           expectedOffersPerPair: health.marketMaker?.cross?.expectedOffersPerPair ?? 0,
           routeCount: health.marketMaker?.cross?.routeCount ?? null,
-          routes: (health.marketMaker?.cross?.routes ?? []).map((route) => ({
+          routes: (health.marketMaker?.cross?.routes ?? []).map(route => ({
             sourceJurisdiction: route.sourceJurisdiction,
             targetJurisdiction: route.targetJurisdiction,
             sourceHubEntityId: route.sourceHubEntityId,
             targetHubEntityId: route.targetHubEntityId,
             offers: route.offers,
             ready: route.ready,
-            pairs: (route.pairs ?? []).map((pair) => ({
+            pairs: (route.pairs ?? []).map(pair => ({
               pairId: pair.pairId,
               offers: pair.offers,
               ready: pair.ready,
@@ -323,11 +330,11 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
             })),
           })),
         },
-        hubs: (health.marketMaker?.hubs ?? []).map((hub) => ({
+        hubs: (health.marketMaker?.hubs ?? []).map(hub => ({
           hubEntityId: hub.hubEntityId,
           offers: hub.offers,
           ready: hub.ready,
-          pairs: (hub.pairs ?? []).map((pair) => ({
+          pairs: (hub.pairs ?? []).map(pair => ({
             pairId: pair.pairId,
             offers: pair.offers,
             ready: pair.ready,
@@ -339,11 +346,11 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
         targetMet: health.bootstrapReserves?.targetMet ?? null,
         requiredTokenCount: health.bootstrapReserves?.requiredTokenCount ?? 0,
         entityCount: health.bootstrapReserves?.entityCount ?? 0,
-        entities: (health.bootstrapReserves?.entities ?? []).map((entity) => ({
+        entities: (health.bootstrapReserves?.entities ?? []).map(entity => ({
           entityId: entity.entityId,
           role: entity.role,
           ready: entity.ready,
-          tokens: entity.tokens.map((token) => ({
+          tokens: entity.tokens.map(token => ({
             tokenId: token.tokenId,
             symbol: token.symbol,
             current: token.current,
@@ -359,7 +366,7 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
         daemonPort: health.custody?.daemonPort ?? null,
         servicePort: health.custody?.servicePort ?? null,
       },
-      hubs: (health.hubs ?? []).map((hub) => ({
+      hubs: (health.hubs ?? []).map(hub => ({
         entityId: hub.entityId,
         name: hub.name ?? null,
         online: hub.online ?? false,
@@ -371,14 +378,10 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
 };
 
 const onlineHubCount = (health: E2EHealthResponse): number =>
-  (health.hubs ?? []).filter((hub) => hub.online === true).length;
+  (health.hubs ?? []).filter(hub => hub.online === true).length;
 
 const reportedHubMeshHubCount = (health: E2EHealthResponse): number =>
-  Math.max(
-    health.hubMesh?.hubIds?.length ?? 0,
-    health.hubMesh?.hubCount ?? 0,
-    onlineHubCount(health),
-  );
+  Math.max(health.hubMesh?.hubIds?.length ?? 0, health.hubMesh?.hubCount ?? 0, onlineHubCount(health));
 
 export const isBaselineReady = (health: E2EHealthResponse | null, options: Required<E2EBaselineOptions>): boolean => {
   if (!health) return false;
@@ -410,26 +413,24 @@ export const buildE2EResetBody = (
   confirm: RESET_CONFIRMATION,
   enableMarketMaker: options.requireMarketMaker === true,
   enableCustody: options.requireCustody === true,
-  ...(options.requireMarketMaker === true
-    ? { requireMarketMaker: true }
-    : {}),
-  ...(options.requireCustody === true
-    ? { requireCustody: true }
-    : {}),
+  ...(options.requireMarketMaker === true ? { requireMarketMaker: true } : {}),
+  ...(options.requireCustody === true ? { requireCustody: true } : {}),
 });
 
-export const resolveE2EBaselineInitialWaitMs = (options: Pick<
-  Required<E2EBaselineOptions>,
-  'timeoutMs' | 'autoResetGraceMs' | 'allowAutoReset'
->): number =>
-  options.allowAutoReset ? Math.min(options.timeoutMs, options.autoResetGraceMs) : options.timeoutMs;
+export const resolveE2EBaselineInitialWaitMs = (
+  options: Pick<Required<E2EBaselineOptions>, 'timeoutMs' | 'autoResetGraceMs' | 'allowAutoReset'>,
+): number => (options.allowAutoReset ? Math.min(options.timeoutMs, options.autoResetGraceMs) : options.timeoutMs);
 
 const namedHubsFromHealth = (health: E2EHealthResponse | null): Map<string, string> => {
   const hubs = Array.isArray(health?.hubs) ? health.hubs : [];
   const byName = new Map<string, string>();
   for (const hub of hubs) {
-    const name = String(hub.name ?? '').trim().toLowerCase();
-    const entityId = String(hub.entityId ?? '').trim().toLowerCase();
+    const name = String(hub.name ?? '')
+      .trim()
+      .toLowerCase();
+    const entityId = String(hub.entityId ?? '')
+      .trim()
+      .toLowerCase();
     if (!name || !entityId) continue;
     byName.set(name, entityId);
   }
@@ -452,9 +453,7 @@ const waitForBaselineReadyWithApi = async (
     await page.waitForTimeout(Math.min(options.pollMs, remainingMs));
   }
 
-  throw new Error(
-    `E2E baseline not ready within ${timeoutMs}ms\n${summarizeHealth(lastHealth)}`,
-  );
+  throw new Error(`E2E baseline not ready within ${timeoutMs}ms\n${summarizeHealth(lastHealth)}`);
 };
 
 const assertIsolatedBaselineReadyWithApi = async (
@@ -484,11 +483,8 @@ const assertIsolatedBaselineReadyWithApi = async (
   throw new Error(`E2E isolated baseline was not live-ready within ${timeoutMs}ms\n${summarizeHealth(lastHealth)}`);
 };
 
-export const getHealth = async (
-  page: Page,
-  apiBaseUrl = API_BASE_URL,
-): Promise<E2EHealthResponse | null> => {
-  return await withApiContext((api) => getHealthWithApi(api, apiBaseUrl));
+export const getHealth = async (page: Page, apiBaseUrl = API_BASE_URL): Promise<E2EHealthResponse | null> => {
+  return await withApiContext(api => getHealthWithApi(api, apiBaseUrl));
 };
 
 export const waitForNamedHubs = async (
@@ -505,7 +501,7 @@ export const waitForNamedHubs = async (
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
   const startedAt = Date.now();
   let lastHealth: E2EHealthResponse | null = null;
-  const wanted = requiredNames.map((name) => name.trim().toLowerCase()).filter(Boolean);
+  const wanted = requiredNames.map(name => name.trim().toLowerCase()).filter(Boolean);
 
   if (process.env.E2E_ISOLATED_BASELINE_READY === '1') {
     lastHealth = readIsolatedBaselineHealthSnapshot();
@@ -545,7 +541,7 @@ export const waitForApiReachable = async (
   timeoutMs = 120_000,
   apiBaseUrl = API_BASE_URL,
 ): Promise<void> => {
-  await withApiContext(async (api) => {
+  await withApiContext(async api => {
     const startedAt = Date.now();
     let lastError = '';
     while (Date.now() - startedAt < timeoutMs) {
@@ -563,10 +559,7 @@ export const waitForApiReachable = async (
   });
 };
 
-export const ensureE2EBaseline = async (
-  page: Page,
-  options: E2EBaselineOptions = {},
-): Promise<E2EHealthResponse> => {
+export const ensureE2EBaseline = async (page: Page, options: E2EBaselineOptions = {}): Promise<E2EHealthResponse> => {
   const resolved: Required<E2EBaselineOptions> = {
     apiBaseUrl: options.apiBaseUrl ?? API_BASE_URL,
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -583,7 +576,7 @@ export const ensureE2EBaseline = async (
   // The isolated runner owns reset/readiness. Tests must not hide readiness
   // problems behind another long wait once Playwright has started.
   if (ISOLATED_STACK) {
-    return await withApiContext((api) => assertIsolatedBaselineReadyWithApi(api, resolved));
+    return await withApiContext(api => assertIsolatedBaselineReadyWithApi(api, resolved));
   }
 
   if (resolved.forceReset) {
@@ -604,12 +597,12 @@ export const ensureE2EBaseline = async (
 
   const initialWaitMs = resolveE2EBaselineInitialWaitMs(resolved);
   try {
-    return await withApiContext((api) => waitForBaselineReadyWithApi(page, api, resolved, initialWaitMs));
+    return await withApiContext(api => waitForBaselineReadyWithApi(page, api, resolved, initialWaitMs));
   } catch (initialError) {
     if (!resolved.allowAutoReset) {
       throw new Error(
         `E2E baseline was not ready and automatic reset is disabled\n` +
-        `${initialError instanceof Error ? initialError.message : String(initialError)}`,
+          `${initialError instanceof Error ? initialError.message : String(initialError)}`,
       );
     }
     const remainingTimeoutMs = resolved.timeoutMs - initialWaitMs;
@@ -630,10 +623,7 @@ export const ensureE2EBaseline = async (
   }
 };
 
-export const resetProdServer = async (
-  page: Page,
-  options: E2EResetOptions = {},
-): Promise<E2EHealthResponse> => {
+export const resetProdServer = async (page: Page, options: E2EResetOptions = {}): Promise<E2EHealthResponse> => {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const apiBaseUrl = options.apiBaseUrl ?? API_BASE_URL;
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
@@ -652,14 +642,14 @@ export const resetProdServer = async (
   };
 
   if (ISOLATED_STACK) {
-    return await withApiContext((api) => assertIsolatedBaselineReadyWithApi(api, resolved));
+    return await withApiContext(api => assertIsolatedBaselineReadyWithApi(api, resolved));
   }
 
   const resetBaseUrl = options.resetBaseUrl ?? (RESET_BASE_URL || requireResetBaseUrl());
   const retries = options.retries ?? Math.max(30, Math.ceil(timeoutMs / Math.max(250, pollMs)));
   const deadline = Date.now() + timeoutMs;
 
-  return await withApiContext(async (api) => {
+  return await withApiContext(async api => {
     const startedAt = Date.now();
     let lastError = '';
     while (Date.now() - startedAt < timeoutMs) {

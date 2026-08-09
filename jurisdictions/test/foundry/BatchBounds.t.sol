@@ -239,6 +239,8 @@ contract BatchBoundsTest is XlnFixture {
     internal pure returns (ProofBody memory pb)
   {
     pb.watchSeed = seed;
+    pb.leftResponseSeconds = LEFT_RESPONSE_SECONDS;
+    pb.rightResponseSeconds = RIGHT_RESPONSE_SECONDS;
     pb.offdeltas = new int256[](tokenCount);
     pb.tokenIds = new uint256[](tokenCount);
     for (uint256 i = 0; i < tokenCount; i++) {
@@ -259,29 +261,32 @@ contract BatchBoundsTest is XlnFixture {
     bytes32 seed = keccak256("seed");
     ProofBody memory pb = _proofBody(seed, tokenCount, int256(0));
     bytes32 pbHash = keccak256(abi.encode(pb));
-    (uint256 accNonce,,,,,,,) = dep._accounts(XlnHanko.accountKey(me, other));
+    (uint256 accNonce, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(me, other));
     uint256 nonce = accNonce + 1;
+    bool proposerIsLeft = other < me;
 
     Batch memory start = XlnHanko.emptyBatch();
     start.disputeStarts = new InitialDisputeProof[](1);
     start.disputeStarts[0] = InitialDisputeProof({
-      counterentity: other, nonce: nonce, proofbodyHash: pbHash,
+      counterentity: other, nonce: nonce, proposerIsLeft: proposerIsLeft, proofbodyHash: pbHash,
       initialProofbody: pb, watchSeed: seed,
       sig: _hanko(1, XlnHanko.disputeProofHash(
-        address(dep), XlnHanko.accountKey(me, other), nonce, pbHash, seed
+        address(dep), XlnHanko.accountKey(me, other), nonce, proposerIsLeft, pbHash, seed
       )),
-      starterInitialArguments: "", starterIncrementedArguments: ""
+      starterInitialArguments: "", starterCounterArguments: "",
+      starterCounterProofCommitment: bytes32(0)
     });
     (bool startedOk, uint256 startGas,) = _rawSubmit(0, start);
     console.log("disputeStart 128 tokens ok:", startedOk);
     console.log("disputeStart 128 tokens gas:", startGas);
 
-    vm.warp(block.timestamp + DISPUTE_DELAY);
+    vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS);
 
     Batch memory fin = XlnHanko.emptyBatch();
     fin.disputeFinalizations = new FinalDisputeProof[](1);
     fin.disputeFinalizations[0] = FinalDisputeProof({
       counterentity: other, initialNonce: nonce, finalNonce: nonce,
+      proposerIsLeft: proposerIsLeft,
       initialProofbodyHash: pbHash, finalProofbody: pb,
       starterArguments: "", otherArguments: "", sig: "",
       startedByLeft: me < other, cooperative: false

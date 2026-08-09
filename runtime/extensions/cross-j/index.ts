@@ -14,6 +14,7 @@ import {
 } from './market';
 import { exactFillRatioToUint16 } from '../../orderbook/swap-execution';
 import { getSwapLotScale } from '../../orderbook';
+import { canonicalAccountDisputeConfig } from '../../account/dispute-config';
 
 export {
   deriveCanonicalCrossJurisdictionBookOwner,
@@ -380,13 +381,17 @@ const normalizeCrossJurisdictionTimePolicy = (
     settlementClock: 'unix_seconds',
     deadlineConversion: 'floor_ms_to_unix_seconds',
     runtimeExpiresAtMs,
-    finalityPolicy: 'source_deadline_then_target_safety',
+    finalityPolicy: 'independent_beneficiary_windows_pull_sum_finality',
   };
 };
 
 export function withCrossJurisdictionPolicyDefaults(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
+  const sourceDisputeConfig = canonicalAccountDisputeConfig(route.sourceDisputeConfig);
+  const targetDisputeConfig = canonicalAccountDisputeConfig(route.targetDisputeConfig);
   return {
     ...route,
+    sourceDisputeConfig,
+    targetDisputeConfig,
     riskMode: route.riskMode || 'fully_collateralized',
     domain: normalizeCrossJurisdictionRouteDomain(route),
     settlementPolicy: normalizeCrossJurisdictionSettlementPolicy(route),
@@ -703,6 +708,10 @@ const ROUTE_HASH_ABI_TYPES = [
   'string',
   'uint256',
   'string',
+  'uint32',
+  'uint32',
+  'uint32',
+  'uint32',
 ] as const;
 
 function requireRuntimeSeed(runtimeSeed: string | undefined): string {
@@ -767,20 +776,29 @@ export function hashCrossJurisdictionCloseBinary(binary: string): string {
 export function cloneCrossJurisdictionCloseProof(
   proof: CrossJurisdictionCloseProof,
 ): CrossJurisdictionCloseProof {
+  const fillRatio = Number(proof.fillRatio);
+  if (!Number.isSafeInteger(fillRatio) || fillRatio < 0 || fillRatio > CROSS_J_MAX_FILL_RATIO) {
+    throw new Error(`CROSS_J_CLOSE_PROOF_FILL_RATIO_INVALID:${String(proof.fillRatio)}`);
+  }
+  if (
+    proof.closeMode !== 'full'
+    && proof.closeMode !== 'partial_cancel_remainder'
+    && proof.closeMode !== 'pure_cancel'
+  ) {
+    throw new Error(`CROSS_J_CLOSE_PROOF_MODE_INVALID:${String(proof.closeMode)}`);
+  }
   return {
     orderId: String(proof.orderId || ''),
     routeHash: String(proof.routeHash || ''),
     sourcePullId: String(proof.sourcePullId || ''),
     targetPullId: String(proof.targetPullId || ''),
-    fillRatio: Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(proof.fillRatio) || 0))),
+    // Clone exact signed financial evidence. Clamping/flooring here would make
+    // the in-memory proof differ from the value authenticated at the boundary.
+    fillRatio,
     cumulativeSourceAmount: BigInt(proof.cumulativeSourceAmount ?? 0n),
     cumulativeTargetAmount: BigInt(proof.cumulativeTargetAmount ?? 0n),
     binaryHash: String(proof.binaryHash || ''),
-    closeMode: proof.closeMode === 'full'
-      ? 'full'
-      : proof.closeMode === 'pure_cancel'
-        ? 'pure_cancel'
-        : 'partial_cancel_remainder',
+    closeMode: proof.closeMode,
   };
 }
 
@@ -878,7 +896,7 @@ const cloneCrossJurisdictionTimePolicy = (
     settlementClock: 'unix_seconds',
     deadlineConversion: 'floor_ms_to_unix_seconds',
     runtimeExpiresAtMs: Number(policy.runtimeExpiresAtMs || 0),
-    finalityPolicy: 'source_deadline_then_target_safety',
+    finalityPolicy: 'independent_beneficiary_windows_pull_sum_finality',
   };
 };
 
@@ -889,6 +907,14 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
     hubEntityId: String(route.hubEntityId || ''),
     source: cloneCrossJurisdictionSwapLeg(route.source),
     target: cloneCrossJurisdictionSwapLeg(route.target),
+    sourceDisputeConfig: {
+      leftResponseSeconds: Number(route.sourceDisputeConfig.leftResponseSeconds),
+      rightResponseSeconds: Number(route.sourceDisputeConfig.rightResponseSeconds),
+    },
+    targetDisputeConfig: {
+      leftResponseSeconds: Number(route.targetDisputeConfig.leftResponseSeconds),
+      rightResponseSeconds: Number(route.targetDisputeConfig.rightResponseSeconds),
+    },
     status: optionalStatus(route.status) ?? 'intent',
     createdAt: Number(route.createdAt || 0),
     updatedAt: Number(route.updatedAt || 0),
@@ -922,7 +948,8 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const settlementPolicy = cloneCrossJurisdictionSettlementPolicy(route.settlementPolicy);
   const timePolicy = cloneCrossJurisdictionTimePolicy(route.timePolicy);
   const claimedRatio = optionalNumber(route.claimedRatio);
-  const registryFillRatio = optionalNumber(route.registryFillRatio);
+  const sourceRegistryFillRatio = optionalNumber(route.sourceRegistryFillRatio);
+  const targetRegistryFillRatio = optionalNumber(route.targetRegistryFillRatio);
   const sourceClaimed = optionalBigInt(route.sourceClaimed);
   const targetClaimed = optionalBigInt(route.targetClaimed);
   const expiresAt = optionalNumber(route.expiresAt);
@@ -958,7 +985,34 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (route.priceImprovementMode) clone.priceImprovementMode = route.priceImprovementMode;
   if (route.riskMode) clone.riskMode = route.riskMode;
   if (claimedRatio !== undefined) clone.claimedRatio = claimedRatio;
-  if (registryFillRatio !== undefined) clone.registryFillRatio = registryFillRatio;
+  if (sourceRegistryFillRatio !== undefined) clone.sourceRegistryFillRatio = sourceRegistryFillRatio;
+  if (targetRegistryFillRatio !== undefined) clone.targetRegistryFillRatio = targetRegistryFillRatio;
+  if (route.sourceRegistryRecord) {
+    clone.sourceRegistryRecord = {
+      fillRatio: route.sourceRegistryRecord.fillRatio,
+      revealedAt: route.sourceRegistryRecord.revealedAt,
+    };
+  }
+  if (route.targetRegistryRecord) {
+    clone.targetRegistryRecord = {
+      fillRatio: route.targetRegistryRecord.fillRatio,
+      revealedAt: route.targetRegistryRecord.revealedAt,
+    };
+  }
+  if (route.pendingSourceRegistryReveal) {
+    clone.pendingSourceRegistryReveal = {
+      fillRatio: route.pendingSourceRegistryReveal.fillRatio,
+      fullSecret: route.pendingSourceRegistryReveal.fullSecret,
+      reveals: [...route.pendingSourceRegistryReveal.reveals] as [string, string, string, string],
+    };
+  }
+  if (route.pendingTargetRegistryReveal) {
+    clone.pendingTargetRegistryReveal = {
+      fillRatio: route.pendingTargetRegistryReveal.fillRatio,
+      fullSecret: route.pendingTargetRegistryReveal.fullSecret,
+      reveals: [...route.pendingTargetRegistryReveal.reveals] as [string, string, string, string],
+    };
+  }
   if (sourceClaimed !== undefined) clone.sourceClaimed = sourceClaimed;
   if (targetClaimed !== undefined) clone.targetClaimed = targetClaimed;
   if (expiresAt !== undefined) clone.expiresAt = expiresAt;
@@ -1217,6 +1271,10 @@ export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRou
       timePolicy.deadlineConversion,
       BigInt(timePolicy.runtimeExpiresAtMs),
       timePolicy.finalityPolicy,
+      policyRoute.sourceDisputeConfig.leftResponseSeconds,
+      policyRoute.sourceDisputeConfig.rightResponseSeconds,
+      policyRoute.targetDisputeConfig.leftResponseSeconds,
+      policyRoute.targetDisputeConfig.rightResponseSeconds,
     ],
   ));
 }
@@ -1302,9 +1360,11 @@ export function buildPreparedCrossJurisdictionRoute(
 ): CrossJurisdictionSwapRoute {
   const now = Math.floor(Number(options.now || 0));
   if (!Number.isFinite(now) || now <= 0) throw new Error(`CROSS_J_NOW_INVALID:${options.now}`);
-  // Book TTL only. Settlement clock is dispute-relative seconds on L1
-  // (disputeStartTimestamp + T/2, unix seconds). No sealed route reveal deadline, no market expiry for
-  // swap finality, no cross-j margin — event-driven sibling fanout owns clocks.
+  // Book TTL only. Settlement clocks are dispute-relative seconds on L1:
+  // Source and Target each use their own beneficiary-side signed window. The
+  // full left+right sum is exclusively the Account finalization barrier.
+  // No sealed route reveal deadline, no market expiry for swap finality,
+  // no cross-j margin — event-driven sibling fanout owns clocks.
   const marketExpiresAt = Math.floor(Number(route.expiresAt ?? (now + CROSS_J_DEFAULT_BOOK_TTL_MS)));
   if (!Number.isFinite(marketExpiresAt) || marketExpiresAt <= now) {
     throw new Error(`CROSS_J_EXPIRES_AT_INVALID:${route.orderId}`);

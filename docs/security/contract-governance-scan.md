@@ -1,6 +1,6 @@
 # Contract Governance And Access-Control Scan
 
-Last refreshed: 2026-07-09.
+Last refreshed: 2026-08-09.
 
 Run:
 
@@ -28,7 +28,7 @@ tests.
 - Entity governance mutation paths require either governance caller validation
   or entity Hanko authorization with `entityActionNonces`.
 - No `tx.origin`, `selfdestruct`, `Ownable`, or `onlyOwner` usage exists in
-  `Depository.sol`, `EntityProvider.sol`, or `Account.sol`.
+  `Depository.sol`, `EntityProvider.sol`, `Account.sol`, or `DeltaTransformer.sol`.
 
 ## Open Manual Review
 

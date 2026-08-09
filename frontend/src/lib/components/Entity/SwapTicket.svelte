@@ -323,6 +323,16 @@
     {manualRouteEstimateLabel}
   />
 
+  {#if swapRouteMode === 'cross'}
+    <section class="cross-j-safety-banner" data-testid="cross-j-safety-banner" aria-live="polite">
+      <strong>Stay online for this cross-network swap</strong>
+      <span>
+        Cross-jurisdiction Pulls require this device to relay secrets. Fills and closure are not automatic:
+        cancel the remaining order manually when you are done. Dispute progress is quantized into 65,535 steps.
+      </span>
+    </section>
+  {/if}
+
   {#if capacityWarning}
     <p class="swap-ticket-warn" data-testid="swap-ticket-capacity-warn">{capacityWarning}</p>
   {/if}
@@ -365,6 +375,30 @@
     padding: 20px;
     border-radius: 18px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  .cross-j-safety-banner {
+    display: grid;
+    gap: 6px;
+    padding: 14px 16px;
+    border: 1px solid color-mix(in srgb, #ffb020 72%, transparent);
+    border-left-width: 5px;
+    border-radius: 12px;
+    background: color-mix(in srgb, #ffb020 14%, var(--surface, #111827));
+    color: var(--text-primary, #f8fafc);
+    box-shadow: 0 8px 24px color-mix(in srgb, #000 20%, transparent);
+  }
+
+  .cross-j-safety-banner strong {
+    color: #ffd27a;
+    font-size: 14px;
+    letter-spacing: 0.01em;
+  }
+
+  .cross-j-safety-banner span {
+    color: var(--text-secondary, #cbd5e1);
+    font-size: 12px;
+    line-height: 1.5;
   }
 
   .swap-ticket-label {

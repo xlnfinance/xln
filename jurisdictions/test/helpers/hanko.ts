@@ -11,12 +11,13 @@ export const BATCH_ABI = [
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
     'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, uint256 nonce, bytes sig)[] collateralToReserve,' +
     'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, uint256 nonce)[] settlements,' +
-    'tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) initialProofbody, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterIncrementedArguments)[] disputeStarts,' +
-    'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
+    'tuple(bytes32 counterentity, uint256 nonce, bool proposerIsLeft, bytes32 proofbodyHash, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) initialProofbody, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment)[] disputeStarts,' +
+    'tuple(bytes32 counterentity, uint256 initialNonce, bytes32 initialProofbodyHash, uint256 counterNonce, bool proposerIsLeft, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) counterProofbody, bytes sig)[] counterDisputes,' +
+    'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bool proposerIsLeft, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
     'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
     'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
-    'tuple(bytes32 fullHash, bytes32 partialRoot, uint16 fillRatio, bytes32 fullSecret, bytes32[4] reveals)[] hashLadderReveals' +
+    'tuple(bytes32 counterpartyEntity, bool targetRole, bytes32 fullHash, bytes32 partialRoot, tuple(uint16 fillRatio, bytes32 fullSecret, bytes32[4] reveals) witness)[] hashLadderRegistrations' +
   ')'
 ];
 
@@ -59,6 +60,49 @@ export const deployEntityProvider = async (foundationRecipient: string) => {
   return entityProvider;
 };
 
+/**
+ * Deploy the one production Depository graph used by every test.
+ *
+ * Keeping this graph in one helper is security-relevant: a test that links
+ * only Account, supplies the retired global delay constructor argument, or
+ * points Depository at a non-canonical DeltaTransformer is not exercising the
+ * contract that can be deployed to mainnet. The transformer address remains
+ * an immutable settlement-logic boundary even though registry writes are
+ * independent public evidence.
+ */
+export const deployDepositoryStack = async (entityProviderAddress: string) => {
+  const AccountFactory = await ethers.getContractFactory('Account');
+  const account = await AccountFactory.deploy();
+  await account.waitForDeployment();
+
+  const DepositoryBoundsFactory = await ethers.getContractFactory('DepositoryBounds');
+  const depositoryBounds = await DepositoryBoundsFactory.deploy();
+  await depositoryBounds.waitForDeployment();
+
+  const HashLadderRegistryFactory = await ethers.getContractFactory('HashLadderRegistry');
+  const hashLadderRegistry = await HashLadderRegistryFactory.deploy();
+  await hashLadderRegistry.waitForDeployment();
+
+  const DeltaTransformerFactory = await ethers.getContractFactory('DeltaTransformer');
+  const deltaTransformer = await DeltaTransformerFactory.deploy();
+  await deltaTransformer.waitForDeployment();
+
+  const DepositoryFactory = await ethers.getContractFactory('Depository', {
+    libraries: {
+      Account: await account.getAddress(),
+      DepositoryBounds: await depositoryBounds.getAddress(),
+      HashLadderRegistry: await hashLadderRegistry.getAddress(),
+    },
+  });
+  const depository = await DepositoryFactory.deploy(
+    entityProviderAddress,
+    await deltaTransformer.getAddress(),
+  );
+  await depository.waitForDeployment();
+
+  return { account, depositoryBounds, hashLadderRegistry, deltaTransformer, depository };
+};
+
 export const encodeBatch = (batch: unknown): string =>
   ethers.AbiCoder.defaultAbiCoder().encode(BATCH_ABI, [batch]);
 
@@ -69,11 +113,12 @@ export const emptyBatch = (overrides: Record<string, unknown> = {}): Record<stri
   collateralToReserve: [],
   settlements: [],
   disputeStarts: [],
+  counterDisputes: [],
   disputeFinalizations: [],
   externalTokenToReserve: [],
   reserveToExternalToken: [],
   revealSecrets: [],
-  hashLadderReveals: [],
+  hashLadderRegistrations: [],
   ...overrides,
 });
 

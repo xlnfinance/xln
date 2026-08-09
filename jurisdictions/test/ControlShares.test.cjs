@@ -44,18 +44,36 @@ describe("Entity Control-Shares System", function () {
     entityProvider = await EntityProviderFactory.deploy(owner.address);
     await entityProvider.waitForDeployment();
 
-    // Deploy Account library first
+    // Deploy the exact production library graph. A reduced test-only graph can
+    // hide missing link references or a non-canonical Pull authorization root.
     const AccountFactory = await ethers.getContractFactory("Account");
     const account = await AccountFactory.deploy();
     await account.waitForDeployment();
 
+    const BoundsFactory = await ethers.getContractFactory("DepositoryBounds");
+    const bounds = await BoundsFactory.deploy();
+    await bounds.waitForDeployment();
+
+    const RegistryFactory = await ethers.getContractFactory("HashLadderRegistry");
+    const registry = await RegistryFactory.deploy();
+    await registry.waitForDeployment();
+
+    const TransformerFactory = await ethers.getContractFactory("DeltaTransformer");
+    const transformer = await TransformerFactory.deploy();
+    await transformer.waitForDeployment();
+
     // Deploy Depository with Account library linked
     const DepositoryFactory = await ethers.getContractFactory("Depository", {
       libraries: {
-        Account: await account.getAddress()
+        Account: await account.getAddress(),
+        DepositoryBounds: await bounds.getAddress(),
+        HashLadderRegistry: await registry.getAddress()
       }
     });
-    depository = await DepositoryFactory.deploy(await entityProvider.getAddress(), 5760);
+    depository = await DepositoryFactory.deploy(
+      await entityProvider.getAddress(),
+      await transformer.getAddress(),
+    );
     await depository.waitForDeployment();
 
     // Create mock board hashes
@@ -122,12 +140,15 @@ describe("Entity Control-Shares System", function () {
     it("Should track governance info correctly", async function () {
       // Register entity
       await entityProvider.registerNumberedEntity(boardHash1);
-      
-      const govInfo = await entityProvider.getGovernanceInfo(2);
-      expect(govInfo.controlTokenId).to.equal(2);
-      expect(govInfo.controlSupply).to.equal(100_000_000_000n);
-      expect(govInfo.dividendSupply).to.equal(100_000_000_000n);
-      expect(govInfo.hasActiveProposal).to.be.false;
+      const entityNumber = 2n;
+      const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
+      const entityAddress = ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
+      const entity = await entityProvider.entities(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32));
+
+      expect(controlTokenId).to.equal(entityNumber);
+      expect(await entityProvider.balanceOf(entityAddress, controlTokenId)).to.equal(100_000_000_000n);
+      expect(await entityProvider.balanceOf(entityAddress, dividendTokenId)).to.equal(100_000_000_000n);
+      expect(entity.proposedBoardHash).to.equal(ethers.ZeroHash);
     });
   });
 
@@ -187,7 +208,7 @@ describe("Entity Control-Shares System", function () {
           "Invalid Release",
           "0x"
         )
-      ).to.be.revertedWith("Invalid depository address");
+      ).to.be.revertedWith("Invalid recipient address");
     });
 
     it("Should reject release for non-existent entity", async function () {

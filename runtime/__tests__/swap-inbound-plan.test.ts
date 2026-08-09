@@ -60,7 +60,7 @@ const account = (tokenDelta?: Delta): AccountState => ({
   leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
   rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
   lastFinalizedJHeight: 0,
-  disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+  disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
   jNonce: 0,
 });
 
@@ -92,13 +92,19 @@ describe('swap inbound capacity planner', () => {
       tokenId: 1,
       requiredInboundAmount: 12_345n,
       allowOpenAccount: true,
+      newAccountDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 20 },
     });
 
     expect(plan.requiredPeerCreditLimit).toBe(12_345n);
     expect(plan.creditIncrease).toBe(12_345n);
     expect(plan.setupTxs).toEqual([{
       type: 'openAccount',
-      data: { targetEntityId: right, tokenId: 1, creditAmount: 12_345n },
+      data: {
+        targetEntityId: right,
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 20 },
+        tokenId: 1,
+        creditAmount: 12_345n,
+      },
     }]);
   });
 

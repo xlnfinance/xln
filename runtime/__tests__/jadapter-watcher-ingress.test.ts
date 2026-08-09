@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AbiCoder, Interface } from 'ethers';
+import { AbiCoder, Interface, keccak256, solidityPacked } from 'ethers';
 
 import { deriveSignerAddressSync } from '../account/crypto';
 import {
@@ -715,6 +715,42 @@ describe('JAdapter watcher ingress', () => {
     validator.state.lastFinalizedJHeight = 10;
     expect(resolveCommittedWatcherCursor(env, pending, 20, 9)).toBe(20);
     expect(pending.has(10)).toBe(false);
+  });
+
+  test('hash-ladder registry logs derive their audience from committed routes', () => {
+    const env = createEmptyEnv('jadapter-hash-ladder-account-scope');
+    const owner = `0x${'67'.repeat(32)}`;
+    const counterparty = `0x${'68'.repeat(32)}`;
+    const unrelated = `0x${'69'.repeat(32)}`;
+    for (const [entityId, signerId] of [[owner, '1'], [counterparty, '2'], [unrelated, '3']] as const) {
+      env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, signerId, true));
+    }
+    const fullHash = `0x${'73'.repeat(32)}`;
+    const partialRoot = `0x${'74'.repeat(32)}`;
+    const ladderHash = keccak256(solidityPacked(['bytes32', 'bytes32'], [fullHash, partialRoot]));
+    env.state.eReplicas.get(`${counterparty}:2`)!.state.crossJurisdictionSwaps = new Map([[
+      'route-a',
+      {
+        source: { entityId: counterparty, counterpartyEntityId: owner },
+        sourcePull: { fullHash, partialRoot },
+      } as never,
+    ]]);
+    const keys = collectRelevantJEventReplicaKeys(env, [{
+      name: 'HashLadderRevealRegistered',
+      args: {
+        entity: owner,
+        counterpartyEntity: counterparty,
+        ladderHash,
+        fillRatio: 1,
+        targetRole: false,
+      },
+      blockNumber: 10,
+      blockHash: `0x${'71'.repeat(32)}`,
+      transactionHash: `0x${'72'.repeat(32)}`,
+      logIndex: 0,
+    }]);
+
+    expect(keys).toEqual([`${owner}:1`, `${counterparty}:2`]);
   });
 
   test('semantic watcher event holds finality when its validator already signed the current round', () => {

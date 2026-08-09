@@ -85,8 +85,6 @@ import {
   RECOVERY_TOWER_STATUS_LIMIT,
   RECOVERY_UPLOAD_DEBOUNCE_MS,
   RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS,
-  WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
-  WATCHTOWER_SAFETY_MARGIN_BLOCKS,
   applyRecoveryBundleMetadata,
   buildDefaultRuntimeRecoveryConfig,
   buildRuntimeRecoveryMeta,

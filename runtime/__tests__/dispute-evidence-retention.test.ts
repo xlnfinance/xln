@@ -14,6 +14,8 @@ import { entity, makeAccount } from './helpers/cross-j';
 
 const proofBody = (byte: string): ProofBodyStruct => ({
   watchSeed: `0x${byte.repeat(32)}`,
+  leftResponseSeconds: 10,
+  rightResponseSeconds: 10,
   offdeltas: [],
   tokenIds: [],
   transformers: [],
@@ -108,7 +110,8 @@ describe('reachable-only dispute evidence retention', () => {
       disputeStartTimestamp: 1700000000,
       jNonce: 3,
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     };
     const pendingFrame = {
       ...account.currentFrame,
@@ -175,7 +178,8 @@ describe('reachable-only dispute evidence retention', () => {
       watchSeed: draftStartBody.watchSeed,
       sig: '0x33',
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     });
     jBatchState.batch.disputeFinalizations.push({
       counterentity: counterparty,
@@ -197,7 +201,8 @@ describe('reachable-only dispute evidence retention', () => {
       watchSeed: proofBody('88').watchSeed,
       sig: '0x88',
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     });
     const sentBatch = initJBatch().batch;
     sentBatch.disputeStarts.push({
@@ -208,7 +213,8 @@ describe('reachable-only dispute evidence retention', () => {
       watchSeed: sentStartBody.watchSeed,
       sig: '0x55',
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     });
     jBatchState.sentBatch = {
       batch: sentBatch,
@@ -283,7 +289,8 @@ describe('reachable-only dispute evidence retention', () => {
       watchSeed: body.watchSeed,
       sig: '0x71',
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     }));
 
     expect(() => collectReachableDisputeEvidenceHashes(account, jBatchState))

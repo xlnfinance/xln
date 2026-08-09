@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { HANKO_MAX_BYTES } from '../hanko/codec';
 
 import { LIMITS } from '../config/constants';
 import type {
@@ -40,7 +41,7 @@ const BRANCH_DOMAIN = domain('xln.consumption-frontier.branch.v1');
 export const EMPTY_CONSUMPTION_ROOT = domain('xln.consumption-frontier.empty.v1');
 export const MAX_CONSUMPTION_PROOF_NODES = 257;
 export const MAX_CONSUMPTION_PROOF_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
-export const MAX_CONSUMPTION_HANKO_BYTES = 1_000_000;
+export const MAX_CONSUMPTION_HANKO_BYTES = HANKO_MAX_BYTES;
 export const MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY = BigInt(
   LIMITS.MAX_ACCOUNTS_PER_ENTITY * 5,
 );

@@ -144,6 +144,10 @@ const run = async (): Promise<void> => {
     const routingFeePPM = parseOptionalNumber(getArg('--routing-fee-ppm', ''));
     const baseFee = parseOptionalBigInt(getArg('--base-fee', ''));
     const swapTakerFeeBps = parseOptionalNumber(getArg('--swap-taker-fee-bps', ''));
+    const usdQuoteAuthorityEntityId = getArg('--usd-quote-authority-entity-id', '').trim().toLowerCase();
+    if (!hasFlag('--no-orderbook') && !/^0x[0-9a-f]{64}$/.test(usdQuoteAuthorityEntityId)) {
+      throw new Error('USD_QUOTE_AUTHORITY_ENTITY_ID_REQUIRED');
+    }
     const config: EnableRoutingConfig = {
       name: base.name,
       seed: base.seed,
@@ -154,6 +158,7 @@ const run = async (): Promise<void> => {
       ...(routingFeePPM !== undefined ? { routingFeePPM } : {}),
       ...(baseFee !== undefined ? { baseFee } : {}),
       ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),
+      usdQuoteAuthorityEntityId,
       initOrderbook: !hasFlag('--no-orderbook'),
     };
     const result = command === 'become-hub'
@@ -181,6 +186,9 @@ const run = async (): Promise<void> => {
         ? { creditTokenIds: parseNumbers(getArg('--credit-token-ids', '')) }
         : {}),
       routingEnabled: hasFlag('--routing-enabled'),
+      ...(getArg('--usd-quote-authority-entity-id', '').trim()
+        ? { usdQuoteAuthorityEntityId: getArg('--usd-quote-authority-entity-id', '').trim().toLowerCase() }
+        : {}),
       ...(routingFeePPM !== undefined ? { routingFeePPM } : {}),
       ...(baseFee !== undefined ? { baseFee } : {}),
       ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),

@@ -1,3 +1,5 @@
+import type { ProofBodyStruct } from '../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+
 /**
  * Common metadata for all J-events (for JBlock tracking).
  */
@@ -18,6 +20,8 @@ export interface DisputeFinalizationEvidence {
   finalNonce: string;
   initialProofbodyHash: string;
   finalProofbodyHash: string;
+  /** Signed branch identity; required because equal-nonce LEFT beats RIGHT. */
+  proposerIsLeft: boolean;
   leftArguments: string;
   rightArguments: string;
   startedByLeft: boolean;
@@ -160,12 +164,17 @@ export type JurisdictionEvent =
         sender: string;
         counterentity: string;
         nonce: string;
+        proposerIsLeft: boolean;
         proofbodyHash: string;
         watchSeed: string;
         starterInitialArguments: string;
-        starterIncrementedArguments: string;
+        starterCounterArguments: string;
+        starterCounterProofCommitment: string;
+        initialProofbody: ProofBodyStruct;
         disputeTimeout: number;
         disputeStartTimestamp: number;
+        leftResponseSeconds: number;
+        rightResponseSeconds: number;
         batchNonce?: number;
       };
     })
@@ -177,7 +186,20 @@ export type JurisdictionEvent =
         initialNonce: string;
         initialProofbodyHash: string;
         finalProofbodyHash: string;
+        finalizationEvidenceHash: string;
+        finalProofbody: ProofBodyStruct;
         batchNonce?: number;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'CounterDisputeRegistered';
+      data: {
+        sender: string;
+        counterentity: string;
+        nonce: number;
+        proposerIsLeft: boolean;
+        proofbodyHash: string;
+        counterProofbody: ProofBodyStruct;
       };
     })
   | (JEventMetadata & {
@@ -187,10 +209,14 @@ export type JurisdictionEvent =
       type: 'HashLadderRevealRegistered';
       data: {
         entity: string;
+        counterpartyEntity: string;
         ladderHash: string;
         fillRatio: number;
         fullSecret: string;
         reveals: [string, string, string, string];
+        targetRole: boolean;
+        /** Exact L1 unix seconds used by role-window settlement. */
+        revealedAt: number;
       };
     })
   | (JEventMetadata & {

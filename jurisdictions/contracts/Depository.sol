@@ -6,7 +6,8 @@ import "./DeltaTransformer.sol";
 import "./Types.sol";
 import "./Account.sol";
 import "./HankoEncoding.sol";
-import "./HashLadder.sol";
+import "./HashLadderRegistry.sol";
+import "./DepositoryBounds.sol";
 
 abstract contract ReentrancyGuardLite {
   error E0();
@@ -32,7 +33,7 @@ interface IERC721 {
 }
 // IERC1155 already defined in @openzeppelin/contracts (imported via EntityProvider.sol)
 
-contract Depository is ReentrancyGuardLite {
+contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   struct ReserveMint {
     bytes32 entity;
     uint tokenId;
@@ -40,46 +41,36 @@ contract Depository is ReentrancyGuardLite {
   }
 
 
-  // Custom errors
+  // Shared E2..E10 / transformer errors: Types.sol.
+  // Depository-only codes stay here — not used by the Account library.
   error E1(); // ZeroAmount
-  error E2(); // Unauthorized
-  error E3(); // InsufficientBalance
-  error E4(); // InvalidSigner
-  error E5(); // NoActiveDispute
-  error E6(); // DisputeInProgress
-  error E7(); // InvalidParty
-  error E8(); // LengthMismatch
-  error E9(); // HashMismatch
-  error E10(); // BatchTooLarge
   error E11(); // UnsupportedToken
-  error E12(); // HashLadderAlreadyRevealed (single-shot slot)
-  error TransformerGasBudgetUnavailable();
-  error TransformerExecutionFailed();
+  // Registry conflict: a Source retry changed ratio, a Target retry lowered
+  // ratio, the signed role mismatched, or a first Source write missed its
+  // beneficiary window. Exact retries remain idempotent.
+  error E12();
 
   // Immutable EntityProvider (set in constructor, gas-efficient static calls)
   address public immutable entityProvider;
+  // Only this deployment's canonical DeltaTransformer may define Pull ABI and
+  // authorize hash-ladder registrations from signed ProofBodies.
+  // Public getter is a deployment trust boundary, not UI convenience:
+  // Runtime readiness must prove that the Depository authorizes the same
+  // transformer whose ABI it uses to sign Pull clauses. Code-shape matching
+  // alone cannot distinguish two canonical deployments at different addresses.
+  address public immutable deltaTransformer;
 
   mapping (bytes32 => mapping (uint => uint)) public _reserves;
 
   mapping (bytes => AccountInfo) public _accounts;
   mapping (bytes => mapping(uint => AccountCollateral)) public _collaterals;
 
-  // Immutable dispute timeout policy.
-  // Delay selection is agreed off-chain and baked into the deployed jurisdiction,
-  // not tuned via mutable admin setters.
-  // Fixed dispute window policy. Local tests fast-forward blocks explicitly;
-  // production deployments must not ship with a minutes-long challenge window.
-  uint256 public immutable defaultDisputeDelay;
-  
-
-  // Cross-j hash-ladder reveal registry. The ONLY on-chain settlement
-  // authority for pulls: DeltaTransformer.applyPull reads this mapping (via the
-  // calling Depository) and never dispute calldata. Keyed by (revealing entity,
-  // ladderHash): processBatch authentication makes the writer the caller, so no
-  // one can register a ratio under a counterparty's key. Value packs
-  // (block.timestamp << 16) | fillRatio — T/2 validity uses the same seconds
-  // clock as disputeTimeout / disputeStartTimestamp.
-  mapping (bytes32 => mapping (bytes32 => uint256)) public hashLadderReveals;
+  // Independent reveal records. Key = (revealer Entity, ladder, role namespace).
+  // Value packs (revealedAt << 16) | fillRatio. Account/dispute semantics are
+  // intentionally absent: the signed DeltaTransformer.Pull owns them.
+  // Sprites-like evidence scoped by authenticated writer, Account peer,
+  // ladder and signed role. No hashed duplicate of this pair is stored.
+  mapping (bytes32 => mapping (bytes32 => mapping (bytes32 => mapping (bool => uint256)))) private hashLadderReveals;
 
   mapping (bytes32 => mapping (uint => Debt[])) public _debts;
   // the current debt index to pay
@@ -90,35 +81,19 @@ contract Depository is ReentrancyGuardLite {
   mapping (bytes32 => mapping (uint => uint)) public _activeDebtsByToken;
 
 
-  address public immutable admin;
+  address private immutable admin;
   uint256 private constant LOCAL_DEV_CHAIN_ID = 31337;
   uint256 private constant SECONDARY_LOCAL_DEV_CHAIN_ID = 31338;
   uint256 private constant DEBT_ENFORCEMENT_CHUNK = 32;
-  uint256 private constant MAX_BATCH_FLASHLOANS = 8;
-  uint256 private constant MAX_BATCH_RESERVE_TO_RESERVE = 64;
-  uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL = 64;
-  uint256 private constant MAX_BATCH_COLLATERAL_TO_RESERVE = 64;
-  uint256 private constant MAX_BATCH_SETTLEMENTS = 32;
-  uint256 private constant MAX_BATCH_DISPUTE_STARTS = 8;
-  // One dispute per transaction gives its user-signed transformer the entire
-  // conservative 15M EVM budget minus the 2M final settlement reserve.
-  uint256 private constant MAX_BATCH_DISPUTE_FINALIZATIONS = 1;
-  uint256 private constant MAX_BATCH_EXTERNAL_TO_RESERVE = 64;
-  uint256 private constant MAX_BATCH_RESERVE_TO_EXTERNAL = 64;
-  uint256 private constant MAX_BATCH_SECRET_REVEALS = 32;
-  uint256 private constant MAX_BATCH_HASH_LADDER_REVEALS = 32;
-  uint256 private constant MAX_BATCH_TOTAL_OPS = 50;
   // EIP-7623 charges a 40-gas floor per non-zero calldata byte. A 256 KiB
   // batch therefore leaves ~4.5M execution gas inside the protocol's 15M-gas
   // liveness envelope; transformer calls dynamically yield to that reserve.
   uint256 private constant MAX_ENCODED_BATCH_BYTES = 256 * 1024;
-  uint256 private constant MAX_RESERVE_TO_COLLATERAL_PAIRS = 64;
   // One top-level R2C item can fan out to many bilateral accounts. Bounding
   // only the outer and inner arrays independently admitted 50 * 64 cold
   // collateral writes (~200M gas), so an otherwise valid signed batch could
   // never be mined. 256 distinct pairs stays inside the 15M liveness envelope;
   // larger transfers remain losslessly expressible across sequential nonces.
-  uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL = 256;
   // Runtime permits up to 1,000 open swaps in one account proof. The canonical
   // DeltaTransformer path is regression-tested below this cap.
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
@@ -134,16 +109,18 @@ contract Depository is ReentrancyGuardLite {
   );
 
   modifier onlyLocalDevAdmin() {
-    if (
-      msg.sender != admin ||
-      (block.chainid != LOCAL_DEV_CHAIN_ID && block.chainid != SECONDARY_LOCAL_DEV_CHAIN_ID)
-    ) revert E2();
+    _requireAdmin();
+    if (block.chainid != LOCAL_DEV_CHAIN_ID && block.chainid != SECONDARY_LOCAL_DEV_CHAIN_ID) revert E2();
     _;
   }
 
   modifier onlyAdmin() {
-    if (msg.sender != admin) revert E2();
+    _requireAdmin();
     _;
+  }
+
+  function _requireAdmin() private view {
+    if (msg.sender != admin) revert E2();
   }
 
   // EntityScore tracking removed for size reduction
@@ -154,14 +131,25 @@ contract Depository is ReentrancyGuardLite {
     bytes32 indexed sender,
     bytes32 indexed counterentity,
     uint indexed nonce,
+    bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed,
     bytes starterInitialArguments,
-    bytes starterIncrementedArguments,
+    bytes starterCounterArguments,
+    bytes32 starterCounterProofCommitment,
     uint256 disputeTimeout,
-    uint256 disputeStartTimestamp
+    uint256 disputeStartTimestamp,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
   );
-  event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash);
+  event DisputeFinalized(
+    bytes32 indexed sender,
+    bytes32 indexed counterentity,
+    uint indexed nonce,
+    bytes32 finalProofbodyHash,
+    bytes32 finalizationEvidenceHash
+  );
+  event CounterDisputeRegistered(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -194,10 +182,13 @@ contract Depository is ReentrancyGuardLite {
   // port the registration without tracing the registration tx calldata.
   event HashLadderRevealRegistered(
     bytes32 indexed entity,
-    bytes32 indexed ladderHash,
+    bytes32 indexed counterpartyEntity,
+    bytes32 ladderHash,
     uint16 fillRatio,
     bytes32 fullSecret,
-    bytes32[4] reveals
+    bytes32[4] reveals,
+    bool targetRole,
+    uint256 revealedAt
   );
   event TokenRegistered(uint256 indexed tokenId, uint8 tokenType, address indexed contractAddress, uint96 externalTokenId);
 
@@ -219,34 +210,38 @@ contract Depository is ReentrancyGuardLite {
   // Efficient token lookup: packedToken -> internalTokenId
   mapping(bytes32 => uint256) public tokenToId;
 
-  /// @param _defaultDisputeDelay Dispute period T in seconds (not blocks).
-  ///        Cap 30d: long enough for cross-j porting, short enough to bound grief.
-  constructor(address _entityProvider, uint256 _defaultDisputeDelay) {
-    if (_entityProvider == address(0) || _defaultDisputeDelay == 0 || _defaultDisputeDelay > 2_592_000) revert E7();
+  constructor(address _entityProvider, address _deltaTransformer) {
+    if (_entityProvider == address(0) || _deltaTransformer == address(0)) revert E7();
     entityProvider = _entityProvider;
-    defaultDisputeDelay = _defaultDisputeDelay;
+    deltaTransformer = _deltaTransformer;
     admin = msg.sender;
     _tokens.push(TokenMetadata({ contractAddress: address(0), externalTokenId: 0, tokenType: TypeERC20 }));
-  }
-
-  function decodeTransformerArgumentListStrict(bytes calldata encoded) external pure returns (bytes[] memory) {
-    return abi.decode(encoded, (bytes[]));
   }
 
   /// @notice Read a registered hash-ladder reveal. Returns (0, 0) when absent.
   /// @dev Called by DeltaTransformer.applyPull with the pull beneficiary as
   /// `entity`; the transformer trusts only this registry, never calldata.
   /// `revealedAt` is unix seconds (block.timestamp at registration).
-  function getHashLadderReveal(bytes32 entity, bytes32 ladderHash)
+  function getHashLadderReveal(
+    bytes32 ownerEntity,
+    bytes32 counterpartyEntity,
+    bytes32 ladderHash,
+    bool targetRole
+  )
     external
     view
     returns (uint16 fillRatio, uint256 revealedAt)
   {
-    uint256 packed = hashLadderReveals[entity][ladderHash];
-    return (uint16(packed), packed >> 16);
+    return HashLadderRegistry.getReveal(
+      hashLadderReveals,
+      ownerEntity,
+      counterpartyEntity,
+      ladderHash,
+      targetRole
+    );
   }
 
-  function getTokensLength() public view returns (uint) {
+  function getTokensLength() external view returns (uint) {
     return _tokens.length;
   }
 
@@ -329,8 +324,12 @@ contract Depository is ReentrancyGuardLite {
   ) external nonReentrant returns (bool completeSuccess) {
     if (encodedBatch.length > MAX_ENCODED_BATCH_BYTES) revert E10();
     Batch memory batch = abi.decode(encodedBatch, (Batch));
-    _assertBatchBounds(batch);
-    Account.validateDisputeProofs(batch.disputeStarts, batch.disputeFinalizations);
+    DepositoryBounds.assertBatch(batch);
+    Account.validateDisputeProofs(
+      batch.disputeStarts,
+      batch.counterDisputes,
+      batch.disputeFinalizations
+    );
     bytes32 batchHash = Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce);
     (bytes32 entityId, bool hankoValid) =
       EntityProvider(entityProvider).verifyCurrentHankoSignature(
@@ -351,16 +350,19 @@ contract Depository is ReentrancyGuardLite {
   ///      dynamic `otherArguments` are intentionally not owner-Hanko-bound because
   ///      secrets, fills, and pull evidence can change until execution. Financial
   ///      authority remains capped by the signed ProofBody and its allowances.
-  function _encodeWatchtowerCounterDisputeHankoPayload(
+  function computeWatchtowerCounterDisputeHash(
     address tower,
     bytes32 entityId,
     bytes32 counterentity,
     uint256 finalNonce,
     bytes32 finalProofbodyHash,
-    uint256 lastResortWindowBlocks,
+    uint256 lastResortWindowSeconds,
     uint256 appointmentSequence
-  ) private view returns (bytes memory) {
-    return HankoEncoding.encodeWatchtowerCounterDispute(
+  ) external view returns (bytes32) {
+    // Keep the public helper and Account.registerWatchtowerCounterDispute on
+    // the same canonical ABI encoding. A hand-written packed address layout is
+    // a different signature domain even when every visible value is equal.
+    return keccak256(HankoEncoding.encodeWatchtowerCounterDispute(
       WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR,
       block.chainid,
       address(this),
@@ -369,27 +371,7 @@ contract Depository is ReentrancyGuardLite {
       counterentity,
       finalNonce,
       finalProofbodyHash,
-      lastResortWindowBlocks,
-      appointmentSequence
-    );
-  }
-
-  function computeWatchtowerCounterDisputeHash(
-    address tower,
-    bytes32 entityId,
-    bytes32 counterentity,
-    uint256 finalNonce,
-    bytes32 finalProofbodyHash,
-    uint256 lastResortWindowBlocks,
-    uint256 appointmentSequence
-  ) public view returns (bytes32) {
-    return keccak256(_encodeWatchtowerCounterDisputeHankoPayload(
-      tower,
-      entityId,
-      counterentity,
-      finalNonce,
-      finalProofbodyHash,
-      lastResortWindowBlocks,
+      lastResortWindowSeconds,
       appointmentSequence
     ));
   }
@@ -405,45 +387,34 @@ contract Depository is ReentrancyGuardLite {
   function watchtowerCounterDispute(
     bytes32 entityId,
     FinalDisputeProof calldata params,
-    uint256 lastResortWindowBlocks,
+    uint256 lastResortWindowSeconds,
     uint256 appointmentSequence,
     bytes calldata ownerAuthorizationHanko
   ) external nonReentrant returns (bool) {
     if (msg.data.length > MAX_ENCODED_BATCH_BYTES) revert E10();
-    bytes memory acct_key = accountKey(entityId, params.counterentity);
-    AccountInfo storage account = _accounts[acct_key];
+    // Full delegated authorization and pre-T locking live in Account so this
+    // settlement entrypoint remains deployable under EIP-170.
+    if (Account.registerWatchtowerCounterDispute(
+      _accounts,
+      WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR,
+      msg.sender,
+      entityId,
+      params,
+      lastResortWindowSeconds,
+      appointmentSequence,
+      ownerAuthorizationHanko,
+      entityProvider
+    )) {
+      return true;
+    }
 
-    if (account.disputeHash == bytes32(0)) revert E5();
-    if (params.cooperative) revert E2();
-    if (params.sig.length == 0) revert E2();
-    // lastResortWindowBlocks keeps its historical name in the watchtower ABI;
-    // the unit is now seconds (same as defaultDisputeDelay / disputeTimeout).
-    if (lastResortWindowBlocks == 0 || lastResortWindowBlocks > defaultDisputeDelay) revert E2();
-    if (params.finalNonce <= account.nonce) revert E2();
-    // A tower inherits its owner's side, not a free-standing right to close.
-    // Only the non-starter may reveal a newer jointly signed state; otherwise a
-    // starter-appointed tower could replay a stale peer signature immediately.
-    bool ownerIsCounterparty = account.disputeStartedByLeft != (entityId < params.counterentity);
-    if (!ownerIsCounterparty) revert E2();
-    if (block.timestamp + lastResortWindowBlocks < account.disputeTimeout) revert E2();
-
-    bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
-    (bytes32 recoveredEntity, bool valid) =
-      EntityProvider(entityProvider).verifyCurrentHankoSignature(
-        ownerAuthorizationHanko,
-        computeWatchtowerCounterDisputeHash(
-          msg.sender,
-          entityId,
-          params.counterentity,
-          params.finalNonce,
-          finalProofbodyHash,
-          lastResortWindowBlocks,
-          appointmentSequence
-        )
-      );
-    if (!valid || recoveredEntity != entityId) revert E4();
-
-    _disputeFinalizeInternal(entityId, params);
+    // At/after T the exact selected identity is already authenticated by its
+    // pre-T counter registration. Account intentionally requires an empty
+    // repeated inner signature so either current-board outer caller can
+    // execute without impersonating the original counter-proof signer.
+    FinalDisputeProof memory executable = params;
+    executable.sig = "";
+    _disputeFinalizeInternal(entityId, executable);
     emit WatchtowerCounterDisputeExecuted(
       msg.sender,
       entityId,
@@ -465,45 +436,6 @@ contract Depository is ReentrancyGuardLite {
   function mintToReserve(bytes32 entity, uint tokenId, uint amount) external onlyLocalDevAdmin {
     if (amount == 0) revert E1();
     _increaseReserve(entity, tokenId, amount);
-  }
-
-  function _assertBatchBounds(Batch memory batch) private pure {
-    // Runtime already chunks J-batches at 50 top-level operations. Mirroring
-    // that cap on-chain keeps authorized-but-gas-hostile batches from relying
-    // only on per-array limits that are individually valid but too large in sum.
-    if (
-      batch.flashloans.length +
-      batch.reserveToReserve.length +
-      batch.reserveToCollateral.length +
-      batch.collateralToReserve.length +
-      batch.settlements.length +
-      batch.disputeStarts.length +
-      batch.disputeFinalizations.length +
-      batch.externalTokenToReserve.length +
-      batch.reserveToExternalToken.length +
-      batch.revealSecrets.length +
-      batch.hashLadderReveals.length > MAX_BATCH_TOTAL_OPS
-    ) revert E10();
-
-    if (batch.flashloans.length > MAX_BATCH_FLASHLOANS) revert E10();
-    if (batch.reserveToReserve.length > MAX_BATCH_RESERVE_TO_RESERVE) revert E10();
-    if (batch.reserveToCollateral.length > MAX_BATCH_RESERVE_TO_COLLATERAL) revert E10();
-    if (batch.collateralToReserve.length > MAX_BATCH_COLLATERAL_TO_RESERVE) revert E10();
-    if (batch.settlements.length > MAX_BATCH_SETTLEMENTS) revert E10();
-    if (batch.disputeStarts.length > MAX_BATCH_DISPUTE_STARTS) revert E10();
-    if (batch.disputeFinalizations.length > MAX_BATCH_DISPUTE_FINALIZATIONS) revert E10();
-    if (batch.externalTokenToReserve.length > MAX_BATCH_EXTERNAL_TO_RESERVE) revert E10();
-    if (batch.reserveToExternalToken.length > MAX_BATCH_RESERVE_TO_EXTERNAL) revert E10();
-    if (batch.revealSecrets.length > MAX_BATCH_SECRET_REVEALS) revert E10();
-    if (batch.hashLadderReveals.length > MAX_BATCH_HASH_LADDER_REVEALS) revert E10();
-
-    uint256 reserveToCollateralPairs;
-    for (uint i = 0; i < batch.reserveToCollateral.length; i++) {
-      uint256 pairCount = batch.reserveToCollateral[i].pairs.length;
-      if (pairCount > MAX_RESERVE_TO_COLLATERAL_PAIRS) revert E10();
-      reserveToCollateralPairs += pairCount;
-    }
-    if (reserveToCollateralPairs > MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL) revert E10();
   }
 
   function _processBatch(bytes32 entityId, Batch memory batch) private {
@@ -594,9 +526,16 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (batch.disputeStarts.length > 0) {
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
+      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, entityProvider)) {
         revert E4();
       }
+    }
+
+    // Counter-proofs are state-selection responses, not early settlement.
+    // Lock them before reveal/finalization processing so an obsolete initial
+    // proof can never win a same-batch race once a newer state is selected.
+    if (batch.counterDisputes.length > 0) {
+      Account.processCounterDisputes(_accounts, entityId, batch.counterDisputes, entityProvider);
     }
 
     // HTLC secret reveals (must run before dispute finalizations)
@@ -607,44 +546,19 @@ contract Depository is ReentrancyGuardLite {
       emit SecretRevealed(keccak256(abi.encode(reveal.secret)), entityId, reveal.secret);
     }
 
-    // Hash-ladder reveals — sole on-chain settlement authority for cross-j pulls
-    // (DeltaTransformer.applyPull reads getHashLadderReveal; never calldata).
-    //
-    // Invariants (owner):
-    //  1. Key = (authenticated caller entityId, ladderHash). Hub cannot write
-    //     under a user's key → cannot force a 1% reveal on the user's leg.
-    //  2. Single-shot: first write locks fillRatio AND revealedAt (unix seconds).
-    //     Same-ratio retry = no-op (idempotent txs). Any other overwrite = E12.
-    //     Counterexample rejected: dust before T/2 then raise to full after T/2
-    //     would settle full under sticky-time raises ("late reveal = 0" broken).
-    //  3. Validity vs disputeStart+T/2 is decided at finalize, not at write.
-    //     Late first registration is stored but applyPull treats it as ratio 0.
-    //  4. E12 reverts the whole processBatch on purpose (fail-loud). Runtime must
-    //     exact-once queue so a stale higher ratio never shares a batch with
-    //     disputeFinalizations. Soft-continue would hide programmer bugs.
-    //  5. Ratio 0 is meaningless (absence already reads 0) → E1.
-    for (uint i = 0; i < batch.hashLadderReveals.length; i++) {
-      HashLadderReveal memory reveal = batch.hashLadderReveals[i];
-      if (reveal.fillRatio == 0) revert E1();
-      if (reveal.fillRatio == type(uint16).max) {
-        if (!HashLadder.verifyFull(reveal.fullHash, reveal.fullSecret)) revert E9();
-      } else if (!HashLadder.verifyPartial(reveal.partialRoot, reveal.fillRatio, reveal.reveals)) {
-        revert E9();
-      }
-      bytes32 ladderHash = keccak256(abi.encodePacked(reveal.fullHash, reveal.partialRoot));
-      uint256 existing = hashLadderReveals[entityId][ladderHash];
-      if (existing != 0) {
-        if (uint16(existing) == reveal.fillRatio) continue;
-        revert E12();
-      }
-      hashLadderReveals[entityId][ladderHash] =
-        (uint256(block.timestamp) << 16) | uint256(reveal.fillRatio);
-      emit HashLadderRevealRegistered(
+    // Reveals are Sprites-like public evidence authenticated by this batch's
+    // outer Entity Hanko. The witness itself is proof-independent, but a first
+    // Source write is useful only for the currently active bilateral dispute.
+    // Enforcing its signed owner window here prevents an early write from
+    // consuming the immutable Source slot before S. Target stays refreshable:
+    // an early/late port is harmless and can be republished for a later clock.
+    for (uint i = 0; i < batch.hashLadderRegistrations.length; i++) {
+      HashLadderRegistration memory registration = batch.hashLadderRegistrations[i];
+      HashLadderRegistry.registerReveal(
+        hashLadderReveals,
+        _accounts,
         entityId,
-        ladderHash,
-        reveal.fillRatio,
-        reveal.fullSecret,
-        reveal.reveals
+        registration
       );
     }
 
@@ -673,9 +587,9 @@ contract Depository is ReentrancyGuardLite {
 
       // Burn flashloan (remove temporary mint)
       _decreaseReserve(entityId, tid, flashloanTotals[j]);
-
-      // Final check: reserves back to original or higher
-      if (_reserves[entityId][tid] < flashloanStarting[j]) revert E3(); // Reserve decreased
+      // The pre-burn inequality proves the post-burn reserve is at least the
+      // starting reserve; _decreaseReserve subtracts exactly flashloanTotals
+      // or reverts, so a second branch here would be unreachable.
     }
 
   }
@@ -690,9 +604,7 @@ contract Depository is ReentrancyGuardLite {
   // DebtSnapshot moved to DepositoryView.sol
 
   function _addDebt(bytes32 debtor, uint256 tokenId, bytes32 creditor, uint256 amount) internal {
-    if (creditor == bytes32(0)) revert E2();
-    if (debtor == creditor) revert E2();
-    if (amount == 0) revert E1();
+    if (creditor == bytes32(0) || debtor == creditor) revert E2();
     Account.addDebt(
       _debts,
       _debtIndex,
@@ -728,19 +640,19 @@ contract Depository is ReentrancyGuardLite {
     return reserve > outstanding ? reserve - outstanding : 0;
   }
 
-  function _enforceSettlementOutflowDebts(Settlement[] memory settlements) private {
-    for (uint i = 0; i < settlements.length; i++) {
-      Settlement memory s = settlements[i];
-      for (uint j = 0; j < s.diffs.length; j++) {
-        SettlementDiff memory diff = s.diffs[j];
-        if (diff.leftDiff < 0) enforceDebts(s.leftEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
-        if (diff.rightDiff < 0) enforceDebts(s.rightEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
-      }
-    }
-  }
-
   function _packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) private pure returns (bytes32) {
     return keccak256(abi.encode(tokenType, contractAddress, externalTokenId));
+  }
+
+  function _enforceSettlementOutflowDebts(Settlement[] memory settlements) private {
+    for (uint256 i = 0; i < settlements.length; i++) {
+      Settlement memory settlement = settlements[i];
+      for (uint256 j = 0; j < settlement.diffs.length; j++) {
+        SettlementDiff memory diff = settlement.diffs[j];
+        if (diff.leftDiff < 0) enforceDebts(settlement.leftEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
+        if (diff.rightDiff < 0) enforceDebts(settlement.rightEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
+      }
+    }
   }
 
   // registerHub removed for size reduction
@@ -832,61 +744,16 @@ contract Depository is ReentrancyGuardLite {
 
   // FIFO debt enforcement. `maxIterations == 0` drains without a slot cap.
   function enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) public {
-    Debt[] storage queue = _debts[entity][tokenId];
-    uint256 length = queue.length;
-    if (length == 0) {
-      _debtIndex[entity][tokenId] = 0;
-      return;
-    }
-
-    uint256 cursor = _debtIndex[entity][tokenId];
-    if (cursor >= length) {
-      cursor = 0;
-    }
-
-    uint256 available = _reserves[entity][tokenId];
-    uint256 iterationCap = maxIterations == 0 ? type(uint256).max : maxIterations;
-    uint256 steps = 0;
-
-    while (cursor < length && steps < iterationCap) {
-      steps++;
-      Debt storage debt = queue[cursor];
-      uint256 amount = debt.amount;
-      if (amount == 0) {
-        cursor++;
-        continue;
-      }
-      if (available == 0) break;
-
-      bytes32 creditor = debt.creditor;
-      uint256 payableAmount = available < amount ? available : amount;
-
-      _decreaseReserve(entity, tokenId, payableAmount);
-      _increaseReserve(creditor, tokenId, payableAmount);
-      _reduceDebtOutstanding(entity, tokenId, payableAmount);
-      available -= payableAmount;
-      amount -= payableAmount;
-
-      // Update debt state
-      uint256 totalPaid = debt.amount - amount;
-      if (amount == 0) {
-        debt.amount = 0;
-        emit DebtEnforced(entity, creditor, tokenId, totalPaid, 0, cursor + 1);
-        _afterDebtCleared(entity, tokenId);
-        delete queue[cursor];
-        cursor++;
-      } else {
-        debt.amount = amount;
-        emit DebtEnforced(entity, creditor, tokenId, totalPaid, debt.amount, cursor);
-      }
-    }
-
-    if (cursor >= length) {
-      _debtIndex[entity][tokenId] = 0;
-      delete _debts[entity][tokenId];
-      return;
-    }
-    _debtIndex[entity][tokenId] = cursor;
+    Account.enforceDebts(
+      _reserves,
+      _debts,
+      _debtIndex,
+      debtOutstanding,
+      _activeDebtsByToken,
+      entity,
+      tokenId,
+      maxIterations
+    );
   }
 
 
@@ -924,7 +791,9 @@ contract Depository is ReentrancyGuardLite {
         int256 signedAmount = int256(amount);
 
         _decreaseReserve(entity, tokenId, amount);
-        col.collateral += amount;
+        // Per-call amount is already ≤ int256.max above, but collateral
+        // accumulates across pairs and senders and shares Account's ceiling.
+        Account.increaseCollateral(col, amount);
         if (receivingEntity < counterentity) { // if receiver is left
           col.ondelta += signedAmount;
         }
@@ -999,6 +868,7 @@ contract Depository is ReentrancyGuardLite {
   function _disputeFinalizeInternal(bytes32 entityId, FinalDisputeProof memory params) private {
     bytes memory acct_key = accountKey(entityId, params.counterentity);
     AccountInfo storage account = _accounts[acct_key];
+    bool initialProposerIsLeft = account.disputeInitialProposerIsLeft;
     (
       bytes memory leftArguments,
       bytes memory rightArguments,
@@ -1007,8 +877,16 @@ contract Depository is ReentrancyGuardLite {
       uint256 eventInitialNonce,
       bytes32 finalProofbodyHash,
       uint256 disputeStartTimestamp,
-      uint256 disputeTimeout
-    ) = Account.prepareDisputeFinalization(_accounts, entityId, params, entityProvider);
+      uint256 disputeTimeout,
+      uint32 leftResponseSeconds,
+      uint32 rightResponseSeconds
+    ) = Account.prepareDisputeFinalization(
+      _accounts,
+      entityId,
+      params,
+      entityProvider,
+      deltaTransformer
+    );
 
     _finalizeAccount(
       entityId,
@@ -1019,18 +897,48 @@ contract Depository is ReentrancyGuardLite {
       leftArgumentsTimestamp,
       rightArgumentsTimestamp,
       disputeStartTimestamp,
-      disputeTimeout
+      disputeTimeout,
+      leftResponseSeconds,
+      rightResponseSeconds
     );
     // Cooperative/counter-dispute adopts its signed nonce. A unilateral
     // timeout has no newer signature, so it consumes exactly one nonce.
-    account.nonce = params.sig.length > 0 ? params.finalNonce : account.nonce + 1;
+    bool adoptsSignedBranch =
+      params.sig.length > 0 ||
+      params.finalNonce != eventInitialNonce ||
+      finalProofbodyHash != params.initialProofbodyHash ||
+      params.proposerIsLeft != initialProposerIsLeft;
+    account.nonce = adoptsSignedBranch ? params.finalNonce : account.nonce + 1;
+
+    bytes32 initialProofbodyHash = params.initialProofbodyHash;
+    uint256 finalNonce = params.finalNonce;
+    bool proposerIsLeft = params.proposerIsLeft;
+    bool startedByLeft = params.startedByLeft;
+    bytes32 starterArgumentsHash = keccak256(params.starterArguments);
+    bytes32 otherArgumentsHash = keccak256(params.otherArguments);
+    bytes32 sigHash = keccak256(params.sig);
+    bytes32 finalizationEvidenceHash;
+    // Exactly abi.encode of seven static words, written directly so finality
+    // authentication does not add a second generic encoder to runtime bytecode.
+    assembly ("memory-safe") {
+      let ptr := mload(0x40)
+      mstore(ptr, initialProofbodyHash)
+      mstore(add(ptr, 0x20), finalNonce)
+      mstore(add(ptr, 0x40), proposerIsLeft)
+      mstore(add(ptr, 0x60), startedByLeft)
+      mstore(add(ptr, 0x80), starterArgumentsHash)
+      mstore(add(ptr, 0xa0), otherArgumentsHash)
+      mstore(add(ptr, 0xc0), sigHash)
+      finalizationEvidenceHash := keccak256(ptr, 0xe0)
+    }
 
     emit DisputeFinalized(
       entityId,
       params.counterentity,
       eventInitialNonce,
-      params.initialProofbodyHash,
-      finalProofbodyHash
+      finalProofbodyHash,
+      // Receipt MPT authenticates this commitment to the non-emitted sidecar.
+      finalizationEvidenceHash
     );
   }
 
@@ -1044,77 +952,40 @@ contract Depository is ReentrancyGuardLite {
     uint256 leftArgumentsTimestamp,
     uint256 rightArgumentsTimestamp,
     uint256 disputeStartTimestamp,
-    uint256 disputeTimeout
+    uint256 disputeTimeout,
+    uint32 leftResponseSeconds,
+    uint32 rightResponseSeconds
   ) private {
     if (proofbody.tokenIds.length != proofbody.offdeltas.length) revert E8();
 
     bytes32 leftAddr = entity1 < entity2 ? entity1 : entity2;
     bytes32 rightAddr = entity1 < entity2 ? entity2 : entity1;
-    bytes memory leftArgs = leftArguments;
-    bytes memory rightArgs = rightArguments;
-    uint256 leftArgsTimestamp = leftArgumentsTimestamp;
-    uint256 rightArgsTimestamp = rightArgumentsTimestamp;
     bytes memory acct_key = accountKey(leftAddr, rightAddr);
 
-    // NOTE: On-chain settlement must apply TOTAL delta (ondelta + offdelta).
-    // - `col.ondelta` tracks the on-chain component (e.g., collateral funding events).
-    // - `proofbody.offdeltas` is the off-chain component agreed/derived by parties.
-    uint256 tokenCount = proofbody.tokenIds.length;
-    int[] memory transformerDeltas = new int[](tokenCount);
-    uint256 negativeDeltaBitmap;
-    bool exactTransformerInputs = true;
-    for (uint256 i = 0; i < tokenCount; i++) {
-      uint256 tokenId = proofbody.tokenIds[i];
-      if (i > 0 && proofbody.tokenIds[i - 1] >= tokenId) revert E8();
-      (bool negative, uint256 rawDelta, bool representable) = _addSignedInt256(
-        _collaterals[acct_key][tokenId].ondelta,
-        proofbody.offdeltas[i]
-      );
-      assembly ("memory-safe") {
-        mstore(add(add(transformerDeltas, 0x20), mul(i, 0x20)), rawDelta)
-      }
-      if (negative) negativeDeltaBitmap |= 1 << i;
-      if (!representable) exactTransformerInputs = false;
-    }
-
-    // Dynamic arguments are adversarial evidence, not signed account state. A
-    // malformed outer wrapper decodes to empty; the user-signed transformer then
-    // decides whether empty evidence proves anything. The transformer itself is
-    // the executable dispute agreement: missing code, revert/OOG, malformed
-    // output, or invalid allowances must revert and leave the dispute active.
-
-    bytes32 accountKeyHash = keccak256(acct_key);
-
-    // Every signed clause must execute. Skipping one would settle a different
-    // agreement from the ProofBody that both sides signed.
-    transformerDeltas = Account.applyTransformers(
-      accountKeyHash,
+    // Account owns bilateral delta arithmetic and signed transformer execution;
+    // Depository owns only the resulting custody, reserve, and debt effects.
+    (int[] memory transformerDeltas, uint256 negativeDeltaBitmap) =
+      Account.prepareSettlementDeltas(
+      _collaterals,
+      acct_key,
       proofbody,
-      transformerDeltas,
-      exactTransformerInputs,
-      leftArgs,
-      rightArgs,
-      leftArgsTimestamp,
-      rightArgsTimestamp,
+      leftArguments,
+      rightArguments,
+      leftArgumentsTimestamp,
+      rightArgumentsTimestamp,
       leftAddr,
       rightAddr,
+      deltaTransformer,
       disputeStartTimestamp,
-      disputeTimeout
+      disputeTimeout,
+      leftResponseSeconds,
+      rightResponseSeconds
     );
-
-    // A transformer can run only on exact int256 inputs. Account reverts before
-    // this point if the signed clause cannot truthfully receive the base delta.
-    if (exactTransformerInputs) {
-      negativeDeltaBitmap = 0;
-      for (uint256 i = 0; i < tokenCount; i++) {
-        if (transformerDeltas[i] < 0) negativeDeltaBitmap |= 1 << i;
-      }
-    }
 
     // Apply exact mathematical deltas. The signed-magnitude representation
     // covers every valid same-nonce R2C trajectory even when ondelta+offdelta
     // exceeds int256; no narrowing or saturating financial approximation occurs.
-    for (uint256 i = 0; i < tokenCount; i++) {
+    for (uint256 i = 0; i < proofbody.tokenIds.length; i++) {
       bool negativeDelta = negativeDeltaBitmap & (1 << i) != 0;
       uint256 deltaMagnitude;
       assembly ("memory-safe") {
@@ -1173,30 +1044,6 @@ contract Depository is ReentrancyGuardLite {
     col.ondelta = 0;
   }
 
-  /// @dev Exact int256 + int256 using a 257-bit sign/magnitude result. The
-  /// modulo sum plus the three sign bits distinguish normal, positive-overflow,
-  /// and negative-overflow cases without checked signed arithmetic. Only
-  /// -2^256 has no uint256 magnitude and is rejected as corrupt signed state.
-  function _addSignedInt256(int256 left, int256 right)
-    private pure returns (bool negative, uint256 rawSum, bool transformerRepresentable)
-  {
-    int256 signedSum;
-    assembly ("memory-safe") {
-      rawSum := add(left, right)
-      signedSum := rawSum
-    }
-    bool leftNegative = left < 0;
-    bool rightNegative = right < 0;
-    bool sumNegative = signedSum < 0;
-    if (leftNegative == rightNegative && leftNegative != sumNegative) {
-      if (!leftNegative) return (false, rawSum, false);
-      if (rawSum == 0) revert E8();
-      return (true, rawSum, false);
-    }
-    if (!sumNegative) return (false, rawSum, true);
-    return (true, rawSum, signedSum != type(int256).min);
-  }
-
   /// @notice Settle shortfall via reserves, then debt
   function _settleShortfall(bytes32 debtor, bytes32 creditor, uint256 tokenId, uint256 amount) private {
     if (amount == 0) return;
@@ -1215,12 +1062,12 @@ contract Depository is ReentrancyGuardLite {
     }
   }
 
-
-  function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) {
-    // Depository also holds EntityProvider governance shares. Receipt therefore
-    // cannot imply asset support: only admin registration writes tokenToId, and
-    // only processBatch credits reserves for a pre-registered token.
-    return this.onERC1155Received.selector;
+  /// @dev Single ERC1155 custody is required for registered external assets.
+  /// Batch receipt stays unsupported so one callback can never imply that an
+  /// arbitrary token set was registered or credited.
+  function onERC1155Received(address, address, uint256, uint256, bytes calldata)
+    external pure returns (bytes4)
+  {
+    return 0xf23a6e61;
   }
-  function onERC1155BatchReceived(address,address,uint256[] calldata,uint256[] calldata,bytes calldata) external pure returns (bytes4) { revert E7(); }
 }

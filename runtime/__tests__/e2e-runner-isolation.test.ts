@@ -7,7 +7,9 @@ import { dirname, join, resolve } from 'node:path';
 import {
   assertE2ECodeFingerprintStable,
   assertE2EShardPortsIsolated,
+  acquireAvailableE2EWorkerPortLeases,
   acquireLocalTestPortLease,
+  awaitE2EWorkersBeforeLeaseRelease,
   batchPlaywrightTargetsByFile,
   computeE2EBuildInputHash,
   computeE2EBuildArtifactHash,
@@ -38,6 +40,18 @@ const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
 };
 
 describe('isolated E2E runner resources', () => {
+  test('canonical package E2E commands never exceed the machine-wide lease pool', () => {
+    const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts as Record<string, string>;
+    const canonicalCommands = Object.entries(scripts)
+      .filter(([name, command]) => name.startsWith('test:e2e:') && command.includes('run-e2e-parallel-isolated.ts'));
+    expect(canonicalCommands.length).toBeGreaterThan(0);
+    for (const [name, command] of canonicalCommands) {
+      const match = command.match(/--shards=(\d+)/);
+      if (!match) continue;
+      expect(Number(match[1]), name).toBeLessThanOrEqual(LOCAL_TEST_STACK_BASES.length);
+    }
+  });
+
   test('--help prints usage without acquiring a lease or starting a stack', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-e2e-help-'));
     try {
@@ -89,6 +103,41 @@ describe('isolated E2E runner resources', () => {
     const reused = await acquireLocalTestPortLease({ slotBases, timeoutMs: 0 });
     expect(reused.basePort).toBe(50_000);
     reused.release();
+  });
+
+  test('reserves only available worker lanes and reuses them without lease starvation', async () => {
+    const slotBases = [50_100, 50_120, 50_140];
+    const occupied = await acquireLocalTestPortLease({ slotBases: [slotBases[0]!], timeoutMs: 0 });
+    try {
+      const workerLeases = await acquireAvailableE2EWorkerPortLeases(3, { slotBases });
+      try {
+        expect(workerLeases.map(lease => lease.basePort)).toEqual([50_120, 50_140]);
+        await expect(acquireLocalTestPortLease({ slotBases, timeoutMs: 0 }))
+          .rejects.toThrow('LOCAL_TEST_PORT_SLOTS_EXHAUSTED');
+      } finally {
+        for (const lease of workerLeases) lease.release();
+      }
+    } finally {
+      occupied.release();
+    }
+  });
+
+  test('keeps sibling worker guards held until abort cleanup settles', async () => {
+    let finishSibling!: () => void;
+    const sibling = new Promise<void>(resolveSibling => { finishSibling = resolveSibling; });
+    let observedError: unknown;
+    let settled = false;
+    const waiting = awaitE2EWorkersBeforeLeaseRelease(
+      [Promise.reject(new Error('primary-worker-failed')), sibling],
+      error => { observedError = error; },
+    ).finally(() => { settled = true; });
+
+    await Bun.sleep(0);
+    expect((observedError as Error)?.message).toBe('primary-worker-failed');
+    expect(settled).toBe(false);
+    finishSibling();
+    await expect(waiting).rejects.toThrow('primary-worker-failed');
+    expect(settled).toBe(true);
   });
 
   test('places runtime, jurisdiction, logs, and artifacts below one shard root', () => {

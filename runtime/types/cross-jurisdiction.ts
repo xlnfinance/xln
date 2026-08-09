@@ -30,6 +30,11 @@ export interface CrossJurisdictionPullLeg {
   partialRoot: string;
 }
 
+export interface CrossJurisdictionDisputeConfig {
+  leftResponseSeconds: number;
+  rightResponseSeconds: number;
+}
+
 export type CrossJurisdictionBookLeg = 'source' | 'target';
 
 export type CrossJurisdictionBookStatus =
@@ -92,7 +97,7 @@ export interface CrossJurisdictionTimePolicy {
   settlementClock: 'unix_seconds';
   deadlineConversion: 'floor_ms_to_unix_seconds';
   runtimeExpiresAtMs: number;
-  finalityPolicy: 'source_deadline_then_target_safety';
+  finalityPolicy: 'independent_beneficiary_windows_pull_sum_finality';
 }
 
 export interface CrossJurisdictionPullBinding {
@@ -153,6 +158,9 @@ export interface CrossJurisdictionSwapRoute {
   hubEntityId: string;
   source: CrossJurisdictionSwapLeg;
   target: CrossJurisdictionSwapLeg;
+  /** Signed Account-clock snapshots; both are committed by routeHash. */
+  sourceDisputeConfig: CrossJurisdictionDisputeConfig;
+  targetDisputeConfig: CrossJurisdictionDisputeConfig;
   sourcePull?: CrossJurisdictionPullLeg;
   targetPull?: CrossJurisdictionPullLeg;
   sourceCloseProof?: CrossJurisdictionCloseProof;
@@ -173,13 +181,32 @@ export interface CrossJurisdictionSwapRoute {
   priceImprovementMode?: 'source_savings';
   riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';
   claimedRatio?: number;
-  /**
-   * Fill ratio from *this entity's* on-chain HashLadderRevealRegistered for the
-   * route ladder. Own-slot single-shot latch for exact-once queue (≠ claimedRatio
-   * / fill progress). Never set from a foreign writer's reveal — source/target
-   * pulls share ladderHash, so a hub event must not block the user port write.
-   */
-  registryFillRatio?: number;
+  /** Sticky ratio from this entity's single-shot Source registry slot. */
+  sourceRegistryFillRatio?: number;
+  /** Latest ratio from this entity's replaceable Target registry slot. */
+  targetRegistryFillRatio?: number;
+  /** Raw finalized Source record; settlement validity is dispute-relative. */
+  sourceRegistryRecord?: {
+    fillRatio: number;
+    revealedAt: number;
+  };
+  /** Raw finalized Target record, including deliberately stored late writes. */
+  targetRegistryRecord?: {
+    fillRatio: number;
+    revealedAt: number;
+  };
+  /** First source reveal waiting for the current J-batch to clear. */
+  pendingSourceRegistryReveal?: {
+    fillRatio: number;
+    fullSecret: string;
+    reveals: [string, string, string, string];
+  };
+  /** Latest target port waiting for the current J-batch to clear. */
+  pendingTargetRegistryReveal?: {
+    fillRatio: number;
+    fullSecret: string;
+    reveals: [string, string, string, string];
+  };
   sourceClaimed?: bigint;
   targetClaimed?: bigint;
   status: CrossJurisdictionSwapStatus;

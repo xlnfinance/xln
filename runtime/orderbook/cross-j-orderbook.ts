@@ -12,6 +12,7 @@ import {
   findCrossJurisdictionBookAdmissionKeyByRoute,
   getCrossJurisdictionBookAdmissionError,
   isCrossJurisdictionBookAdmissionPending,
+  isCrossJurisdictionBookRiskRejection,
   markCrossJurisdictionBookAdmissionClosed,
 } from '../extensions/cross-j/orderbook';
 import { createStructuredLogger, shortOrder } from '../infra/logger';
@@ -90,5 +91,6 @@ export {
   crossJurisdictionBookOwnerRef,
   getCrossJurisdictionBookAdmissionError,
   isCrossJurisdictionBookAdmissionPending,
+  isCrossJurisdictionBookRiskRejection,
   markCrossJurisdictionBookAdmissionClosed,
 };

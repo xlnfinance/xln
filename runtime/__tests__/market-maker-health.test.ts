@@ -344,6 +344,7 @@ const buildBootstrapTopology = (): {
       chainId: 31337,
       depositoryAddress: addr('11'),
       jurisdictionRef: stackRef(31337, '11'),
+      roleEvidence: { entityId: entity('10'), isHub: false, source: 'committed-profile' },
     },
     {
       entityId: entity('20'),
@@ -352,6 +353,7 @@ const buildBootstrapTopology = (): {
       chainId: 31338,
       depositoryAddress: addr('22'),
       jurisdictionRef: stackRef(31338, '22'),
+      roleEvidence: { entityId: entity('20'), isHub: false, source: 'committed-profile' },
     },
   ];
   const visibleHubs: HubProfile[] = [
@@ -364,6 +366,7 @@ const buildBootstrapTopology = (): {
       chainId: 31337,
       depositoryAddress: addr('11'),
       jurisdictionRef: stackRef(31337, '11'),
+      roleEvidence: { entityId: entity('30'), isHub: true, source: 'verified-gossip-profile' },
     },
     {
       name: 'H1 Tron',
@@ -374,6 +377,7 @@ const buildBootstrapTopology = (): {
       chainId: 31338,
       depositoryAddress: addr('22'),
       jurisdictionRef: stackRef(31338, '22'),
+      roleEvidence: { entityId: entity('40'), isHub: true, source: 'verified-gossip-profile' },
     },
   ];
   env.infrastructure.verifiedProfileRoutes = new Map([
@@ -438,10 +442,17 @@ test('five-token jurisdiction keeps same-chain and cross depth inside one accoun
     targetTokenIds,
     sourceTokenIds,
   );
-  const specs = [...buildMarketMakerOfferSpecs([sourceHub.entityId], sourceTokenIds), ...crossSpecs];
+  const sameJurisdictionSpecs = buildMarketMakerOfferSpecs([sourceHub.entityId], sourceTokenIds);
+  const specs = [...sameJurisdictionSpecs, ...crossSpecs];
   const aggregateGiveByToken = new Map<number, bigint>();
 
-  expect(specs).toHaveLength(350);
+  // One Account carries pulls from both directed jurisdiction routes. Each
+  // direction gets half of the 32-slot Account budget so reciprocal MM depth
+  // remains symmetric and atomically dispute-enforceable.
+  expect(crossSpecs).toHaveLength(LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS / 2);
+  expect(specs).toHaveLength(
+    sameJurisdictionSpecs.length + LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS / 2,
+  );
   expect(crossSpecs.some(spec => (spec.crossJurisdiction?.source.tokenId ?? 0) >= 4)).toBeTrue();
   expect(reverseCrossSpecs.some(spec => (spec.crossJurisdiction?.target.tokenId ?? 0) >= 4)).toBeTrue();
   for (const spec of specs) {
@@ -671,6 +682,12 @@ test('runtime market maker health stays red until every byte-budgeted cross mark
   expect(health.cross.routes.some(route => !route.ready)).toBe(true);
   expect(health.cross.routes.some(route => !route.depthReady)).toBe(true);
   expect(health.cross.routes.flatMap(route => route.pairs).some(pair => !pair.ready)).toBe(true);
+  expect(health.cross.routes.flatMap(route => route.pairs).every(pair =>
+    pair.expectedBidOffers + pair.expectedAskOffers === pair.expectedOffers
+  )).toBe(true);
+  expect(health.cross.routes.flatMap(route => route.pairs).every(pair =>
+    pair.expectedBidOffers === 0 || pair.expectedAskOffers === 0
+  )).toBe(true);
 });
 
 test('market maker cross order identity is stable within one expiry generation', () => {

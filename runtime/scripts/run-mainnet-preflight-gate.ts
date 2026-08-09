@@ -4,6 +4,7 @@ import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
+import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
 
 import { assertMinDiskFree, getMinDiskFreeBytes } from '../infra/storage-monitor';
 import { MAINNET_GATE } from './mainnet-gate-constants';
@@ -162,17 +163,16 @@ const runStep = async (step: MainnetPreflightStep): Promise<StepResult> => {
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', step.command], {
     cwd: process.cwd(),
     env: withoutTestArtifactCleanupDoneEnv(),
+    detached: GATE_CHILD_PROCESS_DETACHED,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const prefix = `[mainnet:${step.category}:${step.name}]`;
   proc.stdout.on('data', chunk => process.stdout.write(`${prefix} ${chunk.toString()}`));
   proc.stderr.on('data', chunk => process.stderr.write(`${prefix} ${chunk.toString()}`));
 
+  let termination: Promise<void> | null = null;
   const timer = setTimeout(() => {
-    proc.kill('SIGTERM');
-    setTimeout(() => {
-      if (proc.exitCode === null) proc.kill('SIGKILL');
-    }, 5_000).unref();
+    termination = terminateGateProcessGroup(proc);
   }, step.timeoutMs);
   timer.unref();
 
@@ -181,6 +181,7 @@ const runStep = async (step: MainnetPreflightStep): Promise<StepResult> => {
     proc.once('exit', resolve);
   });
   clearTimeout(timer);
+  if (termination) await termination;
   return { ...step, code, durationMs: Date.now() - startedAt };
 };
 

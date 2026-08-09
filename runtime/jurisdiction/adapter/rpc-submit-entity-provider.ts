@@ -71,7 +71,7 @@ const createActionCall = (
   if (intent.payload.kind === 'releaseControlShares') {
     const args = [
       intent.entityNumber,
-      intent.payload.release.depositoryAddress,
+      intent.payload.release.recipientAddress,
       intent.payload.release.controlAmount,
       intent.payload.release.dividendAmount,
       intent.payload.release.purpose,

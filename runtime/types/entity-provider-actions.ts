@@ -10,6 +10,7 @@ export type EntityProviderTransferPayload = Readonly<{
 }>;
 
 export type EntityProviderReleaseControlSharesPayload = Readonly<{
+  recipientAddress: string;
   controlAmount: bigint;
   dividendAmount: bigint;
   purpose: string;
@@ -22,9 +23,7 @@ export type EntityProviderActionPayload =
     }>
   | Readonly<{
       kind: 'releaseControlShares';
-      release: EntityProviderReleaseControlSharesPayload & {
-        depositoryAddress: string;
-      };
+      release: EntityProviderReleaseControlSharesPayload;
     }>
   | Readonly<{
       kind: 'cancelPendingAction';

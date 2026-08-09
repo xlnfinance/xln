@@ -16,13 +16,19 @@ import { isUsableContractAddress } from '../../../../jurisdiction/machine/contra
 import { shortId } from '../../../../infra/logger';
 import { disputeLog, warnDisputeUnlessQuiet } from './shared';
 import { admitDisputeFinalize } from './finalize-admission';
+import { proofBodyHasPulls } from './start-admission';
 import { scheduleHook } from '../../../scheduler';
-import { refreshCrossJurisdictionTargetRecovery } from '../../j-events-htlc';
+import {
+  countDeferredHashLadderReveals,
+  flushDeferredHashLadderReveals,
+  refreshCrossJurisdictionTargetRecovery,
+} from '../../j-events-htlc';
 import {
   buildFinalProofPayload,
   selectFinalProof,
   verifyCounterProofIdentity,
   type FinalProofPayload,
+  type FinalProofSelection,
 } from './finalize-proof';
 
 type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
@@ -52,29 +58,55 @@ const collectRegistryPublication = (
   return { secrets, transformerAddress };
 };
 
+/**
+ * Timing gate mirrors Account.sol:
+ * - no pulls: the non-starter may immediately accept the state selected and
+ *   signed by the starter; its fresh outer Hanko makes that mutual consent
+ * - the starter has no fresh response from its peer and therefore waits T
+ * - pulls present: both wait full T (applyPull reverts PullRevealWindowActive)
+ * Role is security authority, not presentation metadata. Never collapse these
+ * branches into a generic pull-free fast path.
+ */
 const isFinalizeTimingAllowed = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
   env: EntityRuntimeContext,
+  selection: FinalProofSelection,
 ): boolean => {
   const activeDispute = account.activeDispute!;
-  const callerIsLeft = account.state.leftEntity === state.entityId;
-  const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
-  if (!callerIsStarter) return true;
-  // disputeTimeout is absolute unix seconds on L1.
   const timeoutSec = Number(activeDispute.disputeTimeout || 0);
   const nowSec = Math.floor(Number(state.timestamp || 0) / 1000);
+
+  const hasPulls = proofBodyHasPulls(
+    selection.finalProofbody,
+    requireAccountDeltaTransformerAddress(env.state, account.state),
+  );
+  if (
+    hasPulls
+    && selection.shouldUseCounterProof
+    && activeDispute.selectedCounterNonce === undefined
+  ) {
+    addMessage(state, '⏳ Pull counter-proof must be locked on-chain before finalization');
+    return false;
+  }
   if (timeoutSec > 0 && nowSec >= timeoutSec) return true;
+  if (!hasPulls) {
+    const callerIsLeft = account.state.leftEntity === state.entityId;
+    const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
+    if (!callerIsStarter) return true;
+  }
+
   addMessage(
     state,
-    `❌ disputeFinalize too early for starter: nowSec=${nowSec}, ` +
-    `timeoutSec=${timeoutSec}`,
+    `❌ disputeFinalize too early: nowSec=${nowSec}, timeoutSec=${timeoutSec}` +
+      `${hasPulls ? ', pulls=yes' : ', starter-unilateral'}`,
   );
   warnDisputeUnlessQuiet(env, 'finalize.too_early', {
     counterparty: shortId(counterpartyId),
     nowSec,
     timeoutSec,
+    hasPulls,
   });
   return false;
 };
@@ -135,17 +167,12 @@ const selectedCrossJurisdictionRecoveryIsReady = (
     (pullId) => !Object.hasOwn(plan.recovery.resultsByPullId, pullId),
   );
   if (missing.length === 0) return true;
-  // Missing ports read 0 after on-chain reveal cutoff (startTs + T/2 seconds).
   const timeoutSec = Number(active.disputeTimeout || 0);
-  const startSec = Number(active.disputeStartTimestamp || 0);
   const nowSec = Math.floor(Number(state.timestamp || 0) / 1000);
-  const revealDeadlineSec = startSec > 0 && timeoutSec > startSec
-    ? startSec + Math.floor((timeoutSec - startSec) / 2)
-    : 0;
-  const revealWindowClosed =
-    (revealDeadlineSec > 0 && nowSec > revealDeadlineSec) ||
-    (timeoutSec > 0 && nowSec >= timeoutSec);
-  if (revealWindowClosed) return true;
+  // One canonical clock: the signed Target slot remains writable until the
+  // local on-chain disputeTimeout. Before it, missing ports wait; at/after it,
+  // DeltaTransformer deterministically reads the latest target slot or zero.
+  if (timeoutSec > 0 && nowSec >= timeoutSec) return true;
   if (state.crontabState) {
     scheduleHook(state.crontabState, {
       id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
@@ -157,9 +184,49 @@ const selectedCrossJurisdictionRecoveryIsReady = (
   addMessage(
     state,
     `⏳ disputeFinalize waiting for ${missing.length} cross-j source result(s) ` +
-      `required by the selected proof (nowSec=${nowSec}, revealDeadlineSec=${revealDeadlineSec})`,
+      `required by the selected proof (nowSec=${nowSec}, timeoutSec=${timeoutSec})`,
   );
   return false;
+};
+
+/** Flush pending hash-ladder reveals before disputeFinalize can enter jBatch. */
+const deferFinalizeForPendingReveals = (
+  state: EntityState,
+  outputs: EntityInput[],
+  counterpartyId: string,
+  account: AccountReplica,
+): boolean => {
+  // Pull every mutable witness into the draft before deciding. A sent batch is
+  // immutable, so its deferred witnesses remain counted and keep finalization
+  // out of the draft until the acknowledgement releases them.
+  flushDeferredHashLadderReveals(state);
+  const pendingReveals =
+    (state.jBatchState?.batch.hashLadderRegistrations.length ?? 0)
+    + countDeferredHashLadderReveals(state);
+  if (pendingReveals <= 0) return false;
+  const firstValidator = state.config.validators?.[0];
+  if (firstValidator) {
+    outputs.push({
+      entityId: state.entityId,
+      signerId: firstValidator,
+      entityTxs: [{ type: 'j_broadcast', data: {} }],
+    });
+  }
+  if (state.crontabState) {
+    const timeoutSec = Number(account.activeDispute!.disputeTimeout || 0);
+    const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : Number(state.timestamp ?? 0) + 1000;
+    scheduleHook(state.crontabState, {
+      id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
+      triggerAt: Math.min(Number(state.timestamp ?? 0) + 1000, timeoutMs),
+      type: 'dispute_deadline',
+      data: { accountId: counterpartyId },
+    });
+  }
+  addMessage(
+    state,
+    `⏳ disputeFinalize deferred: ${pendingReveals} hashLadderReveal(s) must broadcast first`,
+  );
+  return true;
 };
 
 export const handleDisputeFinalize = async (
@@ -217,7 +284,13 @@ export const handleDisputeFinalize = async (
     finalNonce: finalProof.finalNonce,
     finalNonceSource: selection.finalNonceSource,
   });
-  if (!isFinalizeTimingAllowed(newState, account, counterpartyId, env)) {
+  if (!isFinalizeTimingAllowed(newState, account, counterpartyId, env, selection)) {
+    return { newState, outputs };
+  }
+  // F3: never co-batch hash-ladder reveals with finalize. A chain tip still
+  // before disputeTimeout reverts PullRevealWindowActive and drops the reveal
+  // with the finalize in the same processBatch. Flush reveals via j_broadcast.
+  if (deferFinalizeForPendingReveals(newState, outputs, counterpartyId, account)) {
     return { newState, outputs };
   }
   queueDisputeFinalize(newState, account, finalProof, registry);

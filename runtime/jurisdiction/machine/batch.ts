@@ -88,17 +88,29 @@ export interface JBatch {
   disputeStarts: Array<{
     counterentity: string;
     nonce: number; // unified nonce (must be > stored account nonce)
+    proposerIsLeft: boolean;
     proofbodyHash: string;
     initialProofbody: ProofBodyStruct;
     watchSeed: string;
     sig: string;
     starterInitialArguments: string;
-    starterIncrementedArguments: string;
+    starterCounterArguments: string;
+    starterCounterProofCommitment: string;
+  }>;
+  counterDisputes: Array<{
+    counterentity: string;
+    initialNonce: number;
+    initialProofbodyHash: string;
+    counterNonce: number;
+    proposerIsLeft: boolean;
+    counterProofbody: ProofBodyStruct;
+    sig: string;
   }>;
   disputeFinalizations: Array<{
     counterentity: string;
     initialNonce: number; // nonce when dispute was started
     finalNonce: number; // signed finalize nonce; unilateral timeout path may keep equal to initialNonce
+    proposerIsLeft: boolean;
     initialProofbodyHash: string;
     finalProofbody: ProofBodyStruct;
     starterArguments: string;
@@ -120,15 +132,19 @@ export interface JBatch {
     secret: string;
   }>;
 
-  // Cross-j hash-ladder reveals: the only on-chain settlement evidence pulls
-  // ever read. Verified against the ladder commitment by the contract and
-  // recorded under the authenticated batch caller's entity key.
-  hashLadderReveals: Array<{
+  // Independent Sprites-like public evidence. The outer processBatch Hanko
+  // authenticates the revealing Entity; counterpartyEntity derives the exact
+  // bilateral Account namespace and has no authority outside that namespace.
+  hashLadderRegistrations: Array<{
+    counterpartyEntity: string;
+    targetRole: boolean;
     fullHash: string;
     partialRoot: string;
-    fillRatio: number;
-    fullSecret: string;
-    reveals: [string, string, string, string];
+    witness: {
+      fillRatio: number;
+      fullSecret: string;
+      reveals: [string, string, string, string];
+    };
   }>;
 }
 
@@ -171,6 +187,12 @@ export interface JBatchState {
   // Lifecycle tracking
   status: JBatchStatus;
   sentBatch?: SentJBatch;
+  /**
+   * Still-valid operations recovered from an invalidated immutable sentBatch.
+   * They are broadcast before the editable draft and never merged into it:
+   * two individually valid 50-op batches may not form one contract-valid batch.
+   */
+  recoveryBatches?: JBatch[];
   /** A protocol-forced draft must broadcast as soon as the in-flight batch clears. */
   autoBroadcastDraft?: boolean;
   entityNonce?: number; // Entity nonce used for this batch (for replay prevention)
@@ -183,11 +205,12 @@ export interface BatchOpBreakdown {
   collateralToReserve: number;
   settlements: number;
   disputeStarts: number;
+  counterDisputes: number;
   disputeFinalizations: number;
   externalTokenToReserve: number;
   reserveToExternalToken: number;
   revealSecrets: number;
-  hashLadderReveals: number;
+  hashLadderRegistrations: number;
 }
 
 export const J_BATCH_CONTRACT_LIMITS = {
@@ -197,13 +220,14 @@ export const J_BATCH_CONTRACT_LIMITS = {
   maxSettlementDiffs: 32,
   maxSettlementForgivenessIds: 32,
   maxDisputeStarts: 8,
+  maxCounterDisputes: 8,
   // One transformer-capable finalization plus 100% gas reserve fits the
   // EIP-7825 2^24 transaction cap; independent disputes use independent txs.
   maxDisputeFinalizations: 1,
   maxReserveToCollateralPairs: 64,
   maxReserveToCollateralPairsTotal: 256,
   maxSecretReveals: 32,
-  maxHashLadderReveals: 32,
+  maxHashLadderRegistrations: 32,
   maxEncodedBatchBytes: 256 * 1024,
   maxDisputeProofBodyBytes: 176 * 1024,
   maxDisputeStarterArgumentsBytes: 64 * 1024,
@@ -251,14 +275,17 @@ export function getJBatchContractLimitIssue(batch: JBatch): string | null {
   if (batch.disputeStarts.length > J_BATCH_CONTRACT_LIMITS.maxDisputeStarts) {
     return `disputeStarts ${batch.disputeStarts.length}/${J_BATCH_CONTRACT_LIMITS.maxDisputeStarts}`;
   }
+  if (batch.counterDisputes.length > J_BATCH_CONTRACT_LIMITS.maxCounterDisputes) {
+    return `counterDisputes ${batch.counterDisputes.length}/${J_BATCH_CONTRACT_LIMITS.maxCounterDisputes}`;
+  }
   if (batch.disputeFinalizations.length > J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations) {
     return `disputeFinalizations ${batch.disputeFinalizations.length}/${J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations}`;
   }
   if (batch.revealSecrets.length > J_BATCH_CONTRACT_LIMITS.maxSecretReveals) {
     return `revealSecrets ${batch.revealSecrets.length}/${J_BATCH_CONTRACT_LIMITS.maxSecretReveals}`;
   }
-  if (batch.hashLadderReveals.length > J_BATCH_CONTRACT_LIMITS.maxHashLadderReveals) {
-    return `hashLadderReveals ${batch.hashLadderReveals.length}/${J_BATCH_CONTRACT_LIMITS.maxHashLadderReveals}`;
+  if (batch.hashLadderRegistrations.length > J_BATCH_CONTRACT_LIMITS.maxHashLadderRegistrations) {
+    return `hashLadderRegistrations ${batch.hashLadderRegistrations.length}/${J_BATCH_CONTRACT_LIMITS.maxHashLadderRegistrations}`;
   }
   for (const [index, op] of batch.reserveToCollateral.entries()) {
     if (op.tokenId <= 0 || !Number.isSafeInteger(op.tokenId)) {
@@ -339,11 +366,12 @@ export function createEmptyBatch(): JBatch {
     collateralToReserve: [],
     settlements: [],
     disputeStarts: [],
+    counterDisputes: [],
     disputeFinalizations: [], // Match Solidity: FinalDisputeProof[]
     externalTokenToReserve: [],
     reserveToExternalToken: [],
     revealSecrets: [],
-    hashLadderReveals: [],
+    hashLadderRegistrations: [],
   };
 }
 
@@ -364,12 +392,13 @@ const DEPOSITORY_BATCH_ABI =
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
     'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, uint256 nonce, bytes sig)[] collateralToReserve,' +
     'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, uint256 nonce)[] settlements,' +
-    'tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) initialProofbody, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterIncrementedArguments)[] disputeStarts,' +
-    'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
+    'tuple(bytes32 counterentity, uint256 nonce, bool proposerIsLeft, bytes32 proofbodyHash, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) initialProofbody, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment)[] disputeStarts,' +
+    'tuple(bytes32 counterentity, uint256 initialNonce, bytes32 initialProofbodyHash, uint256 counterNonce, bool proposerIsLeft, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) counterProofbody, bytes sig)[] counterDisputes,' +
+    'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bool proposerIsLeft, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
     'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
     'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
-    'tuple(bytes32 fullHash, bytes32 partialRoot, uint16 fillRatio, bytes32 fullSecret, bytes32[4] reveals)[] hashLadderReveals' +
+    'tuple(bytes32 counterpartyEntity, bool targetRole, bytes32 fullHash, bytes32 partialRoot, tuple(uint16 fillRatio, bytes32 fullSecret, bytes32[4] reveals) witness)[] hashLadderRegistrations' +
   ')';
 const DEPOSITORY_BATCH_PARAM = ethers.ParamType.from(DEPOSITORY_BATCH_ABI);
 
@@ -497,28 +526,28 @@ export function sanitizeOptionalDisputeArgument(
 
 export function sanitizeOptionalDisputeStarterArgumentPair(
   initialValue: unknown,
-  incrementedValue: unknown,
+  counterValue: unknown,
   context: string,
 ): Readonly<{
   initial: string;
-  incremented: string;
+  counter: string;
   warnings: readonly OptionalDisputeArgumentWarning[];
 }> {
   const initial = sanitizeOptionalDisputeArgument(initialValue, `${context}.initial`);
-  const incremented = sanitizeOptionalDisputeArgument(incrementedValue, `${context}.incremented`);
-  const warnings = [...initial.warnings, ...incremented.warnings];
+  const counter = sanitizeOptionalDisputeArgument(counterValue, `${context}.counter`);
+  const warnings = [...initial.warnings, ...counter.warnings];
   const total = encodedHexBytes(initial.value, `${context}.initial`) +
-    encodedHexBytes(incremented.value, `${context}.incremented`);
+    encodedHexBytes(counter.value, `${context}.counter`);
   if (total <= J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes) {
-    return { initial: initial.value, incremented: incremented.value, warnings };
+    return { initial: initial.value, counter: counter.value, warnings };
   }
   warnings.push({
     code: 'DISPUTE_OPTIONAL_ARGUMENT_AGGREGATE_OVERSIZED',
-    context: `${context}.incremented`,
+    context: `${context}.counter`,
     originalBytes: total,
     limitBytes: J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
   });
-  return { initial: initial.value, incremented: '0x', warnings };
+  return { initial: initial.value, counter: '0x', warnings };
 }
 
 export function encodeJBatch(batch: JBatch): string {
@@ -589,11 +618,12 @@ export function summarizeBatch(batch: JBatch): Record<string, unknown> {
         : null,
     },
     disputeStarts: { count: batch.disputeStarts.length, sample: sample(batch.disputeStarts) },
+    counterDisputes: { count: batch.counterDisputes.length, sample: sample(batch.counterDisputes) },
     disputeFinalizations: { count: batch.disputeFinalizations.length, sample: sample(batch.disputeFinalizations) },
     externalTokenToReserve: { count: batch.externalTokenToReserve.length, sample: sample(batch.externalTokenToReserve) },
     reserveToExternalToken: { count: batch.reserveToExternalToken.length, sample: sample(batch.reserveToExternalToken) },
     revealSecrets: { count: batch.revealSecrets.length, sample: sample(batch.revealSecrets) },
-    hashLadderReveals: { count: batch.hashLadderReveals.length, sample: sample(batch.hashLadderReveals) },
+    hashLadderRegistrations: { count: batch.hashLadderRegistrations.length, sample: sample(batch.hashLadderRegistrations) },
   };
 }
 
@@ -786,11 +816,12 @@ export function isBatchEmpty(batch: JBatch): boolean {
     batch.collateralToReserve.length === 0 &&
     batch.settlements.length === 0 &&
     batch.disputeStarts.length === 0 &&
+    batch.counterDisputes.length === 0 &&
     batch.disputeFinalizations.length === 0 &&
     batch.externalTokenToReserve.length === 0 &&
     batch.reserveToExternalToken.length === 0 &&
     batch.revealSecrets.length === 0 &&
-    batch.hashLadderReveals.length === 0
+    batch.hashLadderRegistrations.length === 0
   );
 }
 
@@ -803,12 +834,23 @@ export function batchOpCount(batch: JBatch): number {
     batch.collateralToReserve.length +
     batch.settlements.length +
     batch.disputeStarts.length +
+    batch.counterDisputes.length +
     batch.disputeFinalizations.length +
     batch.externalTokenToReserve.length +
     batch.reserveToExternalToken.length +
     batch.revealSecrets.length +
-    batch.hashLadderReveals.length
+    batch.hashLadderRegistrations.length
   );
+}
+
+export function hasJBatchWork(state: JBatchState): boolean {
+  return Boolean(state.recoveryBatches?.some(batch => !isBatchEmpty(batch))) || !isBatchEmpty(state.batch);
+}
+
+/** Preserve invalidated sent work without ever overflowing the editable draft. */
+export function prependRecoveryBatch(state: JBatchState, recovered: JBatch): void {
+  if (isBatchEmpty(recovered)) return;
+  state.recoveryBatches = [cloneJBatch(recovered), ...(state.recoveryBatches ?? [])];
 }
 
 /**
@@ -823,11 +865,14 @@ export function mergeBatchOps(target: JBatch, source: JBatch): void {
   merged.collateralToReserve.push(...source.collateralToReserve);
   merged.settlements.push(...source.settlements);
   merged.disputeStarts.push(...source.disputeStarts);
+  merged.counterDisputes.push(...source.counterDisputes);
   merged.disputeFinalizations.push(...source.disputeFinalizations);
   merged.externalTokenToReserve.push(...source.externalTokenToReserve);
   merged.reserveToExternalToken.push(...source.reserveToExternalToken);
   merged.revealSecrets.push(...source.revealSecrets);
-  merged.hashLadderReveals.push(...source.hashLadderReveals);
+  for (const registration of source.hashLadderRegistrations) {
+    upsertHashLadderRegistration(merged.hashLadderRegistrations, registration);
+  }
   assertJBatchWithinContractLimits(merged, 'mergeBatchOps');
   target.flashloans = merged.flashloans;
   target.reserveToReserve = merged.reserveToReserve;
@@ -835,11 +880,12 @@ export function mergeBatchOps(target: JBatch, source: JBatch): void {
   target.collateralToReserve = merged.collateralToReserve;
   target.settlements = merged.settlements;
   target.disputeStarts = merged.disputeStarts;
+  target.counterDisputes = merged.counterDisputes;
   target.disputeFinalizations = merged.disputeFinalizations;
   target.externalTokenToReserve = merged.externalTokenToReserve;
   target.reserveToExternalToken = merged.reserveToExternalToken;
   target.revealSecrets = merged.revealSecrets;
-  target.hashLadderReveals = merged.hashLadderReveals;
+  target.hashLadderRegistrations = merged.hashLadderRegistrations;
 }
 
 /**
@@ -1276,43 +1322,170 @@ export function batchAddRevealSecret(
  * settlement evidence a pull ever reads; dispute calldata carries no pull
  * binaries anymore.
  */
-export function batchAddHashLadderReveal(
+export function batchAddHashLadderRegistration(
   jBatchState: JBatchState,
-  reveal: {
+  registration: {
+    counterpartyEntity: string;
+    targetRole: boolean;
     fullHash: string;
     partialRoot: string;
-    fillRatio: number;
-    fullSecret: string;
-    reveals: [string, string, string, string];
+    witness: {
+      fillRatio: number;
+      fullSecret: string;
+      reveals: [string, string, string, string];
+    };
   },
 ): void {
   assertBatchNotPending(jBatchState, 'hash-ladder reveal');
-  const fullHash = reveal.fullHash.toLowerCase();
-  const partialRoot = reveal.partialRoot.toLowerCase();
-  const exists = jBatchState.batch.hashLadderReveals.find(
-    existing =>
-      existing.fullHash.toLowerCase() === fullHash &&
-      existing.partialRoot.toLowerCase() === partialRoot &&
-      existing.fillRatio === reveal.fillRatio,
+  const ladderHash = hashLadderRegistrationKey(registration);
+  const changed = upsertHashLadderRegistration(
+    jBatchState.batch.hashLadderRegistrations,
+    registration,
+    () => {
+      requireBatchRoom(jBatchState.batch, 'hashLadderRegistration');
+      requireArrayRoom(
+        'hashLadderRegistrations', jBatchState.batch.hashLadderRegistrations.length, 1,
+        J_BATCH_CONTRACT_LIMITS.maxHashLadderRegistrations,
+      );
+    },
   );
-  if (exists) return;
-  requireBatchRoom(jBatchState.batch, 'hashLadderReveal');
-  requireArrayRoom(
-    'hashLadderReveals',
-    jBatchState.batch.hashLadderReveals.length,
-    1,
-    J_BATCH_CONTRACT_LIMITS.maxHashLadderReveals,
-  );
-  jBatchState.batch.hashLadderReveals.push({
-    fullHash: reveal.fullHash,
-    partialRoot: reveal.partialRoot,
-    fillRatio: reveal.fillRatio,
-    fullSecret: reveal.fullSecret,
-    reveals: [...reveal.reveals] as [string, string, string, string],
-  });
+  if (!changed) return;
   if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
   jBatchLog.debug('hash_ladder_reveal.added', {
-    fullHash: shortHash(reveal.fullHash),
-    fillRatio: reveal.fillRatio,
+    counterpartyEntity: shortHash(registration.counterpartyEntity),
+    ladderHash: shortHash(ladderHash),
+    fillRatio: registration.witness.fillRatio,
+    targetRole: registration.targetRole,
+  });
+}
+
+type HashLadderRegistration = JBatch['hashLadderRegistrations'][number];
+
+const hashLadderRegistrationKey = (
+  registration: Pick<HashLadderRegistration, 'counterpartyEntity' | 'fullHash' | 'partialRoot'>,
+): string => ethers.keccak256(
+  ethers.solidityPacked(
+    ['bytes32', 'bytes32', 'bytes32'],
+    [registration.counterpartyEntity, registration.fullHash, registration.partialRoot],
+  ),
+).toLowerCase();
+
+/**
+ * Whether one Account-scoped registration can enter this mutable draft.
+ * Replacing an existing Target slot consumes no new contract array/total-op
+ * capacity; every new slot must satisfy both independent limits.
+ */
+export const hasHashLadderRegistrationRoom = (
+  batch: JBatch,
+  registration: HashLadderRegistration,
+): boolean => {
+  const slotExists = batch.hashLadderRegistrations.some(existing =>
+    existing.targetRole === registration.targetRole
+    && hashLadderRegistrationKey(existing) === hashLadderRegistrationKey(registration)
+  );
+  if (slotExists) return true;
+  return (
+    batch.hashLadderRegistrations.length < J_BATCH_CONTRACT_LIMITS.maxHashLadderRegistrations
+    && batchOpCount(batch) < J_BATCH_CONTRACT_LIMITS.maxTotalOps
+  );
+};
+
+/** One canonical dedupe/replacement policy for normal queueing and recovery merges. */
+function upsertHashLadderRegistration(
+  registrations: HashLadderRegistration[],
+  registration: HashLadderRegistration,
+  beforeAppend: () => void = () => undefined,
+): boolean {
+  const ladderHash = hashLadderRegistrationKey(registration);
+  const normalized = {
+    counterpartyEntity: registration.counterpartyEntity.toLowerCase(),
+    targetRole: registration.targetRole,
+    fullHash: registration.fullHash,
+    partialRoot: registration.partialRoot,
+    witness: {
+      fillRatio: registration.witness.fillRatio,
+      fullSecret: registration.witness.fullSecret,
+      reveals: [...registration.witness.reveals] as [string, string, string, string],
+    },
+  };
+  const existingIndex = registrations.findIndex(existing =>
+    existing.targetRole === registration.targetRole
+    && existing.counterpartyEntity.toLowerCase() === registration.counterpartyEntity.toLowerCase()
+    && hashLadderRegistrationKey(existing) === ladderHash
+  );
+  if (existingIndex >= 0) {
+    const existing = registrations[existingIndex]!;
+    const existingRatio = existing.witness.fillRatio;
+    if (existingRatio === registration.witness.fillRatio) return false;
+    if (!registration.targetRole || registration.witness.fillRatio < existingRatio) {
+      throw new Error(
+        `J_HASH_LADDER_REGISTRATION_CONFLICT:${ladderHash}:` +
+        `${registration.targetRole ? 'target' : 'source'}:` +
+        `${existingRatio}:${registration.witness.fillRatio}`,
+      );
+    }
+    registrations[existingIndex] = normalized;
+  } else {
+    beforeAppend();
+    registrations.push(normalized);
+  }
+  return true;
+}
+
+/** Lock the highest mutually signed counter-proof before the Account deadline. */
+export function batchAddCounterDispute(
+  jBatchState: JBatchState,
+  counterProof: JBatch['counterDisputes'][number],
+): void {
+  assertBatchNotPending(jBatchState, 'counter-dispute');
+  const counterparty = counterProof.counterentity.toLowerCase();
+  const initialHash = counterProof.initialProofbodyHash.toLowerCase();
+  const bodyHash = ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode([PROOF_BODY_PARAM], [counterProof.counterProofbody]),
+  ).toLowerCase();
+  const existingIndex = jBatchState.batch.counterDisputes.findIndex(
+    item => item.counterentity.toLowerCase() === counterparty,
+  );
+  if (existingIndex >= 0) {
+    const existing = jBatchState.batch.counterDisputes[existingIndex]!;
+    const existingBodyHash = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode([PROOF_BODY_PARAM], [existing.counterProofbody]),
+    ).toLowerCase();
+    if (
+      existing.initialNonce !== counterProof.initialNonce
+      || existing.initialProofbodyHash.toLowerCase() !== initialHash
+    ) {
+      throw new Error(`J_COUNTER_DISPUTE_INITIAL_BINDING_CONFLICT:${counterparty}`);
+    }
+    if (counterProof.counterNonce < existing.counterNonce) {
+      throw new Error(`J_COUNTER_DISPUTE_NONCE_REGRESSION:${counterparty}`);
+    }
+    if (counterProof.counterNonce === existing.counterNonce) {
+      if (counterProof.proposerIsLeft !== existing.proposerIsLeft) {
+        if (!counterProof.proposerIsLeft) {
+          throw new Error(`J_COUNTER_DISPUTE_ROLE_REGRESSION:${counterparty}`);
+        }
+      } else if (bodyHash !== existingBodyHash) {
+        throw new Error(`J_COUNTER_DISPUTE_HASH_CONFLICT:${counterparty}:${counterProof.counterNonce}`);
+      } else {
+        return;
+      }
+    }
+    jBatchState.batch.counterDisputes[existingIndex] = structuredClone(counterProof);
+  } else {
+    requireBatchRoom(jBatchState.batch, 'counterDispute');
+    requireArrayRoom(
+      'counterDisputes',
+      jBatchState.batch.counterDisputes.length,
+      1,
+      J_BATCH_CONTRACT_LIMITS.maxCounterDisputes,
+    );
+    jBatchState.batch.counterDisputes.push(structuredClone(counterProof));
+  }
+  if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
+  jBatchLog.debug('counter_dispute.added', {
+    counterparty: shortHash(counterparty),
+    counterNonce: counterProof.counterNonce,
+    bodyHash: shortHash(bodyHash),
   });
 }

@@ -70,7 +70,8 @@ const observedIsOtherLegParticipant = (
  * Invariant: observing DisputeStarted on any live cross-j leg MUST start the
  * sibling Account's dispute clock in the same runtime. Legs are not atomic
  * 2PC — silence still settles 0 — but clocks must start together so the
- * revealer can publish by start+T/2 and the porter can use the second half of T.
+ * Source and Target can each publish within the beneficiary-side window of
+ * their own independently started Account dispute.
  *
  * Fail-loud (never soft-skip): missing route mirror, missing source+target
  * pulls, non-participant self, or observed peer not on the other leg. Soft-skip

@@ -1,20 +1,35 @@
 import { ethers } from 'ethers';
-import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
+import type {
+  CrossJurisdictionPullLeg,
+  CrossJurisdictionSwapRoute,
+} from '../../types/cross-jurisdiction';
 import type {
   AccountReplica,
   CrossJurisdictionDisputeRecovery,
 } from '../../types/account';
 import type { EntityInput, EntityState } from '../types';
 import { addMessage } from '../frame-events';
-import { verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
+import { decodeHashLadderBinary, verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import {
+  buildCrossJurisdictionPullReveal,
   CROSS_J_MAX_FILL_RATIO,
+  deriveCrossJurisdictionPrivateSeed,
+  getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionTerminalStatus,
+  transitionCrossJurisdictionRouteStatus,
 } from '../../extensions/cross-j/index';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
 import { buildCrossJurisdictionEntityOutput, pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
-import { batchAddHashLadderReveal, initJBatch } from '../../jurisdiction/machine/batch';
+import {
+  batchAddHashLadderRegistration,
+  hasHashLadderRegistrationRoom,
+  initJBatch,
+  isBatchEmpty,
+} from '../../jurisdiction/machine/batch';
 import type { JEventAccountTx } from './j-events-types';
+import { compareStableText } from '../../protocol/serialization';
+import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import { findExactSignedProofBodyPull } from '../../account/pull-registry-settlement';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
 
@@ -86,57 +101,395 @@ const pullMatchesLadder = (
   ladderHash: string,
 ): boolean => Boolean(pull && ladderHashForPull(pull) === ladderHash);
 
-/**
- * Queue at most one registry write per (entity, ladder) — mirrors Depository
- * single-shot (E12).
- *
- * Why not max-ratio replace (old policy): on-chain the first write locks both
- * fillRatio and revealedAt. Queuing a strictly higher ratio after the first
- * landed reverts the *entire* processBatch (E12), poisoning sibling ops in the
- * same batch (disputeFinalizations, C2R, settlements). Draft splice-to-max was
- * that latent liveness mine after the contract latch landed.
- *
- * Exact-once layers:
- *  1. route.registryFillRatio — set only when *this* entity wrote on-chain
- *     (foreign hub reveals share ladderHash and must not trip this guard)
- *  2. draft / sentBatch already contain this ladder — any ratio
- * Then append once. Never splice a pending lower write for a higher one.
- */
-export const queueHashLadderRevealRegistration = (
+const counterpartyForRouteLeg = (
   state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  targetRole: boolean,
+): string => {
+  const self = String(state.entityId).toLowerCase();
+  const leg = targetRole ? route.target : route.source;
+  const entity = String(leg.entityId).toLowerCase();
+  const counterparty = String(leg.counterpartyEntityId).toLowerCase();
+  if (self === entity) return counterparty;
+  if (self === counterparty) return entity;
+  throw new Error(`J_HASH_LADDER_ACCOUNT_PARTY_MISMATCH:${route.orderId}:${self}`);
+};
+
+/** Queue one signed-role registry write: source is sticky, target replaceable. */
+export type HashLadderRevealQueueResult =
+  | 'queued'
+  | 'already-queued'
+  | 'deferred-batch-pending'
+  | 'source-window-expired';
+
+export const isSourceRevealWindowExpired = (
+  runtimeTimestampMs: number,
+  deadlineSec: number,
+): boolean => Math.floor(runtimeTimestampMs / 1_000) > deadlineSec;
+
+/**
+ * Mirror Depository's first-Source admission clock before mutating a J draft.
+ * A local unobserved dispute is allowed because its start and reveal are mined
+ * by one processBatch; an observed dispute uses inclusive unix-second bounds.
+ */
+const sourceRevealWindowStatus = (
+  state: EntityState,
+  counterpartyEntity: string,
+): 'open' | 'expired' => {
+  const counterparty = counterpartyEntity.toLowerCase();
+  const account = state.accounts.get(counterparty);
+  if (!account?.activeDispute) {
+    throw new Error(`J_HASH_LADDER_SOURCE_ACTIVE_DISPUTE_MISSING:${counterparty}`);
+  }
+  const active = account.activeDispute;
+  if (!active.observedOnChain) return 'open';
+  const startSec = Number(active.disputeStartTimestamp);
+  if (!Number.isSafeInteger(startSec) || startSec < 0) {
+    throw new Error(`J_HASH_LADDER_SOURCE_DISPUTE_START_INVALID:${String(active.disputeStartTimestamp)}`);
+  }
+  const self = state.entityId.toLowerCase();
+  const selfIsLeft = account.state.leftEntity.toLowerCase() === self;
+  const ownerWindow = selfIsLeft
+    ? account.state.disputeConfig.leftResponseSeconds
+    : account.state.disputeConfig.rightResponseSeconds;
+  const nowSec = Math.floor(Number(state.timestamp) / 1_000);
+  if (nowSec < startSec) {
+    throw new Error(`J_HASH_LADDER_SOURCE_WINDOW_NOT_OPEN:${nowSec}:${startSec}`);
+  }
+  return nowSec > startSec + ownerWindow ? 'expired' : 'open';
+};
+
+export const stashPendingRegistryReveal = (
+  state: EntityState,
+  counterpartyEntity: string,
   pull: { fullHash: string; partialRoot: string },
   decoded: { fillRatio: number; fullSecret?: string; reveals?: [string, string, string, string] },
-): 'queued' | 'already-queued' => {
+  targetRole: boolean,
+): void => {
   const ladderHash = ladderHashForPull(pull);
+  const normalizedCounterparty = String(counterpartyEntity).toLowerCase();
+  let matchedRoutes = 0;
   for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
-    if (route.registryFillRatio === undefined) continue;
-    if (
-      pullMatchesLadder(route.sourcePull, ladderHash) ||
-      pullMatchesLadder(route.targetPull, ladderHash)
-    ) {
-      return 'already-queued';
+    const rolePull = targetRole ? route.targetPull : route.sourcePull;
+    if (!pullMatchesLadder(rolePull, ladderHash)) continue;
+    if (counterpartyForRouteLeg(state, route, targetRole) !== normalizedCounterparty) continue;
+    matchedRoutes += 1;
+    const pending = {
+      fillRatio: decoded.fillRatio,
+      fullSecret: decoded.fullSecret ?? ZERO_BYTES32,
+      reveals: decoded.reveals ?? [ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32],
+    };
+    if (targetRole) {
+      // Target may always replace an unsent port with the newest public Source
+      // evidence. Its signed Pull reads the replaceable Target slot.
+      route.pendingTargetRegistryReveal = pending;
+    } else if (!route.pendingSourceRegistryReveal) {
+      // Never replace source evidence: a second witness can be combined with
+      // the first. The first queued source reveal is the only one publishable.
+      route.pendingSourceRegistryReveal = pending;
+    }
+    route.updatedAt = Number(state.timestamp || route.updatedAt || 0);
+  }
+  if (matchedRoutes === 0) {
+    throw new Error(
+      `J_HASH_LADDER_ROUTE_SLOT_MISSING:${state.entityId}:` +
+      `${ladderHash}:${targetRole ? 'target' : 'source'}`,
+    );
+  }
+};
+
+const targetRevealHasActiveDispute = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): boolean => Boolean(
+  state.accounts.get(String(route.target.entityId || '').toLowerCase())?.activeDispute,
+);
+
+/** Count witnesses that have not yet entered an immutable sent batch. */
+export const countDeferredHashLadderReveals = (state: EntityState): number => {
+  let pending = 0;
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
+    if (route.pendingSourceRegistryReveal) pending += 1;
+    // Pre-binding Target evidence is durable but not yet publishable. It must
+    // neither block an unrelated Account finalization nor be flushed by an
+    // unrelated Hanko ACK before the target dispute defines S.
+    if (route.pendingTargetRegistryReveal && targetRevealHasActiveDispute(state, route)) pending += 1;
+  }
+  return pending;
+};
+
+/** Flush role-scoped reveals after the immutable in-flight batch clears. */
+export const flushDeferredHashLadderReveals = (
+  state: EntityState,
+  accountCounterparty?: string,
+): number => {
+  if (state.jBatchState?.sentBatch) return 0;
+  const scopedCounterparty = accountCounterparty?.toLowerCase();
+  let flushed = 0;
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
+    const sourcePending = route.pendingSourceRegistryReveal;
+    if (sourcePending && route.sourcePull) {
+      const sourceCounterparty = counterpartyForRouteLeg(state, route, false);
+      if (scopedCounterparty && sourceCounterparty !== scopedCounterparty) continue;
+      delete route.pendingSourceRegistryReveal;
+      const result = queueHashLadderRevealRegistration(
+        state,
+        sourceCounterparty,
+        route.sourcePull,
+        sourcePending,
+        false,
+      );
+      if (result === 'queued') flushed += 1;
+    }
+    const targetPending = route.pendingTargetRegistryReveal;
+    if (targetPending && route.targetPull && targetRevealHasActiveDispute(state, route)) {
+      const targetCounterparty = counterpartyForRouteLeg(state, route, true);
+      if (scopedCounterparty && targetCounterparty !== scopedCounterparty) continue;
+      delete route.pendingTargetRegistryReveal;
+      const result = queueHashLadderRevealRegistration(
+        state,
+        targetCounterparty,
+        route.targetPull,
+        targetPending,
+        true,
+      );
+      if (result === 'queued') flushed += 1;
     }
   }
+  return flushed;
+};
 
+const collectExistingRegistryRatios = (
+  state: EntityState,
+  normalizedCounterparty: string,
+  ladderHash: string,
+  targetRole: boolean,
+): {
+  jBatchState: NonNullable<EntityState['jBatchState']>;
+  confirmedRatios: number[];
+  queuedRatios: number[];
+} => {
   const jBatchState = (state.jBatchState ??= initJBatch());
-  const fullHash = pull.fullHash.toLowerCase();
-  const partialRoot = pull.partialRoot.toLowerCase();
-  const sameLadder = (op: { fullHash: string; partialRoot: string }): boolean =>
-    op.fullHash.toLowerCase() === fullHash && op.partialRoot.toLowerCase() === partialRoot;
-  const pending = [
-    ...(jBatchState.sentBatch?.batch.hashLadderReveals ?? []),
-    ...jBatchState.batch.hashLadderReveals,
-  ];
-  if (pending.some(sameLadder)) return 'already-queued';
+  const confirmedRatios: number[] = [];
+  const queuedRatios: number[] = [];
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
+    const rolePull = targetRole ? route.targetPull : route.sourcePull;
+    if (!pullMatchesLadder(rolePull, ladderHash)) continue;
+    if (counterpartyForRouteLeg(state, route, targetRole) !== normalizedCounterparty) continue;
+    const confirmed = targetRole
+      ? route.targetRegistryFillRatio
+      : route.sourceRegistryFillRatio;
+    const pending = targetRole
+      ? route.pendingTargetRegistryReveal
+      : route.pendingSourceRegistryReveal;
+    if (confirmed !== undefined) confirmedRatios.push(confirmed);
+    if (pending) queuedRatios.push(pending.fillRatio);
+  }
+  const collectBatchRatios = (
+    registrations: typeof jBatchState.batch.hashLadderRegistrations,
+  ): void => {
+    for (const registration of registrations) {
+      if (
+        registration.targetRole === targetRole
+        && registration.counterpartyEntity.toLowerCase() === normalizedCounterparty
+        && ladderHashForPull(registration) === ladderHash
+      ) queuedRatios.push(registration.witness.fillRatio);
+    }
+  };
+  collectBatchRatios(jBatchState.batch.hashLadderRegistrations);
+  if (jBatchState.sentBatch) collectBatchRatios(jBatchState.sentBatch.batch.hashLadderRegistrations);
+  for (const recoveryBatch of jBatchState.recoveryBatches ?? []) {
+    collectBatchRatios(recoveryBatch.hashLadderRegistrations);
+  }
+  return { jBatchState, confirmedRatios, queuedRatios };
+};
 
-  batchAddHashLadderReveal(jBatchState, {
+export const queueHashLadderRevealRegistration = (
+  state: EntityState,
+  counterpartyEntity: string,
+  pull: CrossJurisdictionPullLeg,
+  decoded: { fillRatio: number; fullSecret?: string; reveals?: [string, string, string, string] },
+  targetRole: boolean,
+): HashLadderRevealQueueResult => {
+  if (!Number.isInteger(decoded.fillRatio) || decoded.fillRatio <= 0 || decoded.fillRatio > 0xffff) {
+    throw new Error(`J_HASH_LADDER_FILL_RATIO_INVALID:${String(decoded.fillRatio)}`);
+  }
+  const ladderHash = ladderHashForPull(pull);
+  const normalizedCounterparty = String(counterpartyEntity).toLowerCase();
+  if (!ethers.isHexString(normalizedCounterparty, 32)) {
+    throw new Error(`J_HASH_LADDER_COUNTERPARTY_INVALID:${counterpartyEntity}`);
+  }
+  // A source reveal is a one-time witness: an exact retry is harmless, while
+  // any different ratio is E12-equivalent evidence of an attempted second
+  // source. Target is intentionally replaceable, but only monotonically: an
+  // exact retry is a no-op, a lower ratio is stale/conflicting, and a higher
+  // ratio replaces the draft or becomes the one deferred successor to a sent
+  // batch. Include confirmed and deferred route state so retries cannot create
+  // redundant broadcasts merely because the same write left the draft batch.
+  const { jBatchState, confirmedRatios, queuedRatios } = collectExistingRegistryRatios(
+    state,
+    normalizedCounterparty,
+    ladderHash,
+    targetRole,
+  );
+  if (queuedRatios.includes(decoded.fillRatio)) return 'already-queued';
+  if (!targetRole && confirmedRatios.includes(decoded.fillRatio)) return 'already-queued';
+  const existingRatios = [...confirmedRatios, ...queuedRatios];
+  if (existingRatios.length > 0) {
+    const currentRatio = Math.max(...existingRatios);
+    if (!targetRole || decoded.fillRatio < currentRatio) {
+      throw new Error(
+        `J_HASH_LADDER_REGISTRATION_CONFLICT:${ladderHash}:` +
+        `${targetRole ? 'target' : 'source'}:` +
+        `${currentRatio}:${decoded.fillRatio}`,
+      );
+    }
+  }
+  if (!targetRole && sourceRevealWindowStatus(state, normalizedCounterparty) === 'expired') {
+    return 'source-window-expired';
+  }
+
+  // The sent batch is immutable, but the next draft remains writable. Queue
+  // there whenever capacity exists: a Pull-bearing dispute start may already
+  // be holding its zero-window Source witnesses behind the sent nonce, and
+  // deferring those witnesses separately would break their atomicity.
+  const registration: Parameters<typeof batchAddHashLadderRegistration>[1] = {
+    counterpartyEntity: normalizedCounterparty,
+    targetRole,
     fullHash: pull.fullHash,
     partialRoot: pull.partialRoot,
-    fillRatio: decoded.fillRatio,
-    fullSecret: decoded.fullSecret ?? ZERO_BYTES32,
-    reveals: decoded.reveals ?? [ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32],
-  });
+    witness: {
+      fillRatio: decoded.fillRatio,
+      fullSecret: decoded.fullSecret ?? ZERO_BYTES32,
+      reveals: decoded.reveals ?? [ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32],
+    },
+  };
+  if (!hasHashLadderRegistrationRoom(jBatchState.batch, registration)) {
+    stashPendingRegistryReveal(state, normalizedCounterparty, pull, decoded, targetRole);
+    if (jBatchState.sentBatch && !isBatchEmpty(jBatchState.batch)) {
+      // The immutable batch's ACK must drain this already-full successor before
+      // the pending witness can enter the following batch. Without the latch,
+      // the editable draft and a time-sensitive reveal could remain stranded.
+      jBatchState.autoBroadcastDraft = true;
+    }
+    return 'deferred-batch-pending';
+  }
+
+  batchAddHashLadderRegistration(jBatchState, registration);
+  if (jBatchState.sentBatch) {
+    // The exact Hanko ACK owns the next broadcast continuation. Latch the
+    // nonempty draft now so an unrelated in-flight batch cannot strand it.
+    jBatchState.autoBroadcastDraft = true;
+  }
   return 'queued';
+};
+
+export type SourceHubClaimRegistration = {
+  routeId: string;
+  fillRatio: number;
+  result: HashLadderRevealQueueResult;
+};
+
+/**
+ * Publish the Source Hub's already-committed independent registry evidence.
+ * The Account dispute supplies only the settlement clock: registry admission
+ * does not inspect or replay its ProofBody because processBatch already
+ * authenticates the writing Entity.
+ *
+ * A local starter must call this after installing its draft activeDispute and
+ * before sealing jBatch. The start and Source registration then execute in one
+ * Depository.processBatch transaction, so Solidity observes the registration
+ * at the inclusive start second even if mining itself is delayed.
+ */
+export const queueSourceHubClaimRegistrationForRoute = (
+  state: EntityState,
+  routeId: string,
+  counterpartyId: string,
+  runtimeSeed: string | undefined,
+): SourceHubClaimRegistration | undefined => {
+  const route = state.crossJurisdictionSwaps?.get(routeId);
+  if (!route) throw new Error(`CROSS_J_SOURCE_CLAIM_ROUTE_MISSING:${routeId}`);
+  if (isCrossJurisdictionTerminalStatus(route.status) || !route.sourcePull) return undefined;
+  const self = String(state.entityId).toLowerCase();
+  if (
+    String(route.source.counterpartyEntityId).toLowerCase() !== self
+    || String(route.source.entityId).toLowerCase() !== counterpartyId.toLowerCase()
+  ) {
+    return undefined;
+  }
+  const fillRatio = getCrossJurisdictionCommittedProofRatio(route);
+  if (fillRatio <= 0) return undefined;
+  const sourceAccount = state.accounts.get(counterpartyId.toLowerCase());
+  if (!sourceAccount) {
+    throw new Error(`CROSS_J_SOURCE_CLAIM_ACCOUNT_MISSING:${routeId}:${counterpartyId}`);
+  }
+  const active = sourceAccount.activeDispute;
+  if (active?.observedOnChain) {
+    const startSec = Number(active.disputeStartTimestamp);
+    const selfIsLeft = sourceAccount.state.leftEntity.toLowerCase() === self;
+    const beneficiaryWindow = selfIsLeft
+      ? sourceAccount.state.disputeConfig.leftResponseSeconds
+      : sourceAccount.state.disputeConfig.rightResponseSeconds;
+    const deadlineSec = startSec + beneficiaryWindow;
+    if (isSourceRevealWindowExpired(Number(state.timestamp), deadlineSec)) {
+      return { routeId, fillRatio, result: 'source-window-expired' };
+    }
+  }
+  const reveal = buildCrossJurisdictionPullReveal(
+    route,
+    fillRatio,
+    deriveCrossJurisdictionPrivateSeed(runtimeSeed, route),
+  );
+  return {
+    routeId,
+    fillRatio,
+    result: queueHashLadderRevealRegistration(
+      state,
+      counterpartyId,
+      route.sourcePull,
+      decodeHashLadderBinary(reveal.binary),
+      false,
+    ),
+  };
+};
+
+/** Queue every committed Source claim frozen by one Account dispute. */
+export const queueSourceHubClaimRegistrationsForAccount = (
+  state: EntityState,
+  counterpartyId: string,
+  runtimeSeed: string | undefined,
+  signedProofbody: ProofBodyStruct,
+  canonicalDeltaTransformerAddress: string,
+): SourceHubClaimRegistration[] => {
+  const self = String(state.entityId).toLowerCase();
+  const counterparty = counterpartyId.toLowerCase();
+  const routeIds = Array.from(state.crossJurisdictionSwaps?.values?.() ?? [])
+    .filter(route => (
+      !isCrossJurisdictionTerminalStatus(route.status)
+      && Boolean(route.sourcePull)
+      && route.source.counterpartyEntityId.toLowerCase() === self
+      && route.source.entityId.toLowerCase() === counterparty
+    ))
+    .map(route => route.orderId)
+    .sort(compareStableText);
+  const claims: SourceHubClaimRegistration[] = [];
+  for (const routeId of routeIds) {
+    const route = state.crossJurisdictionSwaps!.get(routeId)!;
+    if (!findExactSignedProofBodyPull(
+      signedProofbody,
+      route.sourcePull!,
+      false,
+      canonicalDeltaTransformerAddress,
+    )) continue;
+    const claim = queueSourceHubClaimRegistrationForRoute(
+      state,
+      routeId,
+      counterpartyId,
+      runtimeSeed,
+    );
+    if (claim) claims.push(claim);
+  }
+  return claims;
 };
 
 /**
@@ -167,16 +520,18 @@ export function queueCrossJurisdictionRevealPorts(
   outputs: EntityInput[],
   event: {
     entity: string;
+    counterpartyEntity: string;
     ladderHash: string;
     fillRatio: number;
     fullSecret: string;
     reveals: [string, string, string, string];
+    targetRole: boolean;
   },
   blockNumber: number,
 ): number {
   const self = String(state.entityId || '').toLowerCase();
   const ladderHash = String(event.ladderHash || '').toLowerCase();
-  if (!self || !ladderHash || event.fillRatio <= 0) return 0;
+  if (!self || !ladderHash || event.fillRatio <= 0 || event.targetRole) return 0;
   const binary = revealBinaryFromRegistryEvent(event);
   const batches = new Map<string, {
     entityId: string;
@@ -185,6 +540,8 @@ export function queueCrossJurisdictionRevealPorts(
   }>();
   for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
     if (String(route.source?.entityId || '').toLowerCase() !== self) continue;
+    if (String(route.source?.counterpartyEntityId || '').toLowerCase() !== String(event.entity).toLowerCase()) continue;
+    if (String(route.source.entityId).toLowerCase() !== String(event.counterpartyEntity).toLowerCase()) continue;
     if (!route.sourcePull || !route.targetPull) continue;
     if (isCrossJurisdictionTerminalStatus(route.status)) continue;
     if (ladderHashForPull(route.sourcePull) !== ladderHash) continue;
@@ -232,7 +589,7 @@ export function queueCrossJurisdictionRevealPorts(
   return batches.size;
 }
 
-function findCrossJurisdictionRoutesForTargetDispute(
+export function findCrossJurisdictionRoutesForTargetDispute(
   state: EntityState,
   counterpartyId: string,
 ): CrossJurisdictionSwapRoute[] {
@@ -331,9 +688,10 @@ export function planCrossJurisdictionTargetRecovery(
   // Port-wait recovery stays local. Sibling dispute fanout is a separate
   // EntityTx path (`crossJurisdictionForceSiblingDispute`): observing any
   // DisputeStarted on a route leg asks every sibling to start its own clock
-  // (must-close — missing signer binder throws). Missing ports settle-or-0
-  // only after L1 reveal cutoff (disputeStartTimestamp + T/2, unix seconds);
-  // no sealed pull.revealedUntilTimestamp market gate.
+  // (must-close — missing signer binder throws). Missing ports abandon only
+  // after a source-jurisdiction tip is past its beneficiary-side Source
+  // deadline. Target writes remain durable even when late, but settle as zero.
+  // No sealed pull.revealedUntilTimestamp market gate.
   return {
     representativeRouteId: routes[0]!.orderId,
     recovery: {
@@ -425,8 +783,21 @@ export function queueCrossJurisdictionSiblingDisputeFanout(
   }>();
   for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
     if (isCrossJurisdictionTerminalStatus(route.status)) continue;
-    if (!route.sourcePull || !route.targetPull) continue;
     if (!routeTouchesDisputedAccount(route, self, counterparty)) continue;
+    if (!route.sourcePull || !route.targetPull) {
+      if (route.status === 'intent' && !route.sourcePull && !route.targetPull) {
+        // A persisted raw intent has no bilateral lock and therefore no sibling
+        // clock to start. Authoritative Account dispute start cancels that
+        // zero-exposure preparation instead of wedging J-event ingestion.
+        transitionCrossJurisdictionRouteStatus(
+          route,
+          'cancelled',
+          Number(state.timestamp || 0),
+        );
+        continue;
+      }
+      throw new Error(`CROSS_J_SIBLING_DISPUTE_PULLS_MISSING:${route.orderId}`);
+    }
     const sibling = siblingDisputeTargetForRoute(route, self);
     if (!sibling) {
       // Must-close: a live non-terminal route with pulls that touches this

@@ -329,6 +329,7 @@ const prepareSettlementSeal = (
     proofBodyHash,
     domain,
     postNonce,
+    transition.postProof.proposerIsLeft,
   );
   if (transition.postProof.disputeHash.toLowerCase() !== expectedDisputeHash.toLowerCase()) {
     throw new Error(
@@ -341,7 +342,8 @@ const prepareSettlementSeal = (
     (
       pinnedPostProof.nonce !== postNonce ||
       pinnedPostProof.proofBodyHash.toLowerCase() !== proofBodyHash.toLowerCase() ||
-      pinnedPostProof.disputeHash.toLowerCase() !== expectedDisputeHash.toLowerCase()
+      pinnedPostProof.disputeHash.toLowerCase() !== expectedDisputeHash.toLowerCase() ||
+      pinnedPostProof.proposerIsLeft !== transition.postProof.proposerIsLeft
     )
   ) {
     throw new Error('POST_SETTLEMENT_PROOF_PIN_MISMATCH');
@@ -357,6 +359,7 @@ const prepareSettlementSeal = (
     projectedPostSettlement,
     expectedSettlementHash,
     expectedDisputeHash,
+    proposerIsLeft: transition.postProof.proposerIsLeft,
     pinnedPostProof,
   };
 };
@@ -464,6 +467,7 @@ const commitSettlementSeal = (
     disputeHash: expectedDisputeHash,
     proofBodyHash,
     nonce: postNonce,
+    proposerIsLeft: prepared.proposerIsLeft,
     ...(pinnedPostProof?.leftHanko ? { leftHanko: pinnedPostProof.leftHanko } : {}),
     ...(pinnedPostProof?.rightHanko ? { rightHanko: pinnedPostProof.rightHanko } : {}),
     ...(byLeft ? { leftHanko: postHanko } : { rightHanko: postHanko }),
@@ -490,6 +494,7 @@ const commitSettlementSeal = (
       projectedPostSettlement,
       proofBodyHash,
       postNonce,
+      prepared.proposerIsLeft,
       proofBodyStruct,
     ),
   );

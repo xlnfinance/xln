@@ -257,7 +257,6 @@ export type JurisdictionImportResult = {
   blockTimeMs?: number;
   blockNumber: string;
   stateRoot: string | null;
-  defaultDisputeDelayBlocks: number;
   watcherConfirmationDepth: number;
   entityProviderDeploymentBlock: number;
   contracts: {

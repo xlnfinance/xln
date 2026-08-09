@@ -55,7 +55,7 @@ function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountReplica {
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
     },
     status: 'active',
@@ -100,6 +100,7 @@ describe('dispute argument snapshots', () => {
       account,
       proof.proofBodyHash,
       1,
+      true,
       proof.proofBodyStruct,
     );
 
@@ -146,14 +147,14 @@ describe('dispute argument snapshots', () => {
   test('keeps the initial evidence and drops only the suffix when starter arguments exceed their aggregate cap', () => {
     const abi = ethers.AbiCoder.defaultAbiCoder();
     const initial = abi.encode(['bytes[]'], [[`0x${'11'.repeat(40 * 1024)}`]]);
-    const incremented = abi.encode(['bytes[]'], [[`0x${'22'.repeat(40 * 1024)}`]]);
-    const result = sanitizeOptionalDisputeStarterArgumentPair(initial, incremented, 'dispute.test');
+    const counter = abi.encode(['bytes[]'], [[`0x${'22'.repeat(40 * 1024)}`]]);
+    const result = sanitizeOptionalDisputeStarterArgumentPair(initial, counter, 'dispute.test');
 
     expect(result.initial).toBe(initial);
-    expect(result.incremented).toBe('0x');
+    expect(result.counter).toBe('0x');
     expect(result.warnings.at(-1)).toMatchObject({
       code: 'DISPUTE_OPTIONAL_ARGUMENT_AGGREGATE_OVERSIZED',
-      context: 'dispute.test.incremented',
+      context: 'dispute.test.counter',
       limitBytes: 64 * 1024,
     });
   });
@@ -166,7 +167,7 @@ describe('dispute argument snapshots', () => {
     const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
     );
 
     account.state.swapOffers.clear();
@@ -210,7 +211,7 @@ describe('dispute argument snapshots', () => {
     const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
     );
     account.mempool = [{
       type: 'swap_resolve',
@@ -244,7 +245,7 @@ describe('dispute argument snapshots', () => {
     const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
     );
 
     account.mempool = [
@@ -296,7 +297,7 @@ describe('dispute argument snapshots', () => {
     const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
     );
     const state = {
       entityId: 'left',

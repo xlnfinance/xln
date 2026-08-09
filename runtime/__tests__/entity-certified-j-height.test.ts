@@ -31,6 +31,7 @@ import {
   entity,
   installJurisdictions,
   makeJurisdiction,
+  makeAccount,
   makeState,
 } from './helpers/cross-j';
 
@@ -42,14 +43,13 @@ const counterpartyId = entity('02');
 const signerId = addr('31');
 const secondValidatorId = addr('32');
 
-const envAt = (scannedThroughHeight: number, disputeDelayBlocks: number): RuntimeReplica => {
-  const env = createEmptyEnv(`certified-j-height:${scannedThroughHeight}:${disputeDelayBlocks}`);
+const envAt = (scannedThroughHeight: number): RuntimeReplica => {
+  const env = createEmptyEnv(`certified-j-height:${scannedThroughHeight}`);
   env.state.timestamp = 1_000;
   env.quietRuntimeLogs = true;
   installJurisdictions(env, jurisdiction);
   const replica = env.state.jReplicas.get(jurisdiction.name)!;
   replica.blockNumber = BigInt(scannedThroughHeight);
-  replica.defaultDisputeDelayBlocks = disputeDelayBlocks;
   return env;
 };
 
@@ -63,13 +63,13 @@ const baseState = (): EntityState => {
   return state;
 };
 
-const installDispute = (state: EntityState, timeout: number): void => {
-  const account = state.accounts.get(counterpartyId)!;
+const installDispute = (state: EntityState, timeout: number, accountId = counterpartyId): void => {
+  const account = state.accounts.get(accountId)!;
   account.proofHeader.nextProofNonce = 1;
   const proof = buildAccountProofBody(account, '');
   storeDisputeArgumentSnapshot(
     account,
-    captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+    captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
   );
   account.disputeProofBodiesByHash = { [proof.proofBodyHash]: proof.proofBodyStruct };
   account.activeDispute = {
@@ -79,7 +79,8 @@ const installDispute = (state: EntityState, timeout: number): void => {
     disputeTimeout: timeout,
     jNonce: 0,
     starterInitialArguments: '0x',
-    starterIncrementedArguments: '0x',
+    starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     observedOnChain: true,
     finalizeQueued: false,
   };
@@ -109,8 +110,8 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
       type: 'disputeFinalize',
       data: { counterpartyEntityId: counterpartyId },
     } satisfies Extract<EntityTx, { type: 'disputeFinalize' }>;
-    const lagging = await handleDisputeFinalize(state, tx, envAt(110, 5));
-    const leading = await handleDisputeFinalize(state, tx, envAt(130, 5_760));
+    const lagging = await handleDisputeFinalize(state, tx, envAt(110));
+    const leading = await handleDisputeFinalize(state, tx, envAt(130));
 
     expect(lagging.outputs).toEqual(leading.outputs);
     expect(lagging.newState.jBatchState?.batch.disputeFinalizations).toEqual([]);
@@ -120,6 +121,7 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
 
   test('starter cannot use a stored peer signature to bypass the certified timeout', async () => {
     const state = baseState();
+    state.timestamp = 120_001;
     installDispute(state, 120);
     const account = state.accounts.get(counterpartyId)!;
     const initialHash = account.activeDispute!.initialProofbodyHash;
@@ -134,12 +136,19 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
         type: 'disputeFinalize',
         data: { counterpartyEntityId: counterpartyId },
       },
-      envAt(120, 5),
+      envAt(120),
     );
     const proof = finalized.newState.jBatchState?.batch.disputeFinalizations[0];
 
     expect(proof?.finalNonce).toBe(1);
-    expect(proof?.finalProofbody).toEqual(account.disputeProofBodiesByHash?.[initialHash]);
+    const expectedFinalBody = account.disputeProofBodiesByHash?.[initialHash]!;
+    expect(proof?.finalProofbody).toEqual({
+      ...expectedFinalBody,
+      // ABI canonicalization returns uint32 fields as bigint. Compare that
+      // actual wire representation rather than the pre-encoding JS numbers.
+      leftResponseSeconds: BigInt(expectedFinalBody.leftResponseSeconds),
+      rightResponseSeconds: BigInt(expectedFinalBody.rightResponseSeconds),
+    });
     expect(proof?.sig).toBe('0x');
     expect(proof?.initialProofbodyHash).toBe(initialHash);
   });
@@ -165,13 +174,13 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
       },
     } satisfies Extract<EntityTx, { type: 'scheduledWake' }>;
     const lagging = await handleScheduledWakeEntityTx(
-      envAt(110, 5),
+      envAt(110),
       cloneEntityState(state),
       tx,
       false,
     );
     const leading = await handleScheduledWakeEntityTx(
-      envAt(130, 5_760),
+      envAt(130),
       cloneEntityState(state),
       tx,
       false,
@@ -183,7 +192,53 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
       .toBe(computeCanonicalEntityConsensusStateHash(leading.newState));
   });
 
-  test('dispute start placeholder is independent of local height and delay config', async () => {
+  test('same-tick dispute deadlines emit one legal finalization and retain the next hook', async () => {
+    const secondCounterparty = entity('03');
+    const state = baseState();
+    state.accounts.set(secondCounterparty, makeAccount(entityId, secondCounterparty, jurisdiction));
+    installDispute(state, 1, counterpartyId);
+    installDispute(state, 1, secondCounterparty);
+    state.leaderState = { view: 0, activeValidatorId: signerId, changedAtHeight: 0 };
+    state.crontabState = initCrontab();
+    for (const accountId of [counterpartyId, secondCounterparty]) {
+      scheduleHook(state.crontabState, {
+        id: `deadline:${accountId}`,
+        triggerAt: 1_000,
+        type: 'dispute_deadline',
+        data: { accountId },
+      });
+    }
+    const tx = {
+      type: 'scheduledWake',
+      data: {
+        version: 1,
+        proposerSignerId: signerId,
+        dueAt: 1_000,
+        jobs: [counterpartyId, secondCounterparty].map(accountId => ({
+          kind: 'hook' as const,
+          id: `deadline:${accountId}`,
+          dueAt: 1_000,
+        })),
+      },
+    } satisfies Extract<EntityTx, { type: 'scheduledWake' }>;
+
+    const result = await handleScheduledWakeEntityTx(envAt(120), state, tx, false);
+    expect(result.outputs).toHaveLength(0);
+    expect(result.approvedEntityTxs?.map(item => item.type)).toEqual([
+      'disputeFinalize',
+      'j_broadcast',
+    ]);
+    expect([...result.newState.crontabState!.hooks.values()]).toEqual([
+      {
+        id: `deadline:${secondCounterparty}`,
+        triggerAt: 1_001,
+        type: 'dispute_deadline',
+        data: { accountId: secondCounterparty },
+      },
+    ]);
+  });
+
+  test('dispute start placeholder is independent of validator-local scan height', async () => {
     const privateKeyA = deriveSignerKeySync('certified-j-height:start:a', '1');
     const privateKeyB = deriveSignerKeySync('certified-j-height:start:b', '1');
     const signerA = computeAddress(new SigningKey(hex(privateKeyA)).compressedPublicKey).toLowerCase();
@@ -192,13 +247,13 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     const peerEntityId = generateLazyEntityId([signerB], 1n);
     const state = makeState(starterEntityId, signerA, jurisdiction, peerEntityId);
     state.lastFinalizedJHeight = 100;
-    state.timestamp = 1_000;
+    state.timestamp = 120_001;
     const account = state.accounts.get(peerEntityId)!;
     account.proofHeader.nextProofNonce = 1;
     const proof = buildAccountProofBody(account, '');
     storeDisputeArgumentSnapshot(
       account,
-      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, true, proof.proofBodyStruct),
     );
     account.disputeProofBodiesByHash = { [proof.proofBodyHash]: proof.proofBodyStruct };
     account.counterpartyDisputeProofBodyHash = proof.proofBodyHash;
@@ -207,7 +262,7 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     const disputeHash = createDisputeProofHashWithNonce(account.state, proof.proofBodyHash, {
       chainId: jurisdiction.chainId!,
       depositoryAddress: jurisdiction.depositoryAddress!,
-    }, 1);
+    }, 1, true);
     account.counterpartyDisputeHash = disputeHash;
     const signingEnv = createEmptyEnv('certified-j-height:start:sign');
     signingEnv.runtimeSeed = 'certified-j-height:start:runtime';
@@ -223,13 +278,13 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
       type: 'disputeStart',
       data: { counterpartyEntityId: peerEntityId },
     } satisfies Extract<EntityTx, { type: 'disputeStart' }>;
-    const envFor = (height: number, delay: number): RuntimeReplica => {
-      const env = envAt(height, delay);
+    const envFor = (height: number): RuntimeReplica => {
+      const env = envAt(height);
       env.runtimeSeed = signingEnv.runtimeSeed;
       return env;
     };
-    const lagging = await handleDisputeStart(state, tx, envFor(110, 5));
-    const leading = await handleDisputeStart(state, tx, envFor(130, 5_760));
+    const lagging = await handleDisputeStart(state, tx, envFor(110));
+    const leading = await handleDisputeStart(state, tx, envFor(130));
 
     expect(lagging.outputs).toEqual(leading.outputs);
     expect(lagging.newState.accounts.get(peerEntityId)?.activeDispute).toBeUndefined();

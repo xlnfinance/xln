@@ -14,6 +14,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { AccountState } from '../types/account';
 import {
   getProcess,
@@ -213,7 +214,12 @@ export async function runRebalanceScenario(): Promise<void> {
       signerId: user.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: hub.id, tokenId: USDC_TOKEN_ID, creditAmount: 0n }
+        data: {
+          targetEntityId: hub.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(user.id, false, hub.id, true),
+          tokenId: USDC_TOKEN_ID,
+          creditAmount: 0n,
+        }
       }]
     }]);
     await process(env); // Hub receives and creates account

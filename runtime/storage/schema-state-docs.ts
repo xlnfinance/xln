@@ -1,12 +1,14 @@
 import type { BookState } from '../orderbook';
+import { validateSpreadDistribution } from '../orderbook';
 import { validateBookStructure } from '../orderbook/validity';
 import { verifyAndWarmBookCommitment } from '../orderbook/commitment';
 import { assertAccountFrameHash } from '../account/consensus/frame';
+import { canonicalAccountDisputeConfig } from '../account/dispute-config';
 import { validateAccountReplica } from '../account/state-validation';
 import { assertCanonicalSettlementWorkspace } from '../account/tx/handlers/settle-transition';
 import { MAX_CREDIT_LIMIT } from '../account/tx/handlers/set-credit-limit';
 import { validateEntityState } from '../entity/state-validation';
-import { FINANCIAL, LIMITS, TOKENS, UINT16_MAX } from '../config/constants';
+import { FINANCIAL, LIMITS, TOKENS } from '../config/constants';
 import { normalizeAccountWatchSeed } from '../protocol/account-watch-seed';
 import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../protocol/integer-ranges';
 import type { AccountFrame, AccountState, Delta } from '../types/account';
@@ -77,6 +79,44 @@ const validateStorageHubRebalanceConfig = (value: unknown, code: string): void =
   if (config['rebalanceTimeoutMs'] !== undefined) requireBoundaryInteger(config['rebalanceTimeoutMs'], `${code}_REBALANCE_TIMEOUT_MS`);
 };
 
+const validateStorageOrderbookHubProfile = (
+  value: unknown,
+  entityId: string,
+  code: string,
+): void => {
+  if (value === undefined) return;
+  const profile = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(profile, [
+    'entityId', 'name', 'spreadDistribution', 'referenceTokenId',
+    'usdQuoteAuthorityEntityId', 'minTradeSize', 'supportedPairs',
+  ], [], `${code}_FIELDS`);
+  if (requireStorageString(profile['entityId'], `${code}_ENTITY`) !== entityId) {
+    throw new Error(`${code}_ENTITY_MISMATCH`);
+  }
+  requireStorageString(profile['name'], `${code}_NAME`);
+  const authority = requireStorageString(profile['usdQuoteAuthorityEntityId'], `${code}_USD_AUTHORITY`).toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(authority)) throw new Error(`${code}_USD_AUTHORITY`);
+  requireBoundaryInteger(profile['referenceTokenId'], `${code}_REFERENCE_TOKEN`, 1);
+  requireStorageBigInt(profile['minTradeSize'], `${code}_MIN_TRADE`, 0n);
+  requireStorageArray(profile['supportedPairs'], `${code}_SUPPORTED_PAIRS`)
+    .forEach((pair, index) => requireStorageString(pair, `${code}_PAIR_${index}`));
+  const spread = requireBoundaryRecord(profile['spreadDistribution'], `${code}_SPREAD`);
+  requireExactBoundaryKeys(
+    spread,
+    ['makerBps', 'takerBps', 'hubBps', 'makerReferrerBps', 'takerReferrerBps'],
+    [],
+    `${code}_SPREAD_FIELDS`,
+  );
+  const canonicalSpread = {
+    makerBps: requireBoundaryInteger(spread['makerBps'], `${code}_MAKER_BPS`),
+    takerBps: requireBoundaryInteger(spread['takerBps'], `${code}_TAKER_BPS`),
+    hubBps: requireBoundaryInteger(spread['hubBps'], `${code}_HUB_BPS`),
+    makerReferrerBps: requireBoundaryInteger(spread['makerReferrerBps'], `${code}_MAKER_REFERRER_BPS`),
+    takerReferrerBps: requireBoundaryInteger(spread['takerReferrerBps'], `${code}_TAKER_REFERRER_BPS`),
+  };
+  if (!validateSpreadDistribution(canonicalSpread)) throw new Error(`${code}_SPREAD_TOTAL`);
+};
+
 const ACCOUNT_REPLICA_REQUIRED = [
   'state', 'status', 'mempool', 'currentFrame', 'currentHeight',
   'pendingSignatures', 'rollbackCount', 'proofHeader', 'proofBody',
@@ -90,6 +130,7 @@ const ACCOUNT_REPLICA_OPTIONAL = [
   'counterpartyBoardReseal', 'currentDisputeProofHanko', 'currentDisputeProofNonce',
   'currentDisputeProofBodyHash', 'currentDisputeHash', 'counterpartyDisputeProofHanko',
   'counterpartyDisputeProofNonce', 'counterpartyDisputeProofBodyHash',
+  'currentDisputeProofProposerIsLeft', 'counterpartyDisputeProofProposerIsLeft',
   'counterpartyDisputeHash', 'counterpartySettlementHanko', 'disputeProofNoncesByHash',
   'disputeProofBodiesByHash', 'disputeArgumentSnapshotsByHash', 'disputePrepare',
   'activeDispute', 'swapOrderHistory', 'swapClosedOrders',
@@ -133,7 +174,25 @@ const validateStorageAccountStateCore = (state: Record<string, unknown>, code: s
   requireStorageBigInt(credit['peerLimit'], `${code}_PEER_CREDIT`, 0n, UINT256_MAX);
   requireBoundaryInteger(state['jNonce'], `${code}_J_NONCE`);
   const dispute = requireBoundaryRecord(state['disputeConfig'], `${code}_DISPUTE`);
-  for (const side of ['leftDisputeDelay', 'rightDisputeDelay']) if (requireBoundaryInteger(dispute[side], `${code}_${side}`) > UINT16_MAX) throw new Error(`${code}_${side}`);
+  requireExactBoundaryKeys(
+    dispute,
+    ['leftResponseSeconds', 'rightResponseSeconds'],
+    [],
+    `${code}_DISPUTE_FIELDS`,
+  );
+  // Account clocks are signed uint32 seconds, not uint16 reveal ratios. A user
+  // default is 86,400 seconds, so truncating this storage boundary to uint16
+  // makes a healthy hub fail-stop on its first authoritative restart.
+  canonicalAccountDisputeConfig({
+    leftResponseSeconds: requireBoundaryInteger(
+      dispute['leftResponseSeconds'],
+      `${code}_leftResponseSeconds`,
+    ),
+    rightResponseSeconds: requireBoundaryInteger(
+      dispute['rightResponseSeconds'],
+      `${code}_rightResponseSeconds`,
+    ),
+  });
 };
 
 const validateStorageAccountStateMaps = (state: AccountState, code: string): void => {
@@ -235,6 +294,11 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
   requireStorageBigInt(doc['htlcFeesEarned'], `${code}_HTLC_FEES`);
   requireStorageMap(doc['lockBook'], `${code}_LOCK_BOOK`);
   validateStorageHubRebalanceConfig(doc['hubRebalanceConfig'], `${code}_HUB_REBALANCE_CONFIG`);
+  validateStorageOrderbookHubProfile(
+    doc['orderbookHubProfile'],
+    String(doc['entityId']),
+    `${code}_ORDERBOOK_HUB_PROFILE`,
+  );
   validateDeferredAccountProposals(doc['deferredAccountProposals'], code);
   validateSettlementContinuations(doc['settlementContinuations'], code);
   const {
@@ -290,7 +354,8 @@ function assertBookHeader(value: unknown): asserts value is BookState {
   const book = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(book, [
     'params', 'orders', 'bidBuckets', 'askBuckets', 'bidBucketIdsDesc',
-    'askBucketIdsAsc', 'nextSeq', 'tradeCount', 'tradeQtySum', 'eventHash',
+    'askBucketIdsAsc', 'nextSeq', 'tradeCount', 'tradeQtySum',
+    'lastTradePriceTicks', 'lastAcceptedUsdAskPriceTicks', 'eventHash',
   ], ['commitmentHash'], `${code}_FIELDS`);
   const params = requireBoundaryRecord(book['params'], `${code}_PARAMS`);
   requireExactBoundaryKeys(params, ['bucketWidthTicks', 'maxOrders', 'stpPolicy'], [], `${code}_PARAM_FIELDS`);
@@ -305,6 +370,11 @@ function assertBookHeader(value: unknown): asserts value is BookState {
   requireBoundaryInteger(book['nextSeq'], `${code}_NEXT_SEQ`);
   requireBoundaryInteger(book['tradeCount'], `${code}_TRADE_COUNT`);
   requireStorageBigInt(book['tradeQtySum'], `${code}_TRADE_QTY`);
+  // Retained trade telemetry; it is not cross-j admission authority.
+  requireStorageBigInt(book['lastTradePriceTicks'], `${code}_LAST_TRADE_PRICE`);
+  // This is the signed-authority quote consumed by the cross-j notional cap.
+  // It is intentionally independent of user-controlled trade history.
+  requireStorageBigInt(book['lastAcceptedUsdAskPriceTicks'], `${code}_LAST_USD_ASK_PRICE`);
   requireStorageBigInt(book['eventHash'], `${code}_EVENT_HASH`);
 }
 

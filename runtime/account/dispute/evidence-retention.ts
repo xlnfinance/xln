@@ -96,6 +96,9 @@ export const collectReachableDisputeEvidenceHashes = (
   const counterpartyId = String(account.proofHeader.toEntity).toLowerCase();
   addBatchHashes(hashes, jBatchState?.batch, counterpartyId, 'jBatch.draft');
   addBatchHashes(hashes, jBatchState?.sentBatch?.batch, counterpartyId, 'jBatch.sent');
+  for (const [index, recoveryBatch] of (jBatchState?.recoveryBatches ?? []).entries()) {
+    addBatchHashes(hashes, recoveryBatch, counterpartyId, `jBatch.recovery[${index}]`);
+  }
   return hashes;
 };
 

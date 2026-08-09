@@ -343,6 +343,8 @@ const signedHankoForTest = (
 
 const makeEmptyProofBody = () => ({
   watchSeed: `0x${'f1'.repeat(32)}`,
+  leftResponseSeconds: 10,
+  rightResponseSeconds: 10,
   offdeltas: [],
   tokenIds: [],
   transformers: [],
@@ -366,7 +368,7 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -413,6 +415,7 @@ const setSyntheticPendingAccountProposal = (
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
+    disputeConfig: structuredClone(account.state.disputeConfig),
     proposal: { frame: structuredClone(pendingFrame) },
   };
 };
@@ -652,6 +655,7 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
         initialNonce: 7,
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
+        finalizationEvidenceHash: ethers.ZeroHash,
       },
     } satisfies JurisdictionEvent,
     finalProofbodyHash,
@@ -1027,7 +1031,7 @@ describe('audit fail-fast regressions', () => {
     const proofbodyHash = `0x${'ab'.repeat(32)}`;
     storeDisputeArgumentSnapshot(
       rejectedAccount,
-      captureDisputeArgumentSnapshot(rejectedAccount, proofbodyHash, 0, makeEmptyProofBody()),
+      captureDisputeArgumentSnapshot(rejectedAccount, proofbodyHash, 0, true, makeEmptyProofBody()),
     );
     const { leftArguments } = buildDisputeArgumentsForSnapshot(
       rejectedAccount,
@@ -1074,6 +1078,7 @@ describe('audit fail-fast regressions', () => {
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: structuredClone(receiver.state.domain),
+      disputeConfig: structuredClone(receiver.state.disputeConfig),
       proposal: { frame: invalidFrame, frameHanko },
     };
 
@@ -1167,6 +1172,7 @@ describe('audit fail-fast regressions', () => {
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
       domain: structuredClone(receiver.state.domain),
+      disputeConfig: structuredClone(receiver.state.disputeConfig),
       proposal: { frame: staleFrame, frameHanko },
     };
     const before = safeStringify(receiver);
@@ -1469,6 +1475,8 @@ describe('audit fail-fast regressions', () => {
     const route = withCanonicalCrossJurisdictionRouteHash({
       orderId: 'timestamp-parity-order',
       makerEntityId: left,
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       hubEntityId: right,
       source: {
         jurisdiction: `stack:31337:${depositoryAddress}`,
@@ -1657,7 +1665,10 @@ describe('audit fail-fast regressions', () => {
     installTarget(validatorEnv);
     const rawTx = {
       type: 'openAccount',
-      data: { targetEntityId },
+      data: {
+        targetEntityId,
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      },
     } as const;
 
     const rejected = await applyEntityTx(proposerEnv, state, rawTx);
@@ -1788,6 +1799,8 @@ describe('audit fail-fast regressions', () => {
     const route = withCanonicalCrossJurisdictionRouteHash({
       orderId: 'cross-swap-offer-propose-failfast',
       makerEntityId: left,
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       hubEntityId: right,
       source: {
         jurisdiction: `stack:1:0x${'c1'.repeat(20)}`,
@@ -2208,6 +2221,8 @@ describe('audit fail-fast regressions', () => {
       proofbodyHash: `0x${'cd'.repeat(32)}`,
       initialProofbody: {
         watchSeed: `0x${'12'.repeat(32)}`,
+        leftResponseSeconds: 10n,
+        rightResponseSeconds: 10n,
         offdeltas: [],
         tokenIds: [],
         transformers: [],
@@ -2215,7 +2230,8 @@ describe('audit fail-fast regressions', () => {
       watchSeed: `0x${'12'.repeat(32)}`,
       sig: '0x1234',
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     });
     const finalizationCounterparties = Array.from(
       { length: 8 },
@@ -2229,6 +2245,8 @@ describe('audit fail-fast regressions', () => {
         initialProofbodyHash: `0x${(index + 32).toString(16).padStart(2, '0').repeat(32)}`,
         finalProofbody: {
           watchSeed: `0x${(index + 48).toString(16).padStart(2, '0').repeat(32)}`,
+          leftResponseSeconds: 10n,
+          rightResponseSeconds: 10n,
           offdeltas: [],
           tokenIds: [],
           transformers: [],

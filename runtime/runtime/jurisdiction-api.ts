@@ -175,6 +175,8 @@ const resolveCrossJurisdictionSwapContext = (
     targetJurisdiction,
     sourceStackId,
     targetStackId,
+    sourceDisputeConfig: { ...sourceAccount.disputeConfig },
+    targetDisputeConfig: { ...targetAccount.disputeConfig },
   };
 };
 
@@ -233,6 +235,7 @@ export function buildCrossJurisdictionSwapSubmission(
       tokenId: Number(params.sourceTokenId),
       amount: BigInt(params.sourceAmount),
     },
+    sourceDisputeConfig: context.sourceDisputeConfig,
     target: {
       jurisdiction: context.targetStackId,
       entityId: params.targetHubEntityId,
@@ -240,6 +243,7 @@ export function buildCrossJurisdictionSwapSubmission(
       tokenId: Number(params.targetTokenId),
       amount: BigInt(params.targetAmount),
     },
+    targetDisputeConfig: context.targetDisputeConfig,
     domain: {
       protocol: 'xln-cross-j',
       hashSchema: 'route-domain',

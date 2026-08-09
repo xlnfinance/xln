@@ -20,7 +20,9 @@ import { CANONICAL_J_EVENTS } from '../machine/event-catalog';
 import { decodeJEventLog } from './j-event-log-decoder';
 import {
   decodeDisputeFinalizationEvidenceCalldata,
+  decodeDisputeProofBodyEvidenceCalldata,
   resolveDisputeFinalizationEvidence,
+  resolveDisputeProofBodyEvidence,
 } from './rpc-public';
 
 type BrowserVmHistoryOptions = {
@@ -58,16 +60,34 @@ const decodeHistoricalLog = (options: BrowserVmHistoryOptions, log: Authenticate
     `BROWSERVM_HISTORICAL_LOG_DECODE_FAILED:block=${log.blockNumber}` +
       `:tx=${log.transactionHash}:index=${log.logIndex}`,
   );
-  if (event.name === 'DisputeFinalized') {
+  if (
+    event.name === 'DisputeStarted' ||
+    event.name === 'CounterDisputeRegistered' ||
+    event.name === 'DisputeFinalized'
+  ) {
     const receipt = options.browserVM.getTransactionReceipt(log.transactionHash);
     if (!receipt) {
-      throw new Error(`BROWSERVM_FINALIZATION_RECEIPT_MISSING:${log.transactionHash}`);
+      throw new Error(`BROWSERVM_DISPUTE_RECEIPT_MISSING:${log.transactionHash}`);
     }
-    event.disputeFinalizationEvidence = resolveDisputeFinalizationEvidence(
-      decodeDisputeFinalizationEvidenceCalldata(receipt.data),
-      log.transactionHash,
+    const proofbody = resolveDisputeProofBodyEvidence(
+      decodeDisputeProofBodyEvidenceCalldata(receipt.data),
+      event.name,
       event.args,
     );
+    event.args[
+      event.name === 'DisputeStarted'
+        ? 'initialProofbody'
+        : event.name === 'CounterDisputeRegistered'
+          ? 'counterProofbody'
+          : 'finalProofbody'
+    ] = proofbody;
+    if (event.name === 'DisputeFinalized') {
+      event.disputeFinalizationEvidence = resolveDisputeFinalizationEvidence(
+        decodeDisputeFinalizationEvidenceCalldata(receipt.data),
+        log.transactionHash,
+        event.args,
+      );
+    }
   }
   return CANONICAL_J_EVENTS.some(name => name === event.name) ? event : null;
 };

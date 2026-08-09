@@ -224,7 +224,7 @@ const testMnemonic = 'test test test test test test test test test test test jun
 const testWatchSeed = `0x${'42'.repeat(32)}`;
 const abiCoder = AbiCoder.defaultAbiCoder();
 const proofBodyParam = ParamType.from(
-  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)',
+  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)',
 );
 const proofBodyHashOf = (proofBody: Record<string, unknown>): string =>
   keccak256(abiCoder.encode([proofBodyParam], [proofBody]));
@@ -253,6 +253,8 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
 
   const proofBody = {
     watchSeed: testWatchSeed,
+    leftResponseSeconds: 3_600n,
+    rightResponseSeconds: 86_400n,
     offdeltas: [0n],
     tokenIds: [1n],
     transformers: [],
@@ -277,8 +279,11 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
         },
       },
       accounts: new Map([[counterpartyId, {
-        watchSeed: testWatchSeed,
+        state: {
+          watchSeed: testWatchSeed,
+        },
         counterpartyDisputeProofNonce: 7,
+        counterpartyDisputeProofProposerIsLeft: false,
         counterpartyDisputeProofBodyHash: proofBodyHash,
         counterpartyDisputeProofHanko: '0xcafe',
         disputeProofBodiesByHash: {

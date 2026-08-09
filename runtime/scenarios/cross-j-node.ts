@@ -15,6 +15,7 @@
  */
 
 import fs from 'node:fs';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import net from 'node:net';
 import path from 'node:path';
 
@@ -75,6 +76,7 @@ const USDC = 1;
 const WETH = 2;
 const DECIMALS = 18n;
 const usd = (n: number) => BigInt(n) * 10n ** DECIMALS;
+const usdc = (n: number) => BigInt(n) * 10n ** 6n;
 
 type StackPub = {
   name: string;
@@ -193,6 +195,7 @@ const enableHub = async (env: RuntimeReplica, hub: Party): Promise<void> => {
             name: hub.name,
             spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
             referenceTokenId: USDC,
+            usdQuoteAuthorityEntityId: hub.id,
             minTradeSize: 10n * 10n ** DECIMALS,
             supportedPairs: ['1/2', '1/3', '2/3'],
           },
@@ -254,12 +257,12 @@ const jurisdictionFromStack = (stack: StackPub): JurisdictionConfig =>
     stack.chainId,
   );
 
-const bindDeployedStack = (
+const bindDeployedStack = async (
   env: RuntimeReplica,
   stack: StackPub,
   adapter: JAdapter,
   position: { x: number; y: number; z: number },
-): void => {
+): Promise<void> => {
   const replica = createJReplica(env, stack.name, stack.depository, position);
   replica.chainId = stack.chainId;
   replica.entityProviderDeploymentBlock = stack.entityProviderDeploymentBlock;
@@ -365,8 +368,8 @@ const runHubs = async (): Promise<void> => {
   const { source, target, sourceAdapter, targetAdapter } = await deployHubStacks(env);
   console.log(`CROSS_J_STACKS_READY ${JSON.stringify({ source, target })}`);
 
-  bindDeployedStack(env, source, sourceAdapter, { x: 0, y: 600, z: 0 });
-  bindDeployedStack(env, target, targetAdapter, { x: 400, y: 600, z: 0 });
+  await bindDeployedStack(env, source, sourceAdapter, { x: 0, y: 600, z: 0 });
+  await bindDeployedStack(env, target, targetAdapter, { x: 400, y: 600, z: 0 });
 
   if (!(relayPort > 0)) throw new Error('CROSS_J_RELAY_PORT_MISSING');
   let localDelivery: ReturnType<typeof createLocalDeliveryHandler> | null = null;
@@ -614,7 +617,12 @@ const runUsers = async (): Promise<void> => {
         signerId: mm.signer,
         entityTxs: [{
           type: 'openAccount',
-          data: { targetEntityId: hubSrc.id, tokenId: USDC, creditAmount: usd(100_000) },
+          data: {
+            targetEntityId: hubSrc.id,
+            disputeConfig: defaultAccountDisputeConfigForParties(mm.id, false, hubSrc.id, true),
+            tokenId: USDC,
+            creditAmount: usd(100_000),
+          },
         }],
       },
       {
@@ -622,7 +630,12 @@ const runUsers = async (): Promise<void> => {
         signerId: mmt.signer,
         entityTxs: [{
           type: 'openAccount',
-          data: { targetEntityId: hubTgt.id, tokenId: WETH, creditAmount: usd(100_000) },
+          data: {
+            targetEntityId: hubTgt.id,
+            disputeConfig: defaultAccountDisputeConfigForParties(mmt.id, false, hubTgt.id, true),
+            tokenId: WETH,
+            creditAmount: usd(100_000),
+          },
         }],
       },
     ],
@@ -681,7 +694,10 @@ const runUsers = async (): Promise<void> => {
     targetHubEntityId: hubTgt.id,
     targetUserEntityId: mmt.id,
     sourceTokenId: USDC,
-    sourceAmount: usd(1_000),
+    // Token 1 is the six-decimal USDC reference asset. Using the generic
+    // 18-decimal credit helper here fabricates a $10^15 scenario order and
+    // correctly trips the production $6.5m admission cap.
+    sourceAmount: usdc(1_000),
     targetTokenId: WETH,
     targetAmount: usd(1_000),
     sourceUserSignerId: mm.signer,

@@ -27,7 +27,7 @@ const account = (): AccountReplica => ({
     swapOffers: new Map(),
     globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
     jNonce: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     lastFinalizedJHeight: 0,
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
@@ -168,7 +168,8 @@ describe('canonical account state root', () => {
       disputeStartTimestamp: 1700000000,
       jNonce: 1,
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     };
     expect(computeAccountStateRoot(disputed.state)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, disputed]]))).not.toBe(overlayRoot);

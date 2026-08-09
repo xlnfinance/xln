@@ -96,6 +96,7 @@ const createCommittedAccountFixture = async (): Promise<{
       targetEntityId: counterpartyId,
       watchSeed: hex('77', 32),
       accountDomain,
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     },
   });
   replica.state = opened.newState;

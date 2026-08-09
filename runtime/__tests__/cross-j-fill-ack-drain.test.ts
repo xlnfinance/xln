@@ -17,6 +17,8 @@ import {
   secret,
 } from './helpers/cross-j';
 
+const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
+
 test('pending fill ack is retained (and its incident never resolves) when admission fails', async () => {
   const env = createEmptyEnv('cross-fill-ack-drain-retention');
   env.state.timestamp = 10_000;
@@ -31,6 +33,8 @@ test('pending fill ack is retained (and its incident never resolves) when admiss
     orderId: 'offer-1',
     makerEntityId: userEntity,
     hubEntityId: hubEntity,
+    sourceDisputeConfig: TEST_DISPUTE_CONFIG,
+    targetDisputeConfig: TEST_DISPUTE_CONFIG,
     source: {
       jurisdiction: jref(eth),
       entityId: userEntity,

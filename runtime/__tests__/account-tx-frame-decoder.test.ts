@@ -31,7 +31,14 @@ describe('signed Account frame transaction decoder', () => {
   test('rejects malformed money payloads and unknown or extra fields', () => {
     expect(() => decodeTx({
       type: 'direct_payment',
-      data: { tokenId: 1, amount: '10' },
+      data: {
+        tokenId: 1,
+        amount: '10',
+        route: [entityId],
+        deliveryMode: 'trusted',
+        fromEntityId: hash,
+        toEntityId: entityId,
+      },
     })).toThrow('ACCOUNT_TX_DATA_AMOUNT');
 
     expect(() => decodeTx({
@@ -62,10 +69,41 @@ describe('signed Account frame transaction decoder', () => {
 
   });
 
+  test('rejects cross-j close ratios outside the canonical uint16 domain', () => {
+    const closeTx = (fillRatio: number) => ({
+      type: 'cross_pull_close',
+      data: {
+        pullId: 'pull-1',
+        binary: '0x',
+        proof: {
+          orderId: 'order-1',
+          routeHash: hash,
+          sourcePullId: 'source-pull',
+          targetPullId: 'target-pull',
+          fillRatio,
+          cumulativeSourceAmount: 0n,
+          cumulativeTargetAmount: 0n,
+          binaryHash: hash,
+          closeMode: 'pure_cancel',
+        },
+      },
+    });
+    expect(() => decodeTx(closeTx(-1))).toThrow('ACCOUNT_TX_DATA_PROOF_FILLRATIO');
+    expect(() => decodeTx(closeTx(65_536))).toThrow('ACCOUNT_TX_DATA_PROOF_FILL_RATIO');
+    expect(decodeTx(closeTx(65_535)).type).toBe('cross_pull_close');
+  });
+
   test('accepts representative financial, lending, HTLC, and settlement variants', () => {
     expect(decodeTx({
       type: 'direct_payment',
-      data: { tokenId: 1, amount: 10n, deliveryMode: 'trusted' },
+      data: {
+        tokenId: 1,
+        amount: 10n,
+        route: [entityId],
+        deliveryMode: 'trusted',
+        fromEntityId: hash,
+        toEntityId: entityId,
+      },
     }).type).toBe('direct_payment');
 
     expect(decodeTx({

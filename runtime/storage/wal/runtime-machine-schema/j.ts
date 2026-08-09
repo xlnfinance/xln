@@ -56,14 +56,14 @@ const validateEntityProviderPayload = (value: unknown, code: string): void => {
     const release = requireBoundaryRecord(payload['release'], `${code}_RELEASE`);
     requireExactBoundaryKeys(
       release,
-      ['controlAmount', 'dividendAmount', 'purpose', 'depositoryAddress'],
+      ['recipientAddress', 'controlAmount', 'dividendAmount', 'purpose'],
       [],
       `${code}_RELEASE_FIELDS`,
     );
     requireBigInt(release['controlAmount'], `${code}_RELEASE_CONTROL`, 0n);
     requireBigInt(release['dividendAmount'], `${code}_RELEASE_DIVIDEND`, 0n);
     requireString(release['purpose'], `${code}_RELEASE_PURPOSE`);
-    requireString(release['depositoryAddress'], `${code}_RELEASE_DEPOSITORY`);
+    requireString(release['recipientAddress'], `${code}_RELEASE_RECIPIENT`);
   } else if (payload['kind'] === 'cancelPendingAction') {
     requireExactBoundaryKeys(payload, ['kind', 'cancel'], [], `${code}_FIELDS`);
     const cancel = requireBoundaryRecord(payload['cancel'], `${code}_CANCEL`);
@@ -171,7 +171,7 @@ function assertJReplica(
     'name', 'blockNumber', 'stateRoot', 'mempool', 'blockDelayMs',
     'lastBlockTimestamp', 'position',
   ], [
-    'blockTimeMs', 'blockReady', 'defaultDisputeDelayBlocks', 'watcherConfirmationDepth',
+    'blockTimeMs', 'blockReady', 'watcherConfirmationDepth',
     'rpcs', 'chainId', 'entityProviderDeploymentBlock', 'contracts',
   ], `${code}_FIELDS`);
   const name = requireString(replica['name'], `${code}_NAME`);
@@ -194,7 +194,6 @@ function assertJReplica(
     requireBoolean(replica['blockReady'], `${code}_READY`);
   }
   for (const field of [
-    'defaultDisputeDelayBlocks',
     'watcherConfirmationDepth',
     'chainId',
     'entityProviderDeploymentBlock',

@@ -46,7 +46,7 @@ import { choosePreferredMoveAssetSymbol, computeMoveSourceAvailableBalanceForEnd
 import { getMoveValidationErrorForContext, type MoveValidationMode } from "./move-validation";
 import { createMoveVisualController } from "./move-visual-controller";
 import type { AssetLedgerRow, AssetLedgerTotals } from "./asset-ledger";
-import { buildEntityPanelView, findLocalAccountByCounterparty, getActiveJurisdictionName, getCurrentEntityJurisdictionName, getRuntimeEnv, getRuntimeId, isSameJurisdictionEntity, isSameJurisdictionEntityInReplicas, isAccountLeftPerspective, isHubProfile, materializeAccountView, requireRuntimeEnv } from "./entity-panel-model";
+import { buildEntityPanelView, findLocalAccountByCounterparty, findReplicaForEntityTab, getActiveJurisdictionName, getCurrentEntityJurisdictionName, getRuntimeEnv, getRuntimeId, isSameJurisdictionEntity, isSameJurisdictionEntityInReplicas, isAccountLeftPerspective, isHubProfile, materializeAccountView, requireRuntimeEnv } from "./entity-panel-model";
 import { formatAddress, isPlaceholderEntityName, shortHash } from "./entity-panel-display";
 import { buildConfigureTokenOptions, buildMoveEntityOptions, buildMoveHubEntityOptions, buildMoveSourceAccountOptions, buildOpenAccountEntityOptions, isFullEntityId, normalizeWorkspaceAccountId, resolveConfigureTokenId, resolveMoveTargetHubEntityId } from "./entity-panel-options";
 import { type ExternalAllowanceRead, type ExternalWalletReadResult, type ExternalWalletSnapshotSource } from "./external-wallet-snapshot";
@@ -2260,11 +2260,33 @@ async function openAccountWithFullId(targetEntityId: string) {
     const env = getRuntimeEnv(actionRuntimeEnv);
     const rebalancePolicy = getOpenAccountRebalancePolicyData(getTokenInfo(1).decimals);
     if (env) await prewarmCounterpartyProfiles(env, [trimmed]);
+    const targetReplica = findReplicaForEntityTab(activeReplicas, trimmed, "");
+    const sourceIsHub = replica?.state?.profile?.isHub;
+    const targetIsHub = targetReplica?.state?.profile?.isHub;
+    // Dispute windows are signed Account state. Gossip labels are not
+    // authority, so direct opening requires both committed Entity profiles.
+    if (typeof sourceIsHub !== "boolean" || typeof targetIsHub !== "boolean") {
+      throw new Error(`ACCOUNT_DISPUTE_PARTY_ROLE_UNAVAILABLE:${entityId}:${trimmed}`);
+    }
     await submitPanelRuntimeInput(
       buildDirectOpenAccountRuntimeInput({
         sourceEntityId: entityId,
         signerId,
         targetEntityId: trimmed,
+        sourceRoleEvidence: {
+          entityId,
+          isHub: sourceIsHub,
+          source: 'committed-profile',
+        },
+        targetRoleEvidence: {
+          entityId: trimmed,
+          isHub: targetIsHub,
+          source: 'committed-profile',
+        },
+        committedRoles: new Map([
+          [entityId.toLowerCase(), sourceIsHub],
+          [trimmed.toLowerCase(), targetIsHub],
+        ]),
         rebalancePolicy,
       }),
     );

@@ -9,6 +9,7 @@ import {
   buildClaimsHanko,
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
+  deployDepositoryStack,
   deployEntityProvider,
   deriveHardhatPrivateKey,
   emptyBatch,
@@ -116,19 +117,7 @@ describe("Hanko Authorization", function () {
     // Deploy EntityProvider
     entityProvider = await deployEntityProvider(admin.address);
 
-    // Deploy Account library first
-    const AccountFactory = await hre.ethers.getContractFactory("Account");
-    const account = await AccountFactory.deploy();
-    await account.waitForDeployment();
-
-    // Deploy Depository with Account library linked
-    const DepositoryFactory = await hre.ethers.getContractFactory("Depository", {
-      libraries: {
-        Account: await account.getAddress()
-      }
-    });
-    depository = await DepositoryFactory.deploy(await entityProvider.getAddress(), 5760);
-    await depository.waitForDeployment();
+    ({ depository } = await deployDepositoryStack(await entityProvider.getAddress()));
 
     return { depository, entityProvider, admin, entity1, entity2 };
   }

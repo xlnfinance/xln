@@ -30,6 +30,8 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   swapOrderHistory: 52, swapClosedOrders: 53, pendingWithdrawals: 54,
   'state.requestedRebalance': 55, 'state.requestedRebalanceFeeState': 56,
   'state.rebalanceFeePolicies': 57, shadow: 58,
+  currentDisputeProofProposerIsLeft: 59,
+  counterpartyDisputeProofProposerIsLeft: 60,
 } as const;
 
 export type StorageAccountField = keyof typeof STORAGE_ACCOUNT_FIELD_TAG;

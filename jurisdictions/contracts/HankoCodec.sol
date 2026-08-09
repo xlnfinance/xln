@@ -58,11 +58,12 @@ contract HankoCodec {
     address contractAddress,
     bytes memory accountKey,
     uint256 nonce,
+    bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed
   ) external pure returns (bytes memory) {
     return HankoEncoding.encodeDisputeProof(
-      chainId, contractAddress, accountKey, nonce, proofbodyHash, watchSeed
+      chainId, contractAddress, accountKey, nonce, proposerIsLeft, proofbodyHash, watchSeed
     );
   }
 
@@ -71,11 +72,12 @@ contract HankoCodec {
     address contractAddress,
     bytes memory accountKey,
     uint256 nonce,
+    bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed
   ) external pure returns (bytes32) {
     return keccak256(HankoEncoding.encodeDisputeProof(
-      chainId, contractAddress, accountKey, nonce, proofbodyHash, watchSeed
+      chainId, contractAddress, accountKey, nonce, proposerIsLeft, proofbodyHash, watchSeed
     ));
   }
 
@@ -134,7 +136,7 @@ contract HankoCodec {
     bytes32 counterentity,
     uint256 finalNonce,
     bytes32 finalProofbodyHash,
-    uint256 lastResortWindowBlocks,
+    uint256 lastResortWindowSeconds,
     uint256 appointmentSequence
   ) external pure returns (bytes memory) {
     return HankoEncoding.encodeWatchtowerCounterDispute(
@@ -146,7 +148,7 @@ contract HankoCodec {
       counterentity,
       finalNonce,
       finalProofbodyHash,
-      lastResortWindowBlocks,
+      lastResortWindowSeconds,
       appointmentSequence
     );
   }
@@ -160,7 +162,7 @@ contract HankoCodec {
     bytes32 counterentity,
     uint256 finalNonce,
     bytes32 finalProofbodyHash,
-    uint256 lastResortWindowBlocks,
+    uint256 lastResortWindowSeconds,
     uint256 appointmentSequence
   ) external pure returns (bytes32) {
     return keccak256(HankoEncoding.encodeWatchtowerCounterDispute(
@@ -172,7 +174,7 @@ contract HankoCodec {
       counterentity,
       finalNonce,
       finalProofbodyHash,
-      lastResortWindowBlocks,
+      lastResortWindowSeconds,
       appointmentSequence
     ));
   }

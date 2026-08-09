@@ -1,8 +1,3 @@
-import {
-  deriveSignerAddressSync,
-  deriveSignerKeySync,
-  registerSignerKey,
-} from '../../account/crypto';
 import { registerReliableIngress } from '../../runtime/reliable-delivery';
 import { createEmptyEnv } from '../../runtime';
 import type { DeliverableEntityInput } from '../../runtime/types';
@@ -13,10 +8,6 @@ if (!receiverSeed || !senderRuntimeId || !encodedOutput) {
 }
 
 const receiver = createEmptyEnv(receiverSeed);
-const receiverRuntimeId = deriveSignerAddressSync(receiverSeed, 'runtime').toLowerCase();
-registerSignerKey(receiver, receiverRuntimeId, deriveSignerKeySync(receiverSeed, 'runtime'));
-receiver.runtimeId = receiverRuntimeId;
-receiver.runtimeSeed = receiverSeed;
 receiver.infrastructure ??= {};
 const output = JSON.parse(encodedOutput) as DeliverableEntityInput;
 const registration = registerReliableIngress(receiver, senderRuntimeId, output);

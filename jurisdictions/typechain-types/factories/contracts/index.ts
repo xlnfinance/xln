@@ -3,8 +3,10 @@
 /* eslint-disable */
 export * as deltaTransformerSol from "./DeltaTransformer.sol";
 export * as depositorySol from "./Depository.sol";
+export * as typesSol from "./Types.sol";
 export * as mocks from "./mocks";
 export { Account__factory } from "./Account__factory";
+export { DepositoryBounds__factory } from "./DepositoryBounds__factory";
 export { ERC1155Mock__factory } from "./ERC1155Mock__factory";
 export { ERC20Mock__factory } from "./ERC20Mock__factory";
 export { ERC721Mock__factory } from "./ERC721Mock__factory";
@@ -12,4 +14,5 @@ export { EntityProvider__factory } from "./EntityProvider__factory";
 export { HankoCodec__factory } from "./HankoCodec__factory";
 export { HankoVerifier__factory } from "./HankoVerifier__factory";
 export { HashLadder__factory } from "./HashLadder__factory";
+export { HashLadderRegistry__factory } from "./HashLadderRegistry__factory";
 export { IEntityProvider__factory } from "./IEntityProvider__factory";

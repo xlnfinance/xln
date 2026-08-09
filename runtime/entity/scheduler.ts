@@ -197,6 +197,12 @@ export async function executeCrontab(
     }
 
     if (dueHooks.length > 0) {
+      // Map insertion order is not scheduling priority. Deterministically pick
+      // the oldest hook, then its stable id, so same-tick dispute deadlines
+      // cannot depend on historical insertion order.
+      dueHooks.sort((left, right) =>
+        left.triggerAt - right.triggerAt || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+      );
       crontabLog.debug('hooks.fired', { entity: shortId(replica.entityId), count: dueHooks.length, timestamp: now });
       const hookOutputs = await processDueHooks(env, dueHooks, replica, context);
       allOutputs.push(...hookOutputs);

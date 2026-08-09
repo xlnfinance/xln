@@ -195,10 +195,9 @@ const verifyLastResortPayload = (lastResortPayload: TowerAppointmentV1['lastReso
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_PROOF_NONCE_INVALID');
   }
   normalizeBytes32(lastResortPayload.proofBodyHash, 'LAST_RESORT_PAYLOAD_PROOF_BODY_HASH');
-  if (normalizeNonNegativeInt(lastResortPayload.lastResortWindowBlocks, 'LAST_RESORT_PAYLOAD_LAST_RESORT_WINDOW') <= 0) {
+  if (normalizeNonNegativeInt(lastResortPayload.lastResortWindowSeconds, 'LAST_RESORT_PAYLOAD_LAST_RESORT_WINDOW') <= 0) {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_LAST_RESORT_WINDOW_INVALID');
   }
-  normalizeNonNegativeInt(lastResortPayload.safetyMarginBlocks, 'LAST_RESORT_PAYLOAD_SAFETY_MARGIN');
   assertEncryptedLastResortPayload(lastResortPayload);
 };
 

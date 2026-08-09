@@ -1,4 +1,9 @@
 import type { RuntimeInput } from '@xln/runtime/api/public/runtime-module';
+import {
+  defaultAccountDisputeConfigForRoleEvidence,
+  type AccountRoleEvidence,
+  type AccountRoleEvidenceSource,
+} from '@xln/runtime/account/dispute-config';
 
 import { normalizeEntityId } from '../../utils/entityReplica';
 import type { HubOpenAccountRebalancePolicy } from './hub-discovery-profile';
@@ -6,6 +11,9 @@ import type { HubOpenAccountRebalancePolicy } from './hub-discovery-profile';
 export type OnboardingRuntimeTarget = {
   entityId: string;
   signerId: string;
+  /** Exact signer-backed Entity role used to materialize bilateral clocks. */
+  isHub: boolean;
+  roleSource: AccountRoleEvidenceSource;
   jurisdiction?: string;
   jurisdictionKey?: string;
 };
@@ -16,6 +24,7 @@ export type OnboardingHubCandidate = {
   jurisdictionKey?: string;
   runtimeId?: string | null;
   isHub?: boolean;
+  roleSource?: AccountRoleEvidenceSource;
 };
 
 export type OnboardingRuntimeProjection = {
@@ -24,6 +33,8 @@ export type OnboardingRuntimeProjection = {
   activeJurisdictionName?: string;
   hubCandidates: OnboardingHubCandidate[];
   accountCounterpartiesByEntityId: Record<string, string[]>;
+  /** Independent committed-role index, including explicit false values. */
+  committedRolesByEntityId: Record<string, boolean>;
 };
 
 export type BuildOnboardingProfileInputRequest = {
@@ -34,6 +45,9 @@ export type BuildOnboardingProfileInputRequest = {
 export type BuildOnboardingHubOpenInputRequest = {
   target: OnboardingRuntimeTarget;
   hubEntityIds: string[];
+  /** Single authenticated role authority captured for each counterparty. */
+  hubRoleEvidenceByEntityId: Record<string, AccountRoleEvidence>;
+  committedRolesByEntityId: Record<string, boolean>;
   creditAmount: bigint;
   tokenId?: number;
   rebalancePolicy?: HubOpenAccountRebalancePolicy | null;
@@ -61,6 +75,8 @@ function normalizeTarget(target: OnboardingRuntimeTarget, context: string): Onbo
   return {
     entityId,
     signerId,
+    isHub: target.isHub,
+    roleSource: target.roleSource,
     jurisdiction: String(target.jurisdiction || '').trim(),
     jurisdictionKey: String(target.jurisdictionKey || '').trim(),
   };
@@ -163,6 +179,20 @@ export function buildOnboardingHubOpenRuntimeInput(
       return true;
     });
   if (hubEntityIds.length === 0) throw new Error('Onboarding hub setup requires at least one hub.');
+  const hubRoleEvidence = new Map(
+    Object.entries(request.hubRoleEvidenceByEntityId).map(([entityId, evidence]) => [normalizeEntityId(entityId), evidence] as const),
+  );
+  const targetRoleEvidence: AccountRoleEvidence = {
+    entityId: target.entityId,
+    isHub: target.isHub,
+    source: target.roleSource,
+  };
+  // Never manufacture committed authority from caller-supplied evidence. This
+  // index comes from the independently projected Entity replicas and includes
+  // false, so stale Hub gossip cannot override a committed User profile.
+  const committedRoles = new Map(
+    Object.entries(request.committedRolesByEntityId).map(([entityId, isHub]) => [normalizeEntityId(entityId), isHub] as const),
+  );
 
   return {
     runtimeTxs: [],
@@ -173,6 +203,18 @@ export function buildOnboardingHubOpenRuntimeInput(
         type: 'openAccount' as const,
         data: {
           targetEntityId: hubEntityId,
+          disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+            targetRoleEvidence,
+            (() => {
+              const evidence = hubRoleEvidence.get(hubEntityId);
+              if (!evidence) throw new Error(`Onboarding hub role missing: ${hubEntityId}`);
+              if (normalizeEntityId(evidence.entityId) !== hubEntityId || evidence.isHub !== true) {
+                throw new Error(`Onboarding hub role invalid: ${hubEntityId}`);
+              }
+              return evidence;
+            })(),
+            committedRoles,
+          ),
           creditAmount,
           tokenId,
           ...(request.rebalancePolicy ? { rebalancePolicy: request.rebalancePolicy } : {}),
@@ -188,4 +230,5 @@ export const emptyOnboardingRuntimeProjection = (): OnboardingRuntimeProjection 
   activeJurisdictionName: '',
   hubCandidates: [],
   accountCounterpartiesByEntityId: {},
+  committedRolesByEntityId: {},
 });

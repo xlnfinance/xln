@@ -211,7 +211,7 @@ const makeEnv = (): RuntimeReplica =>
                     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
                     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
                     lastFinalizedJHeight: 0,
-                    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+                    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
                     jNonce: 0,
                   },
                 ],
@@ -246,6 +246,8 @@ const makeBook = (_price: bigint): BookState => ({
   nextSeq: 1,
   tradeCount: 0,
   tradeQtySum: 0n,
+  lastTradePriceTicks: 0n,
+  lastAcceptedUsdAskPriceTicks: 0n,
   eventHash: 0n,
 });
 

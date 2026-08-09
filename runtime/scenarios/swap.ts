@@ -18,6 +18,7 @@
 
 import type { AccountReplica } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import { getLiveJAdapterEntries } from '../runtime/live-jadapters';
 import type { EntityInput } from '../entity/types';
 import { ethers } from 'ethers';
@@ -322,7 +323,10 @@ export async function swap(env: RuntimeReplica): Promise<void> {
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
-    entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+    entityTxs: [{ type: 'openAccount', data: {
+      targetEntityId: hub.id,
+      disputeConfig: defaultAccountDisputeConfigForParties(alice.id, false, hub.id, true),
+    } }],
   }]);
   await converge(env); // Wait for bilateral account creation
 
@@ -438,6 +442,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         name: 'Test Hub',
         spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
         referenceTokenId: USDC_TOKEN_ID,
+        usdQuoteAuthorityEntityId: hub.id,
         minTradeSize: 0n,
         supportedPairs: ['1/2'],
       },
@@ -481,7 +486,10 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   // Open Bob↔Hub account
   console.log('🔗 Opening Bob ↔ Hub account...');
   await process(env, [
-    { entityId: bob.id, signerId: bob.signer, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }] },
+    { entityId: bob.id, signerId: bob.signer, entityTxs: [{ type: 'openAccount', data: {
+      targetEntityId: hub.id,
+      disputeConfig: defaultAccountDisputeConfigForParties(bob.id, false, hub.id, true),
+    } }] },
   ]);
   await converge(env);
   console.log('  ✅ Account opened\n');
@@ -1077,7 +1085,10 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
   console.log('🔗 Opening accounts with Hub...');
   for (const entity of [carol, dave]) {
     await process(env, [
-      { entityId: entity.id, signerId: entity.signer, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }] },
+      { entityId: entity.id, signerId: entity.signer, entityTxs: [{ type: 'openAccount', data: {
+        targetEntityId: hub.id,
+        disputeConfig: defaultAccountDisputeConfigForParties(entity.id, false, hub.id, true),
+      } }] },
     ]);
     await converge(env);
   }

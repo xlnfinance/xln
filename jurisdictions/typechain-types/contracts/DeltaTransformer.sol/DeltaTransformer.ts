@@ -78,6 +78,7 @@ export declare namespace DeltaTransformer {
     claimedRatio: BigNumberish;
     fullHash: BytesLike;
     partialRoot: BytesLike;
+    targetRole: boolean;
   };
 
   export type PullStructOutput = [
@@ -85,13 +86,15 @@ export declare namespace DeltaTransformer {
     amount: bigint,
     claimedRatio: bigint,
     fullHash: string,
-    partialRoot: string
+    partialRoot: string,
+    targetRole: boolean
   ] & {
     deltaIndex: bigint;
     amount: bigint;
     claimedRatio: bigint;
     fullHash: string;
     partialRoot: string;
+    targetRole: boolean;
   };
 
   export type BatchStruct = {
@@ -115,11 +118,10 @@ export interface DeltaTransformerInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "applyBatch"
-      | "cleanSecret"
+      | "containsPull"
       | "decodeArgumentsStrict"
+      | "decodeTransformerArgumentListStrict"
       | "encodeBatch"
-      | "hashRevealed"
-      | "hashToBlock"
       | "hashToTimestamp"
       | "revealSecret"
   ): FunctionFragment;
@@ -137,11 +139,13 @@ export interface DeltaTransformerInterface extends Interface {
       BytesLike,
       BytesLike,
       BigNumberish,
+      BigNumberish,
+      BigNumberish,
       BigNumberish
     ]
   ): string;
   encodeFunctionData(
-    functionFragment: "cleanSecret",
+    functionFragment: "containsPull",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
@@ -149,16 +153,12 @@ export interface DeltaTransformerInterface extends Interface {
     values: [BytesLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "decodeTransformerArgumentListStrict",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "encodeBatch",
     values: [DeltaTransformer.BatchStruct]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "hashRevealed",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "hashToBlock",
-    values: [BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "hashToTimestamp",
@@ -171,7 +171,7 @@ export interface DeltaTransformerInterface extends Interface {
 
   decodeFunctionResult(functionFragment: "applyBatch", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "cleanSecret",
+    functionFragment: "containsPull",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -179,15 +179,11 @@ export interface DeltaTransformerInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "decodeTransformerArgumentListStrict",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "encodeBatch",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "hashRevealed",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "hashToBlock",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -255,17 +251,29 @@ export interface DeltaTransformer extends BaseContract {
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       disputeStartTimestamp: BigNumberish,
-      disputeTimeout: BigNumberish
+      disputeTimeout: BigNumberish,
+      leftResponseSeconds: BigNumberish,
+      rightResponseSeconds: BigNumberish
     ],
     [bigint[]],
     "view"
   >;
 
-  cleanSecret: TypedContractMethod<[hash: BytesLike], [void], "nonpayable">;
+  containsPull: TypedContractMethod<
+    [encodedBatch: BytesLike],
+    [boolean],
+    "view"
+  >;
 
   decodeArgumentsStrict: TypedContractMethod<
     [encoded: BytesLike],
     [DeltaTransformer.ArgumentsStructOutput],
+    "view"
+  >;
+
+  decodeTransformerArgumentListStrict: TypedContractMethod<
+    [encoded: BytesLike],
+    [string[]],
     "view"
   >;
 
@@ -274,10 +282,6 @@ export interface DeltaTransformer extends BaseContract {
     [string],
     "view"
   >;
-
-  hashRevealed: TypedContractMethod<[arg0: BytesLike], [boolean], "view">;
-
-  hashToBlock: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   hashToTimestamp: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
@@ -301,14 +305,16 @@ export interface DeltaTransformer extends BaseContract {
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       disputeStartTimestamp: BigNumberish,
-      disputeTimeout: BigNumberish
+      disputeTimeout: BigNumberish,
+      leftResponseSeconds: BigNumberish,
+      rightResponseSeconds: BigNumberish
     ],
     [bigint[]],
     "view"
   >;
   getFunction(
-    nameOrSignature: "cleanSecret"
-  ): TypedContractMethod<[hash: BytesLike], [void], "nonpayable">;
+    nameOrSignature: "containsPull"
+  ): TypedContractMethod<[encodedBatch: BytesLike], [boolean], "view">;
   getFunction(
     nameOrSignature: "decodeArgumentsStrict"
   ): TypedContractMethod<
@@ -317,14 +323,11 @@ export interface DeltaTransformer extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "decodeTransformerArgumentListStrict"
+  ): TypedContractMethod<[encoded: BytesLike], [string[]], "view">;
+  getFunction(
     nameOrSignature: "encodeBatch"
   ): TypedContractMethod<[b: DeltaTransformer.BatchStruct], [string], "view">;
-  getFunction(
-    nameOrSignature: "hashRevealed"
-  ): TypedContractMethod<[arg0: BytesLike], [boolean], "view">;
-  getFunction(
-    nameOrSignature: "hashToBlock"
-  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "hashToTimestamp"
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;

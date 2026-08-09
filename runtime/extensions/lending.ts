@@ -96,7 +96,14 @@ export const getCreditGrantedByAccountOwner = (
   if (!delta) return 0n;
   const owner = String(ownerEntityId || '').toLowerCase();
   const left = String(account.leftEntity || '').toLowerCase();
-  return owner === left ? BigInt(delta.rightCreditLimit ?? 0n) : BigInt(delta.leftCreditLimit ?? 0n);
+  const right = String(account.rightEntity || '').toLowerCase();
+  if (owner !== left && owner !== right) {
+    throw new Error(`LENDING_ACCOUNT_OWNER_MISMATCH:${ownerEntityId}`);
+  }
+  // Credit granted by the viewer is the canonical peerCreditLimit. Never
+  // select left/right storage fields here: LEFT writes rightCreditLimit and
+  // RIGHT writes leftCreditLimit, which is easy to invert at call sites.
+  return deriveDelta(delta, owner === left).peerCreditLimit;
 };
 
 export const getAccountOutCapacity = (

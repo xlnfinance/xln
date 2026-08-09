@@ -399,6 +399,12 @@ const inspectEpochRotations = async (): Promise<EpochRotationEvidence[]> => {
 };
 
 const commitPostRotationProofFrames = async (): Promise<void> => {
+  // Rotation deliberately saturates the storage worker while its new epoch is
+  // published. A normal control request uses 5s, but the proof frame must be
+  // allowed to wait for that bounded durability barrier; timing out first
+  // would report a red gate after the system and rotation were already green.
+  const proofRequestTimeoutMs = 30_000;
+  const proofObservationTimeoutMs = 60_000;
   const manifestPath = join(workDir, 'prod-mesh', 'runtime-import-manifest.json');
   const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
     manifest?: {
@@ -422,7 +428,7 @@ const commitPostRotationProofFrames = async (): Promise<void> => {
         mode: 'remote',
         wsUrl: entry.wsUrl,
         authKey: entry.token,
-        requestTimeoutMs: 5_000,
+        requestTimeoutMs: proofRequestTimeoutMs,
       });
       const commandSequence = adapter.nextCommandSequence;
       if (!commandSequence) {
@@ -433,7 +439,7 @@ const commitPostRotationProofFrames = async (): Promise<void> => {
       for (let proofIndex = 0; proofIndex < 2; proofIndex++) {
         const sequence = commandSequence + proofIndex;
         const commandId = `epoch-rotation-proof-${label.toLowerCase()}-${proofIndex + 1}`;
-        const deadline = Date.now() + 20_000;
+        const deadline = Date.now() + proofObservationTimeoutMs;
         let result = await adapter.send(
           { runtimeTxs: [], entityInputs: [] },
           { commandId, commandSequence: sequence },

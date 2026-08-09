@@ -1,5 +1,6 @@
 import { getSignerAddress, signAccountFrame, verifyAccountSignature } from '../account/crypto';
 import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../protocol/account-watch-seed';
+import { canonicalAccountDisputeConfig } from '../account/dispute-config';
 import {
   accountStateDomainFromJurisdiction,
   normalizeAccountStateDomain,
@@ -389,6 +390,8 @@ const materializeLocallyAuthoredEntityTx = (
     throw new Error('OPEN_ACCOUNT_DOMAIN_MISMATCH');
   }
   const counterpartyId = String(tx.data.targetEntityId ?? '').trim().toLowerCase();
+  if (tx.data.disputeConfig === undefined) throw new Error('OPEN_ACCOUNT_DISPUTE_CONFIG_REQUIRED');
+  const disputeConfig = canonicalAccountDisputeConfig(tx.data.disputeConfig);
   const watchSeed = tx.data.watchSeed === undefined
     ? deriveAccountWatchSeed({
         runtimeSeed: env.runtimeSeed ?? '',
@@ -397,7 +400,7 @@ const materializeLocallyAuthoredEntityTx = (
         counterpartyId,
       })
     : normalizeAccountWatchSeed(tx.data.watchSeed, 'OPEN_ACCOUNT');
-  return { ...tx, data: { ...tx.data, accountDomain: committedDomain, watchSeed } };
+  return { ...tx, data: { ...tx.data, disputeConfig, accountDomain: committedDomain, watchSeed } };
 };
 
 /**

@@ -109,6 +109,10 @@ export const computeBookCommitmentHash = (book: BookState): string => {
     number(book.nextSeq),
     number(book.tradeCount),
     bigint(book.tradeQtySum),
+    bigint(book.lastTradePriceTicks),
+    // The cross-j USD admission guard consumes this authority-only field, so
+    // it is consensus state and must be covered by the incremental book root.
+    bigint(book.lastAcceptedUsdAskPriceTicks),
     bigint(book.eventHash),
   ]);
   return book.commitmentHash;

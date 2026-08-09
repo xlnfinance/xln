@@ -8,7 +8,7 @@
 export const DEPOSITORY_J_EVENTS = {
   consensus: [
     'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
-    'DisputeStarted', 'DisputeFinalized', 'HashLadderRevealRegistered',
+    'DisputeStarted', 'CounterDisputeRegistered', 'DisputeFinalized', 'HashLadderRevealRegistered',
     'DebtCreated', 'DebtEnforced', 'DebtForgiven',
     'HankoBatchProcessed',
   ],

@@ -109,7 +109,7 @@ export const makeAccount = (
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -188,7 +188,6 @@ export const installJurisdictions = (env: RuntimeReplica, ...jurisdictions: Juri
       name: jurisdiction.name,
       chainId: jurisdiction.chainId,
       rpcs: [jurisdiction.address],
-      contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
       contracts: {
         depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,
@@ -196,7 +195,6 @@ export const installJurisdictions = (env: RuntimeReplica, ...jurisdictions: Juri
         deltaTransformer: addr('99'),
       },
       blockTimeMs: jurisdiction.blockTimeMs,
-      defaultDisputeDelayBlocks: 5,
     } as any);
   }
 };

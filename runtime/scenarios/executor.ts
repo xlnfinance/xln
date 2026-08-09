@@ -5,6 +5,7 @@
  */
 
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types.js';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config.js';
 import type { EntityInput, ConsensusConfig } from '../entity/types.js';
 import { ethers } from 'ethers';
 import type {
@@ -495,7 +496,10 @@ async function handleGrid(
             signerId: `g${id1}`,
             entityTxs: [{
               type: 'openAccount',
-              data: { targetEntityId: entityId2 }
+              data: {
+                targetEntityId: entityId2,
+                disputeConfig: defaultAccountDisputeConfigForParties(entityId1, false, entityId2, false),
+              }
             }]
           });
         }
@@ -518,7 +522,10 @@ async function handleGrid(
             signerId: `g${id1}`,
             entityTxs: [{
               type: 'openAccount',
-              data: { targetEntityId: entityId2 }
+              data: {
+                targetEntityId: entityId2,
+                disputeConfig: defaultAccountDisputeConfigForParties(entityId1, false, entityId2, false),
+              }
             }]
           });
         }
@@ -541,7 +548,10 @@ async function handleGrid(
             signerId: `g${id1}`,
             entityTxs: [{
               type: 'openAccount',
-              data: { targetEntityId: entityId2 }
+              data: {
+                targetEntityId: entityId2,
+                disputeConfig: defaultAccountDisputeConfigForParties(entityId1, false, entityId2, false),
+              }
             }]
           });
         }
@@ -634,13 +644,19 @@ async function handleLazyGrid(
           connectionInputs.push({
             entityId: entityId1,
             signerId: `lazy_${id1}`,
-            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId2 } }]
+            entityTxs: [{ type: 'openAccount', data: {
+              targetEntityId: entityId2,
+              disputeConfig: defaultAccountDisputeConfigForParties(entityId1, false, entityId2, false),
+            } }]
           });
           // Entity2 → Entity1 connection (reciprocal)
           connectionInputs.push({
             entityId: entityId2,
             signerId: `lazy_${id2}`,
-            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId1 } }]
+            entityTxs: [{ type: 'openAccount', data: {
+              targetEntityId: entityId1,
+              disputeConfig: defaultAccountDisputeConfigForParties(entityId2, false, entityId1, false),
+            } }]
           });
         }
       }
@@ -661,13 +677,19 @@ async function handleLazyGrid(
           connectionInputs.push({
             entityId: entityId1,
             signerId: `lazy_${id1}`,
-            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId2 } }]
+            entityTxs: [{ type: 'openAccount', data: {
+              targetEntityId: entityId2,
+              disputeConfig: defaultAccountDisputeConfigForParties(entityId1, false, entityId2, false),
+            } }]
           });
           // Entity2 → Entity1 connection (reciprocal)
           connectionInputs.push({
             entityId: entityId2,
             signerId: `lazy_${id2}`,
-            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId1 } }]
+            entityTxs: [{ type: 'openAccount', data: {
+              targetEntityId: entityId1,
+              disputeConfig: defaultAccountDisputeConfigForParties(entityId2, false, entityId1, false),
+            } }]
           });
         }
       }
@@ -688,13 +710,19 @@ async function handleLazyGrid(
           connectionInputs.push({
             entityId: entityId1,
             signerId: `lazy_${id1}`,
-            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId2 } }]
+            entityTxs: [{ type: 'openAccount', data: {
+              targetEntityId: entityId2,
+              disputeConfig: defaultAccountDisputeConfigForParties(entityId1, false, entityId2, false),
+            } }]
           });
           // Entity2 → Entity1 connection (reciprocal)
           connectionInputs.push({
             entityId: entityId2,
             signerId: `lazy_${id2}`,
-            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId1 } }]
+            entityTxs: [{ type: 'openAccount', data: {
+              targetEntityId: entityId1,
+              disputeConfig: defaultAccountDisputeConfigForParties(entityId2, false, entityId1, false),
+            } }]
           });
         }
       }
@@ -936,7 +964,10 @@ async function handleOpenAccount(
       entityTxs: [
         {
           type: 'openAccount',
-          data: { targetEntityId: toAddress },
+          data: {
+            targetEntityId: toAddress,
+            disputeConfig: defaultAccountDisputeConfigForParties(fromAddress, false, toAddress, false),
+          },
         },
       ],
     },

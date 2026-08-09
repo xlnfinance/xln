@@ -78,6 +78,10 @@ export interface BookState {
   readonly nextSeq: number;
   readonly tradeCount: number;
   readonly tradeQtySum: bigint;
+  /** Maker price of the most recently committed trade; 0 means no trade yet. */
+  readonly lastTradePriceTicks: bigint;
+  /** Latest accepted same-j USD ask from the Hub's signed quote authority. */
+  readonly lastAcceptedUsdAskPriceTicks: bigint;
   readonly eventHash: bigint;
   commitmentHash?: string;
 }
@@ -99,6 +103,8 @@ type MutableBookState = {
   nextSeq: number;
   tradeCount: number;
   tradeQtySum: bigint;
+  lastTradePriceTicks: bigint;
+  lastAcceptedUsdAskPriceTicks: bigint;
   eventHash: bigint;
 };
 
@@ -411,6 +417,11 @@ function matchAgainstBook(
 
     state.tradeCount += 1;
     state.tradeQtySum += tradeQty;
+    // Admission risk must use an executed internal price, never an unfilled
+    // quote that its owner can post and cancel. This assignment is inside the
+    // same pure match transition as TRADE, so replica replay cannot observe a
+    // price that was not committed by the corresponding book mutation.
+    state.lastTradePriceTicks = best.level.priceTicks;
     bumpHash(state, 3, best.level.priceTicks, tradeQty);
 
     events.push({
@@ -463,8 +474,27 @@ export function createBook(params: BookParams): BookState {
     nextSeq: 1,
     tradeCount: 0,
     tradeQtySum: 0n,
+    lastTradePriceTicks: 0n,
+    lastAcceptedUsdAskPriceTicks: 0n,
     eventHash: 0n,
   };
+}
+
+/**
+ * Commit the single USD risk-price source selected in HubProfile.
+ *
+ * Authority and same-j/ask checks live at the Entity boundary, where signed
+ * maker identity and token orientation are available. Keeping this primitive
+ * narrow prevents trades, user quotes, cross-j routes, and cancellations from
+ * mutating the admission price accidentally.
+ */
+export function recordAcceptedUsdAskPrice(state: BookState, priceTicks: bigint): BookState {
+  if (priceTicks <= 0n) throw new Error('BOOK_USD_ASK_PRICE_INVALID');
+  const mutable = state as MutableBookState;
+  if (mutable.lastAcceptedUsdAskPriceTicks === priceTicks) return state;
+  mutable.lastAcceptedUsdAskPriceTicks = priceTicks;
+  bumpHash(mutable, 4, priceTicks, 0);
+  return state;
 }
 
 /**
@@ -671,7 +701,7 @@ export function getBookSideLevels(state: BookState, side: Side, depth = 10): Boo
 export function computeBookHash(state: BookState): string {
   const bid = getBestBid(state)?.toString() ?? '-';
   const ask = getBestAsk(state)?.toString() ?? '-';
-  const combined = `${state.eventHash.toString(16)}|${state.tradeCount}|${state.tradeQtySum}|${state.orders.size}|${bid}|${ask}`;
+  const combined = `${state.eventHash.toString(16)}|${state.tradeCount}|${state.tradeQtySum}|${state.lastTradePriceTicks}|${state.lastAcceptedUsdAskPriceTicks}|${state.orders.size}|${bid}|${ask}`;
   let hash = 0n;
   for (let i = 0; i < combined.length; i += 1) {
     hash = (hash * 31n + BigInt(combined.charCodeAt(i))) & 0xffffffffffffffffn;

@@ -33,6 +33,8 @@ import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/con
  */
 export const cloneProofBodyStruct = (proofBody: ProofBodyStruct): ProofBodyStruct => ({
   watchSeed: proofBody.watchSeed,
+  leftResponseSeconds: proofBody.leftResponseSeconds,
+  rightResponseSeconds: proofBody.rightResponseSeconds,
   offdeltas: [...proofBody.offdeltas],
   tokenIds: [...proofBody.tokenIds],
   transformers: proofBody.transformers.map((transformer) => ({
@@ -48,6 +50,8 @@ export const cloneProofBodyStruct = (proofBody: ProofBodyStruct): ProofBodyStruc
  */
 export interface RuntimeProofBody {
   watchSeed: string;             // bytes32 - bilateral account seed revealed by dispute start
+  leftResponseSeconds: number;   // uint32 - frozen left-side response window, seconds
+  rightResponseSeconds: number;  // uint32 - frozen right-side response window, seconds
   offdeltas: bigint[];           // int256[] - bilateral offdelta per token
   tokenIds: number[];            // uint256[] - sorted ascending
   transformers: RuntimeTransformerClause[];
@@ -112,6 +116,8 @@ export interface RuntimePull {
   claimedRatio: number;
   fullHash: string;
   partialRoot: string;
+  /** Signed registry role; both roles use their own beneficiary-side window. */
+  targetRole: boolean;
 }
 
 /**
@@ -139,12 +145,12 @@ export interface ProofBodyResult {
 }
 
 /**
- * Dispute configuration per bilateral account
- * Value * 10 = blocks. E.g.: 0=instant(unsafe), 1=10 blocks, 2=20 blocks
+ * Bilaterally committed response policy. The protocol unit is seconds.
+ * Zero is an intentional same-timestamp policy; the sum is capped at 365 days.
  */
 export interface DisputeConfig {
-  leftDisputeDelay: number;      // uint16 - left entity's required delay
-  rightDisputeDelay: number;     // uint16 - right entity's required delay
+  leftResponseSeconds: number;      // uint32 - left beneficiary source window
+  rightResponseSeconds: number;     // uint32 - right beneficiary source window
 }
 
 /**
@@ -154,6 +160,8 @@ export interface DisputeConfig {
 export const PROOF_BODY_ABI = {
   components: [
     { name: 'watchSeed', type: 'bytes32' },
+    { name: 'leftResponseSeconds', type: 'uint32' },
+    { name: 'rightResponseSeconds', type: 'uint32' },
     { name: 'offdeltas', type: 'int256[]' },
     { name: 'tokenIds', type: 'uint256[]' },
     {
@@ -214,6 +222,7 @@ export const BATCH_ABI = {
         { name: 'claimedRatio', type: 'uint16' },
         { name: 'fullHash', type: 'bytes32' },
         { name: 'partialRoot', type: 'bytes32' },
+        { name: 'targetRole', type: 'bool' },
       ],
     },
   ],

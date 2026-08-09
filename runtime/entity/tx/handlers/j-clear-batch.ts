@@ -37,6 +37,8 @@ export async function handleJClearBatch(
   }
 
   const oldBatchSize = batchOpCount(newState.jBatchState.batch);
+  const recoveryBatchSize = (newState.jBatchState.recoveryBatches ?? [])
+    .reduce((total, batch) => total + batchOpCount(batch), 0);
   const sentBatchSize = newState.jBatchState.sentBatch ? batchOpCount(newState.jBatchState.sentBatch.batch) : 0;
   const hadSentBatch = !!newState.jBatchState.sentBatch;
   const droppedFinalizeCounterparties = new Set<string>();
@@ -46,11 +48,17 @@ export async function handleJClearBatch(
   for (const op of newState.jBatchState.sentBatch?.batch.disputeFinalizations || []) {
     droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
   }
+  for (const recoveryBatch of newState.jBatchState.recoveryBatches ?? []) {
+    for (const op of recoveryBatch.disputeFinalizations) {
+      droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
+    }
+  }
   let resetSubmittedMarkers = 0;
 
   // Clear current + sent batch and reset lifecycle
   newState.jBatchState.batch = createEmptyBatch();
   delete newState.jBatchState.sentBatch;
+  delete newState.jBatchState.recoveryBatches;
   newState.jBatchState.status = 'empty';
 
   // Manual recovery: release stale "submitted" latches so hub can retry requests.
@@ -68,16 +76,18 @@ export async function handleJClearBatch(
 
   const reasonMsg = reason ? ` (${reason})` : '';
   const pendingMsg = hadSentBatch ? ` [sentBatch=${sentBatchSize} ops]` : '';
+  const recoveryMsg = recoveryBatchSize > 0 ? ` [recoveryBatch=${recoveryBatchSize} ops]` : '';
   const resetMsg = resetSubmittedMarkers > 0 ? `; reset ${resetSubmittedMarkers} submitted rebalance marker(s)` : '';
   jBatchActionLog.debug('clear.completed', {
     entity: shortId(entityState.entityId),
     currentOps: oldBatchSize,
+    recoveryOps: recoveryBatchSize,
     sentOps: sentBatchSize,
     hadSentBatch,
     resetSubmittedMarkers,
     reason: reason ?? '',
   });
-  addMessage(newState, `🗑️ Cleared jBatch current=${oldBatchSize}${pendingMsg}${reasonMsg}${resetMsg}`);
+  addMessage(newState, `🗑️ Cleared jBatch current=${oldBatchSize}${pendingMsg}${recoveryMsg}${reasonMsg}${resetMsg}`);
 
   return { newState, outputs, jOutputs };
 }

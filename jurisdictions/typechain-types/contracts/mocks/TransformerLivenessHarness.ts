@@ -36,6 +36,8 @@ export interface TransformerLivenessHarnessInterface extends Interface {
       BytesLike,
       BytesLike,
       BigNumberish,
+      BigNumberish,
+      BigNumberish,
       BigNumberish
     ]
   ): string;
@@ -103,7 +105,9 @@ export interface TransformerLivenessHarness extends BaseContract {
       arg7: BytesLike,
       arg8: BytesLike,
       arg9: BigNumberish,
-      arg10: BigNumberish
+      arg10: BigNumberish,
+      arg11: BigNumberish,
+      arg12: BigNumberish
     ],
     [bigint[]],
     "view"
@@ -138,7 +142,9 @@ export interface TransformerLivenessHarness extends BaseContract {
       arg7: BytesLike,
       arg8: BytesLike,
       arg9: BigNumberish,
-      arg10: BigNumberish
+      arg10: BigNumberish,
+      arg11: BigNumberish,
+      arg12: BigNumberish
     ],
     [bigint[]],
     "view"

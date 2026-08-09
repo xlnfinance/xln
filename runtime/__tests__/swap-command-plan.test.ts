@@ -18,6 +18,12 @@ const targetHubSigner = `0x${'54'.repeat(20)}`;
 const sourceJurisdiction = `stack:11155111:0x${'61'.repeat(20)}`;
 const targetJurisdiction = `stack:728126428:0x${'62'.repeat(20)}`;
 
+const partyRoles = (entityId: string, entityIsHub: boolean, hubEntityId: string, hubIsHub = true) => ({
+  entityRoleEvidence: { entityId, isHub: entityIsHub, source: 'committed-profile' as const },
+  hubRoleEvidence: { entityId: hubEntityId, isHub: hubIsHub, source: 'verified-gossip-profile' as const },
+  committedRoles: new Map([[entityId, entityIsHub]]),
+});
+
 const sourceAccount = () => {
   const account = makeAccount(sourceUser, sourceHub);
   const token = account.state.deltas.get(1)!;
@@ -39,6 +45,7 @@ const baseInput = () => ({
     hubEntityId: sourceHub,
     hubSignerId: sourceHubSigner,
     jurisdiction: sourceJurisdiction,
+    ...partyRoles(sourceUser, false, sourceHub),
     account: sourceAccount().state,
   },
 });
@@ -95,6 +102,7 @@ describe('runtime-owned swap command plan', () => {
         hubEntityId: targetHub,
         hubSignerId: targetHubSigner,
         jurisdiction: targetJurisdiction,
+        ...partyRoles(targetUser, false, targetHub),
         account: null,
       },
       allowOpenTargetAccount: true,
@@ -105,6 +113,7 @@ describe('runtime-owned swap command plan', () => {
       type: 'openAccount',
       data: {
         targetEntityId: targetHub,
+        disputeConfig: { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 },
         tokenId: 1,
         creditAmount: 1_000n,
       },
@@ -125,6 +134,7 @@ describe('runtime-owned swap command plan', () => {
         hubEntityId: targetHub,
         hubSignerId: targetHubSigner,
         jurisdiction: targetJurisdiction,
+        ...partyRoles(targetUser, false, targetHub),
         account: null,
       },
       allowOpenTargetAccount: false,
@@ -140,6 +150,7 @@ describe('runtime-owned swap command plan', () => {
         hubEntityId: targetHub,
         hubSignerId: targetHubSigner,
         jurisdiction: targetJurisdiction,
+        ...partyRoles(targetUser, false, targetHub),
         account: null,
       },
       allowOpenTargetAccount: true,
@@ -157,5 +168,66 @@ describe('runtime-owned swap command plan', () => {
       planned.crossJurisdictionIntent,
       readyAccount.state,
     )).not.toThrow();
+  });
+
+  test('uses the committed Hub role for a missing Hub target account', () => {
+    const plan = planSwapCommand({
+      ...baseInput(),
+      mode: 'cross',
+      wantTokenId: 1,
+      target: {
+        entityId: targetUser,
+        signerId: targetSigner,
+        hubEntityId: targetHub,
+        hubSignerId: targetHubSigner,
+        jurisdiction: targetJurisdiction,
+        ...partyRoles(targetUser, true, targetHub),
+        account: null,
+      },
+      allowOpenTargetAccount: true,
+    });
+    expect(plan.targetSetupInput?.entityInputs[0]?.entityTxs[0]).toMatchObject({
+      type: 'openAccount',
+      data: {
+        disputeConfig: { leftResponseSeconds: 3_600, rightResponseSeconds: 3_600 },
+      },
+    });
+  });
+
+  test('rejects a target advertised as a Hub without a verified Hub role', () => {
+    expect(() => planSwapCommand({
+      ...baseInput(),
+      mode: 'cross',
+      wantTokenId: 1,
+      target: {
+        entityId: targetUser,
+        signerId: targetSigner,
+        hubEntityId: targetHub,
+        hubSignerId: targetHubSigner,
+        jurisdiction: targetJurisdiction,
+        ...partyRoles(targetUser, false, targetHub, false),
+        account: null,
+      },
+      allowOpenTargetAccount: true,
+    })).toThrow('SWAP_COMMAND_TARGET_PARTY_INVALID');
+  });
+
+  test('committed User role vetoes a conflicting remote Hub advertisement', () => {
+    expect(() => planSwapCommand({
+      ...baseInput(),
+      mode: 'cross',
+      wantTokenId: 1,
+      target: {
+        entityId: targetUser,
+        signerId: targetSigner,
+        hubEntityId: targetHub,
+        hubSignerId: targetHubSigner,
+        jurisdiction: targetJurisdiction,
+        ...partyRoles(targetUser, false, targetHub),
+        committedRoles: new Map([[targetUser, false], [targetHub, false]]),
+        account: null,
+      },
+      allowOpenTargetAccount: true,
+    })).toThrow(`ACCOUNT_ROLE_EVIDENCE_COMMITTED_CONFLICT:${targetHub}`);
   });
 });

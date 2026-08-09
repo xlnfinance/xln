@@ -161,13 +161,17 @@ describe('deriveDelta deterministic property invariants', () => {
         expect(creditorView.outCapacity >= 80n).toBe(true);
         expect(debtorView.outOwnCredit).toBe(0n);
 
+        const fromEntityId = creditorIsLeft ? leftEntity : rightEntity;
+        const toEntityId = creditorIsLeft ? rightEntity : leftEntity;
         const cured = handleDirectPayment(account, {
           type: 'direct_payment',
           data: {
             tokenId: 1,
             amount: 80n,
-            fromEntityId: creditorIsLeft ? leftEntity : rightEntity,
-            toEntityId: creditorIsLeft ? rightEntity : leftEntity,
+            fromEntityId,
+            toEntityId,
+            route: [toEntityId],
+            deliveryMode: 'direct',
           },
         }, creditorIsLeft);
         expect(cured.success).toBe(true);

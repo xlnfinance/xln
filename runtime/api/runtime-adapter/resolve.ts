@@ -190,7 +190,7 @@ export type RuntimeAdapterGraphAccount = {
   activeDispute?: {
     startedByLeft: boolean;
     disputeTimeout: number;
-    initialDisputeNonce: number;
+    initialNonce: number;
   };
 };
 
@@ -456,8 +456,10 @@ const labelForState = (state: EntityState): string => {
   return name || state.entityId;
 };
 
-const isHubState = (state: EntityState): boolean =>
-  state.profile?.isHub === true || Boolean(state.orderbookExt?.hubProfile);
+// Financial role is committed explicitly by the Entity profile. An orderbook
+// is a capability, not authority to shorten the bilateral dispute window: a
+// normal User may publish books without becoming a Hub.
+const isHubState = (state: EntityState): boolean => state.profile?.isHub === true;
 
 const jurisdictionSummary = (jurisdiction: unknown): RuntimeAdapterEntitySummary['jurisdiction'] | undefined => {
   if (!jurisdiction || typeof jurisdiction !== 'object') return undefined;
@@ -497,7 +499,7 @@ const summaryFromProfile = (
     ...(runtimeId ? { runtimeId } : {}),
     label: profileName || entityId,
     height: Math.max(0, Math.floor(Number(profile.lastUpdated || fallbackHeight || 0))),
-    ...(profile.metadata?.isHub === true ? { isHub: true } : {}),
+    isHub: profile.metadata?.isHub === true,
     ...(jurisdiction ? { jurisdiction } : {}),
   };
 };
@@ -519,7 +521,11 @@ const mergeEntitySummaries = (
     };
     if (!summary.jurisdiction && existing?.jurisdiction) merged.jurisdiction = existing.jurisdiction;
     if ((!summary.label || summary.label === entityId) && existing?.label) merged.label = existing.label;
-    if (summary.isHub === true || existing?.isHub === true) merged.isHub = true;
+    // The primary summary is committed local state and must win even when its
+    // role is `false`. Letting a live gossip advertisement OR-in `true` would
+    // change the response clocks signed by an Account-opening command.
+    if (typeof summary.isHub === 'boolean') merged.isHub = summary.isHub;
+    else if (typeof existing?.isHub === 'boolean') merged.isHub = existing.isHub;
     return merged;
   };
   for (const summary of additions) {
@@ -621,7 +627,7 @@ const listLiveEntitySummaries = (
         ...withDefinedProp('signerId', replica.signerId),
         label: labelForState(replica.state),
         height: Math.max(0, Math.floor(Number(replica.state.height ?? 0))),
-        ...(isHub ? { isHub: true } : {}),
+        isHub,
         ...(jurisdiction ? { jurisdiction } : {}),
       };
     });
@@ -661,7 +667,7 @@ const listEntitySummaries = async (
       }
       const profileName = loadedView ? String(loadedView.core.profile?.name || '').trim() : '';
       const isHub = loadedView
-        ? loadedView.core.profile?.isHub === true || Boolean(loadedView.core.orderbookHubProfile)
+        ? loadedView.core.profile?.isHub === true
         : loaded ? isHubState(loaded) : false;
       const jurisdiction = jurisdictionSummary(loadedView?.core.config?.jurisdiction ?? loaded?.config?.jurisdiction);
       summaries.push({
@@ -670,7 +676,7 @@ const listEntitySummaries = async (
         ...withDefinedProp('signerId', loadedView?.core.signerId),
         label: profileName || (loaded ? labelForState(loaded) : normalizedId),
         height: loadedView?.core.height ?? loaded?.height ?? height,
-        ...(isHub ? { isHub: true } : {}),
+        isHub,
         ...(jurisdiction ? { jurisdiction } : {}),
       });
     }
@@ -1028,7 +1034,12 @@ const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => 
       watchSeed: '',
       sig: op.sig ? '[redacted]' : '',
       starterInitialArguments: op.starterInitialArguments ? '[redacted]' : '',
-      starterIncrementedArguments: op.starterIncrementedArguments ? '[redacted]' : '',
+      starterCounterArguments: op.starterCounterArguments ? '[redacted]' : '',
+    })),
+    counterDisputes: (compactArrayTail(batch.counterDisputes, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
+      ...op,
+      counterProofbody: compactProofBodyForBatchView(op.counterProofbody) as typeof op.counterProofbody,
+      sig: op.sig ? '[redacted]' : '',
     })),
     disputeFinalizations: (compactArrayTail(batch.disputeFinalizations, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
       ...op,
@@ -1043,10 +1054,13 @@ const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => 
       ...op,
       secret: op.secret ? '[redacted]' : '',
     })),
-    hashLadderReveals: (compactArrayTail(batch.hashLadderReveals, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
+    hashLadderRegistrations: (compactArrayTail(batch.hashLadderRegistrations, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
       ...op,
-      fullSecret: op.fullSecret ? '[redacted]' : '',
-      reveals: ['[redacted]', '[redacted]', '[redacted]', '[redacted]'],
+      witness: {
+        ...op.witness,
+        fullSecret: op.witness.fullSecret ? '[redacted]' : '',
+        reveals: ['[redacted]', '[redacted]', '[redacted]', '[redacted]'],
+      } as typeof op.witness,
     })),
   };
 };
@@ -1266,6 +1280,8 @@ const compactBookStateForView = (book: BookState, maxLevelsPerSide = 5, maxOrder
     nextSeq: book.nextSeq,
     tradeCount: book.tradeCount,
     tradeQtySum: book.tradeQtySum,
+    lastTradePriceTicks: book.lastTradePriceTicks,
+    lastAcceptedUsdAskPriceTicks: book.lastAcceptedUsdAskPriceTicks,
     eventHash: book.eventHash,
   };
 };
@@ -1401,7 +1417,7 @@ const projectViewFrame = async (
     entityId: activeEntityId,
     label: String(compactStored.core.profile?.name || '').trim() || activeEntityId,
     height: Math.max(0, Math.floor(Number(compactStored.core.height ?? height))),
-    ...(compactStored.core.profile?.isHub === true || Boolean(compactStored.core.orderbookHubProfile) ? { isHub: true } : {}),
+    ...(compactStored.core.profile?.isHub === true ? { isHub: true } : {}),
     ...(fallbackJurisdiction ? { jurisdiction: fallbackJurisdiction } : {}),
   };
 
@@ -1427,7 +1443,7 @@ const projectGraphEntityCore = (core: RuntimeAdapterEntityCoreDoc): RuntimeAdapt
   ...withDefinedProp('prevFrameHash', core.prevFrameHash),
   reserves: new Map(core.reserves),
   profile: { name: core.profile.name, isHub: core.profile.isHub },
-  isHub: core.profile.isHub || Boolean(core.orderbookHubProfile),
+  isHub: core.profile.isHub,
 });
 
 const GRAPH_ACCOUNT_ACTIVITY_SAMPLE_LIMIT = 2;
@@ -1484,7 +1500,7 @@ const projectGraphAccount = (doc: StorageAccountDoc): RuntimeAdapterGraphAccount
     activeDispute: {
       startedByLeft: doc.activeDispute.startedByLeft,
       disputeTimeout: doc.activeDispute.disputeTimeout,
-      initialDisputeNonce: doc.activeDispute.initialNonce,
+      initialNonce: doc.activeDispute.initialNonce,
     },
   } : {}),
 });

@@ -2,6 +2,7 @@ import {
   deterministicEntityTimestamp,
   findAccountByCounterparty,
   getCrossJurisdictionBookAdmissionError,
+  isCrossJurisdictionBookRiskRejection,
   isCrossJurisdictionBookAdmissionPending,
 } from '../../orderbook/cross-j-orderbook';
 import {
@@ -134,7 +135,10 @@ export const admitOrderbookOfferForMatching = (
       deterministicEntityTimestamp(state, env),
     );
     if (admissionError) {
-      if (isCrossJurisdictionBookAdmissionPending(admissionError)) {
+      if (
+        isCrossJurisdictionBookAdmissionPending(admissionError) ||
+        isCrossJurisdictionBookRiskRejection(admissionError)
+      ) {
         entityLog.debug('crossj.orderbook.admission_pending', {
           offer: shortOrder(offer.offerId, 8),
           reason: admissionError,

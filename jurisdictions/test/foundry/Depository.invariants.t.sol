@@ -27,7 +27,7 @@ contract DepositoryInvariants is XlnFixture {
     dep.registerExternalToken(0, address(tokenB), 0);
 
     uint256[4] memory keys = [pk[0], pk[1], pk[2], pk[3]];
-    handler = new DepositoryHandler(dep, erc20, tokenB, keys);
+    handler = new DepositoryHandler(dep, erc20, tokenB, keys, address(this));
 
     // Depository.mintToReserve is gated on msg.sender == admin, which is this
     // contract; the handler pranks it, so no ownership transfer is needed.
@@ -199,7 +199,7 @@ contract DepositoryInvariants is XlnFixture {
   // ═══════════════ invariant 4: dispute monotonicity ═══════════════
 
   /// @notice INVARIANT 4a. The dispute starter can never finalize before
-  ///         `defaultDisputeDelay` blocks have passed.
+  ///         the ProofBody's signed response seconds have passed.
   function invariant_disputeNotFinalizableEarly() public view {
     assertEq(handler.disputeEarlyFinalizeViolations(), 0, "starter finalized before the delay");
   }
@@ -221,8 +221,8 @@ contract DepositoryInvariants is XlnFixture {
     for (uint256 i = 0; i < ACTORS; i++) {
       for (uint256 j = i + 1; j < ACTORS; j++) {
         bytes memory key = XlnHanko.accountKey(entity[i], entity[j]);
-        // AccountInfo: nonce, hash, timeout, startTs, pbHash, c1, c2, byLeft.
-        (, bytes32 disputeHash, uint256 timeout, uint256 startTs, bytes32 initialPbHash, , , ) =
+        // AccountInfo timing is signed seconds, followed by proof commitments.
+        (, bytes32 disputeHash, uint256 timeout, uint256 startTs, , , bytes32 initialPbHash, , , , , , , , ) =
           dep._accounts(key);
         if (disputeHash == bytes32(0)) {
           assertEq(timeout, 0, "stale timeout on a cleared dispute");
@@ -245,7 +245,7 @@ contract DepositoryInvariants is XlnFixture {
     for (uint256 i = 0; i < ACTORS; i++) {
       for (uint256 j = i + 1; j < ACTORS; j++) {
         bytes memory key = XlnHanko.accountKey(entity[i], entity[j]);
-        (uint256 nonce, bytes32 disputeHash,,,,,,) = dep._accounts(key);
+        (uint256 nonce, bytes32 disputeHash, , , , , , , , , , , , , ) = dep._accounts(key);
         if (disputeHash != bytes32(0)) assertGt(nonce, 0, "dispute with a zero account nonce");
       }
     }

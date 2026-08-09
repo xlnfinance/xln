@@ -18,6 +18,7 @@ import {
   getCrossJurisdictionBookAdmissionError,
   getCrossJurisdictionRouteRemainingAmounts,
   isCrossJurisdictionBookAdmissionPending,
+  isCrossJurisdictionBookRiskRejection,
   markCrossJurisdictionBookCancelPending,
   markCrossJurisdictionBookAdmissionClosed,
   markCrossJurisdictionBookRemovalCommitted,
@@ -28,7 +29,7 @@ import type { EntityCandidateEffect, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../types/account';
-import { getSwapLotScale } from '../../../orderbook';
+import { crossJurisdictionBookQtyLots } from '../../../orderbook';
 import {
   materializeCrossJurisdictionBookRemainder,
   removeCrossJurisdictionBookOrderByRouteId,
@@ -52,12 +53,6 @@ import { draftPreparedDisputeStartIfReady } from './dispute';
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
   prepareEntityTxState(entityState, options?.mutableFrameState);
-
-const crossBookQtyLots = (baseTokenId: number, baseAmount: bigint): bigint => {
-  if (baseAmount <= 0n) return 0n;
-  const lotScale = getSwapLotScale(baseTokenId);
-  return (baseAmount + lotScale - 1n) / lotScale;
-};
 
 type CrossJurisdictionBookProgressTx = Extract<EntityTx, { type: 'applyCrossJurisdictionBookProgress' }>;
 
@@ -194,7 +189,7 @@ const updateBookOrderForProgress = (
       state.entityId,
     );
     if (!market) throw new Error(`CROSS_J_BOOK_PROGRESS_MARKET_INVALID: order=${route.orderId}`);
-    const qtyLots = crossBookQtyLots(market.baseTokenId, market.baseAmount);
+    const qtyLots = crossJurisdictionBookQtyLots(market.baseTokenId, market.baseAmount);
     if (resizeCrossJurisdictionBookOrderByRouteId(
       state,
       route.source.entityId,
@@ -285,6 +280,20 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
   if (admissionError) {
     if (isCrossJurisdictionBookAdmissionPending(admissionError)) {
       addMessage(newState, `🌉 Cross-j book admit ${route.orderId}: pending ${admissionError}`);
+      return { newState, outputs: [], swapOffersCreated: [] };
+    }
+    if (isCrossJurisdictionBookRiskRejection(admissionError)) {
+      // Oversize or unpriced orders are normal Hub admission rejections, not
+      // corrupt consensus inputs. Persist the exact reason and leave the
+      // bilateral route available for its explicit manual cancellation path.
+      markCrossJurisdictionBookAdmissionClosed(
+        newState,
+        admission.route.source.entityId,
+        admission.route.orderId,
+        now,
+        admissionError,
+      );
+      addMessage(newState, `🌉 Cross-j book reject ${route.orderId}: ${admissionError}`);
       return { newState, outputs: [], swapOffersCreated: [] };
     }
     throw new Error(admissionError);

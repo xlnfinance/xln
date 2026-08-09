@@ -118,6 +118,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.ReentrancyGuardLite__factory>;
     getContractFactory(
+      name: "DepositoryBounds",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.DepositoryBounds__factory>;
+    getContractFactory(
       name: "EntityProvider",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.EntityProvider__factory>;
@@ -145,6 +149,10 @@ declare module "hardhat/types/runtime" {
       name: "HashLadder",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.HashLadder__factory>;
+    getContractFactory(
+      name: "HashLadderRegistry",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.HashLadderRegistry__factory>;
     getContractFactory(
       name: "IEntityProvider",
       signerOrOptions?: ethers.Signer | FactoryOptions
@@ -185,6 +193,10 @@ declare module "hardhat/types/runtime" {
       name: "TransformerLivenessHarness",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.TransformerLivenessHarness__factory>;
+    getContractFactory(
+      name: "IDepositoryDelegateErrorAbi",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.IDepositoryDelegateErrorAbi__factory>;
 
     getContractAt(
       name: "IERC1155Errors",
@@ -317,6 +329,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.ReentrancyGuardLite>;
     getContractAt(
+      name: "DepositoryBounds",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.DepositoryBounds>;
+    getContractAt(
       name: "EntityProvider",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -351,6 +368,11 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.HashLadder>;
+    getContractAt(
+      name: "HashLadderRegistry",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.HashLadderRegistry>;
     getContractAt(
       name: "IEntityProvider",
       address: string | ethers.Addressable,
@@ -401,6 +423,11 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.TransformerLivenessHarness>;
+    getContractAt(
+      name: "IDepositoryDelegateErrorAbi",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.IDepositoryDelegateErrorAbi>;
 
     deployContract(
       name: "IERC1155Errors",
@@ -507,6 +534,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ReentrancyGuardLite>;
     deployContract(
+      name: "DepositoryBounds",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.DepositoryBounds>;
+    deployContract(
       name: "EntityProvider",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.EntityProvider>;
@@ -534,6 +565,10 @@ declare module "hardhat/types/runtime" {
       name: "HashLadder",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadder>;
+    deployContract(
+      name: "HashLadderRegistry",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HashLadderRegistry>;
     deployContract(
       name: "IEntityProvider",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -574,6 +609,10 @@ declare module "hardhat/types/runtime" {
       name: "TransformerLivenessHarness",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.TransformerLivenessHarness>;
+    deployContract(
+      name: "IDepositoryDelegateErrorAbi",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IDepositoryDelegateErrorAbi>;
 
     deployContract(
       name: "IERC1155Errors",
@@ -706,6 +745,11 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ReentrancyGuardLite>;
     deployContract(
+      name: "DepositoryBounds",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.DepositoryBounds>;
+    deployContract(
       name: "EntityProvider",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -740,6 +784,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadder>;
+    deployContract(
+      name: "HashLadderRegistry",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HashLadderRegistry>;
     deployContract(
       name: "IEntityProvider",
       args: any[],
@@ -790,6 +839,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.TransformerLivenessHarness>;
+    deployContract(
+      name: "IDepositoryDelegateErrorAbi",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IDepositoryDelegateErrorAbi>;
 
     // default types
     getContractFactory(

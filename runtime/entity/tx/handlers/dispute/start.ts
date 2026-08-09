@@ -18,6 +18,7 @@ import { disputeLog } from './shared';
 import {
   admitDisputeStart,
   assertCrossJurisdictionDisputeProofHasPulls,
+  proofBodyHasPulls,
   validateCrossJurisdictionDisputeRoute,
 } from './start-admission';
 import {
@@ -27,8 +28,55 @@ import {
   type StartEvidence,
 } from './start-evidence';
 import { verifyStartHanko } from './start-hanko';
+import { requireAccountDeltaTransformerAddress } from '../../../../account/consensus/helpers';
+import {
+  flushDeferredHashLadderReveals,
+  queueSourceHubClaimRegistrationsForAccount,
+} from '../../j-events-htlc';
 
 type StartTx = Extract<EntityTx, { type: 'disputeStart' }>;
+
+const queuePullDisputeRegistrations = (
+  state: EntityState,
+  tx: StartTx,
+  evidence: StartEvidence,
+  outputs: EntityInput[],
+  runtimeSeed: string | undefined,
+  canonicalDeltaTransformerAddress: string,
+): void => {
+  flushDeferredHashLadderReveals(state, tx.data.counterpartyEntityId);
+  const sourceClaims = queueSourceHubClaimRegistrationsForAccount(
+    state,
+    tx.data.counterpartyEntityId,
+    runtimeSeed,
+    evidence.initialProofbody,
+    canonicalDeltaTransformerAddress,
+  );
+  for (const sourceClaim of sourceClaims) {
+    if (sourceClaim.result === 'source-window-expired') {
+      throw new Error(`DISPUTE_START_SOURCE_CLAIM_WINDOW_IMPOSSIBLE:${sourceClaim.routeId}`);
+    }
+    if (sourceClaim.result === 'already-queued') continue;
+    if (sourceClaim.result === 'deferred-batch-pending' && !state.jBatchState!.sentBatch) {
+      throw new Error(`DISPUTE_START_SOURCE_CLAIM_NOT_ATOMIC:${sourceClaim.routeId}`);
+    }
+    addMessage(
+      state,
+      sourceClaim.result === 'queued'
+        ? `🌉 Cross-j claim ${sourceClaim.routeId}: source reveal bundled with dispute start`
+        : `⏳ Cross-j claim ${sourceClaim.routeId}: start/reveal held behind immutable jBatch`,
+    );
+  }
+  state.jBatchState!.autoBroadcastDraft = true;
+  if (state.jBatchState!.sentBatch) return;
+  const signerId = state.config.validators[0];
+  if (!signerId) throw new Error('DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
+  outputs.push({
+    entityId: state.entityId,
+    signerId,
+    entityTxs: [{ type: 'j_broadcast', data: {} }],
+  });
+};
 
 const queueDisputeStart = (
   sourceState: EntityState,
@@ -37,8 +85,24 @@ const queueDisputeStart = (
   tx: StartTx,
   evidence: StartEvidence,
   outputs: EntityInput[],
+  runtimeSeed: string | undefined,
+  canonicalDeltaTransformerAddress: string,
 ): void => {
   const batch = state.jBatchState!.batch;
+  const hasPulls = proofBodyHasPulls(
+    evidence.initialProofbody,
+    canonicalDeltaTransformerAddress,
+  );
+  if (hasPulls && batchOpCount(batch) !== 0) {
+    // A Pull-bearing start defines the inclusive reveal second S. Mixing it
+    // into an existing mutable draft can exhaust registration capacity after
+    // the Account is already frozen, leaving a valid zero-window claim
+    // impossible. Require a clean draft so start plus every Account-scoped
+    // Source/Target registration is one indivisible processBatch operation.
+    throw new Error(
+      `DISPUTE_START_PULL_BATCH_NOT_EMPTY:${batchOpCount(batch)}`,
+    );
+  }
   if (batch.disputeStarts.length >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts) {
     throw new Error(
       `J_BATCH_LIMIT_EXCEEDED: disputeStarts ${batch.disputeStarts.length + 1}/` +
@@ -54,26 +118,15 @@ const queueDisputeStart = (
   batch.disputeStarts.push({
     counterentity: tx.data.counterpartyEntityId,
     nonce: evidence.signedNonce,
+    proposerIsLeft: evidence.proposerIsLeft,
     proofbodyHash: evidence.proofBodyHash,
     initialProofbody: evidence.initialProofbody,
     watchSeed: String(evidence.initialProofbody.watchSeed),
     sig: evidence.counterpartyHanko,
     starterInitialArguments: evidence.starterInitialArguments,
-    starterIncrementedArguments: evidence.starterIncrementedArguments,
+    starterCounterArguments: evidence.starterCounterArguments,
+    starterCounterProofCommitment: evidence.starterCounterProofCommitment,
   });
-  encodeJBatch(batch);
-  if (tx.data.crossJurisdictionRouteId) {
-    state.jBatchState!.autoBroadcastDraft = true;
-    if (!state.jBatchState!.sentBatch) {
-      const signerId = state.config.validators[0];
-      if (!signerId) throw new Error('DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
-      outputs.push({
-        entityId: state.entityId,
-        signerId,
-        entityTxs: [{ type: 'j_broadcast', data: {} }],
-      });
-    }
-  }
   account.status = 'disputed';
   delete account.disputePrepare;
   freezeAccountForDispute(account, false);
@@ -85,14 +138,34 @@ const queueDisputeStart = (
     ),
     initialProofbodyHash: evidence.proofBodyHash,
     initialNonce: evidence.signedNonce,
+    initialProposerIsLeft: evidence.proposerIsLeft,
     // Depository chooses the authoritative timeout at inclusion height.
     disputeTimeout: 0,
     jNonce: evidence.jNonce,
     starterInitialArguments: evidence.starterInitialArguments,
-    starterIncrementedArguments: evidence.starterIncrementedArguments,
+    starterCounterArguments: evidence.starterCounterArguments,
+    starterCounterProofCommitment: evidence.starterCounterProofCommitment,
     observedOnChain: false,
     finalizeQueued: false,
   };
+  if (hasPulls) {
+    // A verified Target witness may have arrived while order removal was still
+    // preparing this dispute. Install the exact draft binding first, then pull
+    // that evidence into the same start batch. Sealing start alone would lose
+    // one block and makes a bilaterally chosen zero-second window unusable.
+    // Pull semantics come from the signed ProofBody, never an optional UI
+    // route hint. A generic dispute over an Account with Pulls has exactly the
+    // same atomic publication requirements as must-close fanout.
+    queuePullDisputeRegistrations(
+      state,
+      tx,
+      evidence,
+      outputs,
+      runtimeSeed,
+      canonicalDeltaTransformerAddress,
+    );
+  }
+  encodeJBatch(batch);
 };
 
 export const handleDisputeStart = async (
@@ -102,7 +175,7 @@ export const handleDisputeStart = async (
   _storageChanges: RuntimeOverlayRecord[] = [],
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
-  if (entityTx.data.starterIncrementedArguments !== undefined) {
+  if (entityTx.data.starterCounterArguments !== undefined) {
     throw new Error('DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED');
   }
   validateCrossJurisdictionDisputeRoute(entityState, entityTx);
@@ -121,6 +194,7 @@ export const handleDisputeStart = async (
     assertCrossJurisdictionDisputeProofHasPulls(
       proof.initialProofbody,
       entityTx.data.crossJurisdictionRouteId,
+      requireAccountDeltaTransformerAddress(env.state, account.state),
     );
   }
   const nonce = resolveStartNonce(newState, account, counterpartyId, proof.proofBodyHash);
@@ -138,7 +212,16 @@ export const handleDisputeStart = async (
   if (!(await verifyStartHanko(entityState, newState, account, counterpartyId, evidence, env))) {
     return { newState, outputs };
   }
-  queueDisputeStart(entityState, newState, account, entityTx, evidence, outputs);
+  queueDisputeStart(
+    entityState,
+    newState,
+    account,
+    entityTx,
+    evidence,
+    outputs,
+    env.runtimeSeed,
+    requireAccountDeltaTransformerAddress(env.state, account.state),
+  );
   disputeLog.debug('start.jbatch_queued', {
     entity: shortId(entityState.entityId),
     counterparty: shortId(counterpartyId),

@@ -8,6 +8,7 @@ import {
   getFatalDegradedReasons,
   getFatalHealthFailures,
   validateHubTopology,
+  validateDeployedSource,
 } from '../scripts/prod-health-smoke';
 
 test('prod health smoke ignores advisory bootstrap reserve target drift', () => {
@@ -132,4 +133,19 @@ test('prod health smoke builds tower health URLs without guessing proxy query sh
   expect(buildTowerHealthUrl('https://tower.example.com/api/tower/healthz')).toBe('https://tower.example.com/api/tower/healthz');
   expect(buildTowerHealthUrl('https://xln.finance/api/watchtower-proxy?target=http://127.0.0.1:9100&path=/api/tower/healthz'))
     .toBe('https://xln.finance/api/watchtower-proxy?target=http://127.0.0.1:9100&path=/api/tower/healthz');
+});
+
+test('release health is bound to the exact clean deployed candidate', () => {
+  expect(validateDeployedSource(
+    { gitHead: 'abc', codeHash: 'code-abc', dirty: false },
+    { gitHead: 'abc', codeHash: 'code-abc', requireClean: true },
+  )).toEqual([]);
+  expect(validateDeployedSource(
+    { gitHead: 'old', codeHash: 'old-code', dirty: true },
+    { gitHead: 'abc', codeHash: 'code-abc', requireClean: true },
+  )).toEqual([
+    'DEPLOYED_GIT_HEAD_MISMATCH:expected=abc:actual=old',
+    'DEPLOYED_CODE_HASH_MISMATCH:expected=code-abc:actual=old-code',
+    'DEPLOYED_SOURCE_DIRTY:true',
+  ]);
 });

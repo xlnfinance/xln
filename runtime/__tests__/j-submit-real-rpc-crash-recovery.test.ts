@@ -78,6 +78,7 @@ const startAnvil = async (): Promise<ManagedAnvil> => {
       '--chain-id', String(CHAIN_ID),
       '--timestamp', '4102444800',
       '--block-gas-limit', '60000000',
+      '--code-size-limit', '65536',
       '--prune-history', '256',
       '--silent',
       '--state', join(root, 'state.json'),

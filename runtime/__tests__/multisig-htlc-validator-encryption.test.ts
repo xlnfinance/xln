@@ -432,7 +432,7 @@ const paymentAccount = (sourceEntityId: string, targetEntityId: string): Account
         entityId: sourceEntityId,
         counterpartyId: targetEntityId,
       }),
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
     },
     status: 'active',

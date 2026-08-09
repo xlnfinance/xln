@@ -25,7 +25,6 @@ export interface JAdapterConfig {
   watchOnly?: boolean;                // Explicit read/import adapter without a default signer
   watchPollMs?: number;               // Optional watcher polling interval override
   confirmationDepth?: number;         // Optional event finality depth override
-  defaultDisputeDelayBlocks?: number; // Required when deploying a non-dev stack
   txWaitTimeoutMs?: number;           // Optional tx wait timeout override
   txWaitConfirms?: number;            // Optional tx.wait confirmations override
   fromReplica?: JAdapterReplicaConnection; // Connect to an already deployed stack

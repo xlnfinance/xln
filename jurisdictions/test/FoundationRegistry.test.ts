@@ -112,6 +112,36 @@ describe('Foundation authority and name registry', function () {
     expect(await provider.nameToNumber('alpha')).to.equal(entities[2]);
   });
 
+  it('lets Foundation reserve and unreserve a name', async function () {
+    const { provider } = await fixture();
+    const name = 'coinbase';
+    const reserveAuthorization = await buildFoundationAction(
+      provider,
+      await provider.FOUNDATION_SET_RESERVED_NAME(),
+      actionArgumentsHash(['string', 'bool'], [name, true]),
+    );
+    await provider.setReservedName(
+      name,
+      true,
+      reserveAuthorization.hankoData,
+      reserveAuthorization.actionNonce,
+    );
+    expect(await provider.reservedNames(name)).to.equal(true);
+
+    const clearAuthorization = await buildFoundationAction(
+      provider,
+      await provider.FOUNDATION_SET_RESERVED_NAME(),
+      actionArgumentsHash(['string', 'bool'], [name, false]),
+    );
+    await provider.setReservedName(
+      name,
+      false,
+      clearAuthorization.hankoData,
+      clearAuthorization.actionNonce,
+    );
+    expect(await provider.reservedNames(name)).to.equal(false);
+  });
+
   it('does not turn minority Foundation control ownership into admin authority', async function () {
     const { provider, signers } = await fixture();
     const [controlTokenId] = await provider.getTokenIds(1);

@@ -1,6 +1,7 @@
 import { normalizeRuntimeKey, type RelayStore } from '../network/relay/store';
 import { compareStableText } from '../protocol/serialization';
 import type { HubChild } from './orchestrator-types';
+import type { AccountRoleEvidenceSource } from '../account/dispute-config';
 
 export type PublicHubJurisdiction = {
   name: string;
@@ -23,6 +24,8 @@ export type PublicHubDiscoveryHub = {
   };
   lastUpdated: number;
   online: boolean;
+  /** Authority that proved the Hub role consumed by account clock builders. */
+  roleSource: Extract<AccountRoleEvidenceSource, 'operator-config' | 'verified-gossip-profile'>;
 };
 
 type RawHubJurisdiction = {
@@ -113,6 +116,7 @@ export const buildPublicHubDiscoveryPayload = (input: {
             },
             lastUpdated: serverTime,
             online,
+            roleSource: 'operator-config' as const,
           };
         })
         .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub));
@@ -139,6 +143,7 @@ export const buildPublicHubDiscoveryPayload = (input: {
       },
       lastUpdated: Number(profile.lastUpdated || entry.timestamp || serverTime),
       online,
+      roleSource: 'verified-gossip-profile',
     });
   }
 

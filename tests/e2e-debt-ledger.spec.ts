@@ -18,11 +18,30 @@ const USD_100 = (100n * TOKEN_SCALE).toString();
 const USD_50 = (50n * TOKEN_SCALE).toString();
 const ERC20_BALANCE_OF = new Interface(['function balanceOf(address) view returns (uint256)']);
 const LONG_E2E = process.env.E2E_LONG === '1';
-const MAX_BATCH_MINE_BLOCKS = 100;
-const MINE_BLOCKS_TIMEOUT_MS = 90_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function relayToApiBase(relayUrl: string | null): string | null {
+  if (!relayUrl) return null;
+  try {
+    const relay = new URL(relayUrl);
+    const protocol = relay.protocol === 'wss:' ? 'https:' : relay.protocol === 'ws:' ? 'http:' : relay.protocol;
+    return `${protocol}//${relay.host}`;
+  } catch {
+    return null;
+  }
+}
+
+async function getActiveApiBase(page: Page): Promise<string> {
+  if (process.env.E2E_API_BASE_URL) return process.env.E2E_API_BASE_URL;
+  const relayUrl = await page.evaluate(() => {
+    const env = (window as any).isolatedEnv;
+    const relay = env?.infrastructure?.p2p?.relayUrls?.[0];
+    return typeof relay === 'string' ? relay : null;
+  });
+  return relayToApiBase(relayUrl) ?? APP_BASE_URL;
 }
 
 type RuntimeRef = {
@@ -70,7 +89,8 @@ async function getApiToken(page: Page, symbol: string): Promise<{ address: strin
 }
 
 async function rpcCall<T>(page: Page, method: string, params: unknown[]): Promise<T> {
-  const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+  const apiBase = await getActiveApiBase(page);
+  const response = await page.request.post(`${apiBase}/rpc`, {
     data: { jsonrpc: '2.0', id: 1, method, params },
   });
   expect(response.ok(), `${method} RPC must succeed`).toBe(true);
@@ -227,24 +247,28 @@ async function readAccountProgress(
   }, { entityId, signerId, counterpartyId });
 }
 
-async function ensurePrivateAccountOpenViaUi(
+async function ensurePrivateAccountOpenWithClock(
   page: Page,
   entityId: string,
   signerId: string,
   counterpartyId: string,
+  responseSeconds: number,
 ): Promise<void> {
   const already = await readAccountProgress(page, entityId, signerId, counterpartyId);
   if (already.exists && !already.pendingFrame && already.currentHeight > 0) return;
 
-  await openAccountWorkspaceTab(page, 'open');
-  const privateInput = page.locator('.open-private-form .entity-input input').first();
-  await expect(privateInput).toBeVisible({ timeout: 20_000 });
-  await privateInput.fill(counterpartyId);
-  await privateInput.press('Tab');
-
-  const openButton = page.locator('.open-private-form .btn-add').first();
-  await expect(openButton).toBeEnabled({ timeout: 20_000 });
-  await openButton.click();
+  await enqueueEntityTxs(page, entityId, signerId, [{
+    type: 'openAccount',
+    data: {
+      targetEntityId: counterpartyId,
+      disputeConfig: {
+        leftResponseSeconds: responseSeconds,
+        rightResponseSeconds: responseSeconds,
+      },
+      tokenId: TOKEN_ID_USDC,
+      creditAmount: 0n,
+    },
+  }]);
 
   await expect
     .poll(async () => {
@@ -462,6 +486,7 @@ async function sendDirectPayment(
       tokenId: TOKEN_ID_USDC,
       amount: BigInt(amount) * TOKEN_SCALE,
       route: [senderEntityId, recipientId],
+      deliveryMode: 'direct',
       description: 'debt-e2e-direct-bilateral',
     },
   }]);
@@ -684,10 +709,10 @@ async function readAccountState(
   entityId: string,
   signerId: string,
   counterpartyId: string,
-): Promise<{ activeDispute: boolean; disputeTimeout: number }> {
+): Promise<{ activeDispute: boolean; disputeTimeout: number; status: string }> {
   return page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.state?.eReplicas) return { activeDispute: false, disputeTimeout: 0 };
+    if (!env?.state?.eReplicas) return { activeDispute: false, disputeTimeout: 0, status: '' };
     const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
@@ -698,26 +723,14 @@ async function readAccountState(
     return {
       activeDispute: !!account?.activeDispute,
       disputeTimeout: Number(account?.activeDispute?.disputeTimeout || 0),
+      status: String(account?.status || ''),
     };
   }, { entityId, signerId, counterpartyId });
 }
 
-async function readCurrentChainBlock(page: Page): Promise<number> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const body = await postRpc(page, 'eth_blockNumber', []);
-      return Number.parseInt(String(body.result || '0x0'), 16);
-    } catch (error) {
-      lastError = error;
-      await sleep(100 * (attempt + 1));
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-
 async function postRpc(page: Page, method: string, params: unknown[]): Promise<{ result?: unknown; error?: unknown }> {
-  const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+  const apiBase = await getActiveApiBase(page);
+  const response = await page.request.post(`${apiBase}/rpc`, {
     data: { jsonrpc: '2.0', id: 1, method, params },
   });
   const text = await response.text();
@@ -736,66 +749,24 @@ async function mineOneBlock(page: Page): Promise<void> {
   await postRpc(page, 'evm_mine', []);
 }
 
-async function mineBlocks(page: Page, count: number): Promise<void> {
-  const blocks = Math.max(0, Math.floor(count));
-  if (blocks <= 0) return;
-  const startBlock = await readCurrentChainBlock(page);
-  const targetBlock = startBlock + blocks;
-  const deadline = Date.now() + MINE_BLOCKS_TIMEOUT_MS;
-  let chunkLimit = Math.min(blocks, MAX_BATCH_MINE_BLOCKS);
-  const errors: string[] = [];
-
-  while (Date.now() < deadline) {
-    const currentBlock = await readCurrentChainBlock(page);
-    if (currentBlock >= targetBlock) return;
-    const chunk = Math.min(targetBlock - currentBlock, chunkLimit);
-    try {
-      await mineBlockChunk(page, chunk);
-      chunkLimit = Math.min(MAX_BATCH_MINE_BLOCKS, Math.max(chunkLimit, chunk));
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
-      const afterFailureBlock = await readCurrentChainBlock(page).catch(() => currentBlock);
-      if (afterFailureBlock > currentBlock) {
-        chunkLimit = Math.max(1, Math.floor(chunkLimit / 2));
-        continue;
-      }
-      if (chunkLimit > 1) {
-        chunkLimit = Math.max(1, Math.floor(chunkLimit / 2));
-        continue;
-      }
-      throw new Error(`block mining stalled at ${currentBlock}/${targetBlock}: ${errors.slice(-5).join(' | ')}`);
-    }
+async function readCurrentChainTimestamp(page: Page): Promise<number> {
+  const body = await postRpc(page, 'eth_getBlockByNumber', ['latest', false]);
+  const timestamp = (body.result as { timestamp?: unknown } | undefined)?.timestamp;
+  if (typeof timestamp !== 'string') {
+    throw new Error(`unexpected latest block timestamp: ${JSON.stringify(body)}`);
   }
-  throw new Error(`timed out mining to block ${targetBlock}: ${errors.slice(-5).join(' | ')}`);
+  return Number.parseInt(timestamp, 16);
 }
 
-async function mineBlockChunk(page: Page, blocks: number): Promise<void> {
-  if (blocks <= 1) {
+async function waitForUnixSeconds(page: Page, targetTimestamp: number): Promise<void> {
+  const current = await readCurrentChainTimestamp(page);
+  if (current < targetTimestamp) {
+    await postRpc(page, 'evm_setNextBlockTimestamp', [targetTimestamp]);
     await mineOneBlock(page);
-    return;
   }
-  const quantity = `0x${blocks.toString(16)}`;
-  const errors: string[] = [];
-  for (const method of ['anvil_mine', 'hardhat_mine']) {
-    try {
-      await postRpc(page, method, [quantity]);
-      return;
-    } catch (error) {
-      errors.push(`${method}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  throw new Error(`batch block mining unavailable for ${blocks} blocks: ${errors.join(' | ')}`);
-}
-
-async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
-  const deadline = Date.now() + 90_000;
-  for (;;) {
-    const current = await readCurrentChainBlock(page);
-    if (current >= targetBlock) return;
-    if (Date.now() > deadline) {
-      throw new Error(`Timed out waiting for block ${targetBlock}, current=${current}`);
-    }
-    await mineBlocks(page, Math.min(targetBlock - current, MAX_BATCH_MINE_BLOCKS));
+  const advanced = await readCurrentChainTimestamp(page);
+  if (advanced < targetTimestamp) {
+    throw new Error(`failed to advance chain time: target=${targetTimestamp} actual=${advanced}`);
   }
 }
 
@@ -806,7 +777,7 @@ async function readDebtSnapshotsForCounterparty(
   counterpartyId: string,
   tokenId = TOKEN_ID_USDC,
 ): Promise<DebtSnapshot[]> {
-  return page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
+  const rows = await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.state?.eReplicas) return [];
     const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
@@ -819,7 +790,14 @@ async function readDebtSnapshotsForCounterparty(
       ['out', rep?.state?.outDebtsByToken],
       ['in', rep?.state?.inDebtsByToken],
     ] as const;
-    const rows: DebtSnapshot[] = [];
+    const rows: Array<{
+      debtId: string;
+      direction: 'out' | 'in';
+      status: string;
+      createdAmount: string;
+      paidAmount: string;
+      remainingAmount: string;
+    }> = [];
     for (const [direction, ledger] of ledgers) {
       const bucket = ledger?.get?.(tokenId);
       if (!bucket) continue;
@@ -829,14 +807,20 @@ async function readDebtSnapshotsForCounterparty(
           debtId: String(entry?.debtId || ''),
           direction,
           status: String(entry?.status || ''),
-          createdAmount: BigInt(entry?.createdAmount || 0n),
-          paidAmount: BigInt(entry?.paidAmount || 0n),
-          remainingAmount: BigInt(entry?.remainingAmount || 0n),
+          createdAmount: String(entry?.createdAmount || 0n),
+          paidAmount: String(entry?.paidAmount || 0n),
+          remainingAmount: String(entry?.remainingAmount || 0n),
         });
       }
     }
     return rows;
   }, { entityId, signerId, counterpartyId, tokenId });
+  return rows.map((row) => ({
+    ...row,
+    createdAmount: BigInt(row.createdAmount),
+    paidAmount: BigInt(row.paidAmount),
+    remainingAmount: BigInt(row.remainingAmount),
+  }));
 }
 
 async function readAccountDeltaSnapshot(
@@ -974,11 +958,13 @@ async function waitForMirroredDebtSnapshots(
       message: 'mirrored canonical debt state must exist on both runtimes',
     })
     .toBe(true);
+  console.log('[debt-e2e] debt-runtime-mirror-ready');
 
   await Promise.all([
     openOutstandingDebtToken(leftPage),
     openOutstandingDebtToken(rightPage),
   ]);
+  console.log('[debt-e2e] debt-ui-panels-ready');
 
   await expect
     .poll(async () => {
@@ -1010,6 +996,7 @@ async function waitForMirroredDebtSnapshots(
       message: 'mirrored debt row must be visible in UI on both pages',
     })
     .toBe(true);
+  console.log('[debt-e2e] debt-ui-mirror-ready');
 
   if (!latest.left || !latest.right) {
     throw new Error('mirrored debt snapshots missing');
@@ -1218,8 +1205,8 @@ test.describe('debt ledger', () => {
     await connectHub(bobPage, hubId);
 
     step('open-accounts');
-    await ensurePrivateAccountOpenViaUi(alicePage, alice.entityId, alice.signerId, bob.entityId);
-    await ensurePrivateAccountOpenViaUi(bobPage, bob.entityId, bob.signerId, alice.entityId);
+    await ensurePrivateAccountOpenWithClock(alicePage, alice.entityId, alice.signerId, bob.entityId, 5);
+    await ensurePrivateAccountOpenWithClock(bobPage, bob.entityId, bob.signerId, alice.entityId, 5);
 
     step('extend-credit');
     await extendCreditDirect(alicePage, alice.entityId, alice.signerId, bob.entityId, TOKEN_ID_USDC, 1000n * TOKEN_SCALE);
@@ -1268,7 +1255,7 @@ test.describe('debt ledger', () => {
       .toBe('ready');
     await openAccountWorkspaceTab(alicePage, 'history');
     await capturePageScreenshot(alicePage, testInfo, 'dispute-active-history-desktop.png', {
-      fullPage: false,
+      fullPage: true,
       ux: {
         title: 'desktop active dispute history',
         group: 'Disputes',
@@ -1278,25 +1265,32 @@ test.describe('debt ledger', () => {
       },
     });
 
-    const timeoutBlock = disputeState.disputeTimeout;
-    await waitForBlock(alicePage, timeoutBlock);
+    const finalizeBatchBefore = await readJBatchSnapshot(alicePage, alice.entityId, alice.signerId);
+    await waitForUnixSeconds(alicePage, disputeState.disputeTimeout);
 
     step('dispute-finalize-auto');
     await expect
       .poll(async () => {
-        const state = await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId);
-        if (state.activeDispute) {
-          await mineOneBlock(alicePage);
-        }
-        return state.activeDispute;
+        const snapshot = await readJBatchSnapshot(alicePage, alice.entityId, alice.signerId);
+        return snapshot.batchHistoryCount;
       }, {
-        timeout: 90_000,
-        intervals: [500, 1000, 1500],
+        // The authenticated watcher advances at most 256 headers per poll.
+        timeout: 180_000,
+        intervals: [500, 1000, 2000],
       })
-      .toBe(false);
+      .toBeGreaterThan(finalizeBatchBefore.batchHistoryCount);
+    await expect
+      .poll(async () => {
+        const state = await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId);
+        return !state.activeDispute && state.status === 'disputed';
+      }, {
+        timeout: 120_000,
+        intervals: [500, 1000, 2000],
+      })
+      .toBe(true);
     await openAccountWorkspaceTab(alicePage, 'history');
     await capturePageScreenshot(alicePage, testInfo, 'dispute-finalized-history-desktop.png', {
-      fullPage: false,
+      fullPage: true,
       ux: {
         title: 'desktop finalized dispute history',
         group: 'Disputes',

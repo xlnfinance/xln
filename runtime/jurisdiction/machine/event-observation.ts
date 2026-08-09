@@ -39,6 +39,7 @@ export const canonicalDisputeFinalizationEvidenceKey = (evidence: DisputeFinaliz
     normDecimal(evidence.finalNonce),
     normHex(evidence.initialProofbodyHash),
     normHex(evidence.finalProofbodyHash),
+    evidence.proposerIsLeft,
     normHex(evidence.leftArguments),
     normHex(evidence.rightArguments),
     evidence.startedByLeft,

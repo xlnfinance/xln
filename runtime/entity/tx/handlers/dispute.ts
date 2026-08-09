@@ -27,7 +27,7 @@ import { handleDisputeStart } from './dispute/start';
 import { planCrossJurisdictionTargetRecovery } from '../j-events-htlc';
 import {
   resolveStoredDisputeStartNonce,
-  selectIncrementedDisputeSnapshots,
+  selectCounterDisputeSnapshots,
 } from './dispute/start-evidence';
 
 export { canonicalizeProofBodyStruct } from './dispute/shared';
@@ -178,13 +178,18 @@ const targetStartSnapshotHashes = (
   if (!initialHash) return [];
   const starterSide = account.state.leftEntity === state.entityId ? 'left' : 'right';
   const { signedNonce } = resolveStoredDisputeStartNonce(account, initialHash);
-  const incremented = selectIncrementedDisputeSnapshots(
+  const initialProposerIsLeft = account.counterpartyDisputeProofProposerIsLeft;
+  if (typeof initialProposerIsLeft !== 'boolean') {
+    throw new Error(`DISPUTE_START_PROPOSER_ROLE_MISSING:${counterpartyEntityId}`);
+  }
+  const counter = selectCounterDisputeSnapshots(
     account,
     starterSide,
     signedNonce,
+    initialProposerIsLeft,
     counterpartyEntityId,
   );
-  return [initialHash, ...incremented.map((snapshot) => snapshot.proofbodyHash)];
+  return [initialHash, ...counter.map((snapshot) => snapshot.proofbodyHash)];
 };
 
 export const draftPreparedDisputeStartIfReady = async (

@@ -236,8 +236,22 @@ export const checkOnchainHankoAst = (): void => {
     assertExact(hankoEncodingCalls(fn), [encodingCall], `Account.${name} encoding calls`);
   }
 
+  // The linked Account library verifies the tower authorization at the same
+  // storage/mutation boundary where it locks the counter-proof. It still uses
+  // the one canonical HankoEncoding formula and derives the delegatecall
+  // chain/address domain locally; this is not a second financial formula.
+  const towerRegistration = namedFunction(contracts.Account, 'registerWatchtowerCounterDispute');
+  if (!hasChainId(towerRegistration) || !hasAddressThis(towerRegistration)) {
+    fail('Account.registerWatchtowerCounterDispute must derive local domain');
+  }
+  assertExact(
+    hankoEncodingCalls(towerRegistration),
+    ['encodeWatchtowerCounterDispute'],
+    'Account.registerWatchtowerCounterDispute encoding calls',
+  );
+
   for (const [contractName, functionName, encodingName] of [
-    ['Depository', '_encodeWatchtowerCounterDisputeHankoPayload', 'encodeWatchtowerCounterDispute'],
+    ['Depository', 'computeWatchtowerCounterDisputeHash', 'encodeWatchtowerCounterDispute'],
     ['EntityProvider', 'encodeBoardProposalHankoPayload', 'encodeBoardProposal'],
     ['EntityProvider', 'encodeBoardProposalCancelHankoPayload', 'encodeBoardProposalCancel'],
     ['EntityProvider', 'encodeEntityTransferHankoPayload', 'encodeEntityTransfer'],
@@ -256,7 +270,8 @@ export const checkOnchainHankoAst = (): void => {
     'Account._encodeBatchHankoPayload:encodeBatch',
     'Account._encodeCooperativeUpdateHankoPayload:encodeCooperativeUpdate',
     'Account._encodeDisputeProofHankoPayload:encodeDisputeProof',
-    'Depository._encodeWatchtowerCounterDisputeHankoPayload:encodeWatchtowerCounterDispute',
+    'Account.registerWatchtowerCounterDispute:encodeWatchtowerCounterDispute',
+    'Depository.computeWatchtowerCounterDisputeHash:encodeWatchtowerCounterDispute',
     'EntityProvider.encodeBoardProposalHankoPayload:encodeBoardProposal',
     'EntityProvider.encodeBoardProposalCancelHankoPayload:encodeBoardProposalCancel',
     'EntityProvider.encodeEntityTransferHankoPayload:encodeEntityTransfer',
@@ -345,8 +360,8 @@ export const checkOnchainHankoAst = (): void => {
     functions(contracts[contractName]!).filter((fn) => calledNames(fn).includes('verifyCurrentHankoSignature'))
       .map((fn) => `${contractName}.${String(fn.name)}`));
   assertExact(currentInterfaceVerifyConsumers, [
-    'Account.processC2R', 'Account._settleDiffs',
-    'Depository.processBatch', 'Depository.watchtowerCounterDispute',
+    'Account.processC2R', 'Account._settleDiffs', 'Account.registerWatchtowerCounterDispute',
+    'Depository.processBatch',
   ], 'verifyCurrentHankoSignature consumers');
 
   const finalProofConsumers = (['Account', 'Depository', 'EntityProvider'] as const).flatMap((contractName) =>
@@ -385,6 +400,7 @@ export const checkOnchainHankoAst = (): void => {
     'frontend/src',
   ].flatMap(recursiveFiles).filter((path) => (
     !path.startsWith('jurisdictions/ignition/deployments/') &&
+    !path.startsWith('scripts/debug/') &&
     readFileSync(path, 'utf8').includes('HankoCodec')
   ));
   assertExact(deploymentReferences, [], 'production stack HankoCodec references');

@@ -4,6 +4,8 @@ import { decodeTowerProofBody } from '../storage/recovery/tower-proof-body';
 
 const validProofBody = {
   watchSeed: `0x${'12'.repeat(32)}`,
+  leftResponseSeconds: 10n,
+  rightResponseSeconds: 10n,
   offdeltas: [-7n],
   tokenIds: [1n],
   transformers: [

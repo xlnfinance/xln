@@ -61,8 +61,13 @@ export const LIMITS = {
   /** Same-j live offers across all markets in one bilateral Account. */
   MAX_ACCOUNT_SAME_J_SWAP_OFFERS: 1000,
 
-  /** Cross-j live offers across all routes in one bilateral Account. */
-  MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: 1000,
+  /**
+   * Cross-j live offers/Pulls in one bilateral Account. A zero-second signed
+   * reveal window requires every committed registry witness to share the same
+   * processBatch as dispute start; Depository accepts at most 32. Signing a
+   * 33rd live Pull would create valid bilateral state that cannot be enforced.
+   */
+  MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: 32,
 
   /** Maximum live offers for one maker, direction, and economic market. */
   MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: 20,

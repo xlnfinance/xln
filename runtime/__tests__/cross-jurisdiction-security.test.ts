@@ -22,6 +22,8 @@ import {
   secret,
 } from './helpers/cross-j';
 
+const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
+
 const buildRoute = (
   orderId: string,
   seed: string,
@@ -31,6 +33,8 @@ const buildRoute = (
     orderId,
     makerEntityId: entity('01'),
     hubEntityId: entity('02'),
+    sourceDisputeConfig: TEST_DISPUTE_CONFIG,
+    targetDisputeConfig: TEST_DISPUTE_CONFIG,
     source: {
       jurisdiction: jref(eth),
       entityId: entity('01'),
@@ -52,6 +56,15 @@ const buildRoute = (
 }, { runtimeSeed: seed, now: 1_000 });
 
 describe('cross-jurisdiction security invariants', () => {
+  test('route preparation rejects missing signed response clocks without defaults', () => {
+    const route = buildRoute('cross-clock-required', 'cross-clock-required');
+    const { sourceDisputeConfig: _source, ...withoutSourceClock } = route;
+    expect(() => buildPreparedCrossJurisdictionRoute(
+      withoutSourceClock as CrossJurisdictionSwapRoute,
+      { runtimeSeed: 'cross-clock-required', now: 1_000 },
+    )).toThrow('ACCOUNT_DISPUTE_CONFIG_INVALID');
+  });
+
   test('local binding rejects display-name stack ref collision with wrong local stack', () => {
     const env = createEmptyEnv('cross-local-stack-name-collision');
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');

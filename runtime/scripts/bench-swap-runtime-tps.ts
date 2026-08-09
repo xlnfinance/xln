@@ -70,7 +70,7 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountReplica =>
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     jNonce: 0,
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
@@ -150,6 +150,8 @@ const seedCrossSwapAccount = (swaps: number): AccountReplica => {
     hubEntityId: sourceHub,
     bookOwnerEntityId: sourceHub,
     venueId: 'cross:bench-source:1/bench-target:1',
+    sourceDisputeConfig: { ...account.state.disputeConfig },
+    targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     source: {
       jurisdiction: `stack:1:${addr('11')}`,
       entityId: sourceUser,

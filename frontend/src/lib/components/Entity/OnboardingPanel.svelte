@@ -57,9 +57,12 @@
     type OnboardingRuntimeProjection,
   } from './onboarding-runtime-input';
   import { hubDiscoveryJurisdictionKey } from './hub-discovery-profile';
+  import type {
+    AccountRoleEvidence,
+    AccountRoleEvidenceSource,
+  } from '@xln/runtime/account/dispute-config';
 
   export let entityId: string = '';
-  export let signerId: string = '';
   export let runtimeProjection: OnboardingRuntimeProjection = emptyOnboardingRuntimeProjection();
 
   const dispatch = createEventDispatcher();
@@ -121,6 +124,7 @@
     ok: boolean;
     hubs?: Array<{
       entityId?: string;
+      roleSource?: AccountRoleEvidenceSource;
       metadata?: {
         isHub?: boolean;
         jurisdiction?: { name?: string; chainId?: number | string; depositoryAddress?: string };
@@ -136,6 +140,7 @@
     const add = (
       rawEntityId: unknown,
       rawSignerId: unknown,
+      isHub: boolean,
       rawJurisdiction: unknown = '',
       rawJurisdictionKey: unknown = '',
     ) => {
@@ -150,17 +155,20 @@
       );
       const jurisdiction = String(rawJurisdiction || runtimeSigner?.jurisdiction || 'Primary').trim() || 'Primary';
       const jurisdictionKey = String(rawJurisdictionKey || '').trim();
-      const target = { entityId: nextEntityId, signerId: nextSignerId, jurisdiction, ...(jurisdictionKey ? { jurisdictionKey } : {}) };
+      const target = {
+        entityId: nextEntityId,
+        signerId: nextSignerId,
+        isHub,
+        roleSource: 'committed-profile' as const,
+        jurisdiction,
+        ...(jurisdictionKey ? { jurisdictionKey } : {}),
+      };
       seen.add(key);
       targets.push(target);
     };
 
     for (const target of runtimeProjection.targets || []) {
-      add(target.entityId, target.signerId, target.jurisdiction, target.jurisdictionKey);
-    }
-    add(entityId, signerId);
-    for (const runtimeSigner of $activeRuntime?.signers || []) {
-      add(runtimeSigner.entityId, runtimeSigner.address, runtimeSigner.jurisdiction);
+      add(target.entityId, target.signerId, target.isHub, target.jurisdiction, target.jurisdictionKey);
     }
     return targets;
   }
@@ -475,15 +483,41 @@
   type HubDiscovery = {
     advertisedHubEntityIds: string[];
     eligibleHubEntityIds: string[];
+    roleEvidenceByEntityId: Record<string, AccountRoleEvidence>;
   };
+
+  const emptyHubDiscovery = (): HubDiscovery => ({
+    advertisedHubEntityIds: [],
+    eligibleHubEntityIds: [],
+    roleEvidenceByEntityId: {},
+  });
+
+  function authenticatedHubEvidence(
+    entityId: string,
+    source: AccountRoleEvidenceSource | undefined,
+  ): AccountRoleEvidence {
+    const normalized = normalizeEntityId(entityId);
+    const committed = runtimeProjection.committedRolesByEntityId[normalized];
+    if (typeof committed === 'boolean') {
+      if (!committed) throw new Error(`ONBOARDING_HUB_COMMITTED_ROLE_CONFLICT:${normalized}`);
+      return { entityId: normalized, isHub: true, source: 'committed-profile' };
+    }
+    if (source !== 'verified-gossip-profile' && source !== 'operator-config') {
+      throw new Error(`ONBOARDING_HUB_ROLE_SOURCE_INVALID:${normalized}:${String(source)}`);
+    }
+    return { entityId: normalized, isHub: true, source };
+  }
 
   function getProjectedHubDiscovery(target: OnboardingTarget): HubDiscovery {
     const advertisedHubEntityIds: string[] = [];
     const eligibleHubEntityIds: string[] = [];
-    const add = (value: unknown) => {
+    const roleEvidenceByEntityId: Record<string, AccountRoleEvidence> = {};
+    const add = (value: unknown, source: AccountRoleEvidenceSource | undefined) => {
       const id = String(value || '').trim();
       if (!id) return;
       if (normalizeEntityId(id) === normalizeEntityId(target.entityId)) return;
+      const normalized = normalizeEntityId(id);
+      roleEvidenceByEntityId[normalized] = authenticatedHubEvidence(normalized, source);
       if (!advertisedHubEntityIds.some(existing => normalizeEntityId(existing) === normalizeEntityId(id))) {
         advertisedHubEntityIds.push(id);
       }
@@ -496,17 +530,17 @@
     };
 
     for (const candidate of runtimeProjection.hubCandidates || []) {
-      if (candidate.isHub === false) continue;
+      if (candidate.isHub !== true) continue;
       if (!targetJurisdictionMatches(target, candidate)) continue;
-      add(candidate.entityId);
+      add(candidate.entityId, candidate.roleSource);
     }
 
-    return { advertisedHubEntityIds, eligibleHubEntityIds };
+    return { advertisedHubEntityIds, eligibleHubEntityIds, roleEvidenceByEntityId };
   }
 
   async function fetchPublicHubDiscovery(target: OnboardingTarget): Promise<HubDiscovery> {
     if (typeof window === 'undefined') {
-      return { advertisedHubEntityIds: [], eligibleHubEntityIds: [] };
+      return emptyHubDiscovery();
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1200);
@@ -520,19 +554,23 @@
       if (payload.ok !== true) throw new Error('RESPONSE_NOT_OK');
       const advertisedHubEntityIds: string[] = [];
       const eligibleHubEntityIds: string[] = [];
+      const roleEvidenceByEntityId: Record<string, AccountRoleEvidence> = {};
       for (const hub of payload.hubs || []) {
         if (!hub?.entityId || hub.metadata?.isHub !== true) continue;
         const normalized = normalizeEntityId(hub.entityId);
         if (!normalized || normalized === normalizeEntityId(target.entityId)) continue;
         const jurisdiction = String(hub.metadata?.jurisdiction?.name || '').trim();
         const jurisdictionKey = hubDiscoveryJurisdictionKey(hub.metadata?.jurisdiction);
+        const evidence = authenticatedHubEvidence(normalized, hub.roleSource);
         const candidate: OnboardingHubCandidate = {
           entityId: hub.entityId,
           isHub: true,
+          roleSource: evidence.source,
           ...(jurisdiction ? { jurisdiction } : {}),
           ...(jurisdictionKey ? { jurisdictionKey } : {}),
         };
         if (!targetJurisdictionMatches(target, candidate)) continue;
+        roleEvidenceByEntityId[normalized] = evidence;
         if (!advertisedHubEntityIds.some(existing => normalizeEntityId(existing) === normalized)) {
           advertisedHubEntityIds.push(hub.entityId);
         }
@@ -543,7 +581,7 @@
           eligibleHubEntityIds.push(hub.entityId);
         }
       }
-      return { advertisedHubEntityIds, eligibleHubEntityIds };
+      return { advertisedHubEntityIds, eligibleHubEntityIds, roleEvidenceByEntityId };
     } finally {
       clearTimeout(timer);
     }
@@ -560,14 +598,12 @@
     const waitForCandidates = async (): Promise<{
       required: boolean;
       hubEntityIds: string[];
+      roleEvidenceByEntityId: Record<string, AccountRoleEvidence>;
     }> => {
       const timeoutMs = 3_000;
       const pollMs = 100;
       const startedAt = Date.now();
-      let best: HubDiscovery = {
-        advertisedHubEntityIds: [],
-        eligibleHubEntityIds: [],
-      };
+      let best: HubDiscovery = emptyHubDiscovery();
       let discoveryFailure = '';
 
       while (Date.now() - startedAt < timeoutMs) {
@@ -593,6 +629,10 @@
             projected.eligibleHubEntityIds,
             publicDiscovery?.eligibleHubEntityIds || [],
           ).filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId)),
+          roleEvidenceByEntityId: {
+            ...publicDiscovery?.roleEvidenceByEntityId,
+            ...projected.roleEvidenceByEntityId,
+          },
         };
         best = {
           advertisedHubEntityIds: mergeIds(
@@ -602,6 +642,10 @@
           eligibleHubEntityIds: current.eligibleHubEntityIds.length > best.eligibleHubEntityIds.length
             ? current.eligibleHubEntityIds
             : best.eligibleHubEntityIds,
+          roleEvidenceByEntityId: {
+            ...best.roleEvidenceByEntityId,
+            ...current.roleEvidenceByEntityId,
+          },
         };
 
         // A successful public discovery with no hub for this jurisdiction is
@@ -609,14 +653,17 @@
         // Entity was already created and profiled above; there is simply no
         // bilateral hub account to open yet.
         if (publicDiscovery && current.advertisedHubEntityIds.length === 0) {
-          return { required: false, hubEntityIds: [] };
+          return { required: false, hubEntityIds: [], roleEvidenceByEntityId: {} };
         }
         if (current.eligibleHubEntityIds.length >= joinCount) {
-          return selectAdvertisedAutoJoinCandidates({
+          return {
+            ...selectAdvertisedAutoJoinCandidates({
             requested: joinCount,
             advertisedHubEntityIds: current.advertisedHubEntityIds,
             eligibleHubEntityIds: current.eligibleHubEntityIds,
-          });
+            }),
+            roleEvidenceByEntityId: current.roleEvidenceByEntityId,
+          };
         }
         await sleep(pollMs);
       }
@@ -628,11 +675,14 @@
           );
         }
       }
-      return selectAdvertisedAutoJoinCandidates({
-        requested: joinCount,
-        advertisedHubEntityIds: best.advertisedHubEntityIds,
-        eligibleHubEntityIds: best.eligibleHubEntityIds,
-      });
+      return {
+        ...selectAdvertisedAutoJoinCandidates({
+          requested: joinCount,
+          advertisedHubEntityIds: best.advertisedHubEntityIds,
+          eligibleHubEntityIds: best.eligibleHubEntityIds,
+        }),
+        roleEvidenceByEntityId: best.roleEvidenceByEntityId,
+      };
     };
 
     const tokenDecimals = $xlnFunctions.getTokenInfo(1).decimals;
@@ -648,6 +698,12 @@
     await submitRuntimeInput(buildOnboardingHubOpenRuntimeInput({
       target,
       hubEntityIds: readyCandidates,
+      hubRoleEvidenceByEntityId: Object.fromEntries(readyCandidates.map((hubEntityId) => {
+        const evidence = selection.roleEvidenceByEntityId[normalizeEntityId(hubEntityId)];
+        if (!evidence) throw new Error(`ONBOARDING_HUB_ROLE_MISSING:${hubEntityId}`);
+        return [hubEntityId, evidence];
+      })),
+      committedRolesByEntityId: runtimeProjection.committedRolesByEntityId,
       creditAmount,
       tokenId: 1,
       rebalancePolicy,

@@ -136,7 +136,6 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   ...(jr.blockTimeMs !== undefined ? { blockTimeMs: jr.blockTimeMs } : {}),
   lastBlockTimestamp: requireNonNegativeNumber(jr.lastBlockTimestamp, 'LAST_BLOCK_TIMESTAMP'),
   ...(jr.blockReady !== undefined ? { blockReady: jr.blockReady } : {}),
-  ...(jr.defaultDisputeDelayBlocks !== undefined ? { defaultDisputeDelayBlocks: jr.defaultDisputeDelayBlocks } : {}),
   ...(jr.watcherConfirmationDepth !== undefined
     ? { watcherConfirmationDepth: jr.watcherConfirmationDepth }
     : {}),

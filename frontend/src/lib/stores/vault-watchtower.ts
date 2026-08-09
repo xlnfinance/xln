@@ -9,8 +9,6 @@ import type {
 import { Wallet } from 'ethers';
 import { resolveRpcUrl } from './vault-helpers';
 import {
-  WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
-  WATCHTOWER_SAFETY_MARGIN_BLOCKS,
   derivePrivateKey,
   findEntityReplicaByEntityAndSigner,
   findJReplicaByName,
@@ -90,6 +88,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
     for (const [rawCounterpartyId, account] of replica.state.accounts.entries()) {
       const counterpartyId = normalizeEntityId(rawCounterpartyId);
       const proofNonce = Math.max(0, Math.floor(Number(account?.counterpartyDisputeProofNonce || 0)));
+      const proposerIsLeft = account?.counterpartyDisputeProofProposerIsLeft;
       const proofBodyHash = String(account?.counterpartyDisputeProofBodyHash || '')
         .trim()
         .toLowerCase();
@@ -101,6 +100,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
       if (
         !counterpartyId ||
         proofNonce <= 0 ||
+        typeof proposerIsLeft !== 'boolean' ||
         !proofBodyHash ||
         !proofHanko ||
         !proofBody ||
@@ -111,6 +111,20 @@ export async function buildDelayedLastResortAppointmentsForTower(
       }
 
       const appointmentSequence = proofNonce;
+      const finalProofbody = xln.decodeTowerProofBody(proofBody);
+      const leftResponseSeconds = Number(finalProofbody.leftResponseSeconds);
+      const rightResponseSeconds = Number(finalProofbody.rightResponseSeconds);
+      const totalResponseSeconds = leftResponseSeconds + rightResponseSeconds;
+      if (!Number.isSafeInteger(totalResponseSeconds) || totalResponseSeconds <= 0) {
+        // A zero-window account has no delayed phase for a tower to enter. Do
+        // not invent a global fallback: the bilateral ProofBody is the complete
+        // timing authority and the owner may intentionally choose zero.
+        continue;
+      }
+      // Towers are deliberately eligible only in the final 20% of this exact
+      // account's signed seconds window. This is an owner-signed appointment
+      // policy, not consensus configuration; changing it cannot retune L1.
+      const lastResortWindowSeconds = Math.max(1, Math.ceil(totalResponseSeconds * 0.2));
       const lookupKey = xln.deriveRuntimeRecoveryActionLookupKey(
         normalizedRuntimeId,
         runtime.seed,
@@ -125,12 +139,11 @@ export async function buildDelayedLastResortAppointmentsForTower(
         counterpartyId,
         proofNonce,
         proofBodyHash,
-        WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
+        lastResortWindowSeconds,
         appointmentSequence,
       );
       const ownerAuthorizationHanko = xln.buildSingleSignerHanko(entityId, ownerAuthorizationHash, signerPrivateKey);
 
-      const finalProofbody = xln.decodeTowerProofBody(proofBody);
       const transformers = finalProofbody.transformers;
       let leftArguments = '0x';
       let rightArguments = '0x';
@@ -174,12 +187,13 @@ export async function buildDelayedLastResortAppointmentsForTower(
         depositoryAddress,
         watchedEntityId: entityId,
         towerAddress: towerSignerAddress,
-        lastResortWindowBlocks: WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
+        lastResortWindowSeconds,
         appointmentSequence,
         ownerAuthorizationHanko,
         latestProof: {
           counterentity: counterpartyId,
           finalNonce: proofNonce,
+          proposerIsLeft,
           finalProofbody,
           leftArguments,
           rightArguments,
@@ -208,8 +222,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
         proofNonce,
         proofBodyHash,
         responseMode: 'last_resort',
-        lastResortWindowBlocks: WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
-        safetyMarginBlocks: WATCHTOWER_SAFETY_MARGIN_BLOCKS,
+        lastResortWindowSeconds,
       };
       const signedAt = Date.now();
       const ownerProofSignature = await rootWallet.signMessage(

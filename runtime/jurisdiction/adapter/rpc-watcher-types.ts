@@ -5,12 +5,14 @@ import type {
 } from '../../../jurisdictions/typechain-types/index.ts';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
+import type { TxDisputeProofBodyEvidence } from './rpc-public';
 import type {
   EventBatchCounter,
   PendingWatcherJBlockMap,
   PendingWatcherJHistoryRange,
 } from './watcher';
 import type { WatchedErc20Token } from './rpc-watcher-inputs';
+import type { AuthenticatedTxLocation } from './rpc-watcher-inputs';
 
 export type RpcWatcherScanProgress = {
   scannedThroughHeight: number;
@@ -44,7 +46,14 @@ export type RpcWatcherServices = {
   resolveDisputeFinalizationEvidence(
     txHash: string,
     args: Record<string, unknown>,
+    location: AuthenticatedTxLocation,
   ): Promise<DisputeFinalizationEvidence | undefined>;
+  resolveDisputeProofBody(
+    txHash: string,
+    eventName: TxDisputeProofBodyEvidence['eventName'],
+    args: Record<string, unknown>,
+    location: AuthenticatedTxLocation,
+  ): Promise<TxDisputeProofBodyEvidence['proofbody']>;
   isTransientRpcUnavailable(error: unknown): boolean;
 };
 

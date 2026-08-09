@@ -169,13 +169,20 @@ describe('watchtower restart resilience', () => {
       depositoryAddress: addr('55'),
       watchedEntityId,
       towerAddress: towerWallet.address.toLowerCase(),
-      lastResortWindowBlocks: 8,
+      lastResortWindowSeconds: 8,
       appointmentSequence: 3,
       ownerAuthorizationHanko: '0x1234',
       latestProof: {
         counterentity,
         finalNonce: 7,
-        finalProofbody: { watchSeed, tokenIds: [1], offdeltas: [-5n], transformers: [] },
+        finalProofbody: {
+          watchSeed,
+          leftResponseSeconds: 4n,
+          rightResponseSeconds: 6n,
+          tokenIds: [1],
+          offdeltas: [-5n],
+          transformers: [],
+        },
         leftArguments: '0x',
         rightArguments: '0x',
         sig: '0x5678',
@@ -196,8 +203,7 @@ describe('watchtower restart resilience', () => {
       proofNonce: 7,
       proofBodyHash: `0x${'56'.repeat(32)}`,
       responseMode: 'last_resort',
-      lastResortWindowBlocks: 8,
-      safetyMarginBlocks: 0,
+      lastResortWindowSeconds: 8,
     };
     const lastResortSignedAt = 999_001;
     const lastResortAppointment: TowerAppointmentV1 = {
@@ -308,6 +314,9 @@ describe('watchtower restart resilience', () => {
       providerFactory: () => ({
         getBlockNumber: async () => 1,
         getLogs: async () => [],
+        send: async () => ({
+          timestamp: '0x0',
+        }),
       }),
       contractFactory: () => ({
         accountKey: async () => '0xfeed',

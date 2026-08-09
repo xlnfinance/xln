@@ -142,6 +142,7 @@ test('bad board reseal account cannot block good output and retries from one bou
   bad.currentDisputeHash = digest(211);
   bad.currentDisputeProofBodyHash = digest(212);
   bad.currentDisputeProofNonce = 7;
+  bad.currentDisputeProofProposerIsLeft = true;
   bad.currentDisputeProofHanko = '0x03';
   state.accounts = new Map([[badId, bad], [goodId, good]]);
   installBoardResealHook(state, activation(sourceEntityId));
@@ -168,6 +169,7 @@ test('bad board reseal account cannot block good output and retries from one bou
   bad.counterpartyDisputeHash = bad.currentDisputeHash;
   bad.counterpartyDisputeProofBodyHash = bad.currentDisputeProofBodyHash;
   bad.counterpartyDisputeProofNonce = bad.currentDisputeProofNonce;
+  bad.counterpartyDisputeProofProposerIsLeft = bad.currentDisputeProofProposerIsLeft;
   bad.counterpartyDisputeProofHanko = '0x04';
   first.newState.timestamp = retry!.triggerAt;
   const second = await handleScheduledWakeEntityTx(

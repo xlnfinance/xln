@@ -39,7 +39,7 @@ const createAccount = (localEntity = leftEntity, peerEntity = rightEntity): Acco
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -78,6 +78,7 @@ const ackInput = (account: AccountReplica): Extract<AccountInput, { kind: 'ack' 
   fromEntityId: account.proofHeader.toEntity,
   toEntityId: account.proofHeader.fromEntity,
   domain: { ...account.state.domain },
+  disputeConfig: { ...account.state.disputeConfig },
   watchSeed: account.state.watchSeed,
   ack: {
     height: 1,
@@ -199,6 +200,7 @@ describe('typed Account peer rejection', () => {
       fromEntityId: account.proofHeader.toEntity,
       toEntityId: account.proofHeader.fromEntity,
       domain: { ...account.state.domain },
+      disputeConfig: { ...account.state.disputeConfig },
       watchSeed: account.state.watchSeed,
       proposal: { frame, frameHanko: `0x${'66'.repeat(65)}` },
     };
@@ -233,15 +235,17 @@ describe('typed Account peer rejection', () => {
       fromEntityId: account.proofHeader.toEntity,
       toEntityId: account.proofHeader.fromEntity,
       domain: { ...account.state.domain },
+      disputeConfig: { ...account.state.disputeConfig },
       watchSeed: account.state.watchSeed,
       proposal: {
         frame,
         frameHanko: `0x${'66'.repeat(65)}`,
         disputeSeal: {
           hanko: `0x${'77'.repeat(65)}`,
-          hash: createDisputeProofHashWithNonce(account.state, proofBodyHash, account.state.domain, 0),
+          hash: createDisputeProofHashWithNonce(account.state, proofBodyHash, account.state.domain, 0, true),
           proofBodyHash,
           proofNonce: 0,
+          proposerIsLeft: true,
         },
       },
     };
@@ -348,6 +352,7 @@ test('full Account capacity consumes unknown peer genesis and Runtime continues'
     fromEntityId: unknownPeer,
     toEntityId: fixture.entityId,
     domain: { ...domain },
+    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     watchSeed: `0x${'dd'.repeat(32)}`,
     proposal: {
       frame: {

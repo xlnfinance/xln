@@ -268,7 +268,7 @@
       counterpartyName: string;
       startedByLeft: boolean;
       disputeTimeout: number;
-      initialDisputeNonce: number;
+      initialNonce: number;
     }> = [];
 
     const timeIndex = runtimeFrameTimeIndex ? ($runtimeFrameTimeIndex ?? -1) : -1;
@@ -312,7 +312,7 @@
           counterpartyName: entityNames.get(counterpartyId) || counterpartyId,
           startedByLeft: account.activeDispute.startedByLeft,
           disputeTimeout: account.activeDispute.disputeTimeout,
-          initialDisputeNonce: account.activeDispute.initialDisputeNonce,
+          initialNonce: account.activeDispute.initialNonce,
         });
       }
     }
@@ -1174,8 +1174,8 @@
                     <span class="entity-name">{dispute.counterpartyName}</span>
                   </td>
                   <td>{dispute.startedByLeft ? 'Left' : 'Right'}</td>
-                  <td>Block {dispute.disputeTimeout}</td>
-                  <td>{dispute.initialDisputeNonce}</td>
+                  <td>{new Date(dispute.disputeTimeout * 1_000).toLocaleString()}</td>
+                  <td>{dispute.initialNonce}</td>
                 </tr>
               {/each}
             </tbody>

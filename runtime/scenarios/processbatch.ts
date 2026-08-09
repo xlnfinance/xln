@@ -10,6 +10,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { EntityReplica } from '../entity/types';
 import {
   getProcess,
@@ -113,7 +114,12 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeReplica): Pr
       signerId: entity.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: hub.id, tokenId: USDC, creditAmount: 0n },
+        data: {
+          targetEntityId: hub.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(entity.id, false, hub.id, true),
+          tokenId: USDC,
+          creditAmount: 0n,
+        },
       }],
     }]);
     await runProcess(env);

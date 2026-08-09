@@ -64,7 +64,7 @@ export type RuntimeGraphAccountView = {
   activeDispute?: {
     startedByLeft: boolean;
     disputeTimeout: number;
-    initialDisputeNonce: number;
+    initialNonce: number;
   };
 };
 
@@ -196,7 +196,7 @@ const projectGraphAccountView = (account: unknown): RuntimeGraphAccountView => {
       activeDispute: {
         startedByLeft: activeDispute['startedByLeft'] === true,
         disputeTimeout: integer(activeDispute['disputeTimeout']),
-        initialDisputeNonce: integer(activeDispute['initialDisputeNonce'] ?? activeDispute['initialNonce']),
+        initialNonce: integer(activeDispute['initialNonce']),
       },
     } : {}),
   };

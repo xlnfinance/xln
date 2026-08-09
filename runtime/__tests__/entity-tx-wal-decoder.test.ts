@@ -31,6 +31,7 @@ describe('persisted EntityTx decoder', () => {
           fromEntityId: counterpartyId,
           toEntityId: entityId,
           domain: { chainId: 31_337, depositoryAddress: `0x${'55'.repeat(20)}` },
+          disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         },
       },
       'WAL_ACCOUNT_INPUT_KIND',
@@ -123,11 +124,13 @@ describe('persisted EntityTx decoder', () => {
         fromEntityId: entityId,
         toEntityId: counterpartyId,
         domain: { chainId: 31_337, depositoryAddress: `0x${'44'.repeat(20)}` },
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         watchSeed: hash,
         disputeSeal: {
           hash,
           proofBodyHash: hash,
           proofNonce: 1,
+          proposerIsLeft: true,
         },
       },
     }, 'WAL_ACCOUNT').type).toBe('accountInput');

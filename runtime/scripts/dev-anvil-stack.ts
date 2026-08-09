@@ -1,7 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import { createJAdapter, createXlnJsonRpcProvider } from '../jurisdiction/adapter';
-import { ensureLocalDisputeDelayConfigured } from '../jurisdiction/adapter/local-config';
 
 type Args = {
   name: string;
@@ -169,7 +168,6 @@ const main = async (): Promise<void> => {
     rpcUrl,
   });
   await jadapter.deployStack();
-  const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, args.name);
 
   const config = {
     name: args.name,
@@ -187,9 +185,6 @@ const main = async (): Promise<void> => {
       entityProvider: jadapter.addresses.entityProvider,
       deltaTransformer: jadapter.addresses.deltaTransformer,
     },
-    ...(Number.isFinite(defaultDisputeDelayBlocks) && defaultDisputeDelayBlocks
-      ? { defaultDisputeDelayBlocks }
-      : {}),
     createdAt: Date.now(),
   };
 

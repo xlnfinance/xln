@@ -268,6 +268,7 @@ describe('serialization-utils', () => {
         takerReferrerBps: 0,
       },
       referenceTokenId: 1,
+      usdQuoteAuthorityEntityId: 'market-maker',
       minTradeSize: 0n,
       supportedPairs: ['1/2'],
     });

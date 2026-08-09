@@ -226,6 +226,7 @@ const buildProofPulls = (
       ),
       fullHash: pull.fullHash,
       partialRoot: pull.partialRoot,
+      targetRole: pull.crossJurisdiction?.leg === 'target',
     }));
 
 const buildSubcontractTransformers = (
@@ -297,6 +298,8 @@ export function buildAccountProofBody(
   const deltaIndex = buildProofDeltaIndex(account);
   const runtimeProofBody: RuntimeProofBody = {
     watchSeed: normalizeAccountWatchSeed(account.state.watchSeed, 'PROOF_BODY'),
+    leftResponseSeconds: account.state.disputeConfig.leftResponseSeconds,
+    rightResponseSeconds: account.state.disputeConfig.rightResponseSeconds,
     offdeltas: deltaIndex.offdeltas,
     tokenIds: deltaIndex.tokenIds,
     transformers: buildProofTransformers(
@@ -343,6 +346,7 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
         claimedRatio: p.claimedRatio,
         fullHash: p.fullHash,
         partialRoot: p.partialRoot,
+        targetRole: p.targetRole === true,
       })),
     } : null;
 
@@ -363,6 +367,8 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
 
   return {
     watchSeed: runtime.watchSeed,
+    leftResponseSeconds: runtime.leftResponseSeconds,
+    rightResponseSeconds: runtime.rightResponseSeconds,
     offdeltas: runtime.offdeltas,
     tokenIds: runtime.tokenIds.map(id => BigInt(id)),
     transformers,
@@ -387,11 +393,13 @@ export function createDisputeProofHash(
   account: DisputeHashReplica,
   proofBodyHash: string,
   domain: DepositoryHankoDomain,
+  proposerIsLeft: boolean,
 ): string {
   return hashDisputeProofHankoPayload(
     domain,
     getCanonicalAccountKey(account.state),
     account.proofHeader.nextProofNonce,
+    proposerIsLeft,
     proofBodyHash,
     normalizeAccountWatchSeed(account.state.watchSeed, 'DISPUTE_MESSAGE'),
   );
@@ -400,7 +408,7 @@ export function createDisputeProofHash(
 /**
  * Create dispute proof hash with explicit nonce.
  * Used for nonce+1 pre-signing during settlement: after a settlement is applied
- * on-chain, nonce is incremented. Proofs signed at the old nonce
+ * on-chain, nonce is counter. Proofs signed at the old nonce
  * become invalid. Pre-signing at nonce+1 ensures valid dispute proofs exist
  * immediately after settlement.
  *
@@ -413,10 +421,18 @@ export function createDisputeProofHashWithNonce(
   proofBodyHash: string,
   domain: DepositoryHankoDomain,
   nonce: number,
+  proposerIsLeft: boolean,
 ): string {
   const chKey = getCanonicalAccountKey(account);
   const watchSeed = normalizeAccountWatchSeed(account.watchSeed, 'DISPUTE_MESSAGE');
-  return hashDisputeProofHankoPayload(domain, chKey, nonce, proofBodyHash, watchSeed);
+  return hashDisputeProofHankoPayload(
+    domain,
+    chKey,
+    nonce,
+    proposerIsLeft,
+    proofBodyHash,
+    watchSeed,
+  );
 }
 
 /** Matches Account.sol MessageType.CooperativeDisputeProof exactly. */

@@ -214,9 +214,10 @@ describe("EntityProvider with Automatic Governance", function () {
       // 255th bit flip
       expect(dividendTokenId).to.equal(BigInt(entityNumber) | (BigInt(1) << BigInt(255)));
       
-      // Should be able to extract entity number from both token IDs
-      expect(await entityProvider.getEntityFromToken(controlTokenId)).to.equal(entityNumber);
-      expect(await entityProvider.getEntityFromToken(dividendTokenId)).to.equal(entityNumber);
+      // Entity number is the low 255 bits of either token id (first-bit flip convention).
+      const mask = (1n << 255n) - 1n;
+      expect(BigInt(controlTokenId) & mask).to.equal(BigInt(entityNumber));
+      expect(BigInt(dividendTokenId) & mask).to.equal(BigInt(entityNumber));
     });
   });
 
@@ -304,17 +305,19 @@ describe("EntityProvider with Automatic Governance", function () {
     it("Should track governance info correctly", async function () {
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
       await entityProvider.registerNumberedEntity(boardHash);
-      const entityNumber = 2;
-
-      const [controlTokenId, dividendTokenId, controlSupply, dividendSupply, hasActiveProposal, articlesHash] = 
-        await entityProvider.getGovernanceInfo(entityNumber);
-      
+      const entityNumber = 2n;
+      const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
+      const entityAddress = ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
+      const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
+      const entity = await entityProvider.entities(entityId);
       const expectedSupply = 100_000_000_000n;
+
       expect(controlTokenId).to.equal(entityNumber);
-      expect(controlSupply).to.equal(expectedSupply);
-      expect(dividendSupply).to.equal(expectedSupply);
-      expect(hasActiveProposal).to.be.false;
-      expect(articlesHash).to.not.equal(ethers.ZeroHash);
+      expect(await entityProvider.balanceOf(entityAddress, controlTokenId)).to.equal(expectedSupply);
+      expect(await entityProvider.balanceOf(entityAddress, dividendTokenId)).to.equal(expectedSupply);
+      expect(entity.proposedBoardHash).to.equal(ethers.ZeroHash);
+      expect(entity.currentBoardHash).to.equal(boardHash);
+      expect(entity.articles.controlDelay).to.be.gt(0);
     });
 
   });

@@ -7,6 +7,7 @@ import {
   isPositiveUint256,
   normalizeAddress,
   normalizeBigNumberish,
+  normalizeBoolean,
   normalizeBytes32,
   normalizeEntity,
   normalizeHexBytes,
@@ -15,6 +16,11 @@ import {
   type JurisdictionEventNormalizer,
 } from './event-normalization-primitives';
 import { walletEventNormalizers } from './event-normalizers-wallet';
+import { validateProofBody } from './batch-validation';
+import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+
+const normalizeProofBody = (value: unknown): ProofBodyStruct =>
+  validateProofBody(structuredClone(value), 'J_EVENT_PROOFBODY') as ProofBodyStruct;
 
 const foundation = defineEventNormalizer('FoundationBootstrapped', data =>
   decodeFields(data, {
@@ -74,14 +80,26 @@ const disputeStarted = defineEventNormalizer('DisputeStarted', data => {
     sender: normalizeEntity,
     counterentity: normalizeEntity,
     nonce: normalizeBigNumberish,
+    proposerIsLeft: normalizeBoolean,
     proofbodyHash: normalizeString,
     watchSeed: normalizeBytes32,
     starterInitialArguments: normalizeHexBytes,
-    starterIncrementedArguments: normalizeHexBytes,
+    starterCounterArguments: normalizeHexBytes,
+    starterCounterProofCommitment: normalizeBytes32,
+    initialProofbody: normalizeProofBody,
     disputeTimeout: normalizeInt,
     disputeStartTimestamp: normalizeInt,
+    leftResponseSeconds: normalizeInt,
+    rightResponseSeconds: normalizeInt,
   });
-  if (!decoded || decoded.disputeTimeout <= 0 || decoded.disputeStartTimestamp <= 0) return null;
+  if (
+    !decoded ||
+    decoded.disputeStartTimestamp <= 0 ||
+    decoded.leftResponseSeconds < 0 ||
+    decoded.rightResponseSeconds < 0 ||
+    decoded.disputeTimeout !==
+      decoded.disputeStartTimestamp + decoded.leftResponseSeconds + decoded.rightResponseSeconds
+  ) return null;
   const batchNonce = normalizeInt(data['batchNonce']);
   return {
     ...decoded,
@@ -94,8 +112,12 @@ const disputeFinalized = defineEventNormalizer('DisputeFinalized', data => {
     sender: normalizeEntity,
     counterentity: normalizeEntity,
     initialNonce: normalizeBigNumberish,
+    // Recovered from calldata only after finalizationEvidenceHash matches the
+    // receipt-authenticated event commitment.
     initialProofbodyHash: normalizeString,
     finalProofbodyHash: normalizeString,
+    finalizationEvidenceHash: normalizeString,
+    finalProofbody: normalizeProofBody,
   });
   if (!decoded) return null;
   const batchNonce = normalizeInt(data['batchNonce']);
@@ -112,14 +134,36 @@ const normalizeBytes32Quartet = (value: unknown): [string, string, string, strin
 const hashLadderRevealRegistered = defineEventNormalizer('HashLadderRevealRegistered', data => {
   const decoded = decodeFields(data, {
     entity: normalizeEntity,
+    counterpartyEntity: normalizeEntity,
     ladderHash: normalizeBytes32,
     fillRatio: normalizeInt,
     fullSecret: normalizeBytes32,
     reveals: normalizeBytes32Quartet,
+    targetRole: normalizeBoolean,
+    revealedAt: normalizeInt,
   });
-  if (!decoded || decoded.fillRatio <= 0) return null;
+  // Solidity emits uint16. Enforce that ABI boundary again before signed
+  // J-range consensus: synthetic/provider-corrupt evidence must not install a
+  // ratio that later fails Runtime's canonical uint16 settlement conversion.
+  if (
+    !decoded
+    || decoded.fillRatio <= 0
+    || decoded.fillRatio > 0xffff
+    || decoded.revealedAt <= 0
+  ) return null;
   return decoded;
 });
+
+const counterDisputeRegistered = defineEventNormalizer('CounterDisputeRegistered', data =>
+  decodeFields(data, {
+    sender: normalizeEntity,
+    counterentity: normalizeEntity,
+    nonce: normalizeInt,
+    proposerIsLeft: normalizeBoolean,
+    proofbodyHash: normalizeBytes32,
+    counterProofbody: normalizeProofBody,
+  }),
+);
 
 const debtCreated = defineEventNormalizer('DebtCreated', data =>
   decodeFields(data, {
@@ -201,6 +245,7 @@ export const EVENT_NORMALIZERS: Readonly<
   AccountSettled: accountSettled,
   DisputeStarted: disputeStarted,
   DisputeFinalized: disputeFinalized,
+  CounterDisputeRegistered: counterDisputeRegistered,
   HashLadderRevealRegistered: hashLadderRevealRegistered,
   DebtCreated: debtCreated,
   DebtEnforced: debtEnforced,

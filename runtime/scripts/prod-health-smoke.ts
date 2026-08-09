@@ -7,6 +7,9 @@ type HealthSmokeArgs = {
   expectedHubs: number | null;
   expectedTowers: number | null;
   requireHubSelfRelay: boolean;
+  expectedGitHead: string | null;
+  expectedCodeHash: string | null;
+  requireCleanSource: boolean;
   towerUrls: string[];
 };
 
@@ -104,6 +107,8 @@ const parseArgs = (): HealthSmokeArgs => {
   const timeoutMs = Math.max(1_000, Math.floor(Number(flags.get('--timeout-ms') || 15_000)));
   const expectedHubsRaw = flags.get('--expected-hubs') ?? process.env['XLN_EXPECTED_HUBS'];
   const expectedTowersRaw = flags.get('--expected-towers') ?? process.env['XLN_EXPECTED_TOWERS'];
+  const expectedGitHeadRaw = flags.get('--expected-git-head') ?? process.env['XLN_EXPECTED_GIT_HEAD'];
+  const expectedCodeHashRaw = flags.get('--expected-code-hash') ?? process.env['XLN_EXPECTED_CODE_HASH'];
   const expectedHubs = expectedHubsRaw === undefined ? null : Math.floor(Number(expectedHubsRaw));
   const expectedTowers = expectedTowersRaw === undefined ? null : Math.floor(Number(expectedTowersRaw));
   if (expectedHubs !== null && (!Number.isFinite(expectedHubs) || expectedHubs < 0)) {
@@ -112,6 +117,15 @@ const parseArgs = (): HealthSmokeArgs => {
   if (expectedTowers !== null && (!Number.isFinite(expectedTowers) || expectedTowers < 0)) {
     throw new Error(`Invalid --expected-towers=${String(expectedTowersRaw)}`);
   }
+  if (expectedGitHeadRaw === true || expectedCodeHashRaw === true) {
+    throw new Error('Missing value for deployed source fingerprint');
+  }
+  const expectedGitHead = String(expectedGitHeadRaw || '').trim() || null;
+  const expectedCodeHash = String(expectedCodeHashRaw || '').trim() || null;
+  const requireSourceMatch = flags.has('--require-source-match') || process.env['XLN_REQUIRE_SOURCE_MATCH'] === '1';
+  if (requireSourceMatch && (!expectedGitHead || !expectedCodeHash)) {
+    throw new Error('PROD_HEALTH_EXPECTED_SOURCE_REQUIRED');
+  }
   return {
     baseUrl,
     timeoutMs,
@@ -119,6 +133,9 @@ const parseArgs = (): HealthSmokeArgs => {
     expectedHubs,
     expectedTowers,
     requireHubSelfRelay: flags.has('--require-hub-self-relay') || process.env['XLN_REQUIRE_HUB_SELF_RELAY'] === '1',
+    expectedGitHead,
+    expectedCodeHash,
+    requireCleanSource: flags.has('--require-clean-source') || process.env['XLN_REQUIRE_CLEAN_SOURCE'] === '1',
     towerUrls: [
       ...towerUrls,
       ...splitUrlList(process.env['XLN_CAPPED_TESTNET_TOWER_URLS']),
@@ -296,6 +313,31 @@ export const getBlockingOpenIncidents = (incidents: unknown): PublicDebugInciden
   });
 };
 
+export const validateDeployedSource = (
+  source: { gitHead?: unknown; codeHash?: unknown; dirty?: unknown } | undefined,
+  expected: {
+    gitHead: string | null;
+    codeHash: string | null;
+    requireClean: boolean;
+  },
+): string[] => {
+  const errors: string[] = [];
+  if (expected.gitHead !== null && source?.gitHead !== expected.gitHead) {
+    errors.push(
+      `DEPLOYED_GIT_HEAD_MISMATCH:expected=${expected.gitHead}:actual=${String(source?.gitHead || '')}`,
+    );
+  }
+  if (expected.codeHash !== null && source?.codeHash !== expected.codeHash) {
+    errors.push(
+      `DEPLOYED_CODE_HASH_MISMATCH:expected=${expected.codeHash}:actual=${String(source?.codeHash || '')}`,
+    );
+  }
+  if (expected.requireClean && source?.dirty !== false) {
+    errors.push(`DEPLOYED_SOURCE_DIRTY:${String(source?.dirty)}`);
+  }
+  return errors;
+};
+
 const main = async (): Promise<void> => {
   const args = parseArgs();
   const incidentsRes = await fetchWithTimeout(
@@ -327,6 +369,7 @@ const main = async (): Promise<void> => {
     custody?: { ok?: boolean };
     hubs?: Array<{ name?: string; online?: boolean; selfRelayPresence?: boolean }>;
     relay?: { clientCount?: number; activeClientCount?: number };
+    source?: { gitHead?: unknown; codeHash?: unknown; dirty?: unknown };
   };
 
   let metrics = '';
@@ -339,6 +382,13 @@ const main = async (): Promise<void> => {
     metrics = `metrics fetch failed: ${error instanceof Error ? error.message : String(error)}`;
   }
   const healthSummary = buildProdHealthFailureSummary(health, metrics);
+
+  const sourceErrors = validateDeployedSource(health.source, {
+    gitHead: args.expectedGitHead,
+    codeHash: args.expectedCodeHash,
+    requireClean: args.requireCleanSource,
+  });
+  requireCondition(sourceErrors.length === 0, sourceErrors.join(';'));
 
   requireCondition(health.coreOk === true, `health.coreOk is not true: ${healthSummary}`);
   requireCondition(health.systemOk === true, `health.systemOk is not true: ${healthSummary}`);
@@ -398,6 +448,7 @@ const main = async (): Promise<void> => {
     expectedTowers: args.expectedTowers,
     towerCount: towerHealth.length,
     openIncidents: blockingIncidents.length,
+    source: health.source ?? null,
   }, null, 2));
 };
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import type { Readable } from 'node:stream';
+import { GATE_CHILD_PROCESS_DETACHED, terminateGateProcessGroup } from './gate-child-process';
 
 import { assertMinDiskFree, getMinDiskFreeBytes } from '../infra/storage-monitor';
 import {
@@ -25,6 +27,29 @@ type StepResult = {
   durationMs: number;
 };
 
+// Cross-j and hash-ladder tests are a release family, not a hand-maintained
+// sample. Discovering the family makes every new edge-case suite enter the
+// release gate automatically; a static list previously left nine financial
+// suites green locally but invisible to CI/release.
+const CROSS_J_RUNTIME_CORE_TESTS = readdirSync('runtime/__tests__', { withFileTypes: true })
+  .filter(entry => entry.isFile())
+  .map(entry => entry.name)
+  .filter(name =>
+    name.endsWith('.test.ts') &&
+    (
+      name.includes('cross-j') ||
+      name.includes('cross-jurisdiction') ||
+      name.includes('hash-ladder') ||
+      name.includes('pull-registry')
+    )
+  )
+  .sort()
+  .map(name => `runtime/__tests__/${name}`);
+
+if (CROSS_J_RUNTIME_CORE_TESTS.length === 0) {
+  throw new Error('RELEASE_GATE_CROSS_J_TEST_FAMILY_EMPTY');
+}
+
 const RUNTIME_CORE_TESTS = [
   'runtime/__tests__/audit-failfast-regressions-part-1.test.ts',
   'runtime/__tests__/audit-failfast-regressions-part-2.test.ts',
@@ -40,12 +65,8 @@ const RUNTIME_CORE_TESTS = [
   'runtime/__tests__/reliable-frontier-real-crash.test.ts',
   'runtime/__tests__/j-submit-crash-recovery.test.ts',
   'runtime/__tests__/j-submit-real-rpc-crash-recovery.test.ts',
-  'runtime/__tests__/cross-jurisdiction-swap-part-1.test.ts',
-  'runtime/__tests__/cross-jurisdiction-swap-part-2a.test.ts',
-  'runtime/__tests__/cross-jurisdiction-swap-part-2b.test.ts',
-  'runtime/__tests__/cross-jurisdiction-swap-part-3.test.ts',
-  'runtime/__tests__/cross-jurisdiction-security.test.ts',
-  'runtime/__tests__/cross-j-boundary.test.ts',
+  ...CROSS_J_RUNTIME_CORE_TESTS,
+  'runtime/__tests__/entity-frame-j-broadcast-continuation.test.ts',
   'runtime/__tests__/runtime-recovery-timestamp.test.ts',
   'runtime/__tests__/relay-router.test.ts',
   'runtime/__tests__/direct-runtime-bun.test.ts',
@@ -123,7 +144,14 @@ const releaseSteps: GateStep[] = [
   { name: 'bootstrap epoch rotation', command: 'bun run prod:bootstrap:rotation', timeoutMs: 1_200_000 },
   { name: 'deterministic replay oracle', command: 'bun run check:determinism', timeoutMs: 600_000 },
   { name: 'real WebSocket P2P relay', command: 'bun run test:p2p:relay', timeoutMs: 240_000 },
+  // Keep the full deterministic scenario catalog in the release contract.
+  // The isolated RPC runner below intentionally exercises only its expensive
+  // core subset; without this step multi-sig/rapid-fire and other pure flows
+  // could regress while every documented release command stayed green.
+  { name: 'all deterministic scenarios', command: 'bun runtime/scenarios/run.ts --set=all', timeoutMs: 1_200_000 },
   { name: 'RPC system scenarios', command: 'bun run test:system:parallel', timeoutMs: 1_200_000 },
+  { name: 'cross-j system scenario', command: 'bun runtime/scenarios/run.ts cross-j --mode=rpc --single', timeoutMs: 600_000 },
+  { name: 'MM mesh system scenario', command: 'bun runtime/scenarios/run.ts mm-mesh --mode=rpc --single', timeoutMs: 600_000 },
   { name: 'hub 10k storage benchmark', command: 'bun run bench:radapter:hub10k', timeoutMs: 1_200_000 },
   { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 },
   { name: 'Foundation release Hanko', command: 'bun run foundation-release:verify', timeoutMs: 30_000 },
@@ -157,6 +185,7 @@ async function runStep(step: GateStep): Promise<StepResult> {
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', step.command], {
     cwd: process.cwd(),
     env: withoutTestArtifactCleanupDoneEnv(),
+    detached: GATE_CHILD_PROCESS_DETACHED,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -165,20 +194,19 @@ async function runStep(step: GateStep): Promise<StepResult> {
   proc.stderr.on('data', chunk => process.stderr.write(`${prefix} ${chunk.toString()}`));
 
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let termination: Promise<void> | null = null;
   const code = await new Promise<number | null>((resolve, reject) => {
     proc.once('error', reject);
     proc.once('exit', resolve);
     if (step.timeoutMs && step.timeoutMs > 0) {
       timer = setTimeout(() => {
-        proc.kill('SIGTERM');
-        setTimeout(() => {
-          if (proc.exitCode === null) proc.kill('SIGKILL');
-        }, 5_000).unref();
+        termination = terminateGateProcessGroup(proc);
       }, step.timeoutMs);
       timer.unref();
     }
   });
   if (timer) clearTimeout(timer);
+  if (termination) await termination;
 
   return {
     name: step.name,

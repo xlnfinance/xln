@@ -123,7 +123,7 @@ const oversizedAccount: AccountReplica = {
     swapOffers: new Map(),
     pulls: new Map(),
     globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
-    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+    disputeConfig: { leftResponseSeconds: 576, rightResponseSeconds: 576 },
     jNonce: 0,
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),

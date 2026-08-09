@@ -961,6 +961,9 @@ async function enqueueOpenAccount(
     type: 'openAccount',
     data: {
       targetEntityId: hubId,
+      disputeConfig: entityId.toLowerCase() < hubId.toLowerCase()
+        ? { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 }
+        : { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 },
       creditAmount: 10_000n * 10n ** BigInt(getTokenInfo(1).decimals),
       tokenId: 1,
     },

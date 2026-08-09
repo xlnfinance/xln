@@ -25,7 +25,6 @@ const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
   jurisdictions?: Record<string, {
     chainId?: number;
     rpc?: string;
-    defaultDisputeDelayBlocks?: number;
     entityProviderDeploymentBlock?: number;
     contracts?: Record<string, string>;
     tokens?: Record<string, { address?: string; tokenId?: number }>;
@@ -68,11 +67,6 @@ const rpcProvider = adapter.provider as typeof adapter.provider & {
 
 try {
   const registry = await adapter.getTokenRegistry();
-  const configuredDelay = Number(nile.defaultDisputeDelayBlocks);
-  const onchainDelay = Number(await adapter.depository.defaultDisputeDelay());
-  if (!Number.isSafeInteger(configuredDelay) || configuredDelay !== onchainDelay) {
-    throw new Error(`TRON_NILE_DISPUTE_DELAY_MISMATCH:configured=${configuredDelay}:onchain=${onchainDelay}`);
-  }
   const registeredUsdt = registry.find((token) => token.tokenId === 1);
   if (!registeredUsdt || registeredUsdt.address.toLowerCase() !== usdt.address.toLowerCase()) {
     throw new Error('TRON_NILE_USDT_REGISTRY_MISMATCH');
@@ -83,7 +77,6 @@ try {
       chainId: adapter.chainId,
       mode: adapter.mode,
       solidifiedBlock: await getSolidifiedBlockNumber(),
-      defaultDisputeDelayBlocks: onchainDelay,
       usdt: registeredUsdt,
     }));
     await adapter.provider.destroy();
@@ -172,7 +165,6 @@ try {
     blockNumber,
     transactionHash,
     authenticatedLogs: authenticated.logs.length,
-    defaultDisputeDelayBlocks: onchainDelay,
   }));
 } finally {
   await adapter.provider.destroy();

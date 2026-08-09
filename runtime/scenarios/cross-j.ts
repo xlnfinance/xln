@@ -16,6 +16,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 
 import type { RuntimeReplica } from '../runtime/types';
@@ -118,10 +119,15 @@ const spawnNode = (role: 'hubs' | 'users', extraArgs: string[]): ProcInfo => {
   return { role, proc, stdoutBuffer };
 };
 
-const killAll = (procs: ProcInfo[]) => {
-  for (const { proc } of procs) {
-    if (!proc.killed) proc.kill('SIGTERM');
-  }
+const stopAll = async (procs: ProcInfo[]): Promise<void> => {
+  await Promise.all(procs.map(({ proc }) => new Promise<void>((resolve) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      resolve();
+      return;
+    }
+    proc.once('exit', () => resolve());
+    proc.kill('SIGTERM');
+  })));
 };
 
 const extractJsonAfter = (buffer: string[], marker: string): unknown => {
@@ -144,9 +150,9 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
   const relayUrl = `ws://127.0.0.1:${relayPort}`;
   // Parent-owned phase barriers: children must not race credit/orders ahead of
   // bilateral readiness on BOTH runtimes.
-  const barrierRoot = path.join(process.cwd(), 'db-tmp');
-  fs.mkdirSync(barrierRoot, { recursive: true });
-  const barrierDir = fs.mkdtempSync(path.join(barrierRoot, 'cross-j-barrier-'));
+  // Keep process-coordination files outside db-tmp: scenario DB cleanup owns
+  // that tree and may run while the second determinism pass is starting.
+  const barrierDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xln-cross-j-barrier-'));
   console.log(`[cross-j] relay ${relayUrl}`);
   console.log(`[cross-j] barrierDir ${barrierDir}`);
 
@@ -219,7 +225,9 @@ export async function crossJ(_existingEnv?: RuntimeReplica): Promise<RuntimeRepl
     console.log('\n✅ cross-j dual-Runtime scenario complete (settled)\n');
     return _existingEnv ?? ({} as RuntimeReplica);
   } finally {
-    killAll(procs);
+    // Do not delete phase markers until every child has acknowledged SIGTERM;
+    // otherwise a still-running Runtime can observe a torn coordination tree.
+    await stopAll(procs);
     fs.rmSync(barrierDir, { recursive: true, force: true });
   }
 }

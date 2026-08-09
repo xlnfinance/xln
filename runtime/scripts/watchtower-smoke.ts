@@ -35,15 +35,21 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>, name = 'Tow
   env.activeJurisdiction = jurisdiction.name;
   env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 300,
+    lastBlockTimestamp: env.state.timestamp,
+    position: { x: 0, y: 0, z: 0 },
     rpcs: [jurisdiction.address],
-    chainId: jurisdiction.chainId,
+    chainId: jurisdiction.chainId!,
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
       account: addr('13'),
       deltaTransformer: addr('14'),
     },
-  } as JReplica);
+  } satisfies JReplica);
   return jurisdiction;
 };
 

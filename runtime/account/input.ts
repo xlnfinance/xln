@@ -1,6 +1,7 @@
 import type { AccountExternalFinalityInput, AccountInput, AccountState, AccountTx } from '../types/account';
 import type { AccountPeerRejectionCode } from './peer-rejection';
 import { isAccountWatchSeed } from '../protocol/account-watch-seed';
+import { canonicalAccountDisputeConfig } from './dispute-config';
 
 export type AccountInputEnvelopeError = Readonly<{
   code: AccountPeerRejectionCode;
@@ -13,7 +14,7 @@ export type AccountInputEnvelopeError = Readonly<{
  * a transaction handler that could accidentally route to a third entity.
  */
 export const createLocalAccountInput = (
-  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed' | 'disputeConfig'>,
   fromEntityId: string,
   txs: AccountTx[],
 ): AccountInput => {
@@ -26,13 +27,14 @@ export const createLocalAccountInput = (
     toEntityId:
       fromEntityId === account.leftEntity ? account.rightEntity : account.leftEntity,
     domain: { ...account.domain },
+    disputeConfig: canonicalAccountDisputeConfig(account.disputeConfig),
     watchSeed: account.watchSeed,
     txs,
   };
 };
 
 export const createAccountDisputeFinalityInput = (
-  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'disputeConfig'>,
   owningEntityId: string,
   finalizedJNonce: number,
   finalizedTokenIds: number[],
@@ -51,6 +53,7 @@ export const createAccountDisputeFinalityInput = (
         ? account.rightEntity
         : account.leftEntity,
     domain: { ...account.domain },
+    disputeConfig: canonicalAccountDisputeConfig(account.disputeConfig),
     finality: {
       kind: 'dispute_finalized',
       finalizedJNonce,
@@ -60,7 +63,7 @@ export const createAccountDisputeFinalityInput = (
 };
 
 export const createAccountDisputeStartedInput = (
-  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'disputeConfig'>,
   owningEntityId: string,
   finality: Extract<
     AccountExternalFinalityInput['finality'],
@@ -81,13 +84,14 @@ export const createAccountDisputeStartedInput = (
         ? account.rightEntity
         : account.leftEntity,
     domain: { ...account.domain },
+    disputeConfig: canonicalAccountDisputeConfig(account.disputeConfig),
     finality: { ...finality },
   };
 };
 
 /** Validate the common envelope before any Account variant can mutate state. */
 export const getAccountInputEnvelopeError = (
-  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed' | 'disputeConfig'>,
   input: AccountInput,
 ): AccountInputEnvelopeError | undefined => {
   if (
@@ -98,6 +102,25 @@ export const getAccountInputEnvelopeError = (
     return {
       code: 'ACCOUNT_PEER_DOMAIN_INVALID',
       reason: `ACCOUNT_INPUT_DOMAIN_INVALID:${input.fromEntityId}`,
+    };
+  }
+  let inputDisputeConfig: AccountState['disputeConfig'];
+  try {
+    inputDisputeConfig = canonicalAccountDisputeConfig(input.disputeConfig);
+  } catch {
+    return {
+      code: 'ACCOUNT_PEER_DISPUTE_CONFIG_INVALID',
+      reason: `ACCOUNT_INPUT_DISPUTE_CONFIG_INVALID:${input.fromEntityId}`,
+    };
+  }
+  const accountDisputeConfig = canonicalAccountDisputeConfig(account.disputeConfig);
+  if (
+    inputDisputeConfig.leftResponseSeconds !== accountDisputeConfig.leftResponseSeconds ||
+    inputDisputeConfig.rightResponseSeconds !== accountDisputeConfig.rightResponseSeconds
+  ) {
+    return {
+      code: 'ACCOUNT_PEER_DISPUTE_CONFIG_MISMATCH',
+      reason: `ACCOUNT_INPUT_DISPUTE_CONFIG_MISMATCH:${input.fromEntityId}`,
     };
   }
   const left = account.leftEntity.toLowerCase();

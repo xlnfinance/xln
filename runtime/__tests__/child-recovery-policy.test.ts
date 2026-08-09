@@ -93,6 +93,18 @@ describe('managed child recovery policy', () => {
     expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('J_WATCHER_DRAIN_STALLED');
   });
 
+  test('ignores bootstrap WARN tails so SIGKILL keeps H2_UNEXPECTED_EXIT', () => {
+    const reason = selectChildFailureReason(
+      [
+        '[WARN][mesh.hub] mesh.direct_peers.grace_expired {"graceMs":15000,"hub":"H2","peers":2}',
+      ],
+      [],
+      'H2_UNEXPECTED_EXIT code=null signal=SIGKILL',
+    );
+    expect(reason).toBe('H2_UNEXPECTED_EXIT code=null signal=SIGKILL');
+    expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('H2_UNEXPECTED_EXIT');
+  });
+
   test('classifies a structured truncated RPC response instead of its closing brace', () => {
     const reason = selectChildFailureReason(
       [

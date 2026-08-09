@@ -73,7 +73,6 @@ describe('checkpoint persistence with pending bilateral state', () => {
     env.activeJurisdiction = jurisdiction.name;
     env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
       name: jurisdiction.name,
-      contracts: { depository: jurisdiction.depositoryAddress, entityProvider: jurisdiction.entityProviderAddress },
       chainId: jurisdiction.chainId,
       contracts: {
         depository: jurisdiction.depositoryAddress,
@@ -133,6 +132,9 @@ describe('checkpoint persistence with pending bilateral state', () => {
                 targetEntityId: entityB,
                 creditAmount: 1000n,
                 tokenId: 1,
+                // Account clocks are bilateral state and therefore explicit
+                // even in persistence-only fixtures.
+                disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
               },
             },
           ],

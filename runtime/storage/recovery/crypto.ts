@@ -165,7 +165,7 @@ export const computeWatchtowerCounterDisputeAuthorizationHash = (
   counterentity: string,
   finalNonce: number,
   finalProofbodyHash: string,
-  lastResortWindowBlocks: number,
+  lastResortWindowSeconds: number,
   appointmentSequence: number,
 ): string => hashWatchtowerCounterDisputeHankoPayload(
   { chainId, depositoryAddress },
@@ -175,7 +175,7 @@ export const computeWatchtowerCounterDisputeAuthorizationHash = (
     counterentity,
     finalNonce,
     finalProofbodyHash,
-    lastResortWindowBlocks,
+    lastResortWindowSeconds,
     appointmentSequence,
   },
 );

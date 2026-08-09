@@ -13,13 +13,23 @@ const _abi = [
     inputs: [
       {
         internalType: "bytes32",
-        name: "entity",
+        name: "ownerEntity",
+        type: "bytes32",
+      },
+      {
+        internalType: "bytes32",
+        name: "counterpartyEntity",
         type: "bytes32",
       },
       {
         internalType: "bytes32",
         name: "ladderHash",
         type: "bytes32",
+      },
+      {
+        internalType: "bool",
+        name: "targetRole",
+        type: "bool",
       },
     ],
     name: "getHashLadderReveal",

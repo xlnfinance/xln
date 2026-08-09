@@ -6,6 +6,7 @@ buildDefaultEntitySwapPairs
 } from '../account/utils';
 import { LIMITS } from '../config/constants';
 import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
+import { deriveCanonicalCrossJurisdictionMarket } from '../extensions/cross-j/market';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import { compareStableText,safeStringify } from '../protocol/serialization';
 import {
@@ -33,6 +34,7 @@ buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes
 import {
 HubProfile,
 MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK,
+MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE,
 MARKET_MAKER_LEVELS_PER_SIDE,
 MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
 MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
@@ -104,6 +106,7 @@ export const emitMarketMakerCrossBootstrapWaveEvent = (
 };
 
 type MarketMakerCrossHealthPairExpectation = {
+  bookOwnerEntityId: string;
   sourceTokenIds: number[];
   targetTokenIds: number[];
 };
@@ -238,9 +241,20 @@ const buildExpectedMarketMakerCrossRouteGroups = (
           specs: [],
         };
         const expected = group.expectedPairs.get(spec.pairId) ?? {
+          bookOwnerEntityId: normalizeEntityRef(crossJurisdictionBookOwnerRef(route)),
           sourceTokenIds: [],
           targetTokenIds: [],
         };
+        const bookOwnerEntityId = normalizeEntityRef(crossJurisdictionBookOwnerRef(route));
+        if (!bookOwnerEntityId || expected.bookOwnerEntityId !== bookOwnerEntityId) {
+          // A venue has one authoritative orderbook owner. Accepting mixed
+          // owners here would let internal Account completeness mask a public
+          // split-brain book that no client can read atomically.
+          throw new Error(
+            `MARKET_MAKER_CROSS_BOOK_OWNER_AMBIGUOUS:pair=${spec.pairId}:` +
+            `current=${expected.bookOwnerEntityId || 'missing'}:next=${bookOwnerEntityId || 'missing'}`,
+          );
+        }
         expected.sourceTokenIds = normalizePositiveTokenIds([
           ...expected.sourceTokenIds,
           route.source.tokenId,
@@ -307,7 +321,7 @@ export const buildMarketMakerCrossPlanSummary = (
     expectedJobs,
     expectedRoutes,
     expectedOffersPerRoute: Math.min(
-      LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS,
+      MARKET_MAKER_CROSS_OFFERS_PER_DIRECTED_ROUTE,
       maxPairsPerRoute * expectedOffersPerPair,
     ),
     expectedOffersPerPair,
@@ -337,6 +351,15 @@ export const buildMarketMakerCrossHealth = (
         const expected = group.expectedPairs.get(pairId) ?? null;
         const offers = specs.filter(spec => hasFinalizedMarketMakerCrossOffer(env, spec)).length;
         const expectedOffers = specs.length;
+        // Each directional cross-j offer sells its source asset. Canonical
+        // market orientation therefore decides which public side it owns:
+        // source=base is an ask, source=quote is a bid. Keep both counts in
+        // health so readiness proves the signed directional topology instead
+        // of inventing symmetric liquidity for one-way markets.
+        const expectedAskOffers = specs.filter(spec =>
+          spec.crossJurisdiction && deriveCanonicalCrossJurisdictionMarket(spec.crossJurisdiction).sourceIsBase
+        ).length;
+        const expectedBidOffers = expectedOffers - expectedAskOffers;
         const sourceTokenIds = expected?.sourceTokenIds?.length
           ? expected.sourceTokenIds
           : normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.source.tokenId ?? 0));
@@ -345,10 +368,13 @@ export const buildMarketMakerCrossHealth = (
           : normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.target.tokenId ?? 0));
         return {
           pairId,
+          bookOwnerEntityId: expected?.bookOwnerEntityId ?? '',
           offers,
           ready: expectedOffers > 0 && offers > 0,
           depthReady: expectedOffers > 0 && offers === expectedOffers,
           expectedOffers,
+          expectedBidOffers,
+          expectedAskOffers,
           sourceTokenIds,
           targetTokenIds,
         };

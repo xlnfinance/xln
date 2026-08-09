@@ -6,16 +6,21 @@ import "../../../contracts/Depository.sol";
 import "../../../contracts/EntityProvider.sol";
 import {ERC20Mock} from "../../../contracts/ERC20Mock.sol";
 import "../../../contracts/Types.sol";
+import {DeltaTransformer} from "../../../contracts/DeltaTransformer.sol";
 import {XlnHanko} from "./XlnHanko.sol";
 
 /// @notice Deploys the J-layer under test with N lazy single-signer entities.
 abstract contract XlnFixture is Test {
   uint256 internal constant ACTORS = 4;
-  uint256 internal constant DISPUTE_DELAY = 100; // seconds (defaultDisputeDelay)
+  uint32 internal constant LEFT_RESPONSE_SECONDS = 50;
+  uint32 internal constant RIGHT_RESPONSE_SECONDS = 50;
+  uint256 internal constant DISPUTE_WINDOW_SECONDS =
+    uint256(LEFT_RESPONSE_SECONDS) + uint256(RIGHT_RESPONSE_SECONDS);
 
   Depository internal dep;
   EntityProvider internal ep;
   ERC20Mock internal erc20;
+  DeltaTransformer internal deltaTransformer;
 
   uint256[ACTORS] internal pk;
   bytes32[ACTORS] internal entity;
@@ -28,7 +33,8 @@ abstract contract XlnFixture is Test {
 
   function _deployXln() internal {
     ep = new EntityProvider(address(uint160(0xF0)));
-    dep = new Depository(address(ep), DISPUTE_DELAY);
+    deltaTransformer = new DeltaTransformer();
+    dep = new Depository(address(ep), address(deltaTransformer));
 
     // registerExternalToken requires a non-zero totalSupply.
     erc20 = new ERC20Mock("Mock", "MCK", 18, 1e30);

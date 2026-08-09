@@ -37,8 +37,10 @@ const fromStatic = (...parts) => resolve(STATIC_DIR, ...parts);
 const files = [
   { src: '../jurisdictions/artifacts/contracts/Account.sol/Account.json', dest: 'static/contracts/Account.json' },
   { src: '../jurisdictions/artifacts/contracts/Depository.sol/Depository.json', dest: 'static/contracts/Depository.json' },
+  { src: '../jurisdictions/artifacts/contracts/DepositoryBounds.sol/DepositoryBounds.json', dest: 'static/contracts/DepositoryBounds.json' },
   { src: '../jurisdictions/artifacts/contracts/EntityProvider.sol/EntityProvider.json', dest: 'static/contracts/EntityProvider.json' },
   { src: '../jurisdictions/artifacts/contracts/HankoVerifier.sol/HankoVerifier.json', dest: 'static/contracts/HankoVerifier.json' },
+  { src: '../jurisdictions/artifacts/contracts/HashLadderRegistry.sol/HashLadderRegistry.json', dest: 'static/contracts/HashLadderRegistry.json' },
   { src: '../jurisdictions/artifacts/contracts/DeltaTransformer.sol/DeltaTransformer.json', dest: 'static/contracts/DeltaTransformer.json' },
   { src: '../jurisdictions/artifacts/contracts/ERC20Mock.sol/ERC20Mock.json', dest: 'static/contracts/ERC20Mock.json' },
 ];

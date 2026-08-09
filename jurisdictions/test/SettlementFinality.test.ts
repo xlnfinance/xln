@@ -7,6 +7,7 @@ import {
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
   deriveHardhatPrivateKey,
+  deployDepositoryStack,
   deployEntityProvider,
   emptyBatch,
   encodeBatch,
@@ -37,14 +38,7 @@ const orderedActors = (first: Actor, second: Actor): [Actor, Actor] =>
 const deployFixture = async () => {
   const [signer0, signer1] = await ethers.getSigners();
   const entityProvider = await deployEntityProvider(signer0.address);
-  const accountFactory = await ethers.getContractFactory('Account');
-  const account = await accountFactory.deploy();
-  await account.waitForDeployment();
-  const depositoryFactory = await ethers.getContractFactory('Depository', {
-    libraries: { Account: await account.getAddress() },
-  });
-  const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), 5760) as Depository;
-  await depository.waitForDeployment();
+  const { depository } = await deployDepositoryStack(await entityProvider.getAddress());
   return { depository, signer0, signer1 };
 };
 

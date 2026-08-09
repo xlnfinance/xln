@@ -354,6 +354,7 @@ describe('runtime frame atomicity', () => {
           type: 'openAccount' as const,
           data: {
             targetEntityId: hash(byte),
+            disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
             creditAmount: 1_000n,
             tokenId: 1,
             rebalancePolicy,
@@ -383,6 +384,7 @@ describe('runtime frame atomicity', () => {
       type: 'openAccount',
       data: {
         targetEntityId: hash(byte),
+        disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         creditAmount: 1_000n,
         tokenId: 1,
         rebalancePolicy,
@@ -867,11 +869,13 @@ describe('runtime frame atomicity', () => {
             chainId: 31_337,
             depositoryAddress: `0x${'dd'.repeat(20)}`,
           },
+          disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
           disputeSeal: {
             hanko: '0x01',
             hash: hash('41'),
             proofBodyHash: hash('42'),
             proofNonce: 1,
+            proposerIsLeft: true,
           },
         },
       }],

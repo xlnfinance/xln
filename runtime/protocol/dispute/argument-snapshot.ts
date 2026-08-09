@@ -16,6 +16,7 @@ export type DisputeArgumentSnapshot = {
   // may delete terminal swaps/pulls later, so older plans must stay immutable.
   proofbodyHash: string;
   nonce: number;
+  proposerIsLeft: boolean;
   side: DisputeArgumentSide;
   proofBodyStruct: ProofBodyStruct;
   plan: DisputeArgumentPlan;
@@ -31,6 +32,7 @@ export const cloneDisputeArgumentSnapshot = (
 ): DisputeArgumentSnapshot => ({
   proofbodyHash: snapshot.proofbodyHash,
   nonce: snapshot.nonce,
+  proposerIsLeft: snapshot.proposerIsLeft,
   side: snapshot.side,
   proofBodyStruct: cloneProofBodyStruct(snapshot.proofBodyStruct),
   plan: {

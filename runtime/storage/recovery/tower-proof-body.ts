@@ -24,6 +24,14 @@ const requireBigInt = (value: unknown, path: string): bigint => {
   return value;
 };
 
+const requireResponseSeconds = (value: unknown, path: string): bigint => {
+  const seconds = requireBigInt(value, path);
+  if (seconds < 0n || seconds > 0xffff_ffffn) {
+    throw new Error(`TOWER_PROOF_BODY_RESPONSE_SECONDS_INVALID:${path}`);
+  }
+  return seconds;
+};
+
 const requireArray = (value: unknown, path: string): unknown[] => {
   if (!Array.isArray(value)) {
     throw new Error(`TOWER_PROOF_BODY_ARRAY_REQUIRED:${path}`);
@@ -40,8 +48,21 @@ const requireArray = (value: unknown, path: string): unknown[] => {
  */
 export const decodeTowerProofBody = (value: unknown): TowerProofBody => {
   const body = requireRecord(value, 'root');
+  const leftResponseSeconds = requireResponseSeconds(
+    body['leftResponseSeconds'],
+    'leftResponseSeconds',
+  );
+  const rightResponseSeconds = requireResponseSeconds(
+    body['rightResponseSeconds'],
+    'rightResponseSeconds',
+  );
+  if (leftResponseSeconds + rightResponseSeconds > 365n * 24n * 60n * 60n) {
+    throw new Error('TOWER_PROOF_BODY_RESPONSE_TOTAL_INVALID');
+  }
   return {
     watchSeed: requireString(body['watchSeed'], 'watchSeed'),
+    leftResponseSeconds,
+    rightResponseSeconds,
     offdeltas: requireArray(body['offdeltas'], 'offdeltas').map((item, index) =>
       requireBigInt(item, `offdeltas.${index}`),
     ),

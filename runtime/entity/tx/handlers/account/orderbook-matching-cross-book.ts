@@ -1,9 +1,10 @@
 import {
   applyCommand,
+  crossJurisdictionBookQtyLots,
   getBookOrder,
-  getSwapLotScale,
   type BookState,
 } from '../../../../orderbook';
+import { isCrossJurisdictionRouteExpired } from '../../../../extensions/cross-j';
 import { createStructuredLogger, shortOrder } from '../../../../infra/logger';
 import {
   buildCrossMarketOfferFromBookOrder,
@@ -18,13 +19,7 @@ import type { CrossOrderbookPass } from './orderbook-matching-cross-types';
 
 const orderbookCrossLog = createStructuredLogger('orderbook.cross');
 
-export const crossBookQtyLots = (
-  baseTokenId: number,
-  baseAmount: bigint,
-): bigint => {
-  if (baseAmount <= 0n) return 0n;
-  return baseAmount / getSwapLotScale(baseTokenId);
-};
+export const crossBookQtyLots = crossJurisdictionBookQtyLots;
 
 const isWorkingCrossRouteStatus = (status: string | undefined): boolean =>
   status === 'resting' || status === 'partially_filled';
@@ -111,6 +106,16 @@ const validateCrossBookOrder = (
     );
   }
   pass.crossLiveOfferMeta.set(orderId, meta);
+  if (isCrossJurisdictionRouteExpired(meta.route, Number(pass.hubState.timestamp || 0))) {
+    const next = removeCrossBookOrder(pass, pairId, book, orderId);
+    orderbookCrossLog.debug('book.remove_expired_before_match', {
+      pair: pairId,
+      order: shortOrder(orderId, 20),
+      expiresAt: meta.route.expiresAt,
+      now: pass.hubState.timestamp,
+    });
+    return next;
+  }
   if (pendingBookAck || queuedAck) {
     pass.suspendedOrderIds.add(orderId);
     return book;

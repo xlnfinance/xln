@@ -31,11 +31,20 @@ import type { EntityReplica, EntityState, EntityFrame } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent, ValidatorJHistory } from '../types/jurisdiction-events';
+import { hashProofBodyStruct } from '../protocol/dispute/proof-builder';
 
 let entityId = `0x${'91'.repeat(32)}`;
 const depositoryAddress = `0x${'92'.repeat(20)}`;
 const jurisdictionRef = `stack:31337:${depositoryAddress}`;
 const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+const disputeProofbody = {
+  watchSeed: `0x${'96'.repeat(32)}`,
+  leftResponseSeconds: 10,
+  rightResponseSeconds: 10,
+  offdeltas: [],
+  tokenIds: [],
+  transformers: [],
+};
 
 const makeState = (validators: string[]): EntityState => ({
   entityId,
@@ -90,11 +99,17 @@ const disputeStarted = (): JurisdictionEvent => ({
     sender: entityId,
     counterentity: `0x${'94'.repeat(32)}`,
     nonce: '1',
-    proofbodyHash: `0x${'95'.repeat(32)}`,
+    proposerIsLeft: true,
+    proofbodyHash: hashProofBodyStruct(disputeProofbody),
+    initialProofbody: disputeProofbody,
     watchSeed: `0x${'96'.repeat(32)}`,
     starterInitialArguments: '0x',
-    starterIncrementedArguments: '0x',
-    disputeTimeout: 5_760,
+    starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+    disputeTimeout: 1_700_000_020,
+    disputeStartTimestamp: 1_700_000_000,
+    leftResponseSeconds: 10,
+    rightResponseSeconds: 10,
   },
 });
 

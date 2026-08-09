@@ -24,6 +24,7 @@ import { assertEntityAccountInsertionCapacity } from '../../account-capacity';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claim-accumulator';
 import { resolveJurisdictionRebalanceDefaults } from '../../../account/rebalance-policy-defaults';
 import { buildHubRebalancePolicyTx } from './account-admin';
+import { canonicalAccountDisputeConfig } from '../../../account/dispute-config';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 
@@ -55,6 +56,7 @@ const insertLocalAccount = (
   isLeft: boolean,
   accountDomain: ReturnType<typeof normalizeAccountStateDomain>,
   watchSeed: ReturnType<typeof normalizeAccountWatchSeed>,
+  disputeConfig: ReturnType<typeof canonicalAccountDisputeConfig>,
   candidateEffects: EntityCandidateEffect[],
 ): void => {
   candidateEffects.push({
@@ -78,7 +80,7 @@ const insertLocalAccount = (
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+      disputeConfig,
       jNonce: 0,
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
@@ -177,6 +179,7 @@ export const handleOpenAccountEntityTx = async (
   const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
   if (entityTx.data.watchSeed === undefined) throw new Error('OPEN_ACCOUNT_WATCH_SEED_REQUIRED');
   const watchSeed = normalizeAccountWatchSeed(entityTx.data.watchSeed, 'OPEN_ACCOUNT');
+  const disputeConfig = canonicalAccountDisputeConfig(entityTx.data.disputeConfig);
   if (entityTx.data.accountDomain === undefined) throw new Error('OPEN_ACCOUNT_DOMAIN_REQUIRED');
   const accountDomain = normalizeAccountStateDomain(entityTx.data.accountDomain, 'OPEN_ACCOUNT_DOMAIN');
   const jurisdiction = entityState.config?.jurisdiction;
@@ -219,6 +222,7 @@ export const handleOpenAccountEntityTx = async (
     isLeft,
     accountDomain,
     watchSeed,
+    disputeConfig,
     candidateEffects,
   );
   await seedOpenAccountPolicies(accountConsensusContext, newState, entityTx, counterpartyId);

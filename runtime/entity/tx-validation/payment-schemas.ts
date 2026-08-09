@@ -39,7 +39,7 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
     required: { counterpartyEntityId: 'string' },
     optional: {
       crossJurisdictionRouteId: 'string', starterInitialArguments: 'string',
-      starterIncrementedArguments: 'string', description: 'string',
+      starterCounterArguments: 'string', starterCounterProofCommitment: 'string', description: 'string',
     },
   },
   disputeFinalize: {

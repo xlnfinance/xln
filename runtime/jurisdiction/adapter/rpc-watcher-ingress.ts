@@ -200,6 +200,7 @@ export const applyAuthenticatedWatcherRange = async (
     observedHeadHeight: request.currentBlock,
     confirmationDepth: request.session.confirmationDepth,
     findDisputeFinalizationEvidence: request.services.resolveDisputeFinalizationEvidence,
+    findDisputeProofBody: request.services.resolveDisputeProofBody,
   });
   if (request.isCancelled()) {
     request.emitDebug({

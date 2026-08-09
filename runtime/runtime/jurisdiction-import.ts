@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
 
-import { ensureLocalDisputeDelayConfigured } from '../jurisdiction/adapter/local-config';
 import { createJAdapterWithRetry } from '../jurisdiction/adapter/retry';
 import { createStructuredLogger } from '../infra/logger';
 import type { JAdapter, JAdapterConfig } from '../jurisdiction/adapter/types';
@@ -306,7 +305,6 @@ const validateImportResult = (
     throw new Error('IMPORT_J_RESULT_RPC_STATE_INVALID');
   }
   for (const [label, value] of [
-    ['DEFAULT_DISPUTE_DELAY', raw.defaultDisputeDelayBlocks],
     ['WATCHER_CONFIRMATION_DEPTH', raw.watcherConfirmationDepth],
     ['ENTITY_PROVIDER_DEPLOYMENT_BLOCK', raw.entityProviderDeploymentBlock],
   ] as const) {
@@ -325,7 +323,6 @@ const assertReplicaMatchesResult = (
   assertReplicaMatchesRequest(replica, result);
   if (
     replica.blockNumber.toString() !== result.blockNumber ||
-    Number(replica.defaultDisputeDelayBlocks) !== result.defaultDisputeDelayBlocks ||
     Number(replica.watcherConfirmationDepth) !== result.watcherConfirmationDepth ||
     Number(replica.entityProviderDeploymentBlock) !== result.entityProviderDeploymentBlock
   ) throw new Error(`IMPORT_J_RESULT_EXISTING_REPLICA_CONFLICT:${result.name}`);
@@ -380,7 +377,6 @@ export const applyCompleteImportJurisdiction = (
       contracts: structuredClone(result.contracts),
       rpcs: [...result.rpcs],
       chainId: result.chainId,
-      defaultDisputeDelayBlocks: result.defaultDisputeDelayBlocks,
       watcherConfirmationDepth: result.watcherConfirmationDepth,
     });
   }
@@ -491,7 +487,6 @@ const buildPreparedJurisdictionImportResult = async (
 ): Promise<JurisdictionImportResult> => {
   const request = pending.request;
   const contracts = assertAdapterAddresses(adapter, request);
-  const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(adapter, request.name);
   const watcherConfirmationDepth = requireWatcherConfirmationDepth(adapter, request);
   const stateRootBytes = adapter.captureStateRoot ? await adapter.captureStateRoot() : null;
   if (isBrowserVM && !(stateRootBytes instanceof Uint8Array && stateRootBytes.length === 32)) {
@@ -518,7 +513,6 @@ const buildPreparedJurisdictionImportResult = async (
     ...(request.blockTimeMs ? { blockTimeMs: request.blockTimeMs } : {}),
     blockNumber: (await resolveInitialBlockNumber(adapter, request)).toString(),
     stateRoot: stateRootBytes ? ethers.hexlify(stateRootBytes) : null,
-    defaultDisputeDelayBlocks,
     watcherConfirmationDepth,
     entityProviderDeploymentBlock,
     contracts,

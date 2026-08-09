@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  buildPreparedCrossJurisdictionRoute,
+  buildPreparedCrossJurisdictionRoute as buildPreparedCrossJurisdictionRouteCanonical,
 } from '../extensions/cross-j';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import {
   buildCrossJurisdictionMarketOffer,
 } from '../extensions/cross-j/orderbook';
@@ -22,6 +23,17 @@ import {
   makeJurisdiction,
   makeState,
 } from './helpers/cross-j';
+
+const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
+type TestRouteInput = Omit<CrossJurisdictionSwapRoute, 'sourceDisputeConfig' | 'targetDisputeConfig'>;
+const buildPreparedCrossJurisdictionRoute = (
+  route: TestRouteInput,
+  options: { runtimeSeed?: string; now: number },
+): CrossJurisdictionSwapRoute => buildPreparedCrossJurisdictionRouteCanonical({
+  ...route,
+  sourceDisputeConfig: TEST_DISPUTE_CONFIG,
+  targetDisputeConfig: TEST_DISPUTE_CONFIG,
+} as CrossJurisdictionSwapRoute, options);
 
 describe('cross-jurisdiction canonical market surface', () => {
   test('production API exposes only the hashledger orderbook flow', async () => {

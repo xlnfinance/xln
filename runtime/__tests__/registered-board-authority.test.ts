@@ -769,6 +769,7 @@ describe('registered Entity certified board authority', () => {
     account.currentDisputeHash = certifiedDisputeHash;
     account.currentDisputeProofBodyHash = certifiedProofBodyHash;
     account.currentDisputeProofNonce = certifiedProofNonce;
+    account.currentDisputeProofProposerIsLeft = true;
     account.currentDisputeProofHanko = await buildQuorumHanko(env, registeredEntityId, certifiedDisputeHash, [
       { signerId: signerA, signature: await signAccountFrame(env, signerA, certifiedDisputeHash) },
       { signerId: signerB, signature: await signAccountFrame(env, signerB, certifiedDisputeHash) },
@@ -776,6 +777,7 @@ describe('registered Entity certified board authority', () => {
     account.counterpartyDisputeHash = certifiedDisputeHash;
     account.counterpartyDisputeProofBodyHash = certifiedProofBodyHash;
     account.counterpartyDisputeProofNonce = certifiedProofNonce;
+    account.counterpartyDisputeProofProposerIsLeft = true;
     account.counterpartyDisputeProofHanko = await buildQuorumHanko(
       env,
       counterpartyEntityId,

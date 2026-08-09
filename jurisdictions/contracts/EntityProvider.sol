@@ -226,42 +226,12 @@ contract EntityProvider is ERC1155 {
    * @return entityNumber The assigned entity number
    */
   function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber) {
-    require(boardHash != bytes32(0), "Invalid board hash");
-
-    entityNumber = nextNumber++;
-    bytes32 entityId = bytes32(entityNumber);
-
-    // Create entity with default governance articles
     EntityArticles memory defaultArticles = EntityArticles({
       controlDelay: 1000,     // Default 1000 blocks for control
       dividendDelay: 3000,    // Default 3000 blocks for dividend
       foundationDelay: 10000  // Default 10000 blocks for foundation
     });
-
-    entities[entityId] = Entity({
-      currentBoardHash: boardHash,
-      previousBoardHash: bytes32(0),
-      previousBoardValidUntil: 0,
-      proposedBoardHash: bytes32(0),
-      activateAtBlock: 0,
-      registrationBlock: block.number,
-      proposerType: ProposerType.BOARD,
-      articles: defaultArticles
-    });
-
-    // Automatically setup governance with fixed supply
-    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
-    address entityAddress = address(uint160(uint256(entityId)));
-
-    _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
-    _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
-
-    entityIdToNumber[entityId] = entityNumber;
-
-    emit EntityRegistered(entityId, entityNumber, boardHash);
-    emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
-
-    return entityNumber;
+    return _registerEntity(boardHash, defaultArticles);
   }
 
   /**
@@ -271,45 +241,14 @@ contract EntityProvider is ERC1155 {
    */
   function registerNumberedEntitiesBatch(bytes32[] calldata boardHashes) external returns (uint256[] memory entityNumbers) {
     entityNumbers = new uint256[](boardHashes.length);
-
-    // Default governance articles (reused for all)
     EntityArticles memory defaultArticles = EntityArticles({
       controlDelay: 1000,
       dividendDelay: 3000,
       foundationDelay: 10000
     });
     for (uint256 i = 0; i < boardHashes.length; i++) {
-      require(boardHashes[i] != bytes32(0), "Invalid board hash");
-
-      uint256 entityNumber = nextNumber++;
-      bytes32 entityId = bytes32(entityNumber);
-
-      entities[entityId] = Entity({
-        currentBoardHash: boardHashes[i],
-        previousBoardHash: bytes32(0),
-        previousBoardValidUntil: 0,
-        proposedBoardHash: bytes32(0),
-        activateAtBlock: 0,
-        registrationBlock: block.number,
-        proposerType: ProposerType.BOARD,
-        articles: defaultArticles
-      });
-
-      // Setup governance
-      (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
-      address entityAddress = address(uint160(uint256(entityId)));
-
-      _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
-      _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
-
-      entityIdToNumber[entityId] = entityNumber;
-
-      emit EntityRegistered(entityId, entityNumber, boardHashes[i]);
-      emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
-
-      entityNumbers[i] = entityNumber;
+      entityNumbers[i] = _registerEntity(boardHashes[i], defaultArticles);
     }
-
     return entityNumbers;
   }
 
@@ -567,18 +506,6 @@ contract EntityProvider is ERC1155 {
   }
 
   // Utility functions
-  function resolveEntityId(string memory identifier) external view returns (bytes32) {
-    // Try to resolve as name first
-    uint256 number = nameToNumber[identifier];
-    if (number > 0) {
-      return bytes32(number);
-    }
-    
-    // Try to parse as number
-    // Note: This would need a string-to-uint parser in practice
-    return bytes32(0);
-  }
-
   function getEntityInfo(bytes32 entityId) external view returns (
     bool exists,
     bytes32 currentBoardHash,
@@ -702,22 +629,36 @@ contract EntityProvider is ERC1155 {
     dividendTokenId = entityNumber | 0x8000000000000000000000000000000000000000000000000000000000000000;
   }
 
-  /**
-   * @notice Extract entity number from token ID
-   * @param tokenId The token ID (control or dividend)
-   * @return entityNumber The entity number
-   */
-  function getEntityFromToken(uint256 tokenId) public pure returns (uint256 entityNumber) {
-    return tokenId & 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
-  }
-
-
-
-
-
-
-
   // === INTERNAL HELPER FUNCTIONS ===
+
+  function _registerEntity(
+    bytes32 boardHash,
+    EntityArticles memory articles
+  ) internal returns (uint256 entityNumber) {
+    require(boardHash != bytes32(0), "Invalid board hash");
+    entityNumber = nextNumber++;
+    bytes32 entityId = bytes32(entityNumber);
+
+    entities[entityId] = Entity({
+      currentBoardHash: boardHash,
+      previousBoardHash: bytes32(0),
+      previousBoardValidUntil: 0,
+      proposedBoardHash: bytes32(0),
+      activateAtBlock: 0,
+      registrationBlock: block.number,
+      proposerType: ProposerType.BOARD,
+      articles: articles
+    });
+
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
+    address entityAddress = address(uint160(uint256(entityId)));
+    _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+    _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+
+    entityIdToNumber[entityId] = entityNumber;
+    emit EntityRegistered(entityId, entityNumber, boardHash);
+    emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
+  }
 
   function _requireStrictShareMajority(
     bytes32 entityId,
@@ -801,28 +742,6 @@ contract EntityProvider is ERC1155 {
     return 1;
   }
 
-  // === VIEW FUNCTIONS ===
-
-  /**
-   * @notice Get governance info for an entity
-   */
-  function getGovernanceInfo(uint256 entityNumber) external view returns (
-    uint256 controlTokenId,
-    uint256 dividendTokenId,
-    uint256 controlSupply,
-    uint256 dividendSupply,
-    bool hasActiveProposal,
-    bytes32 articlesHash
-  ) {
-    bytes32 entityId = bytes32(entityNumber);
-    (controlTokenId, dividendTokenId) = getTokenIds(entityNumber);
-    bool exists = entities[entityId].currentBoardHash != bytes32(0);
-    controlSupply = exists ? TOTAL_CONTROL_SUPPLY : 0;
-    dividendSupply = exists ? TOTAL_DIVIDEND_SUPPLY : 0;
-    hasActiveProposal = entities[entityId].proposedBoardHash != bytes32(0);
-    articlesHash = keccak256(abi.encode(entities[entityId].articles));
-  }
-
   /**
    * @notice Foundation can create entity with custom governance articles
    * @param boardHash Initial board/quorum hash
@@ -835,41 +754,13 @@ contract EntityProvider is ERC1155 {
     bytes calldata hankoData,
     uint256 actionNonce
   ) external returns (uint256 entityNumber) {
-    require(boardHash != bytes32(0), "Invalid board hash");
     _authorizeFoundation(
       FOUNDATION_REGISTER_ENTITY,
       keccak256(abi.encode(boardHash, articles)),
       hankoData,
       actionNonce
     );
-
-    entityNumber = nextNumber++;
-    bytes32 entityId = bytes32(entityNumber);
-    
-    entities[entityId] = Entity({
-      currentBoardHash: boardHash,
-      previousBoardHash: bytes32(0),
-      previousBoardValidUntil: 0,
-      proposedBoardHash: bytes32(0),
-      activateAtBlock: 0,
-      registrationBlock: block.number,
-      proposerType: ProposerType.BOARD,
-      articles: articles
-    });
-    
-    // Automatically setup governance with fixed supply
-    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
-    address entityAddress = address(uint160(uint256(entityId)));
-    
-    _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
-    _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
-
-    entityIdToNumber[entityId] = entityNumber;
-    
-    emit EntityRegistered(entityId, entityNumber, boardHash);
-    emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
-    
-    return entityNumber;
+    return _registerEntity(boardHash, articles);
   }
 
   // === ENTITY HANKO ACTIONS ===
@@ -956,9 +847,9 @@ contract EntityProvider is ERC1155 {
   // === CONTROL SHARES RELEASE TO DEPOSITORY ===
 
   event ControlSharesReleased(
-    bytes32 indexed entityId, 
-    address indexed depository, 
-    uint256 controlAmount, 
+    bytes32 indexed entityId,
+    address indexed depository,
+    uint256 controlAmount,
     uint256 dividendAmount,
     string purpose
   );
@@ -1066,10 +957,13 @@ contract EntityProvider is ERC1155 {
   }
 
   /**
-   * @notice Release entity's control and/or dividend shares to depository for trading
-   * @dev This mirrors real corporate stock issuance - entity manages its own share releases
+   * @notice Release entity control and/or dividend shares to an explicit custodian.
+   * @dev This operation transfers ERC1155 shares only; it does not credit a
+   *      Depository reserve. The quorum must therefore name the actual wallet
+   *      or custody contract that will account for the shares. An implicit
+   *      Depository destination would accept the callback but strand the assets.
    * @param entityNumber The entity number
-   * @param depository Depository contract address to receive the shares
+   * @param recipient Explicit custody address receiving the shares
    * @param controlAmount Amount of control tokens to release (0 to skip)
    * @param dividendAmount Amount of dividend tokens to release (0 to skip) 
    * @param purpose Human-readable purpose (e.g., "Series A", "Employee Pool", "Public Sale")
@@ -1077,13 +971,13 @@ contract EntityProvider is ERC1155 {
    */
   function releaseControlShares(
     uint256 entityNumber,
-    address depository,
+    address recipient,
     uint256 controlAmount,
     uint256 dividendAmount,
     string calldata purpose,
     bytes calldata hankoData
   ) external {
-    require(depository != address(0), "Invalid depository address");
+    require(recipient != address(0), "Invalid recipient address");
     require(controlAmount > 0 || dividendAmount > 0, "Must release some tokens");
     
     bytes32 entityId = bytes32(entityNumber);
@@ -1092,7 +986,7 @@ contract EntityProvider is ERC1155 {
     
     bytes32 releaseHash = computeReleaseControlSharesHankoHash(
       entityNumber,
-      depository,
+      recipient,
       controlAmount,
       dividendAmount,
       purpose,
@@ -1109,18 +1003,18 @@ contract EntityProvider is ERC1155 {
     // Transfer control tokens if requested
     if (controlAmount > 0) {
       require(balanceOf(entityAddress, controlTokenId) >= controlAmount, "Insufficient control tokens");
-      _safeTransferFrom(entityAddress, depository, controlTokenId, controlAmount, 
+      _safeTransferFrom(entityAddress, recipient, controlTokenId, controlAmount,
         abi.encode("CONTROL_SHARE_RELEASE", purpose));
     }
     
     // Transfer dividend tokens if requested  
     if (dividendAmount > 0) {
       require(balanceOf(entityAddress, dividendTokenId) >= dividendAmount, "Insufficient dividend tokens");
-      _safeTransferFrom(entityAddress, depository, dividendTokenId, dividendAmount,
+      _safeTransferFrom(entityAddress, recipient, dividendTokenId, dividendAmount,
         abi.encode("DIVIDEND_SHARE_RELEASE", purpose));
     }
     
-    emit ControlSharesReleased(entityId, depository, controlAmount, dividendAmount, purpose);
+    emit ControlSharesReleased(entityId, recipient, controlAmount, dividendAmount, purpose);
     emit EntityProviderActionExecuted(
       entityId,
       actionNonce,

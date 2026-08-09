@@ -269,8 +269,8 @@ type AccountRecoveryBundleV1 = {
     counterpartyDisputeHanko: string;
     depositoryAddress: string;
     disputeConfig: {
-      leftDisputeDelay: number;
-      rightDisputeDelay: number;
+      leftResponseSeconds: number;
+      rightResponseSeconds: number;
     };
   };
 
@@ -342,8 +342,8 @@ type TowerAppointmentV1 = {
     proofNonce: number;           // exact proof nonce the remedy may submit
     proofBodyHash: string;
     responseMode: "last_resort";
-    lastResortWindowBlocks: number;
-    safetyMarginBlocks: number;
+    lastResortWindowSeconds: number;
+    safetyMarginSeconds: number;
     maxFeeToken?: string;
     feeBudget?: string;
   };
@@ -530,13 +530,17 @@ The tower monitors J-layer events:
 For every dispute, define:
 
 ```txt
-disputeStartBlock       = observed J block
-disputeTimeoutBlock     = on-chain account.disputeTimeout
-lastResortWindowBlocks  = jurisdiction blocks for 2 hours by default
-safetyMarginBlocks      = jurisdiction blocks for 10-20 minutes by default
-lastResortStartBlock    = disputeTimeoutBlock - lastResortWindowBlocks
-feeBumpStartBlock       = disputeTimeoutBlock - safetyMarginBlocks
+disputeStartTimestamp       = on-chain account.disputeStartTimestamp (unix seconds)
+disputeTimeout              = on-chain account.disputeTimeout (unix seconds)
+lastResortWindowSeconds     = 2 hours by default
+safetyMarginSeconds         = 10-20 minutes by default
+lastResortStartTimestamp    = disputeTimeout - lastResortWindowSeconds
+feeBumpStartTimestamp       = disputeTimeout - safetyMarginSeconds
 ```
+
+Block height is observation/finality metadata only. It must never be converted
+into a protocol deadline: Account and Runtime share exact unix-second clocks,
+and Runtime casts seconds to milliseconds only at its scheduling boundary.
 
 Default policy:
 
@@ -552,10 +556,10 @@ When a tower sees a dispute:
    - do nothing except record observation.
 4. If the on-chain dispute is stale:
    - immediately notify the user, user's other devices, relays, and optional backup towers;
-   - do not submit a transaction before `lastResortStartBlock`;
+   - do not submit a transaction before `lastResortStartTimestamp`;
    - continue checking whether the user or another honest party already countered the dispute;
-   - at `lastResortStartBlock`, decrypt the latest remedy and submit the counter-dispute if no better state is on-chain;
-   - at `feeBumpStartBlock`, fee-bump or rebroadcast if the rescue tx is not confirmed;
+   - at `lastResortStartTimestamp`, decrypt the latest remedy and submit the counter-dispute if no better state is on-chain;
+   - at `feeBumpStartTimestamp`, fee-bump or rebroadcast if the rescue tx is not confirmed;
    - publish a tower action receipt.
 
 The tower action must be **counter-dispute only**:
@@ -575,7 +579,8 @@ Delayed response is useful, but by itself it is only policy. If a tower receives
 Required controls:
 
 1. **On-chain not-before predicate**
-   - Add a watchtower rescue path that checks `block.number >= account.disputeTimeout - lastResortWindowBlocks`.
+   - The watchtower rescue path checks
+     `block.timestamp + lastResortWindowSeconds >= account.disputeTimeout`.
    - The pre-signed tower payload is invalid before that point.
    - This prevents "hub starts dispute, tower instantly finalizes/counters" collusion.
 
@@ -612,7 +617,7 @@ Required controls:
 Required contract/runtime assumption:
 
 - J-layer must support a dispute window where a newer valid proof can replace or defeat an older proof.
-- The rescue path must enforce `lastResortWindowBlocks` on-chain.
+- The rescue path must enforce `lastResortWindowSeconds` on-chain.
 - If this is not currently true, `jurisdictions` contracts need a guarded `watchtowerCounterDispute` or equivalent before last-resort towers can be considered collusion-resistant.
 
 Current repo note:
@@ -718,7 +723,7 @@ Files/modules:
 
 Exit tests:
 
-- stale dispute event causes tower to notify immediately but not publish before `lastResortStartBlock`;
+- stale dispute event causes tower to notify immediately but not publish before `lastResortStartTimestamp`;
 - early colluding-tower submission reverts on-chain;
 - stale dispute event causes tower to publish latest proof inside the last-resort window;
 - honest latest dispute causes no action;
@@ -794,8 +799,8 @@ active backlog.
     runtime coverage grid exists, account-level PSR status remains open.
 11. done: add contract support for dispute update/challenge if missing.
 12. done: add contract-enforced delayed tower action:
-   - `lastResortWindowBlocks`;
-   - `safetyMarginBlocks` as tower policy;
+   - `lastResortWindowSeconds`;
+   - `safetyMarginSeconds` as tower policy;
    - counter-dispute-only payload;
    - no same-proof finalize capability.
 13. partial: add recovery E2E for wiped local browser state and tower restore;

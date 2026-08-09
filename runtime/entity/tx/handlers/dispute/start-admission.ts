@@ -31,13 +31,23 @@ export const validateCrossJurisdictionDisputeRoute = (
   }
   const localEntityId = state.entityId.toLowerCase();
   const counterpartyId = tx.data.counterpartyEntityId.toLowerCase();
-  const isSourceAccount =
-    route.source.entityId.toLowerCase() === localEntityId &&
-    route.source.counterpartyEntityId.toLowerCase() === counterpartyId;
-  const isTargetAccount =
-    route.target.counterpartyEntityId.toLowerCase() === localEntityId &&
-    route.target.entityId.toLowerCase() === counterpartyId;
-  if (!isSourceAccount && !isTargetAccount) {
+  const accountPairMatches = (left: string, right: string): boolean =>
+    (left.toLowerCase() === localEntityId && right.toLowerCase() === counterpartyId)
+    || (right.toLowerCase() === localEntityId && left.toLowerCase() === counterpartyId);
+  const isSourceAccount = accountPairMatches(
+    route.source.entityId,
+    route.source.counterpartyEntityId,
+  );
+  const isTargetAccount = accountPairMatches(
+    route.target.entityId,
+    route.target.counterpartyEntityId,
+  );
+  // Either signer of a bilateral Account may start its clock. Restricting this
+  // check to the user-facing direction breaks must-close when an online Hub
+  // force-starts the sibling leg for an offline user. A route that maps the
+  // same Account onto both legs is ambiguous and is rejected rather than
+  // silently choosing one financial role.
+  if (isSourceAccount === isTargetAccount) {
     throw new Error(`DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH:${routeId}`);
   }
   if (isCrossJurisdictionTerminalStatus(route.status)) {
@@ -56,25 +66,49 @@ export const validateCrossJurisdictionDisputeRoute = (
  *
  * Why: registry settlement only runs inside applyPull. A signed ProofBody that
  * carries only payments/swaps on a route-bound disputeStart would finalize
- * without consulting hashLadderReveals — silent wrong economics. Opaque custom
+ * without consulting hashLadderRegistrations — silent wrong economics. Opaque custom
  * transformers are ignored here; they are not the pull settlement path.
  */
-export const assertCrossJurisdictionDisputeProofHasPulls = (
+/**
+ * True when the signed ProofBody encodes at least one canonical Pull.
+ *
+ * An ABI-compatible custom transformer is still opaque executable logic: its
+ * tuple shape does not grant it DeltaTransformer timing semantics. Conversely,
+ * malformed bytes addressed to the canonical DeltaTransformer must fail loud,
+ * exactly as Solidity abi.decode would, rather than being misclassified as a
+ * pull-free proof eligible for the role-gated non-starter acceptance path.
+ */
+export const proofBodyHasPulls = (
   proofBody: ProofBodyStruct,
-  routeId: string,
-): void => {
-  let pullCount = 0;
-  for (const transformer of proofBody.transformers) {
+  canonicalDeltaTransformerAddress: string,
+): boolean => {
+  if (!ethers.isAddress(canonicalDeltaTransformerAddress)) {
+    throw new Error(`DISPUTE_DELTA_TRANSFORMER_ADDRESS_INVALID:${canonicalDeltaTransformerAddress}`);
+  }
+  const canonicalAddress = canonicalDeltaTransformerAddress.toLowerCase();
+  for (const [transformerIndex, transformer] of proofBody.transformers.entries()) {
+    if (String(transformer.transformerAddress).toLowerCase() !== canonicalAddress) continue;
     try {
       const decoded = ABI_CODER.decode([DELTA_BATCH_PARAM], transformer.encodedBatch)[0] as {
         pull: readonly unknown[];
       };
-      pullCount += decoded.pull.length;
-    } catch {
-      // Opaque / non-DeltaTransformer batches are not pull settlement authority.
+      if (decoded.pull.length > 0) return true;
+    } catch (error) {
+      throw new Error(
+        `DISPUTE_CANONICAL_DELTA_BATCH_INVALID:${transformerIndex}:` +
+        `${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
-  if (pullCount === 0) {
+  return false;
+};
+
+export const assertCrossJurisdictionDisputeProofHasPulls = (
+  proofBody: ProofBodyStruct,
+  routeId: string,
+  canonicalDeltaTransformerAddress: string,
+): void => {
+  if (!proofBodyHasPulls(proofBody, canonicalDeltaTransformerAddress)) {
     throw new Error(`DISPUTE_START_CROSS_J_PROOF_PULLS_MISSING:${routeId}`);
   }
 };

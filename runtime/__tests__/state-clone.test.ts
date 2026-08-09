@@ -57,6 +57,8 @@ const makeCrossJurisdictionRoute = () => ({
     tokenId: 2,
     amount: 200n,
   },
+  sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+  targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
   sourcePull: {
     pullId: 'source-pull',
     tokenId: 1,
@@ -64,6 +66,14 @@ const makeCrossJurisdictionRoute = () => ({
     signedAmount: 100n,
     fullHash: `0x${'bb'.repeat(32)}`,
     partialRoot: `0x${'cc'.repeat(32)}`,
+  },
+  targetPull: {
+    pullId: 'target-pull',
+    tokenId: 2,
+    amount: 200n,
+    signedAmount: 200n,
+    fullHash: `0x${'dd'.repeat(32)}`,
+    partialRoot: `0x${'ee'.repeat(32)}`,
   },
   status: 'resting',
   createdAt: 1,
@@ -81,7 +91,7 @@ const makeProofBodyStruct = () => ({
   }],
 });
 
-const makeManualFallbackAccount = () => ({
+const makeCanonicalAccountFixture = () => ({
   state: {
     leftEntity: 'left',
     rightEntity: 'right',
@@ -112,14 +122,21 @@ const makeManualFallbackAccount = () => ({
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
-    disputeConfig: {},
+    disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
   },
   status: 'active',
   mempool: [{
     type: 'direct_payment',
-    data: { tokenId: 1, amount: 10n },
+    data: {
+      tokenId: 1,
+      amount: 10n,
+      route: ['left'],
+      deliveryMode: 'direct',
+      fromEntityId: 'left',
+      toEntityId: 'right',
+    },
   }],
   currentFrame: {
     height: 0,
@@ -194,7 +211,7 @@ describe('state cloning', () => {
   test('Entity frame candidate clones only an Account it touches', () => {
     const source = makeProjectionReplica().state as EntityState;
     const counterpartyId = `0x${'bb'.repeat(32)}`;
-    const accountFixture = makeManualFallbackAccount();
+    const accountFixture = makeCanonicalAccountFixture();
     delete accountFixture.uncloneable;
     const account = accountFixture as unknown as AccountReplica;
     account.state.leftEntity = source.entityId;
@@ -221,7 +238,7 @@ describe('state cloning', () => {
     const source = makeProjectionReplica().state as EntityState;
     for (const byte of ['b1', 'b2', 'b3']) {
       const counterpartyId = `0x${byte.repeat(32)}`;
-      const accountFixture = makeManualFallbackAccount();
+      const accountFixture = makeCanonicalAccountFixture();
       delete accountFixture.uncloneable;
       const account = accountFixture as unknown as AccountReplica;
       account.state.leftEntity = source.entityId;
@@ -248,7 +265,7 @@ describe('state cloning', () => {
   test('Entity Account candidate preserves the full-clone root and promotes only at commit', () => {
     const source = makeProjectionReplica().state as EntityState;
     const counterpartyId = `0x${'cc'.repeat(32)}`;
-    const accountFixture = makeManualFallbackAccount();
+    const accountFixture = makeCanonicalAccountFixture();
     delete accountFixture.uncloneable;
     const account = accountFixture as unknown as AccountReplica;
     account.state.leftEntity = source.entityId;
@@ -277,7 +294,7 @@ describe('state cloning', () => {
   test('a planner flattens a prior candidate without linking commit to certified state', () => {
     const source = makeProjectionReplica().state as EntityState;
     const counterpartyId = `0x${'cd'.repeat(32)}`;
-    const accountFixture = makeManualFallbackAccount();
+    const accountFixture = makeCanonicalAccountFixture();
     delete accountFixture.uncloneable;
     const account = accountFixture as unknown as AccountReplica;
     account.state.leftEntity = source.entityId;
@@ -316,6 +333,7 @@ describe('state cloning', () => {
         takerReferrerBps: 0,
       },
       referenceTokenId: 1,
+      usdQuoteAuthorityEntityId: 'market-maker',
       minTradeSize: 0n,
       supportedPairs: [firstPair, secondPair],
     });
@@ -424,7 +442,7 @@ describe('state cloning', () => {
     const state = makeProjectionReplica().state as any;
     state.entityId = 'left';
     const route = makeCrossJurisdictionRoute();
-    const account = makeManualFallbackAccount() as any;
+    const account = makeCanonicalAccountFixture() as any;
     delete account.uncloneable;
     account.state.swapOffers = new Map([[
       route.orderId,
@@ -451,7 +469,7 @@ describe('state cloning', () => {
   test('rejects non-canonical and mismatched Account map keys at the Entity boundary', () => {
     const state = makeProjectionReplica().state as any;
     state.entityId = 'left';
-    const account = makeManualFallbackAccount() as any;
+    const account = makeCanonicalAccountFixture() as any;
     delete account.uncloneable;
 
     state.accounts = new Map([['RIGHT', account]]);
@@ -627,7 +645,7 @@ describe('state cloning', () => {
   test('runtime frame snapshot fails fast with the non-cloneable field path', () => {
     for (const absentField of ['deferredAccountProposals'] as const) {
       const replica = { ...makeProjectionReplica(), mempool: [] } as any;
-      const account = makeManualFallbackAccount() as any;
+      const account = makeCanonicalAccountFixture() as any;
       delete account.uncloneable;
       account.provider = { getBlockNumber: () => 1 };
       replica.state.accounts.set('left', account);
@@ -689,7 +707,7 @@ describe('state cloning', () => {
   });
 
   test('account clones preserve absence of optional pulls consensus state', () => {
-    const account = makeManualFallbackAccount() as any;
+    const account = makeCanonicalAccountFixture() as any;
     delete account.state.pulls;
     delete account.uncloneable;
 
@@ -699,7 +717,7 @@ describe('state cloning', () => {
   });
 
   test('account clone isolates mempool, dispute evidence, and cross-j routes', () => {
-    const account = makeManualFallbackAccount();
+    const account = makeCanonicalAccountFixture();
     delete (account as Record<string, unknown>).uncloneable;
     const cloned = cloneAccountReplica(account as any);
 

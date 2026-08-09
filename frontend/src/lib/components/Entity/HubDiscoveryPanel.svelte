@@ -34,17 +34,14 @@
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   // State
-  let loading = false;
   let error = '';
   let connectingHubIds = new Set<string>();
   let expandedHub: string | null = null;
 
   type Hub = HubDiscoveryHub;
 
-  let hubs: Hub[] = [];
-
   // Sorted hubs (with live connection status from current account state)
-  $: projectedHubs = mergeHubs(hubDiscoveryProjection.localHubs, hubs);
+  $: projectedHubs = hubDiscoveryProjection.localHubs;
   $: visibleHubs = projectedHubs.filter((hub) => !isSameEntityId(entityId, hub.entityId));
   $: sortedHubs = visibleHubs
     .map((hub) => ({
@@ -73,13 +70,6 @@
     return (ppm / 100).toFixed(2) + ' bps';
   }
 
-  function mergeHubs(primary: Hub[], secondary: Hub[]): Hub[] {
-    const byId = new Map<string, Hub>();
-    for (const hub of secondary) byId.set(normalizeEntityId(hub.entityId), hub);
-    for (const hub of primary) byId.set(normalizeEntityId(hub.entityId), hub);
-    return Array.from(byId.values());
-  }
-
   function toggleExpand(hubId: string) {
     expandedHub = expandedHub === hubId ? null : hubId;
   }
@@ -93,35 +83,28 @@
     });
   }
 
-  // Discover hubs from the active RuntimeView/radapter projection.
-  async function discoverHubs() {
-    loading = true;
-    error = '';
-
-    try {
-      const localHubs = hubDiscoveryProjection.localHubs;
-      hubs = mergeHubs(localHubs, hubs);
-    } catch (err) {
-      errorLog.log('Hub discovery failed', 'Hub Discovery', { entityId, err });
-      error = (err as Error)?.message || 'Discovery failed';
-    } finally {
-      loading = false;
-    }
-  }
-
   // Connect to hub (open account + extend credit in same frame)
-  async function connectToHub(hub: Hub) {
+  async function connectToHub(selectedHub: Hub) {
     if (!entityId) return;
 
-    const hubId = normalizeEntityId(hub.entityId);
+    const hubId = normalizeEntityId(selectedHub.entityId);
     if (connectingHubIds.has(hubId)) return;
-    const projectedConnection = hubDiscoveryProjection.connectionByHubId.get(normalizeHubEntityId(hub.entityId));
+    const projectedConnection = hubDiscoveryProjection.connectionByHubId.get(hubId);
     if (projectedConnection?.isConnected || projectedConnection?.isOpening) return;
 
     connectingHubIds = new Set(connectingHubIds).add(hubId);
     error = '';
 
     try {
+      // Re-resolve at the command boundary. The projection may have changed
+      // after rendering (for example when committed `isHub:false` arrives),
+      // and a stale click must never sign clocks from the removed card.
+      const hub = hubDiscoveryProjection.localHubs.find(candidate =>
+        normalizeEntityId(candidate.entityId) === hubId
+      );
+      if (!hub || hub.metadata.isHub !== true) {
+        throw new Error(`ACCOUNT_DISPUTE_PARTY_ROLE_UNAVAILABLE:${entityId}:${selectedHub.entityId}`);
+      }
       const currentEnv = actionRuntimeEnv;
       if (!canOpenHubAccount) throw new Error(openAccountPermissionError || 'Open Account is not available');
       if (!submitRuntimeInput) throw new Error('Open Account command path is not connected');
@@ -139,6 +122,11 @@
       const tokenDecimals = $xlnFunctions.getTokenInfo(1).decimals;
       const creditAmount = 10_000n * 10n ** BigInt(tokenDecimals);
       const rebalancePolicy = getOpenAccountRebalancePolicyData(tokenDecimals);
+      const normalizedSourceEntityId = normalizeHubEntityId(entityId);
+      const sourceIsHub = hubDiscoveryProjection.committedRoles.get(normalizedSourceEntityId);
+      if (typeof sourceIsHub !== 'boolean' || hub.metadata.isHub !== true) {
+        throw new Error(`ACCOUNT_DISPUTE_PARTY_ROLE_UNAVAILABLE:${entityId}:${hub.entityId}`);
+      }
 
       // Preload signed gossip/runtime routing metadata first so the initial
       // openAccount does not sit in the local pending queue waiting for pubkey discovery.
@@ -148,6 +136,17 @@
         sourceEntityId: entityId,
         signerId,
         hubEntityId: hub.entityId,
+        sourceRoleEvidence: {
+          entityId: normalizedSourceEntityId,
+          isHub: sourceIsHub,
+          source: 'committed-profile',
+        },
+        hubRoleEvidence: {
+          entityId: normalizeHubEntityId(hub.entityId),
+          isHub: true,
+          source: hub.roleSource,
+        },
+        committedRoles: hubDiscoveryProjection.committedRoles,
         creditAmount,
         tokenId: 1,
         rebalancePolicy,
@@ -163,35 +162,14 @@
     }
   }
 
-  // Track if we've already discovered (prevent repeated auto-fetch loops)
-  let hasDiscoveredOnce = false;
   let activeDiscoveryKey = '';
-
-  $: localHubProjectionSignature = hubDiscoveryProjection.localHubs
-    .map((hub) => `${normalizeHubEntityId(hub.entityId)}:${hub.lastSeen}`)
-    .join('|');
-  let lastLocalHubProjectionSignature = '';
-  $: if (localHubProjectionSignature !== lastLocalHubProjectionSignature) {
-    lastLocalHubProjectionSignature = localHubProjectionSignature;
-    if (localHubProjectionSignature) hubs = mergeHubs(hubDiscoveryProjection.localHubs, hubs);
-  }
 
   $: currentDiscoveryKey = hubDiscoveryProjection.discoveryKey;
   $: if (currentDiscoveryKey !== activeDiscoveryKey) {
     activeDiscoveryKey = currentDiscoveryKey;
-    hubs = [];
     error = '';
     expandedHub = null;
     connectingHubIds = new Set();
-    hasDiscoveredOnce = false;
-  }
-
-  // Also refresh when env becomes available (only once)
-  $: if (currentDiscoveryKey && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
-    hasDiscoveredOnce = true;
-    (async () => {
-      await discoverHubs();
-    })();
   }
 </script>
 
@@ -199,12 +177,6 @@
   <header class="panel-header">
     <div class="panel-copy">
       <span class="panel-kicker">Counterparties</span>
-    </div>
-    <div class="header-controls">
-      <button class="refresh-btn" on:click={() => discoverHubs()} disabled={loading}>
-        <span class:spinning={loading}><RefreshCw size={14} /></span>
-        Refresh
-      </button>
     </div>
   </header>
 
@@ -219,12 +191,7 @@
     <div class="error-banner">{error}</div>
   {/if}
 
-  {#if loading && hubs.length === 0}
-    <div class="loading-state">
-      <span class="pulse"><RefreshCw size={20} /></span>
-      <span>Scanning network...</span>
-    </div>
-  {:else if sortedHubs.length === 0}
+  {#if sortedHubs.length === 0}
     <div class="empty-state">
       <span>No counterparties found</span>
     </div>
@@ -363,47 +330,6 @@
     color: var(--hub-text);
   }
 
-  .header-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .refresh-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 38px;
-    padding: 0 14px !important;
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--hub-surface) 96%, transparent),
-      color-mix(in srgb, var(--hub-elevated) 100%, transparent)
-    ) !important;
-    border: 1px solid color-mix(in srgb, var(--hub-border) 92%, transparent) !important;
-    border-radius: 999px !important;
-    color: var(--hub-text-secondary) !important;
-    font-size: 12px !important;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
-  }
-
-  .refresh-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--hub-surface-hover) 100%, transparent) !important;
-    border-color: color-mix(in srgb, var(--hub-accent) 18%, transparent) !important;
-    color: var(--hub-text) !important;
-  }
-
-  .refresh-btn:disabled {
-    opacity: 0.5;
-  }
-
-  .spinning {
-    display: flex;
-    animation: spin 1s linear infinite;
-  }
-
   @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
@@ -430,7 +356,6 @@
     font-size: 12px;
   }
 
-  .loading-state,
   .empty-state {
     display: flex;
     align-items: center;
@@ -442,16 +367,6 @@
     background: color-mix(in srgb, var(--hub-surface) 98%, transparent);
     color: var(--hub-text-muted);
     font-size: 12px;
-  }
-
-  .pulse {
-    display: flex;
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 1; }
   }
 
   .hub-cards {
@@ -721,11 +636,6 @@
   }
 
   @media (max-width: 740px) {
-    .header-controls {
-      width: auto;
-      justify-content: flex-end;
-    }
-
     .hub-card-top {
       grid-template-columns: 1fr;
       gap: 10px;
@@ -765,12 +675,6 @@
     .panel-kicker {
       font-size: 9px;
       letter-spacing: 0.08em;
-    }
-
-    .refresh-btn {
-      min-height: 34px;
-      padding: 0 12px !important;
-      font-size: 11px !important;
     }
 
     .hub-avatar {

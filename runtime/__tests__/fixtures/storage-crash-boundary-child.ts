@@ -345,11 +345,13 @@ const collectiveTxs: EntityTx[] = [{
     amount: 7n,
   },
 }, {
-  type: 'j_broadcast',
-  data: {},
-}, {
   type: 'chatMessage',
   data: { message: 'certified-height-one', timestamp: env.state.timestamp },
+}, {
+  // A manual broadcast closes the Entity transaction list: every preceding
+  // operation may add J work, and this final transaction owns its submission.
+  type: 'j_broadcast',
+  data: {},
 }];
 const proposalTx = buildCollectiveEntityProposalTx(signerA, collectiveTxs);
 if (proposalTx.type !== 'propose') throw new Error('crash fixture collective proposal missing');

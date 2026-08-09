@@ -48,7 +48,7 @@ const makeAccount = (): AccountReplica => ({
     leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
     rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
-    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+    disputeConfig: { leftResponseSeconds: 576, rightResponseSeconds: 576 },
     jNonce: 0,
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),

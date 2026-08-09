@@ -30,7 +30,7 @@ const diagnosticFiles = [
   {
     path: 'frontend/src/lib/components/Entity/HubDiscoveryPanel.svelte',
     importLine: "import { errorLog } from '../../stores/errorLogStore';",
-    logLine: "errorLog.log('Hub discovery failed', 'Hub Discovery'",
+    logLine: "errorLog.log('Hub connection failed', 'Hub Discovery'",
   },
   {
     path: 'frontend/src/lib/components/Entity/PaymentPanel.svelte',

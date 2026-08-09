@@ -38,9 +38,9 @@ test('onboarding profile setup builds explicit RuntimeInput batches', () => {
   const input = buildOnboardingProfileRuntimeInput({
     displayName: ' Alice ',
     targets: [
-      { entityId: ENTITY.toUpperCase(), signerId: SIGNER.toUpperCase(), jurisdiction: 'Testnet' },
-      { entityId: ENTITY, signerId: SIGNER, jurisdiction: 'Testnet' },
-      { entityId: HUB_A, signerId: SIGNER, jurisdiction: 'Tron' },
+      { entityId: ENTITY.toUpperCase(), signerId: SIGNER.toUpperCase(), isHub: false, roleSource: 'committed-profile', jurisdiction: 'Testnet' },
+      { entityId: ENTITY, signerId: SIGNER, isHub: false, roleSource: 'committed-profile', jurisdiction: 'Testnet' },
+      { entityId: HUB_A, signerId: SIGNER, isHub: true, roleSource: 'committed-profile', jurisdiction: 'Tron' },
     ],
   });
 
@@ -65,8 +65,13 @@ test('onboarding profile setup builds explicit RuntimeInput batches', () => {
 
 test('onboarding hub setup builds one RuntimeInput with deduped open-account txs', () => {
   const input = buildOnboardingHubOpenRuntimeInput({
-    target: { entityId: ENTITY.toUpperCase(), signerId: SIGNER.toUpperCase(), jurisdiction: 'Testnet' },
+    target: { entityId: ENTITY.toUpperCase(), signerId: SIGNER.toUpperCase(), isHub: false, roleSource: 'committed-profile', jurisdiction: 'Testnet' },
     hubEntityIds: [HUB_A.toUpperCase(), HUB_A, ENTITY, HUB_B],
+    hubRoleEvidenceByEntityId: {
+      [HUB_A]: { entityId: HUB_A, isHub: true, source: 'verified-gossip-profile' },
+      [HUB_B]: { entityId: HUB_B, isHub: true, source: 'verified-gossip-profile' },
+    },
+    committedRolesByEntityId: { [ENTITY]: false },
     creditAmount: 10_000n,
     tokenId: 7,
     rebalancePolicy: REBALANCE_POLICY,
@@ -81,6 +86,7 @@ test('onboarding hub setup builds one RuntimeInput with deduped open-account txs
         type: 'openAccount',
         data: {
           targetEntityId: HUB_A.toLowerCase(),
+          disputeConfig: { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 },
           creditAmount: 10_000n,
           tokenId: 7,
           rebalancePolicy: REBALANCE_POLICY,
@@ -90,6 +96,7 @@ test('onboarding hub setup builds one RuntimeInput with deduped open-account txs
         type: 'openAccount',
         data: {
           targetEntityId: HUB_B.toLowerCase(),
+          disputeConfig: { leftResponseSeconds: 86_400, rightResponseSeconds: 3_600 },
           creditAmount: 10_000n,
           tokenId: 7,
           rebalancePolicy: REBALANCE_POLICY,
@@ -102,20 +109,36 @@ test('onboarding hub setup builds one RuntimeInput with deduped open-account txs
 test('onboarding RuntimeInput builders reject malformed setup commands', () => {
   expect(() => buildOnboardingProfileRuntimeInput({
     displayName: 'A',
-    targets: [{ entityId: ENTITY, signerId: SIGNER }],
+    targets: [{ entityId: ENTITY, signerId: SIGNER, isHub: false, roleSource: 'committed-profile' }],
   })).toThrow('profile name');
 
   expect(() => buildOnboardingHubOpenRuntimeInput({
-    target: { entityId: ENTITY, signerId: SIGNER },
+    target: { entityId: ENTITY, signerId: SIGNER, isHub: false, roleSource: 'committed-profile' },
     hubEntityIds: [ENTITY],
+    hubRoleEvidenceByEntityId: {},
+    committedRolesByEntityId: { [ENTITY]: false },
     creditAmount: 1n,
   })).toThrow('requires at least one hub');
 
   expect(() => buildOnboardingHubOpenRuntimeInput({
-    target: { entityId: ENTITY, signerId: SIGNER },
+    target: { entityId: ENTITY, signerId: SIGNER, isHub: false, roleSource: 'committed-profile' },
     hubEntityIds: [HUB_A],
+    hubRoleEvidenceByEntityId: {
+      [HUB_A]: { entityId: HUB_A, isHub: true, source: 'verified-gossip-profile' },
+    },
+    committedRolesByEntityId: { [ENTITY]: false },
     creditAmount: 0n,
   })).toThrow('credit amount must be positive');
+
+  expect(() => buildOnboardingHubOpenRuntimeInput({
+    target: { entityId: ENTITY, signerId: SIGNER, isHub: false, roleSource: 'committed-profile' },
+    hubEntityIds: [HUB_A],
+    hubRoleEvidenceByEntityId: {
+      [HUB_A]: { entityId: HUB_A, isHub: true, source: 'verified-gossip-profile' },
+    },
+    committedRolesByEntityId: { [ENTITY]: false, [HUB_A]: false },
+    creditAmount: 1n,
+  })).toThrow(`ACCOUNT_ROLE_EVIDENCE_COMMITTED_CONFLICT:${HUB_A}`);
 });
 
 test('onboarding completion requires every requested hub account to commit', () => {
@@ -208,7 +231,7 @@ test('FormationPanel uses injected runtime projection instead of xlnEnvironment'
 
   expect(source).toContain('export let runtimeProjection: FormationRuntimeProjection');
   expect(source).toContain('emptyFormationRuntimeProjection');
-  expect(source).toContain('createActiveNumberedEntity(');
+  expect(source).toContain('registerActiveNumberedEntities(');
   expect(source).not.toContain('export let runtimeEnv');
   expect(source).not.toContain('$: env = runtimeEnv');
   expect(source).not.toContain('RuntimeReplica');

@@ -3,7 +3,9 @@ import {
   type CanonicalJEvent,
 } from '../machine/event-catalog';
 import type { RuntimeReplica } from '../../runtime/types';
+import type { EntityState } from '../../entity/types';
 import type { JEventIngress } from './types';
+import { ethers } from 'ethers';
 
 export type CanonicalJEventIngress = JEventIngress & {
   name: CanonicalJEvent;
@@ -16,6 +18,32 @@ export const isCanonicalEvent = (
 ): event is CanonicalJEventIngress => canonicalEventNames.has(event.name);
 
 const normalizedId = (value: unknown): string => String(value).toLowerCase();
+
+const hashLadderRouteNamesEntity = (
+  event: CanonicalJEventIngress,
+  entityId: string,
+  state: EntityState | undefined,
+): boolean => {
+  const writer = normalizedId(event.args['entity']);
+  const counterparty = normalizedId(event.args['counterpartyEntity']);
+  if (writer === entityId && counterparty) return true;
+  if (!state) return false;
+  const ladderHash = normalizedId(event.args['ladderHash']);
+  const targetRole = event.args['targetRole'] === true;
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
+    const leg = targetRole ? route.target : route.source;
+    const pull = targetRole ? route.targetPull : route.sourcePull;
+    if (!pull || normalizedId(leg.entityId) !== entityId) continue;
+    if (normalizedId(leg.counterpartyEntityId) !== writer) continue;
+    if (normalizedId(leg.entityId) !== counterparty) continue;
+    const expectedLadder = ethers.keccak256(ethers.solidityPacked(
+      ['bytes32', 'bytes32'],
+      [pull.fullHash, pull.partialRoot],
+    )).toLowerCase();
+    if (expectedLadder === ladderHash) return true;
+  }
+  return false;
+};
 
 const accountSettlementNamesEntity = (
   event: CanonicalJEventIngress,
@@ -41,6 +69,7 @@ const accountSettlementNamesEntity = (
 export const isEventRelevantToEntity = (
   event: JEventIngress,
   entityId: string,
+  state?: EntityState,
 ): boolean => {
   if (!isCanonicalEvent(event)) return false;
 
@@ -51,11 +80,18 @@ export const isEventRelevantToEntity = (
     case 'EntityRegistered':
     case 'BoardActivated':
     case 'SecretRevealed':
-    // A reveal can matter to any entity holding a route over the ladder; the
-    // per-entity handler self-selects by route ownership. Reveals are rare, so
-    // broadcast beats a second route index here.
-    case 'HashLadderRevealRegistered':
       return true;
+    case 'HashLadderRevealRegistered':
+      // The revealer cannot choose the event audience. The public commitment
+      // identifies the exact opposite Account party through its committed
+      // cross-j route. This prevents both targeted withholding and O(N)
+      // global fanout for monotonically replaceable Target evidence.
+      return hashLadderRouteNamesEntity(event, normalizedEntity, state);
+    case 'CounterDisputeRegistered':
+      return (
+        normalizedId(args['sender']) === normalizedEntity
+        || normalizedId(args['counterentity']) === normalizedEntity
+      );
     case 'ReserveUpdated':
       return normalizedId(args['entity']) === normalizedEntity;
     case 'ExternalWalletSnapshot':
@@ -101,7 +137,7 @@ export const collectRelevantJEventReplicaKeys = (
     ).toLowerCase();
     if (
       entityId &&
-      canonicalEvents.some(event => isEventRelevantToEntity(event, entityId))
+      canonicalEvents.some(event => isEventRelevantToEntity(event, entityId, replica.state))
     ) {
       replicaKeys.add(replicaKey);
     }

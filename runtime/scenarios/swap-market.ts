@@ -16,6 +16,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { EntityInput } from '../entity/types';
 import {
   bindScenarioJReplica,
@@ -246,6 +247,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
         name: hub.name,
         spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
         referenceTokenId: USDC,
+        usdQuoteAuthorityEntityId: eve.id,
         minTradeSize: 0n,
         supportedPairs: hub.pairs,
       },
@@ -273,7 +275,10 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
     await process(env, [{
       entityId: trader.id,
       signerId: trader.signer,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+      entityTxs: [{ type: 'openAccount', data: {
+        targetEntityId: hub.id,
+        disputeConfig: defaultAccountDisputeConfigForParties(trader.id, false, hub.id, true),
+      } }],
     }]);
     await converge(env, 30);
   }
@@ -871,6 +876,7 @@ export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
         name: 'StressHub',
         spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
         referenceTokenId: USDC,
+        usdQuoteAuthorityEntityId: requireDefined(traders[0], 'stress quote authority').id,
         minTradeSize: 0n,
         supportedPairs: [ETH_USDC_PAIR], // ETH/USDC only for simplicity
       },
@@ -885,7 +891,10 @@ export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
     await process(env, [{
       entityId: trader.id,
       signerId: trader.signer,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+      entityTxs: [{ type: 'openAccount', data: {
+        targetEntityId: hub.id,
+        disputeConfig: defaultAccountDisputeConfigForParties(trader.id, false, hub.id, true),
+      } }],
     }]);
     await converge(env, 20);
 

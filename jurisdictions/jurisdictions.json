@@ -58,7 +58,6 @@
       "chainId": 3448148188,
       "rpc": "https://nile.trongrid.io/jsonrpc",
       "blockTimeMs": 3000,
-      "defaultDisputeDelayBlocks": 28800,
       "entityProviderDeploymentBlock": 69421628,
       "contracts": {
         "account": "0xe25ef10bb79f2c7d23855b73f1776a674eebb964",
@@ -119,7 +118,6 @@
       "chainId": 11155111,
       "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
       "blockTimeMs": 12000,
-      "defaultDisputeDelayBlocks": 25,
       "entityProviderDeploymentBlock": 11342391,
       "contracts": {
         "account": "0x2e41cF40fB454CE793a5948852E99a93da72b0a7",

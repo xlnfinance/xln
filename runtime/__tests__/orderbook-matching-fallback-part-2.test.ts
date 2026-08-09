@@ -80,7 +80,7 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
-      disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       jNonce: 0,
     },
     status: 'active',
@@ -162,6 +162,8 @@ describe('orderbook matching fallback execution mapping', () => {
       venueId: pairId,
       makerEntityId: 'maker-entity',
       hubEntityId: 'hub-entity',
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       source: {
         jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',
@@ -265,6 +267,8 @@ describe('orderbook matching fallback execution mapping', () => {
       venueId: pairId,
       makerEntityId: 'maker-entity',
       hubEntityId: 'hub-entity',
+      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
       source: {
         jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',

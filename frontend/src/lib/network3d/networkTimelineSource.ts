@@ -227,7 +227,7 @@ const graphAccountFromSnapshot = (
       activeDispute: {
         startedByLeft: account.activeDispute.startedByLeft === true,
         disputeTimeout: integer(account.activeDispute.disputeTimeout),
-        initialDisputeNonce: integer(account.activeDispute.initialNonce),
+        initialNonce: integer(account.activeDispute.initialNonce),
       },
     } : {}),
   };

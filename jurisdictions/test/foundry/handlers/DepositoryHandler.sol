@@ -21,11 +21,15 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   uint256 public constant ACTORS = 4;
   uint256 public constant PAIRS = 6; // C(4,2)
-  uint256 public constant DISPUTE_DELAY = 100;
+  uint32 public constant LEFT_RESPONSE_SECONDS = 50;
+  uint32 public constant RIGHT_RESPONSE_SECONDS = 50;
+  uint256 public constant DISPUTE_WINDOW_SECONDS =
+    uint256(LEFT_RESPONSE_SECONDS) + uint256(RIGHT_RESPONSE_SECONDS);
 
   Depository public immutable dep;
   ERC20Mock public immutable tokenA; // internal id 1
   ERC20Mock public immutable tokenB; // internal id 2
+  address public immutable admin;
 
   uint256[3] public TOKENS = [uint256(1), uint256(2), uint256(3)];
 
@@ -73,10 +77,11 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   }
   mapping(uint256 => DisputeGhost) public disputes;
 
-  constructor(Depository _dep, ERC20Mock _a, ERC20Mock _b, uint256[ACTORS] memory _pk) {
+  constructor(Depository _dep, ERC20Mock _a, ERC20Mock _b, uint256[ACTORS] memory _pk, address _admin) {
     dep = _dep;
     tokenA = _a;
     tokenB = _b;
+    admin = _admin;
     for (uint256 i = 0; i < ACTORS; i++) {
       pk[i] = _pk[i];
       entityOf[i] = XlnHanko.lazyEntityId(vm.addr(_pk[i]));
@@ -149,11 +154,11 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   }
 
   function _accountNonce(bytes32 e1, bytes32 e2) internal view returns (uint256 n) {
-    (n,,,,,,,) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function _disputeHash(bytes32 e1, bytes32 e2) internal view returns (bytes32 h) {
-    (, h,,,,,,) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (, h, , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function _collateral(bytes32 e1, bytes32 e2, uint256 tokenId) internal view returns (uint256 c) {
@@ -168,7 +173,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     uint256 a = _actor(actorSeed);
     uint256 t = _token(tokenSeed);
     amount = bound(amount, 1, 1e24);
-    vm.prank(dep.admin());
+    vm.prank(admin);
     try dep.mintToReserve(entityOf[a], t, amount) {
       ghostMinted[t] += amount;
       _bump("mint");
@@ -475,6 +480,8 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     internal pure returns (ProofBody memory pb)
   {
     pb.watchSeed = watchSeed;
+    pb.leftResponseSeconds = LEFT_RESPONSE_SECONDS;
+    pb.rightResponseSeconds = RIGHT_RESPONSE_SECONDS;
     pb.offdeltas = new int256[](1);
     pb.offdeltas[0] = offdelta;
     pb.tokenIds = new uint256[](1);
@@ -501,19 +508,22 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
 
     bytes memory key = XlnHanko.accountKey(me, other);
     uint256 nonce = _accountNonce(me, other) + 1;
-    bytes32 h = XlnHanko.disputeProofHash(address(dep), key, nonce, pbHash, watchSeed);
+    bool proposerIsLeft = other < me;
+    bytes32 h = XlnHanko.disputeProofHash(address(dep), key, nonce, proposerIsLeft, pbHash, watchSeed);
 
     Batch memory b = XlnHanko.emptyBatch();
     b.disputeStarts = new InitialDisputeProof[](1);
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
       watchSeed: watchSeed,
       sig: _hanko(cp, h),
       starterInitialArguments: "",
-      starterIncrementedArguments: ""
+      starterCounterArguments: "",
+      starterCounterProofCommitment: bytes32(0)
     });
 
     uint256 pi = pairIndex(from, cp);
@@ -540,8 +550,8 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   }
 
   /// @notice Unilateral timeout finalization on the initial proof body.
-  /// @param bySeed 0 => starter finalizes (must wait out defaultDisputeDelay),
-  ///               1 => counterparty finalizes (allowed immediately by design).
+  /// @param bySeed 0 => starter waits for the signed response sum; 1 => the
+  /// counterparty may immediately accept this pull-free initial state.
   function disputeFinalizeTimeout(uint256 pairSeed, uint256 bySeed) external {
     uint256 pi = pairSeed % PAIRS;
     // Bias towards a live dispute: an unbiased pick almost always lands on a
@@ -568,6 +578,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       counterentity: other,
       initialNonce: g.nonce,
       finalNonce: g.nonce,
+      proposerIsLeft: entityOf[g.counter] < entityOf[g.starter],
       initialProofbodyHash: g.proofbodyHash,
       finalProofbody: pb,
       starterArguments: "",
@@ -578,7 +589,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     });
 
     bool wasActive = g.active && _disputeHash(me, other) != bytes32(0);
-    bool wasEarly = vm.getBlockTimestamp() < g.startTimestamp + DISPUTE_DELAY;
+    bool wasEarly = vm.getBlockTimestamp() < g.startTimestamp + DISPUTE_WINDOW_SECONDS;
     if (byStarter && wasEarly && wasActive) starterEarlyFinalizeAttempts++;
 
     if (_submit(caller, b)) {
@@ -629,6 +640,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       counterentity: other,
       initialNonce: storedNonce,
       finalNonce: finalNonce,
+      proposerIsLeft: other < me,
       initialProofbodyHash: bytes32(0),
       finalProofbody: pb,
       starterArguments: "",
@@ -670,18 +682,21 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     bytes memory key = XlnHanko.accountKey(me, other);
     uint256 nonce = _accountNonce(me, other) + 1;
     bool startedByLeft = me < other;
+    bool proposerIsLeft = other < me;
 
     Batch memory start = XlnHanko.emptyBatch();
     start.disputeStarts = new InitialDisputeProof[](1);
     start.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
       watchSeed: watchSeed,
-      sig: _hanko(cp, XlnHanko.disputeProofHash(address(dep), key, nonce, pbHash, watchSeed)),
+      sig: _hanko(cp, XlnHanko.disputeProofHash(address(dep), key, nonce, proposerIsLeft, pbHash, watchSeed)),
       starterInitialArguments: "",
-      starterIncrementedArguments: ""
+      starterCounterArguments: "",
+      starterCounterProofCommitment: bytes32(0)
     });
     if (!_submit(from, start)) return;
     _bump("disputeStart");
@@ -693,6 +708,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       counterentity: other,
       initialNonce: nonce,
       finalNonce: nonce,
+      proposerIsLeft: proposerIsLeft,
       initialProofbodyHash: pbHash,
       finalProofbody: pb,
       starterArguments: "",
@@ -711,7 +727,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     }
 
     // Step 2: wait out the delay (seconds), then finalize legally.
-    vm.warp(startTs + DISPUTE_DELAY);
+    vm.warp(startTs + DISPUTE_WINDOW_SECONDS);
     if (_submit(from, fin)) {
       _bump("disputeFullCycle");
       starterTimeoutFinalizes++;
@@ -732,7 +748,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       uint256 pi = (startAt + k) % PAIRS;
       DisputeGhost memory g = disputes[pi];
       if (!g.active) continue;
-      uint256 target = g.startTimestamp + DISPUTE_DELAY;
+      uint256 target = g.startTimestamp + DISPUTE_WINDOW_SECONDS;
       if (vm.getBlockTimestamp() >= target) return;
       vm.warp(target);
       _bump("advancePastDisputeDelay");

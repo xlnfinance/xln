@@ -14,36 +14,48 @@ import {
   makeState,
 } from './helpers/cross-j';
 import { applyJEventRange } from './helpers/j-history';
+import { hashProofBodyStruct } from '../protocol/dispute/proof-builder';
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
 const jurisdiction = makeJurisdiction('Ethereum', 1, '11', '12');
 const entityId = entity('01');
 const counterpartyId = entity('02');
 
-const envAt = (scannedThroughHeight: number, disputeDelaySeconds: number): RuntimeReplica => {
-  const env = createEmptyEnv(`dispute-started-timeout:${scannedThroughHeight}:${disputeDelaySeconds}`);
+const envAt = (scannedThroughHeight: number): RuntimeReplica => {
+  const env = createEmptyEnv(`dispute-started-timeout:${scannedThroughHeight}`);
   env.state.timestamp = 1_700_000_000_000;
   env.quietRuntimeLogs = true;
   installJurisdictions(env, jurisdiction);
   const replica = env.state.jReplicas.get(jurisdiction.name)!;
   replica.blockNumber = BigInt(scannedThroughHeight);
-  // Field name still says Blocks in config; unit is now seconds on L1.
-  replica.defaultDisputeDelayBlocks = disputeDelaySeconds;
   return env;
 };
 
 describe('canonical DisputeStarted timeout', () => {
   test('normalization and watcher decoding require the exact on-chain value', () => {
+    const initialProofbody = {
+      watchSeed: `0x${'66'.repeat(32)}`,
+      leftResponseSeconds: 3600,
+      rightResponseSeconds: 2261,
+      offdeltas: [],
+      tokenIds: [],
+      transformers: [],
+    };
     const eventData = {
       sender: entityId,
       counterentity: counterpartyId,
       nonce: '1',
-      proofbodyHash: `0x${'55'.repeat(32)}`,
+      proposerIsLeft: true,
+      proofbodyHash: hashProofBodyStruct(initialProofbody),
+      initialProofbody,
       watchSeed: `0x${'66'.repeat(32)}`,
       starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       disputeTimeout: '1700005861',
       disputeStartTimestamp: '1700000000',
+      leftResponseSeconds: '3600',
+      rightResponseSeconds: '2261',
     };
     const normalized = normalizeJurisdictionEvent({ type: 'DisputeStarted', data: eventData });
     expect(normalized?.data.disputeTimeout).toBe(1_700_005_861);
@@ -55,7 +67,7 @@ describe('canonical DisputeStarted timeout', () => {
     for (const requiredField of [
       'watchSeed',
       'starterInitialArguments',
-      'starterIncrementedArguments',
+      'starterCounterArguments',
     ] as const) {
       const missingEvidence: Partial<typeof eventData> = { ...eventData };
       delete missingEvidence[requiredField];
@@ -71,27 +83,43 @@ describe('canonical DisputeStarted timeout', () => {
       .toThrow('J_EVENT_DISPUTE_TIMEOUT_INVALID');
   });
 
-  test('finalized event applies its timeout independently of validator-local config', async () => {
+  test('finalized event applies its timeout independently of validator-local scan height', async () => {
     const privateKey = deriveSignerKeySync('certified-j-height:event', '1');
     const validatorId = computeAddress(new SigningKey(hex(privateKey)).compressedPublicKey).toLowerCase();
     registerSignerKey('certified-j-height:event-runtime', validatorId, privateKey);
     const state = makeState(entityId, validatorId, jurisdiction, counterpartyId);
+    const account = state.accounts.get(counterpartyId)!;
+    const proofbody = {
+      watchSeed: account.state.watchSeed,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
+      offdeltas: [],
+      tokenIds: [],
+      transformers: [],
+    };
+    const proofbodyHash = hashProofBodyStruct(proofbody);
+    account.disputeProofBodiesByHash = { [proofbodyHash]: proofbody };
     const event = normalizeJurisdictionEvent({
       type: 'DisputeStarted',
       data: {
         sender: entityId,
         counterentity: counterpartyId,
         nonce: '1',
-        proofbodyHash: `0x${'55'.repeat(32)}`,
-        watchSeed: `0x${'66'.repeat(32)}`,
+        proposerIsLeft: true,
+        proofbodyHash,
+        initialProofbody: proofbody,
+        watchSeed: account.state.watchSeed,
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
-        disputeTimeout: 1_700_005_761,
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        disputeTimeout: 1_700_000_020,
         disputeStartTimestamp: 1_700_000_000,
+        leftResponseSeconds: 10,
+        rightResponseSeconds: 10,
       },
     })!;
-    const applyWithConfig = async (height: number, delay: number) => {
-      const env = envAt(height, delay);
+    const applyAtHeight = async (height: number) => {
+      const env = envAt(height);
       env.runtimeSeed = 'certified-j-height:event-runtime';
       return applyJEventRange(state, {
         from: validatorId,
@@ -103,10 +131,10 @@ describe('canonical DisputeStarted timeout', () => {
         transactionHash: `0x${'88'.repeat(32)}`,
       }, env);
     };
-    const lagging = await applyWithConfig(110, 5);
-    const leading = await applyWithConfig(130, 5_760);
+    const lagging = await applyAtHeight(110);
+    const leading = await applyAtHeight(130);
 
-    expect(lagging.newState.accounts.get(counterpartyId)?.activeDispute?.disputeTimeout).toBe(1_700_005_761);
+    expect(lagging.newState.accounts.get(counterpartyId)?.activeDispute?.disputeTimeout).toBe(1_700_000_020);
     expect(lagging.newState.accounts.get(counterpartyId)?.activeDispute?.disputeStartTimestamp)
       .toBe(1_700_000_000);
     expect(computeCanonicalEntityConsensusStateHash(lagging.newState))
@@ -119,21 +147,34 @@ describe('canonical DisputeStarted timeout', () => {
     registerSignerKey('dispute-nonce-boundary-runtime', validatorId, privateKey);
     const state = makeState(entityId, validatorId, jurisdiction, counterpartyId);
     const before = computeCanonicalEntityConsensusStateHash(state);
+    const initialProofbody = {
+      watchSeed: `0x${'66'.repeat(32)}`,
+      leftResponseSeconds: 10,
+      rightResponseSeconds: 10,
+      offdeltas: [],
+      tokenIds: [],
+      transformers: [],
+    };
     const event = normalizeJurisdictionEvent({
       type: 'DisputeStarted',
       data: {
         sender: entityId,
         counterentity: counterpartyId,
         nonce: '9007199254740993',
-        proofbodyHash: `0x${'55'.repeat(32)}`,
+        proposerIsLeft: true,
+        proofbodyHash: hashProofBodyStruct(initialProofbody),
+        initialProofbody,
         watchSeed: `0x${'66'.repeat(32)}`,
         starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
-        disputeTimeout: 1_700_005_761,
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        disputeTimeout: 1_700_000_020,
         disputeStartTimestamp: 1_700_000_000,
+        leftResponseSeconds: 10,
+        rightResponseSeconds: 10,
       },
     })!;
-    const env = envAt(110, 5);
+    const env = envAt(110);
     env.runtimeSeed = 'dispute-nonce-boundary-runtime';
 
     await expect(applyJEventRange(state, {

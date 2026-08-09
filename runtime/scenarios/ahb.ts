@@ -15,6 +15,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { EntityInput } from '../entity/types';
 import {
   bindScenarioJReplica,
@@ -578,7 +579,10 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       signerId: alice.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: hub.id }
+        data: {
+          targetEntityId: hub.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(alice.id, false, hub.id, true),
+        }
       }]
     }]);
     // Tick 2: Hub receives, creates Hub→Alice
@@ -619,7 +623,10 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       signerId: bob.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: hub.id }
+        data: {
+          targetEntityId: hub.id,
+          disputeConfig: defaultAccountDisputeConfigForParties(bob.id, false, hub.id, true),
+        }
       }]
     }]);
     // Tick 2: Hub receives, creates Hub→Bob
@@ -2561,7 +2568,10 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     await process(env, [{
       entityId: carol.id,
       signerId: carol.signer,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }]
+      entityTxs: [{ type: 'openAccount', data: {
+        targetEntityId: hub.id,
+        disputeConfig: defaultAccountDisputeConfigForParties(carol.id, false, hub.id, true),
+      } }]
     }]);
     await processUntil(env, () => {
       const carolAccount = findReplica(env, carol.id)[1].state.accounts.get(hub.id);

@@ -1,6 +1,7 @@
 import type { EntityCandidateEffect, EntityInput, EntityState, HashToSign } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { AccountReplica } from '../../types/account';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
@@ -8,38 +9,50 @@ import { prepareEntityTxState } from '../state-clone';
 import { addMessage } from '../frame-events';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { cancelHook, scheduleHook } from '../scheduler';
-import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';
+import {
+  scrubDisputeFinalizationsForCounterparty,
+  scrubDisputeStartsForCounterparty,
+  scrubCounterDisputesForActiveStart,
+  scrubCounterDisputesForCounterparty,
+  scrubCounterDisputesSupersededByObserved,
+  scrubSourceHashLadderRegistrationsForCounterparty,
+} from './dispute-finalize-guards';
 import {
   getJEventJurisdictionRef,
 } from '../../jurisdiction/machine/event-observation';
 import { verifyAccountSignature } from '../../account/crypto';
 import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
-import { buildAccountProofBodyFromJurisdictions } from '../../account/consensus/helpers';
+import {
+  buildAccountProofBodyFromJurisdictions,
+  requireAccountDeltaTransformerAddress,
+} from '../../account/consensus/helpers';
 import {
   assertDisputeProofBodyWithinContractLimits,
+  batchAddCounterDispute,
   cloneJBatch,
+  hasJBatchWork,
+  initJBatch,
   isBatchEmpty,
-  mergeBatchOps,
+  prependRecoveryBatch,
 } from '../../jurisdiction/machine/batch';
 import { canonicalizeProofBodyStruct } from './handlers/dispute';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
   applyKnownHtlcSecret,
   decodeDisputeStarterInitialSecrets,
+  flushDeferredHashLadderReveals,
   ladderHashForPull,
   planCrossJurisdictionTargetRecovery,
   queueCrossJurisdictionRevealPorts,
   queueCrossJurisdictionSiblingDisputeFanout,
-  queueHashLadderRevealRegistration,
+  queueSourceHubClaimRegistrationsForAccount,
+  refreshCrossJurisdictionTargetRecovery,
 } from './j-events-htlc';
 import {
-  buildCrossJurisdictionPullReveal,
-  deriveCrossJurisdictionPrivateSeed,
-  getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionTerminalStatus,
+  transitionCrossJurisdictionRouteStatus,
 } from '../../extensions/cross-j';
 import { transitionTargetLegTerminal } from './handlers/account-cross-j-followups';
-import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { mergeJEventClaimOps } from './j-events-account';
 import type { JEventApplyResult, JEventAccountTx } from './j-events-types';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
@@ -76,6 +89,18 @@ import {
   applySecretRevealedJEvent,
 } from './j-events-observations';
 import { requireBoundaryUint } from '../../protocol/boundary-validation';
+import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-runtime';
+import {
+  findExactSignedProofBodyPull,
+  resolveFinalizedCrossJurisdictionRouteLeg,
+  resolveFinalizedPullFillRatio,
+  type HashLadderRegistryRecord,
+} from '../../account/pull-registry-settlement';
+import {
+  selectFinalProof,
+  verifyCounterProofIdentity,
+} from './handlers/dispute/finalize-proof';
+import { proofBodyHasPulls } from './handlers/dispute/start-admission';
 
 const jEventLog = createStructuredLogger('j.event');
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -120,6 +145,27 @@ const syncJBatchEntityNonceFromEvent = (
   }
 };
 
+const queueLocalJBatchBroadcast = (
+  state: EntityState,
+  outputs: EntityInput[],
+): boolean => {
+  const jBatchState = state.jBatchState;
+  if (!jBatchState || jBatchState.sentBatch || !hasJBatchWork(jBatchState)) return false;
+  const self = String(state.entityId || '').toLowerCase();
+  if (outputs.some((output) =>
+    String(output.entityId || '').toLowerCase() === self
+    && output.entityTxs?.some((tx) => tx.type === 'j_broadcast')
+  )) return false;
+  const signerId = state.config.validators[0];
+  if (!signerId) throw new Error('J_BATCH_AUTO_BROADCAST_SIGNER_MISSING');
+  outputs.push({
+    entityId: state.entityId,
+    signerId,
+    entityTxs: [{ type: 'j_broadcast', data: {} }],
+  });
+  return true;
+};
+
 const retireSentBatchInvalidatedByDisputeFinality = (
   state: EntityState,
   counterpartyId: string,
@@ -128,12 +174,84 @@ const retireSentBatchInvalidatedByDisputeFinality = (
   const sentBatch = jBatchState?.sentBatch;
   if (!jBatchState || !sentBatch) return 0;
   const remainingBatch = cloneJBatch(sentBatch.batch);
-  const removed = scrubDisputeFinalizationsForCounterparty(remainingBatch, counterpartyId);
+  const removed = scrubDisputeFinalizationsForCounterparty(remainingBatch, counterpartyId)
+    + scrubCounterDisputesForCounterparty(remainingBatch, counterpartyId)
+    + scrubSourceHashLadderRegistrationsForCounterparty(remainingBatch, counterpartyId);
   if (removed === 0) return 0;
 
-  mergeBatchOps(jBatchState.batch, remainingBatch);
+  // The editable draft and recovered sent remainder are independently valid
+  // batches. Keep them separate: blindly merging can exceed contract limits
+  // and reject the authoritative finality event itself.
+  prependRecoveryBatch(jBatchState, remainingBatch);
   delete jBatchState.sentBatch;
-  jBatchState.status = isBatchEmpty(jBatchState.batch) ? 'empty' : 'accumulating';
+  jBatchState.status = hasJBatchWork(jBatchState) ? 'accumulating' : 'empty';
+  return removed;
+};
+
+export const sentBatchOwnsDisputeFinalityAck = (
+  state: EntityState,
+  counterpartyId: string,
+  initialProofbodyHash: string,
+  batchNonce: number | undefined,
+): boolean => {
+  const sent = state.jBatchState?.sentBatch;
+  if (
+    !sent || batchNonce === undefined || !Number.isSafeInteger(batchNonce)
+    || batchNonce <= 0 || sent.entityNonce !== batchNonce
+  ) return false;
+  const counterparty = normalizeEntityId(counterpartyId);
+  const initialHash = String(initialProofbodyHash || '').toLowerCase();
+  return sent.batch.disputeFinalizations.some(finalization =>
+    normalizeEntityId(finalization.counterentity) === counterparty
+    && String(finalization.initialProofbodyHash || '').toLowerCase() === initialHash
+  );
+};
+
+const retireSentBatchInvalidatedByDisputeStart = (
+  state: EntityState,
+  counterpartyId: string,
+  initialProofbodyHash: string,
+): number => {
+  const jBatchState = state.jBatchState;
+  const sentBatch = jBatchState?.sentBatch;
+  if (!jBatchState || !sentBatch) return 0;
+  const remainingBatch = cloneJBatch(sentBatch.batch);
+  const removed = scrubDisputeStartsForCounterparty(remainingBatch, counterpartyId)
+    + scrubCounterDisputesForActiveStart(remainingBatch, counterpartyId, initialProofbodyHash);
+  if (removed === 0) return 0;
+
+  // The competing start is already final, so this sealed transaction can only
+  // revert with E6. Requeue every still-valid operation, especially the Target
+  // registration whose lazy authority is the newly active exact ProofBody.
+  prependRecoveryBatch(jBatchState, remainingBatch);
+  delete jBatchState.sentBatch;
+  jBatchState.status = hasJBatchWork(jBatchState) ? 'accumulating' : 'empty';
+  return removed;
+};
+
+const retireSentBatchSupersededByCounterDispute = (
+  state: EntityState,
+  counterpartyId: string,
+  observedNonce: number,
+  observedProposerIsLeft: boolean,
+  observedProofbodyHash: string,
+): number => {
+  const jBatchState = state.jBatchState;
+  const sentBatch = jBatchState?.sentBatch;
+  if (!jBatchState || !sentBatch) return 0;
+  const remainingBatch = cloneJBatch(sentBatch.batch);
+  const removed = scrubCounterDisputesSupersededByObserved(
+    remainingBatch,
+    counterpartyId,
+    observedNonce,
+    observedProposerIsLeft,
+    observedProofbodyHash,
+    true,
+  );
+  if (removed === 0) return 0;
+  prependRecoveryBatch(jBatchState, remainingBatch);
+  delete jBatchState.sentBatch;
+  jBatchState.status = hasJBatchWork(jBatchState) ? 'accumulating' : 'empty';
   return removed;
 };
 
@@ -437,17 +555,49 @@ const requireFinalizedProofBodyEvidence = (
   return { finalProofbodyHash, proofbody, tokenIds };
 };
 
+const installOnchainDisputeProofBody = (
+  account: AccountReplica,
+  rawProofbody: ProofBodyStruct,
+  expectedHashRaw: unknown,
+  counterpartyId: string,
+  context: string,
+): ProofBodyStruct => {
+  const expectedHash = normalizeFinalProofbodyHash(expectedHashRaw, counterpartyId);
+  const proofbody = canonicalizeProofBodyStruct(
+    rawProofbody,
+    account.state.leftEntity,
+    account.state.rightEntity,
+    context,
+  );
+  assertDisputeProofBodyWithinContractLimits(proofbody, context);
+  const computedHash = hashProofBodyStruct(proofbody).toLowerCase();
+  if (computedHash !== expectedHash) {
+    throw new Error(
+      `J_EVENT_DISPUTE_PROOFBODY_SIDECAR_HASH_MISMATCH:` +
+      `${counterpartyId}:${expectedHash}:${computedHash}`,
+    );
+  }
+  account.disputeProofBodiesByHash ??= {};
+  account.disputeProofBodiesByHash[expectedHash] = proofbody;
+  return proofbody;
+};
+
 type DisputeStartedEventData = {
   sender: string;
   counterentity: string;
   nonce: string;
+  proposerIsLeft: boolean;
   proofbodyHash: string;
   starterInitialArguments: string;
-  starterIncrementedArguments: string;
+  starterCounterArguments: string;
+  starterCounterProofCommitment: string;
+  initialProofbody: ProofBodyStruct;
   watchSeed?: unknown;
   batchNonce?: number;
   disputeTimeout?: number;
   disputeStartTimestamp?: number;
+  leftResponseSeconds?: number;
+  rightResponseSeconds?: number;
   jNonce?: unknown;
 };
 
@@ -458,6 +608,206 @@ type StartedDispute = {
   weAreStarter: boolean;
   starterInitialArguments: string;
   disputeTimeout: number;
+  counterProofQueued: boolean;
+  initialProofbody: ProofBodyStruct;
+  canonicalDeltaTransformerAddress: string;
+};
+
+const queueSelectedPullCounterProof = (
+  context: FinalizedJEventContext,
+  account: AccountReplica,
+  counterpartyId: string,
+): boolean => {
+  const active = account.activeDispute!;
+  const callerIsLeft = account.state.leftEntity.toLowerCase() === context.newState.entityId.toLowerCase();
+  const callerIsStarter = callerIsLeft === active.startedByLeft;
+  if (
+    callerIsStarter
+    || !account.counterpartyDisputeProofHanko
+    || account.counterpartyDisputeProofHanko === '0x'
+    || account.counterpartyDisputeProofNonce === undefined
+    || !account.counterpartyDisputeProofBodyHash
+  ) return false;
+  const selection = selectFinalProof(
+    context.entityState,
+    context.newState,
+    account,
+    counterpartyId,
+    context.env,
+  );
+  if (!selection?.shouldUseCounterProof) return false;
+  const deltaTransformer = requireAccountDeltaTransformerAddress(
+    context.env.state,
+    account.state,
+  );
+  if (!proofBodyHasPulls(selection.finalProofbody, deltaTransformer)) return false;
+  verifyCounterProofIdentity(context.newState, account, counterpartyId, selection);
+  const nowSec = Math.floor(Number(context.newState.timestamp || 0) / 1_000);
+  if (nowSec >= active.disputeTimeout) {
+    // Missing the signed response period is an economic outcome, not a reason
+    // to reject the authoritative DisputeStarted J event and halt the replica.
+    addMessage(
+      context.newState,
+      `❌ Pull counter-proof ${selection.finalNonce} missed T=${active.disputeTimeout}`,
+    );
+    jEventLog.error('counter_dispute.deadline_missed', {
+      counterparty: shortId(counterpartyId),
+      finalNonce: selection.finalNonce,
+      nowSec,
+      timeoutSec: active.disputeTimeout,
+    });
+    return false;
+  }
+  context.newState.jBatchState ??= initJBatch();
+  batchAddCounterDispute(context.newState.jBatchState, {
+    counterentity: counterpartyId,
+    initialNonce: active.initialNonce,
+    initialProofbodyHash: active.initialProofbodyHash,
+    counterNonce: selection.finalNonce,
+    proposerIsLeft: selection.proposerIsLeft,
+    counterProofbody: selection.finalProofbody,
+    sig: selection.finalizeSig,
+  });
+  if (context.newState.jBatchState.sentBatch) {
+    // The immutable batch owns the current nonce. Keep this urgent response
+    // latched so its exact HankoBatchProcessed ACK emits the one continuation
+    // that broadcasts the counter-proof draft before T.
+    context.newState.jBatchState.autoBroadcastDraft = true;
+  }
+  // The selected proof is already authenticated locally and the registry
+  // write is processed after counterDisputes in the same processBatch. Queue
+  // its Source evidence now: waiting for CounterDisputeRegistered would let a
+  // valid counter-proof consume the Hub's shorter Source window before the
+  // first immutable registry write can be mined.
+  queueSourceHubClaimRegistration(
+    context,
+    counterpartyId,
+    selection.finalProofbody,
+    deltaTransformer,
+  );
+  addMessage(
+    context.newState,
+    `🛡️ Locked newer Pull state N${selection.finalNonce} before dispute T`,
+  );
+  return true;
+};
+
+const retireStartedDisputeBatchOps = (
+  state: EntityState,
+  counterpartyId: string,
+  initialProofbodyHash: string,
+  weAreStarter: boolean,
+  outputs: EntityInput[],
+): { removedDraft: number; removedRecovery: number; removedSent: number } => {
+  const removedDraft = scrubDisputeStartsForCounterparty(
+    state.jBatchState?.batch,
+    counterpartyId,
+  ) + scrubCounterDisputesForActiveStart(
+    state.jBatchState?.batch,
+    counterpartyId,
+    initialProofbodyHash,
+  );
+  let removedRecovery = 0;
+  for (const recoveryBatch of state.jBatchState?.recoveryBatches ?? []) {
+    removedRecovery += scrubDisputeStartsForCounterparty(recoveryBatch, counterpartyId)
+      + scrubCounterDisputesForActiveStart(recoveryBatch, counterpartyId, initialProofbodyHash);
+  }
+  if (state.jBatchState?.recoveryBatches) {
+    state.jBatchState.recoveryBatches = state.jBatchState.recoveryBatches
+      .filter(batch => !isBatchEmpty(batch));
+    if (state.jBatchState.recoveryBatches.length === 0) delete state.jBatchState.recoveryBatches;
+  }
+  const counterpartyKey = counterpartyId.toLowerCase();
+  const proofKey = initialProofbodyHash.toLowerCase();
+  const observedStartIsInOwnSentBatch = weAreStarter && Boolean(
+    state.jBatchState?.sentBatch?.batch.disputeStarts.some(start =>
+      String(start.counterentity || '').toLowerCase() === counterpartyKey
+      && String(start.proofbodyHash || '').toLowerCase() === proofKey
+    ),
+  );
+  // Keep a matching locally-originated sent batch until HankoBatchProcessed
+  // acknowledges the whole transaction. Any competing start — including one
+  // sent by our Entity with a different valid proof — makes every local start
+  // for this Account fail E6. Independent reveal registrations remain valid
+  // and are preserved while the start is retired deterministically.
+  const removedSent = observedStartIsInOwnSentBatch
+    ? 0
+    : retireSentBatchInvalidatedByDisputeStart(
+      state,
+      counterpartyId,
+      initialProofbodyHash,
+    );
+  const removed = removedDraft + removedRecovery + removedSent;
+  if (removed === 0) return { removedDraft, removedRecovery, removedSent };
+  // Requeueing a retired sent batch needs a new durable continuation: no
+  // periodic scheduler owns arbitrary accumulating J batches. A mutable draft
+  // already has the continuation emitted when its start/reveal was queued;
+  // emitting another across Entity frames could arrive after the first seals
+  // the batch and fail on the now-active sentBatch.
+  const broadcastQueued = removedSent > 0 || removedRecovery > 0
+    ? queueLocalJBatchBroadcast(state, outputs)
+    : false;
+  jEventLog.info('dispute_started.stale_batch_ops_removed', {
+    counterparty: shortId(counterpartyId),
+    removedDraft,
+    removedRecovery,
+    removedSent,
+    broadcastQueued,
+  });
+  addMessage(
+    state,
+    `🧹 Removed ${removed} stale dispute-start op(s) for ${counterpartyId.slice(-4)}`,
+  );
+  return { removedDraft, removedRecovery, removedSent };
+};
+
+const applyStartedDisputeAccountInput = async (
+  context: FinalizedJEventContext,
+  account: AccountReplica,
+  entityIdNorm: string,
+  senderStr: string,
+  counterpartyId: string,
+  data: DisputeStartedEventData,
+): Promise<void> => {
+  const initialNonce = requireBoundaryUint(data.nonce, 'J_EVENT_DISPUTE_NONCE_INVALID');
+  const jNonce = requireBoundaryUint(
+    data.jNonce ?? data.nonce,
+    'J_EVENT_DISPUTE_J_NONCE_INVALID',
+  );
+  const accountInput = createAccountDisputeStartedInput(account.state, entityIdNorm, {
+    kind: 'dispute_started',
+    starterEntityId: senderStr,
+    initialProofbodyHash: String(data.proofbodyHash),
+    initialNonce,
+    initialProposerIsLeft: data.proposerIsLeft,
+    disputeTimeout: Number(data.disputeTimeout),
+    disputeStartTimestamp: Number(data.disputeStartTimestamp),
+    leftResponseSeconds: requireBoundaryUint(
+      data.leftResponseSeconds,
+      'J_EVENT_DISPUTE_LEFT_RESPONSE_SECONDS_INVALID',
+    ),
+    rightResponseSeconds: requireBoundaryUint(
+      data.rightResponseSeconds,
+      'J_EVENT_DISPUTE_RIGHT_RESPONSE_SECONDS_INVALID',
+    ),
+    jNonce,
+    starterInitialArguments: data.starterInitialArguments || '0x',
+    starterCounterArguments: data.starterCounterArguments || '0x',
+    starterCounterProofCommitment: data.starterCounterProofCommitment,
+    observedBlockNumber: Number(context.blockNumber || 0),
+    ...(data.batchNonce !== undefined ? { batchNonce: data.batchNonce } : {}),
+  });
+  const result = await applyAccountInput(
+    context.accountConsensusContext,
+    account,
+    accountInput,
+  );
+  if (!result.success) {
+    throw new Error(
+      `ACCOUNT_DISPUTE_STARTED_INPUT_FAILED:${counterpartyId}:` +
+      `${result.error ?? 'RESULT_MISSING'}`,
+    );
+  }
 };
 
 const initializeStartedDispute = async (
@@ -467,11 +817,9 @@ const initializeStartedDispute = async (
   const {
     newState,
     env,
-    blockNumber,
     dirtyAccounts,
-    accountConsensusContext,
   } = context;
-  const { sender, counterentity, nonce, proofbodyHash } = data;
+  const { sender, counterentity, proofbodyHash } = data;
   const {
     senderStr,
     entityIdNorm,
@@ -484,47 +832,50 @@ const initializeStartedDispute = async (
     return null;
   }
 
+  installOnchainDisputeProofBody(
+    account,
+    data.initialProofbody,
+    data.proofbodyHash,
+    counterpartyId,
+    'jEvent.disputeStarted',
+  );
+
   const weAreStarter = senderStr === entityIdNorm;
   const disputeTimeout = Number(data.disputeTimeout);
-  const disputeStartTimestamp = Number(data.disputeStartTimestamp);
-  const initialNonce = requireBoundaryUint(nonce, 'J_EVENT_DISPUTE_NONCE_INVALID');
-  const jNonce = requireBoundaryUint(
-    data.jNonce ?? nonce,
-    'J_EVENT_DISPUTE_J_NONCE_INVALID',
-  );
-
-  const accountInput = createAccountDisputeStartedInput(account.state, entityIdNorm, {
-    kind: 'dispute_started',
-    starterEntityId: senderStr,
-    initialProofbodyHash: String(proofbodyHash),
-    initialNonce,
-    disputeTimeout,
-    disputeStartTimestamp,
-    jNonce,
-    starterInitialArguments: data.starterInitialArguments || '0x',
-    starterIncrementedArguments: data.starterIncrementedArguments || '0x',
-    observedBlockNumber: Number(blockNumber || 0),
-    ...(data.batchNonce !== undefined ? { batchNonce: data.batchNonce } : {}),
-  });
-  const accountInputResult = await applyAccountInput(
-    accountConsensusContext,
+  await applyStartedDisputeAccountInput(
+    context,
     account,
-    accountInput,
+    entityIdNorm,
+    senderStr,
+    counterpartyId,
+    data,
   );
-  if (!accountInputResult.success) {
-    throw new Error(
-      `ACCOUNT_DISPUTE_STARTED_INPUT_FAILED:${counterpartyId}:` +
-      `${accountInputResult.error ?? 'RESULT_MISSING'}`,
-    );
-  }
 
   syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
-  dirtyAccounts.add(counterpartyId.toLowerCase());
-
   const activeDispute = account.activeDispute;
   if (!activeDispute) {
     throw new Error(`ACCOUNT_DISPUTE_STARTED_STATE_MISSING:${counterpartyId}`);
   }
+  const retired = retireStartedDisputeBatchOps(
+    newState,
+    counterpartyId,
+    String(proofbodyHash),
+    weAreStarter,
+    context.outputs,
+  );
+  const counterProofQueued = queueSelectedPullCounterProof(context, account, counterpartyId);
+  const flushedReveals = flushDeferredHashLadderReveals(newState);
+  if (
+    (flushedReveals > 0 || counterProofQueued)
+    && retired.removedDraft === 0
+    && retired.removedRecovery === 0
+    && retired.removedSent === 0
+  ) {
+    // Newly queued counter-proof/reveal work needs one durable continuation.
+    // Draft/sent retirement already owns it on the competing-batch path.
+    queueLocalJBatchBroadcast(newState, context.outputs);
+  }
+  dirtyAccounts.add(counterpartyId.toLowerCase());
   const localProof = buildAccountProofBodyFromJurisdictions(env.state, account);
   const onChainProofHash = String(activeDispute.initialProofbodyHash || '').toLowerCase();
   const storedProofKnown = Object.keys(account.disputeProofBodiesByHash ?? {})
@@ -537,6 +888,11 @@ const initializeStartedDispute = async (
       storedProofKnown,
     });
   }
+  const initialProofbody = requireFinalizedProofBodyEvidence(
+    account,
+    activeDispute.initialProofbodyHash,
+    counterpartyId,
+  ).proofbody;
   return {
     counterpartyId,
     senderStr,
@@ -544,6 +900,12 @@ const initializeStartedDispute = async (
     weAreStarter,
     starterInitialArguments: data.starterInitialArguments || '0x',
     disputeTimeout,
+    counterProofQueued,
+    initialProofbody,
+    canonicalDeltaTransformerAddress: requireAccountDeltaTransformerAddress(
+      env.state,
+      account.state,
+    ),
   };
 };
 
@@ -562,6 +924,9 @@ const applyStartedDisputeFollowups = (
     weAreStarter,
     starterInitialArguments,
     disputeTimeout,
+    counterProofQueued,
+    initialProofbody,
+    canonicalDeltaTransformerAddress,
   } = dispute;
   const disputeSecrets = decodeDisputeStarterInitialSecrets(starterInitialArguments);
   for (const disputeSecret of disputeSecrets) {
@@ -576,7 +941,7 @@ const applyStartedDisputeFollowups = (
       'DisputeStarted',
     );
   }
-  if (!weAreStarter) {
+  if (!weAreStarter && !counterProofQueued) {
     const account = newState.accounts.get(counterpartyId);
     const active = account?.activeDispute;
     if (!account || !active) {
@@ -591,9 +956,20 @@ const applyStartedDisputeFollowups = (
     );
     if (plan) active.crossJurisdictionRecovery = plan.recovery;
   }
-  // The source hub's claim requires publishing the reveal; queue it the moment
-  // a dispute touching one of our source pulls is observed.
-  queueSourceHubClaimRegistration(context, counterpartyId);
+  // Never publish the obsolete initial body while superseding it. The selected
+  // body's Source registration was queued beside the counterDispute above, so
+  // Depository locks the selected nonce/hash before consuming its registry
+  // evidence in the same processBatch. CounterDisputeRegistered is only an
+  // idempotent confirmation path; waiting for it would lose the shorter Source
+  // window.
+  if (!counterProofQueued) {
+    queueSourceHubClaimRegistration(
+      context,
+      counterpartyId,
+      initialProofbody,
+      canonicalDeltaTransformerAddress,
+    );
+  }
   // Any local dispute on a live cross-j leg starts the sibling clock too.
   queueCrossJurisdictionSiblingDisputeFanout(
     newState,
@@ -631,7 +1007,175 @@ type DisputeFinalizedEventData = {
   initialNonce: string;
   initialProofbodyHash: string;
   finalProofbodyHash: string;
+  finalProofbody: ProofBodyStruct;
   batchNonce?: number;
+};
+
+type CounterDisputeRegisteredEventData = {
+  sender: string;
+  counterentity: string;
+  nonce: number;
+  proposerIsLeft: boolean;
+  proofbodyHash: string;
+  counterProofbody: ProofBodyStruct;
+};
+
+type ResolvedDisputeAccount = ReturnType<typeof resolveDisputeAccountContext>;
+
+const selectObservedCounterDispute = (
+  context: FinalizedJEventContext,
+  resolved: ResolvedDisputeAccount,
+  data: CounterDisputeRegisteredEventData,
+  nonce: number,
+  proofbodyHash: string,
+): { account: AccountReplica; proofbody: ProofBodyStruct } => {
+  const account = resolved.account;
+  if (!account?.activeDispute) {
+    throw new Error(`COUNTER_DISPUTE_ACTIVE_ACCOUNT_MISSING:${resolved.candidateCounterpartyId}`);
+  }
+  installOnchainDisputeProofBody(
+    account,
+    data.counterProofbody,
+    proofbodyHash,
+    resolved.counterpartyId,
+    'jEvent.counterDisputeRegistered',
+  );
+  const active = account.activeDispute;
+  if (
+    nonce < active.initialNonce ||
+    (
+      nonce === active.initialNonce &&
+      (!data.proposerIsLeft || active.initialProposerIsLeft)
+    )
+  ) {
+    throw new Error(`COUNTER_DISPUTE_NONCE_STALE:${nonce}:${active.initialNonce}`);
+  }
+  if (active.selectedCounterNonce !== undefined) {
+    if (nonce < active.selectedCounterNonce) {
+      throw new Error(`COUNTER_DISPUTE_NONCE_REGRESSION:${nonce}:${active.selectedCounterNonce}`);
+    }
+    if (
+      nonce === active.selectedCounterNonce
+      && data.proposerIsLeft === active.selectedCounterProposerIsLeft
+      && proofbodyHash !== active.selectedCounterProofbodyHash?.toLowerCase()
+    ) {
+      throw new Error(`COUNTER_DISPUTE_HASH_CONFLICT:${nonce}`);
+    }
+    if (
+      nonce === active.selectedCounterNonce
+      && data.proposerIsLeft !== active.selectedCounterProposerIsLeft
+      && !data.proposerIsLeft
+    ) {
+      throw new Error(`COUNTER_DISPUTE_ROLE_REGRESSION:${nonce}`);
+    }
+  }
+  active.selectedCounterNonce = nonce;
+  active.selectedCounterProofbodyHash = proofbodyHash;
+  active.selectedCounterProposerIsLeft = data.proposerIsLeft;
+  const selectedProofbody = requireFinalizedProofBodyEvidence(
+    account,
+    proofbodyHash,
+    resolved.counterpartyId,
+  ).proofbody;
+  const currentRecovery = active.crossJurisdictionRecovery;
+  const recoveryPlan = currentRecovery
+    ? refreshCrossJurisdictionTargetRecovery(
+        context.newState,
+        account,
+        resolved.counterpartyId,
+        [proofbodyHash],
+        currentRecovery,
+      )
+    : planCrossJurisdictionTargetRecovery(
+        context.newState,
+        account,
+        resolved.counterpartyId,
+        [proofbodyHash],
+        {},
+      );
+  if (recoveryPlan) active.crossJurisdictionRecovery = recoveryPlan.recovery;
+  else delete active.crossJurisdictionRecovery;
+  return { account, proofbody: selectedProofbody };
+};
+
+const retireObservedCounterDisputeOperations = (
+  context: FinalizedJEventContext,
+  resolved: ResolvedDisputeAccount,
+  nonce: number,
+  proposerIsLeft: boolean,
+  proofbodyHash: string,
+): number => {
+  const batchState = context.newState.jBatchState;
+  const removedDraft = scrubCounterDisputesSupersededByObserved(
+    batchState?.batch,
+    resolved.counterpartyId,
+    nonce,
+    proposerIsLeft,
+    proofbodyHash,
+    false,
+  );
+  let removedRecovery = 0;
+  for (const recoveryBatch of batchState?.recoveryBatches ?? []) {
+    removedRecovery += scrubCounterDisputesSupersededByObserved(
+      recoveryBatch,
+      resolved.counterpartyId,
+      nonce,
+      proposerIsLeft,
+      proofbodyHash,
+      false,
+    );
+  }
+  if (batchState?.recoveryBatches) {
+    batchState.recoveryBatches = batchState.recoveryBatches.filter(batch => !isBatchEmpty(batch));
+    if (batchState.recoveryBatches.length === 0) delete batchState.recoveryBatches;
+  }
+  const removedSent = retireSentBatchSupersededByCounterDispute(
+    context.newState,
+    resolved.counterpartyId,
+    nonce,
+    proposerIsLeft,
+    proofbodyHash,
+  );
+  if (removedSent > 0) queueLocalJBatchBroadcast(context.newState, context.outputs);
+  return removedDraft + removedRecovery + removedSent;
+};
+
+const applyCounterDisputeRegisteredJEvent = (context: FinalizedJEventContext): void => {
+  const data = context.event.data as CounterDisputeRegisteredEventData;
+  const resolved = resolveDisputeAccountContext(context.newState, data.sender, data.counterentity);
+  const nonce = requireBoundaryUint(data.nonce, 'COUNTER_DISPUTE_NONCE_INVALID');
+  const proofbodyHash = String(data.proofbodyHash || '').toLowerCase();
+  const selected = selectObservedCounterDispute(
+    context,
+    resolved,
+    data,
+    nonce,
+    proofbodyHash,
+  );
+  queueSourceHubClaimRegistration(
+    context,
+    resolved.counterpartyId,
+    selected.proofbody,
+    requireAccountDeltaTransformerAddress(context.env.state, selected.account.state),
+  );
+  const removedQueued = retireObservedCounterDisputeOperations(
+    context,
+    resolved,
+    nonce,
+    data.proposerIsLeft,
+    proofbodyHash,
+  );
+  if (removedQueued > 0) {
+    addMessage(
+      context.newState,
+      `🧹 Retired ${removedQueued} superseded counter-proof operation(s)`,
+    );
+  }
+  context.dirtyAccounts.add(resolved.counterpartyId.toLowerCase());
+  addMessage(
+    context.newState,
+    `🛡️ Counter-proof N${nonce} locked for ${resolved.counterpartyId.slice(-4)}`,
+  );
 };
 
 const resolveFinalizationEvidence = (
@@ -666,17 +1210,33 @@ const resolveFinalizationEvidence = (
     'J_EVENT_DISPUTE_INITIAL_NONCE_INVALID',
   );
   const evidenceSig = String(primary?.sig ?? '').toLowerCase();
-  const evidenceIsUnsignedUnilateral = evidenceSig === '' || evidenceSig === '0x';
+  const evidenceIsUnsigned = evidenceSig === '' || evidenceSig === '0x';
   const finalProofMatchesInitial =
     finalProofbodyHash.toLowerCase() === String(data.initialProofbodyHash || '').toLowerCase();
+  const active = account.activeDispute;
   let eventJNonce = initialNonce;
   if (primary) {
-    eventJNonce = evidenceIsUnsignedUnilateral
+    const finalNonce = requireBoundaryUint(
+      primary.finalNonce,
+      'J_EVENT_DISPUTE_FINAL_NONCE_INVALID',
+    );
+    const matchesSelectedCounter =
+      active?.selectedCounterNonce === finalNonce &&
+      active.selectedCounterProposerIsLeft === primary.proposerIsLeft &&
+      active.selectedCounterProofbodyHash?.toLowerCase() === finalProofbodyHash.toLowerCase();
+    const exactInitialUnilateral =
+      evidenceIsUnsigned &&
+      !matchesSelectedCounter &&
+      finalNonce === initialNonce &&
+      primary.proposerIsLeft === active?.initialProposerIsLeft &&
+      finalProofMatchesInitial;
+    // Solidity adopts a selected/signed branch by the full
+    // (nonce, proposer role, body hash) identity. Signature presence alone is
+    // insufficient: a registered counter-proof may be executed with empty sig,
+    // and equal-nonce LEFT must still replace an initial RIGHT branch.
+    eventJNonce = exactInitialUnilateral
       ? incrementAccountNonce(initialNonce, 'J_EVENT_DISPUTE_FINAL_NONCE_OVERFLOW')
-      : requireBoundaryUint(
-          primary.finalNonce,
-          'J_EVENT_DISPUTE_FINAL_NONCE_INVALID',
-        );
+      : finalNonce;
   } else if (finalProofMatchesInitial) {
     eventJNonce = incrementAccountNonce(
       initialNonce,
@@ -696,24 +1256,63 @@ const retireFinalizedDisputeState = (
   candidateCounterpartyId: string,
   senderStr: string,
   entityIdNorm: string,
+  initialProofbodyHash: string,
+  batchNonce: number | undefined,
 ): void => {
   const { newState, blockNumber } = context;
   const weAreFinalizer = senderStr === entityIdNorm;
+  // `sender == self` is not sufficient: a delegated watchtower finalizes on
+  // behalf of our Entity but emits no HankoBatchProcessed acknowledgement.
+  // Keep a sealed batch only when this exact finalization and nonce prove the
+  // event came from that batch; otherwise retire stale E5/E2 operations and
+  // preserve the unrelated remainder for one deterministic rebroadcast.
+  const ownSentBatchWillAck = weAreFinalizer && sentBatchOwnsDisputeFinalityAck(
+    newState,
+    candidateCounterpartyId,
+    initialProofbodyHash,
+    batchNonce,
+  );
   const removedDraft = scrubDisputeFinalizationsForCounterparty(
     newState.jBatchState?.batch,
     candidateCounterpartyId,
+  ) + scrubCounterDisputesForCounterparty(
+    newState.jBatchState?.batch,
+    candidateCounterpartyId,
+  ) + scrubSourceHashLadderRegistrationsForCounterparty(
+    newState.jBatchState?.batch,
+    candidateCounterpartyId,
   );
-  const removedSent = weAreFinalizer
+  let removedRecovery = 0;
+  for (const recoveryBatch of newState.jBatchState?.recoveryBatches ?? []) {
+    removedRecovery += scrubDisputeFinalizationsForCounterparty(recoveryBatch, candidateCounterpartyId)
+      + scrubCounterDisputesForCounterparty(recoveryBatch, candidateCounterpartyId)
+      + scrubSourceHashLadderRegistrationsForCounterparty(recoveryBatch, candidateCounterpartyId);
+  }
+  if (newState.jBatchState?.recoveryBatches) {
+    newState.jBatchState.recoveryBatches = newState.jBatchState.recoveryBatches
+      .filter(batch => !isBatchEmpty(batch));
+    if (newState.jBatchState.recoveryBatches.length === 0) delete newState.jBatchState.recoveryBatches;
+  }
+  const removedSent = ownSentBatchWillAck
     ? 0
-    : retireSentBatchInvalidatedByDisputeFinality(newState, candidateCounterpartyId);
-  const removed = removedDraft + removedSent;
+    : retireSentBatchInvalidatedByDisputeFinality(
+      newState,
+      candidateCounterpartyId,
+    );
+  const removed = removedDraft + removedRecovery + removedSent;
+  const broadcastQueued = removedSent > 0 || removedRecovery > 0
+    ? queueLocalJBatchBroadcast(newState, context.outputs)
+    : false;
   jEventLog.info('dispute_finalized.applied', {
     entity: shortId(entityIdNorm),
     counterparty: shortId(counterpartyId),
     sender: shortId(senderStr),
+    ownSentBatchWillAck,
     block: Number(blockNumber || 0),
     removedDraft,
+    removedRecovery,
     removedSent,
+    broadcastQueued,
   });
   if (removed > 0) {
     addMessage(
@@ -727,7 +1326,7 @@ async function applyDisputeFinalizedJEvent(
   context: FinalizedJEventContext,
   disputeFinalizationEvidence: DisputeFinalizationEvidence[],
 ): Promise<void> {
-  const { accountConsensusContext, newState, event, dirtyAccounts } = context;
+  const { newState, event } = context;
   const data = event.data as DisputeFinalizedEventData;
   const accountContext = resolveDisputeAccountContext(
     newState,
@@ -749,6 +1348,13 @@ async function applyDisputeFinalizedJEvent(
     });
     return;
   }
+  installOnchainDisputeProofBody(
+    account,
+    data.finalProofbody,
+    data.finalProofbodyHash,
+    counterpartyId,
+    'jEvent.disputeFinalized',
+  );
   // Depository settles only tokenIds from this exact locally signed body.
   const finalizedProof = requireFinalizedProofBodyEvidence(
     account,
@@ -763,12 +1369,54 @@ async function applyDisputeFinalizedJEvent(
     finalizedProof.finalProofbodyHash,
     disputeFinalizationEvidence,
   );
-  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
+  await applyResolvedDisputeFinality(
+    context,
+    account,
+    counterpartyId,
+    senderStr,
+    entityIdNorm,
+    data.batchNonce,
+    finalizedProof,
+    resolved,
+  );
+  retireFinalizedDisputeState(
+    context,
+    counterpartyId,
+    candidateCounterpartyId,
+    senderStr,
+    entityIdNorm,
+    data.initialProofbodyHash,
+    data.batchNonce,
+  );
+}
+
+const applyResolvedDisputeFinality = async (
+  context: FinalizedJEventContext,
+  account: AccountReplica,
+  counterpartyId: string,
+  senderStr: string,
+  entityIdNorm: string,
+  batchNonce: number | undefined,
+  finalizedProof: ReturnType<typeof requireFinalizedProofBodyEvidence>,
+  resolved: ReturnType<typeof resolveFinalizationEvidence>,
+): Promise<void> => {
+  const { accountConsensusContext, newState, dirtyAccounts } = context;
+  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, batchNonce);
   dirtyAccounts.add(counterpartyId.toLowerCase());
   // A finalized dispute changes the authoritative Account epoch. Any
   // settlement drafted or sealed against the previous epoch is unusable even
   // when its numeric nonce is higher; retaining it would strand holds or let a
   // delayed retry resurrect pre-dispute state.
+  // Capture exact Pull economics before Account external finality retires the
+  // active dispute clock and signed ProofBody evidence.
+  const crossJSettlements = resolveCrossJurisdictionFinalitySettlements(
+    newState,
+    account,
+    entityIdNorm,
+    counterpartyId,
+    finalizedProof.proofbody,
+    requireAccountDeltaTransformerAddress(context.env.state, account.state),
+  );
   const accountInput = createAccountDisputeFinalityInput(
     account.state,
     entityIdNorm,
@@ -800,51 +1448,116 @@ async function applyDisputeFinalizedJEvent(
   } else {
     jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
   }
-  retireFinalizedDisputeState(
-    context,
-    counterpartyId,
-    candidateCounterpartyId,
-    senderStr,
-    entityIdNorm,
-  );
-  terminalizeCrossJurisdictionRoutesOnFinality(newState, entityIdNorm, counterpartyId);
-}
+  terminalizeCrossJurisdictionRoutesOnFinality(newState, crossJSettlements);
+};
 
 type HashLadderRevealRegisteredEventData = {
   entity: string;
+  counterpartyEntity: string;
   ladderHash: string;
   fillRatio: number;
   fullSecret: string;
   reveals: [string, string, string, string];
+  targetRole: boolean;
+  revealedAt: number;
 };
 
 /**
- * Cross-j route mirrors over a finalized account terminate with the chain's
- * settlement. Prefer `registryFillRatio` (single-shot on-chain latch) when
- * present. A route can finalize without any registry write — signed-path
- * finality after a cooperative close never reads the registry — and there
- * `claimedRatio` is the committed close-proof fill (pull.ts sets it from
- * `proof.fillRatio`), i.e. exactly the ratio the account settled at.
+ * Resolve economics before Account finality retires the active clock/body.
+ * The exact signed Pull contributes claimedRatio; only a timestamped record
+ * inside this beneficiary's [S,S+W] interval may raise it. Queue latches and
+ * raw event ratios are deliberately not settlement authority.
  */
-const terminalizeCrossJurisdictionRoutesOnFinality = (
-  newState: EntityState,
-  entityIdNorm: string,
+type CrossJurisdictionFinalitySettlement = Readonly<{
+  route: CrossJurisdictionSwapRoute;
+  settledRatio: number;
+}>;
+
+const resolveCrossJurisdictionFinalitySettlements = (
+  state: EntityState,
+  account: AccountReplica,
+  entityId: string,
   counterpartyId: string,
-): void => {
-  const counterpartyNorm = String(counterpartyId || '').toLowerCase();
-  const routes = [...(newState.crossJurisdictionSwaps?.values?.() ?? [])];
-  for (const route of routes) {
+  finalProofbody: ProofBodyStruct,
+  canonicalDeltaTransformerAddress: string,
+): CrossJurisdictionFinalitySettlement[] => {
+  const self = entityId.toLowerCase();
+  const counterparty = counterpartyId.toLowerCase();
+  const localStack = state.config.jurisdiction
+    ? getJurisdictionStackId(state.config.jurisdiction)
+    : undefined;
+  const settlements: CrossJurisdictionFinalitySettlement[] = [];
+  for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
     if (isCrossJurisdictionTerminalStatus(route.status)) continue;
-    const onSourceAccount =
-      String(route.source?.entityId || '').toLowerCase() === entityIdNorm &&
-      String(route.source?.counterpartyEntityId || '').toLowerCase() === counterpartyNorm;
-    const onTargetAccount =
-      String(route.target?.counterpartyEntityId || '').toLowerCase() === entityIdNorm &&
-      String(route.target?.entityId || '').toLowerCase() === counterpartyNorm;
-    if (!onSourceAccount && !onTargetAccount) continue;
-    const settledRatio = Math.floor(
-      Number(route.registryFillRatio ?? route.claimedRatio ?? 0),
+    const role = resolveFinalizedCrossJurisdictionRouteLeg({
+      route,
+      self,
+      counterparty,
+      ...(localStack ? { localStack } : {}),
+    });
+    if (!role) continue;
+    const expectedPull = role === 'source' ? route.sourcePull : route.targetPull;
+    if (!expectedPull) {
+      // A raw intent is persisted before either bilateral Pull exists. If an
+      // older Account dispute finalizes during that short preparation window,
+      // the intent has no locked exposure to settle and must be retired rather
+      // than fail-stopping authoritative J history. Missing Pulls after intent
+      // are corruption and remain loud.
+      if (route.status === 'intent' && !route.sourcePull && !route.targetPull) {
+        settlements.push({ route, settledRatio: 0 });
+        continue;
+      }
+      throw new Error(`CROSS_J_FINALITY_PULL_MISSING:${route.orderId}:${role}`);
+    }
+    const record = role === 'source' ? route.sourceRegistryRecord : route.targetRegistryRecord;
+    const signedPull = findExactSignedProofBodyPull(
+      finalProofbody,
+      expectedPull,
+      role === 'target',
+      canonicalDeltaTransformerAddress,
     );
+    settlements.push({
+      route,
+      // A valid older bilateral proof may predate a route that exists only in
+      // newer local state. On-chain finality then never executed that Pull.
+      // Retire the local route at zero instead of fail-stopping the watcher;
+      // malformed/ambiguous canonical clauses still throw above.
+      settledRatio: signedPull
+        ? resolveFinalizedPullFillRatio({
+            account,
+            proofbody: finalProofbody,
+            canonicalDeltaTransformerAddress,
+            expectedPull,
+            targetRole: role === 'target',
+            ...(record ? { record } : {}),
+          })
+        : 0,
+    });
+  }
+  return settlements;
+};
+
+export const terminalizeCrossJurisdictionRoutesOnFinality = (
+  newState: EntityState,
+  settlements: readonly CrossJurisdictionFinalitySettlement[],
+): void => {
+  for (const { route, settledRatio } of settlements) {
+    // Depository emits DisputeFinalized before HankoBatchProcessed for the
+    // same processBatch transaction. Registry evidence remains independently
+    // publishable, but this route has no future financial consumer after
+    // finality, so retaining deferred work would be useless state and gas.
+    delete route.pendingSourceRegistryReveal;
+    delete route.pendingTargetRegistryReveal;
+    if (route.status === 'intent' && !route.sourcePull && !route.targetPull) {
+      transitionCrossJurisdictionRouteStatus(
+        route,
+        'cancelled',
+        Number(newState.timestamp || 0),
+      );
+      newState.crossJurisdictionSwaps!.set(route.orderId, route);
+      addMessage(newState, `🌉 Cross-j route ${route.orderId} cancelled before Pull lock on Account finality`);
+      continue;
+    }
     const terminal = transitionTargetLegTerminal(
       route,
       Number(newState.timestamp || 0),
@@ -855,20 +1568,48 @@ const terminalizeCrossJurisdictionRoutesOnFinality = (
   }
 };
 
+const updateRegistryRecord = (
+  existing: HashLadderRegistryRecord | undefined,
+  data: HashLadderRevealRegisteredEventData,
+  orderId: string,
+): HashLadderRegistryRecord => {
+  const next = { fillRatio: Math.floor(Number(data.fillRatio)), revealedAt: Number(data.revealedAt) };
+  if (!Number.isSafeInteger(next.revealedAt) || next.revealedAt <= 0) {
+    throw new Error(`CROSS_J_REGISTRY_REVEALED_AT_INVALID:${orderId}:${String(data.revealedAt)}`);
+  }
+  if (!existing) return next;
+  if (existing.fillRatio === next.fillRatio) {
+    if (!data.targetRole && existing.revealedAt !== next.revealedAt) {
+      throw new Error(`CROSS_J_REGISTRY_RETRY_TIME_CONFLICT:${orderId}`);
+    }
+    if (next.revealedAt < existing.revealedAt) {
+      throw new Error(`CROSS_J_REGISTRY_RECORD_TIME_REGRESSION:${orderId}`);
+    }
+    // Target exact-ratio publication intentionally refreshes its timestamp.
+    // This lets evidence published before a target dispute be republished
+    // inside the signed target window without changing the claimed ratio.
+    return next.revealedAt === existing.revealedAt ? existing : next;
+  }
+  if (!data.targetRole || next.fillRatio < existing.fillRatio || next.revealedAt < existing.revealedAt) {
+    throw new Error(`CROSS_J_REGISTRY_RECORD_CONFLICT:${orderId}:${existing.fillRatio}:${next.fillRatio}`);
+  }
+  return next;
+};
+
 /**
  * The hash-ladder reveal registry event — the only cross-j settlement trigger.
  * Roles, self-selected per entity:
  *  1. source-user lane: emit the port instruction to the target user.
  *  2. registering entity: confirm a pending port result on its own dispute.
- *  3. every route mirror: bump claimedRatio from observed fills; latch
- *     registryFillRatio only when *this* entity was the on-chain writer.
+ *  3. every route mirror: store the raw timestamped registry record; latch the
+ *     queue-only role-specific fill-ratio latch when this entity was writer.
  *
- * Invariant: registryFillRatio means "my Depository slot for this ladder is
+ * Invariant: the role-specific fill-ratio field means "my Depository slot is
  * already written" (exact-once queue guard). Source and target pulls share the
  * same ladderHash — latching from a *foreign* entity's reveal (e.g. hub) would
  * make the target-user salvage return already-queued and skip the port write,
- * settling the target leg at 0 on the honest path. claimedRatio still tracks
- * any observed ratio for terminal picks; it is not the own-slot latch.
+ * settling the target leg at 0 on the honest path. claimedRatio remains only
+ * the signed close-proof value; observed records never overwrite it.
  */
 const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext): void => {
   const { newState, outputs, blockNumber, dirtyAccounts } = context;
@@ -880,6 +1621,7 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
   const writerIsSelf = String(data.entity || '').toLowerCase() === self;
   if (writerIsSelf) {
     for (const [accountId, account] of newState.accounts.entries()) {
+      if (String(accountId).toLowerCase() !== String(data.counterpartyEntity).toLowerCase()) continue;
       const recovery = account.activeDispute?.crossJurisdictionRecovery;
       if (!recovery) continue;
       for (const pullId of recovery.requiredPullIds) {
@@ -891,6 +1633,8 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
         if (!route) continue;
         const pull = route.targetPull?.pullId === pullId ? route.targetPull : route.sourcePull;
         if (!pull || ladderHashForPull(pull) !== ladderHash) continue;
+        const expectedTargetRole = route.targetPull?.pullId === pullId;
+        if (data.targetRole !== expectedTargetRole) continue;
         recovery.resultsByPullId = { ...recovery.resultsByPullId, [pullId]: String(data.fillRatio) };
         dirtyAccounts.add(String(accountId).toLowerCase());
       }
@@ -899,19 +1643,39 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
 
   for (const route of newState.crossJurisdictionSwaps?.values?.() ?? []) {
     if (isCrossJurisdictionTerminalStatus(route.status)) continue;
-    const matches =
-      (route.sourcePull && ladderHashForPull(route.sourcePull) === ladderHash) ||
-      (route.targetPull && ladderHashForPull(route.targetPull) === ladderHash);
+    const rolePull = data.targetRole ? route.targetPull : route.sourcePull;
+    const roleLeg = data.targetRole ? route.target : route.source;
+    const matches = Boolean(
+      rolePull
+      && ladderHashForPull(rolePull) === ladderHash
+      && String(roleLeg.counterpartyEntityId).toLowerCase() === String(data.entity).toLowerCase()
+      && String(roleLeg.entityId).toLowerCase() === String(data.counterpartyEntity).toLowerCase()
+    );
     if (!matches) continue;
     const observed = Math.floor(Number(data.fillRatio));
     let dirty = false;
     // Own-slot latch only — foreign reveals must not block our port/claim queue.
-    if (writerIsSelf && route.registryFillRatio === undefined) {
-      route.registryFillRatio = observed;
-      dirty = true;
+    if (writerIsSelf) {
+      if (data.targetRole) {
+        route.targetRegistryFillRatio = observed;
+        dirty = true;
+      } else if (route.sourceRegistryFillRatio === undefined) {
+        route.sourceRegistryFillRatio = observed;
+        dirty = true;
+      } else if (route.sourceRegistryFillRatio !== observed) {
+        throw new Error(
+          `CROSS_J_SOURCE_REGISTRY_CONFLICT:${route.orderId}:` +
+          `${route.sourceRegistryFillRatio}:${observed}`,
+        );
+      }
     }
-    if (observed > Math.floor(Number(route.claimedRatio ?? 0))) {
-      route.claimedRatio = observed;
+    if (data.targetRole) {
+      const next = updateRegistryRecord(route.targetRegistryRecord, data, route.orderId);
+      if (next !== route.targetRegistryRecord) route.targetRegistryRecord = next;
+      dirty = true;
+    } else {
+      const next = updateRegistryRecord(route.sourceRegistryRecord, data, route.orderId);
+      if (next !== route.sourceRegistryRecord) route.sourceRegistryRecord = next;
       dirty = true;
     }
     if (dirty) newState.crossJurisdictionSwaps!.set(route.orderId, route);
@@ -924,39 +1688,28 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
  * the user-side port source. Queue it as soon as a dispute touching the pull
  * is observed, at exactly the committed fill ratio.
  */
-const queueSourceHubClaimRegistration = (context: FinalizedJEventContext, counterpartyId: string): void => {
+const queueSourceHubClaimRegistration = (
+  context: FinalizedJEventContext,
+  counterpartyId: string,
+  signedProofbody: ProofBodyStruct,
+  canonicalDeltaTransformerAddress: string,
+): void => {
   const { newState, env, outputs } = context;
-  const self = String(newState.entityId || '').toLowerCase();
-  const counterpartyNorm = String(counterpartyId || '').toLowerCase();
-  for (const route of newState.crossJurisdictionSwaps?.values?.() ?? []) {
-    if (isCrossJurisdictionTerminalStatus(route.status)) continue;
-    if (!route.sourcePull) continue;
-    if (String(route.source?.counterpartyEntityId || '').toLowerCase() !== self) continue;
-    if (String(route.source?.entityId || '').toLowerCase() !== counterpartyNorm) continue;
-    const ratio = getCrossJurisdictionCommittedProofRatio(route);
-    if (ratio <= 0) continue;
-    const reveal = buildCrossJurisdictionPullReveal(
-      route,
-      ratio,
-      deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route),
-    );
-    const decoded = decodeHashLadderBinary(reveal.binary);
-    const queued = queueHashLadderRevealRegistration(
-      newState,
-      route.sourcePull,
-      decoded,
-    );
-    if (queued !== 'queued') continue;
-    const firstValidator = newState.config.validators?.[0];
-    if (!firstValidator) throw new Error(`CROSS_J_CLAIM_SIGNER_MISSING:${route.orderId}`);
-    outputs.push({
-      entityId: newState.entityId,
-      signerId: firstValidator,
-      entityTxs: [{ type: 'j_broadcast', data: {} }],
-    });
+  for (const claim of queueSourceHubClaimRegistrationsForAccount(
+    newState,
+    counterpartyId,
+    env.runtimeSeed,
+    signedProofbody,
+    canonicalDeltaTransformerAddress,
+  )) {
+    const { fillRatio: ratio, result: queued } = claim;
+    if (queued !== 'queued' && queued !== 'deferred-batch-pending') continue;
+    queueLocalJBatchBroadcast(newState, outputs);
     addMessage(
       newState,
-      `🌉 Cross-j claim ${route.orderId}: registering source reveal ratio ${ratio}`,
+      queued === 'queued'
+        ? `🌉 Cross-j claim ${claim.routeId}: registering source reveal ratio ${ratio}`
+        : `⏳ Cross-j claim ${claim.routeId}: reveal deferred until disputeFinalizations leave the jBatch`,
     );
   }
 };
@@ -1023,6 +1776,9 @@ async function applyFinalizedJEvent(
       break;
     case 'DisputeStarted':
       await applyDisputeStartedJEvent(context);
+      break;
+    case 'CounterDisputeRegistered':
+      applyCounterDisputeRegisteredJEvent(context);
       break;
     case 'DisputeFinalized':
       await applyDisputeFinalizedJEvent(context, disputeFinalizationEvidence);

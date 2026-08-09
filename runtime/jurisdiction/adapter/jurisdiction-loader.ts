@@ -100,7 +100,7 @@ const decodeJurisdiction = (
     'name', 'chainId', 'blockTimeMs', 'rpc', 'contracts',
     'explorer', 'currency', 'status',
   ], [
-    'description', 'rebalancePolicyUsd', 'defaultDisputeDelayBlocks',
+    'description', 'rebalancePolicyUsd',
     'entityProviderDeploymentBlock', 'tokens', 'tronContracts', 'evmContracts',
     'primary',
   ], `${code}_FIELDS`);

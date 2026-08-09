@@ -178,7 +178,7 @@ const validateCompleteImport = (value: unknown, code: string): void => {
   const data = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(data, [
     'importId', 'requestHash', 'name', 'chainId', 'ticker', 'rpcs', 'blockNumber', 'stateRoot',
-    'defaultDisputeDelayBlocks', 'watcherConfirmationDepth', 'entityProviderDeploymentBlock', 'contracts',
+    'watcherConfirmationDepth', 'entityProviderDeploymentBlock', 'contracts',
   ], ['blockTimeMs', 'browserVMState'], `${code}_FIELDS`);
   for (const field of ['importId', 'requestHash', 'name', 'ticker', 'blockNumber']) {
     requireString(data[field], `${code}_${field.toUpperCase()}`);
@@ -187,7 +187,6 @@ const validateCompleteImport = (value: unknown, code: string): void => {
   requireStringArray(data['rpcs'], `${code}_RPCS`);
   if (!/^(0|[1-9][0-9]*)$/.test(String(data['blockNumber']))) throw new Error(`${code}_BLOCK_NUMBER`);
   if (data['stateRoot'] !== null) requireBytes32(data['stateRoot'], `${code}_STATE_ROOT`);
-  requireBoundaryInteger(data['defaultDisputeDelayBlocks'], `${code}_DISPUTE_DELAY`);
   requireBoundaryInteger(data['watcherConfirmationDepth'], `${code}_CONFIRMATION_DEPTH`);
   requireBoundaryInteger(data['entityProviderDeploymentBlock'], `${code}_DEPLOYMENT_BLOCK`, 1);
   if (data['blockTimeMs'] !== undefined) requireBoundaryInteger(data['blockTimeMs'], `${code}_BLOCK_TIME`, 1);

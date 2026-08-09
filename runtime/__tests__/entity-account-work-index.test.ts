@@ -32,7 +32,14 @@ describe('Entity Account work indexes', () => {
     const account = state.accounts.get(counterparty)!;
     account.mempool.push({
       type: 'direct_payment',
-      data: { tokenId: 1, amount: 1n },
+      data: {
+        tokenId: 1,
+        amount: 1n,
+        route: [self],
+        deliveryMode: 'direct',
+        fromEntityId: self,
+        toEntityId: counterparty,
+      },
     });
     refreshAccountWorkIndex(state, counterparty);
 
@@ -108,7 +115,14 @@ describe('Entity Account work indexes', () => {
 
     state.accounts.get(counterparty)!.mempool.push({
       type: 'direct_payment',
-      data: { tokenId: 1, amount: 1n },
+      data: {
+        tokenId: 1,
+        amount: 1n,
+        route: [self],
+        deliveryMode: 'direct',
+        fromEntityId: self,
+        toEntityId: counterparty,
+      },
     });
     refreshAccountWorkIndex(state, counterparty);
     expect(hasEntityLeaderWork(replica)).toBe(true);

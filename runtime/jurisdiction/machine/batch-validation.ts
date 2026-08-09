@@ -42,10 +42,24 @@ const bigint: FieldValidator = (value, code) => requireBigInt(value, code);
 const string: FieldValidator = (value, code) => requireString(value, code);
 const bool: FieldValidator = (value, code) => requireBoolean(value, code);
 
-const validateProofBody = (value: unknown, code: string): unknown => {
+export const validateProofBody = (value: unknown, code: string): unknown => {
   const proof = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(proof, ['watchSeed', 'offdeltas', 'tokenIds', 'transformers'], [], `${code}_FIELDS`);
+  // These response windows are signed executable dispute policy. Omitting
+  // them here would make the RPC watcher reject valid calldata after Solidity
+  // accepted it, while accepting the retired unsigned-clock shape on restore.
+  requireExactBoundaryKeys(proof, [
+    'watchSeed', 'leftResponseSeconds', 'rightResponseSeconds',
+    'offdeltas', 'tokenIds', 'transformers',
+  ], [], `${code}_FIELDS`);
   requireString(proof['watchSeed'], `${code}_WATCH_SEED`);
+  proof['leftResponseSeconds'] = integer(
+    proof['leftResponseSeconds'],
+    `${code}_LEFT_RESPONSE_SECONDS`,
+  );
+  proof['rightResponseSeconds'] = integer(
+    proof['rightResponseSeconds'],
+    `${code}_RIGHT_RESPONSE_SECONDS`,
+  );
   proof['offdeltas'] = requireArray(proof['offdeltas'], `${code}_OFFDELTAS`)
     .map((entry, index) => requireBigInt(entry, `${code}_OFFDELTAS_${index}`));
   proof['tokenIds'] = requireArray(proof['tokenIds'], `${code}_TOKEN_IDS`)
@@ -74,8 +88,8 @@ export function validateJBatch(
   const batch = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(batch, [
     'reserveToExternalToken', 'externalTokenToReserve', 'reserveToReserve',
-    'reserveToCollateral', 'collateralToReserve', 'settlements', 'disputeStarts',
-    'disputeFinalizations', 'flashloans', 'revealSecrets', 'hashLadderReveals',
+    'reserveToCollateral', 'collateralToReserve', 'settlements', 'disputeStarts', 'counterDisputes',
+    'disputeFinalizations', 'flashloans', 'revealSecrets', 'hashLadderRegistrations',
   ], [], `${code}_FIELDS`);
   validateRecordArray(batch['reserveToExternalToken'], `${code}_R2E`, {
     receivingEntity: string, tokenId: integer, amount: bigint,
@@ -108,25 +122,46 @@ export function validateJBatch(
     nonce: integer,
   });
   validateRecordArray(batch['disputeStarts'], `${code}_DISPUTE_STARTS`, {
-    counterentity: string, nonce: integer, proofbodyHash: string, initialProofbody: validateProofBody,
-    watchSeed: string, sig: string, starterInitialArguments: string, starterIncrementedArguments: string,
+    counterentity: string, nonce: integer, proposerIsLeft: bool, proofbodyHash: string, initialProofbody: validateProofBody,
+    watchSeed: string, sig: string, starterInitialArguments: string, starterCounterArguments: string,
+    starterCounterProofCommitment: string,
+  });
+  validateRecordArray(batch['counterDisputes'], `${code}_COUNTER_DISPUTES`, {
+    counterentity: string,
+    initialNonce: integer,
+    initialProofbodyHash: string,
+    counterNonce: integer,
+    proposerIsLeft: bool,
+    counterProofbody: validateProofBody,
+    sig: string,
   });
   validateRecordArray(batch['disputeFinalizations'], `${code}_DISPUTE_FINALIZATIONS`, {
-    counterentity: string, initialNonce: integer, finalNonce: integer, initialProofbodyHash: string,
+    counterentity: string, initialNonce: integer, finalNonce: integer, proposerIsLeft: bool, initialProofbodyHash: string,
     finalProofbody: validateProofBody, starterArguments: string, otherArguments: string, sig: string,
     startedByLeft: bool, cooperative: bool,
   });
   validateRecordArray(batch['flashloans'], `${code}_FLASHLOANS`, { tokenId: integer, amount: bigint });
   validateRecordArray(batch['revealSecrets'], `${code}_REVEAL_SECRETS`, { transformer: string, secret: string });
-  validateRecordArray(batch['hashLadderReveals'], `${code}_HASH_LADDER_REVEALS`, {
+  validateRecordArray(batch['hashLadderRegistrations'], `${code}_HASH_LADDER_REVEALS`, {
+    counterpartyEntity: string,
+    targetRole: bool,
     fullHash: string,
     partialRoot: string,
-    fillRatio: integer,
-    fullSecret: string,
-    reveals: (reveals, revealsCode) => {
-      const items = requireArray(reveals, revealsCode);
-      if (items.length !== 4) throw new Error(`${revealsCode}_LENGTH:${items.length}`);
-      return items.map((reveal, index) => requireString(reveal, `${revealsCode}_${index}`));
+    witness: (witness, witnessCode) => {
+      const record = requireBoundaryRecord(witness, witnessCode);
+      requireExactBoundaryKeys(
+        record,
+        ['fillRatio', 'fullSecret', 'reveals'],
+        [],
+        `${witnessCode}_FIELDS`,
+      );
+      record['fillRatio'] = integer(record['fillRatio'], `${witnessCode}_FILL_RATIO`);
+      requireString(record['fullSecret'], `${witnessCode}_FULL_SECRET`);
+      const reveals = requireArray(record['reveals'], `${witnessCode}_REVEALS`);
+      if (reveals.length !== 4) throw new Error(`${witnessCode}_REVEALS_LENGTH:${reveals.length}`);
+      record['reveals'] = reveals.map((reveal, index) =>
+        requireString(reveal, `${witnessCode}_REVEALS_${index}`));
+      return record;
     },
   });
 }

@@ -28,6 +28,7 @@ const resolveDisputeSeal = (
       hash: proof.disputeHash,
       proofBodyHash: proof.proof.proofBodyHash,
       proofNonce: proof.signedProofNonce,
+      proposerIsLeft: proof.proposerIsLeft,
     };
   }
   if (
@@ -35,6 +36,7 @@ const resolveDisputeSeal = (
     account.currentDisputeHash &&
     account.currentDisputeProofBodyHash?.toLowerCase() ===
       proof.proof.proofBodyHash.toLowerCase() &&
+    account.currentDisputeProofProposerIsLeft === proof.proposerIsLeft &&
     Number(account.currentDisputeProofNonce ?? 0) > Number(candidate.state.jNonce ?? 0)
   ) {
     return {
@@ -42,6 +44,7 @@ const resolveDisputeSeal = (
       hash: account.currentDisputeHash,
       proofBodyHash: account.currentDisputeProofBodyHash,
       proofNonce: account.currentDisputeProofNonce!,
+      proposerIsLeft: proof.proposerIsLeft,
     };
   }
   return undefined;
@@ -68,6 +71,7 @@ const buildOutboundAccountInput = (
     fromEntityId: account.proofHeader.fromEntity,
     toEntityId: account.proofHeader.toEntity,
     domain: structuredClone(account.state.domain),
+    disputeConfig: structuredClone(account.state.disputeConfig),
     watchSeed: account.state.watchSeed,
     proposal,
   };

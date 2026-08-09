@@ -342,8 +342,7 @@ describe('standalone watchtower service', () => {
       proofNonce: 1,
       proofBodyHash: keccak256(toUtf8Bytes('proof-body')),
       responseMode: 'last_resort' as const,
-      lastResortWindowBlocks: 8,
-      safetyMarginBlocks: 2,
+      lastResortWindowSeconds: 8,
     };
     const bundle = {
       version: 1 as const,

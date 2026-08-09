@@ -17,6 +17,14 @@ export const HANKO_ABI = [
 ] as const;
 
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
+// Exact HankoVerifier.sol resource limits. Off-chain consensus must reject a
+// proof which the jurisdiction can never verify; otherwise peers can certify
+// an Account state whose only enforcement evidence is permanently unmineable.
+export const HANKO_MAX_BYTES = 64 * 1024;
+export const HANKO_MAX_ENTITIES = 256;
+export const HANKO_MAX_CLAIMS = 64;
+export const HANKO_MAX_MEMBERS_PER_CLAIM = 256;
+export const HANKO_MAX_TOTAL_MEMBERS = 1024;
 const SECP256K1_HALF_ORDER = BigInt(
   '0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0',
 );
@@ -62,14 +70,39 @@ const encodeClaim = (claim: HankoWireClaim, index: number): readonly unknown[] =
   ];
 };
 
-export const encodeHankoEnvelope = (envelope: HankoEnvelope): HankoString => ABI_CODER.encode(
-  HANKO_ABI,
-  [[
+const assertContractHankoShape = (envelope: HankoEnvelope): void => {
+  const packedBytes = (envelope.packedSignatures.length - 2) / 2;
+  const signatures = signatureCount(packedBytes);
+  const totalEntities = envelope.placeholders.length + signatures + envelope.claims.length;
+  if (
+    envelope.claims.length > HANKO_MAX_CLAIMS
+    || totalEntities > HANKO_MAX_ENTITIES
+    || envelope.placeholders.length > HANKO_MAX_ENTITIES
+    || signatures > HANKO_MAX_ENTITIES
+  ) throw new Error('HANKO_PROOF_TOO_LARGE');
+  let totalMembers = 0;
+  for (const [index, claim] of envelope.claims.entries()) {
+    const members = claim.entityIndexes.length;
+    if (
+      members === 0
+      || members !== claim.weights.length
+      || members > HANKO_MAX_MEMBERS_PER_CLAIM
+    ) throw new Error(`HANKO_CLAIM_SHAPE_INVALID:${index}`);
+    totalMembers += members;
+    if (totalMembers > HANKO_MAX_TOTAL_MEMBERS) throw new Error('HANKO_PROOF_TOO_LARGE');
+  }
+};
+
+export const encodeHankoEnvelope = (envelope: HankoEnvelope): HankoString => {
+  assertContractHankoShape(envelope);
+  const encoded = ABI_CODER.encode(HANKO_ABI, [[
     envelope.placeholders.map((value, index) => asHankoBytes32(value, `PLACEHOLDER_${index}`)),
     asHex(envelope.packedSignatures, 'PACKED_SIGNATURES'),
     envelope.claims.map(encodeClaim),
-  ]],
-);
+  ]]);
+  if ((encoded.length - 2) / 2 > HANKO_MAX_BYTES) throw new Error('HANKO_PROOF_TOO_LARGE');
+  return encoded;
+};
 
 const requireAbiArray = (value: unknown, label: string): readonly unknown[] => {
   if (!Array.isArray(value)) throw new Error(`HANKO_${label}_ARRAY_INVALID`);
@@ -109,6 +142,9 @@ const decodeClaim = (value: unknown, index: number): HankoWireClaim => {
 
 export const decodeHankoEnvelope = (encoded: HankoString): HankoEnvelope => {
   const canonicalInput = asHex(encoded, 'ENVELOPE');
+  if ((canonicalInput.length - 2) / 2 > HANKO_MAX_BYTES) {
+    throw new Error('HANKO_PROOF_TOO_LARGE');
+  }
   let decoded: ethers.Result;
   try {
     decoded = ABI_CODER.decode(HANKO_ABI, canonicalInput);
@@ -126,6 +162,7 @@ export const decodeHankoEnvelope = (encoded: HankoString): HankoEnvelope => {
     packedSignatures: asHex(requireAbiString(packedSignatures, 'PACKED_SIGNATURES'), 'PACKED_SIGNATURES'),
     claims: claims.map(decodeClaim),
   };
+  assertContractHankoShape(envelope);
   if (encodeHankoEnvelope(envelope).toLowerCase() !== canonicalInput) {
     throw new Error('HANKO_ABI_NON_CANONICAL');
   }

@@ -444,7 +444,12 @@ describe('storage frame journal retention', () => {
         signerId: signer,
         entityTxs: [{
           type: 'openAccount',
-          data: { targetEntityId: remoteEntityId, creditAmount: 1_000n, tokenId: 1 },
+          data: {
+            targetEntityId: remoteEntityId,
+            disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+            creditAmount: 1_000n,
+            tokenId: 1,
+          },
         }],
       }],
     });
@@ -1537,6 +1542,7 @@ describe('storage frame journal retention', () => {
               type: 'openAccount',
               data: {
                 targetEntityId: entityB,
+                disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
                 creditAmount: 1000n,
                 tokenId: 1,
               },

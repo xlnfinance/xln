@@ -2,10 +2,11 @@ import type { EntityInput, EntityState } from '../types';
 import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import {
   initJBatch,
-  isBatchEmpty,
+  hasJBatchWork,
 } from '../../jurisdiction/machine/batch';
 import { addMessage } from '../frame-events';
 import { createStructuredLogger } from '../../infra/logger';
+import { flushDeferredHashLadderReveals } from './j-events-htlc';
 
 const jEventBatchLog = createStructuredLogger('j.event.batch');
 
@@ -65,9 +66,15 @@ const finalizePendingBatch = (
   outputs: EntityInput[],
 ): void => {
   delete state.jBatchState!.sentBatch;
-  state.jBatchState!.status = isBatchEmpty(state.jBatchState!.batch) ? 'empty' : 'accumulating';
+  state.jBatchState!.status = hasJBatchWork(state.jBatchState!) ? 'accumulating' : 'empty';
   syncEntityNonce(state, nonce);
-  if (!state.jBatchState!.autoBroadcastDraft || isBatchEmpty(state.jBatchState!.batch)) return;
+  // After finalize leaves sentBatch, queue any Target reveals that waited.
+  const flushed = flushDeferredHashLadderReveals(state);
+  if (flushed > 0) {
+    state.jBatchState!.status = 'accumulating';
+    state.jBatchState!.autoBroadcastDraft = true;
+  }
+  if (!state.jBatchState!.autoBroadcastDraft || !hasJBatchWork(state.jBatchState!)) return;
   const signerId = state.config.validators[0];
   if (!signerId) throw new Error('J_BATCH_AUTO_BROADCAST_SIGNER_MISSING');
   outputs.push({

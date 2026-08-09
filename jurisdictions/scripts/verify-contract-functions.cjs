@@ -11,6 +11,8 @@ function loadDeploymentData() {
         return {
             depository: output.contracts?.depository,
             account: output.contracts?.account,
+            depositoryBounds: output.evmContracts?.depositoryBounds?.address,
+            hashLadderRegistry: output.evmContracts?.hashLadderRegistry?.address,
         };
     }
 
@@ -22,6 +24,8 @@ function loadDeploymentData() {
     return {
         depository: deploymentData['DepositoryModule#Depository'],
         account: deploymentData['DepositoryModule#Account'],
+        depositoryBounds: deploymentData['DepositoryModule#DepositoryBounds'],
+        hashLadderRegistry: deploymentData['DepositoryModule#HashLadderRegistry'],
     };
 }
 
@@ -40,9 +44,11 @@ async function main() {
 
     // Get Account library address for linking
     const accountLibraryAddress = process.env.ACCOUNT_ADDRESS || deploymentData.account;
+    const boundsLibraryAddress = process.env.DEPOSITORY_BOUNDS_ADDRESS || deploymentData.depositoryBounds;
+    const registryLibraryAddress = process.env.HASH_LADDER_REGISTRY_ADDRESS || deploymentData.hashLadderRegistry;
 
-    if (!accountLibraryAddress) {
-        console.log("❌ Account library address not found - needed for Depository linking");
+    if (!accountLibraryAddress || !boundsLibraryAddress || !registryLibraryAddress) {
+        console.log("❌ Complete Depository library graph not found");
         process.exit(1);
     }
     console.log("📍 Account library at:", accountLibraryAddress);
@@ -50,7 +56,9 @@ async function main() {
     // Connect to contract with linked library
     const Depository = await ethers.getContractFactory("Depository", {
         libraries: {
-            Account: accountLibraryAddress
+            Account: accountLibraryAddress,
+            DepositoryBounds: boundsLibraryAddress,
+            HashLadderRegistry: registryLibraryAddress,
         }
     });
     const depository = Depository.attach(depositoryAddress);
@@ -67,7 +75,9 @@ async function main() {
     console.log("🔍 Getting contract factory...");
     const DepositoryFactory = await ethers.getContractFactory("Depository", {
         libraries: {
-            Account: accountLibraryAddress
+            Account: accountLibraryAddress,
+            DepositoryBounds: boundsLibraryAddress,
+            HashLadderRegistry: registryLibraryAddress,
         }
     });
     console.log("🔍 Contract factory:", DepositoryFactory ? "✅ LOADED" : "❌ NULL");

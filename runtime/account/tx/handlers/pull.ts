@@ -1,7 +1,7 @@
 import type { AccountState, AccountTx, PullCommitment } from '../../../types/account';
 import type { CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { deriveDelta } from '../../utils';
-import { FINANCIAL, LIMITS } from '../../../config/constants';
+import { FINANCIAL, LIMITS, TOKENS } from '../../../config/constants';
 import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionPullBinding,
@@ -19,6 +19,7 @@ import {
 import { addHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
 import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
+import { createDefaultDelta } from '../../delta';
 
 type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;
 type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
@@ -136,6 +137,9 @@ const validateCrossPullCloseEvidence = (
   tx: CrossPullCloseTx,
 ): Readonly<{ ok: true; ratio: number } | { ok: false; error: string }> => {
   const { binary, proof } = tx.data;
+  if (!Number.isSafeInteger(proof.fillRatio) || proof.fillRatio < 0 || proof.fillRatio > HASHLADDER_MAX_FILL_RATIO) {
+    return { ok: false, error: `Cross-j close proof ratio out of uint16 range: ${proof.fillRatio}` };
+  }
   const proofError = crossProofMatchesBinding(binding, proof, pull);
   if (proofError) return { ok: false, error: `Cross-j close proof mismatch: ${proofError}` };
   const binaryHash = hashCrossJurisdictionCloseBinary(binary);
@@ -154,14 +158,12 @@ const validateCrossPullCloseEvidence = (
       error: `Invalid cross-j close binary: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-  const ratio = Math.max(
-    0,
-    Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(proof.fillRatio) || 0)),
-  );
+  const ratio = proof.fillRatio;
   if (decodedRatio !== ratio) {
     return { ok: false, error: `Cross-j close ratio mismatch: binary ${decodedRatio} != proof ${ratio}` };
   }
-  // Settlement clock is dispute-relative unix seconds on L1 (start + T/2).
+  // Settlement clocks are dispute-relative unix seconds on L1. Source and
+  // Target each use their beneficiary-side window from their own dispute S.
   // No sealed route/pull reveal deadline gates cooperative close.
   return { ok: true, ratio };
 };
@@ -214,6 +216,74 @@ const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockT
     : 'Cross-j pull jurisdiction does not match Account domain';
 };
 
+export const getNewPullSlotError = (
+  account: AccountState,
+  pullId: string,
+  crossJurisdiction: PullLockTx['data']['crossJurisdiction'],
+): string | null => {
+  if (!pullId || pullId.includes(':')) return 'Invalid pullId';
+  if (account.pulls?.has(pullId)) return `Pull ${pullId} already exists`;
+  if ((account.pulls?.size ?? 0) >= LIMITS.MAX_ACCOUNT_SWAP_OFFERS) return 'Too many open pulls';
+  if (!crossJurisdiction) return null;
+  let liveCrossJurisdictionPulls = 0;
+  for (const existing of account.pulls?.values() ?? []) {
+    if (existing.crossJurisdiction) liveCrossJurisdictionPulls += 1;
+  }
+  return liveCrossJurisdictionPulls >= LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS
+    ? `Too many open cross-j pulls: max ${LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS}`
+    : null;
+};
+
+const validatePullHashMaterial = (
+  account: AccountState,
+  fullHash: string,
+  partialRoot: string,
+  orderId: string,
+): string | null => {
+  if (!HEX_32_RE.test(fullHash) || !HEX_32_RE.test(partialRoot)) {
+    return 'Invalid pull hashladder commitment';
+  }
+  const normalizedFullHash = fullHash.toLowerCase();
+  const normalizedPartialRoot = partialRoot.toLowerCase();
+  for (const existing of account.pulls?.values() ?? []) {
+    const existingOrderId = String(existing.crossJurisdiction?.orderId || '').trim();
+    if (existingOrderId && orderId && existingOrderId === orderId) continue;
+    if (
+      existing.fullHash.toLowerCase() === normalizedFullHash
+      || existing.partialRoot.toLowerCase() === normalizedPartialRoot
+    ) return `Pull hash material collides with live pull ${existing.pullId}`;
+  }
+  return null;
+};
+
+/** Exact non-mutating admission shared by Entity preflight and Account apply. */
+export const getPullLockAdmissionError = (
+  account: AccountState,
+  accountTx: PullLockTx,
+): string | null => {
+  const { pullId, tokenId, amount, fullHash, partialRoot, crossJurisdiction } = accountTx.data;
+  const routeError = validateCrossJurisdictionPullRoute(account, accountTx);
+  if (routeError) return routeError;
+  const slotError = getNewPullSlotError(account, pullId, crossJurisdiction);
+  if (slotError) return slotError;
+  const orderId = String(crossJurisdiction?.orderId || '').trim();
+  const hashError = validatePullHashMaterial(account, fullHash, partialRoot, orderId);
+  if (hashError) return hashError;
+  if (!Number.isSafeInteger(tokenId) || tokenId < 0 || tokenId > TOKENS.MAX_TOKEN_ID) {
+    return 'Invalid pull tokenId';
+  }
+  if (amount === 0n) return 'Pull amount must be non-zero';
+  const absAmount = absBigInt(amount);
+  if (absAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || absAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+    return `Pull amount out of bounds: ${absAmount}`;
+  }
+  const delta = account.deltas.get(tokenId) ?? createDefaultDelta(tokenId);
+  const loserCapacity = deriveDelta(delta, amount < 0n).outCapacity;
+  return absAmount > loserCapacity
+    ? `Insufficient pull capacity: need ${absAmount}, available ${loserCapacity}`
+    : null;
+};
+
 export async function handlePullLock(
   account: AccountState,
   accountTx: PullLockTx,
@@ -224,53 +294,9 @@ export async function handlePullLock(
   const { pullId, tokenId, amount, fullHash, partialRoot, crossJurisdiction } = accountTx.data;
   const events: string[] = [];
 
-  const crossJurisdictionRouteError = validateCrossJurisdictionPullRoute(account, accountTx);
-  if (crossJurisdictionRouteError) return { success: false, error: crossJurisdictionRouteError, events };
-
-  if (!pullId || pullId.includes(':')) {
-    return { success: false, error: `Invalid pullId`, events };
-  }
-  account.pulls ??= new Map();
-  if (account.pulls.has(pullId)) {
-    return { success: false, error: `Pull ${pullId} already exists`, events };
-  }
-  if (account.pulls.size >= LIMITS.MAX_ACCOUNT_SWAP_OFFERS) {
-    return { success: false, error: `Too many open pulls`, events };
-  }
-  if (!HEX_32_RE.test(fullHash) || !HEX_32_RE.test(partialRoot)) {
-    return { success: false, error: `Invalid pull hashladder commitment`, events };
-  }
-  // INVARIANT: unique hashladder root per orderId. Runtime admission also
-  // scans every Entity/Account/swap in the Runtime; this Account-local guard
-  // catches same-frame sequential locks and anything that slipped past.
-  // Same orderId may reuse its own ladder (source/target of one swap).
-  const orderId = String(crossJurisdiction?.orderId || '').trim();
-  const normalizedFullHash = fullHash.toLowerCase();
-  const normalizedPartialRoot = partialRoot.toLowerCase();
-  for (const existing of account.pulls.values()) {
-    const existingOrderId = String(existing.crossJurisdiction?.orderId || '').trim();
-    if (existingOrderId && orderId && existingOrderId === orderId) continue;
-    if (
-      existing.fullHash.toLowerCase() === normalizedFullHash ||
-      existing.partialRoot.toLowerCase() === normalizedPartialRoot
-    ) {
-      return {
-        success: false,
-        error: `Pull hash material collides with live pull ${existing.pullId}`,
-        events,
-      };
-    }
-  }
-  if (!Number.isInteger(tokenId) || tokenId < 0) {
-    return { success: false, error: `Invalid pull tokenId`, events };
-  }
-  if (amount === 0n) {
-    return { success: false, error: `Pull amount must be non-zero`, events };
-  }
+  const admissionError = getPullLockAdmissionError(account, accountTx);
+  if (admissionError) return { success: false, error: admissionError, events };
   const absAmount = absBigInt(amount);
-  if (absAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || absAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-    return { success: false, error: `Pull amount out of bounds: ${absAmount}`, events };
-  }
 
   const beneficiaryIsLeft = amount > 0n;
   const loserIsLeft = !beneficiaryIsLeft;
@@ -282,16 +308,12 @@ export async function handlePullLock(
 
   const delta = ensureDelta(account, tokenId);
 
-  const loserCapacity = deriveDelta(delta, loserIsLeft).outCapacity;
-  if (absAmount > loserCapacity) {
-    return { success: false, error: `Insufficient pull capacity: need ${absAmount}, available ${loserCapacity}`, events };
-  }
-
   const holdError = addHold(delta, loserIsLeft ? 'left' : 'right', absAmount);
   if (holdError) return { success: false, error: holdError, events };
 
   // No sealed pull reveal deadline. Settlement clock is dispute-relative
   // seconds on L1; cooperative close is event-driven (hashladder reveal).
+  account.pulls ??= new Map();
   account.pulls.set(pullId, {
     pullId,
     tokenId,

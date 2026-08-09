@@ -4,10 +4,6 @@
  */
 const hre = require("hardhat");
 
-const disputeDelayBlocks = Number(process.env.XLN_DISPUTE_DELAY_BLOCKS);
-if (!Number.isSafeInteger(disputeDelayBlocks) || disputeDelayBlocks <= 0 || disputeDelayBlocks > 65_535) {
-  throw new Error(`XLN_DISPUTE_DELAY_BLOCKS_INVALID:${process.env.XLN_DISPUTE_DELAY_BLOCKS || 'missing'}`);
-}
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
 
@@ -68,25 +64,8 @@ async function main() {
   console.log(`   HankoVerifier: ${hankoVerifierAddr}`);
   console.log(`   Foundation recipient: ${foundationRecipient}`);
 
-  // 3. Deploy Depository (needs Account library linked)
-  console.log("3️⃣ Deploying Depository...");
-  const Depository = await hre.ethers.getContractFactory("Depository", {
-    libraries: {
-      Account: accountAddr,
-    },
-  });
-  const depository = await Depository.deploy(entityProviderAddr, disputeDelayBlocks);
-  await depository.waitForDeployment();
-  const depositoryAddr = await depository.getAddress();
-  const depositoryDeployment = await deploymentEvidence(
-    depository,
-    depositoryAddr,
-    "DEPOSITORY",
-  );
-  console.log(`   Depository: ${depositoryAddr}`);
-
-  // 4. Deploy DeltaTransformer
-  console.log("4️⃣ Deploying DeltaTransformer...");
+  // 3. Deploy the immutable canonical transformer and both code-size libraries.
+  console.log("3️⃣ Deploying DeltaTransformer + Depository libraries...");
   const DeltaTransformer = await hre.ethers.getContractFactory("DeltaTransformer");
   const deltaTransformer = await DeltaTransformer.deploy();
   await deltaTransformer.waitForDeployment();
@@ -96,6 +75,44 @@ async function main() {
     deltaTransformerAddr,
     "DELTA_TRANSFORMER",
   );
+  const DepositoryBounds = await hre.ethers.getContractFactory("DepositoryBounds");
+  const depositoryBounds = await DepositoryBounds.deploy();
+  await depositoryBounds.waitForDeployment();
+  const depositoryBoundsAddr = await depositoryBounds.getAddress();
+  const depositoryBoundsDeployment = await deploymentEvidence(
+    depositoryBounds,
+    depositoryBoundsAddr,
+    "DEPOSITORY_BOUNDS",
+  );
+  const HashLadderRegistry = await hre.ethers.getContractFactory("HashLadderRegistry");
+  const hashLadderRegistry = await HashLadderRegistry.deploy();
+  await hashLadderRegistry.waitForDeployment();
+  const hashLadderRegistryAddr = await hashLadderRegistry.getAddress();
+  const hashLadderRegistryDeployment = await deploymentEvidence(
+    hashLadderRegistry,
+    hashLadderRegistryAddr,
+    "HASH_LADDER_REGISTRY",
+  );
+
+  // 4. Deploy Depository with one immutable transformer and all linked logic.
+  console.log("4️⃣ Deploying Depository...");
+  const Depository = await hre.ethers.getContractFactory("Depository", {
+    libraries: {
+      Account: accountAddr,
+      DepositoryBounds: depositoryBoundsAddr,
+      HashLadderRegistry: hashLadderRegistryAddr,
+    },
+  });
+  const depository = await Depository.deploy(entityProviderAddr, deltaTransformerAddr);
+  await depository.waitForDeployment();
+  const depositoryAddr = await depository.getAddress();
+  const depositoryDeployment = await deploymentEvidence(
+    depository,
+    depositoryAddr,
+    "DEPOSITORY",
+  );
+  console.log(`   Depository: ${depositoryAddr}`);
+
   console.log(`   DeltaTransformer: ${deltaTransformerAddr}`);
 
   // 5. Register the canonical external stablecoin as tokenId 1. Public
@@ -156,6 +173,8 @@ async function main() {
     entityProviderDeploymentBlock: entityProviderDeployment.deploymentBlock,
     contracts: {
       account: accountAddr,
+      depositoryBounds: depositoryBoundsAddr,
+      hashLadderRegistry: hashLadderRegistryAddr,
       hankoVerifier: hankoVerifierAddr,
       entityProvider: entityProviderAddr,
       depository: depositoryAddr,
@@ -163,6 +182,8 @@ async function main() {
     },
     evmContracts: {
       account: accountDeployment,
+      depositoryBounds: depositoryBoundsDeployment,
+      hashLadderRegistry: hashLadderRegistryDeployment,
       hankoVerifier: hankoVerifierDeployment,
       entityProvider: entityProviderDeployment,
       depository: depositoryDeployment,

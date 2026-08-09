@@ -1,7 +1,9 @@
 import { HDNodeWallet, Mnemonic, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
+import { defaultAccountDisputeConfigForParties } from '../runtime/account/dispute-config';
 import type { MarketSnapshotPayload } from '../runtime/network/relay/market-snapshot';
 import { expect, type Page } from './global-setup.mts';
+export { aggregateExpectedCrossBookDepth } from './utils/e2e-cross-book-depth';
 import { type E2EHealthResponse } from './utils/e2e-baseline';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
@@ -322,6 +324,24 @@ export function expectExactTenByTen(snapshot: MarketSnapshotPayload, context: st
   ).toBe(10);
 }
 
+export function expectExactConfiguredDepth(
+  snapshot: MarketSnapshotPayload,
+  expected: { expectedOffers?: number; expectedBidOffers?: number; expectedAskOffers?: number },
+  context: string,
+): void {
+  const expectedBids = Number(expected.expectedBidOffers ?? -1);
+  const expectedAsks = Number(expected.expectedAskOffers ?? -1);
+  const expectedTotal = Number(expected.expectedOffers ?? -1);
+  expect(expectedBids, `${context} must declare exact bid depth`).toBeGreaterThanOrEqual(0);
+  expect(expectedAsks, `${context} must declare exact ask depth`).toBeGreaterThanOrEqual(0);
+  expect(expectedTotal, `${context} must declare exact total depth`).toBe(expectedBids + expectedAsks);
+  const bidOrders = snapshot.bids.reduce((sum, level) => sum + Number(level.orderCount ?? 1), 0);
+  const askOrders = snapshot.asks.reduce((sum, level) => sum + Number(level.orderCount ?? 1), 0);
+  expect(bidOrders, `${context} bid depth must match canonical health`).toBe(expectedBids);
+  expect(askOrders, `${context} ask depth must match canonical health`).toBe(expectedAsks);
+  expect(bidOrders + askOrders, `${context} total depth must match canonical health`).toBe(expectedTotal);
+}
+
 export function getPrimaryHubApiBaseUrl(health: E2EHealthResponse, primaryHubId: string): string {
   const hub = (health.hubs || []).find(entry => normalizeId(entry.entityId) === normalizeId(primaryHubId)) as
     (E2EHealthResponse['hubs'][number] & { apiPort?: number; apiUrl?: string }) | undefined;
@@ -594,14 +614,12 @@ export async function importRpc2SiblingEntity(
 
       const hasConnectedAdapter = (name: string): boolean => {
         const adapter = env.infrastructure?.liveJAdapters?.get(name);
-        return (
-        Boolean(
-            adapter?.addresses?.depository &&
-            adapter?.addresses?.entityProvider &&
-            adapter?.depository &&
-            adapter?.entityProvider &&
-            typeof adapter?.submitTx === 'function',
-          )
+        return Boolean(
+          adapter?.addresses?.depository &&
+          adapter?.addresses?.entityProvider &&
+          adapter?.depository &&
+          adapter?.entityProvider &&
+          typeof adapter?.submitTx === 'function',
         );
       };
       if (!hasConnectedAdapter(jurisdictionName)) {
@@ -889,6 +907,7 @@ export async function ensureDirectHubAccount(
           targetEntityId: hubId,
           tokenId: USDC,
           creditAmount: tokenAmount(USDC, 10_000n),
+          disputeConfig: defaultAccountDisputeConfigForParties(identity.entityId, false, hubId, true),
         },
       },
     ]);
@@ -1645,27 +1664,31 @@ export async function selectContextEntity(page: Page, identity: RuntimeIdentity)
 
 export async function dismissSwapCompletionModal(page: Page): Promise<void> {
   if (page.isClosed()) return;
-  // The terminal Account frame and Svelte dialog are observed on different
-  // microtasks. Let two paint cycles publish the dialog before deciding it is
-  // absent; otherwise the next navigation click can race a freshly mounted
-  // modal for the rest of the Playwright timeout.
-  await page.evaluate(
-    () =>
-      new Promise<void>(resolve => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      }),
-  );
+  // Fill dialogs mount after the bilateral settle wait returns. A single 1s
+  // probe races the Svelte mount and leaves the overlay intercepting every
+  // later tab click for the rest of the test timeout (shard-8 bob_second_offer).
   const completionClose = page.getByTestId('swap-completion-close').first();
-  if (await completionClose.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await completionClose.click();
-    await expect(completionClose).toBeHidden({ timeout: 5_000 });
+  if (!(await completionClose.isVisible())) {
+    await page.evaluate(
+      () =>
+        new Promise<void>(resolve => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    if (!(await completionClose.isVisible())) return;
   }
+  // A visible completion overlay is authoritative UI state. Failing to close
+  // it must fail this flow; force-clicking the covered workspace would turn a
+  // real modal regression into a false-green financial E2E.
+  await completionClose.click();
+  await expect(completionClose).toBeHidden({ timeout: 3_000 });
 }
 
 export async function openSwapWorkspace(page: Page): Promise<void> {
   await dismissSwapCompletionModal(page);
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await dismissSwapCompletionModal(page);
   await accountsTab.click();
   const swapTab = page.getByTestId('account-workspace-tab-swap').first();
   try {
@@ -1710,7 +1733,9 @@ export async function openSwapWorkspace(page: Page): Promise<void> {
         `cause=${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  await swapTab.click();
+  await dismissSwapCompletionModal(page);
+  await swapTab.click({ force: true });
+  await dismissSwapCompletionModal(page);
   await expect(page.locator('.swap-panel').first()).toBeVisible({ timeout: 15_000 });
 }
 
@@ -1821,12 +1846,12 @@ export async function selectCrossRoute(page: Page, targetEntityId: string): Prom
           disabled: (option as HTMLOptionElement).disabled,
         }),
       );
-      const sourceOptions = Array.from(document.querySelectorAll('[data-testid="swap-ticket-from-network"] option')).map(
-        option => ({
-          value: (option as HTMLOptionElement).value,
-          text: option.textContent,
-        }),
-      );
+      const sourceOptions = Array.from(
+        document.querySelectorAll('[data-testid="swap-ticket-from-network"] option'),
+      ).map(option => ({
+        value: (option as HTMLOptionElement).value,
+        text: option.textContent,
+      }));
       const profiles = env?.gossip?.getProfiles?.() || [];
       const hubProfiles = profiles
         .filter((profile: any) => profile?.metadata?.isHub === true)
@@ -1884,10 +1909,9 @@ export async function selectCrossRoute(page: Page, targetEntityId: string): Prom
   expect(selectedOptionLabel, 'cross route option must name the target jurisdiction once').toMatch(
     /\((Testnet|Tron)\)/,
   );
-  await expect(
-    routeSelect,
-    'cross route selection must remain selected after the reactive UI update',
-  ).toHaveValue(value);
+  await expect(routeSelect, 'cross route selection must remain selected after the reactive UI update').toHaveValue(
+    value,
+  );
   await expect(
     routeSelect.locator('xpath=..').locator('.swap-ticket-sel-text'),
     'the visible destination label must match the selected route',

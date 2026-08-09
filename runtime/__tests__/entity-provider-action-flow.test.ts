@@ -244,13 +244,18 @@ describe('EntityProvider action flow', () => {
     }, 10);
     const release = await applyEntityTx(fixture.env, finalized, {
       type: 'entityProviderReleaseControlShares',
-      data: { controlAmount: 2n, dividendAmount: 3n, purpose: 'Series A' },
+      data: {
+        recipientAddress: address('a4'),
+        controlAmount: 2n,
+        dividendAmount: 3n,
+        purpose: 'Series A',
+      },
     });
     const releaseIntent = requireActionJTx(release.jOutputs[0]?.jTxs[0]).data.intent;
     expect(releaseIntent.payload).toEqual({
       kind: 'releaseControlShares',
       release: {
-        depositoryAddress: address('a2'),
+        recipientAddress: address('a4'),
         controlAmount: 2n,
         dividendAmount: 3n,
         purpose: 'Series A',
@@ -1056,7 +1061,12 @@ describe('EntityProvider action flow', () => {
       }, submitted.blockNumber ?? 1);
       const releaseResult = await applyEntityTx(env, afterTransfer, {
         type: 'entityProviderReleaseControlShares',
-        data: { controlAmount: 3n, dividendAmount: 4n, purpose: 'BrowserVM integration' },
+        data: {
+          recipientAddress: signerId,
+          controlAmount: 3n,
+          dividendAmount: 4n,
+          purpose: 'BrowserVM integration',
+        },
       });
       if (releaseResult.skippedError) throw releaseResult.skippedError;
       const releaseJTx = requireActionJTx(releaseResult.jOutputs[0]?.jTxs[0]);

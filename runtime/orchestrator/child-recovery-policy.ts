@@ -51,11 +51,18 @@ export const selectChildFailureReason = (
   const hasStableCode = (line: string): boolean => /\b(?:[A-Z][A-Z0-9]*_)+[A-Z0-9]+\b/.test(line);
   const hasCriticalMessage = (line: string): boolean =>
     /fatal watcher error|Unexpected end of JSON input|SyntaxError|ECONNRESET|ETIMEDOUT/i.test(line);
-  const isMeaningful = (line: string): boolean => hasStableCode(line) || hasCriticalMessage(line);
+  // Bootstrap WARN/INFO tails (e.g. mesh.direct_peers.grace_expired) are not
+  // crash evidence. Preferring them after SIGKILL misclassifies the incident as
+  // `_WARN__MESH_HUB_` instead of `${name}_UNEXPECTED_EXIT`.
+  const isNoise = (line: string): boolean => /^\[(?:WARN|INFO|DEBUG)\]/i.test(line.trim());
+  const isMeaningful = (line: string): boolean =>
+    !isNoise(line) && (hasStableCode(line) || hasCriticalMessage(line));
+  const lastNonNoise = (lines: readonly string[]): string | undefined =>
+    [...lines].reverse().find(line => line.trim().length > 0 && !isNoise(line));
   return [...recentStderr].reverse().find(isMeaningful)
     ?? [...recentStdout].reverse().find(isMeaningful)
-    ?? recentStderr.at(-1)
-    ?? recentStdout.at(-1)
+    ?? lastNonNoise(recentStderr)
+    ?? lastNonNoise(recentStdout)
     ?? fallback;
 };
 

@@ -36,6 +36,7 @@ async function enqueueBadEntityInput(
           type: 'openAccount',
           data: {
             targetEntityId: `0x${'ac'.repeat(32)}`,
+            disputeConfig: { leftResponseSeconds: 86_400, rightResponseSeconds: 86_400 },
             tokenId: 1,
             creditAmount: 1n,
           },

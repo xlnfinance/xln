@@ -9,6 +9,7 @@ import {
 } from '../runtime';
 import type { JTx } from '../types/jurisdiction-runtime';
 import type { RuntimeInput } from '../runtime/types';
+import { MAX_ENTITY_FRAME_J_RANGE_BYTES } from '../jurisdiction/machine/range-budget';
 
 const jurisdiction = 'Testnet';
 const tx = (): JTx => ({
@@ -59,5 +60,15 @@ describe('runtime J ingress admission', () => {
       jurisdictionName: 'missing',
       jTxs: [tx()],
     }]))).toThrow('Unknown J jurisdiction');
+  });
+
+  test('admits one maximum canonical Entity J-range plus its Runtime envelope', () => {
+    expect(MAX_RUNTIME_J_INPUT_BYTES).toBeGreaterThan(MAX_ENTITY_FRAME_J_RANGE_BYTES);
+    const atomicRange = tx() as JTx & { padding: string };
+    atomicRange.padding = 'x'.repeat(MAX_ENTITY_FRAME_J_RANGE_BYTES);
+    expect(() => validateRuntimeInputAdmission(env(), input([{
+      jurisdictionName: jurisdiction,
+      jTxs: [atomicRange],
+    }]))).not.toThrow();
   });
 });

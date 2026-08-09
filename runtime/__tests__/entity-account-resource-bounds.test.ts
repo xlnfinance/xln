@@ -48,7 +48,7 @@ const makeAccount = (mempool: AccountTx[] = []): AccountReplica => ({
     watchSeed,
     deltas: new Map(),
     globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
-    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+    disputeConfig: { leftResponseSeconds: 576, rightResponseSeconds: 576 },
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
     locks: new Map(),
@@ -201,6 +201,7 @@ test('local account opening rejects capacity overflow before cloning or insertio
         chainId: jurisdiction.chainId,
         depositoryAddress: jurisdiction.depositoryAddress,
       },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     },
   }, createAccountConsensusContext(env))).toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
   expect(state.accounts.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);

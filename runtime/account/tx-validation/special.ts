@@ -16,7 +16,15 @@ const validateCloseProof = (value: unknown, code: string): void => {
     },
     literals: { closeMode: ['full', 'partial_cancel_remainder', 'pure_cancel'] },
   }, code);
-  if (proof['fillRatio'] === undefined) throw new Error(`${code}_FILL_RATIO`);
+  const fillRatio = proof['fillRatio'];
+  if (
+    typeof fillRatio !== 'number'
+    || !Number.isSafeInteger(fillRatio)
+    || fillRatio < 0
+    || fillRatio > 0xffff
+  ) {
+    throw new Error(`${code}_FILL_RATIO`);
+  }
 };
 
 const validateHtlcEnvelope = (value: unknown, code: string): void => {
@@ -123,7 +131,7 @@ const validateSettlementOps = (value: unknown, code: string): void => {
 const validatePostProof = (value: unknown, code: string): void => {
   validateAccountTxDataFields(value, {
     required: {
-      nonce: 'integer', proofBodyHash: 'string', disputeHash: 'string',
+      nonce: 'integer', proposerIsLeft: 'boolean', proofBodyHash: 'string', disputeHash: 'string',
     },
     optional: { hanko: 'string' },
   }, code);

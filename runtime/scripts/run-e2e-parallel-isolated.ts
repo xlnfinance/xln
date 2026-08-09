@@ -70,6 +70,7 @@ import {
   assertLocalTestPortsFree,
   LOCAL_TEST_PORT_POOL_VERSION,
   LOCAL_TEST_STACK_BASES,
+  type LocalTestPortLease,
 } from './local-test-port-lease';
 import {
   buildIsolatedE2ERerunCommand,
@@ -164,6 +165,61 @@ export type CliArgs = {
   startAt: number;
   preserveArtifacts: boolean;
   prewaitHealth: 'reset' | 'http' | 'full';
+};
+
+/**
+ * Reserve the worker lanes once for the whole run.
+ *
+ * Per-target acquire/release lets a fast worker repeatedly win the same lane
+ * while another worker waits until its lease timeout. That starvation is
+ * especially easy when another checkout legitimately owns part of the
+ * machine-wide pool. Reserving every currently available lane up front makes
+ * concurrency exact, fair, and independent of individual test duration.
+ */
+export const acquireAvailableE2EWorkerPortLeases = async (
+  requested: number,
+  options: { slotBases?: readonly number[]; signal?: AbortSignal } = {},
+): Promise<LocalTestPortLease[]> => {
+  if (!Number.isSafeInteger(requested) || requested <= 0) {
+    throw new Error(`E2E_WORKER_LEASE_COUNT_INVALID:${String(requested)}`);
+  }
+  const leases: LocalTestPortLease[] = [];
+  try {
+    for (let index = 0; index < requested; index += 1) {
+      try {
+        leases.push(await acquireLocalTestPortLease({
+          timeoutMs: 0,
+          ...(options.slotBases ? { slotBases: options.slotBases } : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
+        }));
+      } catch (error) {
+        if (String((error as Error)?.message || error).startsWith('LOCAL_TEST_PORT_SLOTS_EXHAUSTED:')) {
+          if (leases.length > 0) break;
+        }
+        throw error;
+      }
+    }
+    return leases;
+  } catch (error) {
+    for (const lease of leases) lease.release();
+    throw error;
+  }
+};
+
+export const awaitE2EWorkersBeforeLeaseRelease = async (
+  workerPromises: readonly Promise<void>[],
+  abortWorkers: (cause: unknown) => void,
+): Promise<void> => {
+  try {
+    await Promise.all(workerPromises);
+  } catch (error) {
+    // Promise.all rejects immediately. Guards must remain held until every
+    // sibling has observed abort and completed process teardown; releasing
+    // them earlier lets another checkout bind a still-live worker lane.
+    abortWorkers(error);
+    await Promise.allSettled(workerPromises);
+    throw error;
+  }
 };
 
 export type E2EShardRunStatus = 'passed' | 'failed' | 'cancelled';
@@ -306,11 +362,10 @@ export type E2EBrowserHealthCounters = {
 };
 const RESET_CONFIRMATION = 'RESET_MESH_STATE';
 /**
- * Restoring a runtime re-proves the EntityProvider deployment by reading code
- * at its deployment block and the one before it. Dispute scenarios mine
- * hundreds of blocks first, so a short history window prunes those states away
- * and the restore fails RPC_ENTITY_PROVIDER_DEPLOYMENT_ORIGIN_UNAVAILABLE.
- * These chains live for one shard and are thrown away.
+ * Dispute scenarios mine hundreds of blocks. Retaining a modest state window
+ * makes failure diagnostics useful without turning shard-local chains into an
+ * unbounded archive; durable deployment origin is proved from creation
+ * receipts and therefore does not depend on these historical state tries.
  */
 const E2E_ANVIL_HISTORY_STATES = 8192;
 const DEFAULT_E2E_TEST_TIMEOUT_MS = 660_000;
@@ -2532,7 +2587,10 @@ async function main(): Promise<void> {
       `(starting at ${args.startAt})`,
     );
 
-    const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length, LOCAL_TEST_STACK_BASES.length));
+    const requestedConcurrency = Math.max(1, Math.min(args.shards, tasks.length, LOCAL_TEST_STACK_BASES.length));
+    const workerPortLeases = await acquireAvailableE2EWorkerPortLeases(requestedConcurrency);
+    const maxConcurrency = workerPortLeases.length;
+    console.log(`Active lanes: ${maxConcurrency}/${requestedConcurrency} requested`);
     console.log(`Build    : ${buildArtifacts.cacheRoot}`);
     const resetLimiter = createAsyncLimiter(Math.max(1, Math.min(args.maxResetConcurrency, maxConcurrency)));
     const results: Array<RunResult | undefined> = new Array(tasks.length);
@@ -2562,30 +2620,21 @@ async function main(): Promise<void> {
       }
       return null;
     };
-    const runWorker = async (): Promise<void> => {
+    const runWorker = async (portLease: LocalTestPortLease): Promise<void> => {
       while (true) {
         const claim = await claimTask();
         if (!claim) break;
         try {
-          const portLease = await acquireLocalTestPortLease({
-            timeoutMs: args.stackTimeoutMs,
-            signal: abortController.signal,
-          });
-          let result: RunResult;
-          try {
-            result = await runShard(
-              claim.task,
-              args,
-              logsDir,
-              buildArtifacts,
-              resetLimiter,
-              portLease.basePort,
-              abortController.signal,
-            );
-            assertLocalTestPortsFree(portLease.ports);
-          } finally {
-            portLease.release();
-          }
+          const result = await runShard(
+            claim.task,
+            args,
+            logsDir,
+            buildArtifacts,
+            resetLimiter,
+            portLease.basePort,
+            abortController.signal,
+          );
+          assertLocalTestPortsFree(portLease.ports);
           try {
             codeDriftGuard.assertStable();
           } catch (error) {
@@ -2609,7 +2658,14 @@ async function main(): Promise<void> {
         }
       }
     };
-    await Promise.all(Array.from({ length: maxConcurrency }, () => runWorker()));
+    const workerPromises = workerPortLeases.map(lease => runWorker(lease));
+    try {
+      await awaitE2EWorkersBeforeLeaseRelease(workerPromises, error => {
+        if (!abortController.signal.aborted) abortController.abort(error);
+      });
+    } finally {
+      for (const lease of workerPortLeases) lease.release();
+    }
     codeDriftGuard.assertStable(true);
     const endCodeFingerprint = computeCodeFingerprint();
     assertE2ECodeFingerprintStable(codeFingerprint.codeHash, endCodeFingerprint.codeHash);

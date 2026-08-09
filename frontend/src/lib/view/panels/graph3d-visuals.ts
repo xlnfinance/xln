@@ -413,7 +413,7 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
         ? {
             startedByLeft: dispute.startedByLeft,
             disputeTimeout: dispute.disputeTimeout,
-            initialDisputeNonce: dispute.initialDisputeNonce,
+            initialNonce: dispute.initialNonce,
           }
         : null,
     },

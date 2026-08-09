@@ -25,12 +25,15 @@ type ContractArtifact = {
 };
 
 const ENTITY_PROVIDER_SELECTOR = '0x4318cdd0';
+const DELTA_TRANSFORMER_SELECTOR = '0x920a1cd2';
 const CONTRACT_ARTIFACT_NAMES = {
   account: 'Account',
   depository: 'Depository',
+  depositoryBounds: 'DepositoryBounds',
   entityProvider: 'EntityProvider',
   deltaTransformer: 'DeltaTransformer',
   hankoVerifier: 'HankoVerifier',
+  hashLadderRegistry: 'HashLadderRegistry',
 } as const;
 type CanonicalArtifactKey = keyof typeof CONTRACT_ARTIFACT_NAMES;
 
@@ -208,16 +211,20 @@ const readRpcCodeAt = async (
 };
 
 const materializeImmutableReferences = (
-  key: (typeof REQUIRED_RPC_CONTRACT_KEYS)[number],
+  key: CanonicalArtifactKey,
   artifact: ContractArtifact,
   expectedCode: string,
   actualCode: string,
   contracts: RpcContractAddresses,
   context: string,
+  expectedImmutableAddress?: string,
 ): string => {
   let expected = expectedCode.slice(2);
   const actual = actualCode.slice(2);
-  const accountWord = String(contracts.account).slice(2).toLowerCase().padStart(64, '0');
+  const boundAddress = expectedImmutableAddress ?? (key === 'account' ? contracts.account : undefined);
+  const boundWord = boundAddress
+    ? String(boundAddress).slice(2).toLowerCase().padStart(64, '0')
+    : undefined;
   for (const [groupId, references] of Object.entries(artifact.immutableReferences)) {
     const first = references[0];
     if (!first || first.length !== 32) throw new Error(`RPC_CANONICAL_IMMUTABLE_INVALID:${key}`);
@@ -226,7 +233,7 @@ const materializeImmutableReferences = (
     if (!/^0{24}[0-9a-fA-F]{40}$/.test(word) || /^0{64}$/.test(word)) {
       throw new Error(`RPC_CANONICAL_IMMUTABLE_VALUE_INVALID:${key}`);
     }
-    if (key === 'account' && word.toLowerCase() !== accountWord) {
+    if (boundWord !== undefined && word.toLowerCase() !== boundWord) {
       throw new Error(`${context}_IMMUTABLE_BINDING_MISMATCH:${key}:${groupId}`);
     }
     for (const reference of references) {
@@ -240,27 +247,39 @@ const materializeImmutableReferences = (
   return `0x${expected}`;
 };
 
-const assertEntityProviderBinding = async (
+const assertDepositoryBindings = async (
   rpcUrl: string,
   contracts: RpcContractAddresses,
   context: string,
   timeoutMs: number,
 ): Promise<void> => {
-  const responses = await fetchRpcBatch(rpcUrl, [{
-    jsonrpc: '2.0',
-    id: 1,
+  const bindings = [
+    { id: 1, name: 'ENTITY_PROVIDER', selector: ENTITY_PROVIDER_SELECTOR, configured: contracts.entityProvider },
+    { id: 2, name: 'DELTA_TRANSFORMER', selector: DELTA_TRANSFORMER_SELECTOR, configured: contracts.deltaTransformer },
+  ] as const;
+  const responses = await fetchRpcBatch(rpcUrl, bindings.map(binding => ({
+    jsonrpc: '2.0' as const,
+    id: binding.id,
     method: 'eth_call',
-    params: [{ to: contracts.depository, data: ENTITY_PROVIDER_SELECTOR }, 'latest'],
-  }], timeoutMs);
-  const entry = responses.get(1);
-  const result = String(entry?.result || '');
-  if (!entry || entry.error || !/^0x[0-9a-fA-F]{64}$/.test(result)) {
-    throw new Error(`${context}_ENTITY_PROVIDER_BINDING_READ_INVALID:${String(entry?.error?.message || result || 'missing')}`);
-  }
-  const linked = `0x${result.slice(-40)}`.toLowerCase();
-  const configured = String(contracts.entityProvider).toLowerCase();
-  if (linked !== configured) {
-    throw new Error(`${context}_ENTITY_PROVIDER_BINDING_MISMATCH:expected=${configured}:actual=${linked}`);
+    params: [{ to: contracts.depository, data: binding.selector }, 'latest'],
+  })), timeoutMs);
+  for (const binding of bindings) {
+    const entry = responses.get(binding.id);
+    const result = String(entry?.result || '');
+    if (!entry || entry.error || !/^0x[0-9a-fA-F]{64}$/.test(result)) {
+      throw new Error(
+        `${context}_${binding.name}_BINDING_READ_INVALID:` +
+        `${String(entry?.error?.message || result || 'missing')}`,
+      );
+    }
+    const linked = `0x${result.slice(-40)}`.toLowerCase();
+    const configured = String(binding.configured).toLowerCase();
+    if (linked !== configured) {
+      throw new Error(
+        `${context}_${binding.name}_BINDING_MISMATCH:` +
+        `expected=${configured}:actual=${linked}`,
+      );
+    }
   }
 };
 
@@ -290,11 +309,57 @@ export const assertCanonicalRpcContractStack = async (
   if (hankoVerifierCode.toLowerCase() !== artifacts.hankoVerifier.deployedBytecode.toLowerCase()) {
     throw new Error(`${context}_CODE_MISMATCH:hankoVerifier`);
   }
+  // Linked addresses are part of the deployed runtime bytecode, so recover
+  // them from that exact code instead of adding mutable configuration. Each
+  // library is then independently code-pinned before it is allowed to
+  // materialize the expected Depository bytecode below.
+  const depositoryCode = String(codes.get('depository'));
+  const depositoryBoundsAddress = readLinkedLibraryAddress(
+    artifacts.depository,
+    depositoryCode,
+    'DepositoryBounds',
+  );
+  const hashLadderRegistryAddress = readLinkedLibraryAddress(
+    artifacts.depository,
+    depositoryCode,
+    'HashLadderRegistry',
+  );
+  const [depositoryBoundsCode, hashLadderRegistryCode] = await Promise.all([
+    readRpcCodeAt(
+      rpcUrl,
+      depositoryBoundsAddress,
+      `${context}_DEPOSITORY_BOUNDS`,
+      timeoutMs,
+    ),
+    readRpcCodeAt(
+      rpcUrl,
+      hashLadderRegistryAddress,
+      `${context}_HASH_LADDER_REGISTRY`,
+      timeoutMs,
+    ),
+  ]);
+  if (depositoryBoundsCode.toLowerCase() !== artifacts.depositoryBounds.deployedBytecode.toLowerCase()) {
+    throw new Error(`${context}_CODE_MISMATCH:depositoryBounds`);
+  }
+  const expectedHashLadderRegistryCode = materializeImmutableReferences(
+    'hashLadderRegistry',
+    artifacts.hashLadderRegistry,
+    artifacts.hashLadderRegistry.deployedBytecode,
+    hashLadderRegistryCode,
+    contracts,
+    context,
+    hashLadderRegistryAddress,
+  );
+  if (hashLadderRegistryCode.toLowerCase() !== expectedHashLadderRegistryCode.toLowerCase()) {
+    throw new Error(`${context}_CODE_MISMATCH:hashLadderRegistry`);
+  }
   for (const key of REQUIRED_RPC_CONTRACT_KEYS) {
     const actual = String(codes.get(key)).toLowerCase();
     const linkedExpected = linkDeployedBytecode(artifacts[key], {
       Account: String(contracts.account),
+      DepositoryBounds: depositoryBoundsAddress,
       HankoVerifier: hankoVerifierAddress,
+      HashLadderRegistry: hashLadderRegistryAddress,
     });
     const expected = materializeImmutableReferences(key, artifacts[key], linkedExpected, actual, contracts, context);
     const normalizedExpected = expected.toLowerCase();
@@ -311,7 +376,10 @@ export const assertCanonicalRpcContractStack = async (
       );
     }
   }
-  await assertEntityProviderBinding(rpcUrl, contracts, context, timeoutMs);
+  // Runtime signs against both addresses. A Depository bound to another
+  // canonical deployment has identical code shape after immutable
+  // materialization but cannot authorize our Pulls or Hanko proofs.
+  await assertDepositoryBindings(rpcUrl, contracts, context, timeoutMs);
 };
 
 export const findMissingRpcContractCode = async (

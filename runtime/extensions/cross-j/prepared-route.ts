@@ -1,5 +1,6 @@
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../../entity/types';
+import { canonicalAccountDisputeConfig } from '../../account/dispute-config';
 import {
   cloneCrossJurisdictionRoute,
   deriveCrossJurisdictionPullId,
@@ -9,47 +10,101 @@ import {
 
 const normalizeEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
-const sourceAccount = (state: EntityState, route: CrossJurisdictionSwapRoute) => {
+const accountForLeg = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  leg: 'source' | 'target',
+) => {
   const self = normalizeEntityId(state.entityId);
-  const sourceEntity = normalizeEntityId(route.source.entityId);
-  const sourceCounterparty = normalizeEntityId(route.source.counterpartyEntityId);
-  const expectedAccount = self === sourceEntity
-    ? sourceCounterparty
-    : self === sourceCounterparty
-      ? sourceEntity
+  const routeLeg = route[leg];
+  const entity = normalizeEntityId(routeLeg.entityId);
+  const counterparty = normalizeEntityId(routeLeg.counterpartyEntityId);
+  const expectedAccount = self === entity
+    ? counterparty
+    : self === counterparty
+      ? entity
       : '';
-  if (!expectedAccount) throw new Error(`CROSS_J_PREPARED_SOURCE_PARTICIPANT_INVALID:${route.orderId}`);
+  if (!expectedAccount) throw new Error(`CROSS_J_PREPARED_${leg.toUpperCase()}_PARTICIPANT_INVALID:${route.orderId}`);
   const account = state.accounts.get(expectedAccount);
   if (account) return account;
-  throw new Error(`CROSS_J_PREPARED_SOURCE_ACCOUNT_MISSING:${route.orderId}`);
+  throw new Error(`CROSS_J_PREPARED_${leg.toUpperCase()}_ACCOUNT_MISSING:${route.orderId}`);
 };
 
-export const committedCrossJSourceDisputeDelayMs = (
+const routeDisputeConfig = (
+  route: CrossJurisdictionSwapRoute,
+  leg: 'source' | 'target',
+): ReturnType<typeof canonicalAccountDisputeConfig> => canonicalAccountDisputeConfig(
+  leg === 'source' ? route.sourceDisputeConfig : route.targetDisputeConfig,
+);
+
+const assertAccountClockMatchesRoute = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  leg: 'source' | 'target',
+) => {
+  const account = accountForLeg(state, route, leg);
+  const actual = canonicalAccountDisputeConfig(account.state.disputeConfig);
+  const expected = routeDisputeConfig(route, leg);
+  if (
+    actual.leftResponseSeconds !== expected.leftResponseSeconds ||
+    actual.rightResponseSeconds !== expected.rightResponseSeconds
+  ) {
+    throw new Error(
+      `CROSS_J_PREPARED_${leg.toUpperCase()}_ACCOUNT_CLOCK_MISMATCH:${route.orderId}:` +
+      `actual=${actual.leftResponseSeconds},${actual.rightResponseSeconds}:` +
+      `route=${expected.leftResponseSeconds},${expected.rightResponseSeconds}`,
+    );
+  }
+  return expected;
+};
+
+const responseWindowForEntity = (
+  route: CrossJurisdictionSwapRoute,
+  leg: 'source' | 'target',
+  entityId: string,
+): number => {
+  const routeLeg = route[leg];
+  const leftEntity = normalizeEntityId(routeLeg.entityId) < normalizeEntityId(routeLeg.counterpartyEntityId)
+    ? normalizeEntityId(routeLeg.entityId)
+    : normalizeEntityId(routeLeg.counterpartyEntityId);
+  const config = routeDisputeConfig(route, leg);
+  return normalizeEntityId(entityId) === leftEntity
+    ? config.leftResponseSeconds
+    : config.rightResponseSeconds;
+};
+
+export const committedCrossJSourceResponseWindowMs = (
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
 ): number => {
-  const blockTimeMs = Number(state.config.jurisdiction?.blockTimeMs);
-  if (!Number.isSafeInteger(blockTimeMs) || blockTimeMs <= 0) {
-    throw new Error(`CROSS_J_PREPARED_BLOCK_TIME_MISSING:${route.orderId}`);
-  }
-  const disputeConfig = sourceAccount(state, route).state.disputeConfig;
-  const leftDelay = Number(disputeConfig.leftDisputeDelay);
-  const rightDelay = Number(disputeConfig.rightDisputeDelay);
-  // Equal bilateral delay config is the prepare-time rule. Wall-clock T may
-  // still differ across chains (different block times); that is intentional.
-  // Settlement uses dispute-relative seconds on L1 — not a sealed route deadline.
-  if (!Number.isSafeInteger(leftDelay) || leftDelay <= 0) {
-    throw new Error(`CROSS_J_PREPARED_DISPUTE_DELAY_INVALID:${route.orderId}:left`);
-  }
-  if (!Number.isSafeInteger(rightDelay) || rightDelay <= 0) {
-    throw new Error(`CROSS_J_PREPARED_DISPUTE_DELAY_INVALID:${route.orderId}:right`);
-  }
-  if (leftDelay !== rightDelay) {
-    throw new Error(
-      `CROSS_J_PREPARED_DISPUTE_DELAY_MISMATCH:${route.orderId}:left=${leftDelay}:right=${rightDelay}`,
-    );
-  }
-  return leftDelay * 10 * blockTimeMs;
+  assertAccountClockMatchesRoute(state, route, 'source');
+  return responseWindowForEntity(route, 'source', route.source.counterpartyEntityId) * 1_000;
+};
+
+export const committedCrossJTargetResponseWindowMs = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): number => {
+  assertAccountClockMatchesRoute(state, route, 'target');
+  return responseWindowForEntity(route, 'target', route.target.counterpartyEntityId) * 1_000;
+};
+
+/**
+ * Validate the local leg's exact signed Account clock. Source and Target use
+ * independent dispute starts and beneficiary windows; no cross-route minimum,
+ * equality rule, or invented relay margin is protocol authority.
+ */
+export const assertLocalCrossJDisputeClock = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): void => {
+  const self = normalizeEntityId(state.entityId);
+  const onSourceLeg = self === normalizeEntityId(route.source.entityId)
+    || self === normalizeEntityId(route.source.counterpartyEntityId);
+  const onTargetLeg = self === normalizeEntityId(route.target.entityId)
+    || self === normalizeEntityId(route.target.counterpartyEntityId);
+  if (onSourceLeg) committedCrossJSourceResponseWindowMs(state, route);
+  if (onTargetLeg) committedCrossJTargetResponseWindowMs(state, route);
 };
 
 const assertBytes32 = (value: unknown, code: string): string => {
@@ -107,10 +162,9 @@ export const validatePreparedCrossJurisdictionRoute = (
     ),
     'CROSS_J_PREPARED_TARGET_SIGNED_AMOUNT',
   );
-  // No sealed pull reveal deadlines on prepared routes. Bilateral dispute delay
-  // is still checked at prepare/register so L1 T is coherent, but it is not
-  // baked into pull commitments.
-  committedCrossJSourceDisputeDelayMs(state, route);
+  // Route hash commits both Account clocks. This makes the cross-domain safety
+  // comparison deterministic instead of trusting mutable jurisdiction config.
+  assertLocalCrossJDisputeClock(state, route);
   const fullHash = assertBytes32(sourcePull.fullHash, 'CROSS_J_PREPARED_FULL_HASH_INVALID');
   const partialRoot = assertBytes32(sourcePull.partialRoot, 'CROSS_J_PREPARED_PARTIAL_ROOT_INVALID');
   assertEqual(assertBytes32(targetPull.fullHash, 'CROSS_J_PREPARED_FULL_HASH_INVALID'), fullHash, 'CROSS_J_PREPARED_FULL_HASH_MISMATCH');
