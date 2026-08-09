@@ -17,6 +17,9 @@ const USD_150 = (150n * TOKEN_SCALE).toString();
 const USD_100 = (100n * TOKEN_SCALE).toString();
 const USD_50 = (50n * TOKEN_SCALE).toString();
 const ERC20_BALANCE_OF = new Interface(['function balanceOf(address) view returns (uint256)']);
+const DEPOSITORY_RESERVES = new Interface([
+  'function _reserves(bytes32 entity, uint256 tokenId) view returns (uint256)',
+]);
 const LONG_E2E = process.env.E2E_LONG === '1';
 
 function sleep(ms: number): Promise<void> {
@@ -111,15 +114,34 @@ async function getRpcExternalBalanceRaw(page: Page, symbol: string, holder: stri
   return BigInt(raw || '0x0');
 }
 
+async function getDepositoryAddress(page: Page): Promise<string> {
+  const apiBase = await getActiveApiBase(page);
+  const response = await page.request.get(`${apiBase}/api/jurisdictions?ts=${Date.now()}`);
+  expect(response.ok(), 'jurisdictions request must succeed').toBe(true);
+  const body = await response.json().catch(() => ({} as Record<string, unknown>));
+  const root = (body?.jurisdictions && typeof body.jurisdictions === 'object')
+    ? body.jurisdictions as Record<string, unknown>
+    : body;
+  const jurisdictions = Object.values(root || {}) as Array<Record<string, unknown>>;
+  const depository = jurisdictions
+    .map((entry) => String((entry?.contracts as Record<string, unknown> | undefined)?.depository || entry?.depository || '').trim())
+    .find((value) => /^0x[a-fA-F0-9]{40}$/.test(value));
+  expect(depository, 'depository address must exist').toBeTruthy();
+  return depository!;
+}
+
 async function readOnchainReserveBalanceRaw(page: Page, entityId: string, symbol: string): Promise<bigint> {
   const token = await getApiToken(page, symbol);
-  const response = await page.request.get(
-    `${APP_BASE_URL}/api/debug/reserve?entityId=${encodeURIComponent(entityId)}&tokenId=${encodeURIComponent(String(token.tokenId))}`,
-  );
-  expect(response.ok(), `debug reserve request must succeed for ${symbol}`).toBe(true);
-  const body = await response.json().catch(() => ({})) as { reserve?: string };
-  expect(typeof body.reserve === 'string', `debug reserve body must include reserve for ${symbol}`).toBe(true);
-  return BigInt(body.reserve || '0');
+  const depository = await getDepositoryAddress(page);
+  const raw = await rpcCall<string>(page, 'eth_call', [
+    {
+      to: depository,
+      data: DEPOSITORY_RESERVES.encodeFunctionData('_reserves', [entityId, token.tokenId]),
+    },
+    'latest',
+  ]);
+  const [reserve] = DEPOSITORY_RESERVES.decodeFunctionResult('_reserves', raw);
+  return BigInt(reserve);
 }
 
 async function openAccountsWorkspace(page: Page): Promise<void> {
