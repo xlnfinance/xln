@@ -29,6 +29,9 @@ const ERC20_BALANCE_OF = new Interface([
 const ERC20_ALLOWANCE = new Interface([
   'function allowance(address owner, address spender) view returns (uint256)',
 ]);
+const DEPOSITORY_RESERVES = new Interface([
+  'function _reserves(bytes32 entity, uint256 tokenId) view returns (uint256)',
+]);
 
 async function timedMillis<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const started = process.hrtime.bigint();
@@ -718,16 +721,16 @@ async function getRpcExternalBalance(page: Page, symbol: string, holder: string)
 
 async function readOnchainReserveBalanceRaw(page: Page, entityId: string, symbol: string): Promise<bigint> {
   const token = await getApiToken(page, symbol);
-  const response = await page.request.get(
-    `${API_BASE_URL}/api/debug/reserve?entityId=${encodeURIComponent(entityId)}&tokenId=${encodeURIComponent(String(token.tokenId))}`,
-  );
-  const body = await response.json().catch(() => ({})) as { error?: string; reserve?: string };
-  expect(
-    response.ok(),
-    `debug reserve request must succeed for ${symbol}: status=${response.status()} body=${JSON.stringify(body)}`,
-  ).toBe(true);
-  expect(typeof body.reserve === 'string', `debug reserve body must include reserve for ${symbol}`).toBe(true);
-  return BigInt(body.reserve || '0');
+  const depository = await getDepositoryAddress(page);
+  const raw = await rpcCall<string>(page, 'eth_call', [
+    {
+      to: depository,
+      data: DEPOSITORY_RESERVES.encodeFunctionData('_reserves', [entityId, token.tokenId]),
+    },
+    'latest',
+  ]);
+  const [reserve] = DEPOSITORY_RESERVES.decodeFunctionResult('_reserves', raw);
+  return BigInt(reserve);
 }
 
 async function readOnchainReserveBalance(page: Page, entityId: string, symbol: string): Promise<number> {
