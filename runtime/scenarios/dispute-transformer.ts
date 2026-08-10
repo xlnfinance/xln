@@ -40,6 +40,7 @@ const WETH = 2;
 const MAX_FILL_RATIO = 65_535n;
 const WETH_LOT = 1_000_000_000_000n;
 const SCENARIO_DEADLINE_MS = 4_102_464_800_000n;
+const DETERMINISTIC_DISPUTE_START_UNIX = 4_102_445_800;
 
 type Registered = { id: string; signer: string; name: string };
 type MineableProvider = { send(method: string, params: unknown[]): Promise<unknown> };
@@ -769,6 +770,15 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
       alice: accountEvidenceSummary(findReplica(env, alice.id)[1].state.accounts.get(hub.id)),
       hub: accountEvidenceSummary(findReplica(env, hub.id)[1].state.accounts.get(alice.id)),
     })}`);
+
+    // Anvil automining derives a block timestamp from elapsed host time even
+    // when genesis is fixed. Pin the economically relevant dispute-start block
+    // so repeated runs exercise identical transformer windows and J-event bytes.
+    const disputeProvider = jadapter.provider as unknown as Partial<MineableProvider>;
+    if (typeof disputeProvider.send !== 'function') {
+      throw new Error('dispute-transformer requires RPC provider timestamp control');
+    }
+    await disputeProvider.send('evm_setNextBlockTimestamp', [DETERMINISTIC_DISPUTE_START_UNIX]);
 
     await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [{ type: 'j_broadcast', data: {} }] }]);
     await syncChain(env, 5);

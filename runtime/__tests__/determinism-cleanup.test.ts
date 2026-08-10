@@ -109,4 +109,15 @@ describe('determinism cleanup lifecycle', () => {
     expect(rpcSource).toContain('if (!session.manualPolling) {');
     expect(bootSource).toContain("'--timestamp', '4102444800'");
   });
+
+  test('dispute transformer pins the economically relevant RPC block before broadcasting', () => {
+    const source = readSource('runtime/scenarios/dispute-transformer.ts');
+    const debugMarker = source.indexOf('DISPUTE_DEBUG:before-start-broadcast');
+    const timestampPin = source.indexOf("send('evm_setNextBlockTimestamp'", debugMarker);
+    const startBroadcast = source.indexOf("entityTxs: [{ type: 'j_broadcast'", debugMarker);
+
+    expect(debugMarker).toBeGreaterThan(0);
+    expect(timestampPin).toBeGreaterThan(debugMarker);
+    expect(startBroadcast).toBeGreaterThan(timestampPin);
+  });
 });
