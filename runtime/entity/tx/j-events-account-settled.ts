@@ -1,11 +1,42 @@
-import type { EntityCandidateEffect } from '../types';
+import type { EntityCandidateEffect, EntityState } from '../types';
+import type { AccountReplica } from '../../types/account';
 import { addMessage } from '../frame-events';
-import { getTokenInfo } from '../../account/utils';
+import { formatTokenAmount } from '../../account/financial-utils';
 import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/machine/event-normalization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import type { FinalizedJEventContext } from './j-events';
 
 const jEventLog = createStructuredLogger('j.event');
+
+const applyObservedReserve = (
+  state: EntityState,
+  tokenId: number,
+  ownReserve: unknown,
+  counterpartyId: string,
+): void => {
+  if (ownReserve !== undefined && ownReserve !== null) {
+    state.reserves.set(tokenId, BigInt(ownReserve as string | number | bigint));
+    return;
+  }
+  jEventLog.warn('account_settled.reserve_missing', {
+    counterparty: shortId(counterpartyId),
+    tokenId,
+  });
+};
+
+const suppressClosedAccountClaim = (
+  state: EntityState,
+  account: AccountReplica,
+  counterpartyId: string,
+): boolean => {
+  if (account.status !== 'disputed') return false;
+  addMessage(
+    state,
+    `⚖️ OBSERVED: closed Account ${counterpartyId.slice(-4)} reserve updated; ` +
+      'bilateral claim permanently suppressed',
+  );
+  return true;
+};
 
 /**
  * Observing settlement never mutates Account deltas directly. It updates the
@@ -44,14 +75,7 @@ export const applyAccountSettledJEvent = (
   }
   const counterpartyId = String(myIsLeft ? rightEntity : leftEntity);
   const ownReserve = myIsLeft ? leftReserve : rightReserve;
-  if (ownReserve !== undefined && ownReserve !== null) {
-    newState.reserves.set(tokenIdNum, BigInt(ownReserve as string | number | bigint));
-  } else {
-    jEventLog.warn('account_settled.reserve_missing', {
-      counterparty: shortId(counterpartyId),
-      tokenId: tokenIdNum,
-    });
-  }
+  applyObservedReserve(newState, tokenIdNum, ownReserve, counterpartyId);
   const account = newState.accounts.get(counterpartyId);
   if (!account) {
     jEventLog.warn('account_settled.account_missing', {
@@ -59,6 +83,14 @@ export const applyAccountSettledJEvent = (
     });
     return;
   }
+  // DisputeStarted permanently freezes the bilateral Account. AccountSettled
+  // remains valid unilateral jurisdiction evidence for the Entity reserve,
+  // but queuing a bilateral claim here would create work that neither party is
+  // allowed to ACK. Repeated third-party R2C settlements could otherwise fill
+  // the closed Account mempool and halt the whole Runtime. Preparation is
+  // different: it can still be cancelled before L1 observation, so its claims
+  // remain durable until the Account either returns active or reaches L1.
+  if (suppressClosedAccountClaim(newState, account, counterpartyId)) return;
   dirtyAccounts.add(counterpartyId.toLowerCase());
   account.state.lastFinalizedJHeight ??= 0;
 
@@ -98,11 +130,13 @@ export const applyAccountSettledJEvent = (
       jHeight,
     },
   });
-  const token = getTokenInfo(tokenIdNum);
-  const collateralDisplay = (Number(collateral) / (10 ** token.decimals)).toFixed(4);
+  const collateralDisplay = formatTokenAmount(
+    tokenIdNum,
+    BigInt(collateral as string | number | bigint),
+  );
   addMessage(
     newState,
-    `⚖️ OBSERVED: ${token.symbol} ${counterpartyId.slice(-4)} | ` +
+    `⚖️ OBSERVED: ${counterpartyId.slice(-4)} | ` +
     `coll=${collateralDisplay} | j-block ${blockNumber} (awaiting 2-of-2)`,
   );
 };

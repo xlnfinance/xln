@@ -102,6 +102,22 @@ describe('deferred Account mempool scheduling', () => {
     expect(hasRuntimeWork(env)).toBe(true);
   });
 
+  test('legacy J-event work cannot wake a permanently closed Account', () => {
+    const { env, account } = frozenRepaymentReplica();
+    account.status = 'disputed';
+    delete account.activeDispute;
+    account.mempool = [{
+      type: 'j_event_claim',
+      data: {
+        jHeight: 1,
+        jBlockHash: `0x${'51'.repeat(32)}`,
+        events: [],
+      },
+    }];
+
+    expect(hasRuntimeWork(env)).toBe(false);
+  });
+
   test('a semantic J prefix finalizes even while an unrelated repayment is frozen', async () => {
     const { env, replica, account, entityId, signerId } = frozenRepaymentReplica();
     env.state.timestamp = 2_000;

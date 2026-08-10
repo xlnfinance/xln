@@ -54,16 +54,10 @@ function relayToApiBase(relayUrl: string | null | undefined): string | null {
 async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return process.env.E2E_API_BASE_URL;
   const runtimeApi = await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        infrastructure?: {
-          p2p?: {
-            relayUrls?: string[];
-          };
-        };
-      };
-    }).isolatedEnv;
-    const relay = env?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
+    const connectivity = (window as typeof window & {
+      __xln?: { runtimeConnectivity?: { relayUrls?: string[] } };
+    }).__xln?.runtimeConnectivity;
+    const relay = connectivity?.relayUrls?.[0] ?? null;
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;

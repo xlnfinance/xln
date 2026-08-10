@@ -87,5 +87,11 @@ export const canProcessAccountTxForDisputeStatus = (
 ): boolean => {
   const normalized = status ?? 'active';
   if (normalized === 'active') return true;
-  return isAccountControlTx(txType);
+  // During local preparation a J-event claim may still become part of the
+  // last bilateral state if preparation is cancelled before it reaches L1.
+  // Once DisputeStarted is final, however, peer inputs are permanently fenced
+  // and no Account transaction has a consumer. Admitting control work there
+  // creates an attacker-fillable durable queue with no possible ACK path.
+  if (normalized === 'dispute_preparing') return isAccountControlTx(txType);
+  return false;
 };

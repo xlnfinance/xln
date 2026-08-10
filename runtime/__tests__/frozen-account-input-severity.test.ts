@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { canProcessFrozenAccountInput, frozenAccountInputLogLevel } from '../entity/tx/handlers/account';
+import { canProcessAccountTxForDisputeStatus } from '../account/consensus/dispute-policy';
 import type { AccountInput, AccountState } from '../types/account';
 
 const account = (
@@ -14,6 +15,13 @@ const account = (
 const input = (kind: AccountInput['kind']): Pick<AccountInput, 'kind'> => ({ kind });
 
 describe('frozen Account input severity', () => {
+  test('admits local J bookkeeping only before DisputeStarted reaches L1', () => {
+    expect(canProcessAccountTxForDisputeStatus('active', 'add_delta')).toBe(true);
+    expect(canProcessAccountTxForDisputeStatus('dispute_preparing', 'j_event_claim')).toBe(true);
+    expect(canProcessAccountTxForDisputeStatus('dispute_preparing', 'add_delta')).toBe(false);
+    expect(canProcessAccountTxForDisputeStatus('disputed', 'j_event_claim')).toBe(false);
+  });
+
   test('rejects every external AccountInput from prepare through on-chain dispute', () => {
     expect(canProcessFrozenAccountInput('dispute_preparing', false, false, ['swap_resolve'])).toBe(false);
     expect(canProcessFrozenAccountInput('dispute_preparing', false, true, [])).toBe(false);

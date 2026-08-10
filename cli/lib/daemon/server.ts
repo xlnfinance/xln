@@ -145,7 +145,7 @@ export const startDaemonServer = async (
         const req = message as DaemonRequest;
         const response = await handleRequest(session, req, authToken);
         respond(socket, response);
-        if (req.op === 'shutdown') {
+        if (req.op === 'shutdown' && response.ok) {
           socket.end();
           server.close();
         }

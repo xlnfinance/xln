@@ -7,9 +7,11 @@ const source = (path: string): string => readFileSync(path, 'utf8');
 test('wallet origin ships no third-party executable code and enforces hashed scripts', () => {
   const appHtml = source('frontend/src/app.html');
   const config = source('frontend/svelte.config.js');
+  const css = `${source('frontend/src/lib/styles/apple-glass.css')}\n${source('frontend/src/lib/components/Landing/landing-page.css')}`;
 
   expect(appHtml).not.toMatch(/<script[^>]+src=["']https?:\/\//i);
   expect(appHtml).not.toContain('plausible.io');
+  expect(css).not.toContain('fonts.googleapis.com');
   expect(config).toContain("mode: 'hash'");
   expect(config).toContain("'script-src': ['self']");
   expect(config).toContain("'script-src-attr': ['none']");

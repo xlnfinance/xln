@@ -28,10 +28,6 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
   Runtime and stale responses are discarded. Still pin ERC20 approval receipt
   verification to its immutable starting Entity/signer/adapter context and
   prove a mid-receipt context switch cannot encourage a retry.
-- **DISPUTE-CLOSE-01 (P1):** ordinary reopen is removed and finalized disputed
-  Accounts are permanently closed. Complete L2 browser/scenario evidence that
-  ordinary open/business traffic cannot revive them; special bilateral recovery
-  remains roadmap-only and has no production discriminant.
 - **TOOLING-COOP-01 (P2):** `public-proof-smoke.ts` still expects cooperative
   dispute finalization although the canonical contract deliberately reverts
   it with `E2`. Replace the stale smoke path; do not add a compatibility route.

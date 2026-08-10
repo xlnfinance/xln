@@ -1,5 +1,6 @@
 import { addMessage } from '../frame-events';
 import { getTokenInfo } from '../../account/utils';
+import { formatTokenAmount } from '../../account/financial-utils';
 import {
   applySignerEntityExternalWalletDelta,
   applySignerEntityExternalWalletSnapshot,
@@ -9,8 +10,7 @@ import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './j-even
 import type { FinalizedJEventContext } from './j-events';
 
 const displayTokenAmount = (tokenId: number, amount: unknown): string => {
-  const token = getTokenInfo(tokenId);
-  return (Number(amount) / (10 ** token.decimals)).toFixed(4);
+  return formatTokenAmount(tokenId, BigInt(amount as string | number | bigint));
 };
 
 export const applyReserveUpdatedJEvent = (context: FinalizedJEventContext): void => {
@@ -25,10 +25,9 @@ export const applyReserveUpdatedJEvent = (context: FinalizedJEventContext): void
       BigInt(event.data.newBalance as string | number | bigint),
     );
   }
-  const token = getTokenInfo(tokenId);
   addMessage(
     newState,
-    `📊 RESERVE: ${token.symbol} = ${displayTokenAmount(tokenId, event.data.newBalance)} | ` +
+    `📊 RESERVE: ${displayTokenAmount(tokenId, event.data.newBalance)} | ` +
     `Block ${blockNumber} | Tx ${transactionHash.slice(0, 10)}...`,
   );
 };

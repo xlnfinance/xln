@@ -2,11 +2,29 @@ import { expect, test } from 'bun:test';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { connect } from 'node:net';
 
 import { createEmptyEnv } from '../../runtime/runtime';
 import { callDaemon, daemonTokenPath } from '../lib/daemon/client';
 import { startDaemonServer } from '../lib/daemon/server';
+import { createFrameDecoder, encodeMessage, type DaemonRequest, type DaemonResponse } from '../lib/daemon/protocol';
 import type { CliSession } from '../lib/session';
+
+const callRawDaemon = (
+  socketPath: string,
+  request: DaemonRequest,
+): Promise<DaemonResponse> => new Promise((resolve, reject) => {
+  const socket = connect(socketPath);
+  const decoder = createFrameDecoder();
+  socket.on('connect', () => socket.write(encodeMessage(request)));
+  socket.on('data', chunk => {
+    for (const message of decoder.push(chunk)) {
+      socket.end();
+      resolve(message as DaemonResponse);
+    }
+  });
+  socket.on('error', reject);
+});
 
 test('daemon binds owner-only files and rejects the wrong API context', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'xln-daemon-'));
@@ -51,6 +69,24 @@ test('daemon binds owner-only files and rejects the wrong API context', async ()
     );
     expect(wrongContext.ok).toBe(false);
     expect(wrongContext.error).toContain('DAEMON_CONTEXT_API_MISMATCH');
+    const rejectedShutdown = await callDaemon(
+      { ...settings, apiBase: 'https://wrong.example' },
+      { op: 'shutdown' },
+    );
+    expect(rejectedShutdown.ok).toBe(false);
+    expect(rejectedShutdown.error).toContain('DAEMON_CONTEXT_API_MISMATCH');
+    const unauthenticatedShutdown = await callRawDaemon(settings.socketPath, {
+      id: 'unauthenticated-shutdown',
+      op: 'shutdown',
+      authToken: 'invalid',
+      expectedApiBase: settings.apiBase,
+    });
+    expect(unauthenticatedShutdown.ok).toBe(false);
+    expect(unauthenticatedShutdown.error).toContain('DAEMON_AUTH_INVALID');
+    expect(await callDaemon(settings, { op: 'ping' })).toMatchObject({
+      ok: true,
+      result: { pong: true },
+    });
   } finally {
     await server.close();
     await rm(homeDir, { recursive: true, force: true });

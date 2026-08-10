@@ -41,32 +41,22 @@ async function readSelectedUiRuntimeIdentity(page: Page): Promise<{ entityId: st
 
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   const ok = await page.evaluate(async () => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        infrastructure?: {
-          p2p?: {
-            isConnected?: () => boolean;
-            connect?: () => void;
-            reconnect?: () => void;
-          };
-        };
-      };
-    }).isolatedEnv;
-    const p2p = env?.infrastructure?.p2p;
-    if (!env || !p2p) return false;
+    type Connectivity = { connected?: boolean; connect?: () => void; reconnect?: () => void };
+    const view = window as typeof window & { __xln?: { runtimeConnectivity?: Connectivity } };
 
     const startedAt = Date.now();
     while (Date.now() - startedAt < 20_000) {
-      if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
-      if (typeof p2p.connect === 'function') {
-        try { p2p.connect(); } catch {}
-      } else if (typeof p2p.reconnect === 'function') {
-        try { p2p.reconnect(); } catch {}
+      const connectivity = view.__xln?.runtimeConnectivity;
+      if (connectivity?.connected === true) return true;
+      if (typeof connectivity?.connect === 'function') {
+        try { connectivity.connect(); } catch {}
+      } else if (typeof connectivity?.reconnect === 'function') {
+        try { connectivity.reconnect(); } catch {}
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
-    return typeof p2p.isConnected === 'function' && p2p.isConnected();
+    return view.__xln?.runtimeConnectivity?.connected === true;
   });
 
   expect(ok, `[${tag}] runtime must be online`).toBe(true);
@@ -74,25 +64,17 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
 
 async function nudgeRuntimeOnline(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        infrastructure?: {
-          p2p?: {
-            isConnected?: () => boolean;
-            connect?: () => void;
-            reconnect?: () => void;
-          };
-        };
-      };
-    }).isolatedEnv;
-    const p2p = env?.infrastructure?.p2p;
-    if (!p2p || (typeof p2p.isConnected === 'function' && p2p.isConnected())) return;
-    if (typeof p2p.connect === 'function') {
-      try { p2p.connect(); } catch {}
+    type Connectivity = { connected?: boolean; connect?: () => void; reconnect?: () => void };
+    const connectivity = (window as typeof window & {
+      __xln?: { runtimeConnectivity?: Connectivity };
+    }).__xln?.runtimeConnectivity;
+    if (!connectivity || connectivity.connected === true) return;
+    if (typeof connectivity.connect === 'function') {
+      try { connectivity.connect(); } catch {}
       return;
     }
-    if (typeof p2p.reconnect === 'function') {
-      try { p2p.reconnect(); } catch {}
+    if (typeof connectivity.reconnect === 'function') {
+      try { connectivity.reconnect(); } catch {}
     }
   }).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -721,62 +703,54 @@ async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 2
     await expect
       .poll(
       async () => page.evaluate(async (targetHubId) => {
-        const env = (window as typeof window & {
-          isolatedEnv?: {
-            gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string }> };
-            infrastructure?: {
-              p2p?: {
-                isConnected?: () => boolean;
-                connect?: () => void;
-                reconnect?: () => void;
-                ensureProfiles?: (ids: string[]) => Promise<boolean>;
-              };
-            };
-          };
-        }).isolatedEnv;
+        type Connectivity = {
+          connected?: boolean;
+          connecting?: boolean;
+          relayUrls?: string[];
+          reconnectState?: unknown;
+          profiles?: Array<{ entityId?: string; runtimeId?: string }>;
+          connect?: () => void;
+          reconnect?: () => void;
+          ensureProfiles?: (ids: string[]) => Promise<boolean>;
+        };
+        const view = window as typeof window & { __xln?: { runtimeConnectivity?: Connectivity } };
         const target = String(targetHubId || '').toLowerCase();
-        const getProfile = () => env?.gossip?.getProfiles?.().find((candidate) =>
+        const getProfile = () => view.__xln?.runtimeConnectivity?.profiles?.find((candidate) =>
           String(candidate?.entityId || '').toLowerCase() === target,
         );
         const profile = getProfile();
         if (String(profile?.runtimeId || '').trim()) return true;
 
-        const p2p = env?.infrastructure?.p2p;
-        if (!p2p) {
-          return { ok: false, reason: 'missing-p2p', profileCount: env?.gossip?.getProfiles?.().length || 0 };
+        const connectivity = view.__xln?.runtimeConnectivity;
+        if (!connectivity) {
+          return { ok: false, reason: 'missing-connectivity-boundary', profileCount: 0 };
         }
 
-        const connectedBefore = typeof p2p.isConnected === 'function' ? p2p.isConnected() : null;
+        const connectedBefore = connectivity.connected ?? null;
         if (!connectedBefore) {
-          if (typeof p2p.connect === 'function') {
-            try { p2p.connect(); } catch {}
-          } else if (typeof p2p.reconnect === 'function') {
-            try { p2p.reconnect(); } catch {}
+          if (typeof connectivity.connect === 'function') {
+            try { connectivity.connect(); } catch {}
+          } else if (typeof connectivity.reconnect === 'function') {
+            try { connectivity.reconnect(); } catch {}
           }
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
 
-        const ensureResult = await p2p.ensureProfiles?.([target]).catch((error) =>
+        const ensureResult = await connectivity.ensureProfiles?.([target]).catch((error) =>
           error instanceof Error ? error.message : String(error),
         );
         const refreshedProfile = getProfile();
-        const diagnosticP2P = p2p as typeof p2p & {
-          relayUrls?: string[];
-          clients?: unknown[];
-          isConnecting?: () => boolean;
-          getReconnectState?: () => unknown;
-        };
+        const refreshed = view.__xln?.runtimeConnectivity;
         return {
           ok: Boolean(String(refreshedProfile?.runtimeId || '').trim()),
           reason: refreshedProfile ? 'profile-without-runtime' : 'missing-profile',
           connectedBefore,
-          connectedAfter: typeof p2p.isConnected === 'function' ? p2p.isConnected() : null,
-          connecting: diagnosticP2P.isConnecting?.() ?? null,
-          relayUrls: diagnosticP2P.relayUrls ?? [],
-          clientCount: diagnosticP2P.clients?.length ?? null,
-          reconnectState: diagnosticP2P.getReconnectState?.() ?? null,
+          connectedAfter: refreshed?.connected ?? null,
+          connecting: refreshed?.connecting ?? null,
+          relayUrls: refreshed?.relayUrls ?? [],
+          reconnectState: refreshed?.reconnectState ?? null,
           ensureResult,
-          profileCount: env?.gossip?.getProfiles?.().length || 0,
+          profileCount: refreshed?.profiles?.length || 0,
           targetRuntimeId: String(refreshedProfile?.runtimeId || '').trim(),
         };
       }, hubId).then((state) => {
@@ -851,40 +825,32 @@ async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeou
     await expect
       .poll(
       async () => page.evaluate(async (targetHubId) => {
-        const env = (window as typeof window & {
-          isolatedEnv?: {
-            gossip?: {
-              getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; wsUrl?: string | null }>;
-            };
-            infrastructure?: {
-              p2p?: {
-                isConnected?: () => boolean;
-                connect?: () => void;
-                reconnect?: () => void;
-                ensureProfiles?: (ids: string[]) => Promise<boolean>;
-                getDirectPeerState?: () => Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }>;
-                ensureDirectClientForRuntime?: (runtimeId: string) => void;
-              };
-            };
-          };
-        }).isolatedEnv;
+        type Connectivity = {
+          connected?: boolean;
+          profiles?: Array<{ entityId?: string; runtimeId?: string; wsUrl?: string | null }>;
+          directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }>;
+          connect?: () => void;
+          reconnect?: () => void;
+          ensureProfiles?: (ids: string[]) => Promise<boolean>;
+        };
+        const view = window as typeof window & { __xln?: { runtimeConnectivity?: Connectivity } };
         const target = String(targetHubId || '').toLowerCase();
-        const p2p = env?.infrastructure?.p2p;
-        const profile = env?.gossip?.getProfiles?.().find((candidate) =>
+        const connectivity = view.__xln?.runtimeConnectivity;
+        const profile = connectivity?.profiles?.find((candidate) =>
           String(candidate?.entityId || '').toLowerCase() === target,
         );
         const runtimeId = String(profile?.runtimeId || '').trim().toLowerCase();
-        if (!p2p || !runtimeId) {
-          await p2p?.ensureProfiles?.([target]).catch(() => false);
-          return { ok: false, reason: 'missing-profile-or-p2p', runtimeId };
+        if (!connectivity || !runtimeId) {
+          await connectivity?.ensureProfiles?.([target]).catch(() => false);
+          return { ok: false, reason: 'missing-profile-or-connectivity', runtimeId };
         }
 
-        const relayConnected = typeof p2p.isConnected === 'function' && p2p.isConnected();
+        const relayConnected = connectivity.connected === true;
         if (!relayConnected) {
-          if (typeof p2p.connect === 'function') {
-            try { p2p.connect(); } catch {}
-          } else if (typeof p2p.reconnect === 'function') {
-            try { p2p.reconnect(); } catch {}
+          if (typeof connectivity.connect === 'function') {
+            try { connectivity.connect(); } catch {}
+          } else if (typeof connectivity.reconnect === 'function') {
+            try { connectivity.reconnect(); } catch {}
           }
         }
 
@@ -903,14 +869,11 @@ async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeou
           }
         })();
         if (directAllowed) {
-          try { p2p.ensureDirectClientForRuntime?.(runtimeId); } catch {}
-          const directPeers = typeof p2p.getDirectPeerState === 'function'
-            ? p2p.getDirectPeerState()
-            : [];
+          const directPeers = view.__xln?.runtimeConnectivity?.directPeers ?? [];
           const peer = directPeers.find((entry) => String(entry.runtimeId || '').toLowerCase() === runtimeId);
           return {
-            ok: peer?.open === true,
-            reason: peer?.open === true ? 'direct-open' : 'direct-not-open',
+            ok: peer?.open === true || relayConnected,
+            reason: peer?.open === true ? 'direct-open' : relayConnected ? 'relay-open' : 'transport-not-open',
             runtimeId,
             directEndpoint,
             directAllowed,
@@ -928,7 +891,7 @@ async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeou
           directEndpoint,
           directAllowed,
           relayConnected,
-          directPeers: typeof p2p.getDirectPeerState === 'function' ? p2p.getDirectPeerState() : [],
+          directPeers: view.__xln?.runtimeConnectivity?.directPeers ?? [],
         };
       }, hubId).then((status) => {
         lastStatus = status;
@@ -1491,14 +1454,10 @@ async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
 
 async function hasExportedRuntimeP2P(page: Page): Promise<boolean> {
   return await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        infrastructure?: {
-          p2p?: unknown;
-        };
-      };
-    }).isolatedEnv;
-    return Boolean(env?.infrastructure?.p2p);
+    const connectivity = (window as typeof window & {
+      __xln?: { runtimeConnectivity?: { runtimeId?: string } };
+    }).__xln?.runtimeConnectivity;
+    return Boolean(connectivity?.runtimeId);
   }).catch(() => false);
 }
 

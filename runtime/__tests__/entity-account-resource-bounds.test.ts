@@ -16,12 +16,14 @@ import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { isLeftEntity } from '../entity/id';
 import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { handleOpenAccountEntityTx } from '../entity/tx/handlers/open-account';
+import { applyAccountSettledJEvent } from '../entity/tx/j-events-account-settled';
 import { createEmptyEnv } from '../runtime';
 import { hydrateAccountDocFromStorage, hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import { signEntityHashes } from '../hanko/signing';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { validateAccountReplica } from '../account/state-validation';
 import { validateEntityState } from '../entity/state-validation';
 import { sealAccountDraftAsEntity } from './helpers/account-draft';
@@ -238,6 +240,55 @@ test('ordinary openAccount cannot replace a permanently disputed Account', async
   }, createAccountConsensusContext(env))).rejects.toThrow('OPEN_ACCOUNT_ALREADY_EXISTS');
   expect(state.accounts.get(counterpartyId)).toBe(finalized);
   expect(finalized.status).toBe('disputed');
+});
+
+test('settlements update Entity reserve without filling a permanently closed Account', () => {
+  const state = makeState();
+  const finalized = makeAccount();
+  finalized.status = 'disputed';
+  delete finalized.activeDispute;
+  state.accounts.set(counterpartyId, finalized);
+  const env = createEmptyEnv('closed-account-settlement-drain');
+  const accountTxs: Array<{ accountId: string; tx: AccountTx }> = [];
+  const dirtyAccounts = new Set<string>();
+
+  for (let index = 0; index < LIMITS.ACCOUNT_MEMPOOL_SIZE + 5; index += 1) {
+    const reserve = BigInt(index + 1);
+    const event: JurisdictionEvent = {
+      blockNumber: index + 1,
+      blockHash: `0x${BigInt(index + 1).toString(16).padStart(64, '0')}`,
+      transactionHash: `0x${BigInt(index + 2).toString(16).padStart(64, '0')}`,
+      logIndex: 0,
+      type: 'AccountSettled',
+      data: {
+        leftEntity: entityId,
+        rightEntity: counterpartyId,
+        tokenId: 1,
+        leftReserve: reserve,
+        rightReserve: 0n,
+        collateral: reserve,
+        ondelta: 0n,
+        nonce: index + 1,
+      },
+    };
+    applyAccountSettledJEvent({
+      entityState: state,
+      newState: state,
+      event,
+      env,
+      accountConsensusContext: createAccountConsensusContext(env),
+      blockNumber: index + 1,
+      transactionHash: event.transactionHash,
+      accountTxs,
+      outputs: [],
+      dirtyAccounts,
+    }, []);
+  }
+
+  expect(state.reserves.get(1)).toBe(BigInt(LIMITS.ACCOUNT_MEMPOOL_SIZE + 5));
+  expect(accountTxs).toEqual([]);
+  expect(dirtyAccounts.size).toBe(0);
+  expect(finalized.mempool).toEqual([]);
 });
 
 test('inbound peer capacity overflow is a deterministic no-op', async () => {
