@@ -674,7 +674,8 @@ test('app remote runtime prompt activates through hot boot instead of reload', (
   expect(source).not.toContain('inactive-tab-reload');
   expect(source).toContain('async function claimActiveTabLockInPlace');
   expect(source).toContain('data-testid="inactive-tab-acquire"');
-  expect(source).toContain('releaseActiveTabLock = await initializeActiveTabLock');
+  expect(source).toContain('releaseActiveTabLock = adoptActiveTabLock');
+  expect(source).toContain('?? await initializeActiveTabLock');
 });
 
 test('embedded remote capability never bypasses explicit runtime consent', () => {
@@ -915,4 +916,26 @@ test('active Runtime ownership uses Web Locks and releases only after quiesce', 
   expect(loseSource.indexOf('await onLoseLockHandler?.()')).toBeGreaterThan(0);
   expect(loseSource.indexOf('releaseWebLock()')).toBeGreaterThan(loseSource.indexOf('await onLoseLockHandler?.()'));
   expect(layoutSource).toContain("logAppShellDiagnostic('Inactive tab activity suspension failed', err);\n      throw err;");
+});
+
+test('projection routes never evict or duplicate an active embedded Runtime', () => {
+  const lockSource = readFileSync('frontend/src/lib/utils/activeTabLock.ts', 'utf8');
+  const connectionSource = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
+  const ownershipStart = connectionSource.indexOf('const ensureProjectionEmbeddedRuntimeOwnership');
+  const bootstrapStart = connectionSource.indexOf("if (!hasStoredRemoteRuntimePreference())");
+  const bootstrapSource = connectionSource.slice(bootstrapStart);
+
+  expect(lockSource).toContain("{ mode: 'exclusive', ifAvailable: true }");
+  expect(connectionSource).toContain('const release = adoptActiveTabLock(suspendProjectionRuntime)');
+  expect(connectionSource).toContain('?? await tryInitializeActiveTabLock(suspendProjectionRuntime)');
+  expect(connectionSource).toContain('if (ownsActiveTabLock()) return;');
+  expect(connectionSource).toContain("throw new Error('LOCAL_RUNTIME_ACTIVE_IN_ANOTHER_TAB')");
+  expect(ownershipStart).toBeGreaterThan(0);
+  expect(bootstrapSource.indexOf('await ensureProjectionEmbeddedRuntimeOwnership()')).toBeLessThan(
+    bootstrapSource.indexOf('await vaultOperations.initialize()'),
+  );
+  expect(bootstrapSource.indexOf('await ensureProjectionEmbeddedRuntimeOwnership()')).toBeLessThan(
+    bootstrapSource.indexOf('await switchAppRuntimeAdapter({'),
+  );
+  expect(connectionSource).toContain("if (currentAdapter?.mode === 'embedded')");
 });

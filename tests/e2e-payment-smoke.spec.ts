@@ -382,40 +382,6 @@ async function hasActivityDebugQuery(page: Page): Promise<boolean> {
   });
 }
 
-async function waitForAdapterRuntime(page: Page, runtimeId: string): Promise<void> {
-  await expect
-    .poll(async () => {
-      return await page.evaluate(() => {
-        const view = window as typeof window & {
-          __xln?: {
-            adapter?: RuntimeAdapterDebugSurface;
-          };
-        };
-        const status = view.__xln?.adapter?.status?.();
-        return {
-          connected: status?.connected === true,
-          runtimeId: String(status?.runtimeId || '').trim().toLowerCase(),
-        };
-      }).catch(() => ({ connected: false, runtimeId: '' }));
-    }, {
-      timeout: CONSENSUS_TIMEOUT_MS,
-      intervals: [500, 1000, 1500],
-      message: `history page must bind to runtime ${runtimeId.slice(0, 12)}`,
-    })
-    .toEqual({ connected: true, runtimeId: runtimeId.toLowerCase() });
-}
-
-async function openEntityHistoryPage(page: Page, entityId: string, runtimeId: string): Promise<Page> {
-  const target = `${APP_BASE_URL}/address/${encodeURIComponent(entityId)}?runtimeId=${encodeURIComponent(runtimeId)}`;
-  const historyPage = await page.context().newPage();
-  await historyPage.goto(target, { waitUntil: 'domcontentloaded' });
-  await historyPage.waitForURL(target, { timeout: CONSENSUS_TIMEOUT_MS });
-  if (await hasActivityDebugQuery(historyPage)) {
-    await waitForAdapterRuntime(historyPage, runtimeId);
-  }
-  return historyPage;
-}
-
 async function verifyEntityActivityHistory(page: Page, entityId: string, options: { requirePaymentFilter?: boolean } = {}): Promise<void> {
   const hasDebugQuery = await hasActivityDebugQuery(page);
   if (hasDebugQuery) {
@@ -436,94 +402,89 @@ async function verifyEntityActivityHistory(page: Page, entityId: string, options
       .toBeGreaterThan(0);
   }
 
-  const runtimeId = await getActiveRuntimeId(page);
-  const historyPage = await openEntityHistoryPage(page, entityId, runtimeId);
-  try {
-    await expect(historyPage.getByTestId('entity-history-panel')).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+  await page.getByRole('button', { name: 'History', exact: true }).click();
+  await expect(page.getByTestId('entity-history-panel')).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+  await expect
+    .poll(() => page.getByTestId('entity-history-event').count(), {
+      timeout: CONSENSUS_TIMEOUT_MS,
+      intervals: [500, 1000, 1500],
+      message: 'entity history should render at least one event',
+    })
+    .toBeGreaterThan(0);
+
+  if (await hasActivityDebugQuery(page)) {
     await expect
-      .poll(() => historyPage.getByTestId('entity-history-event').count(), {
-        timeout: CONSENSUS_TIMEOUT_MS,
-        intervals: [500, 1000, 1500],
-        message: 'entity history should render at least one event',
-      })
-      .toBeGreaterThan(0);
-
-    if (await hasActivityDebugQuery(historyPage)) {
-      await expect
-        .poll(
-          () => countRuntimeActivityEvents(
-            historyPage,
-            entityId,
-            { kind: 'offchain' },
-            isExpectedUiPaymentActivity,
-          ),
-          {
-            timeout: CONSENSUS_TIMEOUT_MS,
-            intervals: [500, 1000, 1500],
-            message: 'history page adapter must expose off-chain payment history',
-          },
-        )
-        .toBeGreaterThan(0);
-    }
-
-    await historyPage.getByTestId('history-kind-offchain').click();
-    await expect
-      .poll(() => historyPage.getByTestId('entity-history-event').count(), {
-        timeout: CONSENSUS_TIMEOUT_MS,
-        intervals: [500, 1000, 1500],
-        message: 'off-chain history tab should keep payment events visible',
-      })
-      .toBeGreaterThan(0);
-
-    if (options.requirePaymentFilter) {
-      await historyPage.getByTestId('history-type-payment').click();
-      await expect
-        .poll(() => historyPage.getByTestId('entity-history-event').count(), {
+      .poll(
+        () => countRuntimeActivityEvents(
+          page,
+          entityId,
+          { kind: 'offchain' },
+          isExpectedUiPaymentActivity,
+        ),
+        {
           timeout: CONSENSUS_TIMEOUT_MS,
           intervals: [500, 1000, 1500],
-          message: 'payment filter should keep payment events visible',
-        })
-        .toBeGreaterThan(0);
-      await expect(
-        historyPage.getByTestId('history-event-amount').filter({ hasText: /^7(\.|$)/ }).first(),
-      ).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
-      await expect
-        .poll(() => historyPage.getByTestId('entity-history-event').evaluateAll((rows) => rows.filter((row) => {
-          const amount = row.querySelector('[data-testid="history-event-amount"]')?.textContent?.trim() || '';
-          const text = row.textContent || '';
-          return /^7(\.|$)/.test(amount) && text.includes('Payment');
-        }).length), {
-          timeout: CONSENSUS_TIMEOUT_MS,
-          intervals: [500, 1000, 1500],
-          message: 'sender history should render the UI payment row',
-        })
-        .toBeGreaterThan(0);
-      if (HISTORY_SCREENSHOT_PATH) {
-        await historyPage.screenshot({ path: HISTORY_SCREENSHOT_PATH, fullPage: true });
-      }
-      await historyPage.getByTestId('history-clear-filters').click();
-    }
-
-    await historyPage.getByTestId('history-search').fill('payment');
-    await expect
-      .poll(() => historyPage.getByTestId('entity-history-event').count(), {
-        timeout: CONSENSUS_TIMEOUT_MS,
-        intervals: [500, 1000, 1500],
-        message: 'search should find payment history',
-      })
+          message: 'history panel adapter must expose off-chain payment history',
+        },
+      )
       .toBeGreaterThan(0);
-    await historyPage.getByTestId('history-clear-filters').click();
-
-    await historyPage.getByTestId('history-mode-infinite').click();
-    await expect(historyPage.getByTestId('history-load-older')).toBeVisible();
-    await historyPage.getByTestId('history-mode-timeframe').click();
-    await expect(historyPage.getByTestId('history-from')).toBeVisible();
-    await expect(historyPage.getByTestId('history-to')).toBeVisible();
-    await historyPage.getByTestId('history-kind-onchain').click();
-    await expect(historyPage.getByTestId('entity-history-panel')).toBeVisible();
-  } finally {
-    await historyPage.close().catch(() => {});
   }
+
+  await page.getByTestId('history-kind-offchain').click();
+  await expect
+    .poll(() => page.getByTestId('entity-history-event').count(), {
+      timeout: CONSENSUS_TIMEOUT_MS,
+      intervals: [500, 1000, 1500],
+      message: 'off-chain history tab should keep payment events visible',
+    })
+    .toBeGreaterThan(0);
+
+  if (options.requirePaymentFilter) {
+    await page.getByTestId('history-type-payment').click();
+    await expect
+      .poll(() => page.getByTestId('entity-history-event').count(), {
+        timeout: CONSENSUS_TIMEOUT_MS,
+        intervals: [500, 1000, 1500],
+        message: 'payment filter should keep payment events visible',
+      })
+      .toBeGreaterThan(0);
+    await expect(
+      page.getByTestId('history-event-amount').filter({ hasText: /^7(\.|$)/ }).first(),
+    ).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+    await expect
+      .poll(() => page.getByTestId('entity-history-event').evaluateAll((rows) => rows.filter((row) => {
+        const amount = row.querySelector('[data-testid="history-event-amount"]')?.textContent?.trim() || '';
+        const text = row.textContent || '';
+        return /^7(\.|$)/.test(amount) && text.includes('Payment');
+      }).length), {
+        timeout: CONSENSUS_TIMEOUT_MS,
+        intervals: [500, 1000, 1500],
+        message: 'sender history should render the UI payment row',
+      })
+      .toBeGreaterThan(0);
+    if (HISTORY_SCREENSHOT_PATH) {
+      await page.screenshot({ path: HISTORY_SCREENSHOT_PATH, fullPage: true });
+    }
+    await page.getByTestId('history-clear-filters').click();
+  }
+
+  await page.getByTestId('history-search').fill('payment');
+  await expect
+    .poll(() => page.getByTestId('entity-history-event').count(), {
+      timeout: CONSENSUS_TIMEOUT_MS,
+      intervals: [500, 1000, 1500],
+      message: 'search should find payment history',
+    })
+    .toBeGreaterThan(0);
+  await page.getByTestId('history-clear-filters').click();
+
+  await page.getByTestId('history-mode-infinite').click();
+  await expect(page.getByTestId('history-load-older')).toBeVisible();
+  await page.getByTestId('history-mode-timeframe').click();
+  await expect(page.getByTestId('history-from')).toBeVisible();
+  await expect(page.getByTestId('history-to')).toBeVisible();
+  await page.getByTestId('history-kind-onchain').click();
+  await expect(page.getByTestId('entity-history-panel')).toBeVisible();
 }
 
 test.describe('Payment Smoke', () => {

@@ -28,6 +28,7 @@
   import { resetEverything } from '$lib/utils/resetEverything';
   import { parseStorageSchemaMismatch } from '$lib/utils/storageSchemaRecovery';
   import {
+    adoptActiveTabLock,
     clearInactiveTabStandby,
     initializeActiveTabLock,
     isInactiveTabStandby
@@ -286,7 +287,9 @@
         releaseActiveTabLock = null;
       }
       if (!releaseActiveTabLock) {
-        releaseActiveTabLock = await initializeActiveTabLock(async () => {
+        releaseActiveTabLock = adoptActiveTabLock(async () => {
+          await deactivateThisTab();
+        }) ?? await initializeActiveTabLock(async () => {
           await deactivateThisTab();
         });
       }
@@ -531,7 +534,9 @@
       if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;
       const bootstrapResult = await processRemoteRuntimeBootstrapFromLocation(remoteRequest);
       if (bootstrapResult === 'pending-auth') return;
-      releaseActiveTabLock = await initializeActiveTabLock(async () => {
+      releaseActiveTabLock = adoptActiveTabLock(async () => {
+        await deactivateThisTab();
+      }) ?? await initializeActiveTabLock(async () => {
         await deactivateThisTab();
       });
       if (disposed) return;

@@ -89,4 +89,31 @@ test.describe('Active tab lock handoff', () => {
       await closeRuntimeContext(context);
     }
   });
+
+  test('projection route cannot evict an active embedded Runtime owner', { tag: '@resilience' }, async ({ browser }) => {
+    const context: BrowserContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    const wallet = await context.newPage();
+    const projection = await context.newPage();
+
+    try {
+      await ensureE2EBaseline(wallet, { requireHubMesh: true });
+      await openApp(wallet, '/app?locktest=1');
+      await waitUntilOwnsActiveLock(wallet);
+      await openApp(projection, '/address');
+
+      await expect(projection.getByText('LOCAL_RUNTIME_ACTIVE_IN_ANOTHER_TAB')).toBeVisible({ timeout: 10_000 });
+      await waitUntilOwnsActiveLock(wallet);
+      await expect(inactiveTabScreen(wallet)).toHaveCount(0);
+      await expect
+        .poll(() => projection.evaluate(() => {
+          const debug = window as typeof window & {
+            __xln?: { adapter?: { status?: () => { connected?: boolean } } };
+          };
+          return debug.__xln?.adapter?.status?.().connected === true;
+        }))
+        .toBe(false);
+    } finally {
+      await closeRuntimeContext(context);
+    }
+  });
 });

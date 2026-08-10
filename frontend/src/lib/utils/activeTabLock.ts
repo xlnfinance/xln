@@ -29,9 +29,14 @@ let onLoseLockHandler: (() => void | Promise<void>) | null = null;
 let releaseHeldLock: (() => void) | null = null;
 let ownsWebLock = false;
 let lossInFlight: Promise<void> | null = null;
+let activeStorageHandler: ((event: StorageEvent) => void) | null = null;
 
 export function isInactiveTabStandby(): boolean {
   return typeof window !== 'undefined' && sessionStorage.getItem(INACTIVE_TAB_STANDBY_KEY) === '1';
+}
+
+export function ownsActiveTabLock(): boolean {
+  return ownsWebLock;
 }
 
 export function enterInactiveTabStandby(): void {
@@ -132,21 +137,46 @@ const acquireWebLock = async (tabId: string): Promise<void> => {
   await acquired;
 };
 
-export async function initializeActiveTabLock(onLoseLock: () => void | Promise<void>): Promise<() => void> {
-  if (typeof window === 'undefined') return () => {};
-  if (activeChannel || releaseHeldLock || ownsWebLock) throw new Error('ACTIVE_TAB_LOCK_ALREADY_INITIALIZED');
+const tryAcquireWebLock = async (tabId: string): Promise<boolean> => {
+  if (!navigator.locks?.request) throw new Error('ACTIVE_TAB_WEB_LOCKS_UNAVAILABLE');
+  let resolveAttempt!: (acquired: boolean) => void;
+  let rejectAttempt!: (error: unknown) => void;
+  const attempted = new Promise<boolean>((resolve, reject) => {
+    resolveAttempt = resolve;
+    rejectAttempt = reject;
+  });
+  void navigator.locks.request(
+    ACTIVE_TAB_WEB_LOCK_NAME,
+    { mode: 'exclusive', ifAvailable: true },
+    async (lock) => {
+      if (!lock) {
+        resolveAttempt(false);
+        return;
+      }
+      ownsWebLock = true;
+      clearInactiveTabStandby();
+      sessionStorage.setItem(ACTIVE_TAB_OWNED_KEY, tabId);
+      activeTabLock.set({ tabId, ownerTabId: tabId, isOwner: true });
+      resolveAttempt(true);
+      await new Promise<void>((resolve) => {
+        releaseHeldLock = resolve;
+      });
+    },
+  ).catch(rejectAttempt);
+  return attempted;
+};
 
+const installActiveTabCoordination = (
+  handler: () => void | Promise<void>,
+): { tabId: string; onStorage: (event: StorageEvent) => void } => {
   const tabId = getOrCreateTabId();
-  onLoseLockHandler = onLoseLock;
+  onLoseLockHandler = handler;
   activeChannel = new BroadcastChannel(ACTIVE_TAB_CHANNEL_NAME);
   activeChannel.onmessage = (event: MessageEvent<ActiveTabLockChannelMessage>) => {
     const message = event.data;
     if (!message || typeof message !== 'object') return;
-    if (message.type === 'takeover-request') {
-      void loseWebLockTo(String(message.tabId || '')).catch(failAsync);
-    } else if (message.type === 'hard-reset') {
-      void handleHardResetRequest(String(message.tabId || '')).catch(failAsync);
-    }
+    if (message.type === 'takeover-request') void loseWebLockTo(String(message.tabId || '')).catch(failAsync);
+    else if (message.type === 'hard-reset') void handleHardResetRequest(String(message.tabId || '')).catch(failAsync);
   };
   const onStorage = (event: StorageEvent): void => {
     if (event.key !== ACTIVE_TAB_HARD_RESET_KEY || !event.newValue) return;
@@ -154,26 +184,74 @@ export async function initializeActiveTabLock(onLoseLock: () => void | Promise<v
     void handleHardResetRequest(typeof payload.tabId === 'string' ? payload.tabId : '').catch(failAsync);
   };
   window.addEventListener('storage', onStorage);
+  activeStorageHandler = onStorage;
+  return { tabId, onStorage };
+};
+
+const cleanupActiveTabCoordination = (onStorage: (event: StorageEvent) => void): void => {
+  window.removeEventListener('storage', onStorage);
+  activeChannel?.close();
+  activeChannel = null;
+  onLoseLockHandler = null;
+  if (activeStorageHandler === onStorage) activeStorageHandler = null;
+};
+
+const createActiveTabLockRelease = (
+  tabId: string,
+  onStorage: (event: StorageEvent) => void,
+): (() => void) => () => {
+  cleanupActiveTabCoordination(onStorage);
+  ownsWebLock = false;
+  sessionStorage.removeItem(ACTIVE_TAB_OWNED_KEY);
+  activeTabLock.set({ tabId, ownerTabId: null, isOwner: false });
+  releaseWebLock();
+};
+
+export async function initializeActiveTabLock(onLoseLock: () => void | Promise<void>): Promise<() => void> {
+  if (typeof window === 'undefined') return () => {};
+  if (activeChannel || releaseHeldLock || ownsWebLock) throw new Error('ACTIVE_TAB_LOCK_ALREADY_INITIALIZED');
+
+  const { tabId, onStorage } = installActiveTabCoordination(onLoseLock);
 
   postChannelMessage({ type: 'takeover-request', tabId });
   try {
     await acquireWebLock(tabId);
   } catch (error) {
-    window.removeEventListener('storage', onStorage);
-    activeChannel.close();
-    activeChannel = null;
-    onLoseLockHandler = null;
+    cleanupActiveTabCoordination(onStorage);
     throw error;
   }
 
-  return () => {
-    window.removeEventListener('storage', onStorage);
-    activeChannel?.close();
-    activeChannel = null;
-    onLoseLockHandler = null;
-    ownsWebLock = false;
-    sessionStorage.removeItem(ACTIVE_TAB_OWNED_KEY);
-    activeTabLock.set({ tabId, ownerTabId: null, isOwner: false });
-    releaseWebLock();
-  };
+  return createActiveTabLockRelease(tabId, onStorage);
+}
+
+/**
+ * Projection routes may inspect an embedded Runtime only when no other tab
+ * owns it. They must never evict an active wallet merely because a background
+ * address or health link was opened.
+ */
+export async function tryInitializeActiveTabLock(
+  onLoseLock: () => void | Promise<void>,
+): Promise<(() => void) | null> {
+  if (typeof window === 'undefined') return () => {};
+  if (activeChannel || releaseHeldLock || ownsWebLock) throw new Error('ACTIVE_TAB_LOCK_ALREADY_INITIALIZED');
+  const { tabId, onStorage } = installActiveTabCoordination(onLoseLock);
+  try {
+    if (!await tryAcquireWebLock(tabId)) {
+      cleanupActiveTabCoordination(onStorage);
+      return null;
+    }
+  } catch (error) {
+    cleanupActiveTabCoordination(onStorage);
+    throw error;
+  }
+  return createActiveTabLockRelease(tabId, onStorage);
+}
+
+/** Transfer an already-held same-document lease between projection and app layouts. */
+export function adoptActiveTabLock(
+  onLoseLock: () => void | Promise<void>,
+): (() => void) | null {
+  if (!ownsWebLock || !activeChannel || !releaseHeldLock || !activeStorageHandler) return null;
+  onLoseLockHandler = onLoseLock;
+  return createActiveTabLockRelease(getOrCreateTabId(), activeStorageHandler);
 }

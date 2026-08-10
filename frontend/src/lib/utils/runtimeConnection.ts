@@ -8,7 +8,8 @@ import {
   runtimeControllerHandle,
 } from '$lib/stores/runtimeControllerStore';
 import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
-import { initializeXLN, switchAppRuntimeAdapter } from '$lib/stores/xlnStore';
+import { initializeXLN, suspendClientActivity, switchAppRuntimeAdapter } from '$lib/stores/xlnStore';
+import { adoptActiveTabLock, ownsActiveTabLock, tryInitializeActiveTabLock } from './activeTabLock';
 import {
   REMOTE_RUNTIME_IMPORT_HASH_PARAM,
   REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
@@ -53,6 +54,30 @@ const PROJECTION_RUNTIME_REQUEST_TIMEOUT_MS = 5_000;
 const PROJECTION_RUNTIME_RECONNECT_MAX_MS = 2_000;
 
 let projectionRuntimeBootstrapPromise: Promise<void> | null = null;
+let projectionRuntimeLockPromise: Promise<void> | null = null;
+let projectionRuntimeLockRelease: (() => void) | null = null;
+
+const suspendProjectionRuntime = async (): Promise<void> => {
+  await vaultOperations.suspendAllRuntimeActivity();
+  await suspendClientActivity();
+};
+
+const ensureProjectionEmbeddedRuntimeOwnership = async (): Promise<void> => {
+  if (ownsActiveTabLock()) return;
+  if (projectionRuntimeLockRelease) {
+    projectionRuntimeLockRelease();
+    projectionRuntimeLockRelease = null;
+  }
+  projectionRuntimeLockPromise ??= (async () => {
+    const release = adoptActiveTabLock(suspendProjectionRuntime)
+      ?? await tryInitializeActiveTabLock(suspendProjectionRuntime);
+    if (!release) throw new Error('LOCAL_RUNTIME_ACTIVE_IN_ANOTHER_TAB');
+    projectionRuntimeLockRelease = release;
+  })().finally(() => {
+    projectionRuntimeLockPromise = null;
+  });
+  await projectionRuntimeLockPromise;
+};
 
 export function normalizeRuntimeWsUrl(value: string): string {
   const parsed = new URL(normalizeWsConnectUrl(String(value || '').trim()));
@@ -298,11 +323,15 @@ export async function ensureProjectionRuntimeConnected(): Promise<RuntimeHandle>
 
   const currentAdapter = getRuntimeControllerAdapter();
   const currentHandle = get(runtimeControllerHandle);
+  if (currentAdapter?.mode === 'embedded') {
+    await ensureProjectionEmbeddedRuntimeOwnership();
+  }
   if (currentAdapter && currentHandle.status === 'connected') return currentHandle;
   if (currentAdapter) return waitForRuntimeConnected();
 
   if (!hasStoredRemoteRuntimePreference()) {
     await runProjectionRuntimeBootstrap(async () => {
+      await ensureProjectionEmbeddedRuntimeOwnership();
       await vaultOperations.initialize();
       const runtime = get(activeRuntime);
       if (!runtime?.id) {
