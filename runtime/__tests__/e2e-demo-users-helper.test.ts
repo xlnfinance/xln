@@ -26,6 +26,19 @@ describe('e2e demo user helper', () => {
     expect(source).toContain('__xln?.runtimeIngress?.waitForIdle');
   });
 
+  test('AHB browser flow reads transport status through the narrow connectivity boundary', () => {
+    const source = readFileSync(join(repoRoot, 'tests/e2e-ahb-payment.spec.ts'), 'utf8');
+    const forbidden = [
+      'infrastructure?.p2p',
+      'infrastructure.p2p',
+      'p2p.clients',
+      'p2p.relayUrls',
+    ];
+
+    for (const pattern of forbidden) expect(source).not.toContain(pattern);
+    expect(source).toContain('__xln?.runtimeConnectivity');
+  });
+
   test('assists profile onboarding before waiting for runtime readiness', () => {
     const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-demo-users.ts'), 'utf8');
     const waitForReadyStart = helper.indexOf('async function waitForReadyAfterCreate');

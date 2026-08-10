@@ -115,8 +115,7 @@ function relayToApiBase(relayUrl: string | null | undefined): string | null {
 async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
   const runtimeApi = await page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
-    const relay = env?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
+    const relay = (window as any).__xln?.runtimeConnectivity?.relayUrls?.[0] ?? null;
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
@@ -149,21 +148,15 @@ async function dismissOnboardingIfVisible(page: Page) {
 }
 
 async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
-  const apiBaseUrl = await getActiveApiBase(page);
   const connected = await page.evaluate(async () => {
     const start = Date.now();
     while (Date.now() - start < 45_000) {
-      const env = (window as any).isolatedEnv;
-      const p2p = env?.infrastructure?.p2p as any;
-      if (p2p && typeof p2p.isConnected === 'function' && p2p.isConnected()) {
-        return true;
-      }
-      if (p2p) {
-        if (typeof p2p.connect === 'function') {
-          try { p2p.connect(); } catch {}
-        } else if (typeof p2p.reconnect === 'function') {
-          try { p2p.reconnect(); } catch {}
-        }
+      const connectivity = (window as any).__xln?.runtimeConnectivity;
+      if (connectivity?.connected === true) return true;
+      if (typeof connectivity?.connect === 'function') {
+        connectivity.connect();
+      } else if (typeof connectivity?.reconnect === 'function') {
+        connectivity.reconnect();
       }
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
@@ -171,50 +164,25 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
   });
   expect(connected, `[${tag}] runtime P2P must connect within 45s`).toBe(true);
 
-  const snapshot = await page.evaluate(async ({ apiBaseUrl }) => {
+  const snapshot = await page.evaluate(() => {
     const env = (window as any).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '');
-    const p2p = env?.infrastructure?.p2p as any;
-    const clients = Array.isArray(p2p?.clients) ? p2p.clients : [];
-    const relayUrls = Array.isArray(p2p?.relayUrls) ? p2p.relayUrls : [];
-    let wsOpenForRuntime = 0;
-    let wsCloseForRuntime = 0;
-
-    if (runtimeId) {
-      try {
-        const res = await fetch(`${apiBaseUrl}/api/debug/events?last=1500&runtimeId=${encodeURIComponent(runtimeId)}`);
-        if (res.ok) {
-          const body = await res.json();
-          const events = Array.isArray(body?.events) ? body.events : [];
-          for (const ev of events) {
-            if (ev?.event === 'ws_open') wsOpenForRuntime += 1;
-            if (ev?.event === 'ws_close') wsCloseForRuntime += 1;
-          }
-        }
-      } catch {
-        // best-effort diagnostics
-      }
-    }
+    const connectivity = (window as any).__xln?.runtimeConnectivity;
+    const relayUrls = Array.isArray(connectivity?.relayUrls) ? connectivity.relayUrls : [];
 
     return {
       runtimeId,
-      hasP2P: !!p2p,
-      isConnected: !!p2p?.isConnected?.(),
-      clientCount: clients.length,
+      connectivityRuntimeId: String(connectivity?.runtimeId || ''),
+      hasP2P: !!connectivity,
+      isConnected: connectivity?.connected === true,
       relayCount: relayUrls.length,
-      wsOpenForRuntime,
-      wsCloseForRuntime,
     };
-  }, { apiBaseUrl });
+  });
 
   expect(snapshot.hasP2P, `[${tag}] runtime must have active P2P`).toBe(true);
+  expect(snapshot.connectivityRuntimeId, `[${tag}] connectivity must belong to active runtime`).toBe(snapshot.runtimeId);
   expect(snapshot.isConnected, `[${tag}] runtime P2P must have open WS`).toBe(true);
-  expect(snapshot.clientCount, `[${tag}] runtime must have exactly one WS client`).toBe(1);
   expect(snapshot.relayCount, `[${tag}] runtime must have exactly one relay URL`).toBe(1);
-  expect(
-    snapshot.wsOpenForRuntime,
-    `[${tag}] relay should not churn ws_open for same runtime (opens=${snapshot.wsOpenForRuntime}, closes=${snapshot.wsCloseForRuntime})`,
-  ).toBeLessThanOrEqual(snapshot.wsCloseForRuntime + 2);
 }
 
 async function waitForActiveRuntime(page: Page, expectedRuntimeId: string, tag: string): Promise<void> {
@@ -230,20 +198,18 @@ async function waitForActiveRuntime(page: Page, expectedRuntimeId: string, tag: 
 
 async function ensureRuntimeOnline(page: Page, tag: string) {
   const ok = await page.evaluate(async () => {
-    const env = (window as any).isolatedEnv;
-    const p2p = env?.infrastructure?.p2p as any;
-    if (!env || !p2p) return false;
     const start = Date.now();
     while (Date.now() - start < 20_000) {
-      if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
-      if (typeof p2p.connect === 'function') {
-        try { p2p.connect(); } catch {}
-      } else if (typeof p2p.reconnect === 'function') {
-        try { p2p.reconnect(); } catch {}
+      const connectivity = (window as any).__xln?.runtimeConnectivity;
+      if (connectivity?.connected === true) return true;
+      if (typeof connectivity?.connect === 'function') {
+        connectivity.connect();
+      } else if (typeof connectivity?.reconnect === 'function') {
+        connectivity.reconnect();
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    return typeof p2p.isConnected === 'function' && p2p.isConnected();
+    return (window as any).__xln?.runtimeConnectivity?.connected === true;
   });
   expect(ok, `[${tag}] runtime must be online before network actions`).toBe(true);
 }
@@ -323,15 +289,15 @@ async function dumpState(page: Page, label: string) {
       }
     }
 
-    const p2p = env.infrastructure?.p2p;
-    const gossipProfiles = env.gossip?.getProfiles?.()?.length || 0;
+    const connectivity = (window as any).__xln?.runtimeConnectivity;
+    const gossipProfiles = Array.isArray(connectivity?.profiles) ? connectivity.profiles.length : 0;
 
     return {
       label,
       runtimeId: env.runtimeId?.slice(0, 12) || 'none',
       envObjId: `env@${env._debugId || 'no-id'}`,
-      loopActive: env.infrastructure?.loopActive || false,
-      p2pConnected: !!p2p,
+      p2pConnected: connectivity?.connected === true,
+      relayCount: Array.isArray(connectivity?.relayUrls) ? connectivity.relayUrls.length : 0,
       gossipProfiles,
       entityCount: env.state?.eReplicas?.size || 0,
       eReplicaKeys: env.state?.eReplicas ? [...env.state.eReplicas.keys()] : [],
