@@ -53,15 +53,7 @@
 		<link rel="icon" type="image/png" sizes="512x512" href="/android-chrome-512x512.png">
 		<link rel="manifest" href="/site.webmanifest">
 
-		<script>
-				(function() {
-					if (window.Capacitor && window.location.pathname === '/') {
-						window.history.replaceState(null, '', '/app');
-					}
-					var isAppRoute = window.location.pathname === '/app' || window.location.pathname.startsWith('/app/');
-					document.documentElement.setAttribute('data-xln-route-mode', isAppRoute ? 'app' : 'default');
-				})();
-			</script>
+		<script src="/route-mode.js"></script>
 
 		%sveltekit.head%
 	</head>
