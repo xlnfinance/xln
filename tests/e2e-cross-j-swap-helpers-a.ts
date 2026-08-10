@@ -1,6 +1,7 @@
-import { HDNodeWallet, Mnemonic, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
+import { HDNodeWallet, Mnemonic, getIndexedAccountPath } from 'ethers';
 import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
 import { defaultAccountDisputeConfigForParties } from '../runtime/account/dispute-config';
+import { deriveJurisdictionSignerIndex } from '../runtime/jurisdiction/machine/signer-derivation';
 import type { MarketSnapshotPayload } from '../runtime/network/relay/market-snapshot';
 import { expect, type Page } from './global-setup.mts';
 export { aggregateExpectedCrossBookDepth } from './utils/e2e-cross-book-depth';
@@ -108,14 +109,6 @@ export type HubEntityInfo = {
   primary: boolean;
 };
 
-export type SyntheticJEventInput = {
-  event: {
-    type: string;
-    data: Record<string, unknown>;
-  };
-  transactionHash: string;
-};
-
 export type CrossRuntimeWindow = Window & {
   isolatedEnv?: {
     runtimeId?: string;
@@ -126,6 +119,20 @@ export type CrossRuntimeWindow = Window & {
   };
   __xln?: {
     instance?: any;
+    jurisdictionConnectivity?: {
+      runtimeId: string;
+      jurisdictions: Array<{ name: string; connected: boolean; mode: string | null; watching: boolean }>;
+    };
+    runtimeIngress?: {
+      waitForIdle?: (timeoutMs?: number) => Promise<boolean>;
+    };
+    runtimeConnectivity?: {
+      profiles: Array<{ entityId: string; runtimeId: string; wsUrl?: string; isHub: boolean }>;
+      connected: boolean;
+      queue: unknown;
+      directPeers: unknown;
+      refreshGossip?: () => void;
+    };
   };
 };
 
@@ -434,14 +441,6 @@ export function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function deriveJurisdictionSignerIndex(jurisdiction: string): number {
-  const key = String(jurisdiction || '')
-    .trim()
-    .toLowerCase();
-  const digest = keccak256(toUtf8Bytes(`xln:jurisdiction-signer:v1:${key}`));
-  return 100_000 + Number(BigInt(digest) % 1_000_000n);
-}
-
 export function deriveSigner(mnemonic: string, jurisdictionName: string): { address: string; privateKey: string } {
   const hd = HDNodeWallet.fromMnemonic(
     Mnemonic.fromPhrase(mnemonic.trim().split(/\s+/).join(' ')),
@@ -450,139 +449,13 @@ export function deriveSigner(mnemonic: string, jurisdictionName: string): { addr
   return { address: hd.address.toLowerCase(), privateKey: hd.privateKey };
 }
 
-export async function injectSyntheticJEventThroughWatcher(
-  page: Page,
-  identity: RuntimeIdentity,
-  input: SyntheticJEventInput,
-): Promise<void> {
-  await page.evaluate(
-    async ({ identity, input }) => {
-      const view = window as CrossRuntimeWindow;
-      const env = view.isolatedEnv;
-      if (!env) throw new Error('isolatedEnv missing');
-      const runtimeModule = view.__xln?.instance;
-      if (!runtimeModule) throw new Error('__xln.instance missing');
-      if (typeof runtimeModule.applyJEventsToEnv !== 'function') {
-        throw new Error('applyJEventsToEnv missing from runtime bundle');
-      }
-
-      const entityId = String(identity.entityId || '').toLowerCase();
-      const signerId = String(identity.signerId || '').toLowerCase();
-      const entityReplica = [...(env.state.eReplicas?.values?.() || [])].find(
-        (replica: any) =>
-          String(replica?.state?.entityId || '').toLowerCase() === entityId &&
-          String(replica?.signerId || '').toLowerCase() === signerId,
-      );
-      const jurisdiction = entityReplica?.state?.config?.jurisdiction;
-      if (!jurisdiction) throw new Error(`entity jurisdiction missing: ${identity.entityId}`);
-      const finalizedHeight = Number(entityReplica.state.lastFinalizedJHeight || 0);
-      const scannedHeight = Number(entityReplica.jHistory?.scannedThroughHeight ?? finalizedHeight);
-      const contiguousHeight = Number(entityReplica.jHistory?.contiguousThroughHeight ?? finalizedHeight);
-      if (
-        !Number.isSafeInteger(finalizedHeight) ||
-        !Number.isSafeInteger(scannedHeight) ||
-        !Number.isSafeInteger(contiguousHeight) ||
-        scannedHeight < finalizedHeight ||
-        contiguousHeight !== scannedHeight
-      ) {
-        throw new Error(
-          `synthetic J history is not contiguous: finalized=${finalizedHeight} ` +
-            `scanned=${scannedHeight} contiguous=${contiguousHeight}`,
-        );
-      }
-      const blockNumber = scannedHeight + 1;
-      const expectedChainId = Number(jurisdiction.chainId);
-      const expectedDepository = String(jurisdiction.depositoryAddress || '').toLowerCase();
-      const watcherMatches = [...(env.state.jReplicas?.values?.() || [])].filter((replica: any) => {
-        const chainId = Number(replica?.chainId ?? replica?.jadapter?.chainId);
-        const depository = String(
-          replica?.depositoryAddress ||
-            replica?.contracts?.depository ||
-            replica?.jadapter?.addresses?.depository ||
-            '',
-        ).toLowerCase();
-        return chainId === expectedChainId && depository === expectedDepository;
-      });
-      if (watcherMatches.length !== 1) {
-        throw new Error(
-          `synthetic J watcher resolution failed: chain=${expectedChainId} ` +
-            `depository=${expectedDepository} matches=${watcherMatches.length}`,
-        );
-      }
-      const rpcUrlRaw = String(watcherMatches[0]?.rpcs?.[0] || jurisdiction.rpc || '');
-      if (!rpcUrlRaw) throw new Error(`synthetic J watcher RPC missing: chain=${expectedChainId}`);
-      const rpcUrl = rpcUrlRaw.startsWith('/') ? new URL(rpcUrlRaw, window.location.origin).toString() : rpcUrlRaw;
-      type RpcPayload = {
-        result?: unknown;
-        error?: { code?: number; message?: string; data?: unknown };
-      };
-      const callRpc = async (method: string, params: unknown[]): Promise<RpcPayload> => {
-        const response = await fetch(rpcUrl, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-        });
-        if (!response.ok) throw new Error(`synthetic J RPC HTTP error: method=${method} status=${response.status}`);
-        const payload = (await response.json()) as RpcPayload;
-        if (payload.error) {
-          throw new Error(`synthetic J RPC error: method=${method} error=${JSON.stringify(payload.error)}`);
-        }
-        return payload;
-      };
-      const blockQuantity = `0x${blockNumber.toString(16)}`;
-      let headerPayload = await callRpc('eth_getBlockByNumber', [blockQuantity, false]);
-      if (headerPayload.result === null) {
-        const currentPayload = await callRpc('eth_blockNumber', []);
-        const currentHeight = Number.parseInt(String(currentPayload.result || ''), 16);
-        if (currentHeight !== scannedHeight) {
-          throw new Error(
-            `synthetic J canonical header gap: chain=${expectedChainId} required=${blockNumber} ` +
-              `current=${currentHeight} scanned=${scannedHeight} rpc=${rpcUrl}`,
-          );
-        }
-        const rpcHost = new URL(rpcUrl).hostname;
-        if (rpcHost !== 'localhost' && rpcHost !== '127.0.0.1' && rpcHost !== '::1') {
-          throw new Error(`synthetic J mining forbidden for non-local RPC: ${rpcUrl}`);
-        }
-        await callRpc('evm_mine', []);
-        headerPayload = await callRpc('eth_getBlockByNumber', [blockQuantity, false]);
-      }
-      const header = headerPayload.result as { hash?: string } | null | undefined;
-      const canonicalBlockHash = String(header?.hash || '').toLowerCase();
-      if (!/^0x[0-9a-f]{64}$/.test(canonicalBlockHash)) {
-        throw new Error(
-          `synthetic J canonical header missing: chain=${expectedChainId} ` +
-            `height=${blockNumber} rpc=${rpcUrl} result=${JSON.stringify(header ?? null)}`,
-        );
-      }
-
-      runtimeModule.applyJEventsToEnv(
-        env,
-        [
-          {
-            name: input.event.type,
-            args: input.event.data,
-            blockNumber,
-            blockHash: canonicalBlockHash,
-            transactionHash: input.transactionHash,
-            logIndex: 0,
-          },
-        ],
-        'e2e-cross-j-source-dispute',
-        watcherMatches[0],
-      );
-    },
-    { identity, input },
-  );
-}
-
 export async function importRpc2SiblingEntity(
   page: Page,
   mnemonic: string,
   label: string,
 ): Promise<JurisdictionIdentity> {
   const result = await page.evaluate(
-    async ({ mnemonic, label }) => {
+    async () => {
       const view = window as CrossRuntimeWindow;
       const env = view.isolatedEnv;
       if (!env) throw new Error('isolatedEnv missing');
@@ -598,90 +471,21 @@ export async function importRpc2SiblingEntity(
       if (!rpc2) throw new Error(`rpc2/tron jurisdiction missing: ${entries.map(([key]) => key).join(',')}`);
       const [jurisdictionKey, jurisdictionRaw] = rpc2;
       const jurisdictionName = String(jurisdictionRaw.name || jurisdictionKey);
-      const rpc = String(jurisdictionRaw.rpc || '').startsWith('/')
-        ? new URL(String(jurisdictionRaw.rpc), window.location.origin).toString()
-        : String(jurisdictionRaw.rpc || '');
-      const contracts = jurisdictionRaw.contracts || {};
-      const blockTimeMs = Number(jurisdictionRaw.blockTimeMs);
-      if (!rpc || !contracts.depository || !contracts.entityProvider) {
-        throw new Error(`rpc2 jurisdiction incomplete: ${JSON.stringify(jurisdictionRaw)}`);
-      }
-      if (!Number.isSafeInteger(blockTimeMs) || blockTimeMs <= 0) {
-        throw new Error(`rpc2 jurisdiction block time invalid: ${String(jurisdictionRaw.blockTimeMs)}`);
-      }
-      const runtimeModule = view.__xln?.instance;
-      if (!runtimeModule) throw new Error('__xln.instance missing');
-
-      const hasConnectedAdapter = (name: string): boolean => {
-        const adapter = env.infrastructure?.liveJAdapters?.get(name);
-        return Boolean(
-          adapter?.addresses?.depository &&
-          adapter?.addresses?.entityProvider &&
-          adapter?.depository &&
-          adapter?.entityProvider &&
-          typeof adapter?.submitTx === 'function',
-        );
-      };
-      if (!hasConnectedAdapter(jurisdictionName)) {
-        const entityProviderDeploymentBlock = Number(jurisdictionRaw.entityProviderDeploymentBlock);
-        if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
-          throw new Error(
-            `rpc2 jurisdiction entity-provider deployment block invalid: ${String(jurisdictionRaw.entityProviderDeploymentBlock)}`,
-          );
-        }
-        runtimeModule.enqueueRuntimeInput(env, {
-          runtimeTxs: [
-            {
-              type: 'importJ',
-              data: {
-                name: jurisdictionName,
-                chainId: Number(jurisdictionRaw.chainId || 31338),
-                ticker: String(jurisdictionRaw.currency || 'TRX'),
-                rpcs: [rpc],
-                blockTimeMs,
-                entityProviderDeploymentBlock,
-                contracts: {
-                  depository: String(contracts.depository),
-                  entityProvider: String(contracts.entityProvider),
-                  account: String(contracts.account || ''),
-                  deltaTransformer: String(contracts.deltaTransformer || ''),
-                },
-              },
-            },
-          ],
-          entityInputs: [],
-        });
-      }
-
       return {
         runtimeId: String(env.runtimeId || ''),
         jurisdictionName,
-        jurisdiction: {
-          name: jurisdictionName,
-          address: rpc,
-          chainId: Number(jurisdictionRaw.chainId || 31338),
-          blockTimeMs,
-          depositoryAddress: String(contracts.depository),
-          entityProviderAddress: String(contracts.entityProvider),
-        },
       };
     },
-    { mnemonic, label },
   );
 
   await expect
     .poll(
       async () =>
         page.evaluate(jurisdictionName => {
-          const env = (window as CrossRuntimeWindow).isolatedEnv;
-          const adapter = env?.infrastructure?.liveJAdapters?.get(jurisdictionName);
-          return Boolean(
-            adapter?.addresses?.depository &&
-            adapter?.addresses?.entityProvider &&
-            adapter?.depository &&
-            adapter?.entityProvider &&
-            typeof adapter?.submitTx === 'function',
-          );
+          const connectivity = (window as CrossRuntimeWindow).__xln?.jurisdictionConnectivity;
+          return connectivity?.jurisdictions.some(
+            jurisdiction => jurisdiction.name === jurisdictionName && jurisdiction.connected,
+          ) === true;
         }, result.jurisdictionName),
       {
         timeout: 60_000,
@@ -693,43 +497,30 @@ export async function importRpc2SiblingEntity(
 
   const signer = deriveSigner(mnemonic, result.jurisdictionName);
   const sibling = await page.evaluate(
-    async ({ signer, label, jurisdiction }) => {
+    ({ signer, jurisdictionName }) => {
       const view = window as CrossRuntimeWindow;
       const env = view.isolatedEnv;
       if (!env) throw new Error('isolatedEnv missing');
-      const runtimeModule = view.__xln?.instance;
-      if (!runtimeModule) throw new Error('__xln.instance missing');
-      const privateKeyBytes = new Uint8Array(
-        signer.privateKey
-          .slice(2)
-          .match(/.{2}/g)
-          .map((byte: string) => Number.parseInt(byte, 16)),
-      );
-      runtimeModule.registerSignerKey(env, signer.address, privateKeyBytes);
-      const entityId = runtimeModule.generateLazyEntityId([signer.address], 1n).toLowerCase();
-      const { config } = runtimeModule.createLazyEntity(`${label}-rpc2`, [signer.address], 1n, jurisdiction);
-      const replicaKey = `${entityId}:${signer.address}`.toLowerCase();
-      if (!env.state.eReplicas?.has(replicaKey)) {
-        runtimeModule.enqueueRuntimeInput(env, {
-          runtimeTxs: [
-            {
-              type: 'importReplica',
-              entityId,
-              signerId: signer.address,
-              data: {
-                isProposer: true,
-                config,
-                profileName: `${label}-rpc2`,
-                position: { x: 240, y: 0, z: 0, jurisdiction: jurisdiction.name },
-              },
-            },
-          ],
-          entityInputs: [],
-        });
+      const matches = Array.from(env.state.eReplicas.entries()).filter(([key, replica]) => {
+        const [, signerId] = String(key).split(':');
+        const replicaJurisdiction = String(
+          replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || '',
+        );
+        return signerId?.toLowerCase() === signer.address && replicaJurisdiction === jurisdictionName;
+      });
+      if (matches.length !== 1) {
+        throw new Error(
+          `Expected one pre-imported ${jurisdictionName} sibling for ${signer.address}, found ${matches.length}`,
+        );
       }
-      return { entityId, signerId: signer.address };
+      const [key, replica] = matches[0]!;
+      const [entityId] = String(key).split(':');
+      return {
+        entityId: String(replica?.state?.entityId || replica?.entityId || entityId || '').toLowerCase(),
+        signerId: signer.address,
+      };
     },
-    { signer, label, jurisdiction: result.jurisdiction },
+    { signer: { address: signer.address }, jurisdictionName: result.jurisdictionName },
   );
 
   await expect
@@ -823,20 +614,12 @@ export async function waitForHubProfile(page: Page, hubId: string): Promise<void
     .poll(
       async () =>
         page.evaluate(targetHubId => {
-          const view = window as CrossRuntimeWindow & {
-            p2p?: { refreshGossip?: () => void };
-          };
-          const env = view.isolatedEnv;
-          view.__xln?.instance?.refreshGossip?.(env);
-          view.p2p?.refreshGossip?.();
+          const connectivity = (window as CrossRuntimeWindow).__xln?.runtimeConnectivity;
+          connectivity?.refreshGossip?.();
           const target = String(targetHubId || '').toLowerCase();
-          const profiles = env?.gossip?.getProfiles?.() || [];
-          return profiles.some(
-            (profile: any) =>
-              String(profile?.entityId || '').toLowerCase() === target &&
-              profile?.metadata?.isHub === true &&
-              typeof profile?.runtimeId === 'string' &&
-              profile.runtimeId.length > 0,
+          return (connectivity?.profiles ?? []).some(
+            profile =>
+              profile.entityId.toLowerCase() === target && profile.isHub && profile.runtimeId.length > 0,
           );
         }, hubId),
       {
@@ -851,34 +634,18 @@ export async function waitForHubProfile(page: Page, hubId: string): Promise<void
 export async function flushRuntime(page: Page, rounds = 3): Promise<void> {
   await page.evaluate(async roundsToRun => {
     const view = window as CrossRuntimeWindow;
-    const env = view.isolatedEnv;
-    if (!env) throw new Error('isolatedEnv missing');
-    const runtimeModule = view.__xln?.instance as
-      | {
-          startRuntimeLoop?: (env: unknown) => unknown;
-          waitForRuntimeProcessingIdle?: (env: unknown, timeoutMs?: number) => Promise<boolean>;
-        }
-      | undefined;
-    if (!runtimeModule) throw new Error('__xln.instance missing');
-    if (env.infrastructure?.halted) {
-      throw new Error(`runtime halted before flush: ${JSON.stringify(env.infrastructure.fatalDebugPayload || {})}`);
-    }
-    runtimeModule.startRuntimeLoop?.(env);
-    if (typeof runtimeModule.waitForRuntimeProcessingIdle !== 'function') {
-      throw new Error('__xln.instance.waitForRuntimeProcessingIdle missing');
+    const waitForIdle = view.__xln?.runtimeIngress?.waitForIdle;
+    if (typeof waitForIdle !== 'function') {
+      throw new Error('__xln.runtimeIngress.waitForIdle missing');
     }
     const waitRounds = Math.max(1, Number(roundsToRun) || 1);
     for (let round = 0; round < waitRounds; round += 1) {
-      const idle = await runtimeModule.waitForRuntimeProcessingIdle(env, 1_000);
+      const idle = await waitForIdle(1_000);
       if (!idle) {
         throw new Error('runtime processing did not become idle before flush timeout');
       }
-      if (env.infrastructure?.halted) {
-        throw new Error(`runtime halted during flush: ${JSON.stringify(env.infrastructure.fatalDebugPayload || {})}`);
-      }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    view.isolatedEnv = env as NonNullable<CrossRuntimeWindow['isolatedEnv']>;
   }, rounds);
 }
 
@@ -1010,15 +777,7 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
         page.evaluate(() => {
           const env = (window as CrossRuntimeWindow).isolatedEnv;
           const jurisdictions = Array.from(env?.state.jReplicas?.keys?.() || []).map(name => String(name));
-          const liveAdapters = Array.from(env?.infrastructure?.liveJAdapters?.entries?.() || []);
-          const isConnected = (adapter: any): boolean =>
-            Boolean(
-              adapter?.addresses?.depository &&
-              adapter?.addresses?.entityProvider &&
-              adapter?.depository &&
-              adapter?.entityProvider &&
-              typeof adapter?.submitTx === 'function',
-            );
+          const liveAdapters = (window as CrossRuntimeWindow).__xln?.jurisdictionConnectivity?.jurisdictions ?? [];
           const entities = Array.from(env?.state.eReplicas?.values?.() || []).map((replica: any) => ({
             entityId: String(replica?.state?.entityId || replica?.entityId || ''),
             signerId: String(replica?.signerId || ''),
@@ -1032,11 +791,9 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
             entityJurisdictionCount: entityJurisdictions.size,
             hasTestnet: jurisdictions.some(name => /^testnet$/i.test(name)),
             hasSecondary: jurisdictions.some(name => /tron|rpc2|second/i.test(name)),
-            hasTestnetAdapter: liveAdapters.some(
-              ([name, adapter]: any) => /^testnet$/i.test(String(name)) && isConnected(adapter),
-            ),
+            hasTestnetAdapter: liveAdapters.some(adapter => /^testnet$/i.test(adapter.name) && adapter.connected),
             hasSecondaryAdapter: liveAdapters.some(
-              ([name, adapter]: any) => /tron|rpc2|second/i.test(String(name)) && isConnected(adapter),
+              adapter => /tron|rpc2|second/i.test(adapter.name) && adapter.connected,
             ),
             entities: entities.length,
           };

@@ -798,7 +798,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       );
 
       await page.evaluate(() => {
-        const view = window as CrossRuntimeWindow & { __crossJFrameTrace?: unknown[]; __crossJClickAt?: number };
+        const view = window as CrossRuntimeWindow & { __crossJClickAt?: number };
         const browserProcess = (
           globalThis as typeof globalThis & {
             process?: { env?: Record<string, string | undefined> };
@@ -821,62 +821,6 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           });
           observer.observe({ entryTypes: ['longtask'] });
         }
-        const env = view.isolatedEnv;
-        const runtimeModule = view.__xln?.instance;
-        if (!env || typeof runtimeModule?.registerRuntimeFrameCommitCallback !== 'function') {
-          throw new Error('cross-j Runtime frame trace API missing');
-        }
-        view.__crossJFrameTrace = [];
-        runtimeModule.registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }: any) => {
-          const activeEnv = view.isolatedEnv;
-          const effectiveTxs = (input: any) =>
-            Array.from(input?.entityTxs || []).flatMap((tx: any) =>
-              tx?.type === 'consensusOutput' || tx?.type === 'runtimeOutput'
-                ? Array.from(tx?.data?.entityTxs || [])
-                : [tx],
-            );
-          const accountInputs = (input: any) =>
-            effectiveTxs(input).flatMap((tx: any) => {
-              if (tx?.type !== 'accountInput') return [];
-              const data = tx.data || {};
-              return [
-                {
-                  entityId: String(input.entityId || ''),
-                  runtimeId: String(input.runtimeId || ''),
-                  sourceRuntimeFrame: input.sourceRuntimeFrame || null,
-                  kind: String(data.kind || ''),
-                  ackHeight: Number(data.ack?.height ?? -1),
-                  proposalHeight: Number(data.proposal?.frame?.height ?? -1),
-                  accountTxTypes: Array.from(data.proposal?.frame?.accountTxs || []).map((accountTx: any) =>
-                    String(accountTx?.type || ''),
-                  ),
-                },
-              ];
-            });
-          view.__crossJFrameTrace!.push({
-            height,
-            wallAfterClickMs: view.__crossJClickAt ? Date.now() - view.__crossJClickAt : null,
-            inputEntityTxTypes: Array.from(runtimeInput?.entityInputs || []).map((input: any) => ({
-              entityId: String(input?.entityId || ''),
-              txTypes: effectiveTxs(input).map((tx: any) => String(tx?.type || '')),
-            })),
-            crossRoutes: Array.from(activeEnv?.state.eReplicas?.values?.() || []).flatMap((replica: any) =>
-              Array.from(replica?.state?.crossJurisdictionSwaps?.values?.() || []).map((route: any) => ({
-                entityId: String(replica?.state?.entityId || replica?.entityId || ''),
-                orderId: String(route?.orderId || ''),
-                status: String(route?.status || ''),
-              })),
-            ),
-            inputAccountInputs: Array.from(runtimeInput?.entityInputs || []).flatMap(accountInputs),
-            inputReliableReceipts: Array.from(runtimeInput?.reliableReceipts || []).map((receipt: any) => ({
-              kind: String(receipt?.body?.identity?.kind || ''),
-              height: Number(receipt?.body?.identity?.height ?? -1),
-              coverage: String(receipt?.body?.coverage || ''),
-              receiverRuntimeId: String(receipt?.body?.receiverRuntimeId || ''),
-            })),
-            pendingOutputAccountInputs: Array.from(activeEnv?.pendingNetworkOutputs || []).flatMap(accountInputs),
-          });
-        });
       });
 
       const cdp = await page.context().newCDPSession(page);
@@ -959,11 +903,6 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         }));
       console.log(`[E2E-CROSS-J-CPU-INCLUSIVE] ${JSON.stringify(inclusiveCpuTop)}`);
       console.log(`[E2E-CROSS-J-LONG-TASKS] ${JSON.stringify(longTasks.slice(-30))}`);
-      const frameTrace = await page.evaluate(
-        () => (window as CrossRuntimeWindow & { __crossJFrameTrace?: unknown[] }).__crossJFrameTrace ?? [],
-      );
-      console.log(`[E2E-CROSS-J-FRAMES] ${JSON.stringify(frameTrace)}`);
-
       await timedStep('cross_j_auto_setup.wait_target_account', () =>
         waitForAccountReady(page, target, targetHub.entityId, [USDC], 90_000),
       );

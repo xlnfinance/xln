@@ -458,11 +458,7 @@ export async function placeCrossOrder(
               height: Number(env?.state.height || 0),
               timestamp: Number(env?.state.timestamp || 0),
               scenarioMode: Boolean(env?.scenarioMode),
-              loopActive: Boolean(env?.infrastructure?.loopActive),
-              wakeRequested: Boolean(env?.infrastructure?.wakeRequested),
-              processing: Boolean(env?.infrastructure?.processingPromise),
               lastProcessEnteredAt: Number(env?.lastProcessEnteredAt || 0),
-              lastFrameAt: Number(env?.infrastructure?.lastFrameAt || 0),
               minFrameDelayMs: Number(env?.runtimeConfig?.minFrameDelayMs || 0),
               queuedAt: Number(env?.runtimeMempool?.queuedAt || 0),
               runtimeInputTypes: Array.from(env?.runtimeInput?.entityInputs || []).map((input: any) => ({
@@ -537,7 +533,6 @@ export async function placeCrossOrder(
             pendingNetworkOutputs: state.pendingNetworkOutputs,
             runtimeMempoolInputs: state.runtimeMempoolInputs,
             p2pState: state.p2pState,
-            recoveryBarrier: state.recoveryBarrier,
             messages: state.messages.slice(-10),
           };
           const route = state.routeSummaries.find(candidate => candidate.orderId === createdOrderId);
@@ -643,7 +638,6 @@ export async function readCrossState(
     precommits: number;
   }>;
   p2pState: { exists: boolean; connected: boolean; queue: unknown; directPeers: unknown };
-  recoveryBarrier: boolean;
   ownerIsLeft: boolean;
   deltas: Record<string, CrossDeltaSnapshot>;
   currentFrameFees: Record<string, string>;
@@ -652,7 +646,9 @@ export async function readCrossState(
 }> {
   return await page.evaluate(
     ({ identity, hubId }) => {
-      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const view = window as CrossRuntimeWindow;
+      const env = view.isolatedEnv;
+      const connectivity = view.__xln?.runtimeConnectivity;
       const entityNeedle = String(identity.entityId || '').toLowerCase();
       const signerNeedle = String(identity.signerId || '').toLowerCase();
       const hubNeedle = String(hubId || '').toLowerCase();
@@ -771,12 +767,11 @@ export async function readCrossState(
           precommits: Number(input?.hashPrecommits?.size || 0),
         })),
         p2pState: {
-          exists: Boolean(env?.infrastructure?.p2p),
-          connected: Boolean(env?.infrastructure?.p2p?.isConnected?.()),
-          queue: env?.infrastructure?.p2p?.getQueueState?.() || null,
-          directPeers: env?.infrastructure?.p2p?.getDirectPeerState?.() || null,
+          exists: Boolean(connectivity),
+          connected: connectivity?.connected === true,
+          queue: connectivity?.queue ?? null,
+          directPeers: connectivity?.directPeers ?? null,
         },
-        recoveryBarrier: Boolean(env?.infrastructure?.recoveryBackupBarrier),
         ownerIsLeft: entityNeedle === String(account?.state?.leftEntity || '').toLowerCase(),
         currentFrameFees: Array.from(account?.currentFrame?.accountTxs || []).reduce(
           (fees: Record<string, string>, tx: any) => {

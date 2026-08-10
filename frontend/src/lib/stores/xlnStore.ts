@@ -1667,6 +1667,22 @@ export async function submitActiveRuntimeInput(
   return routeRuntimeInput(xln, env, input, commandOptions);
 }
 
+async function waitForActiveRuntimeIdle(timeoutMs = 1_000): Promise<boolean> {
+  const xln = await getXLN();
+  const env = await resolveActiveRuntimeCommandEnv(xln);
+  const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+  const fatalPayload = (): unknown => runtimeEnv.infrastructure?.fatalDebugPayload ?? null;
+  if (runtimeEnv.infrastructure?.halted) {
+    throw new Error(`ACTIVE_RUNTIME_HALTED:${xln.safeStringify(fatalPayload())}`);
+  }
+  xln.startRuntimeLoop(runtimeEnv);
+  const idle = await xln.waitForRuntimeProcessingIdle(runtimeEnv, timeoutMs);
+  if (runtimeEnv.infrastructure?.halted) {
+    throw new Error(`ACTIVE_RUNTIME_HALTED:${xln.safeStringify(fatalPayload())}`);
+  }
+  return idle;
+}
+
 export async function dispatchRuntimeInputToRuntimeEnv(env: RuntimeReplica, input: RuntimeInput): Promise<RuntimeReplica | null> {
   assertRuntimeViewIsLive(get(runtimeView));
   assertNetworkMachineIsLive(get(networkMachineRuntime));
@@ -1744,6 +1760,7 @@ export async function submitEntityInputs(inputs: RoutedEntityInput[] = []): Prom
 // View snapshots are intentionally detached and are never mutation authority.
 registerDebugSurface('runtimeIngress', () => ({
   submit: submitActiveRuntimeInput,
+  waitForIdle: waitForActiveRuntimeIdle,
 }));
 
 // === FRONTEND UTILITY FUNCTIONS ===

@@ -4,6 +4,7 @@ import { activeRuntimeId, runtimes } from './runtimeStore';
 import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import { errorLog } from './errorLogStore';
+import { hasConnectedJurisdictionAdapter } from './vault-helpers';
 
 const bootstrapEnvironment = writable<RuntimeReplica | null>(null);
 
@@ -35,6 +36,7 @@ registerDebugSurface('runtimeConnectivity', () => {
       entityId: profile.entityId,
       runtimeId: profile.runtimeId,
       wsUrl: profile.wsUrl,
+      isHub: profile.metadata?.isHub === true,
     })),
     directPeers: p2p?.getDirectPeerState?.() ?? [],
     queue: p2p?.getQueueState?.() ?? null,
@@ -45,6 +47,18 @@ registerDebugSurface('runtimeConnectivity', () => {
     ensureProfiles: (entityIds: string[]) => p2p?.ensureProfiles?.(entityIds) ?? Promise.resolve(false),
   };
 });
+registerDebugSurface('jurisdictionConnectivity', () => ({
+  runtimeId: String(localRuntimeEnv?.runtimeId || ''),
+  jurisdictions: Array.from(localRuntimeEnv?.state.jReplicas.keys() ?? [], name => {
+    const adapter = localRuntimeEnv?.infrastructure?.liveJAdapters?.get(name);
+    return {
+      name: String(name),
+      connected: localRuntimeEnv ? hasConnectedJurisdictionAdapter(localRuntimeEnv, name) : false,
+      mode: adapter?.mode ?? null,
+      watching: Boolean(adapter?.isWatching?.()),
+    };
+  }),
+}));
 
 export function setXlnEnvironment(env: RuntimeReplica | null): void {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;

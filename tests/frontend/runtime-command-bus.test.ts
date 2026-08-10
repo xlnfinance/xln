@@ -62,6 +62,7 @@ test('runtime command bus records pending accepted observed committed error rece
 
 test('browser E2E mutations use the live runtime command bus instead of a detached view RuntimeReplica', () => {
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  const embeddedSource = readFileSync('frontend/src/lib/stores/embeddedRuntimeStore.ts', 'utf8');
   const helperSource = readFileSync('tests/utils/e2e-runtime-input.ts', 'utf8');
   const enqueueStart = helperSource.indexOf('export async function enqueueRuntimeInput');
   const enqueueEnd = helperSource.indexOf('export async function enqueueEntityTxs', enqueueStart);
@@ -69,6 +70,10 @@ test('browser E2E mutations use the live runtime command bus instead of a detach
 
   expect(storeSource).toContain("registerDebugSurface('runtimeIngress'");
   expect(storeSource).toContain('submit: submitActiveRuntimeInput');
+  expect(storeSource).toContain('waitForIdle: waitForActiveRuntimeIdle');
+  expect(storeSource).toContain('ACTIVE_RUNTIME_HALTED:${xln.safeStringify(fatalPayload())}');
+  expect(embeddedSource).toContain("registerDebugSurface('jurisdictionConnectivity'");
+  expect(embeddedSource).toContain('hasConnectedJurisdictionAdapter(localRuntimeEnv, name)');
   expect(enqueueSource).toContain('runtimeIngress.submit(input)');
   expect(enqueueSource).not.toContain('isolatedEnv');
   expect(enqueueSource).not.toContain('await import(');

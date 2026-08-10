@@ -5,6 +5,27 @@ import { join } from 'node:path';
 const repoRoot = process.cwd();
 
 describe('e2e demo user helper', () => {
+  test('cross-j browser helpers never mutate a detached Runtime view', () => {
+    const paths = [
+      'tests/e2e-cross-j-swap-helpers-a.ts',
+      'tests/e2e-cross-j-swap-helpers-b.ts',
+      'tests/e2e-cross-j-swap.spec.ts',
+    ];
+    const source = paths.map(path => readFileSync(join(repoRoot, path), 'utf8')).join('\n');
+    const forbidden = [
+      'isolatedEnv.infrastructure',
+      'enqueueRuntimeInput(env',
+      'applyJEventsToEnv(',
+      'registerSignerKey(env',
+      'registerRuntimeFrameCommitCallback(env',
+      'waitForRuntimeProcessingIdle(env',
+    ];
+
+    for (const pattern of forbidden) expect(source).not.toContain(pattern);
+    expect(source).toContain('__xln?.jurisdictionConnectivity');
+    expect(source).toContain('__xln?.runtimeIngress?.waitForIdle');
+  });
+
   test('assists profile onboarding before waiting for runtime readiness', () => {
     const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-demo-users.ts'), 'utf8');
     const waitForReadyStart = helper.indexOf('async function waitForReadyAfterCreate');
