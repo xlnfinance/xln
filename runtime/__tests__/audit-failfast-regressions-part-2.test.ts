@@ -1921,6 +1921,8 @@ describe('audit fail-fast regressions', () => {
       giveAmount,
       wantTokenId: 1,
       wantAmount,
+      maxFee: 0n,
+      minNetReceive: wantAmount,
       priceTicks: 3_000n * ORDERBOOK_PRICE_SCALE,
       timeInForce: 0,
       makerIsLeft,
@@ -1990,6 +1992,8 @@ describe('audit fail-fast regressions', () => {
         giveAmount: baseAmount,
         wantTokenId: 1,
         wantAmount: quoteAmount,
+        maxFee: 0n,
+        minNetReceive: quoteAmount,
       },
     });
     const takerOffer = await proposalFor(taker, {
@@ -2000,6 +2004,8 @@ describe('audit fail-fast regressions', () => {
         giveAmount: quoteAmount,
         wantTokenId: 2,
         wantAmount: baseAmount,
+        maxFee: 0n,
+        minNetReceive: baseAmount,
       },
     });
 
