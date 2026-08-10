@@ -32,6 +32,7 @@
   import {
     createPaymentTerminalMonitor,
     PAYMENT_TERMINAL_EVENT_NAMES,
+    sharedPaymentTerminalCursorStore,
     type PaymentTerminalEvent,
     type PaymentTerminalReadRequest,
     type PaymentTerminalReceiptPage,
@@ -400,6 +401,7 @@
         readPage: readPaymentTerminalReceipts,
         onEvent: surfacePaymentTerminalEvent,
         onError: surfacePaymentTerminalError,
+        cursorStore: sharedPaymentTerminalCursorStore,
       });
       unsubPaymentTerminalHandle = runtimeControllerHandle.subscribe(syncPaymentTerminalObservation);
       unsubPaymentTerminalView = runtimeView.subscribe(syncPaymentTerminalObservation);

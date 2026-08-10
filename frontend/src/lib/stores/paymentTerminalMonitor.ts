@@ -48,10 +48,15 @@ type PaymentTerminalMonitorDeps = {
   readPage: (request: PaymentTerminalReadRequest) => Promise<PaymentTerminalReceiptPage>;
   onEvent: (event: PaymentTerminalEvent) => void;
   onError: (error: unknown) => void;
+  cursorStore?: Map<string, number>;
   waitBeforeRetry?: () => Promise<void>;
   isRetryableGapError?: (error: unknown) => boolean;
   maxGapRetries?: number;
 };
+
+// A View can be recreated while a durable frame read is in flight. Its
+// successor must resume the last unconsumed frame instead of baselining past it.
+export const sharedPaymentTerminalCursorStore = new Map<string, number>();
 
 const PAGE_SIZE = 500;
 const DEFAULT_MAX_GAP_RETRIES = 20;
@@ -101,6 +106,7 @@ class PaymentTerminalMonitor {
   private readonly waitBeforeRetry: () => Promise<void>;
   private readonly isRetryableGapError: (error: unknown) => boolean;
   private readonly maxGapRetries: number;
+  private readonly cursorStore: Map<string, number>;
   private readonly seenEventKeys = new Set<string>();
   private generation = 0;
   private activeKey = '';
@@ -115,6 +121,7 @@ class PaymentTerminalMonitor {
     this.waitBeforeRetry = deps.waitBeforeRetry ?? defaultWaitBeforeRetry;
     this.isRetryableGapError = deps.isRetryableGapError ?? defaultIsRetryableGapError;
     this.maxGapRetries = deps.maxGapRetries ?? DEFAULT_MAX_GAP_RETRIES;
+    this.cursorStore = deps.cursorStore ?? new Map<string, number>();
   }
 
   observe(observation: PaymentTerminalObservation): void {
@@ -130,6 +137,7 @@ class PaymentTerminalMonitor {
     const key = `${runtimeId}:${entityId}`;
     if (key !== this.activeKey || height < this.nextHeight - 1) {
       this.reset({ ...observation, runtimeId, entityId, height });
+      this.startDrain();
       return;
     }
     this.targetHeight = Math.max(this.targetHeight, height);
@@ -147,9 +155,11 @@ class PaymentTerminalMonitor {
     this.activeEntityId = normalizeId(observation?.entityId);
     this.activeKey = observation ? `${this.activeRuntimeId}:${this.activeEntityId}` : '';
     const height = Math.max(0, Math.floor(Number(observation?.height || 0)));
-    this.nextHeight = height + 1;
+    const storedNextHeight = this.activeKey ? this.cursorStore.get(this.activeKey) : undefined;
+    this.nextHeight = Math.max(1, Math.min(storedNextHeight ?? height + 1, height + 1));
     this.targetHeight = height;
     this.paused = !observation;
+    if (this.activeKey) this.rememberCursor(this.nextHeight);
   }
 
   private pause(): void {
@@ -186,6 +196,7 @@ class PaymentTerminalMonitor {
       if (page.scannedThroughHeight >= pageEnd) {
         this.emitPageEvents(page, expectedGeneration);
         this.nextHeight = pageEnd + 1;
+        this.rememberCursor(this.nextHeight);
         return true;
       }
       if (attempt >= this.maxGapRetries) {
@@ -229,6 +240,13 @@ class PaymentTerminalMonitor {
     if (this.seenEventKeys.size <= 1000) return;
     const oldest = this.seenEventKeys.values().next().value;
     if (oldest) this.seenEventKeys.delete(oldest);
+  }
+
+  private rememberCursor(nextHeight: number): void {
+    this.cursorStore.set(this.activeKey, nextHeight);
+    if (this.cursorStore.size <= 200) return;
+    const oldest = this.cursorStore.keys().next().value;
+    if (oldest) this.cursorStore.delete(oldest);
   }
 }
 

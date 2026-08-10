@@ -65,6 +65,28 @@ test('baselines current height and emits only new exact-entity terminal events',
   monitor.stop();
 });
 
+test('recovers a terminal event from the current frame after observer restart', async () => {
+  const events: PaymentTerminalEvent[] = [];
+  const cursorStore = new Map<string, number>();
+  const createMonitor = () => createPaymentTerminalMonitor({
+    readPage: async (request) => terminalPage(request),
+    onEvent: (event) => events.push(event),
+    onError: (error) => { throw error; },
+    cursorStore,
+  });
+
+  const oldMonitor = createMonitor();
+  oldMonitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 4, connected: true });
+  oldMonitor.stop();
+
+  const restartedMonitor = createMonitor();
+  restartedMonitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 5, connected: true });
+  await waitFor(() => events.length === 1);
+
+  expect(events[0]).toMatchObject({ runtimeId: RUNTIME_A, height: 5, name: 'HtlcFinalized' });
+  restartedMonitor.stop();
+});
+
 test('serializes height bursts and drains them in bounded 500-frame pages', async () => {
   const reads: PaymentTerminalReadRequest[] = [];
   const monitor = createPaymentTerminalMonitor({
