@@ -33,7 +33,7 @@ import { getDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-
 
 type HtlcPaymentTx = Extract<EntityTx, { type: 'htlcPayment' }>;
 type PreparedRouteProfile = NonNullable<HtlcPaymentTx['data']['preparedRouteProfiles']>[number];
-type RoutingProfile = Pick<Profile, 'entityId' | 'accounts'> & {
+export type RoutingProfile = Pick<Profile, 'entityId' | 'accounts'> & {
   metadata: Pick<Profile['metadata'], 'routingFeePPM' | 'baseFee'>;
 };
 
@@ -66,6 +66,7 @@ export type ValidatedPreparedHtlcPayment = Readonly<{
   startedAtMs: number;
   hashlock: string;
   senderLockAmount: bigint;
+  maxSenderDebit: bigint;
   totalFee: bigint;
   lockId: string;
   timelock: bigint;
@@ -167,13 +168,16 @@ const normalizeHashlock = (value: unknown): string => {
   return hashlock;
 };
 
-const RAW_PAYMENT_REQUIRED_FIELDS = ['amount', 'deliveryMode', 'route', 'targetEntityId', 'tokenId'] as const;
+const RAW_PAYMENT_REQUIRED_FIELDS = [
+  'amount', 'deliveryMode', 'maxSenderDebit', 'route', 'targetEntityId', 'tokenId',
+] as const;
 const RAW_PAYMENT_OPTIONAL_FIELDS = ['description', 'hashlock', 'startedAtMs'] as const;
 const PREPARED_PAYMENT_FIELDS = [
   'amount',
   'deliveryMode',
   'description',
   'hashlock',
+  'maxSenderDebit',
   'preparedAtEntityHeight',
   'preparedAtJHeight',
   'preparedEnvelope',
@@ -256,7 +260,7 @@ const feeForHop = (profile: RoutingProfile, nextHop: string, tokenId: number): {
   };
 };
 
-const quoteRoute = (
+export const quoteHtlcPaymentRoute = (
   profiles: RoutingProfile[],
   route: string[],
   tokenId: number,
@@ -486,6 +490,7 @@ type EnvelopeBuildInput = Readonly<{
   tokenId: number;
   recipientAmount: bigint;
   senderLockAmount: bigint;
+  maxSenderDebit: bigint;
   totalFee: bigint;
   description: string;
   deliveryMode: 'instant' | 'async';
@@ -507,6 +512,7 @@ const canonicalEnvelopeSeed = (input: EnvelopeBuildInput): string =>
     tokenId: input.tokenId,
     recipientAmount: input.recipientAmount,
     senderLockAmount: input.senderLockAmount,
+    maxSenderDebit: input.maxSenderDebit,
     totalFee: input.totalFee,
     description: input.description,
     deliveryMode: input.deliveryMode,
@@ -600,6 +606,8 @@ export const prepareHtlcPaymentEntityTx = async (
   assertExactPaymentFields(tx.data, 'raw');
   const targetEntityId = normalizeEntityId(tx.data.targetEntityId, 'HTLC_PAYMENT_TARGET_INVALID');
   const recipientAmount = parsePositiveBigInt(tx.data.amount, 'HTLC_PAYMENT_AMOUNT_INVALID');
+  const maxSenderDebit = parsePositiveBigInt(tx.data.maxSenderDebit, 'HTLC_PAYMENT_MAX_SENDER_DEBIT_INVALID');
+  if (maxSenderDebit < recipientAmount) throw new Error('HTLC_PAYMENT_MAX_SENDER_DEBIT_BELOW_AMOUNT');
   if (!Number.isSafeInteger(tx.data.tokenId) || tx.data.tokenId < 0) throw new Error('HTLC_PAYMENT_TOKEN_INVALID');
   const deliveryMode = tx.data.deliveryMode;
   if (deliveryMode !== 'instant' && deliveryMode !== 'async') throw new Error('HTLC_PAYMENT_DELIVERY_MODE_INVALID');
@@ -627,7 +635,8 @@ export const prepareHtlcPaymentEntityTx = async (
   );
   const route = await resolveRoute(env, state, tx, recipientAmount, targetEntityId);
   const profiles = requireProfiles(env);
-  const quote = quoteRoute(profiles, route, tx.data.tokenId, recipientAmount);
+  const quote = quoteHtlcPaymentRoute(profiles, route, tx.data.tokenId, recipientAmount);
+  if (quote.senderLockAmount > maxSenderDebit) throw new Error('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
   const deadlines = paymentDeadlines({ timestamp: startedAtMs, jHeight: preparedAtJHeight }, deliveryMode, route);
   const lockId = generateLockId(hashlock, preparedAtEntityHeight, 0, startedAtMs);
   const certified = await certifyRouteProfiles(env, profiles, route);
@@ -640,6 +649,7 @@ export const prepareHtlcPaymentEntityTx = async (
     tokenId: tx.data.tokenId,
     recipientAmount,
     senderLockAmount: quote.senderLockAmount,
+    maxSenderDebit,
     totalFee,
     description,
     deliveryMode,
@@ -657,6 +667,7 @@ export const prepareHtlcPaymentEntityTx = async (
       targetEntityId,
       tokenId: tx.data.tokenId,
       amount: recipientAmount,
+      maxSenderDebit,
       route,
       deliveryMode,
       startedAtMs,
@@ -709,6 +720,7 @@ type PreparedPaymentBasics = Readonly<{
   targetEntityId: string;
   route: string[];
   recipientAmount: bigint;
+  maxSenderDebit: bigint;
   deliveryMode: 'instant' | 'async';
   description: string;
   startedAtMs: number;
@@ -722,6 +734,8 @@ const validatePreparedPaymentBasics = (state: EntityState, tx: HtlcPaymentTx): P
   const targetEntityId = normalizeEntityId(tx.data.targetEntityId, 'HTLC_PAYMENT_TARGET_INVALID');
   const route = normalizeRoute(tx.data.route, state.entityId.toLowerCase(), targetEntityId);
   const recipientAmount = parsePositiveBigInt(tx.data.amount, 'HTLC_PAYMENT_AMOUNT_INVALID');
+  const maxSenderDebit = parsePositiveBigInt(tx.data.maxSenderDebit, 'HTLC_PAYMENT_MAX_SENDER_DEBIT_INVALID');
+  if (maxSenderDebit < recipientAmount) throw new Error('HTLC_PAYMENT_MAX_SENDER_DEBIT_BELOW_AMOUNT');
   if (!Number.isSafeInteger(tx.data.tokenId) || tx.data.tokenId < 0) throw new Error('HTLC_PAYMENT_TOKEN_INVALID');
   const deliveryMode = tx.data.deliveryMode;
   if (deliveryMode !== 'instant' && deliveryMode !== 'async') throw new Error('HTLC_PAYMENT_DELIVERY_MODE_INVALID');
@@ -746,6 +760,7 @@ const validatePreparedPaymentBasics = (state: EntityState, tx: HtlcPaymentTx): P
     targetEntityId,
     route,
     recipientAmount,
+    maxSenderDebit,
     deliveryMode,
     description,
     startedAtMs,
@@ -765,6 +780,7 @@ export const validatePreparedHtlcPayment = async (
     targetEntityId,
     route,
     recipientAmount,
+    maxSenderDebit,
     deliveryMode,
     description,
     startedAtMs,
@@ -773,7 +789,7 @@ export const validatePreparedHtlcPayment = async (
     preparedAtJHeight,
   } = basics;
   const certified = await validatePreparedRouteProfiles(env, state, route, tx.data.preparedRouteProfiles);
-  const quote = quoteRoute(certified.routingProfiles, route, tx.data.tokenId, recipientAmount);
+  const quote = quoteHtlcPaymentRoute(certified.routingProfiles, route, tx.data.tokenId, recipientAmount);
   const senderLockAmount = parsePositiveBigInt(
     tx.data.preparedSenderLockAmount,
     'HTLC_PAYMENT_PREPARED_AMOUNT_INVALID',
@@ -787,6 +803,7 @@ export const validatePreparedHtlcPayment = async (
   ) {
     throw new Error('HTLC_PAYMENT_PREPARED_QUOTE_MISMATCH');
   }
+  if (senderLockAmount > maxSenderDebit) throw new Error('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
   validatePreparedForwardAmounts(route, tx.data.preparedHopForwardAmounts, quote.hopForwardAmounts);
   const lockId = String(tx.data.preparedLockId || '').toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(lockId)) throw new Error('HTLC_PAYMENT_PREPARED_LOCK_ID_INVALID');
@@ -844,6 +861,7 @@ export const validatePreparedHtlcPayment = async (
     startedAtMs,
     hashlock,
     senderLockAmount,
+    maxSenderDebit,
     totalFee,
     lockId,
     timelock,

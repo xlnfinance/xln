@@ -41,6 +41,8 @@ export type SwapCommandPlanInput = Readonly<{
   wantTokenId: number;
   giveAmount: bigint;
   priceTicks: bigint;
+  maxFee: bigint;
+  minNetReceive: bigint;
   source: SwapCommandParty;
   target?: SwapCommandParty;
   allowOpenTargetAccount?: boolean;
@@ -241,6 +243,14 @@ export const planSwapCommand = (input: SwapCommandPlanInput): SwapCommandPlan =>
     if (input.giveTokenId === input.wantTokenId) {
       throw new Error('SWAP_COMMAND_SAME_J_TOKEN_PAIR_INVALID');
     }
+    if (
+      input.maxFee < 0n ||
+      input.minNetReceive <= 0n ||
+      input.maxFee >= preparedOrder.effectiveWant ||
+      input.minNetReceive > preparedOrder.effectiveWant
+    ) {
+      throw new Error('SWAP_COMMAND_NET_AUTHORIZATION_INVALID');
+    }
     const capacityPlan = inboundPlan(
       source,
       input.wantTokenId,
@@ -263,6 +273,8 @@ export const planSwapCommand = (input: SwapCommandPlanInput): SwapCommandPlan =>
             giveAmount: preparedOrder.effectiveGive,
             wantTokenId: input.wantTokenId,
             wantAmount: preparedOrder.effectiveWant,
+            maxFee: input.maxFee,
+            minNetReceive: input.minNetReceive,
             priceTicks: preparedOrder.priceTicks,
           },
         },
@@ -274,6 +286,9 @@ export const planSwapCommand = (input: SwapCommandPlanInput): SwapCommandPlan =>
 
   const target = input.target ? requireParty(input.target, 'TARGET') : null;
   if (!target) throw new Error('SWAP_COMMAND_TARGET_REQUIRED');
+  if (input.maxFee !== 0n || input.minNetReceive !== preparedOrder.effectiveWant) {
+    throw new Error('SWAP_COMMAND_CROSS_J_NET_AUTHORIZATION_INVALID');
+  }
   if (source.jurisdiction === target.jurisdiction) {
     throw new Error('SWAP_COMMAND_CROSS_J_REQUIRES_DISTINCT_JURISDICTIONS');
   }

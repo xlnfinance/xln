@@ -1286,20 +1286,9 @@ test.describe('debt ledger', () => {
       },
     });
 
-    const finalizeBatchBefore = await readJBatchSnapshot(alicePage, alice.entityId, alice.signerId);
     await waitForUnixSeconds(alicePage, disputeState.disputeTimeout);
 
     step('dispute-finalize-auto');
-    await expect
-      .poll(async () => {
-        const snapshot = await readJBatchSnapshot(alicePage, alice.entityId, alice.signerId);
-        return snapshot.batchHistoryCount;
-      }, {
-        // The authenticated watcher advances at most 256 headers per poll.
-        timeout: 180_000,
-        intervals: [500, 1000, 2000],
-      })
-      .toBeGreaterThan(finalizeBatchBefore.batchHistoryCount);
     await expect
       .poll(async () => {
         const state = await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId);

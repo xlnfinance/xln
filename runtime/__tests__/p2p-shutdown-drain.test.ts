@@ -60,6 +60,23 @@ test('direct runtime quiesce is info-level backpressure, not a transport warning
   expect(warnings).toEqual(['WS_DIRECT_ERROR']);
 });
 
+test('an unauthenticated duplicate-runtime close cannot permanently stop a headless client', () => {
+  const client = new RuntimeWsClient({
+    url: 'ws://127.0.0.1:1/relay',
+    runtimeId: RUNTIME_ID,
+    helloAudience: 'ws://127.0.0.1:1/relay',
+  });
+  const internals = client as unknown as {
+    closed: boolean;
+    shouldReconnectAfterClose: (code: number, reason: string) => boolean;
+  };
+
+  expect(internals.shouldReconnectAfterClose(4009, 'superseded-runtime')).toBe(true);
+  expect(internals.closed).toBe(false);
+  expect(internals.shouldReconnectAfterClose(1006, 'duplicate-runtime')).toBe(true);
+  expect(internals.closed).toBe(false);
+});
+
 test('websocket client remains closed until the authenticated hello settles', async () => {
   let releaseHandshake!: () => void;
   const handshakeGate = new Promise<void>((resolve) => { releaseHandshake = resolve; });

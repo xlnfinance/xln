@@ -28,6 +28,8 @@ export interface SwapOfferLike {
   giveAmount: bigint;
   quantizedGive?: bigint;
   quantizedWant?: bigint;
+  maxFee: bigint;
+  minNetReceive: bigint;
 }
 
 export interface NormalizedOrderbookOffer extends SwapOfferLike {
@@ -37,6 +39,8 @@ export interface NormalizedOrderbookOffer extends SwapOfferLike {
   fromEntity: string;
   toEntity: string;
   wantAmount: bigint;
+  maxFee: bigint;
+  minNetReceive: bigint;
   priceTicks: bigint;
   timeInForce: 0 | 1 | 2;
   createdHeight: number;
@@ -53,6 +57,8 @@ export interface OrderbookOfferInput {
   giveAmount: bigint;
   wantTokenId: number;
   wantAmount: bigint;
+  maxFee: bigint;
+  minNetReceive: bigint;
   priceTicks?: bigint | undefined;
   timeInForce?: 0 | 1 | 2 | undefined;
   crossJurisdiction?: CrossJurisdictionSwapRoute | undefined;
@@ -78,6 +84,8 @@ export const normalizeSwapOfferForOrderbook = (
     giveAmount: offer.giveAmount,
     wantTokenId: offer.wantTokenId,
     wantAmount: offer.wantAmount,
+    maxFee: offer.maxFee,
+    minNetReceive: offer.minNetReceive,
     priceTicks,
     timeInForce: offer.timeInForce ?? 0,
     ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),

@@ -507,6 +507,7 @@ const submitWithdrawal = async (withdrawal: WithdrawalRecord) => await withPayme
     targetEntityId: withdrawal.targetEntityId,
     tokenId: withdrawal.tokenId,
     amount: withdrawal.requestedAmountMinor.toString(),
+    maxSenderDebit: withdrawal.amountMinor.toString(),
     description: withdrawal.description,
     route,
     mode: 'async',

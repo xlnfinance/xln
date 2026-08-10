@@ -28,6 +28,7 @@ import {
 import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta } from '../account/utils';
 import { isLeftEntity } from '../entity/id';
+import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 import {
   bindScenarioJReplica,
   createJurisdictionConfig,
@@ -355,6 +356,7 @@ export async function runRebalanceScenario(): Promise<void> {
         targetEntityId: bob.id,
         tokenId: USDC_TOKEN_ID,
         amount: usd(8_000),
+        maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC_TOKEN_ID, usd(8_000)).senderLockAmount,
         route: [alice.id, hub.id, bob.id],
         deliveryMode: 'instant',
         description: 'Alice→Hub→Bob $8K',
@@ -374,6 +376,7 @@ export async function runRebalanceScenario(): Promise<void> {
         targetEntityId: dave.id,
         tokenId: USDC_TOKEN_ID,
         amount: usd(12_000),
+        maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [charlie.id, hub.id, dave.id], USDC_TOKEN_ID, usd(12_000)).senderLockAmount,
         route: [charlie.id, hub.id, dave.id],
         deliveryMode: 'instant',
         description: 'Charlie→Hub→Dave $12K',

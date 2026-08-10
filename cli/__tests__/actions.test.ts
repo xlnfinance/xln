@@ -1,12 +1,32 @@
 import { describe, expect, test } from 'bun:test';
 import { buildOpenHubAccountInput } from '../lib/actions/open-account';
-import { buildPaymentInput } from '../lib/actions/pay';
+import { buildPaymentInput, ensureCliPaymentProfiles } from '../lib/actions/pay';
 import { buildMoveInput } from '../lib/actions/move';
 import { buildReceiveInvoice } from '../lib/actions/pay';
 import { normalizeNativeDeepLinkPath } from '../../frontend/src/lib/native/deeplink';
 import { parseXlnInvoice } from '../../frontend/src/lib/utils/xlnInvoice';
+import { resolveCliHubPartyRoles } from '../lib/account-role-evidence';
 
 describe('cli action builders', () => {
+  test('hub role evidence uses committed Entity profile plus authorized public hub', () => {
+    const sourceEntityId = `0x${'11'.repeat(32)}`;
+    const hubEntityId = `0x${'22'.repeat(32)}`;
+    const roles = resolveCliHubPartyRoles({
+      entityId: sourceEntityId,
+      env: {
+        state: { eReplicas: new Map([['source', { state: { entityId: sourceEntityId, profile: { isHub: false } } }]]) },
+        gossip: { getProfiles: () => [] },
+      },
+    } as never, hubEntityId, {
+      entityId: hubEntityId,
+      runtimeId: null,
+      metadata: { isHub: true },
+      roleSource: 'operator-config',
+    });
+    expect(roles.entityRoleEvidence).toMatchObject({ isHub: false, source: 'committed-profile' });
+    expect(roles.hubRoleEvidence).toMatchObject({ isHub: true, source: 'operator-config' });
+  });
+
   test('openAccount runtime input shape', () => {
     const input = buildOpenHubAccountInput({
       sourceEntityId: '0xaaa',
@@ -14,11 +34,15 @@ describe('cli action builders', () => {
       hubEntityId: '0xhub',
       creditAmount: 100n,
       tokenId: 1,
+      sourceRoleEvidence: { entityId: '0xaaa', isHub: false, source: 'committed-profile' },
+      hubRoleEvidence: { entityId: '0xhub', isHub: true, source: 'verified-gossip-profile' },
+      committedRoles: new Map([['0xaaa', false]]),
     });
     expect(input.entityInputs[0]?.entityTxs[0]?.type).toBe('openAccount');
     expect(input.entityInputs[0]?.entityTxs[0]?.data).toMatchObject({
       targetEntityId: '0xhub',
       tokenId: 1,
+      disputeConfig: { leftResponseSeconds: 86400, rightResponseSeconds: 3600 },
     });
   });
 
@@ -31,6 +55,7 @@ describe('cli action builders', () => {
       tokenId: 1,
       route: ['0xa', '0xb'],
       deliveryMode: 'direct',
+      maxSenderDebit: 5n,
     });
     expect(direct.entityInputs[0]?.entityTxs[0]?.type).toBe('directPayment');
 
@@ -42,8 +67,21 @@ describe('cli action builders', () => {
       tokenId: 1,
       route: ['0xa', '0xb', '0xc'],
       deliveryMode: 'instant',
+      maxSenderDebit: 5n,
     });
     expect(htlc.entityInputs[0]?.entityTxs[0]?.type).toBe('htlcPayment');
+  });
+
+  test('payment prewarms every remote route profile before submit', async () => {
+    const requested: string[][] = [];
+    await ensureCliPaymentProfiles({
+      env: {
+        infrastructure: {
+          p2p: { ensureProfiles: async (ids: string[]) => (requested.push(ids), true) },
+        },
+      },
+    } as never, ['0xself', '0xhub', '0xtarget']);
+    expect(requested).toEqual([['0xhub', '0xtarget']]);
   });
 
   test('move builders', () => {

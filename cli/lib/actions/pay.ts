@@ -1,7 +1,9 @@
 import type { RuntimeInput } from '../runtime-types';
 import type { CliSession } from '../session';
-import { submitAndWait } from '../session';
+import { submitQueued } from '../session';
 import { findAccount } from '../accounts';
+import { ensureCliProfiles } from '../profile-barrier';
+import { quoteHtlcPaymentRoute } from '../../../runtime/runtime.ts';
 
 export type DeliveryMode = 'direct' | 'trusted' | 'instant' | 'async';
 
@@ -13,6 +15,7 @@ export const buildPaymentInput = (input: {
   tokenId: number;
   route: string[];
   deliveryMode: DeliveryMode;
+  maxSenderDebit: bigint;
   description?: string;
 }): RuntimeInput => {
   const targetEntityId = input.targetEntityId.toLowerCase();
@@ -55,6 +58,7 @@ export const buildPaymentInput = (input: {
                   targetEntityId,
                   tokenId: input.tokenId,
                   amount: input.amount,
+                  maxSenderDebit: input.maxSenderDebit,
                   route,
                   deliveryMode: input.deliveryMode === 'instant' ? 'instant' : 'async',
                   ...(input.description ? { description: input.description } : {}),
@@ -96,6 +100,11 @@ export const resolveSimpleRoute = (
   throw new Error(`No route to ${target}. Open a hub account or pass --hub.`);
 };
 
+export const ensureCliPaymentProfiles = async (
+  session: CliSession,
+  route: readonly string[],
+): Promise<void> => ensureCliProfiles(session, route.slice(1), 'CLI_PAYMENT');
+
 export const sendPayment = async (
   session: CliSession,
   args: {
@@ -108,6 +117,11 @@ export const sendPayment = async (
   },
 ): Promise<number> => {
   const route = resolveSimpleRoute(session, args.to, args.hub);
+  const usesHtlc = args.mode === 'instant' || args.mode === 'async';
+  if (usesHtlc) await ensureCliPaymentProfiles(session, route);
+  const senderDebit = usesHtlc
+    ? quoteHtlcPaymentRoute(session.env.gossip.getProfiles(), route, args.tokenId, args.amount).senderLockAmount
+    : args.amount;
   const input = buildPaymentInput({
     entityId: session.entityId,
     signerId: session.signerId,
@@ -116,9 +130,10 @@ export const sendPayment = async (
     tokenId: args.tokenId,
     route,
     deliveryMode: args.mode,
+    maxSenderDebit: senderDebit,
     description: args.description,
   });
-  return submitAndWait(session.env, input, () => true, 'payment', 30_000);
+  return submitQueued(session.env, input, 'payment', 30_000);
 };
 
 export const buildReceiveInvoice = (session: CliSession): string => {

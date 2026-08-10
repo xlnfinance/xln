@@ -19,6 +19,7 @@
 import type { AccountReplica } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
 import { getLiveJAdapterEntries } from '../runtime/live-jadapters';
 import type { EntityInput } from '../entity/types';
 import { ethers } from 'ethers';
@@ -530,6 +531,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         giveAmount: eth(TRADE_ETH),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(TRADE_USDC_MAIN_UNITS),
+        ...deriveSwapNetAuthorization(usdc(TRADE_USDC_MAIN_UNITS), 1),
       },
     }],
   }]);
@@ -575,6 +577,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         giveAmount: usdcForEth(TRADE_ETH_HALF, ETH_PRICE_HIGH),
         wantTokenId: ETH_TOKEN_ID,
         wantAmount: eth(TRADE_ETH_HALF),
+        ...deriveSwapNetAuthorization(eth(TRADE_ETH_HALF), 1),
       },
     }],
   }]);
@@ -767,6 +770,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         giveAmount: eth(disputeEth),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(disputeUsdc),
+        ...deriveSwapNetAuthorization(usdc(disputeUsdc), 1),
       },
     }],
   }]);
@@ -785,6 +789,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
         giveAmount: usdcForEth(disputeFillEth, ETH_PRICE_MAIN),
         wantTokenId: ETH_TOKEN_ID,
         wantAmount: eth(disputeFillEth),
+        ...deriveSwapNetAuthorization(eth(disputeFillEth), 1),
       },
     }],
   }]);
@@ -1127,6 +1132,7 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
         giveAmount: eth(CAROL_SELL_ETH),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdcForEth(CAROL_SELL_ETH, ETH_PRICE_LOW),
+        ...deriveSwapNetAuthorization(usdcForEth(CAROL_SELL_ETH, ETH_PRICE_LOW), 1),
       },
     }],
   }]);
@@ -1157,6 +1163,7 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
         giveAmount: usdcForEth(DAVE_BUY_ETH, ETH_PRICE_MAIN),
         wantTokenId: ETH_TOKEN_ID,
         wantAmount: eth(DAVE_BUY_ETH),
+        ...deriveSwapNetAuthorization(eth(DAVE_BUY_ETH), 1),
       },
     }],
   }]);
@@ -1186,6 +1193,7 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
         giveAmount: eth(CAROL_SELL_2_ETH),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdcForEth(CAROL_SELL_2_ETH, ETH_PRICE_HIGH),
+        ...deriveSwapNetAuthorization(usdcForEth(CAROL_SELL_2_ETH, ETH_PRICE_HIGH), 1),
       },
     }],
   }]);
@@ -1215,6 +1223,7 @@ export async function multiPartyTrading(env: RuntimeReplica): Promise<RuntimeRep
         giveAmount: usdcForEth(DAVE_SWEEP_ETH, ETH_PRICE_SWEEP),
         wantTokenId: ETH_TOKEN_ID,
         wantAmount: eth(DAVE_SWEEP_ETH),
+        ...deriveSwapNetAuthorization(eth(DAVE_SWEEP_ETH), 1),
       },
     }],
   }]);

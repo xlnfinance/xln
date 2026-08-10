@@ -1392,6 +1392,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: ENTITY_ID,
         tokenId: 1,
         amount: 25n,
+        maxSenderDebit: 25n,
         route: [SENDER_ID, ENTITY_ID],
         deliveryMode: 'async',
       },
@@ -1475,6 +1476,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: ENTITY_ID,
         tokenId: 1,
         amount: 25n,
+        maxSenderDebit: 25n,
         route: [SENDER_ID, ENTITY_ID],
         deliveryMode: 'async',
       },
@@ -1488,6 +1490,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: ENTITY_ID,
         tokenId: 1,
         amount: 25n,
+        maxSenderDebit: 25n,
         route: [SENDER_ID, ENTITY_ID],
         deliveryMode: 'async',
         hashlock: `0x${'12'.repeat(32)}`,
@@ -1520,6 +1523,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: ENTITY_ID,
         tokenId: 1,
         amount: 1_001n,
+        maxSenderDebit: 1_001n,
         route: [SENDER_ID, ENTITY_ID],
         deliveryMode: 'async',
       },
@@ -1571,6 +1575,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: ENTITY_ID,
         tokenId: 1,
         amount: 1_001n,
+        maxSenderDebit: 1_001n,
         route: [SENDER_ID, ENTITY_ID],
         deliveryMode: 'async',
       },
@@ -1628,6 +1633,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: ENTITY_ID,
         tokenId: 1,
         amount: 25n,
+        maxSenderDebit: 25n,
         route: [SENDER_ID, ENTITY_ID],
         deliveryMode: 'async',
         description: 'custody-withdrawal:test',
@@ -1680,6 +1686,7 @@ describe('multisig HTLC validator encryption', () => {
           targetEntityId: ENTITY_ID,
           tokenId: 1,
           amount: 1n,
+          maxSenderDebit: 1n,
           route: [SENDER_ID, ENTITY_ID],
           deliveryMode: 'instant',
           secret: `0x${'ac'.repeat(32)}`,
@@ -1696,6 +1703,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: ENTITY_ID,
         tokenId: 1,
         amount: 1n,
+        maxSenderDebit: 1n,
         route: [SENDER_ID, ENTITY_ID],
       },
     } as never)).rejects.toThrow('HTLC_PAYMENT_RAW_FIELDS_INVALID');
@@ -1749,6 +1757,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: destination.entityId,
         tokenId: 1,
         amount: 25n,
+        maxSenderDebit: 25n,
         route: [sourceEntityId, destination.entityId],
         deliveryMode: 'async',
         description: 'process ingress replay',
@@ -1780,6 +1789,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: destination.entityId,
         tokenId: 1,
         amount: 24n,
+        maxSenderDebit: 24n,
         route: [sourceEntityId, destination.entityId],
         deliveryMode: 'async',
         description: 'wallet intent without preimage',
@@ -1805,6 +1815,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: destination.entityId,
         tokenId: 1,
         amount: 1_001n,
+        maxSenderDebit: 1_001n,
         route: [sourceEntityId, destination.entityId],
         deliveryMode: 'async',
         description: 'rejected payment truth',
@@ -2119,6 +2130,7 @@ describe('multisig HTLC validator encryption', () => {
         targetEntityId: destination.entityId,
         tokenId: 1,
         amount: 25n,
+        maxSenderDebit: 1_000n,
         route: [SENDER_ID, hub.entityId, destination.entityId],
         deliveryMode: 'async',
         description: 'certified multi-hop',
@@ -2126,6 +2138,12 @@ describe('multisig HTLC validator encryption', () => {
       },
     }, rawSecret);
     const prepared = await prepareHtlcPaymentEntityTx(admissionEnv, state, raw);
+    const exactSenderDebit = BigInt(String(prepared.data.preparedSenderLockAmount));
+    expect(exactSenderDebit).toBeGreaterThan(raw.data.amount);
+    await expect(prepareHtlcPaymentEntityTx(admissionEnv, state, withDeterministicHtlcTestSecret({
+      ...raw,
+      data: { ...raw.data, maxSenderDebit: exactSenderDebit - 1n },
+    }, rawSecret))).rejects.toThrow('HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
     expect(prepared.data.preparedRouteProfiles).toHaveLength(2);
     expect(prepared.data.preparedHopForwardAmounts).toEqual([{ entityId: hub.entityId, amount: '25' }]);
 
@@ -2221,6 +2239,9 @@ describe('multisig HTLC validator encryption', () => {
     await rejectsMutation((candidate) => {
       (candidate.data.preparedEnvelope as Record<string, unknown>)['provider'] = 'ignored-before-fix';
     }, 'HTLC_PAYMENT_PREPARED_ENVELOPE_SHAPE_INVALID');
+    await rejectsMutation((candidate) => {
+      candidate.data.maxSenderDebit = exactSenderDebit - 1n;
+    }, 'HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED');
 
     await expect(prepareHtlcPaymentEntityTx(admissionEnv, state, withDeterministicHtlcTestSecret({
       ...raw,

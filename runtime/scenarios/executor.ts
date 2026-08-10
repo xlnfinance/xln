@@ -28,6 +28,7 @@ import {
 import { resolveRuntimeJurisdictionConfig } from '../jurisdiction/machine/jurisdiction-runtime.js';
 import { safeStringify } from '../protocol/serialization.js';
 import { commitRuntimeInput, processJEvents, waitScenario } from './helpers';
+import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 
 let payRandomCounter = 0;
 const scenarioBoardSigner = (env: RuntimeReplica, alias: string): string => {
@@ -819,6 +820,7 @@ async function handlePayRandom(
           targetEntityId: destEntityId,
           tokenId: token,
           amount: amount,
+          maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), route, token, amount).senderLockAmount,
           route,
           deliveryMode: 'instant',
           description: `Random payment #${i + 1}`

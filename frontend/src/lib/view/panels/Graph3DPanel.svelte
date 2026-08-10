@@ -65,7 +65,7 @@ import {
 } from "./graph3d-visuals";
 import type { GraphConnectionData, GraphEntityData, GraphFrameActivity, GraphJBlockHistoryEntry, GraphPaymentJob, GraphRendererMode, GraphRipple, GraphXLNRuntime } from "./graph3d-types";
 import { buildRuntimeGraphProjections } from "./graph3d-runtime-projections";
-import { buildGraphPaymentInput, collectGraphTokenIds, executeGraphScenario, getGraphEntitySizeForToken, loadGraphScenarioSteps } from "./graph3d-actions";
+import { buildGraphPaymentInput, collectGraphTokenIds, executeGraphScenario, getGraphEntitySizeForToken, loadGraphScenarioSteps, parseGraphPaymentAmount } from "./graph3d-actions";
 let showMiniPanel = false;
 let miniPanelEntityId = "";
 let miniPanelEntityName = "";
@@ -2638,7 +2638,22 @@ async function executeSinglePayment(job: GraphPaymentJob) {
         break;
       }
     }
-    const paymentInput = buildGraphPaymentInput(job, signerId, selectedRoute.path, getTokenDecimals(job.tokenId));
+    const recipientAmount = parseGraphPaymentAmount(job.amount, getTokenDecimals(job.tokenId));
+    const profiles = actionEnv.gossip?.getProfiles?.();
+    if (!Array.isArray(profiles)) throw new Error("Graph payment routing profiles unavailable");
+    const maxSenderDebit = XLN.quoteHtlcPaymentRoute(
+      profiles,
+      selectedRoute.path,
+      job.tokenId,
+      recipientAmount,
+    ).senderLockAmount;
+    const paymentInput = buildGraphPaymentInput(
+      job,
+      signerId,
+      selectedRoute.path,
+      getTokenDecimals(job.tokenId),
+      maxSenderDebit,
+    );
     triggerEntityActivity(job.from);
     triggerEntityActivity(job.to);
     const nextEnv = await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput] });

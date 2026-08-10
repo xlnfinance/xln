@@ -734,12 +734,10 @@ async function handleWithdrawSubmit(event) {
     if (!isEntityId(resolvedTargetEntityId)) {
       throw new Error('Enter a valid XLN invoice or destination entity id');
     }
-    if (parsedIntent?.tokenId) {
-      selectedTokenId = parsedIntent.tokenId;
-    }
-    if (parsedIntent?.amount) {
-      withdrawAmount = parsedIntent.amount;
-    }
+    // Invoice amount/token are a one-time form prefill in
+    // applyWithdrawIntentPrefill(). At submit, the visible form fields are the
+    // sole authority so a user's edits cannot be silently overwritten by the
+    // still-present invoice text.
     if (!state) throw new Error('Custody dashboard state unavailable');
     const selectedToken = state.tokens.find((token) => token.tokenId === selectedTokenId);
     if (!selectedToken) throw new Error(`Unknown custody token: ${selectedTokenId}`);

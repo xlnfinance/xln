@@ -7,6 +7,10 @@ import { addHold } from '../../hold-utils';
 import { recordSwapOfferLifecycle } from '../swap-history';
 import type { SwapOfferAdmission, SwapOfferTx } from './admission';
 import type { PreparedSwapOfferAmounts } from './quantization';
+import {
+  requantizeSwapNetAuthorization,
+  type SwapNetAuthorization,
+} from '../../../swap-net-authorization';
 
 type SwapOfferResult = {
   success: boolean;
@@ -24,6 +28,20 @@ export const commitSwapOffer = (
 ): SwapOfferResult => {
   const { offerId, giveTokenId, wantTokenId, timeInForce, crossJurisdiction } = tx.data;
   const { priceTicks, effectiveGiveAmount, effectiveWantAmount } = prepared;
+  let authorization: SwapNetAuthorization;
+  try {
+    authorization = requantizeSwapNetAuthorization(
+      tx.data,
+      effectiveGiveAmount,
+      effectiveWantAmount,
+    );
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      events: [],
+    };
+  }
   const delta = ensureDelta(account.state, giveTokenId);
   // A cross-j source pull already owns the economic lock. Adding a second hold
   // here would double-reserve the same funds; same-j offers lock capacity now.
@@ -44,6 +62,7 @@ export const commitSwapOffer = (
     giveAmount: effectiveGiveAmount,
     wantTokenId,
     wantAmount: effectiveWantAmount,
+    ...authorization,
     priceTicks,
     ...(timeInForce !== undefined ? { timeInForce } : {}),
     makerIsLeft: admission.makerIsLeft,
@@ -79,6 +98,7 @@ export const commitSwapOffer = (
       giveAmount: effectiveGiveAmount,
       wantTokenId,
       wantAmount: effectiveWantAmount,
+      ...authorization,
       priceTicks,
       ...(timeInForce !== undefined ? { timeInForce } : {}),
       ...(publicRoute ? { crossJurisdiction: publicRoute } : {}),

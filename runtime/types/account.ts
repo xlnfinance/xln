@@ -84,6 +84,8 @@ export interface SwapOffer {
   giveAmount: bigint;           // Original amount (partial fills reduce this)
   wantTokenId: number;          // Token maker wants in return
   wantAmount: bigint;           // Corresponding want amount (maintains ratio)
+  maxFee: bigint;               // Maximum total fee authorized for this remaining offer
+  minNetReceive: bigint;        // Minimum net receive authorized for this remaining offer
   priceTicks: bigint;           // Canonical limit price used for requantization after partial fills
   timeInForce?: 0 | 1 | 2;      // 0 = GTC, 1 = IOC, 2 = FOK
   makerIsLeft: boolean;         // Who created this offer (canonical direction)
@@ -958,6 +960,8 @@ export type AccountTx =
         giveAmount: bigint;
         wantTokenId: number;
         wantAmount: bigint;       // at this ratio
+        maxFee: bigint;           // Maximum fee across the full offered amount
+        minNetReceive: bigint;    // Minimum net receive across the full offered amount
         // Explicit limit price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
         // Optional because an order may express only give/want amounts; the
         // Account transition then derives the canonical tick before committing.

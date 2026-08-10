@@ -258,6 +258,7 @@ export function Pay() {
 								targetEntityId: target,
 								tokenId,
 								amount: chosen.recipientAmount,
+								maxSenderDebit: chosen.senderAmount,
 								route: chosen.path,
 								deliveryMode,
 								...(description.trim() ? { description: description.trim() } : {}),

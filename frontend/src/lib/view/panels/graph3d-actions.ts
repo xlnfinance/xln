@@ -6,7 +6,13 @@ export function parseGraphPaymentAmount(amount: string, decimals: number): bigin
   return parseTokenAmountInput(amount, decimals);
 }
 
-export function buildGraphPaymentInput(job: GraphPaymentJob, signerId: string, route: string[], decimals: number) {
+export function buildGraphPaymentInput(
+  job: GraphPaymentJob,
+  signerId: string,
+  route: string[],
+  decimals: number,
+  maxSenderDebit: bigint,
+) {
   if (route.length < 2) throw new Error(`Invalid route: expected at least 2 entities, got ${route.length}`);
   if (route[0] !== job.from || route[route.length - 1] !== job.to) {
     throw new Error(`Route mismatch: expected ${job.from} → ${job.to}, got ${route[0]} → ${route[route.length - 1]}`);
@@ -21,6 +27,7 @@ export function buildGraphPaymentInput(job: GraphPaymentJob, signerId: string, r
           targetEntityId: job.to,
           tokenId: job.tokenId,
           amount: parseGraphPaymentAmount(job.amount, decimals),
+          maxSenderDebit,
           route,
           deliveryMode: 'instant' as const,
           description: `Bird view payment: ${job.amount}`,

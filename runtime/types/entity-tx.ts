@@ -249,6 +249,8 @@ type EntityTxPayload =
         targetEntityId: string;
         tokenId: number;
         amount: bigint;
+        /** Caller-authorized maximum gross first-hop lock, including all route fees. */
+        maxSenderDebit: bigint;
         route: string[]; // Full path from source to target
         description?: string;
         deliveryMode: Extract<PaymentDeliveryMode, 'instant' | 'async'>;
@@ -715,6 +717,8 @@ type EntityTxPayload =
         giveAmount: bigint;
         wantTokenId: number;
         wantAmount: bigint;
+        maxFee: bigint;
+        minNetReceive: bigint;
         // Explicit limit price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
         // Sent together with give/want for deterministic cross-checking.
         priceTicks?: bigint;

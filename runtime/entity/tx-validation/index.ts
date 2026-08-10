@@ -137,7 +137,7 @@ const validateScheduledWake = (value: unknown, code: string): void => {
 };
 
 const PREPARED_HTLC_PAYMENT_FIELDS = [
-  'amount', 'deliveryMode', 'description', 'hashlock', 'preparedAtEntityHeight',
+  'amount', 'deliveryMode', 'description', 'hashlock', 'maxSenderDebit', 'preparedAtEntityHeight',
   'preparedAtJHeight', 'preparedEnvelope', 'preparedHopForwardAmounts', 'preparedLockId',
   'preparedRevealBeforeHeight', 'preparedRouteProfiles', 'preparedSenderLockAmount',
   'preparedTimelock', 'preparedTotalFee', 'route', 'startedAtMs', 'targetEntityId', 'tokenId',
@@ -146,6 +146,7 @@ const PREPARED_HTLC_PAYMENT_FIELDS = [
 const validatePreparedHtlcPayment = (value: unknown, code: string): void => {
   const data = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(data, PREPARED_HTLC_PAYMENT_FIELDS, [], `${code}_FIELDS`);
+  requireBigInt(data['maxSenderDebit'], `${code}_MAX_SENDER_DEBIT`, 1n);
   const envelope = requireBoundaryRecord(data['preparedEnvelope'], `${code}_ENVELOPE`);
   requireExactBoundaryKeys(envelope, ['nextHop', 'innerEnvelope'], [], `${code}_ENVELOPE_FIELDS`);
   requireString(envelope['nextHop'], `${code}_ENVELOPE_NEXT_HOP`);

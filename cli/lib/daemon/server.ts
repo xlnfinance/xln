@@ -64,7 +64,8 @@ const handleRequest = async (
         };
       case 'pay':
         return { id: req.id, ok: true, result: {
-          accepted: 'runtime-input-committed',
+          status: 'queued',
+          evidence: 'runtime-input-committed',
           committedHeight: await sendPayment(session, {
           to: req.to,
           amount: BigInt(req.amount),

@@ -67,13 +67,13 @@ const collectRegistryPublication = (
  * Role is security authority, not presentation metadata. Never collapse these
  * branches into a generic pull-free fast path.
  */
-const isFinalizeTimingAllowed = (
+const resolveFinalizeSubmitNotBefore = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
   env: EntityRuntimeContext,
   selection: FinalProofSelection,
-): boolean => {
+): number | null | undefined => {
   const activeDispute = account.activeDispute!;
   const timeoutSec = Number(activeDispute.disputeTimeout || 0);
   const nowSec = Math.floor(Number(state.timestamp || 0) / 1000);
@@ -88,13 +88,15 @@ const isFinalizeTimingAllowed = (
     && activeDispute.selectedCounterNonce === undefined
   ) {
     addMessage(state, '⏳ Pull counter-proof must be locked on-chain before finalization');
-    return false;
+    return undefined;
   }
-  if (timeoutSec > 0 && nowSec >= timeoutSec) return true;
+  const callerIsLeft = account.state.leftEntity === state.entityId;
+  const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
+  if (timeoutSec > 0 && nowSec >= timeoutSec) {
+    return hasPulls || callerIsStarter ? timeoutSec : null;
+  }
   if (!hasPulls) {
-    const callerIsLeft = account.state.leftEntity === state.entityId;
-    const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
-    if (!callerIsStarter) return true;
+    if (!callerIsStarter) return null;
   }
 
   addMessage(
@@ -108,7 +110,7 @@ const isFinalizeTimingAllowed = (
     timeoutSec,
     hasPulls,
   });
-  return false;
+  return undefined;
 };
 
 const queueDisputeFinalize = (
@@ -116,6 +118,7 @@ const queueDisputeFinalize = (
   account: AccountReplica,
   proof: FinalProofPayload,
   registry: { secrets: string[]; transformerAddress: string },
+  submitNotBeforeTimestamp: number | null,
 ): void => {
   const batch = state.jBatchState!.batch;
   if (
@@ -137,7 +140,10 @@ const queueDisputeFinalize = (
   for (const secret of registry.secrets) {
     batchAddRevealSecret(state.jBatchState!, registry.transformerAddress, secret);
   }
-  batch.disputeFinalizations.push(proof);
+  batch.disputeFinalizations.push({
+    ...proof,
+    ...(submitNotBeforeTimestamp === null ? {} : { submitNotBeforeTimestamp }),
+  });
   encodeJBatch(batch);
   account.activeDispute!.finalizeQueued = true;
 };
@@ -284,7 +290,14 @@ export const handleDisputeFinalize = async (
     finalNonce: finalProof.finalNonce,
     finalNonceSource: selection.finalNonceSource,
   });
-  if (!isFinalizeTimingAllowed(newState, account, counterpartyId, env, selection)) {
+  const submitNotBeforeTimestamp = resolveFinalizeSubmitNotBefore(
+    newState,
+    account,
+    counterpartyId,
+    env,
+    selection,
+  );
+  if (submitNotBeforeTimestamp === undefined) {
     return { newState, outputs };
   }
   // F3: never co-batch hash-ladder reveals with finalize. A chain tip still
@@ -293,7 +306,13 @@ export const handleDisputeFinalize = async (
   if (deferFinalizeForPendingReveals(newState, outputs, counterpartyId, account)) {
     return { newState, outputs };
   }
-  queueDisputeFinalize(newState, account, finalProof, registry);
+  queueDisputeFinalize(
+    newState,
+    account,
+    finalProof,
+    registry,
+    submitNotBeforeTimestamp,
+  );
   disputeLog.debug('finalize.jbatch_queued', {
     entity: shortId(entityState.entityId),
     counterparty: shortId(counterpartyId),

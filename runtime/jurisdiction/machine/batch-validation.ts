@@ -15,15 +15,22 @@ const validateRecordArray = (
   value: unknown,
   code: string,
   fields: Record<string, FieldValidator>,
+  optionalFields: Record<string, FieldValidator> = {},
 ): unknown[] => {
   const records = requireArray(value, code);
   for (const [index, raw] of records.entries()) {
     const itemCode = `${code}_${index}`;
     const item = requireBoundaryRecord(raw, itemCode);
     const keys = Object.keys(fields);
-    requireExactBoundaryKeys(item, keys, [], `${itemCode}_FIELDS`);
+    const optionalKeys = Object.keys(optionalFields);
+    requireExactBoundaryKeys(item, keys, optionalKeys, `${itemCode}_FIELDS`);
     for (const key of keys) {
       item[key] = fields[key]!(item[key], `${itemCode}_${key.toUpperCase()}`);
+    }
+    for (const key of optionalKeys) {
+      if (item[key] !== undefined) {
+        item[key] = optionalFields[key]!(item[key], `${itemCode}_${key.toUpperCase()}`);
+      }
     }
   }
   return records;
@@ -139,6 +146,8 @@ export function validateJBatch(
     counterentity: string, initialNonce: integer, finalNonce: integer, proposerIsLeft: bool, initialProofbodyHash: string,
     finalProofbody: validateProofBody, starterArguments: string, otherArguments: string, sig: string,
     startedByLeft: bool, cooperative: bool,
+  }, {
+    submitNotBeforeTimestamp: integer,
   });
   validateRecordArray(batch['flashloans'], `${code}_FLASHLOANS`, { tokenId: integer, amount: bigint });
   validateRecordArray(batch['revealSecrets'], `${code}_REVEAL_SECRETS`, { transformer: string, secret: string });

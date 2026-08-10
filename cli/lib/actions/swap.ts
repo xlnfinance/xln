@@ -1,49 +1,13 @@
 import {
-  computeSwapPriceTicks,
+  deriveSwapNetAuthorization,
   planSwapCommand,
+  prepareSwapOrder,
 } from '../../../runtime/runtime.ts';
 import type { CliSession } from '../session';
 import { submitAndWait } from '../session';
 import { findAccount } from '../accounts';
-
-const normalizedId = (value: unknown): string => String(value || '').trim().toLowerCase();
-
-export const resolveCliSwapPartyRoles = (
-  session: CliSession,
-  hubEntityId: string,
-) => {
-  const sourceEntityId = normalizedId(session.entityId);
-  const hubId = normalizedId(hubEntityId);
-  const committedRoles = new Map<string, boolean>();
-  for (const replica of session.env.state.eReplicas.values()) {
-    const entityId = normalizedId(replica.state.entityId);
-    const isHub = replica.state.profile?.metadata?.isHub;
-    if (entityId && typeof isHub === 'boolean') committedRoles.set(entityId, isHub);
-  }
-  const sourceIsHub = committedRoles.get(sourceEntityId);
-  const committedHubRole = committedRoles.get(hubId);
-  const gossipHub = session.env.gossip.getProfiles().find(profile => (
-    normalizedId(profile.entityId) === hubId && profile.metadata?.isHub === true
-  ));
-  if (typeof sourceIsHub !== 'boolean' || (committedHubRole !== true && !gossipHub)) {
-    throw new Error(`CLI_SWAP_PARTY_ROLE_UNAVAILABLE:${sourceEntityId}:${hubId}`);
-  }
-  return {
-    entityRoleEvidence: {
-      entityId: sourceEntityId,
-      isHub: sourceIsHub,
-      source: 'committed-profile' as const,
-    },
-    hubRoleEvidence: {
-      entityId: hubId,
-      isHub: true,
-      source: committedHubRole === true
-        ? 'committed-profile' as const
-        : 'verified-gossip-profile' as const,
-    },
-    committedRoles,
-  };
-};
+import { resolveCliHubPartyRoles } from '../account-role-evidence';
+import { ensureCliProfiles } from '../profile-barrier';
 
 export const placeSwap = async (
   session: CliSession,
@@ -58,19 +22,32 @@ export const placeSwap = async (
   const hubEntityId = args.hubEntityId.toLowerCase();
   const accountReplica = findAccount(session.env, session.entityId, hubEntityId);
   if (!accountReplica) throw new Error(`No account with hub ${hubEntityId}. Open it first.`);
+  await ensureCliProfiles(session, [hubEntityId], 'CLI_SWAP');
+  const hubProfile = session.env.gossip.getProfiles().find(
+    profile => String(profile.entityId || '').toLowerCase() === hubEntityId,
+  );
+  if (!hubProfile || hubProfile.metadata?.isHub !== true) {
+    throw new Error(`CLI_SWAP_HUB_PROFILE_UNAVAILABLE:${hubEntityId}`);
+  }
 
-  const priceTicks = computeSwapPriceTicks(
+  const preparedOrder = prepareSwapOrder(
     args.giveTokenId,
     args.wantTokenId,
     args.giveAmount,
     args.wantAmount,
+  );
+  if (!preparedOrder) throw new Error('CLI_SWAP_ORDER_TOO_SMALL');
+  const priceTicks = preparedOrder.priceTicks;
+  const swapNetAuthorization = deriveSwapNetAuthorization(
+    preparedOrder.effectiveWant,
+    hubProfile.metadata.swapTakerFeeBps ?? 0,
   );
 
   // hubSignerId is the hub's validator id from gossip when known; for same-j
   // capacity planning the source account state is what matters. Use hub entity
   // id as a stable non-empty binder matching frontend when hub signer unknown.
   const hubSignerId = hubEntityId;
-  const partyRoles = resolveCliSwapPartyRoles(session, hubEntityId);
+  const partyRoles = resolveCliHubPartyRoles(session, hubEntityId);
   const plan = planSwapCommand({
     mode: 'same',
     logicalTimestamp: session.env.state.timestamp,
@@ -80,6 +57,7 @@ export const placeSwap = async (
     wantTokenId: args.wantTokenId,
     giveAmount: args.giveAmount,
     priceTicks,
+    ...swapNetAuthorization,
     source: {
       entityId: session.entityId,
       signerId: session.signerId,

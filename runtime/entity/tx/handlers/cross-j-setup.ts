@@ -405,6 +405,11 @@ const buildSourceRegistrationTxs = (
           giveAmount: route.source.amount,
           wantTokenId: route.target.tokenId,
           wantAmount: route.target.amount,
+          // Cross-j settlement has no independent Account fee debit. Bind the
+          // source offer to the exact target amount instead of inheriting the
+          // same-j fee budget semantics.
+          maxFee: 0n,
+          minNetReceive: route.target.amount,
           ...(route.priceTicks !== undefined ? { priceTicks: route.priceTicks } : {}),
           timeInForce: 0,
           crossJurisdiction: cloneCrossJurisdictionRoute(route),

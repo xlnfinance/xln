@@ -17,6 +17,7 @@
 
 import type { RuntimeReplica } from '../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
+import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
 import type { EntityInput } from '../entity/types';
 import {
   bindScenarioJReplica,
@@ -371,6 +372,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveAmount: eth(10),
           wantTokenId: USDC,
           wantAmount: usdc(31000), // $3100/ETH
+          ...deriveSwapNetAuthorization(usdc(31000), 1),
         },
       }],
     },
@@ -387,6 +389,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveAmount: eth(5),
           wantTokenId: USDC,
           wantAmount: usdc(15250), // $3050/ETH
+          ...deriveSwapNetAuthorization(usdc(15250), 1),
         },
       }],
     },
@@ -403,6 +406,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveAmount: usdc(23600), // $2950/ETH * 8
           wantTokenId: ETH,
           wantAmount: eth(8),
+          ...deriveSwapNetAuthorization(eth(8), 1),
         },
       }],
     },
@@ -428,6 +432,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveAmount: wbtc(2),
           wantTokenId: USDC,
           wantAmount: usdc(122000), // $61000/WBTC
+          ...deriveSwapNetAuthorization(usdc(122000), 1),
         },
       }],
     },
@@ -444,6 +449,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveAmount: usdc(59000), // $59000/WBTC
           wantTokenId: WBTC,
           wantAmount: wbtc(1),
+          ...deriveSwapNetAuthorization(wbtc(1), 1),
         },
       }],
     },
@@ -469,6 +475,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveAmount: dai(500),
           wantTokenId: USDC,
           wantAmount: usdc(501), // ~$1.002/DAI
+          ...deriveSwapNetAuthorization(usdc(501), 1),
         },
       }],
     },
@@ -485,6 +492,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
           giveAmount: usdc(299), // ~$0.997/DAI * 300
           wantTokenId: DAI,
           wantAmount: dai(300),
+          ...deriveSwapNetAuthorization(dai(300), 1),
         },
       }],
     },
@@ -539,6 +547,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
         giveAmount: usdc(9300), // $3100/ETH * 3 ETH
         wantTokenId: ETH,
         wantAmount: eth(3),
+        ...deriveSwapNetAuthorization(eth(3), 1),
       },
     }],
   }]);
@@ -559,6 +568,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
         giveAmount: wbtc(1),
         wantTokenId: USDC,
         wantAmount: usdc(58000), // Lower than Alice's bid
+        ...deriveSwapNetAuthorization(usdc(58000), 1),
       },
     }],
   }]);
@@ -579,6 +589,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
         giveAmount: usdc(101), // ~$1.01/DAI * 100
         wantTokenId: DAI,
         wantAmount: dai(100),
+        ...deriveSwapNetAuthorization(dai(100), 1),
       },
     }],
   }]);
@@ -663,6 +674,7 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
         giveAmount: eth(10),
         wantTokenId: USDC,
         wantAmount: usdc(30200), // $3020/ETH (better price)
+        ...deriveSwapNetAuthorization(usdc(30200), 1),
       },
     }],
   }]);
@@ -949,6 +961,7 @@ export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
               giveAmount: usdc(qty * price),
               wantTokenId: ETH,
               wantAmount: eth(qty),
+              ...deriveSwapNetAuthorization(eth(qty), 1),
             },
           }],
         });
@@ -966,6 +979,7 @@ export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
               giveAmount: eth(qty),
               wantTokenId: USDC,
               wantAmount: usdc(qty * price),
+              ...deriveSwapNetAuthorization(usdc(qty * price), 1),
             },
           }],
         });

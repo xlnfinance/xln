@@ -401,17 +401,15 @@ export class RuntimeWsClient {
   private shouldReconnectAfterClose(code: number, reason: string): boolean {
     if (this.closed) return false;
     if (this.isDuplicateRuntimeClose(code, reason)) {
-      const browserStandby = typeof document !== 'undefined';
-      if (!browserStandby) {
-        this.closed = true;
-      }
       console.info(
         `[WS] Duplicate runtime session for ${this.options.runtimeId} on ${this.options.url}; ` +
-          (browserStandby
-            ? 'entering standby until this tab is visible again'
-            : 'stopping auto-reconnect for this client'),
+          'retrying with normal backoff',
       );
-      return false;
+      // A close frame is not authenticated protocol authority. Browser tabs
+      // may enter visibility-controlled standby, but a headless Runtime must
+      // never become permanently unreachable because a relay (or MITM on a
+      // plaintext development socket) forged code 4009 or its reason string.
+      return true;
     }
     return true;
   }

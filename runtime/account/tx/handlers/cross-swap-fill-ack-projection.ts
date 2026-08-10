@@ -140,6 +140,8 @@ const retainCrossOfferRemainder = (
   offer.wantAmount = outcome.remainingTarget;
   offer.quantizedGive = outcome.remainingSource;
   offer.quantizedWant = outcome.remainingTarget;
+  offer.maxFee = 0n;
+  offer.minNetReceive = outcome.remainingTarget;
   // The route price is the cross-j index when the clearing side republished it;
   // otherwise the committed offer keeps the price it was admitted at.
   if (route.priceTicks !== undefined) offer.priceTicks = route.priceTicks;
@@ -161,6 +163,8 @@ const retainCrossOfferRemainder = (
       giveAmount: offer.giveAmount,
       wantTokenId: offer.wantTokenId,
       wantAmount: offer.wantAmount,
+      maxFee: offer.maxFee,
+      minNetReceive: offer.minNetReceive,
       priceTicks: offer.priceTicks,
       ...(offer.timeInForce !== undefined
         ? { timeInForce: offer.timeInForce }

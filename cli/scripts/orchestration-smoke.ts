@@ -299,7 +299,7 @@ const main = async (): Promise<void> => {
 
     log('onboard A');
     requireOk(
-      await runCli(apiBase, walletA, ['onboard', '--mode', 'demo', '--passphrase', 'smoke-pass', '--name', 'alice']),
+      await runCli(apiBase, walletA, ['onboard', '--mode', 'demo', '--name', 'alice']),
       'onboard A',
     );
 
@@ -327,7 +327,7 @@ const main = async (): Promise<void> => {
 
     log('onboard B + open');
     requireOk(
-      await runCli(apiBase, walletB, ['onboard', '--mode', 'demo', '--passphrase', 'smoke-pass', '--name', 'bob']),
+      await runCli(apiBase, walletB, ['onboard', '--mode', 'demo', '--name', 'bob']),
       'onboard B',
     );
     requireOk(

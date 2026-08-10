@@ -157,6 +157,7 @@ describe('runtime ingress receipts', () => {
         targetEntityId: `0x${'33'.repeat(32)}`,
         tokenId: 1,
         amount: 7n,
+        maxSenderDebit: 7n,
         route: [`0x${'44'.repeat(32)}`, `0x${'33'.repeat(32)}`],
         deliveryMode: 'instant',
       },

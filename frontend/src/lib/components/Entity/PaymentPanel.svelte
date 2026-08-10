@@ -1284,6 +1284,7 @@
                 targetEntityId: routeTargetEntityId,
                 tokenId,
                 amount: route.recipientAmount,
+                maxSenderDebit: route.senderAmount,
                 route: route.path,
                 deliveryMode: conditionalDeliveryMode,
                 ...(descriptionValue ? { description: descriptionValue } : {}),

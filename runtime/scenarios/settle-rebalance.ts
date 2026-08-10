@@ -32,6 +32,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { ethers } from 'ethers';
+import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 
 const USDC = 1;
 const convergeScenario = (env: RuntimeReplica, maxCycles = 15): Promise<void> => converge(env, maxCycles);
@@ -350,6 +351,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
     entityTxs: [{
       type: 'htlcPayment', data: {
         targetEntityId: bob.id, tokenId: USDC, amount: usd(8_000),
+        maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC, usd(8_000)).senderLockAmount,
         route: [alice.id, hub.id, bob.id], description: 'Alice→Bob $8K',
         deliveryMode: 'instant',
       }
@@ -364,6 +366,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
     entityTxs: [{
       type: 'htlcPayment', data: {
         targetEntityId: dave.id, tokenId: USDC, amount: usd(12_000),
+        maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [charlie.id, hub.id, dave.id], USDC, usd(12_000)).senderLockAmount,
         route: [charlie.id, hub.id, dave.id], description: 'Charlie→Dave $12K',
         deliveryMode: 'instant',
       }
@@ -462,6 +465,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeReplica): Promise
           targetEntityId: dave.id,
           tokenId: USDC,
           amount: usd(2_000),
+          maxSenderDebit: usd(2_000),
           route: [hub.id, dave.id],
           deliveryMode: 'async',
           description: 'hub->dave htlc rebalance trigger',

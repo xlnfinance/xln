@@ -3,6 +3,7 @@
 /* eslint-disable */
 import type * as noReturnErc20MockSol from "./NoReturnERC20Mock.sol";
 export type { noReturnErc20MockSol };
+export type { DepositoryDebtHarness } from "./DepositoryDebtHarness";
 export type { EntityProviderSupplyHarness } from "./EntityProviderSupplyHarness";
 export type { FeeOnTransferERC20 } from "./FeeOnTransferERC20";
 export type { HashLadderHarness } from "./HashLadderHarness";

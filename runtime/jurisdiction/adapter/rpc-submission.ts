@@ -24,7 +24,8 @@ import type { RpcTransactionSequencer } from './rpc-transaction-sequencer';
 import type { JAdapter, JAdapterConfig, JSubmitResult } from './types';
 import type { RpcWriteMethods } from './rpc-write-methods';
 import type { RpcReceiptReaders } from './rpc-receipts';
-import { batchOpCount } from '../machine/batch';
+import type { JBatch } from '../machine/batch';
+import { computeAccountKey } from './contract-codec';
 
 type SubmitOptions = {
   env: RuntimeReplica;
@@ -63,6 +64,107 @@ type CompetingFinalizationReconciliation = {
 
 const NO_ACTIVE_DISPUTE_SELECTOR = ethers.id('E5()').slice(0, 10).toLowerCase();
 const STALE_FINALIZATION_AWAITING_FINALITY = 'STALE_FINALIZATION_AWAITING_FINALITY';
+const DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME =
+  'DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME';
+
+type FinalizationChainAccount = Readonly<{
+  nonce: bigint;
+  disputeHash: string;
+  disputeTimeout: bigint;
+  disputeInitialProofbodyHash: string;
+  disputeStartedByLeft: boolean;
+}>;
+
+type TimedFinalization = JBatch['disputeFinalizations'][number];
+
+/**
+ * Runtime time may lead the jurisdiction head under parallel load. Solidity's
+ * timeout is authoritative, so a timeout-only proof must not even be
+ * simulated until that exact L1 deadline. Never generalize this to E2: E2 is
+ * also used for malformed authority, nonce, and role failures.
+ */
+export const classifyFinalizationChainTimeGate = (
+  finalization: TimedFinalization,
+  account: FinalizationChainAccount,
+  chainTimestamp: number,
+): JSubmitResult | null => {
+  const notBefore = finalization.submitNotBeforeTimestamp;
+  if (notBefore === undefined) return null;
+  if (!Number.isSafeInteger(notBefore) || notBefore <= 0) {
+    throw new Error(`DISPUTE_FINALIZATION_NOT_BEFORE_INVALID:${String(notBefore)}`);
+  }
+  if (!Number.isSafeInteger(chainTimestamp) || chainTimestamp < 0) {
+    throw new Error(`J_CHAIN_BLOCK_TIMESTAMP_INVALID:${String(chainTimestamp)}`);
+  }
+  // A competing finalizer may already have consumed the dispute. Let the
+  // existing exact receipt/evidence reconciliation classify that E5 race.
+  if (account.disputeHash.toLowerCase() === ethers.ZeroHash) return null;
+  const mismatch =
+    account.nonce !== BigInt(finalization.initialNonce)
+    || account.disputeTimeout !== BigInt(notBefore)
+    || account.disputeInitialProofbodyHash.toLowerCase()
+      !== finalization.initialProofbodyHash.toLowerCase()
+    || account.disputeStartedByLeft !== finalization.startedByLeft;
+  if (mismatch) {
+    throw new Error(
+      `DISPUTE_FINALIZATION_CHAIN_IDENTITY_MISMATCH:`
+      + `nonce=${account.nonce.toString()}/${finalization.initialNonce}:`
+      + `timeout=${account.disputeTimeout.toString()}/${notBefore}:`
+      + `hash=${account.disputeInitialProofbodyHash}/${finalization.initialProofbodyHash}:`
+      + `startedByLeft=${String(account.disputeStartedByLeft)}/${String(finalization.startedByLeft)}`,
+    );
+  }
+  if (chainTimestamp >= notBefore) return null;
+  return makeJAdapterFailureResult(DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME, {
+    category: 'transient',
+    code: DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME,
+    message: `${DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME}:`
+      + `head=${chainTimestamp}:notBefore=${notBefore}`,
+  });
+};
+
+type FinalizationChainTimeGateReaders = Readonly<{
+  batch: JBatch;
+  readAccount(finalization: TimedFinalization): Promise<FinalizationChainAccount>;
+  readLatestBlockTimestamp(): Promise<number>;
+}>;
+
+export const readFinalizationChainTimeGate = async (
+  input: FinalizationChainTimeGateReaders,
+): Promise<JSubmitResult | null> => {
+  const timed = input.batch.disputeFinalizations.filter(
+    finalization => finalization.submitNotBeforeTimestamp !== undefined,
+  );
+  if (timed.length === 0) return null;
+  if (input.batch.disputeFinalizations.length !== 1 || timed.length !== 1) {
+    throw new Error(
+      `DISPUTE_FINALIZATION_CHAIN_GATE_CARDINALITY_INVALID:`
+      + `${timed.length}/${input.batch.disputeFinalizations.length}`,
+    );
+  }
+  const finalization = timed[0]!;
+  const account = await input.readAccount(finalization);
+  const chainTimestamp = await input.readLatestBlockTimestamp();
+  return classifyFinalizationChainTimeGate(finalization, account, chainTimestamp);
+};
+
+const readSubmissionFinalizationChainTimeGate = async (
+  context: SubmissionContext,
+  planned: Extract<ReturnType<typeof planRpcBatchSubmission>, { kind: 'submit' }>,
+): Promise<JSubmitResult | null> => {
+  try {
+    return await readFinalizationChainTimeGate({
+      batch: planned.plan.batch,
+      readAccount: finalization => context.stack.depository._accounts(computeAccountKey(
+        planned.plan.normalizedEntityId,
+        finalization.counterentity,
+      )),
+      readLatestBlockTimestamp: context.chainIo.readLatestBlockTimestamp,
+    });
+  } catch (error) {
+    return makeJAdapterFailureResult(error);
+  }
+};
 
 const nestedErrorRecords = (error: unknown): Array<Record<string, unknown>> => {
   const records: Array<Record<string, unknown>> = [];
@@ -153,6 +255,13 @@ export const reconcileCompetingFinalizationReceipt = async (
   return receipt ? classifyCompetingFinalizationReceipt(input.failure, receipt) : input.failure;
 };
 
+export const selectCompetingFinalization = (
+  batch: JBatch,
+): TimedFinalization | null =>
+  batch.disputeFinalizations.length === 1
+    ? batch.disputeFinalizations[0]!
+    : null;
+
 const resolveBatchSubmitter = async (
   context: SubmissionContext,
   signerPrivateKey: Uint8Array | undefined,
@@ -185,9 +294,12 @@ const reconcileCompetingFinalization = async (
   noActiveDispute: boolean,
 ): Promise<JSubmitResult> => {
   if (failure.success || !noActiveDispute) return failure;
-  const finalizations = planned.plan.batch.disputeFinalizations;
-  if (finalizations.length !== 1 || batchOpCount(planned.plan.batch) !== 1) return failure;
-  const finalization = finalizations[0]!;
+  // The exact receipt only makes this finalization stale; it does not claim
+  // that co-batched evidence or value operations were mined. Keep the whole
+  // sealed batch transient until authenticated DisputeFinalized ingress
+  // removes the stale finalization and deterministically requeues the rest.
+  const finalization = selectCompetingFinalization(planned.plan.batch);
+  if (!finalization) return failure;
   return reconcileCompetingFinalizationReceipt({
     receipts: context.receipts,
     entityId: planned.plan.normalizedEntityId,
@@ -204,6 +316,8 @@ const executeBatchSubmission = async (
   options: SubmitOptions,
 ): Promise<JSubmitResult> => {
   const plan = planned.plan;
+  const chainTimeGate = await readSubmissionFinalizationChainTimeGate(context, planned);
+  if (chainTimeGate) return chainTimeGate;
   const submitter = await resolveBatchSubmitter(
     context,
     options.signerPrivateKey,

@@ -203,6 +203,7 @@ describe('runtime activity history', () => {
         targetEntityId: hub,
         tokenId: 1,
         amount: 7n,
+        maxSenderDebit: 7n,
         route: [alice, hub],
         deliveryMode: 'instant' as const,
         hashlock: '0xhash',

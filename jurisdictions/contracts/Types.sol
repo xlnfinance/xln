@@ -20,6 +20,10 @@ error E7(); // InvalidParty
 error E8(); // LengthMismatch / Int256Overflow
 error E10(); // BatchTooLarge
 
+// Runtime frame heights and protocol nonces use exact JavaScript safe integers.
+// This bound does not apply to money or other true uint256 quantities.
+uint256 constant JS_SAFE_NONCE_MAX = 9007199254740991;
+
 interface IDepositoryDelegateErrorAbi {
   // E5 is emitted only inside the linked Account library. Keeping the same
   // selector in Depository's inherited ABI lets operators and tests decode a

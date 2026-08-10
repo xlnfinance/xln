@@ -47,6 +47,7 @@ const queueSameTradeFills = (
       qty: event.qty,
     });
   }
+  const plans = [];
   for (const [namespacedOrderId, fill] of aggregateSameTradeFills(trades)) {
     const { accountId, offerId } = parseNamespacedOrderId(
       namespacedOrderId,
@@ -90,16 +91,22 @@ const queueSameTradeFills = (
       ...(resolveComment ? { resolveComment } : {}),
       takerFeeBps: pass.swapTakerFeeBps,
     });
+    plans.push(plan);
+  }
+  // Build and authorize every paired Account resolution before queuing any of
+  // them. A taker fee rejection must discard the preview atomically; otherwise
+  // the maker Account could move while the taker Account rejects its half.
+  for (const plan of plans) {
     const queued = queueUniqueSwapResolveForEntityState(
       pass.accountTxs,
       pass.hubState,
       pass.queuedSwapResolutions,
-      accountId,
+      plan.accountId,
       plan.resolveEnqueueData,
     );
     if (queued) {
       orderbookSameLog.debug('resolve.queued', {
-        offer: shortOrder(offerId, 8),
+        offer: shortOrder(plan.offerId, 8),
         fillPct: plan.fillPct,
         cancel: plan.cancelRemainder,
         source: plan.offerSource,
@@ -107,6 +114,11 @@ const queueSameTradeFills = (
     }
   }
 };
+
+export const rejectFeeUnauthorizedOffer = (
+  pass: SameOrderbookPass,
+  offer: PreparedSameOffer,
+): void => rejectUnfilledOffer(pass, offer, 'fee-authorization-exceeded', 'fee-authorization-exceeded');
 
 const rejectUnfilledOffer = (
   pass: SameOrderbookPass,

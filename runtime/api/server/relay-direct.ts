@@ -33,10 +33,14 @@ const normalizePeerIp = (value: string | null | undefined): string => {
 export const resolveRequestClientIp = (request: Request, peerAddress?: string | null): string => {
   const peer = normalizePeerIp(peerAddress);
   if (peer === '127.0.0.1' || peer === '::1') {
-    const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-    const realIp = request.headers.get('x-real-ip')?.trim();
-    const cfIp = request.headers.get('cf-connecting-ip')?.trim();
-    return forwarded || realIp || cfIp || peer;
+    // With one trusted loopback proxy, proxy_add_x_forwarded_for appends the
+    // real peer after caller-supplied hops. The first hop is spoofable.
+    const forwarded = request.headers.get('x-forwarded-for')
+      ?.split(',')
+      .map(value => value.trim())
+      .filter(Boolean)
+      .at(-1);
+    return forwarded || peer;
   }
   return peer || 'unknown';
 };

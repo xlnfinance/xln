@@ -2,6 +2,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export * as noReturnErc20MockSol from "./NoReturnERC20Mock.sol";
+export { DepositoryDebtHarness__factory } from "./DepositoryDebtHarness__factory";
 export { EntityProviderSupplyHarness__factory } from "./EntityProviderSupplyHarness__factory";
 export { FeeOnTransferERC20__factory } from "./FeeOnTransferERC20__factory";
 export { HashLadderHarness__factory } from "./HashLadderHarness__factory";

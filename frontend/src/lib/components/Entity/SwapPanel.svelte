@@ -2443,6 +2443,14 @@ $: canonicalPriceTicks = preparedOrder?.priceTicks ?? limitPriceTicks;
 $: canonicalGiveAmount = preparedOrder?.effectiveGive ?? 0n;
 $: canonicalWantAmount = preparedOrder?.effectiveWant ?? 0n;
 $: giveAmountLeftover = preparedOrder?.unspentGiveAmount ?? 0n;
+$: displayedSwapNetAuthorization = (() => {
+  if (canonicalWantAmount <= 0n) return null;
+  if (swapRouteMode === 'cross') return { maxFee: 0n, minNetReceive: canonicalWantAmount };
+  const profile = getHubProfile(activeOrderAccountId);
+  const bps = profile?.metadata?.swapTakerFeeBps;
+  if (!activeXlnFunctions?.deriveSwapNetAuthorization || !Number.isSafeInteger(bps)) return null;
+  return activeXlnFunctions.deriveSwapNetAuthorization(canonicalWantAmount, Number(bps));
+})();
 function orderHistoryDeps() {
   return {
     resolvePairOrientation,
@@ -2642,6 +2650,15 @@ async function placeSwapOffer() {
     if (!activeXlnFunctions?.planSwapCommand) {
       throw new Error('SWAP_COMMAND_PLANNER_UNAVAILABLE');
     }
+    const swapNetAuthorization = placementMode === 'cross'
+      ? { maxFee: 0n, minNetReceive: effectiveWantAmount }
+      : (() => {
+          const feeBps = getHubProfile(resolvedCounterparty)?.metadata?.swapTakerFeeBps;
+          if (!activeXlnFunctions.deriveSwapNetAuthorization || !Number.isSafeInteger(feeBps)) {
+            throw new Error('SWAP_FEE_POLICY_UNAVAILABLE');
+          }
+          return activeXlnFunctions.deriveSwapNetAuthorization(effectiveWantAmount, Number(feeBps));
+        })();
     const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(committedSourceReplica);
     // Setup is derived from the latest committed target Account, not the
     // asynchronously rendered workspace projection. Otherwise a second order
@@ -2674,6 +2691,7 @@ async function placeSwapOffer() {
       wantTokenId: wantToken,
       giveAmount,
       priceTicks: canonicalPriceTicks,
+      ...swapNetAuthorization,
       source: {
         entityId: sourceEntityId,
         signerId,
@@ -2879,6 +2897,8 @@ function useMarketPrice(): void {
         {wantToken}
         {formatAmount}
         {targetCapacityLabel}
+        maxFee={displayedSwapNetAuthorization?.maxFee ?? 0n}
+        minNetReceive={displayedSwapNetAuthorization?.minNetReceive ?? 0n}
         {tokenClass}
         {tokenIconText}
         bind:priceRatioInput

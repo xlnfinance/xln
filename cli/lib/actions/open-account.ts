@@ -5,6 +5,9 @@ import { submitAndWait } from '../session';
 import { findAccount } from '../accounts';
 import { paint } from '../theme';
 import { shortId } from '../format';
+import { defaultAccountDisputeConfigForRoleEvidence, type AccountRoleEvidence } from '../../../runtime/account/dispute-config';
+import { resolveCliHubPartyRoles } from '../account-role-evidence';
+import { ensureCliProfiles } from '../profile-barrier';
 
 export const buildOpenHubAccountInput = (input: {
   sourceEntityId: string;
@@ -12,6 +15,9 @@ export const buildOpenHubAccountInput = (input: {
   hubEntityId: string;
   creditAmount: bigint;
   tokenId?: number;
+  sourceRoleEvidence: AccountRoleEvidence;
+  hubRoleEvidence: AccountRoleEvidence;
+  committedRoles: ReadonlyMap<string, boolean>;
 }): RuntimeInput => {
   const sourceEntityId = input.sourceEntityId.toLowerCase();
   const hubEntityId = input.hubEntityId.toLowerCase();
@@ -31,6 +37,11 @@ export const buildOpenHubAccountInput = (input: {
             type: 'openAccount',
             data: {
               targetEntityId: hubEntityId,
+              disputeConfig: defaultAccountDisputeConfigForRoleEvidence(
+                input.sourceRoleEvidence,
+                input.hubRoleEvidence,
+                input.committedRoles,
+              ),
               creditAmount: input.creditAmount,
               tokenId,
             },
@@ -40,26 +51,6 @@ export const buildOpenHubAccountInput = (input: {
     ],
   };
 };
-
-export const buildDirectOpenAccountInput = (input: {
-  sourceEntityId: string;
-  signerId: string;
-  targetEntityId: string;
-}): RuntimeInput => ({
-  runtimeTxs: [],
-  entityInputs: [
-    {
-      entityId: input.sourceEntityId.toLowerCase(),
-      signerId: input.signerId,
-      entityTxs: [
-        {
-          type: 'openAccount',
-          data: { targetEntityId: input.targetEntityId.toLowerCase() },
-        },
-      ],
-    },
-  ],
-});
 
 export const listDiscoverableHubs = async (session: CliSession): Promise<HubApiRow[]> => {
   const remote = await fetchHubs(session.settings).catch(() => [] as HubApiRow[]);
@@ -102,12 +93,19 @@ export const openHubAccount = async (
   creditAmount: bigint,
   tokenId = 1,
 ): Promise<number> => {
+  const publicHubs = await fetchHubs(session.settings);
+  const publicHub = publicHubs.find(hub => String(hub.entityId).toLowerCase() === hubEntityId.toLowerCase());
+  const partyRoles = resolveCliHubPartyRoles(session, hubEntityId, publicHub);
+  await ensureCliProfiles(session, [hubEntityId], 'CLI_OPEN_ACCOUNT');
   const input = buildOpenHubAccountInput({
     sourceEntityId: session.entityId,
     signerId: session.signerId,
     hubEntityId,
     creditAmount,
     tokenId,
+    sourceRoleEvidence: partyRoles.entityRoleEvidence,
+    hubRoleEvidence: partyRoles.hubRoleEvidence,
+    committedRoles: partyRoles.committedRoles,
   });
   return submitAndWait(
     session.env,

@@ -6,6 +6,10 @@ import type {
   AppliedSwapResolve,
   SwapResolveFailure,
 } from './swap-resolve-types';
+import {
+  requantizeSwapNetAuthorization,
+  type SwapNetAuthorization,
+} from '../../swap-net-authorization';
 
 export type SwapResolveRemainderResult =
   | {
@@ -98,6 +102,16 @@ export const applySwapResolveRemainder = (
       'filled remainder dropped below lot size',
     );
   }
+  let authorization: SwapNetAuthorization;
+  try {
+    authorization = requantizeSwapNetAuthorization(
+      resolve.offer,
+      requantized.effectiveGive,
+      requantized.effectiveWant,
+    );
+  } catch (error) {
+    return failure(events, error instanceof Error ? error.message : String(error));
+  }
   const dustFailure = releaseGiveHold(
     resolve,
     requantized.releasedGiveDust,
@@ -106,6 +120,8 @@ export const applySwapResolveRemainder = (
   if (dustFailure) return dustFailure;
   resolve.offer.giveAmount = requantized.effectiveGive;
   resolve.offer.wantAmount = requantized.effectiveWant;
+  resolve.offer.maxFee = authorization.maxFee;
+  resolve.offer.minNetReceive = authorization.minNetReceive;
   resolve.offer.priceTicks = priceTicks;
   resolve.offer.quantizedGive = requantized.effectiveGive;
   resolve.offer.quantizedWant = requantized.effectiveWant;

@@ -68,10 +68,15 @@ function currentSettlement(giveAmount: bigint, wantAmount: bigint, fillRatio: nu
  * quantized amounts are always present and always agree with the live amounts.
  */
 function committedOffer(
-  offer: Omit<SwapOffer, 'priceTicks' | 'quantizedGive' | 'quantizedWant'>,
+  offer: Omit<
+    SwapOffer,
+    'priceTicks' | 'quantizedGive' | 'quantizedWant' | 'maxFee' | 'minNetReceive'
+  >,
 ): SwapOffer {
   return {
     ...offer,
+    maxFee: 0n,
+    minNetReceive: offer.wantAmount,
     priceTicks: computeSwapPriceTicks(
       offer.giveTokenId,
       offer.wantTokenId,

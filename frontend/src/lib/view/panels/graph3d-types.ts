@@ -17,6 +17,12 @@ export type GraphXLNRuntime = {
   executeScenario: (env: unknown, scenario: unknown) => Promise<{ success: boolean; framesGenerated: number; errors?: string[] }>;
   process: (env: unknown, inputs: unknown[]) => Promise<void>;
   parseScenario: (text: string) => { errors: unknown[]; scenario: unknown };
+  quoteHtlcPaymentRoute: (
+    profiles: unknown[],
+    route: string[],
+    tokenId: number,
+    recipientAmount: bigint,
+  ) => { senderLockAmount: bigint };
   classifyBilateralState: (
     myAccount: unknown,
     peerCurrentHeight: number | undefined,

@@ -234,7 +234,7 @@
       payload: importPayload,
       source: importSource,
     });
-    if (remoteRequest && (remoteRequest.requiresAuthPaste || (!remoteRequest.authKey && !hasAcceptedRemoteRuntime(remoteRequest)))) {
+    if (remoteRequest && (remoteRequest.requiresAuthPaste || !hasAcceptedRemoteRuntime(remoteRequest))) {
       pendingRemoteRuntime = remoteRequest;
       stripRemoteRuntimeParams();
       showInactiveTabStandby();
@@ -460,6 +460,7 @@
       await suspendClientActivity();
     } catch (err) {
       logAppShellDiagnostic('Inactive tab activity suspension failed', err);
+      throw err;
     }
   }
 

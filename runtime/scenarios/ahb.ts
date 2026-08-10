@@ -35,6 +35,7 @@ import { deriveDelta, isLeftEntity } from '../account/utils';
 import { createGossipLayer } from '../network/p2p/gossip';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
+import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 import { ethers } from 'ethers';
 import {
   AHB_DEBUG,
@@ -930,6 +931,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: payment1,
+          maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC_TOKEN_ID, payment1).senderLockAmount,
           route: [alice.id, hub.id, bob.id],
           deliveryMode: 'instant',
           description: 'Payment 1 of 2'
@@ -1022,6 +1024,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: payment2,
+          maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC_TOKEN_ID, payment2).senderLockAmount,
           route: [alice.id, hub.id, bob.id],
           deliveryMode: 'instant',
           description: 'Payment 2 of 2'
@@ -1126,6 +1129,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
           targetEntityId: alice.id,
           tokenId: USDC_TOKEN_ID,
           amount: reversePayment,
+          maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [bob.id, hub.id, alice.id], USDC_TOKEN_ID, reversePayment).senderLockAmount,
           route: [bob.id, hub.id, alice.id],  // CRITICAL: B→H→A route
           deliveryMode: 'instant',
           description: 'Reverse payment: Bob pays Alice'

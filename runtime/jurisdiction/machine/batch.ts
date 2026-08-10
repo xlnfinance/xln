@@ -118,6 +118,11 @@ export interface JBatch {
     sig: string;
     startedByLeft: boolean;
     cooperative: boolean;
+    /**
+     * Runtime-only submission gate for timeout-authorized proofs. This is the
+     * exact authenticated L1 deadline and is deliberately not ABI-encoded.
+     */
+    submitNotBeforeTimestamp?: number;
   }>;
 
   // Flashloans (for atomic batch execution)

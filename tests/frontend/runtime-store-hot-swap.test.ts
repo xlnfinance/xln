@@ -677,6 +677,16 @@ test('app remote runtime prompt activates through hot boot instead of reload', (
   expect(source).toContain('releaseActiveTabLock = await initializeActiveTabLock');
 });
 
+test('embedded remote capability never bypasses explicit runtime consent', () => {
+  const source = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+  expect(source).toContain(
+    'remoteRequest && (remoteRequest.requiresAuthPaste || !hasAcceptedRemoteRuntime(remoteRequest))',
+  );
+  expect(source).not.toContain(
+    'remoteRequest.requiresAuthPaste || (!remoteRequest.authKey && !hasAcceptedRemoteRuntime(remoteRequest))',
+  );
+});
+
 test('accepted remote runtime links persist into the shared runtime registry', () => {
   const source = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
   const persistStart = source.indexOf('export function persistRemoteRuntimeRequest');
@@ -882,4 +892,19 @@ test('frontend surfaces do not bypass RuntimeController when switching active ru
     .filter((file) => /\bactiveRuntimeId\.set\(/.test(readFileSync(file, 'utf8')));
 
   expect(bypasses).toEqual([]);
+});
+
+test('active Runtime ownership uses Web Locks and releases only after quiesce', () => {
+  const lockSource = readFileSync('frontend/src/lib/utils/activeTabLock.ts', 'utf8');
+  const layoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+  const loseStart = lockSource.indexOf('const loseWebLockTo');
+  const loseEnd = lockSource.indexOf('async function handleHardResetRequest', loseStart);
+  const loseSource = lockSource.slice(loseStart, loseEnd);
+
+  expect(lockSource).toContain("navigator.locks.request(ACTIVE_TAB_WEB_LOCK_NAME, { mode: 'exclusive' }");
+  expect(lockSource).not.toContain("localStorage.getItem('xln-active-tab-lock')");
+  expect(lockSource).not.toContain("sessionStorage.getItem(ACTIVE_TAB_ID_KEY)");
+  expect(loseSource.indexOf('await onLoseLockHandler?.()')).toBeGreaterThan(0);
+  expect(loseSource.indexOf('releaseWebLock()')).toBeGreaterThan(loseSource.indexOf('await onLoseLockHandler?.()'));
+  expect(layoutSource).toContain("logAppShellDiagnostic('Inactive tab activity suspension failed', err);\n      throw err;");
 });

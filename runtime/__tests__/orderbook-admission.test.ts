@@ -74,6 +74,8 @@ const candidateFor = (offer: SwapOffer, overrides: Record<string, unknown> = {})
         giveAmount: offer.giveAmount,
         wantTokenId: offer.wantTokenId,
         wantAmount: offer.wantAmount,
+        maxFee: offer.maxFee,
+        minNetReceive: offer.minNetReceive,
         priceTicks: offer.priceTicks,
         timeInForce: offer.timeInForce ?? 0,
       },

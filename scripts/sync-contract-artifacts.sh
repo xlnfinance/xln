@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# RELEASE INVARIANT: Solidity source changes necessarily change canonical ABI/bytecode.
+# Always rebuild and commit both frontend/static/contracts and jurisdictions/typechain-types
+# with the Solidity change. Stale generated artifacts are a release blocker, never a cache.
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LOCK_DIR="$ROOT_DIR/.tmp/contracts-sync.lock"
 TYPECHAIN_BUILD_DIR=".typechain-types-build-$$"

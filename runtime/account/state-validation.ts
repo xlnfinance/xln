@@ -23,6 +23,7 @@ import {
 } from './rebalance-validation';
 import { normalizeAccountStateDomain } from './state-root';
 import { validateSwapHistoryMap } from './swap-history-validation';
+import { assertSwapNetAuthorization } from './swap-net-authorization';
 
 const LENDING_INTENTS = new Set([
   'fund',
@@ -33,6 +34,25 @@ const LENDING_INTENTS = new Set([
   'close-request',
   'close-payout',
 ]);
+
+const validateSwapOffers = (value: unknown, context: string): void => {
+  const offers = validateMapInstance(value, context);
+  for (const [offerId, value] of offers) {
+    const offer = validateObject(value, `${context}.${String(offerId)}`);
+    try {
+      assertSwapNetAuthorization({
+        giveAmount: offer['giveAmount'] as bigint,
+        wantAmount: offer['wantAmount'] as bigint,
+        maxFee: offer['maxFee'] as bigint,
+        minNetReceive: offer['minNetReceive'] as bigint,
+      }, 0n, 0n, 0n);
+    } catch (error) {
+      throw new FinancialDataCorruptionError(`${context}.${String(offerId)} authorization is invalid`, {
+        cause: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+};
 
 const validateLendingIntents = (value: unknown, context: string): void => {
   if (value === undefined) return;
@@ -174,7 +194,7 @@ function assertAccountReplica(
   const deltas = validateMapInstance(state['deltas'], `${context}.state.deltas`);
   assertAccountDeltaCapacity(deltas.size, `${context}.deltas`);
   validateMapInstance(state['locks'], `${context}.state.locks`);
-  validateMapInstance(state['swapOffers'], `${context}.state.swapOffers`);
+  validateSwapOffers(state['swapOffers'], `${context}.state.swapOffers`);
   if (state['pulls'] !== undefined) {
     validateMapInstance(state['pulls'], `${context}.state.pulls`);
   }

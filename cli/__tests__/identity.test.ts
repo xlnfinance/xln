@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -34,6 +34,8 @@ describe('cli identity', () => {
       expect(await walletExists(settings)).toBe(false);
       await saveWallet(settings, { mnemonic, passphrase: 'secret', label: 't' });
       expect(await walletExists(settings)).toBe(true);
+      expect((await stat(join(settings.homeDir, 'wallet.json'))).mode & 0o777).toBe(0o600);
+      expect((await stat(settings.homeDir)).mode & 0o777).toBe(0o700);
       const unlocked = await unlockWallet(settings, 'secret');
       expect(unlocked.runtimeId).toBe(address);
       expect(unlocked.signerAddress).toBe(address);
@@ -52,6 +54,21 @@ describe('cli identity', () => {
         label: 't',
       });
       await expect(unlockWallet(settings, 'wrong')).rejects.toThrow();
+    } finally {
+      await rm(settings.homeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a wallet file that is readable by another user', async () => {
+    const settings = await tempSettings();
+    try {
+      await saveWallet(settings, {
+        mnemonic: createDemoMnemonic(),
+        passphrase: 'right',
+        label: 't',
+      });
+      await chmod(join(settings.homeDir, 'wallet.json'), 0o644);
+      await expect(unlockWallet(settings, 'right')).rejects.toThrow('CLI_WALLET_FILE_PERMISSIONS_INVALID');
     } finally {
       await rm(settings.homeDir, { recursive: true, force: true });
     }

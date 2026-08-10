@@ -1,6 +1,7 @@
 import type { AccountState, AccountTx } from '../../../../types/account';
 import { FINANCIAL, LIMITS } from '../../../../config/constants';
 import { getAccountSwapMarketLimitError } from '../../../swap-limits';
+import { assertSwapNetAuthorization } from '../../../swap-net-authorization';
 
 export type SwapOfferTx = Extract<AccountTx, { type: 'swap_offer' }>;
 
@@ -54,6 +55,14 @@ const validateOfferShape = (tx: SwapOfferTx): string | null => {
   }
   if (wantAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || wantAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     return `Invalid wantAmount: ${wantAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`;
+  }
+  if (tx.data.maxFee >= wantAmount || tx.data.minNetReceive <= 0n) {
+    return 'SWAP_NET_AUTH_INITIAL_TERMS_INVALID';
+  }
+  try {
+    assertSwapNetAuthorization(tx.data, 0n, 0n, 0n);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
   }
   if (giveTokenId === wantTokenId && !crossJurisdiction) {
     return `Cannot swap same token: ${giveTokenId}`;

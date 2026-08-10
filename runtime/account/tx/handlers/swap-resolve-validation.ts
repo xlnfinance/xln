@@ -11,6 +11,7 @@ import type {
   SwapResolveTx,
   ValidatedSwapResolve,
 } from './swap-resolve-types';
+import { assertSwapNetAuthorization } from '../../swap-net-authorization';
 
 const swapResolveLog = createStructuredLogger('account.swap');
 
@@ -200,6 +201,16 @@ const validateExecutionEconomics = (
       events,
       `Swap taker fee ${feeAmount} exceeds or equals filled receive amount ${fill.filledWant}`,
     );
+  }
+  try {
+    assertSwapNetAuthorization(
+      canonical.offer,
+      fill.filledGive,
+      fill.filledWant,
+      feeAmount,
+    );
+  } catch (error) {
+    return failure(events, error instanceof Error ? error.message : String(error));
   }
   if (fill.executionProvided) {
     const hasFill = fill.filledGive > 0n || fill.filledWant > 0n;

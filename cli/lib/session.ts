@@ -4,6 +4,7 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   generateLazyEntityId,
+  getP2PState,
   loadEnvFromDB,
   processRuntime,
   readPersistedStorageFrameRecord,
@@ -119,6 +120,30 @@ export const submitAndWait = async (
     label,
     timeoutMs,
   );
+  const drained = await waitForRuntimeWorkDrained(env, Math.min(timeoutMs, 15_000));
+  if (!drained) throw new Error(`${label}: runtime work drain timed out after commit ${committedHeight}`);
+  return committedHeight;
+};
+
+/**
+ * Commit an explicitly asynchronous command and wait only for local Runtime
+ * work to drain. Success means "durably queued", never financial completion.
+ */
+export const submitQueued = async (
+  env: RuntimeReplica,
+  input: RuntimeInput,
+  label: string,
+  timeoutMs = 45_000,
+): Promise<number> => {
+  const afterHeight = env.state.height;
+  enqueueRuntimeInput(env, input);
+  const committedHeight = await waitForRuntimeInputCommitted({
+    env,
+    submitted: input,
+    afterHeight,
+    readPersistedFrame: height => readPersistedStorageFrameRecord(env, height),
+    timeoutMs,
+  });
   const drained = await waitForRuntimeWorkDrained(env, Math.min(timeoutMs, 15_000));
   if (!drained) throw new Error(`${label}: runtime work drain timed out after commit ${committedHeight}`);
   return committedHeight;
@@ -333,15 +358,12 @@ export const openSession = async (
   }
 
   if (options.startNetwork !== false && typeof startP2P === 'function') {
-    try {
-      startP2P(env, {
-        relayUrls: [resolveCliRelayUrl(settings.apiBase)],
-        signerId: runtimeId,
-        gossipPollMs: 5_000,
-      });
-    } catch (err) {
-      console.error(`[xln] P2P start warning: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    startP2P(env, {
+      relayUrls: [resolveCliRelayUrl(settings.apiBase)],
+      signerId: runtimeId,
+      gossipPollMs: 5_000,
+    });
+    await waitUntil(() => getP2PState(env).connected, 'CLI relay connection', 15_000);
   }
 
   return {

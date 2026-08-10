@@ -29,6 +29,11 @@ import {
   type WorkingOrderbookOffer,
 } from '../../../../orderbook/swap-execution';
 import {
+  assertSwapNetAuthorization,
+  requantizeSwapNetAuthorization,
+  type SwapNetAuthorization,
+} from '../../../../account/swap-net-authorization';
+import {
   buildCrossJurisdictionMarketOffer,
   crossJurisdictionBookAdmissionKeyFor,
   getCrossJurisdictionRouteRemainingAmounts,
@@ -58,6 +63,7 @@ type CanonicalRestingOffer = {
   quantizedWant: bigint;
   priceTicks: bigint;
 };
+type AuthorizedCanonicalRestingOffer = CanonicalRestingOffer & SwapNetAuthorization;
 
 type SameTradeFillAggregate = {
   filledLots: bigint;
@@ -73,6 +79,10 @@ type CrossTradeFillAggregate = {
 type RestingOrderTerms = {
   giveTokenId: number;
   wantTokenId: number;
+  giveAmount: bigint;
+  wantAmount: bigint;
+  maxFee: bigint;
+  minNetReceive: bigint;
 };
 
 type SameFillResolvePlan = {
@@ -346,6 +356,8 @@ export const buildCrossMarketOfferFromBookOrder = (
           giveAmount: offer.giveAmount,
           wantTokenId: offer.wantTokenId,
           wantAmount: offer.wantAmount,
+          maxFee: offer.maxFee,
+          minNetReceive: offer.minNetReceive,
           priceTicks: offer.priceTicks,
           timeInForce: offer.timeInForce,
           crossJurisdiction: offer.crossJurisdiction,
@@ -374,6 +386,8 @@ export const buildCrossMarketOfferFromBookOrder = (
         giveAmount: remaining.sourceRemaining,
         wantTokenId: Number(admission.route.target.tokenId),
         wantAmount: remaining.targetRemaining,
+        maxFee: 0n,
+        minNetReceive: remaining.targetRemaining,
         ...(admission.route.priceTicks !== undefined ? { priceTicks: BigInt(admission.route.priceTicks) } : {}),
         crossJurisdiction: admission.route,
       },
@@ -504,7 +518,7 @@ const resolveSameExecutionOffer = (
   isCurrentTakerOrder: boolean,
   restingPriceTicks: bigint,
   originalLots: bigint,
-): NormalizedOrderbookOffer | CanonicalRestingOffer => {
+): NormalizedOrderbookOffer | AuthorizedCanonicalRestingOffer => {
   if (isCurrentTakerOrder) {
     return {
       ...input.currentOffer,
@@ -519,17 +533,21 @@ const resolveSameExecutionOffer = (
         `account=${input.accountId} offer=${input.offerId}`,
     );
   }
-  return materializeCanonicalRestingOffer(
+  const canonical = materializeCanonicalRestingOffer(
     resting.giveTokenId,
     resting.wantTokenId,
     restingPriceTicks,
     originalLots,
   );
+  return {
+    ...canonical,
+    ...requantizeSwapNetAuthorization(resting, canonical.giveAmount, canonical.wantAmount),
+  };
 };
 
 const applySameFillTakerFee = (
   data: SwapResolveEnqueueData,
-  offer: NormalizedOrderbookOffer | CanonicalRestingOffer,
+  offer: NormalizedOrderbookOffer | AuthorizedCanonicalRestingOffer,
   takerFeeBps: number,
 ): void => {
   const fee = calculateSwapTakerFeeAmount(data.executionWantAmount ?? 0n, takerFeeBps);
@@ -598,6 +616,12 @@ export const buildSameFillResolvePlan = (input: SameFillResolveInput): SameFillR
   if (isCurrentTakerOrder) {
     applySameFillTakerFee(resolveEnqueueData, offerForExecution, input.takerFeeBps);
   }
+  assertSwapNetAuthorization(
+    offerForExecution,
+    resolveEnqueueData.executionGiveAmount ?? 0n,
+    resolveEnqueueData.executionWantAmount ?? 0n,
+    resolveEnqueueData.feeAmount ?? 0n,
+  );
 
   return {
     accountId: input.accountId,

@@ -49,7 +49,8 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
   swap_offer: {
     required: {
       offerId: 'string', giveTokenId: 'integer', giveAmount: 'bigint',
-      wantTokenId: 'integer', wantAmount: 'bigint',
+      wantTokenId: 'integer', wantAmount: 'bigint', maxFee: 'bigint',
+      minNetReceive: 'bigint',
     },
     optional: { priceTicks: 'bigint', timeInForce: 'integer', crossJurisdiction: 'record' },
     literals: { timeInForce: [0, 1, 2] },

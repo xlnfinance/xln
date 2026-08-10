@@ -268,7 +268,7 @@ test('HTLC note insertion rejects atomically at the Entity cap', () => {
   expect(() => indexCertifiedEntityFrameNotes(replica, { txs: [{
     type: 'htlcPayment',
     data: {
-      targetEntityId: rightEntity, tokenId: 1, amount: 1n, route: [leftEntity, rightEntity],
+      targetEntityId: rightEntity, tokenId: 1, amount: 1n, maxSenderDebit: 1n, route: [leftEntity, rightEntity],
       deliveryMode: 'instant', hashlock, preparedLockId: lockId, description: 'new note',
     },
   }] })).toThrow(
@@ -289,6 +289,7 @@ test('HTLC note text validation rejects before adding either lookup key', () => 
       targetEntityId: rightEntity,
       tokenId: 1,
       amount: 1n,
+      maxSenderDebit: 1n,
       route: [leftEntity, rightEntity],
       deliveryMode: 'instant',
       hashlock,
@@ -308,6 +309,7 @@ test('certified proposal and executed vote frames index nested HTLC descriptions
       targetEntityId: rightEntity,
       tokenId: 1,
       amount: 1n,
+      maxSenderDebit: 1n,
       route: [leftEntity, rightEntity],
       deliveryMode: 'instant',
       hashlock,

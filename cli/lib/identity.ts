@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { HDNodeWallet, Mnemonic, getIndexedAccountPath } from 'ethers';
@@ -32,6 +32,35 @@ export type UnlockedIdentity = {
 };
 
 const walletPath = (settings: CliSettings): string => join(settings.homeDir, 'wallet.json');
+
+const writeWalletRecord = async (
+  settings: CliSettings,
+  record: WalletRecord,
+): Promise<void> => {
+  await mkdir(settings.homeDir, { recursive: true, mode: 0o700 });
+  await chmod(settings.homeDir, 0o700);
+  const path = walletPath(settings);
+  const temporaryPath = `${path}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    handle = await open(temporaryPath, 'wx', 0o600);
+    await handle.writeFile(`${JSON.stringify(record, null, 2)}\n`, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await rename(temporaryPath, path);
+    await chmod(path, 0o600);
+    const directory = await open(settings.homeDir, 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } finally {
+    await handle?.close().catch(() => {});
+    await rm(temporaryPath, { force: true }).catch(() => {});
+  }
+};
 
 export const walletExists = async (settings: CliSettings): Promise<boolean> => {
   try {
@@ -109,13 +138,24 @@ export const saveWallet = async (
     createdAt: new Date().toISOString(),
     cipher: encryptMnemonic(input.mnemonic.trim().toLowerCase().replace(/\s+/g, ' '), input.passphrase),
   };
-  await mkdir(settings.homeDir, { recursive: true });
-  await writeFile(walletPath(settings), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  await writeWalletRecord(settings, record);
   return record;
 };
 
 export const loadWalletRecord = async (settings: CliSettings): Promise<WalletRecord> => {
-  const raw = await readFile(walletPath(settings), 'utf8');
+  const path = walletPath(settings);
+  const [homeStat, walletStat] = await Promise.all([lstat(settings.homeDir), lstat(path)]);
+  if (!homeStat.isDirectory() || (homeStat.mode & 0o777) !== 0o700) {
+    throw new Error('CLI_WALLET_HOME_PERMISSIONS_INVALID: expected 0700');
+  }
+  if (!walletStat.isFile() || walletStat.isSymbolicLink() || (walletStat.mode & 0o777) !== 0o600) {
+    throw new Error('CLI_WALLET_FILE_PERMISSIONS_INVALID: expected regular 0600 file');
+  }
+  const expectedUid = typeof process.getuid === 'function' ? process.getuid() : null;
+  if (expectedUid !== null && (homeStat.uid !== expectedUid || walletStat.uid !== expectedUid)) {
+    throw new Error('CLI_WALLET_OWNER_INVALID');
+  }
+  const raw = await readFile(path, 'utf8');
   const record = JSON.parse(raw) as WalletRecord;
   if (record.version !== 1 || !record.cipher?.data) throw new Error('Corrupt wallet.json');
   return record;
@@ -148,12 +188,11 @@ export const unlockWallet = async (settings: CliSettings, passphrase: string): P
 export const updateWalletEntityId = async (settings: CliSettings, entityId: string): Promise<void> => {
   const record = await loadWalletRecord(settings);
   record.entityId = entityId;
-  await writeFile(walletPath(settings), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  await writeWalletRecord(settings, record);
 };
 
-export const resolvePassphrase = (explicit?: string): string | null => {
+export const resolvePassphrase = (): string | null => {
   const fromEnv = process.env['XLN_PASSPHRASE']?.trim();
-  if (explicit?.trim()) return explicit.trim();
   if (fromEnv) return fromEnv;
   return null;
 };

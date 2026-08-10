@@ -39,6 +39,8 @@ const baseInput = () => ({
   wantTokenId: 3,
   giveAmount: 1_000n,
   priceTicks: 10_000n,
+  maxFee: 0n,
+  minNetReceive: 1_000n,
   source: {
     entityId: sourceUser,
     signerId: sourceSigner,
@@ -85,6 +87,8 @@ describe('runtime-owned swap command plan', () => {
           giveAmount: 1_000n,
           wantTokenId: 3,
           wantAmount: 1_000n,
+          maxFee: 0n,
+          minNetReceive: 1_000n,
           priceTicks: 10_000n,
         },
       },

@@ -14,6 +14,8 @@ export interface SwapOfferEvent {
   giveAmount: bigint;
   wantTokenId: number;
   wantAmount: bigint;
+  maxFee: bigint;
+  minNetReceive: bigint;
   priceTicks?: bigint | undefined;
   timeInForce?: 0 | 1 | 2 | undefined;
   crossJurisdiction?: CrossJurisdictionSwapRoute;

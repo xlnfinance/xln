@@ -42,6 +42,7 @@ export {
 export { calculateSolvency, verifySolvency } from '../../runtime/solvency';
 export { classifyBilateralState, getAccountBarVisual } from '../../account/view-state';
 export { createDefaultDelta } from '../../account/delta';
+export { deriveSwapNetAuthorization } from '../../account/swap-net-authorization';
 export {
   isDelta,
   validateAccountDeltas,

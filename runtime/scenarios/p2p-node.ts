@@ -24,6 +24,7 @@ import type { JAdapter, JTokenInfo } from '../jurisdiction/adapter/types';
 import type { Profile } from '../entity/profile';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { hasCliFlag, readCliOption } from '../config/cli';
+import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 
 const args = globalThis.process.argv.slice(2);
 
@@ -1097,6 +1098,7 @@ const run = async () => {
               targetEntityId: bobProfile.entityId,
               tokenId: USDC,
               amount: HTLC_AMOUNT,
+              maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [entityId, hubProfile.entityId, bobProfile.entityId], USDC, HTLC_AMOUNT).senderLockAmount,
               route: [entityId, hubProfile.entityId, bobProfile.entityId],
               deliveryMode: 'async',
               description: 'p2p-htlc',

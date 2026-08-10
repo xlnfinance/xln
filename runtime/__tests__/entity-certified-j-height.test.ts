@@ -151,6 +151,7 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     });
     expect(proof?.sig).toBe('0x');
     expect(proof?.initialProofbodyHash).toBe(initialHash);
+    expect(proof?.submitNotBeforeTimestamp).toBe(120);
   });
 
   test('scheduled dispute wake is independent of validator-local scan height', async () => {

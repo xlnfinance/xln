@@ -10,6 +10,8 @@ import { removeCrossJurisdictionBookOrderByRouteId } from '../orderbook/cross-j'
 
 import { processOrderbookCancels, processOrderbookSwaps } from '../entity/tx/handlers/account';
 
+import { buildCrossMarketOfferFromBookOrder } from '../entity/tx/handlers/account/orderbook-matching-helpers';
+
 import { applyCrossJurisdictionBookProgressToState } from '../entity/tx/handlers/cross-j-book-order';
 
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
@@ -345,6 +347,9 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(admission?.route.filledSourceAmount).toBe(filledSourceAmount);
     expect(admission?.route.filledTargetAmount).toBe(filledTargetAmount);
     expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(30_000n);
+    const normalizedRemainder = buildCrossMarketOfferFromBookOrder(entityState, namespacedOrderId);
+    expect(normalizedRemainder?.offer.maxFee).toBe(0n);
+    expect(normalizedRemainder?.offer.minNetReceive).toBe(targetTotal - filledTargetAmount);
 
     admission!.pendingFill = {
       fillId: 'pending-exact-duplicate',

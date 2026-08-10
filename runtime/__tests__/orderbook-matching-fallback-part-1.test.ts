@@ -36,14 +36,23 @@ const CROSS_WETH_USDC_PAIR = `cross:${TESTNET_STACK}:2/${TRON_STACK}:1`;
 
 const CROSS_USDC_USDC_PAIR = `cross:${TESTNET_STACK}:1/${TRON_STACK}:1`;
 
+const withZeroFeeTestAuthorization = <T extends { wantAmount: bigint }>(offer: T): T & {
+  maxFee: bigint;
+  minNetReceive: bigint;
+} => ({ maxFee: 0n, minNetReceive: offer.wantAmount, ...offer });
+
 const processCommittedOrderbookSwaps = (
   state: Parameters<typeof processOrderbookSwaps>[0],
   offers: NormalizedOrderbookOffer[],
   options?: Parameters<typeof processOrderbookSwaps>[2],
-) => processOrderbookSwaps(state, offers.map(markWorkingOrderbookOffer), options);
+) => processOrderbookSwaps(
+  state,
+  offers.map(offer => markWorkingOrderbookOffer(withZeroFeeTestAuthorization(offer))),
+  options,
+);
 
 function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountReplica {
-  const offers = Array.isArray(input) ? input : [input];
+  const offers = (Array.isArray(input) ? input : [input]).map(withZeroFeeTestAuthorization);
   const firstOffer = offers[0];
   const deltas = new Map<number, ReturnType<typeof createDefaultDelta>>();
   for (const offer of offers) {
@@ -962,6 +971,8 @@ describe('orderbook matching fallback execution mapping', () => {
                     giveAmount: lot,
                     wantTokenId: 5,
                     wantAmount: (1000n * lot) / 10_000n,
+                    maxFee: 0n,
+                    minNetReceive: (1000n * lot) / 10_000n,
                     makerIsLeft: false,
                     createdHeight: 1,
                     priceTicks: 1000n,
@@ -1116,12 +1127,14 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: makerQuoteQty,
       wantTokenId: 2,
       wantAmount: makerBaseQty,
+      maxFee: makerBaseQty / 10_000n,
+      minNetReceive: makerBaseQty - makerBaseQty / 10_000n,
       createdHeight: 2,
       timeInForce: 0,
       priceTicks: makerPriceTicks,
     };
 
-    const entityState = {
+    const makeFeeEntityState = () => ({
       entityId: 'hub-entity',
       hubRebalanceConfig: {
         matchingStrategy: 'amount',
@@ -1155,7 +1168,7 @@ describe('orderbook matching fallback execution mapping', () => {
         books: new Map(),
         pairConfig: new Map(),
       } as any,
-    } as any;
+    } as any);
 
     const makerOffer = {
       offerId: 'maker-ask-fee',
@@ -1172,7 +1185,28 @@ describe('orderbook matching fallback execution mapping', () => {
       priceTicks: makerPriceTicks,
     };
 
-    const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
+    const unauthorized = processCommittedOrderbookSwaps(makeFeeEntityState(), [makerOffer, {
+      ...takerOffer,
+      maxFee: 0n,
+      minNetReceive: makerBaseQty,
+    }]);
+    expect(unauthorized.accountTxs.some(
+      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+    )).toBe(false);
+    expect(unauthorized.accountTxs).toContainEqual(expect.objectContaining({
+      accountId: 'taker-account',
+      tx: expect.objectContaining({
+        type: 'swap_resolve',
+        data: expect.objectContaining({
+          offerId: 'taker-buy-with-fee',
+          fillRatio: 0,
+          cancelRemainder: true,
+          comment: 'fee-authorization-exceeded',
+        }),
+      }),
+    }));
+
+    const result = processCommittedOrderbookSwaps(makeFeeEntityState(), [makerOffer, takerOffer]);
     const takerResolve = result.accountTxs.find(
       item =>
         item.accountId === 'taker-account' &&
@@ -1193,6 +1227,8 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: makerQuoteQty,
       wantTokenId: 2,
       wantAmount: makerBaseQty,
+      maxFee: makerBaseQty / 10_000n,
+      minNetReceive: makerBaseQty - makerBaseQty / 10_000n,
       createdHeight: 2,
       priceTicks: makerPriceTicks,
       quantizedGive: makerQuoteQty,

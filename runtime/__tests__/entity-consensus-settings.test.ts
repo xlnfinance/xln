@@ -16,6 +16,7 @@ const preparedPayment = (): Extract<EntityTx, { type: 'htlcPayment' }> => ({
     targetEntityId: recipient,
     tokenId: 7,
     amount: 1_000n,
+    maxSenderDebit: 1_025n,
     route: [`0x${'aa'.repeat(32)}`, recipient],
     deliveryMode: 'instant',
     secret: `0x${'44'.repeat(32)}`,

@@ -68,6 +68,8 @@
   export let wantToken = 2;
   export let formatAmount: (amount: bigint, tokenId: number) => string = () => '';
   export let targetCapacityLabel = '0';
+  export let maxFee: bigint = 0n;
+  export let minNetReceive: bigint = 0n;
 
   export let tokenClass: (symbol: string) => string = () => '';
   export let tokenIconText: (symbol: string) => string = () => '';
@@ -323,6 +325,11 @@
     {manualRouteEstimateLabel}
   />
 
+  <div class="swap-net-authorization" data-testid="swap-net-authorization">
+    <span>Maximum fee <strong data-testid="swap-max-fee">{formatAmount(maxFee, wantToken)} {wantTokenSymbol}</strong></span>
+    <span>Minimum receive <strong data-testid="swap-min-net-receive">{formatAmount(minNetReceive, wantToken)} {wantTokenSymbol}</strong></span>
+  </div>
+
   {#if swapRouteMode === 'cross'}
     <section class="cross-j-safety-banner" data-testid="cross-j-safety-banner" aria-live="polite">
       <strong>Stay online for this cross-network swap</strong>
@@ -375,6 +382,30 @@
     padding: 20px;
     border-radius: 18px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  .swap-net-authorization {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .swap-net-authorization span {
+    display: grid;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--border, #334155) 78%, transparent);
+    border-radius: 10px;
+    color: var(--text-secondary, #94a3b8);
+    font-size: 11px;
+  }
+
+  .swap-net-authorization strong {
+    overflow: hidden;
+    color: var(--text-primary, #f8fafc);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .cross-j-safety-banner {

@@ -84,6 +84,8 @@ const requireCommittedSwapOffer = (
     committedOffer.wantTokenId !== offer.wantTokenId ||
     committedGive !== offer.giveAmount ||
     committedWant !== offer.wantAmount ||
+    committedOffer.maxFee !== offer.maxFee ||
+    committedOffer.minNetReceive !== offer.minNetReceive ||
     committedPriceTicks !== offer.priceTicks ||
     committedOffer.makerIsLeft !== offer.makerIsLeft ||
     Boolean(committedOffer.crossJurisdiction) !== Boolean(offer.crossJurisdiction)

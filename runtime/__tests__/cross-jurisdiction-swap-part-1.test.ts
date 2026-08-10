@@ -2484,6 +2484,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(swapOfferTx?.data.crossJurisdiction?.routeHash).toBe(preparedRoute.routeHash);
     expect(swapOfferTx?.data.crossJurisdiction?.source.jurisdiction).toBe(jref(sourceUserAliasJurisdiction));
     expect(swapOfferTx?.data.crossJurisdiction?.sourcePull?.fullHash).toBe(preparedRoute.sourcePull.fullHash);
+    expect(swapOfferTx?.data.maxFee).toBe(0n);
+    expect(swapOfferTx?.data.minNetReceive).toBe(BigInt(preparedRoute.target.amount));
 
     const clearingHubState = sourceRegistration.newState;
     const clearingRoute = {
@@ -2762,6 +2764,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       giveAmount: 1_000n,
       wantTokenId: 1,
       wantAmount: 900n,
+      maxFee: 0n,
+      minNetReceive: 900n,
       priceTicks: 900n,
       timeInForce: 0,
       makerIsLeft: account.state.leftEntity === sourceUser,
@@ -2776,6 +2780,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         giveAmount: 1_000n,
         wantTokenId: 1,
         wantAmount: 900n,
+        maxFee: 0n,
+        minNetReceive: 900n,
         crossJurisdiction: { ...route, __debugOnly: secret('b8') } as any,
       },
     });

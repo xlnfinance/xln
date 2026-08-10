@@ -95,6 +95,8 @@ export const buildLiveSameOfferMeta = (
       giveAmount: liveOffer.giveAmount,
       wantTokenId: liveOffer.wantTokenId,
       wantAmount: liveOffer.wantAmount,
+      maxFee: liveOffer.maxFee,
+      minNetReceive: liveOffer.minNetReceive,
       priceTicks: liveOffer.priceTicks,
       timeInForce: liveOffer.timeInForce,
     },

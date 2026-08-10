@@ -31,6 +31,7 @@ import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { htlcRouteConvergenceCycleBudget } from './test-economy';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
+import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);
@@ -693,6 +694,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: payment1,
+          maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC_TOKEN_ID, payment1).senderLockAmount,
           route: [alice.id, hub.id, bob.id],
           deliveryMode: 'async',
           description: 'HTLC Payment 1 of 2',
@@ -832,6 +834,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: payment2,
+          maxSenderDebit: payment2SenderGross,
           route: [alice.id, hub.id, bob.id],
           deliveryMode: 'instant',
           description: 'Payment 2 of 2'
@@ -952,6 +955,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           targetEntityId: alice.id,
           tokenId: USDC_TOKEN_ID,
           amount: reversePayment,
+          maxSenderDebit: reverseSenderGross,
           route: [bob.id, hub.id, alice.id],  // CRITICAL: B→H→A route
           deliveryMode: 'instant',
           description: 'Reverse payment: Bob pays Alice'
@@ -1316,6 +1320,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           route: [hub.id, charlie.id],
           tokenId: USDC_TOKEN_ID,
           amount: usd(10_000),
+          maxSenderDebit: usd(10_000),
           deliveryMode: 'instant',
           hashlock: testHashlock,
           description: 'canonical timeout proof',
@@ -1511,6 +1516,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           route: [alice.id, hub.id, hub2.id, bob.id], // Explicit 4-hop route
           tokenId: USDC_TOKEN_ID,
           amount: payment4Hop,
+          maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, hub2.id, bob.id], USDC_TOKEN_ID, payment4Hop).senderLockAmount,
           deliveryMode: 'async',
           description: '4-hop onion routing test',
           hashlock: htlc4.hashlock,
@@ -1572,6 +1578,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           route: [hub.id, bob.id],
           tokenId: USDC_TOKEN_ID,
           amount: hostageAmount,
+          maxSenderDebit: hostageAmount,
           deliveryMode: 'async',
           hashlock: hostageSecret.hashlock,
           description: 'canonical hostage proof',

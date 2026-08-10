@@ -49,6 +49,7 @@ import {
 } from './frame/notifications';
 
 export { admitAtomicCrossJAccountInputs };
+export { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 
 let processRuntimeImpl: ReturnType<typeof createRuntimeProcessor> | undefined;
 

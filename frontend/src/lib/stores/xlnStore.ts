@@ -143,6 +143,7 @@ export interface FrontendXlnFunctions {
   planSwapInboundCapacity: XLNModule['planSwapInboundCapacity'];
   readSwapAccountCapacity: XLNModule['readSwapAccountCapacity'];
   planSwapCommand: XLNModule['planSwapCommand'];
+  deriveSwapNetAuthorization: XLNModule['deriveSwapNetAuthorization'];
   formatTokenAmount: (tokenId: number, amount: bigint | null | undefined) => string;
   getTokenInfo: XLNModule['getTokenInfo'];
   getKnownTokenIds: XLNModule['getKnownTokenIds'];
@@ -1817,6 +1818,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       planSwapInboundCapacity: failFn('planSwapInboundCapacity'),
       readSwapAccountCapacity: failFn('readSwapAccountCapacity'),
       planSwapCommand: failFn('planSwapCommand'),
+      deriveSwapNetAuthorization: failFn('deriveSwapNetAuthorization'),
       formatTokenAmount: failFn('formatTokenAmount'),
       getTokenInfo: failFn('getTokenInfo'),
       getKnownTokenIds: failFn('getKnownTokenIds'),
@@ -1872,6 +1874,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     planSwapInboundCapacity: $xlnInstance.planSwapInboundCapacity,
     readSwapAccountCapacity: $xlnInstance.readSwapAccountCapacity,
     planSwapCommand: $xlnInstance.planSwapCommand,
+    deriveSwapNetAuthorization: $xlnInstance.deriveSwapNetAuthorization,
     // Frontend display formatter with configurable precision from Settings.
     // Signature used across UI: formatTokenAmount(tokenId, amount).
     formatTokenAmount: formatTokenAmountUi,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { parseArgs, flagNumber, flagString } from '../lib/args';
 import { parseHumanAmount } from '../lib/format';
+import { assertNoSecretArgv } from '../commands/index';
 
 describe('cli args', () => {
   test('parses command positionals and flags', () => {
@@ -13,6 +14,13 @@ describe('cli args', () => {
 
   test('bare xln has null command', () => {
     expect(parseArgs(['bun', 'xln']).command).toBeNull();
+  });
+
+  test('rejects every retired secret argv form before parsing', () => {
+    for (const arg of ['--passphrase', '--passphrase=secret', '-p', '-p=secret', '--mnemonic', '--mnemonic=words', '--bv-pass=secret']) {
+      expect(() => assertNoSecretArgv(['bun', 'xln', 'onboard', arg])).toThrow('CLI_SECRET_ARG_FORBIDDEN');
+    }
+    expect(() => assertNoSecretArgv(['bun', 'xln', 'onboard', '--name', 'alice'])).not.toThrow();
   });
 });
 

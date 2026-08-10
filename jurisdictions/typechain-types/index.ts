@@ -74,6 +74,8 @@ export type { HashLadderRegistry } from "./contracts/HashLadderRegistry";
 export { HashLadderRegistry__factory } from "./factories/contracts/HashLadderRegistry__factory";
 export type { IEntityProvider } from "./contracts/IEntityProvider";
 export { IEntityProvider__factory } from "./factories/contracts/IEntityProvider__factory";
+export type { DepositoryDebtHarness } from "./contracts/mocks/DepositoryDebtHarness";
+export { DepositoryDebtHarness__factory } from "./factories/contracts/mocks/DepositoryDebtHarness__factory";
 export type { EntityProviderSupplyHarness } from "./contracts/mocks/EntityProviderSupplyHarness";
 export { EntityProviderSupplyHarness__factory } from "./factories/contracts/mocks/EntityProviderSupplyHarness__factory";
 export type { FeeOnTransferERC20 } from "./contracts/mocks/FeeOnTransferERC20";

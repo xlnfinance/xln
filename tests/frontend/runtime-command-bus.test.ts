@@ -639,6 +639,7 @@ test('embedded command completion is multiset-exact and accepts only derived HTL
     type: 'htlcPayment',
     data: {
       targetEntityId: '0xtarget', tokenId: 1, amount: 7n, description: 'rent',
+      maxSenderDebit: 7n,
       route: ['0xentity-a', '0xtarget'], deliveryMode: 'instant',
     },
   } as never;
@@ -646,6 +647,7 @@ test('embedded command completion is multiset-exact and accepts only derived HTL
     type: 'htlcPayment',
     data: {
       targetEntityId: '0xtarget', tokenId: 1, amount: 7n, description: 'rent',
+      maxSenderDebit: 7n,
       hashlock: '0xhash', route: ['0xentity-a', '0xtarget'], deliveryMode: 'instant',
       envelope: { version: 1 },
     },

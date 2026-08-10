@@ -25,6 +25,7 @@ export type RpcChainIo = {
   signerForPrivateKey(privateKey: string): Promise<Signer>;
   estimateGas(estimate: () => Promise<bigint>): Promise<bigint>;
   readCurrentBlockNumber(): Promise<number>;
+  readLatestBlockTimestamp(): Promise<number>;
   readSafeBlockNumber(): Promise<number>;
   readBlockHeaders(heights: number[]): Promise<Array<{ jHeight: number; jBlockHash: string }>>;
   sendAuthenticatedBatch(calls: readonly RpcBatchCall[]): Promise<unknown[]>;
@@ -109,6 +110,19 @@ const parseBlockNumber = (raw: unknown): number => {
     throw new Error(`J_WATCHER_BLOCK_NUMBER_INVALID:${String(raw)}`);
   }
   return blockNumber;
+};
+
+export const parseBlockTimestamp = (raw: unknown): number => {
+  let timestamp: number;
+  try {
+    timestamp = Number(BigInt(String(raw)));
+  } catch {
+    throw new Error(`J_CHAIN_BLOCK_TIMESTAMP_INVALID:${String(raw)}`);
+  }
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+    throw new Error(`J_CHAIN_BLOCK_TIMESTAMP_INVALID:${String(raw)}`);
+  }
+  return timestamp;
 };
 
 const readTronSolidifiedBlockNumber = async (config: JAdapterConfig): Promise<number> => {
@@ -265,12 +279,20 @@ export const createRpcChainIo = (
     applyGasHeadroom(await estimate(), settings.gasHeadroomBps);
   const readCurrentBlockNumber = async (): Promise<number> =>
     parseBlockNumber(await provider.send('eth_blockNumber', []));
+  const readLatestBlockTimestamp = async (): Promise<number> => {
+    const raw = await provider.send('eth_getBlockByNumber', ['latest', false]);
+    if (typeof raw !== 'object' || raw === null || !('timestamp' in raw)) {
+      throw new Error('J_CHAIN_LATEST_BLOCK_INVALID');
+    }
+    return parseBlockTimestamp((raw as { timestamp: unknown }).timestamp);
+  };
   return {
     buildFeeOverrides: createFeeReader(config, provider, settings.maxFeePerGasWei),
     waitForReceipt: createReceiptWaiter(settings),
     signerForPrivateKey: createSignerFactory(config, provider, signer),
     estimateGas,
     readCurrentBlockNumber,
+    readLatestBlockTimestamp,
     readSafeBlockNumber: () =>
       isTronChainId(config.chainId) ? readTronSolidifiedBlockNumber(config) : readCurrentBlockNumber(),
     readBlockHeaders: createHeaderReader(config),

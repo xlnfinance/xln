@@ -49,6 +49,7 @@ export type FinalProofPayload = {
   sig: string;
   startedByLeft: boolean;
   cooperative: false;
+  submitNotBeforeTimestamp?: number;
 };
 
 type CounterProofCandidate = Readonly<{

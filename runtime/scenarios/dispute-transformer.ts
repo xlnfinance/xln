@@ -14,6 +14,8 @@ import type { JAdapter } from '../jurisdiction/adapter/types';
 import { deriveDisputeTokenFinalization } from '../protocol/dispute/finalization';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
+import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
+import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
 import { ASYNC_PAYMENT_EXPIRY_MS } from '../types/payment';
 import { safeStringify } from '../protocol/serialization';
 import { releaseUncommittedReliableIngress } from '../runtime/reliable-delivery';
@@ -506,12 +508,13 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
             route: [alice.id, hub.id],
             tokenId: USDC,
             amount: usd(7),
+            maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id], USDC, usd(7)).senderLockAmount,
             deliveryMode: 'async',
             hashlock: aliceHashlock,
             description: 'dispute-transformer-alice-lock',
           },
         }, aliceSecret),
-        { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount: aliceWantAmount } },
+        { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount: aliceWantAmount, ...deriveSwapNetAuthorization(aliceWantAmount, 1) } },
       ],
     }]);
     await processUntilWithoutLocalHtlcAdvance(
@@ -568,6 +571,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
             route: [hub.id, alice.id],
             tokenId: USDC,
             amount: usd(3),
+            maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [hub.id, alice.id], USDC, usd(3)).senderLockAmount,
             deliveryMode: 'async',
             hashlock: hubHashlock,
             description: 'dispute-transformer-hub-lock',
@@ -582,6 +586,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
             giveAmount: hubGiveAmount,
             wantTokenId: USDC,
             wantAmount: hubWantAmount,
+            ...deriveSwapNetAuthorization(hubWantAmount, 1),
           },
         },
       ],
@@ -613,6 +618,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
           giveAmount: 16_384n * 3_000n,
           wantTokenId: WETH,
           wantAmount: 16_384n * WETH_LOT,
+          ...deriveSwapNetAuthorization(16_384n * WETH_LOT, 1),
         },
       }],
     }]);
@@ -636,6 +642,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
           giveAmount: 32_768n * 3_100n,
           wantTokenId: WETH,
           wantAmount: 32_768n * WETH_LOT,
+          ...deriveSwapNetAuthorization(32_768n * WETH_LOT, 1),
         },
       }],
     }]);

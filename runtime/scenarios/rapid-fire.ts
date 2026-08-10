@@ -32,6 +32,7 @@ import { commitRuntimeInput, getOffdelta, converge, assert, enableStrictScenario
 import { generateLazyEntityId } from '../entity/factory';
 import { DEFAULT_TOKENS } from '../jurisdiction/machine/default-tokens';
 import { isLeftEntity } from '../account/utils';
+import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 
 let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
 
@@ -197,6 +198,7 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
             targetEntityId: bob.id,
             tokenId: USDC,
             amount: paymentAmount,
+            maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [alice.id, hub.id, bob.id], USDC, paymentAmount).senderLockAmount,
             route: [alice.id, hub.id, bob.id],
             deliveryMode: 'instant',
             description: `Forward #${forwardCount++}`,
@@ -214,6 +216,7 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
             targetEntityId: alice.id,
             tokenId: USDC,
             amount: paymentAmount,
+            maxSenderDebit: quoteHtlcPaymentRoute(env.gossip.getProfiles(), [bob.id, hub.id, alice.id], USDC, paymentAmount).senderLockAmount,
             route: [bob.id, hub.id, alice.id],
             deliveryMode: 'instant',
             description: `Reverse #${reverseCount++}`,

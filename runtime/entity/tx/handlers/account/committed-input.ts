@@ -80,6 +80,8 @@ const buildCommittedSwapOfferEvent = (
     giveAmount: offer.giveAmount,
     wantTokenId: offer.wantTokenId,
     wantAmount: offer.wantAmount,
+    maxFee: offer.maxFee,
+    minNetReceive: offer.minNetReceive,
     priceTicks: offer.priceTicks,
     ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
     ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),

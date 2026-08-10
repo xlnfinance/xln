@@ -21,11 +21,17 @@ import { startDaemonServer } from '../lib/daemon/server';
 import { runTui } from '../tui/app';
 import { paint } from '../lib/theme';
 
-const requirePassphrase = async (flags: Record<string, string | boolean>): Promise<string> => {
-  const fromFlag = flagString(flags, 'passphrase') || flagString(flags, 'p');
-  const resolved = resolvePassphrase(fromFlag);
+const requirePassphrase = async (): Promise<string> => {
+  const resolved = resolvePassphrase();
   if (resolved) return resolved;
   return ask('Wallet passphrase: ', true);
+};
+
+const FORBIDDEN_SECRET_ARG = /^(?:--passphrase(?:=|$)|-p(?:=|$)|--mnemonic(?:=|$)|--bv-pass(?:=|$))/;
+
+export const assertNoSecretArgv = (argv: readonly string[]): void => {
+  if (!argv.some(value => FORBIDDEN_SECRET_ARG.test(value))) return;
+  throw new Error('CLI_SECRET_ARG_FORBIDDEN: use a hidden prompt or XLN_PASSPHRASE');
 };
 
 const withSession = async (
@@ -42,7 +48,7 @@ const withSession = async (
   if (await daemonSocketExists(settings) && !flagBool(flags, 'local')) {
     // Caller should prefer daemon path; this helper is for local in-process.
   }
-  const passphrase = await requirePassphrase(flags);
+  const passphrase = await requirePassphrase();
   const session = await openSession(settings, passphrase);
   logSessionBanner(session);
   let runError: unknown;
@@ -88,6 +94,7 @@ const runViaDaemonOrLocal = async (
 };
 
 export const runCli = async (argv: string[]): Promise<number> => {
+  assertNoSecretArgv(argv);
   const { command, positionals, flags } = parseArgs(argv);
   if (flagBool(flags, 'help') || command === 'help' || command === '--help' || command === '-h') {
     console.log(helpText());
@@ -104,7 +111,7 @@ export const runCli = async (argv: string[]): Promise<number> => {
       console.log(paint('warn', 'No wallet found. Starting onboard…'));
       await runOnboard(flags);
     }
-    const passphrase = await requirePassphrase(flags);
+    const passphrase = await requirePassphrase();
     const session = await openSession(settings, passphrase);
     try {
       await runTui(session);
@@ -294,7 +301,7 @@ export const runCli = async (argv: string[]): Promise<number> => {
     case 'daemon': {
       const settings = await loadSettings();
       if (!(await walletExists(settings))) throw new Error('No wallet. Run: xln onboard');
-      const passphrase = await requirePassphrase(flags);
+      const passphrase = await requirePassphrase();
       const session = await openSession(settings, passphrase);
       const server = await startDaemonServer(session);
       const shutdown = () => void server.close();
@@ -335,10 +342,10 @@ const runOnboard = async (flags: Record<string, string | boolean>): Promise<void
     console.log(paint('warn', 'Write this mnemonic down — shown once:'));
     console.log(mnemonic);
   } else if (mode === '2' || mode === 'import') {
-    mnemonic = flagString(flags, 'mnemonic') || (await ask('Mnemonic: ', true));
+    mnemonic = await ask('Mnemonic: ', true);
   } else if (mode === '3' || mode === 'brainvault' || mode === 'bv') {
     const name = flagString(flags, 'bv-name') || (await ask('BrainVault name: '));
-    const bvPass = flagString(flags, 'bv-pass') || (await ask('BrainVault passphrase: ', true));
+    const bvPass = await ask('BrainVault passphrase: ', true);
     const shardInput = flagNumber(flags, 'factor', 1);
     console.log(paint('muted', 'Deriving BrainVault (Argon2)…'));
     mnemonic = await createFromBrainVault({ name, passphrase: bvPass, shardInput });
@@ -346,9 +353,12 @@ const runOnboard = async (flags: Record<string, string | boolean>): Promise<void
   } else {
     throw new Error('Invalid onboard mode');
   }
-  const passphrase = flagString(flags, 'passphrase') || (await ask('Encrypt wallet with passphrase: ', true));
-  const confirm = flagString(flags, 'passphrase') || (await ask('Confirm passphrase: ', true));
-  if (passphrase !== confirm) throw new Error('Passphrase mismatch');
+  const configuredPassphrase = resolvePassphrase();
+  const passphrase = configuredPassphrase || await ask('Encrypt wallet with passphrase: ', true);
+  if (!configuredPassphrase) {
+    const confirm = await ask('Confirm passphrase: ', true);
+    if (passphrase !== confirm) throw new Error('Passphrase mismatch');
+  }
   await saveWallet(settings, { mnemonic, passphrase, label });
   console.log(paint('ok', `Wallet saved under ${settings.homeDir}`));
   console.log(paint('muted', 'Bootstrapping runtime (importJ + entity)…'));

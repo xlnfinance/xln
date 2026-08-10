@@ -76,6 +76,17 @@ library Account {
   uint256 private constant MAX_SETTLEMENT_DIFFS = 32;
   uint256 private constant MAX_SETTLEMENT_FORGIVENESS_IDS = 32;
   uint256 private constant TOKEN_SUPPLY_GAS_LIMIT = 30_000;
+  // Runtime heights/nonces are exact JavaScript safe integers. Keep the top
+  // representable value reserved for the one unilateral finalization successor
+  // so every live Account state remains closable without emitting an unsafe J
+  // event. Financial uint256 values are intentionally not subject to this cap.
+  function _requireLiveAccountNonce(uint256 nonce) private pure {
+    if (nonce >= JS_SAFE_NONCE_MAX) revert E10();
+  }
+
+  function _requireStoredAccountNonce(uint256 nonce) private pure {
+    if (nonce > JS_SAFE_NONCE_MAX) revert E10();
+  }
 
   function _readFixedTokenSupply(uint8 tokenType, address token, uint96 externalTokenId)
     private view returns (uint256 supply, bool valid)
@@ -456,12 +467,17 @@ library Account {
     FinalDisputeProof[] memory disputeFinalizations
   ) external pure {
     for (uint256 i = 0; i < disputeStarts.length; i++) {
+      _requireLiveAccountNonce(disputeStarts[i].nonce);
       _validateInitialDisputeProof(disputeStarts[i]);
     }
     for (uint256 i = 0; i < counterDisputes.length; i++) {
+      _requireLiveAccountNonce(counterDisputes[i].initialNonce);
+      _requireLiveAccountNonce(counterDisputes[i].counterNonce);
       _validateProofBody(counterDisputes[i].counterProofbody);
     }
     for (uint256 i = 0; i < disputeFinalizations.length; i++) {
+      _requireLiveAccountNonce(disputeFinalizations[i].initialNonce);
+      _requireLiveAccountNonce(disputeFinalizations[i].finalNonce);
       _validateProofBody(disputeFinalizations[i].finalProofbody);
       if (
         disputeFinalizations[i].starterArguments.length > MAX_DISPUTE_STARTER_ARGUMENT_BYTES ||
@@ -607,6 +623,8 @@ library Account {
     uint32 leftResponseSeconds,
     uint32 rightResponseSeconds
   ) {
+    _requireLiveAccountNonce(params.initialNonce);
+    _requireLiveAccountNonce(params.finalNonce);
     finalProofbodyHash = _validateProofBody(params.finalProofbody);
     if (
       params.starterArguments.length > MAX_DISPUTE_STARTER_ARGUMENT_BYTES ||
@@ -614,6 +632,7 @@ library Account {
     ) revert E10();
     bytes memory acct_key = _accountKey(entityId, params.counterentity);
     AccountInfo storage account = _accounts[acct_key];
+    _requireStoredAccountNonce(account.nonce);
     uint256 starterArgumentsTimestamp = block.timestamp;
     eventInitialNonce = params.initialNonce;
 
@@ -1173,6 +1192,8 @@ library Account {
 
     if (_accounts[acct_key].disputeHash != bytes32(0)) revert IDepositoryDelegateErrorAbi.E6();
 
+    _requireStoredAccountNonce(_accounts[acct_key].nonce);
+    _requireLiveAccountNonce(c2r.nonce);
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (c2r.nonce <= _accounts[acct_key].nonce) revert E2();
 
@@ -1284,6 +1305,7 @@ library Account {
   ) external returns (bool) {
     bytes memory acctKey = _accountKey(entityId, params.counterentity);
     AccountInfo storage account = _accounts[acctKey];
+    _requireStoredAccountNonce(account.nonce);
     if (account.disputeHash == bytes32(0)) revert IDepositoryDelegateErrorAbi.E5();
     if (params.cooperative || params.sig.length == 0) revert E2();
     if (
@@ -1340,6 +1362,8 @@ library Account {
     CounterDisputeProof memory params,
     address entityProvider
   ) private {
+    _requireLiveAccountNonce(params.initialNonce);
+    _requireLiveAccountNonce(params.counterNonce);
     bytes32 bodyHash = _validateProofBody(params.counterProofbody);
     bytes memory acctKey = _accountKey(entityId, params.counterentity);
     AccountInfo storage account = _accounts[acctKey];
@@ -1443,7 +1467,14 @@ library Account {
         if (s.diffs[j].tokenId == s.diffs[k].tokenId) revert E2();
       }
     }
+    for (uint j = 0; j < s.forgiveDebtsInTokenIds.length; j++) {
+      for (uint k = 0; k < j; k++) {
+        if (s.forgiveDebtsInTokenIds[j] == s.forgiveDebtsInTokenIds[k]) revert E2();
+      }
+    }
 
+    _requireStoredAccountNonce(_accounts[acct_key].nonce);
+    _requireLiveAccountNonce(s.nonce);
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (s.nonce <= _accounts[acct_key].nonce) revert E2();
 
@@ -1604,6 +1635,7 @@ library Account {
     // Validate the full signed body and every gas-bound before touching nonce
     // or dispute storage. Reverts roll back anyway, but this ordering also
     // keeps the mutation boundary auditable and prevents hash-only gas bombs.
+    _requireLiveAccountNonce(params.nonce);
     _validateInitialDisputeProof(params);
     bytes memory acct_key = _accountKey(entityId, params.counterentity);
 
@@ -1613,6 +1645,7 @@ library Account {
     // We keep the account-key semantics uniform and prefer not to add another
     // branch unless self-dispute becomes a real operational problem.
 
+    _requireStoredAccountNonce(_accounts[acct_key].nonce);
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (params.nonce <= _accounts[acct_key].nonce) revert E2();
 

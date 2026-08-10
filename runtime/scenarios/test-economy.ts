@@ -12,6 +12,7 @@ import {
   registerEntities,
 } from './boot';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
+import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 
 export interface EconomyEntity {
   id: string;
@@ -302,6 +303,12 @@ export async function testHtlcRoute(
       route: [from.id, ...route.map(e => e.id), to.id],
       tokenId,
       amount,
+      maxSenderDebit: quoteHtlcPaymentRoute(
+        env.gossip.getProfiles(),
+        [from.id, ...route.map(entity => entity.id), to.id],
+        tokenId,
+        amount,
+      ).senderLockAmount,
       deliveryMode: 'async' as const,
       description,
       ...(opts?.hashlock ? { hashlock: opts.hashlock } : {}),

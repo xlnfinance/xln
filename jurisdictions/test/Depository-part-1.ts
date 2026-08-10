@@ -322,6 +322,7 @@ describe('Depository', () => {
       leftArguments?: string;
       rightArguments?: string;
       skipFunding?: boolean;
+      disputeNonce?: bigint;
     } = {},
   ) {
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
@@ -349,7 +350,7 @@ describe('Depository', () => {
     const finalProofbody = proofBody(offdeltas, tokenIds, transformers);
     const finalProofbodyHash = proofBodyHash(finalProofbody);
     const accountKey = await accountKeyFor(target, left.entityId, right.entityId);
-    const disputeNonce = 1n;
+    const disputeNonce = argumentOverrides.disputeNonce ?? 1n;
     const argumentList = abi.encode(['bytes[]'], [transformers.map(() => '0x')]);
     const leftArguments = argumentOverrides.leftArguments ?? argumentList;
     const rightArguments = argumentOverrides.rightArguments ?? '0x';
@@ -936,8 +937,8 @@ describe('Depository', () => {
         ondeltaDiff: 0n,
       },
     ];
-    // Overlap + duplicate forgiveness ids must not duplicate AccountSettled tokens.
-    const forgiveDebtsInTokenIds = [tokenId, forgiveOnlyTokenId, forgiveOnlyTokenId];
+    // Overlap between a diff and forgiveness must not duplicate AccountSettled tokens.
+    const forgiveDebtsInTokenIds = [tokenId, forgiveOnlyTokenId];
     const settlementHash = await cooperativeUpdateHash(
       depository,
       acctKey,
@@ -1022,6 +1023,172 @@ describe('Depository', () => {
 
     expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
     expect(await depository.entityNonces(left.entityId)).to.equal(1n);
+  });
+
+  it('rejects duplicate forgiveness token ids before one settlement can advance the debt cursor twice', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const forgiveDebtsInTokenIds = [tokenId, tokenId];
+    const settlementHash = await cooperativeUpdateHash(
+      depository,
+      acctKey,
+      1n,
+      [],
+      forgiveDebtsInTokenIds,
+    );
+    const batch = emptyBatch({
+      settlements: [{
+        leftEntity: left.entityId,
+        rightEntity: right.entityId,
+        diffs: [],
+        forgiveDebtsInTokenIds,
+        sig: signEntityHash(right.entityId, settlementHash, right.privateKey),
+        nonce: 1n,
+      }],
+    });
+    const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
+
+    await expect(
+      depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E2');
+    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
+  });
+
+  it('rejects unsafe Account and outer batch nonces at the Solidity write boundary', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const maxSafeNonce = 9_007_199_254_740_991n;
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const diffs = [{
+      tokenId: 1n,
+      leftDiff: 0n,
+      rightDiff: 0n,
+      collateralDiff: 0n,
+      ondeltaDiff: 0n,
+    }];
+    const settlementHash = await cooperativeUpdateHash(depository, acctKey, maxSafeNonce, diffs);
+    const batch = emptyBatch({
+      settlements: [{
+        leftEntity: left.entityId,
+        rightEntity: right.entityId,
+        diffs,
+        forgiveDebtsInTokenIds: [],
+        sig: signEntityHash(right.entityId, settlementHash, right.privateKey),
+        nonce: maxSafeNonce,
+      }],
+    });
+    const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
+
+    const expectUnsafeBatch = async (unsafeBatch: Record<string, unknown>): Promise<void> => {
+      const candidate = await signDepositoryBatch(depository, left.entityId, left.privateKey, unsafeBatch);
+      await expect(
+        depository.connect(left.signer).processBatch(
+          candidate.encodedBatch,
+          candidate.hankoData,
+          candidate.nonce,
+        ),
+      ).to.be.revertedWithCustomError(depository, 'E10');
+      expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    };
+
+    await expectUnsafeBatch(batch);
+    await expectUnsafeBatch(emptyBatch({
+      collateralToReserve: [{
+        counterparty: right.entityId,
+        tokenId: 1n,
+        amount: 1n,
+        nonce: maxSafeNonce,
+        sig: '0x',
+      }],
+    }));
+    const emptyProof = proofBody([], []);
+    const emptyProofHash = proofBodyHash(emptyProof);
+    await expectUnsafeBatch(emptyBatch({
+      disputeStarts: [{
+        counterentity: right.entityId,
+        nonce: maxSafeNonce,
+        proposerIsLeft: false,
+        proofbodyHash: emptyProofHash,
+        initialProofbody: emptyProof,
+        watchSeed: TEST_WATCH_SEED,
+        sig: '0x',
+        starterInitialArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: ethers.ZeroHash,
+      }],
+    }));
+    await expectUnsafeBatch(emptyBatch({
+      counterDisputes: [{
+        counterentity: right.entityId,
+        initialNonce: maxSafeNonce,
+        initialProofbodyHash: emptyProofHash,
+        counterNonce: maxSafeNonce,
+        proposerIsLeft: false,
+        counterProofbody: emptyProof,
+        sig: '0x',
+      }],
+    }));
+    await expectUnsafeBatch(emptyBatch({
+      disputeFinalizations: [{
+        counterentity: right.entityId,
+        initialNonce: maxSafeNonce,
+        finalNonce: maxSafeNonce,
+        proposerIsLeft: false,
+        initialProofbodyHash: emptyProofHash,
+        finalProofbody: emptyProof,
+        starterArguments: '0x',
+        otherArguments: '0x',
+        sig: '0x',
+        startedByLeft: true,
+        cooperative: false,
+      }],
+    }));
+    await expect(
+      depository.connect(left.signer).processBatch('0x', '0x', maxSafeNonce + 1n),
+    ).to.be.revertedWithCustomError(depository, 'E10');
+    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
+  });
+
+  it('reserves the maximum safe nonce for one unilateral finalization successor', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const maxSafeNonce = 9_007_199_254_740_991n;
+    const dispute = await buildTimedOutTransformerFinalization(
+      depository,
+      [],
+      [],
+      [],
+      { skipFunding: true, disputeNonce: maxSafeNonce - 1n },
+    );
+
+    await expect(
+      depository
+        .connect(dispute.left.signer)
+        .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce),
+    )
+      .to.emit(depository, 'DisputeFinalized')
+      .withArgs(
+        dispute.left.entityId,
+        dispute.right.entityId,
+        maxSafeNonce - 1n,
+        proofBodyHash(proofBody([], [])),
+        ethers.keccak256(abi.encode(
+          ['bytes32', 'uint256', 'bool', 'bool', 'bytes32', 'bytes32', 'bytes32'],
+          [
+            proofBodyHash(proofBody([], [])),
+            maxSafeNonce - 1n,
+            false,
+            true,
+            ethers.keccak256(dispute.finalization.starterArguments as string),
+            ethers.keccak256(dispute.finalization.otherArguments as string),
+            ethers.keccak256('0x'),
+          ],
+        )),
+      );
+    expect((await depository._accounts(dispute.accountKey)).nonce).to.equal(maxSafeNonce);
   });
 
   it('reverts settlement with E8 when a reserve would exceed int256.max and leaves no partial diff', async function () {
@@ -2802,6 +2969,47 @@ describe('Depository', () => {
       await time.increaseTo(Number(lastResortStartTimestamp));
     }
 
+    const unsafeFinalNonce = 9_007_199_254_740_991n;
+    const unsafeFinalHash = await disputeProofHash(
+      depository,
+      acctKey,
+      unsafeFinalNonce,
+      finalProofbodyHash,
+      TEST_WATCH_SEED,
+      true,
+    );
+    const unsafeOwnerAuthHash = await watchtowerCounterDisputeHash(
+      depository,
+      tower.address,
+      right.entityId,
+      left.entityId,
+      unsafeFinalNonce,
+      finalProofbodyHash,
+      lastResortWindowSeconds,
+      appointmentSequence,
+    );
+    const unsafeFinalization = {
+      ...finalization,
+      finalNonce: unsafeFinalNonce,
+      sig: signEntityHash(left.entityId, unsafeFinalHash, left.privateKey),
+    };
+    const unsafeOwnerAuthorization = signEntityHash(
+      right.entityId,
+      unsafeOwnerAuthHash,
+      right.privateKey,
+    );
+    await expect(
+      depository
+        .connect(tower)
+        .watchtowerCounterDispute(
+          right.entityId,
+          unsafeFinalization,
+          lastResortWindowSeconds,
+          appointmentSequence,
+          unsafeOwnerAuthorization,
+        ),
+    ).to.be.revertedWithCustomError(depository, 'E10');
+
     await expect(
       depository
         .connect(tower)
@@ -2820,6 +3028,17 @@ describe('Depository', () => {
     // window, but the same finalization barrier T applies to everyone. A
     // second submission at T executes the already-selected proof.
     await time.increaseTo(Number(timeoutTimestamp));
+    await expect(
+      depository
+        .connect(tower)
+        .watchtowerCounterDispute(
+          right.entityId,
+          unsafeFinalization,
+          lastResortWindowSeconds,
+          appointmentSequence,
+          unsafeOwnerAuthorization,
+        ),
+    ).to.be.revertedWithCustomError(depository, 'E10');
     await expect(
       depository
         .connect(tower)

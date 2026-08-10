@@ -27,6 +27,7 @@ export type DaemonQueuePaymentResult = {
   targetEntityId: string;
   tokenId: number;
   amount: string;
+  maxSenderDebit: string;
   route: string[];
   mode: PaymentDeliveryMode;
   description?: string;
@@ -42,6 +43,7 @@ export type DaemonQueuePaymentParams = {
   targetEntityId: string;
   tokenId: number;
   amount: string;
+  maxSenderDebit: string;
   description?: string;
   route: string[];
   mode: PaymentDeliveryMode;
@@ -311,6 +313,10 @@ export class DaemonRpcClient {
     const targetEntityId = normalizeEntityId(params.targetEntityId, 'custody payment target entity is invalid');
     const tokenId = normalizePositiveInteger(params.tokenId, 'custody payment tokenId must be positive');
     const amount = normalizePositiveAmount(params.amount);
+    const maxSenderDebit = normalizePositiveAmount(params.maxSenderDebit);
+    if (BigInt(maxSenderDebit) < BigInt(amount)) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', 'custody payment maxSenderDebit is below recipient amount');
+    }
     const route = normalizeRoute(params.route, sourceEntityId, targetEntityId);
     const description = normalizeDescription(params.description);
     const mode = normalizePaymentMode(params.mode);
@@ -327,7 +333,7 @@ export class DaemonRpcClient {
 
     const data = { targetEntityId, tokenId, amount: BigInt(amount), route, ...(description ? { description } : {}) };
     const entityTx: EntityTx = mode === 'instant' || mode === 'async'
-      ? { type: 'htlcPayment', data: { ...data, deliveryMode: mode } }
+      ? { type: 'htlcPayment', data: { ...data, maxSenderDebit: BigInt(maxSenderDebit), deliveryMode: mode } }
       : {
           type: 'directPayment',
           data: {
@@ -372,6 +378,7 @@ export class DaemonRpcClient {
       targetEntityId,
       tokenId,
       amount,
+      maxSenderDebit,
       route,
       mode,
       ...(description ? { description } : {}),

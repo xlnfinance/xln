@@ -350,6 +350,7 @@ const paymentTxFor = (
       targetEntityId: hub.entityId,
       tokenId,
       amount,
+      maxSenderDebit: amount,
       route: [user.entityId, hub.entityId],
       deliveryMode: 'async',
       description,

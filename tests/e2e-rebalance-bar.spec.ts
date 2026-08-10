@@ -696,6 +696,7 @@ async function sendRoutedHtlcPayment(
       targetEntityId,
       tokenId: USDC_TOKEN_ID,
       amount: usdcUnits(amountUsd),
+      maxSenderDebit: usdcUnits(amountUsd) * 2n,
       route,
       description,
       deliveryMode: 'instant',

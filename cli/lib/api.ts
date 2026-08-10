@@ -39,6 +39,7 @@ export type HubApiRow = {
   };
   lastUpdated?: number;
   online?: boolean;
+  roleSource?: 'verified-gossip-profile' | 'operator-config';
 };
 
 const withBust = (url: string): string => {

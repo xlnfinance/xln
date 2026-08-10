@@ -21,6 +21,8 @@ const offer = (
   giveAmount: 1n,
   wantTokenId,
   wantAmount: 1n,
+  maxFee: 0n,
+  minNetReceive: 1n,
   makerIsLeft,
   createdHeight: 1,
 });
@@ -63,6 +65,8 @@ describe('account economic swap limits', () => {
         giveAmount: 1n,
         wantTokenId: 2,
         wantAmount: 1n,
+        maxFee: 0n,
+        minNetReceive: 1n,
       },
     }, true, 2);
 
@@ -93,6 +97,8 @@ describe('account economic swap limits', () => {
         giveAmount: 1n,
         wantTokenId: 101,
         wantAmount: 1n,
+        maxFee: 0n,
+        minNetReceive: 1n,
         crossJurisdiction: { status: 'resting' },
       },
     } as Parameters<typeof handleSwapOffer>[1], true, 2);

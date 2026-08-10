@@ -10,14 +10,8 @@ async function openApp(page: Page, path: string): Promise<void> {
 async function waitUntilOwnsActiveLock(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const tabId = window.sessionStorage.getItem('xln-tab-id');
-    const raw = window.localStorage.getItem('xln-active-tab-lock');
-    if (!tabId || !raw) return false;
-    try {
-      const parsed = JSON.parse(raw) as { tabId?: string };
-      return parsed.tabId === tabId;
-    } catch {
-      return false;
-    }
+    const owner = window.sessionStorage.getItem('xln-active-tab-owned');
+    return Boolean(tabId && owner === tabId);
   }, undefined, { timeout: 10_000 });
 }
 

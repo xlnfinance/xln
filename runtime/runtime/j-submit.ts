@@ -462,6 +462,8 @@ const recordFailedSubmit = async (
   };
   if (failure.code === 'STALE_FINALIZATION_AWAITING_FINALITY') {
     jSubmitLog.info('tx.competing_finalization_awaiting_finality', fields);
+  } else if (failure.code === 'DISPUTE_FINALIZATION_AWAITING_CHAIN_TIME') {
+    jSubmitLog.info('tx.dispute_finalization_awaiting_chain_time', fields);
   } else {
     jSubmitLog.error('tx.submit_failed', fields);
   }

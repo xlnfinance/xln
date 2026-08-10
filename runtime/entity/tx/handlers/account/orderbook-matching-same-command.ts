@@ -57,7 +57,10 @@ export const applySameOfferCommand = (
   });
   try {
     const result = applyCommand(
-      offer.book,
+      // applyCommand intentionally mutates its BookState hot cache. Matching a
+      // user-authorized fee must therefore run on a detached preview: the
+      // original cache cannot move until every paired Account resolve passes.
+      structuredClone(offer.book),
       {
         kind: 0,
         ownerId: offer.makerId,
@@ -70,10 +73,6 @@ export const applySameOfferCommand = (
       },
       { suspendedOrderIds: pass.suspendedSameOrderIds },
     );
-    pass.bookCache.set(offer.bookKey, result.state);
-    if (!pass.debugRebuildProjectionOnly) {
-      pass.bookUpdates.push({ pairId: offer.bookKey, book: result.state });
-    }
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

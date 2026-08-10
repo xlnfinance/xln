@@ -224,7 +224,9 @@ const validateStorageAccountStateMaps = (state: AccountState, code: string): voi
     for (const field of ['giveTokenId', 'wantTokenId']) if (requireBoundaryInteger(row[field], `${code}_OFFER_TOKEN`) > TOKENS.MAX_TOKEN_ID) throw new Error(`${code}_OFFER_TOKEN`);
     // Zero persisted offers are inert financial state and must not survive hydration.
     requireStorageBigInt(row['giveAmount'], `${code}_OFFER_GIVE`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
-    requireStorageBigInt(row['wantAmount'], `${code}_OFFER_WANT`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
+    const wantAmount = requireStorageBigInt(row['wantAmount'], `${code}_OFFER_WANT`, FINANCIAL.MIN_PAYMENT_AMOUNT, FINANCIAL.MAX_PAYMENT_AMOUNT);
+    requireStorageBigInt(row['maxFee'], `${code}_OFFER_MAX_FEE`, 0n, wantAmount);
+    requireStorageBigInt(row['minNetReceive'], `${code}_OFFER_MIN_NET`, 0n, wantAmount);
   }
   if (state.subcontracts !== undefined) {
     for (const subcontract of requireStorageMap(state.subcontracts, `${code}_SUBCONTRACTS`).values()) {

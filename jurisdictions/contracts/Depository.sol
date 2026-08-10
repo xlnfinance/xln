@@ -322,6 +322,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     bytes calldata hankoData,
     uint256 nonce
   ) external nonReentrant returns (bool completeSuccess) {
+    if (nonce > JS_SAFE_NONCE_MAX) revert E10();
     if (encodedBatch.length > MAX_ENCODED_BATCH_BYTES) revert E10();
     Batch memory batch = abi.decode(encodedBatch, (Batch));
     DepositoryBounds.assertBatch(batch);
@@ -812,6 +813,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
           ondelta: col.ondelta
         });
         AccountSettlement[] memory settled = new AccountSettlement[](1);
+        if (_accounts[accountKey(leftEntity, rightEntity)].nonce > JS_SAFE_NONCE_MAX) revert E10();
         settled[0] = AccountSettlement({
           left: leftEntity,
           right: rightEntity,
@@ -831,28 +833,22 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     uint256 idx = _debtIndex[debtor][tokenId];
     Debt[] storage queue = _debts[debtor][tokenId];
     uint256 len = queue.length;
-    uint256 nextLive = type(uint256).max;
-    for (uint256 j = idx; j < len; j++) {
-      uint256 amount = queue[j].amount;
-      if (amount == 0) {
-        continue;
-      }
-      if (queue[j].creditor == creditor) {
-        queue[j].amount = 0;
-        _reduceDebtOutstanding(debtor, tokenId, amount);
-        _afterDebtCleared(debtor, tokenId);
-        emit DebtForgiven(debtor, creditor, tokenId, amount, j);
-      } else if (nextLive == type(uint256).max) {
-        nextLive = j;
-      }
-    }
-    if (idx < len && queue[idx].amount == 0) {
-      if (nextLive == type(uint256).max) {
-        _debtIndex[debtor][tokenId] = 0;
-        delete _debts[debtor][tokenId];
-      } else {
-        _debtIndex[debtor][tokenId] = nextLive;
-      }
+    if (idx >= len) return;
+    Debt storage current = queue[idx];
+    uint256 amount = current.amount;
+    // Forgiveness is deliberately FIFO and O(1): a bilateral settlement may
+    // forgive only the debtor's current debt when that debt belongs to the
+    // counterparty. It must never scan or partially process an unbounded tail.
+    if (amount == 0 || current.creditor != creditor) return;
+    current.amount = 0;
+    _reduceDebtOutstanding(debtor, tokenId, amount);
+    _afterDebtCleared(debtor, tokenId);
+    emit DebtForgiven(debtor, creditor, tokenId, amount, idx);
+    if (idx + 1 == len) {
+      _debtIndex[debtor][tokenId] = 0;
+      delete _debts[debtor][tokenId];
+    } else {
+      _debtIndex[debtor][tokenId] = idx + 1;
     }
   }
 
@@ -908,7 +904,13 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       params.finalNonce != eventInitialNonce ||
       finalProofbodyHash != params.initialProofbodyHash ||
       params.proposerIsLeft != initialProposerIsLeft;
-    account.nonce = adoptsSignedBranch ? params.finalNonce : account.nonce + 1;
+    if (adoptsSignedBranch) {
+      if (params.finalNonce >= JS_SAFE_NONCE_MAX) revert E10();
+      account.nonce = params.finalNonce;
+    } else {
+      if (account.nonce >= JS_SAFE_NONCE_MAX) revert E10();
+      account.nonce += 1;
+    }
 
     bytes32 initialProofbodyHash = params.initialProofbodyHash;
     uint256 finalNonce = params.finalNonce;

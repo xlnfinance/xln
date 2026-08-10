@@ -87,4 +87,8 @@ xln pay 0x… 1 --token 1    # routes via daemon when socket exists
 xln pay 0x… 1 --local      # force one-shot in-process session
 ```
 
+`xln pay` reports `queued` only after the RuntimeInput is durably committed.
+That is command acceptance, not proof that the recipient was paid; inspect the
+payment activity in the wallet Runtime for the later terminal outcome.
+
 Wallet secrets live encrypted in `~/.xln/wallet.json`. Runtime DB under `~/.xln/db` (or `XLN_DB_PATH`).

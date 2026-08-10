@@ -13,6 +13,7 @@ import {
   isLiquidSwapToken,
 } from '../account/utils';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
+import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
 import {
   canonicalAccountRoleEvidence,
   defaultAccountDisputeConfigForRoleEvidence,
@@ -1929,6 +1930,13 @@ export const maintainMarketMakerQuotes = async (
       remainingNewOffers,
     );
     if (allowedNewOffers <= 0) continue;
+    const hubProfile = (env.gossip?.getProfiles?.() || []).find(
+      candidate => String(candidate.entityId || '').toLowerCase() === hubEntityId,
+    );
+    const hubSwapFeeBps = hubProfile?.metadata?.swapTakerFeeBps;
+    if (!hubProfile || hubProfile.metadata?.isHub !== true || !Number.isSafeInteger(hubSwapFeeBps)) {
+      throw new Error(`MM_SWAP_FEE_POLICY_UNAVAILABLE:${hubEntityId}`);
+    }
     const missing = specs
       .filter(spec => !existingOfferIds.has(spec.offerId))
       .filter(
@@ -1939,6 +1947,7 @@ export const maintainMarketMakerQuotes = async (
       .slice(0, allowedNewOffers);
     if (missing.length === 0) continue;
     for (const spec of missing) {
+      const swapNetAuthorization = deriveSwapNetAuthorization(spec.wantAmount, Number(hubSwapFeeBps));
       pushMarketMakerEntityTx(entityInputsByEntitySigner, mmEntityId, mmSignerId, {
         type: 'placeSwapOffer' as const,
         data: {
@@ -1948,6 +1957,7 @@ export const maintainMarketMakerQuotes = async (
           giveAmount: spec.giveAmount,
           wantTokenId: spec.wantTokenId,
           wantAmount: spec.wantAmount,
+          ...swapNetAuthorization,
           priceTicks: spec.priceTicks,
         },
       });

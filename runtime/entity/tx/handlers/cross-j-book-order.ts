@@ -97,6 +97,8 @@ const buildCommittedCrossJurisdictionOfferEvent = (
       giveAmount: remaining.sourceRemaining,
       wantTokenId: Number(route.target.tokenId),
       wantAmount: remaining.targetRemaining,
+      maxFee: 0n,
+      minNetReceive: remaining.targetRemaining,
       ...(route.priceTicks !== undefined ? { priceTicks: BigInt(route.priceTicks) } : {}),
       crossJurisdiction: cloneCrossJurisdictionRoute(route),
     };
@@ -112,6 +114,8 @@ const buildCommittedCrossJurisdictionOfferEvent = (
     giveAmount: remaining.sourceRemaining,
     wantTokenId: offer.wantTokenId,
     wantAmount: remaining.targetRemaining,
+    maxFee: 0n,
+    minNetReceive: remaining.targetRemaining,
     priceTicks: offer.priceTicks,
     ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
     crossJurisdiction: cloneCrossJurisdictionRoute(route),

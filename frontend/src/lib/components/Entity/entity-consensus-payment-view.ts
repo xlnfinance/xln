@@ -61,6 +61,13 @@ const requireRecipientAmount = (value: unknown, proposalId: string, txIndex: num
   return value;
 };
 
+const requireSenderDebitCap = (value: unknown, proposalId: string, txIndex: number): bigint => {
+  if (typeof value !== 'bigint' || value <= 0n) {
+    throw projectionError('CONSENSUS_SETTINGS_HTLC_MAX_SENDER_DEBIT_INVALID', proposalId, txIndex);
+  }
+  return value;
+};
+
 const requireHashlock = (value: unknown, proposalId: string, txIndex: number): string => {
   const hashlock = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if (!/^0x[0-9a-f]{64}$/.test(hashlock)) {
@@ -114,9 +121,13 @@ const projectPreparedPayment = (
   const recipientAmount = requireRecipientAmount(tx.data.amount, proposalId, txIndex);
   const hashlock = requireHashlock(tx.data.hashlock, proposalId, txIndex);
   const totalDebit = requirePreparedAmount(tx.data.preparedSenderLockAmount, 'CONSENSUS_SETTINGS_HTLC_PREPARED_DEBIT_INVALID', proposalId, txIndex);
+  const maxSenderDebit = requireSenderDebitCap(tx.data.maxSenderDebit, proposalId, txIndex);
   const totalFee = requirePreparedAmount(tx.data.preparedTotalFee, 'CONSENSUS_SETTINGS_HTLC_PREPARED_FEE_INVALID', proposalId, txIndex, true);
   if (totalDebit !== recipientAmount + totalFee) {
     throw projectionError('CONSENSUS_SETTINGS_HTLC_TOTAL_MISMATCH', proposalId, txIndex);
+  }
+  if (totalDebit > maxSenderDebit) {
+    throw projectionError('CONSENSUS_SETTINGS_HTLC_MAX_SENDER_DEBIT_EXCEEDED', proposalId, txIndex);
   }
   const deliveryMode = requireDeliveryMode(tx.data.deliveryMode, proposalId, txIndex);
   assertPreparedEnvelope(tx.data.preparedEnvelope, proposalId, txIndex);
