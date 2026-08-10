@@ -86,7 +86,6 @@ const invalidateCommittedMapsForTx = (
       // byte-identical until a later swap_resolve applies the cancellation.
       return;
     case 'rebalance_policy':
-    case 'reopen_disputed':
       return;
     default:
       // This is a financial cache-safety boundary, not merely a TypeScript

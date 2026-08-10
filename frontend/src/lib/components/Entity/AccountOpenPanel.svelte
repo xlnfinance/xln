@@ -23,7 +23,6 @@
   export let openAccountWithFullId: (targetEntityId: string) => void | Promise<void>;
   export let submitRuntimeInput: (input: RuntimeInput) => Promise<unknown> | unknown;
   export let openDisputedAccount: (counterpartyEntityId: string) => void;
-  export let reopenDisputedAccount: (counterpartyEntityId: string) => void | Promise<void>;
 </script>
 
 <div class="account-open-sections">
@@ -79,7 +78,7 @@
   {#if disputedAccounts.length > 0}
     <div class="open-section disputed-section">
       <h4 class="section-head">Disputed Accounts</h4>
-      <p class="muted">Hidden from the main list. Open active disputes, reopen only after finalize.</p>
+      <p class="muted">Hidden from the main list. Finalized disputes permanently close the account.</p>
       <div class="disputed-list">
         {#each disputedAccounts as item (item.counterpartyId)}
           <div class="disputed-row">
@@ -88,7 +87,7 @@
               <div class="disputed-state">
                 {item.status === 'active'
                   ? 'Active dispute in progress'
-                  : 'Finalized disputed account'}
+                  : 'Permanently closed after finalized dispute'}
               </div>
             </div>
             {#if item.status === 'active'}
@@ -97,14 +96,6 @@
                 on:click={() => openDisputedAccount(item.counterpartyId)}
               >
                 Open
-              </button>
-            {:else}
-              <button
-                class="btn-reopen-disputed"
-                on:click={() => reopenDisputedAccount(item.counterpartyId)}
-                disabled={!activeIsLive}
-              >
-                Reopen
               </button>
             {/if}
           </div>

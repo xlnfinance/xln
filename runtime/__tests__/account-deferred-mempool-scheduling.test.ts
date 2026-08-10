@@ -88,9 +88,16 @@ describe('deferred Account mempool scheduling', () => {
     expect(account.mempool.map((tx) => tx.type)).toEqual(['lending_repay']);
   });
 
-  test('an allowed control transaction beside a frozen repayment still wakes the Account', () => {
+  test('J-event bookkeeping beside a frozen repayment still wakes the Account', () => {
     const { env, account } = frozenRepaymentReplica();
-    account.mempool.push({ type: 'reopen_disputed', data: { jNonce: 1 } });
+    account.mempool.push({
+      type: 'j_event_claim',
+      data: {
+        jHeight: 1,
+        jBlockHash: `0x${'51'.repeat(32)}`,
+        events: [],
+      },
+    });
 
     expect(hasRuntimeWork(env)).toBe(true);
   });

@@ -610,7 +610,7 @@ export const getSignedSettlementWorkspaceTxError = (
     !workspace ||
     (!workspace.settlementHash && !workspace.leftHanko && !workspace.rightHanko && !workspace.postSettlementDisputeProof)
   ) return undefined;
-  if (tx.type === 'j_event_claim' || tx.type === 'reopen_disputed') return undefined;
+  if (tx.type === 'j_event_claim') return undefined;
   if (tx.type === 'settle_transition' && (tx.data.kind === 'seal' || tx.data.kind === 'submit')) return undefined;
   return `SETTLEMENT_SIGNED_ACCOUNT_FROZEN:${tx.type}`;
 };

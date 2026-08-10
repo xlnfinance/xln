@@ -2,7 +2,7 @@ import { marked } from 'marked';
 
 const ALLOWED_TAGS = new Set([
   'A', 'BLOCKQUOTE', 'BR', 'CODE', 'DEL', 'DETAILS', 'EM', 'H1', 'H2', 'H3', 'H4',
-  'H5', 'H6', 'HR', 'LI', 'OL', 'P', 'PRE', 'STRONG', 'SUMMARY', 'TABLE', 'TBODY',
+  'H5', 'H6', 'HR', 'IMG', 'LI', 'OL', 'P', 'PRE', 'STRONG', 'SUMMARY', 'TABLE', 'TBODY',
   'TD', 'TH', 'THEAD', 'TR', 'UL',
 ]);
 const DROP_TAGS = new Set(['EMBED', 'IFRAME', 'MATH', 'OBJECT', 'SCRIPT', 'STYLE', 'SVG']);
@@ -28,7 +28,14 @@ export function sanitizeRenderedHtml(html: string): string {
       continue;
     }
     for (const attribute of [...element.attributes]) {
-      const allowed = (element.tagName === 'A' && (attribute.name === 'href' || attribute.name === 'title')) ||
+      const allowed = (element.tagName === 'A' && (
+        attribute.name === 'href' || attribute.name === 'title' || attribute.name === 'data-doc-link'
+      )) ||
+        (/^H[1-6]$/.test(element.tagName) && attribute.name === 'id') ||
+        (element.tagName === 'IMG' && (
+          attribute.name === 'src' || attribute.name === 'alt' ||
+          attribute.name === 'title' || attribute.name === 'loading'
+        )) ||
         (element.tagName === 'CODE' && attribute.name === 'class') ||
         ((element.tagName === 'TD' || element.tagName === 'TH') && attribute.name === 'align');
       if (!allowed) element.removeAttribute(attribute.name);
@@ -41,6 +48,14 @@ export function sanitizeRenderedHtml(html: string): string {
         element.removeAttribute('href');
       }
       element.rel = 'noreferrer noopener';
+    }
+    if (element instanceof HTMLImageElement && element.hasAttribute('src')) {
+      try {
+        const target = new URL(element.getAttribute('src') || '', window.location.origin);
+        if (!['http:', 'https:'].includes(target.protocol)) element.removeAttribute('src');
+      } catch {
+        element.removeAttribute('src');
+      }
     }
   }
   return template.innerHTML;

@@ -25,7 +25,7 @@ export const ENTITY_TX_TYPES = [
   'prepareCrossJurisdictionSwap', 'prepareDispute', 'processHtlcTimeouts', 'profile-update',
   'propose', 'proposeCancelSwap', 'r2c', 'r2e', 'r2r',
   'registerCrossJurisdictionSwap', 'reissueCertifiedOutput', 'removeCrossJurisdictionBookOrder',
-  'reopenDisputedAccount', 'requestCollateral', 'requestCrossJurisdictionClear',
+  'requestCollateral', 'requestCrossJurisdictionClear',
   'materializeCrossJurisdictionClear', 'materializeCrossJurisdictionSwap',
   'resolveHtlcLock',
   'runtimeOutput', 'scheduledWake', 'setHubConfig', 'setRebalancePolicy',

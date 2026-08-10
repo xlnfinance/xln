@@ -14,11 +14,13 @@ const disputePolicyLog = createStructuredLogger('account.dispute-policy');
  *
  * Once disputeStart is queued or observed on-chain, calldata hashes are already
  * committed. From that point even evidence updates must stop changing account
- * state; only jurisdiction-event bookkeeping and explicit reopen are allowed.
+ * state; only jurisdiction-event bookkeeping is allowed. Finalized disputed
+ * Accounts remain permanently closed; recovery requires a future, separately
+ * domain-separated bilateral protocol rather than ordinary Account traffic.
  */
 
 export const isAccountControlTx = (txType: string): boolean =>
-  txType === 'j_event_claim' || txType === 'reopen_disputed';
+  txType === 'j_event_claim';
 
 const isEvidenceBearingAccountTx = (tx: AccountTx): boolean => {
   if (tx.type === 'cross_pull_close') return typeof tx.data.binary === 'string' && Boolean(tx.data.proof);

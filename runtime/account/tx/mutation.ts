@@ -12,7 +12,6 @@ import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
 import { handleRequestCollateral } from './handlers/request-collateral';
 import { handleRebalancePolicy } from './handlers/rebalance-policy';
 import { handleRebalanceRefund } from './handlers/rebalance-refund';
-import { handleReopenDisputed } from './handlers/reopen-disputed';
 import { handleHtlcLock } from './handlers/htlc-lock';
 import { handleHtlcResolve } from './handlers/htlc-resolve';
 import {
@@ -191,8 +190,7 @@ export const applyAccountTxMutation = async (
   };
   if (!canProcessAccountTxForDisputeStatus(account.status, tx.type)) {
     const error =
-      `Account is ${account.status}; tx ${tx.type} rejected until ` +
-      'dispute/reopen flow completes';
+      `ACCOUNT_CLOSED_FOR_DISPUTE:status=${account.status};tx=${tx.type}`;
     return { success: false, events: [error], error };
   }
   const freezeError = getSignedSettlementWorkspaceTxError(account, tx);
@@ -213,7 +211,6 @@ export const applyAccountTxMutation = async (
     case 'request_collateral': return applyCollateralRequest(context);
     case 'rebalance_refund': return handleRebalanceRefund(account, tx, byLeft);
     case 'rebalance_policy': return handleRebalancePolicy(account.state, tx, byLeft, timestamp);
-    case 'reopen_disputed': return handleReopenDisputed(account, tx);
     case 'j_event_claim': return applyJEventClaim(context);
     case 'htlc_lock':
       return handleHtlcLock(account, tx, byLeft, timestamp, height, isValidation);

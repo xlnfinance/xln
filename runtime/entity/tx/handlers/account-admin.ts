@@ -263,33 +263,3 @@ export const handleRequestCollateralEntityTx = (
     }],
   };
 };
-
-export const handleReopenDisputedAccountEntityTx = (
-  entityState: EntityState,
-  entityTx: EntityTxOf<'reopenDisputedAccount'>,
-  mutableFrameState = false,
-): AccountAdminResult => {
-  const newState = prepareEntityTxState(entityState, mutableFrameState);
-  const { counterpartyEntityId } = entityTx.data;
-  const account = newState.accounts.get(counterpartyEntityId);
-
-  if (!account) {
-    log.warn('reopen_disputed.missing_account', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
-    return { newState: entityState, outputs: [] };
-  }
-
-  const jNonce = Number(entityTx.data.jNonce ?? account.state.jNonce ?? 0);
-  addMessage(newState, `🔓 Reopen requested with ${counterpartyEntityId.slice(-4)} at nonce=${jNonce}`);
-
-  return {
-    newState,
-    outputs: processingTrigger(entityState),
-    accountTxs: [{
-      accountId: counterpartyEntityId,
-      tx: {
-        type: 'reopen_disputed',
-        data: { jNonce },
-      },
-    }],
-  };
-};

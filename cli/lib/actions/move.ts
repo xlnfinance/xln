@@ -68,7 +68,7 @@ export const executeMove = async (
     counterpartyId?: string;
     to?: string;
   },
-): Promise<void> => {
+): Promise<number> => {
   const input = buildMoveInput({
     entityId: session.entityId,
     signerId: session.signerId,
@@ -79,5 +79,5 @@ export const executeMove = async (
     toEntityId: args.kind === 'r2r' ? args.to : undefined,
     receivingEntity: args.kind === 'r2e' ? args.to : undefined,
   });
-  await submitAndWait(session.env, input, () => true, `move:${args.kind}`, 45_000);
+  return submitAndWait(session.env, input, () => true, `move:${args.kind}`, 45_000);
 };

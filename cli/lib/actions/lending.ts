@@ -45,7 +45,7 @@ export const executeLending = async (
     tokenId: number;
     amount: bigint;
   },
-): Promise<void> => {
+): Promise<number> => {
   const input = buildLendingInput({
     entityId: session.entityId,
     signerId: session.signerId,
@@ -54,7 +54,7 @@ export const executeLending = async (
     tokenId: args.tokenId,
     amount: args.amount,
   });
-  await submitAndWait(session.env, input, () => true, `lend:${args.op}`, 45_000);
+  return submitAndWait(session.env, input, () => true, `lend:${args.op}`, 45_000);
 };
 
 export const readLendingState = async (

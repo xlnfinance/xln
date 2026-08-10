@@ -4,6 +4,7 @@
   import { page } from '$app/stores';
   import { browser } from '$app/environment';
   import { marked } from 'marked';
+  import { sanitizeRenderedHtml } from '$lib/security/safe-markdown';
   import { Archive, BookOpen, Compass, ExternalLink, FileText, Menu, Search, Shield, Wrench, X } from 'lucide-svelte';
 
   interface DocEntry {
@@ -227,11 +228,11 @@
       return `<img src="${src}" alt="${alt}" loading="lazy"${title}>`;
     };
 
-    return marked.parse(preparedMarkdown, {
+    return sanitizeRenderedHtml(marked.parse(preparedMarkdown, {
       renderer,
       gfm: true,
       breaks: false,
-    }) as string;
+    }) as string);
   }
 
   async function loadManifest() {

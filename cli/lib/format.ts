@@ -1,4 +1,4 @@
-import { formatTokenAmount, getTokenInfo } from '../../runtime/runtime.ts';
+import { formatTokenAmount, parseTokenAmount } from '../../runtime/runtime.ts';
 import { paint } from './theme';
 
 export const shortId = (id: string, head = 6, tail = 4): string => {
@@ -20,15 +20,9 @@ export const formatAmount = (amount: bigint, tokenId: number): string => {
 export const parseHumanAmount = (raw: string, tokenId: number): bigint => {
   const text = String(raw || '').trim();
   if (!text) throw new Error('Amount is required');
-  if (/^\d+n?$/.test(text)) return BigInt(text.replace(/n$/, ''));
-  const info = getTokenInfo(tokenId);
-  const [whole, frac = ''] = text.split('.');
-  if (!/^\d+$/.test(whole || '') || (frac && !/^\d+$/.test(frac))) {
-    throw new Error(`Invalid amount: ${text}`);
-  }
-  const decimals = info.decimals;
-  const padded = (frac + '0'.repeat(decimals)).slice(0, decimals);
-  return BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(padded || '0');
+  if (/^\d+n$/.test(text)) return BigInt(text.slice(0, -1));
+  if (!/^\d+(?:\.\d+)?$/.test(text)) throw new Error(`Invalid amount: ${text}`);
+  return parseTokenAmount(tokenId, text);
 };
 
 export const headerLine = (title: string, width = 72): string => {

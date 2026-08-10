@@ -80,7 +80,6 @@ function entityTxTypeLabel(type: string): string {
     settle_finalize: 'Settle Finalize',
     disputeStart: 'Dispute Start',
     disputeFinalize: 'Dispute Finalize',
-    reopenDisputedAccount: 'Reopen Disputed',
     placeSwapOffer: 'Swap Offer',
     requestSwapCancel: 'Swap Cancel Request',
     j_broadcast: 'J Broadcast',
@@ -267,8 +266,6 @@ function summarizeAccountTx(
       return `Resolved HTLC · ${String(data['outcome'] || 'unknown')}`;
     case 'settle_transition':
       return `Settlement workspace · ${String(data['kind'] || 'updated')} v${Number(data['version'] || 0)}`;
-    case 'reopen_disputed':
-      return 'Reopened disputed account';
     case 'j_event_claim':
       return `Claimed J#${Number(data['jHeight'] || 0)} · ${describeClaimedEvents(data['events'])}`;
     default:

@@ -26,17 +26,15 @@ export const frozenAccountInputLogLevel = (
 
 export const canProcessFrozenAccountInput = (
   status: AccountReplica['status'],
-  hasActiveDispute: boolean,
+  _hasActiveDispute: boolean,
   _hasAck: boolean,
-  frameTxTypes: readonly string[],
+  _frameTxTypes: readonly string[],
 ): boolean => {
   if ((status ?? 'active') === 'active') return true;
   // Finalization removes activeDispute but deliberately leaves the Account
-  // closed. Only the exact bilateral reopen transition may cross that fence.
-  return status === 'disputed' &&
-    !hasActiveDispute &&
-    frameTxTypes.length === 1 &&
-    frameTxTypes[0] === 'reopen_disputed';
+  // permanently closed. No ordinary peer frame may cross this fence. A future
+  // recovery mechanism must use a new, bilateral, domain-separated protocol.
+  return false;
 };
 
 export const rejectFrozenAccountInput = (

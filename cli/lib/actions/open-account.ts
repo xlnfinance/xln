@@ -101,7 +101,7 @@ export const openHubAccount = async (
   hubEntityId: string,
   creditAmount: bigint,
   tokenId = 1,
-): Promise<void> => {
+): Promise<number> => {
   const input = buildOpenHubAccountInput({
     sourceEntityId: session.entityId,
     signerId: session.signerId,
@@ -109,7 +109,7 @@ export const openHubAccount = async (
     creditAmount,
     tokenId,
   });
-  await submitAndWait(
+  return submitAndWait(
     session.env,
     input,
     () => Boolean(findAccount(session.env, session.entityId, hubEntityId)),

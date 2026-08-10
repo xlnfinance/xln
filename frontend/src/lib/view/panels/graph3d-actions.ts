@@ -1,11 +1,9 @@
 import type { GraphPaymentJob, GraphXLNRuntime } from './graph3d-types';
 import { graphReserveValue } from './graph3d-helpers';
+import { parseTokenAmountInput } from '../../components/Entity/token-amount-input';
 
 export function parseGraphPaymentAmount(amount: string, decimals: number): bigint {
-  const [wholeRaw = '0', decimalRaw = ''] = String(amount).split('.');
-  const whole = BigInt(wholeRaw || '0');
-  const decimal = BigInt(decimalRaw.padEnd(decimals, '0').slice(0, decimals) || '0');
-  return whole * 10n ** BigInt(decimals) + decimal;
+  return parseTokenAmountInput(amount, decimals);
 }
 
 export function buildGraphPaymentInput(job: GraphPaymentJob, signerId: string, route: string[], decimals: number) {

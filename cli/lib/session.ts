@@ -6,10 +6,12 @@ import {
   generateLazyEntityId,
   loadEnvFromDB,
   processRuntime,
+  readPersistedStorageFrameRecord,
   registerSignerKey,
   startP2P,
   startRuntimeLoop,
   waitForRuntimeWorkDrained,
+  waitForRuntimeInputCommitted,
 } from '../../runtime/runtime.ts';
 import type { RuntimeInput, RuntimeReplica } from './runtime-types';
 import {
@@ -44,13 +46,17 @@ export const resolveCliRelayUrl = (apiBase: string): string => {
 };
 
 export const closeSession = async (session: CliSession): Promise<void> => {
-  const results = await Promise.allSettled([
-    closeRuntimeDb(session.env),
-    closeInfraDb(session.env),
-  ]);
-  const errors = results
-    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-    .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+  const errors: Error[] = [];
+  try {
+    await closeRuntimeDb(session.env);
+  } catch (error) {
+    errors.push(error instanceof Error ? error : new Error(String(error)));
+  }
+  try {
+    await closeInfraDb(session.env);
+  } catch (error) {
+    errors.push(error instanceof Error ? error : new Error(String(error)));
+  }
   if (errors.length === 1) throw errors[0];
   if (errors.length > 1) throw new AggregateError(errors, 'CLI_SESSION_CLOSE_FAILED');
 };
@@ -93,8 +99,16 @@ export const submitAndWait = async (
   ready: () => boolean,
   label: string,
   timeoutMs = 45_000,
-): Promise<void> => {
+): Promise<number> => {
+  const afterHeight = env.state.height;
   enqueueRuntimeInput(env, input);
+  const committedHeight = await waitForRuntimeInputCommitted({
+    env,
+    submitted: input,
+    afterHeight,
+    readPersistedFrame: height => readPersistedStorageFrameRecord(env, height),
+    timeoutMs,
+  });
   await waitUntil(
     () => {
       if (env.infrastructure?.loopActive === false) {
@@ -105,7 +119,9 @@ export const submitAndWait = async (
     label,
     timeoutMs,
   );
-  await waitForRuntimeWorkDrained(env, Math.min(timeoutMs, 15_000));
+  const drained = await waitForRuntimeWorkDrained(env, Math.min(timeoutMs, 15_000));
+  if (!drained) throw new Error(`${label}: runtime work drain timed out after commit ${committedHeight}`);
+  return committedHeight;
 };
 
 const hasJAddresses = (env: RuntimeReplica, name: string): boolean => {

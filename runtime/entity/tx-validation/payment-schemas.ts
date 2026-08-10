@@ -24,10 +24,6 @@ export const ENTITY_TX_PAYMENT_SCHEMAS = {
     },
     optional: { feeTokenId: 'integer' },
   },
-  reopenDisputedAccount: {
-    required: { counterpartyEntityId: 'string' },
-    optional: { jNonce: 'integer' },
-  },
   prepareDispute: {
     required: { counterpartyEntityId: 'string' },
     optional: {

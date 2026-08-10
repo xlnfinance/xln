@@ -5,6 +5,7 @@ import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
 import type { AssetLedgerRow, AssetLedgerTotals } from './asset-ledger';
 import { getExternalTokenIdentityKey, type ExternalToken } from './entity-asset-catalog';
 import { requireTokenDecimals } from './token-metadata';
+import { parseTokenAmountInput as parseStrictTokenAmountInput } from './token-amount-input';
 
 export type AssetTokenInfo = {
   symbol?: string;
@@ -62,11 +63,8 @@ export function formatTokenAmount(amount: bigint, decimals: number, rawPrecision
 }
 
 export function parseTokenAmountInput(amount: string, decimals: number): bigint {
-  const [wholeRaw, fracRaw = ''] = amount.split('.');
-  const whole = wholeRaw && wholeRaw.length > 0 ? BigInt(wholeRaw) : 0n;
-  const fracPadded = (fracRaw + '0'.repeat(decimals)).slice(0, decimals);
-  const frac = fracPadded.length > 0 ? BigInt(fracPadded) : 0n;
-  return whole * 10n ** BigInt(decimals) + frac;
+  const normalized = amount.startsWith('.') ? `0${amount}` : amount;
+  return parseStrictTokenAmountInput(normalized, decimals);
 }
 
 export function formatTokenInputAmount(amount: bigint, decimals: number): string {
@@ -82,6 +80,7 @@ export function parsePositiveAssetAmount(raw: string, token: { decimals: number 
   const trimmed = raw.trim();
   if (!trimmed) throw new Error('Amount is required');
   if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(trimmed)) throw new Error('Invalid amount format');
+  if (/^0*(?:\.0*)?$/.test(trimmed)) throw new Error('Amount must be greater than zero');
   const parsed = parseTokenAmountInput(trimmed, token.decimals);
   if (parsed <= 0n) throw new Error('Amount must be greater than zero');
   if (typeof maxAmount === 'bigint' && parsed > maxAmount) throw new Error('Amount exceeds available balance');

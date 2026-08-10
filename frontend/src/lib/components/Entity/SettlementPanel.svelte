@@ -83,8 +83,9 @@
     const trimmed = input.trim();
     if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(trimmed)) throw new Error('Invalid amount format');
     const [wholeRaw, fracRaw = ''] = trimmed.split('.');
+    if (fracRaw.length > decimals) throw new Error(`Amount supports at most ${decimals} decimal places`);
     const whole = BigInt(wholeRaw || '0');
-    const fracPadded = (fracRaw + '0'.repeat(decimals)).slice(0, decimals);
+    const fracPadded = fracRaw.padEnd(decimals, '0');
     const frac = fracPadded ? BigInt(fracPadded) : 0n;
     return whole * (10n ** BigInt(decimals)) + frac;
   }
@@ -776,62 +777,74 @@
   }
 
   async function queueReserveToCollateral(): Promise<void> {
-    if (!counterpartyEntityId) throw new Error('Select account first');
-    const parsedAmount = parsePositiveAmount(amount, tokenId);
-    const reserveBalance = getReserveBalance(tokenId);
-    if (parsedAmount > reserveBalance) {
-      const requestedLabel = formatConfirmAmount(tokenId, parsedAmount);
-      const reserveLabel = formatConfirmAmount(tokenId, reserveBalance);
-      const proceed = confirm(
-        `Requested Reserve → Collateral exceeds current reserve.\n\n` +
-        `Current reserve: ${reserveLabel}\n` +
-        `Requested amount: ${requestedLabel}\n\n` +
-        `Queue it anyway?`,
-      );
-      if (!proceed) return;
+    if (sending) throw new Error('SETTLEMENT_SUBMISSION_IN_FLIGHT');
+    sending = true;
+    try {
+      if (!counterpartyEntityId) throw new Error('Select account first');
+      const parsedAmount = parsePositiveAmount(amount, tokenId);
+      const reserveBalance = getReserveBalance(tokenId);
+      if (parsedAmount > reserveBalance) {
+        const requestedLabel = formatConfirmAmount(tokenId, parsedAmount);
+        const reserveLabel = formatConfirmAmount(tokenId, reserveBalance);
+        const proceed = confirm(
+          `Requested Reserve → Collateral exceeds current reserve.\n\n` +
+          `Current reserve: ${reserveLabel}\n` +
+          `Requested amount: ${requestedLabel}\n\n` +
+          `Queue it anyway?`,
+        );
+        if (!proceed) return;
+      }
+      const env = activeEnv;
+      if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
+      if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
+      const signerId = resolveSignerId(env);
+      await submitEntityInputs([{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'r2c',
+          data: {
+            counterpartyId: counterpartyEntityId,
+            tokenId,
+            amount: parsedAmount,
+          },
+        }],
+      }]);
+      amount = '';
+    } finally {
+      sending = false;
     }
-    const env = activeEnv;
-    if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
-    if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
-    const signerId = resolveSignerId(env);
-    await submitEntityInputs([{
-      entityId,
-      signerId,
-      entityTxs: [{
-        type: 'r2c',
-        data: {
-          counterpartyId: counterpartyEntityId,
-          tokenId,
-          amount: parsedAmount,
-        },
-      }],
-    }]);
-    amount = '';
   }
 
   async function queueCollateralToReserve(): Promise<void> {
-    if (!counterpartyEntityId) throw new Error('Select account first');
-    const parsedAmount = parsePositiveAmount(amount, tokenId);
-    const withdrawable = getWorkspaceWithdrawableCollateral(tokenId);
-    if (parsedAmount > withdrawable) throw new Error('Amount exceeds available collateral');
-    const env = activeEnv;
-    if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
-    if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
-    const signerId = resolveSignerId(env);
-    await submitEntityInputs([{
-      entityId,
-      signerId,
-      entityTxs: [{
-        type: 'settle_propose',
-        data: {
-          counterpartyEntityId,
-          executorIsLeft: String(entityId).trim().toLowerCase() < counterpartyEntityId.toLowerCase(),
-          memo: 'settle-c2r',
-          ops: [{ type: 'c2r', tokenId, amount: parsedAmount }],
-        },
-      }],
-    }]);
-    amount = '';
+    if (sending) throw new Error('SETTLEMENT_SUBMISSION_IN_FLIGHT');
+    sending = true;
+    try {
+      if (!counterpartyEntityId) throw new Error('Select account first');
+      const parsedAmount = parsePositiveAmount(amount, tokenId);
+      const withdrawable = getWorkspaceWithdrawableCollateral(tokenId);
+      if (parsedAmount > withdrawable) throw new Error('Amount exceeds available collateral');
+      const env = activeEnv;
+      if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
+      if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
+      const signerId = resolveSignerId(env);
+      await submitEntityInputs([{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'settle_propose',
+          data: {
+            counterpartyEntityId,
+            executorIsLeft: String(entityId).trim().toLowerCase() < counterpartyEntityId.toLowerCase(),
+            memo: 'settle-c2r',
+            ops: [{ type: 'c2r', tokenId, amount: parsedAmount }],
+          },
+        }],
+      }]);
+      amount = '';
+    } finally {
+      sending = false;
+    }
   }
 
   async function autoAddSignedWorkspaceToDraft(): Promise<void> {

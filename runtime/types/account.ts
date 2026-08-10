@@ -1044,12 +1044,6 @@ export type AccountTx =
           };
     }
   | {
-      type: 'reopen_disputed';
-      data: {
-        jNonce: number;
-      };
-    }
-  | {
       type: 'j_event_claim';
       data: {
         jHeight: number;

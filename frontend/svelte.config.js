@@ -12,6 +12,22 @@ const config = {
 	preprocess: vitePreprocess(),
 
 	kit: {
+		csp: {
+			mode: 'hash',
+			directives: {
+				'default-src': ['self'],
+				'script-src': ['self'],
+				'script-src-attr': ['none'],
+				'object-src': ['none'],
+				'base-uri': ['self'],
+				'form-action': ['self'],
+				'img-src': ['self', 'data:', 'blob:', 'https:'],
+				'font-src': ['self', 'data:'],
+				'worker-src': ['self', 'blob:'],
+				'connect-src': ['self', 'https:', 'wss:', 'http:', 'ws:'],
+				'style-src': ['self', 'unsafe-inline'],
+			},
+		},
 		outDir,
 		files: {
 			assets: assetsDir,

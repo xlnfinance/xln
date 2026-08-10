@@ -8,6 +8,7 @@ import {
 } from '../../frontend/src/lib/utils/liveRuntimeEnv';
 
 function makeLiveEnv() {
+  const profiles = new Map();
   return {
     state: {
       eReplicas: new Map(),
@@ -15,9 +16,21 @@ function makeLiveEnv() {
       height: 1,
       timestamp: 1,
     },
-    runtimeInput: { runtimeTxs: [], entityInputs: [], jInputs: [] },
+    runtimeMempool: { runtimeTxs: [], entityInputs: [], jInputs: [] },
     history: [],
-    gossip: { getProfiles: () => [] },
+    gossip: {
+      profiles,
+      announce: () => undefined,
+      getProfiles: () => Array.from(profiles.values()),
+      getHubs: () => [],
+      getNetworkGraph: () => ({ findPaths: async () => [] }),
+    },
+    frameLogs: [],
+    log: () => undefined,
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
+    emit: () => undefined,
   };
 }
 
@@ -67,5 +80,24 @@ describe('live runtime env helpers', () => {
     const detachedEntity = detached.state.eReplicas.get('entity:signer') as typeof entity;
     expect(detachedEntity.state.accounts.get('peer')?.deltas.get(1)?.offdelta).toBe(10n);
     expect(unwrapLiveRuntimeEnv(detached)).toBe(detached);
+  });
+
+  test('detached runtime view cannot alias or pause live Runtime infrastructure', () => {
+    const liveEnv = makeLiveEnv();
+    Object.assign(liveEnv, {
+      infrastructure: { persistencePaused: false },
+      runtimeConfig: { storage: { enabled: true } },
+    });
+    const detached = createDetachedRuntimeViewEnv(liveEnv as never);
+
+    expect(detached.infrastructure).toBeUndefined();
+    expect(detached.runtimeMempool).not.toBe(liveEnv.runtimeMempool);
+    expect(detached.history).not.toBe(liveEnv.history);
+    expect(detached.gossip.profiles).not.toBe(liveEnv.gossip.profiles);
+
+    detached.runtimeConfig = { storage: { enabled: false } };
+    expect(liveEnv.runtimeConfig.storage.enabled).toBe(true);
+    expect(liveEnv.infrastructure.persistencePaused).toBe(false);
+    expect(() => detached.log('forbidden')).toThrow('DETACHED_RUNTIME_VIEW_MUTATION_FORBIDDEN');
   });
 });

@@ -106,7 +106,7 @@ export const sendPayment = async (
     hub?: string;
     description?: string;
   },
-): Promise<RuntimeInput> => {
+): Promise<number> => {
   const route = resolveSimpleRoute(session, args.to, args.hub);
   const input = buildPaymentInput({
     entityId: session.entityId,
@@ -118,16 +118,16 @@ export const sendPayment = async (
     deliveryMode: args.mode,
     description: args.description,
   });
-  await submitAndWait(session.env, input, () => true, 'payment', 30_000);
-  return input;
+  return submitAndWait(session.env, input, () => true, 'payment', 30_000);
 };
 
 export const buildReceiveInvoice = (session: CliSession): string => {
   const entityId = session.entityId;
+  const encoded = encodeURIComponent(entityId);
   const lines = [
     `entity: ${entityId}`,
-    `xln://pay?to=${entityId}`,
-    `${session.settings.apiBase.replace(/\/$/, '')}/pay?to=${entityId}`,
+    `xln://pay/${entityId}`,
+    `${session.settings.apiBase.replace(/\/$/, '')}/app#pay/${encoded}`,
   ];
   return lines.join('\n');
 };

@@ -1638,6 +1638,7 @@ export const registerActiveNumberedEntities = async (
   input: NumberedRegistrationCommand,
   expectedRuntimeId: string,
 ): Promise<NumberedRegistrationCommandResult> => {
+  vaultOperations.assertRuntimeAuthority(expectedRuntimeId);
   const adapter = getRuntimeControllerAdapter();
   if (!adapter) throw new Error('NUMBERED_ENTITY_RUNTIME_ADAPTER_MISSING');
   const expected = String(expectedRuntimeId || '').trim().toLowerCase();
@@ -1657,6 +1658,7 @@ export async function submitActiveRuntimeInput(
   assertNetworkMachineIsLive(get(networkMachineRuntime));
   const adapter = getRuntimeControllerAdapter();
   const handle = get(runtimeControllerHandle);
+  vaultOperations.assertRuntimeAuthority(handle.runtimeId);
   if (adapter?.mode === 'remote' && handle.mode === 'remote') {
     return routeRemoteRuntimeInput(input, commandOptions);
   }
@@ -1708,6 +1710,7 @@ export async function submitActiveCrossJurisdictionIntent(
   assertRuntimeViewIsLive(get(runtimeView));
   assertNetworkMachineIsLive(get(networkMachineRuntime));
   const adapter = getRuntimeControllerAdapter();
+  vaultOperations.assertRuntimeAuthority(get(runtimeControllerHandle).runtimeId);
   if (!adapter || adapter.status !== 'connected') {
     throw new Error('CROSS_J_INTENT_RUNTIME_ADAPTER_NOT_CONNECTED');
   }

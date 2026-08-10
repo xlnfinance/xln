@@ -8,10 +8,11 @@ export function parseDecimalAmountToBigInt(raw: string, decimals: number): bigin
   if (!trimmed) return 0n;
   if (!/^\d+(\.\d+)?$/.test(trimmed)) return 0n;
   const [wholeRaw, fracRaw = ''] = trimmed.split('.');
-  const whole = BigInt(wholeRaw || '0');
   const normalizedDecimals = Math.max(0, Math.floor(decimals || 0));
+  if (fracRaw.length > normalizedDecimals) return 0n;
+  const whole = BigInt(wholeRaw || '0');
   const scale = 10n ** BigInt(normalizedDecimals);
-  const fracPadded = (fracRaw + '0'.repeat(normalizedDecimals)).slice(0, normalizedDecimals);
+  const fracPadded = fracRaw.padEnd(normalizedDecimals, '0');
   const frac = fracPadded ? BigInt(fracPadded) : 0n;
   return whole * scale + frac;
 }

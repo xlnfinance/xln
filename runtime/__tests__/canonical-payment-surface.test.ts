@@ -20,11 +20,13 @@ const removedEntityTxs = [
   ['pull', 'Cancel', 'Expired'].join(''),
   ['resolve', 'Swap'].join(''),
   ['cross', 'Jurisdiction', 'Settled'].join(''),
+  ['reopen', 'Disputed', 'Account'].join(''),
 ];
 const removedAccountTxs = [
   ['pull', 'lock'].join('_'),
   ['pull', 'resolve'].join('_'),
   ['pull', 'cancel'].join('_'),
+  ['reopen', 'disputed'].join('_'),
 ];
 const historicalPrefixes = ['.archive/', 'audits/', 'docs/archive/', 'docs/audit/', 'docs/releases/'];
 
@@ -55,7 +57,7 @@ test('retired payment transactions stay absent from active tracked files', () =>
   }
 });
 
-test('retired Entity and Account pull discriminants fail at their canonical decoders', () => {
+test('retired Entity and Account discriminants fail at their canonical decoders', () => {
   for (const type of removedEntityTxs) {
     expect(() => validateEntityTx({ type, data: {} }, 'CANONICAL_PULL'))
       .toThrow(`CANONICAL_PULL_TYPE_UNKNOWN:${type}`);

@@ -64,6 +64,7 @@ import {
   type ProtectedVaultSecrets,
   type VaultUnlockDurationMs,
 } from '../security/vaultProtection';
+import { isVaultAuthorityLeaseExpired } from '../security/vault-authority-lease';
 
 import { lockRuntimeCommandJournal } from './runtimeCommandJournalKeyring';
 
@@ -331,6 +332,19 @@ const scheduleVaultLock = (runtime: Runtime): void => {
       });
     }, delay),
   );
+};
+
+const assertRuntimeAuthorityLease = (runtime: Runtime): void => {
+  if (!runtime.seed) throw new Error(`RUNTIME_LOCKED:${runtime.id}`);
+  if (!isVaultAuthorityLeaseExpired(runtime.protectedSecrets?.unlockUntil)) return;
+  const expectedProtection = runtime.protectedSecrets;
+  // Timer delivery is only a cleanup optimization. Revoke journal authority
+  // synchronously at the point of use, then finish durable lock cleanup.
+  lockRuntimeCommandJournal(runtime.id);
+  void vaultOperations.lockRuntime(runtime.id, expectedProtection).catch(error => {
+    errorLog.log('Expired wallet lock failed', 'Runtime Security', { runtimeId: runtime.id, error });
+  });
+  throw new Error(`VAULT_UNLOCK_EXPIRED:${runtime.id}`);
 };
 
 const protectRuntimeForDevice = async (
@@ -1010,6 +1024,7 @@ function runtimeToEntry(runtime: Runtime, env: RuntimeReplica) {
 }
 
 async function registerRuntimeSignerKeys(runtime: Runtime, xln: XLNModule): Promise<void> {
+  assertRuntimeAuthorityLease(runtime);
   for (const signer of runtime.signers) {
     const privateKey = derivePrivateKey(runtime.seed, getSignerDerivationIndex(signer));
     const privateKeyBytes = new Uint8Array(
@@ -1410,10 +1425,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 
 function registerRuntimeResumeListener(): void {
   if (resumeListenerRegistered || typeof window === 'undefined' || typeof document === 'undefined') return;
-  const triggerRefresh = () => {
+  const triggerRefresh = async () => {
     if (isInactiveTabStandby()) return;
     if (document.visibilityState !== 'visible') return;
-    void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch(error => {
+    await vaultOperations.lockExpiredRuntimeLeases();
+    await vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch(error => {
       errorLog.log('Resume refresh failed', 'Runtime Resume', error);
     });
   };
@@ -1453,6 +1469,24 @@ export function shutdownRuntimeResumeListener(): void {
 
 // Runtime operations
 export const vaultOperations = {
+  assertRuntimeAuthority(runtimeId?: string | null): void {
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId || get(activeRuntimeId));
+    if (!normalizedRuntimeId) throw new Error('NO_ACTIVE_RUNTIME_AUTHORITY');
+    const resolved = findRuntimeByIdCaseInsensitive(get(runtimesState).runtimes, normalizedRuntimeId);
+    if (!resolved) throw new Error(`RUNTIME_AUTHORITY_NOT_FOUND:${normalizedRuntimeId}`);
+    assertRuntimeAuthorityLease(resolved.runtime);
+  },
+
+  async lockExpiredRuntimeLeases(now = Date.now()): Promise<void> {
+    const expired = Object.values(get(runtimesState).runtimes)
+      .filter(runtime => runtime.seed && isVaultAuthorityLeaseExpired(runtime.protectedSecrets?.unlockUntil, now))
+      .map(runtime => ({ runtimeId: runtime.id, protection: runtime.protectedSecrets }));
+    for (const entry of expired) {
+      lockRuntimeCommandJournal(entry.runtimeId);
+      await this.lockRuntime(entry.runtimeId, entry.protection);
+    }
+  },
+
   beginRuntimePageUnload(): void {
     shutdownRuntimeResumeListener();
     const localEnvs = Array.from(get(runtimes).values())
@@ -1700,7 +1734,8 @@ export const vaultOperations = {
     const normalizedRuntimeId = normalizeRuntimeId(runtimeId || get(activeRuntimeId));
     if (!normalizedRuntimeId) throw new Error('No active runtime selected');
     const runtime = get(runtimesState).runtimes[normalizedRuntimeId];
-    if (!runtime?.seed) throw new Error(`Runtime seed unavailable: ${normalizedRuntimeId}`);
+    if (!runtime) throw new Error(`Runtime seed unavailable: ${normalizedRuntimeId}`);
+    assertRuntimeAuthorityLease(runtime);
     const wallet = new Wallet(derivePrivateKey(runtime.seed, 0));
     if (normalizeRuntimeId(wallet.address) !== normalizedRuntimeId) {
       throw new Error(`RUNTIME_OWNER_KEY_MISMATCH:${normalizedRuntimeId}:${wallet.address.toLowerCase()}`);
@@ -2473,7 +2508,7 @@ export const vaultOperations = {
     const runtime = current.runtimes[resolvedRuntimeId];
 
     if (runtime) {
-      if (!runtime.seed) throw new Error(`RUNTIME_LOCKED:${resolvedRuntimeId}`);
+      assertRuntimeAuthorityLease(runtime);
       // CRITICAL: Re-register ALL signer private keys when switching runtimes
       // Keys are stored in memory (signerKeys Map), lost on page refresh
       // Must re-register from HD derivation to enable signing
@@ -2544,6 +2579,7 @@ export const vaultOperations = {
 
     const runtime = current.runtimes[current.activeRuntimeId];
     if (!runtime?.seed) return null;
+    assertRuntimeAuthorityLease(runtime);
 
     const jurisdictionKey = normalizeJurisdictionKey(jurisdiction);
     if (jurisdictionKey) {
@@ -2757,6 +2793,7 @@ export const vaultOperations = {
 
     const runtime = current.runtimes[current.activeRuntimeId];
     if (!runtime?.seed || signerIndex >= runtime.signers.length) return null;
+    assertRuntimeAuthorityLease(runtime);
 
     return derivePrivateKey(runtime.seed, getSignerDerivationIndex(runtime.signers[signerIndex]));
   },

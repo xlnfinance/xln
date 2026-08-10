@@ -41,7 +41,10 @@
     const parts = str.split('.');
     const wholePart = BigInt(parts[0] || '0');
     const fractionalPart = parts[1] || '';
-    const paddedFractional = fractionalPart.padEnd(decimals, '0').slice(0, decimals);
+    if (fractionalPart.length > decimals) {
+      throw new Error(`too many fractional digits (maximum ${decimals})`);
+    }
+    const paddedFractional = fractionalPart.padEnd(decimals, '0');
 
     return wholePart * decimalScale(decimals) + BigInt(paddedFractional || '0');
   }

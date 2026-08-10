@@ -1509,7 +1509,7 @@ describe('atomic settlement Account transition', () => {
     expect(account.state.deltas.get(1)?.leftHold).toBe(0n);
   });
 
-  test('a signed settlement freezes financial Account txs but never blocks dispute reopen', async () => {
+  test('a finalized disputed Account permanently rejects financial Account txs', async () => {
     const account = await signedWorkspaceAccount(10);
     const beforeOffdelta = account.state.deltas.get(1)?.offdelta;
 
@@ -1529,13 +1529,22 @@ describe('atomic settlement Account transition', () => {
     expect(account.state.deltas.get(1)?.offdelta).toBe(beforeOffdelta);
 
     account.status = 'disputed';
-    const reopen = await applyAccountTx(account, {
-      type: 'reopen_disputed',
-      data: { jNonce: 11 },
+    const finalizedNonce = account.state.jNonce;
+    const afterFinality = await applyAccountTx(account, {
+      type: 'direct_payment',
+      data: {
+        tokenId: 1,
+        amount: 1n,
+        route: [LEFT, RIGHT],
+        fromEntityId: LEFT,
+        toEntityId: RIGHT,
+        deliveryMode: 'direct',
+      },
     }, true, 2_001);
-    expect(reopen.success).toBe(true);
-    expect(account.status).toBe('active');
-    expect(account.state.jNonce).toBe(11);
+    expect(afterFinality.success).toBe(false);
+    expect(afterFinality.error).toBe('ACCOUNT_CLOSED_FOR_DISPUTE:status=disputed;tx=direct_payment');
+    expect(account.status).toBe('disputed');
+    expect(account.state.jNonce).toBe(finalizedNonce);
   });
 
   test('AccountSettled finality wins a submit retry race by releasing exact workspace holds', async () => {

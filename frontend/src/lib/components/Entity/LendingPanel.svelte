@@ -3,7 +3,12 @@
   import type { RuntimeInput } from '@xln/runtime/runtime/types';
   import type { EntityTx } from '@xln/runtime/types/entity-tx';
   import type { EntityReplica } from '$lib/types/ui';
-  import { xlnFunctions } from '../../stores/xlnStore';
+  import { resolveConfiguredApiBase, xlnFunctions } from '../../stores/xlnStore';
+  import {
+    getRuntimeControllerConfig,
+    isRuntimeControllerConfigCurrent,
+  } from '../../stores/runtimeControllerStore';
+  import { runtimeHttpOriginFromWsUrl } from '$lib/utils/wsUrl';
   import { toasts } from '../../stores/toastStore';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
@@ -82,6 +87,7 @@
   let lastSuccess = '';
   let state: LendingStateResponse | null = null;
   let lastAutoRefreshKey = '';
+  let refreshVersion = 0;
 
   $: activeXlnFunctions = $xlnFunctions;
   $: normalizedEntityId = String(entityId || replica?.state?.entityId || '').trim().toLowerCase();
@@ -99,7 +105,10 @@
   $: selectedTokenSymbol = tokenSymbol(selectedTokenId);
   $: pools = state?.pools ?? [];
   $: loans = state?.loans ?? [];
-  $: activeLoans = loans.filter((loan) => loan.status !== 'repaid');
+  $: activeLoans = loans.filter((loan) => (
+    loan.status === 'active' &&
+    String(loan.borrowerEntityId || '').trim().toLowerCase() === normalizedEntityId
+  ));
   $: totalAvailable = parseAmount(state?.totals?.availableAmount);
   $: totalBorrowed = parseAmount(state?.totals?.borrowedAmount);
   $: canSubmit = isLive && !!selectedHubEntityId && !!normalizedEntityId && !submitting;
@@ -175,28 +184,49 @@
   }
 
   async function refreshLendingState(): Promise<void> {
+    const version = ++refreshVersion;
     if (!isLive || !selectedHubEntityId || !normalizedEntityId) {
       state = null;
       return;
     }
     loading = true;
     lastError = '';
+    const operation = {
+      config: getRuntimeControllerConfig(),
+      hubEntityId: selectedHubEntityId,
+      entityId: normalizedEntityId,
+      tokenId: selectedTokenId,
+    };
     try {
-      const url = new URL('/api/lending/state', window.location.origin);
-      url.searchParams.set('hubEntityId', selectedHubEntityId);
-      url.searchParams.set('userEntityId', normalizedEntityId);
-      url.searchParams.set('tokenId', String(selectedTokenId));
+      if (!operation.config) throw new Error('LENDING_RUNTIME_CONTROLLER_NOT_CONNECTED');
+      const apiBase = operation.config.mode === 'remote'
+        ? runtimeHttpOriginFromWsUrl(String(operation.config.wsUrl || ''))
+        : resolveConfiguredApiBase(window.location.origin);
+      const url = new URL('/api/lending/state', apiBase);
+      url.searchParams.set('hubEntityId', operation.hubEntityId);
+      url.searchParams.set('userEntityId', operation.entityId);
+      url.searchParams.set('tokenId', String(operation.tokenId));
       const response = await fetch(url, { cache: 'no-store' });
       const result = await readJson(response) as LendingStateResponse;
       if (!response.ok || result.success !== true) {
         throw new Error(result.error || `Lending state failed (${response.status})`);
       }
-      state = result;
+      if (
+        !isRuntimeControllerConfigCurrent(operation.config) ||
+        operation.hubEntityId !== selectedHubEntityId ||
+        operation.entityId !== normalizedEntityId ||
+        operation.tokenId !== selectedTokenId
+      ) {
+        return;
+      }
+      if (version === refreshVersion) state = result;
     } catch (error) {
-      state = null;
-      lastError = error instanceof Error ? error.message : String(error);
+      if (version === refreshVersion) {
+        state = null;
+        lastError = error instanceof Error ? error.message : String(error);
+      }
     } finally {
-      loading = false;
+      if (version === refreshVersion) loading = false;
     }
   }
 
@@ -270,7 +300,12 @@
   }
 
   async function repayLoan(loan: LendingLoan): Promise<void> {
+    if (loan.status !== 'active') throw new Error(`LENDING_LOAN_NOT_ACTIVE:${loan.loanId}:${loan.status}`);
+    if (String(loan.borrowerEntityId || '').trim().toLowerCase() !== normalizedEntityId) {
+      throw new Error(`LENDING_REPAY_BORROWER_MISMATCH:${loan.loanId}`);
+    }
     const remaining = parseAmount(loan.repaymentAmount) - parseAmount(loan.repaidAmount);
+    if (remaining <= 0n) throw new Error(`LENDING_REPAY_AMOUNT_INVALID:${loan.loanId}`);
     await submitLendingTx({
       type: 'lendingRepay',
       data: {
@@ -423,8 +458,8 @@
               <strong>{formatAmount(loan.repaymentAmount, loan.tokenId)} {tokenSymbol(loan.tokenId)}</strong>
               <span>{loan.termId} · {rateLabel(loan.interestBps)} · {loan.status} · due {dueLabel(loan.dueAt)}</span>
             </div>
-            <button class="secondary" type="button" disabled={submitting || loan.status === 'closing'} on:click={() => repayLoan(loan)} data-testid="lending-repay-submit">
-              {loan.status === 'closing' ? 'Closing' : loan.status === 'opening' ? 'Opening' : 'Repay'}
+            <button class="secondary" type="button" disabled={submitting} on:click={() => repayLoan(loan)} data-testid="lending-repay-submit">
+              Repay
             </button>
           </div>
         {/each}

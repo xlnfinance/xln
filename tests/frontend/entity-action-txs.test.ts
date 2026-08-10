@@ -8,7 +8,6 @@ import {
   buildMoveSettlementContinuation,
   buildOpenAccountTx,
   buildPrepareDisputeTx,
-  buildReopenDisputedAccountTx,
   buildReserveToCollateralTx,
   buildReserveToExternalEoaTx,
   buildReserveToReserveTx,
@@ -81,7 +80,6 @@ describe('entity action tx builders', () => {
       },
     });
     expect(buildDisputeFinalizeTx(hubId, 'final')).toEqual({ type: 'disputeFinalize', data: { counterpartyEntityId: hubId, description: 'final' } });
-    expect(buildReopenDisputedAccountTx(hubId)).toEqual({ type: 'reopenDisputedAccount', data: { counterpartyEntityId: hubId } });
     expect(buildAddTokenToAccountTx(hubId, 4)).toEqual({ type: 'extendCredit', data: { counterpartyEntityId: hubId, tokenId: 4, amount: 0n } });
   });
 

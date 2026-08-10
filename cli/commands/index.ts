@@ -106,7 +106,11 @@ export const runCli = async (argv: string[]): Promise<number> => {
     }
     const passphrase = await requirePassphrase(flags);
     const session = await openSession(settings, passphrase);
-    await runTui(session);
+    try {
+      await runTui(session);
+    } finally {
+      await closeSession(session);
+    }
     return 0;
   }
 
@@ -293,15 +297,17 @@ export const runCli = async (argv: string[]): Promise<number> => {
       const passphrase = await requirePassphrase(flags);
       const session = await openSession(settings, passphrase);
       const server = await startDaemonServer(session);
-      const shutdown = async () => {
+      const shutdown = () => void server.close();
+      process.once('SIGINT', shutdown);
+      process.once('SIGTERM', shutdown);
+      try {
+        await server.closed;
+      } finally {
+        process.off('SIGINT', shutdown);
+        process.off('SIGTERM', shutdown);
         await server.close();
-        process.exit(0);
-      };
-      process.on('SIGINT', () => void shutdown());
-      process.on('SIGTERM', () => void shutdown());
-      await new Promise(() => {
-        /* run until signal */
-      });
+        await closeSession(session);
+      }
       return 0;
     }
     case 'wallet':

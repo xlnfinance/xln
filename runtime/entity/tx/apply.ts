@@ -56,7 +56,6 @@ import {
 import { handleDirectPaymentEntityTx } from './handlers/direct-payment';
 import {
   handleExtendCreditEntityTx,
-  handleReopenDisputedAccountEntityTx,
   handleRequestCollateralEntityTx,
   handleSetHubConfigEntityTx,
   handleSetRebalancePolicyEntityTx,
@@ -470,11 +469,6 @@ const entityTxDispatchers = {
   requestCollateral: (_env, state, tx, options) => handleRequestCollateralEntityTx(
     state,
     tx as Extract<EntityTx, { type: 'requestCollateral' }>,
-    options?.mutableFrameState,
-  ),
-  reopenDisputedAccount: (_env, state, tx, options) => handleReopenDisputedAccountEntityTx(
-    state,
-    tx as Extract<EntityTx, { type: 'reopenDisputedAccount' }>,
     options?.mutableFrameState,
   ),
   crossPullClose: (env, state, tx, options) => handleCrossPullCloseEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossPullClose' }>, options),

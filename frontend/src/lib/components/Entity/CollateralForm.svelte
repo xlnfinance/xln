@@ -34,6 +34,7 @@
   let lastPrefillKey = '';
   let lastAutoMax = 0n;
   let overCollateralMinutes = 30;
+  let submitting = false;
 
   const OVERCOLLATERAL_RENT_RATE_USD_PER_100_PER_HOUR = 1;
   const usdFormatter = new Intl.NumberFormat('en-US', {
@@ -154,6 +155,17 @@
     };
   }
 
+  $: projectedFeePolicy = activeEnv
+    ? resolveCounterpartyPolicy(activeEnv, entityId, effectiveCounterparty, selectedTokenId)
+    : resolveProjectedCounterpartyPolicy(accountOverride, entityId, selectedTokenId);
+  $: projectedFeeAmount = projectedFeePolicy
+    ? projectedFeePolicy.baseFee + projectedFeePolicy.gasFee +
+      ((collateralAmount * projectedFeePolicy.liquidityFeeBps) / 10000n)
+    : 0n;
+  $: projectedNetCollateral = collateralAmount > projectedFeeAmount
+    ? collateralAmount - projectedFeeAmount
+    : 0n;
+
   type CollateralEntityInput = {
     entityId: string;
     signerId: string;
@@ -172,6 +184,8 @@
 
   async function requestCollateral() {
     if (!effectiveCounterparty) return;
+    if (submitting) throw new Error('COLLATERAL_SUBMISSION_IN_FLIGHT');
+    submitting = true;
     try {
       const env = activeEnv;
       const handle = get(runtimeControllerHandle);
@@ -198,6 +212,9 @@
       if (feeAmount < 0n) {
         throw new Error('Computed rebalance fee is negative. Counterparty policy is invalid.');
       }
+      if (feeAmount >= collateralAmount) {
+        throw new Error('Collateral fee must be lower than the gross request amount.');
+      }
 
       const collateralInput: CollateralEntityInput = {
         entityId,
@@ -223,6 +240,8 @@
       errorLog.log('Collateral request failed', 'Collateral Form', { entityId, counterpartyId: effectiveCounterparty, err });
       const message = err instanceof Error ? err.message : 'Unknown error';
       error.set(`Collateral request failed: ${message}`);
+    } finally {
+      submitting = false;
     }
   }
 
@@ -255,23 +274,30 @@
       bind:value={collateralAmount}
       decimals={selectedTokenDecimals}
       placeholder="Collateral amount"
+      disabled={submitting}
     />
     <button
       class="action-button max"
       type="button"
       on:click={useMaxCollateral}
-      disabled={!effectiveCounterparty || maxCollateralNeeded <= 0n}
+      disabled={submitting || !effectiveCounterparty || maxCollateralNeeded <= 0n}
       title="Use max suggested amount"
     >
       Max
     </button>
-    <button class="action-button collateral" on:click={requestCollateral} disabled={!effectiveCounterparty || collateralAmount <= 0n}>
-      Request Collateral
+    <button class="action-button collateral" on:click={requestCollateral} disabled={submitting || !effectiveCounterparty || collateralAmount <= 0n || !projectedFeePolicy || projectedNetCollateral <= 0n}>
+      {submitting ? 'Submitting…' : 'Request Collateral'}
     </button>
   </div>
   <div class="max-hint">
-    Suggested max: {activeXlnFunctions?.formatTokenAmount(selectedTokenId, maxCollateralNeeded) || '0'}
+    Suggested gross max: {activeXlnFunctions?.formatTokenAmount(selectedTokenId, maxCollateralNeeded) || '0'}
   </div>
+  {#if projectedFeePolicy && collateralAmount > 0n}
+    <div class="max-hint" data-testid="collateral-authorization-breakdown">
+      Gross {formatTokenAmount(collateralAmount)} − exact fee {formatTokenAmount(projectedFeeAmount)}
+      = net collateral {formatTokenAmount(projectedNetCollateral)} {tokenSymbol(selectedTokenId)}
+    </div>
+  {/if}
 
   {#if overCollateralAmount > 0n}
     <div class="over-collateral-note">

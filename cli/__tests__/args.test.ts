@@ -18,8 +18,13 @@ describe('cli args', () => {
 
 describe('parseHumanAmount', () => {
   test('parses integer and decimal against token decimals', () => {
-    // token 1 is typically 18 decimals in xln token table; accept bigint raw too
     expect(parseHumanAmount('100n', 1)).toBe(100n);
-    expect(parseHumanAmount('2', 1) > 0n).toBe(true);
+    expect(parseHumanAmount('1', 1)).toBe(parseHumanAmount('1.0', 1));
+    expect(parseHumanAmount('1', 1)).toBeGreaterThan(1n);
+  });
+
+  test('rejects fractional precision that cannot be represented exactly', () => {
+    expect(() => parseHumanAmount('1.0000001', 1)).toThrow();
+    expect(() => parseHumanAmount('1.2n', 1)).toThrow('Invalid amount');
   });
 });

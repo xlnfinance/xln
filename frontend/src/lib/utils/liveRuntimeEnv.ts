@@ -1,8 +1,39 @@
 import type { RuntimeReplica, EnvSnapshot } from '@xln/runtime/api/public/runtime-module';
+import type { Profile } from '@xln/runtime/api/public/runtime-module';
 
 const LIVE_RUNTIME_ENV_KEY = '__xlnLiveEnv';
 
 type RuntimeViewEnv = RuntimeReplica & { [LIVE_RUNTIME_ENV_KEY]?: RuntimeReplica };
+
+const detachedMutation = (): never => {
+  throw new Error('DETACHED_RUNTIME_VIEW_MUTATION_FORBIDDEN');
+};
+
+const createDetachedGossip = (liveEnv: RuntimeReplica): RuntimeReplica['gossip'] => {
+  const profiles = new Map<string, Profile>(
+    structuredClone(Array.from(liveEnv.gossip.profiles.entries())),
+  );
+  const getProfiles = (): Profile[] => Array.from(profiles.values());
+  const hubProfiles = structuredClone(liveEnv.gossip.getHubs());
+  return {
+    profiles,
+    announce: detachedMutation,
+    setProfiles: detachedMutation,
+    getProfiles,
+    getHubs: () => [...hubProfiles],
+    getProfileBundle: (entityId: string) => {
+      const profile = profiles.get(entityId);
+      if (!profile) return { peers: [] };
+      return {
+        profile,
+        peers: profile.publicAccounts
+          .map(peerId => profiles.get(peerId))
+          .filter((peer): peer is Profile => peer !== undefined),
+      };
+    },
+    getNetworkGraph: detachedMutation,
+  };
+};
 
 export function isRuntimeLikeEnv(value: unknown): value is RuntimeReplica {
   if (!value || typeof value !== 'object') return false;
@@ -23,14 +54,33 @@ export function attachLiveRuntimeEnv<T extends object>(viewEnv: T, liveEnv: Runt
 }
 
 export function createDetachedRuntimeViewEnv(liveEnv: RuntimeReplica): RuntimeReplica {
+  const { infrastructure: _liveInfrastructure, ...visibleLiveFields } = liveEnv;
   return {
-    ...liveEnv,
+    ...visibleLiveFields,
     // Runtime mutates the H+1 candidate in place for hub-scale performance.
     // A shallow Map copy would still alias every nested Entity/Account and let
     // an unrelated Svelte render expose candidate balances before WAL commit.
     // This UI-only projection is published after commit; cloning it does not
     // add work to headless hubs or to the consensus transition.
     state: structuredClone(liveEnv.state),
+    runtimeMempool: structuredClone(liveEnv.runtimeMempool),
+    history: structuredClone(liveEnv.history),
+    gossip: createDetachedGossip(liveEnv),
+    frameLogs: structuredClone(liveEnv.frameLogs),
+    ...(liveEnv.overlay ? { overlay: structuredClone(liveEnv.overlay) } : {}),
+    ...(liveEnv.runtimeConfig ? { runtimeConfig: structuredClone(liveEnv.runtimeConfig) } : {}),
+    ...(liveEnv.browserVMState ? { browserVMState: structuredClone(liveEnv.browserVMState) } : {}),
+    ...(liveEnv.pendingOutputs ? { pendingOutputs: structuredClone(liveEnv.pendingOutputs) } : {}),
+    ...(liveEnv.networkInbox ? { networkInbox: structuredClone(liveEnv.networkInbox) } : {}),
+    ...(liveEnv.pendingNetworkOutputs
+      ? { pendingNetworkOutputs: structuredClone(liveEnv.pendingNetworkOutputs) }
+      : {}),
+    ...(liveEnv.extra ? { extra: structuredClone(liveEnv.extra) } : {}),
+    log: detachedMutation,
+    info: detachedMutation,
+    warn: detachedMutation,
+    error: detachedMutation,
+    emit: detachedMutation,
   };
 }
 

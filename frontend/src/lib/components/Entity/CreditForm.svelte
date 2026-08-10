@@ -27,6 +27,7 @@
   let selectedCounterparty = counterpartyId || '';
   let selectedTokenId = 1;
   let creditAmountBigInt = 0n;
+  let submitting = false;
 
   $: effectiveCounterparty = counterpartyId || selectedCounterparty;
   $: tokenList = activeXlnFunctions
@@ -112,11 +113,19 @@
   }
 
   async function extendCredit() {
-    await submitExtendCredit(`Credit extended: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, creditAmountBigInt)}`);
+    if (submitting) throw new Error('CREDIT_SUBMISSION_IN_FLIGHT');
+    submitting = true;
+    try {
+      await submitExtendCredit(`Credit extended: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, creditAmountBigInt)}`);
+    } finally {
+      submitting = false;
+    }
   }
 
   async function requestCredit() {
+    if (submitting) throw new Error('CREDIT_SUBMISSION_IN_FLIGHT');
     if (!effectiveCounterparty) return;
+    submitting = true;
     try {
       if (!activeIsLive) throw new Error('Credit requests are only available in LIVE mode');
       const apiBase = typeof window === 'undefined' ? '' : window.location.origin;
@@ -148,6 +157,8 @@
       const message = err instanceof Error ? err.message : 'Unknown error';
       errorLog.log('Credit request failed', 'Credit Form', { entityId, counterpartyId: effectiveCounterparty, err });
       error.set(`Credit request failed: ${message}`);
+    } finally {
+      submitting = false;
     }
   }
 </script>
@@ -158,7 +169,7 @@
     {#if counterpartyId === null}
       <EntitySelect bind:value={selectedCounterparty} options={accountIds} {entityNames} placeholder="Select account" />
     {/if}
-    <select bind:value={selectedTokenId} class="form-select">
+    <select bind:value={selectedTokenId} class="form-select" disabled={submitting}>
       {#each tokenList as token}
         <option value={token.id}>{token.symbol}</option>
       {/each}
@@ -167,15 +178,16 @@
       bind:value={creditAmountBigInt}
       decimals={selectedTokenDecimals}
       placeholder="Credit amount"
+      disabled={submitting}
     />
     <div class="button-row">
       {#if mode === 'request'}
-        <button class="action-button tertiary" on:click={requestCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>
-          Request Credit
+        <button class="action-button tertiary" on:click={requestCredit} disabled={submitting || !effectiveCounterparty || creditAmountBigInt <= 0n}>
+          {submitting ? 'Submitting…' : 'Request Credit'}
         </button>
       {:else}
-        <button class="action-button secondary" on:click={extendCredit} disabled={!effectiveCounterparty || creditAmountBigInt <= 0n}>
-          Extend Credit
+        <button class="action-button secondary" on:click={extendCredit} disabled={submitting || !effectiveCounterparty || creditAmountBigInt <= 0n}>
+          {submitting ? 'Submitting…' : 'Extend Credit'}
         </button>
       {/if}
     </div>

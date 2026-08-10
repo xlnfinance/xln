@@ -215,6 +215,18 @@
       runtimeFrameEnv.set($runtimeFrameEnv);
     }
 
+    // Dev Lab executes against a detached projection only. It must never use
+    // the live Runtime's WAL, adapters, P2P handles, or persistence controls.
+    $runtimeFrameEnv.scenarioMode = true;
+    $runtimeFrameEnv.scenarioJAdapterMode = 'browservm';
+    $runtimeFrameEnv.runtimeConfig = {
+      ...$runtimeFrameEnv.runtimeConfig,
+      storage: { ...$runtimeFrameEnv.runtimeConfig?.storage, enabled: false },
+    };
+    if ($runtimeFrameEnv.infrastructure) {
+      throw new Error(`${label}: detached scenario unexpectedly owns live infrastructure`);
+    }
+
     if (seed !== null && seed !== undefined && $runtimeFrameEnv.runtimeSeed !== seed) {
       $runtimeFrameEnv.runtimeSeed = seed;
     }

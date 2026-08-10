@@ -21,11 +21,11 @@ describe('frozen Account input severity', () => {
     expect(canProcessFrozenAccountInput('active', false, true, [])).toBe(true);
   });
 
-  test('allows only the explicit reopen frame and ACK after finalization', () => {
-    expect(canProcessFrozenAccountInput('disputed', false, false, ['reopen_disputed'])).toBe(true);
-    expect(canProcessFrozenAccountInput('disputed', false, true, ['reopen_disputed'])).toBe(true);
-    expect(canProcessFrozenAccountInput('disputed', true, false, ['reopen_disputed'])).toBe(false);
-    expect(canProcessFrozenAccountInput('disputed', false, false, ['reopen_disputed', 'add_delta'])).toBe(false);
+  test('rejects every ordinary peer frame after finalization', () => {
+    expect(canProcessFrozenAccountInput('disputed', false, false, ['j_event_claim'])).toBe(false);
+    expect(canProcessFrozenAccountInput('disputed', false, true, ['j_event_claim'])).toBe(false);
+    expect(canProcessFrozenAccountInput('disputed', false, false, ['add_delta'])).toBe(false);
+    expect(canProcessFrozenAccountInput('disputed', false, false, [])).toBe(false);
   });
 
   test('classifies an authenticated in-flight frame_ack after durable on-chain freeze as expected terminal traffic', () => {

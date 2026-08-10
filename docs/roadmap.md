@@ -142,6 +142,11 @@ blocker list:
   one-signature representation reuse and internal verified-witness reuse.
 - Runtime-level CrossJCoordinator plus separate immutable CrossJTerms and
   versioned CrossJProgress reducers.
+- Explicit bilateral special-confirm recovery for a finalized disputed Account,
+  with a new domain-separated confirmation, immutable finalized J-nonce binding,
+  and complete stale proof/draft cleanup. Until that protocol is designed,
+  audited, and activated, finalized disputed Accounts remain permanently closed;
+  ordinary `openAccount` never replaces them and no compatibility reopen path exists.
 - Rich browser physical-storage inspector, unified QA/Health cockpit,
   shareable detached history viewer and additional failure-inbox UX.
 - A future fresh typed mutable-path schema for generic oversized Entity/Book

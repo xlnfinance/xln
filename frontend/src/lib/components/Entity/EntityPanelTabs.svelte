@@ -85,7 +85,6 @@ import {
   buildExternalToReserveTx,
   buildMoveSettlementContinuation,
   buildPrepareDisputeTx,
-  buildReopenDisputedAccountTx,
   buildReserveToCollateralTx,
   buildReserveToExternalEoaTx,
   buildReserveToReserveTx,
@@ -2367,32 +2366,6 @@ async function queueDisputeFinalize(counterpartyEntityId: string, description = 
     toasts.error(`Dispute finalize failed: ${(err as Error).message}`);
   }
 }
-async function reopenDisputedAccount(counterpartyEntityId: string) {
-  const entityId = replica?.state?.entityId || tab.entityId;
-  const signerId = resolveEntitySigner(entityId, "reopen-disputed-account");
-  if (!entityId) {
-    notifyUserActionError("reopen-disputed-account", "Active entity missing for reopen");
-    return;
-  }
-  if (!signerId) {
-    notifyUserActionError("reopen-disputed-account", "Active signer missing for reopen");
-    return;
-  }
-  if (!activeIsLive) {
-    toasts.error("Reopen account requires LIVE mode");
-    return;
-  }
-  try {
-    await submitEntityInputs([buildEntityInput(entityId, signerId, [buildReopenDisputedAccountTx(counterpartyEntityId)])]);
-    toasts.success("Reopen disputed account queued");
-  } catch (err) {
-    logEntityPanelDiagnostic("Reopen disputed account failed", {
-      counterpartyEntityId,
-      error: toErrorMessage(err, "Reopen disputed account failed"),
-    });
-    toasts.error(`Reopen failed: ${(err as Error).message}`);
-  }
-}
 async function enforceOutstandingDebt(request: DebtDrainRequest): Promise<void> {
   const { tokenId, symbol, maxIterations, openCount, outstandingAmount, reserveAmount, payableAmount, nextDebtIndex } = request;
   const entityId = String(replica?.state?.entityId || tab.entityId || "").trim();
@@ -2935,7 +2908,7 @@ $: if (typeof window !== "undefined") {
             {rebroadcastPendingBatch} {broadcastPendingBatch} {handleWorkspaceAccountChange}
             {confirmAndQueueDisputeFinalize}
             {confirmAndQueueDisputePrepare} {addTokenToAccount} {handleOpenAccountTargetChange}
-            {openAccountWithFullId} {openDisputedAccount} {reopenDisputedAccount}
+            {openAccountWithFullId} {openDisputedAccount}
             {resolveSelfEntityId} {formatAmount} {formatApproxUsd}
             getMovePrimaryActionLabel={getPanelMovePrimaryActionLabel}
             onMoveVisualRoot={moveVisualController.setRoot}

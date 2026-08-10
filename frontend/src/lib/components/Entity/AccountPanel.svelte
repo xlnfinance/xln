@@ -421,7 +421,6 @@
   function txKindTone(type: string): 'neutral' | 'good' | 'warn' | 'danger' {
     if (type === 'swap_resolve' || type === 'account_settle') return 'good';
     if (type === 'swap_cancel_request' || type === 'request_collateral') return 'warn';
-    if (type === 'reopen_disputed') return 'danger';
     return 'neutral';
   }
 

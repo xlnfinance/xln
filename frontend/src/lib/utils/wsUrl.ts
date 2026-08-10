@@ -69,3 +69,13 @@ export const sameWsEndpoint = (left: string, right: string, ignoreProtocol = fal
   const rightKey = getWsUrlKey(right, ignoreProtocol);
   return !!leftKey && leftKey === rightKey;
 };
+
+export const runtimeHttpOriginFromWsUrl = (value: string): string => {
+  const parsed = parseWsUrl(value);
+  if (!parsed) throw new Error('REMOTE_RUNTIME_WS_URL_INVALID');
+  parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
+  parsed.pathname = '/';
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.origin;
+};

@@ -273,15 +273,7 @@ function sanitizeNativeWebBuild(): void {
 	for (const file of walkFiles(BUILD_DIR)) {
 		if (path.basename(file) === '.DS_Store') {
 			unlinkSync(file);
-			continue;
 		}
-		if (path.extname(file) !== '.html') continue;
-		const source = readFileSync(file, 'utf8');
-		const sanitized = source.replace(
-			/\n\s*<!-- Plausible Analytics -->\s*<script async src="https:\/\/plausible\.io\/js\/[^"]+"><\/script>\s*<script>\s*window\.plausible[\s\S]*?plausible\.init\(\)\s*<\/script>/g,
-			'',
-		);
-		if (sanitized !== source) writeFileSync(file, sanitized);
 	}
 }
 

@@ -208,6 +208,38 @@ test('local account opening rejects capacity overflow before cloning or insertio
   expect(state.accounts.has(counterpartyId)).toBe(false);
 });
 
+test('ordinary openAccount cannot replace a permanently disputed Account', async () => {
+  const state = makeState();
+  const finalized = makeAccount();
+  finalized.status = 'disputed';
+  delete finalized.activeDispute;
+  state.accounts.set(counterpartyId, finalized);
+  const env = createEmptyEnv('closed-account-open-rejected');
+  env.state.eReplicas.set(`${counterpartyId}:peer`, {
+    entityId: counterpartyId,
+    signerId: 'peer',
+    entityEncPubKey: '',
+    isProposer: true,
+    mempool: [],
+    state: { ...makeState(), entityId: counterpartyId },
+  } as EntityReplica);
+
+  await expect(handleOpenAccountEntityTx(state, {
+    type: 'openAccount',
+    data: {
+      targetEntityId: counterpartyId,
+      watchSeed,
+      accountDomain: {
+        chainId: jurisdiction.chainId,
+        depositoryAddress: jurisdiction.depositoryAddress,
+      },
+      disputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+    },
+  }, createAccountConsensusContext(env))).rejects.toThrow('OPEN_ACCOUNT_ALREADY_EXISTS');
+  expect(state.accounts.get(counterpartyId)).toBe(finalized);
+  expect(finalized.status).toBe('disputed');
+});
+
 test('inbound peer capacity overflow is a deterministic no-op', async () => {
   const state = makeState();
   fillAccounts(state, LIMITS.MAX_ACCOUNTS_PER_ENTITY);

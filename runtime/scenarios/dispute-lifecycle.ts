@@ -5,7 +5,7 @@
  * 1) disputeStart freezes account immediately (local shadow state)
  * 2) DisputeStarted/DisputeFinalized are handled unilaterally (no j_event_claim path)
  * 3) DisputeFinalized clears activeDispute but keeps the account finalized-disputed
- * 4) explicit reopen moves both sides back to active and clears pending disputed state
+ * 4) finalized Accounts stay permanently closed and reject later business traffic
  */
 
 import type { RuntimeReplica } from '../runtime/types';
@@ -58,27 +58,6 @@ async function advancePastDisputeTimeout(
       `dispute-lifecycle unix advance failed: before=${before} target=${timeoutUnixSeconds} after=${after}`,
     );
   }
-}
-
-async function reopenFromAlice(
-  env: RuntimeReplica,
-  process: Awaited<ReturnType<typeof getProcess>>,
-  aliceId: string,
-  aliceSigner: string,
-  hubId: string,
-): Promise<void> {
-  await process(env, [{
-    entityId: aliceId,
-    signerId: aliceSigner,
-    entityTxs: [{
-      type: 'reopenDisputedAccount',
-      data: { counterpartyEntityId: hubId },
-    }],
-  }]);
-  for (let i = 0; i < 6; i++) {
-    await process(env);
-  }
-  await converge(env, 10);
 }
 
 export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
@@ -226,7 +205,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
     assert(aliceAfterStart?.status === 'disputed', 'Alice status must remain disputed after start', env);
     assert(hubAfterStart?.status === 'disputed', 'Hub status must be disputed after start', env);
 
-    // Business txs must be blocked while disputed (only j_event_claim/reopen_disputed allowed).
+    // Business txs must be blocked while disputed (only J-event bookkeeping is allowed).
     // Keep this in sync with runtime/account/tx/apply.ts disputed gate.
     const frameBeforeBlockedTraffic = Number(aliceAfterStart?.currentHeight || 0);
     await process(env, [{
@@ -405,14 +384,35 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       );
     }
 
-    await reopenFromAlice(env, process, alice.id, alice.signer, hub.id);
+    const finalizedHeight = Number(aliceAfterFinalize?.currentHeight || 0);
+    await process(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'directPayment',
+        data: {
+          targetEntityId: hub.id,
+          tokenId: USDC,
+          amount: usd(1),
+          route: [alice.id, hub.id],
+          deliveryMode: 'direct',
+          description: 'must-fail-after-finalized-dispute',
+        },
+      }],
+    }]);
+    await converge(env, 4);
 
-    const aliceAfterReopen = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
-    const hubAfterReopen = findReplica(env, hub.id)[1].state.accounts.get(alice.id);
-    assert(aliceAfterReopen?.status === 'active', 'Alice account must reactivate after explicit reopen', env);
-    assert(hubAfterReopen?.status === 'active', 'Hub account must reactivate after explicit reopen', env);
-    assert(!aliceAfterReopen?.pendingFrame, 'Alice pendingFrame must clear after explicit reopen', env);
-    assert(!hubAfterReopen?.pendingFrame, 'Hub pendingFrame must clear after explicit reopen', env);
+    const aliceAfterRejectedTraffic = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
+    const hubAfterRejectedTraffic = findReplica(env, hub.id)[1].state.accounts.get(alice.id);
+    assert(aliceAfterRejectedTraffic?.status === 'disputed', 'Alice finalized account must remain closed', env);
+    assert(hubAfterRejectedTraffic?.status === 'disputed', 'Hub finalized account must remain closed', env);
+    assert(!aliceAfterRejectedTraffic?.activeDispute, 'Alice finalized dispute must remain cleared', env);
+    assert(!hubAfterRejectedTraffic?.activeDispute, 'Hub finalized dispute must remain cleared', env);
+    assert(
+      Number(aliceAfterRejectedTraffic?.currentHeight || 0) === finalizedHeight,
+      'Finalized account must not commit later business traffic',
+      env,
+    );
 
     if (visualTrace) env.history = [...visualTrace.snapshots];
     console.log('✅ dispute-lifecycle passed');

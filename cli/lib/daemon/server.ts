@@ -1,5 +1,6 @@
 import { createServer, type Socket } from 'node:net';
-import { mkdir, unlink } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { chmod, mkdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { CliSession } from '../session';
 import { formatAccountsPanel } from '../accounts';
@@ -14,13 +15,26 @@ import {
   type DaemonRequest,
   type DaemonResponse,
 } from './protocol';
+import { daemonTokenPath } from './client';
 
 const respond = (socket: Socket, response: DaemonResponse): void => {
   socket.write(encodeMessage(response));
 };
 
-const handleRequest = async (session: CliSession, req: DaemonRequest): Promise<DaemonResponse> => {
+const normalizedApiBase = (value: string): string => value.trim().replace(/\/$/, '');
+
+const handleRequest = async (
+  session: CliSession,
+  req: DaemonRequest,
+  authToken: string,
+): Promise<DaemonResponse> => {
   try {
+    if (req.authToken !== authToken) throw new Error('DAEMON_AUTH_INVALID');
+    if (normalizedApiBase(req.expectedApiBase) !== normalizedApiBase(session.settings.apiBase)) {
+      throw new Error(
+        `DAEMON_CONTEXT_API_MISMATCH:expected=${req.expectedApiBase}:actual=${session.settings.apiBase}`,
+      );
+    }
     switch (req.op) {
       case 'ping':
         return { id: req.id, ok: true, result: { pong: true } };
@@ -40,44 +54,58 @@ const handleRequest = async (session: CliSession, req: DaemonRequest): Promise<D
         return { id: req.id, ok: true, result: { text: formatHubList(hubs, session), hubs } };
       }
       case 'open':
-        await openHubAccount(session, req.hubEntityId, BigInt(req.creditAmount), req.tokenId ?? 1);
-        return { id: req.id, ok: true, result: { opened: req.hubEntityId } };
+        return {
+          id: req.id,
+          ok: true,
+          result: {
+            accepted: 'runtime-input-committed',
+            committedHeight: await openHubAccount(session, req.hubEntityId, BigInt(req.creditAmount), req.tokenId ?? 1),
+          },
+        };
       case 'pay':
-        await sendPayment(session, {
+        return { id: req.id, ok: true, result: {
+          accepted: 'runtime-input-committed',
+          committedHeight: await sendPayment(session, {
           to: req.to,
           amount: BigInt(req.amount),
           tokenId: req.tokenId ?? 1,
           mode: (req.mode as DeliveryMode) || 'direct',
           hub: req.hub,
           description: req.description,
-        });
-        return { id: req.id, ok: true, result: { paid: req.to, amount: req.amount } };
+          }),
+        } };
       case 'swap':
-        await placeSwap(session, {
+        return { id: req.id, ok: true, result: {
+          accepted: 'runtime-input-committed',
+          committedHeight: await placeSwap(session, {
           hubEntityId: req.hubEntityId,
           giveTokenId: req.giveTokenId,
           wantTokenId: req.wantTokenId,
           giveAmount: BigInt(req.giveAmount),
           wantAmount: BigInt(req.wantAmount),
-        });
-        return { id: req.id, ok: true, result: { swapped: true } };
+          }),
+        } };
       case 'move':
-        await executeMove(session, {
+        return { id: req.id, ok: true, result: {
+          accepted: 'runtime-input-committed',
+          committedHeight: await executeMove(session, {
           kind: req.kind,
           amount: BigInt(req.amount),
           tokenId: req.tokenId ?? 1,
           counterpartyId: req.counterpartyId,
           to: req.to,
-        });
-        return { id: req.id, ok: true, result: { moved: req.kind } };
+          }),
+        } };
       case 'lend':
-        await executeLending(session, {
+        return { id: req.id, ok: true, result: {
+          accepted: 'runtime-input-committed',
+          committedHeight: await executeLending(session, {
           op: req.lendOp,
           hubEntityId: req.hubEntityId,
           amount: BigInt(req.amount),
           tokenId: req.tokenId ?? 1,
-        });
-        return { id: req.id, ok: true, result: { lend: req.lendOp } };
+          }),
+        } };
       case 'receive':
         return { id: req.id, ok: true, result: { invoice: buildReceiveInvoice(session) } };
       case 'shutdown':
@@ -96,24 +124,28 @@ const handleRequest = async (session: CliSession, req: DaemonRequest): Promise<D
 
 export const startDaemonServer = async (
   session: CliSession,
-): Promise<{ close: () => Promise<void> }> => {
-  await mkdir(dirname(session.settings.socketPath), { recursive: true });
+): Promise<{ close: () => Promise<void>; closed: Promise<void> }> => {
+  const parent = dirname(session.settings.socketPath);
+  const tokenPath = daemonTokenPath(session.settings);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  await chmod(parent, 0o700);
   try {
     await unlink(session.settings.socketPath);
-  } catch {
-    /* absent */
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
+  const authToken = randomBytes(32).toString('hex');
+  await writeFile(tokenPath, authToken, { encoding: 'utf8', mode: 0o600 });
+  await chmod(tokenPath, 0o600);
 
-  let shuttingDown = false;
   const server = createServer(socket => {
     const decoder = createFrameDecoder();
     socket.on('data', async chunk => {
       for (const message of decoder.push(chunk)) {
         const req = message as DaemonRequest;
-        const response = await handleRequest(session, req);
+        const response = await handleRequest(session, req, authToken);
         respond(socket, response);
         if (req.op === 'shutdown') {
-          shuttingDown = true;
           socket.end();
           server.close();
         }
@@ -125,19 +157,33 @@ export const startDaemonServer = async (
     server.once('error', reject);
     server.listen(session.settings.socketPath, () => resolve());
   });
+  await chmod(session.settings.socketPath, 0o600);
+
+  const closed = new Promise<void>((resolve, reject) => {
+    server.once('close', async () => {
+      try {
+        for (const path of [session.settings.socketPath, tokenPath]) {
+          try {
+            await unlink(path);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          }
+        }
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 
   console.log(`[xln daemon] listening on ${session.settings.socketPath}`);
   console.log(`[xln daemon] entity ${session.entityId}`);
 
   return {
+    closed,
     close: async () => {
-      if (shuttingDown) return;
-      await new Promise<void>(resolve => server.close(() => resolve()));
-      try {
-        await unlink(session.settings.socketPath);
-      } catch {
-        /* ignore */
-      }
+      if (server.listening) server.close();
+      await closed;
     },
   };
 };

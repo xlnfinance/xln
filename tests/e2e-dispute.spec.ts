@@ -1601,8 +1601,8 @@ test.describe('E2E Dispute Flow', () => {
       await openAccountButton.click();
       const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
       await expect(disputedRow).toBeVisible({ timeout: 60_000 });
-      await expect(disputedRow).toContainText('Finalized disputed account');
-      await expect(disputedRow.getByRole('button', { name: /^Reopen$/ })).toBeVisible();
+      await expect(disputedRow).toContainText('Permanently closed after finalized dispute');
+      await expect(disputedRow.getByRole('button')).toHaveCount(0);
       await capturePageScreenshot(page, testInfo, 'dispute-finalized-recovery-desktop.png', {
         fullPage: false,
         ux: {
@@ -1681,14 +1681,12 @@ test.describe('E2E Dispute Flow', () => {
       await page.getByRole('button', { name: /^Open Account$/ }).click();
       const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
       await expect(disputedRow).toBeVisible({ timeout: 60_000 });
-      await expect(disputedRow).toContainText(/Active dispute in progress|Finalized disputed account/);
+      await expect(disputedRow).toContainText(/Active dispute in progress|Permanently closed after finalized dispute/);
       const disputedText = await disputedRow.textContent();
-      if (disputedText?.includes('Finalized disputed account')) {
-        await expect(disputedRow.getByRole('button', { name: /^Reopen$/i })).toBeVisible({ timeout: 60_000 });
-        await expect(disputedRow.getByRole('button', { name: /^Open$/i })).toHaveCount(0);
+      if (disputedText?.includes('Permanently closed after finalized dispute')) {
+        await expect(disputedRow.getByRole('button')).toHaveCount(0);
       } else {
         await expect(disputedRow.getByRole('button', { name: /^Open$/i })).toBeVisible({ timeout: 60_000 });
-        await expect(disputedRow.getByRole('button', { name: /^Reopen$/i })).toHaveCount(0);
       }
     });
   });

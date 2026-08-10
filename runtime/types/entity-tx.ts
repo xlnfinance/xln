@@ -353,14 +353,6 @@ type EntityTxPayload =
       };
     }
   | {
-      // Manual reopen for disputed account (reactivates business txs after dispute cycle)
-      type: 'reopenDisputedAccount';
-      data: {
-        counterpartyEntityId: string;
-        jNonce?: number;
-      };
-    }
-  | {
       type: 'prepareDispute';
       data: {
         counterpartyEntityId: string;

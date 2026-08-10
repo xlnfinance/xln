@@ -1,16 +1,14 @@
-export type DaemonRequest =
-  | { id: string; op: 'ping' }
-  | { id: string; op: 'status' }
-  | { id: string; op: 'hubs' }
+export type DaemonOperation =
+  | { op: 'ping' }
+  | { op: 'status' }
+  | { op: 'hubs' }
   | {
-      id: string;
       op: 'open';
       hubEntityId: string;
       creditAmount: string;
       tokenId?: number;
     }
   | {
-      id: string;
       op: 'pay';
       to: string;
       amount: string;
@@ -20,7 +18,6 @@ export type DaemonRequest =
       description?: string;
     }
   | {
-      id: string;
       op: 'swap';
       hubEntityId: string;
       giveTokenId: number;
@@ -29,7 +26,6 @@ export type DaemonRequest =
       wantAmount: string;
     }
   | {
-      id: string;
       op: 'move';
       kind: 'r2c' | 'r2r' | 'r2e';
       amount: string;
@@ -38,15 +34,20 @@ export type DaemonRequest =
       to?: string;
     }
   | {
-      id: string;
       op: 'lend';
       lendOp: 'offer' | 'borrow' | 'repay';
       hubEntityId: string;
       amount: string;
       tokenId?: number;
     }
-  | { id: string; op: 'receive' }
-  | { id: string; op: 'shutdown' };
+  | { op: 'receive' }
+  | { op: 'shutdown' };
+
+export type DaemonRequest = DaemonOperation & {
+  id: string;
+  authToken: string;
+  expectedApiBase: string;
+};
 
 export type DaemonResponse = {
   id: string;
@@ -57,6 +58,7 @@ export type DaemonResponse = {
 
 export const encodeMessage = (value: unknown): Buffer => {
   const body = Buffer.from(JSON.stringify(value), 'utf8');
+  if (body.length > 1_048_576) throw new Error(`DAEMON_FRAME_TOO_LARGE:${body.length}`);
   const header = Buffer.alloc(4);
   header.writeUInt32BE(body.length, 0);
   return Buffer.concat([header, body]);
@@ -70,6 +72,7 @@ export const createFrameDecoder = () => {
       const messages: unknown[] = [];
       while (buffer.length >= 4) {
         const size = buffer.readUInt32BE(0);
+        if (size > 1_048_576) throw new Error(`DAEMON_FRAME_TOO_LARGE:${size}`);
         if (buffer.length < 4 + size) break;
         const body = buffer.subarray(4, 4 + size);
         buffer = buffer.subarray(4 + size);

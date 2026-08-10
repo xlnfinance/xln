@@ -752,6 +752,10 @@ test('lending mutations use the signer runtime command path instead of unauthent
   expect(source).toContain('if (!isLive || !selectedHubEntityId || !normalizedEntityId)');
   expect(source).toContain('$: lendingStateKey = isLive && selectedHubEntityId');
   expect(source).toContain('disabled={!isLive || loading}');
+  expect(source).toContain('runtimeHttpOriginFromWsUrl');
+  expect(source).toContain('isRuntimeControllerConfigCurrent(operation.config)');
+  expect(source).toContain("loan.status === 'active'");
+  expect(source).toContain('loan.borrowerEntityId');
   expect(source).not.toContain("postLending('/api/lending/");
   expect(source).not.toContain('recordRuntimeIngressReceipt');
 });

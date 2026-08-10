@@ -10,7 +10,7 @@ import {
 
 describe('graph3d action helpers', () => {
   test('builds exact decimal payment amounts without floating-point math', () => {
-    expect(parseGraphPaymentAmount('1.23456789', 6)).toBe(1_234_567n);
+    expect(() => parseGraphPaymentAmount('1.23456789', 6)).toThrow('TOKEN_AMOUNT_PRECISION_EXCEEDED');
     const input = buildGraphPaymentInput(
       {
         id: 'job',

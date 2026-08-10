@@ -172,6 +172,9 @@ describe('vault runtime creation lock', () => {
 
     expect(store).toContain('if (!runtime?.seed) return null;');
     expect(store).toContain('if (!runtime?.seed || signerIndex >= runtime.signers.length) return null;');
+    expect(store).toContain('assertRuntimeAuthorityLease(runtime);');
+    expect(store).toContain('VAULT_UNLOCK_EXPIRED:');
+    expect(store).toContain('await vaultOperations.lockExpiredRuntimeLeases();');
     expect(panel).toContain('const activeVaultLocked = $derived(');
     expect(panel).toContain('(!hasSigner || activeVaultLocked)');
   });

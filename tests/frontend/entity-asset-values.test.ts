@@ -30,7 +30,7 @@ describe('entity asset value helpers', () => {
   });
 
   test('parses positive asset input and formats input values', () => {
-    expect(parseTokenAmountInput('1.23456789', 6)).toBe(1_234_567n);
+    expect(() => parseTokenAmountInput('1.23456789', 6)).toThrow('TOKEN_AMOUNT_PRECISION_EXCEEDED');
     expect(parseTokenAmountInput('.5', 6)).toBe(500_000n);
     expect(formatTokenInputAmount(1_230_000n, 6)).toBe('1.23');
     expect(formatTokenInputAmount(0n, 6)).toBe('');

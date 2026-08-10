@@ -2111,41 +2111,44 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   // finalize would duplicate the already sealed nonce.
   console.log('\n⚖️ STEP 6: Scheduler finalizes dispute after timeout...');
   const zeroHash = '0x' + '0'.repeat(64);
-  const waitForDisputeFinality = async (label: string): Promise<void> => {
+  const waitForDisputeFinality = async (
+    label: string,
+    participant: typeof bob = bob,
+  ): Promise<void> => {
     for (let round = 0; round < 40; round++) {
       // Deadline hook + j_broadcast are Entity txs; syncChain alone cannot draft them.
       await process(env);
       await syncChain(env, 2);
       await processJEvents(env);
-      const onChainInfo = await jadapter.getAccountInfo(bob.id, hub.id);
-      const [, bobReplica] = findReplica(env, bob.id);
+      const onChainInfo = await jadapter.getAccountInfo(participant.id, hub.id);
+      const [, participantReplica] = findReplica(env, participant.id);
       const [, hubReplica] = findReplica(env, hub.id);
       if (
         onChainInfo.disputeHash === zeroHash &&
         onChainInfo.disputeTimeout === 0n &&
-        !bobReplica.state.accounts.get(hub.id)?.activeDispute &&
-        !hubReplica.state.accounts.get(bob.id)?.activeDispute &&
-        !bobReplica.state.jBatchState?.sentBatch &&
+        !participantReplica.state.accounts.get(hub.id)?.activeDispute &&
+        !hubReplica.state.accounts.get(participant.id)?.activeDispute &&
+        !participantReplica.state.jBatchState?.sentBatch &&
         !hubReplica.state.jBatchState?.sentBatch
       ) return;
     }
-    const onChainInfo = await jadapter.getAccountInfo(bob.id, hub.id);
-    const [, bobReplica] = findReplica(env, bob.id);
+    const onChainInfo = await jadapter.getAccountInfo(participant.id, hub.id);
+    const [, participantReplica] = findReplica(env, participant.id);
     const [, hubReplica] = findReplica(env, hub.id);
-    const bobAcc = bobReplica.state.accounts.get(hub.id);
-    const hubAcc = hubReplica.state.accounts.get(bob.id);
+    const participantAcc = participantReplica.state.accounts.get(hub.id);
+    const hubAcc = hubReplica.state.accounts.get(participant.id);
     throw new Error(
       `ASSERT: ${label}: scheduled dispute finalization did not converge on chain and both entities ` +
       `onChainHash=${onChainInfo.disputeHash} onChainTimeout=${onChainInfo.disputeTimeout} ` +
-      `bobActive=${Boolean(bobAcc?.activeDispute)} hubActive=${Boolean(hubAcc?.activeDispute)} ` +
-      `bobFinalizeQueued=${String(bobAcc?.activeDispute?.finalizeQueued)} ` +
+      `participantActive=${Boolean(participantAcc?.activeDispute)} hubActive=${Boolean(hubAcc?.activeDispute)} ` +
+      `participantFinalizeQueued=${String(participantAcc?.activeDispute?.finalizeQueued)} ` +
       `hubFinalizeQueued=${String(hubAcc?.activeDispute?.finalizeQueued)} ` +
-      `bobDraft=${bobReplica.state.jBatchState?.batch.disputeFinalizations?.length ?? 0} ` +
+      `participantDraft=${participantReplica.state.jBatchState?.batch.disputeFinalizations?.length ?? 0} ` +
       `hubDraft=${hubReplica.state.jBatchState?.batch.disputeFinalizations?.length ?? 0} ` +
-      `bobSent=${Boolean(bobReplica.state.jBatchState?.sentBatch)} ` +
+      `participantSent=${Boolean(participantReplica.state.jBatchState?.sentBatch)} ` +
       `hubSent=${Boolean(hubReplica.state.jBatchState?.sentBatch)} ` +
-      `runtimeTs=${env.state.timestamp} bobTs=${bobReplica.state.timestamp} hubTs=${hubReplica.state.timestamp} ` +
-      `timeout=${String(bobAcc?.activeDispute?.disputeTimeout ?? hubAcc?.activeDispute?.disputeTimeout ?? 'cleared')}`,
+      `runtimeTs=${env.state.timestamp} participantTs=${participantReplica.state.timestamp} hubTs=${hubReplica.state.timestamp} ` +
+      `timeout=${String(participantAcc?.activeDispute?.disputeTimeout ?? hubAcc?.activeDispute?.disputeTimeout ?? 'cleared')}`,
     );
   };
   await waitForDisputeFinality('PHASE 7');
@@ -2224,39 +2227,14 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   console.log('   - Bob reserve += $100K collateral, Hub debt = $50K (exceeded collateral)\n');
 
   // ============================================================================
-  // PHASE 8: DISPUTE EDGE CASES (counter-dispute + early finalize failure)
+  // PHASE 8: INDEPENDENT ACCOUNT DISPUTE EDGE CASES
   // ============================================================================
-  console.log('\n⚖️ PHASE 8: Dispute edge cases (counter-dispute + early finalize)');
-  const reopenBobHub = async (label: string) => {
-    await process(env, [{
-      entityId: bob.id,
-      signerId: bob.signer,
-      entityTxs: [{
-        type: 'reopenDisputedAccount',
-        data: { counterpartyEntityId: hub.id },
-      }],
-    }]);
-    await processUntil(env, () => {
-      const [, bobRep] = findReplica(env, bob.id);
-      const [, hubRep] = findReplica(env, hub.id);
-      const bobAcc = bobRep.state.accounts.get(hub.id);
-      const hubAcc = hubRep.state.accounts.get(bob.id);
-      return Boolean(
-        bobAcc &&
-        hubAcc &&
-        bobAcc.status === 'active' &&
-        hubAcc.status === 'active' &&
-        !bobAcc.pendingFrame &&
-        !hubAcc.pendingFrame,
-      );
-    }, 20, `reopen Bob-Hub (${label})`);
-  };
-
-  await reopenBobHub('phase8');
-  // Start a fresh dispute (Bob starts again)
+  console.log('\n⚖️ PHASE 8: Independent-account dispute edge cases (early finalize)');
+  // Bob-Hub is permanently closed by Phase 7. Exercise the remaining edge
+  // cases on Alice-Hub instead of reviving finalized bilateral state.
   await process(env, [{
-    entityId: bob.id,
-    signerId: bob.signer,
+    entityId: alice.id,
+    signerId: alice.signer,
     entityTxs: [{
       type: 'prepareDispute',
       data: {
@@ -2266,13 +2244,13 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     }],
   }]);
 
-  let [, bobAfterEdgeStartAttempt] = findReplica(env, bob.id);
-  let edgeDisputeStarts = bobAfterEdgeStartAttempt.state.jBatchState?.batch.disputeStarts.length ?? 0;
-  assert(edgeDisputeStarts > 0, 'PHASE 8: disputeStart not enqueued after reopen');
+  const [, aliceAfterEdgeStartAttempt] = findReplica(env, alice.id);
+  const edgeDisputeStarts = aliceAfterEdgeStartAttempt.state.jBatchState?.batch.disputeStarts.length ?? 0;
+  assert(edgeDisputeStarts > 0, 'PHASE 8: Alice disputeStart not enqueued');
 
   await process(env, [{
-    entityId: bob.id,
-    signerId: bob.signer,
+    entityId: alice.id,
+    signerId: alice.signer,
     entityTxs: [{
       type: 'j_broadcast',
       data: {}
@@ -2286,7 +2264,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   for (let round = 0; round < 40; round++) {
     await syncChain(env, 1);
     await processJEvents(env);
-    if ((await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout !== 0n) {
+    if ((await jadapter.getAccountInfo(alice.id, hub.id)).disputeTimeout !== 0n) {
       edgeDisputeOnChain = true;
       break;
     }
@@ -2295,22 +2273,22 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     throw new Error('PHASE 8: edge disputeStart never reached the chain');
   }
 
-  const [, bobEdgeStart] = findReplica(env, bob.id);
-  const bobEdgeAccount = bobEdgeStart.state.accounts.get(hub.id);
-  assert(bobEdgeAccount?.activeDispute, 'PHASE 8: Bob activeDispute not set after edge disputeStart');
+  const [, aliceEdgeStart] = findReplica(env, alice.id);
+  const aliceEdgeAccount = aliceEdgeStart.state.accounts.get(hub.id);
+  assert(aliceEdgeAccount?.activeDispute, 'PHASE 8: Alice activeDispute not set after edge disputeStart');
 
   // Starter tries to finalize before timeout (should fail)
-  console.log('🧪 STEP 8a: Bob attempts early finalize (should fail)...');
-  const edgeInfoBeforeFail = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
+  console.log('🧪 STEP 8a: Alice attempts early finalize (should fail)...');
+  const edgeInfoBeforeFail = vm?.getAccountInfo ? await vm.getAccountInfo(alice.id, hub.id) : null;
   const jRepEarly = env.state.jReplicas?.get('AHB Demo');
   if (!jRepEarly) {
     throw new Error('PHASE 8: J-Machine not found for early finalize check');
   }
-  const activeDispute = bobEdgeAccount.activeDispute;
+  const activeDispute = aliceEdgeAccount.activeDispute;
   if (!activeDispute) {
     throw new Error('PHASE 8: activeDispute missing before early finalize check');
   }
-  const senderIsCounterparty = activeDispute.startedByLeft !== isLeftEntity(bob.id, hub.id);
+  const senderIsCounterparty = activeDispute.startedByLeft !== isLeftEntity(alice.id, hub.id);
   if (senderIsCounterparty) {
     throw new Error('PHASE 8: early finalize test expects starter (not counterparty)');
   }
@@ -2332,37 +2310,37 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   await processJEvents(env);
 
-  const edgeInfoAfterFail = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
+  const edgeInfoAfterFail = vm?.getAccountInfo ? await vm.getAccountInfo(alice.id, hub.id) : null;
   if (edgeInfoAfterFail) {
     assert(edgeInfoAfterFail.disputeHash !== zeroHash, 'PHASE 8: dispute cleared by early finalize (expected fail)');
   }
-  const [, bobEdgeAfterFail] = findReplica(env, bob.id);
-  assert(bobEdgeAfterFail.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute cleared after early finalize');
+  const [, aliceEdgeAfterFail] = findReplica(env, alice.id);
+  assert(aliceEdgeAfterFail.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute cleared after early finalize');
   console.log('✅ Early finalize failed as expected (dispute still active)');
 
   // Once DisputeStarted is committed, ordinary Account business is frozen.
   // A valid higher counter-proof must already have been signed before this
   // boundary; creating a new payment now would mutate the committed calldata.
   for (let round = 0; round < 12; round++) {
-    const bobObserved = findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute?.observedOnChain === true;
-    const hubObserved = findReplica(env, hub.id)[1].state.accounts.get(bob.id)?.activeDispute?.observedOnChain === true;
-    if (bobObserved && hubObserved) break;
+    const aliceObserved = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.activeDispute?.observedOnChain === true;
+    const hubObserved = findReplica(env, hub.id)[1].state.accounts.get(alice.id)?.activeDispute?.observedOnChain === true;
+    if (aliceObserved && hubObserved) break;
     await syncChain(env, 1);
   }
   const [, hubEdgeAfterFail] = findReplica(env, hub.id);
-  const bobFrozenAccount = bobEdgeAfterFail.state.accounts.get(hub.id);
-  const hubFrozenAccount = hubEdgeAfterFail.state.accounts.get(bob.id);
-  assert(bobFrozenAccount?.status === 'disputed', 'PHASE 8: Bob account must remain frozen during dispute');
+  const aliceFrozenAccount = aliceEdgeAfterFail.state.accounts.get(hub.id);
+  const hubFrozenAccount = hubEdgeAfterFail.state.accounts.get(alice.id);
+  assert(aliceFrozenAccount?.status === 'disputed', 'PHASE 8: Alice account must remain frozen during dispute');
   assert(hubFrozenAccount?.status === 'disputed', 'PHASE 8: Hub account must remain frozen during dispute');
-  assert(!bobFrozenAccount.pendingFrame && bobFrozenAccount.mempool.length === 0, 'PHASE 8: Bob frozen account has pending business');
+  assert(!aliceFrozenAccount.pendingFrame && aliceFrozenAccount.mempool.length === 0, 'PHASE 8: Alice frozen account has pending business');
   assert(!hubFrozenAccount.pendingFrame && hubFrozenAccount.mempool.length === 0, 'PHASE 8: Hub frozen account has pending business');
   checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 DISPUTE-FROZEN');
 
-  const disputeState = hubFrozenAccount.activeDispute ?? bobFrozenAccount.activeDispute;
+  const disputeState = hubFrozenAccount.activeDispute ?? aliceFrozenAccount.activeDispute;
   assert(disputeState, 'PHASE 8: activeDispute missing before timeout wait');
   let targetCounterTimeoutUnix = Number(disputeState.disputeTimeout || 0);
   if (!(targetCounterTimeoutUnix > 0)) {
-    targetCounterTimeoutUnix = Number((await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout || 0);
+    targetCounterTimeoutUnix = Number((await jadapter.getAccountInfo(alice.id, hub.id)).disputeTimeout || 0);
   }
   if (!(targetCounterTimeoutUnix > 0)) {
     throw new Error('PHASE 8: disputeTimeout still 0 before counter-timeout wait');
@@ -2387,14 +2365,14 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   );
 
   console.log('⚖️ STEP 8c: Scheduler finalizes the committed proof (post-timeout)...');
-  await waitForDisputeFinality('PHASE 8');
+  await waitForDisputeFinality('PHASE 8', alice);
 
-  const edgeInfoAfterCounter = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
+  const edgeInfoAfterCounter = vm?.getAccountInfo ? await vm.getAccountInfo(alice.id, hub.id) : null;
   if (edgeInfoAfterCounter) {
     assert(edgeInfoAfterCounter.disputeHash === zeroHash, 'PHASE 8: dispute not cleared after timeout');
   }
-  const [, bobEdgeFinal] = findReplica(env, bob.id);
-  assert(!bobEdgeFinal.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute not cleared after timeout');
+  const [, aliceEdgeFinal] = findReplica(env, alice.id);
+  assert(!aliceEdgeFinal.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute not cleared after timeout');
   console.log('✅ Committed proof finalized after timeout and converged on both entities');
 
   checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 POST-DISPUTE');

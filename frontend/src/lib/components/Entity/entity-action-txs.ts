@@ -125,13 +125,6 @@ export function buildDisputeFinalizeTx(counterpartyEntityId: string, description
   };
 }
 
-export function buildReopenDisputedAccountTx(counterpartyEntityId: string): EntityTxOf<'reopenDisputedAccount'> {
-  return {
-    type: 'reopenDisputedAccount',
-    data: { counterpartyEntityId },
-  };
-}
-
 export function buildAddTokenToAccountTx(counterpartyEntityId: string, tokenId: number): EntityTxOf<'extendCredit'> {
   return {
     type: 'extendCredit',

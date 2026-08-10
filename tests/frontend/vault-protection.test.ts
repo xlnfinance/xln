@@ -7,6 +7,7 @@ import {
   unprotectVaultSecrets,
   type ProtectedVaultSecrets,
 } from '../../frontend/src/lib/security/vaultProtection';
+import { isVaultAuthorityLeaseExpired } from '../../frontend/src/lib/security/vault-authority-lease';
 
 const installSuccessfulKeyDb = (operations: Array<{ method: string; key: IDBValidKey }>): IDBFactory => ({
   open: () => {
@@ -120,6 +121,13 @@ test('vault protection lease identity prevents stale tabs from locking a refresh
   expect(sameVaultProtectionLease(oldLease, oldLease)).toBe(true);
   expect(sameVaultProtectionLease(oldLease, refreshedLease)).toBe(false);
   expect(sameVaultProtectionLease(oldLease, undefined)).toBe(false);
+});
+
+test('hydrated signing authority expires against the absolute lease deadline', () => {
+  expect(isVaultAuthorityLeaseExpired(999, 1_000)).toBe(true);
+  expect(isVaultAuthorityLeaseExpired(1_000, 1_000)).toBe(true);
+  expect(isVaultAuthorityLeaseExpired(1_001, 1_000)).toBe(false);
+  expect(isVaultAuthorityLeaseExpired(null, 1_000)).toBe(false);
 });
 
 test('vault protection lease ignores renewed ciphertext for the same device key', () => {

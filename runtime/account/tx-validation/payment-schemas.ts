@@ -80,5 +80,4 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
     },
     literals: { ackKind: ['fill', 'cancel'], priceImprovementMode: ['source_savings'] },
   },
-  reopen_disputed: { required: { jNonce: 'integer' } },
 } as const satisfies Readonly<Record<string, AccountTxDataSchema>>;

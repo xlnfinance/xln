@@ -146,6 +146,14 @@ const failfastAssert: (
 export type RuntimeLoopConfig = NonNullable<Parameters<typeof startRuntimeLoop>[1]>;
 
 export {
+  findCommittedRuntimeInputHeight,
+  findPersistedRuntimeInputHeight,
+  runtimeFrameContainsSubmittedInput,
+  runtimeInputParts,
+  waitForRuntimeInputCommitted,
+} from './input-completion';
+
+export {
   registerRuntimePublishedCallback,
   registerRuntimeFrameCommitCallback,
   registerRecoveryBackupBarrier,
