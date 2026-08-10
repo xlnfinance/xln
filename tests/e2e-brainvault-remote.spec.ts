@@ -57,7 +57,9 @@ test(
     });
     const remoteUrl = `${APP_BASE_URL}/app#${hash.toString()}`;
     await page.goto(remoteUrl, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('remote-runtime-login-screen')).not.toBeVisible({ timeout: 30_000 });
+    const remotePrompt = page.getByTestId('remote-runtime-login-screen');
+    await expect(remotePrompt).toBeVisible({ timeout: 30_000 });
+    await remotePrompt.getByRole('button', { name: 'Connect remote runtime' }).click();
     await page.waitForFunction(() => {
       const adapter = (window as typeof window & {
         __xln?: { adapter?: { status?: () => { connected?: boolean; authLevel?: string | null } } };
