@@ -678,12 +678,20 @@ test('app remote runtime prompt activates through hot boot instead of reload', (
 });
 
 test('embedded remote capability never bypasses explicit runtime consent', () => {
-  const source = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
-  expect(source).toContain(
-    'remoteRequest && (remoteRequest.requiresAuthPaste || !hasAcceptedRemoteRuntime(remoteRequest))',
+  const appLayout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+  const runtimeConnection = readFileSync('frontend/src/lib/utils/runtimeConnection.ts', 'utf8');
+  expect(appLayout).toContain('remoteRequest && remoteRuntimeRequiresConsent(remoteRequest)');
+  expect(runtimeConnection).toContain('export function remoteRuntimeRequiresConsent');
+
+  const projectionStart = runtimeConnection.indexOf('export async function ensureProjectionRuntimeConnected');
+  const projectionSource = runtimeConnection.slice(projectionStart);
+  expect(projectionSource).toContain('request && remoteRuntimeRequiresConsent(request)');
+  expect(projectionSource).toContain('REMOTE_RUNTIME_CONSENT_REQUIRED');
+  expect(projectionSource.indexOf('remoteRuntimeRequiresConsent(request)')).toBeLessThan(
+    projectionSource.indexOf('persistRemoteRuntimeRequest(request)'),
   );
-  expect(source).not.toContain(
-    'remoteRequest.requiresAuthPaste || (!remoteRequest.authKey && !hasAcceptedRemoteRuntime(remoteRequest))',
+  expect(projectionSource.indexOf('remoteRuntimeRequiresConsent(request)')).toBeLessThan(
+    projectionSource.indexOf('switchAppRuntimeAdapter(config)'),
   );
 });
 

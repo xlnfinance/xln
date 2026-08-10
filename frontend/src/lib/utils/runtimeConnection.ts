@@ -202,6 +202,10 @@ export function hasAcceptedRemoteRuntime(request: RemoteRuntimeRequest): boolean
   }
 }
 
+export function remoteRuntimeRequiresConsent(request: RemoteRuntimeRequest): boolean {
+  return request.requiresAuthPaste === true || !hasAcceptedRemoteRuntime(request);
+}
+
 export function stripRemoteRuntimeParamsFromHistory(): void {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
@@ -266,6 +270,13 @@ export async function ensureProjectionRuntimeConnected(): Promise<RuntimeHandle>
   const request = readRemoteRuntimeRequestFromUrl();
   if (request?.requiresAuthPaste) {
     throw new Error('Remote runtime link is missing a capability token. Open /app and paste a fresh capability.');
+  }
+  // A valid capability authenticates the remote Runtime; it does not prove the
+  // user chose to switch this tab to it. Only /app owns that consent UI. If a
+  // projection route persisted first, it would also set the accept bit and
+  // turn an attacker-supplied /address or /health link into durable consent.
+  if (request && remoteRuntimeRequiresConsent(request)) {
+    throw new Error('REMOTE_RUNTIME_CONSENT_REQUIRED: Open /app and confirm this remote runtime first.');
   }
   if (request) {
     persistRemoteRuntimeRequest(request);

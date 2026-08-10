@@ -1,6 +1,7 @@
 import { expect, test, type Page } from './global-setup.mts';
 
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
+import { acceptRemoteRuntimeConsent } from './utils/e2e-runtime-import';
 
 type RuntimeImportCapability = {
   label: string;
@@ -57,9 +58,7 @@ test(
     });
     const remoteUrl = `${APP_BASE_URL}/app#${hash.toString()}`;
     await page.goto(remoteUrl, { waitUntil: 'domcontentloaded' });
-    const remotePrompt = page.getByTestId('remote-runtime-login-screen');
-    await expect(remotePrompt).toBeVisible({ timeout: 30_000 });
-    await remotePrompt.getByRole('button', { name: 'Connect remote runtime' }).click();
+    await acceptRemoteRuntimeConsent(page, 30_000);
     await page.waitForFunction(() => {
       const adapter = (window as typeof window & {
         __xln?: { adapter?: { status?: () => { connected?: boolean; authLevel?: string | null } } };

@@ -47,12 +47,12 @@
     stripLocalRuntimePairingToken,
   } from '$lib/utils/localRuntimePairing';
   import {
-    hasAcceptedRemoteRuntime,
     persistRemoteRuntimeRequest,
     readRemoteRuntimeImportPayloadFromHash,
     readRemoteRuntimeImportSourceFromHash,
     readRemoteRuntimeRequestFromUrl,
     remoteAcceptKey,
+    remoteRuntimeRequiresConsent,
     stripRemoteRuntimeParamsFromHistory,
     type RemoteRuntimeRequest,
   } from '$lib/utils/runtimeConnection';
@@ -234,7 +234,7 @@
       payload: importPayload,
       source: importSource,
     });
-    if (remoteRequest && (remoteRequest.requiresAuthPaste || !hasAcceptedRemoteRuntime(remoteRequest))) {
+    if (remoteRequest && remoteRuntimeRequiresConsent(remoteRequest)) {
       pendingRemoteRuntime = remoteRequest;
       stripRemoteRuntimeParams();
       showInactiveTabStandby();

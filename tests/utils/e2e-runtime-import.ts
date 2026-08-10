@@ -18,6 +18,13 @@ const manifestFromPayload = (payload: RuntimeImportPayload): unknown => {
 const hasImportEntries = (manifest: unknown): boolean =>
   isRecord(manifest) && Array.isArray(manifest.entries) && manifest.entries.length > 0;
 
+export const acceptRemoteRuntimeConsent = async (page: Page, timeoutMs = 15_000): Promise<void> => {
+  const prompt = page.getByTestId('remote-runtime-login-screen');
+  await prompt.waitFor({ state: 'visible', timeout: timeoutMs });
+  await prompt.getByRole('button', { name: 'Connect remote runtime' }).click();
+  await prompt.waitFor({ state: 'hidden', timeout: timeoutMs });
+};
+
 export const resolveRuntimeImportAppUrl = async (
   page: Page,
   options: {

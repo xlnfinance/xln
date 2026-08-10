@@ -4,7 +4,7 @@ import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth, waitForNamedH
 
 import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 
-import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
+import { acceptRemoteRuntimeConsent, resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
 
 import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 
@@ -696,9 +696,7 @@ test('remote /app opens an existing hub runtime through radapter', { tag: '@func
   const url = remoteRuntimeUrl('/app', wsUrl, key);
 
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-
-  const remotePrompt = page.getByTestId('remote-runtime-login-screen');
-  await expect(remotePrompt).not.toBeVisible({ timeout: 10_000 });
+  await acceptRemoteRuntimeConsent(page);
 
   await page.waitForFunction(
     ({ hubId, expectedRuntimeId }) => {
@@ -819,6 +817,7 @@ test(
         waitUntil: 'domcontentloaded',
       },
     );
+    await acceptRemoteRuntimeConsent(page);
 
     await page.waitForFunction(
       () => {
@@ -948,6 +947,7 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
       waitUntil: 'domcontentloaded',
     },
   );
+  await acceptRemoteRuntimeConsent(page);
 
   await page.waitForFunction(
     () => {
@@ -1120,6 +1120,7 @@ test(
         waitUntil: 'domcontentloaded',
       },
     );
+    await acceptRemoteRuntimeConsent(page);
     await page.waitForFunction(
       ({ runtimeId, ws }) => {
         const view = window as typeof window & {
@@ -1439,6 +1440,7 @@ test(
         waitUntil: 'domcontentloaded',
       },
     );
+    await acceptRemoteRuntimeConsent(page);
 
     await page.waitForFunction(
       ({ expectedRuntimeId, hubId }) => {
@@ -1492,6 +1494,7 @@ test('admin remote runtime opens normal app workspace', { tag: '@functional' }, 
     remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey),
     { waitUntil: 'domcontentloaded' },
   );
+  await acceptRemoteRuntimeConsent(page);
 
   await page.waitForFunction(
     () => {
@@ -1570,6 +1573,7 @@ test(
       remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey),
       { waitUntil: 'domcontentloaded' },
     );
+    await acceptRemoteRuntimeConsent(page);
 
     await page.waitForFunction(
       ({ expectedRuntimeId }) => {
@@ -1685,10 +1689,37 @@ test(
     });
     page.on('pageerror', error => consoleProblems.push(`pageerror: ${error.message}`));
 
-    await page.goto(
-      remoteRuntimeUrl('/address', h1Endpoint.wsUrl, adminKey),
-      { waitUntil: 'domcontentloaded' },
-    );
+    const directAddressUrl = remoteRuntimeUrl('/address', h1Endpoint.wsUrl, adminKey);
+    await page.goto(directAddressUrl, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.empty.error')).toContainText('REMOTE_RUNTIME_CONSENT_REQUIRED', {
+      timeout: REMOTE_E2E_WAIT_MS,
+    });
+    const addressBeforeConsent = await page.evaluate(() => ({
+      adapterConnected: (window as any).__xln?.adapter?.status?.().connected === true,
+      remoteMode: localStorage.getItem('xln-runtime-adapter-mode'),
+      sessionKey: sessionStorage.getItem('xln-runtime-adapter-key'),
+      acceptedKeys: Object.keys(sessionStorage).filter(key => key.startsWith('xln-remote-runtime-accepted:')),
+    }));
+    expect(addressBeforeConsent).toEqual({
+      adapterConnected: false,
+      remoteMode: null,
+      sessionKey: null,
+      acceptedKeys: [],
+    });
+
+    await page.goto(remoteRuntimeUrl('/health', h1Endpoint.wsUrl, adminKey), {
+      waitUntil: 'domcontentloaded',
+    });
+    await expect(page.locator('.panel.error')).toContainText('REMOTE_RUNTIME_CONSENT_REQUIRED', {
+      timeout: REMOTE_E2E_WAIT_MS,
+    });
+    expect(await page.evaluate(() => sessionStorage.getItem('xln-runtime-adapter-key'))).toBeNull();
+
+    await page.goto(remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey), {
+      waitUntil: 'domcontentloaded',
+    });
+    await acceptRemoteRuntimeConsent(page);
+    await page.goto(`${APP_BASE_URL}/address`, { waitUntil: 'domcontentloaded' });
 
     await page.waitForFunction(
       () => {
@@ -1772,6 +1803,7 @@ test(
       remoteRuntimeUrl('/app', h1Endpoint.wsUrl, adminKey),
       { waitUntil: 'domcontentloaded' },
     );
+    await acceptRemoteRuntimeConsent(page);
 
     await page.waitForFunction(
       () => {
@@ -2067,6 +2099,7 @@ test(
       remoteRuntimeUrl('/app', fixture.wsUrl, token),
       { waitUntil: 'domcontentloaded' },
     );
+    await acceptRemoteRuntimeConsent(page);
     await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
     const gate = page.getByTestId('runtime-command-gate');
     await expect(gate).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
@@ -2171,6 +2204,7 @@ test(
       remoteRuntimeUrl('/app', h2Endpoint.wsUrl, adminKey),
       { waitUntil: 'domcontentloaded' },
     );
+    await acceptRemoteRuntimeConsent(page);
     await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
     await expect
       .poll(

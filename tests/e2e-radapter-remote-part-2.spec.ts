@@ -4,7 +4,7 @@ import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth, waitForNamedH
 
 import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 
-import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
+import { acceptRemoteRuntimeConsent, resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
 
 import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 
@@ -703,6 +703,7 @@ test(
         waitUntil: 'domcontentloaded',
       },
     );
+    await acceptRemoteRuntimeConsent(page);
 
     await page.waitForFunction(
       ({ expectedRuntimeId, hubId }) => {
@@ -1434,6 +1435,7 @@ test(
         waitUntil: 'domcontentloaded',
       },
     );
+    await acceptRemoteRuntimeConsent(page);
     await page.waitForFunction(
       expectedRuntimeId => String((window as any).__xln?.view?.runtimeId || '') === expectedRuntimeId,
       h1Endpoint.runtimeId,
