@@ -2613,6 +2613,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       giveAmount: BigInt(route.source.amount),
       wantTokenId: Number(route.target.tokenId),
       wantAmount: BigInt(route.target.amount),
+      maxFee: 0n,
+      minNetReceive: BigInt(route.target.amount),
       priceTicks: 900n,
       timeInForce: 0,
       makerIsLeft: account.state.leftEntity === sourceUser,

@@ -62,6 +62,8 @@ test('pending fill ack is retained (and its incident never resolves) when admiss
     giveAmount: 100n,
     wantTokenId: 2,
     wantAmount: 90n,
+    maxFee: 0n,
+    minNetReceive: 90n,
     makerIsLeft: true,
     createdHeight: 1,
     crossJurisdiction: route,
@@ -121,6 +123,8 @@ test('pending fill ack drains once admission succeeds', async () => {
     giveAmount: 100n,
     wantTokenId: 2,
     wantAmount: 90n,
+    maxFee: 0n,
+    minNetReceive: 90n,
     makerIsLeft: true,
     createdHeight: 1,
   });
