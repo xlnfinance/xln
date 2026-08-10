@@ -184,34 +184,8 @@ const validateExecutionEconomics = (
   byLeft: boolean,
   events: string[],
 ): SwapResolveFailure | null => {
-  const feeAmount = tx.data.feeAmount ?? 0n;
-  const feeTokenId = tx.data.feeTokenId ?? canonical.offer.wantTokenId;
-  if (feeAmount < 0n) return failure(events, 'Swap taker fee must be >= 0');
-  if (feeAmount > 0n && fill.filledGive <= 0n) {
-    return failure(events, 'Swap taker fee requires a non-zero fill');
-  }
-  if (feeAmount > 0n && feeTokenId !== canonical.offer.wantTokenId) {
-    return failure(
-      events,
-      `Swap taker fee token mismatch: expected ${canonical.offer.wantTokenId}, got ${feeTokenId}`,
-    );
-  }
-  if (feeAmount >= fill.filledWant && fill.filledWant > 0n) {
-    return failure(
-      events,
-      `Swap taker fee ${feeAmount} exceeds or equals filled receive amount ${fill.filledWant}`,
-    );
-  }
-  try {
-    assertSwapNetAuthorization(
-      canonical.offer,
-      fill.filledGive,
-      fill.filledWant,
-      feeAmount,
-    );
-  } catch (error) {
-    return failure(events, error instanceof Error ? error.message : String(error));
-  }
+  const feeFailure = validateSwapFeeAuthorization(tx, canonical, fill, events);
+  if (feeFailure) return feeFailure;
   if (fill.executionProvided) {
     const hasFill = fill.filledGive > 0n || fill.filledWant > 0n;
     if (hasFill && (fill.filledGive <= 0n || fill.filledWant <= 0n)) {
@@ -262,6 +236,50 @@ const validateExecutionEconomics = (
       );
     }
   }
+  return validateFilledAmountBounds(fill, events);
+};
+
+const validateSwapFeeAuthorization = (
+  tx: SwapResolveTx,
+  canonical: CanonicalOffer,
+  fill: ExecutionFill,
+  events: string[],
+): SwapResolveFailure | null => {
+  const feeAmount = tx.data.feeAmount ?? 0n;
+  const feeTokenId = tx.data.feeTokenId ?? canonical.offer.wantTokenId;
+  if (feeAmount < 0n) return failure(events, 'Swap taker fee must be >= 0');
+  if (feeAmount > 0n && fill.filledGive <= 0n) {
+    return failure(events, 'Swap taker fee requires a non-zero fill');
+  }
+  if (feeAmount > 0n && feeTokenId !== canonical.offer.wantTokenId) {
+    return failure(
+      events,
+      `Swap taker fee token mismatch: expected ${canonical.offer.wantTokenId}, got ${feeTokenId}`,
+    );
+  }
+  if (feeAmount >= fill.filledWant && fill.filledWant > 0n) {
+    return failure(
+      events,
+      `Swap taker fee ${feeAmount} exceeds or equals filled receive amount ${fill.filledWant}`,
+    );
+  }
+  try {
+    assertSwapNetAuthorization(
+      canonical.offer,
+      fill.filledGive,
+      fill.filledWant,
+      feeAmount,
+    );
+  } catch (error) {
+    return failure(events, error instanceof Error ? error.message : String(error));
+  }
+  return null;
+};
+
+const validateFilledAmountBounds = (
+  fill: ExecutionFill,
+  events: string[],
+): SwapResolveFailure | null => {
   if (fill.canonicalFillRatio > 0 && (
     fill.filledGive < FINANCIAL.MIN_PAYMENT_AMOUNT ||
     fill.filledGive > FINANCIAL.MAX_PAYMENT_AMOUNT
