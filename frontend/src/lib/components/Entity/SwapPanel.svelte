@@ -2,7 +2,7 @@
 import { tick } from 'svelte';
 import type { AccountReplica, EntityReplica, Tab } from '$lib/types/ui';
 import { writable } from 'svelte/store';
-import type { BookState, RuntimeReplica, SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/public/runtime-module';
+import type { BookState, Profile, RuntimeReplica, SwapAccountCapacityView, SwapBookEntry, SwapInboundCapacityPlan } from '@xln/runtime/api/public/runtime-module';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
@@ -10,14 +10,9 @@ import {
   getBestAsk,
   getBestBid,
 } from '@xln/runtime/api/public/runtime-module';
-import type { Profile } from '@xln/runtime/api/public/runtime-module';
-import type { SwapBookEntry } from '@xln/runtime/api/public/runtime-module';
 import type { AccountRoleEvidence } from '@xln/runtime/account/dispute-config';
 import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
-import {
-  readRuntimeAccountProjection,
-  readRuntimeEntityProjectionFrame,
-} from '../../stores/runtimeViewStore';
+import { readRuntimeAccountProjection, readRuntimeEntityProjectionFrame } from '../../stores/runtimeViewStore';
 import { toasts } from '../../stores/toastStore';
 import { errorLog } from '../../stores/errorLogStore';
 import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
@@ -113,7 +108,6 @@ export let env: RuntimeReplica | null = null;
 export let isLive: boolean;
 export let runtimeView: SwapPanelRuntimeView | null = null;
 export let runtimeHeight = 0;
-// Props
 export let counterpartyId: string = '';
 let orderbookScopeMode: 'aggregated' | 'selected' = 'selected';
 let swapPanelRoot: HTMLDivElement | null = null;
@@ -383,7 +377,6 @@ async function refreshDetailedOrderAccount(
     errorLog.log(submitError, 'Swap Panel', { entityId, accountId, error });
   }
 }
-// Get available accounts (counterparties)
 $: accounts = currentReplica?.state?.accounts ? Array.from(currentReplica.state.accounts.keys()) : [];
 $: baseAccountIds = accounts.map((id) => String(id)).sort();
 $: accountIds = (() => {
@@ -1868,8 +1861,7 @@ $: estimatedSpendLabel =
 $: sourceAssetLabel = tokenNetworkLabel(giveToken, sourceJurisdictionLabel, tokenSymbol);
 $: targetAssetLabel = tokenNetworkLabel(wantToken, targetJurisdictionLabel, tokenSymbol);
 $: swapRouteTitle = swapRouteMode === 'cross' ? `${sourceJurisdictionLabel} -> ${targetJurisdictionLabel}` : sourceJurisdictionLabel;
-// resolveReferencePriceTicks reads these values through a function boundary;
-// enumerate them so a fresh book snapshot updates the visible best price.
+// Enumerate function-boundary dependencies so a fresh book snapshot updates the visible price.
 $: {
   orderMode;
   tradeSide;
@@ -2067,8 +2059,7 @@ function computeOrderAmountSelection(percent: number): {
   const levelBaseDecimals = getTokenDecimals(selectedOrderLevel.baseTokenId);
   const levelQuoteDecimals = getTokenDecimals(selectedOrderLevel.quoteTokenId);
   const levelGiveCapacity = readOutCapacity(selectedLevelAccountId, levelGiveTokenId);
-  // A clicked level defines the limit price, not the order size. The matcher
-  // sweeps cumulative liquidity up to that limit; GTC keeps any remainder.
+  // A clicked level is the limit price; matching sweeps to it and GTC keeps any remainder.
   const rawGive = (levelGiveCapacity * BigInt(clamped)) / 100n;
   const explicitPriceTicks = selectedOrderLevel.inputPriceTicks > 0n ? selectedOrderLevel.inputPriceTicks : selectedOrderLevel.priceTicks;
   const levelWantTokenId = selectedOrderLevel.side === 'ask' ? selectedOrderLevel.baseTokenId : selectedOrderLevel.quoteTokenId;
@@ -2245,8 +2236,7 @@ function handleOrderbookLevelClick(event: CustomEvent<SwapOrderbookLevelClickDet
     if (side !== takeableSide) {
       return;
     }
-    // Cross-j book owner can be the target hub. Source capacity still
-    // belongs to activeOrderAccountId, so do not rewrite createOrderAccountId.
+    // Target hub may own the cross-j book; source capacity remains on activeOrderAccountId.
   } else if (orderbookScopeMode === 'aggregated') {
     createOrderAccountId = clickedAccountId;
   } else {
@@ -2759,7 +2749,6 @@ async function placeSwapOffer() {
     if (crossJurisdiction) {
       toasts.success('Cross-j swap preparation submitted');
     }
-    // Reset form
     orderPercent = 100;
     selectedOrderLevel = null;
     setOrderAmountInputValue('');
@@ -2833,7 +2822,6 @@ async function requestCrossClear(offerId: string, cancelRemainder = false) {
     toasts.error(`Clear failed: ${message}`);
   }
 }
-// Format BigInt for display
 function formatAmount(amount: bigint, tokenIdValue: number): string {
   return formatSwapTokenAmount(amount, getTokenDecimals(tokenIdValue));
 }
