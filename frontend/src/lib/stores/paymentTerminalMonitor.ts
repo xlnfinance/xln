@@ -139,9 +139,13 @@ class PaymentTerminalMonitor {
     }
     this.paused = false;
     const key = `${runtimeId}:${entityId}`;
+    // Shared dedupe survives View remounts, so clean it from the durable head
+    // itself rather than from this monitor instance's previous observation.
+    // A Runtime rollback may happen while no View exists; the successor must
+    // replay rewritten heights even when their log identity matches the old WAL.
+    this.forgetEventsAfterHeight(key, height);
     const rolledBack = key === this.activeKey && height < this.nextHeight - 1;
     if (key !== this.activeKey || rolledBack) {
-      if (rolledBack) this.forgetEventsAfterHeight(key, height);
       this.reset({ ...observation, runtimeId, entityId, height });
       this.startDrain();
       return;

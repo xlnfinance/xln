@@ -156,6 +156,36 @@ test('forgets only the rolled-back owner events before replay', async () => {
   monitor.stop();
 });
 
+test('replays a rewritten height when rollback happens between View instances', async () => {
+  const cursorStore = new Map<string, number>();
+  const seenEventStore = new Map<string, number>();
+  const surfaced: PaymentTerminalEvent[] = [];
+  const createMonitor = () => createPaymentTerminalMonitor({
+    readPage: async (request) => terminalPage(request),
+    onEvent: (event) => surfaced.push(event),
+    onError: (error) => { throw error; },
+    cursorStore,
+    seenEventStore,
+  });
+
+  const oldMonitor = createMonitor();
+  oldMonitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 4, connected: true });
+  oldMonitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 5, connected: true });
+  await waitFor(() => surfaced.length === 1);
+  oldMonitor.stop();
+
+  const restartedMonitor = createMonitor();
+  restartedMonitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 4, connected: true });
+  restartedMonitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 5, connected: true });
+  await waitFor(() => surfaced.length === 2);
+
+  expect(surfaced.map(({ height, name }) => [height, name])).toEqual([
+    [5, 'HtlcFinalized'],
+    [5, 'HtlcFinalized'],
+  ]);
+  restartedMonitor.stop();
+});
+
 test('serializes height bursts and drains them in bounded 500-frame pages', async () => {
   const reads: PaymentTerminalReadRequest[] = [];
   const monitor = createPaymentTerminalMonitor({

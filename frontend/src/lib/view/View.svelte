@@ -42,7 +42,6 @@
   let commandPaletteOpen = false;
   let commandPaletteView: CommandPaletteView = emptyCommandPaletteView();
   let paymentSpotlightOwnerKey = '';
-  let paymentSpotlightOwnerHeight = 0;
 
   function handlePaletteCommand(event: CustomEvent<{ type: string; args: Record<string, unknown> }>) {
     const { type, args } = event.detail;
@@ -247,6 +246,7 @@
     if (!paymentSpotlightOwnerKey) throw new Error('PAYMENT_SPOTLIGHT_OWNER_UNAVAILABLE');
     paymentSpotlight.show({
       ownerKey: paymentSpotlightOwnerKey,
+      ownerHeight: event.height,
       kicker: isSender ? 'Payment Sent' : 'Payment Received',
       title: elapsedMs ? `${isSender ? 'Paid' : 'Received'} in ${elapsedMs}ms` : (isSender ? 'Paid' : 'Received'),
       amountLine: formatSpotlightAmount(event.data['tokenId'], event.data['amount']),
@@ -352,14 +352,8 @@
       ? `${runtimeId}:${entityId}`
       : '';
     const nextHeight = Math.max(0, Math.floor(Number(handle.height || 0)));
-    const rolledBack = Boolean(
-      nextOwnerKey &&
-      nextOwnerKey === paymentSpotlightOwnerKey &&
-      nextHeight < paymentSpotlightOwnerHeight,
-    );
-    paymentSpotlight.retainForOwner(nextOwnerKey, rolledBack);
+    paymentSpotlight.retainForOwner(nextOwnerKey, nextHeight);
     paymentSpotlightOwnerKey = nextOwnerKey;
-    paymentSpotlightOwnerHeight = nextHeight;
     paymentTerminalMonitor?.observe({
       runtimeId: handle.runtimeId,
       entityId,

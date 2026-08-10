@@ -3,6 +3,7 @@ import { writable } from 'svelte/store';
 export type PaymentSpotlight = {
   id: string;
   ownerKey: string;
+  ownerHeight: number;
   kicker?: string;
   title: string;
   amountLine: string;
@@ -42,8 +43,11 @@ export function createPaymentSpotlightStore() {
     }
   }
 
-  function retainForOwner(ownerKey: string, invalidate = false) {
-    if (activeSpotlight && (invalidate || activeSpotlight.ownerKey !== ownerKey)) clear();
+  function retainForOwner(ownerKey: string, ownerHeight: number) {
+    if (
+      activeSpotlight &&
+      (activeSpotlight.ownerKey !== ownerKey || activeSpotlight.ownerHeight > ownerHeight)
+    ) clear();
   }
 
   return { subscribe, show, clear, retainForOwner };
