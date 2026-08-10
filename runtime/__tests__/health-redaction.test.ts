@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   isLocalOperatorRequest,
   publicAggregatedHealth,
@@ -24,6 +25,12 @@ test('health redaction keeps local operator requests on loopback only', () => {
   expect(isLocalOperatorRequest(new Request('http://127.0.0.1:8080/api/health', {
     headers: { origin: 'https://attacker.example' },
   }), '127.0.0.1')).toBe(false);
+});
+
+test('proxied Runtime API never treats loopback socket origin as operator authority', () => {
+  const source = readFileSync(new URL('../api/server/index.ts', import.meta.url), 'utf8');
+  expect(source).toContain('const operatorAuthorized = hasDaemonControlAuth(req, session.env);');
+  expect(source).not.toContain('isLocalOperatorRequest(req, peerAddress) || hasDaemonControlAuth');
 });
 
 test('public runtime health strips operational identifiers and reserves', () => {

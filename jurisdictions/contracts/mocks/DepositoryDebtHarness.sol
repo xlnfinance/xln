@@ -12,7 +12,9 @@ contract DepositoryDebtHarness is Depository {
     _addDebt(debtor, tokenId, creditor, amount);
   }
 
-  function harnessForgiveCurrent(bytes32 debtor, bytes32 creditor, uint256 tokenId) external {
-    _forgiveDebtsBetweenEntities(debtor, creditor, tokenId);
+  function harnessForgiveCurrent(bytes32 debtor, bytes32 creditor, uint256 tokenId)
+    external returns (bool hasCurrentDebt, bool forgiven)
+  {
+    return _forgiveDebtsBetweenEntities(debtor, creditor, tokenId);
   }
 }

@@ -154,6 +154,29 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     expect(proof?.submitNotBeforeTimestamp).toBe(120);
   });
 
+  test('pull-free selected counter-proof remains locked until timeout', async () => {
+    const state = baseState();
+    installDispute(state, 120);
+    const account = state.accounts.get(counterpartyId)!;
+    const active = account.activeDispute!;
+    active.startedByLeft = false;
+    active.selectedCounterNonce = 2;
+    active.selectedCounterProposerIsLeft = true;
+    active.selectedCounterProofbodyHash = active.initialProofbodyHash;
+    const tx = {
+      type: 'disputeFinalize',
+      data: { counterpartyEntityId: counterpartyId },
+    } satisfies Extract<EntityTx, { type: 'disputeFinalize' }>;
+
+    const early = await handleDisputeFinalize(state, tx, envAt(120));
+    expect(early.newState.jBatchState?.batch.disputeFinalizations).toEqual([]);
+
+    state.timestamp = 120_001;
+    const ready = await handleDisputeFinalize(state, tx, envAt(120));
+    expect(ready.newState.jBatchState?.batch.disputeFinalizations[0])
+      .toMatchObject({ finalNonce: 2, submitNotBeforeTimestamp: 120 });
+  });
+
   test('scheduled dispute wake is independent of validator-local scan height', async () => {
     const state = baseState();
     installDispute(state, 120);

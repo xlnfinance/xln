@@ -4,7 +4,7 @@ import {
   prepareSwapOrder,
 } from '../../../runtime/runtime.ts';
 import type { CliSession } from '../session';
-import { submitAndWait } from '../session';
+import { submitQueued } from '../session';
 import { findAccount } from '../accounts';
 import { resolveCliHubPartyRoles } from '../account-role-evidence';
 import { ensureCliProfiles } from '../profile-barrier';
@@ -69,5 +69,5 @@ export const placeSwap = async (
     },
   });
 
-  return submitAndWait(session.env, plan.runtimeInput, () => true, 'swap', 45_000);
+  return submitQueued(session.env, plan.runtimeInput, 'swap', 45_000);
 };

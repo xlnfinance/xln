@@ -125,10 +125,7 @@ export const submitAndWait = async (
   return committedHeight;
 };
 
-/**
- * Commit an explicitly asynchronous command and wait only for local Runtime
- * work to drain. Success means "durably queued", never financial completion.
- */
+/** Commit an asynchronous command. The exact persisted input is the receipt. */
 export const submitQueued = async (
   env: RuntimeReplica,
   input: RuntimeInput,
@@ -144,8 +141,6 @@ export const submitQueued = async (
     readPersistedFrame: height => readPersistedStorageFrameRecord(env, height),
     timeoutMs,
   });
-  const drained = await waitForRuntimeWorkDrained(env, Math.min(timeoutMs, 15_000));
-  if (!drained) throw new Error(`${label}: runtime work drain timed out after commit ${committedHeight}`);
   return committedHeight;
 };
 

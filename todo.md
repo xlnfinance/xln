@@ -6,17 +6,7 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
 ## Current candidate — 2026-08-10
 
 - Branch: `main` (the only writable release worktree).
-- Open protocol/code blockers: **3 active remediation batches**.
-- **ROUTED-DEBIT-AUTH-01 (P1):** routed payments authorize a recipient amount
-  but do not bind a maximum sender debit. Owner must confirm the canonical
-  `maxSenderDebit` semantics before the signed input/schema is changed.
-- **SWAP-NET-AUTH-01 (P1):** a signed swap offer does not bind maximum fee or
-  minimum net receive. Owner must confirm the canonical `maxFee` +
-  `minNetReceive` semantics before Account/Entity consensus bytes are changed.
-- **ACTIVE-TAB-01 (P2):** duplicated tabs can inherit one session tab ID and
-  takeover publishes ownership before the old Runtime is fully quiescent.
-  Awaiting owner confirmation to use Web Locks as the sole ownership authority,
-  with quiesce-before-lock and an explicit Runtime resume after reacquisition.
+- Open protocol/code blockers: **0**. Release gates and final quorum are pending.
 - Hash-ladder publication is an independent Sprites-like `processBatch`
   operation authenticated by the publishing Entity. The registry stores the
   account-scoped ladder record; it does not authorize against, retain, or
@@ -35,7 +25,7 @@ same bytes and an independent contract/runtime audit reports no blocker:
 
 - `bun run check`
 - `bun run gate:release`
-- `bun run gate:mainnet`
+- `bun run gate:mainnet-preflight` (owner explicitly excluded the soak gate)
 - post-deploy `bun run prod:health`
 
 Completed work and stale findings are deleted rather than retained as open

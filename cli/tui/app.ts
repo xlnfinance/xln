@@ -170,7 +170,7 @@ export const runTui = async (session: CliSession): Promise<void> => {
             giveAmount: parseHumanAmount(giveRaw, giveTokenId),
             wantAmount: parseHumanAmount(wantRaw, wantTokenId),
           });
-          status = 'Swap offer placed';
+          status = 'Swap offer queued';
           tab = 'accounts';
         } catch (err) {
           status = err instanceof Error ? err.message : String(err);

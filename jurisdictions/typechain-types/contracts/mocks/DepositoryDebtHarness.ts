@@ -1064,7 +1064,7 @@ export interface DepositoryDebtHarness extends BaseContract {
 
   harnessForgiveCurrent: TypedContractMethod<
     [debtor: BytesLike, creditor: BytesLike, tokenId: BigNumberish],
-    [void],
+    [[boolean, boolean] & { hasCurrentDebt: boolean; forgiven: boolean }],
     "nonpayable"
   >;
 
@@ -1294,7 +1294,7 @@ export interface DepositoryDebtHarness extends BaseContract {
     nameOrSignature: "harnessForgiveCurrent"
   ): TypedContractMethod<
     [debtor: BytesLike, creditor: BytesLike, tokenId: BigNumberish],
-    [void],
+    [[boolean, boolean] & { hasCurrentDebt: boolean; forgiven: boolean }],
     "nonpayable"
   >;
   getFunction(

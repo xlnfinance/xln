@@ -520,8 +520,14 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
         Settlement memory s = batch.settlements[i];
         for (uint j = 0; j < s.forgiveDebtsInTokenIds.length; j++) {
           uint tokenId = s.forgiveDebtsInTokenIds[j];
-          _forgiveDebtsBetweenEntities(s.leftEntity, s.rightEntity, tokenId);
-          _forgiveDebtsBetweenEntities(s.rightEntity, s.leftEntity, tokenId);
+          (bool leftHasDebt, bool leftForgiven) =
+            _forgiveDebtsBetweenEntities(s.leftEntity, s.rightEntity, tokenId);
+          (bool rightHasDebt, bool rightForgiven) =
+            _forgiveDebtsBetweenEntities(s.rightEntity, s.leftEntity, tokenId);
+          // A token-only settlement authorizes the current bilateral debt. A
+          // third-party FIFO head must fail the whole signed settlement rather
+          // than silently consuming its nonce and unrelated diffs as "success".
+          if (!leftForgiven && !rightForgiven && (leftHasDebt || rightHasDebt)) revert E2();
         }
       }
     }
@@ -829,17 +835,20 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
 
 
-  function _forgiveDebtsBetweenEntities(bytes32 debtor, bytes32 creditor, uint tokenId) internal {
+  function _forgiveDebtsBetweenEntities(bytes32 debtor, bytes32 creditor, uint tokenId)
+    internal returns (bool hasCurrentDebt, bool forgiven)
+  {
     uint256 idx = _debtIndex[debtor][tokenId];
     Debt[] storage queue = _debts[debtor][tokenId];
     uint256 len = queue.length;
-    if (idx >= len) return;
+    if (idx >= len) return (false, false);
     Debt storage current = queue[idx];
     uint256 amount = current.amount;
     // Forgiveness is deliberately FIFO and O(1): a bilateral settlement may
     // forgive only the debtor's current debt when that debt belongs to the
     // counterparty. It must never scan or partially process an unbounded tail.
-    if (amount == 0 || current.creditor != creditor) return;
+    if (amount == 0) return (false, false);
+    if (current.creditor != creditor) return (true, false);
     current.amount = 0;
     _reduceDebtOutstanding(debtor, tokenId, amount);
     _afterDebtCleared(debtor, tokenId);
@@ -850,6 +859,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     } else {
       _debtIndex[debtor][tokenId] = idx + 1;
     }
+    return (true, true);
   }
 
   function _increaseReserve(bytes32 entity, uint256 tokenId, uint256 amount) internal {

@@ -92,8 +92,16 @@ const resolveFinalizeSubmitNotBefore = (
   }
   const callerIsLeft = account.state.leftEntity === state.entityId;
   const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
+  const hasSelectedCounterProof = activeDispute.selectedCounterNonce !== undefined;
   if (timeoutSec > 0 && nowSec >= timeoutSec) {
-    return hasPulls || callerIsStarter ? timeoutSec : null;
+    return hasPulls || callerIsStarter || hasSelectedCounterProof ? timeoutSec : null;
+  }
+  // Once Solidity has selected a registered counter-proof, neither side may
+  // execute it before T—even when its ProofBody has no Pulls. The immediate
+  // non-starter path below applies only to the starter-selected initial state.
+  if (hasSelectedCounterProof) {
+    addMessage(state, `❌ selected counter-proof cannot finalize before timeout: nowSec=${nowSec}, timeoutSec=${timeoutSec}`);
+    return undefined;
   }
   if (!hasPulls) {
     if (!callerIsStarter) return null;

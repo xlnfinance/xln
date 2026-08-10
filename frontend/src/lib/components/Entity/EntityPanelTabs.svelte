@@ -2123,6 +2123,10 @@ function handleMoveAllowanceAmountInput(nextValue: string): void {
   moveAllowanceAmount = nextValue;
 }
 async function submitMovePrimaryAction(): Promise<void> {
+  if (moveExecuting) {
+    toasts.info("Move is already being submitted");
+    return;
+  }
   if (isImmediateMoveExecutionRoute(moveFromEndpoint, moveToEndpoint)) {
     await executeMovePlan();
     return;

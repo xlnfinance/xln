@@ -218,7 +218,7 @@ export const runCli = async (argv: string[]): Promise<number> => {
         async () => {
           await withSession(flags, async session => {
             await placeSwap(session, { hubEntityId: hub, giveTokenId, wantTokenId, giveAmount, wantAmount });
-            console.log(paint('ok', 'Swap offer placed'));
+            console.log(paint('ok', 'Swap offer queued'));
           });
         },
       );

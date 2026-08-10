@@ -38,7 +38,7 @@ import type { JAdapterConfig } from '../../jurisdiction/adapter/types';
 import { createMarketMakerServerState, resetMarketMakerServerState } from './market-maker-health';
 import { serveStaticApp } from './static-assets';
 import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth } from './auth';
-import { isLocalOperatorRequest, resolveSocketPeerAddress } from './health-redaction';
+import { resolveSocketPeerAddress } from './health-redaction';
 import { listLocalControlEntities } from './control-entities';
 import { getAccountReplica, getEntityReplicaById } from './entity-lookup';
 import { createRuntimeIngressReceiptStore } from '../../runtime/ingress-receipts';
@@ -887,8 +887,10 @@ const handleHttpRequest = async (
     try {
       const directClientIp = resolveAssistantDirectClientIp(server, req);
       const clientId = resolveAssistantRateClientId(req, directClientIp);
-      const peerAddress = resolveSocketPeerAddress(server, req);
-      const operatorAuthorized = isLocalOperatorRequest(req, peerAddress) || hasDaemonControlAuth(req, session.env);
+      // This listener may sit behind a same-host reverse proxy, so a loopback
+      // TCP peer is not operator identity. Privileged Runtime APIs require the
+      // Runtime-bound admin capability even when the socket peer is local.
+      const operatorAuthorized = hasDaemonControlAuth(req, session.env);
       return await handleApi(req, pathname, session.env, clientId, operatorAuthorized);
     } catch (error) {
       const message = getErrorMessage(error, 'API handler failed');

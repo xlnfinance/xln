@@ -8,6 +8,7 @@ import {
 } from '../account/swap-limits';
 import type { SwapOffer } from '../types/account';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
+import { validateSwapOfferAdmission } from '../account/tx/handlers/swap-offer/admission';
 import { makeAccount } from './helpers/cross-j';
 
 const offer = (
@@ -28,6 +29,26 @@ const offer = (
 });
 
 describe('account economic swap limits', () => {
+  test('rejects fee-bearing cross-j authorization at Account admission', () => {
+    const account = makeAccount('left', 'right');
+    const result = validateSwapOfferAdmission(account.state, {
+      type: 'swap_offer',
+      data: {
+        offerId: 'malformed-cross-j-auth',
+        giveTokenId: 1,
+        giveAmount: 1n,
+        wantTokenId: 2,
+        wantAmount: 2n,
+        maxFee: 1n,
+        minNetReceive: 1n,
+        crossJurisdiction: { status: 'resting' },
+      },
+    } as Parameters<typeof validateSwapOfferAdmission>[1], true);
+
+    expect(result).toEqual({ error: 'CROSS_J_SWAP_NET_AUTH_INVALID' });
+    expect(account.state.swapOffers.size).toBe(0);
+  });
+
   test('counts one directed market independently for each bilateral side', () => {
     const limit = LIMITS.MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET;
     const offers = [

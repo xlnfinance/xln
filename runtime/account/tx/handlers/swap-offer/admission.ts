@@ -64,6 +64,16 @@ const validateOfferShape = (tx: SwapOfferTx): string | null => {
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
+  // Cross-j settlement has no fee-bearing resolve path: its paired Pulls commit
+  // the exact gross source and target amounts. Enforce that invariant again at
+  // Account admission because a current board may submit AccountTx directly,
+  // bypassing the Entity command planner that normally constructs these terms.
+  if (
+    crossJurisdiction &&
+    (tx.data.maxFee !== 0n || tx.data.minNetReceive !== wantAmount)
+  ) {
+    return 'CROSS_J_SWAP_NET_AUTH_INVALID';
+  }
   if (giveTokenId === wantTokenId && !crossJurisdiction) {
     return `Cannot swap same token: ${giveTokenId}`;
   }
