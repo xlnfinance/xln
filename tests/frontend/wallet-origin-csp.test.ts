@@ -20,6 +20,7 @@ test('wallet origin ships no third-party executable code and enforces hashed scr
   expect(config).toContain("'script-src': ['self']");
   expect(config).toContain("'script-src-attr': ['none']");
   expect(config).toContain("'object-src': ['none']");
+  expect(config).toContain("'media-src': ['self', 'blob:']");
 });
 
 test('selected remote Runtime WebSocket pins same-origin HTTP reads', () => {

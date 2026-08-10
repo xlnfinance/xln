@@ -22,6 +22,7 @@ const config = {
 				'base-uri': ['self'],
 				'form-action': ['self'],
 				'img-src': ['self', 'data:', 'blob:', 'https:'],
+				'media-src': ['self', 'blob:'],
 				'font-src': ['self', 'data:'],
 				'worker-src': ['self', 'blob:'],
 				'connect-src': ['self', 'https:', 'wss:', 'http:', 'ws:'],
