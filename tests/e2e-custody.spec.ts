@@ -183,41 +183,29 @@ const toWsUrl = (baseUrl: string, pathname: string): string => {
 async function ensureRuntimeProfileDownloaded(page: Page, entityId: string): Promise<void> {
   const ok = await page.evaluate(async (targetEntityId: string) => {
     const maybeWindow = window as typeof window & {
-      isolatedEnv?: {
-        gossip?: {
-          getProfiles?: () => Array<{ entityId?: string }>;
-        };
-        infrastructure?: {
-          p2p?: {
-            ensureProfiles?: (entityIds: string[]) => Promise<boolean>;
-            refreshGossip?: () => Promise<void> | void;
-          };
+      __xln?: {
+        runtimeConnectivity?: {
+          profiles?: Array<{ entityId?: string }>;
+          ensureProfiles?: (entityIds: string[]) => Promise<boolean>;
+          refreshGossip?: () => Promise<void> | void;
         };
       };
     };
-    const env = maybeWindow.isolatedEnv;
-    const p2p = env?.infrastructure?.p2p;
     const target = String(targetEntityId || '').toLowerCase();
     const hasProfile = (): boolean =>
-      (env?.gossip?.getProfiles?.() ?? []).some(profile => String(profile.entityId || '').toLowerCase() === target);
+      (maybeWindow.__xln?.runtimeConnectivity?.profiles ?? [])
+        .some(profile => String(profile.entityId || '').toLowerCase() === target);
 
     if (hasProfile()) return true;
     const startedAt = Date.now();
     while (Date.now() - startedAt < 15_000) {
-      if (typeof p2p?.ensureProfiles === 'function') {
-        try {
-          const found = await p2p.ensureProfiles([target]);
-          if (found && hasProfile()) return true;
-        } catch {
-          // best effort
-        }
+      const connectivity = maybeWindow.__xln?.runtimeConnectivity;
+      if (typeof connectivity?.ensureProfiles === 'function') {
+        const found = await connectivity.ensureProfiles([target]);
+        if (found && hasProfile()) return true;
       }
-      if (typeof p2p?.refreshGossip === 'function') {
-        try {
-          await p2p.refreshGossip();
-        } catch {
-          // best effort
-        }
+      if (typeof connectivity?.refreshGossip === 'function') {
+        await connectivity.refreshGossip();
       }
       if (hasProfile()) return true;
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -416,40 +404,28 @@ async function faucetOffchain(
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   const ok = await page.evaluate(async () => {
     const maybeWindow = window as typeof window & {
-      isolatedEnv?: {
-        infrastructure?: {
-          p2p?: {
-            isConnected?: () => boolean;
-            connect?: () => void;
-            reconnect?: () => void;
-          };
+      __xln?: {
+        runtimeConnectivity?: {
+          connected?: boolean;
+          connect?: () => void;
+          reconnect?: () => void;
         };
       };
     };
-    const env = maybeWindow.isolatedEnv;
-    const p2p = env?.infrastructure?.p2p;
-    if (!env || !p2p) return false;
 
     const startedAt = Date.now();
     while (Date.now() - startedAt < 20_000) {
-      if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
-      if (typeof p2p.connect === 'function') {
-        try {
-          p2p.connect();
-        } catch {
-          // best effort
-        }
-      } else if (typeof p2p.reconnect === 'function') {
-        try {
-          p2p.reconnect();
-        } catch {
-          // best effort
-        }
+      const connectivity = maybeWindow.__xln?.runtimeConnectivity;
+      if (connectivity?.connected === true) return true;
+      if (typeof connectivity?.connect === 'function') {
+        connectivity.connect();
+      } else if (typeof connectivity?.reconnect === 'function') {
+        connectivity.reconnect();
       }
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    return typeof p2p.isConnected === 'function' && p2p.isConnected();
+    return maybeWindow.__xln?.runtimeConnectivity?.connected === true;
   });
 
   expect(ok, `[${tag}] runtime must be online`).toBe(true);

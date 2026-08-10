@@ -45,8 +45,7 @@ function relayToApiBase(relayUrl: string | null | undefined): string | null {
 async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
   const runtimeApi = await page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
-    const relay = env?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
+    const relay = (window as any).__xln?.runtimeConnectivity?.relayUrls?.[0] ?? null;
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
@@ -627,16 +626,24 @@ async function waitForOutCapAtLeast(
 }
 
 async function setSnapshotInterval(page: Page, frames: number) {
-  const ok = await page.evaluate((frames) => {
-    const env = (window as any).isolatedEnv;
-    if (!env) return false;
-    if (!env.runtimeConfig) env.runtimeConfig = {};
-    if (!env.runtimeConfig.storage) env.runtimeConfig.storage = {};
-    env.runtimeConfig.snapshotIntervalFrames = frames;
-    env.runtimeConfig.storage.snapshotPeriodFrames = frames;
-    return true;
+  const configured = await page.evaluate(async (frames) => {
+    const target = window as any;
+    const persistence = target.__xln?.runtimePersistence;
+    const ingress = target.__xln?.runtimeIngress;
+    if (typeof persistence?.setSnapshotPeriodFrames !== 'function') {
+      throw new Error('RUNTIME_PERSISTENCE_CONTROL_UNAVAILABLE');
+    }
+    if (typeof ingress?.waitForDrained !== 'function') throw new Error('RUNTIME_INGRESS_DRAIN_CONTROL_UNAVAILABLE');
+    if (!await ingress.waitForDrained(5_000)) throw new Error('RUNTIME_PERSISTENCE_DRAIN_TIMEOUT');
+    const runtimeId = String(target.isolatedEnv?.runtimeId || '');
+    if (!runtimeId || persistence.runtimeId !== runtimeId) {
+      throw new Error(`RUNTIME_PERSISTENCE_RUNTIME_MISMATCH:${runtimeId}:${persistence.runtimeId}`);
+    }
+    const applied = persistence.setSnapshotPeriodFrames(frames);
+    const readback = target.__xln?.runtimePersistence?.snapshotPeriodFrames;
+    return { applied, readback };
   }, frames);
-  expect(ok, 'setSnapshotInterval failed').toBe(true);
+  expect(configured, 'setSnapshotInterval failed').toEqual({ applied: frames, readback: frames });
 }
 
 test.describe('E2E: Multi-runtime persistence reload', () => {

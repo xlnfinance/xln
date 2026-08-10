@@ -12,7 +12,7 @@
  */
 import { test, expect, type Page } from './global-setup.mts';
 import { Wallet } from 'ethers';
-import { APP_BASE_URL } from './utils/e2e-baseline';
+import { API_BASE_URL, APP_BASE_URL } from './utils/e2e-baseline';
 import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
@@ -38,6 +38,7 @@ type AccountProgress = {
 
 type EntityIdleSnapshot = {
   quiescent: boolean;
+  runtimeIdle: boolean;
   runtimeHeight: number;
   entityHeight: number;
   projectedJHeight: number;
@@ -217,8 +218,25 @@ async function readEntityIdleSnapshot(
   entityId: string,
   signerId: string,
 ): Promise<EntityIdleSnapshot> {
-  return await page.evaluate(({ targetEntityId, targetSignerId }) => {
-    const env = (window as typeof window & {
+  const runtimeIdle = await page.evaluate(async () => {
+    const waitForDrained = (window as typeof window & {
+      __xln?: { runtimeIngress?: { waitForDrained?: (timeoutMs?: number) => Promise<boolean> } };
+    }).__xln?.runtimeIngress?.waitForDrained;
+    if (typeof waitForDrained !== 'function') throw new Error('E2E_DRAIN_RUNTIME_INGRESS_MISSING');
+    return await waitForDrained(1_000);
+  });
+
+  return await page.evaluate(({ targetEntityId, targetSignerId, runtimeIdle }) => {
+    const view = window as typeof window & {
+      __xln?: {
+        jurisdictionConnectivity?: {
+          jurisdictions?: Array<{
+            chainId?: number;
+            depositoryAddress?: string;
+            scannedThroughHeight?: number;
+          }>;
+        };
+      };
       isolatedEnv?: {
         height?: number;
         jReplicas?: Map<string, {
@@ -252,7 +270,8 @@ async function readEntityIdleSnapshot(
           };
         }>;
       };
-    }).isolatedEnv;
+    };
+    const env = view.isolatedEnv;
     if (!env?.state?.eReplicas) throw new Error('E2E_IDLE_RUNTIME_MISSING');
     const entity = targetEntityId.toLowerCase();
     const signer = targetSignerId.toLowerCase();
@@ -264,14 +283,9 @@ async function readEntityIdleSnapshot(
     const jurisdiction = replica.state.config?.jurisdiction;
     const jurisdictionChainId = Number(jurisdiction?.chainId ?? 0);
     const jurisdictionDepository = String(jurisdiction?.depositoryAddress ?? '').toLowerCase();
-    const watcherMatches = Array.from(env.state.jReplicas?.values() ?? []).filter((candidate) => {
-      const chainId = Number(candidate.chainId ?? candidate.jadapter?.chainId ?? 0);
-      const depository = String(
-        candidate.depositoryAddress ??
-        candidate.contracts?.depository ??
-        candidate.jadapter?.addresses?.depository ??
-        '',
-      ).toLowerCase();
+    const watcherMatches = (view.__xln?.jurisdictionConnectivity?.jurisdictions ?? []).filter((candidate) => {
+      const chainId = Number(candidate.chainId ?? 0);
+      const depository = String(candidate.depositoryAddress ?? '').toLowerCase();
       return chainId === jurisdictionChainId && depository === jurisdictionDepository;
     });
     if (watcherMatches.length !== 1) {
@@ -281,7 +295,7 @@ async function readEntityIdleSnapshot(
       );
     }
     const watcherScannedJHeight = Number(
-      watcherMatches[0].jadapter?.getWatcherScanProgress?.().scannedThroughHeight ?? 0,
+      watcherMatches[0].scannedThroughHeight ?? 0,
     );
     const accounts = Array.from(replica.state.accounts?.values() ?? []);
     const runtimeMempool = env.runtimeMempool;
@@ -297,12 +311,7 @@ async function readEntityIdleSnapshot(
       (runtimeMempool?.reliableReceipts?.length ?? 0) +
       (env.pendingOutputs?.length ?? 0) +
       (env.networkInbox?.length ?? 0) +
-      (env.pendingNetworkOutputs?.length ?? 0) +
-      (env.infrastructure?.inFlightEntityInputs ?? 0) +
-      (env.infrastructure?.pendingReliableIngress?.size ?? 0) +
-      (env.infrastructure?.reliableIngressCommitting?.size ?? 0) +
-      (env.infrastructure?.pendingCommittedJOutbox?.length ?? 0) +
-      (env.infrastructure?.processingPromise ? 1 : 0);
+      (env.pendingNetworkOutputs?.length ?? 0);
     const recentInputs = (env.history ?? []).slice(-24).flatMap(frame =>
       (frame.runtimeInput?.entityInputs ?? [])
         .filter(input => String(input.entityId ?? '').toLowerCase() === entity)
@@ -316,6 +325,7 @@ async function readEntityIdleSnapshot(
     );
     return {
       quiescent:
+        runtimeIdle &&
         pendingWorkCount === 0 &&
         pendingSemanticJEventCount === 0 &&
         (replica.mempool?.length ?? 0) === 0 &&
@@ -323,6 +333,7 @@ async function readEntityIdleSnapshot(
         !replica.lockedFrame &&
         accounts.every((account) => (account.mempool?.length ?? 0) === 0 && !account.pendingFrame),
       runtimeHeight: Number(env.state.height ?? 0),
+      runtimeIdle,
       entityHeight: Number(replica.state.height ?? 0),
       projectedJHeight,
       watcherScannedJHeight,
@@ -331,7 +342,7 @@ async function readEntityIdleSnapshot(
       pendingSemanticJEventCount,
       recentInputs,
     };
-  }, { targetEntityId: entityId, targetSignerId: signerId });
+  }, { targetEntityId: entityId, targetSignerId: signerId, runtimeIdle });
 }
 
 async function mineEmptyJurisdictionBlock(page: Page): Promise<void> {

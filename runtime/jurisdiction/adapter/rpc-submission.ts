@@ -24,6 +24,7 @@ import type { RpcTransactionSequencer } from './rpc-transaction-sequencer';
 import type { JAdapter, JAdapterConfig, JSubmitResult } from './types';
 import type { RpcWriteMethods } from './rpc-write-methods';
 import type { RpcReceiptReaders } from './rpc-receipts';
+import { batchOpCount } from '../machine/batch';
 
 type SubmitOptions = {
   env: RuntimeReplica;
@@ -51,6 +52,60 @@ type ProcessedBatchFailureReconciliation = {
   failure: JSubmitResult;
 };
 
+type CompetingFinalizationReconciliation = {
+  receipts: Pick<RpcReceiptReaders, 'readDisputeFinalizationReceipt'>;
+  entityId: string;
+  counterentity: string;
+  initialNonce: bigint;
+  initialProofbodyHash: string;
+  failure: JSubmitResult;
+};
+
+const NO_ACTIVE_DISPUTE_SELECTOR = ethers.id('E5()').slice(0, 10).toLowerCase();
+const STALE_FINALIZATION_AWAITING_FINALITY = 'STALE_FINALIZATION_AWAITING_FINALITY';
+
+const nestedErrorRecords = (error: unknown): Array<Record<string, unknown>> => {
+  const records: Array<Record<string, unknown>> = [];
+  let current = typeof error === 'object' && error !== null ? error as Record<string, unknown> : null;
+  for (let depth = 0; current && depth < 5; depth += 1) {
+    records.push(current);
+    current = typeof current['error'] === 'object' && current['error'] !== null
+      ? current['error'] as Record<string, unknown>
+      : typeof current['info'] === 'object' && current['info'] !== null &&
+          typeof (current['info'] as Record<string, unknown>)['error'] === 'object'
+        ? (current['info'] as Record<string, unknown>)['error'] as Record<string, unknown>
+        : null;
+  }
+  return records;
+};
+
+const hasNoActiveDisputeSelector = (error: unknown): boolean =>
+  nestedErrorRecords(error).some(record => {
+    const data = record['data'];
+    return typeof data === 'string' && data.slice(0, 10).toLowerCase() === NO_ACTIVE_DISPUTE_SELECTOR;
+  });
+
+export const classifyCompetingFinalizationReceipt = (
+  failure: JSubmitResult,
+  receipt: Readonly<{ blockNumber: number; transactionHash: string }>,
+): JSubmitResult => {
+  if (failure.success) return failure;
+  if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber < 0) {
+    throw new Error('STALE_FINALIZATION_RECEIPT_BOUNDARY_INVALID');
+  }
+  // A globally visible receipt is not Runtime authority. The local watcher may
+  // still be behind its finality-safe head (or its bounded poll range), and
+  // Tron uses a distinct SolidityNode head. Only the authenticated J-event may
+  // retire the immutable sent batch; the receipt merely proves that retrying
+  // the same finalization must wait for watcher convergence.
+  return makeJAdapterFailureResult(failure.error || 'competing dispute finalization', {
+    category: 'transient',
+    code: STALE_FINALIZATION_AWAITING_FINALITY,
+    message: `${STALE_FINALIZATION_AWAITING_FINALITY}:` +
+      `tx=${receipt.transactionHash}:block=${receipt.blockNumber}`,
+  });
+};
+
 /**
  * A provider may lose a mined receipt and make the next static call fail with
  * an already-consumed nonce. Only the exact canonical event proves success;
@@ -72,6 +127,30 @@ export const reconcileProcessedBatchFailure = async (
     // a proven terminal contradiction. Preserve the reader's failure class.
     return makeJAdapterFailureResult(error);
   }
+};
+
+export const reconcileCompetingFinalizationReceipt = async (
+  input: CompetingFinalizationReconciliation,
+): Promise<JSubmitResult> => {
+  let receipt;
+  try {
+    receipt = await input.receipts.readDisputeFinalizationReceipt(
+      input.entityId,
+      input.counterentity,
+      input.initialNonce,
+      input.initialProofbodyHash,
+    );
+  } catch (error) {
+    rpcLog.warn('competing_finalization.receipt_read_failed', {
+      entityId: input.entityId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    // Unknown transport outcomes remain retryable; contradictory or malformed
+    // receipt evidence remains a loud terminal integrity failure. Never hide
+    // either class behind the original E5 revert.
+    return makeJAdapterFailureResult(error);
+  }
+  return receipt ? classifyCompetingFinalizationReceipt(input.failure, receipt) : input.failure;
 };
 
 const resolveBatchSubmitter = async (
@@ -99,6 +178,26 @@ const resolveBatchSubmitter = async (
   return submitter;
 };
 
+const reconcileCompetingFinalization = async (
+  context: SubmissionContext,
+  planned: Extract<ReturnType<typeof planRpcBatchSubmission>, { kind: 'submit' }>,
+  failure: JSubmitResult,
+  noActiveDispute: boolean,
+): Promise<JSubmitResult> => {
+  if (failure.success || !noActiveDispute) return failure;
+  const finalizations = planned.plan.batch.disputeFinalizations;
+  if (finalizations.length !== 1 || batchOpCount(planned.plan.batch) !== 1) return failure;
+  const finalization = finalizations[0]!;
+  return reconcileCompetingFinalizationReceipt({
+    receipts: context.receipts,
+    entityId: planned.plan.normalizedEntityId,
+    counterentity: finalization.counterentity,
+    initialNonce: BigInt(finalization.initialNonce),
+    initialProofbodyHash: finalization.initialProofbodyHash,
+    failure,
+  });
+};
+
 const executeBatchSubmission = async (
   context: SubmissionContext,
   planned: Extract<ReturnType<typeof planRpcBatchSubmission>, { kind: 'submit' }>,
@@ -117,14 +216,23 @@ const executeBatchSubmission = async (
     : context.stack.depository;
   const data = plan.jTx.data;
   const entityNonce = BigInt(data.entityNonce);
-  const reconcileFailure = (failure: JSubmitResult): Promise<JSubmitResult> =>
-    reconcileProcessedBatchFailure({
+  const reconcileFailure = async (
+    failure: JSubmitResult,
+    noActiveDispute: boolean,
+  ): Promise<JSubmitResult> => {
+    const processed = await reconcileProcessedBatchFailure({
       receipts: context.receipts,
       entityId: plan.normalizedEntityId,
       batchHash: data.batchHash,
       entityNonce,
       failure,
     });
+    // An exact absence returns the original object. Any replacement is already
+    // classified receipt-authority evidence (including integrity failures) and
+    // must not be overwritten by a second reconciliation source.
+    if (processed.success || processed !== failure) return processed;
+    return reconcileCompetingFinalization(context, planned, processed, noActiveDispute);
+  };
   const disputeDebug = await buildDisputeStartDebug(plan.batch, plan.normalizedEntityId, {
     chainId: context.config.chainId,
     depositoryAddress: await context.stack.getDepositoryAddress(),
@@ -146,7 +254,12 @@ const executeBatchSubmission = async (
       gasLimit,
       disputeStartDebug: disputeDebug,
     });
-    if (preflightFailure) return await reconcileFailure(preflightFailure);
+    if (preflightFailure) {
+      return await reconcileFailure(
+        preflightFailure,
+        preflightFailure.failure?.code === 'NO_ACTIVE_DISPUTE',
+      );
+    }
     const receipt = await context.sequencer.send(
       submitter ?? context.signer,
       'submitTx:processBatch',
@@ -170,11 +283,21 @@ const executeBatchSubmission = async (
       ),
     };
   } catch (error) {
-    rpcLog.error('process_batch.failed', {
-      entityId: plan.normalizedEntityId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return await reconcileFailure(makeJAdapterFailureResult(error));
+    const failure = await reconcileFailure(
+      makeJAdapterFailureResult(error),
+      hasNoActiveDisputeSelector(error),
+    );
+    if (!failure.success) {
+      // The Runtime owns the durable failure classification after one final
+      // authenticated watcher poll. A counterparty may have finalized the
+      // dispute while this RPC was in flight; logging an error here would
+      // misclassify that externally ordered but protocol-valid event race.
+      rpcLog.debug('process_batch.rejected', {
+        entityId: plan.normalizedEntityId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return failure;
   }
 };
 

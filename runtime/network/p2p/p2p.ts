@@ -823,6 +823,10 @@ export class RuntimeP2P {
     return !!this.getActiveClient();
   }
 
+  getRelayClientCount(): number {
+    return this.clients.length;
+  }
+
   private hasRelayConnectionActivity(): boolean {
     return this.clients.some(
       client => client.isOpen() || client.isConnecting() || client.getReconnectState() !== null,

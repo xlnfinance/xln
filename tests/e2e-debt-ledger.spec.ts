@@ -40,8 +40,7 @@ function relayToApiBase(relayUrl: string | null): string | null {
 async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return process.env.E2E_API_BASE_URL;
   const relayUrl = await page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
-    const relay = env?.infrastructure?.p2p?.relayUrls?.[0];
+    const relay = (window as any).__xln?.runtimeConnectivity?.relayUrls?.[0];
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(relayUrl) ?? APP_BASE_URL;

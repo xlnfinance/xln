@@ -495,7 +495,14 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
 
 async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Promise<unknown> {
   return page.evaluate(({ hubId }) => {
-    const env = (window as typeof window & {
+    const view = window as typeof window & {
+      __xln?: {
+        runtimeConnectivity?: {
+          connected?: boolean;
+          directPeers?: unknown;
+          queue?: unknown;
+        };
+      };
       isolatedEnv?: {
         state?: {
           height?: number;
@@ -560,7 +567,8 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
           };
         }>;
       };
-    }).isolatedEnv;
+    };
+    const env = view.isolatedEnv;
     const summarizeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
       (inputs || []).slice(-10).map((input) => ({
         entityId: String(input.entityId || '').slice(-8),
@@ -639,11 +647,6 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
       height: Number(env?.state?.height || 0),
       timestamp: Number(env?.state?.timestamp || 0),
       runtimeId: env?.runtimeId ?? null,
-      infrastructure: env?.infrastructure ? {
-        halted: Boolean(env.infrastructure.halted),
-        loopActive: Boolean(env.infrastructure.loopActive),
-        fatalDebugPayload: env.infrastructure.fatalDebugPayload ?? null,
-      } : null,
       uiErrors: Array.from(document.querySelectorAll('.hub-panel .error-banner, [role="alert"], .toast'))
         .map((entry) => String(entry.textContent || '').trim())
         .filter(Boolean)
@@ -1263,7 +1266,14 @@ async function getConnectDebugState(
   hubId: string,
 ): Promise<unknown> {
   return page.evaluate(({ identity, hubId }) => {
-    const env = (window as typeof window & {
+    const view = window as typeof window & {
+      __xln?: {
+        runtimeConnectivity?: {
+          connected?: boolean;
+          directPeers?: unknown;
+          queue?: unknown;
+        };
+      };
       isolatedEnv?: {
         state?: {
           height?: number;
@@ -1287,16 +1297,10 @@ async function getConnectDebugState(
         runtimeInput?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
         runtimeMempool?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
         gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: unknown }> };
-        infrastructure?: {
-          p2p?: {
-            getDirectPeerState?: () => Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }>;
-            getQueueState?: () => unknown;
-            getReconnectState?: () => unknown;
-            isConnected?: () => boolean;
-          };
-        };
       };
-    }).isolatedEnv;
+    };
+    const env = view.isolatedEnv;
+    const connectivity = view.__xln?.runtimeConnectivity;
     const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
     const resolveCounterpartyAccount = (
       accounts: Map<string, {
@@ -1356,10 +1360,9 @@ async function getConnectDebugState(
       height: env?.state?.height,
       timestamp: env?.state?.timestamp,
       p2p: {
-        connected: env?.infrastructure?.p2p?.isConnected?.() ?? null,
-        directPeers: env?.infrastructure?.p2p?.getDirectPeerState?.() ?? null,
-        queue: env?.infrastructure?.p2p?.getQueueState?.() ?? null,
-        reconnect: env?.infrastructure?.p2p?.getReconnectState?.() ?? null,
+        connected: connectivity?.connected ?? null,
+        directPeers: connectivity?.directPeers ?? null,
+        queue: connectivity?.queue ?? null,
       },
       account: account ? {
         currentHeight: Number(account.currentHeight || 0),

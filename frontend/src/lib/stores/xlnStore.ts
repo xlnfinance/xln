@@ -1667,7 +1667,23 @@ export async function submitActiveRuntimeInput(
   return routeRuntimeInput(xln, env, input, commandOptions);
 }
 
-async function waitForActiveRuntimeIdle(timeoutMs = 1_000): Promise<boolean> {
+async function waitForActiveRuntimeDrained(timeoutMs = 1_000): Promise<boolean> {
+  const xln = await getXLN();
+  const env = await resolveActiveRuntimeCommandEnv(xln);
+  const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+  const fatalPayload = (): unknown => runtimeEnv.infrastructure?.fatalDebugPayload ?? null;
+  if (runtimeEnv.infrastructure?.halted) {
+    throw new Error(`ACTIVE_RUNTIME_HALTED:${xln.safeStringify(fatalPayload())}`);
+  }
+  xln.startRuntimeLoop(runtimeEnv);
+  const drained = await xln.waitForRuntimeWorkDrained(runtimeEnv, timeoutMs);
+  if (runtimeEnv.infrastructure?.halted) {
+    throw new Error(`ACTIVE_RUNTIME_HALTED:${xln.safeStringify(fatalPayload())}`);
+  }
+  return drained;
+}
+
+async function waitForActiveRuntimeProcessingIdle(timeoutMs = 1_000): Promise<boolean> {
   const xln = await getXLN();
   const env = await resolveActiveRuntimeCommandEnv(xln);
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
@@ -1760,7 +1776,8 @@ export async function submitEntityInputs(inputs: RoutedEntityInput[] = []): Prom
 // View snapshots are intentionally detached and are never mutation authority.
 registerDebugSurface('runtimeIngress', () => ({
   submit: submitActiveRuntimeInput,
-  waitForIdle: waitForActiveRuntimeIdle,
+  waitForProcessingIdle: waitForActiveRuntimeProcessingIdle,
+  waitForDrained: waitForActiveRuntimeDrained,
 }));
 
 // === FRONTEND UTILITY FUNCTIONS ===

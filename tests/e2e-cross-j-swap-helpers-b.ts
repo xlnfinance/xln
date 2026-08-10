@@ -1,4 +1,4 @@
-import { deriveDelta } from '../runtime/account/utils';
+import { deriveTransferOffdeltaChange } from '../runtime/protocol/delta-movement';
 import {
   API_BASE_URL,
   CROSS_J_SOURCE_COMMITTED_OR_ADVANCED_STATUSES,
@@ -21,7 +21,6 @@ import {
 } from './e2e-cross-j-swap-helpers-a';
 import { expect, type Page } from './global-setup.mts';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
-export { transferFeeAmount } from './utils/e2e-cross-j-fee-observation';
 
 export async function expectCrossOrderbookReady(
   page: Page,
@@ -640,9 +639,6 @@ export async function readCrossState(
   p2pState: { exists: boolean; connected: boolean; queue: unknown; directPeers: unknown };
   ownerIsLeft: boolean;
   deltas: Record<string, CrossDeltaSnapshot>;
-  currentFrameFees: Record<string, string>;
-  /** Cumulative prepaid rebalance fees by tokenId (feePaidUpfront). */
-  rebalanceFeesPaid: Record<string, string>;
 }> {
   return await page.evaluate(
     ({ identity, hubId }) => {
@@ -718,6 +714,7 @@ export async function readCrossState(
           updatedAt: Number(route?.updatedAt || route?.createdAt || 0),
         });
       }
+      const ownerIsLeft = entityNeedle === String(account?.state?.leftEntity || '').toLowerCase();
       return {
         offers,
         routes: Number(state?.crossJurisdictionSwaps?.size || 0),
@@ -772,23 +769,7 @@ export async function readCrossState(
           queue: connectivity?.queue ?? null,
           directPeers: connectivity?.directPeers ?? null,
         },
-        ownerIsLeft: entityNeedle === String(account?.state?.leftEntity || '').toLowerCase(),
-        currentFrameFees: Array.from(account?.currentFrame?.accountTxs || []).reduce(
-          (fees: Record<string, string>, tx: any) => {
-            const tokenId = Number(tx?.data?.feeTokenId ?? -1);
-            const feeAmount = BigInt(tx?.data?.feeAmount ?? 0n);
-            if (tokenId < 0 || feeAmount <= 0n) return fees;
-            const key = String(tokenId);
-            fees[key] = String(BigInt(fees[key] ?? '0') + feeAmount);
-            return fees;
-          },
-          {},
-        ),
-        rebalanceFeesPaid: Object.fromEntries(
-          Array.from(account?.state?.requestedRebalanceFeeState?.entries?.() || []).map(
-            ([tokenId, feeState]: [unknown, any]) => [String(tokenId), String(feeState?.feePaidUpfront ?? 0n)],
-          ),
-        ),
+        ownerIsLeft,
         deltas: Object.fromEntries(
           Array.from(account?.state?.deltas?.entries?.() || []).map(([tokenId, delta]: [unknown, any]) => [
             String(tokenId),
@@ -810,6 +791,36 @@ export async function readCrossState(
     },
     { identity, hubId },
   );
+}
+
+export async function readCommittedAccountRebalanceFee(
+  page: Page,
+  identity: RuntimeIdentity,
+  counterpartyId: string,
+  tokenId: number,
+  afterHeight: number,
+  throughHeight: number,
+): Promise<bigint> {
+  const fees = await page.evaluate(async input => {
+    const persistence = (window as CrossRuntimeWindow & {
+      __xln?: CrossRuntimeWindow['__xln'] & {
+        runtimePersistence?: {
+          readAccountRebalanceFees?: (query: typeof input) => Promise<Array<{ feeAmount: string }>>;
+        };
+      };
+    }).__xln?.runtimePersistence;
+    if (typeof persistence?.readAccountRebalanceFees !== 'function') {
+      throw new Error('RUNTIME_ACCOUNT_FEE_HISTORY_UNAVAILABLE');
+    }
+    return persistence.readAccountRebalanceFees(input);
+  }, {
+    entityId: identity.entityId,
+    counterpartyId,
+    tokenId,
+    afterHeight,
+    throughHeight,
+  });
+  return fees.reduce((sum, fee) => sum + BigInt(fee.feeAmount), 0n);
 }
 
 export async function readHubCrossDeltas(
@@ -853,27 +864,11 @@ export function expectCrossTransfer(
   expect(amount, `${label} amount must be positive`).toBeGreaterThan(0n);
   expect(feeAmount, `${label} fee must not be negative`).toBeGreaterThanOrEqual(0n);
   expect(feeAmount, `${label} fee must not consume the transfer`).toBeLessThan(amount);
-  const canonicalSign = direction === 'spend' ? (ownerIsLeft ? -1n : 1n) : ownerIsLeft ? 1n : -1n;
-  const deriveSnapshot = (snapshot: CrossDeltaSnapshot) =>
-    deriveDelta(
-      {
-        tokenId: snapshot.tokenId,
-        collateral: BigInt(snapshot.collateral),
-        ondelta: BigInt(snapshot.ondelta),
-        offdelta: BigInt(snapshot.offdelta),
-        leftCreditLimit: BigInt(snapshot.leftCreditLimit),
-        rightCreditLimit: BigInt(snapshot.rightCreditLimit),
-        leftAllowance: BigInt(snapshot.leftAllowance),
-        rightAllowance: BigInt(snapshot.rightAllowance),
-        leftHold: BigInt(snapshot.leftHold),
-        rightHold: BigInt(snapshot.rightHold),
-      },
-      ownerIsLeft,
-    );
+  const senderIsLeft = direction === 'spend' ? ownerIsLeft : !ownerIsLeft;
   expect(
-    deriveSnapshot(after).delta - deriveSnapshot(before).delta,
-    `${label} must apply the exact canonical delta net of its signed fee`,
-  ).toBe(canonicalSign * (amount - feeAmount));
+    BigInt(after.offdelta) - BigInt(before.offdelta),
+    `${label} must apply the exact canonical offdelta movement net of its signed fee`,
+  ).toBe(deriveTransferOffdeltaChange(senderIsLeft, amount - feeAmount));
   expect({ leftHold: after.leftHold, rightHold: after.rightHold }, `${label} must clear both bilateral holds`).toEqual({
     leftHold: '0',
     rightHold: '0',

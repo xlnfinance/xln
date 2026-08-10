@@ -119,8 +119,7 @@ function relayToApiBase(relayUrl: string | null | undefined): string | null {
 async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
   const relay = await page.evaluate(() => {
-    const env = (window as any).isolatedEnv;
-    return env?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
+    return (window as any).__xln?.runtimeConnectivity?.relayUrls?.[0] ?? null;
   });
   return relayToApiBase(relay) ?? APP_BASE_URL;
 }
@@ -147,11 +146,10 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
       } catch {
         // fall back to the local gossip cache below
       }
-      const env = (window as any).isolatedEnv;
-      const profiles = env?.gossip?.getProfiles?.() ?? [];
+      const connectivity = (window as any).__xln?.runtimeConnectivity;
+      const profiles = connectivity?.profiles ?? [];
       if (profiles.some((p: any) => String(p?.entityId || '').toLowerCase() === target)) return true;
-      const p2p = env?.infrastructure?.p2p;
-      if (typeof p2p?.refreshGossip === 'function') try { await p2p.refreshGossip(); } catch {}
+      if (typeof connectivity?.refreshGossip === 'function') await connectivity.refreshGossip();
       await new Promise(r => setTimeout(r, 400));
     }
     return false;
@@ -161,19 +159,19 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
 
 async function discoverHubs(page: Page): Promise<string[]> {
   return page.evaluate(async () => {
-    const env = (window as any).isolatedEnv;
+    const view = window as any;
     const start = Date.now();
     while (Date.now() - start < 20_000) {
-      const profiles = env?.gossip?.getProfiles?.() ?? [];
+      const connectivity = view.__xln?.runtimeConnectivity;
+      const profiles = connectivity?.profiles ?? [];
       const hubs = profiles
         .filter((p: any) => p?.metadata?.isHub === true)
         .map((p: any) => String(p.entityId));
       if (hubs.length >= 3) return hubs;
-      const p2p = env?.infrastructure?.p2p;
-      if (typeof p2p?.refreshGossip === 'function') try { await p2p.refreshGossip(); } catch {}
+      if (typeof connectivity?.refreshGossip === 'function') await connectivity.refreshGossip();
       await new Promise(r => setTimeout(r, 800));
     }
-    const profiles = env?.gossip?.getProfiles?.() ?? [];
+    const profiles = view.__xln?.runtimeConnectivity?.profiles ?? [];
     return profiles.filter((p: any) => p?.metadata?.isHub).map((p: any) => String(p.entityId));
   });
 }

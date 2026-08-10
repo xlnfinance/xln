@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const repoRoot = process.cwd();
@@ -23,11 +23,15 @@ describe('e2e demo user helper', () => {
 
     for (const pattern of forbidden) expect(source).not.toContain(pattern);
     expect(source).toContain('__xln?.jurisdictionConnectivity');
-    expect(source).toContain('__xln?.runtimeIngress?.waitForIdle');
+    expect(source).toContain('__xln?.runtimeIngress?.waitForProcessingIdle');
   });
 
   test('AHB browser flow reads transport status through the narrow connectivity boundary', () => {
-    const source = readFileSync(join(repoRoot, 'tests/e2e-ahb-payment.spec.ts'), 'utf8');
+    const paths = [
+      'tests/e2e-ahb-payment.spec.ts',
+      'tests/e2e-custody.spec.ts',
+    ];
+    const source = paths.map(path => readFileSync(join(repoRoot, path), 'utf8')).join('\n');
     const forbidden = [
       'infrastructure?.p2p',
       'infrastructure.p2p',
@@ -37,6 +41,41 @@ describe('e2e demo user helper', () => {
 
     for (const pattern of forbidden) expect(source).not.toContain(pattern);
     expect(source).toContain('__xln?.runtimeConnectivity');
+  });
+
+  test('browser E2E reads no live infrastructure through detached Runtime views', () => {
+    const exceptionPaths = new Set([
+      'tests/e2e-runtime-ingress-debug.spec.ts',
+      'tests/e2e-storage-writer-lock.spec.ts',
+    ]);
+    const paths = [
+      ...readdirSync(join(repoRoot, 'tests'))
+        .filter(name => name.endsWith('.spec.ts'))
+        .map(name => `tests/${name}`),
+      ...readdirSync(join(repoRoot, 'tests/utils'))
+        .filter(name => name.endsWith('.ts'))
+        .map(name => `tests/utils/${name}`),
+    ].filter(path => !exceptionPaths.has(path));
+
+    for (const path of paths) {
+      const source = readFileSync(join(repoRoot, path), 'utf8');
+      expect(source, `${path} must use a narrow live status or command surface`).not.toContain('.infrastructure');
+    }
+  });
+
+  test('runtime persistence E2E configures the live Runtime through a narrow control', () => {
+    const source = readFileSync(join(repoRoot, 'tests/e2e-runtime-persistence.spec.ts'), 'utf8');
+    const persistenceStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/embeddedRuntimeStore.ts'), 'utf8');
+    const commandStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
+    expect(source).not.toContain('env.runtimeConfig');
+    expect(source).toContain('__xln?.runtimePersistence');
+    expect(source).toContain('setSnapshotPeriodFrames(frames)');
+    expect(source).toContain('await ingress.waitForDrained(5_000)');
+    expect(commandStore).toContain('xln.waitForRuntimeWorkDrained(runtimeEnv, timeoutMs)');
+    expect(persistenceStore).toContain('Number.isSafeInteger(frames)');
+    expect(persistenceStore).not.toContain('snapshotIntervalFrames: frames');
+    expect(persistenceStore).toContain('xln.readPersistedAccountFrameHistory(');
+    expect(persistenceStore).toContain("tx.type !== 'request_collateral'");
   });
 
   test('assists profile onboarding before waiting for runtime readiness', () => {

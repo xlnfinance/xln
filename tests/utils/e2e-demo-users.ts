@@ -774,13 +774,6 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
             nextAttemptAt: Number(entry?.nextAttemptAt ?? 0),
             output: inputSummary({ entityInputs: [entry?.output ?? entry] }),
           })),
-          reliable: {
-            ingressPending: env?.infrastructure?.pendingReliableIngress?.size ?? 0,
-            ingressActive: env?.infrastructure?.reliableIngressReceiptLedger?.size ?? 0,
-            ingressTerminal: env?.infrastructure?.reliableIngressTerminalWatermarks?.size ?? 0,
-            senderActive: env?.infrastructure?.receivedReliableReceiptLedger?.size ?? 0,
-            senderTerminal: env?.infrastructure?.receivedReliableTerminalWatermarks?.size ?? 0,
-          },
           replicas: Array.from(env?.state?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
             key,
             height: Number(replica?.state?.height ?? 0),

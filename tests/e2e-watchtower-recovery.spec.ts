@@ -356,24 +356,21 @@ async function waitForRuntimeOnline(page: Page, label: string): Promise<void> {
   await expect
     .poll(async () => {
       return await page.evaluate(() => {
-        const env = (window as typeof window & {
-          isolatedEnv?: {
-            infrastructure?: {
-              p2p?: {
-                isConnected?: () => boolean;
-                connect?: () => void;
-                reconnect?: () => void;
-              };
+        const connectivity = (window as typeof window & {
+          __xln?: {
+            runtimeConnectivity?: {
+              connected?: boolean;
+              connect?: () => void;
+              reconnect?: () => void;
             };
           };
-        }).isolatedEnv;
-        const p2p = env?.infrastructure?.p2p;
-        if (!p2p) return false;
-        if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
-        if (typeof p2p.connect === 'function') {
-          try { p2p.connect(); } catch {}
-        } else if (typeof p2p.reconnect === 'function') {
-          try { p2p.reconnect(); } catch {}
+        }).__xln?.runtimeConnectivity;
+        if (!connectivity) return false;
+        if (connectivity.connected === true) return true;
+        if (typeof connectivity.connect === 'function') {
+          connectivity.connect();
+        } else if (typeof connectivity.reconnect === 'function') {
+          connectivity.reconnect();
         }
         return false;
       }).catch(() => false);
@@ -554,24 +551,23 @@ async function createRuntimeViaUi(
     await expect
       .poll(async () => {
         return await page.evaluate(() => {
-          const env = (window as typeof window & {
-            isolatedEnv?: {
-              infrastructure?: {
-                p2p?: {
-                  isConnected?: () => boolean;
-                  connect?: () => void;
-                  reconnect?: () => void;
-                };
+          const connectivity = (window as typeof window & {
+            __xln?: {
+              runtimeConnectivity?: {
+                connected?: boolean;
+                connect?: () => void;
+                reconnect?: () => void;
               };
             };
-          }).isolatedEnv;
-          const p2p = env?.infrastructure?.p2p;
-          if (!env || !p2p) return false;
-          if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
-          const start = typeof p2p.connect === 'function' ? p2p.connect : p2p.reconnect;
+          }).__xln?.runtimeConnectivity;
+          if (!connectivity) return false;
+          if (connectivity.connected === true) return true;
+          const start = typeof connectivity.connect === 'function'
+            ? connectivity.connect
+            : connectivity.reconnect;
           if (typeof start === 'function') {
             setTimeout(() => {
-              try { start.call(p2p); } catch {}
+              start();
             }, 0);
           }
           return false;

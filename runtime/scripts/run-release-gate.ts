@@ -70,6 +70,7 @@ const RUNTIME_CORE_TESTS = [
   'runtime/__tests__/runtime-recovery-timestamp.test.ts',
   'runtime/__tests__/relay-router.test.ts',
   'runtime/__tests__/direct-runtime-bun.test.ts',
+  'runtime/__tests__/p2p-connect-idempotent.test.ts',
   'runtime/__tests__/p2p-direct-policy.test.ts',
   'runtime/__tests__/proof-builder.test.ts',
   'runtime/__tests__/transformer-ordering.test.ts',

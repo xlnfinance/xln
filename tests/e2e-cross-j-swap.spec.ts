@@ -55,8 +55,8 @@ import {
   expectSwapTokens,
   placeCrossOrder,
   readCrossState,
+  readCommittedAccountRebalanceFee,
   readHubCrossDeltas,
-  transferFeeAmount,
   visibleOrderbookRow,
   waitForCrossOffersCleared,
   waitForCrossPendingFill,
@@ -394,11 +394,6 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         fullTargetBefore.ownerIsLeft,
         'receive',
         'full target Account',
-        transferFeeAmount(
-          BigInt(filledTargetState.currentFrameFees[String(USDC)] ?? '0'),
-          BigInt(filledTargetState.rebalanceFeesPaid[String(USDC)] ?? '0') -
-            BigInt(fullTargetBefore.rebalanceFeesPaid[String(USDC)] ?? '0'),
-        ),
       );
       await expect(page.getByTestId('swap-open-order-row')).toHaveCount(0, { timeout: 15_000 });
 
@@ -546,6 +541,15 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         'spend',
         'partial source Account',
       );
+      const partialTargetRebalanceFee = await readCommittedAccountRebalanceFee(
+        page,
+        target,
+        targetHub.entityId,
+        USDC,
+        partialTargetBefore.currentHeight,
+        partialTargetAfter.currentHeight,
+      );
+      expect(partialTargetRebalanceFee, 'partial target signed rebalance fee').toBe(2_679_487n);
       expectCrossTransfer(
         partialTargetBefore.deltas[String(USDC)],
         partialTargetAfter.deltas[String(USDC)],
@@ -553,11 +557,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         partialTargetBefore.ownerIsLeft,
         'receive',
         'partial target Account',
-        transferFeeAmount(
-          BigInt(partialTargetAfter.currentFrameFees[String(USDC)] ?? '0'),
-          BigInt(partialTargetAfter.rebalanceFeesPaid[String(USDC)] ?? '0') -
-            BigInt(partialTargetBefore.rebalanceFeesPaid[String(USDC)] ?? '0'),
-        ),
+        partialTargetRebalanceFee,
       );
     },
   );

@@ -96,6 +96,11 @@ type DeltaSnapshot = {
 };
 
 type TestWindow = typeof window & {
+  __xln?: {
+    runtimeConnectivity?: {
+      relayUrls?: string[];
+    };
+  };
   isolatedEnv?: {
     runtimeId?: string;
     frameLogs?: FrameLogEntryView[];
@@ -105,11 +110,6 @@ type TestWindow = typeof window & {
     };
     gossip?: {
       getProfiles?: () => GossipProfile[];
-    };
-    infrastructure?: {
-      p2p?: {
-        relayUrls?: string[];
-      };
     };
   };
 };
@@ -218,7 +218,7 @@ async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
   const runtimeApi = await page.evaluate(() => {
     const view = window as TestWindow;
-    const relay = view.isolatedEnv?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
+    const relay = view.__xln?.runtimeConnectivity?.relayUrls?.[0] ?? null;
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;

@@ -5,6 +5,7 @@ import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEn
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import { errorLog } from './errorLogStore';
 import { hasConnectedJurisdictionAdapter } from './vault-helpers';
+import { getXLN } from './xlnRuntimeLoader';
 
 const bootstrapEnvironment = writable<RuntimeReplica | null>(null);
 
@@ -31,6 +32,7 @@ registerDebugSurface('runtimeConnectivity', () => {
     runtimeId: String(localRuntimeEnv?.runtimeId || ''),
     connected: Boolean(p2p?.isConnected?.()),
     connecting: Boolean(p2p?.isConnecting?.()),
+    relayClientCount: p2p?.getRelayClientCount?.() ?? 0,
     relayUrls: [...(localRuntimeEnv?.infrastructure?.lastP2PConfig?.relayUrls ?? [])],
     profiles: (localRuntimeEnv?.gossip.getProfiles() ?? []).map(profile => ({
       entityId: profile.entityId,
@@ -50,14 +52,71 @@ registerDebugSurface('runtimeConnectivity', () => {
 registerDebugSurface('jurisdictionConnectivity', () => ({
   runtimeId: String(localRuntimeEnv?.runtimeId || ''),
   jurisdictions: Array.from(localRuntimeEnv?.state.jReplicas.keys() ?? [], name => {
+    const replica = localRuntimeEnv?.state.jReplicas.get(name);
     const adapter = localRuntimeEnv?.infrastructure?.liveJAdapters?.get(name);
     return {
       name: String(name),
+      chainId: Number(replica?.chainId ?? 0),
+      depositoryAddress: String(replica?.contracts?.depository ?? ''),
       connected: localRuntimeEnv ? hasConnectedJurisdictionAdapter(localRuntimeEnv, name) : false,
       mode: adapter?.mode ?? null,
       watching: Boolean(adapter?.isWatching?.()),
+      scannedThroughHeight: Number(adapter?.getWatcherScanProgress?.().scannedThroughHeight ?? 0),
     };
   }),
+}));
+registerDebugSurface('runtimePersistence', () => ({
+  runtimeId: String(localRuntimeEnv?.runtimeId || ''),
+  snapshotPeriodFrames: localRuntimeEnv?.runtimeConfig?.storage?.snapshotPeriodFrames ?? null,
+  setSnapshotPeriodFrames: (frames: number) => {
+    if (!localRuntimeEnv) throw new Error('RUNTIME_PERSISTENCE_ENV_UNAVAILABLE');
+    if (!localRuntimeEnv.runtimeConfig) throw new Error('RUNTIME_PERSISTENCE_CONFIG_UNAVAILABLE');
+    if (!Number.isSafeInteger(frames) || frames < 1) {
+      throw new Error(`RUNTIME_PERSISTENCE_SNAPSHOT_PERIOD_INVALID:${frames}`);
+    }
+    localRuntimeEnv.runtimeConfig = {
+      ...localRuntimeEnv.runtimeConfig,
+      storage: {
+        ...(localRuntimeEnv.runtimeConfig?.storage ?? {}),
+        snapshotPeriodFrames: frames,
+      },
+    };
+    return frames;
+  },
+  readAccountRebalanceFees: async (input: {
+    entityId: string;
+    counterpartyId: string;
+    afterHeight: number;
+    throughHeight: number;
+    tokenId: number;
+  }) => {
+    if (!localRuntimeEnv) throw new Error('RUNTIME_PERSISTENCE_ENV_UNAVAILABLE');
+    const { afterHeight, throughHeight, tokenId } = input;
+    if (
+      !Number.isSafeInteger(afterHeight) || afterHeight < 0 ||
+      !Number.isSafeInteger(throughHeight) || throughHeight < afterHeight ||
+      throughHeight - afterHeight > 1_000 ||
+      !Number.isSafeInteger(tokenId) || tokenId < 0
+    ) throw new Error('RUNTIME_ACCOUNT_FEE_QUERY_BOUNDARY_INVALID');
+    const xln = await getXLN();
+    const frames = await xln.readPersistedAccountFrameHistory(
+      localRuntimeEnv,
+      input.entityId,
+      input.counterpartyId,
+      Math.max(1, throughHeight - afterHeight + 1),
+      { maxAccountHeight: throughHeight },
+    );
+    return frames
+      .filter(frame => frame.height > afterHeight && frame.height <= throughHeight)
+      .flatMap(frame => frame.accountTxs.flatMap(tx => {
+        if (tx.type !== 'request_collateral' || tx.data.tokenId !== tokenId) return [];
+        return [{
+          height: frame.height,
+          feeTokenId: tx.data.feeTokenId ?? tx.data.tokenId,
+          feeAmount: tx.data.feeAmount.toString(),
+        }];
+      }));
+  },
 }));
 
 export function setXlnEnvironment(env: RuntimeReplica | null): void {

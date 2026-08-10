@@ -70,7 +70,9 @@ test('browser E2E mutations use the live runtime command bus instead of a detach
 
   expect(storeSource).toContain("registerDebugSurface('runtimeIngress'");
   expect(storeSource).toContain('submit: submitActiveRuntimeInput');
-  expect(storeSource).toContain('waitForIdle: waitForActiveRuntimeIdle');
+  expect(storeSource).toContain('waitForDrained: waitForActiveRuntimeDrained');
+  expect(storeSource).toContain('waitForProcessingIdle: waitForActiveRuntimeProcessingIdle');
+  expect(storeSource).toContain('xln.waitForRuntimeWorkDrained(runtimeEnv, timeoutMs)');
   expect(storeSource).toContain('ACTIVE_RUNTIME_HALTED:${xln.safeStringify(fatalPayload())}');
   expect(embeddedSource).toContain("registerDebugSurface('jurisdictionConnectivity'");
   expect(embeddedSource).toContain('hasConnectedJurisdictionAdapter(localRuntimeEnv, name)');

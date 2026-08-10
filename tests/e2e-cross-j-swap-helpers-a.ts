@@ -124,7 +124,8 @@ export type CrossRuntimeWindow = Window & {
       jurisdictions: Array<{ name: string; connected: boolean; mode: string | null; watching: boolean }>;
     };
     runtimeIngress?: {
-      waitForIdle?: (timeoutMs?: number) => Promise<boolean>;
+      waitForProcessingIdle?: (timeoutMs?: number) => Promise<boolean>;
+      waitForDrained?: (timeoutMs?: number) => Promise<boolean>;
     };
     runtimeConnectivity?: {
       profiles: Array<{ entityId: string; runtimeId: string; wsUrl?: string; isHub: boolean }>;
@@ -634,13 +635,13 @@ export async function waitForHubProfile(page: Page, hubId: string): Promise<void
 export async function flushRuntime(page: Page, rounds = 3): Promise<void> {
   await page.evaluate(async roundsToRun => {
     const view = window as CrossRuntimeWindow;
-    const waitForIdle = view.__xln?.runtimeIngress?.waitForIdle;
-    if (typeof waitForIdle !== 'function') {
-      throw new Error('__xln.runtimeIngress.waitForIdle missing');
+    const waitForProcessingIdle = view.__xln?.runtimeIngress?.waitForProcessingIdle;
+    if (typeof waitForProcessingIdle !== 'function') {
+      throw new Error('__xln.runtimeIngress.waitForProcessingIdle missing');
     }
     const waitRounds = Math.max(1, Number(roundsToRun) || 1);
     for (let round = 0; round < waitRounds; round += 1) {
-      const idle = await waitForIdle(1_000);
+      const idle = await waitForProcessingIdle(1_000);
       if (!idle) {
         throw new Error('runtime processing did not become idle before flush timeout');
       }

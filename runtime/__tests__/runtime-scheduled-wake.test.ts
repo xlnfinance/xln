@@ -177,6 +177,18 @@ describe('runtime scheduled wake', () => {
     expect(state.crontabState?.hooks.has('due-after-runtime-stopped')).toBe(true);
   });
 
+  test('full drain does not report idle while reliable ingress remains pending', async () => {
+    const env = createEmptyEnv('reliable-ingress-drain-test');
+    env.infrastructure!.pendingReliableIngress = new Map([['pending', {} as never]]);
+    env.infrastructure!.loopPromise = new Promise<void>(() => undefined);
+
+    // Pending consensus is a drain barrier, not scheduler work: treating it as
+    // runnable would spin empty Runtime frames while waiting for the peer.
+    expect(hasRuntimeWork(env)).toBe(false);
+    expect(await waitForRuntimeWorkDrained(env, 20, 1)).toBe(false);
+    env.infrastructure!.loopPromise = null;
+  });
+
   test('does not initialize consensus crontab state outside a committed Entity frame', async () => {
     const env = createEmptyEnv('scheduled-wake-noop-state-test');
     env.state.timestamp = 10_000;

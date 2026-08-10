@@ -169,6 +169,56 @@ describe('durable validator-local J submit state', () => {
     expect(collectDueJSubmitRuntimeTxs(env, env.state.timestamp)).toHaveLength(1);
   });
 
+  test('authenticated J input arriving during a failed submit defers failure classification', async () => {
+    const { env, replica, jOutbox } = await commitAttempt();
+    let pollCalls = 0;
+    let submitCalls = 0;
+    installSubmitAdapter(env, {
+      pollNow: async () => {
+        pollCalls += 1;
+        if (pollCalls !== 2) return;
+        env.runtimeMempool!.entityInputs.push({
+          entityId,
+          signerId,
+          entityTxs: [{ type: 'j_event', data: {} as never }],
+        });
+      },
+      submitTx: async () => {
+        submitCalls += 1;
+        return { success: false, error: 'staticCall revert: E5()' };
+      },
+    } as JAdapter);
+    const queued: Parameters<typeof applyRuntimeTx>[1][] = [];
+
+    await submitRuntimeJOutbox(env, jOutbox, {
+      enqueueRuntimeInputs: (_target, _inputs, runtimeTxs) => queued.push(...(runtimeTxs ?? [])),
+    });
+
+    expect({ pollCalls, submitCalls }).toEqual({ pollCalls: 2, submitCalls: 1 });
+    expect(env.runtimeMempool!.entityInputs[0]?.entityTxs?.[0]?.type).toBe('j_event');
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({
+      type: 'recordJSubmitResult',
+      data: { outcome: 'eventBarrier', message: 'authenticated-j-events-after-submit-failure' },
+    });
+    await applyRuntimeTx(env, queued[0]!, { isReplay: true });
+    expect(replica.jSubmitState?.lastResultOutcome).toBe('eventBarrier');
+    expect(replica.jSubmitState?.terminalFailure).toBeUndefined();
+    env.runtimeMempool!.entityInputs = [];
+    const [retry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
+    if (!retry) throw new Error('post-barrier retry missing');
+    const retryOutbox = await applyRuntimeTx(env, retry, { isReplay: true });
+    const terminalResults: Parameters<typeof applyRuntimeTx>[1][] = [];
+    await submitRuntimeJOutbox(env, retryOutbox, {
+      enqueueRuntimeInputs: (_target, _inputs, runtimeTxs) => terminalResults.push(...(runtimeTxs ?? [])),
+    });
+    expect(terminalResults).toHaveLength(1);
+    expect(terminalResults[0]).toMatchObject({
+      type: 'recordJSubmitResult',
+      data: { outcome: 'terminalFailure', message: 'staticCall revert: E5()' },
+    });
+  });
+
   test('empty J-prefix liveness does not starve an otherwise valid submit', async () => {
     const { env, jOutbox } = await commitAttempt();
     let submitCalls = 0;

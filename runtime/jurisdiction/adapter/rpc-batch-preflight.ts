@@ -4,6 +4,8 @@ import { classifyJAdapterFailure, makeJAdapterFailureResult } from './failure';
 import { decodeStandardSolidityRevertData, rpcErrorText, rpcLog } from './rpc-public';
 import type { JSubmitResult } from './types';
 
+const NO_ACTIVE_DISPUTE_SELECTOR = '0x88d0662b';
+
 type RevertSource = {
   data?: unknown;
   error?: { data?: unknown };
@@ -55,6 +57,7 @@ export const preflightProcessBatch = async (input: ProcessBatchPreflight): Promi
     const source = typeof error === 'object' && error !== null ? (error as RevertSource) : null;
     const revertData = source?.data ?? source?.error?.data ?? source?.info?.error?.data;
     const usableRevertData = revertData === '0x' ? undefined : revertData;
+    const selector = typeof usableRevertData === 'string' ? usableRevertData.slice(0, 10).toLowerCase() : '';
     if (!usableRevertData && failure.category === 'transient') {
       return makeJAdapterFailureResult(error);
     }
@@ -66,7 +69,9 @@ export const preflightProcessBatch = async (input: ProcessBatchPreflight): Promi
     }
     return makeJAdapterFailureResult(error, {
       category: 'terminal',
-      code: failure.code === 'J_ADAPTER_TERMINAL' ? 'CALL_EXCEPTION' : failure.code,
+      code: selector === NO_ACTIVE_DISPUTE_SELECTOR
+        ? 'NO_ACTIVE_DISPUTE'
+        : failure.code === 'J_ADAPTER_TERMINAL' ? 'CALL_EXCEPTION' : failure.code,
       message: `staticCall revert: ${detail}`,
     });
   }

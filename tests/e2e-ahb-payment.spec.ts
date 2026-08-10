@@ -175,6 +175,7 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
       connectivityRuntimeId: String(connectivity?.runtimeId || ''),
       hasP2P: !!connectivity,
       isConnected: connectivity?.connected === true,
+      relayClientCount: Number(connectivity?.relayClientCount ?? 0),
       relayCount: relayUrls.length,
     };
   });
@@ -182,6 +183,7 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
   expect(snapshot.hasP2P, `[${tag}] runtime must have active P2P`).toBe(true);
   expect(snapshot.connectivityRuntimeId, `[${tag}] connectivity must belong to active runtime`).toBe(snapshot.runtimeId);
   expect(snapshot.isConnected, `[${tag}] runtime P2P must have open WS`).toBe(true);
+  expect(snapshot.relayClientCount, `[${tag}] runtime must have exactly one relay client`).toBe(1);
   expect(snapshot.relayCount, `[${tag}] runtime must have exactly one relay URL`).toBe(1);
 }
 

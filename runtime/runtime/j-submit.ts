@@ -430,21 +430,41 @@ const recordSuccessfulSubmit = async (
   }
 };
 
-const recordFailedSubmit = (
+const recordFailedSubmit = async (
   env: RuntimeReplica,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
+  adapter: JAdapter,
   jTx: JTx,
   result: JSubmitResult,
-): void => {
+): Promise<void> => {
+  if (jTx.type === 'batch') {
+    const authenticatedJInputs = await awaitAuthenticatedJEventsBeforeSubmit(env, adapter);
+    if (authenticatedJInputs > 0) {
+      queueBatchResult(env, deps, jurisdictionName, jTx, 'eventBarrier', {
+        message: 'authenticated-j-events-after-submit-failure',
+      });
+      jSubmitLog.info('tx.failure_deferred_for_j_events', {
+        entityId: shortId(jTx.entityId),
+        jurisdictionName,
+        authenticatedJInputs,
+      });
+      return;
+    }
+  }
   const message = result.error || 'unknown';
   const failure = result.failure ?? classifyJAdapterFailure(message);
-  jSubmitLog.error('tx.submit_failed', {
+  const fields = {
     type: jTx.type,
     entityId: shortId(jTx.entityId),
     jurisdictionName,
     error: message,
-  });
+  };
+  if (failure.code === 'STALE_FINALIZATION_AWAITING_FINALITY') {
+    jSubmitLog.info('tx.competing_finalization_awaiting_finality', fields);
+  } else {
+    jSubmitLog.error('tx.submit_failed', fields);
+  }
   if (queueKnownFailure(env, deps, jurisdictionName, jTx, failure)) return;
   if (failure.category === 'transient') throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
   throw new Error(`J_SUBMIT_FATAL: ${message}`);
@@ -485,7 +505,7 @@ const submitOneJTx = async (
   if (result.success) {
     await recordSuccessfulSubmit(env, deps, jurisdictionName, adapter, jTx, result);
   } else {
-    recordFailedSubmit(env, deps, jurisdictionName, jTx, result);
+    await recordFailedSubmit(env, deps, jurisdictionName, adapter, jTx, result);
   }
 };
 

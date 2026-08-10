@@ -41,6 +41,17 @@ const waitForProcessingCycle = async (env: RuntimeReplica, remaining: number): P
   ]);
 };
 
+const hasRuntimeDrainBlocker = (env: RuntimeReplica): boolean => {
+  const state = env.infrastructure;
+  return Boolean(
+    (state?.pendingReliableIngress?.size ?? 0) > 0 ||
+    (state?.reliableIngressCommitting?.size ?? 0) > 0 ||
+    (state?.inFlightEntityInputs ?? 0) > 0 ||
+    (state?.inFlightReliableInputKeys?.size ?? 0) > 0 ||
+    state?.stateMutationInFlight,
+  );
+};
+
 const drainInactiveRuntime = async (
   env: RuntimeReplica,
   remaining: number,
@@ -74,7 +85,11 @@ export const waitForRuntimeWorkDrained = async (
     const remaining = timeoutMs - (now - startedAt);
     if (remaining <= 0) return false;
     await waitForProcessingCycle(env, remaining);
-    const hasWork = deps.hasRuntimeWork(env) || Boolean(env.infrastructure?.processingPromise);
+    const hasDrainableWork = deps.hasRuntimeWork(env);
+    const hasWork =
+      hasDrainableWork ||
+      hasRuntimeDrainBlocker(env) ||
+      Boolean(env.infrastructure?.processingPromise);
     if (!hasWork) {
       idleSince ??= Date.now();
       const quietFor = Date.now() - idleSince;
@@ -83,10 +98,15 @@ export const waitForRuntimeWorkDrained = async (
       continue;
     }
     idleSince = null;
-    if (!options.allowPersistencePaused && await drainInactiveRuntime(env, remaining, deps)) {
+    if (
+      hasDrainableWork &&
+      !options.allowPersistencePaused &&
+      await drainInactiveRuntime(env, remaining, deps)
+    ) {
       continue;
     }
     if (
+      hasDrainableWork &&
       options.allowPersistencePaused &&
       !env.infrastructure?.loopPromise &&
       !env.infrastructure?.processingPromise

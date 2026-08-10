@@ -17,6 +17,8 @@ import { startDisputeFromManageUi } from './utils/e2e-account-workspace';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 import { quiesceRuntimePage } from './utils/e2e-runtime-shutdown.mts';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../runtime/account/crypto';
+import { createXlnJsonRpcProvider } from '../runtime/jurisdiction/adapter';
+import { mineRpcToBlockExact } from '../runtime/scenarios/rpc-block-mining';
 import {
   buildPushRegistrationMessage,
   buildPushUnregisterMessage,
@@ -106,19 +108,23 @@ function relayToApiBase(relayUrl: string | null | undefined): string | null {
 async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return process.env.E2E_API_BASE_URL;
   const runtimeApi = await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        infrastructure?: {
-          p2p?: {
-            relayUrls?: string[];
-          };
-        };
-      };
-    }).isolatedEnv;
-    const relay = env?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
+    const relay = (window as typeof window & {
+      __xln?: { runtimeConnectivity?: { relayUrls?: string[] } };
+    }).__xln?.runtimeConnectivity?.relayUrls?.[0] ?? null;
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
+}
+
+async function confirmDisputeForWatchtower(rpcUrl: string): Promise<void> {
+  const provider = createXlnJsonRpcProvider(rpcUrl);
+  try {
+    const head = BigInt(await provider.send('eth_blockNumber', []));
+    const result = await mineRpcToBlockExact(provider, head + 12n);
+    expect(result.minedBlocks, 'watchtower finality boundary must mine exactly 12 blocks').toBe(12n);
+  } finally {
+    provider.destroy();
+  }
 }
 
 async function readActivePushWakeTarget(page: Page): Promise<{
@@ -679,6 +685,7 @@ test('settings registers and revokes signed push wake token through browser UI',
       return snap.batchHistoryCount;
     }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(disputeHistoryBeforeBroadcast);
 
+    await confirmDisputeForWatchtower(watchtowerRpcUrl);
     await expect.poll(() => capture.notifications.length, { timeout: 20_000, intervals: [500, 1000, 2000] }).toBe(1);
     expect(capture.notifications[0]).toMatchObject({
       token: victimToken,
