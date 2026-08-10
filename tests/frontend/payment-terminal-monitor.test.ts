@@ -87,6 +87,75 @@ test('recovers a terminal event from the current frame after observer restart', 
   restartedMonitor.stop();
 });
 
+test('does not duplicate a surfaced event when a later event fails across remount', async () => {
+  const cursorStore = new Map<string, number>();
+  const seenEventStore = new Map<string, number>();
+  const surfaced: string[] = [];
+  const errors: unknown[] = [];
+  let failReceivedOnce = true;
+  const createMonitor = () => createPaymentTerminalMonitor({
+    readPage: async (request) => {
+      const page = terminalPage(request);
+      page.receipts[0]!.logs.push({
+        id: 99,
+        message: 'HtlcReceived',
+        entityId: ENTITY_A,
+        data: { entityId: ENTITY_A },
+      });
+      return page;
+    },
+    onEvent: (event) => {
+      if (event.name === 'HtlcReceived' && failReceivedOnce) {
+        failReceivedOnce = false;
+        throw new Error('SPOTLIGHT_SURFACE_FAILED');
+      }
+      surfaced.push(event.name);
+    },
+    onError: (error) => errors.push(error),
+    cursorStore,
+    seenEventStore,
+  });
+
+  const oldMonitor = createMonitor();
+  oldMonitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 4, connected: true });
+  oldMonitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 5, connected: true });
+  await waitFor(() => errors.length === 1);
+  oldMonitor.stop();
+
+  const restartedMonitor = createMonitor();
+  restartedMonitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 5, connected: true });
+  await waitFor(() => surfaced.length === 2);
+
+  expect(surfaced).toEqual(['HtlcFinalized', 'HtlcReceived']);
+  expect(cursorStore.get(`${RUNTIME_A}:${ENTITY_A}`)).toBe(6);
+  restartedMonitor.stop();
+});
+
+test('forgets only the rolled-back owner events before replay', async () => {
+  const cursorStore = new Map<string, number>();
+  const seenEventStore = new Map<string, number>();
+  const surfaced: string[] = [];
+  const monitor = createPaymentTerminalMonitor({
+    readPage: async (request) => terminalPage(request),
+    onEvent: (event) => surfaced.push(`${event.runtimeId}:${event.name}`),
+    onError: (error) => { throw error; },
+    cursorStore,
+    seenEventStore,
+  });
+
+  monitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 4, connected: true });
+  monitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 5, connected: true });
+  await waitFor(() => surfaced.length === 1);
+  seenEventStore.set(`${RUNTIME_B}:${ENTITY_A}:5:5:HtlcFinalized`, 5);
+
+  monitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 4, connected: true });
+  monitor.observe({ runtimeId: RUNTIME_A, entityId: ENTITY_A, height: 5, connected: true });
+  await waitFor(() => surfaced.length === 2);
+
+  expect(seenEventStore.has(`${RUNTIME_B}:${ENTITY_A}:5:5:HtlcFinalized`)).toBe(true);
+  monitor.stop();
+});
+
 test('serializes height bursts and drains them in bounded 500-frame pages', async () => {
   const reads: PaymentTerminalReadRequest[] = [];
   const monitor = createPaymentTerminalMonitor({

@@ -9,9 +9,11 @@ import {
 } from '../protocol/dispute/arguments';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import {
+  J_BATCH_CONTRACT_LIMITS,
   sanitizeOptionalDisputeArgument,
   sanitizeOptionalDisputeStarterArgumentPair,
 } from '../jurisdiction/machine/batch';
+import { LIMITS } from '../config/constants';
 import type { AccountReplica, AccountTx, SwapOffer } from '../types/account';
 import type { EntityState } from '../entity/types';
 
@@ -157,6 +159,54 @@ describe('dispute argument snapshots', () => {
       context: 'dispute.test.counter',
       limitBytes: 64 * 1024,
     });
+  });
+
+  test('keeps maximum honest dynamic arguments within the jurisdiction byte cap', () => {
+    const abi = ethers.AbiCoder.defaultAbiCoder();
+    const encodeArguments = (fillRatioCount: number, secretCount: number): string => {
+      const transformerArgs = abi.encode(
+        ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
+        [{
+          fillRatios: Array.from({ length: fillRatioCount }, () => 0xffff),
+          secrets: Array.from(
+            { length: secretCount },
+            (_, index) => `0x${(index + 1).toString(16).padStart(64, '0')}`,
+          ),
+        }],
+      );
+      return abi.encode(['bytes[]'], [[transformerArgs]]);
+    };
+    const encodedBytes = (value: string): number => ethers.getBytes(value).length;
+    const maxOffers = LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS;
+    const maxSecrets = LIMITS.MAX_ACCOUNT_HTLC_LOCKS;
+
+    // All live same-j offers may belong to one maker side, and every live HTLC
+    // may reveal a secret on that same side. This is the largest honest wrapper
+    // one participant can supply for the signed DeltaTransformer plan.
+    const maximumSide = encodeArguments(maxOffers, maxSecrets);
+    expect(encodedBytes(maximumSide)).toBeLessThanOrEqual(
+      J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
+    );
+    expect(sanitizeOptionalDisputeArgument(maximumSide, 'dispute.max-side')).toEqual({
+      value: maximumSide,
+      warnings: [],
+    });
+
+    // Splitting the same maximum Account state across both makers adds a second
+    // bytes[] wrapper, so it is the aggregate-cap boundary the pair sanitizer
+    // must preserve without erasing either side's honest evidence.
+    const left = encodeArguments(Math.ceil(maxOffers / 2), maxSecrets);
+    const right = encodeArguments(Math.floor(maxOffers / 2), 0);
+    expect(encodedBytes(left)).toBeLessThanOrEqual(
+      J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
+    );
+    expect(encodedBytes(right)).toBeLessThanOrEqual(
+      J_BATCH_CONTRACT_LIMITS.maxDisputeStarterArgumentsBytes,
+    );
+    const sanitizedPair = sanitizeOptionalDisputeStarterArgumentPair(left, right, 'dispute.max-account');
+    expect(sanitizedPair).toEqual({ initial: left, counter: right, warnings: [] });
+    expect(sanitizedPair.initial).not.toBe('0x');
+    expect(sanitizedPair.counter).not.toBe('0x');
   });
 
   test('builds positional swap args from the signed snapshot, not live swap maps', () => {

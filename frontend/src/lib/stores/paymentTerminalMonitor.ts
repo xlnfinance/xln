@@ -49,6 +49,7 @@ type PaymentTerminalMonitorDeps = {
   onEvent: (event: PaymentTerminalEvent) => void;
   onError: (error: unknown) => void;
   cursorStore?: Map<string, number>;
+  seenEventStore?: Map<string, number>;
   waitBeforeRetry?: () => Promise<void>;
   isRetryableGapError?: (error: unknown) => boolean;
   maxGapRetries?: number;
@@ -57,6 +58,7 @@ type PaymentTerminalMonitorDeps = {
 // A View can be recreated while a durable frame read is in flight. Its
 // successor must resume the last unconsumed frame instead of baselining past it.
 export const sharedPaymentTerminalCursorStore = new Map<string, number>();
+export const sharedPaymentTerminalSeenEventStore = new Map<string, number>();
 
 const PAGE_SIZE = 500;
 const DEFAULT_MAX_GAP_RETRIES = 20;
@@ -75,9 +77,10 @@ const logMatchesEntity = (log: PaymentTerminalLog, entityId: string): boolean =>
 
 const terminalEventKey = (
   runtimeId: string,
+  entityId: string,
   receipt: PaymentTerminalReceipt,
   log: PaymentTerminalLog,
-): string => `${runtimeId}:${receipt.height}:${log.id}:${log.message}`;
+): string => `${runtimeId}:${entityId}:${receipt.height}:${log.id}:${log.message}`;
 
 const defaultWaitBeforeRetry = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, DEFAULT_RETRY_MS));
@@ -107,7 +110,7 @@ class PaymentTerminalMonitor {
   private readonly isRetryableGapError: (error: unknown) => boolean;
   private readonly maxGapRetries: number;
   private readonly cursorStore: Map<string, number>;
-  private readonly seenEventKeys = new Set<string>();
+  private readonly seenEventStore: Map<string, number>;
   private generation = 0;
   private activeKey = '';
   private activeRuntimeId = '';
@@ -122,6 +125,7 @@ class PaymentTerminalMonitor {
     this.isRetryableGapError = deps.isRetryableGapError ?? defaultIsRetryableGapError;
     this.maxGapRetries = deps.maxGapRetries ?? DEFAULT_MAX_GAP_RETRIES;
     this.cursorStore = deps.cursorStore ?? new Map<string, number>();
+    this.seenEventStore = deps.seenEventStore ?? new Map<string, number>();
   }
 
   observe(observation: PaymentTerminalObservation): void {
@@ -135,7 +139,9 @@ class PaymentTerminalMonitor {
     }
     this.paused = false;
     const key = `${runtimeId}:${entityId}`;
-    if (key !== this.activeKey || height < this.nextHeight - 1) {
+    const rolledBack = key === this.activeKey && height < this.nextHeight - 1;
+    if (key !== this.activeKey || rolledBack) {
+      if (rolledBack) this.forgetEventsAfterHeight(key, height);
       this.reset({ ...observation, runtimeId, entityId, height });
       this.startDrain();
       return;
@@ -150,7 +156,6 @@ class PaymentTerminalMonitor {
 
   private reset(observation?: PaymentTerminalObservation): void {
     this.generation += 1;
-    this.seenEventKeys.clear();
     this.activeRuntimeId = normalizeId(observation?.runtimeId);
     this.activeEntityId = normalizeId(observation?.entityId);
     this.activeKey = observation ? `${this.activeRuntimeId}:${this.activeEntityId}` : '';
@@ -227,19 +232,26 @@ class PaymentTerminalMonitor {
       for (const log of receipt.logs) {
         const event = terminalEventFromLog(this.activeRuntimeId, this.activeEntityId, receipt, log);
         if (!event) continue;
-        const key = terminalEventKey(this.activeRuntimeId, receipt, log);
-        if (this.seenEventKeys.has(key)) continue;
+        const key = terminalEventKey(this.activeRuntimeId, this.activeEntityId, receipt, log);
+        if (this.seenEventStore.has(key)) continue;
         this.deps.onEvent(event);
-        this.rememberEvent(key);
+        this.rememberEvent(key, receipt.height);
       }
     }
   }
 
-  private rememberEvent(key: string): void {
-    this.seenEventKeys.add(key);
-    if (this.seenEventKeys.size <= 1000) return;
-    const oldest = this.seenEventKeys.values().next().value;
-    if (oldest) this.seenEventKeys.delete(oldest);
+  private rememberEvent(key: string, height: number): void {
+    this.seenEventStore.set(key, height);
+    if (this.seenEventStore.size <= 1000) return;
+    const oldest = this.seenEventStore.keys().next().value;
+    if (oldest) this.seenEventStore.delete(oldest);
+  }
+
+  private forgetEventsAfterHeight(activeKey: string, height: number): void {
+    const prefix = `${activeKey}:`;
+    for (const [key, eventHeight] of this.seenEventStore) {
+      if (key.startsWith(prefix) && eventHeight > height) this.seenEventStore.delete(key);
+    }
   }
 
   private rememberCursor(nextHeight: number): void {

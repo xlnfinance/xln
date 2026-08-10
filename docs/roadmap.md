@@ -142,6 +142,17 @@ blocker list:
   one-signature representation reuse and internal verified-witness reuse.
 - Runtime-level CrossJCoordinator plus separate immutable CrossJTerms and
   versioned CrossJProgress reducers.
+- Cross-j evidence simplification after release: one pure verified-evidence
+  decoder shared by consumers without sharing their authority checks; one
+  committed-route transition reducer; and a minimal canonical progress tuple
+  with UI/debug projections derived from it.
+- Rebuildable cross-j lookup indexes and consolidated telemetry formatting.
+  Indexes remain non-authoritative, bootstrap from committed state, and are
+  checked against canonical state; opening/progress/close retain distinct typed
+  validators instead of a generic financial transaction.
+- A centrally tested dispute-evidence budget derived from the canonical ABI and
+  Account resource limits, so future limit or ABI changes cannot make honestly
+  signed state exceed jurisdiction calldata bounds.
 - Explicit bilateral special-confirm recovery for a finalized disputed Account,
   with a new domain-separated confirmation, immutable finalized J-nonce binding,
   and complete stale proof/draft cleanup. Until that protocol is designed,

@@ -20,7 +20,7 @@ import {
   routeRemoteCrossJurisdictionBookCancels,
 } from '../entity/tx/handlers/account';
 
-import { applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
+import { applyEntityFrame, applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
 
 import {
   appendDefaultProposerCrossJMaterializations,
@@ -50,7 +50,7 @@ import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../runtime/
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 
-import { generateLazyEntityId } from '../entity/factory';
+import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
 
 import { createDefaultDelta } from '../account/delta';
 
@@ -171,6 +171,7 @@ import {
   installJurisdictions,
   jref,
   makeAccount,
+  makeConfig,
   makeJurisdiction,
   makeState,
   partialBinary,
@@ -759,6 +760,147 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(accountAfterClear.state.pulls?.has(route.sourcePull!.pullId)).toBe(false);
     const releasedDelta = accountAfterClear.state.deltas.get(route.sourcePull!.tokenId)!;
     expect(sourcePullPayerIsLeft ? releasedDelta.leftHold : releasedDelta.rightHold).toBe(0n);
+  });
+
+  test('source-savings clear materialization cannot split its two Account effects at the mempool cap', async () => {
+    const env = createEmptyEnv('cross-clear-source-savings-atomic-capacity');
+    env.state.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const sourceJ = makeJurisdiction('Ethereum', 1, '11', '12');
+    const targetJ = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('91');
+    const targetHub = entity('93');
+    const targetUser = entity('94');
+    const sourceHubSigner = registerTestSigner(env, 'cross-clear-source-savings-atomic-capacity', '1');
+    const sourceHub = hashBoard(encodeBoard(makeConfig(sourceHubSigner, sourceJ))).toLowerCase();
+    const targetHubSigner = addr('96');
+    const state = makeState(sourceHub, sourceHubSigner, sourceJ, sourceUser);
+    addReplica(env, state, sourceHubSigner);
+
+    const prepared = buildPreparedCrossJurisdictionRoute(
+      {
+        orderId: 'cross-clear-source-savings-atomic-capacity',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        sourceHubSignerId: sourceHubSigner,
+        targetHubSignerId: targetHubSigner,
+        source: {
+          jurisdiction: jref(sourceJ),
+          entityId: sourceUser,
+          counterpartyEntityId: sourceHub,
+          tokenId: 1,
+          amount: 1_000n,
+        },
+        target: {
+          jurisdiction: jref(targetJ),
+          entityId: targetHub,
+          counterpartyEntityId: targetUser,
+          tokenId: 1,
+          amount: 900n,
+        },
+        priceImprovementMode: 'source_savings',
+        status: 'resting',
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
+        expiresAt: 70_000,
+      },
+      { runtimeSeed: env.runtimeSeed, now: env.state.timestamp },
+    );
+    const route = {
+      ...prepared,
+      status: 'partially_filled' as const,
+      fillSeq: 1,
+      cumulativeFillRatio: 32_768,
+      claimedRatio: 32_768,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
+      filledSourceAmount: 500n,
+      filledTargetAmount: 450n,
+      priceImprovementSourceAmount: 25n,
+      sourceClaimed: 500n,
+      targetClaimed: 450n,
+    };
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+    const account = state.accounts.get(sourceUser)!;
+    account.state.pulls = new Map([
+      [
+        route.sourcePull!.pullId,
+        {
+          pullId: route.sourcePull!.pullId,
+          tokenId: route.sourcePull!.tokenId,
+          amount: route.sourcePull!.signedAmount,
+          claimedRatio: 0,
+          claimedAmount: 0n,
+          fullHash: route.sourcePull!.fullHash,
+          partialRoot: route.sourcePull!.partialRoot,
+          crossJurisdiction: buildCrossJurisdictionPullBinding(
+            { ...route, status: 'clearing', clearingPolicy: 'cancel_and_clear' },
+            'source',
+          ),
+          createdHeight: 0,
+          createdTimestamp: env.state.timestamp,
+        },
+      ],
+    ]);
+
+    const requested = await applyEntityTx(env, state, {
+      type: 'requestCrossJurisdictionClear',
+      data: { orderId: route.orderId, cancelRemainder: true },
+    });
+    const [materialization] = appendDefaultProposerCrossJMaterializations(
+      env,
+      {
+        entityId: sourceHub,
+        signerId: sourceHubSigner,
+        entityEncPubKey: '',
+        state: requested.newState,
+        mempool: [],
+      } as EntityReplica,
+      [],
+    );
+    if (materialization?.type !== 'materializeCrossJurisdictionClear') {
+      throw new Error('TEST_CROSS_J_CLEAR_MATERIALIZATION_REQUIRED');
+    }
+    const derived = await applyEntityTx(env, requested.newState, materialization);
+    expect(derived.accountTxs?.map(({ tx }) => tx.type)).toEqual([
+      'cross_pull_close',
+      'direct_payment',
+    ]);
+
+    const capacityState = requested.newState;
+    const capacityAccount = capacityState.accounts.get(sourceUser)!;
+    capacityAccount.mempool = Array.from(
+      { length: LIMITS.ACCOUNT_MEMPOOL_SIZE - 1 },
+      (_, index): AccountTx => ({
+        type: 'direct_payment',
+        data: {
+          tokenId: 1,
+          amount: 1n,
+          route: [sourceHub, sourceUser],
+          deliveryMode: 'direct',
+          description: `capacity-${index}`,
+          fromEntityId: sourceHub,
+          toEntityId: sourceUser,
+        },
+      }),
+    );
+    const before = cloneEntityState(capacityState);
+    const frameTxs = prepareLocallyAuthoredEntityTxs(
+      env,
+      capacityState,
+      sourceHubSigner,
+      [materialization],
+    );
+
+    await expect(
+      applyEntityFrame(env, capacityState, frameTxs, env.state.timestamp),
+    ).rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
+    expect(capacityState).toEqual(before);
+    expect(capacityState.accounts.get(sourceUser)!.mempool).toHaveLength(
+      LIMITS.ACCOUNT_MEMPOOL_SIZE - 1,
+    );
+    expect(capacityState.accounts.get(sourceUser)!.mempool.some(tx => tx.type === 'cross_pull_close')).toBe(false);
+    expect(capacityState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clear_requested');
   });
 
   test('target cross_pull_close rejects lower valid reveal than source close proof', async () => {
