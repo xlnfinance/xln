@@ -1,4 +1,5 @@
-import type { AccountTx } from '../../types/account';
+import type { AccountReplica, AccountTx } from '../../types/account';
+import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute-policy';
 import type { EntityState } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
 import { getPerfMs } from '../../infra/time';
@@ -35,6 +36,10 @@ const recordAccountChange = (
     counterpartyId: accountId,
   });
 };
+
+export const shouldSuppressReturnedAccountTx = (
+  account: Pick<AccountReplica, 'status'>,
+): boolean => !canProcessAccountTxForDisputeStatus(account.status);
 
 const applyReturnedAccountTxs = async (
   context: ApplyEntityTxsInOrderContext,
@@ -78,6 +83,18 @@ const applyReturnedAccountTxs = async (
       }
       entityLog.warn('mempool_op.account_missing', {
         account: shortId(accountId, 8),
+        tx: tx.type,
+      });
+      continue;
+    }
+    // Returned effects are admitted after their EntityTx mutates status. This
+    // catches both ordinary commands issued after a freeze and a certified J
+    // range containing AccountSettled before DisputeStarted. Never reintroduce
+    // work after the canonical Account policy has closed the proposal lane.
+    if (shouldSuppressReturnedAccountTx(account)) {
+      entityLog.info('account_tx.suppressed_non_active', {
+        account: shortId(accountId, 8),
+        status: account.status,
         tx: tx.type,
       });
       continue;

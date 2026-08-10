@@ -15,11 +15,10 @@ const account = (
 const input = (kind: AccountInput['kind']): Pick<AccountInput, 'kind'> => ({ kind });
 
 describe('frozen Account input severity', () => {
-  test('admits local J bookkeeping only before DisputeStarted reaches L1', () => {
-    expect(canProcessAccountTxForDisputeStatus('active', 'add_delta')).toBe(true);
-    expect(canProcessAccountTxForDisputeStatus('dispute_preparing', 'j_event_claim')).toBe(true);
-    expect(canProcessAccountTxForDisputeStatus('dispute_preparing', 'add_delta')).toBe(false);
-    expect(canProcessAccountTxForDisputeStatus('disputed', 'j_event_claim')).toBe(false);
+  test('defers local J bookkeeping until dispute preparation returns active', () => {
+    expect(canProcessAccountTxForDisputeStatus('active')).toBe(true);
+    expect(canProcessAccountTxForDisputeStatus('dispute_preparing')).toBe(false);
+    expect(canProcessAccountTxForDisputeStatus('disputed')).toBe(false);
   });
 
   test('rejects every external AccountInput from prepare through on-chain dispute', () => {

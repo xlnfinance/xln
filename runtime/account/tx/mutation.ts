@@ -188,7 +188,7 @@ export const applyAccountTxMutation = async (
     myEntityId,
     counterparty,
   };
-  if (!canProcessAccountTxForDisputeStatus(account.status, tx.type)) {
+  if (!canProcessAccountTxForDisputeStatus(account.status)) {
     const error =
       `ACCOUNT_CLOSED_FOR_DISPUTE:status=${account.status};tx=${tx.type}`;
     return { success: false, events: [error], error };

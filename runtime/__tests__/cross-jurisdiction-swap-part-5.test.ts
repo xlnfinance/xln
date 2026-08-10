@@ -10,6 +10,7 @@ import {
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../protocol/dispute/arguments';
 import { planCrossJurisdictionTargetRecovery } from '../entity/tx/j-events-htlc';
+import { handlePrepareDispute } from '../entity/tx/handlers/dispute';
 import { addReplica, addr, entity, jref, makeJurisdiction, makeState } from './helpers/cross-j';
 
 const TEST_DISPUTE_CONFIG = { leftResponseSeconds: 10, rightResponseSeconds: 10 } as const;
@@ -233,6 +234,64 @@ describe('cross-jurisdiction target dispute route selection', () => {
     expect(new Set(plan?.recovery.requiredPullIds)).toEqual(
       new Set([covered.targetPull!.pullId, uncovered.targetPull!.pullId]),
     );
+  });
+
+  test('atomic empty target recovery returns active and restores the pending J claim', async () => {
+    const fixture = makeTargetDisputeRouteSelectionFixture('cross-target-dispute-empty-recovery');
+    const route = fixture.buildRoute('empty-recovery');
+    fixture.state.crossJurisdictionSwaps?.set(route.orderId, route);
+    const account = fixture.state.accounts.get(fixture.targetHub)!;
+    const recovery = fixture.plan({ [route.targetPull!.pullId]: '0x' });
+    expect(recovery?.recovery.requiredPullIds).toEqual([route.targetPull!.pullId]);
+
+    const proofBodyHash = Object.keys(account.disputeArgumentSnapshotsByHash ?? {})[0]!;
+    account.counterpartyDisputeProofBodyHash = proofBodyHash;
+    account.counterpartyDisputeProofNonce = 1;
+    account.counterpartyDisputeProofProposerIsLeft = true;
+    account.pendingFrame = {
+      ...account.currentFrame,
+      height: account.currentFrame.height + 1,
+      timestamp: fixture.state.timestamp,
+      prevFrameHash: account.currentFrame.height === 0
+        ? 'genesis'
+        : account.currentFrame.stateHash,
+      stateHash: `0x${'88'.repeat(32)}`,
+      accountStateRoot: `0x${'99'.repeat(32)}`,
+      accountTxs: [{
+        type: 'j_event_claim',
+        data: {
+          jHeight: 7,
+          jBlockHash: `0x${'77'.repeat(32)}`,
+          events: [],
+        },
+      }],
+    };
+    account.pendingAccountInput = {
+      kind: 'frame',
+      fromEntityId: account.proofHeader.fromEntity,
+      toEntityId: account.proofHeader.toEntity,
+      domain: structuredClone(account.state.domain),
+      disputeConfig: structuredClone(account.state.disputeConfig),
+      proposal: { frame: structuredClone(account.pendingFrame) },
+    };
+
+    const result = await handlePrepareDispute(
+      fixture.state,
+      {
+        type: 'prepareDispute',
+        data: { counterpartyEntityId: fixture.targetHub },
+      },
+      fixture.env,
+      [],
+      false,
+      { [route.targetPull!.pullId]: '0x' },
+    );
+    const returned = result.newState.accounts.get(fixture.targetHub)!;
+
+    expect(returned.status).toBe('active');
+    expect(returned.disputePrepare).toBeUndefined();
+    expect(returned.pendingFrame).toBeUndefined();
+    expect(returned.mempool.map(tx => tx.type)).toEqual(['j_event_claim']);
   });
 
   test('ignores a route bound to another target hub', () => {

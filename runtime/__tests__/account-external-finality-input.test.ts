@@ -45,6 +45,14 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
       createdTimestamp: 1,
     }],
   ]);
+  account.mempool = [{
+    type: 'j_event_claim',
+    data: {
+      jHeight: 3,
+      jBlockHash: `0x${'cc'.repeat(32)}`,
+      events: [],
+    },
+  }];
 
   const input = createAccountDisputeFinalityInput(
     account.state,
@@ -72,6 +80,7 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     hadSettlementWorkspace: false,
     removedSettlementTxs: 0,
   });
+  expect(account.mempool).toEqual([]);
   expect(account.currentHeight).toBe(0);
   expect(account.state.jNonce).toBe(4);
   expect(account.status).toBe('disputed');

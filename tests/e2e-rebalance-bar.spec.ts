@@ -390,27 +390,22 @@ async function ensureRuntimeOnline(page: Page, tag: string) {
     .poll(async () => {
       if (page.isClosed()) return false;
       return await page.evaluate(() => {
-        type RuntimeP2P = {
-          isConnected?: () => boolean;
+        type RuntimeConnectivity = {
+          connected?: boolean;
           connect?: () => void;
           reconnect?: () => void;
         };
-        type RuntimeEnv = {
-          infrastructure?: {
-            p2p?: RuntimeP2P;
-          };
-        };
-        const runtimeWindow = window as typeof window & {
-          isolatedEnv?: RuntimeEnv;
-        };
-        const env = runtimeWindow.isolatedEnv;
-        const p2p = env?.infrastructure?.p2p;
-        if (!env || !p2p) return false;
-        if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
-        const start = typeof p2p.connect === 'function' ? p2p.connect : p2p.reconnect;
+        const connectivity = (window as typeof window & {
+          __xln?: { runtimeConnectivity?: RuntimeConnectivity };
+        }).__xln?.runtimeConnectivity;
+        if (!connectivity) return false;
+        if (connectivity.connected === true) return true;
+        const start = typeof connectivity.connect === 'function'
+          ? connectivity.connect
+          : connectivity.reconnect;
         if (typeof start === 'function') {
           setTimeout(() => {
-            try { start.call(p2p); } catch {}
+            try { start(); } catch {}
           }, 0);
         }
         return false;

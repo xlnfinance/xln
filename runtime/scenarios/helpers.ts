@@ -871,7 +871,10 @@ export function assertRuntimeIdle(env: RuntimeReplica, label: string = 'runtime'
         errors.push(`pendingFrame ${replicaKey}↔${counterpartyId.slice(-4)}`);
       }
       if (account.mempool.length > 0) {
-        errors.push(`accountMempool ${replicaKey}↔${counterpartyId.slice(-4)}=${account.mempool.length}`);
+        errors.push(
+          `accountMempool ${replicaKey}↔${counterpartyId.slice(-4)}=${account.mempool.length}` +
+          `[${account.mempool.map(tx => tx.type).join(',')}]`,
+        );
       }
     }
   }

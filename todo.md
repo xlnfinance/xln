@@ -6,7 +6,7 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
 ## Current candidate — 2026-08-10
 
 - Branch: `main` (the only writable release worktree).
-- Open protocol/code blockers: **6 active remediation batches**.
+- Open protocol/code blockers: **5 active remediation batches**.
 - **CHAIN-NUMBER-01 (P1):** `Account.sol` can store/emit a nonce above
   `Number.MAX_SAFE_INTEGER`, while Runtime correctly rejects that event rather
   than rounding it. Inventory every Solidity number crossing into a Runtime
@@ -24,12 +24,6 @@ product backlog; long-term work belongs in `docs/roadmap.md`.
   takeover publishes ownership before the old Runtime is fully quiescent.
   Awaiting owner confirmation to use Web Locks as the sole ownership authority,
   with quiesce-before-lock and an explicit Runtime resume after reacquisition.
-- **PREPARE-CLAIM-01 (P1):** `AccountSettled` claims observed during
-  `dispute_preparing` cannot receive their ACK on the locally frozen Account
-  lane, yet they must remain recoverable if preparation returns to `active`.
-  Owner must confirm the canonical durable deferred-claim design; never silently
-  drop collateral finality, let an attacker cancel dispute preparation, or grow
-  an undrainable Account mempool.
 - **CLI-SOCKET-02 (P3):** owner-only socket plus rotating bearer token prevents
   cross-user access and wrong-API context, but same-UID process isolation still
   needs a documented OS peer-credential policy before unattended mainnet use.

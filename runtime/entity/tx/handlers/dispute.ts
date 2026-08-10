@@ -17,7 +17,10 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import { freezeAccountForDispute } from '../../../account/consensus/dispute-policy';
+import {
+  freezeAccountForDispute,
+  returnPreparedAccountToActive,
+} from '../../../account/consensus/dispute-policy';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { swapKey } from '../../../orderbook/swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/orderbook';
@@ -255,9 +258,7 @@ const finishDisputePreparation = async (
   if (recovery?.requiredPullIds.every(
     (pullId) => recovery.resultsByPullId[pullId] === '0x',
   )) {
-    account.status = 'active';
-    delete account.disputePrepare;
-    freezeAccountForDispute(account, false);
+    returnPreparedAccountToActive(account);
     addMessage(state, '🌉 Cross-j source finality required no target dispute');
     return { newState: state, outputs };
   }

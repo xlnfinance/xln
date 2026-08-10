@@ -64,6 +64,14 @@ const rejectUnavailableProposal = (
   quiet: boolean,
   events: string[],
 ): ProposeAccountFrameResult | null => {
+  const status = account.status ?? 'active';
+  if (status !== 'active') {
+    return {
+      success: false,
+      error: `ACCOUNT_PROPOSAL_STATUS_FROZEN:${status}`,
+      events,
+    };
+  }
   if (account.mempool.length > MEMPOOL_LIMIT) {
     accountLog.warn('proposal.mempool_overflow', {
       mempool: account.mempool.length,

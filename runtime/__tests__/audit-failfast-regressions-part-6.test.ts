@@ -1224,6 +1224,18 @@ describe('audit fail-fast regressions', () => {
     expect(nextAccount.disputePrepare?.reason).toBe('test-prepare');
     expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
+
+    const reentered = await handlePrepareDispute(
+      result.newState,
+      {
+        type: 'prepareDispute',
+        data: { counterpartyEntityId: userId, description: 'retry-prepare' },
+      },
+      env,
+    );
+    const reenteredAccount = reentered.newState.accounts.get(userId)!;
+    expect(reenteredAccount.status).toBe('dispute_preparing');
+    expect(reenteredAccount.disputePrepare?.reason).toBe('test-prepare');
   });
 
   test('disputeStart freezes optimistic traffic and treats an unknown HTLC secret as optional evidence', async () => {

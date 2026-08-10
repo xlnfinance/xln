@@ -168,7 +168,9 @@ export const applyAccountDisputeFinality = (
   const hadActiveDispute = Boolean(account.activeDispute);
   const hadSettlementWorkspace = Boolean(account.state.settlementWorkspace);
   if (hadSettlementWorkspace) clearFinalizedSettlementWorkspace(account);
-  const beforeMempool = account.mempool.length;
+  const removedSettlementTxs = account.mempool.filter(
+    tx => tx.type === 'settle_transition',
+  ).length;
   account.mempool = account.mempool.filter(tx => tx.type !== 'settle_transition');
 
   account.state.jNonce = finalizedJNonce;
@@ -187,6 +189,6 @@ export const applyAccountDisputeFinality = (
   return {
     hadActiveDispute,
     hadSettlementWorkspace,
-    removedSettlementTxs: beforeMempool - account.mempool.length,
+    removedSettlementTxs,
   };
 };

@@ -24,16 +24,17 @@ const applyObservedReserve = (
   });
 };
 
-const suppressClosedAccountClaim = (
+const suppressNonActiveAccountClaim = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
 ): boolean => {
-  if (account.status !== 'disputed') return false;
+  const status = account.status ?? 'active';
+  if (status === 'active') return false;
   addMessage(
     state,
-    `⚖️ OBSERVED: closed Account ${counterpartyId.slice(-4)} reserve updated; ` +
-      'bilateral claim permanently suppressed',
+    `⚖️ OBSERVED: non-active Account ${counterpartyId.slice(-4)} reserve updated; ` +
+      `bilateral claim suppressed (${status})`,
   );
   return true;
 };
@@ -83,14 +84,13 @@ export const applyAccountSettledJEvent = (
     });
     return;
   }
-  // DisputeStarted permanently freezes the bilateral Account. AccountSettled
-  // remains valid unilateral jurisdiction evidence for the Entity reserve,
-  // but queuing a bilateral claim here would create work that neither party is
-  // allowed to ACK. Repeated third-party R2C settlements could otherwise fill
-  // the closed Account mempool and halt the whole Runtime. Preparation is
-  // different: it can still be cancelled before L1 observation, so its claims
-  // remain durable until the Account either returns active or reaches L1.
-  if (suppressClosedAccountClaim(newState, account, counterpartyId)) return;
+  // A persisted dispute_preparing Account has no return-to-active transition:
+  // the sole empty-result return happens atomically inside the initial prepare
+  // EntityTx, before another certified J range can interleave. Preserve claims
+  // already frozen by that EntityTx, but never append attacker-fillable work
+  // while the peer ACK lane is closed. Entity reserve finality above remains
+  // unconditional; terminal on-chain dispute finality owns Account economics.
+  if (suppressNonActiveAccountClaim(newState, account, counterpartyId)) return;
   dirtyAccounts.add(counterpartyId.toLowerCase());
   account.state.lastFinalizedJHeight ??= 0;
 

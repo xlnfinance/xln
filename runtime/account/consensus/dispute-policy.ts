@@ -38,23 +38,28 @@ export const freezeAccountForDispute = (
   account: AccountReplica,
   retainOptionalEvidence: boolean,
 ): void => {
-  const pendingEvidence = retainOptionalEvidence
-    ? (account.pendingFrame?.accountTxs ?? []).filter(isDisputeEvidenceAccountTx)
-    : [];
+  const retainDeferredClaims = account.status === 'dispute_preparing';
+  const pendingRetained = (account.pendingFrame?.accountTxs ?? []).filter((tx) => (
+    (retainDeferredClaims && isAccountControlTx(tx.type)) ||
+    (retainOptionalEvidence && isDisputeEvidenceAccountTx(tx))
+  ));
   account.mempool = (account.mempool || []).filter((tx) => (
-    isAccountControlTx(tx.type) || (retainOptionalEvidence && isDisputeEvidenceAccountTx(tx))
+    (retainDeferredClaims && isAccountControlTx(tx.type)) ||
+    (retainOptionalEvidence && isDisputeEvidenceAccountTx(tx))
   ));
   // A locally proposed frame is not mutually signed state, but a unilateral
-  // resolve inside it is still valid transformer evidence. Move that evidence
-  // back before deleting the candidate; later resolves are already behind it
-  // in mempool and remain available while the peer is offline.
-  prependUniqueMempoolTxs(account, pendingEvidence);
+  // resolve inside it is still valid transformer evidence. A J claim is also
+  // restored only while preparation can return to active; after the Account is
+  // permanently disputed, on-chain finality owns the economics and retaining
+  // an unprocessable claim would prevent Runtime quiescence.
+  prependUniqueMempoolTxs(account, pendingRetained);
   disputePolicyLog.info('freeze', {
     leftEntity: account.state.leftEntity,
     rightEntity: account.state.rightEntity,
     status: account.status,
     retainOptionalEvidence,
-    restoredPendingEvidence: pendingEvidence.map(tx => tx.type),
+    retainDeferredClaims,
+    restoredPendingEvidence: pendingRetained.map(tx => tx.type),
     retainedMempool: account.mempool.map(tx => tx.type),
   });
   // The candidate is not mutually committed state. Dispute always starts from
@@ -63,6 +68,18 @@ export const freezeAccountForDispute = (
   delete account.pendingAccountInput;
   account.rollbackCount = 0;
   delete account.lastRollbackFrameHash;
+};
+
+export const returnPreparedAccountToActive = (account: AccountReplica): void => {
+  if (account.status !== 'dispute_preparing') {
+    throw new Error(`ACCOUNT_DISPUTE_PREPARATION_RETURN_INVALID:${account.status ?? 'active'}`);
+  }
+  // Preserve deferred J claims while the preparation fence still owns them,
+  // then reopen the ordinary proposal lane. Reversing this order would make
+  // freezeAccountForDispute classify the claims as terminal and drop them.
+  freezeAccountForDispute(account, false);
+  account.status = 'active';
+  delete account.disputePrepare;
 };
 
 export const isDisputeStartedByLeft = (
@@ -83,15 +100,11 @@ export const isDisputeStartedByLeft = (
 
 export const canProcessAccountTxForDisputeStatus = (
   status: string | undefined,
-  txType: string,
 ): boolean => {
   const normalized = status ?? 'active';
   if (normalized === 'active') return true;
-  // During local preparation a J-event claim may still become part of the
-  // last bilateral state if preparation is cancelled before it reaches L1.
-  // Once DisputeStarted is final, however, peer inputs are permanently fenced
-  // and no Account transaction has a consumer. Admitting control work there
-  // creates an attacker-fillable durable queue with no possible ACK path.
-  if (normalized === 'dispute_preparing') return isAccountControlTx(txType);
+  // Local preparation has no peer ACK path. J claims remain durable in the
+  // Account mempool and become proposable only if preparation returns active.
+  // Once DisputeStarted is final, no Account transaction has a consumer.
   return false;
 };

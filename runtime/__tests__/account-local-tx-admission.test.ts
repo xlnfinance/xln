@@ -2,11 +2,14 @@ import { describe, expect, test } from 'bun:test';
 
 import { admitLocalAccountTx } from '../account/local-tx-admission';
 import { applyAccountInput } from '../account/consensus/index';
+import { proposeAccountFrame } from '../account/consensus/propose';
 import { createLocalAccountInput } from '../account/input';
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
 import {
+  canProcessAccountTxForDisputeStatus,
   freezeAccountForDispute,
   isDisputeStartedByLeft,
+  returnPreparedAccountToActive,
 } from '../account/consensus/dispute-policy';
 import { LIMITS } from '../config/constants';
 import type { AccountReplica, AccountTx } from '../types/account';
@@ -117,6 +120,86 @@ describe('account mempool multiplicity', () => {
     expect(account.pendingFrame).toBeUndefined();
     expect(account.mempool.map(tx => tx.type)).toEqual(['swap_resolve', 'cross_pull_close']);
     expect(account.mempool[0]).toEqual(fill);
+  });
+
+  test('defers a pending J claim through preparation and drops it after permanent close', () => {
+    const claim: AccountTx = {
+      type: 'j_event_claim',
+      data: {
+        jHeight: 3,
+        jBlockHash: `0x${'33'.repeat(32)}`,
+        events: [],
+      },
+    };
+    const account = accountWithPending(claim);
+    account.status = 'dispute_preparing';
+
+    freezeAccountForDispute(account, false);
+
+    expect(account.pendingFrame).toBeUndefined();
+    expect(account.mempool).toEqual([claim]);
+
+    account.status = 'disputed';
+    freezeAccountForDispute(account, false);
+
+    expect(account.mempool).toEqual([]);
+  });
+
+  test('returning preparation to active reopens the deferred J claim lane', () => {
+    const claim: AccountTx = {
+      type: 'j_event_claim',
+      data: {
+        jHeight: 4,
+        jBlockHash: `0x${'44'.repeat(32)}`,
+        events: [],
+      },
+    };
+    const account = accountWithPending(claim);
+    account.status = 'dispute_preparing';
+    account.disputePrepare = {
+      startedAt: 1,
+      readyAfter: 1,
+      reason: 'cross-j-recovery',
+    };
+
+    returnPreparedAccountToActive(account);
+
+    expect(account.status).toBe('active');
+    expect(account.disputePrepare).toBeUndefined();
+    expect(account.pendingFrame).toBeUndefined();
+    expect(account.mempool).toEqual([claim]);
+    expect(canProcessAccountTxForDisputeStatus(account.status)).toBe(true);
+  });
+
+  test('direct proposal cannot consume deferred work from a preparing Account', async () => {
+    const claim: AccountTx = {
+      type: 'j_event_claim',
+      data: {
+        jHeight: 5,
+        jBlockHash: `0x${'55'.repeat(32)}`,
+        events: [],
+      },
+    };
+    const account = accountWithPending(PAYMENT);
+    delete account.pendingFrame;
+    account.status = 'dispute_preparing';
+    account.mempool = [claim];
+    const before = structuredClone(account);
+
+    const result = await proposeAccountFrame(accountContext(), account, 1);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('ACCOUNT_PROPOSAL_STATUS_FROZEN:dispute_preparing');
+    expect(account).toEqual(before);
+  });
+
+  test('preparation return rejects active and permanently disputed Accounts', () => {
+    const active = accountWithPending(PAYMENT);
+    expect(() => returnPreparedAccountToActive(active))
+      .toThrow('ACCOUNT_DISPUTE_PREPARATION_RETURN_INVALID:active');
+    active.status = 'disputed';
+    expect(() => returnPreparedAccountToActive(active))
+      .toThrow('ACCOUNT_DISPUTE_PREPARATION_RETURN_INVALID:disputed');
   });
 
   test('counts pending and queued transactions under one outstanding limit', () => {
