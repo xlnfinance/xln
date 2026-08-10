@@ -89,6 +89,7 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
     required: {
       counterpartyEntityId: 'string', offerId: 'string', giveTokenId: 'integer',
       giveAmount: 'bigint', wantTokenId: 'integer', wantAmount: 'bigint',
+      maxFee: 'bigint', minNetReceive: 'bigint',
     },
     optional: { priceTicks: 'bigint', timeInForce: 'integer' },
     literals: { timeInForce: [0, 1, 2] },

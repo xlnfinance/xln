@@ -8,6 +8,7 @@ import { deriveManagedEntityIdentity, DaemonControlClient, setupCustody } from '
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
 import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
 import {
+  isPublicDaemonHealthReady,
   spawnBunChild,
   stopManagedChild,
   waitForHttpReady,
@@ -69,14 +70,6 @@ type ExistingCustodyPayload = {
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
-};
-
-const isDaemonHealthReady = (payload: unknown): boolean => {
-  const body = payload as {
-    system?: { runtime?: boolean };
-    database?: boolean;
-  } | null;
-  return body?.system?.runtime === true;
 };
 
 const findProcessIdsByPattern = async (pattern: string): Promise<number[]> => {
@@ -212,7 +205,7 @@ const isHttpReady = async (url: string): Promise<boolean> => {
     const response = await fetch(url);
     if (response.status >= 500) return false;
     if (url.endsWith('/api/health')) {
-      return isDaemonHealthReady(await response.json());
+      return isPublicDaemonHealthReady(await response.json());
     }
     return true;
   } catch {
@@ -285,7 +278,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
     `http://127.0.0.1:${DAEMON_PORT}/api/health`,
     daemonChild,
     240_000,
-    async (_response, bodyText) => isDaemonHealthReady(JSON.parse(bodyText)),
+    async (_response, bodyText) => isPublicDaemonHealthReady(JSON.parse(bodyText)),
   );
   const controlDeadline = Date.now() + 60_000;
   while (Date.now() < controlDeadline) {

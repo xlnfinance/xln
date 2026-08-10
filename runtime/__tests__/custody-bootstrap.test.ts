@@ -4,11 +4,28 @@ import { EventEmitter } from 'node:events';
 import { safeStringify } from '../protocol/serialization';
 
 import {
+  isPublicDaemonHealthReady,
   stopManagedChild,
   waitForCustodyRouteableState,
   waitForHttpReady,
   type ManagedChild,
 } from '../orchestrator/custody-bootstrap';
+
+test('public daemon health waits for completed runtime boot without private health fields', () => {
+  expect(isPublicDaemonHealthReady({
+    system: { runtime: true },
+    boot: { phase: 'ready' },
+  })).toBe(true);
+  expect(isPublicDaemonHealthReady({
+    system: { runtime: true },
+    boot: { phase: 'starting' },
+  })).toBe(false);
+  expect(isPublicDaemonHealthReady({
+    system: { runtime: false },
+    boot: { phase: 'ready' },
+  })).toBe(false);
+  expect(isPublicDaemonHealthReady(null)).toBe(false);
+});
 
 test('waitForHttpReady rejects when the spawned child exited behind a stale ready listener', async () => {
   const server = Bun.serve({

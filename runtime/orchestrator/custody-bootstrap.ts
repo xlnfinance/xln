@@ -322,13 +322,20 @@ export const waitForHttpReady = async (
   throw new Error(`URL did not become ready at ${url}: ${lastError}`);
 };
 
+export const isPublicDaemonHealthReady = (payload: unknown): boolean => {
+  // Bootstrap consumes only the unauthenticated health contract. Private adapter
+  // details are intentionally redacted there, while `ready` is published only
+  // after jurisdiction adapters and P2P have completed startup.
+  const body = payload as {
+    system?: { runtime?: boolean };
+    boot?: { phase?: string };
+  } | null;
+  return body?.system?.runtime === true && body.boot?.phase === 'ready';
+};
+
 const isDaemonHealthReady = (_response: Response, bodyText: string): boolean => {
   try {
-    const body = JSON.parse(bodyText) as {
-      system?: { runtime?: boolean };
-      jMachines?: Array<{ status?: string }>;
-    };
-    return body.system?.runtime === true && Array.isArray(body.jMachines) && body.jMachines.length > 0;
+    return isPublicDaemonHealthReady(JSON.parse(bodyText));
   } catch {
     return false;
   }

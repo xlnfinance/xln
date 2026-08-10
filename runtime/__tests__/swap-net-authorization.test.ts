@@ -10,6 +10,8 @@ import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { decodeAccountTx } from '../account/tx-validation';
 import { validateAccountReplica } from '../account/state-validation';
+import { buildEntityTransactionProposalAction } from '../entity/authorization';
+import { validateEntityTx } from '../entity/tx-validation';
 import { computeSwapPriceTicks, SWAP_LOT_SCALE } from '../orderbook/types';
 import { exactFillRatioToUint16 } from '../orderbook/swap-execution';
 import type { AccountReplica, SwapOffer } from '../types/account';
@@ -111,6 +113,30 @@ describe('swap net authorization', () => {
     const { minNetReceive: _removed, ...missing } = data;
     expect(() => decodeAccountTx({ type: 'swap_offer', data: missing }, 'TEST_SWAP'))
       .toThrow('TEST_SWAP_DATA_FIELDS');
+  });
+
+  test('persists authorized offers through the nested Entity proposal boundary', () => {
+    const placeSwapOffer = {
+      type: 'placeSwapOffer' as const,
+      data: {
+        counterpartyEntityId: 'hub',
+        offerId: 'nested-storage-offer',
+        giveTokenId: 1,
+        giveAmount: 100n,
+        wantTokenId: 2,
+        wantAmount: 90n,
+        maxFee: 1n,
+        minNetReceive: 89n,
+      },
+    };
+    const proposal = {
+      type: 'propose' as const,
+      data: {
+        proposer: 'validator',
+        action: buildEntityTransactionProposalAction([placeSwapOffer]),
+      },
+    };
+    expect(() => validateEntityTx(proposal, 'AUTHORIZED_SWAP_PROPOSAL')).not.toThrow();
   });
 
   test('validates and commits authorization into canonical Account offer state', async () => {
