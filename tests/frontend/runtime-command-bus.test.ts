@@ -830,7 +830,7 @@ test('entity panel pure RuntimeInput mutations do not require embedded RuntimeRe
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'add-token-to-account')");
   expect(source).not.toContain("throw new Error('Environment not ready')");
   expect(source).toMatch(/requireRuntimeEnv\(actionRuntimeEnv, ["']settings-import-jmachine["']\)/);
-  expect(source).toMatch(/requireRuntimeEnv\(actionRuntimeEnv, ["']send-external-asset["']\)/);
+  expect(source).toContain('captureSignerAuthorityContext("send-external-asset")');
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'move-reserve-to-external-draft')");
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'move-external-to-reserve-draft')");
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'debt-enforcement')");
