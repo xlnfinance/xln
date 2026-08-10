@@ -26,6 +26,25 @@ const callRawDaemon = (
   socket.on('error', reject);
 });
 
+const callRawDaemonSequence = (
+  socketPath: string,
+  requests: readonly DaemonRequest[],
+): Promise<DaemonResponse[]> => new Promise((resolve, reject) => {
+  const socket = connect(socketPath);
+  const decoder = createFrameDecoder();
+  const responses: DaemonResponse[] = [];
+  socket.on('connect', () => {
+    socket.write(Buffer.concat(requests.map(request => encodeMessage(request))));
+  });
+  socket.on('data', chunk => {
+    for (const message of decoder.push(chunk)) responses.push(message as DaemonResponse);
+    if (responses.length !== requests.length) return;
+    socket.end();
+    resolve(responses);
+  });
+  socket.on('error', reject);
+});
+
 test('daemon binds owner-only files and rejects the wrong API context', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'xln-daemon-'));
   const settings = {
@@ -87,6 +106,58 @@ test('daemon binds owner-only files and rejects the wrong API context', async ()
       ok: true,
       result: { pong: true },
     });
+  } finally {
+    await server.close();
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('daemon serializes shutdown and rejects later decoded commands', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'xln-daemon-order-'));
+  const settings = {
+    barStyle: 'closed' as const,
+    apiBase: 'https://xln.finance',
+    dbPath: join(homeDir, 'db'),
+    homeDir,
+    socketPath: join(homeDir, 'daemon.sock'),
+    profileName: 'wallet',
+  };
+  const session = {
+    settings,
+    env: createEmptyEnv('daemon-order'),
+    entityId: `0x${'11'.repeat(32)}`,
+    signerId: '1',
+    jurisdictionName: 'daemon-test',
+    identity: {
+      mnemonic: 'test only',
+      runtimeId: `0x${'22'.repeat(20)}`,
+      signerAddress: `0x${'22'.repeat(20)}`,
+      privateKeyHex: `0x${'33'.repeat(32)}`,
+      privateKeyBytes: new Uint8Array(32),
+      label: 'daemon-test',
+      entityId: null,
+    },
+  } satisfies CliSession;
+  const server = await startDaemonServer(session);
+  try {
+    const authToken = (await Bun.file(daemonTokenPath(settings)).text()).trim();
+    const request = (id: string, op: 'ping' | 'shutdown'): DaemonRequest => ({
+      id,
+      op,
+      authToken,
+      expectedApiBase: settings.apiBase,
+    });
+    const responses = await callRawDaemonSequence(settings.socketPath, [
+      request('before', 'ping'),
+      request('stop', 'shutdown'),
+      request('after', 'ping'),
+    ]);
+    expect(responses).toEqual([
+      { id: 'before', ok: true, result: { pong: true } },
+      { id: 'stop', ok: true, result: { shutdown: true } },
+      { id: 'after', ok: false, error: 'DAEMON_SHUTTING_DOWN' },
+    ]);
+    await server.closed;
   } finally {
     await server.close();
     await rm(homeDir, { recursive: true, force: true });

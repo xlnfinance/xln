@@ -185,3 +185,13 @@ test('same-j offers are projected only by the counterparty matcher', () => {
   expect(frameApplication).not.toContain('ORDERBOOK_EXTENSION_REQUIRED_FOR_MATCHING');
   expect(frameApplication).not.toContain('Fallback:');
 });
+
+test('public proof smoke exercises only the canonical timed dispute path', () => {
+  const publicProof = source('jurisdictions/scripts/public-proof-smoke.ts');
+  expect(publicProof).not.toContain('hashCooperativeDisputeProofHankoPayload');
+  expect(publicProof).not.toContain('cooperativeClose');
+  expect(publicProof).not.toContain('cooperative: true');
+  expect(publicProof).toContain('const disputeNonce = settlementNonce + 1n;');
+  expect(publicProof).toContain('cooperative: false');
+  expect(publicProof).toContain('await waitForUnixTimestamp(targetTimestamp)');
+});

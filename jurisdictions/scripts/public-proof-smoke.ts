@@ -7,7 +7,6 @@ import { ethers } from 'ethers';
 import { generateLazyEntityId } from '../../runtime/entity/factory';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../../runtime/hanko/batch';
 import {
-  hashCooperativeDisputeProofHankoPayload,
   hashCooperativeUpdateHankoPayload,
   hashDisputeProofHankoPayload,
 } from '../../runtime/hanko/onchain-domain';
@@ -246,39 +245,10 @@ try {
     'E2',
   );
 
-  const cooperativeNonce = settlementNonce + 1n;
-  const cooperativeHash = hashCooperativeDisputeProofHankoPayload(
-    domain,
-    accountKey,
-    cooperativeNonce,
-    proofBodyHash,
-    ethers.keccak256('0x'),
-  );
-  const cooperativeClose = createEmptyBatch();
-  cooperativeClose.disputeFinalizations.push({
-    counterentity: counterpartyEntityId,
-    initialNonce: Number(settlementNonce),
-    finalNonce: Number(cooperativeNonce),
-    initialProofbodyHash: ethers.ZeroHash,
-    finalProofbody: proofBody,
-    starterArguments: '0x',
-    otherArguments: '0x',
-    sig: buildSingleSignerHanko(counterpartyEntityId, cooperativeHash, counterpartyPrivateKey),
-    // The inner Hanko belongs to counterparty, so this flag describes the
-    // counterparty's side, not the outer batch signer.
-    startedByLeft: !ownerIsLeft,
-    cooperative: true,
-  });
-  const cooperativeCloseReceipt = await sendBatch(cooperativeClose);
-  const cooperativelyClosedAccount = await depository._accounts(accountKey);
-  if (cooperativelyClosedAccount.nonce !== cooperativeNonce) {
-    throw new Error(
-      `PUBLIC_PROOF_COOPERATIVE_CLOSE_NONCE_MISMATCH:` +
-      `${cooperativelyClosedAccount.nonce}:${cooperativeNonce}`,
-    );
-  }
-
-  const disputeNonce = cooperativeNonce + 1n;
+  // Cooperative dispute finalization is deliberately not a production path:
+  // Depository rejects it with E2. Start the canonical timed dispute directly
+  // from the last bilaterally settled nonce and prove the timeout path below.
+  const disputeNonce = settlementNonce + 1n;
   const disputeHash = hashDisputeProofHankoPayload(
     domain,
     accountKey,
@@ -377,7 +347,6 @@ try {
     tokenMintTransactionHash,
     depositTransactionHash: depositReceipt.hash,
     settlementTransactionHash: settlementReceipt.hash,
-    cooperativeCloseTransactionHash: cooperativeCloseReceipt.hash,
     disputeStartTransactionHash: disputeStartReceipt.hash,
     disputeFinalizeTransactionHash: finalizationReceipt.hash,
     withdrawalTransactionHash: withdrawalReceipt.hash,

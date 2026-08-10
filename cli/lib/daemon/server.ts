@@ -137,18 +137,41 @@ export const startDaemonServer = async (
   const authToken = randomBytes(32).toString('hex');
   await writeFile(tokenPath, authToken, { encoding: 'utf8', mode: 0o600 });
   await chmod(tokenPath, 0o600);
+  let shuttingDown = false;
+  let requestQueue = Promise.resolve();
+  const sockets = new Set<Socket>();
+  const endSocketsAfterQueueDrain = (): void => {
+    queueMicrotask(() => {
+      void requestQueue.finally(() => {
+        for (const openSocket of sockets) openSocket.end();
+      });
+    });
+  };
 
   const server = createServer(socket => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
     const decoder = createFrameDecoder();
-    socket.on('data', async chunk => {
+    socket.on('data', chunk => {
       for (const message of decoder.push(chunk)) {
         const req = message as DaemonRequest;
-        const response = await handleRequest(session, req, authToken);
-        respond(socket, response);
-        if (req.op === 'shutdown' && response.ok) {
-          socket.end();
-          server.close();
-        }
+        // One unlocked CliSession is one financial command lane. Socket data
+        // callbacks may overlap across clients, so serialize at process scope;
+        // per-socket ordering alone still permits pay/pay and pay/shutdown races.
+        requestQueue = requestQueue.then(async () => {
+          const response = shuttingDown
+            ? { id: req.id, ok: false, error: 'DAEMON_SHUTTING_DOWN' }
+            : await handleRequest(session, req, authToken);
+          respond(socket, response);
+          if (req.op === 'shutdown' && response.ok) {
+            // Every command admitted before this shutdown has completed. Stop
+            // new connections now; requests already decoded after shutdown are
+            // rejected by the same queue instead of racing session teardown.
+            shuttingDown = true;
+            server.close();
+            endSocketsAfterQueueDrain();
+          }
+        });
       }
     });
   });
@@ -182,6 +205,9 @@ export const startDaemonServer = async (
   return {
     closed,
     close: async () => {
+      shuttingDown = true;
+      await requestQueue;
+      for (const socket of sockets) socket.end();
       if (server.listening) server.close();
       await closed;
     },

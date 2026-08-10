@@ -45,7 +45,7 @@ describe('e2e demo user helper', () => {
     expect(completeBody).toContain('PROFILE_ONBOARDING_SUBMIT_FAILED');
   });
 
-  test('waits for hub gossip profile hydration through a connected p2p client', () => {
+  test('waits for hub gossip profile hydration through the narrow connectivity boundary', () => {
     const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-connect.ts'), 'utf8');
     const waitForProfileStart = helper.indexOf('async function waitForHubRuntimeProfile');
     const waitForProfileEnd = helper.indexOf('async function waitForHubRuntimeTransportReady');
@@ -55,10 +55,11 @@ describe('e2e demo user helper', () => {
     const body = helper.slice(waitForProfileStart, waitForProfileEnd);
     expect(body).toContain('lastHubProfileState');
     expect(body).toContain('connectedBefore');
-    expect(body).toContain('p2p.connect()');
-    expect(body).toContain('p2p.reconnect()');
-    expect(body).toContain('const ensureResult = await p2p.ensureProfiles?.([target])');
-    expect(body.indexOf('p2p.connect()')).toBeLessThan(body.indexOf('p2p.ensureProfiles'));
+    expect(body).toContain('connectivity.connect()');
+    expect(body).toContain('connectivity.reconnect()');
+    expect(body).toContain('const ensureResult = await connectivity.ensureProfiles?.([target])');
+    expect(body.indexOf('connectivity.connect()')).toBeLessThan(body.indexOf('connectivity.ensureProfiles'));
+    expect(body).not.toContain('isolatedEnv.infrastructure');
   });
 
   test('uses public readiness checks for prod UI-only hub connect', () => {

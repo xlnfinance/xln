@@ -1030,27 +1030,65 @@ function getMoveAllowanceToken(): ExternalToken {
   }
   return token;
 }
-async function getMoveAllowanceContext(context: string): Promise<{
+type SignerAuthorityContext = Readonly<{
   env: RuntimeReplica;
+  runtimeId: string;
+  entityId: string;
+  signerId: string;
+  owner: string;
+}>;
+function captureSignerAuthorityContext(context: string): SignerAuthorityContext {
+  const env = requireRuntimeEnv(actionRuntimeEnv, context);
+  const runtimeId = String(getRuntimeId(env) || "").trim();
+  const entityId = resolveSelfEntityId();
+  const signerId = String(currentSignerId || tab.signerId || "").trim();
+  const owner = resolveSelfEoaAddress();
+  if (!runtimeId) throw new Error(`${context}: active Runtime missing`);
+  if (!entityId) throw new Error(`${context}: active Entity missing`);
+  if (!signerId) throw new Error(`${context}: active signer missing`);
+  if (!isAddress(owner)) throw new Error(`${context}: active signer EOA missing`);
+  const exactReplica = buildEntityPanelView(env, entityId, signerId).replica;
+  if (!exactReplica) throw new Error(`${context}: Entity/signer replica missing`);
+  return { env, runtimeId, entityId, signerId, owner };
+}
+function signerAuthorityContextIsCurrent(authority: SignerAuthorityContext): boolean {
+  const env = getRuntimeEnv(actionRuntimeEnv);
+  return Boolean(
+    env &&
+    String(getRuntimeId(env) || "").trim() === authority.runtimeId &&
+    resolveSelfEntityId() === authority.entityId &&
+    String(currentSignerId || tab.signerId || "").trim() === authority.signerId &&
+    resolveSelfEoaAddress().toLowerCase() === authority.owner.toLowerCase()
+  );
+}
+function assertSignerAuthorityContextCurrent(
+  authority: SignerAuthorityContext,
+  context: string,
+): void {
+  if (!signerAuthorityContextIsCurrent(authority)) {
+    throw new Error(`${context}: signer authority context changed before submission`);
+  }
+}
+async function getMoveAllowanceContext(context: string): Promise<{
+  authority: SignerAuthorityContext;
   jadapter: JAdapter;
   token: ExternalToken;
-  owner: string;
   spender: string;
 }> {
-  const env = requireRuntimeEnv(actionRuntimeEnv, context);
+  // Capture every reactive authority field before the first await. Resolving
+  // the adapter or gas can yield long enough for the selected tab to change.
+  const authority = captureSignerAuthorityContext(context);
+  const token = getMoveAllowanceToken();
   const xln = await getXLN();
-  const jadapter = getCurrentEntityJAdapter(xln, env, context);
-  const owner = resolveSelfEoaAddress();
-  if (!isAddress(owner)) throw new Error("Active signer EOA missing");
+  const jadapter = getCurrentEntityJAdapter(xln, authority.env, context);
   const spender = String(jadapter.addresses.depository || "").trim();
   if (!isAddress(spender) || spender === ZeroAddress) {
     throw new Error("Depository address unavailable");
   }
   return {
-    env,
+    authority,
     jadapter,
-    token: getMoveAllowanceToken(),
-    owner,
+    token,
     spender,
   };
 }
@@ -1094,41 +1132,51 @@ async function ensureMoveAllowanceOwnerGas(jadapter: JAdapter, owner: string): P
   throw new Error(`External wallet lacks gas for approve owner=${owner} nativeBalance=${nextBalance}`);
 }
 async function approveMoveExternalAllowance(mode: "amount" | "max"): Promise<void> {
-  const { jadapter, token, owner, spender } = await getMoveAllowanceContext("move-erc20-allowance-approve");
-  const privKey = await getActiveSignerPrivateKey();
+  const { authority, jadapter, token, spender } = await getMoveAllowanceContext("move-erc20-allowance-approve");
+  const { owner, entityId } = authority;
+  const privKey = await getSignerPrivateKeyForAuthority(authority);
   const approvalAmount = mode === "max" ? MaxUint256 : parsePositiveAssetAmount(moveAllowanceAmount, token);
-  const entityId = String(replica?.state?.entityId || tab.entityId || "")
-    .trim()
-    .toLowerCase();
-  if (!entityId) throw new Error("Active entity missing for allowance approval");
   if (typeof token.tokenId !== "number") throw new Error(`Token id missing for ${token.symbol} allowance approval`);
   moveExecuting = true;
   moveAllowanceSubmittingMode = mode;
   moveProgressLabel = `Approving ${token.symbol} allowance`;
   try {
     await ensureMoveAllowanceOwnerGas(jadapter, owner);
+    assertSignerAuthorityContextCurrent(authority, "move-erc20-allowance-before-send");
     moveProgressLabel = `Approving ${token.symbol} allowance`;
     await jadapter.approveErc20(privKey, token.address, spender, approvalAmount, {
       entityId,
       tokenId: token.tokenId,
     });
-    await fetchExternalTokens(true);
-    let confirmedAllowance = readObservedExternalAllowance(getCurrentLiveEntityReplica()?.state?.externalWallet, owner, token.address, spender) ?? moveAllowanceRaw;
+    // Verify the receipt against the same adapter/owner/token/spender that was
+    // authorized at click time. Reactive UI state may now point at another
+    // Runtime or signer; consulting it could report false failure and invite a
+    // second approval, or mistake another wallet's allowance for this result.
+    let confirmedAllowance = await jadapter.getErc20Allowance(token.address, owner, spender);
     const confirmationDeadline = Date.now() + 5_000;
-    while ((confirmedAllowance === null || confirmedAllowance < approvalAmount) && Date.now() < confirmationDeadline) {
+    while (confirmedAllowance < approvalAmount && Date.now() < confirmationDeadline) {
       await sleep(200);
-      await fetchExternalTokens(true);
-      confirmedAllowance = readObservedExternalAllowance(getCurrentLiveEntityReplica()?.state?.externalWallet, owner, token.address, spender) ?? moveAllowanceRaw;
-    }
-    if (confirmedAllowance === null) {
-      throw new Error(`approveErc20 postcondition missing observed allowance owner=${owner} token=${token.address} spender=${spender}`);
+      confirmedAllowance = await jadapter.getErc20Allowance(token.address, owner, spender);
     }
     if (confirmedAllowance < approvalAmount) {
       throw new Error(`approveErc20 postcondition failed owner=${owner} token=${token.address} spender=${spender} ` + `allowance=${confirmedAllowance} requested=${approvalAmount}`);
     }
-    moveAllowanceRaw = confirmedAllowance;
-    moveAllowanceError = null;
-    moveAllowanceLoading = false;
+    if (signerAuthorityContextIsCurrent(authority)) {
+      moveAllowanceRaw = confirmedAllowance;
+      moveAllowanceError = null;
+      moveAllowanceLoading = false;
+      await fetchExternalTokens(true);
+    } else {
+      logEntityPanelDiagnostic("Move approve allowance completed after context switch", {
+        runtimeId: authority.runtimeId,
+        entityId: authority.entityId,
+        signerId: authority.signerId,
+        owner,
+        token: token.address,
+        spender,
+        allowance: confirmedAllowance.toString(),
+      });
+    }
     toasts.success(mode === "max" ? `Approved MAX ${token.symbol}` : `Approved ${formatAmount(approvalAmount, token.decimals)} ${token.symbol}`);
   } catch (error) {
     logEntityPanelDiagnostic("Move approve allowance failed", {
@@ -1726,24 +1774,34 @@ async function fetchExternalTokens(forceSnapshot = false) {
   return await externalFetchInFlight;
 }
 async function getActiveSignerPrivateKey(): Promise<Uint8Array> {
-  const signerId = String(currentSignerId || "").trim();
-  if (!signerId) throw new Error("No active signer selected");
+  return await getSignerPrivateKeyForAuthority(
+    captureSignerAuthorityContext("active-signer-private-key"),
+  );
+}
+async function getSignerPrivateKeyForAuthority(
+  authority: SignerAuthorityContext,
+): Promise<Uint8Array> {
   const xln = await getXLN();
   const getCachedSignerPrivateKey = xln.getCachedSignerPrivateKey;
   if (!getCachedSignerPrivateKey) throw new Error("Cached signer key reader unavailable");
-  const runtimeEnv = requireRuntimeEnv(actionRuntimeEnv, "active-signer-private-key");
-  const privKey = getCachedSignerPrivateKey(runtimeEnv, signerId);
-  if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
+  const privKey = getCachedSignerPrivateKey(authority.env, authority.signerId);
+  if (!privKey) throw new Error(`No registered signer key for ${authority.signerId}`);
+  const derivedOwner = new Wallet(hexlify(privKey)).address;
+  if (derivedOwner.toLowerCase() !== authority.owner.toLowerCase()) {
+    throw new Error(`SIGNER_KEY_AUTHORITY_MISMATCH:${authority.signerId}:${authority.owner}:${derivedOwner}`);
+  }
   return privKey;
 }
 async function sendExternalAsset(): Promise<void> {
+  const authority = captureSignerAuthorityContext("send-external-asset");
   const token = requirePanelExternalToken(sendAssetSymbol);
   const recipient = sendAssetRecipient.trim();
   if (!isAddress(recipient)) throw new Error("Recipient must be a valid EOA address");
   const amount = parsePositiveAssetAmount(sendAssetAmount, token, token.balance);
   const xln = await getXLN();
-  const jadapter = getCurrentEntityJAdapter(xln, requireRuntimeEnv(actionRuntimeEnv, "send-external-asset"), "send-external-asset");
-  const privKey = await getActiveSignerPrivateKey();
+  const jadapter = getCurrentEntityJAdapter(xln, authority.env, "send-external-asset");
+  const privKey = await getSignerPrivateKeyForAuthority(authority);
+  assertSignerAuthorityContextCurrent(authority, "send-external-asset-before-send");
   sendingExternalToken = token.symbol;
   try {
     if (token.address === ZeroAddress) {
