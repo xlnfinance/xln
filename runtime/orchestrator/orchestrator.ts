@@ -75,7 +75,6 @@ import {
   HUB_BASELINE_STATUS_LOG_INTERVAL_MS,
   HUB_DIRECT_LINK_BASELINE_GRACE_MS,
   HUB_NAMES,
-  HUB_PROFILES_READY_TIMEOUT_MS,
   HUB_REQUIRED_TOKEN_COUNT,
   MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
   RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
@@ -136,6 +135,8 @@ import {
   type RpcContractAddresses,
 } from './contract-readiness';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
+import { resolveConfiguredRelayAudience } from './relay-audience';
+import { areHubChildrenReady } from './hub-mesh-readiness';
 import {
   HUB_MESH_CREDIT_AMOUNT,
   deriveMarketMakerEntityId,
@@ -241,9 +242,12 @@ const marketMakerReadyRestartLimit = Math.max(
 );
 const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;
 const relayUrl = args.relayUrl;
+// There is one relay store/process. These are only its explicitly authenticated
+// browser-facing proxy names; accepting a Host value never creates another relay.
 const relayAudiences = new Set([
   canonicalizeRuntimeWsAudience(relayUrl),
   canonicalizeRuntimeWsAudience(new URL('/relay', args.publicWsBaseUrl).toString()),
+  ...args.relayAudienceUrls.map(canonicalizeRuntimeWsAudience),
 ]);
 
 const resolveRelayUpgradeData = (
@@ -252,9 +256,14 @@ const resolveRelayUpgradeData = (
   peerAddress: string | null,
 ): OrchestratorWebSocket['data'] | null => {
   const type = resolveOrchestratorSocketType(url.searchParams.get('protocol'));
-  const audience = canonicalizeRuntimeWsAudience(request.url);
-  // Host is caller-controlled; it selects only among operator-configured URLs.
-  if (type === 'relay' && !relayAudiences.has(audience)) return null;
+  const audience = type === 'relay'
+    ? resolveConfiguredRelayAudience({
+      requestUrl: request.url,
+      origin: request.headers.get('origin'),
+      configuredAudiences: relayAudiences,
+    })
+    : canonicalizeRuntimeWsAudience(request.url);
+  if (!audience) return null;
   return { type, audience, clientIp: resolveRequestClientIp(request, peerAddress) };
 };
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
@@ -1894,7 +1903,7 @@ const computeAggregatedHealth = (options: {
   const hubMeshOk =
     hubsOnline &&
     hubIds.length === HUB_NAMES.length &&
-    hubChildren.every((child) => child.lastHealth?.mesh?.ready === true);
+    areHubChildrenReady(hubChildren);
   const custodyOk = capabilityHealth.custodyOk;
   const bootstrapReservesOk =
     reserveEntities.length >= HUB_NAMES.length &&
@@ -2201,34 +2210,6 @@ const waitForHubBaseline = async (): Promise<void> => {
   }
 };
 
-const waitForHubProfilesReady = async (): Promise<void> => {
-  const deadline = Date.now() + HUB_PROFILES_READY_TIMEOUT_MS;
-  let lastVisibleByHub: Record<string, string[]> = {};
-  while (Date.now() < deadline) {
-    await pollAllHubHealth();
-    const allVisible = hubChildren.every((child) => {
-      const visibleNames = new Set(child.lastHealth?.gossip?.visibleHubNames ?? []);
-      return HUB_NAMES.every((name) => visibleNames.has(name));
-    });
-    if (allVisible) {
-      return;
-    }
-    lastVisibleByHub = Object.fromEntries(hubChildren.map(child => [
-      child.name,
-      child.lastHealth?.gossip?.visibleHubNames ?? [],
-    ]));
-    if (hubChildren.some((child) => !child.recoveryInProgress && (
-      child.proc?.exitCode !== null || child.proc?.signalCode !== null
-    ))) {
-      throw new Error(`HUB_PROFILES_READY_EXIT ${safeStringify(computeAggregatedHealth().hubs)}`);
-    }
-    await scheduler.wait(250);
-  }
-  console.warn(
-    `[MESH] continuing after gossip profile grace: timeoutMs=${HUB_PROFILES_READY_TIMEOUT_MS} visible=${safeStringify(lastVisibleByHub)}`,
-  );
-};
-
 const waitForMarketMakerReady = async (): Promise<void> => {
   let restartAttempts = 0;
   let publicDepthSignature = '';
@@ -2492,7 +2473,6 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     finishTiming('reset_spawn_h23', spawnH23StartedAt);
 
     const waitStartedAt = startTiming('reset_wait_hubs');
-    await waitForHubProfilesReady();
     await waitForHubBaseline();
     finishTiming('reset_wait_hubs', waitStartedAt);
 

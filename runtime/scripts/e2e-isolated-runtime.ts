@@ -153,6 +153,7 @@ const spawnText = (cmd: string, args: string[]): string => {
 
 export const isE2EBuildInputPath = (file: string): boolean => {
   const path = file.replaceAll('\\', '/').replace(/^\.\//, '');
+  if (!isE2ECodeInputPath(path)) return false;
   if (path.startsWith('runtime/')) {
     return !path.startsWith('runtime/__tests__/') && !path.startsWith('runtime/scripts/');
   }
@@ -166,6 +167,18 @@ export const isE2EBuildInputPath = (file: string): boolean => {
   return ['bun.lock', 'package.json', 'tsconfig.json', 'tsconfig.runtime.json', 'scripts/build-runtime.sh'].includes(
     path,
   );
+};
+
+const E2E_GENERATED_OUTPUTS = new Set([
+  'frontend/static/runtime.js',
+  'ui/public/runtime.js',
+]);
+
+export const isE2ECodeInputPath = (file: string): boolean => {
+  const path = file.replaceAll('\\', '/').replace(/^\.\//, '');
+  // These tracked bundles are outputs, not candidate authority. Dev watchers may
+  // rebuild them while an isolated run uses its own immutable runtime bundle.
+  return !E2E_GENERATED_OUTPUTS.has(path);
 };
 
 const updateSourceHash = (hash: ReturnType<typeof createHash>, file: string, data: Buffer): void => {
@@ -215,13 +228,14 @@ export const computeE2ESourceDriftProbe = (files: readonly string[], root = proc
   return hash.digest('hex');
 };
 
-export const computeRepositorySourceDriftProbe = (): string => computeE2ESourceDriftProbe(listRepositorySourceFiles());
+export const computeRepositorySourceDriftProbe = (): string =>
+  computeE2ESourceDriftProbe(listRepositorySourceFiles().filter(isE2ECodeInputPath));
 
 export const computeCodeFingerprint = (): QaCodeFingerprint => {
   const gitHead = spawnText('git', ['rev-parse', 'HEAD']) || null;
   const gitBranch = spawnText('git', ['rev-parse', '--abbrev-ref', 'HEAD']) || null;
   const gitStatus = spawnText('git', ['status', '--short', '--untracked-files=all']);
-  const files = listRepositorySourceFiles();
+  const files = listRepositorySourceFiles().filter(isE2ECodeInputPath);
   const hash = createHash('sha256');
   const buildInputHash = createHash('sha256');
   let trackedBytes = 0;

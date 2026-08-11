@@ -34,7 +34,7 @@ for name in RPC_PORT RPC2_PORT API_PORT WEB_PORT WEB_HTTP_PORT CUSTODY_PORT CUST
   require_env "$name"
 done
 if [[ "$role" == "ready" ]]; then
-  for name in DEV_RUNTIME_BUNDLE_PATH DEV_STARTED_AT_MS DEV_READY_TIMEOUT_MS; do
+  for name in DEV_RUNTIME_BUNDLE_PATH DEV_STARTED_AT_MS DEV_READY_TIMEOUT_MS DEV_RELAY_WEB_URLS; do
     require_env "$name"
   done
 fi
@@ -173,6 +173,8 @@ case "$role" in
         --host 127.0.0.1 \
         --port "$API_PORT" \
         --public-ws-base-url "ws://127.0.0.1:${API_PORT}" \
+        --relay-url "ws://127.0.0.1:${API_PORT}/relay" \
+        --relay-web-urls "$DEV_RELAY_WEB_URLS" \
         --rpc-url "http://127.0.0.1:${RPC_PORT}" \
         --rpc2-url "http://127.0.0.1:${RPC2_PORT}" \
         --db-root "$XLN_RDB_ROOT/mesh" \
@@ -203,7 +205,8 @@ case "$role" in
   ready)
     run_owned bun scripts/dev/wait-dev-ready.ts \
       --api-url "http://127.0.0.1:${API_PORT}" \
-      --web-url "http://127.0.0.1:${WEB_HTTP_PORT}" \
+      --web-url "http://localhost:${WEB_HTTP_PORT}" \
+      --relay-web-urls "$DEV_RELAY_WEB_URLS" \
       --watchtower-url "http://127.0.0.1:${WATCHTOWER_PORT}" \
       --runtime-bundle "$DEV_RUNTIME_BUNDLE_PATH" \
       --started-at-ms "$DEV_STARTED_AT_MS" \

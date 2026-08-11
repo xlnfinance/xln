@@ -130,8 +130,7 @@ const proxyConfig = {
  * audience from the request Host and validates it against the operator's
  * configured URLs, so rewriting the Host here would hand the browser an
  * audience for the API origin it never dialled and every hello would fail
- * `WS_HELLO_AUDIENCE_MISMATCH`. Dev keeps `changeOrigin` because its browser
- * and relay already share an origin.
+ * `WS_HELLO_AUDIENCE_MISMATCH`.
  */
 const previewProxyConfig = {
 	...proxyConfig,

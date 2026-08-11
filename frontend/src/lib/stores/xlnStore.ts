@@ -69,7 +69,9 @@ import {
   resolveStoredRemoteRuntimeAuthKey,
   type RemoteRuntimeHubSummary,
 } from '$lib/utils/remoteRuntimeImport';
-import { waitForOpenAccountCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
+import {
+  waitForOpenAccountCounterpartyProfiles,
+} from '$lib/utils/p2pPrefetch';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
 import { parseProfile } from '@xln/runtime/entity/profile';
@@ -118,7 +120,6 @@ export const REMOTE_VIEW_PAGE_SIZE = REMOTE_RUNTIME.VIEW_PAGE_SIZE;
 const REMOTE_PROJECTION_REFRESH_WARNING_COOLDOWN_MS = 7_500;
 const FRONTEND_REMOTE_REQUEST_TIMEOUT_MS = 5_000;
 const FRONTEND_REMOTE_RECONNECT_MAX_MS = 2_000;
-const OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS = 1_200;
 const REMOTE_RUNTIME_PROJECTION_WAIT_TIMEOUT_MS = 5_000;
 const REMOTE_RUNTIME_PROJECTION_WAIT_POLL_MS = 100;
 const PAYMENT_GOSSIP_REFRESH_ATTEMPTS = 3;
@@ -1573,7 +1574,7 @@ const routeRuntimeInput = async (
     }
     assertLocalRuntimeInputIngressOpen(runtimeEnv);
     if (input.entityInputs?.length) {
-      const ready = await waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs, OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS);
+      const ready = await waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs);
       if (!ready) {
         throw new Error('OPEN_ACCOUNT_COUNTERPARTY_PROFILE_NOT_READY: counterparty jurisdiction profile is not ready');
       }
@@ -1708,7 +1709,7 @@ export async function dispatchRuntimeInputToRuntimeEnv(env: RuntimeReplica, inpu
   const xln = await getXLN();
   assertLocalRuntimeInputIngressOpen(runtimeEnv);
   if (input.entityInputs?.length) {
-    const ready = await waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs, OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS);
+    const ready = await waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs);
     if (!ready) {
       throw new Error('OPEN_ACCOUNT_COUNTERPARTY_PROFILE_NOT_READY: counterparty jurisdiction profile is not ready');
     }

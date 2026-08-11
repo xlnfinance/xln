@@ -230,6 +230,30 @@ describe('hub baseline progress', () => {
     expect(after.evaluations['H2']?.stalled).toBe(false);
   });
 
+  test('gossip profiles remain part of the canonical baseline completion gate', () => {
+    const missingProfiles = health({
+      timings: p2pReady,
+      gossip: { visibleHubNames: ['H1'], visibleHubIds: ['h1'], ready: false },
+      mesh: { ready: true, pairs: [] },
+      bootstrapReserves: { ok: true, targetMet: true, tokens: [], entities: [] },
+    });
+    const initial = evaluateHubBaselineDeadlines(
+      [{ name: 'H1', health: missingProfiles }],
+      {},
+      0,
+      60_000,
+    );
+    const stalled = evaluateHubBaselineDeadlines(
+      [{ name: 'H1', health: missingProfiles }],
+      initial.state,
+      60_000,
+      60_000,
+    );
+    expect(stalled.stalledNames).toEqual(['H1']);
+    expect(buildHubBaselineProgressSignature([{ name: 'H1', health: missingProfiles }]))
+      .toContain('profiles');
+  });
+
   test('counts only the exact peer mirror as causal progress for a waiting hub', () => {
     const h1 = health({ entityId: 'h1', timings: p2pReady });
     const h2 = health({ entityId: 'h2', timings: p2pReady });

@@ -94,7 +94,10 @@ export default defineConfig({
         target: API_PROXY_TARGET,
         agent: API_PROXY_AGENT,
         ws: true,
-        changeOrigin: true,
+        // The relay challenge is bound to the browser-visible WebSocket
+        // audience. Rewriting Host to the API port makes every authenticated
+        // browser Runtime sign a different audience and permanently fail P2P.
+        changeOrigin: false,
         configure: configureWsProxyLifecycle,
       },
     },

@@ -120,6 +120,7 @@ export {
   deriveE2EShardPaths,
   deriveE2EShardPorts,
   isE2EBuildInputPath,
+  isE2ECodeInputPath,
   parseE2EChildPerfOutput,
   readE2EChildrenPerf,
 } from './e2e-isolated-runtime';

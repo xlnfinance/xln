@@ -18,6 +18,7 @@ import {
   deriveE2EBuildArtifacts,
   deriveE2EShardPaths,
   deriveE2EShardPorts,
+  isE2ECodeInputPath,
   LOCAL_TEST_STACK_BASES,
   parsePlaywrightFilesFlag,
 } from '../scripts/run-e2e-parallel-isolated';
@@ -428,5 +429,12 @@ describe('isolated E2E runner resources', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('generated runtime bundles cannot invalidate an isolated source candidate', () => {
+    expect(isE2ECodeInputPath('runtime/runtime.ts')).toBe(true);
+    expect(isE2ECodeInputPath('frontend/src/app.ts')).toBe(true);
+    expect(isE2ECodeInputPath('frontend/static/runtime.js')).toBe(false);
+    expect(isE2ECodeInputPath('ui/public/runtime.js')).toBe(false);
   });
 });

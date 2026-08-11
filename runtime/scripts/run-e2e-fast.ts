@@ -10,6 +10,10 @@ import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 
 const FAST_E2E_TARGETS = [
   {
+    file: 'tests/e2e-brainvault-parity.spec.ts',
+    title: 'standalone BrainVault creates and starts the XLN wallet with deterministic seed material',
+  },
+  {
     file: 'tests/e2e-payment-smoke.spec.ts',
     title: 'fresh runtimes can open accounts, faucet, pay, and reload persisted state',
   },

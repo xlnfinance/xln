@@ -1,10 +1,19 @@
 #!/usr/bin/env bun
 
 import { stat } from 'node:fs/promises';
+import { deriveSignerAddressSync, signDigest } from '../../runtime/account/crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../runtime/protocol/p2p-crypto';
+import {
+  deserializeWsMessage,
+  hashHelloMessage,
+  serializeWsMessage,
+} from '../../runtime/network/p2p/ws-protocol';
+import { relayAudienceFromWebUrl } from '../../runtime/orchestrator/relay-audience';
 
 export type DevReadyProbe = {
   apiUrl: string;
   webUrl: string;
+  relayWebUrls: string[];
   watchtowerUrl: string;
   runtimeBundle: string;
   startedAtMs: number;
@@ -21,6 +30,70 @@ const readObject = async (response: Response): Promise<Record<string, unknown>> 
     ? value as Record<string, unknown>
     : {};
 };
+
+const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> => new Promise(resolve => {
+  const expectedAudience = relayAudienceFromWebUrl(webUrl);
+  const origin = new URL(webUrl).origin;
+  const probeSeed = 'xln/dev-ready/relay-auth/v1';
+  const signerLabel = '1';
+  const runtimeId = deriveSignerAddressSync(probeSeed, signerLabel).toLowerCase();
+  const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(probeSeed).publicKey);
+  const socket = new WebSocket(expectedAudience, { headers: { Origin: origin } });
+  socket.binaryType = 'arraybuffer';
+  let settled = false;
+  const finish = (result: DevReadyResult): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    socket.close();
+    resolve(result);
+  };
+  const timer = setTimeout(
+    () => finish({ ready: false, reason: 'wallet-relay-challenge-timeout' }),
+    2_000,
+  );
+  socket.onmessage = event => {
+    try {
+      const message = deserializeWsMessage(event.data as ArrayBuffer);
+      if (message.type === 'hello_ack') {
+        if (message.to !== runtimeId) {
+          finish({ ready: false, reason: 'wallet-relay-auth-runtime-mismatch' });
+          return;
+        }
+        finish({ ready: true });
+        return;
+      }
+      if (message.type !== 'hello_challenge') return;
+      if (message.audience !== expectedAudience) {
+        finish({
+          ready: false,
+          reason: `wallet-relay-audience-mismatch:${String(message.audience || 'missing')}`,
+        });
+        return;
+      }
+      const timestamp = Date.now();
+      socket.send(serializeWsMessage({
+        type: 'hello',
+        from: runtimeId,
+        fromEncryptionPubKey: encryptionPubKey,
+        timestamp,
+        audience: expectedAudience,
+        auth: {
+          nonce: message.challenge!,
+          timestamp,
+          signature: signDigest(
+            probeSeed,
+            signerLabel,
+            hashHelloMessage(runtimeId, encryptionPubKey, timestamp, message.challenge!, expectedAudience),
+          ),
+        },
+      }));
+    } catch (error) {
+      finish({ ready: false, reason: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  socket.onerror = () => finish({ ready: false, reason: 'wallet-relay-websocket-error' });
+});
 
 export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResult> => {
   try {
@@ -54,6 +127,12 @@ export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResul
     if (!watchtowerResponse.ok || watchtower['ok'] !== true) {
       return { ready: false, reason: `watchtower-http-${watchtowerResponse.status}` };
     }
+    for (const webUrl of input.relayWebUrls) {
+      const relay = await probeRelayChallenge(webUrl);
+      if (!relay.ready) {
+        return { ready: false, reason: `${webUrl}:${relay.reason}` };
+      }
+    }
     return { ready: true };
   } catch (error) {
     return {
@@ -82,6 +161,15 @@ const stringFlag = (name: string): string => {
   return value;
 };
 
+const stringListFlag = (name: string): string[] => {
+  const values = stringFlag(name)
+    .split(',')
+    .map(value => value.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  if (values.length === 0) throw new Error(`DEV_READY_ARG_INVALID:${name}`);
+  return [...new Set(values)];
+};
+
 const numberFlag = (name: string): number => {
   const value = Number(stringFlag(name));
   if (!Number.isSafeInteger(value) || value <= 0) {
@@ -99,6 +187,7 @@ if (import.meta.main) {
   const input: DevReadyProbe = {
     apiUrl: stringFlag('--api-url').replace(/\/$/, ''),
     webUrl: stringFlag('--web-url').replace(/\/$/, ''),
+    relayWebUrls: stringListFlag('--relay-web-urls'),
     watchtowerUrl: stringFlag('--watchtower-url').replace(/\/$/, ''),
     runtimeBundle: stringFlag('--runtime-bundle'),
     startedAtMs: numberFlag('--started-at-ms'),

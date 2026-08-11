@@ -333,12 +333,9 @@ test('frontend remote runtime operations use short fail-fast budgets', () => {
 
   expect(xlnStoreSource).toContain('const FRONTEND_REMOTE_REQUEST_TIMEOUT_MS = 5_000');
   expect(xlnStoreSource).toContain('const FRONTEND_REMOTE_RECONNECT_MAX_MS = 2_000');
-  expect(xlnStoreSource).toContain('const OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS = 1_200');
   expect(xlnStoreSource).toContain('const REMOTE_RUNTIME_PROJECTION_WAIT_TIMEOUT_MS = 5_000');
   expect(xlnStoreSource).toContain('requestTimeoutMs: config.requestTimeoutMs ?? FRONTEND_REMOTE_REQUEST_TIMEOUT_MS');
   expect(xlnStoreSource).toContain('reconnectMaxMs: config.reconnectMaxMs ?? FRONTEND_REMOTE_RECONNECT_MAX_MS');
-  expect(xlnStoreSource).toContain('waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs, OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS)');
-  expect(xlnStoreSource).not.toContain('waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs, 5_000)');
 
   expect(runtimeConnectionSource).toContain('const PROJECTION_RUNTIME_CONNECT_TIMEOUT_MS = 6_000');
   expect(runtimeConnectionSource).toContain('const PROJECTION_RUNTIME_REQUEST_TIMEOUT_MS = 5_000');

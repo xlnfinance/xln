@@ -63,10 +63,12 @@ export const buildHubBaselineProgressSignature = (
       health?.timings?.['p2p_connect']?.completedAt !== undefined,
     phase: !health
       ? 'health'
-      : health.timings?.['p2p_connect']?.completedAt === null ||
+        : health.timings?.['p2p_connect']?.completedAt === null ||
         health.timings?.['p2p_connect']?.completedAt === undefined
         ? 'startup'
-        : !health.mesh?.ready
+        : !health.gossip?.ready
+          ? 'profiles'
+          : !health.mesh?.ready
           ? 'accounts'
           : !health.bootstrapReserves?.ok
             ? 'reserves'
@@ -153,7 +155,8 @@ export const evaluateHubBaselineDeadlines = (
       lastProgressAt: evaluation.lastProgressAt,
     };
     evaluations[observation.name] = evaluation;
-    const complete = observation.health?.mesh?.ready === true &&
+    const complete = observation.health?.gossip?.ready === true &&
+      observation.health.mesh?.ready === true &&
       observation.health.bootstrapReserves?.ok === true;
     if (!complete && evaluation.stalled) stalledNames.push(observation.name);
   }

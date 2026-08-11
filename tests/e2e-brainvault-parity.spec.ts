@@ -31,6 +31,8 @@ type CanonicalEntityProbe = {
   height: number;
   profileName: string;
   accountCount: number;
+  accountIds: string[];
+  pendingAccountIds: string[];
 };
 
 type BrowserEntityEnv = {
@@ -227,6 +229,14 @@ async function waitForCanonicalProfile(page: Page, expectedProfileName: string):
         height: Number(replica?.state?.height || 0),
         profileName: replica.state.profile.name,
         accountCount: Number(replica?.state?.accounts?.size || 0),
+        accountIds: Array.from(replica?.state?.accounts?.keys?.() ?? [])
+          .map(String)
+          .map(value => value.toLowerCase())
+          .sort(),
+        pendingAccountIds: Array.from(replica?.state?.accounts?.entries?.() ?? [])
+          .filter(([, account]) => Boolean((account as { pendingFrame?: unknown })?.pendingFrame))
+          .map(([counterpartyId]) => String(counterpartyId).toLowerCase())
+          .sort(),
       };
     }
     return null;
@@ -278,6 +288,7 @@ async function startBrainvaultWallet(page: Page, expectedProfileName: string): P
   const configureHeading = page.getByRole('heading', { name: /Configure account/i });
   await expect(configureHeading).toBeVisible({ timeout: 30_000 });
   await page.locator('#display-name').fill(expectedProfileName);
+  await page.locator('#hub-join-select').selectOption('3');
 
   const terms = page.locator('.confirm-section input[type="checkbox"]').first();
   if (!await terms.isChecked()) await terms.check();
@@ -338,6 +349,32 @@ async function startBrainvaultWallet(page: Page, expectedProfileName: string): P
   return waitForCanonicalProfile(page, expectedProfileName);
 }
 
+async function readDurableHubProfileIds(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const profiles = (window as typeof window & {
+      isolatedEnv?: { gossip?: { profiles?: Map<string, { metadata?: { isHub?: boolean } }> } };
+    }).isolatedEnv?.gossip?.profiles;
+    return Array.from(profiles?.entries?.() ?? [])
+      .filter(([, profile]) => profile.metadata?.isHub === true)
+      .map(([entityId]) => entityId.toLowerCase())
+      .sort();
+  });
+}
+
+async function readAdvertisedHubIds(page: Page): Promise<string[]> {
+  const response = await page.request.get(new URL('/api/hubs', APP_BASE_URL).toString());
+  expect(response.ok()).toBe(true);
+  const payload = await response.json() as {
+    ok?: boolean;
+    hubs?: Array<{ entityId?: string; metadata?: { isHub?: boolean } }>;
+  };
+  expect(payload.ok).toBe(true);
+  return (payload.hubs ?? [])
+    .filter(hub => hub.metadata?.isHub === true && typeof hub.entityId === 'string')
+    .map(hub => hub.entityId!.toLowerCase())
+    .sort();
+}
+
 test.describe('brainvault parity', () => {
   for (const currentCase of CASES) {
     test(`browser brainvault matches local CLI for ${currentCase.shards} shards`, { tag: '@functional' }, async ({ page }) => {
@@ -391,10 +428,15 @@ test.describe('brainvault parity', () => {
     expect(canonicalEntity.signerId).toBe(expectedRuntimeId);
     expect(canonicalEntity.replicaKey).toBe(`${canonicalEntity.entityId}:${canonicalEntity.signerId}`);
     expect(canonicalEntity.height).toBeGreaterThan(0);
-    if (canonicalEntity.accountCount < 1) {
+    if (canonicalEntity.accountCount !== 3) {
       const diagnostic = await readOnboardingRuntimeDiagnostics(page);
       throw new Error(`BRAINVAULT_AUTO_JOIN_NOT_FINALIZED:${JSON.stringify(diagnostic)}`);
     }
+    expect(canonicalEntity.pendingAccountIds).toEqual([]);
+    const visibleHubIds = await readDurableHubProfileIds(page);
+    const advertisedHubIds = await readAdvertisedHubIds(page);
+    expect(canonicalEntity.accountIds.every(accountId => visibleHubIds.includes(accountId))).toBe(true);
+    expect(canonicalEntity.accountIds.every(accountId => advertisedHubIds.includes(accountId))).toBe(true);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     const restoredEntity = await waitForCanonicalProfile(page, 'standalone live profile');
@@ -402,7 +444,9 @@ test.describe('brainvault parity', () => {
     expect(restoredEntity.entityId).toBe(canonicalEntity.entityId);
     expect(restoredEntity.signerId).toBe(canonicalEntity.signerId);
     expect(restoredEntity.height).toBeGreaterThanOrEqual(canonicalEntity.height);
-    expect(restoredEntity.accountCount).toBeGreaterThanOrEqual(1);
+    expect(restoredEntity.accountCount).toBe(3);
+    expect(restoredEntity.accountIds).toEqual(canonicalEntity.accountIds);
+    expect(restoredEntity.pendingAccountIds).toEqual([]);
     await expect(page.getByRole('heading', { name: /Configure account/i })).toHaveCount(0);
   });
 

@@ -1,6 +1,7 @@
 import type { RuntimeReplica, RoutedEntityInput } from '@xln/runtime/api/public/runtime-module';
 
 const DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS = 1_200;
+const OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS = 5_000;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -144,7 +145,7 @@ function collectOpenAccountCounterparties(entityInputs: readonly RoutedEntityInp
 export async function waitForOpenAccountCounterpartyProfiles(
   env: RuntimeReplica | null | undefined,
   entityInputs: readonly RoutedEntityInput[],
-  timeoutMs = DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS,
+  timeoutMs = OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS,
 ): Promise<boolean> {
   const pairs = collectOpenAccountCounterparties(entityInputs);
   if (pairs.length === 0) return true;

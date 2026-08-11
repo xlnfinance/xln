@@ -3,6 +3,7 @@ import { normalizeLoopbackUrl } from '../network/p2p/loopback-url';
 import { readPositiveIntegerEnv } from '../config/environment';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import type { Args } from './orchestrator-types';
+import { relayAudienceFromWebUrl } from './relay-audience';
 
 const argsRaw = process.argv.slice(2);
 
@@ -15,7 +16,6 @@ export const HEALTH_RESPONSE_REFRESH_TIMEOUT_MS = Math.max(
   250,
   Math.min(CHILD_HEALTH_TIMEOUT_MS, readPositiveIntegerEnv('XLN_HEALTH_RESPONSE_REFRESH_TIMEOUT_MS', 1_500)),
 );
-export const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntegerEnv('XLN_HUB_PROFILES_READY_TIMEOUT_MS', 5_000);
 export const HUB_BASELINE_TIMEOUT_MS = readPositiveIntegerEnv('XLN_HUB_BASELINE_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
 export const HUB_BASELINE_STALL_TIMEOUT_MS = Math.max(
   10_000,
@@ -104,6 +104,11 @@ export const parseArgs = (): Args => {
   fallbackRelayUrl.pathname = '/relay';
   fallbackRelayUrl.search = '';
   fallbackRelayUrl.hash = '';
+  const relayAudienceUrls = String(getArg('--relay-web-urls', ''))
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+    .map(relayAudienceFromWebUrl);
   const rpcUrls: Record<number, string> = {};
   for (const index of RPC_PROXY_INDEXES) {
     const flag = index === 1 ? '--rpc-url' : `--rpc${index}-url`;
@@ -118,6 +123,7 @@ export const parseArgs = (): Args => {
     host,
     port,
     relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || ''), fallbackRelayUrl.toString(), '--relay-url'),
+    relayAudienceUrls,
     publicWsBaseUrl,
     nodeApiPortBase,
     nodePublicPortBase,

@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 
 import {
   hasUsableOpenAccountCounterpartyProfile,
@@ -61,16 +60,35 @@ test('prewarmCounterpartyProfiles degrades cleanly when runtime p2p is unavailab
   await expect(prewarmCounterpartyProfiles({ infrastructure: {} } as never, ['0xabc'])).resolves.toBe(false);
 });
 
-test('open-account profile waits stay fail-fast for cockpit commands', () => {
-  const source = readFileSync('frontend/src/lib/utils/p2pPrefetch.ts', 'utf8');
-  const openAccountSlice = source.slice(
-    source.indexOf('export async function waitForOpenAccountCounterpartyProfiles'),
-    source.indexOf('export async function waitForCounterpartyRuntimeRoutes'),
-  );
-  expect(source).toContain('const DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS = 1_200');
-  expect(openAccountSlice).toContain('timeoutMs = DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS');
-  expect(openAccountSlice).not.toContain('timeoutMs = 5_000');
-  expect(openAccountSlice).not.toContain('Math.min(boundedTimeoutMs, 5_000)');
+test('open-account profile wait survives a cold browser P2P handshake', async () => {
+  const profiles: Array<{
+    entityId: string;
+    runtimeId: string;
+    metadata: { isHub: boolean; jurisdiction: typeof TRON_JURISDICTION };
+  }> = [];
+  const env = envWithSourceJurisdiction({
+    gossip: { getProfiles: () => profiles },
+    infrastructure: {
+      p2p: {
+        ensureProfiles: async () => profiles.length > 0,
+      },
+    },
+  });
+  const input = {
+    entityId: SOURCE,
+    signerId: SIGNER,
+    entityTxs: [{ type: 'openAccount', data: { targetEntityId: COUNTERPARTY } }],
+  };
+  const publish = setTimeout(() => profiles.push({
+    entityId: COUNTERPARTY,
+    runtimeId: `0x${'55'.repeat(20)}`,
+    metadata: { isHub: true, jurisdiction: TRON_JURISDICTION },
+  }), 1_300);
+  try {
+    await expect(waitForOpenAccountCounterpartyProfiles(env as never, [input] as never)).resolves.toBe(true);
+  } finally {
+    clearTimeout(publish);
+  }
 });
 
 test('waitForCounterpartyRuntimeRoutes requires a gossip runtime id', async () => {

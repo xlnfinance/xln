@@ -1,12 +1,71 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { probeDevReady } from '../../scripts/dev/wait-dev-ready';
+import { verifyHelloAuth } from '../network/p2p/hello-auth';
+import { deserializeWsMessage, serializeWsMessage } from '../network/p2p/ws-protocol';
+import { areHubChildrenReady } from '../orchestrator/hub-mesh-readiness';
+import { relayAudienceFromWebUrl, resolveConfiguredRelayAudience } from '../orchestrator/relay-audience';
 
 const repoRoot = resolve(import.meta.dir, '../..');
+
+test('dev wallet uses one shared web-origin list for relay authorization and readiness', () => {
+  const dev = readFileSync(join(repoRoot, 'scripts/dev/run-dev.sh'), 'utf8');
+  const devChild = readFileSync(join(repoRoot, 'scripts/dev/run-dev-child.sh'), 'utf8');
+  const httpVite = readFileSync(join(repoRoot, 'frontend/vite.config.http.ts'), 'utf8');
+  const relayProxy = httpVite.slice(
+    httpVite.indexOf("'/relay':"),
+    httpVite.indexOf('},', httpVite.indexOf("'/relay':")) + 2,
+  );
+
+  expect(devChild).toContain('--relay-url "ws://127.0.0.1:${API_PORT}/relay"');
+  expect(dev).toContain('DEV_RELAY_WEB_URLS="${DEV_WEB_SCHEME}://localhost:${WEB_PORT},http://localhost:${WEB_HTTP_PORT}"');
+  expect(devChild).toContain('--relay-web-urls "$DEV_RELAY_WEB_URLS"');
+  expect(devChild).toContain('--web-url "http://localhost:${WEB_HTTP_PORT}"');
+  expect(devChild.match(/--relay-web-urls "\$DEV_RELAY_WEB_URLS"/g)).toHaveLength(2);
+  expect(relayProxy).toContain('changeOrigin: false');
+  expect(relayProxy).not.toContain('changeOrigin: true');
+});
+
+test('relay proxy selects only exact configured HTTP and HTTPS browser audiences', () => {
+  const audiences = new Set([
+    'ws://127.0.0.1:8082/relay',
+    relayAudienceFromWebUrl('http://localhost:8081'),
+    relayAudienceFromWebUrl('https://localhost:8080'),
+  ]);
+  expect(resolveConfiguredRelayAudience({
+    requestUrl: 'ws://127.0.0.1:8082/relay',
+    origin: 'http://localhost:8081',
+    configuredAudiences: audiences,
+  })).toBe('ws://localhost:8081/relay');
+  expect(resolveConfiguredRelayAudience({
+    requestUrl: 'ws://127.0.0.1:8082/relay',
+    origin: 'https://localhost:8080',
+    configuredAudiences: audiences,
+  })).toBe('wss://localhost:8080/relay');
+  expect(resolveConfiguredRelayAudience({
+    requestUrl: 'ws://127.0.0.1:8082/relay',
+    origin: 'https://attacker.invalid',
+    configuredAudiences: audiences,
+  })).toBeNull();
+  expect(resolveConfiguredRelayAudience({
+    requestUrl: 'ws://127.0.0.1:8082/relay',
+    origin: null,
+    configuredAudiences: audiences,
+  })).toBe('ws://127.0.0.1:8082/relay');
+});
+
+test('mesh readiness requires bilateral mesh and signed gossip profiles', () => {
+  const child = (mesh: boolean, gossip: boolean) => ({
+    lastHealth: { mesh: { ready: mesh }, gossip: { ready: gossip } },
+  });
+  expect(areHubChildrenReady([child(true, true)])).toBe(true);
+  expect(areHubChildrenReady([child(true, false)])).toBe(false);
+  expect(areHubChildrenReady([child(false, true)])).toBe(false);
+});
 
 test('dev readiness uses canonical runtime-import readiness and every browser sidecar', async () => {
   const root = mkdtempSync(join(tmpdir(), 'xln-dev-ready-'));
@@ -21,13 +80,48 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
       ? Response.json({ ok: true, ready: true })
       : new Response('not found', { status: 404 }),
   });
-  const web = Bun.serve({
+  const serveWebRelay = () => {
+    const server = Bun.serve<{ challenge: string; audience: string }>({
     hostname: '127.0.0.1',
     port: 0,
-    fetch: request => new URL(request.url).pathname === '/runtime.js'
-      ? new Response('export const ready = true;', { headers: { 'content-type': 'text/javascript' } })
-      : new Response('<main>ready</main>', { headers: { 'content-type': 'text/html' } }),
-  });
+    fetch: (request, server) => {
+      const pathname = new URL(request.url).pathname;
+      if (pathname === '/relay') {
+        const audience = `ws://127.0.0.1:${server.port}/relay`;
+        return server.upgrade(request, { data: { challenge: 'dev-ready-test', audience } })
+          ? undefined
+          : new Response('upgrade failed', { status: 400 });
+      }
+      return pathname === '/runtime.js'
+        ? new Response('export const ready = true;', { headers: { 'content-type': 'text/javascript' } })
+        : new Response('<main>ready</main>', { headers: { 'content-type': 'text/html' } });
+    },
+    websocket: {
+      open(socket) {
+        socket.send(serializeWsMessage({
+          type: 'hello_challenge',
+          challenge: socket.data.challenge,
+          audience: socket.data.audience,
+        }));
+      },
+      message(socket, raw) {
+        const hello = deserializeWsMessage(raw);
+        const authError = verifyHelloAuth(
+          hello.from!,
+          hello.fromEncryptionPubKey!,
+          hello.auth,
+          10_000,
+          socket.data.audience,
+        );
+        if (authError) throw new Error(authError);
+        socket.send(serializeWsMessage({ type: 'hello_ack', to: hello.from! }));
+      },
+    },
+    });
+    return server;
+  };
+  const web = serveWebRelay();
+  const relayAlias = serveWebRelay();
   const watchtower = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -38,6 +132,10 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
     const input = {
       apiUrl: `http://127.0.0.1:${api.port}`,
       webUrl: `http://127.0.0.1:${web.port}`,
+      relayWebUrls: [
+        `http://127.0.0.1:${web.port}`,
+        `http://127.0.0.1:${relayAlias.port}`,
+      ],
       watchtowerUrl: `http://127.0.0.1:${watchtower.port}`,
       runtimeBundle,
       startedAtMs,
@@ -48,6 +146,7 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
       'scripts/dev/wait-dev-ready.ts',
       '--api-url', input.apiUrl,
       '--web-url', input.webUrl,
+      '--relay-web-urls', input.relayWebUrls.join(','),
       '--watchtower-url', input.watchtowerUrl,
       '--runtime-bundle', runtimeBundle,
       '--started-at-ms', String(startedAtMs),
@@ -69,6 +168,7 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
   } finally {
     api.stop(true);
     web.stop(true);
+    relayAlias.stop(true);
     watchtower.stop(true);
     rmSync(root, { recursive: true, force: true });
   }
@@ -84,6 +184,7 @@ test('dev readiness rejects a partial runtime-import response before claiming re
     expect(await probeDevReady({
       apiUrl: `http://127.0.0.1:${api.port}`,
       webUrl: 'http://127.0.0.1:1',
+      relayWebUrls: ['http://127.0.0.1:1'],
       watchtowerUrl: 'http://127.0.0.1:1',
       runtimeBundle: '/missing/runtime.js',
       startedAtMs: Date.now(),
