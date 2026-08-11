@@ -1844,6 +1844,7 @@ test.describe('Rebalance E2E', () => {
     await timedStep('rebalance_persist.wait_hub_profile', () => waitForHubProfile(page, hubId));
     await timedStep('rebalance_persist.connect_hub', () => connectHub(page, entityId, signerId, hubId));
     scenarioStartedAt = Date.now();
+    const firstSettlementCursor = await getPersistedReceiptCursor(page);
 
     const firstPersistTrigger = await timedStep('rebalance_persist.drive_to_first_request', () =>
       driveFaucetsUntilRequestCollateralCommitted(page, {
@@ -1919,6 +1920,12 @@ test.describe('Rebalance E2E', () => {
       collateral: BigInt(firstSnapshot.collateral || '0'),
       jHeight: Number(firstSnapshot.lastFinalizedJHeight || 0),
     };
+    const firstSettlement = await waitForPersistedFrameEventMatch(page, {
+      cursor: firstSettlementCursor,
+      eventName: 'account_settled_finalized_bilateral',
+      entityId,
+      predicate: (event) => persistedEventHasAccount(event, hubId),
+    });
     const claimSnapshotBeforeReload = await readAccountJEventClaims(page, hubId);
     const uniqueSettleKeysBeforeReload = new Set(
       (claimSnapshotBeforeReload?.claims || []).map((claim) => `${claim.txHash}:${claim.nonce}:${claim.jHeight}`),
@@ -1937,6 +1944,7 @@ test.describe('Rebalance E2E', () => {
         };
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toEqual(settledBeforeReload);
     });
+    const secondSettlementCursor = await getPersistedReceiptCursor(page);
 
     const secondPersistTrigger = await timedStep('rebalance_persist.drive_to_second_request', () =>
       driveFaucetsUntilRequestCollateralCommitted(page, {
@@ -1996,28 +2004,12 @@ test.describe('Rebalance E2E', () => {
       debugErrors: finalArtifacts.debugErrors,
       frameEvents: finalArtifacts.frameEvents,
     });
-    const userIdLower = entityId.toLowerCase();
-    const hubIdLower = hubId.toLowerCase();
-    const userDeliveredCount = countRebalanceStepEvents(
-      finalSteps,
-      'j_event_delivered',
-      (step) => String(step.entityId || '').toLowerCase() === userIdLower,
-    );
-    const hubDeliveredCount = countRebalanceStepEvents(
-      finalSteps,
-      'j_event_delivered',
-      (step) => String(step.entityId || '').toLowerCase() === hubIdLower,
-    );
-    const userClaimQueuedCount = countRebalanceStepEvents(
-      finalSteps,
-      'j_event_claim_queued',
-      (step) => String(step.entityId || '').toLowerCase() === userIdLower,
-    );
-    const hubClaimQueuedCount = countRebalanceStepEvents(
-      finalSteps,
-      'j_event_claim_queued',
-      (step) => String(step.entityId || '').toLowerCase() === hubIdLower,
-    );
+    const secondSettlement = await waitForPersistedFrameEventMatch(page, {
+      cursor: secondSettlementCursor,
+      eventName: 'account_settled_finalized_bilateral',
+      entityId,
+      predicate: (event) => persistedEventHasAccount(event, hubId),
+    });
     const claimSnapshotAfterReload = await readAccountJEventClaims(page, hubId);
     const uniqueSettleKeysAfterReload = new Set(
       (claimSnapshotAfterReload?.claims || []).map((claim) => `${claim.txHash}:${claim.nonce}:${claim.jHeight}`),
@@ -2028,10 +2020,18 @@ test.describe('Rebalance E2E', () => {
     expect(Number(postReloadSnapshot.lastFinalizedJHeight || 0) > settledBeforeReload.jHeight, `jHeight must advance after reload second cycle\n${finalDebugDump}`).toBe(true);
     expect(BigInt(postReloadSnapshot.requested || '0'), `requested must clear after reload second cycle\n${finalDebugDump}`).toBe(0n);
     expect(BigInt(postReloadSnapshot.uncollateralized || '0'), `uncollateralized must clear after reload second cycle\n${finalDebugDump}`).toBe(0n);
-    expect(userDeliveredCount >= 2, `user runtime must receive AccountSettled before and after reload\n${finalDebugDump}`).toBe(true);
-    expect(hubDeliveredCount >= 2, `hub runtime must receive AccountSettled before and after reload\n${finalDebugDump}`).toBe(true);
-    expect(userClaimQueuedCount >= 2, `user runtime must queue bilateral j_event_claim before and after reload\n${finalDebugDump}`).toBe(true);
-    expect(hubClaimQueuedCount >= 2, `hub runtime must queue bilateral j_event_claim before and after reload\n${finalDebugDump}`).toBe(true);
+    expect(
+      firstSettlement.frameHeight > firstPersistTrigger.committed.frameHeight,
+      `first durable settlement must follow its request commit\n${finalDebugDump}`,
+    ).toBe(true);
+    expect(
+      secondSettlement.frameHeight > secondPersistTrigger.committed.frameHeight,
+      `second durable settlement must follow its request commit\n${finalDebugDump}`,
+    ).toBe(true);
+    expect(
+      secondSettlement.frameHeight > firstSettlement.frameHeight,
+      `post-reload durable settlement must be distinct from the first cycle\n${finalDebugDump}`,
+    ).toBe(true);
     const finalizedJHeightAdvancedAfterReload = Number(postReloadSnapshot.lastFinalizedJHeight || 0) > settledBeforeReload.jHeight;
     expect(
       uniqueSettleKeysAfterReload.size >= uniqueSettleKeysBeforeReload.size + 1 ||
