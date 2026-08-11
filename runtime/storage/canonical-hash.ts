@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-event-collector';
+import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-events';
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeInput, RuntimeReplica } from '../runtime/types';

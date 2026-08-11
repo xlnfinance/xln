@@ -1,5 +1,7 @@
 import type { EntityFrameEvent, EntityState } from './types';
-import { ENTITY_FRAME_EVENT_COLLECTOR } from './frame-event-collector';
+
+/** Reducer-local carrier excluded from every consensus and storage projection. */
+export const ENTITY_FRAME_EVENT_COLLECTOR = '__xlnEntityFrameEvents' as const;
 
 type EntityStateWithFrameEvents = EntityState & {
   [ENTITY_FRAME_EVENT_COLLECTOR]?: EntityFrameEvent[];

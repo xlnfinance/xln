@@ -16,7 +16,7 @@ const TARGETS = [
   'runtime/account/consensus/index.ts',
   'runtime/entity/consensus/leader-certificates.ts',
   'runtime/entity/consensus/j-prefix-round.ts',
-  'runtime/entity/consensus/state-size-observation.ts',
+  'runtime/entity/consensus/state-quota.ts',
   'runtime/entity/consensus/input-consensus.ts',
   'runtime/entity/consensus/frame-application.ts',
   'runtime/runtime/j-submit.ts',

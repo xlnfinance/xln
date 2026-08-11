@@ -12,7 +12,7 @@ import { entityLog } from './entity-log';
 import {
   emitCommittedEntitySizeLog,
   prepareCommittedEntitySizeLog,
-} from './state-size-observation';
+} from './state-quota';
 import {
   pruneReplicaFinalizedJHistory,
   runLocalPostCommitHooks,

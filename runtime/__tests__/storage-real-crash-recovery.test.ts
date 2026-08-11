@@ -18,7 +18,7 @@ import {
   deriveLocalEntityCryptoKeys,
   requireEntityEncryptionPrivateKey,
 } from '../entity/crypto';
-import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-event-collector';
+import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-events';
 import { getEntityLeaderState } from '../entity/consensus/leader';
 import { buildJPrefixCertificate } from '../jurisdiction/machine/j-prefix-consensus';
 import { generateNumberedEntityId } from '../entity/factory';
