@@ -365,7 +365,7 @@ describe('swap panel helpers', () => {
     const placeStart = panel.indexOf('async function placeSwapOffer()');
     const cancelStart = panel.indexOf('async function cancelSwapOffer(');
     const clearStart = panel.indexOf('async function requestCrossClear(');
-    const formatStart = panel.indexOf('// Format BigInt for display');
+    const formatStart = panel.indexOf('function formatAmount(');
     expect(placeStart).toBeGreaterThan(0);
     expect(cancelStart).toBeGreaterThan(placeStart);
     expect(clearStart).toBeGreaterThan(cancelStart);
