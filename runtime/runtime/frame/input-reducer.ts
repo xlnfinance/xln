@@ -18,6 +18,7 @@ import { applyRuntimeTx } from '../tx-handlers';
 import {
   atomicCrossJPairIndexesThatDidNotCommit,
   admitAtomicCrossJAccountInputs,
+  markPotentialAtomicCrossJInputPairs,
 } from './cross-j-atomic-admission';
 import {
   markCommittedAtomicCrossJAckOutputs,
@@ -307,7 +308,8 @@ const applyRuntimeInputPhases = async (
   isReplay: boolean,
 ): Promise<{ result: AppliedRuntimeInput; profiledRuntimeTxs: RuntimeTx[] }> => {
   const ingress = prepareRuntimeInputIngress(env, runtimeInput, isReplay, deps);
-  const mergedInputs = mergeEntityInputs(ingress.entityInputs, input =>
+  const cohortIsolatedInputs = markPotentialAtomicCrossJInputPairs(ingress.entityInputs);
+  const mergedInputs = mergeEntityInputs(cohortIsolatedInputs, input =>
     hasVerifiedEntityCommitPrecertificate(env, input));
   profile.mark('validateMerge');
   if (runtimeInput.reliableReceipts?.length) {

@@ -1109,8 +1109,12 @@ run_local_deploy() {
   export PATH="$HOME/.bun/bin:$PATH"
 
   if [ "$FRESH" = "1" ]; then
-    echo "[deploy] removing local runtime state"
-    rm -rf db db-tmp
+    if [ "$PRODUCTION" != "1" ]; then
+      echo "[deploy] removing local runtime state"
+      rm -rf db db-tmp
+    else
+      echo "[deploy] preserving checkout state until production migration completes"
+    fi
     find logs -type f -name '*.log' -delete 2>/dev/null || true
   fi
 
@@ -1212,8 +1216,8 @@ run_local_deploy() {
 
       if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
         export XLN_MESH_PRESERVE_STATE_ON_RESET=1
-        echo "[deploy] resetting production anvil + runtime state"
-        rm -rf "$XLN_RDB_ROOT/runtime/prod-main" "$XLN_RDB_ROOT/runtime/prod-mesh" "$XLN_RDB_ROOT/custody/prod" "$XLN_RDB_ROOT/custody-tmp"
+        echo "[deploy] resetting production anvil + runtime + chain-bound watchtower state"
+        rm -rf "$XLN_RDB_ROOT/runtime/prod-main" "$XLN_RDB_ROOT/runtime/prod-mesh" "$XLN_RDB_ROOT/custody/prod" "$XLN_RDB_ROOT/custody-tmp" "$XLN_RDB_ROOT/watchtower/prod-main" "$XLN_RDB_ROOT/watchtower/push-main"
         rm -f "$XLN_JDB_ROOT/anvil-state.json" "$XLN_JDB_ROOT/anvil2-state.json"
         install -d -m 700 "$XLN_RDB_ROOT/runtime"
         rm -f "$XLN_RDB_ROOT/runtime/.mesh-reset-once" "$XLN_RDB_ROOT/runtime/.mesh-reset-once.claimed"

@@ -37,6 +37,7 @@ import {
   submitCrossJurisdictionIntent,
   submitCrossJurisdictionSwap,
 } from '../runtime';
+import { markPotentialAtomicCrossJInputPairs } from '../runtime/frame/cross-j-atomic-admission';
 
 import { buildCrossJurisdictionSwapSubmission } from '../runtime/jurisdiction-api';
 
@@ -1367,6 +1368,26 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...proposals,
     ];
     expect(selectPotentialCrossJAccountInputPairs(repeatedCohorts)).toHaveLength(2);
+    const prematurelyMergedCohorts = mergeEntityInputs(repeatedCohorts);
+    expect(prematurelyMergedCohorts).toHaveLength(2);
+    expect(prematurelyMergedCohorts.every(input =>
+      getEffectiveEntityInputTxs(input).filter(tx => tx.type === 'accountInput').length === 2,
+    )).toBe(true);
+    const safelyMergedCohorts = mergeEntityInputs(
+      markPotentialAtomicCrossJInputPairs(repeatedCohorts),
+    );
+    expect(safelyMergedCohorts).toHaveLength(4);
+    expect(safelyMergedCohorts.every(input =>
+      getEffectiveEntityInputTxs(input).filter(tx => tx.type === 'accountInput').length === 1,
+    )).toBe(true);
+    expect(selectPotentialCrossJAccountInputPairs(safelyMergedCohorts)).toHaveLength(2);
+    const unframedLocalCohort = proposals.map(input => {
+      const { sourceRuntimeFrame: _sourceRuntimeFrame, ...localInput } = input;
+      return localInput;
+    });
+    const markedLocalCohort = markPotentialAtomicCrossJInputPairs(unframedLocalCohort);
+    expect(markedLocalCohort.every(input => input.atomicCrossJurisdictionPair === undefined)).toBe(true);
+    expect(() => mergeEntityInputs(markedLocalCohort)).not.toThrow();
     // Regression: dispatch pairs with allowDifferentSourceRuntimeFrames because
     // sibling Entity consensus may certify the two legs of one cohort in
     // adjacent Runtime frames. That option also drops the only predicate

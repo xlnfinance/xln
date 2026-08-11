@@ -18,6 +18,7 @@ const MAX_CROSS_J_LOG_SAMPLES = 8;
 type CrossJSelection = ReturnType<typeof selectMatchedCrossJAccountInputPairs>;
 type CrossJPair = CrossJSelection['pairs'][number];
 type EntityInputOutcomes = RuntimeEntityInputApplyResult['inputOutcomes'];
+type AtomicCrossJPairMarker = NonNullable<RoutedEntityInput['atomicCrossJurisdictionPair']>;
 
 type AtomicProposalRetryCohort = Readonly<{
   indexes: readonly [number, number];
@@ -85,6 +86,43 @@ export const selectPotentialAtomicCrossJInputIndexes = (
       .flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]),
   );
 
+const applyAtomicCrossJPairMarkers = (
+  inputs: readonly RoutedEntityInput[],
+  markers: ReadonlyMap<number, AtomicCrossJPairMarker>,
+): RoutedEntityInput[] => inputs.map((input, inputIndex) => {
+  const marker = markers.get(inputIndex);
+  return marker
+    ? { ...input, atomicCrossJurisdictionPair: { ...marker } }
+    : input;
+});
+
+/**
+ * Preserve complete cross-j cohorts before generic Entity-input merging.
+ *
+ * A locally produced pair may not have its transport envelope marker yet.
+ * Merging those legs by Entity first can concatenate independent Account
+ * inputs and turn valid 2-leg cohorts into an ambiguous 3-candidate group.
+ * This marker only isolates structure; state-aware authorization and exact
+ * Account-frame verification still happen in `admitAtomicCrossJAccountInputs`.
+ */
+export const markPotentialAtomicCrossJInputPairs = (
+  inputs: readonly RoutedEntityInput[],
+): RoutedEntityInput[] => {
+  const markers = new Map<number, AtomicCrossJPairMarker>();
+  for (const pair of selectPotentialCrossJAccountInputPairs(inputs)) {
+    const source = inputs[pair.sourceInputIndex]!;
+    const target = inputs[pair.targetInputIndex]!;
+    if (source.atomicCrossJurisdictionPair || target.atomicCrossJurisdictionPair) continue;
+    // Local loopback inputs intentionally have no transport frame. Marking them
+    // would make the Entity merge key require provenance that does not exist.
+    if (!source.sourceRuntimeFrame || !target.sourceRuntimeFrame) continue;
+    const marker = { phase: 'proposal' as const, pairKey: pair.pairKey };
+    markers.set(pair.sourceInputIndex, marker);
+    markers.set(pair.targetInputIndex, marker);
+  }
+  return applyAtomicCrossJPairMarkers(inputs, markers);
+};
+
 export const atomicCrossJPairIndexesThatDidNotCommit = (
   pairs: CrossJSelection['pairs'],
   outcomes: EntityInputOutcomes,
@@ -143,7 +181,7 @@ const groupAtomicPairsFirst = (
   if (grouped.rejectedLegs.length > 0 || grouped.pairs.length !== selection.pairs.length) {
     throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_GROUPING_DIVERGED');
   }
-  const markers = new Map<number, RoutedEntityInput['atomicCrossJurisdictionPair']>();
+  const markers = new Map<number, AtomicCrossJPairMarker>();
   for (const pair of grouped.pairs) {
     const marker = { phase: pair.phase, pairKey: pair.pairKey };
     markers.set(pair.sourceInputIndex, marker);
@@ -151,12 +189,7 @@ const groupAtomicPairsFirst = (
   }
   return {
     ...grouped,
-    inputs: grouped.inputs.map((input, inputIndex) => {
-      const marker = markers.get(inputIndex);
-      return marker
-        ? { ...input, atomicCrossJurisdictionPair: { ...marker } }
-        : input;
-    }),
+    inputs: applyAtomicCrossJPairMarkers(grouped.inputs, markers),
   };
 };
 

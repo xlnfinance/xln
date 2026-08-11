@@ -393,8 +393,8 @@ describe('production startup wiring', () => {
     const receiptHelper = readFileSync(join(repoRoot, 'tests/utils/e2e-runtime-receipts.ts'), 'utf8');
 
     expect(paymentSmoke).toContain("Boolean(env && typeof env === 'object' && String(env.runtimeId || '').trim())");
-    expect(paymentSmoke).toContain('if (await hasActivityDebugQuery(historyPage))');
-    expect(paymentSmoke).toContain("historyPage.getByTestId('entity-history-event').count()");
+    expect(paymentSmoke).toContain('if (await hasActivityDebugQuery(page))');
+    expect(paymentSmoke).toContain("page.getByTestId('entity-history-event').count()");
     expect(receiptHelper).toContain("throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE')");
     expect(receiptHelper).toContain("throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE')");
     expect(receiptHelper).not.toContain('catch {\n      return { cursor: { nextHeight }');
@@ -1438,13 +1438,17 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('--code-only');
     expect(deploy).toContain('if [ "$RESET_PRODUCTION_MESH" = "1" ]; then');
     expect(deploy).toContain('echo "[deploy] restarting production services without resetting anvil/runtime state"');
-    expect(deploy).toContain('echo "[deploy] resetting production anvil + runtime state"');
+    expect(deploy).toContain('echo "[deploy] resetting production anvil + runtime + chain-bound watchtower state"');
     expect(deploy).toContain('export XLN_JDB_ROOT="${XLN_JDB_ROOT:-$XLN_STATE_ROOT/jdb}"');
     expect(deploy).toContain('export XLN_RDB_ROOT="${XLN_RDB_ROOT:-$XLN_STATE_ROOT/rdb}"');
     expect(deploy).toContain('PRODUCTION_STATE_MIGRATION_COLLISION');
+    expect(deploy).toContain('if [ "$PRODUCTION" != "1" ]; then');
+    expect(deploy).toContain('echo "[deploy] preserving checkout state until production migration completes"');
     expect(deploy).toContain('rmdir data db db-tmp 2>/dev/null || true');
     expect(deploy).toContain('chmod -R go-rwx "$XLN_STATE_ROOT"');
     expect(deploy).toContain('rm -rf "$XLN_RDB_ROOT/runtime/prod-main"');
+    expect(deploy).toContain('"$XLN_RDB_ROOT/watchtower/prod-main"');
+    expect(deploy).toContain('"$XLN_RDB_ROOT/watchtower/push-main"');
     expect(deploy).not.toContain('-- --reset');
     expect(deploy).toContain('--kill-timeout 60000 --restart-delay 2000');
     const startAnvil = deploy.slice(

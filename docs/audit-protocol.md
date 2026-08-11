@@ -492,13 +492,23 @@ One release epoch has one scope, one writer, and one immutable candidate:
    editing when the root cause or ownership boundary is uncertain.
 4. Fix in priority order: irreversible money/authority, deterministic replay,
    persistence/restart, authenticated transport, then user-path correctness.
-5. Prove every fix L1 then L2. Create a candidate commit only when the mutable
-   worktree has no unexplained changes.
-6. Pin two independent auditors to that exact candidate. Any accepted finding
-   creates a new candidate and invalidates only its dependency cone.
-7. On the final unchanged candidate, run browser/F12 evidence and the owning L3
-   gate exactly once, then integrate directly into `main`.
-8. Remove merged temporary worktrees and branches. Preserve an annotated audit
+5. Before freezing, run one deletion/deduplication pass: remove the displaced
+   path, shared formula, fallback, and redundant state. At every non-obvious
+   authority boundary, keep a short comment naming the tempting wrong design,
+   its hostile old→new counterexample, and the owning L1 regression. Comments
+   explain evidence; they never replace it.
+6. Prove every fix with its recorded exact commands: L1 then L2, followed by
+   `bun run check`. Create a candidate commit only when the mutable worktree has
+   no unexplained changes.
+7. Pin two blind independent auditors from different model families to the
+   exact candidate SHA and invariant question. The primary adjudicates concrete
+   claims against the code and trust model; scores and votes do not close a
+   finding. Any semantic fix creates a new candidate and invalidates affected
+   tests and quorum.
+8. On the final unchanged candidate, run browser/F12 evidence and the owning L3
+   gate exactly once, then integrate directly into `main`. A gate failure returns
+   to the smallest reproducing L1/L2; never rerun an unchanged broad gate.
+9. Remove merged temporary worktrees and branches. Preserve an annotated audit
    or release tag when the snapshot must remain addressable.
 
 The handoff packet contains: final SHA, scope and deferrals, open findings,
