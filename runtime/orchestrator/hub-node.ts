@@ -107,7 +107,7 @@ import {
   registerRuntimeFrameCommitCallback,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
-import { registerEnvChangeCallback } from '../runtime/loop-environment';
+import { registerEnvChangeCallback } from '../runtime/loop/loop-environment.ts';
 import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered-registration-driver';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';

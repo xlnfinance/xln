@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
-import { mergeDurableReceiptOnlyInputs } from '../runtime/reliable-durable-inputs';
-import { getInputReliableIdentity } from '../runtime/reliable-receipt';
-import { reliableIdentityExactKey } from '../runtime/reliable-frontier';
+import { mergeDurableReceiptOnlyInputs } from '../runtime/reliable/reliable-durable-inputs.ts';
+import { getInputReliableIdentity } from '../runtime/reliable/reliable-receipt.ts';
+import { reliableIdentityExactKey } from '../runtime/reliable/reliable-frontier.ts';
 import { splitRoutedOutputByDeliveryLane } from '../runtime/output-routing';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import { safeStringify } from '../protocol/serialization';

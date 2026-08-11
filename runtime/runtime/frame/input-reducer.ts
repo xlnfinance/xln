@@ -13,7 +13,7 @@ import { getPerfMs } from '../../infra/time';
 import { attachEventEmitters } from '../env-events';
 import { applyMergedEntityInputs } from '../entity-inputs';
 import type { RuntimeEntityRoutingDeps } from '../entity-routing';
-import { applyReliableDeliveryReceipts, type ReliableIngressCommit } from '../reliable-delivery';
+import { applyReliableDeliveryReceipts, type ReliableIngressCommit } from '../reliable/reliable-delivery.ts';
 import { applyRuntimeTx } from '../tx-handlers';
 import {
   atomicCrossJPairIndexesThatDidNotCommit,

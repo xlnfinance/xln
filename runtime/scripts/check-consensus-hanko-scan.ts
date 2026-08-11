@@ -79,7 +79,7 @@ const entityConsensusPaths = [
 ];
 const entityConsensusPath = entityConsensusPaths.join(', ');
 const envEventsPath = 'runtime/runtime/env-events.ts';
-const entityEffectPublicationPath = 'runtime/runtime/entity-input-output.ts';
+const entityEffectPublicationPath = 'runtime/runtime/entity-input/entity-input-output.ts';
 const entityFramePath = 'runtime/entity/consensus/frame.ts';
 const hankoSigningPath = 'runtime/hanko/signing.ts';
 const hankoCodecPath = 'runtime/hanko/codec.ts';

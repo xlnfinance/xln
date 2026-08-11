@@ -3,7 +3,7 @@ import {
   cloneIsolatedRuntimeInput,
 } from '../../runtime/input-clone';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { writeRuntimeMetadata } from '../../runtime/loop-environment';
+import { writeRuntimeMetadata } from '../../runtime/loop/loop-environment.ts';
 import { restoreDurableOutputRetryState } from '../../runtime/durable-output-retry';
 import type { RuntimeReplica } from '../../runtime/types';
 import {

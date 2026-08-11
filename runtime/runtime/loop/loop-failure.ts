@@ -1,7 +1,7 @@
-import { createStructuredLogger } from '../infra/logger';
-import { normalizeRuntimeFailureCode } from '../protocol/failure-taxonomy';
-import type { RuntimeReplica } from './types';
-import { transitionRuntimeLifecycle } from './lifecycle';
+import { createStructuredLogger } from '../../infra/logger.ts';
+import { normalizeRuntimeFailureCode } from '../../protocol/failure-taxonomy.ts';
+import type { RuntimeReplica } from '../types.ts';
+import { transitionRuntimeLifecycle } from '../lifecycle.ts';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 

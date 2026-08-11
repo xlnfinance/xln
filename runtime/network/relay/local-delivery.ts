@@ -21,7 +21,7 @@ import { createStructuredLogger } from '../../infra/logger';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
 import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
 import { decodeRuntimeEntityInputsEnvelope } from '../p2p/entity-input-envelope';
-import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input-envelope-auth';
+import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input/entity-input-envelope-auth.ts';
 
 const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'

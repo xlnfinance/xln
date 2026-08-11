@@ -1,29 +1,29 @@
-import type { RuntimeReplica } from './types';
-import { getWallClockMs } from '../infra/time';
-import { inferRuntimeLifecyclePhase, transitionRuntimeLifecycle } from './lifecycle';
-import { requestRuntimeLoopWake, requireRuntimeMempool } from './input-queue';
+import type { RuntimeReplica } from '../types.ts';
+import { getWallClockMs } from '../../infra/time.ts';
+import { inferRuntimeLifecyclePhase, transitionRuntimeLifecycle } from '../lifecycle.ts';
+import { requestRuntimeLoopWake, requireRuntimeMempool } from '../input-queue.ts';
 import {
   waitForRuntimeLoopWake,
   waitForRuntimeLoopWakeOrTimeout,
-} from './loop-infrastructure';
+} from './loop-infrastructure.ts';
 import {
   generateHookPings,
   getEarliestWallClockDueTimestamp,
   getRemainingRuntimeFrameDelayMs,
-} from './loop-work';
-import { yieldRuntimeIoTurn } from './platform';
-import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
-import { deleteScheduledWakeIndex, rebuildScheduledWakeIndex } from './scheduled-wake';
+} from './loop-work.ts';
+import { yieldRuntimeIoTurn } from '../platform.ts';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
+import { deleteScheduledWakeIndex, rebuildScheduledWakeIndex } from '../scheduled-wake.ts';
 import {
   startJurisdictionWatchers,
   stopJurisdictionWatchers,
   stopJurisdictionWatchersAndWait,
-} from './loop-watchers';
+} from './loop-watchers.ts';
 import {
   waitForPromiseBeforeTimeout,
   waitForRuntimeWorkDrained,
-} from './loop-drain';
-import { emitRuntimeLoopError, reportFatalLoopError } from './loop-failure';
+} from './loop-drain.ts';
+import { emitRuntimeLoopError, reportFatalLoopError } from './loop-failure.ts';
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;

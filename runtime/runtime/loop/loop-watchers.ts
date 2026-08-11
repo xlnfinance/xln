@@ -1,9 +1,9 @@
 import type { Provider } from 'ethers';
-import type { JAdapter } from '../jurisdiction/adapter/types';
-import { createStructuredLogger } from '../infra/logger';
-import type { RuntimeReplica } from './types';
-import type { JReplica } from '../types/jurisdiction-runtime';
-import { getLiveJAdapter, getLiveJAdapterEntries } from './live-jadapters';
+import type { JAdapter } from '../../jurisdiction/adapter/types.ts';
+import { createStructuredLogger } from '../../infra/logger.ts';
+import type { RuntimeReplica } from '../types.ts';
+import type { JReplica } from '../../types/jurisdiction-runtime.ts';
+import { getLiveJAdapter, getLiveJAdapterEntries } from '../live-jadapters.ts';
 
 const watcherLog = createStructuredLogger('runtime.jadapter-watcher');
 

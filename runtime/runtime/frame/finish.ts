@@ -2,7 +2,7 @@ import type { RuntimeReplica } from '../types';
 import {
   rollbackReliableDeliveryReceipts,
   rollbackReliableIngressCommit,
-} from '../reliable-delivery';
+} from '../reliable/reliable-delivery.ts';
 import { requireRuntimeMempool } from '../input-queue';
 import { transitionRuntimeLifecycle } from '../lifecycle';
 import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';

@@ -49,9 +49,9 @@ test('rpc jadapter startup and watcher lifecycle logs stay structured', () => {
 
 test('runtime dev startup status logs stay structured', () => {
   const runtime = readFileSync(join(process.cwd(), 'runtime/runtime/composition.ts'), 'utf8');
-  const runtimeLoop = readFileSync(join(process.cwd(), 'runtime/runtime/loop.ts'), 'utf8');
-  const runtimeWatchers = readFileSync(join(process.cwd(), 'runtime/runtime/loop-watchers.ts'), 'utf8');
-  const runtimeFailure = readFileSync(join(process.cwd(), 'runtime/runtime/loop-failure.ts'), 'utf8');
+  const runtimeLoop = readFileSync(join(process.cwd(), 'runtime/runtime/loop/loop.ts'), 'utf8');
+  const runtimeWatchers = readFileSync(join(process.cwd(), 'runtime/runtime/loop/loop-watchers.ts'), 'utf8');
+  const runtimeFailure = readFileSync(join(process.cwd(), 'runtime/runtime/loop/loop-failure.ts'), 'utf8');
   const runtimeFrameStart = readFileSync(join(process.cwd(), 'runtime/runtime/frame/start.ts'), 'utf8');
   const hubNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/hub-node.ts'), 'utf8');
   const marketMakerNode = readMarketMakerNodeSource();

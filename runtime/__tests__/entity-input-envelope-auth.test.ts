@@ -4,7 +4,7 @@ import { createEmptyEnv } from '../runtime';
 import {
   assertRuntimeEntityInputsEnvelopeSource,
   signRuntimeEntityInputsEnvelope,
-} from '../runtime/entity-input-envelope-auth';
+} from '../runtime/entity-input/entity-input-envelope-auth.ts';
 import type { UnsignedRuntimeEntityInputsEnvelope } from '../runtime/types';
 
 const setup = () => {

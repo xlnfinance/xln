@@ -41,7 +41,7 @@ import type {
   RuntimeEntityInputsEnvelope,
   RuntimeReplica,
 } from '../../runtime/types';
-import { signRuntimeEntityInputsEnvelope } from '../../runtime/entity-input-envelope-auth';
+import { signRuntimeEntityInputsEnvelope } from '../../runtime/entity-input/entity-input-envelope-auth.ts';
 import { createEntityProposalFixture } from './entity-proposal-fixture';
 import { createTestJReplica } from './j-replica';
 

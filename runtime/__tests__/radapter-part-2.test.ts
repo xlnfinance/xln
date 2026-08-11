@@ -21,7 +21,7 @@ import {
 } from '../api/runtime-adapter/codec';
 
 import { EmbeddedRuntimeAdapter } from '../api/runtime-adapter/embedded';
-import { registerRuntimePublishedCallback } from '../runtime/loop-environment';
+import { registerRuntimePublishedCallback } from '../runtime/loop/loop-environment.ts';
 import { notifyRuntimeStateChanged } from '../runtime/frame/notifications';
 import { acquireRuntimeFrameWriter } from '../runtime/frame/writer-lock';
 

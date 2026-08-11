@@ -271,7 +271,7 @@ const p2pSource = readText('runtime/network/p2p/p2p.ts');
 assertNotIncludes(p2pSource, 'pendingByRuntime', 'runtime/network/p2p/p2p.ts');
 assertNotIncludes(p2pSource, 'flushPending', 'runtime/network/p2p/p2p.ts');
 
-const runtimeRoutingPath = 'runtime/runtime/loop-routing.ts';
+const runtimeRoutingPath = 'runtime/runtime/loop/loop-routing.ts';
 const runtimeRouting = readText(runtimeRoutingPath);
 assertIncludes(runtimeRouting, 'sendEntityInputWithRouting(env, input, outputRoutingDeps())', runtimeRoutingPath);
 const sendEntityInputStart = runtimeRouting.indexOf('sendEntityInput: (env: RuntimeReplica');

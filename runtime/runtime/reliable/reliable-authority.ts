@@ -1,19 +1,19 @@
-import type { EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica } from '../entity/types';
-import type { RuntimeReplica, ReliableDeliveryIdentity, RoutedEntityInput } from './types';
-import type { EntityTx } from '../types/entity-tx';
-import { getEntityLeaderState } from '../entity/consensus/leader';
-import { reconcileJEventRangeWithFinalizedState } from '../jurisdiction/machine/local-history';
-import { decodeUnsignedJEventRange } from '../jurisdiction/machine/j-event-range-validation';
+import type { EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica } from '../../entity/types.ts';
+import type { RuntimeReplica, ReliableDeliveryIdentity, RoutedEntityInput } from '../types.ts';
+import type { EntityTx } from '../../types/entity-tx.ts';
+import { getEntityLeaderState } from '../../entity/consensus/leader.ts';
+import { reconcileJEventRangeWithFinalizedState } from '../../jurisdiction/machine/local-history.ts';
+import { decodeUnsignedJEventRange } from '../../jurisdiction/machine/j-event-range-validation.ts';
 import {
   getJPrefixAttestationTemporalDisposition,
   verifyOutOfRoundJPrefixAttestation,
-} from '../jurisdiction/machine/j-prefix-consensus';
+} from '../../jurisdiction/machine/j-prefix-consensus.ts';
 import {
   assertReliableLaneCompatible,
   reliableIdentityExactKey,
-} from './reliable-frontier';
-import { getReliableOutputIdentity } from './output-routing';
-import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+} from './reliable-frontier.ts';
+import { getReliableOutputIdentity } from '../output-routing.ts';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope.ts';
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 

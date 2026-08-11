@@ -39,20 +39,20 @@ const readText = (path: string): string => {
       'runtime/runtime/frame/transaction.ts',
       'runtime/runtime/frame/writer-lock.ts',
     ],
-    'runtime/runtime/loop.ts': [
-      'runtime/runtime/loop.ts',
+    'runtime/runtime/loop/loop.ts': [
+      'runtime/runtime/loop/loop.ts',
       'runtime/runtime/frame/input-discard.ts',
-      'runtime/runtime/loop-lifecycle.ts',
-      'runtime/runtime/loop-failure.ts',
+      'runtime/runtime/loop/loop-lifecycle.ts',
+      'runtime/runtime/loop/loop-failure.ts',
     ],
     'runtime/runtime/entity-inputs.ts': [
       'runtime/runtime/entity-inputs.ts',
-      'runtime/runtime/entity-input-admission.ts',
-      'runtime/runtime/entity-input-atomic.ts',
-      'runtime/runtime/entity-input-contract.ts',
-      'runtime/runtime/entity-input-output.ts',
-      'runtime/runtime/entity-input-replica.ts',
-      'runtime/runtime/entity-input-staging.ts',
+      'runtime/runtime/entity-input/entity-input-admission.ts',
+      'runtime/runtime/entity-input/entity-input-atomic.ts',
+      'runtime/runtime/entity-input/entity-input-contract.ts',
+      'runtime/runtime/entity-input/entity-input-output.ts',
+      'runtime/runtime/entity-input/entity-input-replica.ts',
+      'runtime/runtime/entity-input/entity-input-staging.ts',
     ],
     'runtime/entity/tx/handlers/account.ts': [
       'runtime/entity/tx/handlers/account.ts',
@@ -167,7 +167,7 @@ const fatalIncidentRoutes = [
   {
     name: 'managed-runtime',
     steps: [
-      ['runtime/runtime/loop.ts', ['await config.onFatal({', 'getRuntimeProcessGlobal()?.exit?.(1);']],
+      ['runtime/runtime/loop/loop.ts', ['await config.onFatal({', 'getRuntimeProcessGlobal()?.exit?.(1);']],
       ['runtime/orchestrator/hub-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       ['runtime/orchestrator/mm-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       [
@@ -223,7 +223,7 @@ const fatalIncidentRoutes = [
           'queueBatchResult(env, deps, jurisdictionName, jTx, outcome, extra)',
         ],
       ],
-      ['runtime/runtime/loop.ts', ['await deps.processRuntime(env);', 'await config.onFatal({']],
+      ['runtime/runtime/loop/loop.ts', ['await deps.processRuntime(env);', 'await config.onFatal({']],
     ],
   },
 ] as const;

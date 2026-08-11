@@ -7,27 +7,27 @@ import {
   entityInputSlowMs,
   type RuntimeEntityInputApplyOptions,
   type RuntimeEntityInputApplyResult,
-} from './entity-input-contract';
+} from './entity-input/entity-input-contract.ts';
 import {
   applyExternalEntityInput,
   discardMalformedRemoteEntityInput,
-} from './entity-input-staging';
+} from './entity-input/entity-input-staging.ts';
 import {
   applyAtomicEntityInputPair,
   atomicPairInputsMatch,
-} from './entity-input-atomic';
-import { drainImmediateCrossJurisdictionOutputs } from './entity-input-output';
+} from './entity-input/entity-input-atomic.ts';
+import { drainImmediateCrossJurisdictionOutputs } from './entity-input/entity-input-output.ts';
 import { getPerfMs } from '../infra/time';
 
 export {
   RuntimeEntityInputApplyError,
   type RuntimeEntityInputApplyOptions,
   type RuntimeEntityInputApplyResult,
-} from './entity-input-contract';
+} from './entity-input/entity-input-contract.ts';
 export {
   collectAppliedAccountSenderHints,
   validateExternalEntityInputTargets,
-} from './entity-input-admission';
+} from './entity-input/entity-input-admission.ts';
 
 /**
  * Runtime composition root for ordered Entity inputs.

@@ -1,4 +1,4 @@
-import { registerReliableIngress } from '../../runtime/reliable-delivery';
+import { registerReliableIngress } from '../../runtime/reliable/reliable-delivery.ts';
 import { createEmptyEnv } from '../../runtime';
 import type { DeliverableEntityInput } from '../../runtime/types';
 

@@ -11,8 +11,8 @@ import {
 } from '../api/server/relay-direct';
 import type { DeliverableEntityInput, RuntimeReplica, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import { createEmptyEnv } from '../runtime';
-import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
-import { assertRuntimeEntityInputsEnvelopeSource } from '../runtime/entity-input-envelope-auth';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input/entity-input-envelope-auth.ts';
+import { assertRuntimeEntityInputsEnvelopeSource } from '../runtime/entity-input/entity-input-envelope-auth.ts';
 import { decodeRuntimeEntityInputsEnvelope } from '../network/p2p/entity-input-envelope';
 
 type SentMessage = {

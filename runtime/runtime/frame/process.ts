@@ -3,7 +3,7 @@ import { collectDueLocalProfileCertificationInputs } from '../../network/p2p/loc
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { recordRuntimeHistoryTraceForTesting } from '../history-retention';
 import { createStructuredLogger } from '../../infra/logger';
-import type { createRuntimeLoopApi } from '../loop';
+import type { createRuntimeLoopApi } from '../loop/loop.ts';
 import { materializePendingJurisdictionImportResults } from '../jurisdiction-import';
 import { requireRuntimeMempool } from '../input-queue';
 import { transitionRuntimeLifecycle } from '../lifecycle';

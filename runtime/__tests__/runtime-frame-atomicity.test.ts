@@ -25,7 +25,7 @@ import {
 import {
   createReliableDeliveryReceipt,
   getInputReliableIdentity,
-} from '../runtime/reliable-delivery';
+} from '../runtime/reliable/reliable-delivery.ts';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { KEY_HEAD } from '../storage/keys';
 import { readStorageHead } from '../storage';

@@ -23,7 +23,7 @@ import {
   requireDeliveryResult,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
-import { reliableReceiptCoversIdentity, senderFrontierKey, senderFrontierKeyForIdentity } from '../reliable-frontier';
+import { reliableReceiptCoversIdentity, senderFrontierKey, senderFrontierKeyForIdentity } from '../reliable/reliable-frontier.ts';
 import { explainCrossJPairing, selectPotentialCrossJAccountInputPairs } from '../entity-routing';
 import {
   accountProposalSettledBySender,

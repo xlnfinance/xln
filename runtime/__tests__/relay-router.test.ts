@@ -10,7 +10,7 @@ import { encryptJSON, deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
 import { DEFAULT_GOSSIP_BATCH_LIMIT } from '../network/p2p/profile-batch';
 import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
 import { createEmptyEnv } from '../runtime';
-import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input/entity-input-envelope-auth.ts';
 import {
   buildCryptographicProfileFixture,
   certifySingleSignerProfileFixture,

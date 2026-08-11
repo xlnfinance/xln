@@ -8,11 +8,11 @@ import {
   loadEnvFromDB,
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { getReliableDeliveryReceiptValidationError } from '../runtime/reliable-delivery';
+import { getReliableDeliveryReceiptValidationError } from '../runtime/reliable/reliable-delivery.ts';
 import {
   receiverFrontierKey,
   senderFrontierKey,
-} from '../runtime/reliable-frontier';
+} from '../runtime/reliable/reliable-frontier.ts';
 import { dbRootPath } from '../runtime/platform';
 import type { RuntimeReplica, ReliableDeliveryReceipt } from '../runtime/types';
 

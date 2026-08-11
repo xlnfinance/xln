@@ -26,7 +26,7 @@ import {
   closeRuntimeDb,
   closeInfraDb,
 } from '../../runtime.ts';
-import { registerEnvChangeCallback } from '../../runtime/loop-environment';
+import { registerEnvChangeCallback } from '../../runtime/loop/loop-environment.ts';
 import { ensurePendingNumberedRegistrationsResumed } from '../../runtime/registration/numbered-registration-driver';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../../protocol/serialization';

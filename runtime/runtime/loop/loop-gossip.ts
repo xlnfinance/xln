@@ -1,9 +1,9 @@
-import type { RuntimeReplica } from './types';
-import { clearInfraGossipProfiles } from './infra-gossip-store';
+import type { RuntimeReplica } from '../types.ts';
+import { clearInfraGossipProfiles } from '../infra-gossip-store.ts';
 import {
   drainInfraDbWrites,
   infraGossipDbAccess,
-} from './loop-infrastructure';
+} from './loop-infrastructure.ts';
 
 /**
  * Gossip is infrastructure state. Clear its durable records before publishing

@@ -7,8 +7,8 @@ import type { JInput } from '../../jurisdiction/machine/input';
 import {
   getInputReliableIdentity,
   registerReliableIngress,
-} from '../reliable-delivery';
-import { compareReliableIdentityPosition } from '../reliable-frontier';
+} from '../reliable/reliable-delivery.ts';
+import { compareReliableIdentityPosition } from '../reliable/reliable-frontier.ts';
 import {
   validateExternalEntityInputTargets,
   RuntimeEntityInputApplyError,

@@ -1,10 +1,10 @@
-import type { RuntimeReplica } from './types';
+import type { RuntimeReplica } from '../types.ts';
 import {
   assertReliableIngressSourceLaneBound,
   assertReliableIngressSourceLaneCapacity,
   receiverFrontierKey,
-} from './reliable-frontier';
-import { ensureReliableState } from './reliable-receipt';
+} from './reliable-frontier.ts';
+import { ensureReliableState } from './reliable-receipt.ts';
 
 const durableReceiverSourceLaneKeys = (
   state: NonNullable<RuntimeReplica['infrastructure']>,

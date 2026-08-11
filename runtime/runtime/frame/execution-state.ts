@@ -6,7 +6,7 @@ import type {
 import type {
   ReliableIngressCommit,
   ReliableReceiptSenderCheckpoint,
-} from '../reliable-delivery';
+} from '../reliable/reliable-delivery.ts';
 import type { RuntimeFrameTransaction } from './transaction';
 
 type RuntimeReceiptDelivery = {

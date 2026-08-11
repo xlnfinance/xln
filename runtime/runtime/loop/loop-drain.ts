@@ -1,8 +1,8 @@
-import type { RuntimeReplica } from './types';
-import { inferRuntimeLifecyclePhase } from './lifecycle';
-import { requestRuntimeLoopWake } from './input-queue';
-import { getRemainingRuntimeFrameDelayMs } from './loop-work';
-import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
+import type { RuntimeReplica } from '../types.ts';
+import { inferRuntimeLifecyclePhase } from '../lifecycle.ts';
+import { requestRuntimeLoopWake } from '../input-queue.ts';
+import { getRemainingRuntimeFrameDelayMs } from './loop-work.ts';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 

@@ -7,7 +7,7 @@ import type {
 } from '../runtime/types';
 import { RuntimeP2P } from '../network/p2p/p2p';
 import { createEmptyEnv } from '../runtime';
-import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input/entity-input-envelope-auth.ts';
 
 const TARGET_RUNTIME_ID = '0x1111111111111111111111111111111111111111';
 const SOURCE_RUNTIME_ID = '0x3333333333333333333333333333333333333333';

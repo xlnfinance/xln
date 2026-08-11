@@ -12,7 +12,7 @@ import {
   commitReliableIngress,
   registerReliableIngress,
   releaseUncommittedReliableIngress,
-} from '../runtime/reliable-delivery';
+} from '../runtime/reliable/reliable-delivery.ts';
 import type { DeliverableEntityInput, RuntimeReplica } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 

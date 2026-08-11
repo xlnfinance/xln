@@ -8,7 +8,7 @@ import {
   DEFAULT_HISTORY_VIEW_RETAIN_FRAMES,
   DEFAULT_RETAIN_SNAPSHOTS,
 } from '../storage/keys';
-import { ensureRuntimeConfig } from '../runtime/loop-environment';
+import { ensureRuntimeConfig } from '../runtime/loop/loop-environment.ts';
 import { measureRuntimeFrameCloneBytes } from '../runtime/frame/clone';
 
 describe('storage config', () => {

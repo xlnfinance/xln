@@ -23,7 +23,7 @@ import {
   splitRoutedOutputByDeliveryLane,
   type ReliableOutputIdentity,
 } from './identity';
-import { signRuntimeEntityInputsEnvelope } from '../entity-input-envelope-auth';
+import { signRuntimeEntityInputsEnvelope } from '../entity-input/entity-input-envelope-auth.ts';
 import {
   buildPendingNetworkOutputs,
   buildRoutingDeliveryResult,

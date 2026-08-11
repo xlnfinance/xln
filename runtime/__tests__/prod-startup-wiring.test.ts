@@ -306,7 +306,7 @@ describe('production startup wiring', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
-    const runtimeLoop = readFileSync(join(repoRoot, 'runtime/runtime/loop-failure.ts'), 'utf8');
+    const runtimeLoop = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop-failure.ts'), 'utf8');
 
     expect(orchestrator.match(/stdio: \['pipe', 'pipe', 'pipe', 'ipc'\]/g)).toHaveLength(2);
     expect(orchestrator.match(/attachManagedChildFatalIpc\(/g)).toHaveLength(2);
@@ -526,7 +526,7 @@ describe('production startup wiring', () => {
     );
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
     const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime/entity-routing.ts'), 'utf8');
-    const runtimeLoopSource = readFileSync(join(repoRoot, 'runtime/runtime/loop.ts'), 'utf8');
+    const runtimeLoopSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop.ts'), 'utf8');
     const standaloneServer = readFileSync(join(repoRoot, 'runtime/api/server/index.ts'), 'utf8');
     const custodyBootstrap = readFileSync(join(repoRoot, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
     const startCustodyDev = readFileSync(join(repoRoot, 'runtime/scripts/start-custody-dev.ts'), 'utf8');
@@ -692,7 +692,7 @@ describe('production startup wiring', () => {
     expect(runtimeEntityRouting).not.toContain('deps.startRuntimeLoop(env);');
     expect(runtimeEntityRouting).not.toContain('processRuntime(env)');
     expect(runtimeEntityRouting).not.toContain('queueMicrotask(() =>');
-    const runtimeLifecycleSource = readFileSync(join(repoRoot, 'runtime/runtime/loop-failure.ts'), 'utf8');
+    const runtimeLifecycleSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop-failure.ts'), 'utf8');
     expect(runtimeLifecycleSource).toContain('getRuntimeProcessGlobal()?.exit?.(1);');
     expect(runtimeLoopSource).not.toContain('shouldExitOnRuntimeFatal');
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1'");
@@ -853,8 +853,8 @@ describe('production startup wiring', () => {
     const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime/composition.ts'), 'utf8');
     const frameDispatchSource = readFileSync(join(repoRoot, 'runtime/runtime/frame/dispatch.ts'), 'utf8');
     const framePreparationSource = readFileSync(join(repoRoot, 'runtime/runtime/frame/prepare.ts'), 'utf8');
-    const runtimeLoopWorkSource = readFileSync(join(repoRoot, 'runtime/runtime/loop-work.ts'), 'utf8');
-    const runtimeLoopLifecycleSource = readFileSync(join(repoRoot, 'runtime/runtime/loop-lifecycle.ts'), 'utf8');
+    const runtimeLoopWorkSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop-work.ts'), 'utf8');
+    const runtimeLoopLifecycleSource = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop-lifecycle.ts'), 'utf8');
     expect(runtimeLoopLifecycleSource).toContain(
       'const tickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));',
     );
@@ -1264,8 +1264,8 @@ describe('production startup wiring', () => {
 
   test('managed runtime teardown stops J-event producers before draining runtime and network IO', () => {
     const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime/composition.ts'), 'utf8');
-    const runtimeLoop = readFileSync(join(repoRoot, 'runtime/runtime/loop.ts'), 'utf8');
-    const runtimeWatchers = readFileSync(join(repoRoot, 'runtime/runtime/loop-watchers.ts'), 'utf8');
+    const runtimeLoop = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop.ts'), 'utf8');
+    const runtimeWatchers = readFileSync(join(repoRoot, 'runtime/runtime/loop/loop-watchers.ts'), 'utf8');
     const nodeQuiesce = readFileSync(join(repoRoot, 'runtime/orchestrator/node-runtime-quiesce.ts'), 'utf8');
     const sources = [
       readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),

@@ -9,9 +9,9 @@ import {
   getInputReliableIdentity,
   releaseUncommittedReliableIngress,
   type ReliableIngressCommit,
-} from '../reliable-delivery';
-import { mergeDurableReceiptOnlyInputs } from '../reliable-durable-inputs';
-import { reliableIdentityExactKey } from '../reliable-frontier';
+} from '../reliable/reliable-delivery.ts';
+import { mergeDurableReceiptOnlyInputs } from '../reliable/reliable-durable-inputs.ts';
+import { reliableIdentityExactKey } from '../reliable/reliable-frontier.ts';
 import { splitRoutedOutputByDeliveryLane } from '../output-routing';
 
 const runtimeLog = createStructuredLogger('runtime');

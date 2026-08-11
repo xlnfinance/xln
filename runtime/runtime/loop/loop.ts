@@ -3,10 +3,10 @@ import {
   MAX_RUNTIME_J_INPUTS,
   MAX_RUNTIME_J_TXS,
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-} from './input-validation';
-import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
-import type { RuntimeReplica, RuntimeInput } from './types';
-import { closeRuntimeWalDb, closeHistoryViewDb, closeInfraDb, closeStorageDb } from '../storage/runtime-dbs';
+} from '../input-validation.ts';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
+import type { RuntimeReplica, RuntimeInput } from '../types.ts';
+import { closeRuntimeWalDb, closeHistoryViewDb, closeInfraDb, closeStorageDb } from '../../storage/runtime-dbs.ts';
 import {
   ENV_APPLY_ALLOWED_KEY,
   ENV_REPLAY_MODE_KEY,
@@ -17,7 +17,7 @@ import {
   registerRecoveryBackupBarrier,
   registerRuntimeFrameCommitCallback,
   writeRuntimeMetadata,
-} from './loop-environment';
+} from './loop-environment.ts';
 import {
   clearCleanLogs,
   copyCleanLogs,
@@ -36,7 +36,7 @@ import {
   tryOpenRuntimeHistoryViewDb,
   tryOpenRuntimeInfraDb,
   tryOpenRuntimeStorageDb,
-} from './loop-infrastructure';
+} from './loop-infrastructure.ts';
 import {
   applyEntityInputFrameCap,
   applyEntityTxFrameCap,
@@ -48,18 +48,18 @@ import {
   resolveNextWallClockWakeTimestamp,
   resolveRuntimeWorkReason,
   type RuntimeWorkDeps,
-} from './loop-work';
+} from './loop-work.ts';
 import {
   discardRejectedEntityInput,
   RuntimeInputDiscardedError,
-} from './frame/input-discard';
-import { createRuntimeRoutingApi } from './loop-routing';
+} from '../frame/input-discard.ts';
+import { createRuntimeRoutingApi } from './loop-routing.ts';
 import {
   createRuntimeLifecycleApi,
-} from './loop-lifecycle';
-import { waitForPromiseBeforeTimeout } from './loop-drain';
+} from './loop-lifecycle.ts';
+import { waitForPromiseBeforeTimeout } from './loop-drain.ts';
 
-type RuntimeModule = typeof import('../runtime');
+type RuntimeModule = typeof import('../../runtime.ts');
 
 export type RuntimeLoopApiDeps = {
   notifyEnvChange(env: RuntimeReplica): void;

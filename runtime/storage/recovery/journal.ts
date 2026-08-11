@@ -9,7 +9,7 @@ import {
   deleteRuntimeMetadata,
   readRuntimeMetadata,
   writeRuntimeMetadata,
-} from '../../runtime/loop-environment';
+} from '../../runtime/loop/loop-environment.ts';
 import {
   clearPendingAuditEvents,
   dropPendingHistoryRecords,
@@ -20,7 +20,7 @@ import {
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
 } from '../../runtime/j-submit-state';
-import { finalizeReliableIngressCommit } from '../../runtime/reliable-delivery';
+import { finalizeReliableIngressCommit } from '../../runtime/reliable/reliable-delivery.ts';
 import { refreshScheduledWakeIndex } from '../../runtime/scheduled-wake';
 import {
   clearReplayOutputSignerHints,

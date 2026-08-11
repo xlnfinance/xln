@@ -1,16 +1,16 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
 
-import { signAccountFrame, verifyAccountSignature } from '../account/crypto';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
-import { serializeTaggedJson } from '../protocol/serialization';
+import { signAccountFrame, verifyAccountSignature } from '../../account/crypto.ts';
+import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
+import { serializeTaggedJson } from '../../protocol/serialization.ts';
 import type {
   RuntimeReplica,
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-} from './types';
-import { getReliableIdentityValidationError } from './reliable-frontier';
-import { getReliableOutputIdentity } from './output-routing';
+} from '../types.ts';
+import { getReliableIdentityValidationError } from './reliable-frontier.ts';
+import { getReliableOutputIdentity } from '../output-routing.ts';
 
 export const ensureReliableState = (env: RuntimeReplica): NonNullable<RuntimeReplica['infrastructure']> => {
   env.infrastructure ??= {};

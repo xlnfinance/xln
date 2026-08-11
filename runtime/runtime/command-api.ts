@@ -1,7 +1,7 @@
 import { assertCrossJurisdictionSwapTargetReadyInEnv } from './swap-target-readiness';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
-import type { createRuntimeLoopApi } from './loop';
+import type { createRuntimeLoopApi } from './loop/loop.ts';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { RuntimeReplica } from './types';
 import {

@@ -1,18 +1,18 @@
 import {
   DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
-} from './platform';
+} from '../platform.ts';
 import {
   isProductionRuntime,
   readRuntimeEnv,
-} from '../infra/runtime-process';
-import { safeStringify } from '../protocol/serialization';
-import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
-import type { RuntimeReplica, RuntimeInput } from './types';
+} from '../../infra/runtime-process.ts';
+import { safeStringify } from '../../protocol/serialization.ts';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
+import type { RuntimeReplica, RuntimeInput } from '../types.ts';
 import {
   getRuntimeCommandReadiness,
   inferRuntimeLifecyclePhase,
   type RuntimeLifecyclePhase,
-} from './lifecycle';
+} from '../lifecycle.ts';
 
 export const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 export const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');

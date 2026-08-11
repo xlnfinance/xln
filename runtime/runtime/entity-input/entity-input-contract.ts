@@ -1,18 +1,18 @@
-import type { EntityInputOutcome } from '../entity/consensus/index';
-import type { EntityTx } from '../types/entity-tx';
-import type { JInput } from '../jurisdiction/machine/input';
-import type { RoutedEntityInput } from './types';
-import type { RuntimeEntityRoutingDeps } from './entity-routing';
+import type { EntityInputOutcome } from '../../entity/consensus/index.ts';
+import type { EntityTx } from '../../types/entity-tx.ts';
+import type { JInput } from '../../jurisdiction/machine/input.ts';
+import type { RoutedEntityInput } from '../types.ts';
+import type { RuntimeEntityRoutingDeps } from '../entity-routing.ts';
 import {
   classifyEntityInputApplyFailure,
   type EntityInputApplyFailureKind,
-} from '../entity/tx/invariant-errors';
-import { nodeProcess } from '../infra/runtime-process';
+} from '../../entity/tx/invariant-errors.ts';
+import { nodeProcess } from '../../infra/runtime-process.ts';
 import {
   isRuntimePerfProfileEnabled,
   readRuntimePerfSlowMs,
-} from '../infra/perf-runtime-flags';
-import { createStructuredLogger } from '../infra/logger';
+} from '../../infra/perf-runtime-flags.ts';
+import { createStructuredLogger } from '../../infra/logger.ts';
 
 export const entityInputLog = createStructuredLogger('runtime.entity_inputs');
 

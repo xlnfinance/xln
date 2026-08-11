@@ -1,21 +1,21 @@
 import {
   normalizeEntityKey,
   removeRejectedCrossJAccountInputsByIndex,
-} from './entity-routing';
-import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+} from '../entity-routing.ts';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope.ts';
 import {
   accountInputAck,
   accountInputProposal,
-} from '../account/consensus/flush';
-import type { RoutedEntityInput, RuntimeReplica } from './types';
-import { commitEntityFrameCandidateState } from '../entity/state-clone';
+} from '../../account/consensus/flush.ts';
+import type { RoutedEntityInput, RuntimeReplica } from '../types.ts';
+import { commitEntityFrameCandidateState } from '../../entity/state-clone.ts';
 import {
   isCommittedEntityInput,
   RuntimeEntityInputApplyError,
   type RuntimeEntityInputApplyOptions,
   type RuntimeEntityInputApplyResult,
   type RuntimeEntityInputBatchContext,
-} from './entity-input-contract';
+} from './entity-input-contract.ts';
 import {
   applyExternalEntityInput,
   collectCommittedAccountFrames,
@@ -23,7 +23,7 @@ import {
   publishStagedEntityNodeChanges,
   stageExternalEntityInput,
   type StagedEntityInput,
-} from './entity-input-staging';
+} from './entity-input-staging.ts';
 
 export const atomicPairInputsMatch = (
   first: RoutedEntityInput,

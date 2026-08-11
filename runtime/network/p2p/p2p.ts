@@ -41,7 +41,7 @@ import {
   type ValidatorEncryptionAnnouncement,
 } from '../../entity/profile-encryption';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
-import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input-envelope-auth';
+import { assertRuntimeEntityInputsEnvelopeSource } from '../../runtime/entity-input/entity-input-envelope-auth.ts';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');

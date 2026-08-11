@@ -1,13 +1,13 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
 
-import { getSignerAddress, signAccountFrame, verifyAccountSignature } from '../account/crypto';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
-import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
+import { getSignerAddress, signAccountFrame, verifyAccountSignature } from '../../account/crypto.ts';
+import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value.ts';
 import type {
   RuntimeEntityInputsEnvelope,
   RuntimeReplica,
   UnsignedRuntimeEntityInputsEnvelope,
-} from './types';
+} from '../types.ts';
 
 const ENVELOPE_SIGNATURE_DOMAIN = 'xln.runtime.entity-inputs-envelope.v1';
 

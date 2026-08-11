@@ -4,8 +4,8 @@ import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import { rebuildScheduledWakeIndex } from '../scheduled-wake';
 import { getLiveJAdapterEntries } from '../live-jadapters';
 import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
-import { getInputReliableIdentity } from '../reliable-delivery';
-import { reliableIdentityExactKey } from '../reliable-frontier';
+import { getInputReliableIdentity } from '../reliable/reliable-delivery.ts';
+import { reliableIdentityExactKey } from '../reliable/reliable-frontier.ts';
 
 export { cloneRuntimeFrameMempool } from './clone';
 

@@ -37,7 +37,7 @@ import {
   submitCrossJurisdictionIntent,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
-import { registerEnvChangeCallback } from '../runtime/loop-environment';
+import { registerEnvChangeCallback } from '../runtime/loop/loop-environment.ts';
 import { ensurePendingNumberedRegistrationsResumed } from '../runtime/registration/numbered-registration-driver';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../api/server/health-redaction';

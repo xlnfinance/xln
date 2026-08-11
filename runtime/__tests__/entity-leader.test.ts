@@ -37,7 +37,7 @@ import {
   mergeJPrefixAttestations,
 } from '../jurisdiction/machine/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
-import { commitReliableIngress } from '../runtime/reliable-delivery';
+import { commitReliableIngress } from '../runtime/reliable/reliable-delivery.ts';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
 import type { ConsensusConfig, EntityReplica, EntityState, EntityFrame } from '../entity/types';

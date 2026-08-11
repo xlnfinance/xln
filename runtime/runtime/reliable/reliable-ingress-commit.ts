@@ -3,15 +3,15 @@ import type {
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-} from './types';
-import { isLocalEntityLeaderTimeoutVote } from '../entity/consensus/leader';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
+} from '../types.ts';
+import { isLocalEntityLeaderTimeoutVote } from '../../entity/consensus/leader.ts';
+import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
 import {
   assertReliableIdentityDurableInPostState,
   isReliableAccountAckAwaitingCommit,
   isAuthenticatedAppliedStaleJPrefixInput,
   isReliableIdentityTerminalInPostState,
-} from './reliable-authority';
+} from './reliable-authority.ts';
 import {
   advanceReliableFrontier,
   assertReliableLaneCompatible,
@@ -21,18 +21,18 @@ import {
   reliableIdentityExactKey,
   reliableReceiptCoversIdentity,
   sameReliableIdentityPosition,
-} from './reliable-frontier';
+} from './reliable-frontier.ts';
 import {
   assertReceiverSourceLaneCapacity,
   ensureReliableIngressState,
   receiverSourceLaneKeys,
-} from './reliable-ingress-state';
-import { splitRoutedOutputByDeliveryLane } from './output-routing';
+} from './reliable-ingress-state.ts';
+import { splitRoutedOutputByDeliveryLane } from '../output-routing.ts';
 import {
   createReliableDeliveryReceipt,
   ensureReliableState,
   getInputReliableIdentity,
-} from './reliable-receipt';
+} from './reliable-receipt.ts';
 
 export type ReliableIngressCommit = {
   key: string | null;

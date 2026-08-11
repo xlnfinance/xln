@@ -14,7 +14,7 @@ import { accountInputAck, accountInputProposal } from '../account/consensus/flus
 import { safeStringify } from '../protocol/serialization';
 import { cloneCrossJurisdictionRoute } from '../extensions/cross-j';
 import { validatePreparedCrossJurisdictionRoute } from '../extensions/cross-j/prepared-route';
-import { assertRuntimeEntityInputsEnvelopeSource } from './entity-input-envelope-auth';
+import { assertRuntimeEntityInputsEnvelopeSource } from './entity-input/entity-input-envelope-auth.ts';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 

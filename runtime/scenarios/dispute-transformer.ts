@@ -18,7 +18,7 @@ import { quoteHtlcPaymentRoute } from '../entity/htlc/payment-admission';
 import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
 import { ASYNC_PAYMENT_EXPIRY_MS } from '../types/payment';
 import { safeStringify } from '../protocol/serialization';
-import { releaseUncommittedReliableIngress } from '../runtime/reliable-delivery';
+import { releaseUncommittedReliableIngress } from '../runtime/reliable/reliable-delivery.ts';
 import { bootScenario, fundEntities, registerEntities } from './boot';
 import {
   assert,

@@ -1,22 +1,22 @@
 import {
   collectCrossJurisdictionRemoteEntityHints,
   registerEntityRuntimeHintWithDeps,
-} from './entity-routing';
-import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+} from '../entity-routing.ts';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope.ts';
 import {
   accountInputAck,
   accountInputProposal,
-} from '../account/consensus/flush';
-import type { EntityReplica } from '../entity/types';
-import type { RoutedEntityInput, RuntimeReplica } from './types';
-import { commitEntityFrameCandidateState } from '../entity/state-clone';
-import { getPerfMs } from '../infra/time';
-import { shortId } from '../infra/logger';
+} from '../../account/consensus/flush.ts';
+import type { EntityReplica } from '../../entity/types.ts';
+import type { RoutedEntityInput, RuntimeReplica } from '../types.ts';
+import { commitEntityFrameCandidateState } from '../../entity/state-clone.ts';
+import { getPerfMs } from '../../infra/time.ts';
+import { shortId } from '../../infra/logger.ts';
 import {
   assertExternalEntityInputAllowed,
   collectAppliedAccountSenderHints,
   resolveEntityInputReplica,
-} from './entity-input-admission';
+} from './entity-input-admission.ts';
 import {
   entityInputLog,
   isCommittedEntityInput,
@@ -24,17 +24,17 @@ import {
   type RuntimeEntityInputApplyOptions,
   type RuntimeEntityInputApplyResult,
   type RuntimeEntityInputBatchContext,
-} from './entity-input-contract';
+} from './entity-input-contract.ts';
 import {
   applyEntityInputToReplica,
   type AppliedEntityReplicaInput,
-} from './entity-input-replica';
+} from './entity-input-replica.ts';
 import {
   collectCommittedEntityResult,
   recordEntityInputProfile,
-} from './entity-input-output';
-import { cacheCommittedConsumptionNodeChanges } from '../entity/consumption-store';
-import { cacheCommittedAccountJClaimNodeChanges } from '../entity/account-j-claim-node-store';
+} from './entity-input-output.ts';
+import { cacheCommittedConsumptionNodeChanges } from '../../entity/consumption-store.ts';
+import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account-j-claim-node-store.ts';
 
 export const collectCommittedAccountFrames = (
   input: RoutedEntityInput,

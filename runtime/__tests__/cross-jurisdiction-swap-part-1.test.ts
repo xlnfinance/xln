@@ -47,7 +47,7 @@ import type { AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica } from '../entity/types';
 import type { RoutedEntityInput } from '../runtime/types';
-import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input/entity-input-envelope-auth.ts';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 

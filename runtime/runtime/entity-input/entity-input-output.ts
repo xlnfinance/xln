@@ -1,12 +1,12 @@
-import type { EntityTx } from '../types/entity-tx';
-import type { RoutedEntityInput, RuntimeReplica } from './types';
-import { safeStringify } from '../protocol/serialization';
-import { getPerfMs } from '../infra/time';
-import { shortId } from '../infra/logger';
+import type { EntityTx } from '../../types/entity-tx.ts';
+import type { RoutedEntityInput, RuntimeReplica } from '../types.ts';
+import { safeStringify } from '../../protocol/serialization.ts';
+import { getPerfMs } from '../../infra/time.ts';
+import { shortId } from '../../infra/logger.ts';
 import {
   assertRuntimeEntityIngress,
   findEntityReplicaKey,
-} from './entity-input-admission';
+} from './entity-input-admission.ts';
 import {
   entityInputLog,
   entityInputProfileEnabled,
@@ -14,17 +14,17 @@ import {
   type CrossJCommand,
   type RuntimeEntityInputApplyOptions,
   type RuntimeEntityInputBatchContext,
-} from './entity-input-contract';
+} from './entity-input-contract.ts';
 import {
   applyEntityInputToReplica,
   type AppliedEntityReplicaInput,
-} from './entity-input-replica';
-import { cacheCommittedConsumptionNodeChanges } from '../entity/consumption-store';
-import { cacheCommittedAccountJClaimNodeChanges } from '../entity/account-j-claim-node-store';
+} from './entity-input-replica.ts';
+import { cacheCommittedConsumptionNodeChanges } from '../../entity/consumption-store.ts';
+import { cacheCommittedAccountJClaimNodeChanges } from '../../entity/account-j-claim-node-store.ts';
 import {
   applyStorageChanges,
   publishEntityCandidateEffects,
-} from './env-events';
+} from '../env-events.ts';
 
 export const recordEntityInputProfile = (
   context: RuntimeEntityInputBatchContext,

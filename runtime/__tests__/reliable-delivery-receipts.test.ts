@@ -18,7 +18,7 @@ import {
   releaseUncommittedReliableIngress,
   rollbackReliableDeliveryReceipts,
   rollbackReliableIngressCommit,
-} from '../runtime/reliable-delivery';
+} from '../runtime/reliable/reliable-delivery.ts';
 import { canonicalJEventRangeHash, EMPTY_J_HISTORY_ROOT } from '../jurisdiction/machine/history-consensus';
 import {
   buildLocalJPrefixAttestation,

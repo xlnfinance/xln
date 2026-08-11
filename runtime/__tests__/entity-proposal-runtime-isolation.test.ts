@@ -15,7 +15,7 @@ import {
   processRuntime,
   readPersistedFrameJournal,
 } from '../runtime';
-import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input-envelope-auth';
+import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input/entity-input-envelope-auth.ts';
 import {
   buildAuthenticatedInvalidProposal,
   cleanupPersistedProposalFixtures,

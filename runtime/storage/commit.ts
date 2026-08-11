@@ -7,7 +7,7 @@ import {
 } from '../runtime/env-events';
 import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
-import { readRuntimeMetadata } from '../runtime/loop-environment';
+import { readRuntimeMetadata } from '../runtime/loop/loop-environment.ts';
 import { safeStringify } from '../protocol/serialization';
 import type {
   RoutedEntityInput,

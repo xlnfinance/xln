@@ -17,7 +17,7 @@ import {
 import {
   applyReliableDeliveryReceipts,
   createReliableDeliveryReceipt,
-} from '../runtime/reliable-delivery';
+} from '../runtime/reliable/reliable-delivery.ts';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,

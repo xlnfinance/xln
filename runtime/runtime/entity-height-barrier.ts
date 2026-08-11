@@ -1,8 +1,8 @@
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from './types';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
-import { getInputReliableIdentity } from './reliable-delivery';
-import { reliableIdentityExactKey } from './reliable-frontier';
+import { getInputReliableIdentity } from './reliable/reliable-delivery.ts';
+import { reliableIdentityExactKey } from './reliable/reliable-frontier.ts';
 import { atomicCrossJInputCohortKey } from './entity-routing';
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();

@@ -1,8 +1,8 @@
-import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from '../account/crypto';
-import { extractEntityId, extractSignerId } from '../protocol/identity';
-import { createStructuredLogger } from '../infra/logger';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
-import type { RuntimeReplica } from './types';
+import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from '../../account/crypto.ts';
+import { extractEntityId, extractSignerId } from '../../protocol/identity.ts';
+import { createStructuredLogger } from '../../infra/logger.ts';
+import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
+import type { RuntimeReplica } from '../types.ts';
 
 const identityLog = createStructuredLogger('runtime.identity');
 

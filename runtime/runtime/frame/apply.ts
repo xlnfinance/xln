@@ -10,7 +10,7 @@ import { getPerfMs } from '../../infra/time';
 import {
   captureReliableReceiptSenderCheckpoint,
   type ReliableIngressCommit,
-} from '../reliable-delivery';
+} from '../reliable/reliable-delivery.ts';
 import {
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,

@@ -15,8 +15,8 @@ import {
   applyReliableDeliveryReceipts,
   matchReceiptsToOutputs,
   type ReliableIngressCommit,
-} from './reliable-delivery';
-import { reliableIdentityExactKey } from './reliable-frontier';
+} from './reliable/reliable-delivery.ts';
+import { reliableIdentityExactKey } from './reliable/reliable-frontier.ts';
 
 export type RuntimeContinuationEnqueuer = (
   env: RuntimeReplica,

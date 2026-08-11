@@ -1,9 +1,9 @@
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
 import type {
   RuntimeReplica,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-} from './types';
+} from '../types.ts';
 import {
   assertReliableLaneCompatible,
   compareReliableIdentityPosition,
@@ -13,16 +13,16 @@ import {
   sameReliableIdentityPosition,
   senderFrontierKey,
   senderFrontierKeyForIdentity,
-} from './reliable-frontier';
+} from './reliable-frontier.ts';
 import {
   pruneReceiptedReliableOutputs,
-} from './output-routing';
+} from '../output-routing.ts';
 import {
   ensureReliableState,
   getInputReliableIdentity,
   getReliableDeliveryReceiptValidationError,
-} from './reliable-receipt';
-import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
+} from './reliable-receipt.ts';
+import { cloneIsolatedRoutedEntityInputs } from '../input-clone.ts';
 
 export type ReliableReceiptSenderCheckpoint = {
   pendingNetworkOutputs: RoutedEntityInput[];

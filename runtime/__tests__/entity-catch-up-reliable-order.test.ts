@@ -40,7 +40,7 @@ import {
   finalizeReliableIngressCommit,
   registerReliableIngress,
   releaseUncommittedReliableIngress,
-} from '../runtime/reliable-delivery';
+} from '../runtime/reliable/reliable-delivery.ts';
 import {
   closeInfraDb,
   createEmptyEnv,

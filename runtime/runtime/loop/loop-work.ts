@@ -1,33 +1,33 @@
-import { hasProposableAccount } from '../entity/consensus/account-work-index';
-import { isEntityActiveLeader } from '../entity/consensus/leader';
+import { hasProposableAccount } from '../../entity/consensus/account-work-index.ts';
+import { isEntityActiveLeader } from '../../entity/consensus/leader.ts';
 import {
   entityRequiresJPrefixCertificate,
   getLocalJPrefixAttestableHeight,
   hasCurrentRoundJPrefixAttestation,
   hasPendingLocalJEvent,
   isFrozenBaseJPrefixRollAuthorized,
-} from '../jurisdiction/machine/j-prefix-consensus';
-import { getWallClockMs } from '../infra/time';
+} from '../../jurisdiction/machine/j-prefix-consensus.ts';
+import { getWallClockMs } from '../../infra/time.ts';
 import {
   getNextNetworkRetryTimestamp,
   hasReadyPendingNetworkOutputs,
   type RuntimeOutputRoutingDeps,
-} from './output-routing';
+} from '../output-routing.ts';
 import {
   generateHookPingsWithDeps,
   getEarliestWallClockDueTimestampWithDeps,
   getNextWallClockWakeTimestampWithDeps,
   hasDueEntityHooksWithDeps,
-} from './wake';
-import { requireRuntimeMempool } from './input-queue';
-import { ensureRuntimeConfig } from './loop-environment';
-import { enqueueRuntimeInputs } from './loop-infrastructure';
-import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
-import type { EntityInput, EntityReplica } from '../entity/types';
-import type { RoutedEntityInput, RuntimeReplica, RuntimeInput } from './types';
-import { atomicCrossJInputCohortKey } from './entity-routing';
+} from '../wake.ts';
+import { requireRuntimeMempool } from '../input-queue.ts';
+import { ensureRuntimeConfig } from './loop-environment.ts';
+import { enqueueRuntimeInputs } from './loop-infrastructure.ts';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
+import type { EntityInput, EntityReplica } from '../../entity/types.ts';
+import type { RoutedEntityInput, RuntimeReplica, RuntimeInput } from '../types.ts';
+import { atomicCrossJInputCohortKey } from '../entity-routing.ts';
 
-import { createStructuredLogger } from '../infra/logger';
+import { createStructuredLogger } from '../../infra/logger.ts';
 
 const loopWorkLog = createStructuredLogger('runtime.loop-work');
 

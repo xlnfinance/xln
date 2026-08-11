@@ -7,7 +7,7 @@ import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
 import {
   getRuntimeInfraDb,
   tryOpenRuntimeInfraDb,
-} from '../runtime/loop-infrastructure';
+} from '../runtime/loop/loop-infrastructure.ts';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { clearGossip, closeInfraDb, createEmptyEnv } from '../runtime';
 import { resolveDbPath } from '../storage/runtime-dbs';

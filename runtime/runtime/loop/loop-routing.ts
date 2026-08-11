@@ -1,8 +1,8 @@
-import { extractEntityId } from '../protocol/identity';
-import { createStructuredLogger } from '../infra/logger';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
-import { safeStringify } from '../protocol/serialization';
-import { runtimeInputRequiresOutboxCapacity } from './admission';
+import { extractEntityId } from '../../protocol/identity.ts';
+import { createStructuredLogger } from '../../infra/logger.ts';
+import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
+import { safeStringify } from '../../protocol/serialization.ts';
+import { runtimeInputRequiresOutboxCapacity } from '../admission.ts';
 import {
   createRuntimeOutputRoutingDeps,
   registerEntityRuntimeHintWithDeps,
@@ -11,8 +11,8 @@ import {
   type RuntimeInboundEntityInputOptions,
   type RuntimeInboundEntityInputsResult,
   type RuntimeEntityRoutingDeps,
-} from './entity-routing';
-import { enqueueRuntimeInputs } from './loop-infrastructure';
+} from '../entity-routing.ts';
+import { enqueueRuntimeInputs } from './loop-infrastructure.ts';
 import {
   ensureRuntimeGossipProfiles,
   getRuntimeP2P,
@@ -24,25 +24,25 @@ import {
   stopRuntimeP2PAndWait,
   type P2PConfig,
   type RuntimeP2PLifecycleDeps,
-} from './p2p-lifecycle';
-import { registerReliableReceiptIngress } from './reliable-delivery';
-import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
-import { assertScheduledWakeTxAuthorized } from './scheduled-wake';
-import { assertRuntimeCommandReady } from './lifecycle';
+} from '../p2p-lifecycle.ts';
+import { registerReliableReceiptIngress } from '../reliable/reliable-delivery.ts';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
+import { assertScheduledWakeTxAuthorized } from '../scheduled-wake.ts';
+import { assertRuntimeCommandReady } from '../lifecycle.ts';
 import {
   MAX_RUNTIME_J_INPUT_BYTES,
   MAX_RUNTIME_J_INPUTS,
   MAX_RUNTIME_J_TXS,
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
   validateRuntimeInputShapeAndLimits,
-} from './input-validation';
-import { MAX_PENDING_NETWORK_OUTPUTS, sendEntityInputWithRouting } from './output-routing';
-import { normalizeDbNamespace } from '../storage/runtime-dbs';
-import { decodeRoutedEntityInput } from './routing-validation';
-import type { EntityInput } from '../entity/types';
-import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeInput } from './types';
-import { clearRuntimeGossip } from './loop-gossip';
-import { assertRuntimeInputCapabilitiesAuthorized } from './internal-tx-auth';
+} from '../input-validation.ts';
+import { MAX_PENDING_NETWORK_OUTPUTS, sendEntityInputWithRouting } from '../output-routing.ts';
+import { normalizeDbNamespace } from '../../storage/runtime-dbs.ts';
+import { decodeRoutedEntityInput } from '../routing-validation.ts';
+import type { EntityInput } from '../../entity/types.ts';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeInput } from '../types.ts';
+import { clearRuntimeGossip } from './loop-gossip.ts';
+import { assertRuntimeInputCapabilitiesAuthorized } from '../internal-tx-auth.ts';
 import {
   deriveRuntimeId,
   getLocalSignerIdsForEntity,
@@ -50,7 +50,7 @@ import {
   hasLocalSignerForEntity,
   hasLocalSignerForEntitySigner,
   resolveSoleLocalSignerForEntity,
-} from './loop-identity';
+} from './loop-identity.ts';
 
 const routingLog = createStructuredLogger('runtime.routing');
 

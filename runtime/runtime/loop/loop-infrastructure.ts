@@ -3,14 +3,14 @@ import {
   clearRuntimeCleanLogs,
   copyRuntimeCleanLogs,
   getRuntimeCleanLogs,
-} from './clean-logs';
-import { createStructuredLogger } from '../infra/logger';
+} from '../clean-logs.ts';
+import { createStructuredLogger } from '../../infra/logger.ts';
 import {
   enqueueRuntimeInputsWithDeps,
   requestRuntimeLoopWake,
   type RuntimeInputQueueOptions,
-} from './input-queue';
-import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
+} from '../input-queue.ts';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure.ts';
 import {
   getRuntimeWalDb,
   getHistoryViewDb,
@@ -21,10 +21,10 @@ import {
   tryOpenHistoryViewDb,
   tryOpenStorageDb,
   type StorageDbRole,
-} from '../storage/runtime-dbs';
-import type { EntityInput } from '../entity/types';
-import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeTx } from './types';
-import type { JInput } from '../jurisdiction/machine/input';
+} from '../../storage/runtime-dbs.ts';
+import type { EntityInput } from '../../entity/types.ts';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeTx } from '../types.ts';
+import type { JInput } from '../../jurisdiction/machine/input.ts';
 
 const infrastructureLog = createStructuredLogger('runtime.infrastructure');
 const storageDeps = { ensureRuntimeInfrastructure };

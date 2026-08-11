@@ -34,7 +34,7 @@ import {
   commitReliableIngress,
   registerReliableIngress,
   releaseUncommittedReliableIngress,
-} from '../runtime/reliable-delivery';
+} from '../runtime/reliable/reliable-delivery.ts';
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';

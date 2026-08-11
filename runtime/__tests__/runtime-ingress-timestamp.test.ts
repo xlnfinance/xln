@@ -26,7 +26,7 @@ import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { getWallClockMs } from '../infra/time';
 import { attachLiveJAdapter } from '../runtime/live-jadapters';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { applyEntityInputFrameCap, applyEntityTxFrameCap } from '../runtime/loop-work';
+import { applyEntityInputFrameCap, applyEntityTxFrameCap } from '../runtime/loop/loop-work.ts';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,

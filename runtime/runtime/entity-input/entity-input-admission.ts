@@ -1,9 +1,9 @@
-import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../extensions/cross-j/boundary';
-import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
-import { safeStringify } from '../protocol/serialization';
-import type { EntityReplica } from '../entity/types';
-import type { RoutedEntityInput, RuntimeReplica, RuntimeTx } from './types';
-import { RuntimeEntityInputApplyError } from './entity-input-contract';
+import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../../extensions/cross-j/boundary.ts';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope.ts';
+import { safeStringify } from '../../protocol/serialization.ts';
+import type { EntityReplica } from '../../entity/types.ts';
+import type { RoutedEntityInput, RuntimeReplica, RuntimeTx } from '../types.ts';
+import { RuntimeEntityInputApplyError } from './entity-input-contract.ts';
 
 export const assertRuntimeEntityIngress: (
   condition: unknown,

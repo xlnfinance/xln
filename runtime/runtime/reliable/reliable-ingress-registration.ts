@@ -1,30 +1,30 @@
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
 import type {
   RuntimeReplica,
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-} from './types';
+} from '../types.ts';
 import {
   assertTerminalReceiptCoversInput,
   canReissueTerminalAccountFrameAck,
   isReliableIdentityTerminalInPostState,
-} from './reliable-authority';
+} from './reliable-authority.ts';
 import {
   assertReliableLaneCompatible,
   compareReliableIdentityPosition,
   receiverFrontierKey,
   reliableIdentityExactKey,
   reliableReceiptCoversIdentity,
-} from './reliable-frontier';
+} from './reliable-frontier.ts';
 import {
   assertReceiverSourceLaneCapacity,
   ensureReliableIngressState,
-} from './reliable-ingress-state';
+} from './reliable-ingress-state.ts';
 import {
   createReliableDeliveryReceipt,
   getInputReliableIdentity,
-} from './reliable-receipt';
+} from './reliable-receipt.ts';
 
 export type ReliableIngressRegistration =
   | { kind: 'ordinary' }

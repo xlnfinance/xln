@@ -5,7 +5,7 @@ import {
   commitReliableIngress,
   finalizeReliableIngressCommit,
   registerReliableIngress,
-} from '../runtime/reliable-delivery';
+} from '../runtime/reliable/reliable-delivery.ts';
 import { applyRecoveryRuntimeOutputPlan } from '../runtime/recovery-output';
 import type { RuntimeOutputRoutingDeps } from '../runtime/output-routing';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';

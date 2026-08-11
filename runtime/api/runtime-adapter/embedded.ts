@@ -20,7 +20,7 @@ import { RuntimeAdapterError } from './errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
 import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../../runtime/lifecycle';
 import { ensureRuntimeInfrastructure } from '../../runtime/runtime-infrastructure';
-import type { RuntimePublishedNotice } from '../../runtime/loop-environment';
+import type { RuntimePublishedNotice } from '../../runtime/loop/loop-environment.ts';
 import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
 import {
   ensurePendingNumberedRegistrationsResumed,

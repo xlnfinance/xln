@@ -1,6 +1,6 @@
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/machine/registration-evidence';
 import { safeStringify } from '../../protocol/serialization';
-import { writeRuntimeMetadata } from '../../runtime/loop-environment';
+import { writeRuntimeMetadata } from '../../runtime/loop/loop-environment.ts';
 import type { RuntimeReplica } from '../../runtime/types';
 import {
   listStorageSnapshotHeights,

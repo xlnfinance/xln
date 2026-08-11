@@ -181,7 +181,7 @@ import {
 import { createJReplica } from '../scenarios/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
-import { assertExternalEntityInputAllowed } from '../runtime/entity-input-admission';
+import { assertExternalEntityInputAllowed } from '../runtime/entity-input/entity-input-admission.ts';
 import { discardRejectedEntityInput } from '../runtime/frame/input-discard';
 
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';

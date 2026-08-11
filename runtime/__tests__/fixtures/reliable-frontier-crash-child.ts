@@ -13,7 +13,7 @@ import {
 import {
   receiverFrontierKey,
   senderFrontierKey,
-} from '../../runtime/reliable-frontier';
+} from '../../runtime/reliable/reliable-frontier.ts';
 import { applyRuntimeStorageChanges } from '../../runtime/env-events';
 import { serializeTaggedJson } from '../../protocol/serialization';
 import {
