@@ -30,6 +30,7 @@ let releaseHeldLock: (() => void) | null = null;
 let ownsWebLock = false;
 let lossInFlight: Promise<void> | null = null;
 let activeStorageHandler: ((event: StorageEvent) => void) | null = null;
+let acquireInFlight = false;
 
 export function isInactiveTabStandby(): boolean {
   return typeof window !== 'undefined' && sessionStorage.getItem(INACTIVE_TAB_STANDBY_KEY) === '1';
@@ -223,11 +224,14 @@ export async function initializeActiveTabLock(onLoseLock: () => void | Promise<v
   const { tabId, onStorage } = installActiveTabCoordination(onLoseLock);
 
   postChannelMessage({ type: 'takeover-request', tabId });
+  acquireInFlight = true;
   try {
     await acquireWebLock(tabId);
   } catch (error) {
     cleanupActiveTabCoordination(onStorage);
     throw error;
+  } finally {
+    acquireInFlight = false;
   }
 
   return createActiveTabLockRelease(tabId, onStorage);
@@ -242,7 +246,7 @@ export async function tryInitializeActiveTabLock(
   onLoseLock: () => void | Promise<void>,
 ): Promise<(() => void) | null> {
   if (typeof window === 'undefined') return () => {};
-  if (activeChannel && !releaseHeldLock && !ownsWebLock && activeStorageHandler) {
+  if (activeChannel && !acquireInFlight && !releaseHeldLock && !ownsWebLock && activeStorageHandler) {
     cleanupActiveTabCoordination(activeStorageHandler);
   } else if (activeChannel || releaseHeldLock || ownsWebLock) {
     throw new Error('ACTIVE_TAB_LOCK_ALREADY_INITIALIZED');

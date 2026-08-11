@@ -928,6 +928,8 @@ test('projection routes never evict or duplicate an active embedded Runtime', ()
   expect(lockSource).toContain("{ mode: 'exclusive', ifAvailable: true }");
   expect(lockSource).toContain('if (!acquiredLock) rejectAttempt(error);');
   expect(lockSource).toContain('await lossInFlight;');
+  expect(lockSource).toContain('acquireInFlight = true;');
+  expect(lockSource).toContain('activeChannel && !acquireInFlight && !releaseHeldLock && !ownsWebLock');
   expect(connectionSource).toContain('const release = adoptActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('?? await tryInitializeActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('if (ownsActiveTabLock()) {');
