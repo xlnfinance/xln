@@ -16,10 +16,49 @@ import {
   splitWorkingOrderbookOffers,
   type OrderbookProcessOptions,
 } from './orderbook-matching-helpers';
-import { processCrossJurisdictionOrderbookOffers } from './orderbook-matching-cross';
-import { processSameAccountOrderbookOffers } from './orderbook-matching-same';
+import { finalizeCrossOrderbookAcks } from './orderbook-matching-cross-acks';
+import {
+  crossBookQtyLots,
+  primeCommittedCrossBooks,
+} from './orderbook-matching-cross-book';
+import { processCrossOrderbookOffer } from './orderbook-matching-cross-offer';
+import { createCrossOrderbookPass } from './orderbook-matching-cross-pass';
+import type { CrossOrderbookProcessInput } from './orderbook-matching-cross-types';
+import {
+  createSameOrderbookPass,
+  type SameOrderbookProcessInput,
+} from './orderbook-matching-same-pass';
+import { processSameOrderbookOffer } from './orderbook-matching-same-offer';
 
 const orderbookLog = createStructuredLogger('orderbook');
+const orderbookSameLog = createStructuredLogger('orderbook.same');
+
+export { crossBookQtyLots };
+
+const processCrossJurisdictionOrderbookOffers = (
+  input: CrossOrderbookProcessInput,
+): void => {
+  const pass = createCrossOrderbookPass(input);
+  primeCommittedCrossBooks(pass);
+  for (const offer of input.crossJurisdictionSwapOffers) {
+    processCrossOrderbookOffer(pass, offer);
+  }
+  finalizeCrossOrderbookAcks(pass);
+};
+
+const processSameAccountOrderbookOffers = (
+  input: SameOrderbookProcessInput,
+): void => {
+  const pass = createSameOrderbookPass(input);
+  for (const offer of input.sameAccountSwapOffers) {
+    processSameOrderbookOffer(pass, offer);
+  }
+  if (pass.pairSweepCount > 0) {
+    orderbookSameLog.debug('pass.summary', {
+      pairSweep: pass.pairSweepCount,
+    });
+  }
+};
 
 /**
  * Shared orderbook matcher for both same-chain and cross-chain swaps.

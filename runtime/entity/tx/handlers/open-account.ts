@@ -8,7 +8,7 @@ import { upsertSortedStringMapEntry } from '../../../infra/sorted-map-index';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/defaults';
 import { normalizeAccountWatchSeed } from '../../../protocol/account-watch-seed';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
@@ -22,7 +22,7 @@ import { applyAccountInput } from '../../../account/consensus';
 import { createLocalAccountInput } from '../../../account/input';
 import { assertEntityAccountInsertionCapacity } from '../../account-capacity';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claim-accumulator';
-import { resolveJurisdictionRebalanceDefaults } from '../../../account/rebalance-policy-defaults';
+import { resolveJurisdictionRebalanceDefaults } from '../../../account/defaults';
 import { buildHubRebalancePolicyTx } from './account-admin';
 import { canonicalAccountDisputeConfig } from '../../../account/dispute-config';
 

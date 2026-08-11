@@ -1,5 +1,5 @@
 import type { Delta } from '../types/account';
-import { assertAccountDeltaCapacity } from './delta-capacity';
+import { assertAccountDeltaCapacity } from './delta';
 import {
   TypeSafetyViolationError,
   validateObject,

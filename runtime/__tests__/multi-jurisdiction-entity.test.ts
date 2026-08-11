@@ -25,7 +25,7 @@ import {
 } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { getEntityConfigBoardHash } from '../hanko/signing';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/defaults';
 import { accountStateDomainFromJurisdiction } from '../account/state-root';
 import type { JAdapter } from '../jurisdiction/adapter/types';
 import { canonicalizeProfile, parseProfile } from '../entity/profile';

@@ -145,7 +145,7 @@ import {
 
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 
-import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching-cross';
+import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching';
 import { buildFinalProofPayload } from '../entity/tx/handlers/dispute/finalize-proof';
 
 import {

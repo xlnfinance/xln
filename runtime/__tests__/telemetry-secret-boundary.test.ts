@@ -94,7 +94,7 @@ test('consensus logging has no raw payload escape hatch', () => {
     'runtime/entity/consensus/state-size-observation.ts',
     'runtime/entity/consensus/input-consensus.ts',
     'runtime/entity/consensus/frame-application.ts',
-    'runtime/entity/tx/handlers/account/orderbook-matching-same.ts',
+    'runtime/entity/tx/handlers/account/orderbook-matching.ts',
     'runtime/entity/tx/handlers/dispute.ts',
     'runtime/entity/tx/handlers/dispute/shared.ts',
     'runtime/entity/tx/handlers/dispute/start.ts',

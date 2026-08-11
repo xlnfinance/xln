@@ -2,9 +2,11 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { resolveJurisdictionRebalanceDefaults } from '../account/rebalance-policy-defaults';
-import { getDefaultRebalancePolicyForToken } from '../account/rebalance-defaults';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
+import {
+  DEFAULT_ACCOUNT_TOKEN_IDS,
+  getDefaultRebalancePolicyForToken,
+  resolveJurisdictionRebalanceDefaults,
+} from '../account/defaults';
 import type { EntityState, JurisdictionConfig } from '../entity/types';
 
 const baseJurisdiction: JurisdictionConfig = {

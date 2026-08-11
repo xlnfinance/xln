@@ -141,7 +141,7 @@ import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../entity/
 
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 
-import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching-cross';
+import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching';
 
 import {
   createRuntimeOutputRoutingDeps,

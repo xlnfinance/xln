@@ -12,7 +12,7 @@ import type { AccountReplica } from '../types/account';
 import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
 import { assertAccountMempoolWithinLimit } from './mempool';
 import { validateDelta } from './delta-validation';
-import { assertAccountDeltaCapacity } from './delta-capacity';
+import { assertAccountDeltaCapacity } from './delta';
 import { decodeAccountFrame } from './frame-validation';
 import { decodeAccountTxs } from './tx-validation';
 import { validatePendingAccountResend } from './pending-resend-validation';

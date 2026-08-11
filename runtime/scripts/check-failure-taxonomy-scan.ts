@@ -569,7 +569,7 @@ for (const [path, markers] of [
     'runtime/account/consensus/propose.ts',
     ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile'],
   ],
-  ['runtime/entity/tx/handlers/account/orderbook-matching-same.ts', ["createStructuredLogger('orderbook.same')"]],
+  ['runtime/entity/tx/handlers/account/orderbook-matching.ts', ["createStructuredLogger('orderbook.same')"]],
   ['runtime/runtime/tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'replica.import_start']],
   [
     'runtime/runtime/jurisdiction-import.ts',
@@ -814,7 +814,7 @@ const accountProposePath = 'runtime/account/consensus/propose.ts';
 const accountPropose = readText(accountProposePath);
 assertNotIncludes(accountPropose, 'console.', accountProposePath);
 
-const sameOrderbookMatchingPath = 'runtime/entity/tx/handlers/account/orderbook-matching-same.ts';
+const sameOrderbookMatchingPath = 'runtime/entity/tx/handlers/account/orderbook-matching.ts';
 const sameOrderbookMatching = readText(sameOrderbookMatchingPath);
 assertNotIncludes(sameOrderbookMatching, 'console.', sameOrderbookMatchingPath);
 

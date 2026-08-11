@@ -4,7 +4,7 @@ import {
   assertNoTokenlessHubRawOverrides,
   getDefaultRebalanceBaseFeeForToken,
   getDefaultRebalancePolicyForToken,
-} from '../account/rebalance-defaults';
+} from '../account/defaults';
 import { dai, eth, usd } from '../scenarios/helpers';
 import { getBootstrapTokenAmount } from '../jurisdiction/machine/bootstrap-economy';
 

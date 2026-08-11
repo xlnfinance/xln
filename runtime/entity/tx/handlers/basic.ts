@@ -3,7 +3,7 @@ import type { EntityInput, EntityState, Proposal } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { log } from '../../../infra/diagnostics';
-import { normalizeEntityName } from '../../profile-name';
+import { normalizeEntityName } from '../../profile';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage, addTextMessage } from '../../frame-events';
 import {
@@ -18,13 +18,33 @@ import {
   resolveCanonicalEntityBoardShares,
 } from '../../authorization';
 import { resolveEntityCommandBoard } from '../../command';
-import { validateMessage } from '../validation';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 import { buildCertifiedEntityOutput } from '../cross-j-outputs';
 import { hashCertifiedEntityOutputSemantic } from '../../consensus/output-certification';
 import { normalizeEntityRef } from '../account-key';
 
 const basicLog = createStructuredLogger('entity.basic');
+
+const validateMessage = (message: string): boolean => {
+  try {
+    if (typeof message !== 'string') {
+      log.error(`❌ Message must be string, got: ${typeof message}`);
+      return false;
+    }
+    if (message.length > 1000) {
+      log.error(`❌ Message too long: ${message.length} > 1000 chars`);
+      return false;
+    }
+    if (message.length === 0) {
+      log.error('❌ Empty message not allowed');
+      return false;
+    }
+    return true;
+  } catch (error) {
+    log.error(`❌ Message validation error: ${error}`);
+    return false;
+  }
+};
 
 type BasicEntityTxResult = {
   newState: EntityState;

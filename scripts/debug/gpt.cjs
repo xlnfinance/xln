@@ -126,7 +126,7 @@ const CORE_FILES = {
 
     // Transaction processing (how txs are applied)
     'entity/tx/apply.ts',    // Entity transaction dispatcher
-    'entity/tx/validation.ts', // Transaction validation
+    'entity/tx/handlers/basic.ts', // Basic Entity transaction validation and handlers
     'entity/tx/proposals.ts', // Proposal logic
     'entity/tx/j-events.ts',  // Jurisdiction event handling
     'entity/tx/handlers/account.ts',         // Account operations (openAccount, extendCredit)
@@ -157,8 +157,6 @@ const CORE_FILES = {
     'entity/tx/handlers/cross-j-sweep.ts',   // Cross-j terminal sweep
     'entity/tx/handlers/account/orderbook-offers.ts', // Book order projection from swap offers
     'entity/tx/handlers/account/orderbook-matching.ts', // Account matching orchestrator
-    'entity/tx/handlers/account/orderbook-matching-same.ts', // Same-chain order matching
-    'entity/tx/handlers/account/orderbook-matching-cross.ts', // Cross-j order matching
     'entity/tx/handlers/account/orderbook-matching-helpers.ts', // Shared matching helpers
     'entity/tx/handlers/account/orderbook-cancels.ts', // Orderbook cancellation path
     'extensions/lending.ts',                              // Hub lending pool math, terms, ids, memos
@@ -347,8 +345,6 @@ const CROSS_FILES = {
     'entity/tx/handlers/account/orderbook-offers.ts',
     'entity/tx/handlers/account/orderbook-queue.ts',
     'entity/tx/handlers/account/orderbook-matching.ts',
-    'entity/tx/handlers/account/orderbook-matching-same.ts',
-    'entity/tx/handlers/account/orderbook-matching-cross.ts',
     'entity/tx/handlers/account/orderbook-matching-helpers.ts',
     'entity/tx/handlers/account/orderbook-cancels.ts',
     'entity/tx/handlers/swap-requests.ts',
@@ -482,7 +478,7 @@ const RUNTIME_FILES = {
     'jurisdiction/machine/event-normalization.ts',
     'jurisdiction/machine/event-observation.ts',
     'entity/tx/apply.ts',
-    'entity/tx/validation.ts',
+    'entity/tx/handlers/basic.ts',
     'entity/tx/proposals.ts',
     'entity/tx/j-events.ts',
     'entity/tx/j-events-account.ts',
@@ -572,8 +568,6 @@ const ORDERBOOK_FILES = {
     'entity/tx/handlers/account/orderbook-offers.ts',
     'entity/tx/handlers/account/orderbook-queue.ts',
     'entity/tx/handlers/account/orderbook-matching.ts',
-    'entity/tx/handlers/account/orderbook-matching-same.ts',
-    'entity/tx/handlers/account/orderbook-matching-cross.ts',
     'entity/tx/handlers/account/orderbook-matching-helpers.ts',
     'entity/tx/handlers/account/orderbook-cancels.ts',
     'account/tx/handlers/swap-offer.ts',
@@ -642,7 +636,6 @@ const SWAP_FILES = {
     'entity/tx/handlers/account/orderbook-offers.ts',
     'entity/tx/handlers/account/orderbook-queue.ts',
     'entity/tx/handlers/account/orderbook-matching.ts',
-    'entity/tx/handlers/account/orderbook-matching-same.ts',
     'entity/tx/handlers/account/orderbook-matching-helpers.ts',
     'entity/tx/handlers/account/orderbook-cancels.ts',
     'account/tx/apply.ts',
@@ -1086,7 +1079,7 @@ User UI -> placeSwapOffer
 \`\`\`
 
 Same-chain orderbook matching lives in:
-- \`runtime/entity/tx/handlers/account/orderbook-matching-same.ts\`
+- \`runtime/entity/tx/handlers/account/orderbook-matching.ts\`
 - \`runtime/entity/tx/handlers/account/orderbook-matching-helpers.ts\`
 - \`runtime/account/tx/handlers/swap-offer.ts\`
 - \`runtime/account/tx/handlers/swap-resolve.ts\`
@@ -1253,7 +1246,7 @@ xln/
 
     entity/tx/
       apply.ts                   ${fileSizes['runtime/entity/tx/apply.ts'] || '?'} lines - Entity tx dispatcher
-      validation.ts              ${fileSizes['runtime/entity/tx/validation.ts'] || '?'} lines - Transaction validation
+      handlers/basic.ts          ${fileSizes['runtime/entity/tx/handlers/basic.ts'] || '?'} lines - Basic tx validation and handlers
       proposals.ts               ${fileSizes['runtime/entity/tx/proposals.ts'] || '?'} lines - Proposal logic
       j-events.ts                ${fileSizes['runtime/entity/tx/j-events.ts'] || '?'} lines - Jurisdiction events
       handlers/account.ts              ${fileSizes['runtime/entity/tx/handlers/account.ts'] || '?'} lines - Account operations

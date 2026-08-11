@@ -9,8 +9,10 @@ import {
   sameAccountStateDomain,
 } from '../../../../account/state-root';
 import { isAccountWatchSeed } from '../../../../protocol/account-watch-seed';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../../account/default-tokens';
-import { resolveJurisdictionRebalanceDefaults } from '../../../../account/rebalance-policy-defaults';
+import {
+  DEFAULT_ACCOUNT_TOKEN_IDS,
+  resolveJurisdictionRebalanceDefaults,
+} from '../../../../account/defaults';
 import { createEmptyAccountJClaimAccumulator } from '../../../../account/j-claim-accumulator';
 import {
   accountInputReferenceHeight,

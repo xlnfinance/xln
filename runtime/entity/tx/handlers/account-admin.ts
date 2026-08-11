@@ -10,7 +10,7 @@ import { checkAutoRebalance } from '../../../account/tx/handlers/request-collate
 import {
   assertNoTokenlessHubRawOverrides,
   getDefaultRebalanceBaseFeeForToken,
-} from '../../../account/rebalance-defaults';
+} from '../../../account/defaults';
 import type { AccountTxTarget } from './account';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;

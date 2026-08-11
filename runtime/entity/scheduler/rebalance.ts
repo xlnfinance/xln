@@ -10,7 +10,7 @@ import {
   assertNoTokenlessHubRawOverrides,
   getDefaultRebalanceBaseFeeForToken,
   getDefaultRebalancePolicyForToken,
-} from '../../account/rebalance-defaults';
+} from '../../account/defaults';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import {
   batchAddReserveToCollateral,
