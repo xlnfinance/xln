@@ -1843,6 +1843,11 @@ test.describe('E2E Swap Isolated Flow', () => {
         waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 1, wholeSwapTokenUnits(1, 20n)),
       ]);
 
+      await Promise.all([
+        closeExpectedSwapCompletionModal(alicePage),
+        closeExpectedSwapCompletionModal(bobPage),
+      ]);
+
       await placeAliceSellOffer(bobPage, '0.0095', '2600');
       await placeBobMatchingBuyOrder(alicePage, '24.7', '2600');
 
@@ -1864,6 +1869,11 @@ test.describe('E2E Swap Isolated Flow', () => {
           intervals: [250, 500, 750],
         })
         .toBeGreaterThanOrEqual(2);
+
+      await Promise.all([
+        closeExpectedSwapCompletionModal(alicePage),
+        closeExpectedSwapCompletionModal(bobPage),
+      ]);
 
       await Promise.all([
         expectClosedOrderRowStatus(alicePage, /Filled/i, 1),
