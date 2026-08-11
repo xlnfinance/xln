@@ -57,14 +57,6 @@ export const XLN_URI_SCHEME = 'xln://';
 /** Default runtime host (for local single-runtime setup) */
 export const DEFAULT_RUNTIME_HOST = 'localhost:8080';
 
-/** Coordinator for cross-runtime messaging (future) */
-export const XLN_COORDINATOR = 'xln.finance';
-
-/** Well-known EVM chain IDs */
-export const CHAIN_IDS = {
-  local: '31337',
-} as const;
-
 // =============================================================================
 // REPLICA KEY - Structured, type-safe
 // =============================================================================

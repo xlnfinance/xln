@@ -232,10 +232,6 @@ export function getSectionOrder(sectionId) {
   return getSectionMeta(sectionId)?.order ?? 999;
 }
 
-export function getSectionTitle(sectionId) {
-  return getSectionMeta(sectionId)?.title || 'Other';
-}
-
 export function getSectionKind(sectionId) {
   return getSectionMeta(sectionId)?.kind || 'live';
 }

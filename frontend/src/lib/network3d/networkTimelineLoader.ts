@@ -195,14 +195,6 @@ class RemoteRuntimeReaderPool {
 const timelineRemoteReaders = new RemoteRuntimeReaderPool();
 const graphRemoteReaders = new RemoteRuntimeReaderPool();
 
-export const pruneNetworkTimelineReaders = (runtimeMap: Map<string, Runtime>): void => {
-  timelineRemoteReaders.prune(new Set(
-    Array.from(runtimeMap.values())
-      .filter((runtime) => runtime.type === 'remote')
-      .map((runtime) => runtimeId(runtime.id)),
-  ));
-};
-
 export const pruneNetworkGraphReaders = (runtimeMap: Map<string, Runtime>): void => {
   graphRemoteReaders.prune(new Set(
     Array.from(runtimeMap.values())

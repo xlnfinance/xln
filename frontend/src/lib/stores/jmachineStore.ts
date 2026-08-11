@@ -153,10 +153,6 @@ export function normalizeJMachineConfigList(raw: unknown): JMachineConfig[] {
   return Array.from(deduped.values()).sort((a, b) => compareStableText(a.name, b.name));
 }
 
-export function stringifyJMachineConfig(config: JMachineConfig): string {
-  return JSON.stringify(config, null, 2);
-}
-
 export function parseJMachineConfigJson(raw: string): JMachineConfig {
   const parsed = normalizeJMachineConfig(JSON.parse(raw));
   if (!parsed) {
@@ -169,12 +165,6 @@ export function parseJMachineConfigJson(raw: string): JMachineConfig {
 export const jmachineState = writable<JMachineStoreState>(defaultState);
 
 // Derived stores
-export const jmachineConfigs = {
-  subscribe: (fn: (value: JMachineConfig[]) => void) => {
-    return jmachineState.subscribe(state => fn(state.configs));
-  }
-};
-
 export const activeJMachine = {
   subscribe: (fn: (value: string | null) => void) => {
     return jmachineState.subscribe(state => fn(state.activeJMachine));

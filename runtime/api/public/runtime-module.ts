@@ -27,10 +27,10 @@ export type { RuntimeReplica, EnvSnapshot, RuntimeInput, RoutedEntityInput } fro
 export type { EntityReplica, EntityState, SwapBookEntry, JurisdictionConfig, ConsensusConfig, EntityInput } from '../../entity/types';
 export type { JReplica } from '../../types/jurisdiction-runtime';
 export type { EntityTx } from '../../types/entity-tx';
-export type { AccountReplica, AccountState, AccountFrame, AccountSnapshot, Delta, DerivedDelta, AccountTx, SettlementDiff } from '../../types/account';
+export type { AccountReplica, AccountState, AccountFrame, Delta, DerivedDelta, AccountTx, SettlementDiff } from '../../types/account';
 export type { Xlnomy, XlnomySnapshot } from '../../types/xlnomy';
 export type { HubRebalanceConfig } from '../../types/rebalance';
-export type { DebtEntry, DebtStatus } from '../../types/debt';
+export type { DebtEntry } from '../../types/debt';
 export type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 export type { PaymentDeliveryMode } from '../../types/payment';
 export type { PersistedFrameJournal } from '../../storage/types';
@@ -61,7 +61,7 @@ export type {
 export type { GossipLayer } from '../../network/p2p/gossip';
 export type { Profile } from '../../entity/profile';
 export type { PaymentRoute } from '../../routing/pathfinding';
-export type { CompletedBatch, JBatch, JBatchState } from '../../jurisdiction/machine/batch';
+export type { JBatch, JBatchState } from '../../jurisdiction/machine/batch';
 export type { JAdapter, JEvent } from '../../jurisdiction/adapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from '../../orderbook';
 export type {
@@ -171,30 +171,12 @@ import type {
 	  RuntimeAdapterTimelineFrame,
 	} from '../runtime-adapter/types';
 
-export type QueueEntityInputPayload = {
-  type: string;
-} & Record<string, unknown>;
-
 export type BrowserVMTokenInfo = {
   tokenId: number;
   symbol: string;
   name?: string;
   address?: string;
   decimals: number;
-};
-
-export type LoadEnvFromDbOptions = {
-  fromSnapshotHeight?: number;
-};
-
-export type VerifyRuntimeChainResult = {
-  ok: true;
-  latestHeight: number;
-  checkpointHeight: number;
-  selectedSnapshotHeight: number;
-  restoredHeight: number;
-  expectedStateHash: string;
-  actualStateHash: string;
 };
 
 export type {
@@ -228,15 +210,6 @@ export interface EntityDisplayInfo {
   name: string;
   avatar: string;
   type: 'numbered' | 'lazy' | 'named';
-}
-
-/**
- * Signer display info returned by getSignerDisplayInfo
- */
-export interface SignerDisplayInfo {
-  name: string;
-  address: string;
-  avatar: string;
 }
 
 /** Exact financial utility shapes exported by runtime. */

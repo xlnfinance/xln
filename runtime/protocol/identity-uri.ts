@@ -1,15 +1,10 @@
 import {
-  DEFAULT_RUNTIME_HOST,
   XLN_URI_SCHEME,
   toEntityId,
   toEpAddress,
   toJId,
   toSignerId,
-  type EntityId,
-  type EntityProviderAddress,
-  type JId,
   type ReplicaUri,
-  type SignerId,
 } from './identity';
 
 export const formatReplicaUri = (uri: ReplicaUri): string =>
@@ -32,16 +27,3 @@ export const parseReplicaUri = (uriString: string): ReplicaUri => {
     signerId: toSignerId(signerId),
   };
 };
-
-export const createLocalUri = (
-  jId: JId,
-  epAddress: EntityProviderAddress,
-  entityId: EntityId,
-  signerId: SignerId,
-): ReplicaUri => ({
-  runtimeHost: DEFAULT_RUNTIME_HOST,
-  jId,
-  epAddress,
-  entityId,
-  signerId,
-});

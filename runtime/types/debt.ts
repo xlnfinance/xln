@@ -1,5 +1,3 @@
-export type DebtStatus = 'open' | 'paid' | 'forgiven';
-
 export type DebtEventType = 'DebtCreated' | 'DebtEnforced' | 'DebtForgiven';
 
 /** One active on-chain obligation. Terminal history lives in the bounded Runtime activity WAL. */

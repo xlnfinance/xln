@@ -343,23 +343,6 @@ export function assertJBatchWithinContractLimits(batch: JBatch, context = 'jBatc
   }
 }
 
-/** Completed batch record (stored in entity state history) */
-export interface CompletedBatch {
-  batchHash: string;
-  txHash: string;
-  status: 'confirmed' | 'failed';
-  broadcastedAt: number;
-  confirmedAt: number;
-  opCount: number; // Total operations in batch
-  entityNonce: number;
-  jBlockNumber?: number; // Finalized J-block that emitted HankoBatchProcessed
-  batch?: JBatch; // Optional full batch snapshot for rich UI history
-  operations?: BatchOpBreakdown; // Optional per-op breakdown for UI history
-  source?: 'self-batch' | 'counterparty-event';
-  eventType?: 'DisputeStarted' | 'DisputeFinalized';
-  note?: string;
-}
-
 /**
  * Create empty batch (2019src.txt line 3368)
  */

@@ -40,16 +40,6 @@ let VERBOSE_ENABLED = true; // DEFAULT ON for development
 // Monkey-patch console for performance-aware logging
 const originalLog = console.log;
 
-export function enableFrontendLog(category: keyof FrontendLogConfig): void {
-  LOG_CONFIG[category] = true;
-  originalLog(`✅ ${category} enabled`);
-}
-
-export function disableFrontendLog(category: keyof FrontendLogConfig): void {
-  LOG_CONFIG[category] = false;
-  originalLog(`❌ ${category} disabled`);
-}
-
 export function setFrontendVerboseLogging(enabled: boolean): void {
   VERBOSE_ENABLED = enabled;
   for (const key of Object.keys(LOG_CONFIG) as Array<keyof FrontendLogConfig>) {

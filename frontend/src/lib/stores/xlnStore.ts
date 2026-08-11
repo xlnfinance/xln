@@ -93,7 +93,6 @@ import type {
   NumberedRegistrationCommand,
   NumberedRegistrationCommandResult,
   EntityDisplayInfo,
-  SignerDisplayInfo,
   FinancialConstants,
   SwapBookEntry,
   CrossJurisdictionSwapRoute,

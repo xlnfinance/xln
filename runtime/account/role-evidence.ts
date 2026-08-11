@@ -27,11 +27,3 @@ export const verifiedGossipAccountRoleEvidence = (
     committedIsHub,
   );
 };
-
-export const operatorAccountRoleEvidence = (
-  entityId: string,
-  isHub: boolean,
-): AccountRoleEvidence => canonicalAccountRoleEvidence(
-  { entityId, isHub, source: 'operator-config' },
-  entityId,
-);

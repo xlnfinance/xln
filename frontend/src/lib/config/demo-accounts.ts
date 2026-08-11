@@ -34,5 +34,3 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
   // live-runtime dropdown (radapter token system), not throwaway seeds.
   ...['A', 'B', 'C', 'D', 'E'].map((l) => make(l, 'user')),
 ];
-
-export const DEFAULT_DEMO_ACCOUNT = DEMO_ACCOUNTS[0];

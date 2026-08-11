@@ -70,7 +70,6 @@ export interface AccountRebalanceShadowState {
   pendingRequest?: { tokenId: number; targetAmount: bigint };
 }
 
-export const REFERENCE_TOKEN_ID = 1;
 export const DEFAULT_SOFT_LIMIT_WHOLE = 500n;
 export const DEFAULT_HARD_LIMIT_WHOLE = 10_000n;
 export const DEFAULT_MAX_FEE_WHOLE = 15n;
@@ -85,22 +84,6 @@ const requireTokenDecimals = (value: number): bigint => {
 
 export const scaleWholeTokenAmount = (amount: bigint, decimals: number): bigint =>
   amount * 10n ** requireTokenDecimals(decimals);
-
-export const scaleRawTokenAmount = (
-  amount: bigint,
-  sourceDecimals: number,
-  targetDecimals: number,
-): bigint => {
-  const source = requireTokenDecimals(sourceDecimals);
-  const target = requireTokenDecimals(targetDecimals);
-  if (source === target) return amount;
-  if (target > source) return amount * 10n ** (target - source);
-  const divisor = 10n ** (source - target);
-  if (amount % divisor !== 0n) {
-    throw new Error(`TOKEN_AMOUNT_PRECISION_LOSS:${amount}:${sourceDecimals}:${targetDecimals}`);
-  }
-  return amount / divisor;
-};
 
 export const buildDefaultRebalancePolicy = (decimals: number): RebalancePolicy => ({
   r2cRequestSoftLimit: scaleWholeTokenAmount(DEFAULT_SOFT_LIMIT_WHOLE, decimals),

@@ -48,7 +48,6 @@ export type {
 } from '../../protocol/identity';
 export type { JurisdictionInfo } from '../../protocol/jurisdiction-identity';
 export {
-  deriveSignerKey,
   deriveSignerKeySync,
   getCachedSignerPrivateKey,
   registerSignerKey,
@@ -138,9 +137,6 @@ export {
   parseUniversalEntityId,
   createProviderScopedEntityId,
   getShortId,
-  formatEntityIdDisplay,
-  entityIdsEqual,
-  extractProvider,
 } from '../../entity/id';
 export type { ParsedEntityId } from '../../entity/id';
-export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from '../../qa/runtime-ascii';
+export { formatRuntime, formatEntity, formatAccount } from '../../qa/runtime-ascii';

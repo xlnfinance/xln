@@ -6,7 +6,6 @@ import {
 import { createStructuredLogger } from '../infra/logger';
 import { attachEventEmitters } from './env-events';
 import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
-import type { EntityTx } from '../types/entity-tx';
 import type { RuntimeReplica } from './types';
 import type { TrustedJurisdictionRpcBinding } from './infra';
 
@@ -116,28 +115,3 @@ export const bootstrapRuntime = async (
   }
   return env;
 };
-
-export const queueEntityTransaction = (
-  enqueue: (
-    env: RuntimeReplica,
-    entityId: string,
-    signerId: string,
-    tx: EntityTx,
-  ) => void,
-  env: RuntimeReplica,
-  entityId: string,
-  signerId: string,
-  txData: { type: EntityTx['type'] } & Record<string, unknown>,
-): void => {
-  enqueue(env, entityId, signerId, { type: txData.type, data: txData } as EntityTx);
-};
-
-export const getHistory = (env: RuntimeReplica) => env.history || [];
-
-export const getSnapshot = (env: RuntimeReplica, index: number) => {
-  const history = getHistory(env);
-  return index >= 0 && index < history.length ? history[index] : null;
-};
-
-export const getCurrentHistoryIndex = (env: RuntimeReplica): number =>
-  getHistory(env).length - 1;

@@ -381,24 +381,6 @@ export const QA = {
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
-// CRYPTOGRAPHY
-// ═══════════════════════════════════════════════════════════════
-
-export const CRYPTO = {
-  /** Hash function for frame hashes */
-  HASH_ALGORITHM: 'keccak256' as const,
-
-  /** Signature scheme */
-  SIGNATURE_SCHEME: 'secp256k1' as const,
-
-  /** Entity ID length (bytes) */
-  ENTITY_ID_LENGTH: 32,
-
-  /** Signature length (bytes) */
-  SIGNATURE_LENGTH: 65,
-} as const;
-
-// ═══════════════════════════════════════════════════════════════
 // VALIDATION THRESHOLDS
 // ═══════════════════════════════════════════════════════════════
 

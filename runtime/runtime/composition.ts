@@ -19,9 +19,6 @@ import { loadGossipProfilesFromInfraDb } from './infra-gossip-store';
 import { withStorageConsistentRead } from '../storage/runtime-dbs';
 import {
   createRuntimeCommandApi,
-  getEntityDisplayInfoFromProfile,
-  resolveEntityName,
-  searchEntityNames,
 } from './command-api';
 import {
   cloneRuntimeFrameMempool,
@@ -36,10 +33,6 @@ import { clearRuntimeDatabases } from './storage-admin';
 import { loadLiveRuntimeFromDB } from './live-restore';
 import {
   bootstrapRuntime,
-  getCurrentHistoryIndex,
-  getHistory,
-  getSnapshot,
-  queueEntityTransaction,
   type RuntimeCreationOptions,
   type RuntimeLocalSigner,
 } from './bootstrap';
@@ -230,36 +223,9 @@ const main = (
 }, runtimeSeedOverride, options);
 
 // Clear database for a specific runtime and return a fresh env
-/**
- * Queue an entity transaction for processing (helper for UI components)
- * Wraps applyRuntimeInput with a single entity tx
- */
-export const queueEntityInput = async (
-  env: RuntimeReplica,
-  entityId: string,
-  signerId: string,
-  txData: Parameters<typeof queueEntityTransaction>[4],
-): Promise<void> => {
-  queueEntityTransaction((target, targetEntityId, targetSignerId, tx) => {
-    enqueueRuntimeInputs(
-      target,
-      [{ entityId: targetEntityId, signerId: targetSignerId, entityTxs: [tx] }],
-      undefined,
-      undefined,
-      target.state.timestamp,
-    );
-  }, env, entityId, signerId, txData);
-};
-
 export {
   applyRuntimeInput,
-  getCurrentHistoryIndex,
-  getEntityDisplayInfoFromProfile,
-  getHistory,
-  getSnapshot,
   main,
-  resolveEntityName,
-  searchEntityNames,
   assertBrowserVMJurisdiction,
 };
 

@@ -1,11 +1,6 @@
 import { assertCrossJurisdictionSwapTargetReadyInEnv } from './swap-target-readiness';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
 import { normalizeRuntimeId } from '../network/p2p/runtime-id';
-import {
-  getRuntimeEntityDisplayInfo,
-  resolveRuntimeEntityName,
-  searchRuntimeEntityNames,
-} from '../routing/name-resolution';
 import type { createRuntimeLoopApi } from './loop';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { RuntimeReplica } from './types';
@@ -21,15 +16,6 @@ type RuntimeCommandDependencies = Pick<
   ReturnType<typeof createRuntimeLoopApi>,
   'enqueueRuntimeInputs' | 'getRuntimeOutputRoutingDeps'
 >;
-
-export const searchEntityNames = (query: string, limit?: number) =>
-  searchRuntimeEntityNames(null, query, limit);
-
-export const resolveEntityName = (entityId: string) =>
-  resolveRuntimeEntityName(null, entityId);
-
-export const getEntityDisplayInfoFromProfile = (entityId: string) =>
-  getRuntimeEntityDisplayInfo(null, entityId);
 
 /** Commands enter the owning Runtime through its normal ingress/WAL path. */
 export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies) => {

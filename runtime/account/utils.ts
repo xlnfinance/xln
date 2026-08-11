@@ -319,11 +319,6 @@ const SWAP_PAIR_POLICY_BY_BASE_QUOTE: Record<string, SwapPairPolicy> = {
   },
 };
 
-export function getSwapPairPolicy(tokenA: number, tokenB: number): SwapPairPolicy {
-  const oriented = getSwapPairOrientation(tokenA, tokenB);
-  return getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
-}
-
 export function getSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: number): SwapPairPolicy {
   const key = `${baseTokenId}/${quoteTokenId}`;
   return SWAP_PAIR_POLICY_BY_BASE_QUOTE[key] ?? DEFAULT_SWAP_PAIR_POLICY;

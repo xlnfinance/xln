@@ -434,13 +434,6 @@ export const computeAccountStateRootCold = (account: AccountState): string => {
   ).root;
 };
 
-export const assertAccountStateRootCache = (account: AccountState, code = 'ACCOUNT_STATE_ROOT_CACHE'): string => {
-  const incremental = computeAccountStateRoot(account);
-  const cold = computeAccountStateRootCold(account);
-  if (incremental !== cold) throw new Error(`${code}_MISMATCH:incremental=${incremental}:cold=${cold}`);
-  return incremental;
-};
-
 const settlementOverlayState = (
   workspace: SettlementWorkspace | undefined,
 ): unknown => {

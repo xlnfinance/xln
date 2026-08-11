@@ -2,7 +2,6 @@ import { getTokenInfo } from './utils';
 import {
   buildDefaultRebalanceBaseFee,
   buildDefaultRebalancePolicy,
-  scaleRawTokenAmount,
   type RebalancePolicy,
 } from '../types/rebalance';
 
@@ -30,13 +29,3 @@ export const getDefaultRebalancePolicyForToken = (tokenId: number): RebalancePol
 
 export const getDefaultRebalanceBaseFeeForToken = (tokenId: number): bigint =>
   buildDefaultRebalanceBaseFee(tokenDecimals(tokenId));
-
-export const rescaleRawAmountBetweenTokens = (
-  amount: bigint,
-  sourceTokenId: number,
-  targetTokenId: number,
-): bigint => scaleRawTokenAmount(
-  amount,
-  tokenDecimals(sourceTokenId),
-  tokenDecimals(targetTokenId),
-);

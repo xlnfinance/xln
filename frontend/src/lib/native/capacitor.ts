@@ -70,25 +70,6 @@ export const requestNativePaymentWakeNotifications = async (): Promise<void> => 
 	await maybeRegisterPush();
 };
 
-export const sendLocalPaymentWake = async (title: string, body: string, extra: Record<string, unknown> = {}): Promise<void> => {
-	if (window.xlnDesktop?.notifyPaymentWake) {
-		await window.xlnDesktop.notifyPaymentWake({ title, body, extra });
-		return;
-	}
-	if (!Capacitor.isNativePlatform()) return;
-	const permission = await LocalNotifications.requestPermissions();
-	if (permission.display !== 'granted') return;
-	await LocalNotifications.schedule({
-		notifications: [{
-			id: Date.now() % 2_147_483_647,
-			title,
-			body,
-			schedule: { at: new Date(Date.now() + 250) },
-			extra,
-		}],
-	});
-};
-
 export const initializeNativeShell = async (): Promise<void> => {
 	if (window.xlnDesktop) {
 		installDesktopDeepLinkListener();

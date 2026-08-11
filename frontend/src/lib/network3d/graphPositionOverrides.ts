@@ -37,7 +37,3 @@ export const writeGraphPositionOverride = (
   if (storage) storage.setItem(GRAPH_POSITION_OVERRIDES_KEY, JSON.stringify(Object.fromEntries(current)));
   return current;
 };
-
-export const clearGraphPositionOverrides = (storage: Storage | null): void => {
-  storage?.removeItem(GRAPH_POSITION_OVERRIDES_KEY);
-};

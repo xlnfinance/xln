@@ -101,10 +101,6 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
   },
 ];
 
-export function getNetworkByChainId(chainId: number): NetworkConfig | undefined {
-  return POPULAR_NETWORKS.find(n => n.chainId === chainId);
-}
-
 export function isBrowserVM(rpcs: string[]): boolean {
   return rpcs.length === 0;
 }

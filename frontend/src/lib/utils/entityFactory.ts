@@ -2,7 +2,6 @@
  * Entity Factory - Auto-create ephemeral entities for signers
  */
 
-import { keccak256, toUtf8Bytes } from 'ethers';
 import type { RuntimeReplica, EntityReplica } from '@xln/runtime/api/public/runtime-module';
 import { unwrapLiveRuntimeEnv } from './liveRuntimeEnv';
 import { dispatchRuntimeInputToRuntimeEnv, getXLN } from '$lib/stores/xlnStore';
@@ -35,22 +34,6 @@ async function waitForCondition(
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   throw new Error(`[EntityFactory] Timeout waiting for condition: ${label}`);
-}
-
-/**
- * Counter for deterministic ephemeral entity ID generation
- * Ensures same signer + counter always generates same entity ID
- */
-let ephemeralEntityCounter = 0;
-
-/**
- * Generate deterministic ephemeral entity ID from signer address
- * Format: keccak256(signerId + counter)
- * Uses counter instead of Date.now() to maintain RJEA determinism
- */
-export function generateEphemeralEntityId(signerId: string): string {
-  const data = signerId + (ephemeralEntityCounter++).toString();
-  return keccak256(toUtf8Bytes(data));
 }
 
 /**

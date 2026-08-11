@@ -340,9 +340,6 @@ export const parseRemoteRuntimeImportPayload = (payload: string): RemoteRuntimeI
   throw lastError instanceof Error ? lastError : new Error('REMOTE_RUNTIME_IMPORT_PAYLOAD_INVALID');
 };
 
-export const formatRemoteRuntimeImportLines = (entries: RemoteRuntimeImportEntry[]): string =>
-  entries.map(entry => `${entry.label} | ${entry.access} | ${entry.wsUrl} | ${entry.token}`).join('\n');
-
 export const limitRemoteRuntimeImportEntries = <T extends RemoteRuntimeImportEntry>(entries: T[]): T[] => {
   if (entries.length > MAX_REMOTE_RUNTIME_IMPORTS) {
     throw new Error(`REMOTE_RUNTIME_IMPORT_LIMIT_EXCEEDED:${entries.length}:${MAX_REMOTE_RUNTIME_IMPORTS}`);

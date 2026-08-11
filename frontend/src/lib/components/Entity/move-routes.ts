@@ -72,31 +72,6 @@ export function buildMoveArrowPath(
   return `M ${start.x} ${start.y} C ${control1X} ${start.y} ${control2X} ${end.y} ${end.x} ${end.y}`;
 }
 
-export function moveRouteExecutionLabel(from: MoveEndpoint, to: MoveEndpoint): string {
-  switch (getMoveRouteKey(from, to)) {
-    case 'external->reserve':
-      return 'Deposit into reserve';
-    case 'reserve->external':
-      return 'Withdraw to wallet';
-    case 'reserve->account':
-      return 'Fund account';
-    case 'external->external':
-      return 'Send to wallet';
-    case 'external->account':
-      return 'Deposit and fund account';
-    case 'reserve->reserve':
-      return 'Move between reserves';
-    case 'account->reserve':
-      return 'Return funds to reserve';
-    case 'account->external':
-      return 'Withdraw from account';
-    case 'account->account':
-      return 'Move between accounts';
-    default:
-      return 'Unavailable';
-  }
-}
-
 export type MoveRouteTextContext = {
   targetEntityLabel: string;
   targetHubLabel: string;
@@ -154,34 +129,5 @@ export function buildMoveRouteSteps(
       ];
     default:
       return ['Route not available'];
-  }
-}
-
-export function buildMoveRouteMeta(
-  from: MoveEndpoint,
-  to: MoveEndpoint,
-  context: Pick<MoveRouteTextContext, 'hasRemoteReserveRecipient'>,
-): string {
-  switch (getMoveRouteKey(from, to)) {
-    case 'external->reserve':
-      return context.hasRemoteReserveRecipient ? '2 steps • ~300k gas' : 'On-chain batch • ~140k gas';
-    case 'reserve->reserve':
-      return '1 batch • ~160k gas';
-    case 'reserve->account':
-      return '1 batch • ~180k gas';
-    case 'account->reserve':
-      return context.hasRemoteReserveRecipient ? '2 steps • ~200k gas' : '2 steps • ~120k gas';
-    case 'reserve->external':
-      return '1 batch • ~140k gas';
-    case 'external->external':
-      return '1 wallet transfer';
-    case 'external->account':
-      return '2 steps • ~320k gas';
-    case 'account->external':
-      return '2 steps • ~260k gas';
-    case 'account->account':
-      return '2 steps • ~300k gas';
-    default:
-      return '';
   }
 }

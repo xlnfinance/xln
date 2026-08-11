@@ -30,8 +30,6 @@ export {
   MAX_ORDERBOOK_QTY_LOTS,
 } from './core';
 
-// Import for local use
-import { MAX_FILL_RATIO } from './core';
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from '../account/utils';
 
 // Price tick precision used for ratio encoding in orderbook flows.
@@ -305,13 +303,6 @@ export function requantizeRemainingSwapAtPrice(
     effectiveWant: quantizedBaseAmount,
     releasedGiveDust: remainingGiveAmount > quantizedQuoteAmount ? remainingGiveAmount - quantizedQuoteAmount : 0n,
   };
-}
-
-/** Calculate fill amount from ratio (uint16) */
-export function applyFillRatio(amount: bigint, ratio: number): bigint {
-  if (ratio >= MAX_FILL_RATIO) return amount;
-  if (ratio <= 0) return 0n;
-  return (amount * BigInt(ratio)) / BigInt(MAX_FILL_RATIO);
 }
 
 // ============================================================================

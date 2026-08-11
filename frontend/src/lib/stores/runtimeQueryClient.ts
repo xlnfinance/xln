@@ -98,8 +98,6 @@ export const clearRuntimeQueryCache = (): void => {
   queryCache.clear();
 };
 
-export const runtimeQueryCacheSize = (): number => queryCache.size;
-
 export class RuntimeQueryClient {
   constructor(
     private readonly resolveAdapter: () => RuntimeAdapter | null = getRuntimeControllerAdapter,

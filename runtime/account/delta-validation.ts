@@ -145,12 +145,3 @@ export const validateAccountDeltas = (
   }
   return result;
 };
-
-export const isDelta = (value: unknown): value is Delta => {
-  try {
-    validateDelta(value, 'type-guard');
-    return true;
-  } catch {
-    return false;
-  }
-};

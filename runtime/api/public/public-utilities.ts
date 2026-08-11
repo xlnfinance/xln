@@ -12,7 +12,6 @@ export {
   submitProcessBatch,
 } from '../../jurisdiction/adapter';
 export { getAvailableJurisdictions } from '../../jurisdiction/adapter/config';
-export { createProfileUpdateTx } from '../../routing/name-resolution';
 export {
   createDemoDelta,
   deriveDelta,
@@ -44,13 +43,11 @@ export { classifyBilateralState, getAccountBarVisual } from '../../account/view-
 export { createDefaultDelta } from '../../account/delta';
 export { deriveSwapNetAuthorization } from '../../account/swap-net-authorization';
 export {
-  isDelta,
   validateAccountDeltas,
   validateDelta,
 } from '../../account/delta-validation';
 export { decode, encode } from '../../storage/snapshot-coder';
 export {
-  CHAIN_IDS,
   createReplicaKey,
   DEFAULT_RUNTIME_HOST,
   extractEntityId,
@@ -68,7 +65,6 @@ export {
   toEntityId,
   toJId,
   toSignerId,
-  XLN_COORDINATOR,
   XLN_URI_SCHEME,
 } from '../../protocol/identity';
 export {
@@ -77,16 +73,8 @@ export {
   formatReplicaDisplay,
   getEntityDisplayNumber,
 } from '../../protocol/identity-display';
-export {
-  createLocalUri,
-  formatReplicaUri,
-  parseReplicaUri,
-} from '../../protocol/identity-uri';
+export { formatReplicaUri, parseReplicaUri } from '../../protocol/identity-uri';
 export { EntityMap, ReplicaMap } from '../../protocol/identity-collections';
-export {
-  createLazyJId,
-  jIdFromChainId,
-} from '../../protocol/jurisdiction-identity';
 export { clearDatabase } from '../../storage/clear-database';
 export { generateEntityAvatar, generateSignerAvatar, getEntityDisplayInfo, getSignerDisplayInfo, hashToAvatar } from '../../presentation/identity-display';
 export { getEntityShortId } from '../../presentation/identity-display';

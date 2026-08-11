@@ -52,18 +52,3 @@ export const appendAccountMempoolTxs = (
   assertAccountMempoolAdmission(account, txs.length, context);
   if (txs.length > 0) account.mempool.push(...txs);
 };
-
-export const prependAccountMempoolTxs = (
-  account: AccountMempoolSubject,
-  txs: readonly AccountTx[],
-  context: string,
-): void => {
-  assertAccountMempoolAdmission(account, txs.length, context);
-  if (txs.length > 0) account.mempool.unshift(...txs);
-};
-
-export const appendAccountMempoolTx = (
-  account: AccountMempoolSubject,
-  tx: AccountTx,
-  context: string,
-): void => appendAccountMempoolTxs(account, [tx], context);

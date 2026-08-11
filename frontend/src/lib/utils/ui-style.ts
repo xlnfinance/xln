@@ -46,19 +46,6 @@ export const DEFAULT_UI_STYLE: UIStyleSettings = {
   typography: 'md',
 };
 
-export const CLASSIC_UI_STYLE: UIStyleSettings = {
-  density: 'comfortable',
-  radius: 'soft',
-  borders: 'subtle',
-  shadows: 'soft',
-  tabs: 'rail',
-  buttons: 'soft',
-  cards: 'filled',
-  inputs: 'outlined',
-  accent: 'normal',
-  typography: 'md',
-};
-
 const VALID_BAR_COLOR_MODE: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
 const VALID_BAR_LAYOUT: readonly BarLayoutMode[] = ['center', 'sides'] as const;
 const VALID_ACCOUNT_DELTA_VIEW: readonly AccountDeltaViewMode[] = ['per-token', 'aggregated'] as const;
@@ -87,19 +74,6 @@ export function normalizeUiStyle(input: Partial<UIStyleSettings> | null | undefi
     accent: pickOption(input?.accent, VALID_ACCENT, DEFAULT_UI_STYLE.accent),
     typography: pickOption(input?.typography, VALID_TYPOGRAPHY, DEFAULT_UI_STYLE.typography),
   };
-}
-
-export function isUiStyleEqual(left: UIStyleSettings, right: UIStyleSettings): boolean {
-  return left.density === right.density
-    && left.radius === right.radius
-    && left.borders === right.borders
-    && left.shadows === right.shadows
-    && left.tabs === right.tabs
-    && left.buttons === right.buttons
-    && left.cards === right.cards
-    && left.inputs === right.inputs
-    && left.accent === right.accent
-    && left.typography === right.typography;
 }
 
 export function applyUiStyleToDocument(uiStyleInput: Partial<UIStyleSettings> | null | undefined): void {

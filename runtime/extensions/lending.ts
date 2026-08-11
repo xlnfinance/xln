@@ -12,11 +12,6 @@ export const LENDING_TERM_MS: Record<LendingTermId, number> = {
   '1m': 30 * 24 * 60 * 60 * 1000,
 };
 
-const ENTITY_ID_RE = /^0x[0-9a-fA-F]{64}$/;
-
-export const isLendingEntityId = (value: unknown): value is string =>
-  typeof value === 'string' && ENTITY_ID_RE.test(value);
-
 export const normalizeLendingTerm = (value: unknown): LendingTermId => {
   if (value === '1h' || value === '1d' || value === '1m') return value;
   throw new Error(`LENDING_INVALID_TERM: ${String(value)}`);
@@ -39,25 +34,6 @@ export const computeLendingInterest = (principal: bigint, interestBps: number): 
 
 const lendingHash = (parts: readonly unknown[]): string =>
   ethers.keccak256(ethers.toUtf8Bytes(parts.map(part => String(part)).join('|'))).toLowerCase();
-
-export const buildLendingPositionId = (input: {
-  hubEntityId: string;
-  lenderEntityId: string;
-  tokenId: number;
-  amount: bigint;
-  termId: LendingTermId;
-  interestBps: number;
-  createdAt: number;
-}): string => `lend-${lendingHash([
-  'position',
-  input.hubEntityId.toLowerCase(),
-  input.lenderEntityId.toLowerCase(),
-  input.tokenId,
-  input.amount.toString(),
-  input.termId,
-  input.interestBps,
-  input.createdAt,
-]).slice(2, 18)}`;
 
 export const buildLendingLoanId = (input: {
   hubEntityId: string;

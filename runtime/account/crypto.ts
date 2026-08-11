@@ -197,10 +197,6 @@ const isHexAddress = (value: string): boolean => /^0x[a-fA-F0-9]{40}$/.test(valu
  * Derive signer private key from BrainVault master seed.
  * Numeric signer IDs (1-based) use BIP-39 + account path derivation.
  */
-export async function deriveSignerKey(masterSeed: Uint8Array | string, signerId: string): Promise<Uint8Array> {
-  return deriveSignerKeySync(masterSeed, signerId);
-}
-
 export function deriveSignerKeySync(masterSeed: Uint8Array | string, signerId: string): Uint8Array {
   const signerIndex = parseSignerIndex(signerId);
   if (signerIndex !== null) {
@@ -734,4 +730,3 @@ export function verifyAccountSignature(
     return false;
   }
 }
-

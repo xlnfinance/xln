@@ -17,15 +17,6 @@ export interface AccountDelta {
   delta: bigint; // Positive = we owe them, Negative = they owe us
 }
 
-// Simple account state snapshot (for currentFrame)
-export interface AccountSnapshot {
-  height: number; // Renamed from frameId for S/E/A consistency
-  timestamp: number;
-  tokenIds: number[]; // Array of token IDs in this account
-  deltas: bigint[]; // Array of deltas corresponding to tokenIds
-  stateHash?: string; // Optional hash for cryptographic verification
-}
-
 // ═══════════════════════════════════════════════════════════════
 // HTLC (Hash Time-Locked Contracts)
 // ═══════════════════════════════════════════════════════════════

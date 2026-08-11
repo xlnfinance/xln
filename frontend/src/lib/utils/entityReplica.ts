@@ -89,14 +89,6 @@ export function getCounterpartyAccount(
   return null;
 }
 
-export function hasCounterpartyAccount(
-  envLike: EnvLike,
-  ownerEntityId: string,
-  counterpartyEntityId: string,
-): boolean {
-  return !!getCounterpartyAccount(envLike, ownerEntityId, counterpartyEntityId);
-}
-
 export function isCommittedAccount(account: AccountReplica | null | undefined): boolean {
   if (!account) return false;
   return Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
@@ -105,31 +97,4 @@ export function isCommittedAccount(account: AccountReplica | null | undefined): 
 export function isOpeningAccount(account: AccountReplica | null | undefined): boolean {
   if (!account) return false;
   return !isCommittedAccount(account);
-}
-
-export function isCounterpartyBlockedByDispute(
-  envLike: EnvLike,
-  ownerEntityId: string,
-  counterpartyEntityId: string,
-): boolean {
-  const entry = getCounterpartyAccount(envLike, ownerEntityId, counterpartyEntityId);
-  if (!entry) return false;
-  const account = entry.account;
-  if (Boolean(account.activeDispute)) return true;
-  return String(account.status || '').trim().toLowerCase() === 'disputed';
-}
-
-export function getConnectedCounterpartyIds(envLike: EnvLike, ownerEntityId: string): Set<string> {
-  const connected = new Set<string>();
-  const replica = getReplicaForEntity(envLike, ownerEntityId);
-  if (!replica) return connected;
-  const accounts = replica.state.accounts;
-  for (const [accountKey, account] of accounts.entries()) {
-    if (!isCommittedAccount(account)) continue;
-    const byKey = normalizeEntityId(accountKey);
-    if (byKey) connected.add(byKey);
-    const canonical = resolveCounterpartyFromAccount(account, ownerEntityId);
-    if (canonical) connected.add(canonical);
-  }
-  return connected;
 }

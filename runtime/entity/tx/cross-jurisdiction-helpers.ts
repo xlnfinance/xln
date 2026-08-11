@@ -80,17 +80,6 @@ export const isCrossJurisdictionRouteParticipant = (
   ].some(candidate => candidate && normalizeEntityRef(candidate) === current);
 };
 
-export const findCrossJurisdictionPullRoute = (
-  state: EntityState,
-  pullId: string,
-): { route: CrossJurisdictionSwapRoute; leg: 'source' | 'target' } | null => {
-  for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
-    if (route.sourcePull?.pullId === pullId) return { route, leg: 'source' };
-    if (route.targetPull?.pullId === pullId) return { route, leg: 'target' };
-  }
-  return null;
-};
-
 export const canonicalizeCrossJurisdictionRouteForKnownEntities = (
   env: EntityRuntimeContext,
   state: EntityState,

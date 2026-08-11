@@ -1,5 +1,5 @@
 import type { EntityState, SwapBookEntry } from '../entity/types';
-import { compareCanonicalText, swapKey } from './swap-execution';
+import { compareCanonicalText } from './swap-execution';
 
 export function listOpenSwapOffers(state: Pick<EntityState, 'accounts'>): SwapBookEntry[] {
   const offers: SwapBookEntry[] = [];
@@ -27,8 +27,4 @@ export function listOpenSwapOffers(state: Pick<EntityState, 'accounts'>): SwapBo
     if (accountCmp !== 0) return accountCmp;
     return compareCanonicalText(left.offerId, right.offerId);
   });
-}
-
-export function getOpenSwapOfferEntries(state: Pick<EntityState, 'accounts'>): Map<string, SwapBookEntry> {
-  return new Map(listOpenSwapOffers(state).map((offer) => [swapKey(offer.accountId, offer.offerId), offer]));
 }
