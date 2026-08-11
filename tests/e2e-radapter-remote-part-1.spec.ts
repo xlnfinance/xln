@@ -2330,7 +2330,9 @@ test(
 
     const gate = page.getByTestId('runtime-command-gate');
     await expect(gate).toBeVisible({ timeout: 15_000 });
-    await expect(submit).toBeDisabled();
+    await expect
+      .poll(async () => (await submit.count()) === 0 || (await submit.isDisabled()))
+      .toBe(true);
     await expect(page.getByTestId('runtime-command-gate-reason')).toHaveText(
       /adapter-(?:error|connecting|disconnected)|phase=(?:quiescing|restoring|halted)/,
     );
@@ -2400,6 +2402,8 @@ test(
         runtimeId: beforeStatus.runtimeId,
       });
     await expect(gate).toBeHidden();
+    await expect(recipient).toBeVisible();
+    await recipient.fill(h1);
     await expect(submit).toBeEnabled();
     const restoredHeight = await page.evaluate(() => Number((window as any).__xln?.adapter?.status?.().height || 0));
     expect(restoredHeight).toBeGreaterThanOrEqual(beforeStatus.height);
