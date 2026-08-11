@@ -2385,10 +2385,10 @@ test.describe('E2E Swap Flow', () => {
         .toBe(swapResolveCountBefore);
     });
 
-    const cancelButton = page.getByTestId('swap-open-order-cancel').first();
+    const cancelButton = openOrderRow.getByTestId('swap-open-order-cancel');
     await expect(cancelButton).toBeVisible({ timeout: 20_000 });
     await timedStep('swap.cancel_offer', async () => {
-      await cancelButton.click({ force: true });
+      await cancelButton.click();
       await expect
         .poll(async () => {
           const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
@@ -2634,7 +2634,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
 
     const cancelButton = firstRow.getByTestId('swap-open-order-cancel');
     await expect(cancelButton).toBeVisible({ timeout: 10_000 });
-    await cancelButton.click({ force: true });
+    await cancelButton.click();
     await expect
       .poll(async () => await page.getByTestId('swap-open-order-row').count(), {
         timeout: 60_000,
@@ -2755,7 +2755,7 @@ test('swap keeps a within-band wide limit as a resting order instead of filling 
 
     const cancelButton = page.getByTestId('swap-open-order-cancel').first();
     await expect(cancelButton).toBeVisible({ timeout: 10_000 });
-    await cancelButton.click({ force: true });
+    await cancelButton.click();
     await expect
       .poll(async () => await page.getByTestId('swap-open-order-row').count(), {
         timeout: 60_000,

@@ -1162,7 +1162,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         ]),
       ]);
 
-      await alicePage.getByTestId('swap-open-order-cancel').first().click({ force: true });
+      await alicePage.getByTestId('swap-open-order-cancel').first().click();
       await expect
         .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
           timeout: 30_000,
@@ -1175,7 +1175,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         waitForOrderbookLevelGone(bobPage, 'ask', restingAskPrice),
       ]);
 
-      await bobPage.getByTestId('swap-open-order-cancel').first().click({ force: true });
+      await bobPage.getByTestId('swap-open-order-cancel').first().click();
       await expect
         .poll(async () => await readSwapOfferCount(bobPage, bob.entityId, bob.signerId, hubId), {
           timeout: 30_000,
@@ -1486,7 +1486,7 @@ test.describe('E2E Swap Isolated Flow', () => {
 
       const cancelButton = alicePage.getByTestId('swap-open-order-cancel').first();
       await expect(cancelButton).toBeVisible({ timeout: 20_000 });
-      await cancelButton.click({ force: true });
+      await cancelButton.click();
 
       await expect
         .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
