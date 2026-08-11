@@ -133,7 +133,10 @@ const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void
   if (typeof window === 'undefined' || typeof performance === 'undefined') return;
   const elapsedMs = performance.now() - startedAt;
   if (elapsedMs < SLOW_BROWSER_TIMER_MS) return;
-  p2pLog.warn('perf.slow_timer', {
+  // This is latency telemetry, not a transport or consensus fault. Keep it
+  // visible without turning ordinary host scheduling jitter into a browser
+  // health incident; actual P2P failures use the fail-loud paths below.
+  p2pLog.info('perf.slow_timer', {
     label,
     elapsedMs: Number(elapsedMs.toFixed(1)),
     ...(extra ? { extra } : {}),
