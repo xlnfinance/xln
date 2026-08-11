@@ -132,7 +132,9 @@
       });
       // Same-tab navigation to /app resumes this session: the capability is
       // session-confined (sessionStorage), the endpoint is not a secret.
-      if (authKey.trim()) persistRuntimeAdapterSession(wsUrl, authKey.trim());
+      if (authKey.trim() && $runtimeControllerHandle.authLevel === 'admin') {
+        persistRuntimeAdapterSession(wsUrl, authKey.trim());
+      }
       await refresh();
     } catch (err) {
       error = errorMessage(err);

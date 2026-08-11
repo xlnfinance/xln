@@ -262,17 +262,16 @@ test('activity history panel reads activity through RuntimeQueryClient only', ()
   const source = `${panelSource}\n${querySource}`;
   const activityE2EHelper = paymentSmokeSource.slice(
     paymentSmokeSource.indexOf('async function countRuntimeActivityEvents'),
-    paymentSmokeSource.indexOf('async function openEntityHistoryPage'),
+    paymentSmokeSource.indexOf('test.describe'),
   );
-
   expect(panelSource).toContain('runtimeQueryClient.readActivity');
   expect(panelSource).toContain("from '$lib/stores/runtimeQueryClient'");
   expect(addressRouteSource).toContain("$page.url.searchParams.get('runtimeId')");
   expect(addressRouteSource).toContain("runtimeOperations.selectRuntime(targetRuntimeId)");
   expect(addressRouteSource).toContain('Runtime ${targetRuntimeId} is not imported');
   expect(paymentSmokeSource).toContain('__xln?.adapter?.query?.activity');
-  expect(paymentSmokeSource).toContain('?runtimeId=${encodeURIComponent(runtimeId)}');
-  expect(paymentSmokeSource).toContain('history page adapter must expose off-chain payment history');
+  expect(paymentSmokeSource).toContain("getByRole('button', { name: 'History', exact: true }).click()");
+  expect(paymentSmokeSource).toContain('history panel adapter must expose off-chain payment history');
   expect(paymentSmokeSource).not.toContain('/api/debug/activity');
   expect(paymentSmokeSource).not.toContain('readPersistedRuntimeActivityPage');
   expect(source).not.toContain('readPersistedRuntimeActivityPage');
@@ -557,6 +556,8 @@ test('runtime adapter health panel uses shared RuntimeView store instead of owni
   expect(source).toContain('refreshRuntimeView({');
   expect(source).toContain('const head = $derived($runtimeView.head)');
   expect(source).toContain('const viewFrame = $derived($runtimeView.frame)');
+  expect(source).toContain("authKey.trim() && $runtimeControllerHandle.authLevel === 'admin'");
+  expect(source).toContain('persistRuntimeAdapterSession(wsUrl, authKey.trim())');
   expect(source).not.toContain('runtimeQueryClient.readHead');
   expect(source).not.toContain('runtimeQueryClient.readViewFrame');
   expect(source).not.toContain('let head = $state');
