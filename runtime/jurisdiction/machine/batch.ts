@@ -460,10 +460,13 @@ const estimatedArgumentBytes = (value: unknown): number =>
     : 0;
 
 /**
- * Dynamic transformer arguments are evidence, never dispute authority. Signed
- * ProofBody bytes remain strict elsewhere; a malformed or over-budget wrapper
- * is deterministically reduced to empty evidence, and the signed transformer
- * decides whether that evidence is sufficient.
+ * DESIGN INVARIANT — dynamic transformer arguments are evidence, never dispute
+ * authority. They can change until submission and are deliberately not bound
+ * by the owner's Hanko. A malformed/over-budget outer wrapper therefore
+ * becomes empty evidence; the signed ProofBody transformer alone decides
+ * whether empty evidence is valid. Do not replace this with an outer revert or
+ * zero-delta fallback: transformer code/revert/OOG/output remain strict and a
+ * failure keeps the dispute active. Regression: dispute-arguments.test.ts.
  */
 export function sanitizeOptionalDisputeArgument(
   value: unknown,

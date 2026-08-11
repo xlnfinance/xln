@@ -764,8 +764,12 @@ const routeTouchesDisputedAccount = (
  * a signer binder — that left one leg's dispute unstarted while the other
  * finalized (economic residual). Missing binder → throw SIGNER_MISSING.
  *
- * Delivery of the EntityTx is still best-effort inside the runtime; this
- * function only guarantees we never *choose* to skip a required sibling.
+ * This is not a network best-effort fanout. `localRuntimeProtocol:'cross-j'`
+ * is accepted only for an exact local target, drained as a continuation of
+ * the same Runtime candidate, and covered by that candidate's single WAL
+ * commit. A crash before WAL publishes neither leg; recovery after WAL sees
+ * both. Never move this output into the transport outbox: doing so would
+ * create the one-leg durability gap that the must-close invariant forbids.
  */
 export function queueCrossJurisdictionSiblingDisputeFanout(
   state: EntityState,

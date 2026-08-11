@@ -302,11 +302,13 @@ export const resolveConsensusOutputBoardAuthority = (
     throw new Error(`CONSENSUS_OUTPUT_LATEST_BOARD_MEMBERSHIP_MISSING:${origin.sourceEntityId}`);
   }
   if (!sameCertifiedBoardRecord(latestRecord, binding.record)) {
-    // A rotation does not instantly strand already-certified bilateral
-    // Account traffic. EntityProvider keeps exactly the immediate previous
-    // board live for the same exclusive grace boundary. Bind acceptance to
-    // the receiver's certified latest record and deterministic Entity time;
-    // never trust expiry or current authority supplied by the peer output.
+    // DESIGN INVARIANT — a rotation must not repudiate bilateral state already
+    // signed by the retired board. Only the immediate previous board remains
+    // historical Account evidence for the exclusive seven-day window. It does
+    // not regain processBatch, settlement, governance, or watchtower authority;
+    // those paths remain current-board-only. Bind grace to the receiver's
+    // certified latest record and deterministic Entity time, never peer claims.
+    // Regression: registered-board-authority.test.ts / BoardRotationGrace.test.ts.
     if (isImmediatePreviousBoardAuthorityLive(binding.record, latestRecord, observerState.timestamp)) {
       return { kind: 'registered', record: latestRecord };
     }
