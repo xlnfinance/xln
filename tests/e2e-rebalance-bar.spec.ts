@@ -1607,7 +1607,7 @@ test.describe('Rebalance E2E', () => {
         hubId,
         snapshot: postSnapshot,
         diagnostics,
-        rebalanceSteps,
+        rebalanceSteps: [],
         stateTimeline: [...stateTimeline, { atMs: 'post-faucet-2nd-cycle', ...postSnapshot }],
         rebalanceConsole: [...rebalanceConsole, ...criticalConsole],
         phaseMarkers,
