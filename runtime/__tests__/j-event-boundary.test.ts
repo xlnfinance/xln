@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { receiptFromEvents } from '../jurisdiction/adapter/browservm-submit';
+import { receiptFromEvents } from '../jurisdiction/adapter/browservm/browservm-submit';
 import { rawEventToJEvents } from '../jurisdiction/adapter/j-event-payloads';
 import type { JEvent } from '../jurisdiction/adapter/types';
 

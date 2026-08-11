@@ -14,26 +14,26 @@ import {
   Depository__factory,
   DeltaTransformer__factory,
   EntityProvider__factory,
-} from '../../../jurisdictions/typechain-types/index.ts';
+} from '../../../../jurisdictions/typechain-types/index';
 
-import type { RuntimeReplica } from '../../runtime/types';
+import type { RuntimeReplica } from '../../../runtime/types';
 import type {
   JAdapter,
   JAdapterConfig,
-} from './types';
+} from '../types';
 import type { BrowserVMProvider } from './browservm-provider';
 import {
   assertDepositoryEntityProviderBinding,
   assertJStackAddressMatch,
-} from './stack-binding';
+} from '../stack-binding';
 import { createBrowserVmHistoryWatcher } from './browservm-history';
 import {
   createBrowserVmSubmitTx,
 } from './browservm-submit';
 import { createBrowserVmStateMethods } from './browservm-state-methods';
 import { createBrowserVmIoMethods } from './browservm-io';
-import { createSignerNonceSequencer } from './rpc-transaction-sequencer';
-import { prepareDurableEvmTransaction } from './evm-durable-transaction';
+import { createSignerNonceSequencer } from '../rpc-transaction-sequencer';
+import { prepareDurableEvmTransaction } from '../evm-durable-transaction';
 
 export async function createBrowserVMAdapter(
   config: JAdapterConfig,

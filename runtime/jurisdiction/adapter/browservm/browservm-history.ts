@@ -1,5 +1,5 @@
-import type { Depository, EntityProvider } from '../../../jurisdictions/typechain-types/index.ts';
-import type { RuntimeReplica, RuntimeTx } from '../../runtime/types';
+import type { Depository, EntityProvider } from '../../../../jurisdictions/typechain-types/index';
+import type { RuntimeReplica, RuntimeTx } from '../../../runtime/types';
 import {
   enqueueJHistoryRange,
   findWatcherJurisdictionReplica,
@@ -8,22 +8,22 @@ import {
   processEventBatch,
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
-} from './watcher';
-import type { JEventIngress } from './types';
+} from '../watcher';
+import type { JEventIngress } from '../types';
 import type { BrowserVMProvider } from './browservm-provider';
-import type { AuthenticatedRpcLog } from '../machine/receipt-codec';
+import type { AuthenticatedRpcLog } from '../../machine/receipt-codec';
 import {
   buildCertifiedRegistrationEvidence,
   markLocalJAuthorityRuntimeTx,
-} from '../machine/registration-evidence';
-import { CANONICAL_J_EVENTS } from '../machine/event-catalog';
-import { decodeJEventLog } from './j-event-log-decoder';
+} from '../../machine/registration-evidence';
+import { CANONICAL_J_EVENTS } from '../../machine/event-catalog';
+import { decodeJEventLog } from '../j-event-log-decoder';
 import {
   decodeDisputeFinalizationEvidenceCalldata,
   decodeDisputeProofBodyEvidenceCalldata,
   resolveDisputeFinalizationEvidence,
   resolveDisputeProofBodyEvidence,
-} from './rpc-public';
+} from '../rpc-public';
 
 type BrowserVmHistoryOptions = {
   chainId: number;

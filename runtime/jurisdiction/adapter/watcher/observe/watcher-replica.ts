@@ -1,7 +1,7 @@
-import type { JurisdictionConfig } from '../../entity/types';
-import type { RuntimeReplica } from '../../runtime/types';
-import type { JReplica } from '../../types/jurisdiction-runtime';
-import { getValidatorJContiguousThroughHeight } from '../machine/local-history';
+import type { JurisdictionConfig } from '../../../../entity/types';
+import type { RuntimeReplica } from '../../../../runtime/types';
+import type { JReplica } from '../../../../types/jurisdiction-runtime';
+import { getValidatorJContiguousThroughHeight } from '../../../machine/local-history';
 
 const normalizedLabel = (value: unknown): string =>
   String(value || '').trim().toLowerCase();

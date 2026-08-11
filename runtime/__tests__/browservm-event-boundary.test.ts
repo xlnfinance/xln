@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import {
   decodeBrowserVmEvents,
   type EthereumLog,
-} from '../jurisdiction/adapter/browservm-events';
+} from '../jurisdiction/adapter/browservm/browservm-events';
 
 const knownAddress = '0x1111111111111111111111111111111111111111';
 const unknownAddress = '0x2222222222222222222222222222222222222222';

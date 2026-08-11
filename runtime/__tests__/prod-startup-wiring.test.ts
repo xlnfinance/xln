@@ -26,8 +26,8 @@ const readRpcAdapterSource = (): string =>
     'rpc-lifecycle.ts',
     'rpc-reads.ts',
     'rpc-wallet-writes.ts',
-    'rpc-watcher-ingress.ts',
-    'rpc-watcher-poll.ts',
+    'rpc/watcher/rpc-watcher-ingress.ts',
+    'rpc/watcher/rpc-watcher-poll.ts',
   ]
     .map(file => readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter', file), 'utf8'))
     .join('\n');
@@ -2896,8 +2896,8 @@ describe('production startup wiring', () => {
   });
 
   test('RPC watcher pauses during persistence quiesce instead of entering j-event ingress', () => {
-    const poll = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/rpc-watcher-poll.ts'), 'utf8');
-    const ingress = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/rpc-watcher-ingress.ts'), 'utf8');
+    const poll = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts'), 'utf8');
+    const ingress = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/rpc/watcher/rpc-watcher-ingress.ts'), 'utf8');
     const pauseHelper = poll.indexOf('const isIngressPaused = (env: RuntimeReplica): boolean =>');
     const earlyPause = poll.indexOf("pauseForQuiesce(request, { step: 'before-block-number' });");
     const batchPause = ingress.indexOf("step: 'before-process-event-batch'");

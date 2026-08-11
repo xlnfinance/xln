@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
 import { bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
-import { extractCanonicalDepositoryEventArgs } from './depository-event-codec';
-import type { JEvent } from './types';
+import { extractCanonicalDepositoryEventArgs } from '../depository-event-codec';
+import type { JEvent } from '../types';
 
 export type EthereumLog = [
   Address | Uint8Array | string | { toBytes?: () => Uint8Array; toString(): string },

@@ -5,7 +5,7 @@ export { getLiveJAdapter, getLiveJAdapterEntries } from './live-jadapters';
 // v1 in place; there are no compatibility branches inside the state machine.
 export const RUNTIME_SCHEMA_VERSION = 1;
 
-import { assertBrowserVMJurisdiction } from '../jurisdiction/adapter/browservm-registry';
+import { assertBrowserVMJurisdiction } from '../jurisdiction/adapter/browservm/browservm-registry';
 import { attachEventEmitters } from './env-events';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from './types';

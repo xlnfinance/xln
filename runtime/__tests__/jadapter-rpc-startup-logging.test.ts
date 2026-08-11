@@ -19,8 +19,8 @@ const readRpcAdapterSource = (): string => [
   'rpc-reads.ts',
   'rpc-submission.ts',
   'rpc-wallet-writes.ts',
-  'rpc-watcher-controller.ts',
-  'rpc-watcher-poll.ts',
+  'rpc/watcher/rpc-watcher-controller.ts',
+  'rpc/watcher/rpc-watcher-poll.ts',
   'rpc-write-methods.ts',
 ].map(file => readFileSync(join(process.cwd(), 'runtime/jurisdiction/adapter', file), 'utf8')).join('\n');
 

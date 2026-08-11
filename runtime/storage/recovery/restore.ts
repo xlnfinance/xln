@@ -12,7 +12,7 @@ import {
 } from '../../runtime/recovery-infra';
 import { rehydrateRestoredRuntimeInfra } from '../../runtime/infra';
 import { runtimeIsBrowser } from '../../infra/runtime-process';
-import { assertBrowserVMJurisdiction } from '../../jurisdiction/adapter/browservm-registry';
+import { assertBrowserVMJurisdiction } from '../../jurisdiction/adapter/browservm/browservm-registry';
 import { replayPersistedRuntimeJournals } from './journal';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../../runtime/types';
 import type { PersistedFrameJournal } from '../types';

@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import { normalizeLoopbackUrl } from '../../network/p2p/loopback-url';
-import { createBrowserVMAdapter } from './browservm';
+import { createBrowserVMAdapter } from './browservm/browservm';
 import { DEV_CHAIN_IDS, TRON_CHAIN_IDS } from './chain-ids';
 import { createRpcAdapter } from './rpc-adapter';
 import type { JAdapter, JAdapterConfig } from './types';
@@ -74,12 +74,12 @@ class NonceTrackingWallet extends ethers.Wallet {
 }
 
 const createBrowserAdapter = async (config: JAdapterConfig, privateKey: string | undefined): Promise<JAdapter> => {
-  const { BrowserVMProvider } = await import('./browservm-provider');
+  const { BrowserVMProvider } = await import('./browservm/browservm-provider');
   const browserVM = new BrowserVMProvider();
   await browserVM.init({ chainId: config.chainId });
   if (config.browserVMState) await browserVM.restoreState(config.browserVMState);
 
-  const { BrowserVMEthersProvider } = await import('./browservm-ethers-provider');
+  const { BrowserVMEthersProvider } = await import('./browservm/browservm-ethers-provider');
   const provider = new BrowserVMEthersProvider(browserVM);
   if (!privateKey) throw new Error('BROWSERVM_SIGNER_KEY_REQUIRED');
   return createBrowserVMAdapter(config, provider, new NonceTrackingWallet(privateKey, provider), browserVM);

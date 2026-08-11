@@ -1,6 +1,6 @@
-import { normalizeEntityId } from '../../entity/id';
+import { normalizeEntityId } from '../../../entity/id';
 import type { BrowserVMProvider } from './browservm-provider';
-import type { JAdapter, JEvent } from './types';
+import type { JAdapter, JEvent } from '../types';
 import { receiptFromEvents } from './browservm-submit';
 
 type BrowserVmIoMethod =

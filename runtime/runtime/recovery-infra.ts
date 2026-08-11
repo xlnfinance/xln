@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { getLocalSignerPrivateKey } from '../account/crypto';
-import { assertBrowserVMJurisdiction } from '../jurisdiction/adapter/browservm-registry';
-import { findWatcherJurisdictionReplica } from '../jurisdiction/adapter/watcher-replica';
+import { assertBrowserVMJurisdiction } from '../jurisdiction/adapter/browservm/browservm-registry';
+import { findWatcherJurisdictionReplica } from '../jurisdiction/adapter/watcher/observe/watcher-replica';
 import { requireDurableJurisdictionStack } from '../jurisdiction/machine/contract-address';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';

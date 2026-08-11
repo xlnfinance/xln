@@ -464,7 +464,7 @@ export type RuntimeHistoryRecord = AccountHistoryRecord | {
   timestamp?: number;
 };
 
-export type BrowserVMState = import('../jurisdiction/adapter/browservm-state').BrowserVmSerializedState;
+export type BrowserVMState = import('../jurisdiction/adapter/browservm/browservm-state').BrowserVmSerializedState;
 
 /**
  * Deterministic data fixed by one committed Runtime frame.

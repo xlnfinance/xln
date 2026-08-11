@@ -15,7 +15,7 @@ import { createRpcReceiptReaders } from './rpc-receipts';
 import { createRpcSubmitTx } from './rpc-submission';
 import { createRpcTransactionSequencer } from './rpc-transaction-sequencer';
 import { createRpcWalletWriteMethods } from './rpc-wallet-writes';
-import { createRpcWatcherController } from './rpc-watcher-controller';
+import { createRpcWatcherController } from './rpc/watcher/rpc-watcher-controller';
 import {
   createTxDisputeProofBodyReader,
   createTxFinalizationEvidenceReader,

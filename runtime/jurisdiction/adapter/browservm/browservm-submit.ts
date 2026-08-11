@@ -1,12 +1,12 @@
-import { normalizeEntityId } from '../../entity/id';
-import { batchOpCount, isBatchEmpty } from '../machine/batch';
-import { assertSealedJBatchBinding } from '../machine/sealed-batch';
-import { assertEntityProviderActionJTxBinding } from '../../entity/entity-provider-action';
-import type { JTx } from '../../types/jurisdiction-runtime';
+import { normalizeEntityId } from '../../../entity/id';
+import { batchOpCount, isBatchEmpty } from '../../machine/batch';
+import { assertSealedJBatchBinding } from '../../machine/sealed-batch';
+import { assertEntityProviderActionJTxBinding } from '../../../entity/entity-provider-action';
+import type { JTx } from '../../../types/jurisdiction-runtime';
 import type { BrowserVMProvider } from './browservm-provider';
-import type { JAdapter, JAdapterAddresses, JBatchReceipt, JEvent, JSubmitResult } from './types';
-import { makeJAdapterFailureResult } from './failure';
-import { submitDebtEnforcement, submitMint } from './rpc-submit-basic';
+import type { JAdapter, JAdapterAddresses, JBatchReceipt, JEvent, JSubmitResult } from '../types';
+import { makeJAdapterFailureResult } from '../failure';
+import { submitDebtEnforcement, submitMint } from '../rpc-submit-basic';
 
 type BrowserVmSubmitContext = {
   chainId: number;

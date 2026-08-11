@@ -1,9 +1,9 @@
-import { compareStableText } from '../../protocol/serialization';
+import { compareStableText } from '../../../../protocol/serialization';
 import {
   getEntityCertifiedJAnchor,
   getValidatorJExpectedBlockHash,
-} from '../machine/local-history';
-import type { RuntimeReplica } from '../../runtime/types';
+} from '../../../machine/local-history';
+import type { RuntimeReplica } from '../../../../runtime/types';
 import {
   findWatcherJurisdictionReplica,
   getMinimumCommittedSignerJHeight,
@@ -13,13 +13,13 @@ import {
   isWatcherJHistoryRangeDurable,
   resolveCommittedWatcherCursor,
   updateWatcherJurisdictionCursor,
-} from './watcher';
+} from '../../watcher';
 import {
   isTronChainId,
   resolveWatcherPollToBlock,
   rpcLog,
-} from './rpc-public';
-import { shouldAuditCanonicalWatcherState } from './watcher-poll-policy';
+} from '../../rpc-public';
+import { shouldAuditCanonicalWatcherState } from '../../watcher/observe/watcher-poll-policy';
 import {
   assertAuthorityEvidenceCanonical,
   reconcileWatcherCanonicalTip,

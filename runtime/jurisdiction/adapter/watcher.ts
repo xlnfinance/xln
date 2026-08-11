@@ -29,7 +29,7 @@ export {
   getMinimumCommittedSignerJHeight,
   getMinimumScannedSignerJHeight,
   isEntityReplicaRelevantToWatcher,
-} from './watcher-replica';
+} from './watcher/observe/watcher-replica';
 
 export {
   getWatcherStartBlock,
@@ -39,11 +39,11 @@ export {
   updateWatcherJurisdictionCursor,
   type PendingWatcherJBlockMap,
   type PendingWatcherJHistoryRange,
-} from './watcher-cursor';
+} from './watcher/observe/watcher-cursor';
 
 export {
   processEventBatch,
-} from './watcher-event-batch';
+} from './watcher/observe/watcher-event-batch';
 
 export {
   collectRelevantJEventReplicaKeys,

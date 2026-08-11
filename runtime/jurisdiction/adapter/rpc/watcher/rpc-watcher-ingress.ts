@@ -1,4 +1,4 @@
-import type { RuntimeReplica, RuntimeInput } from '../../runtime/types';
+import type { RuntimeReplica, RuntimeInput } from '../../../../runtime/types';
 import {
   applyJBlockHeadersIngressTransform,
   enqueueJHistoryRange,
@@ -6,16 +6,16 @@ import {
   type findWatcherJurisdictionReplica,
   processEventBatch,
   rememberPendingWatcherJBlock,
-} from './watcher';
-import { isTronChainId, prepareAuthenticatedWatcherIngress } from './rpc-public';
-import { readAuthenticatedReceiptRange } from './receipt-root';
-import { buildTrackedExternalOwners } from './rpc-watcher-inputs';
-import { decodeAuthenticatedWatcherEvents } from './rpc-watcher-events';
+} from '../../watcher';
+import { isTronChainId, prepareAuthenticatedWatcherIngress } from '../../rpc-public';
+import { readAuthenticatedReceiptRange } from '../../receipt-root';
+import { buildTrackedExternalOwners } from '../../rpc-watcher-inputs';
+import { decodeAuthenticatedWatcherEvents } from '../../rpc-watcher-events';
 import type {
   RpcWatcherServices,
   RpcWatcherSession,
 } from './rpc-watcher-types';
-import type { JEvent } from './types';
+import type { JEvent } from '../../types';
 
 type WatcherReplica = NonNullable<ReturnType<typeof findWatcherJurisdictionReplica>>;
 

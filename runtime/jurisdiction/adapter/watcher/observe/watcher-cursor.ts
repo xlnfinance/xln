@@ -1,12 +1,12 @@
-import type { RuntimeReplica, RuntimeTx } from '../../runtime/types';
-import { enqueueRuntimeInput } from '../../runtime/input-queue';
+import type { RuntimeReplica, RuntimeTx } from '../../../../runtime/types';
+import { enqueueRuntimeInput } from '../../../../runtime/input-queue';
 import {
   getEntityCertifiedJAnchor,
   getValidatorJContiguousThroughHeight,
   getValidatorJExpectedBlockHash,
   assertValidatorJHistoryMatchesCertifiedAnchor,
-} from '../machine/local-history';
-import { markLocalJAuthorityRuntimeTx } from '../machine/registration-evidence';
+} from '../../../machine/local-history';
+import { markLocalJAuthorityRuntimeTx } from '../../../machine/registration-evidence';
 import {
   findWatcherJurisdictionReplica,
   getMinimumCommittedSignerJHeight,

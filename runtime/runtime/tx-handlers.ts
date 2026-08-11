@@ -52,7 +52,7 @@ import {
   applyCompleteImportJurisdiction,
   applyImportJurisdictionIntent,
 } from './jurisdiction-import';
-import { applyWatcherJurisdictionCursor } from '../jurisdiction/adapter/watcher-cursor';
+import { applyWatcherJurisdictionCursor } from '../jurisdiction/adapter/watcher/observe/watcher-cursor';
 import {
   applyNumberedRegistrationIntent,
   applyNumberedRegistrationResolution,

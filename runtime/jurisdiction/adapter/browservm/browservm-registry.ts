@@ -1,6 +1,6 @@
-import type { JurisdictionConfig } from '../../entity/types';
-import { requireUsableContractAddress } from '../machine/contract-address';
-import type { BrowserVMProvider } from './types';
+import type { JurisdictionConfig } from '../../../entity/types';
+import { requireUsableContractAddress } from '../../machine/contract-address';
+import type { BrowserVMProvider } from '../types';
 
 export const buildBrowserVMJurisdiction = (
   depositoryAddress: string,

@@ -6,7 +6,7 @@
  * helpers, and Runtime API from forming a circular initialization graph.
  */
 export * from './types';
-export * from './browservm-registry';
+export * from './browservm/browservm-registry';
 export * from './chain-ids';
 export * from './factory';
 export * from './jurisdiction';

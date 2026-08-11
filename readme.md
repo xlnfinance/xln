@@ -338,7 +338,7 @@ bun run bench:radapter:hub1m:allmem  # Same, but materialize all 1M accounts int
 - **Reset:** Refresh page = new universe
 - **Persistent:** Optional IndexedDB (resume sessions)
 
-**Implementation:** `runtime/jurisdiction/adapter/browservm.ts` and its focused
+**Implementation:** `runtime/jurisdiction/adapter/browservm/browservm.ts` and its focused
 `browservm-*` modules
 
 **Demo:** Load any scenario (AHB, Grid) - BrowserVM deploys contracts automatically

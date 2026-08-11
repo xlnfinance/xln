@@ -1,15 +1,15 @@
-import { BLOCKCHAIN } from '../../config/constants';
-import type { RuntimeReplica } from '../../runtime/types';
-import { isDebugEventEmitter } from './rpc-utils';
+import { BLOCKCHAIN } from '../../../../config/constants';
+import type { RuntimeReplica } from '../../../../runtime/types';
+import { isDebugEventEmitter } from '../../rpc-utils';
 import {
   haltProcessForFatalWatcherError,
   watcherErrorDetails,
   watcherErrorMessage,
-} from './rpc-boundary';
-import { rpcLog } from './rpc-public';
-import { getWatcherStartBlock } from './watcher';
+} from '../../rpc-boundary';
+import { rpcLog } from '../../rpc-public';
+import { getWatcherStartBlock } from '../../watcher';
 import { runWatcherPoll } from './rpc-watcher-poll';
-import { createWatchedErc20TokenReader } from './rpc-watcher-inputs';
+import { createWatchedErc20TokenReader } from '../../rpc-watcher-inputs';
 import type {
   RpcWatcherControllerState,
   RpcWatcherMethods,

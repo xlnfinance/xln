@@ -22,7 +22,7 @@ import {
 import {
   isEntityReplicaRelevantToWatcher,
   requireWatcherJurisdictionReplica,
-} from './watcher-replica';
+} from './watcher/observe/watcher-replica';
 
 const log = createStructuredLogger('jadapter.history-ingress');
 

@@ -1,18 +1,18 @@
-import type { RuntimeInput, RuntimeReplica, RuntimeTx } from '../../runtime/types';
-import { enqueueRuntimeInput } from '../../runtime/input-queue';
-import { indexReserveUpdatedEvents } from '../machine/event-evidence';
-import { isCanonicalEvent } from './event-relevance';
-import { applyJEventIngressTransform } from './ingress-transform';
+import type { RuntimeInput, RuntimeReplica, RuntimeTx } from '../../../../runtime/types';
+import { enqueueRuntimeInput } from '../../../../runtime/input-queue';
+import { indexReserveUpdatedEvents } from '../../../machine/event-evidence';
+import { isCanonicalEvent } from '../../event-relevance';
+import { applyJEventIngressTransform } from '../../ingress-transform';
 import {
   assertJEventIngressOpen,
   buildJEventObservationInput,
   type EventBatchCounter,
-} from './event-observation';
+} from '../../event-observation';
 import {
   appendJHistoryRange,
   buildJHistoryRangeRuntimeInput,
-} from './history-ingress';
-import type { JEventIngress } from './types';
+} from '../../history-ingress';
+import type { JEventIngress } from '../../types';
 
 const MAX_DEDUP_LOGS = 50_000;
 

@@ -1,11 +1,11 @@
 import {
   getEntityCertifiedJAnchor,
   getValidatorJExpectedBlockHash,
-} from '../machine/local-history';
-import type { EntityReplica } from '../../entity/types';
-import type { RuntimeReplica } from '../../runtime/types';
-import type { JReplica } from '../../types/jurisdiction-runtime';
-import { isEntityReplicaRelevantToWatcher } from './watcher';
+} from '../../../machine/local-history';
+import type { EntityReplica } from '../../../../entity/types';
+import type { RuntimeReplica } from '../../../../runtime/types';
+import type { JReplica } from '../../../../types/jurisdiction-runtime';
+import { isEntityReplicaRelevantToWatcher } from '../../watcher';
 
 type WatcherLocalFrontier = {
   replicaKey: string;

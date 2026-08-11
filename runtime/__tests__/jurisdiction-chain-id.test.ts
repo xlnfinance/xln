@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { buildJAdapterConfigFromJurisdiction } from '../jurisdiction/adapter/jurisdiction';
-import { BrowserVMEthersProvider } from '../jurisdiction/adapter/browservm-ethers-provider';
+import { BrowserVMEthersProvider } from '../jurisdiction/adapter/browservm/browservm-ethers-provider';
 import { requireJurisdictionChainId } from '../jurisdiction/machine/jurisdiction-stack';
 import type { JurisdictionConfig } from '../entity/types';
 

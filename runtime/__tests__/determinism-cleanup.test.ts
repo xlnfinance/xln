@@ -10,11 +10,11 @@ const readSource = (path: string): string =>
         'rpc-lifecycle.ts',
         'rpc-reads.ts',
         'rpc-wallet-writes.ts',
-        'rpc-watcher-canonical.ts',
-        'rpc-watcher-controller.ts',
-        'rpc-watcher-ingress.ts',
-        'rpc-watcher-poll.ts',
-        'rpc-watcher-types.ts',
+        'rpc/watcher/rpc-watcher-canonical.ts',
+        'rpc/watcher/rpc-watcher-controller.ts',
+        'rpc/watcher/rpc-watcher-ingress.ts',
+        'rpc/watcher/rpc-watcher-poll.ts',
+        'rpc/watcher/rpc-watcher-types.ts',
       ]
         .map(file => readFileSync(`${repoRoot}/runtime/jurisdiction/adapter/${file}`, 'utf8'))
         .join('\n')

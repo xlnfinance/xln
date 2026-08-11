@@ -1,20 +1,20 @@
 import {
   getCertifiedBoardStackKey,
-} from '../machine/board-registry';
+} from '../../../machine/board-registry';
 import {
   getEntityCertifiedJAnchor,
   getValidatorJExpectedBlockHash,
-} from '../machine/local-history';
-import type { RuntimeReplica } from '../../runtime/types';
+} from '../../../machine/local-history';
+import type { RuntimeReplica } from '../../../../runtime/types';
 import {
   enqueueJHistoryRewindForReplicaKeys,
   findWatcherJurisdictionReplica,
-} from './watcher';
+} from '../../watcher';
 import {
   assertFinalizedWatcherAnchors,
   collectTargetedWatcherRewinds,
   collectWatcherCanonicalAudit,
-} from './watcher-reconciliation';
+} from '../../watcher/observe/watcher-reconciliation';
 import type {
   RpcWatcherServices,
   RpcWatcherSession,

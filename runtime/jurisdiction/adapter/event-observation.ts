@@ -17,7 +17,7 @@ import { isEventRelevantToEntity } from './event-relevance';
 import {
   isEntityReplicaRelevantToWatcher,
   requireWatcherJurisdictionReplica,
-} from './watcher-replica';
+} from './watcher/observe/watcher-replica';
 import type { JEventIngress } from './types';
 
 const log = createStructuredLogger('jadapter.event-observation');

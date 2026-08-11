@@ -56,7 +56,7 @@ const FORBIDDEN = [
 
 const ALLOWLIST: readonly Allowance[] = [
   {
-    file: 'runtime/jurisdiction/adapter/browservm-provider.ts',
+    file: 'runtime/jurisdiction/adapter/browservm/browservm-provider.ts',
     match: 'createLegacyTx',
     reason: 'Third-party @ethereumjs/tx export name for pre-EIP-2718 transactions.',
   },

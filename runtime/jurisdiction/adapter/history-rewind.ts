@@ -7,7 +7,7 @@ import {
   findWatcherJurisdictionReplica,
   isEntityReplicaRelevantToWatcher,
   requireWatcherJurisdictionReplica,
-} from './watcher-replica';
+} from './watcher/observe/watcher-replica';
 
 const enqueueScopedRewind = (
   env: RuntimeReplica,

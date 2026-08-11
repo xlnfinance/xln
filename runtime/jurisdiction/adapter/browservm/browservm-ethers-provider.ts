@@ -8,7 +8,7 @@
 
 import { ethers } from 'ethers';
 import { createAddressFromString } from '@ethereumjs/util';
-import type { BrowserVmEthersProviderTarget } from './types';
+import type { BrowserVmEthersProviderTarget } from '../types';
 
 const requireBrowserVmChainId = (browserVM: BrowserVmEthersProviderTarget): number => {
   if (typeof browserVM.getChainId !== 'function') {

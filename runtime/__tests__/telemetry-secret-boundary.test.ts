@@ -120,7 +120,7 @@ test('consensus logging has no raw payload escape hatch', () => {
 
 test('J adapters route failures through structured telemetry and never synthesize zero reads', () => {
   const repoRoot = join(import.meta.dir, '..', '..');
-  const browserVm = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/browservm-provider.ts'), 'utf8');
+  const browserVm = readFileSync(join(repoRoot, 'runtime/jurisdiction/adapter/browservm/browservm-provider.ts'), 'utf8');
   const rpc = readRpcAdapterSource(repoRoot);
 
   expect(browserVm).not.toContain('console.error');

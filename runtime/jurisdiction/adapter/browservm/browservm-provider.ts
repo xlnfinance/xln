@@ -26,39 +26,39 @@ import {
   Depository__factory,
   DepositoryBounds__factory,
   HashLadderRegistry__factory,
-} from '../../../jurisdictions/typechain-types/index.ts';
-import { safeStringify } from '../../protocol/serialization.js';
-import { createStructuredLogger } from '../../infra/logger';
-import { isLeftEntity, normalizeEntityId } from '../../entity/id';
-import { requireBoundaryUint } from '../../protocol/boundary-validation';
-import type { EntityProviderActionIntent } from '../../types/entity-provider-actions';
+} from '../../../../jurisdictions/typechain-types/index';
+import { safeStringify } from '../../../protocol/serialization.js';
+import { createStructuredLogger } from '../../../infra/logger';
+import { isLeftEntity, normalizeEntityId } from '../../../entity/id';
+import { requireBoundaryUint } from '../../../protocol/boundary-validation';
+import type { EntityProviderActionIntent } from '../../../types/entity-provider-actions';
 import {
   assertEntityProviderActionIntent,
   assertEntityProviderActionResolutionReceipt,
-} from '../../entity/entity-provider-action';
-import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../machine/batch';
-import { buildExternalTokenToReserveBatch, packTokenReference } from './contract-codec';
-import { buildSingleSignerHanko, prepareSignedBatch } from '../../hanko/batch';
-import { decodeHankoEnvelope } from '../../hanko/codec';
+} from '../../../entity/entity-provider-action';
+import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../../machine/batch';
+import { buildExternalTokenToReserveBatch, packTokenReference } from '../contract-codec';
+import { buildSingleSignerHanko, prepareSignedBatch } from '../../../hanko/batch';
+import { decodeHankoEnvelope } from '../../../hanko/codec';
 import {
   hashCooperativeUpdateHankoPayload,
   hashDisputeProofHankoPayload,
-} from '../../hanko/onchain-domain';
-import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../machine/default-tokens';
-import { getBootstrapTokenAmountBySymbol } from '../machine/bootstrap-economy';
+} from '../../../hanko/onchain-domain';
+import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../../machine/default-tokens';
+import { getBootstrapTokenAmountBySymbol } from '../../machine/bootstrap-economy';
 import {
   decodeBrowserVmEvents,
   toBrowserVmReceiptLogs,
   type BrowserVmEventCarrier,
   type EthereumLog,
 } from './browservm-events';
-import type { JEvent } from './types';
+import type { JEvent } from '../types';
 import {
   computeCanonicalReceiptsRoot,
   createCanonicalReceiptProofs,
   type AuthenticatedRpcLog,
   type CanonicalRpcReceipt,
-} from '../machine/receipt-codec';
+} from '../../machine/receipt-codec';
 import {
   BROWSERVM_CONTRACT_VERSION,
   decodeBrowserVmStateRoot,
@@ -1653,7 +1653,7 @@ export class BrowserVMProvider {
 
   async processEntityBatch(
     entityId: string,
-    batch: import('../machine/batch').JBatch,
+    batch: import('../../machine/batch').JBatch,
     hankoPrivKey: Uint8Array,
     txPrivKey: Uint8Array = this.deployerPrivKey,
   ): Promise<JEvent[]> {

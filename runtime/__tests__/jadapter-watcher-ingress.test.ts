@@ -197,8 +197,8 @@ describe('JAdapter watcher ingress', () => {
     const files = [
       'history-ingress.ts',
       'manual-event-ingress.ts',
-      'watcher-cursor.ts',
-      'watcher-event-batch.ts',
+      'watcher/observe/watcher-cursor.ts',
+      'watcher/observe/watcher-event-batch.ts',
     ];
     const source = files
       .map(file => readFileSync(join(process.cwd(), 'runtime/jurisdiction/adapter', file), 'utf8'))

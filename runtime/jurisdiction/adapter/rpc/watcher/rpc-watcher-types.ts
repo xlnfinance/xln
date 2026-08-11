@@ -2,17 +2,17 @@ import type { ethers } from 'ethers';
 import type {
   Depository,
   EntityProvider,
-} from '../../../jurisdictions/typechain-types/index.ts';
-import type { RuntimeReplica } from '../../runtime/types';
-import type { DisputeFinalizationEvidence } from '../../types/jurisdiction-events';
-import type { TxDisputeProofBodyEvidence } from './rpc-public';
+} from '../../../../../jurisdictions/typechain-types/index';
+import type { RuntimeReplica } from '../../../../runtime/types';
+import type { DisputeFinalizationEvidence } from '../../../../types/jurisdiction-events';
+import type { TxDisputeProofBodyEvidence } from '../../rpc-public';
 import type {
   EventBatchCounter,
   PendingWatcherJBlockMap,
   PendingWatcherJHistoryRange,
-} from './watcher';
-import type { WatchedErc20Token } from './rpc-watcher-inputs';
-import type { AuthenticatedTxLocation } from './rpc-watcher-inputs';
+} from '../../watcher';
+import type { WatchedErc20Token } from '../../rpc-watcher-inputs';
+import type { AuthenticatedTxLocation } from '../../rpc-watcher-inputs';
 
 type RpcWatcherScanProgress = {
   scannedThroughHeight: number;
