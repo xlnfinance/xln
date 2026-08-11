@@ -22,7 +22,11 @@
     refreshCurrentRuntimeProjection,
   } from '$lib/stores/xlnStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore';
+  import {
+    runtimeView,
+    runtimeViewActiveEntityId,
+    setRuntimeViewActiveEntityId,
+  } from '$lib/stores/runtimeViewStore';
   import { runtimes, activeRuntimeId, runtimeOperations } from '$lib/stores/runtimeStore';
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import type { Tab } from '$lib/types/ui';
@@ -367,7 +371,16 @@
 
   $effect(() => {
     if (isRemoteRuntime || !currentFrame?.state.eReplicas) return;
-    if (selectedEntityId && selectedReplica) return;
+    if (selectedEntityId && selectedReplica) {
+      // Adapter replacement clears RuntimeView selection before the new
+      // Runtime is connected. The visible wallet selection remains the owner,
+      // so republish it; otherwise command UI and durable receipt observation
+      // disagree about the active Entity after a Runtime switch.
+      if ($runtimeViewActiveEntityId !== selectedEntityId) {
+        setRuntimeViewActiveEntityId(selectedEntityId);
+      }
+      return;
+    }
 
     const vault = $activeRuntimeStore;
     const activeSignerIndex = Number(vault?.activeSignerIndex ?? 0);

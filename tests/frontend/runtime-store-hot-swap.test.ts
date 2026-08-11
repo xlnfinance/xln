@@ -430,7 +430,9 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   expect(viewSource).toContain("registerDebugSurface('publishLiveRuntimeSnapshot', () => publishLocalEnv");
   expect(viewSource).not.toContain("Object.defineProperty(window, 'runtimeFrameEnv'");
   expect(viewSource).not.toContain("Object.defineProperty(window, 'isolatedEnv'");
-  expect(viewSource).toContain("import { refreshSelectedRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore'");
+  expect(viewSource).toContain('refreshSelectedRuntimeView,');
+  expect(viewSource).toContain('runtimeViewActiveEntityId,');
+  expect(viewSource).toContain("from '$lib/stores/runtimeViewStore'");
   expect(viewSource).toContain("from '$lib/utils/debugSurface'");
   expect(viewSource).toContain("registerDebugSurface('view', () => get(runtimeView)");
   expect(viewSource).not.toContain("legacyName: '__xlnRuntimeView'");

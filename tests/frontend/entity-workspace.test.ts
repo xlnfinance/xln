@@ -212,7 +212,10 @@ test('user mode remote workspace mounts from RuntimeView instead of RuntimeRepli
   const dockWrapper = readFileSync('frontend/src/lib/view/panels/wrappers/EntityPanelWrapper.svelte', 'utf8');
   const workspace = readFileSync('frontend/src/lib/components/Entity/EntityWorkspace.svelte', 'utf8');
 
-  expect(userMode).toContain("import { runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore'");
+  expect(userMode).toContain('runtimeView,');
+  expect(userMode).toContain('runtimeViewActiveEntityId,');
+  expect(userMode).toContain('setRuntimeViewActiveEntityId,');
+  expect(userMode).toContain("from '$lib/stores/runtimeViewStore'");
   expect(userMode).toContain('setRuntimeViewActiveEntityId');
   expect(userMode).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
   expect(userMode).toContain('$runtimeView.frame');

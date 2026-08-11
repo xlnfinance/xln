@@ -195,6 +195,17 @@ test('automatic root refresh preserves the pinned RuntimeView Entity', () => {
   expect(source).not.toContain('refreshRuntimeView()');
 });
 
+test('payment terminal observation follows the synchronous Entity selection', () => {
+  const viewSource = readFileSync('frontend/src/lib/view/View.svelte', 'utf8');
+  const userModeSource = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
+
+  expect(viewSource).toContain('const entityId = String(get(runtimeViewActiveEntityId)');
+  expect(viewSource).toContain('runtimeViewActiveEntityId.subscribe(');
+  expect(viewSource).not.toContain('const entityId = String(get(runtimeView).activeEntityId');
+  expect(userModeSource).toContain('if ($runtimeViewActiveEntityId !== selectedEntityId)');
+  expect(userModeSource).toContain('setRuntimeViewActiveEntityId(selectedEntityId);');
+});
+
 test('runtime view height pushes cannot race the initial remote projection', () => {
   const liveView = {
     atHeight: null,

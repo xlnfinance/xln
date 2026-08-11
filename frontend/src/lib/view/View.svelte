@@ -26,7 +26,11 @@
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
   import { activeRuntimeId } from '$lib/stores/runtimeStore';
-  import { refreshSelectedRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
+  import {
+    refreshSelectedRuntimeView,
+    runtimeView,
+    runtimeViewActiveEntityId,
+  } from '$lib/stores/runtimeViewStore';
   import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { isLocalDebugSurfaceAllowed, registerDebugSurface } from '$lib/utils/debugSurface';
   import {
@@ -325,7 +329,7 @@
   let unregisterRuntimeStatus: (() => void) | null = null;
   let paymentTerminalMonitor: ReturnType<typeof createPaymentTerminalMonitor> | null = null;
   let unsubPaymentTerminalHandle: (() => void) | null = null;
-  let unsubPaymentTerminalView: (() => void) | null = null;
+  let unsubPaymentTerminalEntitySelection: (() => void) | null = null;
   let runtimeViewRefreshPromise: Promise<unknown> | null = null;
   let runtimeViewRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let runtimeViewRefreshQueued = false;
@@ -346,7 +350,12 @@
 
   const syncPaymentTerminalObservation = (): void => {
     const handle = get(runtimeControllerHandle);
-    const entityId = String(get(runtimeView).activeEntityId || '').trim().toLowerCase();
+    // Payment observation must follow the synchronous wallet selection, not
+    // the asynchronously materialized RuntimeView projection. Under load the
+    // projection can publish after a terminal frame; baselining from that late
+    // identity would correctly skip the already-current frame and hide its
+    // receipt. The selection store is the command/UI owner for this Entity.
+    const entityId = String(get(runtimeViewActiveEntityId) || '').trim().toLowerCase();
     const runtimeId = normalizeRuntimeId(handle.runtimeId);
     const nextOwnerKey = handle.status === 'connected' && runtimeId && entityId
       ? `${runtimeId}:${entityId}`
@@ -418,7 +427,9 @@
         seenEventStore: sharedPaymentTerminalSeenEventStore,
       });
       unsubPaymentTerminalHandle = runtimeControllerHandle.subscribe(syncPaymentTerminalObservation);
-      unsubPaymentTerminalView = runtimeView.subscribe(syncPaymentTerminalObservation);
+      unsubPaymentTerminalEntitySelection = runtimeViewActiveEntityId.subscribe(
+        syncPaymentTerminalObservation,
+      );
 
       unsubRuntimeHistory = runtimeHistory.subscribe((frames) => {
         if (!publishedRuntimeKey) {
@@ -473,7 +484,7 @@
     unsubRuntimeViewPalette?.();
     unregisterRuntimeStatus?.();
     unsubPaymentTerminalHandle?.();
-    unsubPaymentTerminalView?.();
+    unsubPaymentTerminalEntitySelection?.();
     paymentTerminalMonitor?.stop();
     if (runtimeViewRefreshTimer) clearTimeout(runtimeViewRefreshTimer);
     lastSeenFrameLogIdByRuntime.clear();
