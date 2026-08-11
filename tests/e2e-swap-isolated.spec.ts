@@ -482,9 +482,16 @@ async function ensureOrderbookVisible(page: Page): Promise<void> {
 }
 
 async function dismissSwapCompletionModalIfVisible(page: Page): Promise<void> {
-  const modalCloseButton = page.locator('.swap-modal-actions button').filter({ hasText: /^Close$/ }).first();
+  const modalCloseButton = page.getByTestId('swap-completion-close').first();
   if (!await modalCloseButton.isVisible({ timeout: 500 }).catch(() => false)) return;
-  await modalCloseButton.click().catch(() => {});
+  await modalCloseButton.click();
+  await expect(page.locator('.swap-modal-overlay')).toHaveCount(0, { timeout: 10_000 });
+}
+
+async function closeExpectedSwapCompletionModal(page: Page): Promise<void> {
+  const modalCloseButton = page.getByTestId('swap-completion-close').first();
+  await expect(modalCloseButton).toBeVisible({ timeout: 30_000 });
+  await modalCloseButton.click();
   await expect(page.locator('.swap-modal-overlay')).toHaveCount(0, { timeout: 10_000 });
 }
 
@@ -1713,13 +1720,35 @@ test.describe('E2E Swap Isolated Flow', () => {
           .toBe(0);
 
         await expect
-          .poll(async () => await readSwapHistoryCount(alicePage, alice.entityId, alice.signerId, hubId), {
+          .poll(async () => (await readClosedSwapResolveSnapshots(alicePage, alice.entityId, hubId)).length, {
             timeout: 30_000,
             intervals: [250, 500, 750],
-            message: `Alice swapOrderHistory should accumulate round ${round}`,
+            message: `Alice swapClosedOrders should accumulate round ${round}`,
           })
           .toBeGreaterThanOrEqual(round);
+
+        await expect
+          .poll(async () => (await readClosedSwapResolveSnapshots(bobPage, bob.entityId, hubId)).length, {
+            timeout: 30_000,
+            intervals: [250, 500, 750],
+            message: `Bob swapClosedOrders should accumulate round ${round}`,
+          })
+          .toBeGreaterThanOrEqual(round);
+
+        await Promise.all([
+          closeExpectedSwapCompletionModal(alicePage),
+          closeExpectedSwapCompletionModal(bobPage),
+        ]);
       }
+
+      await Promise.all([
+        alicePage.getByTestId('swap-orders-tab-closed').first().click(),
+        bobPage.getByTestId('swap-orders-tab-closed').first().click(),
+      ]);
+      await Promise.all([
+        expect(alicePage.getByTestId('swap-closed-order-row')).toHaveCount(3, { timeout: 30_000 }),
+        expect(bobPage.getByTestId('swap-closed-order-row')).toHaveCount(3, { timeout: 30_000 }),
+      ]);
     } finally {
       await Promise.all([
         aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
