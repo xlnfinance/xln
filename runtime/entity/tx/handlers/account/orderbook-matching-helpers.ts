@@ -19,7 +19,6 @@ import {
 } from '../../../../account/utils';
 import {
   buildSwapResolveDataFromOrderbookFill,
-  calculateSwapTakerFeeAmount,
   isWorkingOrderbookOffer,
   MAX_SWAP_FILL_RATIO,
   type CrossJurisdictionWorkingOrderbookOffer,
@@ -30,6 +29,7 @@ import {
 } from '../../../../orderbook/swap-execution';
 import {
   assertSwapNetAuthorization,
+  deriveSwapFillPolicyFee,
   requantizeSwapNetAuthorization,
   type SwapNetAuthorization,
 } from '../../../../account/swap-net-authorization';
@@ -550,7 +550,16 @@ const applySameFillTakerFee = (
   offer: NormalizedOrderbookOffer | AuthorizedCanonicalRestingOffer,
   takerFeeBps: number,
 ): void => {
-  const fee = calculateSwapTakerFeeAmount(data.executionWantAmount ?? 0n, takerFeeBps);
+  // The policy fee consumes the same signed progress as authorization. Computing
+  // it from raw improved output would exceed the taker's limit-derived fee budget;
+  // recomputing bps per partial fill would also introduce a second rounding path.
+  const fee = deriveSwapFillPolicyFee(
+    offer,
+    data.executionGiveAmount ?? 0n,
+    data.executionWantAmount ?? 0n,
+    takerFeeBps,
+    data.cancelRemainder ?? false,
+  );
   if (fee <= 0n) return;
   data.feeTokenId = offer.wantTokenId;
   data.feeAmount = fee;
@@ -621,6 +630,7 @@ export const buildSameFillResolvePlan = (input: SameFillResolveInput): SameFillR
     resolveEnqueueData.executionGiveAmount ?? 0n,
     resolveEnqueueData.executionWantAmount ?? 0n,
     resolveEnqueueData.feeAmount ?? 0n,
+    resolveData.cancelRemainder,
   );
 
   return {

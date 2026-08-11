@@ -60,7 +60,7 @@ const validateOfferShape = (tx: SwapOfferTx): string | null => {
     return 'SWAP_NET_AUTH_INITIAL_TERMS_INVALID';
   }
   try {
-    assertSwapNetAuthorization(tx.data, 0n, 0n, 0n);
+    assertSwapNetAuthorization(tx.data, 0n, 0n, 0n, false);
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }

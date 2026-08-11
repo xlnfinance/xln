@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   assertSwapNetAuthorization,
+  deriveSwapFillPolicyFee,
   deriveSwapNetAuthorization,
   requantizeSwapNetAuthorization,
 } from '../account/swap-net-authorization';
@@ -78,13 +79,54 @@ describe('swap net authorization', () => {
 
   test('bounds every partial fill without letting price improvement enlarge fee authority', () => {
     const offer = authorizationOffer();
-    expect(() => assertSwapNetAuthorization(offer, 50n, 50n, 5n)).not.toThrow();
-    expect(() => assertSwapNetAuthorization(offer, 50n, 50n, 6n))
+    expect(() => assertSwapNetAuthorization(offer, 50n, 50n, 5n, false)).not.toThrow();
+    expect(() => assertSwapNetAuthorization(offer, 50n, 50n, 6n, false))
       .toThrow('SWAP_NET_AUTH_MAX_FEE_EXCEEDED');
-    expect(() => assertSwapNetAuthorization(offer, 50n, 49n, 5n))
+    expect(() => assertSwapNetAuthorization(offer, 50n, 49n, 5n, false))
       .toThrow('SWAP_NET_AUTH_MIN_RECEIVE_NOT_MET');
-    expect(() => assertSwapNetAuthorization(offer, 100n, 200n, 11n))
+    expect(() => assertSwapNetAuthorization(offer, 100n, 200n, 11n, false))
       .toThrow('SWAP_NET_AUTH_MAX_FEE_EXCEEDED');
+  });
+
+  test('terminal price improvement may consume full signed authority exactly once', () => {
+    const offer = authorizationOffer({
+      giveAmount: 78_000_000n,
+      wantAmount: 30_000_000_000_000_000n,
+      maxFee: 3_000_000_000_000n,
+      minNetReceive: 29_997_000_000_000_000n,
+    });
+    const executionGive = 75_000_000n;
+    const executionWant = offer.wantAmount;
+    expect(() => assertSwapNetAuthorization(offer, executionGive, executionWant, offer.maxFee, false))
+      .toThrow('SWAP_NET_AUTH_MAX_FEE_EXCEEDED');
+    expect(() => assertSwapNetAuthorization(
+      offer,
+      executionGive,
+      executionWant,
+      offer.maxFee,
+      true,
+    )).not.toThrow();
+  });
+
+  test('terminal progress cannot amplify fee authority across prior partial fills', () => {
+    const first = authorizationOffer();
+    expect(() => assertSwapNetAuthorization(first, 50n, 50n, 5n, false)).not.toThrow();
+    const remainingAuthorization = requantizeSwapNetAuthorization(first, 50n, 50n);
+    const remaining = authorizationOffer({
+      giveAmount: 50n,
+      wantAmount: 50n,
+      ...remainingAuthorization,
+    });
+    expect(() => assertSwapNetAuthorization(remaining, 40n, 50n, 5n, true)).not.toThrow();
+    expect(5n + 5n).toBe(first.maxFee);
+    expect(() => assertSwapNetAuthorization({ ...first, maxFee: 0n, minNetReceive: 100n }, 75n, 100n, 1n, true))
+      .toThrow('SWAP_NET_AUTH_MAX_FEE_EXCEEDED');
+  });
+
+  test('derives policy fee from the same progress and rounding as signed authority', () => {
+    const offer = { giveAmount: 10_001n, wantAmount: 10_001n };
+    expect(deriveSwapFillPolicyFee(offer, 10_000n, 10_000n, 1, false)).toBe(0n);
+    expect(deriveSwapFillPolicyFee(offer, 10_001n, 11_000n, 1, true)).toBe(1n);
   });
 
   test('requantizes remaining authorization conservatively across repeated partial fills', () => {

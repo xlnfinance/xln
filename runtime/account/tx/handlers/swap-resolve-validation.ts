@@ -269,6 +269,7 @@ const validateSwapFeeAuthorization = (
       fill.filledGive,
       fill.filledWant,
       feeAmount,
+      tx.data.cancelRemainder,
     );
   } catch (error) {
     return failure(events, error instanceof Error ? error.message : String(error));

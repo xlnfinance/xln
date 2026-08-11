@@ -45,7 +45,7 @@ const validateSwapOffers = (value: unknown, context: string): void => {
         wantAmount: offer['wantAmount'] as bigint,
         maxFee: offer['maxFee'] as bigint,
         minNetReceive: offer['minNetReceive'] as bigint,
-      }, 0n, 0n, 0n);
+      }, 0n, 0n, 0n, false);
     } catch (error) {
       throw new FinancialDataCorruptionError(`${context}.${String(offerId)} authorization is invalid`, {
         cause: error instanceof Error ? error.message : String(error),

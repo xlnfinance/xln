@@ -1220,6 +1220,90 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(takerResolve!.tx.data.feeTokenId).toBe(2);
     expect(takerResolve!.tx.data.feeAmount).toBe(makerBaseQty / 10_000n);
 
+    const improvedQuoteLimit = (makerQuoteQty * 11n) / 10n;
+    const improvedTakerOffer = {
+      ...takerOffer,
+      offerId: 'taker-buy-with-price-improvement',
+      giveAmount: improvedQuoteLimit,
+      priceTicks: 1100n,
+    };
+    const improved = processCommittedOrderbookSwaps(
+      makeFeeEntityState(),
+      [makerOffer, improvedTakerOffer],
+    );
+    const improvedMakerResolve = improved.accountTxs.find(
+      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+    );
+    const improvedTakerResolve = improved.accountTxs.find(
+      item =>
+        item.accountId === 'taker-account' &&
+        item.tx.type === 'swap_resolve' &&
+        item.tx.data.offerId === improvedTakerOffer.offerId,
+    );
+    expect(improvedMakerResolve).toBeDefined();
+    expect(improvedTakerResolve).toBeDefined();
+    expect(improvedTakerResolve!.tx.data).toMatchObject({
+      executionGiveAmount: makerQuoteQty,
+      executionWantAmount: makerBaseQty,
+      feeAmount: makerBaseQty / 10_000n,
+      cancelRemainder: true,
+    });
+
+    const betterBidPriceTicks = 1100n;
+    const betterBidQuoteQty = (makerBaseQty * betterBidPriceTicks) / 10_000n;
+    const sellLimitQuoteQty = makerQuoteQty;
+    const makerBid = {
+      offerId: 'maker-bid-price-improvement',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker-entity',
+      accountId: 'maker-account',
+      giveTokenId: 5,
+      giveAmount: betterBidQuoteQty,
+      wantTokenId: 2,
+      wantAmount: makerBaseQty,
+      createdHeight: 1,
+      timeInForce: 0,
+      priceTicks: betterBidPriceTicks,
+    };
+    const improvedSellTaker = {
+      offerId: 'taker-sell-with-price-improvement',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker-entity',
+      accountId: 'taker-account',
+      giveTokenId: 2,
+      giveAmount: makerBaseQty,
+      wantTokenId: 5,
+      wantAmount: sellLimitQuoteQty,
+      maxFee: sellLimitQuoteQty / 10_000n,
+      minNetReceive: sellLimitQuoteQty - sellLimitQuoteQty / 10_000n,
+      createdHeight: 2,
+      timeInForce: 0,
+      priceTicks: makerPriceTicks,
+    };
+    const improvedSell = processCommittedOrderbookSwaps(
+      makeFeeEntityState(),
+      [makerBid, improvedSellTaker],
+    );
+    const improvedSellMakerResolve = improvedSell.accountTxs.find(
+      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+    );
+    const improvedSellTakerResolve = improvedSell.accountTxs.find(
+      item =>
+        item.accountId === 'taker-account' &&
+        item.tx.type === 'swap_resolve' &&
+        item.tx.data.offerId === improvedSellTaker.offerId,
+    );
+    expect(improvedSellMakerResolve).toBeDefined();
+    expect(improvedSellTakerResolve).toBeDefined();
+    expect(improvedSellTakerResolve!.tx.data).toMatchObject({
+      executionGiveAmount: makerBaseQty,
+      executionWantAmount: betterBidQuoteQty,
+      feeAmount: sellLimitQuoteQty / 10_000n,
+      cancelRemainder: true,
+    });
+
     const accountMachine = makeAccountMachine({
       offerId: 'taker-buy-with-fee',
       makerIsLeft: false,
