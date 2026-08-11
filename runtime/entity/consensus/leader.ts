@@ -8,8 +8,8 @@ import { cloneIsolatedProposedEntityFrame } from '../input-clone';
 import { hasQueuedOrPendingAccountWork } from './account-work-index';
 import { hasActionableSettlementContinuation } from './settlement-continuation';
 
-export const ENTITY_LEADER_TIMEOUT_BASE_MS = 10_000;
-export const ENTITY_LEADER_TIMEOUT_MAX_MS = 60_000;
+const ENTITY_LEADER_TIMEOUT_BASE_MS = 10_000;
+const ENTITY_LEADER_TIMEOUT_MAX_MS = 60_000;
 export const ENTITY_J_SUBMIT_FALLBACK_MS = 60_000;
 
 const normalizeSignerId = (value: string): string => value.trim().toLowerCase();

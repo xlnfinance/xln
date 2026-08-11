@@ -29,8 +29,8 @@
  * WHY HOOKS EXIST:
  *   Entities only process crontab during applyEntityInput(). If an entity
  *   is idle (no messages, no payments), periodic tasks never run. Hooks
- *   solve this: the runtime loop checks getEarliestHookTime() and injects
- *   a ping entityInput to wake the entity at the right time.
+ *   solve this: the runtime scheduled-wake scanner tracks the next deadline
+ *   and injects a ping entityInput to wake the entity at the right time.
  *
  * HOOK TYPES & SECURITY APPLICATIONS:
  *   'htlc_timeout'      — Auto-resolve expired HTLC locks (prevents fund lockup)
@@ -69,14 +69,10 @@ import {
 } from './consensus/account-work-index';
 
 export {
-  HUB_MAX_C2R_PER_TICK,
-  HUB_MAX_R2C_PER_TICK,
   HUB_PENDING_BROADCAST_STALE_MS,
-  HUB_SUBMITTED_REQUEST_STALE_MS,
 } from './scheduler/rebalance';
 export {
   cancelHook,
-  getEarliestHookTime,
   scheduleHook,
 } from './scheduler/hook-state';
 

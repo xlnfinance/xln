@@ -127,7 +127,7 @@ export const resolveEntityCommandBoard = (
  * participant registry can broaden authors without changing the codec,
  * nonce fence, or validator replay path.
  */
-export const resolveEntityCommandAuthor = (
+const resolveEntityCommandAuthor = (
   env: EntityRuntimeContext,
   state: EntityState,
   rawSignerId: string,
@@ -143,7 +143,7 @@ export const resolveEntityCommandAuthor = (
   return { boardHash: board.boardHash, boardEpoch: board.boardEpoch, signerId, signer: author.signer };
 };
 
-export const getEntityCommandStackKey = (state: EntityState): string =>
+const getEntityCommandStackKey = (state: EntityState): string =>
   state.config.jurisdiction
     ? getCertifiedBoardStackKey(state.config.jurisdiction)
     : UNREGISTERED_ENTITY_COMMAND_STACK_KEY;

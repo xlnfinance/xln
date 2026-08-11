@@ -14,7 +14,7 @@ import { markLocalEntityProviderActionRuntimeTx } from './entity-provider-action
 type RecordActionResultTx = Extract<RuntimeTx, { type: 'recordEntityProviderActionSubmitResult' }>;
 type PendingActionAttempt = { jurisdictionName: string; jTx: ActionJTx };
 
-export const ENTITY_PROVIDER_ACTION_RESULT_FINGERPRINT_LIMIT = 256;
+const ENTITY_PROVIDER_ACTION_RESULT_FINGERPRINT_LIMIT = 256;
 const MAX_UINT256 = (1n << 256n) - 1n;
 
 const assertValidAdapterFailure = (data: RecordActionResultTx['data']): void => {
@@ -128,7 +128,7 @@ const findRecordedFingerprint = (env: RuntimeReplica, attemptId: string): string
   return found;
 };
 
-export const removePendingEntityProviderActionAttempt = (env: RuntimeReplica, attemptId: string): void => {
+const removePendingEntityProviderActionAttempt = (env: RuntimeReplica, attemptId: string): void => {
   const remaining = (env.infrastructure?.pendingCommittedJOutbox ?? []).flatMap((input) => {
     const jTxs = input.jTxs.filter((jTx) => !(
       isEntityProviderActionJTx(jTx) &&

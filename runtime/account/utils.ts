@@ -189,7 +189,7 @@ export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, del
  * USDC is primary token (1), ETH is secondary (2)
  */
 const TOKEN_COLORS = ['#2775ca', '#627eea', '#26a17b', '#ef0027', '#f59e0b'] as const;
-export const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number; color: string }> =
+const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number; color: string }> =
   Object.fromEntries(
     [...DEFAULT_TOKENS, ...TRON_ONLY_DEFAULT_TOKENS].map((token, index) => [
       index + 1,
@@ -218,8 +218,8 @@ export function getTokenIdsForJurisdiction(
 
 // Canonical USD reference stables used for quote-side orientation in swap pairs.
 // Prices for volatile/non-reference assets are displayed and quoted as stable per 1 asset.
-export const REFERENCE_STABLE_TOKEN_IDS = new Set<number>([1, 3]); // USDC, USDT
-export const DEFAULT_ENTITY_SWAP_PAIR_TOKENS = [1, 2, 3] as const;
+const REFERENCE_STABLE_TOKEN_IDS = new Set<number>([1, 3]); // USDC, USDT
+const DEFAULT_ENTITY_SWAP_PAIR_TOKENS = [1, 2, 3] as const;
 export type EntitySwapPairConfig = {
   baseTokenId: number;
   quoteTokenId: number;

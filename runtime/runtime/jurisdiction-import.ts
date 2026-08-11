@@ -240,7 +240,7 @@ export const applyImportJurisdictionIntent = (
   });
 };
 
-export const markLocalJImportResultRuntimeTx = <T extends CompleteImportJRuntimeTx>(tx: T): T => {
+const markLocalJImportResultRuntimeTx = <T extends CompleteImportJRuntimeTx>(tx: T): T => {
   Object.defineProperty(tx, LOCAL_J_IMPORT_RESULT, { value: true, enumerable: false });
   return tx;
 };
@@ -522,7 +522,7 @@ const buildPreparedJurisdictionImportResult = async (
   };
 };
 
-export const prepareJurisdictionImportResult = async (
+const prepareJurisdictionImportResult = async (
   pending: PendingJurisdictionImport,
 ): Promise<JurisdictionImportResult> => {
   const request = pending.request;

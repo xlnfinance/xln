@@ -153,7 +153,7 @@ const commandToEntityInput = (
   }],
 });
 
-export const routeCommittedEntityOutputs = (
+const routeCommittedEntityOutputs = (
   env: RuntimeReplica,
   outputs: RoutedEntityInput[],
   context: RuntimeEntityInputBatchContext,

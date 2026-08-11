@@ -20,16 +20,13 @@ import type {
 export type {
   ConsumptionAccumulatorState,
   ConsumptionApplyResult,
-  ConsumptionBranchNode,
   ConsumptionFrontierValue,
-  ConsumptionLeafNode,
   ConsumptionNode,
   ConsumptionNodeEntry,
   ConsumptionNodeStore,
   ConsumptionOutputIdentity,
   ConsumptionProof,
   ConsumptionProofResult,
-  ConsumptionQuarantineEvidence,
 } from './consumption-accumulator-types';
 
 const ABI = ethers.AbiCoder.defaultAbiCoder();
@@ -40,8 +37,8 @@ const LEAF_DOMAIN = domain('xln.consumption-frontier.leaf.v1');
 const BRANCH_DOMAIN = domain('xln.consumption-frontier.branch.v1');
 export const EMPTY_CONSUMPTION_ROOT = domain('xln.consumption-frontier.empty.v1');
 export const MAX_CONSUMPTION_PROOF_NODES = 257;
-export const MAX_CONSUMPTION_PROOF_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
-export const MAX_CONSUMPTION_HANKO_BYTES = HANKO_MAX_BYTES;
+const MAX_CONSUMPTION_PROOF_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
+const MAX_CONSUMPTION_HANKO_BYTES = HANKO_MAX_BYTES;
 export const MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY = BigInt(
   LIMITS.MAX_ACCOUNTS_PER_ENTITY * 5,
 );
@@ -203,7 +200,7 @@ const frontierFromIdentity = (
   });
 };
 
-export const getConsumptionValue = (identity: ConsumptionOutputIdentity): ConsumptionFrontierValue =>
+const getConsumptionValue = (identity: ConsumptionOutputIdentity): ConsumptionFrontierValue =>
   frontierFromIdentity(identity, 1n);
 
 const hashFrontier = (valueInput: ConsumptionFrontierValue): string => {
@@ -272,7 +269,7 @@ const frontierByteLength = (value: ConsumptionFrontierValue): number => {
     (quarantine ? 8 + 32 + 32 + (quarantine.conflictingOutputHanko.length - 2) / 2 : 0);
 };
 
-export const getConsumptionProofByteLength = (proof: ConsumptionProof): number =>
+const getConsumptionProofByteLength = (proof: ConsumptionProof): number =>
   3 + proof.nodes.reduce(
     (total, node) => total + (node.type === 'branch' ? 68 : 35 + frontierByteLength(node.value)),
     0,

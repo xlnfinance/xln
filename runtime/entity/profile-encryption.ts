@@ -119,7 +119,7 @@ const cacheForEntity = (env: EntityRuntimeContext, entityId: string): Map<string
   return bySigner;
 };
 
-export const mergeProfileEncryptionAttestations = (
+const mergeProfileEncryptionAttestations = (
   env: EntityRuntimeContext,
   board: ValidatorEncryptionBoard,
   incoming: Iterable<ValidatorEncryptionAttestation>,

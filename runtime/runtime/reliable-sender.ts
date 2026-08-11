@@ -67,7 +67,7 @@ const receiptAdvancesSameCoverage = (
   return true;
 };
 
-export const reliableReceiptMatchesOutput = (
+const reliableReceiptMatchesOutput = (
   output: RoutedEntityInput,
   receipt: ReliableDeliveryReceipt,
 ): boolean => {

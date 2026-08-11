@@ -13,7 +13,7 @@ const PROCESS_PROFILE =
   APPLY_PROFILE || ACCOUNT_CAUSAL_TRACE || nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
 const PROCESS_SLOW_MS = Math.max(0, Number(nodeProcess?.env?.['XLN_RUNTIME_PROCESS_SLOW_MS'] || '1000'));
 
-export type RuntimeProcessProfileMetrics = {
+type RuntimeProcessProfileMetrics = {
   triggerReason?: string;
   heightBefore: number;
   heightAfter: number;

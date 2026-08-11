@@ -9,7 +9,7 @@ import {
   requireStringArray,
 } from '../../protocol/boundary-primitives';
 
-export type EntityTxFieldKind =
+type EntityTxFieldKind =
   | 'array'
   | 'bigint'
   | 'bigintOrString'

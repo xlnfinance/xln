@@ -38,7 +38,6 @@ export {
 } from './account/orderbook-cancels';
 export { processOrderbookSwaps } from './account/orderbook-matching';
 export type {
-  MatchResult,
   SwapCancelEvent,
   SwapCancelRequestEvent,
   SwapOfferEvent,

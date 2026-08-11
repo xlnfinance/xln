@@ -42,8 +42,8 @@ export const generateProposalId = (
   return `prop_${hash}`;
 };
 
-export const MAX_PENDING_ENTITY_PROPOSALS = LIMITS.MAX_PENDING_PROPOSALS_PER_ENTITY;
-export const MAX_TERMINAL_ENTITY_PROPOSALS = LIMITS.MAX_TERMINAL_PROPOSALS_PER_ENTITY;
+const MAX_PENDING_ENTITY_PROPOSALS = LIMITS.MAX_PENDING_PROPOSALS_PER_ENTITY;
+const MAX_TERMINAL_ENTITY_PROPOSALS = LIMITS.MAX_TERMINAL_PROPOSALS_PER_ENTITY;
 
 export const assertEntityProposalCapacity = (state: EntityState, rawProposer: string): void => {
   const proposer = canonicalEntityBoardSignerId(rawProposer);

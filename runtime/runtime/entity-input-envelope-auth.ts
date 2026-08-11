@@ -18,7 +18,7 @@ const unsignedEnvelope = (
   return body;
 };
 
-export const hashRuntimeEntityInputsEnvelope = (
+const hashRuntimeEntityInputsEnvelope = (
   targetRuntimeIdRaw: string,
   body: UnsignedRuntimeEntityInputsEnvelope,
 ): string => {

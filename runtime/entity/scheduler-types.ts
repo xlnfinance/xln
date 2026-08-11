@@ -12,7 +12,7 @@ export type EntityTransitionContext = {
 
 export type CrontabTaskMethod = 'maintainPendingAccounts' | 'hubRebalance';
 
-export type CrontabTaskParam = string | number | boolean;
+type CrontabTaskParam = string | number | boolean;
 
 export interface CrontabTaskState {
   method: CrontabTaskMethod;
@@ -39,37 +39,37 @@ type ScheduledHookBase<TType extends ScheduledHookType, TData extends Record<str
   data: TData;
 };
 
-export type HtlcTimeoutHook = ScheduledHookBase<'htlc_timeout', {
+type HtlcTimeoutHook = ScheduledHookBase<'htlc_timeout', {
   accountId: string;
   lockId: string;
 }>;
 
-export type DisputeDeadlineHook = ScheduledHookBase<'dispute_deadline', {
+type DisputeDeadlineHook = ScheduledHookBase<'dispute_deadline', {
   accountId: string;
 }>;
 
-export type HtlcSecretAckTimeoutHook = ScheduledHookBase<'htlc_secret_ack_timeout', {
+type HtlcSecretAckTimeoutHook = ScheduledHookBase<'htlc_secret_ack_timeout', {
   hashlock: string;
   counterpartyEntityId: string;
   inboundLockId: string;
 }>;
 
-export type SettlementWindowHook = ScheduledHookBase<'settlement_window', Record<string, never>>;
+type SettlementWindowHook = ScheduledHookBase<'settlement_window', Record<string, never>>;
 
-export type WatchdogHook = ScheduledHookBase<'watchdog', Record<string, never>>;
+type WatchdogHook = ScheduledHookBase<'watchdog', Record<string, never>>;
 
-export type HubRebalanceKickHook = ScheduledHookBase<'hub_rebalance_kick', {
+type HubRebalanceKickHook = ScheduledHookBase<'hub_rebalance_kick', {
   reason: string;
   counterpartyId: string;
 }>;
 
-export type BoardResealHook = ScheduledHookBase<'board_reseal', {
+type BoardResealHook = ScheduledHookBase<'board_reseal', {
   activationJHeight: number;
   activationLogIndex: number;
   afterCounterpartyId: string;
 }>;
 
-export type CrossJurisdictionOrderbookSweepHook = ScheduledHookBase<'cross_j_orderbook_sweep', {
+type CrossJurisdictionOrderbookSweepHook = ScheduledHookBase<'cross_j_orderbook_sweep', {
   reason: string;
 }>;
 

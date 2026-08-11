@@ -17,7 +17,7 @@ import { buildAccountProofBody } from '../../protocol/dispute/proof-builder';
 
 const accountConsensusHelperLog = createStructuredLogger('account.consensus');
 
-export const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
 export const isEntityId32 = (value: unknown): value is string =>
   typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);

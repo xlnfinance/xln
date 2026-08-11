@@ -11,7 +11,7 @@ import { EntityCommandRejectionError } from './tx/invariant-errors';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../protocol/htlc/consensus-secret-guard';
 import { isCrossJurisdictionSiblingPair } from '../extensions/cross-j/boundary';
 
-export const ENTITY_PROPOSAL_ACTION_DOMAIN = 'xln:entity-proposal-action:v1' as const;
+const ENTITY_PROPOSAL_ACTION_DOMAIN = 'xln:entity-proposal-action:v1' as const;
 
 export const canonicalEntityBoardSignerId = (
   value: unknown,
@@ -115,7 +115,7 @@ const assertTxBatchShape: (txs: unknown, code: string) => asserts txs is EntityT
   }
 };
 
-export const hashCollectiveEntityActionTxs = (txs: EntityTx[]): string => {
+const hashCollectiveEntityActionTxs = (txs: EntityTx[]): string => {
   assertNoConsensusVisibleHtlcPaymentSecrets(txs);
   assertTxBatchShape(txs, 'ENTITY_COLLECTIVE_ACTION');
   for (const tx of txs) {
@@ -461,7 +461,7 @@ const assertCertifiedCrossJRecoveryAuthority = (
   }
 };
 
-export const assertCertifiedOutputSemanticAuthority = (
+const assertCertifiedOutputSemanticAuthority = (
   source: string,
   target: string,
   tx: EntityTx,

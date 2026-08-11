@@ -28,7 +28,7 @@ export type AccountSwapOfferCreated = {
   timeInForce?: 0 | 1 | 2 | undefined;
 };
 
-export type AccountConsensusFrameResult = {
+type AccountConsensusFrameResult = {
   success: boolean;
   events: string[];
   error?: string;

@@ -401,7 +401,7 @@ export type SourceHubClaimRegistration = {
  * Depository.processBatch transaction, so Solidity observes the registration
  * at the inclusive start second even if mining itself is delayed.
  */
-export const queueSourceHubClaimRegistrationForRoute = (
+const queueSourceHubClaimRegistrationForRoute = (
   state: EntityState,
   routeId: string,
   counterpartyId: string,
@@ -589,7 +589,7 @@ export function queueCrossJurisdictionRevealPorts(
   return batches.size;
 }
 
-export function findCrossJurisdictionRoutesForTargetDispute(
+function findCrossJurisdictionRoutesForTargetDispute(
   state: EntityState,
   counterpartyId: string,
 ): CrossJurisdictionSwapRoute[] {

@@ -3,7 +3,6 @@ export {
   carriesEntityCommitNotification,
   getReliableOutputIdentity,
   splitRoutedOutputByDeliveryLane,
-  type ReliableOutputIdentity,
 } from './delivery/identity';
 export {
   MAX_PENDING_NETWORK_OUTPUTS,

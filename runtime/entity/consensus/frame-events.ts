@@ -9,7 +9,7 @@ import type { EntityFrameEvent } from '../types';
  */
 export const MAX_ENTITY_FRAME_EVENT_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 
-export const getEntityFrameEventByteLength = (events: EntityFrameEvent[]): number =>
+const getEntityFrameEventByteLength = (events: EntityFrameEvent[]): number =>
   new TextEncoder().encode(safeStringify(events)).byteLength;
 
 export const assertEntityFrameEventByteBudget = (events: EntityFrameEvent[]): void => {

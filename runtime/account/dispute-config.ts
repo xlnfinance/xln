@@ -11,9 +11,9 @@ export type AccountRoleEvidence = {
   source: AccountRoleEvidenceSource;
 };
 
-export const HUB_RESPONSE_SECONDS = 60 * 60;
-export const USER_RESPONSE_SECONDS = 24 * 60 * 60;
-export const MAX_ACCOUNT_DISPUTE_SECONDS = 365 * 24 * 60 * 60;
+const HUB_RESPONSE_SECONDS = 60 * 60;
+const USER_RESPONSE_SECONDS = 24 * 60 * 60;
+const MAX_ACCOUNT_DISPUTE_SECONDS = 365 * 24 * 60 * 60;
 
 const requireResponseSeconds = (value: unknown, side: 'left' | 'right'): number => {
   const seconds = Number(value);
@@ -44,7 +44,7 @@ export const canonicalAccountDisputeConfig = (value: AccountDisputeConfig): Acco
 };
 
 /** Defaults are materialized once at account creation and then signed. */
-export const defaultAccountDisputeConfig = (
+const defaultAccountDisputeConfig = (
   leftIsHub: boolean,
   rightIsHub: boolean,
 ): AccountDisputeConfig => ({

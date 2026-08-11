@@ -3,9 +3,9 @@ import type { RuntimeInput } from './types';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { requireBoundaryInteger } from '../protocol/boundary-validation';
 
-export type RuntimeIngressReceiptStatus = 'pending' | 'observed' | 'expired';
+type RuntimeIngressReceiptStatus = 'pending' | 'observed' | 'expired';
 
-export type RuntimeIngressCounts = {
+type RuntimeIngressCounts = {
   runtimeTxs: number;
   entityInputs: number;
   jInputs: number;
@@ -116,7 +116,7 @@ const normalizeRuntimeInputForReceipt = (input: RuntimeInput): RuntimeInput => (
   ...(Array.isArray(input.jInputs) ? { jInputs: input.jInputs } : { jInputs: [] }),
 });
 
-export const hashRuntimeIngressInput = (input: RuntimeInput): string =>
+const hashRuntimeIngressInput = (input: RuntimeInput): string =>
   `sha256:${createHash('sha256').update(serializeTaggedJson(normalizeRuntimeInputForReceipt(input))).digest('hex')}`;
 
 const hashRuntimeIngressPart = (value: unknown): string =>

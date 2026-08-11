@@ -67,4 +67,3 @@ export const recordRuntimeHistoryTraceForTesting = (
  * browser demo recorder. Runtime memory stays bounded either way — the collector owns the
  * frames and `stop()` releases them.
  */
-export type RuntimeFrameTrace = RuntimeHistoryTraceCollector;

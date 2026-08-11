@@ -9,12 +9,12 @@ import type {
 } from '../reliable-delivery';
 import type { RuntimeFrameTransaction } from './transaction';
 
-export type RuntimeReceiptDelivery = {
+type RuntimeReceiptDelivery = {
   runtimeId: string;
   receipt: ReliableDeliveryReceipt;
 };
 
-export type RuntimeInputRestore = (
+type RuntimeInputRestore = (
   error: unknown,
   options?: { discardMalformedRemoteInput?: boolean; requeue?: boolean },
 ) => Promise<Error>;

@@ -14,7 +14,7 @@ export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 // exact retransmission must remain available after an arbitrary outage.
 // Financial expiry decisions are separately checked against receiver-local
 // Entity time/J-height before an incoming frame is applied.
-export const MAX_FRAME_FUTURE_SKEW_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
+const MAX_FRAME_FUTURE_SKEW_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
 export const MAX_FRAME_SIZE_BYTES = 10_000_000;
 
 export function isWithinAccountFrameBounds(

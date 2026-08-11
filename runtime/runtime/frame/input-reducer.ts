@@ -55,7 +55,7 @@ export type RuntimeInputReducerDeps =
     getRoutingDeps(): RuntimeEntityRoutingDeps;
   };
 
-export type AppliedRuntimeInput = {
+type AppliedRuntimeInput = {
   entityOutbox: RoutedEntityInput[];
   mergedInputs: RoutedEntityInput[];
   jOutbox: JInput[];

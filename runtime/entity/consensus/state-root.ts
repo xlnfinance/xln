@@ -285,7 +285,7 @@ const requireConsensusAddress = (value: unknown, field: string): string => {
  * display label. Two honest validators commonly reach the same chain through
  * different URLs; committing either URL would make identical replay fork.
  */
-export const projectConsensusConfigCommitment = (config: ConsensusConfig): Record<string, unknown> => {
+const projectConsensusConfigCommitment = (config: ConsensusConfig): Record<string, unknown> => {
   assertNoConsensusConfigExtensions(config, CONSENSUS_CONFIG_KEYS);
   const normalized = normalizeAuthorityConfig(config);
   const jurisdiction = normalized.jurisdiction;
@@ -324,7 +324,7 @@ export const projectConsensusConfigCommitment = (config: ConsensusConfig): Recor
   };
 };
 
-export const projectEntityConsensusState = (state: EntityState, expandAccounts = true): Record<string, unknown> => {
+const projectEntityConsensusState = (state: EntityState, expandAccounts = true): Record<string, unknown> => {
   // Preserve property presence exactly: optional fields that are absent from
   // the live State must remain absent from the signed projection. Symbols such
   // as the frame-local event collector cannot enter through this string-key

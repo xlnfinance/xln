@@ -8,13 +8,13 @@
 
 import type { AccountReplica } from '../types/account';
 
-export type BilateralState =
+type BilateralState =
   | 'committed'    // Both sides synced
   | 'mempool'      // Local transactions not yet proposed
   | 'proposed'     // Frame sent to peer, awaiting ACK
   | 'conflict';    // Simultaneous proposals detected
 
-export interface BilateralVisualizationState {
+interface BilateralVisualizationState {
   state: BilateralState;
   isLeftEntity: boolean;
   shouldRollback: boolean;  // True if this side should rollback in conflict
@@ -98,7 +98,7 @@ export function classifyBilateralState(
 /**
  * Get visual properties for account bar rendering
  */
-export interface AccountBarVisual {
+interface AccountBarVisual {
   glowColor: 'yellow' | 'blue' | 'red' | null;
   glowSide: 'left' | 'right' | 'both' | null;
   glowIntensity: number; // 0.0 to 1.0

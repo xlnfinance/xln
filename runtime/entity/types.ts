@@ -118,7 +118,7 @@ export interface EntityInput {
  * its frame is committed. Keeping those fields unrepresentable here prevents
  * validator topology from leaking into Entity consensus.
  */
-export type EntityAddressedOutput = Omit<
+type EntityAddressedOutput = Omit<
   EntityInput,
   'signerId' | 'runtimeId' | 'from'
 > & {
@@ -146,7 +146,6 @@ export interface Proposal {
   /** Full canonical commitment to action.data, independently recomputed. */
   actionHash: string;
   // Votes: signerId → vote (string for simple votes, object for commented votes)
-  // Future: Create VoteData interface for type-safe vote objects
   votes: Map<string, 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment: string }>;
   status: 'pending' | 'executed' | 'rejected';
   created: number; // entity timestamp when proposal was created (deterministic)
@@ -168,14 +167,6 @@ export type ProposalAction =
     };
 
 
-export interface VoteData {
-  proposalId: string;
-  voter: string;
-  choice: 'yes' | 'no' | 'abstain';
-  comment?: string;
-}
-
-
 export interface EntitySwapPair {
   baseTokenId: number;
   quoteTokenId: number;
@@ -183,7 +174,7 @@ export interface EntitySwapPair {
 }
 
 
-export interface PendingCrossJurisdictionFillAck {
+interface PendingCrossJurisdictionFillAck {
   accountId: string;
   tx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
   storedAt: number;
@@ -192,7 +183,7 @@ export interface PendingCrossJurisdictionFillAck {
 }
 
 
-export type ExternalWalletBalanceRecord = {
+type ExternalWalletBalanceRecord = {
   tokenAddress: string;
   tokenId?: number;
   balance: bigint;
@@ -201,7 +192,7 @@ export type ExternalWalletBalanceRecord = {
 };
 
 
-export type ExternalWalletAllowanceRecord = {
+type ExternalWalletAllowanceRecord = {
   tokenAddress: string;
   spender: string;
   allowance: bigint;

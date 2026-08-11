@@ -24,7 +24,6 @@ export {
   MAX_ENTITY_FRAME_EVENT_BYTES,
   assertEntityFrameEventByteBudget,
   entityFrameEventsEqual,
-  getEntityFrameEventByteLength,
 } from './frame-events';
 
 export const isCanonicalEntityFrameDigest = (value: unknown): value is string =>
@@ -131,7 +130,7 @@ const canonicalAccountInputForFrameHash = (value: unknown): Record<string, unkno
   };
 };
 
-export const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> => {
+const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> => {
   assertNoConsensusVisibleHtlcPaymentSecrets([tx]);
   if (tx.type === 'j_event') {
     return { type: tx.type, data: canonicalJEventDataForFrameHash(tx.data) };
@@ -145,7 +144,7 @@ export const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unkn
   };
 };
 
-export const getEntityFrameTxByteLength = (txs: EntityTx[]): number =>
+const getEntityFrameTxByteLength = (txs: EntityTx[]): number =>
   new TextEncoder().encode(
     encodeCanonicalConsensusValue({
       domain: 'xln:entity-frame-txs:v1',

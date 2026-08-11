@@ -58,7 +58,7 @@ const normalizeSide = (value: unknown): AccountJClaimSide => {
   return value;
 };
 
-export const getAccountJClaimAccountKey = (value: AccountJClaimDomain): string => {
+const getAccountJClaimAccountKey = (value: AccountJClaimDomain): string => {
   const chainId = Number(value.chainId);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
     throw new Error(`ACCOUNT_J_CLAIM_CHAIN_INVALID:${String(value.chainId)}`);

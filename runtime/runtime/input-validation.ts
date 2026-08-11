@@ -10,9 +10,9 @@ export const MAX_RUNTIME_J_TXS_PER_JURISDICTION = 512;
 // a smaller independent cap would wedge that canonical height forever. The
 // extra MiB bounds the Runtime/JInput envelope for the existing count limits.
 export const MAX_RUNTIME_J_INPUT_BYTES = MAX_ENTITY_FRAME_J_RANGE_BYTES + 1024 * 1024;
-export const MAX_RUNTIME_TXS = 1_000;
-export const MAX_RUNTIME_ENTITY_INPUTS = 10_000;
-export const MAX_RUNTIME_RELIABLE_RECEIPTS = 10_000;
+const MAX_RUNTIME_TXS = 1_000;
+const MAX_RUNTIME_ENTITY_INPUTS = 10_000;
+const MAX_RUNTIME_RELIABLE_RECEIPTS = 10_000;
 
 type RejectRuntimeInput = (message: string) => never;
 

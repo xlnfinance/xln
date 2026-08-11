@@ -33,7 +33,7 @@ export type CrossOrderbookProcessInput = {
   recordDebugProjectionReject: RecordDebugProjectionReject;
 };
 
-export type CrossAggregatedFill = {
+type CrossAggregatedFill = {
   filledLots: bigint;
   weightedCost: bigint;
 };

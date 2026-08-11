@@ -50,7 +50,7 @@ export interface RuntimeInput {
   queuedAt?: number | undefined; // When first queued into runtime mempool (ms)
 }
 
-export type ReliableDeliveryKind =
+type ReliableDeliveryKind =
   | 'entity-frame'
   | 'hash-precommit'
   | 'leader-timeout-vote'
@@ -59,7 +59,7 @@ export type ReliableDeliveryKind =
   | 'j-prefix-attestation'
   | 'j-finality';
 
-export type ReliableDeliveryEvidenceKind =
+type ReliableDeliveryEvidenceKind =
   | 'entity-proposal'
   | 'entity-certificate'
   | 'hash-precommit'
@@ -95,7 +95,7 @@ export type ReliableDeliveryIdentity = {
   evidenceBindings?: ReliableDeliveryEvidenceBinding[];
 };
 
-export type ReliableDeliveryReceiptBody = {
+type ReliableDeliveryReceiptBody = {
   /**
    * Canonical v1 receipts bind one exact durably applied identity. Receivers and
    * senders may compact protocol-terminal identities to one monotonic frontier
@@ -115,7 +115,7 @@ export type ReliableDeliveryReceipt = {
   signature: string;
 };
 
-export type PendingReliableIngress = {
+type PendingReliableIngress = {
   identity: ReliableDeliveryIdentity;
   targetRuntimeIds: Set<string>;
 };
@@ -160,7 +160,7 @@ export type NumberedRegistrationDefinition = Readonly<{
   position?: { x: number; y: number; z: number; jurisdiction?: string };
 }>;
 
-export type NumberedRegistrationCommandEntity = Readonly<
+type NumberedRegistrationCommandEntity = Readonly<
   Omit<NumberedRegistrationDefinition, 'validators'> & {
     validators: ReadonlyArray<Readonly<{ name: string; weight: number }>>;
   }
@@ -186,7 +186,7 @@ export type NumberedRegistrationCommandResult = Readonly<{
   }>>;
 }>;
 
-export type NumberedRegistrationEntityPlan = {
+type NumberedRegistrationEntityPlan = {
   name: string;
   boardHash: string;
   config: ConsensusConfig;
@@ -227,7 +227,7 @@ export type CompletedNumberedRegistration = {
   }>;
 };
 
-export type QuarantinedNumberedRegistration = Omit<PendingNumberedRegistration, 'status'> & {
+type QuarantinedNumberedRegistration = Omit<PendingNumberedRegistration, 'status'> & {
   status: 'quarantined';
   reason: string;
 };
@@ -481,7 +481,7 @@ export interface RuntimeState {
 }
 
 /** One live Runtime instance: committed State plus local machine machinery. */
-export interface RuntimeInfrastructure {
+interface RuntimeInfrastructure {
   /** Validator-local secrets; never enter Runtime State, WAL, or history. */
   entityEncryptionPrivateKeys?: Map<string, string>;
   /**

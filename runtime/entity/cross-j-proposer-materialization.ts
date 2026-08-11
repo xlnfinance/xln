@@ -49,7 +49,7 @@ export const entityTxContainsCrossJMaterialization = (tx: EntityTx): boolean =>
     nested => nested.type === 'materializeCrossJurisdictionSwap' || nested.type === 'materializeCrossJurisdictionClear',
   );
 
-export const entityTxContainsCrossJRegistration = (tx: EntityTx): boolean =>
+const entityTxContainsCrossJRegistration = (tx: EntityTx): boolean =>
   nestedTxs(tx).some(nested => nested.type === 'registerCrossJurisdictionSwap');
 
 export const entityTxContainsCrossJSetup = (tx: EntityTx): boolean =>

@@ -19,7 +19,7 @@ const solvencyLog = createStructuredLogger('runtime.solvency');
  * them as `expectedInternalValue`, and only then is `isValid` meaningful -
  * `null` means "not checked", never "checked and fine".
  */
-export type AssetSolvency = {
+type AssetSolvency = {
   stackId: string;
   chainId: number;
   depositoryAddress: string;

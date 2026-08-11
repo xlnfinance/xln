@@ -29,12 +29,3 @@ export const cancelHook = (
     crontabLog.debug('hook.cancelled', { id: shortHash(hookId) });
   }
 };
-
-export const getEarliestHookTime = (state: CrontabState): number => {
-  if (!state.hooks || state.hooks.size === 0) return Infinity;
-  let earliest = Infinity;
-  for (const hook of state.hooks.values()) {
-    if (hook.triggerAt < earliest) earliest = hook.triggerAt;
-  }
-  return earliest;
-};

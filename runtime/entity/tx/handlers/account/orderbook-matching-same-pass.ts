@@ -72,7 +72,7 @@ export const createSameOrderbookPass = (
   pairSweepCount: 0,
 });
 
-export const buildLiveSameOfferMeta = (
+const buildLiveSameOfferMeta = (
   pass: SameOrderbookPass,
   namespacedOrderId: string,
 ): NormalizedOrderbookOffer | null => {

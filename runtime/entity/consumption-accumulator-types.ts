@@ -59,7 +59,7 @@ export type ConsumptionProofResult =
   | Readonly<{ status: 'member'; value: ConsumptionFrontierValue }>
   | Readonly<{ status: 'absent'; terminalKey?: string }>;
 
-export type ConsumptionApplyStatus =
+type ConsumptionApplyStatus =
   | 'inserted'
   | 'advanced'
   | 'idempotent'

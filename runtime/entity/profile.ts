@@ -17,7 +17,7 @@ import {
 import { normalizeEntityName } from './profile-name';
 import { MAX_ROUTING_FEE_PPM } from '../routing/fees';
 
-export type BoardValidator = {
+type BoardValidator = {
   signer: string; // canonical recovered signer address (0x...)
   weight: number; // uint16 voting power
   signerId: string; // exact normalized consensus-board alias
@@ -30,7 +30,7 @@ export type BoardMetadata = {
   encryptionAttestations: ValidatorEncryptionAttestation[];
 };
 
-export type ProfileMetadata = {
+type ProfileMetadata = {
   isHub: boolean;
   hubName?: string;
   routingFeePPM: number;

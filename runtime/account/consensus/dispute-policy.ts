@@ -19,7 +19,7 @@ const disputePolicyLog = createStructuredLogger('account.dispute-policy');
  * domain-separated bilateral protocol rather than ordinary Account traffic.
  */
 
-export const isAccountControlTx = (txType: string): boolean =>
+const isAccountControlTx = (txType: string): boolean =>
   txType === 'j_event_claim';
 
 const isEvidenceBearingAccountTx = (tx: AccountTx): boolean => {
@@ -27,7 +27,7 @@ const isEvidenceBearingAccountTx = (tx: AccountTx): boolean => {
   return false;
 };
 
-export const isDisputeEvidenceAccountTx = (txOrType: AccountTx | string): boolean => {
+const isDisputeEvidenceAccountTx = (txOrType: AccountTx | string): boolean => {
   if (typeof txOrType === 'string') {
     return txOrType === 'cross_pull_close' || txOrType === 'swap_resolve';
   }

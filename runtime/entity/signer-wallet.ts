@@ -4,11 +4,11 @@ import type { JurisdictionEvent } from '../types/jurisdiction-events';
 type ExternalWalletSnapshotEvent = Extract<JurisdictionEvent, { type: 'ExternalWalletSnapshot' }>;
 type ExternalWalletDeltaEvent = Extract<JurisdictionEvent, { type: 'ExternalWalletDelta' }>;
 
-export const NATIVE_EXTERNAL_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000000';
+const NATIVE_EXTERNAL_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-export const normalizeExternalWalletAddress = (value: unknown, label: string): string => {
+const normalizeExternalWalletAddress = (value: unknown, label: string): string => {
   const normalized = String(value || '').trim().toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(normalized)) {
     throw new Error(`j_event rejected: invalid external wallet ${label}`);
@@ -16,9 +16,9 @@ export const normalizeExternalWalletAddress = (value: unknown, label: string): s
   return normalized;
 };
 
-export const externalWalletBalanceKey = (tokenAddress: string): string => tokenAddress.toLowerCase();
+const externalWalletBalanceKey = (tokenAddress: string): string => tokenAddress.toLowerCase();
 
-export const externalWalletAllowanceKey = (tokenAddress: string, spender: string): string =>
+const externalWalletAllowanceKey = (tokenAddress: string, spender: string): string =>
   `${tokenAddress.toLowerCase()}:${spender.toLowerCase()}`;
 
 const ensureNestedMap = <T>(map: Map<string, Map<string, T>>, key: string): Map<string, T> => {
@@ -29,19 +29,19 @@ const ensureNestedMap = <T>(map: Map<string, Map<string, T>>, key: string): Map<
   return next;
 };
 
-export const isSignerEntityExternalWalletOwner = (state: EntityState, owner: string): boolean => {
+const isSignerEntityExternalWalletOwner = (state: EntityState, owner: string): boolean => {
   const normalizedOwner = normalizeSignerId(owner);
   return (state.config.validators || []).some((validatorId) => normalizeSignerId(validatorId) === normalizedOwner);
 };
 
-export const assertSignerEntityExternalWalletOwner = (state: EntityState, owner: string): void => {
+const assertSignerEntityExternalWalletOwner = (state: EntityState, owner: string): void => {
   if (isSignerEntityExternalWalletOwner(state, owner)) return;
   throw new Error(
     `EXTERNAL_WALLET_OWNER_NOT_SIGNER entity=${String(state.entityId).slice(0, 12)} owner=${owner}`,
   );
 };
 
-export const ensureSignerEntityExternalWalletState = (
+const ensureSignerEntityExternalWalletState = (
   state: EntityState,
 ): NonNullable<EntityState['externalWallet']> => {
   if (!state.externalWallet) {

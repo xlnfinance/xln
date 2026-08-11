@@ -22,7 +22,6 @@ import {
 } from './numbered-registration';
 export type {
   NumberedRegistrationCommand,
-  NumberedRegistrationCommandEntity,
   NumberedRegistrationCommandResult,
 } from '../types';
 
@@ -194,7 +193,7 @@ export const registerNumberedEntities = (
   }));
 };
 
-export const resumePendingNumberedRegistrations = async (env: RuntimeReplica): Promise<void> => {
+const resumePendingNumberedRegistrations = async (env: RuntimeReplica): Promise<void> => {
   const pending = [...(env.infrastructure?.numberedRegistrationIntents?.values() ?? [])]
     .filter(record => record.status === 'pending')
     .sort((left, right) => left.transactionNonce - right.transactionNonce);

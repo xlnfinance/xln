@@ -224,20 +224,3 @@ export const calculateQuorumPower = (config: ConsensusConfig, signers: string[])
     return total + shares;
   }, 0n);
 };
-
-export const sortSignatures = (signatures: Map<string, string>, config: ConsensusConfig): Map<string, string> => {
-  const sortedEntries = Array.from(signatures.entries()).sort(([a], [b]) => {
-    const indexA = config.validators.indexOf(a);
-    const indexB = config.validators.indexOf(b);
-    return indexA - indexB;
-  });
-  return new Map(sortedEntries);
-};
-
-export const getEntityStateSummary = (replica: EntityReplica): string => {
-  const hasProposal = replica.proposal ? '✓' : '✗';
-  return `mempool=${replica.mempool.length}, proposal=${hasProposal}`;
-};
-
-export const shouldAutoPropose = (replica: EntityReplica, _config: ConsensusConfig): boolean =>
-  replica.mempool.length > 0 && replica.isProposer && replica.proposal === undefined;

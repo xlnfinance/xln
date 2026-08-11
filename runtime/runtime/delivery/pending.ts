@@ -188,7 +188,7 @@ export const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): bool
     );
   });
 
-export const isCrossJAdmissionProposal = (output: RoutedEntityInput): boolean =>
+const isCrossJAdmissionProposal = (output: RoutedEntityInput): boolean =>
   getEffectiveEntityInputTxs(output).some(tx => {
     if (tx.type !== 'accountInput') return false;
     const proposal = accountInputProposal(tx.data);

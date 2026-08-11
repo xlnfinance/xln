@@ -13,7 +13,6 @@ import {
   accountJClaimKeyBit,
   createAccountJClaimRecord,
   firstDifferentAccountJClaimBit,
-  getAccountJClaimAccountKey,
   getAccountJClaimKey,
   hashAccountJClaimNode,
   normalizeAccountJBytes32,
@@ -31,8 +30,6 @@ export {
   EMPTY_ACCOUNT_J_CLAIM_ROOT,
   createAccountJClaimProof,
   createAccountJClaimRecord,
-  getAccountJClaimAccountKey,
-  getAccountJClaimKey,
   hashAccountJClaimNode,
   verifyAccountJClaimProof,
 };

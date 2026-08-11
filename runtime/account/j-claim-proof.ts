@@ -16,8 +16,8 @@ import {
   type AccountJClaimProofPath,
 } from './j-claim-codec';
 
-export const MAX_ACCOUNT_J_CLAIM_PROOF_NODES = 257;
-export const MAX_ACCOUNT_J_CLAIM_PROOF_BYTES = 3 + 256 * 68 + 140;
+const MAX_ACCOUNT_J_CLAIM_PROOF_NODES = 257;
+const MAX_ACCOUNT_J_CLAIM_PROOF_BYTES = 3 + 256 * 68 + 140;
 
 const proofObject = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('ACCOUNT_J_CLAIM_PROOF_INVALID');
@@ -42,7 +42,7 @@ const parseProof = (value: unknown): AccountJClaimProof => {
   return proof;
 };
 
-export const getAccountJClaimProofByteLength = (proof: AccountJClaimProof): number =>
+const getAccountJClaimProofByteLength = (proof: AccountJClaimProof): number =>
   3 + proof.nodes.reduce((total, node) => total + (node.type === 'branch' ? 68 : 140), 0);
 
 export type AccountJClaimInspection = Readonly<{

@@ -49,7 +49,7 @@ export type RuntimeInboundEntityInputsResult = {
   receipts: ReliableDeliveryReceipt[];
 };
 
-export type RuntimeInboundEntityInputValidation =
+type RuntimeInboundEntityInputValidation =
   | { kind: 'accepted' }
   | { kind: 'ignored' };
 
@@ -327,7 +327,7 @@ const pairedCloseListsMatch = (
   return true;
 };
 
-export type CrossJAccountInputPair = {
+type CrossJAccountInputPair = {
   pairKey: string;
   phase: 'proposal' | 'ack';
   sourceInputIndex: number;
@@ -336,7 +336,7 @@ export type CrossJAccountInputPair = {
   targetAccountFrame: CrossJAccountFrameExpectation;
 };
 
-export type CrossJAccountFrameExpectation = {
+type CrossJAccountFrameExpectation = {
   entityId: string;
   signerId: string;
   counterpartyEntityId: string;
@@ -360,14 +360,14 @@ export type CrossJAccountInputPairSelection = {
  * marker whose declared cohort did not survive. Reporting one assumed cause for
  * all four sends every investigation to the wrong layer.
  */
-export type CrossJRejectedAccountInputReason =
+type CrossJRejectedAccountInputReason =
   | 'unpaired'
   | 'multiple-candidates-per-input'
   | 'candidate-invalid'
   | 'pair-match-failed'
   | 'atomic-group-invalid';
 
-export type CrossJRejectedAccountInput = {
+type CrossJRejectedAccountInput = {
   inputIndex: number;
   accountInput: AccountInput;
   reason: CrossJRejectedAccountInputReason;
@@ -1385,7 +1385,7 @@ export const resolveRuntimeIdForEntity = (
   return null;
 };
 
-export const resolveRuntimeIdForCrossJurisdictionEntity = (
+const resolveRuntimeIdForCrossJurisdictionEntity = (
   env: RuntimeReplica,
   entityId: string,
   signerId: string,
@@ -1511,7 +1511,7 @@ const validateInboundEntityCommands = (
   }
 };
 
-export const validateInboundP2PEntityInput = (
+const validateInboundP2PEntityInput = (
   env: RuntimeReplica,
   from: string,
   input: RoutedEntityInput,

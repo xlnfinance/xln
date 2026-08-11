@@ -14,7 +14,7 @@ import {
   requireCompleteValidatorEncryptionManifest,
 } from '../protocol/htlc/validator-encryption';
 
-export const ENTITY_PROFILE_DESCRIPTOR_VERSION = 'xln:entity-profile:v1' as const;
+const ENTITY_PROFILE_DESCRIPTOR_VERSION = 'xln:entity-profile:v1' as const;
 
 export type EntityProfileDescriptor = Readonly<{
   version: typeof ENTITY_PROFILE_DESCRIPTOR_VERSION;

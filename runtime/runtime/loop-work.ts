@@ -137,7 +137,7 @@ const runtimeWakeDeps = {
   getRuntimeNowMs: (env: RuntimeReplica) => env.state.timestamp ?? 0,
 };
 
-export const hasDueEntityHooks = (env: RuntimeReplica): boolean =>
+const hasDueEntityHooks = (env: RuntimeReplica): boolean =>
   hasDueEntityHooksWithDeps(env, runtimeWakeDeps);
 
 export const getEarliestWallClockDueTimestamp = (env: RuntimeReplica): number | null =>

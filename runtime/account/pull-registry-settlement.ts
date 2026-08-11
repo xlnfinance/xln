@@ -37,7 +37,7 @@ const safeUint = (value: unknown, max: number, code: string): number => {
   return number;
 };
 
-export const decodeSignedProofBodyPulls = (
+const decodeSignedProofBodyPulls = (
   proofbody: ProofBodyStruct,
   canonicalDeltaTransformerAddress: string,
 ): SignedProofBodyPull[] => {

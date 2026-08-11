@@ -8,7 +8,7 @@ import type { ProposeAccountFrameResult } from './types';
 
 const accountLog = createStructuredLogger('account');
 
-export type ProposalAdmission = {
+type ProposalAdmission = {
   success: true;
   myEntityId: string;
   counterparty: string;

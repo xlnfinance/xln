@@ -24,7 +24,7 @@ export type EntityConsensusStateByteMeasurement = Readonly<{
   totalBytes: bigint;
 }>;
 
-export type EntityConsensusStateQuotaClassification =
+type EntityConsensusStateQuotaClassification =
   | 'within'
   | 'warning_growth'
   | 'warning_non_growth';

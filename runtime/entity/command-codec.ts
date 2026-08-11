@@ -7,7 +7,7 @@ import type { EntityTx, SignedEntityCommandV1 } from '../types/entity-tx';
 import { canonicalEntityBoardSignerId, isEntityProtocolTx } from './authorization';
 import { EntityCommandRejectionError } from './tx/invariant-errors';
 
-export const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:v1' as const;
+const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:v1' as const;
 export const UNREGISTERED_ENTITY_COMMAND_STACK_KEY = ethers
   .id('xln:entity-command:unregistered-stack:v1')
   .toLowerCase();
@@ -119,7 +119,7 @@ export const hashEntityCommandTxs = (txs: EntityTx[]): string => {
     .toLowerCase();
 };
 
-export const normalizeEntityCommandBody = (command: EntityCommandBody): EntityCommandBody => {
+const normalizeEntityCommandBody = (command: EntityCommandBody): EntityCommandBody => {
   if (command.version !== 1) throw new Error(`ENTITY_COMMAND_VERSION_INVALID:${String(command.version)}`);
   if (typeof command.nonce !== 'bigint' || command.nonce < 1n) {
     throw new Error(`ENTITY_COMMAND_NONCE_INVALID:${String(command.nonce)}`);

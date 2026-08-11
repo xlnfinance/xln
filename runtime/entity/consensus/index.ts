@@ -17,19 +17,11 @@ export {
 export { attachTargetConsumptionProofs } from './consumption-output';
 export {
   selectProposableEntityTxs,
-  type ProposableEntityTxSelection,
 } from './proposal-policy';
-export { createEntityFrameHash } from './frame';
 export {
   mergeEntityInputs,
   prioritizeEntityConsensusInputs,
   prioritizeProtocolEntityInputs,
 } from './input-merge';
-export {
-  calculateQuorumPower,
-  getEntityStateSummary,
-  shouldAutoPropose,
-  sortSignatures,
-} from './replica-validation';
 export { applyEntityInput, type EntityInputOutcome } from './input-consensus';
 export { applyEntityFrame } from './frame-application';

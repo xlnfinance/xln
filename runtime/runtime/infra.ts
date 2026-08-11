@@ -49,16 +49,6 @@ export const applyTrustedJurisdictionRpcBindings = (
   }
 };
 
-export const hasLiveJAdapter = (value: unknown): value is JAdapter => {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<JAdapter>;
-  return (
-    typeof candidate.startWatching === 'function' &&
-    typeof candidate.stopWatching === 'function' &&
-    typeof candidate.submitTx === 'function'
-  );
-};
-
 export const normalizeRestoredJReplicas = (env: RuntimeReplica): void => {
   if (!env.state.jReplicas) env.state.jReplicas = new Map();
   for (const [name, replica] of env.state.jReplicas.entries()) {

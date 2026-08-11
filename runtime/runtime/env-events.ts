@@ -232,7 +232,7 @@ export const applyRuntimeStorageChanges = (env: RuntimeReplica, changes: readonl
   }
 };
 
-export const applyEntityStorageChanges = (
+const applyEntityStorageChanges = (
   state: EntityState,
   changes: readonly RuntimeOverlayRecord[],
 ): void => {
@@ -361,7 +361,7 @@ export const publishEntityCandidateEffects = (
   }
 };
 
-export const recordEntityFrameHistory = (
+const recordEntityFrameHistory = (
   env: RuntimeReplica,
   record: { entityId: string; link: CertifiedEntityFrameLink },
 ): void => {

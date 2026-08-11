@@ -73,11 +73,7 @@ import {
 } from '../peer-rejection';
 export { proposeAccountFrame } from './propose';
 export type {
-  AccountConsensusFrameResult,
-  AccountConsensusHashToSign,
-  AccountSwapOfferCreated,
   HandleAccountInputResult,
-  ProposeAccountFrameResult,
 } from './types';
 
 const accountLog = createStructuredLogger('account');

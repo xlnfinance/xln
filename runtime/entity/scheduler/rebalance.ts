@@ -28,9 +28,9 @@ import { getRebalanceAccountIds } from '../consensus/account-work-index';
 const crontabLog = createStructuredLogger('entity.crontab');
 
 export const HUB_PENDING_BROADCAST_STALE_MS = 120_000;
-export const HUB_SUBMITTED_REQUEST_STALE_MS = 5 * 60 * 1_000;
-export const HUB_MAX_R2C_PER_TICK = 10;
-export const HUB_MAX_C2R_PER_TICK = 10;
+const HUB_SUBMITTED_REQUEST_STALE_MS = 5 * 60 * 1_000;
+const HUB_MAX_R2C_PER_TICK = 10;
+const HUB_MAX_C2R_PER_TICK = 10;
 
 type RebalanceDebug = (payload: Record<string, unknown>) => void;
 

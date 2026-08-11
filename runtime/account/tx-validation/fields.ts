@@ -4,7 +4,7 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 
-export type AccountTxFieldKind =
+type AccountTxFieldKind =
   | 'array'
   | 'bigint'
   | 'boolean'

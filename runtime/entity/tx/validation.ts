@@ -1,18 +1,5 @@
-// Security validation helpers: validateNonce, validateMessage
+// Security validation helper for user-visible entity messages.
 import { log } from '../../infra/diagnostics';
-
-export const validateNonce = (currentNonce: number, expectedNonce: number, from: string): boolean => {
-  try {
-    if (expectedNonce !== currentNonce + 1) {
-      log.error(`❌ Invalid nonce from ${from}: expected ${currentNonce + 1}, got ${expectedNonce}`);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    log.error(`❌ Nonce validation error: ${error}`);
-    return false;
-  }
-};
 
 export const validateMessage = (message: string): boolean => {
   try {

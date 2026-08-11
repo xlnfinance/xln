@@ -35,7 +35,7 @@ type AccountResealDraft = {
 
 type ActivationPosition = readonly [jHeight: number, logIndex: number];
 
-export const MAX_BOARD_RESEALS_PER_FRAME = 32;
+const MAX_BOARD_RESEALS_PER_FRAME = 32;
 export const BOARD_RESEAL_HOOK_ID = 'board-reseal';
 export const BOARD_RESEAL_RETRY_MS = 1_000;
 
@@ -137,7 +137,7 @@ const activationPosition = (event: BoardActivatedEvent): ActivationPosition => {
   return [jHeight, logIndex];
 };
 
-export const boardResealActivation = (event: BoardActivatedEvent): BoardResealActivation => {
+const boardResealActivation = (event: BoardActivatedEvent): BoardResealActivation => {
   const [jHeight, logIndex] = activationPosition(event);
   return {
     entityId: event.data.entityId.toLowerCase(),

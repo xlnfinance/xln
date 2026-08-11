@@ -216,7 +216,7 @@ const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockT
     : 'Cross-j pull jurisdiction does not match Account domain';
 };
 
-export const getNewPullSlotError = (
+const getNewPullSlotError = (
   account: AccountState,
   pullId: string,
   crossJurisdiction: PullLockTx['data']['crossJurisdiction'],

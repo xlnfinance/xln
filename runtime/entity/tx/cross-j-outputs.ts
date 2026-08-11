@@ -45,7 +45,7 @@ export const buildCrossJurisdictionEntityOutput = (
   };
 };
 
-export const buildCrossJurisdictionTargetFillNoticeOutput = (
+const buildCrossJurisdictionTargetFillNoticeOutput = (
   currentEntityState: EntityState,
   tx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
 ): EntityInput => {

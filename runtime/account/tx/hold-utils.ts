@@ -6,7 +6,7 @@ export function getHold(delta: Delta, side: HoldSide): bigint {
   return side === 'left' ? delta.leftHold : delta.rightHold;
 }
 
-export function ensureHoldAdd(side: HoldSide, amount: bigint): string | undefined {
+function ensureHoldAdd(side: HoldSide, amount: bigint): string | undefined {
   if (amount < 0n) return `HOLD_ADD_NEGATIVE:${side} amount=${amount.toString()}`;
   return undefined;
 }
@@ -19,7 +19,7 @@ export function addHold(delta: Delta, side: HoldSide, amount: bigint): string | 
   return undefined;
 }
 
-export function ensureHoldRelease(
+function ensureHoldRelease(
   delta: Delta,
   side: HoldSide,
   amount: bigint,

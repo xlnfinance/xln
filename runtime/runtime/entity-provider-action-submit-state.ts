@@ -133,7 +133,7 @@ export const findEntityProviderActionReplica = (
   return null;
 };
 
-export const actionAttemptMatchesIdentity = (
+const actionAttemptMatchesIdentity = (
   jurisdictionName: string,
   jTx: JTx,
   identity: Omit<EntityProviderActionAttemptIdentity, 'attemptNumber'>,

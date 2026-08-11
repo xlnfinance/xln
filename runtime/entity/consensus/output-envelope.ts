@@ -24,7 +24,7 @@ export const getCertifiedOutputNestedTxs = (
   return nested;
 };
 
-export const getRuntimeOutputNestedTxs = (
+const getRuntimeOutputNestedTxs = (
   tx: EntityTx,
 ): readonly EntityTx[] | null => {
   if (tx.type !== 'runtimeOutput') return null;
@@ -74,7 +74,7 @@ export const orderCertifiedOutputsBySequence = (txs: readonly EntityTx[]): Entit
   return result;
 };
 
-export const isReliableCertifiedPayloadTx = (tx: EntityTx): boolean =>
+const isReliableCertifiedPayloadTx = (tx: EntityTx): boolean =>
   tx.type === 'j_event' || (
     tx.type === 'accountInput' &&
     (tx.data.kind === 'ack' || tx.data.kind === 'frame_ack' || tx.data.kind === 'board_reseal')
