@@ -15,7 +15,10 @@ import { createRuntimeFrameTransaction } from '../runtime/frame/transaction';
 import { dbRootPath } from '../runtime/platform';
 import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import { classifyRuntimeFrameCommitProof } from '../storage/commit';
+import {
+  buildRuntimeFrameCommitProofExpectation,
+  classifyRuntimeFrameCommitProof,
+} from '../storage/commit';
 import { buildDurableRuntimeMachineSnapshot } from '../storage/wal/snapshot';
 
 const fixture = join(import.meta.dir, 'fixtures/runtime-storage-timeout-child.ts');
@@ -75,6 +78,57 @@ describe('Runtime WAL storage failure boundary', () => {
       runtimeMachine,
       runtimeStateHash,
     )).toBe('conflict');
+    expect(classifyRuntimeFrameCommitProof(
+      {
+        runtimeInput,
+        runtimeMachine: { ...runtimeMachine, runtimeId: 'different-runtime' },
+        runtimeStateHash,
+      },
+      runtimeInput,
+      runtimeMachine,
+      runtimeStateHash,
+    )).toBe('conflict');
+  });
+
+  test('probes the exact WAL projection when persisted history is still pending', () => {
+    const env = createEmptyEnv('wal-commit-proof-history');
+    env.state.height = 8;
+    env.state.timestamp = 800;
+    ensureRuntimeInfrastructure(env).pendingHistoryRecords = [{
+      kind: 'entityFrame',
+      entityId: '0x01',
+      entityHeight: 1,
+      link: {},
+    } as never];
+    env.pendingNetworkOutputs = [{
+      entityId: 'stale-output',
+      signerId: 'stale-signer',
+      entityTxs: [],
+    }];
+    const runtimeInput = { runtimeTxs: [], entityInputs: [] };
+
+    // The active frame's exact outputs override the live outbox, and history
+    // records already persisted beside the WAL frame are excluded from its
+    // Runtime-machine commitment.
+    const expected = buildRuntimeFrameCommitProofExpectation(
+      env,
+      [],
+      runtimeInput,
+    );
+    expect(expected.runtimeMachine).not.toHaveProperty('pendingNetworkOutputs');
+    expect(expected.runtimeMachine).not.toHaveProperty(
+      'infrastructure.pendingHistoryRecords',
+    );
+    expect(classifyRuntimeFrameCommitProof(
+      {
+        runtimeInput,
+        runtimeMachine: expected.runtimeMachine,
+        runtimeStateHash: expected.runtimeStateHash,
+      },
+      runtimeInput,
+      expected.runtimeMachine,
+      expected.runtimeStateHash,
+    )).toBe('committed');
   });
 
   test('leaves a known-undurable in-place frame for the failure path to halt and reload', async () => {

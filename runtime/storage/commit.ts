@@ -15,7 +15,7 @@ import type {
   RuntimeReplica,
 } from '../runtime/types';
 import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
-import { computeCanonicalStateHashFromEnv } from './canonical-hash';
+import { computeCanonicalStateHashFromRuntimeMachine } from './canonical-hash';
 import {
   readStorageFrameRecord,
   readStorageHead,
@@ -74,10 +74,38 @@ export const classifyRuntimeFrameCommitProof = (
   return inputMatches && runtimeMachineMatches && stateMatches ? 'committed' : 'conflict';
 };
 
+export const buildRuntimeFrameCommitProofExpectation = (
+  env: RuntimeReplica,
+  currentFrameOutputs?: RoutedEntityInput[],
+  pendingRuntimeInput?: RuntimeInput,
+): {
+  runtimeMachine: ReturnType<typeof buildDurableRuntimeMachineSnapshot>;
+  runtimeStateHash: string;
+} => {
+  // The authoritative probe must hash the exact Runtime-machine projection
+  // written to the WAL. Rebuilding through a defaulted helper can reintroduce
+  // already-persisted history records or choose different frame outputs,
+  // turning a durable commit into a false conflict after a post-WAL failure.
+  const runtimeMachine = buildDurableRuntimeMachineSnapshot(env, {
+    pendingNetworkOutputs:
+      currentFrameOutputs ?? env.pendingNetworkOutputs ?? [],
+    ...(pendingRuntimeInput ? { runtimeInput: pendingRuntimeInput } : {}),
+    excludePersistedHistoryRecords: true,
+  });
+  return {
+    runtimeMachine,
+    runtimeStateHash: computeCanonicalStateHashFromRuntimeMachine(
+      env,
+      runtimeMachine,
+    ),
+  };
+};
+
 const resolveAuthoritativeFrameCommitStatus = async (
   deps: RuntimeStorageApiDeps,
   env: RuntimeReplica,
   expectedInput: RuntimeInput | undefined,
+  currentFrameOutputs: RoutedEntityInput[] | undefined,
   pendingRuntimeInput: RuntimeInput | undefined,
 ): Promise<RuntimeFrameCommitStatus> => {
   if (!(await deps.tryOpenRuntimeWalDb(env))) return 'unknown';
@@ -92,15 +120,16 @@ const resolveAuthoritativeFrameCommitStatus = async (
       runtimeTxs: [],
       entityInputs: [],
     };
+    const expectedProof = buildRuntimeFrameCommitProofExpectation(
+      env,
+      currentFrameOutputs,
+      pendingRuntimeInput,
+    );
     return classifyRuntimeFrameCommitProof(
       frame,
       expectedInputValue,
-      buildDurableRuntimeMachineSnapshot(env, {
-        pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-        ...(pendingRuntimeInput ? { runtimeInput: pendingRuntimeInput } : {}),
-        excludePersistedHistoryRecords: true,
-      }),
-      computeCanonicalStateHashFromEnv(env, pendingRuntimeInput),
+      expectedProof.runtimeMachine,
+      expectedProof.runtimeStateHash,
     );
   }
   if (!head) return 'unknown';
@@ -169,6 +198,7 @@ export const saveRuntimeEnvironment = async (
           deps,
           env,
           currentFrameInput,
+          currentFrameOutputs,
           pendingRuntimeInput,
         );
       } catch (probeError) {

@@ -154,14 +154,23 @@ export const computeCanonicalRuntimeStateHash = (
     ...(runtimeMachine ? { runtimeMachine: canonicalizeStorageAuditValue(runtimeMachine) } : {}),
   });
 
-export const computeCanonicalStateHashFromEnv = (
+export const computeCanonicalStateHashFromRuntimeMachine = (
   env: RuntimeReplica,
-  runtimeInput?: RuntimeInput,
+  runtimeMachine: Record<string, unknown>,
 ): string =>
   computeCanonicalRuntimeStateHash(
     env.state.height,
     env.state.timestamp,
     computeCanonicalEntityHashesFromEnv(env),
+    runtimeMachine,
+  );
+
+export const computeCanonicalStateHashFromEnv = (
+  env: RuntimeReplica,
+  runtimeInput?: RuntimeInput,
+): string =>
+  computeCanonicalStateHashFromRuntimeMachine(
+    env,
     buildDurableRuntimeMachineSnapshot(env, {
       ...(runtimeInput ? { runtimeInput } : {}),
     }),
