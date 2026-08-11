@@ -145,6 +145,7 @@ const tryAcquireWebLock = async (tabId: string): Promise<boolean> => {
     resolveAttempt = resolve;
     rejectAttempt = reject;
   });
+  let acquiredLock = false;
   void navigator.locks.request(
     ACTIVE_TAB_WEB_LOCK_NAME,
     { mode: 'exclusive', ifAvailable: true },
@@ -153,6 +154,7 @@ const tryAcquireWebLock = async (tabId: string): Promise<boolean> => {
         resolveAttempt(false);
         return;
       }
+      acquiredLock = true;
       ownsWebLock = true;
       clearInactiveTabStandby();
       sessionStorage.setItem(ACTIVE_TAB_OWNED_KEY, tabId);
@@ -162,7 +164,10 @@ const tryAcquireWebLock = async (tabId: string): Promise<boolean> => {
         releaseHeldLock = resolve;
       });
     },
-  ).catch(rejectAttempt);
+  ).catch((error) => {
+    if (!acquiredLock) rejectAttempt(error);
+    else failAsync(error);
+  });
   return attempted;
 };
 

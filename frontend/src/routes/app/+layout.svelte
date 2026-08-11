@@ -572,7 +572,10 @@
       disposed = true;
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('hashchange', handleLocationChange);
-      releaseActiveTabLock?.();
+      // The Web Lock owns the document-scoped embedded Runtime, not this route.
+      // Releasing it on an SPA transition would permit a second tab to write the
+      // same WAL while this document's Runtime is still alive. The destination
+      // route adopts the lease; cross-tab takeover quiesces before releasing it.
       releaseActiveTabLock = null;
     };
   });

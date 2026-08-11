@@ -15,6 +15,27 @@ async function waitUntilOwnsActiveLock(page: Page): Promise<void> {
   }, undefined, { timeout: 10_000 });
 }
 
+async function waitForEmbeddedRuntime(page: Page): Promise<string> {
+  await expect
+    .poll(() => page.evaluate(() => {
+      const debug = window as typeof window & {
+        isolatedEnv?: { runtimeId?: unknown };
+        __xln?: { adapter?: { status?: () => { connected?: boolean; runtimeId?: unknown } } };
+      };
+      const status = debug.__xln?.adapter?.status?.();
+      const runtimeId = String(status?.runtimeId || debug.isolatedEnv?.runtimeId || '').trim();
+      return status?.connected === true && runtimeId.length > 0;
+    }), { timeout: 30_000, intervals: [250, 500, 1000] })
+    .toBe(true);
+  return page.evaluate(() => {
+    const debug = window as typeof window & {
+      isolatedEnv?: { runtimeId?: unknown };
+      __xln?: { adapter?: { status?: () => { runtimeId?: unknown } } };
+    };
+    return String(debug.__xln?.adapter?.status?.().runtimeId || debug.isolatedEnv?.runtimeId || '').trim();
+  });
+}
+
 function inactiveTabScreen(page: Page) {
   return page.getByTestId('inactive-tab-screen');
 }
@@ -97,21 +118,36 @@ test.describe('Active tab lock handoff', () => {
 
     try {
       await ensureE2EBaseline(wallet, { requireHubMesh: true });
-      await openApp(wallet, '/app?locktest=1');
+      await openApp(wallet, '/app');
       await waitUntilOwnsActiveLock(wallet);
+      const runtimeId = await waitForEmbeddedRuntime(wallet);
+
+      await wallet.evaluate(() => {
+        const view = window as typeof window & { __xlnDocumentMarker?: string };
+        view.__xlnDocumentMarker = 'same-document';
+        const link = document.createElement('a');
+        link.href = '/address';
+        document.body.appendChild(link);
+        link.click();
+      });
+      await wallet.waitForURL((url) => url.pathname === '/address', { timeout: 10_000 });
+      expect(await wallet.evaluate(() => (
+        window as typeof window & { __xlnDocumentMarker?: string }
+      ).__xlnDocumentMarker)).toBe('same-document');
+      expect(await waitForEmbeddedRuntime(wallet)).toBe(runtimeId);
+
       await openApp(projection, '/address');
 
       await expect(projection.getByText('LOCAL_RUNTIME_ACTIVE_IN_ANOTHER_TAB')).toBeVisible({ timeout: 10_000 });
       await waitUntilOwnsActiveLock(wallet);
-      await expect(inactiveTabScreen(wallet)).toHaveCount(0);
-      await expect
-        .poll(() => projection.evaluate(() => {
-          const debug = window as typeof window & {
-            __xln?: { adapter?: { status?: () => { connected?: boolean } } };
-          };
-          return debug.__xln?.adapter?.status?.().connected === true;
-        }))
-        .toBe(false);
+      expect(await waitForEmbeddedRuntime(wallet)).toBe(runtimeId);
+      await projection.waitForTimeout(1_500);
+      expect(await projection.evaluate(() => {
+        const debug = window as typeof window & {
+          __xln?: { adapter?: { status?: () => { connected?: boolean } } };
+        };
+        return debug.__xln?.adapter?.status?.().connected === true;
+      })).toBe(false);
     } finally {
       await closeRuntimeContext(context);
     }

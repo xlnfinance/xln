@@ -63,7 +63,11 @@ const suspendProjectionRuntime = async (): Promise<void> => {
 };
 
 const ensureProjectionEmbeddedRuntimeOwnership = async (): Promise<void> => {
-  if (ownsActiveTabLock()) return;
+  if (ownsActiveTabLock()) {
+    projectionRuntimeLockRelease = adoptActiveTabLock(suspendProjectionRuntime)
+      ?? projectionRuntimeLockRelease;
+    return;
+  }
   if (projectionRuntimeLockRelease) {
     projectionRuntimeLockRelease();
     projectionRuntimeLockRelease = null;
@@ -71,7 +75,10 @@ const ensureProjectionEmbeddedRuntimeOwnership = async (): Promise<void> => {
   projectionRuntimeLockPromise ??= (async () => {
     const release = adoptActiveTabLock(suspendProjectionRuntime)
       ?? await tryInitializeActiveTabLock(suspendProjectionRuntime);
-    if (!release) throw new Error('LOCAL_RUNTIME_ACTIVE_IN_ANOTHER_TAB');
+    if (!release) {
+      await suspendProjectionRuntime();
+      throw new Error('LOCAL_RUNTIME_ACTIVE_IN_ANOTHER_TAB');
+    }
     projectionRuntimeLockRelease = release;
   })().finally(() => {
     projectionRuntimeLockPromise = null;

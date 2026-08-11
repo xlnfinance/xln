@@ -926,9 +926,12 @@ test('projection routes never evict or duplicate an active embedded Runtime', ()
   const bootstrapSource = connectionSource.slice(bootstrapStart);
 
   expect(lockSource).toContain("{ mode: 'exclusive', ifAvailable: true }");
+  expect(lockSource).toContain('if (!acquiredLock) rejectAttempt(error);');
   expect(connectionSource).toContain('const release = adoptActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('?? await tryInitializeActiveTabLock(suspendProjectionRuntime)');
-  expect(connectionSource).toContain('if (ownsActiveTabLock()) return;');
+  expect(connectionSource).toContain('if (ownsActiveTabLock()) {');
+  expect(connectionSource).toContain('projectionRuntimeLockRelease = adoptActiveTabLock(suspendProjectionRuntime)');
+  expect(connectionSource).toContain('await suspendProjectionRuntime();');
   expect(connectionSource).toContain("throw new Error('LOCAL_RUNTIME_ACTIVE_IN_ANOTHER_TAB')");
   expect(ownershipStart).toBeGreaterThan(0);
   expect(bootstrapSource.indexOf('await ensureProjectionEmbeddedRuntimeOwnership()')).toBeLessThan(
@@ -938,4 +941,9 @@ test('projection routes never evict or duplicate an active embedded Runtime', ()
     bootstrapSource.indexOf('await switchAppRuntimeAdapter({'),
   );
   expect(connectionSource).toContain("if (currentAdapter?.mode === 'embedded')");
+  const layoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+  const destroyStart = layoutSource.indexOf('return () => {\n      disposed = true;');
+  const destroySource = layoutSource.slice(destroyStart, destroyStart + 600);
+  expect(destroyStart).toBeGreaterThan(0);
+  expect(destroySource).not.toContain('releaseActiveTabLock?.()');
 });
