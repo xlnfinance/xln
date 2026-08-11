@@ -10,7 +10,7 @@
 
 export type WebSocketSendResult = boolean | number | void;
 
-export type WebSocketSendDisposition = 'accepted' | 'backpressured' | 'dropped';
+type WebSocketSendDisposition = 'accepted' | 'backpressured' | 'dropped';
 
 export const classifyWebSocketSendResult = (
   result: WebSocketSendResult,

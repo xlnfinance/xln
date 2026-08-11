@@ -17,11 +17,9 @@ import { getSwapLotScale } from '../../orderbook';
 import { canonicalAccountDisputeConfig } from '../../account/dispute-config';
 
 export {
-  deriveCanonicalCrossJurisdictionBookOwner,
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarket,
   deriveCanonicalCrossJurisdictionMarketForLegs,
-  deriveCanonicalCrossJurisdictionVenueId,
 } from './market';
 
 /** Book TTL default only — not a sealed pull/settlement reveal window. */

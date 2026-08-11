@@ -101,7 +101,7 @@ const compareSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(left:
 export const sortSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(offers: readonly T[]): T[] =>
   [...offers].sort(compareSwapOffersForOrderbook);
 
-export const WORKING_ORDERBOOK_OFFER_BRAND: unique symbol = Symbol('WORKING_ORDERBOOK_OFFER_BRAND');
+const WORKING_ORDERBOOK_OFFER_BRAND: unique symbol = Symbol('WORKING_ORDERBOOK_OFFER_BRAND');
 
 // Only entity-level admission may create WorkingOrderbookOffer. The shared
 // book matcher must never receive raw UI/account events or uncommitted locks.

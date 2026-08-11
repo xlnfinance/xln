@@ -12,7 +12,7 @@ const DEFAULT_FEE_PPM = Number((HTLC.FEE_RATE_UBP * 1_000_000n) / HTLC.FEE_DENOM
  * Calculate forwarded amount after fees.
  * Fee = baseFee + floor(amountIn * feePPM / 1,000,000)
  */
-export function calculateHtlcForwardAmount(
+function calculateHtlcForwardAmount(
   amountIn: bigint,
   feePPM: number = DEFAULT_FEE_PPM,
   baseFee: bigint = HTLC.BASE_FEE_USD

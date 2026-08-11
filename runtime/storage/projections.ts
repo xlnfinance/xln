@@ -193,19 +193,6 @@ export const encodeReplicaMeta = (
 export const projectAccountDoc = (account: AccountReplica): StorageAccountDoc =>
   cloneAccountReplica(account, true);
 
-export const buildAccountMerkleFromDocs = (
-  accounts: ReadonlyMap<string, StorageAccountDoc>,
-  radix: RadixMerkleRadix = DEFAULT_ACCOUNT_MERKLE_RADIX,
-) => {
-  return buildHexKeyedMerkle(
-    Array.from(accounts.entries()).map(([counterpartyId, doc]) => ({
-      hexKey: counterpartyId,
-      value: encodeBuffer(doc),
-    })),
-    { radix },
-  );
-};
-
 export const buildAccountMerkleFromState = (
   accounts: ReadonlyMap<string, AccountReplica>,
   radix: RadixMerkleRadix = DEFAULT_ACCOUNT_MERKLE_RADIX,

@@ -33,9 +33,9 @@ type SourceEvent = {
   transactionHash?: string;
 };
 
-export const TOKEN_ID = 1;
-export const TRANSFER_AMOUNT = 123n;
-export const FUNDING_AMOUNT = 1_000n;
+const TOKEN_ID = 1;
+const TRANSFER_AMOUNT = 123n;
+const FUNDING_AMOUNT = 1_000n;
 
 const toJurisdictionHash = (events: SourceEvent[], entityId: string): string =>
   canonicalJurisdictionEventsHash(events.flatMap((event) => {

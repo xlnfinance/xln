@@ -216,7 +216,6 @@ export type {
   StorageHead,
   StoragePersistenceBoundary,
   StoragePersistenceProgressHook,
-  StorageReplicaMeta,
   StorageRuntimeConfig,
 } from './types';
 

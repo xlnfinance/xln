@@ -12,7 +12,7 @@ const buildFromReplica = (jurisdiction: JurisdictionConfig): JAdapterReplicaConn
     },
   });
 
-export const isBrowserVMJurisdiction = (jurisdiction: JurisdictionConfig): boolean =>
+const isBrowserVMJurisdiction = (jurisdiction: JurisdictionConfig): boolean =>
   String(jurisdiction.address || '').startsWith('browservm://');
 
 export const buildJAdapterConfigFromJurisdiction = (jurisdiction: JurisdictionConfig): JAdapterConfig => {

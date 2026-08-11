@@ -568,7 +568,7 @@ function cartesianProduct<T>(arrays: T[][]): T[][] {
  * Expand repeat blocks into explicit events
  * Called during scenario execution to generate events at specific timestamps
  */
-export function expandRepeatBlocks(
+function expandRepeatBlocks(
   scenario: Scenario,
   maxTimestamp: number
 ): ScenarioEvent[] {

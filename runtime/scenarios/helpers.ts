@@ -221,7 +221,7 @@ export async function waitScenario(env: RuntimeReplica, ms: number): Promise<voi
 }
 
 /** Align runtime wake clock with an absolute L1 unix deadline (seconds → ms). */
-export const syncRuntimeToUnixSeconds = (env: RuntimeReplica, unixSeconds: number): void => {
+const syncRuntimeToUnixSeconds = (env: RuntimeReplica, unixSeconds: number): void => {
   if (!Number.isSafeInteger(unixSeconds) || unixSeconds < 0) {
     throw new Error(`SCENARIO_UNIX_TARGET_INVALID:${unixSeconds}`);
   }

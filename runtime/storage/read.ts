@@ -76,10 +76,7 @@ import {
   type AccountJClaimAccumulatorState,
 } from '../account/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
-import {
-  validateEntityReplica,
-  validateEntityReplicaMetadata,
-} from '../entity/replica-validation';
+import { validateEntityReplicaMetadata } from '../entity/replica-validation';
 import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,
@@ -257,19 +254,6 @@ export const readStorageFrameRecord = async (
     throw new Error(`STORAGE_FRAME_KEY_HEIGHT_MISMATCH:key=${targetHeight}:value=${frame.height}`);
   }
   return frame;
-};
-
-export const readStorageReplicaMeta = async (
-  db: RuntimeDbLike,
-  entityId: string,
-  signerId: string,
-): Promise<StorageReplicaMeta | null> => {
-  const raw = await readRawOrNull(db, keyLiveReplicaMeta(entityId, signerId));
-  if (!raw) return null;
-  return validateEntityReplica(
-    decodeBuffer<unknown>(raw),
-    `StorageReplicaMeta[${entityId}:${signerId}]`,
-  ) as StorageReplicaMeta;
 };
 
 const listReplicaMetas = async (

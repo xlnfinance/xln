@@ -3,7 +3,7 @@ import { StringDecoder } from 'node:string_decoder';
 
 export const E2E_FATAL_LOG_TAIL_LINES = 80;
 
-export const RUNTIME_FATAL_LOG_PATTERNS: RegExp[] = [
+const RUNTIME_FATAL_LOG_PATTERNS: RegExp[] = [
   /MISSING_SIGNER_KEY/,
   /JADAPTER_MISSING/,
   /MM_READY_TIMEOUT/,

@@ -146,7 +146,7 @@ const artifactKindRank = (kind: QaArtifactKind): number => {
   return 6;
 };
 
-export const collectShardArtifacts = (logsDir: string, shard: number): QaArtifact[] => {
+const collectShardArtifacts = (logsDir: string, shard: number): QaArtifact[] => {
   const resultsDir = deriveE2EShardPaths(logsDir, shard).resultsDir;
   if (!existsSync(resultsDir)) return [];
   const artifacts: QaArtifact[] = [];
@@ -196,7 +196,7 @@ const cleanCueText = (label: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-export const writeShardCueArtifacts = (logsDir: string, shard: number, steps: QaSlowStep[]): void => {
+const writeShardCueArtifacts = (logsDir: string, shard: number, steps: QaSlowStep[]): void => {
   const cues = steps
     .filter(step => Number.isFinite(Number(step.startMs)) && Number.isFinite(Number(step.endMs)))
     .map((step, index) => ({
@@ -280,7 +280,7 @@ export const assertE2EBrowserHealthGate = (health: E2EBrowserHealthCounters | un
   }
 };
 
-export const readShardTitle = (logsDir: string, shard: number): string | null => {
+const readShardTitle = (logsDir: string, shard: number): string | null => {
   const resultsDir = deriveE2EShardPaths(logsDir, shard).resultsDir;
   if (!existsSync(resultsDir)) return null;
   const entry = readdirSync(resultsDir, { withFileTypes: true }).find(
@@ -418,7 +418,7 @@ export const writeRunManifest = (
 
 type QaRunBenchmark = NonNullable<QaRunManifest['benchmark']>;
 
-export const formatBenchmarkMetric = (metric: QaRunBenchmark['metrics'][number]): string =>
+const formatBenchmarkMetric = (metric: QaRunBenchmark['metrics'][number]): string =>
   `${metric.label} ${metric.deltaPct > 0 ? '+' : ''}${metric.deltaPct}% (${metric.baseline}->${metric.current}${metric.unit})`;
 
 export const printBenchmarkComparison = (benchmark: QaRunManifest['benchmark']): void => {

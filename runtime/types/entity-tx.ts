@@ -76,7 +76,7 @@ type SettlementContinuationAction =
       amount: bigint;
     };
 
-export type SettlementContinuationPlan = {
+type SettlementContinuationPlan = {
   actions: SettlementContinuationAction[];
   broadcast: boolean;
 };

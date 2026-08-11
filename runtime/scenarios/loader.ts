@@ -17,28 +17,6 @@ export async function loadScenarioFromFile(filePath: string): Promise<ParsedScen
 }
 
 /**
- * Load scenario from text content
- */
-export function loadScenarioFromText(content: string): ParsedScenario {
-  return parseScenario(content);
-}
-
-/**
- * Load scenario from base64-encoded URL parameter
- */
-export function loadScenarioFromURL(base64Content: string): ParsedScenario {
-  const decoded = Buffer.from(base64Content, 'base64').toString('utf-8');
-  return parseScenario(decoded);
-}
-
-/**
- * Encode scenario to base64 for URL sharing
- */
-export function encodeScenarioForURL(content: string): string {
-  return Buffer.from(content, 'utf-8').toString('base64');
-}
-
-/**
  * Validate and report scenario parsing results
  */
 export function validateScenario(parsed: ParsedScenario): boolean {

@@ -8,7 +8,7 @@ import type { ChildProcess } from 'node:child_process';
  */
 export const GATE_CHILD_PROCESS_DETACHED = process.platform !== 'win32';
 
-export const signalGateProcessGroup = (
+const signalGateProcessGroup = (
   child: ChildProcess,
   signal: NodeJS.Signals,
 ): void => {

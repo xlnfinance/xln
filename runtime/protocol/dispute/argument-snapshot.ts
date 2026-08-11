@@ -3,7 +3,7 @@ import { cloneProofBodyStruct } from './proof-body';
 
 export type DisputeArgumentSide = 'left' | 'right';
 
-export type DisputeArgumentPlan = {
+type DisputeArgumentPlan = {
   paymentHashlocks: string[];
   leftSwapOfferIds: string[];
   rightSwapOfferIds: string[];

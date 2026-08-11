@@ -266,15 +266,13 @@ export interface JSubmitResult {
   failure?: JAdapterFailure;
 }
 
-// Settlement diff structure matching Depository contract
-export interface SettlementDiff {
+interface SettlementDiff {
   tokenId: number;
   leftDiff: bigint;
   rightDiff: bigint;
   collateralDiff: bigint;
   ondeltaDiff?: bigint;
 }
-
 
 // Receipt for processBatch
 export interface JBatchReceipt {

@@ -18,9 +18,8 @@ export const LOCAL_TEST_STACK_BASES = Object.freeze([
   20_100,
   20_120,
 ] as const);
-export const LOCAL_TEST_STACK_WIDTH = 20;
-export const LOCAL_TEST_STACK_GUARD_OFFSET = 19;
-export const LOCAL_TEST_ASSERT_ONLY_MODE = 'assert-only-v1';
+const LOCAL_TEST_STACK_GUARD_OFFSET = 19;
+const LOCAL_TEST_ASSERT_ONLY_MODE = 'assert-only-v1';
 export const LOCAL_TEST_LEASE_ENV_NAMES = Object.freeze([
   'XLN_LOCAL_TEST_LEASE_MODE',
   'XLN_LOCAL_TEST_LEASE_POOL',
@@ -29,7 +28,7 @@ export const LOCAL_TEST_LEASE_ENV_NAMES = Object.freeze([
   'XLN_LOCAL_TEST_LEASE_OWNER_PID',
   'XLN_LOCAL_TEST_LEASE_REPO_ROOT',
 ] as const);
-export const LOCAL_TEST_STACK_OFFSETS = Object.freeze([
+const LOCAL_TEST_STACK_OFFSETS = Object.freeze([
   0, 1, 2, 4, 7, 8, 10, 11, 12, 13, 14, 15,
 ] as const);
 

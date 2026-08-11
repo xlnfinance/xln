@@ -1006,13 +1006,3 @@ function applyViewState(
     }
   }
 }
-
-/**
- * Helper to convert scenario entity ID to actual address
- */
-export function resolveEntityAddress(
-  scenarioId: string,
-  context: ScenarioExecutionContext
-): string | undefined {
-  return context.entityMapping.get(scenarioId);
-}

@@ -1062,7 +1062,7 @@
         crisisMode: 'star'
       };
     } else if (type === 'star') {
-      // MINIMAL STAR: 1 Fed + 2 Banks = 3 entities (matches topology-presets.ts)
+      // MINIMAL STAR: 1 Fed + 2 Banks = 3 entities
       return {
         type: 'star',
         layers: [

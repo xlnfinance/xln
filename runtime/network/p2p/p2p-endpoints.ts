@@ -16,7 +16,7 @@ const parseWsUrl = (value: string): URL | null => {
   }
 };
 
-export const getWsUrlKey = (value: string, ignoreProtocol = false): string | null => {
+const getWsUrlKey = (value: string, ignoreProtocol = false): string | null => {
   const parsed = parseWsUrl(value);
   if (!parsed) return null;
   const host = normalizeLoopbackHost(parsed.hostname);

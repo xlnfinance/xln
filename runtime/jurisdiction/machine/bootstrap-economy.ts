@@ -1,5 +1,5 @@
-export const BOOTSTRAP_USD_NOTIONAL = 2_000_000n;
-export const BOOTSTRAP_WETH_USD_RATE = 1_000n;
+const BOOTSTRAP_USD_NOTIONAL = 2_000_000n;
+const BOOTSTRAP_WETH_USD_RATE = 1_000n;
 
 const bootstrapWholeTokens = (tokenId: number): bigint =>
   tokenId === 2

@@ -14,9 +14,7 @@ import {
 } from './commitment';
 
 export type Side = 0 | 1;        // 0 = BUY (bids), 1 = SELL (asks)
-export type TIF = 0 | 1 | 2;     // 0 = GTC, 1 = IOC, 2 = FOK
-
-export const MAX_FILL_RATIO = 65535;
+type TIF = 0 | 1 | 2;     // 0 = GTC, 1 = IOC, 2 = FOK
 
 export type OrderCmd =
   | { kind: 0; ownerId: string; orderId: string; side: Side; tif: TIF; postOnly: boolean; priceTicks: bigint; qtyLots: bigint }
@@ -117,7 +115,7 @@ const sideBucketIds = (state: Pick<BookState, 'bidBucketIdsDesc' | 'askBucketIds
 const priceKey = (priceTicks: bigint): string => priceTicks.toString();
 const bucketKey = (bucketId: bigint): string => bucketId.toString();
 
-export function bucketIdForPrice(priceTicks: bigint, bucketWidthTicks: bigint): bigint {
+function bucketIdForPrice(priceTicks: bigint, bucketWidthTicks: bigint): bigint {
   if (priceTicks <= 0n) throw new Error('priceTicks must be positive');
   if (bucketWidthTicks <= 0n) throw new Error('bucketWidthTicks must be positive');
   return priceTicks / bucketWidthTicks;
@@ -656,13 +654,6 @@ export function getBestBid(state: BookState): bigint | null {
 export function getBestAsk(state: BookState): bigint | null {
   const first = getTopLevel(state, 1);
   return first?.level.priceTicks ?? null;
-}
-
-export function getSpread(state: BookState): bigint | null {
-  const bid = getBestBid(state);
-  const ask = getBestAsk(state);
-  if (bid === null || ask === null) return null;
-  return ask - bid;
 }
 
 export function getBookOrder(state: BookState, orderId: string): BookOrderState | null {

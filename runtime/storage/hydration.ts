@@ -1,6 +1,6 @@
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../orderbook';
 import type { AccountReplica } from '../types/account';
-import type { EntityReplica, EntityState } from '../entity/types';
+import type { EntityState } from '../entity/types';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionAccountTxRoute,
@@ -139,4 +139,4 @@ export const hydrateEntityStateFromStorage = (options: {
   };
 };
 
-export type { BookState, EntityReplica };
+export type { BookState };

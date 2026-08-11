@@ -19,7 +19,7 @@ export const STORAGE_FRAME_FORMAT = Object.freeze({
   hashMode: 'storage-merkle-v1',
 } as const);
 
-export class StorageSchemaMismatchError extends Error {
+class StorageSchemaMismatchError extends Error {
   readonly code = 'STORAGE_SCHEMA_MISMATCH' as const;
 
   constructor(

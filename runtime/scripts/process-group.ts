@@ -9,7 +9,7 @@ export type StopProcessGroupOptions = Readonly<{
   onEscalate?: () => void;
 }>;
 
-export const processGroupIsAlive = (pid: number): boolean => {
+const processGroupIsAlive = (pid: number): boolean => {
   try {
     process.kill(-pid, 0);
     return true;
@@ -30,7 +30,7 @@ export const signalProcessGroup = (pid: number, signal: NodeJS.Signals): boolean
   }
 };
 
-export const waitForProcessGroupExit = async (pid: number, timeoutMs: number): Promise<boolean> => {
+const waitForProcessGroupExit = async (pid: number, timeoutMs: number): Promise<boolean> => {
   const deadline = performance.now() + timeoutMs;
   while (performance.now() < deadline) {
     if (!processGroupIsAlive(pid)) return true;

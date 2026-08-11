@@ -32,7 +32,7 @@ export interface LogConfig {
 
 // Default log config - derived from config/constants.ts PERFORMANCE flags
 // Individual categories can be toggled at runtime via window.logConfig.set()
-export const LOG_CONFIG: LogConfig = {
+const LOG_CONFIG: LogConfig = {
   ENTITY_TX: PERFORMANCE.DEBUG_CONSENSUS,        // Entity-level consensus
   ACCOUNT_OPEN: PERFORMANCE.DEBUG_ACCOUNTS,      // Account creation
   SIGNER_LOOKUP: PERFORMANCE.DEBUG_CONSENSUS,    // Validator management
@@ -69,7 +69,7 @@ function formatLogArgs(args: unknown[]): string {
 }
 
 // Helper to check if logging is enabled for a category
-export function shouldLog(category: keyof LogConfig): boolean {
+function shouldLog(category: keyof LogConfig): boolean {
   return LOG_CONFIG[category] ?? false;
 }
 
@@ -195,7 +195,7 @@ export const createStructuredLogger = (scope: string, baseFields: StructuredLogF
 });
 
 // Conditional logger with levels
-export function log(category: keyof LogConfig, level: LogLevel, ...args: unknown[]): void {
+function log(category: keyof LogConfig, level: LogLevel, ...args: unknown[]): void {
   if (shouldLog(category)) {
     const prefix = `[${category}]`;
     const redactedArgs = args.map(arg => redactTelemetryValue(arg));

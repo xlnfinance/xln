@@ -40,7 +40,7 @@ export interface ScenarioRng {
  * @param seed - Base seed string (e.g., env.runtimeSeed or 'test-seed-42')
  * @param initialCounter - Starting counter value (default 0)
  */
-export function createScenarioRng(seed: string, initialCounter: bigint = 0n): ScenarioRng {
+function createScenarioRng(seed: string, initialCounter: bigint = 0n): ScenarioRng {
   let _counter = initialCounter;
 
   const nextBytes32 = (): string => {

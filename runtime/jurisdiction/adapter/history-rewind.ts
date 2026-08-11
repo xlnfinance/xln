@@ -104,19 +104,3 @@ export const enqueueJHistoryRewindForReplicaKeys = (
     chainId,
   );
 };
-
-export const enqueueJHistoryRewind = (
-  env: RuntimeReplica,
-  conflictingHeight: number,
-  conflictingBlockHash: string,
-  depositoryAddress?: string,
-  chainId?: number,
-): string[] =>
-  enqueueScopedRewind(
-    env,
-    conflictingHeight,
-    conflictingBlockHash,
-    null,
-    depositoryAddress,
-    chainId,
-  );

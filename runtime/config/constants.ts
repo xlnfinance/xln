@@ -198,22 +198,6 @@ export const TIMING = {
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
-// CONSENSUS PARAMETERS
-// ═══════════════════════════════════════════════════════════════
-
-export const CONSENSUS = {
-  /** Default BFT threshold (2/3 + 1 for safety) */
-  DEFAULT_THRESHOLD_NUMERATOR: 2n,
-  DEFAULT_THRESHOLD_DENOMINATOR: 3n,
-
-  /** Maximum precommit locks before forcing progress */
-  MAX_PRECOMMIT_LOCKS: 10,
-
-  /** Frame retention for state proofs (how many old frames to keep) */
-  FRAME_RETENTION_COUNT: 1000,
-} as const;
-
-// ═══════════════════════════════════════════════════════════════
 // BLOCKCHAIN INTEGRATION (J-Machine)
 // ═══════════════════════════════════════════════════════════════
 

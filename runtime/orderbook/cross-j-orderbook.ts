@@ -90,5 +90,4 @@ export {
   getCrossJurisdictionBookAdmissionError,
   isCrossJurisdictionBookAdmissionPending,
   isCrossJurisdictionBookRiskRejection,
-  markCrossJurisdictionBookAdmissionClosed,
 };

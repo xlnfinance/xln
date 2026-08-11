@@ -2,7 +2,7 @@ import { mkdir } from 'fs/promises';
 import { join } from 'path';
 import type { StorageHealth } from '../../infra/storage-monitor';
 
-export const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
 export const isEntityId32 = (value: unknown): value is string =>
   typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);

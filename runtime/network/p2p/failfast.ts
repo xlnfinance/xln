@@ -1,4 +1,4 @@
-export class FailFastError extends Error {
+class FailFastError extends Error {
   code: string;
   context: Record<string, unknown> | undefined;
 

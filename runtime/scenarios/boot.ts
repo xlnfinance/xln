@@ -22,7 +22,7 @@ import {
 
 export type { JAdapterMode };
 
-export const SCENARIO_JADAPTER_MISSING = 'SCENARIO_JADAPTER_MISSING';
+const SCENARIO_JADAPTER_MISSING = 'SCENARIO_JADAPTER_MISSING';
 
 export const isScenarioJAdapterMissingError = (error: unknown): boolean =>
   error instanceof Error && error.message.startsWith(`${SCENARIO_JADAPTER_MISSING}:`);

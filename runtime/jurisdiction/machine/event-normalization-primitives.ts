@@ -108,9 +108,6 @@ export const normalizeMetadata = (
   return metadata;
 };
 
-export const isEntityId = (value: string | null): value is string =>
-  value !== null && /^0x[0-9a-f]{64}$/.test(value);
-
 export const isPositiveUint256 = (value: string | null): value is string =>
   value !== null && BigInt(value) >= 1n && BigInt(value) <= (1n << 256n) - 1n;
 

@@ -7,7 +7,7 @@ const hashSeed = (seed: string): number => {
   return hash || 0x9e3779b9;
 };
 
-export const RETAINED_FAULT_SEEDS = [
+const RETAINED_FAULT_SEEDS = [
   'xln-fault-0001',
   'xln-fault-0013',
   'xln-fault-0021',

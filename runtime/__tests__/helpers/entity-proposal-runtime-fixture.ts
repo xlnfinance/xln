@@ -49,7 +49,7 @@ const fixtureSeed = 'entity-proposal-runtime-isolation';
 export const proposalRuntimeFixture = createEntityProposalFixture(fixtureSeed);
 const durableFixtureSeed = `${fixtureSeed}:durable`;
 export const durableProposalFixture = createEntityProposalFixture(durableFixtureSeed, 3n);
-export const durableProposalRuntimeSeed = `${durableFixtureSeed}:victim-runtime`;
+const durableProposalRuntimeSeed = `${durableFixtureSeed}:victim-runtime`;
 
 const jurisdiction = {
   name: 'ProposalIsolation',

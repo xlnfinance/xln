@@ -13,7 +13,6 @@ import {
 } from './assistant-proxy-policy';
 
 export {
-  readAssistantProxyConfig,
   resolveAssistantDirectClientIp,
   resolveAssistantRateClientId,
 } from './assistant-proxy-policy';

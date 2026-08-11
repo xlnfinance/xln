@@ -34,15 +34,13 @@ import {
 
 export type { RuntimeFrameCommitStatus } from './commit-status';
 export {
-  getRuntimeProcessGlobal,
-  RuntimeStorageWriteTimeoutError,
   shouldRequireCanonicalStorageAudit,
 } from './commit-deadline';
 
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 const formatPerfMs = (value: number): string => value.toFixed(2);
 
-export class RuntimeFrameStorageError extends Error {
+class RuntimeFrameStorageError extends Error {
   constructor(
     readonly commitStatus: RuntimeFrameCommitStatus,
     cause: unknown,

@@ -20,11 +20,9 @@ declare const SignerIdBrand: unique symbol;
 declare const JIdBrand: unique symbol;
 declare const EntityProviderAddressBrand: unique symbol;
 declare const AccountKeyBrand: unique symbol;
-declare const HashlockBrand: unique symbol;
 declare const LockIdBrand: unique symbol;
 declare const ProposalIdBrand: unique symbol;
 declare const JurisdictionNameBrand: unique symbol;
-declare const TokenIdBrand: unique symbol;
 
 /** Entity identifier - 32-byte hex string (0x + 64 chars) */
 export type EntityId = string & { readonly [EntityIdBrand]: typeof EntityIdBrand };
@@ -37,8 +35,6 @@ export type JId = string & { readonly [JIdBrand]: typeof JIdBrand };
 
 /** EntityProvider contract address - 20-byte hex (0x + 40 chars) */
 export type EntityProviderAddress = string & { readonly [EntityProviderAddressBrand]: typeof EntityProviderAddressBrand };
-export type Hashlock = string & { readonly [HashlockBrand]: typeof HashlockBrand };
-export type TokenId = number & { readonly [TokenIdBrand]: typeof TokenIdBrand };
 
 // =============================================================================
 // CONSTANTS

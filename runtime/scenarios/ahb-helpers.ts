@@ -28,7 +28,7 @@ export const DECIMALS = BigInt(DEFAULT_TOKENS[USDC_TOKEN_ID - 1]!.decimals);
 export const ONE_TOKEN = 10n ** DECIMALS;
 export const AHB_JURISDICTION = 'AHB Demo';
 
-export type ExternalTokenToReserveOptions = NonNullable<Parameters<JAdapter['externalTokenToReserve']>[4]>;
+type ExternalTokenToReserveOptions = NonNullable<Parameters<JAdapter['externalTokenToReserve']>[4]>;
 export type SnapshotLogs = { logs?: FrameLogEntry[]; frameLogs?: FrameLogEntry[] };
 
 export type RequiredBrowserVM = {

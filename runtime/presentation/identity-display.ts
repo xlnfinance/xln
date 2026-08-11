@@ -3,7 +3,7 @@ import { toSvg } from 'jdenticon';
 import { extractNumberFromEntityId } from '../entity/factory';
 import { Buffer } from '../infra/platform-crypto';
 
-export const DEMO_SIGNERS = {
+const DEMO_SIGNERS = {
   alice: {
     name: 'alice.eth',
     address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',

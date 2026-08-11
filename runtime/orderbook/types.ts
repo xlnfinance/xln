@@ -17,13 +17,10 @@ export {
   applyCommand,
   getBestBid,
   getBestAsk,
-  getSpread,
   getBookOrder,
   getBookOrders,
   getBookSideLevels,
-  bucketIdForPrice,
   computeBookHash,
-  MAX_FILL_RATIO,
   MAX_ORDERBOOK_QTY_LOTS,
 } from './core';
 
@@ -307,7 +304,7 @@ export function requantizeRemainingSwapAtPrice(
 // ============================================================================
 
 /** Basis points constant (10000 = 100%) */
-export const BPS_BASE = 10000;
+const BPS_BASE = 10000;
 
 /**
  * Spread distribution rules - how trade spread is allocated
@@ -438,7 +435,7 @@ export function rebuildOrderbookPairIndex(ext: OrderbookExtState): Map<string, s
   return next;
 }
 
-export function ensureOrderbookPairIndex(ext: OrderbookExtState): Map<string, string[]> {
+function ensureOrderbookPairIndex(ext: OrderbookExtState): Map<string, string[]> {
   if (!(ext.orderPairs instanceof Map)) {
     return rebuildOrderbookPairIndex(ext);
   }
