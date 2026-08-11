@@ -1,6 +1,6 @@
 /** Read already-canonical BigInt capacities from a parsed gossip profile. */
 
-export type TokenCapacityLike = {
+type TokenCapacityLike = {
   inCapacity: bigint;
   outCapacity: bigint;
 } | null | undefined;

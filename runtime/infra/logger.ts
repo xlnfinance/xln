@@ -152,7 +152,7 @@ export const formatAmount = (value: unknown): string => {
   return String(value ?? '');
 };
 
-export const emitStructuredLog = (
+const emitStructuredLog = (
   level: LogLevel,
   scope: string,
   message: string,

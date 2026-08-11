@@ -19,7 +19,7 @@ const firstDefined = <T>(...values: Array<T | undefined>): T | undefined => {
   return undefined;
 };
 
-export const normalizeJurisdictionName = (value: unknown): string =>
+const normalizeJurisdictionName = (value: unknown): string =>
   typeof value === 'string' ? value.trim().toLowerCase() : '';
 
 export const getJurisdictionConfigName = (jurisdiction?: Pick<JurisdictionConfig, 'name'> | null): string =>
@@ -224,7 +224,7 @@ const sameSigner = (replica: EntityReplica, signerId?: string | null): boolean =
   return String(replica?.signerId || '').toLowerCase() === String(signerId).toLowerCase();
 };
 
-export function assertEntityJurisdictionBinding(
+function assertEntityJurisdictionBinding(
   env: EntityRuntimeContext,
   entityId: string,
   incomingJurisdiction?: JurisdictionConfig | null,
@@ -329,7 +329,7 @@ export function requireEntityRuntimeJurisdictionConfig(
   return requireRuntimeJurisdictionConfigByName(env, name);
 }
 
-export function mergeRuntimeJurisdictionConfig(
+function mergeRuntimeJurisdictionConfig(
   config: ConsensusConfig,
   env: EntityRuntimeContext,
 ): ConsensusConfig {

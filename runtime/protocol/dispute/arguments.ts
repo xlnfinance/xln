@@ -14,7 +14,6 @@ import {
 } from './argument-snapshot';
 
 export type {
-  DisputeArgumentPlan,
   DisputeArgumentSide,
   DisputeArgumentSnapshot,
 } from './argument-snapshot';

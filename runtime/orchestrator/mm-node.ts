@@ -10,11 +10,9 @@ export {
   type HubProfile,
   type MarketMakerEntityContext,
   type MarketMakerHealth,
-  type MarketMakerOfferSpec,
   type MarketMakerTokenIdsByContext,
 } from './mm-node-core';
 export {
-  buildMarketMakerBootstrapEntityStateHash,
   buildMarketMakerBootstrapFingerprint,
   buildMarketMakerCrossHealth,
   getMarketMakerHealth,

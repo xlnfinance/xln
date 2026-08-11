@@ -12,7 +12,7 @@ type EventData<T extends EventType> = Extract<
 export type JurisdictionEventNormalizer = (
   data: UnknownRecord,
 ) => JurisdictionEvent | null;
-export type FieldDecoder<T> = (value: unknown) => T | null;
+type FieldDecoder<T> = (value: unknown) => T | null;
 type FieldSchema = Readonly<Record<string, FieldDecoder<unknown>>>;
 type DecodedFields<T extends FieldSchema> = {
   [K in keyof T]: Exclude<ReturnType<T[K]>, null>;

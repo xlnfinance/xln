@@ -3,7 +3,7 @@ export type JurisdictionStackConfig = {
   depositoryAddress?: unknown;
 };
 
-export const normalizeStackAddress = (value: unknown): string =>
+const normalizeStackAddress = (value: unknown): string =>
   typeof value === 'string' ? value.trim().toLowerCase() : '';
 
 export const normalizeStackChainId = (value: unknown): number | null => {

@@ -95,7 +95,7 @@ type MarketMakerCrossBootstrapWaveDebug = {
   remainingSourceHubGroups?: number;
 };
 
-export const emitMarketMakerCrossBootstrapWaveEvent = (
+const emitMarketMakerCrossBootstrapWaveEvent = (
   event: string,
   fields: MarketMakerCrossBootstrapWaveDebug,
 ): void => {

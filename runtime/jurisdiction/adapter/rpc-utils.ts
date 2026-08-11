@@ -18,8 +18,7 @@ export type RpcBatchResponse = {
   error?: { message?: string };
 };
 
-const RPC_CODE_PROBE_TIMEOUT_MS = 10_000;
-export const DEFAULT_RPC_BATCH_TIMEOUT_MS = 5_000;
+const DEFAULT_RPC_BATCH_TIMEOUT_MS = 5_000;
 
 export const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
   typeof value === 'object' &&
@@ -29,51 +28,6 @@ export const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter 
 
 export const firstAddress = (...values: Array<unknown>): string =>
   firstUsableContractAddress(...values) ?? '';
-
-export const fetchRpcCode = async (
-  rpcUrl: string,
-  address: string,
-  timeoutMs = RPC_CODE_PROBE_TIMEOUT_MS,
-): Promise<string> => {
-  if (!ethers.isAddress(address)) {
-    throw new Error(`INVALID_CONTRACT_ADDRESS:${String(address)}`);
-  }
-
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'eth_getCode',
-        params: [address, 'latest'],
-      }),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error(`ETH_GET_CODE_HTTP_${response.status}`);
-    }
-
-    const body = await response.json() as { result?: unknown; error?: { message?: string } };
-    if (body.error) {
-      throw new Error(`ETH_GET_CODE_RPC:${body.error.message || 'unknown'}`);
-    }
-    if (typeof body.result !== 'string') {
-      throw new Error('ETH_GET_CODE_INVALID_RESULT');
-    }
-    return body.result;
-  } catch (error) {
-    if ((error as Error)?.name === 'AbortError') {
-      throw new Error(`ETH_GET_CODE_TIMEOUT:${address}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutHandle);
-  }
-};
 
 export const sendRpcBatch = async (
   rpcUrl: string,

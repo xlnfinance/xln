@@ -2,7 +2,7 @@ import type { RadixMerkleRadix } from '../protocol/radix-merkle';
 import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../infra/integrity-checksum';
 import { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './merkle-namespace-tags';
 
-export { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './merkle-namespace-tags';
+export type { StorageMerkleNamespace } from './merkle-namespace-tags';
 
 /**
  * xln testnet has one canonical storage format. We deliberately do not carry
@@ -145,7 +145,7 @@ export const textBytes = (value: string): Buffer => {
   return Buffer.concat([len, raw]);
 };
 
-export const readText = (buffer: Buffer, offset: number): { value: string; nextOffset: number } => {
+const readText = (buffer: Buffer, offset: number): { value: string; nextOffset: number } => {
   const len = buffer.readUInt16BE(offset);
   const start = offset + 2;
   return { value: buffer.subarray(start, start + len).toString('utf8'), nextOffset: start + len };

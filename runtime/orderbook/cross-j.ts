@@ -15,10 +15,10 @@ import { invalidateBookOrderCommitment } from './commitment';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
-export const crossJurisdictionBookOrderIdFor = (sourceEntityId: string, orderId: string): string =>
+const crossJurisdictionBookOrderIdFor = (sourceEntityId: string, orderId: string): string =>
   `${normalizeEntityRef(sourceEntityId)}:${String(orderId)}`;
 
-export const crossJurisdictionBookOrderId = (route: CrossJurisdictionSwapRoute): string =>
+const crossJurisdictionBookOrderId = (route: CrossJurisdictionSwapRoute): string =>
   crossJurisdictionBookOrderIdFor(route.source.entityId, route.orderId);
 
 export const removeBookOrderById = (
@@ -56,7 +56,7 @@ export const removeBookOrderById = (
   return true;
 };
 
-export const hasBookOrderById = (
+const hasBookOrderById = (
   state: EntityState,
   namespacedOrderId: string,
 ): boolean => {
@@ -91,7 +91,7 @@ export const removeCrossJurisdictionBookOrderByRouteId = (
   storageChanges,
 );
 
-export const resizeBookOrderById = (
+const resizeBookOrderById = (
   state: EntityState,
   namespacedOrderId: string,
   nextQtyLots: bigint,

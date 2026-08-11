@@ -121,7 +121,7 @@ export const rememberPendingWatcherJBlock = (
   }
 };
 
-export const areJEventReplicaKeysFinalizedThrough = (
+const areJEventReplicaKeysFinalizedThrough = (
   env: RuntimeReplica,
   replicaKeys: Iterable<string>,
   blockNumber: number,

@@ -1,7 +1,7 @@
 import type { JBatch } from './batch';
 import { normalizeEntityId } from '../../entity/id';
 
-export type DraftBatchReserveOpType =
+type DraftBatchReserveOpType =
   | 'reserveToReserve'
   | 'settlement'
   | 'reserveToCollateral'

@@ -9,12 +9,12 @@
 
 import { INT256_MAX, INT256_MIN, UINT256_MAX } from '../integer-ranges';
 
-export type DisputeDirectionAmounts = Readonly<{
+type DisputeDirectionAmounts = Readonly<{
   leftToRight: bigint;
   rightToLeft: bigint;
 }>;
 
-export type DisputeSideAmounts = Readonly<{
+type DisputeSideAmounts = Readonly<{
   left: bigint;
   right: bigint;
 }>;

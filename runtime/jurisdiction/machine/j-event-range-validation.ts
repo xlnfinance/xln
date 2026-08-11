@@ -21,7 +21,7 @@ export type JEventRangeSignatureVerifier = (
   signature: string,
 ) => boolean;
 
-export type ValidatedJEventRange = {
+type ValidatedJEventRange = {
   signerId: string;
   jurisdictionRef: string;
   data: JurisdictionEventData;

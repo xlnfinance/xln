@@ -33,7 +33,7 @@ const setCache = <T>(map: Map<string, T>, cache: SortedStringKeyCache): void => 
   });
 };
 
-export const invalidateSortedStringMapKeys = <T>(map: Map<string, T>): void => {
+const invalidateSortedStringMapKeys = <T>(map: Map<string, T>): void => {
   const indexed: IndexedStringMap<T> = map;
   if (indexed[SORTED_STRING_KEYS]) delete indexed[SORTED_STRING_KEYS];
 };

@@ -4,7 +4,7 @@ type LoopbackFetchInit = RequestInit & {
   };
 };
 
-const isLoopbackHttps = (input: string | URL | Request): boolean => {
+export const isLoopbackHttps = (input: string | URL | Request): boolean => {
   const raw = input instanceof Request ? input.url : String(input);
   try {
     const url = new URL(raw);

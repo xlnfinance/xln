@@ -1,8 +1,6 @@
 export type {
   AuthenticatedRpcLog,
-  CanonicalRpcLog,
   CanonicalRpcReceipt,
-  CanonicalReceiptMptProof,
 } from '../machine/receipt-codec';
 
 export {
@@ -18,6 +16,5 @@ export type {
   AuthenticatedReceiptRange,
   ReceiptReadProfile,
   RpcBatchCall,
-  RpcBatchSend,
 } from './receipt-reader';
 export { readAuthenticatedLogsForRange, readAuthenticatedReceiptRange } from './receipt-reader';

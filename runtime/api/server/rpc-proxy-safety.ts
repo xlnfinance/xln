@@ -23,9 +23,9 @@ const FORBIDDEN_RPC_PREFIXES = [
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1']);
 const LOOPBACK_CLIENTS = new Set(['localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
-export const MAX_RPC_PROXY_REQUEST_BYTES = 256 * 1024;
-export const MAX_RPC_PROXY_BATCH_CALLS = 128;
-export const MAX_RPC_PROXY_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MAX_RPC_PROXY_REQUEST_BYTES = 256 * 1024;
+const MAX_RPC_PROXY_BATCH_CALLS = 128;
+const MAX_RPC_PROXY_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 export class RpcProxyError extends Error {
   constructor(

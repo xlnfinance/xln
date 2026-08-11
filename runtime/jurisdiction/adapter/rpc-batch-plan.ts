@@ -8,7 +8,7 @@ import type { FeeOverrides } from './rpc-boundary';
 
 type BatchJTx = Extract<JTx, { type: 'batch' }>;
 
-export type RpcBatchSubmissionPlan = {
+type RpcBatchSubmissionPlan = {
   jTx: SealedBatchJTx;
   batch: JBatch;
   normalizedEntityId: string;

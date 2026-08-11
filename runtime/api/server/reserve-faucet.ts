@@ -13,9 +13,7 @@ import {
 import type { TokenCatalogEntry } from './reserve-faucet-evidence';
 
 export {
-  findReserveUpdatedEvidence,
   parseReserveFaucetAmount,
-  waitForReserveUpdatedEvidence,
 } from './reserve-faucet-evidence';
 
 const faucetLog = createStructuredLogger('server.faucet');

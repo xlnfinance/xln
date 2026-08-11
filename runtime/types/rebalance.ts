@@ -39,7 +39,7 @@ export interface BilateralRebalanceFeePolicy {
 }
 
 /** Active rebalance quote (one per account, quoteId = env.timestamp). */
-export interface RebalanceQuote {
+interface RebalanceQuote {
   quoteId: number;
   tokenId: number;
   amount: bigint;
@@ -70,9 +70,9 @@ export interface AccountRebalanceShadowState {
   pendingRequest?: { tokenId: number; targetAmount: bigint };
 }
 
-export const DEFAULT_SOFT_LIMIT_WHOLE = 500n;
-export const DEFAULT_HARD_LIMIT_WHOLE = 10_000n;
-export const DEFAULT_MAX_FEE_WHOLE = 15n;
+const DEFAULT_SOFT_LIMIT_WHOLE = 500n;
+const DEFAULT_HARD_LIMIT_WHOLE = 10_000n;
+const DEFAULT_MAX_FEE_WHOLE = 15n;
 export const QUOTE_EXPIRY_MS = 300_000;
 
 const requireTokenDecimals = (value: number): bigint => {

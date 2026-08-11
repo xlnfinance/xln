@@ -206,7 +206,7 @@ export const computeStorageEntityHashesFromDocs = (
   })).sort((left, right) => compareStableText(left.entityId, right.entityId));
 };
 
-export const normalizeFrameEntityHashes = (entityHashes: StorageFrameEntityHash[] | undefined): StorageFrameEntityHash[] =>
+const normalizeFrameEntityHashes = (entityHashes: StorageFrameEntityHash[] | undefined): StorageFrameEntityHash[] =>
   (entityHashes ?? [])
     .map((entry) => ({
       entityId: normalizeEntityId(entry.entityId),

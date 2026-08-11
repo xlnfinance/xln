@@ -13,10 +13,8 @@ export {
   buildRecoveryJournalFromStorageFrame,
 } from './history';
 export type {
-  PersistedRuntimeActivityPage,
 } from './history';
 export type {
-  DetachedRuntimeRecordingAdapter,
 } from './recording';
 export type {
   PersistenceQueryDeps,

@@ -65,7 +65,7 @@ const bytesToUint256 = (bytes: Uint8Array): bigint => BigInt(rawBytesToHex(bytes
  * tail. Base64 remains the outer transport representation used by the existing
  * ciphertext object; every nested binary field is length-delimited exactly once.
  */
-export const encodeMultiRecipientCiphertext = (
+const encodeMultiRecipientCiphertext = (
   value: MultiRecipientCiphertext,
 ): Uint8Array => {
   const writer = new BinaryWriter(MAX_HTLC_BINARY_LAYER_BYTES, 'HTLC_CIPHERTEXT_BINARY_TOO_LARGE');
@@ -111,7 +111,7 @@ export const encodeMultiRecipientCiphertext = (
   return writer.finish();
 };
 
-export const decodeMultiRecipientCiphertext = (
+const decodeMultiRecipientCiphertext = (
   encoded: Uint8Array,
 ): MultiRecipientCiphertext => {
   const code = 'HTLC_CIPHERTEXT_BINARY_INVALID';

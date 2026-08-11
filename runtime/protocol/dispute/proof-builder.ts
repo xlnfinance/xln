@@ -52,7 +52,7 @@ const DELTA_BATCH_PARAM = ethers.ParamType.from(BATCH_ABI);
 const INT256_MIN = -(1n << 255n);
 const INT256_MAX = (1n << 255n) - 1n;
 
-export const encodeProofBodyStruct = (proofBody: ProofBodyStruct): string =>
+const encodeProofBodyStruct = (proofBody: ProofBodyStruct): string =>
   ABI_CODER.encode([PROOF_BODY_PARAM], [proofBody]);
 
 export const hashProofBodyStruct = (proofBody: ProofBodyStruct): string =>

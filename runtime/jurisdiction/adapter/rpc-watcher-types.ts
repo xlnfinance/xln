@@ -14,7 +14,7 @@ import type {
 import type { WatchedErc20Token } from './rpc-watcher-inputs';
 import type { AuthenticatedTxLocation } from './rpc-watcher-inputs';
 
-export type RpcWatcherScanProgress = {
+type RpcWatcherScanProgress = {
   scannedThroughHeight: number;
   replicaScannedThrough: Record<string, number>;
 };

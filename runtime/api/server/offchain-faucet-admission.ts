@@ -8,7 +8,7 @@ export type OffchainFaucetAccountState = {
   settledCapacitySnapshot: boolean;
 };
 
-export const hasSettledOffchainFaucetCapacitySnapshot = (
+const hasSettledOffchainFaucetCapacitySnapshot = (
   account: AccountReplica | null | undefined,
 ): boolean =>
   Boolean(account?.currentFrame) &&

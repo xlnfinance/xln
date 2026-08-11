@@ -47,5 +47,5 @@ export type MarketSubscriptionContext<WS extends MarketSocket> = {
   publisherInFlight: boolean;
 };
 
-export type MarketPublishMessage = { type: 'market_publish' };
+type MarketPublishMessage = { type: 'market_publish' };
 export type MarketHandlerMessage = MarketWireRequest | MarketPublishMessage;

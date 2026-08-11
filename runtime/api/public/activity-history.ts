@@ -128,7 +128,7 @@ const eventMatchesFilters = (event: RuntimeActivityEvent, filters: RuntimeActivi
   return true;
 };
 
-export const runtimeActivityDedupeKey = (event: RuntimeActivityEvent): string => {
+const runtimeActivityDedupeKey = (event: RuntimeActivityEvent): string => {
   const rawType = String(event.rawType || '');
   if (event.source === 'runtime_log' && rawType.startsWith('Htlc') && event.hash) {
     return [

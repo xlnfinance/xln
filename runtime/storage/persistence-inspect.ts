@@ -20,7 +20,7 @@ import type {
   TowerReceiptV1,
 } from './recovery/types';
 
-export type PersistenceIssueSeverity = 'info' | 'warning' | 'critical';
+type PersistenceIssueSeverity = 'info' | 'warning' | 'critical';
 
 export type PersistenceIssue = {
   severity: PersistenceIssueSeverity;
@@ -246,7 +246,7 @@ export const inspectRecoveryBundleFile = (path?: string): PersistenceBundleSumma
   }
 };
 
-export const inspectTowerReceipt = async (
+const inspectTowerReceipt = async (
   towerUrl?: string,
   lookupKey?: string,
 ): Promise<PersistenceTowerSummary> => {

@@ -510,7 +510,7 @@ const buildCustodyConnectivityInput = (
   };
 };
 
-export const ensureManagedEntity = async (
+const ensureManagedEntity = async (
   client: DaemonControlClient,
   config: ManagedEntityConfig,
 ): Promise<ManagedEntityIdentity> => {

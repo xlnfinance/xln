@@ -6,13 +6,13 @@ const DEFAULT_MAX_VALUE_CHARS = 320;
 const MIN_MAX_VALUE_CHARS = 32;
 const MAX_MAX_VALUE_CHARS = 4_096;
 
-export type RuntimeStateDiffValue = {
+type RuntimeStateDiffValue = {
   type: string;
   value: string;
   totalChars: number;
 };
 
-export type RuntimeStateFirstDifference = {
+type RuntimeStateFirstDifference = {
   path: string;
   reason:
     | 'missing-left'

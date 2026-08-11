@@ -11,12 +11,6 @@ import type {
 } from './rebalance';
 import type { AccountJClaimAccumulatorState, AccountJClaimProof } from './account-j-claims';
 
-// Account machine structures for signed and collateralized accounts between entities
-export interface AccountDelta {
-  tokenId: number;
-  delta: bigint; // Positive = we owe them, Negative = they owe us
-}
-
 // ═══════════════════════════════════════════════════════════════
 // HTLC (Hash Time-Locked Contracts)
 // ═══════════════════════════════════════════════════════════════
@@ -156,7 +150,7 @@ export interface HtlcRoute {
   createdTimestamp: number;
 }
 
-export interface CrossJurisdictionSecretRelay {
+interface CrossJurisdictionSecretRelay {
   routeId: string;
   fillRatio: number;
   sourceAmount: bigint;
@@ -170,15 +164,15 @@ export interface CrossJurisdictionSecretRelay {
 /** End-to-end payment notes stored locally by hashlock/lockId for activity rendering. */
 export type HtlcNoteKey = `hashlock:${string}` | `lock:${string}`;
 
-export type AccountStatus = 'active' | 'dispute_preparing' | 'disputed';
+type AccountStatus = 'active' | 'dispute_preparing' | 'disputed';
 
-export interface AccountRejectedFrameEvidence {
+interface AccountRejectedFrameEvidence {
   reason: string;
   frame: AccountFrame;
   frameHanko: HankoString;
 }
 
-export interface AccountSubcontract {
+interface AccountSubcontract {
   transformerAddress: string;
   encodedBatch: string;
   allowances: Array<{
@@ -192,7 +186,7 @@ export interface AccountSubcontract {
   rightArgumentsHash?: string;
 }
 
-export type AccountLendingIntentKind =
+type AccountLendingIntentKind =
   | 'fund'
   | 'borrow'
   | 'repay'

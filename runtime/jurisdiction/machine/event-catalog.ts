@@ -33,7 +33,7 @@ export const ENTITY_PROVIDER_J_EVENTS = {
 
 // These events are authenticated from tracked ERC20 receipts rather than
 // emitted by Depository or EntityProvider.
-export const SYNTHETIC_J_EVENTS = [
+const SYNTHETIC_J_EVENTS = [
   'ExternalWalletSnapshot',
   'ExternalWalletDelta',
 ] as const;

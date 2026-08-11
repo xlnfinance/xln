@@ -13,11 +13,9 @@ import type {
 import { isMarketMessageType } from './market-wire';
 
 export type {
-  MarketSubscription,
   MarketSubscriptionStack,
   MarketSubscriptionStackOptions,
 } from './market-subscription-types';
-export { isMarketMessageType } from './market-wire';
 
 export const createMarketSubscriptionStack = <WS extends MarketSocket>(
   options: MarketSubscriptionStackOptions<WS>,

@@ -74,7 +74,7 @@ export const normalizeTowerModeV1 = (mode: unknown): TowerModeV1 => {
   throw new Error(`TOWER_MODE_INVALID:${rawMode}`);
 };
 
-export type TowerActionKindV1 = 'counter_dispute_only';
+type TowerActionKindV1 = 'counter_dispute_only';
 
 export type TowerProofBody = {
   watchSeed: string;

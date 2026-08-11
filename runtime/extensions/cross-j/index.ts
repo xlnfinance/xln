@@ -22,12 +22,10 @@ export {
   deriveCanonicalCrossJurisdictionMarket,
   deriveCanonicalCrossJurisdictionMarketForLegs,
   deriveCanonicalCrossJurisdictionVenueId,
-  deriveCanonicalCrossJurisdictionVenueIdForLegs,
-  type CanonicalCrossJurisdictionMarket,
 } from './market';
 
 /** Book TTL default only — not a sealed pull/settlement reveal window. */
-export const CROSS_J_DEFAULT_BOOK_TTL_MS = 60_000;
+const CROSS_J_DEFAULT_BOOK_TTL_MS = 60_000;
 export const CROSS_J_MAX_FILL_RATIO = 65_535;
 
 const CROSS_J_STATUS_RANK: Record<CrossJurisdictionSwapStatus, number> = {
@@ -251,7 +249,7 @@ export const hasCrossJurisdictionCommittedFill = (route: CrossJurisdictionSwapRo
  * request the clear. If only one side sees the dust close, the source offer is
  * deleted while its pulls stay bound until expiry.
  */
-export const isCrossJurisdictionDustRemainder = (
+const isCrossJurisdictionDustRemainder = (
   route: CrossJurisdictionSwapRoute,
   sourceTotal: bigint,
   targetTotal: bigint,
@@ -385,7 +383,7 @@ const normalizeCrossJurisdictionTimePolicy = (
   };
 };
 
-export function withCrossJurisdictionPolicyDefaults(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
+function withCrossJurisdictionPolicyDefaults(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
   const sourceDisputeConfig = canonicalAccountDisputeConfig(route.sourceDisputeConfig);
   const targetDisputeConfig = canonicalAccountDisputeConfig(route.targetDisputeConfig);
   return {
@@ -399,7 +397,7 @@ export function withCrossJurisdictionPolicyDefaults(route: CrossJurisdictionSwap
   };
 }
 
-export function assertCrossJurisdictionRiskPolicy(route: CrossJurisdictionSwapRoute): void {
+function assertCrossJurisdictionRiskPolicy(route: CrossJurisdictionSwapRoute): void {
   const riskMode = route.riskMode || 'fully_collateralized';
   if (riskMode !== 'fully_collateralized') {
     throw new Error(`CROSS_J_RISK_MODE_UNSUPPORTED:${route.orderId}:${riskMode}`);
@@ -1159,7 +1157,7 @@ export function cloneCrossJurisdictionBookAdmission(
   return clone;
 }
 
-export function cloneCrossJurisdictionCarrierRoute<T extends { crossJurisdiction?: CrossJurisdictionSwapRoute }>(value: T): T {
+function cloneCrossJurisdictionCarrierRoute<T extends { crossJurisdiction?: CrossJurisdictionSwapRoute }>(value: T): T {
   if (!value.crossJurisdiction) return value;
   return {
     ...value,
@@ -1279,7 +1277,7 @@ export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRou
   ));
 }
 
-export function withCrossJurisdictionVenueDefaults(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
+function withCrossJurisdictionVenueDefaults(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
   const bookOwnerEntityId = normalizeEntityId(route.bookOwnerEntityId || deriveCanonicalCrossJurisdictionBookOwner(route));
   const venueId = route.venueId || deriveCanonicalCrossJurisdictionVenueId(route);
   return {
@@ -1321,7 +1319,7 @@ export function deriveCrossJurisdictionPullId(route: CrossJurisdictionSwapRoute,
   ].join(':')));
 }
 
-export function deriveCrossJurisdictionHashLadderProof(
+function deriveCrossJurisdictionHashLadderProof(
   route: CrossJurisdictionSwapRoute,
   privateSeed: string,
 ) {

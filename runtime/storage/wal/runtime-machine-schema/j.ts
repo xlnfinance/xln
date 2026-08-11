@@ -143,7 +143,7 @@ function assertJTx(value: unknown, code: string): asserts value is JTx {
   else throw new Error(`${code}_TYPE`);
 }
 
-export const validateJTx = (value: unknown, code: string): JTx => {
+const validateJTx = (value: unknown, code: string): JTx => {
   assertJTx(value, code);
   return value;
 };

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const MAX_IDENTICAL_CHILD_FAILURES = 3;
+const MAX_IDENTICAL_CHILD_FAILURES = 3;
 
 export type ChildFailureObservation = {
   role: 'hub' | 'market-maker' | 'orchestrator';
@@ -30,10 +30,10 @@ const stableReasonCode = (reason: string): string => {
   return clean.slice(-512) || 'UNREPORTED_CHILD_FAILURE';
 };
 
-export const isTerminalBootstrapFailureReasonCode = (reasonCode: string): boolean =>
+const isTerminalBootstrapFailureReasonCode = (reasonCode: string): boolean =>
   /(?:BOOTSTRAP_STALLED|WATCHER_DRAIN_STALLED)$/.test(reasonCode);
 
-export const isRuntimeLoopFatalReason = (reason: string): boolean =>
+const isRuntimeLoopFatalReason = (reason: string): boolean =>
   /\[ERROR\]\[runtime\]\s+loop\.error\b/.test(reason) ||
   /\bRUNTIME_LOOP_(?:ERROR|HALTED)\b/.test(reason);
 

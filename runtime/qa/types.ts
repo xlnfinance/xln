@@ -1,7 +1,7 @@
 import type { QaSeveritySignal } from './severity';
 import type { QaCandidateIdentity } from './candidate';
 
-export type { QaSeverity, QaSeverityEvidence, QaSeveritySignal } from './severity';
+export type { QaSeverity, QaSeveritySignal } from './severity';
 
 export type QaSlowStep = {
   label: string;
@@ -26,7 +26,7 @@ export type QaScenarioMetadata = {
 };
 
 export type QaArtifactKind = 'video' | 'image' | 'trace' | 'json' | 'text' | 'archive' | 'other';
-export type QaArtifactSensitivity = 'public' | 'internal' | 'secret-bearing';
+type QaArtifactSensitivity = 'public' | 'internal' | 'secret-bearing';
 
 export type QaArtifact = {
   name: string;
@@ -77,7 +77,7 @@ export type QaCodeFingerprint = {
   trackedBytes: number;
 };
 
-export type QaPerfChildSample = {
+type QaPerfChildSample = {
   name: string;
   pid: number;
   cpuPct: number;
@@ -85,7 +85,7 @@ export type QaPerfChildSample = {
   rssKb: number;
 };
 
-export type QaPerfSample = {
+type QaPerfSample = {
   ts: number;
   load1: number;
   load5: number;
@@ -109,8 +109,8 @@ export type QaPerfSummary = {
 
 export type QaPerfSummaryView = Omit<QaPerfSummary, 'samples'>;
 
-export type QaBrowserIssueType = 'console' | 'pageerror' | 'requestfailed' | 'http';
-export type QaBrowserIssueSeverity = 'error' | 'warning';
+type QaBrowserIssueType = 'console' | 'pageerror' | 'requestfailed' | 'http';
+type QaBrowserIssueSeverity = 'error' | 'warning';
 
 export type QaBrowserIssue = {
   type: QaBrowserIssueType;
@@ -237,7 +237,7 @@ export type QaFailureCapsule = {
   rerunCommand: string;
 };
 
-export type QaShardManifest = {
+type QaShardManifest = {
   candidateId?: string;
   gateConfigHash?: string;
   shard: number;
@@ -429,7 +429,7 @@ export type QaRetentionPurgeResult = {
   deletedHistoryRows: number;
 };
 
-export type QaStorySource = 'e2e-screenshots' | 'qa-run';
+type QaStorySource = 'e2e-screenshots' | 'qa-run';
 
 export type QaStoryScreenshot = {
   id: string;

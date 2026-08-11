@@ -80,7 +80,7 @@ const encodeManifest = (
   return encoded;
 };
 
-export const decodeAccountFieldsManifest = (value: Buffer): AccountFieldsManifest | null => {
+const decodeAccountFieldsManifest = (value: Buffer): AccountFieldsManifest | null => {
   if (value.byteLength < ACCOUNT_FIELDS_MAGIC.byteLength ||
       !value.subarray(0, ACCOUNT_FIELDS_MAGIC.byteLength).equals(ACCOUNT_FIELDS_MAGIC)) return null;
   const fixedOffset = ACCOUNT_FIELDS_MAGIC.byteLength;

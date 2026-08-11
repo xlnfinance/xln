@@ -8,7 +8,7 @@ import {
   resolveDisputeFinalizationEvidence,
 } from './rpc-public';
 
-export type DisputeFinalizationReceipt = {
+type DisputeFinalizationReceipt = {
   blockNumber: number;
   transactionHash: string;
 };

@@ -37,11 +37,7 @@ export type JId = string & { readonly [JIdBrand]: typeof JIdBrand };
 
 /** EntityProvider contract address - 20-byte hex (0x + 40 chars) */
 export type EntityProviderAddress = string & { readonly [EntityProviderAddressBrand]: typeof EntityProviderAddressBrand };
-export type AccountKey = string & { readonly [AccountKeyBrand]: typeof AccountKeyBrand };
 export type Hashlock = string & { readonly [HashlockBrand]: typeof HashlockBrand };
-export type LockId = string & { readonly [LockIdBrand]: typeof LockIdBrand };
-export type ProposalId = string & { readonly [ProposalIdBrand]: typeof ProposalIdBrand };
-export type JurisdictionName = string & { readonly [JurisdictionNameBrand]: typeof JurisdictionNameBrand };
 export type TokenId = number & { readonly [TokenIdBrand]: typeof TokenIdBrand };
 
 // =============================================================================

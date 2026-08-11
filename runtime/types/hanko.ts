@@ -27,7 +27,7 @@ export interface HankoRecoveredSignature {
   readonly signature: HankoHex;
 }
 
-export interface HankoBoardMemberClaim {
+interface HankoBoardMemberClaim {
   readonly entityId: HankoHex;
   readonly weight: bigint;
 }
@@ -38,17 +38,3 @@ export interface HankoSemanticClaim {
   readonly threshold: bigint;
   readonly delays: HankoBoardDelays;
 }
-
-export type CanonicalHankoMergeResult =
-  | Readonly<{
-      complete: false;
-      targetEntityId: HankoHex;
-      power: bigint;
-      threshold: bigint;
-      missingEntityIds: readonly HankoHex[];
-    }>
-  | Readonly<{
-      complete: true;
-      targetEntityId: HankoHex;
-      hanko: HankoString;
-    }>;

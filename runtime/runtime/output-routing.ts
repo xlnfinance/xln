@@ -16,7 +16,6 @@ export {
   splitPendingOutputsByRetryWindow,
   type PlannedRemoteOutput,
   type RuntimeDirectEntityInputDispatchResult,
-  type RuntimeEntityInputRoutingResult,
   type RuntimeOutputRoutingDeps,
 } from './delivery/pending';
 export { planEntityOutputs } from './delivery/plan';

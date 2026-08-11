@@ -341,7 +341,7 @@ const isDaemonHealthReady = (_response: Response, bodyText: string): boolean => 
   }
 };
 
-export const runDaemonControl = async (
+const runDaemonControl = async (
   args: string[],
   env: NodeJS.ProcessEnv,
   secrets: ChildSecrets,
@@ -407,7 +407,7 @@ export const runDaemonControl = async (
   return await result;
 };
 
-export const fetchDebugEntities = async (apiBaseUrl: string): Promise<DebugEntitySummary[]> => {
+const fetchDebugEntities = async (apiBaseUrl: string): Promise<DebugEntitySummary[]> => {
   const response = await fetch(new URL('/api/debug/entities?limit=5000', apiBaseUrl));
   if (!response.ok) {
     throw new Error(`debug entities endpoint failed (${response.status})`);

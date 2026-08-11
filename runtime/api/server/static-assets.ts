@@ -19,7 +19,7 @@ const getMimeType = (path: string): string | undefined => {
   return MIME_TYPES[path.slice(idx)];
 };
 
-export const serveStatic = async (pathname: string, staticDir: string): Promise<Response | null> => {
+const serveStatic = async (pathname: string, staticDir: string): Promise<Response | null> => {
   let file = Bun.file(`${staticDir}${pathname}`);
   if (await file.exists()) {
     const contentType = getMimeType(pathname);
@@ -36,7 +36,7 @@ export const serveStatic = async (pathname: string, staticDir: string): Promise<
   return null;
 };
 
-export const serveRuntimeBundle = async (): Promise<Response | null> => {
+const serveRuntimeBundle = async (): Promise<Response | null> => {
   const path = await import('path');
   const candidates = [
     path.join(process.cwd(), 'frontend', 'static', 'runtime.js'),

@@ -98,7 +98,7 @@ export type QaCodeFingerprint = {
   trackedBytes: number;
 };
 
-export type QaPerfChildSample = {
+type QaPerfChildSample = {
   name: string;
   pid: number;
   cpuPct: number;
@@ -106,7 +106,7 @@ export type QaPerfChildSample = {
   rssKb: number;
 };
 
-export type QaPerfSample = {
+type QaPerfSample = {
   ts: number;
   load1: number;
   load5: number;
@@ -243,7 +243,7 @@ export type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmar
 export type QaTestCategory = 'functional' | 'resilience';
 export type QaRunTestCategory = QaTestCategory | 'mixed' | 'unknown';
 
-export type QaFailureCapsule = {
+type QaFailureCapsule = {
   version: 1;
   reportPath: string;
   file: string;
@@ -422,7 +422,7 @@ export type QaShardFailureInput = Pick<QaShardManifest, 'status' | 'error' | 'lo
 // the canonical platform deploy hard-resets/cleans — while defaulting to local .logs for dev.
 // Curated story screenshots stay tracked in-repo and ship with the code deploy, so
 // their root is intentionally left relative to the checkout.
-export const QA_EVIDENCE_ROOT = process.env['QA_EVIDENCE_ROOT']
+const QA_EVIDENCE_ROOT = process.env['QA_EVIDENCE_ROOT']
   ? resolve(process.env['QA_EVIDENCE_ROOT'])
   : resolve(process.cwd(), '.logs');
 export const QA_LOGS_ROOT = resolve(QA_EVIDENCE_ROOT, 'e2e-parallel');

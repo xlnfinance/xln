@@ -7,10 +7,8 @@
  */
 
 export {
-  buildJEventObservationInput,
   rawEventToJEvents,
   type EventBatchCounter,
-  type JEventsRuntimeInputBuildResult,
 } from './event-observation';
 
 export {
@@ -20,11 +18,9 @@ export {
 
 export {
   enqueueJHistoryRange,
-  buildJHistoryRangeRuntimeInput,
 } from './history-ingress';
 
 export {
-  enqueueJHistoryRewind,
   enqueueJHistoryRewindForReplicaKeys,
 } from './history-rewind';
 
@@ -36,7 +32,6 @@ export {
 } from './watcher-replica';
 
 export {
-  applyWatcherJurisdictionCursor,
   getWatcherStartBlock,
   isWatcherJHistoryRangeDurable,
   rememberPendingWatcherJBlock,
@@ -52,9 +47,6 @@ export {
 
 export {
   collectRelevantJEventReplicaKeys,
-  isCanonicalEvent,
-  isEventRelevantToEntity,
-  type CanonicalJEventIngress,
 } from './event-relevance';
 
 export {

@@ -15,7 +15,7 @@ const normalizeEntityId = (entityId: unknown): string => String(entityId || '').
 export const isHubProfile = (profile: Profile): boolean =>
   profile.metadata.isHub === true;
 
-export const sortProfilesForBatch = (left: Profile, right: Profile): number => {
+const sortProfilesForBatch = (left: Profile, right: Profile): number => {
   const leftHub = isHubProfile(left);
   const rightHub = isHubProfile(right);
   if (leftHub !== rightHub) return leftHub ? -1 : 1;

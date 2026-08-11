@@ -42,7 +42,7 @@ const errorCode = (error: unknown): string => {
   return '';
 };
 
-export const jAdapterFailureMessage = (error: unknown): string => {
+const jAdapterFailureMessage = (error: unknown): string => {
   if (error instanceof Error && error.message) return error.message;
   const message = errorRecord(error)?.['message'];
   return typeof message === 'string' && message ? message : String(error);

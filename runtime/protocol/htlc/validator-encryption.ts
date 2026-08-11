@@ -2,9 +2,9 @@ import { Signature, computeAddress, getAddress, keccak256, recoverAddress } from
 import { compareStableText, serializeTaggedJson } from '../serialization';
 
 export const VALIDATOR_ENCRYPTION_ATTESTATION_VERSION = 'xln:validator-encryption-key:v1' as const;
-export const ENTITY_PROFILE_CERTIFICATION_VERSION = 'xln:entity-profile-certification:v1' as const;
+const ENTITY_PROFILE_CERTIFICATION_VERSION = 'xln:entity-profile-certification:v1' as const;
 
-export type ValidatorEncryptionBoardMember = Readonly<{
+type ValidatorEncryptionBoardMember = Readonly<{
   signerId: string;
   signer: string;
   publicKey?: string;
@@ -178,7 +178,7 @@ const boardMemberBySignerId = (
   return board.validators.find((validator) => normalizeSignerId(validator.signerId) === target);
 };
 
-export const verifyValidatorEncryptionAttestation = (
+const verifyValidatorEncryptionAttestation = (
   board: ValidatorEncryptionBoard,
   rawAttestation: ValidatorEncryptionAttestation,
 ): ValidatorEncryptionAttestation => {

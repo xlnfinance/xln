@@ -25,7 +25,7 @@ export type HankoBoardAuthorityValidator = (
   claimIndex: number,
 ) => boolean;
 
-export interface VerifiedHankoClaim extends HankoSemanticClaim {
+interface VerifiedHankoClaim extends HankoSemanticClaim {
   readonly boardHash: HankoHex;
   readonly votingPower: bigint;
 }

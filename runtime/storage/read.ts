@@ -108,12 +108,12 @@ import type {
   StorageReplicaMeta,
 } from './types';
 
-export type StorageAccountDocPage = {
+type StorageAccountDocPage = {
   items: StorageAccountDoc[];
   nextCursor: string | null;
 };
 
-export type StorageBookDocPage = {
+type StorageBookDocPage = {
   items: Array<{ pairId: string; book: BookState }>;
   nextCursor: string | null;
 };

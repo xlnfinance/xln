@@ -17,7 +17,7 @@ import {
 
 export const HTLC_MULTI_RECIPIENT_VERSION = 'xln:htlc-multi-recipient:v1' as const;
 
-export type ValidatorWrappedContentKey = Readonly<{
+type ValidatorWrappedContentKey = Readonly<{
   signerId: string;
   encryptionPublicKey: string;
   wrappedKey: string;

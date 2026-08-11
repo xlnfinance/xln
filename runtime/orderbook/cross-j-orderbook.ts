@@ -2,7 +2,6 @@ import type { CrossJurisdictionBookAdmission } from '../types/cross-jurisdiction
 import type { EntityState } from '../entity/types';
 import type { EntityRuntimeContext } from '../entity/runtime-context';
 import type { RuntimeOverlayRecord } from '../types/account';
-import { normalizeSwapOfferForOrderbook } from './swap-execution';
 import { type OrderbookExtState } from './index';
 import { removeBookOrderById } from './cross-j';
 import {
@@ -17,7 +16,6 @@ import {
 } from '../extensions/cross-j/orderbook';
 import { createStructuredLogger, shortOrder } from '../infra/logger';
 
-export type OrderbookOfferForMatch = ReturnType<typeof normalizeSwapOfferForOrderbook>;
 type CommittedSwapCancel = Readonly<{ offerId: string; accountId: string }>;
 
 const crossJBookLog = createStructuredLogger('crossj.orderbook');

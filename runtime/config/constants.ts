@@ -381,36 +381,6 @@ export const QA = {
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
-// VALIDATION THRESHOLDS
-// ═══════════════════════════════════════════════════════════════
-
-export const VALIDATION = {
-  /** Maximum age of frame before rejection (milliseconds) */
-  MAX_FRAME_AGE_MS: 3600_000, // 1 hour
-
-  /** Minimum shares for entity registration */
-  MIN_ENTITY_SHARES: 1n,
-
-  /** Maximum shares for entity registration (prevents overflow) */
-  MAX_ENTITY_SHARES: 2n ** 64n - 1n,
-} as const;
-
-// ═══════════════════════════════════════════════════════════════
-// ENCODING & SERIALIZATION
-// ═══════════════════════════════════════════════════════════════
-
-export const ENCODING = {
-  /** Default encoding for buffers */
-  DEFAULT_ENCODING: 'hex' as const,
-
-  /** UTF-8 encoding for text */
-  TEXT_ENCODING: 'utf8' as const,
-
-  /** RLP encoding for Ethereum compatibility */
-  USE_RLP: true,
-} as const;
-
-// ═══════════════════════════════════════════════════════════════
 // TESTNET OVERRIDES (Uncomment for faster testing)
 // ═══════════════════════════════════════════════════════════════
 

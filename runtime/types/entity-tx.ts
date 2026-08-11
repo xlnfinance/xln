@@ -10,7 +10,7 @@ import type { CertifiedBoardAuthorityBinding } from './entity-board-registry';
 import type { ConsumptionProof } from '../entity/consumption-accumulator-types';
 import type { MultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';
 
-export type ProfileUpdateTx = {
+type ProfileUpdateTx = {
   name?: string;
   avatar?: string;
   bio?: string;
@@ -55,7 +55,7 @@ export type EntityCommandNonceState = {
  * commits the plan, binds it to the resulting workspace hash, and materializes
  * it only after both Account replicas have committed `ready_to_submit`.
  */
-export type SettlementContinuationAction =
+type SettlementContinuationAction =
   | {
       type: 'r2r';
       toEntityId: string;

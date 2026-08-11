@@ -37,11 +37,6 @@ export interface HtlcEnvelope {
   forwardAmount?: string;     // Exact amount this hop must forward to next hop
 }
 
-export interface HtlcRoutingContext {
-  route: string[];            // Full route (used by sender to create envelopes)
-  currentHopIndex: number;    // Which hop we're at (for debugging)
-}
-
 export type HtlcEnvelopeBinding = Readonly<{
   rootLockId: string;
   hashlock: string;

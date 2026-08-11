@@ -156,7 +156,7 @@ export function buildEntityProfile(
   return profile;
 }
 
-export const createProfileSignerResolver = (env: RuntimeReplica): ProfileSignerResolver => {
+const createProfileSignerResolver = (env: RuntimeReplica): ProfileSignerResolver => {
   return {
     getSignerAddress: (signerId) => getSignerAddress(env, signerId),
     getSignerPublicKeyHex: (signerId) => {
@@ -167,7 +167,7 @@ export const createProfileSignerResolver = (env: RuntimeReplica): ProfileSignerR
   };
 };
 
-export const getNextProfileTimestamp = (env: RuntimeReplica, entityId: string, fallbackTimestamp?: number): number => {
+const getNextProfileTimestamp = (env: RuntimeReplica, entityId: string, fallbackTimestamp?: number): number => {
   const existingProfile = env.gossip.getProfiles().find((profile) => profile.entityId === entityId);
   const lastTimestamp = existingProfile?.lastUpdated ?? 0;
   const candidate = typeof fallbackTimestamp === 'number' ? fallbackTimestamp : env.state.timestamp;

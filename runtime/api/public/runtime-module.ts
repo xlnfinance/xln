@@ -16,11 +16,8 @@ export type {
   JId,
   EntityProviderAddress,
   ReplicaKey,
-  FullReplicaAddress,
-  ReplicaUri,
   EntityType,
 } from '../../protocol/identity';
-export type { JurisdictionInfo } from '../../protocol/jurisdiction-identity';
 
 // Re-export core types from types.ts
 export type { RuntimeReplica, EnvSnapshot, RuntimeInput, RoutedEntityInput } from '../../runtime/types';
@@ -28,66 +25,36 @@ export type { EntityReplica, EntityState, SwapBookEntry, JurisdictionConfig, Con
 export type { JReplica } from '../../types/jurisdiction-runtime';
 export type { EntityTx } from '../../types/entity-tx';
 export type { AccountReplica, AccountState, AccountFrame, Delta, DerivedDelta, AccountTx, SettlementDiff } from '../../types/account';
-export type { Xlnomy, XlnomySnapshot } from '../../types/xlnomy';
+export type { Xlnomy } from '../../types/xlnomy';
 export type { HubRebalanceConfig } from '../../types/rebalance';
 export type { DebtEntry } from '../../types/debt';
 export type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 export type { PaymentDeliveryMode } from '../../types/payment';
 export type { PersistedFrameJournal } from '../../storage/types';
-export type { BoardMemberInput } from '../../entity/factory';
-export type { PersistedActivityJournal } from '../../storage/views/activity-types';
 export type { RuntimeFrame, StorageHead } from '../../storage/types';
 export type {
   EncryptedRuntimeRecoveryBundleV1,
-  RuntimeRecording,
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
   TowerLastResortPayloadV1,
-  TowerActionKindV1,
-  TowerAppointmentOwnerProofV1,
   TowerAppointmentV1,
   TowerCounterDisputeRemedy,
-  TowerDiscoverResponseV1,
-  TowerEncryptedPayloadV1,
-  TowerFinalDisputeProof,
-  TowerProofBody,
   TowerModeV1,
   TowerReceiptV1,
-  TowerRestoreRequestV1,
-  TowerRestoreResponseV1,
 } from '../../storage/recovery/types';
 
-export type { GossipLayer } from '../../network/p2p/gossip';
 export type { Profile } from '../../entity/profile';
 export type { PaymentRoute } from '../../routing/pathfinding';
 export type { JBatch, JBatchState } from '../../jurisdiction/machine/batch';
-export type { JAdapter, JEvent } from '../../jurisdiction/adapter/types';
-export type { BookState, OrderbookExtState, PreparedSwapOrder } from '../../orderbook';
+export type { JAdapter } from '../../jurisdiction/adapter/types';
+export type { BookState } from '../../orderbook';
 export type {
   SwapAccountCapacityView,
-  SwapAccountCapacityViewInput,
   SwapInboundCapacityPlan,
-  SwapInboundCapacityPlanInput,
 } from '../../account/swap-inbound-plan';
-export type {
-  CrossJurisdictionSwapCommandPlan,
-  SameJurisdictionSwapCommandPlan,
-  SwapCommandPlan,
-  SwapCommandPlanInput,
-  SwapCommandPreparedOrder,
-} from '../../runtime/swap-command-plan';
-export type {
-  MppChallenge,
-  MppChallengeBindingInput,
-  MppCredential,
-  MppJsonRecord,
-  MppJsonValue,
-  MppReceipt,
-} from '../../protocol/payments/mpp';
 export type { RuntimeActivityEvent, RuntimeActivityFilters } from '../../storage/views/activity-types';
-export type { DeliveryOutcome, DeliveryResult } from '../../protocol/payments/delivery-result';
-export type { RuntimeEntityInputRoutingResult } from '../../runtime/output-routing';
+export type { DeliveryResult } from '../../protocol/payments/delivery-result';
 export type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -115,11 +82,9 @@ export {
 export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
-  deriveCanonicalCrossJurisdictionVenueIdForLegs,
 } from '../../extensions/cross-j/market';
 export {
   getJurisdictionStackId,
-  isJurisdictionStackRef,
 } from '../../jurisdiction/machine/jurisdiction-stack';
 
 // Re-export identity functions types
@@ -152,11 +117,6 @@ export {
 export { formatReplicaUri, parseReplicaUri } from '../../protocol/identity-uri';
 
 import type {
-  RuntimeAdapterAccountPage,
-  RuntimeAdapterBookPage,
-  RuntimeAdapterGraphAccount,
-  RuntimeAdapterGraphAccountActivity,
-  RuntimeAdapterGraphAccountPage,
   RuntimeAdapterGraphEntityCore,
   RuntimeAdapterGraphFrame,
   RuntimeAdapterFrameSummary,
@@ -168,7 +128,6 @@ import type {
 	  RuntimeAdapterEntitySummary,
 	  RuntimeAdapterSolvencySummary,
 	  RuntimeAdapterTimelineIndexPage,
-	  RuntimeAdapterTimelineFrame,
 	} from '../runtime-adapter/types';
 
 export type BrowserVMTokenInfo = {
@@ -180,11 +139,6 @@ export type BrowserVMTokenInfo = {
 };
 
 export type {
-  RuntimeAdapterAccountPage,
-  RuntimeAdapterBookPage,
-  RuntimeAdapterGraphAccount,
-  RuntimeAdapterGraphAccountActivity,
-  RuntimeAdapterGraphAccountPage,
   RuntimeAdapterGraphEntityCore,
   RuntimeAdapterGraphFrame,
   RuntimeAdapterFrameSummary,
@@ -194,14 +148,8 @@ export type {
 	  RuntimeAdapterEntitySummary,
 	  RuntimeAdapterSolvencySummary,
 	  RuntimeAdapterTimelineIndexPage,
-	  RuntimeAdapterTimelineFrame,
 	};
 
-export type { P2PConfig } from '../../network/p2p/p2p';
-export type {
-  CrossJurisdictionSwapSubmitParams,
-  CrossJurisdictionSwapSubmitResult,
-} from '../../runtime/jurisdiction-api';
 
 /**
  * Entity display info returned by getEntityDisplayInfo

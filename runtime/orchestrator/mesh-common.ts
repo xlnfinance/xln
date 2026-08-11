@@ -3,7 +3,6 @@ import type { EntityTx } from '../types/entity-tx';
 import type { RuntimeReplica } from '../runtime/types';
 import { deriveDelta, getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
-import { compareStableText } from '../protocol/serialization';
 import { getBootstrapTokenAmount } from '../jurisdiction/machine/bootstrap-economy';
 import { getEntityReplicaById } from '../entity/replica-lookup';
 import { assertEntityProposalAction } from '../entity/authorization';
@@ -12,8 +11,6 @@ import { getReliableOutputIdentity } from '../runtime/output-routing';
 export { getEntityReplicaById } from '../entity/replica-lookup';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
 export {
-  BOOTSTRAP_USD_NOTIONAL,
-  BOOTSTRAP_WETH_USD_RATE,
   getBootstrapTokenAmount,
 } from '../jurisdiction/machine/bootstrap-economy';
 
@@ -28,7 +25,7 @@ export const HUB_REQUIRED_TOKEN_COUNT = 3;
 export const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 export const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** BigInt(getTokenInfo(HUB_MESH_TOKEN_ID).decimals);
 export const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env['BOOTSTRAP_POLL_MS'] || '50'));
-export const RUNTIME_SETTLE_POLL_MS = Math.max(5, Number(process.env['RUNTIME_SETTLE_POLL_MS'] || '10'));
+const RUNTIME_SETTLE_POLL_MS = Math.max(5, Number(process.env['RUNTIME_SETTLE_POLL_MS'] || '10'));
 
 export const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
@@ -394,17 +391,3 @@ export const hasPairMutualCredits = (
   tokenId,
   typeof amount === 'function' ? amount(tokenId) : amount,
 ));
-
-export const serializeReserves = (reserves: ReadonlyMap<string | number, bigint>): Record<string, string> => {
-  const entries = Array.from(reserves.entries())
-    .map(([tokenId, amount]) => [String(tokenId), amount.toString()] as const)
-    .sort(([left], [right]) => {
-      const leftNum = Number(left);
-      const rightNum = Number(right);
-      if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
-        return leftNum - rightNum;
-      }
-      return compareStableText(left, right);
-    });
-  return Object.fromEntries(entries);
-};

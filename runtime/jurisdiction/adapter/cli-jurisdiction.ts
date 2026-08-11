@@ -15,7 +15,7 @@ type RawJurisdictionsPayload = Record<string, unknown> & {
   jurisdictions?: Record<string, RawJurisdictionEntry>;
 };
 
-export type CliJurisdictionContracts = {
+type CliJurisdictionContracts = {
   account: string;
   depository: string;
   entityProvider: string;

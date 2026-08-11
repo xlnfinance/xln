@@ -2,7 +2,7 @@ import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction/adap
 import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import { isLoopbackUrl, normalizeLoopbackUrl, toPublicRpcUrl } from '../network/p2p/loopback-url';
 
-export type MeshJurisdictionConfig = {
+type MeshJurisdictionConfig = {
   name: string;
   chainId: number;
   rpc: string;
@@ -90,7 +90,7 @@ export const requireJurisdictionBlockTimeMs = (
   throw new Error(`JURISDICTION_BLOCK_TIME_MISSING:${jurisdiction.name}`);
 };
 
-export const isSecondaryJurisdictionConfig = (
+const isSecondaryJurisdictionConfig = (
   key: string,
   jurisdiction: MeshJurisdictionConfig,
   primaryRpc: string,

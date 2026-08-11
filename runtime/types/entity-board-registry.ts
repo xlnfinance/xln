@@ -33,14 +33,14 @@ export type CertifiedBoardRecord = {
   source: CertifiedBoardSource;
 };
 
-export type CertifiedBoardLeafNode = {
+type CertifiedBoardLeafNode = {
   version: 1;
   type: 'leaf';
   key: string;
   record: CertifiedBoardRecord;
 };
 
-export type CertifiedBoardBranchNode = {
+type CertifiedBoardBranchNode = {
   version: 1;
   type: 'branch';
   /** Most-significant-bit index in [0, 255]. Child branch bits strictly rise. */

@@ -5,10 +5,10 @@
  * utilization = 1 - (outCapacity / totalCapacity)
  * effectivePPM = basePPM * (1 + utilization)
  */
-export const PPM_DENOM = 1_000_000n;
+const PPM_DENOM = 1_000_000n;
 export const MAX_ROUTING_FEE_PPM = 999_999;
-export const DIRECTIONAL_UTIL_STEP_PPM = 50_000n; // 5% utilization buckets
-export const DIRECTIONAL_UTIL_CAP_PPM = 500_000n; // cap uplift at +50% (1.5x base fee)
+const DIRECTIONAL_UTIL_STEP_PPM = 50_000n; // 5% utilization buckets
+const DIRECTIONAL_UTIL_CAP_PPM = 500_000n; // cap uplift at +50% (1.5x base fee)
 
 const clampNonNegative = (value: bigint): bigint => (value < 0n ? 0n : value);
 

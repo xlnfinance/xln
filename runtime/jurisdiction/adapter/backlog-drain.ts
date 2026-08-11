@@ -11,7 +11,7 @@ import { safeStringify } from '../../protocol/serialization';
 import { scheduler } from 'node:timers/promises';
 import { getLiveJAdapterEntries } from '../../runtime/live-jadapters';
 
-export const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 60_000;
+const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 60_000;
 const J_WATCHER_DRAIN_RETRY_DELAY_MS = 100;
 
 export type JWatcherDrainProgress = {
@@ -38,7 +38,7 @@ export const observeJWatcherDrainProgress = (
   return { ...previous, retrying: true };
 };
 
-export type CapturedJWatcherTarget = {
+type CapturedJWatcherTarget = {
   adapter: JAdapter;
   targetBlock: number;
 };
@@ -88,7 +88,7 @@ const requireWatcherReplica = (env: RuntimeReplica, adapter: JAdapter): JReplica
   return replica;
 };
 
-export const captureTrustedJWatcherTargets = async (env: RuntimeReplica): Promise<CapturedJWatcherTarget[]> => {
+const captureTrustedJWatcherTargets = async (env: RuntimeReplica): Promise<CapturedJWatcherTarget[]> => {
   const targets: CapturedJWatcherTarget[] = [];
   for (const adapter of getUniqueWatcherAdapters(env)) {
     if (
@@ -156,7 +156,7 @@ const replicaDrainStatus = (key: string, replica: EntityReplica) => {
   };
 };
 
-export const getJWatcherDrainStatus = (
+const getJWatcherDrainStatus = (
   env: RuntimeReplica,
   target: CapturedJWatcherTarget,
 ): JWatcherDrainStatus => {

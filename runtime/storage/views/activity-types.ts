@@ -16,7 +16,7 @@ export type ActivityType =
   | 'system'
   | 'error';
 export type ActivityDirection = 'in' | 'out' | 'neutral';
-export type ActivitySource = 'runtime_input' | 'runtime_log' | 'j_input';
+type ActivitySource = 'runtime_input' | 'runtime_log' | 'j_input';
 
 export type RuntimeActivityFilters = {
   entityId?: string | undefined;

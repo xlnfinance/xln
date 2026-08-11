@@ -38,5 +38,3 @@ export const waitForReserveUpdatedEvidence = async (
   }
   return findReserveUpdatedEvidence(env, entityId, tokenId, expectedMin);
 };
-
-export { findReserveUpdatedEvidence };

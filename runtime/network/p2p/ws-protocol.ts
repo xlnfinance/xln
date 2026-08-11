@@ -25,7 +25,7 @@ import {
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
 
-export const DEFAULT_MAX_WS_MESSAGE_BYTES = 1024 * 1024;
+const DEFAULT_MAX_WS_MESSAGE_BYTES = 1024 * 1024;
 const WS_STRING_FIELD_MAX_BYTES: Readonly<Record<string, number>> = {
   id: 128,
   from: 128,
@@ -41,7 +41,7 @@ const WS_STRING_FIELD_MAX_BYTES: Readonly<Record<string, number>> = {
 };
 const utf8Encoder = new TextEncoder();
 
-export type RuntimeWsMessageType =
+type RuntimeWsMessageType =
   | 'hello'
   | 'hello_challenge'
   | 'hello_ack'
@@ -378,7 +378,7 @@ export const resolveRuntimeWsRelayAudience = (
 export const directRuntimeWsAudience = (runtimeId: string): string =>
   `xln-runtime:${runtimeId.toLowerCase()}`;
 
-export const buildHelloMessage = (
+const buildHelloMessage = (
   runtimeId: string,
   encryptionPubKey: string,
   timestamp: number,

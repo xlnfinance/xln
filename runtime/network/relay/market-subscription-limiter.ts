@@ -1,4 +1,4 @@
-export type MarketSubscriptionLimitFailure = {
+type MarketSubscriptionLimitFailure = {
   ok: false;
   code: 'E_RATE_LIMITED';
   error: string;

@@ -1,6 +1,6 @@
 import type { RuntimeOverlayRecord } from '../types/account';
 
-export const normalizeOverlayEntityId = (value: string): string =>
+const normalizeOverlayEntityId = (value: string): string =>
   String(value || '').toLowerCase();
 
 export const storageOverlayRecordKey = (record: RuntimeOverlayRecord): string => {

@@ -2,7 +2,7 @@
  * Shared default token catalog for dev/testnets.
  */
 
-export const DEFAULT_TOKEN_SUPPLY_UNITS = 1_000_000_000_000n;
+const DEFAULT_TOKEN_SUPPLY_UNITS = 1_000_000_000_000n;
 export const TOKEN_REGISTRATION_AMOUNT = 1n;
 
 export type DefaultTokenDefinition = {

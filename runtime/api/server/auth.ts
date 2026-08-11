@@ -17,7 +17,7 @@ const extractBearerAuth = (header: string | null): string => {
   return match ? match[1]!.trim() : '';
 };
 
-export const verifyDaemonCapability = (
+const verifyDaemonCapability = (
   env: RuntimeReplica | null,
   key: unknown,
   requiredLevel: RuntimeAdapterAuthLevel,
@@ -52,7 +52,7 @@ export const requireDaemonControlAuth = (
   return new Response(serializeTaggedJson({ ok: false, error: 'Unauthorized' }), { status: 401, headers: JSON_HEADERS });
 };
 
-export class ControlBodyTooLargeError extends Error {
+class ControlBodyTooLargeError extends Error {
   readonly status = 413;
 
   constructor(bytes: number, maxBytes: number) {

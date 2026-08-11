@@ -4,7 +4,7 @@ import type { NamespaceBytes, RuntimeDbLike } from './types';
 
 const STORAGE_BATCH_CHUNK_SIZE = 256;
 
-export const storageKeyToBuffer = (rawKey: Buffer | Uint8Array | string): Buffer => {
+const storageKeyToBuffer = (rawKey: Buffer | Uint8Array | string): Buffer => {
   if (Buffer.isBuffer(rawKey)) return rawKey;
   if (rawKey instanceof Uint8Array) return Buffer.from(rawKey);
   return Buffer.from(String(rawKey));

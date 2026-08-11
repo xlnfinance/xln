@@ -29,7 +29,7 @@ export interface HealthStatus {
   };
 }
 
-export interface JMachineHealth {
+interface JMachineHealth {
   name: string;
   chainId: number;
   rpc: string[];
@@ -53,7 +53,7 @@ export interface HubHealth {
   error?: string | undefined;
 }
 
-export interface SystemHealth {
+interface SystemHealth {
   runtime: boolean;
   p2p: boolean;
   relay: boolean;

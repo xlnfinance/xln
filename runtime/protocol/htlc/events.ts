@@ -1,4 +1,4 @@
-export const buildHtlcReceivedTimingFields = (startedAtMs: number | undefined, receivedAtMs: number) => {
+const buildHtlcReceivedTimingFields = (startedAtMs: number | undefined, receivedAtMs: number) => {
   if (!startedAtMs) {
     return { receivedAtMs };
   }
@@ -10,7 +10,7 @@ export const buildHtlcReceivedTimingFields = (startedAtMs: number | undefined, r
   };
 };
 
-export const buildHtlcFinalizedTimingFields = (startedAtMs: number | undefined, finalizedAtMs: number) => {
+const buildHtlcFinalizedTimingFields = (startedAtMs: number | undefined, finalizedAtMs: number) => {
   if (!startedAtMs) {
     return { finalizedAtMs };
   }

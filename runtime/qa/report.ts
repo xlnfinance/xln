@@ -76,7 +76,7 @@ import {
   type QaUxReleasePackAudit,
 } from './report-types';
 
-export type { QaSeverity, QaSeverityEvidence, QaSeveritySignal } from './severity';
+export type { QaSeverity, QaSeveritySignal } from './severity';
 export * from './report-types';
 
 export const auditQaUxReleasePack = (stories: QaStoryScreenshot[]): QaUxReleasePackAudit => {
@@ -416,7 +416,7 @@ const fatalMarkerLine = (value: string): string | null => {
   return null;
 };
 
-export const summarizeQaFatalMarkers = (run: Pick<QaRunManifest, 'shards'>): QaFatalMarker[] => {
+const summarizeQaFatalMarkers = (run: Pick<QaRunManifest, 'shards'>): QaFatalMarker[] => {
   const markers: QaFatalMarker[] = [];
   for (const shard of run.shards) {
     const sources = [
@@ -1041,7 +1041,7 @@ const explicitRunTestCategory = (value: unknown): QaRunTestCategory | null =>
     ? value
     : null;
 
-export const deriveQaRunTestCategory = (
+const deriveQaRunTestCategory = (
   run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>,
 ): QaRunTestCategory => {
   const explicit = explicitRunTestCategory(run.testCategory);
@@ -1060,7 +1060,7 @@ export const deriveQaRunTestCategory = (
   return 'unknown';
 };
 
-export const qaRunSuiteKey = (run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>): string => {
+const qaRunSuiteKey = (run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>): string => {
   const args = run.args ?? {};
   const source = {
     pwProject: normalizeSuiteText(args['pwProject']),
@@ -1074,7 +1074,7 @@ export const qaRunSuiteKey = (run: Pick<QaRunManifest, 'testCategory' | 'args' |
   return createHash('sha256').update(JSON.stringify(source)).digest('hex').slice(0, 24);
 };
 
-export const qaRunSuiteLabel = (run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>): string => {
+const qaRunSuiteLabel = (run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>): string => {
   const testCategory = deriveQaRunTestCategory(run);
   const prefix = testCategory === 'unknown' ? '' : `${testCategory} · `;
   if (run.shards.length === 1) {
@@ -1249,7 +1249,7 @@ const averageBootstrapMs = (run: QaRunManifest): number | null => {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 };
 
-export const summarizeQaRunTiming = (run: QaRunManifest): QaRunTimingSummary => ({
+const summarizeQaRunTiming = (run: QaRunManifest): QaRunTimingSummary => ({
   avgShardMs: averageShardMs(run),
   maxShardMs: maxShardMs(run),
   bootstrapMs: averageBootstrapMs(run),
@@ -1440,7 +1440,7 @@ export const assertQaRunCandidateBinding = (run: QaRunManifest): void => {
   }
 };
 
-export const assertQaCandidateHeaderBinding = (
+const assertQaCandidateHeaderBinding = (
   run: Pick<QaRunManifest, 'manifestVersion' | 'candidate' | 'gateConfig' | 'code'>,
 ): QaCandidateIdentity => {
   if (run.manifestVersion < 5) {
@@ -1861,7 +1861,7 @@ const rowToQaRunSummary = (row: Record<string, unknown>): QaRunSummary => {
   };
 };
 
-export const findComparableQaBenchmarkRun = (run: QaRunManifest): QaRunManifest | null => {
+const findComparableQaBenchmarkRun = (run: QaRunManifest): QaRunManifest | null => {
   const db = openQaHistoryDb();
   try {
     const row = db.query(`
@@ -2168,7 +2168,7 @@ const readUxScreenshotMetadata = async (imagePath: string): Promise<QaUxScreensh
   }
 };
 
-export const makeQaStoryImageUrl = (source: QaStorySource, relativePath: string): string =>
+const makeQaStoryImageUrl = (source: QaStorySource, relativePath: string): string =>
   `/api/qa/story-image?source=${encodeURIComponent(source)}&path=${encodeURIComponent(relativePath)}`;
 
 const shortTail = (text: string, lines: number = QA.LOG_TAIL_LINES): string => text.split('\n').slice(-lines).join('\n');
@@ -2258,7 +2258,7 @@ const shortQaTestDescription = (description: string): string => {
   return words.length <= 9 ? words.join(' ') : `${words.slice(0, 9).join(' ')}…`;
 };
 
-export const buildQaTestLedger = (runs: readonly QaRunManifest[]): QaTestLedgerEntry[] => {
+const buildQaTestLedger = (runs: readonly QaRunManifest[]): QaTestLedgerEntry[] => {
   const latest = new Map<string, QaTestLedgerEntry>();
   const ordered = [...runs].sort((a, b) => b.createdAt - a.createdAt || b.runId.localeCompare(a.runId));
   for (const run of ordered) {
@@ -2363,7 +2363,7 @@ export const parseQaTimelineSteps = (text: string): QaSlowStep[] => {
   return out;
 };
 
-export const parseQaSlowSteps = (text: string): QaSlowStep[] => {
+const parseQaSlowSteps = (text: string): QaSlowStep[] => {
   const out = parseQaTimelineSteps(text);
   return out.sort((a, b) => b.ms - a.ms);
 };
@@ -2670,7 +2670,7 @@ const listQaRunIds = async (limit: number): Promise<string[]> => {
     .slice(0, limit);
 };
 
-export const listQaRuns = async (limit = 20): Promise<QaRunManifest[]> => {
+const listQaRuns = async (limit = 20): Promise<QaRunManifest[]> => {
   const runIds = await listQaRunIds(limit);
   return await Promise.all(runIds.map(runId => readQaRun(runId)));
 };
@@ -2797,7 +2797,7 @@ export const resolveQaArtifactPath = async (runId: string, relativePath: string)
   return realArtifactPath;
 };
 
-export const makeQaArtifactUrl = (runId: string, relativePath: string): string =>
+const makeQaArtifactUrl = (runId: string, relativePath: string): string =>
   `/api/qa/artifact?runId=${encodeURIComponent(runId)}&path=${encodeURIComponent(relativePath)}`;
 
 const enrichQaArtifactUrl = async (runId: string, artifact: QaArtifact): Promise<QaArtifact> => {

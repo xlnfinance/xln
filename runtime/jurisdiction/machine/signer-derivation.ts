@@ -3,7 +3,7 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 const JURISDICTION_SIGNER_INDEX_BASE = 100_000;
 const JURISDICTION_SIGNER_INDEX_BUCKETS = 1_000_000n;
 
-export const normalizeJurisdictionSignerKey = (jurisdiction: string): string =>
+const normalizeJurisdictionSignerKey = (jurisdiction: string): string =>
   String(jurisdiction || '').trim().toLowerCase();
 
 /**

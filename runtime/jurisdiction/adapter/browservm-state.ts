@@ -57,7 +57,7 @@ type BrowserVmStateManager = { _trie?: BrowserVmTrie };
 type BrowserVmHandle = { stateManager: unknown };
 type TrieMapStore = { _database?: unknown; db?: unknown };
 
-export const normalizeBrowserVmEvenHex = (hex: string): string => {
+const normalizeBrowserVmEvenHex = (hex: string): string => {
   const raw = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex;
   return raw.length % 2 === 1 ? `0${raw}` : raw;
 };
@@ -75,7 +75,7 @@ const getBrowserVmTrieMap = (vm: BrowserVmHandle, operation: string): Map<unknow
   throw new Error(`BrowserVM ${operation}: unsupported trie db`);
 };
 
-export const normalizeBrowserVmHex = (value: unknown): string | null => {
+const normalizeBrowserVmHex = (value: unknown): string | null => {
   if (value === null || value === undefined) return null;
   if (typeof value === 'string') {
     const raw = value.startsWith('0x') ? value.slice(2) : value;

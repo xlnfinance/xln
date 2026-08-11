@@ -3,13 +3,13 @@ import type { JAdapterFailure } from './jurisdiction-runtime';
 export type EntityProviderExecutableActionKind = 'entityTransferTokens' | 'releaseControlShares';
 export type EntityProviderActionKind = EntityProviderExecutableActionKind | 'cancelPendingAction';
 
-export type EntityProviderTransferPayload = Readonly<{
+type EntityProviderTransferPayload = Readonly<{
   to: string;
   tokenId: bigint;
   amount: bigint;
 }>;
 
-export type EntityProviderReleaseControlSharesPayload = Readonly<{
+type EntityProviderReleaseControlSharesPayload = Readonly<{
   recipientAddress: string;
   controlAmount: bigint;
   dividendAmount: bigint;
@@ -56,7 +56,7 @@ export type EntityProviderActionState = {
   pending?: EntityProviderActionIntent;
 };
 
-export type EntityProviderActionSubmitAttempt = Readonly<{
+type EntityProviderActionSubmitAttempt = Readonly<{
   attemptId: string;
   attemptNumber: number;
   attemptedAt: number;
@@ -70,7 +70,7 @@ export type EntityProviderActionJTxData = {
   runtimeSubmitAttempt?: EntityProviderActionSubmitAttempt;
 };
 
-export type EntityProviderActionSubmitOutcome =
+type EntityProviderActionSubmitOutcome =
   | 'submitted'
   | 'transientFailure'
   | 'terminalFailure'

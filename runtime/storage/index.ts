@@ -156,12 +156,7 @@ import type {
 import { resolveStorageRuntimeConfig } from './config';
 export { resolveStorageRuntimeConfig } from './config';
 export {
-  buildAccountMerkleFromDocs,
   buildAccountMerkleFromState,
-  hydrateAccountDocFromStorage,
-  hydrateEntityStateFromStorage,
-  projectAccountDoc,
-  projectEntityCoreDoc,
 } from './projections';
 export {
   readHistoryViewAccountFrames,
@@ -179,7 +174,6 @@ export {
 export {
   computeStorageFrameHash,
   computeStoragePostStateHash,
-  computeStorageStateRoot,
 } from './hashes';
 export {
   readStorageOverlayRecordsFromDiffs,
@@ -192,7 +186,6 @@ export {
   hydrateAccountJClaimRootNodesFromStorage,
   hydrateCertifiedBoardRootNodesFromStorage,
   hydrateConsumptionRootNodesFromStorage,
-  listStorageLiveEntityIds,
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
   listStorageSnapshotReplicaMetas,
@@ -203,41 +196,28 @@ export {
   loadEntityViewPageFromStorage,
   readStorageFrameRecord,
   readStorageHead,
-  readStorageReplicaMeta,
 } from './read';
 export {
   verifyStorageTailIntegrity,
 } from './verify';
 export {
   replaceRestoredStorageBase,
-  type RestoredStorageBaseOptions,
 } from './restore-import';
 
 export type {
-  StorageAccountDocPage,
-  StorageBookDocPage,
   StorageEntityViewPage,
 } from './read';
 
 export type {
   RuntimeDbLike,
   StorageAccountDoc,
-  StorageDebugStats,
-  StorageDiffRecord,
-  StorageDoc,
-  StorageDocRef,
-  StorageEntityCoreDoc,
   StorageEntityHashDoc,
-  StorageEpochSeedStats,
-  StorageFrameEntityHash,
   RuntimeFrame,
   StorageHead,
   StoragePersistenceBoundary,
-  StoragePersistenceBoundaryHook,
   StoragePersistenceProgressHook,
   StorageReplicaMeta,
   StorageRuntimeConfig,
-  StorageSnapshotManifest,
 } from './types';
 
 const storageLog = createStructuredLogger('runtime.storage');
@@ -756,7 +736,7 @@ export type StorageFrameSaveResult = {
   persistencePerfMs?: StoragePersistencePerf;
 };
 
-export type StoragePersistencePerf = {
+type StoragePersistencePerf = {
   open: number;
   planning: number;
   planningStages: Record<string, number>;

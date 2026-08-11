@@ -7,10 +7,7 @@
 // Re-export core types
 export type {
   Side,
-  TIF,
-  OrderCmd,
   BookEvent,
-  BookParams,
   BookOrderState,
   BookState,
   PriceBucketState,

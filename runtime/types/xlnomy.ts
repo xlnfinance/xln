@@ -6,9 +6,9 @@ import type { EnvSnapshot } from '../runtime/types';
  * Economic Topology Types
  * Defines how central bank, commercial banks, and customers interact
  */
-export type TopologyType = 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid';
+type TopologyType = 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid';
 
-export interface TopologyLayer {
+interface TopologyLayer {
   name: string;              // "Federal Reserve", "Tier 1 Banks", "Customers"
   yPosition: number;         // Vertical position in 3D space
   entityCount: number;       // How many entities in this layer
@@ -24,7 +24,7 @@ export interface TopologyLayer {
   canMintMoney: boolean;     // Only central bank = true
 }
 
-export interface ConnectionRules {
+interface ConnectionRules {
   // Who can create accounts with whom
   allowedPairs: Array<{ from: string; to: string }>;
 
@@ -37,7 +37,7 @@ export interface ConnectionRules {
   defaultCreditLimits: Map<string, bigint>;
 }
 
-export interface XlnomyTopology {
+interface XlnomyTopology {
   type: TopologyType;
   layers: TopologyLayer[];
   rules: ConnectionRules;
@@ -89,7 +89,7 @@ export interface Xlnomy {
  * Abstract jurisdiction EVM (BrowserVM or RPC to Reth/Erigon/Monad)
  * Allows swapping execution layer without changing runtime code
  */
-export interface JurisdictionEVM {
+interface JurisdictionEVM {
   type: 'browservm' | 'reth' | 'erigon' | 'monad';
 
   // Contract deployment
@@ -120,7 +120,7 @@ export interface JurisdictionEVM {
  * Persisted Xlnomy snapshot (stored in Level/IndexedDB)
  * Can be exported as JSON and shared/imported
  */
-export interface XlnomySnapshot {
+interface XlnomySnapshot {
   name: string;
   version: string;
   created: number;

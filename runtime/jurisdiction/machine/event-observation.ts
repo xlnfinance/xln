@@ -8,7 +8,7 @@ import {
   requireCanonicalJurisdictionEvents,
 } from './event-normalization';
 
-export const UNCONFIGURED_J_EVENT_JURISDICTION = 'unconfigured';
+const UNCONFIGURED_J_EVENT_JURISDICTION = 'unconfigured';
 
 export const getJEventJurisdictionRef = (jurisdiction: unknown): string =>
   getJurisdictionIdentityRef(jurisdiction) || UNCONFIGURED_J_EVENT_JURISDICTION;
@@ -31,7 +31,7 @@ const normDecimal = (value: unknown): string => {
   return String(value || '').trim();
 };
 
-export const canonicalDisputeFinalizationEvidenceKey = (evidence: DisputeFinalizationEvidence): string => {
+const canonicalDisputeFinalizationEvidenceKey = (evidence: DisputeFinalizationEvidence): string => {
   return JSON.stringify([
     normHex(evidence.sender),
     normHex(evidence.counterentity),

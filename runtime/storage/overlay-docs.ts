@@ -42,7 +42,7 @@ export const mergeOverlayRecordsIntoEnv = (
   return env.overlay.map((record) => ({ ...record }));
 };
 
-export const overlayRecordsFromDocs = (
+const overlayRecordsFromDocs = (
   puts: readonly StorageDoc[] | undefined,
   dels: readonly StorageDocRef[] | undefined,
 ): RuntimeOverlayRecord[] => {

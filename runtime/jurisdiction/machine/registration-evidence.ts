@@ -67,7 +67,7 @@ const evidenceBody = (
 export const registrationEvidenceKey = (stackKey: string, entityId: string): string =>
   `${bytes32(stackKey, 'STACK_KEY')}:${bytes32(entityId, 'ENTITY_ID')}`;
 
-export const buildRegistrationEvidenceRawLogDigest = (
+const buildRegistrationEvidenceRawLogDigest = (
   value: Pick<
     CertifiedRegistrationEvidence,
     | 'emitter'

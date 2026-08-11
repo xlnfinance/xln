@@ -297,7 +297,7 @@ const spawnText = (cmd: string, args: string[]): string => {
   return String(result.stdout || '').trim();
 };
 
-export const computeQaRestartFingerprint = (): QaCodeFingerprint => {
+const computeQaRestartFingerprint = (): QaCodeFingerprint => {
   const gitHead = spawnText('git', ['rev-parse', 'HEAD']) || null;
   const gitBranch = spawnText('git', ['rev-parse', '--abbrev-ref', 'HEAD']) || null;
   const gitStatus = spawnText('git', ['status', '--short', '--untracked-files=all']);
@@ -745,7 +745,7 @@ const reapQaRestartState = (now = Date.now()): void => {
   }
 };
 
-export const readQaRestartStatus = (now = Date.now()): Record<string, unknown> => {
+const readQaRestartStatus = (now = Date.now()): Record<string, unknown> => {
   if (!activeRestart) {
     const cooldownRemainingMs = Math.max(0, restartCooldownUntil - now);
     const severity = cooldownRemainingMs > 0

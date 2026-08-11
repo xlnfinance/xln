@@ -7,7 +7,7 @@ import type { RuntimeReplica } from '../../runtime/types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import { isEntityReplicaRelevantToWatcher } from './watcher';
 
-export type WatcherLocalFrontier = {
+type WatcherLocalFrontier = {
   replicaKey: string;
   replica: EntityReplica;
   height: number;

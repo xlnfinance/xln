@@ -92,7 +92,7 @@ export const invalidateWatchtowerStats = (context: WatchtowerStoreContext): void
 
 export const lookupKeyFor = (lookupKey: string): string => `lookup:${normalizeLookupKey(lookupKey)}`;
 
-export const emptyMetaStats = (): StoredTowerMetaStats => ({ actionReceiptCount: 0 });
+const emptyMetaStats = (): StoredTowerMetaStats => ({ actionReceiptCount: 0 });
 
 const isMissingLevelKey = (error: unknown): boolean =>
   /LEVEL_NOT_FOUND|NotFound/i.test(error instanceof Error ? error.message : String(error));

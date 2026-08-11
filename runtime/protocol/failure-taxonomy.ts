@@ -14,7 +14,7 @@ const RUNTIME_FAILURE_CATEGORIES = new Set<RuntimeFailureCategory>([
   'Contradiction',
 ]);
 
-export const isRuntimeFailureCategory = (value: unknown): value is RuntimeFailureCategory =>
+const isRuntimeFailureCategory = (value: unknown): value is RuntimeFailureCategory =>
   typeof value === 'string' && RUNTIME_FAILURE_CATEGORIES.has(value as RuntimeFailureCategory);
 
 export const isRuntimeFailureSignal = (value: unknown): value is RuntimeFailureSignal =>

@@ -77,7 +77,7 @@ const sameIncident = (
   left!.resolvedAt === right.resolvedAt &&
   left!.occurrences === right.occurrences;
 
-export const runtimeSecurityIncidentFingerprint = (runtimeId: string, incidentId: string): string =>
+const runtimeSecurityIncidentFingerprint = (runtimeId: string, incidentId: string): string =>
   `runtime-security-${createHash('sha256').update(`${runtimeId}\0${incidentId}`).digest('hex').slice(0, 32)}`;
 
 export const syncRuntimeSecurityTelemetry = (

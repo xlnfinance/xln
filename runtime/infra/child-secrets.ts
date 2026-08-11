@@ -6,8 +6,8 @@ import type { Writable } from 'node:stream';
 // secret pipe. Bun 1.3.x on macOS implements extra stdio pipes as connecting
 // Unix sockets, which can fail before the first write. FD 0 is a real anonymous
 // pipe and keeps the same no-argv/no-environment secret boundary reliably.
-export const XLN_CHILD_SECRET_FD = 0;
-export const XLN_CHILD_SECRET_FD_ENV = 'XLN_CHILD_SECRET_FD';
+const XLN_CHILD_SECRET_FD = 0;
+const XLN_CHILD_SECRET_FD_ENV = 'XLN_CHILD_SECRET_FD';
 const MAX_CHILD_SECRET_BYTES = 64 * 1024;
 const CHILD_SECRET_WRITE_TIMEOUT_MS = 5_000;
 

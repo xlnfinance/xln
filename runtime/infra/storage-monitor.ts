@@ -16,7 +16,7 @@ type StorageHistoryEntry = {
   tracked: Record<string, number>;
 };
 
-export type StorageTrackedHealth = {
+type StorageTrackedHealth = {
   name: string;
   kind: StorageKind;
   path: string;

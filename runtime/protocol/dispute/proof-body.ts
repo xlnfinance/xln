@@ -10,13 +10,6 @@
 // Re-export typechain types for external use
 export type {
   ProofBodyStruct,
-  ProofBodyStructOutput,
-  TransformerClauseStruct,
-  TransformerClauseStructOutput,
-  AllowanceStruct,
-  AllowanceStructOutput,
-  FinalDisputeProofStruct,
-  FinalDisputeProofStructOutput,
 } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
 
 export type {
@@ -62,13 +55,13 @@ export interface RuntimeProofBody {
  */
 export type RuntimeTransformerClause = RuntimeTypedTransformerClause | RuntimeEncodedTransformerClause;
 
-export interface RuntimeTypedTransformerClause {
+interface RuntimeTypedTransformerClause {
   transformerAddress: string;    // DeltaTransformer contract address
   batch: RuntimeBatch;           // Decoded batch (not encoded bytes)
   allowances: RuntimeAllowance[];
 }
 
-export interface RuntimeEncodedTransformerClause {
+interface RuntimeEncodedTransformerClause {
   transformerAddress: string;
   encodedBatch: string;          // Opaque bytes for custom transformer deployments
   allowances: RuntimeAllowance[];
@@ -142,15 +135,6 @@ export interface ProofBodyResult {
 
   // Hash for signing
   proofBodyHash: string;         // keccak256(encodedProofBody)
-}
-
-/**
- * Bilaterally committed response policy. The protocol unit is seconds.
- * Zero is an intentional same-timestamp policy; the sum is capped at 365 days.
- */
-export interface DisputeConfig {
-  leftResponseSeconds: number;      // uint32 - left beneficiary source window
-  rightResponseSeconds: number;     // uint32 - right beneficiary source window
 }
 
 /**

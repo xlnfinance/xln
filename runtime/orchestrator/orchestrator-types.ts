@@ -35,7 +35,7 @@ export const resolveOrchestratorSocketType = (protocol: string | null): Orchestr
 
 export type OrchestratorWebSocket = ServerWebSocket<{ type: OrchestratorSocketType; clientIp: string; audience: string }>;
 
-export type StageTiming = {
+type StageTiming = {
   startedAt: number | null;
   completedAt: number | null;
   ms: number | null;
@@ -43,9 +43,9 @@ export type StageTiming = {
 
 export type TimingMap = Record<string, StageTiming>;
 
-export type BootstrapTimelineStageStatus = 'done' | 'active' | 'blocked' | 'pending' | 'disabled';
+type BootstrapTimelineStageStatus = 'done' | 'active' | 'blocked' | 'pending' | 'disabled';
 
-export type BootstrapTimelineStage = {
+type BootstrapTimelineStage = {
   key: string;
   label: string;
   status: BootstrapTimelineStageStatus;
@@ -62,7 +62,7 @@ export type BootstrapTimelineStage = {
   }>;
 };
 
-export type BootstrapTimelineBacklog = {
+type BootstrapTimelineBacklog = {
   processing: boolean;
   runtimeTxs: number;
   entityInputs: number;
@@ -99,7 +99,7 @@ export type ResetState = {
   failedAt: number | null;
 };
 
-export type HubProcessSpec = {
+type HubProcessSpec = {
   name: 'H1' | 'H2' | 'H3';
   region: string;
   seed: string;
@@ -254,7 +254,7 @@ export type HubInfoPayload = {
   };
 };
 
-export type MarketMakerCrossRouteHealthPayload = {
+type MarketMakerCrossRouteHealthPayload = {
   sourceJurisdiction: string;
   targetJurisdiction: string;
   sourceMmEntityId?: string;
@@ -350,9 +350,9 @@ export type MarketMakerHealthPayload = {
 
 export type MarketMakerInfoPayload = HubInfoPayload;
 
-export type ManagedRuntimeRole = 'hub' | 'market-maker';
+type ManagedRuntimeRole = 'hub' | 'market-maker';
 
-export type RuntimeQuiescenceHealth = {
+type RuntimeQuiescenceHealth = {
   pendingRuntimeWork: number;
   pendingReliableOutputs: number;
   pendingAccountFrames: number;

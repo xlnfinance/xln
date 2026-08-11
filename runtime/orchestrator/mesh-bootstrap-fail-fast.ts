@@ -1,9 +1,9 @@
-export type MeshBootstrapErrorClassification = Readonly<{
+type MeshBootstrapErrorClassification = Readonly<{
   category: 'retryable-transport' | 'fatal';
   message: string;
 }>;
 
-export const classifyMeshBootstrapError = (error: unknown): MeshBootstrapErrorClassification => {
+const classifyMeshBootstrapError = (error: unknown): MeshBootstrapErrorClassification => {
   const message = String((error as Error)?.message || error || '');
   const retryable = /(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR_[A-Z_]+|fetch failed|socket hang up|Unexpected end of JSON input|response ended prematurely|aborted)/i.test(message);
   return { category: retryable ? 'retryable-transport' : 'fatal', message };

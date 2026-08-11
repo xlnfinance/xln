@@ -48,7 +48,7 @@ const normalizeEvidence = (value: unknown): QaSeverityEvidence[] => {
   });
 };
 
-export const isQaSeverity = (value: unknown): value is QaSeverity =>
+const isQaSeverity = (value: unknown): value is QaSeverity =>
   QA_SEVERITIES.has(value as QaSeverity);
 
 export const makeQaSeveritySignal = (input: QaSeveritySignal): QaSeveritySignal => ({
@@ -86,4 +86,3 @@ export const assertQaSeveritySignal = (value: unknown, label: string): void => {
   if (typeof record['owner'] !== 'string' || !record['owner'].trim()) throw new Error(`${label}_OWNER_REQUIRED`);
   if (!Array.isArray(record['evidence'])) throw new Error(`${label}_EVIDENCE_REQUIRED`);
 };
-

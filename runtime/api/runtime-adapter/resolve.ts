@@ -90,7 +90,7 @@ export type RuntimeAdapterResolveContext = {
   findPaymentRoutes?: (query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
 };
 
-export type RuntimeAdapterAccountPage = {
+type RuntimeAdapterAccountPage = {
   items: StorageAccountDoc[];
   nextCursor: string | null;
   prevCursor?: string | null;
@@ -103,7 +103,7 @@ export type RuntimeAdapterAccountPage = {
   summary?: RuntimeAdapterAccountPageSummary;
 };
 
-export type RuntimeAdapterBookPage = {
+type RuntimeAdapterBookPage = {
   items: Array<{ pairId: string; book: BookState }>;
   nextCursor: string | null;
   prevCursor?: string | null;
@@ -115,13 +115,13 @@ export type RuntimeAdapterBookPage = {
   limit?: number;
 };
 
-export type RuntimeAdapterVisibleDeltaSummary = {
+type RuntimeAdapterVisibleDeltaSummary = {
   counterpartyId: string;
   tokenId: number;
   delta: string;
 };
 
-export type RuntimeAdapterAccountPageSummary = {
+type RuntimeAdapterAccountPageSummary = {
   totalItems: number | null;
   visibleItems: number;
   limit: number;
@@ -133,7 +133,7 @@ export type RuntimeAdapterAccountPageSummary = {
   visibleTopDeltas: RuntimeAdapterVisibleDeltaSummary[];
 };
 
-export type RuntimeAdapterViewEntityFrame = {
+type RuntimeAdapterViewEntityFrame = {
   summary: RuntimeAdapterEntitySummary;
   core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
@@ -159,7 +159,7 @@ export type RuntimeAdapterGraphEntityCore = {
   isHub?: boolean;
 };
 
-export type RuntimeAdapterGraphAccountActivity = {
+type RuntimeAdapterGraphAccountActivity = {
   type: string;
   tokenId?: number;
   amount?: bigint;
@@ -167,7 +167,7 @@ export type RuntimeAdapterGraphAccountActivity = {
   toEntityId?: string;
 };
 
-export type RuntimeAdapterGraphAccountFrame = Pick<
+type RuntimeAdapterGraphAccountFrame = Pick<
   StorageAccountDoc['currentFrame'],
   'height' | 'timestamp' | 'jHeight' | 'prevFrameHash' | 'accountStateRoot' | 'stateHash' | 'byLeft'
 > & {
@@ -175,7 +175,7 @@ export type RuntimeAdapterGraphAccountFrame = Pick<
   accountTxCount: number;
 };
 
-export type RuntimeAdapterGraphAccount = {
+type RuntimeAdapterGraphAccount = {
   leftEntity: string;
   rightEntity: string;
   status: StorageAccountDoc['status'];
@@ -194,11 +194,11 @@ export type RuntimeAdapterGraphAccount = {
   };
 };
 
-export type RuntimeAdapterGraphAccountPage = Omit<RuntimeAdapterAccountPage, 'items' | 'summary'> & {
+type RuntimeAdapterGraphAccountPage = Omit<RuntimeAdapterAccountPage, 'items' | 'summary'> & {
   items: RuntimeAdapterGraphAccount[];
 };
 
-export type RuntimeAdapterGraphEntityFrame = {
+type RuntimeAdapterGraphEntityFrame = {
   summary: RuntimeAdapterEntitySummary;
   core: RuntimeAdapterGraphEntityCore | null;
   accounts: RuntimeAdapterGraphAccountPage;

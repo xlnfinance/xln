@@ -60,7 +60,7 @@ export function deriveEncryptionKeyPair(seed: Uint8Array | string): P2PKeyPair {
  *
  * Wire format: ephemeralPub (32) + nonce (12) + ciphertext (data.length + 16)
  */
-export function encryptMessage(
+function encryptMessage(
   plaintext: Uint8Array,
   recipientPubKey: Uint8Array
 ): Uint8Array {
@@ -93,7 +93,7 @@ export function encryptMessage(
 /**
  * Decrypt message with our private key
  */
-export function decryptMessage(
+function decryptMessage(
   packed: Uint8Array,
   privateKey: Uint8Array
 ): Uint8Array {

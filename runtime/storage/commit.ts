@@ -138,7 +138,7 @@ const resolveAuthoritativeFrameCommitStatus = async (
   return 'unknown';
 };
 
-export const saveRuntimeEnvironment = async (
+const saveRuntimeEnvironment = async (
   deps: RuntimeStorageApiDeps,
   env: RuntimeReplica,
   currentFrameInput?: RuntimeInput,

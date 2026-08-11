@@ -14,7 +14,7 @@ import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelo
  * messages. Consequently no cross-j EntityTx is network-deliverable, even when
  * all four route participants happen to form a known two-runtime topology.
  */
-export const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
+const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
   'registerCrossJurisdictionSwap',
   'crossJurisdictionFillNotice',
   'requestCrossJurisdictionClear',
@@ -27,7 +27,7 @@ export const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
   'crossJurisdictionBookOrderRemoved',
 ]);
 
-export const isCrossJurisdictionIntraRuntimeTx = (tx: EntityTx | { type?: unknown } | null | undefined): boolean =>
+const isCrossJurisdictionIntraRuntimeTx = (tx: EntityTx | { type?: unknown } | null | undefined): boolean =>
   CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES.has(String(tx?.type || ''));
 
 export const entityInputHasCrossJurisdictionIntraRuntimeTx = (

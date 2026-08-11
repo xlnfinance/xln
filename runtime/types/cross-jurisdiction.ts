@@ -30,14 +30,14 @@ export interface CrossJurisdictionPullLeg {
   partialRoot: string;
 }
 
-export interface CrossJurisdictionDisputeConfig {
+interface CrossJurisdictionDisputeConfig {
   leftResponseSeconds: number;
   rightResponseSeconds: number;
 }
 
-export type CrossJurisdictionBookLeg = 'source' | 'target';
+type CrossJurisdictionBookLeg = 'source' | 'target';
 
-export type CrossJurisdictionBookStatus =
+type CrossJurisdictionBookStatus =
   | 'pending'
   | 'admitted'
   | 'resolving'

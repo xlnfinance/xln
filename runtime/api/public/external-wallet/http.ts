@@ -5,7 +5,7 @@ import { safeStringify } from '../../../protocol/serialization';
 
 export const MAX_WALLET_SNAPSHOT_BODY_BYTES = 32 * 1024;
 export const MAX_WALLET_SNAPSHOT_TOKEN_ADDRESSES = 128;
-export const MAX_WALLET_SNAPSHOT_ALLOWANCES = 128;
+const MAX_WALLET_SNAPSHOT_ALLOWANCES = 128;
 
 /** Stream-counted admission errors are safe to expose as typed 400/413 responses. */
 export class RequestBodyError extends Error {

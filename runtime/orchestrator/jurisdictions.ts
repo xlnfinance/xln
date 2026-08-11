@@ -47,7 +47,7 @@ type ProvisionedRpcStack = Pick<
   'contracts' | 'entityProviderDeploymentBlock'
 >;
 
-export const LOCAL_TESTNET_BLOCK_TIME_MS = 10_000;
+const LOCAL_TESTNET_BLOCK_TIME_MS = 10_000;
 
 const requireLocalAnvilRpcUrl = (rawUrl: string): string => {
   const url = new URL(rawUrl);

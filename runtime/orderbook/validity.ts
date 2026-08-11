@@ -14,8 +14,8 @@ import { compareCanonicalText, swapKey, type SwapKey } from './swap-execution';
 import type { AccountState, SwapOffer } from '../types/account';
 import type { EntityState } from '../entity/types';
 
-export type OrderbookMediumField = 'pairId' | 'side' | 'priceTicks' | 'qtyLots' | 'ownerId' | 'pairIndex';
-export type QuarantineReason =
+type OrderbookMediumField = 'pairId' | 'side' | 'priceTicks' | 'qtyLots' | 'ownerId' | 'pairIndex';
+type QuarantineReason =
   | 'invalid-direction'
   | 'zero-amount'
   | 'lot-misaligned'

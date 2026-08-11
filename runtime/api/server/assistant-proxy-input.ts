@@ -1,4 +1,4 @@
-export type AssistantMessage = Readonly<{
+type AssistantMessage = Readonly<{
   role: 'system' | 'user' | 'assistant';
   content: string;
 }>;

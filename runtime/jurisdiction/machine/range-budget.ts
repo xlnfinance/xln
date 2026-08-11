@@ -42,7 +42,7 @@ export const canonicalJRangeBodiesByteLength = (ranges: readonly JRangeBody[]): 
     }),
   ).byteLength;
 
-export const canonicalJEventDataPayloadByteLength = (ranges: readonly JurisdictionEventData[]): number =>
+const canonicalJEventDataPayloadByteLength = (ranges: readonly JurisdictionEventData[]): number =>
   utf8Encoder.encode(
     encodeCanonicalConsensusValue({
       domain: J_RANGE_FRAME_PAYLOAD_DOMAIN,
@@ -71,7 +71,7 @@ const assertValidRangeSpans = (ranges: readonly JRangeBody[]): void => {
   }
 };
 
-export const getJEventDataBudgetError = (ranges: readonly JurisdictionEventData[]): string | null => {
+const getJEventDataBudgetError = (ranges: readonly JurisdictionEventData[]): string | null => {
   assertValidRangeSpans(ranges);
   const byteLength = canonicalJEventDataPayloadByteLength(ranges);
   return byteLength > MAX_ENTITY_FRAME_J_RANGE_BYTES

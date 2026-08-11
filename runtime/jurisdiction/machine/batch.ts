@@ -154,7 +154,7 @@ export interface JBatch {
 }
 
 /** Batch lifecycle: current accumulates, sentBatch tracks one in-flight submission */
-export type JBatchStatus = 'empty' | 'accumulating' | 'sent' | 'failed';
+type JBatchStatus = 'empty' | 'accumulating' | 'sent' | 'failed';
 
 /** In-flight batch snapshot (authoritative until HankoBatchProcessed arrives). */
 export interface SentJBatch {
@@ -201,21 +201,6 @@ export interface JBatchState {
   /** A protocol-forced draft must broadcast as soon as the in-flight batch clears. */
   autoBroadcastDraft?: boolean;
   entityNonce?: number; // Entity nonce used for this batch (for replay prevention)
-}
-
-export interface BatchOpBreakdown {
-  flashloans: number;
-  reserveToReserve: number;
-  reserveToCollateral: number;
-  collateralToReserve: number;
-  settlements: number;
-  disputeStarts: number;
-  counterDisputes: number;
-  disputeFinalizations: number;
-  externalTokenToReserve: number;
-  reserveToExternalToken: number;
-  revealSecrets: number;
-  hashLadderRegistrations: number;
 }
 
 export const J_BATCH_CONTRACT_LIMITS = {
@@ -747,8 +732,6 @@ export {
 } from './reserve-simulation';
 export type {
   DraftBatchReserveIssue,
-  DraftBatchReserveSimulation,
-  OpenOutgoingDebtLedger,
 } from './reserve-simulation';
 
 export function computeBatchHankoHash(
@@ -788,7 +771,7 @@ export function initJBatch(): JBatchState {
  * We intentionally DO NOT throw when `sentBatch` exists; operators can keep
  * preparing the next batch while waiting for on-chain finalization.
  */
-export function assertBatchNotPending(jBatchState: JBatchState, operation: string): void {
+function assertBatchNotPending(jBatchState: JBatchState, operation: string): void {
   if (jBatchState.sentBatch) {
     console.warn(
       `ℹ️ jBatch sentBatch pending (nonce=${jBatchState.sentBatch.entityNonce}) while queueing ${operation} into draft batch`,
@@ -842,41 +825,6 @@ export function hasJBatchWork(state: JBatchState): boolean {
 export function prependRecoveryBatch(state: JBatchState, recovered: JBatch): void {
   if (isBatchEmpty(recovered)) return;
   state.recoveryBatches = [cloneJBatch(recovered), ...(state.recoveryBatches ?? [])];
-}
-
-/**
- * Merge all operations from source batch into target batch (append semantics).
- * Used by failure/abort recovery flows when moving sentBatch ops back to current.
- */
-export function mergeBatchOps(target: JBatch, source: JBatch): void {
-  const merged = cloneJBatch(target);
-  merged.flashloans.push(...source.flashloans);
-  merged.reserveToReserve.push(...source.reserveToReserve);
-  merged.reserveToCollateral.push(...source.reserveToCollateral);
-  merged.collateralToReserve.push(...source.collateralToReserve);
-  merged.settlements.push(...source.settlements);
-  merged.disputeStarts.push(...source.disputeStarts);
-  merged.counterDisputes.push(...source.counterDisputes);
-  merged.disputeFinalizations.push(...source.disputeFinalizations);
-  merged.externalTokenToReserve.push(...source.externalTokenToReserve);
-  merged.reserveToExternalToken.push(...source.reserveToExternalToken);
-  merged.revealSecrets.push(...source.revealSecrets);
-  for (const registration of source.hashLadderRegistrations) {
-    upsertHashLadderRegistration(merged.hashLadderRegistrations, registration);
-  }
-  assertJBatchWithinContractLimits(merged, 'mergeBatchOps');
-  target.flashloans = merged.flashloans;
-  target.reserveToReserve = merged.reserveToReserve;
-  target.reserveToCollateral = merged.reserveToCollateral;
-  target.collateralToReserve = merged.collateralToReserve;
-  target.settlements = merged.settlements;
-  target.disputeStarts = merged.disputeStarts;
-  target.counterDisputes = merged.counterDisputes;
-  target.disputeFinalizations = merged.disputeFinalizations;
-  target.externalTokenToReserve = merged.externalTokenToReserve;
-  target.reserveToExternalToken = merged.reserveToExternalToken;
-  target.revealSecrets = merged.revealSecrets;
-  target.hashLadderRegistrations = merged.hashLadderRegistrations;
 }
 
 /**
@@ -973,7 +921,7 @@ export function batchAddReserveToCollateral(
  *
  * Returns: { isPureC2R: true, withdrawer: 'left'|'right', tokenId, amount } or { isPureC2R: false }
  */
-export function detectPureC2R(
+function detectPureC2R(
   diffs: Array<{
     tokenId: number;
     leftDiff: bigint;

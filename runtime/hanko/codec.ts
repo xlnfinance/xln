@@ -12,7 +12,7 @@ import {
   signDigestBytesWithPrivateKey,
 } from '../account/crypto';
 
-export const HANKO_ABI = [
+const HANKO_ABI = [
   'tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])',
 ] as const;
 
@@ -21,10 +21,10 @@ const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
 // proof which the jurisdiction can never verify; otherwise peers can certify
 // an Account state whose only enforcement evidence is permanently unmineable.
 export const HANKO_MAX_BYTES = 64 * 1024;
-export const HANKO_MAX_ENTITIES = 256;
-export const HANKO_MAX_CLAIMS = 64;
-export const HANKO_MAX_MEMBERS_PER_CLAIM = 256;
-export const HANKO_MAX_TOTAL_MEMBERS = 1024;
+const HANKO_MAX_ENTITIES = 256;
+const HANKO_MAX_CLAIMS = 64;
+const HANKO_MAX_MEMBERS_PER_CLAIM = 256;
+const HANKO_MAX_TOTAL_MEMBERS = 1024;
 const SECP256K1_HALF_ORDER = BigInt(
   '0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0',
 );
@@ -251,7 +251,7 @@ export const recoverHankoSignatures = (
   });
 };
 
-export const signAndPackHankoDigest = (
+const signAndPackHankoDigest = (
   digest: string,
   privateKeys: readonly Uint8Array[],
 ): HankoHex => {

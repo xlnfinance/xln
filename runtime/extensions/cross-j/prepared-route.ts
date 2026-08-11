@@ -81,7 +81,7 @@ export const committedCrossJSourceResponseWindowMs = (
   return responseWindowForEntity(route, 'source', route.source.counterpartyEntityId) * 1_000;
 };
 
-export const committedCrossJTargetResponseWindowMs = (
+const committedCrossJTargetResponseWindowMs = (
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
 ): number => {
@@ -94,7 +94,7 @@ export const committedCrossJTargetResponseWindowMs = (
  * independent dispute starts and beneficiary windows; no cross-route minimum,
  * equality rule, or invented relay margin is protocol authority.
  */
-export const assertLocalCrossJDisputeClock = (
+const assertLocalCrossJDisputeClock = (
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
 ): void => {

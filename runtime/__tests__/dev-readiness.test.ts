@@ -82,14 +82,20 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
       : new Response('not found', { status: 404 }),
   });
   let publicFaucetEnabled = true;
-  const serveWebRelay = () => {
+  const serveWebRelay = (secure = false) => {
     const server = Bun.serve<{ challenge: string; audience: string }>({
     hostname: '127.0.0.1',
     port: 0,
+    ...(secure ? {
+      tls: {
+        cert: Bun.file(join(repoRoot, 'frontend/localhost+3.pem')),
+        key: Bun.file(join(repoRoot, 'frontend/localhost+3-key.pem')),
+      },
+    } : {}),
     async fetch(request, server) {
       const pathname = new URL(request.url).pathname;
       if (pathname === '/relay') {
-        const audience = `ws://127.0.0.1:${server.port}/relay`;
+        const audience = `${secure ? 'wss' : 'ws'}://127.0.0.1:${server.port}/relay`;
         return server.upgrade(request, { data: { challenge: 'dev-ready-test', audience } })
           ? undefined
           : new Response('upgrade failed', { status: 400 });
@@ -138,9 +144,12 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
       },
     },
     });
-    return server;
+    return {
+      server,
+      webUrl: `${secure ? 'https' : 'http'}://127.0.0.1:${server.port}`,
+    };
   };
-  const web = serveWebRelay();
+  const web = serveWebRelay(true);
   const relayAlias = serveWebRelay();
   const watchtower = Bun.serve({
     hostname: '127.0.0.1',
@@ -151,10 +160,10 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
   try {
     const input = {
       apiUrl: `http://127.0.0.1:${api.port}`,
-      webUrl: `http://127.0.0.1:${web.port}`,
+      webUrl: web.webUrl,
       relayWebUrls: [
-        `http://127.0.0.1:${web.port}`,
-        `http://127.0.0.1:${relayAlias.port}`,
+        web.webUrl,
+        relayAlias.webUrl,
       ],
       watchtowerUrl: `http://127.0.0.1:${watchtower.port}`,
       runtimeBundle,
@@ -193,8 +202,8 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
     expect(exitCode).toBe(0);
   } finally {
     api.stop(true);
-    web.stop(true);
-    relayAlias.stop(true);
+    web.server.stop(true);
+    relayAlias.server.stop(true);
     watchtower.stop(true);
     rmSync(root, { recursive: true, force: true });
   }

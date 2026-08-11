@@ -16,7 +16,6 @@ import {
   deliveryAccepted,
   deliveryDeferred,
   deliveryFailure,
-  type DeliveryOutcome,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
 import {
@@ -31,7 +30,7 @@ import type { WebSocketSendResult } from '../websocket-send-result';
 // Types
 // ---------------------------------------------------------------------------
 
-export type RelayClient = {
+type RelayClient = {
   ws: RelaySocketLike;
   runtimeId: string;
   lastSeen: number;
@@ -81,8 +80,6 @@ export type RelayDebugIncident = {
   lastEventId: number;
   sample: RelayDebugEvent;
 };
-
-export type RelayDeliveryOutcome = DeliveryOutcome;
 
 export type RelayDeliveryResult = DeliveryResult;
 
@@ -265,7 +262,7 @@ const normalizeRootFingerprint = (value: unknown): string =>
     ? value.trim().toLowerCase()
     : '';
 
-export const classifyDebugIncident = (
+const classifyDebugIncident = (
   event: RelayDebugEvent,
 ): Pick<RelayDebugIncident, 'fingerprint' | 'source' | 'code' | 'message' | 'runtimeId'> | null => {
   const details = asRecord(event.details);

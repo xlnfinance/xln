@@ -54,7 +54,7 @@ export const computeRuntimeRecoveryCheckpointHash = (checkpoint: Record<string, 
 export const computeRuntimeRecoveryBundleHash = (bundle: RuntimeRecoveryBundleV1): string =>
   ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(bundle)));
 
-export const computeRuntimeRecoveryBundleSignatureDigest = (
+const computeRuntimeRecoveryBundleSignatureDigest = (
   bundle: RuntimeRecoveryBundleV1 | UnsignedRuntimeRecoveryBundleV1,
 ): string => {
   const { signature: _signature, ...unsigned } = bundle as RuntimeRecoveryBundleV1;

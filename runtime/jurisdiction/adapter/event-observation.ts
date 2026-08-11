@@ -11,7 +11,6 @@ import {
 import { markLocalJAuthorityRuntimeTx } from '../machine/registration-evidence';
 import {
   bindLocalJEventIngressSource,
-  type LocalJEventIngressSource,
 } from './local-ingress-source';
 import { rawEventToJEvents } from './j-event-payloads';
 import { isEventRelevantToEntity } from './event-relevance';
@@ -259,5 +258,4 @@ export const buildJEventObservationInput = (
   };
 };
 
-export type { LocalJEventIngressSource };
 export { rawEventToJEvents };

@@ -8,7 +8,6 @@ export type {
   LastResortTowerAppointment,
   StoredTowerActionReceipt,
   WatchtowerStoreOptions,
-  WatchtowerStoreStats,
 } from './store-types';
 
 export const createWatchtowerStore = (options: WatchtowerStoreOptions = {}) => {

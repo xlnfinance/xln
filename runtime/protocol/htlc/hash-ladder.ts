@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
 
 export const HASHLADDER_MAX_FILL_RATIO = 0xffff;
-export const HASHLADDER_NIBBLE_COUNT = 4;
-export const HASHLADDER_MAX_NIBBLE = 15;
+const HASHLADDER_NIBBLE_COUNT = 4;
+const HASHLADDER_MAX_NIBBLE = 15;
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -11,7 +11,7 @@ export type HashLadderCommitment = {
   partialRoot: string;
 };
 
-export type HashLadderSecrets = {
+type HashLadderSecrets = {
   fullSecret: string;
   nibbleBases: [string, string, string, string];
 };
@@ -31,12 +31,12 @@ export type DecodedHashLadderBinary = {
   reveals?: [string, string, string, string];
 };
 
-export function hashNode(node: string): string {
+function hashNode(node: string): string {
   if (!HEX_32_RE.test(node)) throw new Error(`HASHLADDER_INVALID_NODE:${node}`);
   return ethers.keccak256(node);
 }
 
-export function hashSteps(node: string, steps: number): string {
+function hashSteps(node: string, steps: number): string {
   let result = node;
   for (let i = 0; i < Math.max(0, Math.floor(steps)); i += 1) {
     result = hashNode(result);
@@ -44,7 +44,7 @@ export function hashSteps(node: string, steps: number): string {
   return result;
 }
 
-export function nibbles(fillRatio: number): [number, number, number, number] {
+function nibbles(fillRatio: number): [number, number, number, number] {
   const ratio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(fillRatio) || 0)));
   return [
     (ratio >> 12) & 0x0f,
@@ -54,14 +54,14 @@ export function nibbles(fillRatio: number): [number, number, number, number] {
   ];
 }
 
-export function partialRootFromRoots(roots: readonly string[]): string {
+function partialRootFromRoots(roots: readonly string[]): string {
   if (roots.length !== HASHLADDER_NIBBLE_COUNT) {
     throw new Error(`HASHLADDER_INVALID_ROOT_COUNT:${roots.length}`);
   }
   return ethers.keccak256(ethers.solidityPacked(['bytes32', 'bytes32', 'bytes32', 'bytes32'], roots));
 }
 
-export function buildHashLadderCommitment(secrets: HashLadderSecrets): HashLadderCommitment {
+function buildHashLadderCommitment(secrets: HashLadderSecrets): HashLadderCommitment {
   const roots = secrets.nibbleBases.map(base => hashSteps(base, HASHLADDER_MAX_NIBBLE));
   return {
     fullHash: hashNode(secrets.fullSecret),
@@ -145,7 +145,7 @@ export function decodeHashLadderBinary(binary?: string): DecodedHashLadderBinary
   return { fillRatio, reveals };
 }
 
-export function verifyHashLadderReveal(
+function verifyHashLadderReveal(
   commitment: HashLadderCommitment,
   fillRatio: number,
   fullSecret?: string,

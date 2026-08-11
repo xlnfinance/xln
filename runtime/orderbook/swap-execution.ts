@@ -1,4 +1,4 @@
-import { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey } from './swap-keys.ts';
+import { compareCanonicalText, swapKey, type SwapKey } from './swap-keys.ts';
 import { deriveSide } from './types.ts';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { UINT16_MAX } from '../config/constants.ts';
@@ -92,7 +92,7 @@ export const normalizeSwapOfferForOrderbook = (
   };
 };
 
-export const compareSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(left: T, right: T): number => {
+const compareSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(left: T, right: T): number => {
   if (left.createdHeight !== right.createdHeight) return left.createdHeight - right.createdHeight;
   const accountOrder = compareCanonicalText(left.accountId, right.accountId);
   return accountOrder !== 0 ? accountOrder : compareCanonicalText(left.offerId, right.offerId);
@@ -143,7 +143,7 @@ export function markWorkingOrderbookOffer(offer: NormalizedOrderbookOffer): Work
   } as SameJurisdictionWorkingOrderbookOffer;
 }
 
-export { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey };
+export { compareCanonicalText, swapKey, type SwapKey };
 
 export interface ExactFillRatio {
   numerator: bigint;
@@ -161,7 +161,7 @@ const bigintGcd = (left: bigint, right: bigint): bigint => {
   return a === 0n ? 1n : a;
 };
 
-export function reduceExactFillRatio(numerator: bigint, denominator: bigint): ExactFillRatio {
+function reduceExactFillRatio(numerator: bigint, denominator: bigint): ExactFillRatio {
   if (denominator <= 0n) {
     throw new Error(`EXACT_FILL_RATIO_INVALID_DENOMINATOR:${denominator.toString()}`);
   }

@@ -13,12 +13,12 @@ export type {
   NumberedRegistrationCommandResult,
 } from '../../runtime/registration/numbered-registration-driver';
 
-export type RuntimeAdapterMode = 'embedded' | 'remote';
+type RuntimeAdapterMode = 'embedded' | 'remote';
 export type RuntimeAdapterStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 export type RuntimeAdapterAuthLevel = 'inspect' | 'admin';
 export type RuntimeAdapterAuthRole = RuntimeAdapterAuthLevel | 'read' | 'full';
 export type RuntimeAdapterCommandLaneKind = 'owner' | 'capability';
-export type RuntimeAdapterOwnerBindingSigner = (input: {
+type RuntimeAdapterOwnerBindingSigner = (input: {
   runtimeId: string;
   challenge: string;
   capability: string;
@@ -148,7 +148,7 @@ export type RuntimeAdapterSolvencySummary = {
   isValid: boolean | null;
 };
 
-export type RuntimeAdapterTimelineFrame = {
+type RuntimeAdapterTimelineFrame = {
   runtimeId: string;
   height: number;
   timestamp: number;

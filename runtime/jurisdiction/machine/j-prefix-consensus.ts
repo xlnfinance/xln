@@ -290,7 +290,7 @@ const normalizeAttestationClaimEvidence = (
   return { headers, signature };
 };
 
-export const normalizeJPrefixAttestation = (state: EntityState, raw: JPrefixAttestation): JPrefixAttestation => {
+const normalizeJPrefixAttestation = (state: EntityState, raw: JPrefixAttestation): JPrefixAttestation => {
   if (raw.version !== 1) throw new Error(`J_PREFIX_VERSION_UNSUPPORTED:${String(raw.version)}`);
   const entityId = normalizeText(raw.entityId);
   if (entityId !== normalizeText(state.entityId)) {
@@ -408,7 +408,7 @@ export const verifyOutOfRoundJPrefixAttestation = (
   return attestation;
 };
 
-export const verifyJPrefixAttestation = (
+const verifyJPrefixAttestation = (
   env: EntityRuntimeContext,
   state: EntityState,
   raw: JPrefixAttestation,
@@ -500,7 +500,7 @@ const clipAttestation = (
 
 const claimKey = (claim: JPrefixClaim): string => encodeCanonicalConsensusValue(claim);
 
-export const calculateJPrefixQuorumPower = (config: ConsensusConfig, rawSigners: readonly string[]): bigint => {
+const calculateJPrefixQuorumPower = (config: ConsensusConfig, rawSigners: readonly string[]): bigint => {
   const signers = new Set<string>();
   let total = 0n;
   for (const rawSigner of rawSigners) {
@@ -715,7 +715,7 @@ const localClaimAtHeight = (
   return buildUnsignedJEventRangeAtHeight(state, history, height) ?? buildBaseClaim(state, history);
 };
 
-export const assertJPrefixCertificateMatchesLocalHistory = (
+const assertJPrefixCertificateMatchesLocalHistory = (
   env: EntityRuntimeContext,
   state: EntityState,
   history: ValidatorJHistory | undefined,
@@ -767,7 +767,7 @@ export const hasPendingLocalJEvent = (state: EntityState, history: ValidatorJHis
  * must not manufacture one empty Entity frame per intermediate header while
  * the watcher closes the gap.
  */
-export const hasAttestablePendingLocalJEvent = (
+const hasAttestablePendingLocalJEvent = (
   state: EntityState,
   history: ValidatorJHistory | undefined,
 ): boolean => {

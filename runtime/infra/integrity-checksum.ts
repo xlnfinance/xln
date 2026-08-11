@@ -1,6 +1,6 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 
-export const INTEGRITY_CHECKSUM_BYTES = 16;
+const INTEGRITY_CHECKSUM_BYTES = 16;
 export const INTEGRITY_DIGEST_ALGORITHM_ID = 'sha256' as const;
 
 type NativeHasher = {
@@ -17,17 +17,17 @@ const nativeHasher = (): NativeHasherConstructor | undefined => {
   return typeof constructor === 'function' ? constructor as NativeHasherConstructor : undefined;
 };
 
-export const computeIntegrityDigestBytes = (bytes: Uint8Array): Uint8Array => {
+const computeIntegrityDigestBytes = (bytes: Uint8Array): Uint8Array => {
   const Native = nativeHasher();
   return Native
     ? new Uint8Array(new Native(INTEGRITY_DIGEST_ALGORITHM_ID).update(bytes).digest())
     : sha256(bytes);
 };
 
-export const computeIntegrityChecksumBytes = (bytes: Uint8Array): Uint8Array =>
+const computeIntegrityChecksumBytes = (bytes: Uint8Array): Uint8Array =>
   computeIntegrityDigestBytes(bytes).slice(0, INTEGRITY_CHECKSUM_BYTES);
 
-export const integrityChecksumToHex = (bytes: Uint8Array): string => {
+const integrityChecksumToHex = (bytes: Uint8Array): string => {
   let output = '0x';
   for (const byte of bytes) output += byte.toString(16).padStart(2, '0');
   return output;

@@ -2,7 +2,7 @@ import * as secp256k1 from '@noble/secp256k1';
 import { keccak256 } from 'ethers';
 import { hashHelloMessage, hashRuntimeWsFrame, type RuntimeWsAuth, type RuntimeWsMessage } from './ws-protocol';
 
-export const recoverHelloAddress = (digestHex: string, signatureHex: string): string => {
+const recoverHelloAddress = (digestHex: string, signatureHex: string): string => {
   const sig = signatureHex.replace('0x', '');
   if (sig.length < 130) {
     throw new Error('Signature too short');

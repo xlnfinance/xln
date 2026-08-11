@@ -32,7 +32,7 @@ export const HUB_BASELINE_STATUS_LOG_INTERVAL_MS = Math.max(
   1_000,
   readPositiveIntegerEnv('XLN_HUB_BASELINE_STATUS_LOG_INTERVAL_MS', 10_000),
 );
-export const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
+const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
   readPositiveIntegerEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000),
 );

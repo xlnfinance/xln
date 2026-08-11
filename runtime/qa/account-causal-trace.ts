@@ -3,13 +3,13 @@ import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope'
 import type { AccountInput, AccountTx } from '../types/account';
 import type { EntityInput } from '../entity/types';
 
-export type AccountTxCausalTrace = {
+type AccountTxCausalTrace = {
   type: AccountTx['type'];
   offerId?: string;
   fillRatio?: number;
 };
 
-export type AccountEnvelopeCausalTrace = {
+type AccountEnvelopeCausalTrace = {
   kind: AccountInput['kind'];
   from: string;
   to: string;
@@ -55,7 +55,7 @@ const summarizeAccountTx = (tx: AccountTx): AccountTxCausalTrace => {
   };
 };
 
-export const summarizeAccountEnvelope = (input: AccountInput): AccountEnvelopeCausalTrace => {
+const summarizeAccountEnvelope = (input: AccountInput): AccountEnvelopeCausalTrace => {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
   const proposalTxs = (proposal?.frame.accountTxs ?? []).map(summarizeAccountTx);
