@@ -403,11 +403,13 @@ test('p2p shutdown drains every client before reporting aggregate failure', asyn
   });
   let slowDone = false;
   const failedClient = {
+    close: () => {},
     closeAndWait: async () => {
       throw new Error('relay-close-failed');
     },
   };
   const slowClient = {
+    close: () => {},
     closeAndWait: async () => {
       await Bun.sleep(40);
       slowDone = true;
@@ -415,6 +417,7 @@ test('p2p shutdown drains every client before reporting aggregate failure', asyn
   };
   const internals = p2p as unknown as {
     clients: Array<typeof failedClient | typeof slowClient>;
+    retiringClients: Map<typeof failedClient | typeof slowClient, unknown>;
     closeAndWait: () => Promise<void>;
   };
   internals.clients = [failedClient, slowClient];
@@ -425,7 +428,74 @@ test('p2p shutdown drains every client before reporting aggregate failure', asyn
   expect(error?.message).toContain('relay-close-failed');
   expect(slowDone).toBe(true);
   expect(performance.now() - startedAt).toBeGreaterThanOrEqual(35);
-  expect(internals.clients).toEqual([failedClient]);
+  expect(internals.clients).toEqual([]);
+  expect(internals.retiringClients.has(failedClient)).toBe(true);
+  expect(internals.retiringClients.has(slowClient)).toBe(false);
+});
+
+test('relay reconfiguration removes active ownership and final shutdown drains the retiree', async () => {
+  const env = createEmptyEnv('p2p-relay-reconfigure-retire');
+  const p2p = new RuntimeP2P({
+    env,
+    runtimeId: RUNTIME_ID,
+    onEntityInputs: () => {},
+    onGossipProfiles: () => {},
+  });
+  let closeCalls = 0;
+  let drained = false;
+  const oldClient = {
+    close: () => { closeCalls += 1; },
+    closeAndWait: async () => { drained = true; },
+  };
+  const internals = p2p as unknown as {
+    clients: Array<typeof oldClient>;
+    retiringClients: Map<typeof oldClient, unknown>;
+    closeClients: () => void;
+    drainAllClients: (timeoutMs: number) => Promise<void>;
+  };
+  internals.clients = [oldClient];
+
+  internals.closeClients();
+
+  expect(internals.clients).toEqual([]);
+  expect(internals.retiringClients.has(oldClient)).toBe(true);
+  expect(closeCalls).toBe(1);
+  await internals.drainAllClients(100);
+  expect(drained).toBe(true);
+  expect(internals.retiringClients.size).toBe(0);
+});
+
+test('direct endpoint removal retires the exact client before transport selection can reuse it', () => {
+  const env = createEmptyEnv('p2p-direct-endpoint-removal');
+  const p2p = new RuntimeP2P({
+    env,
+    runtimeId: RUNTIME_ID,
+    onEntityInputs: () => {},
+    onGossipProfiles: () => {},
+  });
+  const targetRuntimeId = `0x${'22'.repeat(20)}`;
+  let closeCalls = 0;
+  const oldClient = { close: () => { closeCalls += 1; } };
+  const internals = p2p as unknown as {
+    directClients: Map<string, typeof oldClient>;
+    directClientUrls: Map<string, string>;
+    directClientErrors: Map<string, unknown>;
+    retiringClients: Map<typeof oldClient, unknown>;
+    getDirectPeerEndpoint: () => null;
+    ensureDirectClientForRuntime: (runtimeId: string) => void;
+  };
+  internals.directClients.set(targetRuntimeId, oldClient);
+  internals.directClientUrls.set(targetRuntimeId, 'ws://127.0.0.1:9001/relay');
+  internals.directClientErrors.set(targetRuntimeId, { error: 'old' });
+  internals.getDirectPeerEndpoint = () => null;
+
+  internals.ensureDirectClientForRuntime(targetRuntimeId);
+
+  expect(closeCalls).toBe(1);
+  expect(internals.directClients.has(targetRuntimeId)).toBe(false);
+  expect(internals.directClientUrls.has(targetRuntimeId)).toBe(false);
+  expect(internals.directClientErrors.has(targetRuntimeId)).toBe(false);
+  expect(internals.retiringClients.has(oldClient)).toBe(true);
 });
 
 test('closing p2p rejects late direct-client creation', () => {
@@ -527,7 +597,10 @@ test('synchronous runtime stop preserves actual P2P clients until awaited drain'
       drained = true;
     },
   };
-  const internals = p2p as unknown as { clients: Array<typeof client> };
+  const internals = p2p as unknown as {
+    clients: Array<typeof client>;
+    retiringClients: Map<typeof client, unknown>;
+  };
   internals.clients = [client];
   env.infrastructure = {
     ...env.infrastructure,
@@ -544,7 +617,8 @@ test('synchronous runtime stop preserves actual P2P clients until awaited drain'
 
   stopRuntimeP2P(env, deps);
   expect(closeStarted).toBe(true);
-  expect(internals.clients).toEqual([client]);
+  expect(internals.clients).toEqual([]);
+  expect(internals.retiringClients.has(client)).toBe(true);
 
   const startedAt = performance.now();
   await stopRuntimeP2PAndWait(env, deps);
@@ -552,6 +626,7 @@ test('synchronous runtime stop preserves actual P2P clients until awaited drain'
   expect(drained).toBe(true);
   expect(performance.now() - startedAt).toBeGreaterThanOrEqual(20);
   expect(internals.clients).toEqual([]);
+  expect(internals.retiringClients.size).toBe(0);
   expect(env.infrastructure?.p2p).toBeNull();
 });
 

@@ -4,7 +4,7 @@ import {
   resolvePaymentDeadlineWindow,
 } from '../protocol/payments/delivery';
 import { HTLC } from '../config/constants';
-import { calculateHopRevealHeight } from '../protocol/htlc/utils';
+import { calculateHopRevealHeight, calculateHopTimelock } from '../protocol/htlc/utils';
 import { ASYNC_PAYMENT_EXPIRY_BLOCKS, ASYNC_PAYMENT_EXPIRY_MS } from '../types/payment';
 
 describe('payment delivery modes', () => {
@@ -39,6 +39,27 @@ describe('payment delivery modes', () => {
     expect(upstream - intermediary).toBe(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS);
     expect(intermediary - recipient).toBe(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS);
     expect(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS).toBeGreaterThan(1);
+  });
+
+  test('charges the timelock delta exactly once per actual forward', () => {
+    const sixHopWindow = resolvePaymentDeadlineWindow({
+      mode: 'instant',
+      runtimeJHeight: 0,
+      timestamp: 0,
+      totalHops: 6,
+    });
+    expect(calculateHopTimelock(sixHopWindow.baseTimelock, 0)).toBe(sixHopWindow.baseTimelock);
+    expect(calculateHopTimelock(sixHopWindow.baseTimelock, 5)).toBe(70_000n);
+
+    const maxHopWindow = resolvePaymentDeadlineWindow({
+      mode: 'instant',
+      runtimeJHeight: 0,
+      timestamp: 0,
+      totalHops: HTLC.MAX_HOPS,
+    });
+    const finalHop = calculateHopTimelock(maxHopWindow.baseTimelock, HTLC.MAX_HOPS - 1);
+    expect(finalHop).toBeGreaterThan(BigInt(HTLC.MIN_FORWARD_TIMELOCK_MS));
+    expect(() => calculateHopTimelock(maxHopWindow.baseTimelock, -1)).toThrow('HTLC_HOP_INDEX_INVALID');
   });
 
   test('trusted delivery permits exactly one declared gateway', () => {

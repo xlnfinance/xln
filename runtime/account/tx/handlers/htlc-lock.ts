@@ -25,7 +25,7 @@ const validateHtlcLock = (
   account: AccountReplica,
   tx: HtlcLockTx,
   currentTimestamp: number,
-  currentHeight: number,
+  currentJHeight: number,
 ): string | undefined => {
   const { lockId, timelock, revealBeforeHeight, amount } = tx.data;
   if (account.state.locks.has(lockId)) return `Lock ${lockId} already exists`;
@@ -35,8 +35,8 @@ const validateHtlcLock = (
   if (isHtlcTimelockExpired(currentTimestamp, timelock)) {
     return `Timelock ${timelock} already expired (timestamp)`;
   }
-  if (revealBeforeHeight <= currentHeight) {
-    return `revealBeforeHeight ${revealBeforeHeight} already passed (current height: ${currentHeight})`;
+  if (revealBeforeHeight <= currentJHeight) {
+    return `revealBeforeHeight ${revealBeforeHeight} already passed (current J height: ${currentJHeight})`;
   }
   if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     return `Invalid amount: ${amount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`;
@@ -49,7 +49,7 @@ export async function handleHtlcLock(
   accountTx: HtlcLockTx,
   byLeft: boolean,
   currentTimestamp: number,
-  currentHeight: number,
+  currentJHeight: number,
   _isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
   const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId } = accountTx.data;
@@ -60,7 +60,7 @@ export async function handleHtlcLock(
     account.state.locks = new Map();
   }
 
-  const validationError = validateHtlcLock(account, accountTx, currentTimestamp, currentHeight);
+  const validationError = validateHtlcLock(account, accountTx, currentTimestamp, currentJHeight);
   if (validationError) return { success: false, error: validationError, events };
 
   const delta = ensureDelta(account.state, tokenId);

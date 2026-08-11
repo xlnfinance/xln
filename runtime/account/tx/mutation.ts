@@ -35,7 +35,7 @@ type MutationContext = {
   tx: AccountTx;
   byLeft: boolean;
   timestamp: number;
-  height: number;
+  jHeight: number;
   isValidation: boolean;
   consensusContext?: AccountConsensusContext;
   jClaimSession?: AccountJClaimSession;
@@ -119,7 +119,7 @@ const applyHtlcResolve = async (context: MutationContext): Promise<ApplyAccountT
     context.account.state,
     context.tx,
     context.byLeft,
-    context.height,
+    context.jHeight,
     context.timestamp,
   );
   return {
@@ -158,14 +158,16 @@ const applyJEventClaim = (context: MutationContext): ApplyAccountTxResult => {
 
 /**
  * This is the only transaction router inside Account consensus. Each handler
- * receives the same frame-controlled time/height and mutates only this Account.
+ * receives the same frame-controlled timestamp/J-height and mutates only this
+ * Account. Never substitute `account.currentHeight`: HTLC and cross-j expiry
+ * domains are finalized jurisdiction height.
  */
 export const applyAccountTxMutation = async (
   account: AccountReplica,
   tx: AccountTx,
   byLeft: boolean,
   timestamp: number,
-  height: number,
+  jHeight: number,
   isValidation: boolean,
   consensusContext: AccountConsensusContext | undefined,
   jClaimSession: AccountJClaimSession | undefined,
@@ -179,7 +181,7 @@ export const applyAccountTxMutation = async (
     tx,
     byLeft,
     timestamp,
-    height,
+    jHeight,
     isValidation,
     ...(consensusContext ? { consensusContext } : {}),
     ...(jClaimSession ? { jClaimSession } : {}),
@@ -213,17 +215,17 @@ export const applyAccountTxMutation = async (
     case 'rebalance_policy': return handleRebalancePolicy(account.state, tx, byLeft, timestamp);
     case 'j_event_claim': return applyJEventClaim(context);
     case 'htlc_lock':
-      return handleHtlcLock(account, tx, byLeft, timestamp, height, isValidation);
+      return handleHtlcLock(account, tx, byLeft, timestamp, jHeight, isValidation);
     case 'htlc_resolve': return applyHtlcResolve(context);
-    case 'cross_pull_lock': return handlePullLock(account.state, tx, byLeft, height, timestamp);
+    case 'cross_pull_lock': return handlePullLock(account.state, tx, byLeft, jHeight, timestamp);
     case 'cross_pull_close': return handleCrossPullClose(account.state, tx, byLeft, timestamp);
     case 'cross_pull_progress': return handleCrossPullProgress(account.state, tx, byLeft);
-    case 'swap_offer': return handleSwapOffer(account, tx, byLeft, height, isValidation);
-    case 'swap_resolve': return handleSwapResolve(account, tx, byLeft, height, isValidation);
+    case 'swap_offer': return handleSwapOffer(account, tx, byLeft, jHeight, isValidation);
+    case 'swap_resolve': return handleSwapResolve(account, tx, byLeft, jHeight, isValidation);
     case 'cross_swap_fill_ack':
-      return handleCrossSwapFillAck(account, tx, byLeft, timestamp, height);
+      return handleCrossSwapFillAck(account, tx, byLeft, timestamp, jHeight);
     case 'swap_cancel_request':
-      return handleSwapCancelRequest(account, tx, byLeft, height, isValidation);
+      return handleSwapCancelRequest(account, tx, byLeft, jHeight, isValidation);
     case 'settle_transition':
       return handleSettleTransition(
         account,

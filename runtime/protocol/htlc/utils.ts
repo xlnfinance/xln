@@ -98,10 +98,13 @@ export function hashHtlcSecret(secret: string): string {
 export function calculateHopTimelock(
   baseTimelock: bigint,
   hopIndex: number,  // 0 = Alice (first), 1 = Hub, 2 = Bob
-  totalHops: number
 ): bigint {
-  // Each hop gets HTLC_MIN_TIMELOCK_DELTA_MS less than previous
-  const reduction = BigInt((totalHops - hopIndex - 1) * HTLC.MIN_TIMELOCK_DELTA_MS);
+  if (!Number.isSafeInteger(hopIndex) || hopIndex < 0) {
+    throw new Error(`HTLC_HOP_INDEX_INVALID:${hopIndex}`);
+  }
+  // Source owns the full window. Each actual forward applies exactly one
+  // delta; pre-reducing by the route tail here would charge every hop twice.
+  const reduction = BigInt(hopIndex) * BigInt(HTLC.MIN_TIMELOCK_DELTA_MS);
   return baseTimelock - reduction;
 }
 

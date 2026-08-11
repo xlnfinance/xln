@@ -346,7 +346,7 @@ const paymentDeadlines = (
     totalHops: route.length - 1,
   });
   return {
-    timelock: calculateHopTimelock(window.baseTimelock, 0, route.length - 1),
+    timelock: calculateHopTimelock(window.baseTimelock, 0),
     revealBeforeHeight: calculateHopRevealHeight(window.baseHeight, 0, route.length - 1),
   };
 };

@@ -8,6 +8,7 @@ import {
   hashHelloMessage,
   serializeWsMessage,
 } from '../../runtime/network/p2p/ws-protocol';
+import { fetchLoopback, isLoopbackHttps } from '../../runtime/orchestrator/loopback-fetch';
 import { relayAudienceFromWebUrl } from '../../runtime/orchestrator/relay-audience';
 
 export type DevReadyProbe = {
@@ -22,7 +23,7 @@ export type DevReadyProbe = {
 export type DevReadyResult = { ready: true } | { ready: false; reason: string };
 
 const fetchWithin = (url: string, init: RequestInit = {}): Promise<Response> =>
-  fetch(url, { ...init, signal: AbortSignal.timeout(2_000) });
+  fetchLoopback(url, { ...init, signal: AbortSignal.timeout(2_000) });
 
 const readObject = async (response: Response): Promise<Record<string, unknown>> => {
   const value: unknown = await response.json();
@@ -34,17 +35,32 @@ const readObject = async (response: Response): Promise<Record<string, unknown>> 
 const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> => new Promise(resolve => {
   const expectedAudience = relayAudienceFromWebUrl(webUrl);
   const origin = new URL(webUrl).origin;
-  const probeSeed = 'xln/dev-ready/relay-auth/v1';
+  const probeSeed = `xln/dev-ready/relay-auth/v1:${expectedAudience}`;
   const signerLabel = '1';
   const runtimeId = deriveSignerAddressSync(probeSeed, signerLabel).toLowerCase();
   const encryptionPubKey = pubKeyToHex(deriveEncryptionKeyPair(probeSeed).publicKey);
-  const socket = new WebSocket(expectedAudience, { headers: { Origin: origin } });
+  const socket = new WebSocket(expectedAudience, {
+    headers: { Origin: origin },
+    // DEV uses a self-signed localhost certificate. Disable verification only
+    // for this loopback readiness client; browser and non-loopback TLS policy
+    // remain unchanged.
+    ...(isLoopbackHttps(webUrl) ? { tls: { rejectUnauthorized: false } } : {}),
+  });
   socket.binaryType = 'arraybuffer';
   let settled = false;
   const finish = (result: DevReadyResult): void => {
     if (settled) return;
     settled = true;
     clearTimeout(timer);
+    if (result.ready && socket.readyState === WebSocket.OPEN) {
+      const closeFallback = setTimeout(() => resolve(result), 500);
+      socket.onclose = () => {
+        clearTimeout(closeFallback);
+        resolve(result);
+      };
+      socket.close(1000, 'dev-ready-complete');
+      return;
+    }
     socket.close();
     resolve(result);
   };

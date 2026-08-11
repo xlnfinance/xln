@@ -271,6 +271,7 @@ export class RuntimeP2P {
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
   private directClientErrors = new Map<string, { at: number; error: string }>();
+  private retiringClients = new Map<RuntimeWsClient, { kind: 'relay' | 'direct'; key: string }>();
   private verifiedProfileRoutes: Map<
     string,
     {
@@ -388,24 +389,33 @@ export class RuntimeP2P {
           return this.resolveTargetEncryptionKey(targetRuntimeId);
         },
         onOpen: () => {
-          if (this.closing || this.closed) return;
+          if (this.closing || this.closed || !this.clients.includes(client)) return;
           this.requestSeedGossip('full');
           this.announceLocalProfiles();
         },
         onEntityInputs: async (from, envelope, timestamp) => {
+          if (!this.clients.includes(client)) return;
           await this.acceptInboundEntityInputs('relay', from, envelope, timestamp);
         },
         onReliableReceipt: (from, receipt) => {
-          if (!this.closing && !this.closed) this.onReliableReceipt(from, receipt);
+          if (!this.closing && !this.closed && this.clients.includes(client)) {
+            this.onReliableReceipt(from, receipt);
+          }
         },
         onGossipRequest: (from, payload) => {
-          if (!this.closing && !this.closed) this.handleGossipRequest(from, payload);
+          if (!this.closing && !this.closed && this.clients.includes(client)) {
+            this.handleGossipRequest(from, payload);
+          }
         },
         onGossipResponse: (from, payload) => {
-          if (!this.closing && !this.closed) this.handleGossipResponse(from, payload);
+          if (!this.closing && !this.closed && this.clients.includes(client)) {
+            this.handleGossipResponse(from, payload);
+          }
         },
         onGossipAnnounce: (from, payload) => {
-          if (!this.closing && !this.closed) this.handleGossipAnnounce(from, payload);
+          if (!this.closing && !this.closed && this.clients.includes(client)) {
+            this.handleGossipAnnounce(from, payload);
+          }
         },
         onError: error => {
           reportRelayClientError(this.env, url, error);
@@ -1518,25 +1528,44 @@ export class RuntimeP2P {
   }
 
   private closeClients() {
-    // close() only initiates terminal shutdown. Keep ownership until
-    // drainAllClients() receives every close handshake or reports failure.
-    for (const client of this.clients) {
-      client.close();
-    }
+    const active = this.clients;
+    this.clients = [];
+    active.forEach((client, index) => this.retireClient(client, 'relay', String(index)));
   }
 
   private closeDirectClients() {
-    // Direct clients follow the same sync-then-awaited lifecycle as relays.
-    for (const client of this.directClients.values()) {
-      client.close();
+    for (const [runtimeId, client] of this.directClients.entries()) {
+      this.retireClient(client, 'direct', runtimeId);
     }
+    this.directClients.clear();
+    this.directClientUrls.clear();
+    this.directClientErrors.clear();
+  }
+
+  private retireClient(
+    client: RuntimeWsClient,
+    kind: 'relay' | 'direct',
+    key: string,
+  ): void {
+    if (this.retiringClients.has(client)) return;
+    this.retiringClients.set(client, { kind, key });
+    client.close();
+  }
+
+  private retireDirectClient(runtimeId: string, client: RuntimeWsClient): void {
+    if (this.directClients.get(runtimeId) === client) this.directClients.delete(runtimeId);
+    this.directClientUrls.delete(runtimeId);
+    this.directClientErrors.delete(runtimeId);
+    this.retireClient(client, 'direct', runtimeId);
   }
 
   private async drainAllClients(timeoutMs: number): Promise<void> {
-    const entries = [
-      ...this.clients.map(client => ({ kind: 'relay' as const, key: '', client })),
-      ...[...this.directClients.entries()].map(([key, client]) => ({ kind: 'direct' as const, key, client })),
-    ];
+    this.closeClients();
+    this.closeDirectClients();
+    const entries = [...this.retiringClients.entries()].map(([client, identity]) => ({
+      ...identity,
+      client,
+    }));
     const results = await Promise.allSettled(entries.map(({ client }) => client.closeAndWait(timeoutMs)));
     const errors: Error[] = [];
     results.forEach((result, index) => {
@@ -1548,12 +1577,7 @@ export class RuntimeP2P {
         );
         return;
       }
-      if (entry.kind === 'relay') this.clients = this.clients.filter(client => client !== entry.client);
-      else if (this.directClients.get(entry.key) === entry.client) {
-        this.directClients.delete(entry.key);
-        this.directClientUrls.delete(entry.key);
-        this.directClientErrors.delete(entry.key);
-      }
+      this.retiringClients.delete(entry.client);
     });
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, 'P2P_CLOSE_FAILED');
@@ -1621,10 +1645,13 @@ export class RuntimeP2P {
     if (this.closing || this.closed) return;
     const normalizedTargetRuntimeId = normalizeRuntimeId(runtimeId);
     if (!normalizedTargetRuntimeId || normalizedTargetRuntimeId === this.runtimeId) return;
-    const endpoint = this.getDirectPeerEndpoint(normalizedTargetRuntimeId);
-    if (!endpoint) return;
     const existing = this.directClients.get(normalizedTargetRuntimeId);
     const existingUrl = this.directClientUrls.get(normalizedTargetRuntimeId);
+    const endpoint = this.getDirectPeerEndpoint(normalizedTargetRuntimeId);
+    if (!endpoint) {
+      if (existing) this.retireDirectClient(normalizedTargetRuntimeId, existing);
+      return;
+    }
     if (existing && existingUrl === endpoint) {
       if (!existing.isOpen() && !existing.isConnecting()) {
         existing.connect().catch(error => {
@@ -1638,10 +1665,7 @@ export class RuntimeP2P {
       return;
     }
     if (existing) {
-      existing.close();
-      this.directClients.delete(normalizedTargetRuntimeId);
-      this.directClientUrls.delete(normalizedTargetRuntimeId);
-      this.directClientErrors.delete(normalizedTargetRuntimeId);
+      this.retireDirectClient(normalizedTargetRuntimeId, existing);
     }
     const client = new RuntimeWsClient({
       url: endpoint,
@@ -1657,17 +1681,27 @@ export class RuntimeP2P {
         this.handlePeerEncryptionKey(fromRuntimeId, pubKeyHex);
       },
       onOpen: () => {
-        if (this.closing || this.closed) return;
+        if (
+          this.closing || this.closed ||
+          this.directClients.get(normalizedTargetRuntimeId) !== client
+        ) return;
         this.directClientErrors.delete(normalizedTargetRuntimeId);
       },
       onEntityInputs: async (from, envelope, timestamp) => {
+        if (this.directClients.get(normalizedTargetRuntimeId) !== client) return;
         await this.acceptInboundEntityInputs('direct', from, envelope, timestamp);
       },
       onReliableReceipt: (from, receipt) => {
-        if (!this.closing && !this.closed) this.onReliableReceipt(from, receipt);
+        if (
+          !this.closing && !this.closed &&
+          this.directClients.get(normalizedTargetRuntimeId) === client
+        ) this.onReliableReceipt(from, receipt);
       },
       onError: error => {
-        if (this.closing || this.closed) return;
+        if (
+          this.closing || this.closed ||
+          this.directClients.get(normalizedTargetRuntimeId) !== client
+        ) return;
         if (
           reportDirectClientError(this.env, endpoint, normalizedTargetRuntimeId, error) === 'retryable-backpressure'
         ) {

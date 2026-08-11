@@ -94,11 +94,11 @@ function getHtlcSecretResolveError(
   lock: HtlcLock,
   data: Extract<HtlcResolveTx['data'], { outcome: 'secret' }>,
   byLeft: boolean,
-  currentHeight: number,
+  currentJHeight: number,
   currentTimestamp: number,
 ): string | undefined {
-  if (currentHeight > 0 && currentHeight > lock.revealBeforeHeight) {
-    return `Lock expired by height: ${currentHeight} > ${lock.revealBeforeHeight}`;
+  if (currentJHeight > 0 && currentJHeight > lock.revealBeforeHeight) {
+    return `Lock expired by J height: ${currentJHeight} > ${lock.revealBeforeHeight}`;
   }
   if (isHtlcTimelockExpired(currentTimestamp, lock.timelock)) {
     return `Lock expired by time: ${currentTimestamp} >= ${lock.timelock}`;
@@ -132,13 +132,13 @@ function getHtlcErrorResolveError(
   lock: HtlcLock,
   data: Extract<HtlcResolveTx['data'], { outcome: 'error' }>,
   byLeft: boolean,
-  currentHeight: number,
+  currentJHeight: number,
   currentTimestamp: number,
 ): string | undefined {
   const callerIsBeneficiary = byLeft !== lock.senderIsLeft;
   const callerIsPayer = byLeft === lock.senderIsLeft;
   const expired =
-    (currentHeight > 0 && currentHeight > lock.revealBeforeHeight) ||
+    (currentJHeight > 0 && currentJHeight > lock.revealBeforeHeight) ||
     isHtlcTimelockExpired(currentTimestamp, lock.timelock);
   // Before expiry only the beneficiary may cancel. Letting the payer submit an
   // arbitrary error would make the conditional payment revocable on demand.
@@ -200,7 +200,7 @@ export async function handleHtlcResolve(
   account: AccountState,
   accountTx: HtlcResolveTx,
   byLeft: boolean,
-  currentHeight: number,
+  currentJHeight: number,
   currentTimestamp: number,
 ): Promise<HtlcResolveResult> {
   const { lockId, outcome } = accountTx.data;
@@ -217,14 +217,14 @@ export async function handleHtlcResolve(
         lock,
         accountTx.data,
         byLeft,
-        currentHeight,
+        currentJHeight,
         currentTimestamp,
       )
     : getHtlcErrorResolveError(
         lock,
         accountTx.data,
         byLeft,
-        currentHeight,
+        currentJHeight,
         currentTimestamp,
       );
   if (validationError) return { success: false, error: validationError, events };
