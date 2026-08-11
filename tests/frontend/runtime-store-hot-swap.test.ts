@@ -927,11 +927,13 @@ test('projection routes never evict or duplicate an active embedded Runtime', ()
 
   expect(lockSource).toContain("{ mode: 'exclusive', ifAvailable: true }");
   expect(lockSource).toContain('if (!acquiredLock) rejectAttempt(error);');
+  expect(lockSource).toContain('await lossInFlight;');
   expect(connectionSource).toContain('const release = adoptActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('?? await tryInitializeActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('if (ownsActiveTabLock()) {');
   expect(connectionSource).toContain('projectionRuntimeLockRelease = adoptActiveTabLock(suspendProjectionRuntime)');
   expect(connectionSource).toContain('await suspendProjectionRuntime();');
+  expect(connectionSource).toContain('await waitForActiveTabLockLoss();');
   expect(connectionSource).toContain("throw new Error('LOCAL_RUNTIME_ACTIVE_IN_ANOTHER_TAB')");
   expect(ownershipStart).toBeGreaterThan(0);
   expect(bootstrapSource.indexOf('await ensureProjectionEmbeddedRuntimeOwnership()')).toBeLessThan(
@@ -946,4 +948,6 @@ test('projection routes never evict or duplicate an active embedded Runtime', ()
   const destroySource = layoutSource.slice(destroyStart, destroyStart + 600);
   expect(destroyStart).toBeGreaterThan(0);
   expect(destroySource).not.toContain('releaseActiveTabLock?.()');
+  const fastGateSource = readFileSync('runtime/scripts/run-e2e-fast.ts', 'utf8');
+  expect(fastGateSource).toContain("title: 'projection route cannot evict an active embedded Runtime owner'");
 });

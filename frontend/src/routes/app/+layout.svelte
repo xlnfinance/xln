@@ -31,7 +31,8 @@
     adoptActiveTabLock,
     clearInactiveTabStandby,
     initializeActiveTabLock,
-    isInactiveTabStandby
+    isInactiveTabStandby,
+    waitForActiveTabLockLoss
   } from '$lib/utils/activeTabLock';
   import {
     describeRemoteRuntimeImportError,
@@ -335,8 +336,9 @@
   async function claimActiveTabLockInPlace(): Promise<void> {
     if (claimingActiveTabLock) return;
     claimingActiveTabLock = true;
-    clearInactiveTabStandby();
     try {
+      await waitForActiveTabLockLoss();
+      clearInactiveTabStandby();
       await bootAfterActiveTabClaim({
         replaceExistingLock: true,
         processLocationRemoteBootstrap: true,

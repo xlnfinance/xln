@@ -9,7 +9,12 @@ import {
 } from '$lib/stores/runtimeControllerStore';
 import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
 import { initializeXLN, suspendClientActivity, switchAppRuntimeAdapter } from '$lib/stores/xlnStore';
-import { adoptActiveTabLock, ownsActiveTabLock, tryInitializeActiveTabLock } from './activeTabLock';
+import {
+  adoptActiveTabLock,
+  ownsActiveTabLock,
+  tryInitializeActiveTabLock,
+  waitForActiveTabLockLoss,
+} from './activeTabLock';
 import {
   REMOTE_RUNTIME_IMPORT_HASH_PARAM,
   REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
@@ -63,6 +68,7 @@ const suspendProjectionRuntime = async (): Promise<void> => {
 };
 
 const ensureProjectionEmbeddedRuntimeOwnership = async (): Promise<void> => {
+  await waitForActiveTabLockLoss();
   if (ownsActiveTabLock()) {
     projectionRuntimeLockRelease = adoptActiveTabLock(suspendProjectionRuntime)
       ?? projectionRuntimeLockRelease;

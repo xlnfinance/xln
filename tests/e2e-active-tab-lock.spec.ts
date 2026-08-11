@@ -134,6 +134,7 @@ test.describe('Active tab lock handoff', () => {
       expect(await wallet.evaluate(() => (
         window as typeof window & { __xlnDocumentMarker?: string }
       ).__xlnDocumentMarker)).toBe('same-document');
+      await expect(wallet.getByRole('heading', { name: 'XLN Address Directory' })).toBeVisible();
       expect(await waitForEmbeddedRuntime(wallet)).toBe(runtimeId);
 
       await openApp(projection, '/address');

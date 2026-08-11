@@ -50,6 +50,10 @@ const FAST_E2E_TARGETS = [
     title: 'second /app tab takes ownership and first becomes inactive',
   },
   {
+    file: 'tests/e2e-active-tab-lock.spec.ts',
+    title: 'projection route cannot evict an active embedded Runtime owner',
+  },
+  {
     file: 'tests/e2e-ahb-isolated.spec.ts',
     title: 'bidirectional payments survive across two isolated browser contexts',
   },

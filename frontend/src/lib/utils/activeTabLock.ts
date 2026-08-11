@@ -39,6 +39,10 @@ export function ownsActiveTabLock(): boolean {
   return ownsWebLock;
 }
 
+export async function waitForActiveTabLockLoss(): Promise<void> {
+  await lossInFlight;
+}
+
 export function enterInactiveTabStandby(): void {
   if (typeof window === 'undefined') return;
   sessionStorage.setItem(INACTIVE_TAB_STANDBY_KEY, '1');
@@ -238,7 +242,11 @@ export async function tryInitializeActiveTabLock(
   onLoseLock: () => void | Promise<void>,
 ): Promise<(() => void) | null> {
   if (typeof window === 'undefined') return () => {};
-  if (activeChannel || releaseHeldLock || ownsWebLock) throw new Error('ACTIVE_TAB_LOCK_ALREADY_INITIALIZED');
+  if (activeChannel && !releaseHeldLock && !ownsWebLock && activeStorageHandler) {
+    cleanupActiveTabCoordination(activeStorageHandler);
+  } else if (activeChannel || releaseHeldLock || ownsWebLock) {
+    throw new Error('ACTIVE_TAB_LOCK_ALREADY_INITIALIZED');
+  }
   const { tabId, onStorage } = installActiveTabCoordination(onLoseLock);
   try {
     if (!await tryAcquireWebLock(tabId)) {
