@@ -43,7 +43,7 @@ const finiteNumber = (value: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-export const PRODUCTION_HEALTH_UNAVAILABLE_TIMEOUT_MS = 60_000;
+const PRODUCTION_HEALTH_UNAVAILABLE_TIMEOUT_MS = 60_000;
 
 export const isProductionHealthUnavailableExpired = (
   lastAvailableAtMs: number,

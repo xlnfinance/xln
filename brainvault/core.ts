@@ -217,7 +217,7 @@ export async function deriveEthereumAddress(
 /**
  * Derive Ethereum address at a specific derivation path
  */
-export async function deriveEthereumAddressAtPath(
+async function deriveEthereumAddressAtPath(
   mnemonic: string,
   path: string,
   passphrase: string = ''

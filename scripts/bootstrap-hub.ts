@@ -222,21 +222,6 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
   return { entityId, signerId: signerAddress };
 }
 
-export async function bootstrapHubs(env: RuntimeReplica, configs: HubConfig[]): Promise<Array<{ entityId: string; signerId: string; signerLabel: string }>> {
-  const entities: Array<{ entityId: string; signerId: string; signerLabel: string }> = [];
-  for (const config of configs) {
-    const result = await bootstrapHub(env, config);
-    if (result?.entityId) {
-      entities.push({
-        entityId: result.entityId,
-        signerId: result.signerId,
-        signerLabel: config.signerId,
-      });
-    }
-  }
-  return entities;
-}
-
 if (import.meta.main) {
   if (!DEFAULT_CONFIG.seed) {
     throw new Error('Hub seed is required via --seed or XLN_RUNTIME_SEED');

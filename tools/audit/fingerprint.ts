@@ -197,7 +197,7 @@ export const listModuleFingerprintFiles = (
   return [...importClosure([...explicit, ...sourceClosure, ...reverseTests], graph)].sort();
 };
 
-export const computeModuleFingerprint = (
+const computeModuleFingerprint = (
   root: string,
   moduleId: string,
   registry: AuditRegistry,

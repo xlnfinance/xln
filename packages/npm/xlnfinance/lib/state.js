@@ -25,7 +25,7 @@ const defaultStateDir = () => {
   return join(xdgState || join(homedir(), '.local', 'state'), 'xlnfinance');
 };
 
-export const STATE_DIR = String(process.env['XLNFINANCE_STATE_DIR'] || '').trim() || defaultStateDir();
+const STATE_DIR = String(process.env['XLNFINANCE_STATE_DIR'] || '').trim() || defaultStateDir();
 export const PATHS = Object.freeze({
   app: join(PACKAGE_ROOT, 'app'),
   server: join(PACKAGE_ROOT, 'dist', 'server.js'),
@@ -40,7 +40,7 @@ export const PATHS = Object.freeze({
   brainvaultOwner: join(STATE_DIR, 'brainvault-owner.json'),
 });
 
-export const ensureStateDirectory = () => {
+const ensureStateDirectory = () => {
   mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
   chmodSync(STATE_DIR, 0o700);
 };

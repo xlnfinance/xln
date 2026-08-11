@@ -13,7 +13,7 @@ export type BalanceRecord = {
   updatedAt: number;
 };
 
-export type DepositRecord = {
+type DepositRecord = {
   eventKey: string;
   userId: string | null;
   tokenId: number;
@@ -26,7 +26,7 @@ export type DepositRecord = {
   startedAtMs: number | null;
 };
 
-export type WithdrawalStatus = 'submitting' | 'sent' | 'finalized' | 'failed';
+type WithdrawalStatus = 'submitting' | 'sent' | 'finalized' | 'failed';
 
 export type WithdrawalRecord = {
   id: string;
@@ -62,8 +62,8 @@ const toBigInt = (value: string | bigint | number): bigint => {
 
 const now = (): number => Date.now();
 
-export const DEFAULT_MAX_CUSTODY_SESSIONS = 100_000;
-export const DEFAULT_EMPTY_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+const DEFAULT_MAX_CUSTODY_SESSIONS = 100_000;
+const DEFAULT_EMPTY_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 
 type CustodyStoreOptions = {
   maxSessions?: number;

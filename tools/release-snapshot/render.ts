@@ -49,7 +49,7 @@ function renderChildren(node: TreeNode, prefix: string, lines: string[]): void {
   });
 }
 
-export function renderAscii(snapshot: ReleaseSnapshot): string {
+function renderAscii(snapshot: ReleaseSnapshot): string {
   const metrics = snapshot.repository.metrics;
   const lines = [
     `xln / RELEASE ${snapshot.release.version} / CODEBASE SNAPSHOT`,
