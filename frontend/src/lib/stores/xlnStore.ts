@@ -1659,10 +1659,10 @@ export async function submitActiveRuntimeInput(
   assertNetworkMachineIsLive(get(networkMachineRuntime));
   const adapter = getRuntimeControllerAdapter();
   const handle = get(runtimeControllerHandle);
-  vaultOperations.assertRuntimeAuthority(handle.runtimeId);
   if (adapter?.mode === 'remote' && handle.mode === 'remote') {
     return routeRemoteRuntimeInput(input, commandOptions);
   }
+  vaultOperations.assertRuntimeAuthority(handle.runtimeId);
   const xln = await getXLN();
   const env = await resolveActiveRuntimeCommandEnv(xln);
   return routeRuntimeInput(xln, env, input, commandOptions);
@@ -1743,7 +1743,10 @@ export async function submitActiveCrossJurisdictionIntent(
   assertRuntimeViewIsLive(get(runtimeView));
   assertNetworkMachineIsLive(get(networkMachineRuntime));
   const adapter = getRuntimeControllerAdapter();
-  vaultOperations.assertRuntimeAuthority(get(runtimeControllerHandle).runtimeId);
+  const handle = get(runtimeControllerHandle);
+  if (adapter?.mode !== 'remote' || handle.mode !== 'remote') {
+    vaultOperations.assertRuntimeAuthority(handle.runtimeId);
+  }
   if (!adapter || adapter.status !== 'connected') {
     throw new Error('CROSS_J_INTENT_RUNTIME_ADAPTER_NOT_CONNECTED');
   }

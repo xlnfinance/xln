@@ -559,6 +559,24 @@ test('xlnStore routes RuntimeInput mutations through RuntimeCommandBus', () => {
 	  expect(source).toContain('export async function submitEntityInputs');
 	});
 
+test('remote command authority does not depend on a local vault Runtime', () => {
+  const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  const submitStart = source.indexOf('export async function submitActiveRuntimeInput');
+  const submitEnd = source.indexOf('async function waitForActiveRuntimeDrained', submitStart);
+  const submitSource = source.slice(submitStart, submitEnd);
+  const remoteReturn = submitSource.indexOf('return routeRemoteRuntimeInput(input, commandOptions);');
+  const localAuthority = submitSource.indexOf('vaultOperations.assertRuntimeAuthority(handle.runtimeId);');
+
+  expect(remoteReturn).toBeGreaterThan(0);
+  expect(localAuthority).toBeGreaterThan(remoteReturn);
+
+  const crossStart = source.indexOf('export async function submitActiveCrossJurisdictionIntent');
+  const crossEnd = source.indexOf('// === FRONTEND UTILITY FUNCTIONS ===', crossStart);
+  const crossSource = source.slice(crossStart, crossEnd);
+  expect(crossSource).toContain("if (adapter?.mode !== 'remote' || handle.mode !== 'remote')");
+  expect(crossSource).toContain('vaultOperations.assertRuntimeAuthority(handle.runtimeId);');
+});
+
 test('embedded command completion follows the submitted input, not unrelated consensus backlog', () => {
   const submitted: RuntimeInput = {
     runtimeTxs: [],
