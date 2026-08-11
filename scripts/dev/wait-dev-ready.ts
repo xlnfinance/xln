@@ -21,8 +21,8 @@ export type DevReadyProbe = {
 
 export type DevReadyResult = { ready: true } | { ready: false; reason: string };
 
-const fetchWithin = (url: string): Promise<Response> =>
-  fetch(url, { signal: AbortSignal.timeout(2_000) });
+const fetchWithin = (url: string, init: RequestInit = {}): Promise<Response> =>
+  fetch(url, { ...init, signal: AbortSignal.timeout(2_000) });
 
 const readObject = async (response: Response): Promise<Record<string, unknown>> => {
   const value: unknown = await response.json();
@@ -95,6 +95,39 @@ const probeRelayChallenge = (webUrl: string): Promise<DevReadyResult> => new Pro
   socket.onerror = () => finish({ ready: false, reason: 'wallet-relay-websocket-error' });
 });
 
+const probeOffchainFaucetPipe = async (webUrl: string): Promise<DevReadyResult> => {
+  const hubsResponse = await fetchWithin(`${webUrl}/api/hubs`);
+  const hubsBody = await readObject(hubsResponse);
+  const hubs = Array.isArray(hubsBody['hubs']) ? hubsBody['hubs'] : [];
+  const hubEntityId = String((hubs[0] as Record<string, unknown> | undefined)?.['entityId'] || '');
+  if (!hubsResponse.ok || !/^0x[0-9a-fA-F]{64}$/.test(hubEntityId)) {
+    return { ready: false, reason: `wallet-faucet-hubs-${hubsResponse.status}` };
+  }
+
+  // This intentionally invalid user id proves browser proxy -> orchestrator ->
+  // exact hub child routing without enqueueing a financial RuntimeInput.
+  const response = await fetchWithin(`${webUrl}/api/faucet/offchain`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      Origin: new URL(webUrl).origin,
+    },
+    body: JSON.stringify({
+      userEntityId: 'dev-ready-invalid-entity',
+      hubEntityId,
+      tokenId: 1,
+      amount: '1',
+    }),
+  });
+  const body = await readObject(response);
+  return response.status === 400 && body['code'] === 'FAUCET_INVALID_USER_ENTITY_ID'
+    ? { ready: true }
+    : {
+        ready: false,
+        reason: `wallet-faucet-pipe-${response.status}:${String(body['code'] || 'missing-code')}`,
+      };
+};
+
 export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResult> => {
   try {
     const importResponse = await fetchWithin(`${input.apiUrl}/api/runtime-import?access=admin`);
@@ -131,6 +164,10 @@ export const probeDevReady = async (input: DevReadyProbe): Promise<DevReadyResul
       const relay = await probeRelayChallenge(webUrl);
       if (!relay.ready) {
         return { ready: false, reason: `${webUrl}:${relay.reason}` };
+      }
+      const faucet = await probeOffchainFaucetPipe(webUrl);
+      if (!faucet.ready) {
+        return { ready: false, reason: `${webUrl}:${faucet.reason}` };
       }
     }
     return { ready: true };

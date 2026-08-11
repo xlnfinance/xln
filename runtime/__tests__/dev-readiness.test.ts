@@ -25,6 +25,7 @@ test('dev wallet uses one shared web-origin list for relay authorization and rea
   expect(dev).toContain('DEV_RELAY_WEB_URLS="${DEV_WEB_SCHEME}://localhost:${WEB_PORT},http://localhost:${WEB_HTTP_PORT}"');
   expect(devChild).toContain('--relay-web-urls "$DEV_RELAY_WEB_URLS"');
   expect(devChild).toContain('--web-url "http://localhost:${WEB_HTTP_PORT}"');
+  expect(devChild).toContain('XLN_PUBLIC_FAUCET="${XLN_PUBLIC_FAUCET:-1}"');
   expect(devChild.match(/--relay-web-urls "\$DEV_RELAY_WEB_URLS"/g)).toHaveLength(2);
   expect(relayProxy).toContain('changeOrigin: false');
   expect(relayProxy).not.toContain('changeOrigin: true');
@@ -80,17 +81,36 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
       ? Response.json({ ok: true, ready: true })
       : new Response('not found', { status: 404 }),
   });
+  let publicFaucetEnabled = true;
   const serveWebRelay = () => {
     const server = Bun.serve<{ challenge: string; audience: string }>({
     hostname: '127.0.0.1',
     port: 0,
-    fetch: (request, server) => {
+    async fetch(request, server) {
       const pathname = new URL(request.url).pathname;
       if (pathname === '/relay') {
         const audience = `ws://127.0.0.1:${server.port}/relay`;
         return server.upgrade(request, { data: { challenge: 'dev-ready-test', audience } })
           ? undefined
           : new Response('upgrade failed', { status: 400 });
+      }
+      if (pathname === '/api/hubs') {
+        return Response.json({
+          ok: true,
+          hubs: [{ entityId: `0x${'11'.repeat(32)}` }],
+        });
+      }
+      if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
+        if (!publicFaucetEnabled) {
+          return Response.json({ code: 'PUBLIC_FAUCET_DISABLED', error: 'Not found' }, { status: 404 });
+        }
+        const body = await request.json() as Record<string, unknown>;
+        return Response.json({
+          success: false,
+          code: body['userEntityId'] === 'dev-ready-invalid-entity'
+            ? 'FAUCET_INVALID_USER_ENTITY_ID'
+            : 'TEST_EXPECTED_INVALID_ENTITY',
+        }, { status: 400 });
       }
       return pathname === '/runtime.js'
         ? new Response('export const ready = true;', { headers: { 'content-type': 'text/javascript' } })
@@ -141,6 +161,12 @@ test('dev readiness uses canonical runtime-import readiness and every browser si
       startedAtMs,
     };
     expect(await probeDevReady(input)).toEqual({ ready: true });
+    publicFaucetEnabled = false;
+    expect(await probeDevReady(input)).toEqual({
+      ready: false,
+      reason: `${input.relayWebUrls[0]}:wallet-faucet-pipe-404:PUBLIC_FAUCET_DISABLED`,
+    });
+    publicFaucetEnabled = true;
 
     const child = spawn('bun', [
       'scripts/dev/wait-dev-ready.ts',

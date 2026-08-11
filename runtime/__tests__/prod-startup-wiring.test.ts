@@ -2714,11 +2714,10 @@ describe('production startup wiring', () => {
     }
   });
 
-  test('explicit hub action proxy polls health only as a lookup fallback', async () => {
+  test('explicit hub action proxy fails fast when the selected child is absent', async () => {
     const originalFetch = globalThis.fetch;
     const hubEntityId = `0x${'ef'.repeat(32)}`;
     let pollCalls = 0;
-    let hubVisible = false;
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ success: true }), {
         status: 200,
@@ -2730,10 +2729,8 @@ describe('production startup wiring', () => {
         defaultRpcUrl: '',
         pollAllHubHealth: async () => {
           pollCalls += 1;
-          hubVisible = true;
         },
-        getHubChildByEntityId: (entityId: string) =>
-          hubVisible && entityId === hubEntityId ? ({ apiPort: 19302 } as any) : null,
+        getHubChildByEntityId: () => null,
         getHealthyHub: () => null,
       });
       const response = await handlers.proxyHubApi(
@@ -2745,10 +2742,10 @@ describe('production startup wiring', () => {
         '/api/faucet/offchain',
       );
 
-      expect(response.status).toBe(200);
-      expect(pollCalls).toBe(1);
-      expect(response.headers.get('x-xln-proxy-health-polled')).toBe('1');
-      expect(Number(response.headers.get('x-xln-proxy-health-poll-ms'))).toBeGreaterThanOrEqual(0);
+      expect(response.status).toBe(404);
+      expect(pollCalls).toBe(0);
+      expect(response.headers.get('x-xln-proxy-health-polled')).toBe('0');
+      expect((await response.json()).code).toBe('FAUCET_HUB_NOT_FOUND');
     } finally {
       globalThis.fetch = originalFetch;
     }

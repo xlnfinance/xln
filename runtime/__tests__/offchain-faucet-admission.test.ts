@@ -204,7 +204,7 @@ describe('offchain faucet admission', () => {
     });
   });
 
-  test('reports typed transient failure when no faucet hub is visible', async () => {
+  test('rejects when the exact requested hub is absent from the active hub set', async () => {
     const account = makeAccount({
       currentHeight: 0,
       pendingFrame: makeFrame(1),
@@ -216,19 +216,20 @@ describe('offchain faucet admission', () => {
       activeHubEntityIds: [],
     });
 
-    expect(response.status).toBe(503);
-    expect(body.error).toBe('No faucet hub available in gossip');
-    expect(body.code).toBe('FAUCET_HUBS_EMPTY');
-    expect(body.category).toBe('TransientRace');
-    expect(body.retryable).toBe(true);
+    expect(response.status).toBe(404);
+    expect(body.error).toBe(`Requested hub not found: ${HUB.toLowerCase()}`);
+    expect(body.code).toBe('FAUCET_REQUESTED_HUB_NOT_FOUND');
+    expect(body.category).toBe('ExpectedEmpty');
+    expect(body.retryable).toBe(false);
     expect(body.fatal).toBe(false);
     expect(body.failure).toMatchObject({
-      category: 'TransientRace',
-      code: 'FAUCET_HUBS_EMPTY',
-      retryable: true,
+      category: 'ExpectedEmpty',
+      code: 'FAUCET_REQUESTED_HUB_NOT_FOUND',
+      retryable: false,
       fatal: false,
     });
-    expect(body.activeHubEntityIds).toEqual([]);
+    expect(body.requestedHubEntityId).toBe(HUB.toLowerCase());
+    expect(body.knownHubEntityIds).toEqual([]);
     expect(enqueued).toBeNull();
   });
 

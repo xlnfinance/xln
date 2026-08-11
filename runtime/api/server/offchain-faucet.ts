@@ -10,7 +10,6 @@ import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
 import { getErrorMessage, isEntityId32 } from './utils';
 import { getAccountReplica, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
 import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';
-import { getFaucetHubProfiles } from './faucet-hubs';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../../runtime/ingress-receipts';
 import {
   describeOffchainFaucetAccountState,
@@ -133,104 +132,51 @@ const parseFaucetRequest = async (
   };
 };
 
-const recordRuntimeVisibility = (
-  relayStore: RelayStore,
-  request: FaucetRequest,
-): void => {
-  const runtimeKey = normalizeRuntimeKey(request.userRuntimeId);
-  const runtimeSeenLocally = relayStore.clients.has(runtimeKey);
-  const runtimePubKey = relayStore.runtimeEncryptionKeys.get(runtimeKey);
-  if (runtimeSeenLocally && runtimePubKey) return;
-  faucetLog.info('offchain.runtime_not_local', {
-    requestId: request.requestId,
-    runtime: shortId(request.userRuntimeId, 10),
-  });
-  // The API may use an external relay, so local socket visibility is
-  // diagnostic evidence only and must never reject a valid faucet request.
-  pushDebugEvent(relayStore, {
-    event: 'debug_event',
-    status: 'info',
-    reason: !runtimeSeenLocally ? 'FAUCET_RUNTIME_NOT_LOCAL_RELAY_CLIENT' : 'FAUCET_RUNTIME_PUBKEY_MISSING_LOCAL',
-    details: {
-      endpoint: '/api/faucet/offchain',
-      userEntityId: request.userEntityId,
-      userRuntimeId: request.userRuntimeId,
-      runtimeSeenLocally,
-      hasRuntimePubKey: Boolean(runtimePubKey),
-      activeRelayClients: Array.from(relayStore.clients.keys()),
-    },
-  });
-};
-
 const resolveFaucetHub = (
   input: OffchainFaucetHandlerInput & { env: RuntimeReplica },
   request: FaucetRequest,
 ): FaucetPhase<FaucetHub> => {
-  const activeHubs = input.relayStore.activeHubEntityIds.filter(Boolean).map(entityId => ({ entityId }));
-  const gossipHubs = activeHubs.length > 0 ? [] : getFaucetHubProfiles(input.env, input.relayStore.activeHubEntityIds);
-  const hubs = activeHubs.length > 0 ? activeHubs : gossipHubs;
-  if (hubs.length === 0) {
-    const profileCount = input.env.gossip?.getProfiles()?.length || 0;
-    pushDebugEvent(input.relayStore, {
-      event: 'error',
-      status: 'rejected',
-      reason: 'FAUCET_HUBS_EMPTY',
-      details: {
-        endpoint: '/api/faucet/offchain',
-        profiles: profileCount,
-        activeHubEntityIds: input.relayStore.activeHubEntityIds,
-        gossipHubCount: gossipHubs.length,
-        hint: 'No faucet-capable hubs in server active set or gossip cache',
-      },
-    });
-    return fail(input.headers, 503, {
-      error: 'No faucet hub available in gossip',
-      code: 'FAUCET_HUBS_EMPTY',
-      extra: {
-        profiles: profileCount,
-        activeHubEntityIds: input.relayStore.activeHubEntityIds,
-        gossipHubCount: gossipHubs.length,
-      },
-    });
-  }
+  const activeHubEntityIds = input.relayStore.activeHubEntityIds.filter(Boolean);
   if (!request.requestedHubId) {
     return fail(input.headers, 400, {
       error: 'Missing hubEntityId for offchain faucet',
       code: 'FAUCET_HUB_REQUIRED',
-      extra: { knownHubEntityIds: hubs.map(hub => hub.entityId) },
+      extra: { knownHubEntityIds: activeHubEntityIds },
     });
   }
-  const selected = hubs.find(hub => hub.entityId.toLowerCase() === request.requestedHubId);
-  if (!selected) {
+  const selectedEntityId = activeHubEntityIds.find(
+    entityId => entityId.toLowerCase() === request.requestedHubId,
+  );
+  if (!selectedEntityId) {
     return fail(input.headers, 404, {
       error: `Requested hub not found: ${request.requestedHubId}`,
       code: 'FAUCET_REQUESTED_HUB_NOT_FOUND',
       extra: {
         requestedHubEntityId: request.requestedHubId,
-        knownHubEntityIds: hubs.map(hub => hub.entityId),
+        knownHubEntityIds: activeHubEntityIds,
       },
     });
   }
-  if (!getEntityReplicaById(input.env, selected.entityId)) {
+  if (!getEntityReplicaById(input.env, selectedEntityId)) {
     return fail(input.headers, 503, {
       error: 'Faucet hub is not ready yet',
       code: 'FAUCET_HUB_NOT_READY',
-      extra: { hubEntityId: selected.entityId },
+      extra: { hubEntityId: selectedEntityId },
     });
   }
   try {
     return {
       ok: true,
       value: {
-        entityId: selected.entityId,
-        signerId: resolveEntityProposerId(input.env, selected.entityId, 'faucet-offchain'),
+        entityId: selectedEntityId,
+        signerId: resolveEntityProposerId(input.env, selectedEntityId, 'faucet-offchain'),
       },
     };
   } catch (error) {
     return fail(input.headers, 503, {
       error: 'Faucet hub signer is unavailable',
       code: 'FAUCET_HUB_SIGNER_UNAVAILABLE',
-      extra: { hubEntityId: selected.entityId, details: getErrorMessage(error) },
+      extra: { hubEntityId: selectedEntityId, details: getErrorMessage(error) },
     });
   }
 };
@@ -385,7 +331,7 @@ const successResponse = (
 ): Response => {
   const serverDurationMs = Date.now() - requestStartedAt;
   faucetLog.info('offchain.accepted', { requestId: request.requestId, durationMs: serverDurationMs });
-  return new Response(JSON.stringify({
+  return new Response(safeStringify({
     success: true,
     type: 'offchain',
     status: 'queued',
@@ -423,16 +369,9 @@ export const handleOffchainFaucet = async (
       user: shortId(request.userEntityId, 8),
       runtime: shortId(request.userRuntimeId, 10),
     });
-    recordRuntimeVisibility(input.relayStore, request);
     return await withRuntimeCommittedRead(initializedInput.env, () => {
       const hub = resolveFaucetHub(initializedInput, request);
       if (!hub.ok) return hub.response;
-      pushDebugEvent(input.relayStore, {
-        event: 'debug_event',
-        status: 'info',
-        reason: 'REB_STEP0_FAUCET_REQUEST',
-        details: { ...request, hubEntityId: hub.value.entityId },
-      });
       const account = admitFaucetAccount(initializedInput, request, hub.value);
       if (!account.ok) return account.response;
       const runtimeInput = buildFaucetRuntimeInput(

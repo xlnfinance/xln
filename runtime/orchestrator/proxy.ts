@@ -224,14 +224,7 @@ const proxyHubApi = async (
     }
 
     const requestedHubId = String(bodyJson?.hubEntityId || '').toLowerCase();
-    let child = deps.getHubChildByEntityId(requestedHubId);
-    if (!child) {
-      const pollStartedAt = Date.now();
-      await deps.pollAllHubHealth();
-      healthPolled = true;
-      healthPollMs = Date.now() - pollStartedAt;
-      child = deps.getHubChildByEntityId(requestedHubId);
-    }
+    const child = deps.getHubChildByEntityId(requestedHubId);
     if (!child) {
       return new Response(safeStringify(proxyFailureBody({
         success: false,
