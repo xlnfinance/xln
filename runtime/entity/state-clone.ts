@@ -19,12 +19,12 @@ import {
   createEntityAccountCandidateMap,
   commitEntityAccountCandidate,
   snapshotEntityAccountMap,
-} from './account-candidate-map';
+} from './candidate-map';
 import {
   commitEntityOrderbookCandidate,
   createEntityOrderbookCandidate,
   snapshotEntityOrderbookCandidate,
-} from './orderbook-candidate';
+} from './candidate-map';
 
 const cloneLog = createStructuredLogger('entity.state_clone');
 

@@ -15,7 +15,7 @@ import {
 import {
   commitEntityAccountCandidate,
   EntityAccountCandidateMap,
-} from '../entity/account-candidate-map';
+} from '../entity/candidate-map';
 import {
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,

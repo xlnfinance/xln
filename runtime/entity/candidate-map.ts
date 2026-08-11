@@ -150,3 +150,90 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     return new Set([...this.#changes.keys(), ...this.#deleted]);
   }
 }
+
+/**
+ * Account iteration is mutation-capable by convention, so it clones values.
+ * This protects older reducers that mutate nested Maps inside `for..of`.
+ */
+export class EntityAccountCandidateMap
+  extends EntityCandidateMap<string, AccountReplica> {
+  constructor(base: Map<string, AccountReplica>) {
+    super(base, cloneAccountReplica, true);
+  }
+
+  /** Pure commitment projection that does not claim untouched values for mutation. */
+  entriesForConsensusCommitment(): MapIterator<[string, AccountReplica]> {
+    return this.visibleEntriesWithoutCloning();
+  }
+}
+
+export const createEntityAccountCandidateMap = (
+  accounts: Map<string, AccountReplica>,
+): EntityAccountCandidateMap => new EntityAccountCandidateMap(accounts);
+
+export const snapshotEntityAccountMap = (
+  accounts: Map<string, AccountReplica>,
+): Map<string, AccountReplica> =>
+  accounts instanceof EntityAccountCandidateMap ? accounts.snapshot() : accounts;
+
+export const commitEntityAccountCandidate = (
+  accounts: Map<string, AccountReplica>,
+): Map<string, AccountReplica> =>
+  accounts instanceof EntityAccountCandidateMap ? accounts.commit() : accounts;
+
+export const entityAccountCommitmentEntries = (
+  accounts: Map<string, AccountReplica>,
+): MapIterator<[string, AccountReplica]> =>
+  accounts instanceof EntityAccountCandidateMap
+    ? accounts.entriesForConsensusCommitment()
+    : accounts.entries();
+
+const cloneBook = (book: BookState): BookState =>
+  structuredCloneOrThrow(book, 'ENTITY_ORDERBOOK_BOOK_CLONE_FAILED');
+
+const clonePairs = (pairs: string[]): string[] => [...pairs];
+
+const cloneReferral = (
+  referral: OrderbookExtState['referrals'] extends Map<string, infer Value>
+    ? Value
+    : never,
+) => ({ ...referral });
+
+export const createEntityOrderbookCandidate = (
+  source: OrderbookExtState,
+): OrderbookExtState => ({
+  books: new EntityCandidateMap(source.books, cloneBook, false),
+  orderPairs: new EntityCandidateMap(source.orderPairs, clonePairs, false),
+  referrals: new EntityCandidateMap(source.referrals, cloneReferral, false),
+  hubProfile: structuredCloneOrThrow(source.hubProfile, 'ENTITY_ORDERBOOK_PROFILE_CLONE_FAILED'),
+});
+
+export const snapshotEntityOrderbookCandidate = (
+  source: OrderbookExtState,
+): OrderbookExtState => ({
+  books: source.books instanceof EntityCandidateMap ? source.books.snapshot() : source.books,
+  orderPairs: source.orderPairs instanceof EntityCandidateMap
+    ? source.orderPairs.snapshot()
+    : source.orderPairs,
+  referrals: source.referrals instanceof EntityCandidateMap
+    ? source.referrals.snapshot()
+    : source.referrals,
+  hubProfile: source.hubProfile,
+});
+
+export const commitEntityOrderbookCandidate = (
+  source: OrderbookExtState,
+): OrderbookExtState => ({
+  books: source.books instanceof EntityCandidateMap ? source.books.commit() : source.books,
+  orderPairs: source.orderPairs instanceof EntityCandidateMap
+    ? source.orderPairs.commit()
+    : source.orderPairs,
+  referrals: source.referrals instanceof EntityCandidateMap
+    ? source.referrals.commit()
+    : source.referrals,
+  hubProfile: source.hubProfile,
+});
+import { cloneAccountReplica } from '../account/state-clone';
+import type { AccountReplica } from '../types/account';
+import type { BookState, OrderbookExtState } from '../orderbook';
+import { structuredCloneOrThrow } from '../protocol/structured-clone';
