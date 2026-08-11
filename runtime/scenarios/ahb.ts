@@ -28,8 +28,7 @@ import {
   resolveScenarioJurisdictionAddress,
 } from './boot';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, advanceScenarioPastDisputeTimeout, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from './helpers';
-import { readRpcUnixSeconds } from './rpc-block-mining';
+import { snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, advanceScenarioTime, advanceScenarioPastDisputeTimeout, readScenarioJurisdictionUnix, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput, setScenarioStorageEnabled } from './helpers';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta, isLeftEntity } from '../account/utils';
 import { createGossipLayer } from '../network/p2p/gossip';
@@ -2025,9 +2024,6 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   // 5) Wait for absolute unix dispute timeout (seconds, not block height).
   // Local disputeStart latches timeout=0 until DisputeStarted is observed.
   const providerAny = jadapter.provider as { send?: (method: string, params: unknown[]) => Promise<unknown> };
-  if (typeof providerAny.send !== 'function') {
-    throw new Error('AHB dispute timeout advance requires RPC provider with evm_increaseTime support');
-  }
   let timeoutUnix = 0;
   for (let round = 0; round < 40; round++) {
     await syncChain(env, 1);
@@ -2097,7 +2093,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   const timeAdvance = await advanceScenarioPastDisputeTimeout(
     env,
-    { send: providerAny.send.bind(providerAny) },
+    jadapter,
     timeoutUnix,
   );
   console.log(
@@ -2300,10 +2296,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     if (edgeInfoBeforeFail.disputeTimeout === 0n) {
       throw new Error('PHASE 8: disputeTimeout missing on-chain (early finalize check)');
     }
-    if (typeof providerAny.send !== 'function') {
-      throw new Error('PHASE 8: early finalize check requires RPC provider clock');
-    }
-    const currentUnix = await readRpcUnixSeconds({ send: providerAny.send.bind(providerAny) });
+    const currentUnix = await readScenarioJurisdictionUnix(jadapter);
     if (currentUnix >= Number(edgeInfoBeforeFail.disputeTimeout)) {
       throw new Error(
         `PHASE 8: expected pre-timeout (unix=${currentUnix}, timeout=${edgeInfoBeforeFail.disputeTimeout})`,
@@ -2350,12 +2343,9 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     throw new Error('PHASE 8: disputeTimeout still 0 before counter-timeout wait');
   }
   console.log(`⏳ STEP 8b: Waiting dispute timeout (unix ${targetCounterTimeoutUnix})...`);
-  if (typeof providerAny.send !== 'function') {
-    throw new Error('AHB counter-dispute timeout advance requires RPC provider with evm_increaseTime support');
-  }
   const counterAdvance = await advanceScenarioPastDisputeTimeout(
     env,
-    { send: providerAny.send.bind(providerAny) },
+    jadapter,
     targetCounterTimeoutUnix,
   );
   console.log(

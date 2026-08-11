@@ -32,10 +32,10 @@ import {
   processUntilWithoutLocalHtlcAdvance,
   withholdScenarioLocalHtlcAdvances,
   syncChain,
-  syncRuntimeToUnixSeconds,
+  pinScenarioJurisdictionUnix,
+  advanceScenarioPastDisputeTimeout,
   usd,
 } from './helpers';
-import { advanceRpcToUnixSeconds } from './rpc-block-mining';
 
 const USDC = 1;
 const WETH = 2;
@@ -45,7 +45,6 @@ const SCENARIO_DEADLINE_MS = 4_102_464_800_000n;
 const DETERMINISTIC_DISPUTE_START_UNIX = 4_102_445_800;
 
 type Registered = { id: string; signer: string; name: string };
-type MineableProvider = { send(method: string, params: unknown[]): Promise<unknown> };
 type DecodedArguments = { fillRatios: bigint[]; secrets: string[]; pulls: string[] };
 type AccountAckInput = Extract<AccountInput, { kind: 'ack' }>;
 type AccountProposalInput = Extract<AccountInput, { kind: 'frame' } | { kind: 'frame_ack' }>;
@@ -270,16 +269,7 @@ const advancePastDisputeTimeout = async (
   jadapter: JAdapter,
   timeoutUnixSeconds: number,
 ) => {
-  const provider = jadapter.provider as unknown as Partial<MineableProvider>;
-  if (typeof provider.send !== 'function') {
-    throw new Error('DISPUTE_TRANSFORMER_EVM_TIME_REQUIRED');
-  }
-  const advanced = await advanceRpcToUnixSeconds(
-    { send: provider.send.bind(provider) },
-    timeoutUnixSeconds,
-  );
-  syncRuntimeToUnixSeconds(env, timeoutUnixSeconds);
-  return advanced;
+  return await advanceScenarioPastDisputeTimeout(env, jadapter, timeoutUnixSeconds);
 };
 
 const transformerClauseArguments = (encoded: string, context: string): string => {
@@ -781,11 +771,7 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     // Anvil automining derives a block timestamp from elapsed host time even
     // when genesis is fixed. Pin the economically relevant dispute-start block
     // so repeated runs exercise identical transformer windows and J-event bytes.
-    const disputeProvider = jadapter.provider as unknown as Partial<MineableProvider>;
-    if (typeof disputeProvider.send !== 'function') {
-      throw new Error('dispute-transformer requires RPC provider timestamp control');
-    }
-    await disputeProvider.send('evm_setNextBlockTimestamp', [DETERMINISTIC_DISPUTE_START_UNIX]);
+    await pinScenarioJurisdictionUnix(env, jadapter, DETERMINISTIC_DISPUTE_START_UNIX);
 
     await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [{ type: 'j_broadcast', data: {} }] }]);
     await syncChain(env, 5);

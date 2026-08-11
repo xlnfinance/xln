@@ -16,6 +16,7 @@ import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
 import { buildRouteOutputKey } from '../runtime/output-routing';
 import { releaseUncommittedReliableIngress } from '../runtime/reliable-delivery';
 import { accountHasProposableMempool } from '../entity/consensus/account-mempool-eligibility';
+import type { JAdapter } from '../jurisdiction/adapter/types';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeReplica>) | null = null;
@@ -231,15 +232,94 @@ type ScenarioRpcSendProvider = {
   send: (method: string, params: unknown[]) => Promise<unknown>;
 };
 
+const requireScenarioRpcSend = (jadapter: JAdapter, operation: string): ScenarioRpcSendProvider => {
+  const provider = jadapter.provider as unknown as Partial<ScenarioRpcSendProvider>;
+  if (typeof provider.send !== 'function') {
+    throw new Error(`${operation}_RPC_SEND_UNAVAILABLE`);
+  }
+  return { send: provider.send.bind(provider) };
+};
+
+const requireScenarioUnixSeconds = (unixSeconds: number): number => {
+  if (!Number.isSafeInteger(unixSeconds) || unixSeconds < 0) {
+    throw new Error(`SCENARIO_UNIX_TARGET_INVALID:${unixSeconds}`);
+  }
+  return unixSeconds;
+};
+
+const requireScenarioBlockUnix = (value: unknown): number => {
+  const unixSeconds = typeof value === 'bigint' ? Number(value) : value;
+  if (!Number.isSafeInteger(unixSeconds) || Number(unixSeconds) < 0) {
+    throw new Error(`SCENARIO_JURISDICTION_UNIX_INVALID:${String(value)}`);
+  }
+  return Number(unixSeconds);
+};
+
+/**
+ * Pin the next economically relevant jurisdiction block in both scenario modes.
+ *
+ * BrowserVM's clock is already deterministic and owned by Runtime frames, so
+ * an external absolute pin must not jump every Runtime timer forward with it.
+ * Align the adapter to the current Runtime clock and let the next frame keep
+ * that authority. External RPC chains need the explicit absolute instruction
+ * because their autominer owns wall time. Keeping this split here prevents both
+ * raw Anvil calls through BrowserVM and premature HTLC/scheduler wakeups.
+ */
+export const pinScenarioJurisdictionUnix = async (
+  env: RuntimeReplica,
+  jadapter: JAdapter,
+  unixSeconds: number,
+): Promise<void> => {
+  const target = requireScenarioUnixSeconds(unixSeconds);
+  if (typeof jadapter.setBlockTimestamp === 'function') {
+    jadapter.setBlockTimestamp(env.state.timestamp || 0);
+    return;
+  }
+  await requireScenarioRpcSend(jadapter, 'SCENARIO_PIN_JURISDICTION_UNIX')
+    .send('evm_setNextBlockTimestamp', [target]);
+};
+
+/** Latest jurisdiction clock in absolute unix seconds. */
+export const readScenarioJurisdictionUnix = async (
+  jadapter: JAdapter,
+): Promise<number> => {
+  if (typeof jadapter.setBlockTimestamp === 'function') {
+    const block = await jadapter.provider.getBlock('latest');
+    if (!block) throw new Error('SCENARIO_JURISDICTION_BLOCK_MISSING');
+    return requireScenarioBlockUnix(block.timestamp);
+  }
+  const { readRpcUnixSeconds } = await import('./rpc-block-mining');
+  return await readRpcUnixSeconds(requireScenarioRpcSend(jadapter, 'SCENARIO_READ_JURISDICTION_UNIX'));
+};
+
 /** Jump chain + runtime clocks past an absolute disputeTimeout (unix seconds). */
 export const advanceScenarioPastDisputeTimeout = async (
   env: RuntimeReplica,
-  provider: ScenarioRpcSendProvider,
+  jadapter: JAdapter,
   timeoutUnixSeconds: number,
 ) => {
+  const target = requireScenarioUnixSeconds(timeoutUnixSeconds);
+  if (typeof jadapter.setBlockTimestamp === 'function') {
+    const startUnix = await readScenarioJurisdictionUnix(jadapter);
+    if (startUnix >= target) {
+      syncRuntimeToUnixSeconds(env, startUnix);
+      return { startUnix, finalUnix: startUnix, advancedSeconds: 0 };
+    }
+    syncRuntimeToUnixSeconds(env, target);
+    jadapter.setBlockTimestamp(target * 1000);
+    const finalUnix = await readScenarioJurisdictionUnix(jadapter);
+    return {
+      startUnix,
+      finalUnix,
+      advancedSeconds: Math.max(0, finalUnix - startUnix),
+    };
+  }
   const { advanceRpcToUnixSeconds } = await import('./rpc-block-mining');
-  const advanced = await advanceRpcToUnixSeconds(provider, timeoutUnixSeconds);
-  syncRuntimeToUnixSeconds(env, timeoutUnixSeconds);
+  const advanced = await advanceRpcToUnixSeconds(
+    requireScenarioRpcSend(jadapter, 'SCENARIO_ADVANCE_JURISDICTION_UNIX'),
+    target,
+  );
+  syncRuntimeToUnixSeconds(env, target);
   return advanced;
 };
 

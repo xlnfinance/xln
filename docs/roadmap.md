@@ -160,6 +160,12 @@ blocker list:
   ordinary `openAccount` never replaces them and no compatibility reopen path exists.
 - Rich browser physical-storage inspector, unified QA/Health cockpit,
   shareable detached history viewer and additional failure-inbox UX.
+- Complete BrowserVM-only catalog parity for the non-release `lock-ahb` and
+  `dispute-transformer` runners before exposing either as a browser preset.
+  Their dispute start/finalization uses the canonical scenario clock and receipt
+  evidence, but later multi-entity history fanout can still reject with
+  `J_PREFIX_LOCAL_PREFIX_MISMATCH`; RPC/mainnet and the shipped hub-collapse
+  Scenario Player flow are independently green.
 - A future fresh typed mutable-path schema for generic oversized Entity/Book
   records. There will be no compatibility reader before mainnet.
 

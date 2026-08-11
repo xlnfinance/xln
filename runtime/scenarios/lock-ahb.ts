@@ -19,7 +19,7 @@ import type { RuntimeReplica } from '../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
 import type { EntityInput } from '../entity/types';
 import type { JAdapter } from '../jurisdiction/adapter/types';
-import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, advanceScenarioPastDisputeTimeout, processUntilWithoutLocalHtlcAdvance, withholdScenarioLocalHtlcAdvances } from './helpers';
+import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, findCommittedScenarioHtlcLockId, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry, advanceScenarioTime, advanceScenarioPastDisputeTimeout, pinScenarioJurisdictionUnix, processUntilWithoutLocalHtlcAdvance, withholdScenarioLocalHtlcAdvances } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from './boot';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { isLeftEntity } from '../account/utils';
@@ -1670,16 +1670,10 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // STEP 2: Broadcast batch to J-machine (submit disputeStart to blockchain)
     console.log(`📡 STEP 2: Bob broadcasts jBatch to J-machine...`);
     const deterministicDisputeStartUnix = 4_102_500_000;
-    const disputeProvider = jadapter.provider as {
-      send?: (method: string, params: unknown[]) => Promise<unknown>;
-    };
-    if (typeof disputeProvider.send !== 'function') {
-      throw new Error('lock-ahb deterministic dispute start requires RPC provider timestamp control');
-    }
     // Anvil automining derives a block timestamp from elapsed host time even
     // when genesis is fixed. Pin the economically relevant dispute-start block
     // so repeated runs exercise identical signed windows and J-event bytes.
-    await disputeProvider.send('evm_setNextBlockTimestamp', [deterministicDisputeStartUnix]);
+    await pinScenarioJurisdictionUnix(env, jadapter, deterministicDisputeStartUnix);
     await processWithOffline(env, [{
       entityId: bob.id,
       signerId: bob.signer,
@@ -1709,13 +1703,9 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // STEP 4: Wait for dispute timeout (absolute unix seconds on L1)
     const timeoutUnix = Number(bobHubAccountAfterStart.activeDispute!.disputeTimeout);
     console.log(`⏳ STEP 4: Waiting for dispute timeout (unix ${timeoutUnix})...`);
-    const providerAny = disputeProvider;
-    if (typeof providerAny.send !== 'function') {
-      throw new Error('lock-ahb timeout advance requires RPC provider with evm_increaseTime support');
-    }
     const timeAdvance = await advanceScenarioPastDisputeTimeout(
       env,
-      { send: providerAny.send.bind(providerAny) },
+      jadapter,
       timeoutUnix,
     );
     console.log(

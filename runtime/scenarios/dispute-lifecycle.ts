@@ -10,7 +10,6 @@
 
 import type { RuntimeReplica } from '../runtime/types';
 import { defaultAccountDisputeConfigForParties } from '../account/dispute-config';
-import type { JAdapter } from '../jurisdiction/adapter/types';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { bootScenario, registerEntities, fundEntities } from './boot';
 import {
@@ -22,43 +21,21 @@ import {
   findReplica,
   usd,
   enableStrictScenario,
-  syncRuntimeToUnixSeconds,
+  pinScenarioJurisdictionUnix,
+  readScenarioJurisdictionUnix,
+  advanceScenarioPastDisputeTimeout,
 } from './helpers';
-import { advanceRpcToUnixSeconds, readRpcUnixSeconds } from './rpc-block-mining';
 
 const USDC = 1;
 const DETERMINISTIC_DISPUTE_START_UNIX = 4_102_500_000;
 
 type Registered = { id: string; signer: string; name: string };
-type MineableProvider = { send(method: string, params: unknown[]): Promise<unknown> };
-
 const requireRegistered = (entity: Registered | undefined, name: string): Registered => {
   if (!entity) {
     throw new Error(`DISPUTE_LIFECYCLE_MISSING_ENTITY:${name}`);
   }
   return entity;
 };
-
-async function advancePastDisputeTimeout(
-  env: RuntimeReplica,
-  jadapter: JAdapter,
-  timeoutUnixSeconds: number,
-): Promise<void> {
-  const mineableProvider = jadapter.provider as unknown as Partial<MineableProvider>;
-  if (typeof mineableProvider.send !== 'function') {
-    throw new Error('dispute-lifecycle requires RPC provider with evm_increaseTime support');
-  }
-  const send = mineableProvider.send.bind(mineableProvider);
-  const before = await readRpcUnixSeconds({ send });
-  await advanceRpcToUnixSeconds({ send }, timeoutUnixSeconds);
-  syncRuntimeToUnixSeconds(env, timeoutUnixSeconds);
-  const after = await readRpcUnixSeconds({ send });
-  if (after < timeoutUnixSeconds) {
-    throw new Error(
-      `dispute-lifecycle unix advance failed: before=${before} target=${timeoutUnixSeconds} after=${after}`,
-    );
-  }
-}
 
 export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promise<RuntimeReplica> {
   console.log('\n' + '='.repeat(80));
@@ -182,11 +159,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
     // Anvil automining derives a block timestamp from elapsed host time even
     // when genesis is fixed. Pin the economically relevant dispute-start block
     // so repeated runs exercise identical challenge windows and J-event bytes.
-    const disputeProvider = jadapter.provider as unknown as Partial<MineableProvider>;
-    if (typeof disputeProvider.send !== 'function') {
-      throw new Error('dispute-lifecycle requires RPC provider timestamp control');
-    }
-    await disputeProvider.send('evm_setNextBlockTimestamp', [DETERMINISTIC_DISPUTE_START_UNIX]);
+    await pinScenarioJurisdictionUnix(env, jadapter, DETERMINISTIC_DISPUTE_START_UNIX);
 
     // Broadcast disputeStart and process unilateral j-events
     await process(env, [{
@@ -281,11 +254,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
 
     // Advance jurisdiction wall-clock past absolute unix challenge end.
     const timeoutUnix = Number(aliceAfterStart?.activeDispute?.disputeTimeout || 0);
-    const provider = jadapter.provider as unknown as Partial<MineableProvider>;
-    if (typeof provider.send !== 'function') {
-      throw new Error('dispute-lifecycle requires RPC provider with eth_getBlockByNumber');
-    }
-    const currentUnix = await readRpcUnixSeconds({ send: provider.send.bind(provider) });
+    const currentUnix = await readScenarioJurisdictionUnix(jadapter);
     assert(
       timeoutUnix >= currentUnix,
       `Expected present-or-future unix timeout, got timeout=${timeoutUnix}, current=${currentUnix}`,
@@ -295,7 +264,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
     const hubReserveBeforeFinalize = await jadapter.getReserves(hub.id, USDC);
     const aliceCollateralBeforeFinalize = aliceAfterStart?.state.deltas.get(USDC)?.collateral ?? 0n;
 
-    await advancePastDisputeTimeout(env, jadapter, timeoutUnix);
+    await advanceScenarioPastDisputeTimeout(env, jadapter, timeoutUnix);
 
     let autoFinalizeObserved = false;
     for (let i = 0; i < 40; i++) {

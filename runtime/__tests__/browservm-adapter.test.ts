@@ -5,6 +5,11 @@ import { createJAdapter } from '../jurisdiction/adapter';
 import { verifyCanonicalReceiptProof } from '../jurisdiction/machine/receipt-codec';
 import { createEmptyEnv } from '../runtime';
 import { bindScenarioJReplica, createJReplica, createJurisdictionConfig } from '../scenarios/boot';
+import {
+  advanceScenarioPastDisputeTimeout,
+  pinScenarioJurisdictionUnix,
+  readScenarioJurisdictionUnix,
+} from '../scenarios/helpers';
 import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';
 import type { EntityReplica } from '../entity/types';
 
@@ -47,6 +52,48 @@ const makeReplica = (entityId: string, signerId: string): EntityReplica =>
   }) as EntityReplica;
 
 describe('BrowserVM JAdapter boundary', () => {
+  test('uses the Runtime-owned clock for absolute scenario dispute deadlines', async () => {
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
+    const env = createEmptyEnv('browservm-scenario-clock');
+    env.state.timestamp = 147_000;
+    const externalRpcPinUnix = 4_102_500_000;
+    const disputeStartUnix = 147;
+    const disputeTimeoutUnix = 157;
+    try {
+      await pinScenarioJurisdictionUnix(env, adapter, externalRpcPinUnix);
+      expect(env.state.timestamp).toBe(disputeStartUnix * 1000);
+      expect(await readScenarioJurisdictionUnix(adapter)).toBe(disputeStartUnix);
+
+      const advanced = await advanceScenarioPastDisputeTimeout(env, adapter, disputeTimeoutUnix);
+      expect(advanced).toEqual({
+        startUnix: disputeStartUnix,
+        finalUnix: disputeTimeoutUnix,
+        advancedSeconds: 10,
+      });
+      expect(env.state.timestamp).toBe(disputeTimeoutUnix * 1000);
+      expect(await readScenarioJurisdictionUnix(adapter)).toBe(disputeTimeoutUnix);
+
+      expect(await advanceScenarioPastDisputeTimeout(env, adapter, disputeTimeoutUnix)).toEqual({
+        startUnix: disputeTimeoutUnix,
+        finalUnix: disputeTimeoutUnix,
+        advancedSeconds: 0,
+      });
+      expect(await advanceScenarioPastDisputeTimeout(env, adapter, disputeTimeoutUnix - 5)).toEqual({
+        startUnix: disputeTimeoutUnix,
+        finalUnix: disputeTimeoutUnix,
+        advancedSeconds: 0,
+      });
+      expect(env.state.timestamp).toBe(disputeTimeoutUnix * 1000);
+      expect(await readScenarioJurisdictionUnix(adapter)).toBe(disputeTimeoutUnix);
+
+      await expect(
+        adapter.provider.send('evm_setNextBlockTimestamp', [disputeTimeoutUnix + 1]),
+      ).rejects.toThrow('BROWSERVM_RPC_METHOD_UNSUPPORTED');
+    } finally {
+      await adapter.close();
+    }
+  }, 30_000);
+
   test('contract reads never mutate the BrowserVM state root', async () => {
     const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
     try {

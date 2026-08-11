@@ -82,11 +82,17 @@ const decodeHistoricalLog = (options: BrowserVmHistoryOptions, log: Authenticate
           : 'finalProofbody'
     ] = proofbody;
     if (event.name === 'DisputeFinalized') {
-      event.disputeFinalizationEvidence = resolveDisputeFinalizationEvidence(
+      const evidence = resolveDisputeFinalizationEvidence(
         decodeDisputeFinalizationEvidenceCalldata(receipt.data),
         log.transactionHash,
         event.args,
       );
+      // The Solidity log commits only the evidence hash; calldata recovery
+      // supplies the initial proof hash that Runtime consensus validates. Keep
+      // BrowserVM identical to the RPC watcher: attaching only the sidecar
+      // would leave the canonical event payload incomplete and fail closed.
+      event.args['initialProofbodyHash'] = evidence.initialProofbodyHash;
+      event.disputeFinalizationEvidence = evidence;
     }
   }
   return CANONICAL_J_EVENTS.some(name => name === event.name) ? event : null;

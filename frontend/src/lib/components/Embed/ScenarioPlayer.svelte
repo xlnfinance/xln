@@ -73,16 +73,6 @@
       focus: ['Alice', 'Hub', 'Bob', 'payment', 'settlement'],
     },
     {
-      id: 'lock-ahb',
-      runtimeId: 'lock-ahb',
-      runner: 'lockAhb',
-      title: 'HTLC route',
-      description: 'Hash-locked multi-hop payment through a hub with secret propagation and timeout protection.',
-      intent: 'Preview payment safety without trusting the intermediary.',
-      tags: ['htlc', 'routing'],
-      focus: ['HTLC', 'secret', 'timeout', 'Hostage'],
-    },
-    {
       id: 'settle',
       runtimeId: 'settle',
       runner: 'settle',

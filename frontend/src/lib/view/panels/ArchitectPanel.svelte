@@ -462,40 +462,6 @@
     }
   }
 
-  /** Start HTLC Tutorial (lock-ahb scenario) */
-  let htlcRunning = false;
-  async function startHTLCTutorial() {
-    if (!requireLiveMode('run HTLC tutorial')) return;
-    if (htlcRunning) {
-      return;
-    }
-    htlcRunning = true;
-    loading = true;
-    try {
-      const XLN = await getXLN();
-      ensureScenarioEnv(XLN, 'HTLC');
-      $runtimeFrameEnv.state.eReplicas.clear();
-      $runtimeFrameEnv.history = [];
-      await XLN.scenarios.lockAhb($runtimeFrameEnv);
-
-      const frames = $runtimeFrameEnv.history || [];
-      publishCurrentEnv(frames);
-      lastAction = `HTLC: ${frames.length} frames loaded.`;
-    } catch (err: any) {
-      const frames = $runtimeFrameEnv?.history || [];
-      if (frames.length > 0) {
-        publishCurrentEnv(frames);
-        lastAction = `HTLC: ${frames.length} frames (error). ${err.message}`;
-      } else {
-        lastAction = `❌ ${err.message}`;
-      }
-      console.error('[HTLC] error:', err);
-    } finally {
-      loading = false;
-      htlcRunning = false;
-    }
-  }
-
   /** Start Swap Tutorial */
   let swapRunning = false;
   async function startSwapTutorial() {
@@ -1894,14 +1860,6 @@
               <div class="info">
                 <strong>Alice-Hub-Bob</strong>
                 <p>Auto-play tutorial · Bilateral consensus</p>
-              </div>
-            </button>
-
-            <button class="preset-item" on:click={startHTLCTutorial} disabled={loading}>
-              <span class="icon">🔒</span>
-              <div class="info">
-                <strong>HTLC Payments</strong>
-                <p>Hash-locked · Multi-hop routing</p>
               </div>
             </button>
 

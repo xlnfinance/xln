@@ -916,10 +916,6 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     'Counterparty dispute proofBodyHash matches on-chain start hash'
   );
 
-  const providerAny = jadapter.provider as { send?: (method: string, params: unknown[]) => Promise<unknown> };
-  if (typeof providerAny.send !== 'function') {
-    throw new Error('swap dispute timeout requires RPC provider with evm_increaseTime support');
-  }
   // Local disputeStart latches timeout=0 until DisputeStarted is observed.
   let timeoutUnix = 0;
   for (let round = 0; round < 40; round++) {
@@ -940,7 +936,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   console.log(`⏳ Waiting for dispute timeout (unix ${timeoutUnix})...`);
   const advanced = await advanceScenarioPastDisputeTimeout(
     env,
-    { send: providerAny.send.bind(providerAny) },
+    jadapter,
     timeoutUnix,
   );
   console.log(
