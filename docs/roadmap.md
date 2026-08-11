@@ -166,6 +166,10 @@ blocker list:
   evidence, but later multi-entity history fanout can still reject with
   `J_PREFIX_LOCAL_PREFIX_MISMATCH`; RPC/mainnet and the shipped hub-collapse
   Scenario Player flow are independently green.
+- Persist the original signed swap `maxFee` and `minNetReceive` in terminal
+  swap-history projections so closed-order UI and audits retain the user's
+  authorization envelope. This is audit metadata only and must not introduce
+  another fee formula or change execution authority.
 - A future fresh typed mutable-path schema for generic oversized Entity/Book
   records. There will be no compatibility reader before mainnet.
 
