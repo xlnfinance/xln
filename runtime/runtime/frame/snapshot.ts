@@ -26,7 +26,6 @@ export const prepareRuntimeFrameCommit = (
       meta: {
         title: env.extra?.subtitle?.title ?? `Frame ${env.state.height}`,
         ...(env.extra?.subtitle ? { subtitle: env.extra.subtitle } : {}),
-        ...(env.frameDisplayMs !== undefined ? { displayMs: env.frameDisplayMs } : {}),
       },
       logs,
       gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],

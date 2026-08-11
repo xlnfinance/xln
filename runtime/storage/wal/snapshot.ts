@@ -527,7 +527,6 @@ export const buildCanonicalEnvSnapshot = (
           meta: {
             ...(options.meta.title ? { title: options.meta.title } : {}),
             ...(options.meta.subtitle ? { subtitle: structuredClone(options.meta.subtitle) } : {}),
-            ...(options.meta.displayMs !== undefined ? { displayMs: options.meta.displayMs } : {}),
           },
         }
       : {}),

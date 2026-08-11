@@ -758,9 +758,6 @@ export interface RuntimeReplica {
   // Frame stepping: stop at specific frame for debugging
   stopAtFrame?: number | undefined; // When set, process() stops at this frame and dumps state
 
-  // Frame display duration hint (for time-travel visualization)
-  frameDisplayMs?: number | undefined; // How long to display this frame (default: 100ms)
-
   // Snapshot extras for scenarios (set before process(), consumed by captureSnapshot)
   extra?: {
     subtitle?: {
@@ -811,7 +808,6 @@ export interface EnvSnapshot {
       tradfiParallel?: string; // Traditional finance equivalent (optional)
       keyMetrics?: string[];   // Bullet points of key numbers
     };
-    displayMs?: number; // Display duration hint for time-travel visualization
   };
   // Interactive storytelling narrative
   narrative?: string; // Detailed explanation of what's happening in this frame
