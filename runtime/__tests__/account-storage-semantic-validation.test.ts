@@ -68,8 +68,14 @@ const makeFixture = async (): Promise<ValidationContext> => {
     giveAmount: 5n,
     wantTokenId: 2,
     wantAmount: 10n,
+    maxFee: 0n,
+    minNetReceive: 10n,
+    priceTicks: 2_000_000n,
+    timeInForce: 0,
     makerIsLeft: true,
     createdHeight: 1,
+    quantizedGive: 5n,
+    quantizedWant: 10n,
   });
   account.state.subcontracts = new Map([['transformer-1', {
     transformerAddress: `0x${'44'.repeat(20)}`,

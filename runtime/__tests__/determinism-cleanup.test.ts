@@ -113,7 +113,7 @@ describe('determinism cleanup lifecycle', () => {
   test('dispute transformer pins the economically relevant RPC block before broadcasting', () => {
     const source = readSource('runtime/scenarios/dispute-transformer.ts');
     const debugMarker = source.indexOf('DISPUTE_DEBUG:before-start-broadcast');
-    const timestampPin = source.indexOf("send('evm_setNextBlockTimestamp'", debugMarker);
+    const timestampPin = source.indexOf('pinScenarioJurisdictionUnix(', debugMarker);
     const startBroadcast = source.indexOf("entityTxs: [{ type: 'j_broadcast'", debugMarker);
 
     expect(debugMarker).toBeGreaterThan(0);

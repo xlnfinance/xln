@@ -5,6 +5,7 @@ import {
   getMarketMakerHealth as getServerMarketMakerHealth,
 } from '../api/server/market-maker-health';
 import { buildDefaultEntitySwapPairs } from '../account/utils';
+import { deriveSwapNetAuthorization } from '../account/swap-net-authorization';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { deriveSameOrderbookMaterialization } from '../entity/tx/handlers/account/orderbook-matching-helpers';
 import { buildMarketSnapshotForReplica } from '../network/relay/market-snapshot';
@@ -239,6 +240,7 @@ test('five-token market maker depth remains canonical through Account and hub ad
   const rejected: string[] = [];
 
   for (const spec of specs) {
+    const netAuthorization = deriveSwapNetAuthorization(spec.wantAmount, 1);
     const result = await handleSwapOffer(account, {
       type: 'swap_offer',
       data: {
@@ -247,6 +249,7 @@ test('five-token market maker depth remains canonical through Account and hub ad
         giveAmount: spec.giveAmount,
         wantTokenId: spec.wantTokenId,
         wantAmount: spec.wantAmount,
+        ...netAuthorization,
         priceTicks: spec.priceTicks,
       },
     }, true, 1);

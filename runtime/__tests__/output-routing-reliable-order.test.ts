@@ -187,6 +187,8 @@ const crossJProposalOutput = (
               giveAmount: 10n,
               wantTokenId: 2,
               wantAmount: 20n,
+              maxFee: 0n,
+              minNetReceive: 20n,
               timeInForce: 0,
               crossJurisdiction: cloneCrossJurisdictionRoute(route),
             },
