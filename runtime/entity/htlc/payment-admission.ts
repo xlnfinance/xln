@@ -22,7 +22,7 @@ import {
   generateLockId,
   hashHtlcSecret,
 } from '../../protocol/htlc/utils';
-import { computeHtlcEnvelopeContextHash, createOnionEnvelopes, type HtlcEnvelope } from '../../protocol/htlc/envelope';
+import { computeHtlcEnvelopeContextHash, createOnionEnvelopes, type HtlcEnvelope } from '../../protocol/htlc/codec/envelope';
 import { isMultiRecipientCiphertext, validateMultiRecipientCiphertext } from '../../protocol/htlc/multi-recipient';
 import type { CertifiedValidatorEncryptionManifest } from '../../protocol/htlc/validator-encryption';
 import { verifyHankoForHash } from '../../hanko/signing';

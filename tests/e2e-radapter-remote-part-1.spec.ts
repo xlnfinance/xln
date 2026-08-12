@@ -14,9 +14,9 @@ import { HUB_MESH_CREDIT_AMOUNT } from '../runtime/orchestrator/mesh-common';
 
 import { decodeRuntimeAdapterRequest } from '../runtime/api/runtime-adapter/codec';
 
-import { signRuntimeAdapterServerIdentity } from '../runtime/api/runtime-adapter/server-identity-signer';
+import { signRuntimeAdapterServerIdentity } from '../runtime/api/runtime-adapter/security/server-identity-signer';
 
-import { deriveRuntimeAdapterCapabilityToken } from '../runtime/api/runtime-adapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../runtime/api/runtime-adapter/security/auth';
 
 import type { RuntimeAdapterRequest } from '../runtime/api/runtime-adapter/types';
 

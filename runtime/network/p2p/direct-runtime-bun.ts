@@ -17,10 +17,10 @@ import {
   serializeWsMessage,
   type RuntimeWsMessage,
 } from './ws-protocol';
-import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
-import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from './hello-auth';
-import { createHelloChallengeRegistry } from './hello-challenge';
-import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
+import { isRuntimeId, normalizeRuntimeId } from './auth/runtime-id';
+import { verifyHelloAuth, verifyRuntimeWsFrameAuth } from './auth/hello-auth';
+import { createHelloChallengeRegistry } from './auth/hello-challenge';
+import { decodeRuntimeEntityInputsEnvelope } from './auth/entity-input-envelope';
 import {
   classifyWebSocketSendResult,
   type WebSocketSendResult,

@@ -89,7 +89,7 @@ import {
 import {
   assertCrossJurisdictionOrderAdmissible,
   findCrossJurisdictionBookAdmissionForAck,
-} from '../orderbook/cross-j-orderbook';
+} from '../orderbook/cross-j/orderbook';
 
 import {
   buildCrossJurisdictionMarketOffer,
@@ -226,14 +226,14 @@ import { sealAccountDraftAsEntity } from './helpers/account-draft';
 
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 
-import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } from '../protocol/htlc/envelope';
+import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } from '../protocol/htlc/codec/envelope';
 
 import { encryptBytesForValidatorManifest } from '../protocol/htlc/multi-recipient';
 
 import { buildHtlcOnionAdvanceTx } from '../entity/htlc/onion-advance';
-import { hashEncryptedHtlcLayer } from '../protocol/htlc/onion-layer';
+import { hashEncryptedHtlcLayer } from '../protocol/htlc/codec/onion-layer';
 
-import { encodeHtlcSecretOffer, encodeOnionLayer } from '../protocol/htlc/onion-codec';
+import { encodeHtlcSecretOffer, encodeOnionLayer } from '../protocol/htlc/codec/onion';
 
 import {
   computeEntityProfileCertificationHash,

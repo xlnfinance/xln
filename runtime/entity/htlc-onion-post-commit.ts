@@ -1,8 +1,8 @@
 import { createStructuredLogger } from '../infra/logger';
 import { buildValidatorEncryptionBoard } from './profile-encryption';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
-import { unwrapEnvelope, validateEnvelope } from '../protocol/htlc/envelope';
-import { decodeHtlcSecretOffer } from '../protocol/htlc/onion-codec';
+import { unwrapEnvelope, validateEnvelope } from '../protocol/htlc/codec/envelope';
+import { decodeHtlcSecretOffer } from '../protocol/htlc/codec/onion';
 import { decryptBytesForLocalValidator } from '../protocol/htlc/multi-recipient';
 import {
   buildHtlcOnionAcceptOfferTx,
@@ -15,7 +15,7 @@ import {
   committedHtlcLockEnvelope,
   hashEncryptedHtlcLayer,
   htlcSecretOfferContextHash,
-} from '../protocol/htlc/onion-layer';
+} from '../protocol/htlc/codec/onion-layer';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { accountInputAck } from '../account/consensus/flush';
 import type { AccountTx, HtlcLock } from '../types/account';

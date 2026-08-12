@@ -11,7 +11,7 @@ import {
   encodeRuntimeAdapterMessage,
 } from '../api/runtime-adapter/codec';
 import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
-import { signRuntimeAdapterServerIdentity } from '../api/runtime-adapter/server-identity-signer';
+import { signRuntimeAdapterServerIdentity } from '../api/runtime-adapter/security/server-identity-signer';
 import type { RuntimeAdapterFrameReceipt, RuntimeAdapterFrameReceiptResponse } from '../api/runtime-adapter/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';

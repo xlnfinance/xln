@@ -3,9 +3,9 @@ import { resolveCertifiedAccountCounterpartyProposer } from './account-counterpa
 import { getLocalSignerPrivateKey } from '../account/crypto';
 import { getEntityLeaderState, isEntityActiveLeader } from '../entity/consensus/leader';
 import type { Profile } from '../entity/profile';
-import { computeHtlcEnvelopeContextHash } from '../protocol/htlc/envelope';
+import { computeHtlcEnvelopeContextHash } from '../protocol/htlc/codec/envelope';
 import { validateMultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';
-import { encryptedHtlcLayer } from '../protocol/htlc/onion-layer';
+import { encryptedHtlcLayer } from '../protocol/htlc/codec/onion-layer';
 import type { AccountPeerInput } from '../types/account';
 import type { EntityOutput, EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from './types';

@@ -40,7 +40,7 @@ import {
 import { getJurisdictionIdentityRef } from '../jurisdiction/machine/jurisdiction-runtime';
 import { getJurisdictionStackId, requireJurisdictionChainId } from '../jurisdiction/machine/jurisdiction-stack';
 import { type DirectWebSocket } from '../network/p2p/direct-runtime-bun';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import {
   baseAmountAtPrice,
   baseAmountAtPriceCeil,
@@ -52,7 +52,7 @@ import {
 } from '../orderbook';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { registerRuntimeAdapterAuthSeed } from '../api/runtime-adapter/auth';
+import { registerRuntimeAdapterAuthSeed } from '../api/runtime-adapter/security/auth';
 import { type RuntimeAdapterSocket } from '../api/runtime-adapter/server';
 import { enqueueRuntimeInput } from '../runtime.ts';
 import type { AccountReplica, SwapOffer } from '../types/account';

@@ -1,5 +1,5 @@
 import { normalizeEntityRef } from '../account-key';
-import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
+import { deterministicEntityTimestamp } from '../../../orderbook/cross-j/orderbook';
 import {
   cloneCrossJurisdictionRoute,
   compareCrossJurisdictionRouteStatus,

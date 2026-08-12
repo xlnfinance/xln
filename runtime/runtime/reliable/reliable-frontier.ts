@@ -1,7 +1,7 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value.ts';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
-import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
+import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import { compareStableText, safeStringify } from '../../protocol/serialization.ts';
 import type { ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, ReliableDeliveryReceipt } from '../types.ts';
 

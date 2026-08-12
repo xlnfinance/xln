@@ -1,6 +1,6 @@
 import { extractEntityId } from '../../protocol/identity.ts';
 import { createStructuredLogger } from '../../infra/logger.ts';
-import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
+import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import { safeStringify } from '../../protocol/serialization.ts';
 import { runtimeInputRequiresOutboxCapacity } from '../admission.ts';
 import {
@@ -41,7 +41,7 @@ import { normalizeDbNamespace } from '../../storage/runtime-dbs.ts';
 import { decodeRoutedEntityInput } from '../routing-validation.ts';
 import type { EntityInput } from '../../entity/types.ts';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeInput } from '../types.ts';
-import { clearRuntimeGossip } from './loop-gossip.ts';
+import { clearRuntimeGossip } from '../infrastructure/gossip.ts';
 import { assertRuntimeInputCapabilitiesAuthorized } from '../internal-tx-auth.ts';
 import {
   deriveRuntimeId,

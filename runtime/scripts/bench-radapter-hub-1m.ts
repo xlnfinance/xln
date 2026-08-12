@@ -10,7 +10,7 @@ import { createEmptyAccountJClaimAccumulator } from '../account/j-claims/j-claim
 import { createFrameHash } from '../account/consensus/frame/hash';
 import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 
-import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import { decodeRuntimeAdapterRequest } from '../api/runtime-adapter/codec';
 import { applyRuntimeAdapterCommandMarker } from '../runtime/command-frontier';
 import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';

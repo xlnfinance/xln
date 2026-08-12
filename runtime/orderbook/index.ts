@@ -9,4 +9,4 @@ export * from './types';
 export * from './core';
 export * from './validity';
 export * from './commitment';
-export * from './cross-j-quantity';
+export * from './cross-j/quantity';

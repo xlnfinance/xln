@@ -10,7 +10,7 @@ import { buildRuntimeRecoveryBundle } from '../storage/recovery/bundle';
 import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../storage/recovery/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
 import type { JurisdictionConfig, TowerAppointmentV1 } from '../api/public/runtime-module';
-import { decodeStoredLookupDoc } from '../watchtower/store-decode';
+import { decodeStoredLookupDoc } from '../watchtower/store/decode';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../watchtower/standalone-server';
 import { createTestJReplica } from './helpers/j-replica';
 

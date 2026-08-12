@@ -11,7 +11,7 @@ import {
   computeHtlcEnvelopeContextHash,
   type HtlcEnvelope,
   validateEnvelope,
-} from '../../protocol/htlc/envelope';
+} from '../../protocol/htlc/codec/envelope';
 import {
   type MultiRecipientCiphertext,
   validateMultiRecipientCiphertext,
@@ -21,7 +21,7 @@ import {
   hashEncryptedHtlcLayer,
   htlcSecretOfferContextHash,
   type HtlcEncryptedEnvelope,
-} from '../../protocol/htlc/onion-layer';
+} from '../../protocol/htlc/codec/onion-layer';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 
 export type HtlcOnionAdvanceTx = Extract<EntityTx, { type: 'htlcOnionAdvance' }>;

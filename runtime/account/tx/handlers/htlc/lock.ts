@@ -17,7 +17,7 @@ import { FINANCIAL, LIMITS } from '../../../../config/constants';
 import { ensureDelta } from '../../delta-utils';
 import { addHold } from '../../hold-utils';
 import { isHtlcTimelockExpired } from '../../../htlc-deadline';
-import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol/htlc/onion-layer';
+import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
 
 type HtlcLockTx = Extract<AccountTx, { type: 'htlc_lock' }>;
 

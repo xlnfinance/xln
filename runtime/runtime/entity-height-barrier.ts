@@ -1,6 +1,6 @@
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from './types';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import { getInputReliableIdentity } from './reliable/reliable-delivery.ts';
 import { reliableIdentityExactKey } from './reliable/reliable-frontier.ts';
 import { atomicCrossJInputCohortKey } from './entity-routing';

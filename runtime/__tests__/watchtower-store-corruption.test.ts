@@ -8,9 +8,9 @@ import {
   ensureWatchtowerStoreOpen,
   lookupKeyFor,
   META_STATS_KEY,
-} from '../watchtower/store-db';
+} from '../watchtower/store/db';
 import { createWatchtowerStore } from '../watchtower/store';
-import { decodeStoredActionReceipt } from '../watchtower/store-decode';
+import { decodeStoredActionReceipt } from '../watchtower/store/decode';
 import { serializeTaggedJson } from '../protocol/serialization';
 
 const temporaryStores: string[] = [];

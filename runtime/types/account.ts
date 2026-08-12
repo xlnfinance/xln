@@ -878,7 +878,7 @@ export type AccountTx =
         amount: bigint;
         tokenId: number;
         deliveryMode?: Extract<PaymentDeliveryMode, 'instant' | 'async'>;
-        envelope?: import('../protocol/htlc/envelope').HtlcEnvelope
+        envelope?: import('../protocol/htlc/codec/envelope').HtlcEnvelope
           | import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext
           | string
           | undefined;

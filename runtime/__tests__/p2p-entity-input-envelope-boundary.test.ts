@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   decodeRuntimeEntityInputsEnvelope,
   MAX_P2P_ENTITY_INPUTS,
-} from '../network/p2p/entity-input-envelope';
+} from '../network/p2p/auth/entity-input-envelope';
 
 const runtimeId = `0x${'11'.repeat(20)}`;
 const sourceSignature = `0x${'11'.repeat(65)}`;

@@ -13,9 +13,9 @@ import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import {
   computeHtlcEnvelopeContextHash,
   createOnionEnvelopes,
-} from '../protocol/htlc/envelope';
+} from '../protocol/htlc/codec/envelope';
 import { decryptBytesForLocalValidator } from '../protocol/htlc/multi-recipient';
-import { decodeOnionLayer } from '../protocol/htlc/onion-codec';
+import { decodeOnionLayer } from '../protocol/htlc/codec/onion';
 import {
   computeEntityProfileCertificationHash,
   computeValidatorEncryptionAttestationDigest,

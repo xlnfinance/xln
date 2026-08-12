@@ -17,7 +17,7 @@ import {
   type RuntimeIngressReceipt,
 } from '../../runtime/ingress-receipts';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
-import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
+import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './security/rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import { createStructuredLogger } from '../../infra/logger';
 import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../../runtime/lifecycle';
@@ -43,11 +43,11 @@ import {
   resolveRuntimeAdapterAuthSeed,
   runtimeAdapterRevokedTokenIds,
   verifyRuntimeAdapterAuthCredential,
-} from './auth';
+} from './security/auth';
 import {
   normalizeRuntimeAdapterIdentityChallenge,
-} from './server-identity';
-import { signRuntimeAdapterServerIdentity } from './server-identity-signer';
+} from './security/server-identity';
+import { signRuntimeAdapterServerIdentity } from './security/server-identity-signer';
 import {
   countActiveRuntimeAdapterCommandLanes,
   MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES,
@@ -57,7 +57,7 @@ import {
   runtimeAdapterOwnerCommandLaneId,
 } from '../../runtime/command-frontier';
 import { markLocalRuntimeAdapterCommandTx } from '../../runtime/command-frontier-auth';
-import { verifyRuntimeAdapterOwnerBinding } from './owner-binding';
+import { verifyRuntimeAdapterOwnerBinding } from './security/owner-binding';
 import { encodeBinaryPayload } from '../../storage/binary-codec';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
 import { withRuntimeCommittedRead } from '../../runtime/frame/writer-lock';

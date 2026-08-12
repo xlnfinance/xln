@@ -20,7 +20,7 @@ import {
   crossJurisdictionBookOwnerRef,
   deterministicEntityTimestamp,
   normalizeEntityRef,
-} from '../../orderbook/cross-j-orderbook';
+} from '../../orderbook/cross-j/orderbook';
 import { swapKey, type WorkingOrderbookOffer } from '../../orderbook/swap-execution';
 import { mergeStorageOverlayRecords } from '../../protocol/overlay';
 import { compareStableText, safeStringify } from '../../protocol/serialization';

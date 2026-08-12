@@ -4,7 +4,7 @@ import {
   getCrossJurisdictionBookAdmissionError,
   isCrossJurisdictionBookRiskRejection,
   isCrossJurisdictionBookAdmissionPending,
-} from '../../orderbook/cross-j-orderbook';
+} from '../../orderbook/cross-j/orderbook';
 import {
   markWorkingOrderbookOffer,
   type NormalizedOrderbookOffer,

@@ -6,7 +6,7 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { deriveManagedEntityIdentity, DaemonControlClient, setupCustody } from '../orchestrator/daemon-control';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/adapter/jurisdictions-path';
-import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import {
   isPublicDaemonHealthReady,
   spawnBunChild,

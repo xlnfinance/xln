@@ -1,4 +1,4 @@
-import { normalizeRuntimeId } from '../../network/p2p/runtime-id.ts';
+import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id.ts';
 import type {
   RuntimeReplica,
   ReliableDeliveryIdentity,

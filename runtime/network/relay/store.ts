@@ -5,7 +5,7 @@
  * and debug events. No WebSocket API, no crypto, no RuntimeReplica.
  */
 
-import { isRuntimeId, normalizeRuntimeId } from '../p2p/runtime-id';
+import { isRuntimeId, normalizeRuntimeId } from '../p2p/auth/runtime-id';
 import { canonicalizeProfile, type Profile } from '../../entity/profile';
 import { safeStringify } from '../../protocol/serialization';
 import {
@@ -22,7 +22,7 @@ import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
   type GossipProfileBatchRequest,
-} from '../p2p/profile-batch';
+} from '../p2p/gossip/profile-batch';
 import { redactTelemetryValue } from '../../infra/telemetry-redaction';
 import type { WebSocketSendResult } from '../websocket-send-result';
 

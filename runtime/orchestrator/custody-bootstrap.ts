@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
-import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import { deserializeTaggedJson } from '../protocol/serialization';
 import { fetchLoopback } from './loopback-fetch';
 import {

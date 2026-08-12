@@ -3,7 +3,7 @@ import type { EntityTx } from '../../types/entity-tx';
 import type { RuntimeReplica, ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, RoutedEntityInput } from '../types';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { hasEntityCommitCertificate } from '../../entity/signatures';
-import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { txFingerprint } from '../../protocol/tx-multiset';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { buildPreparedFrameEvidence, hashEntityLeaderVoteBody } from '../../entity/consensus/leader';

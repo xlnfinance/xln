@@ -1,5 +1,5 @@
 import { createStructuredLogger, logError, shortId } from '../../infra/logger';
-import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { decodeRoutedEntityInput } from '../routing-validation';
 import { validateJInputs } from '../../storage/wal/runtime-machine-schema/j';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';

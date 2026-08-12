@@ -11,7 +11,7 @@ import {
   resolveRuntimeAdapterAuthSeed,
   verifyRuntimeAdapterAuthCredential,
   verifyRuntimeAdapterAuthKey,
-} from '../api/runtime-adapter/auth';
+} from '../api/runtime-adapter/security/auth';
 
 import {
   decodeRuntimeAdapterBrowserMessage,
@@ -27,11 +27,11 @@ import { acquireRuntimeFrameWriter } from '../runtime/frame/writer-lock';
 
 import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
 
-import { verifyRuntimeAdapterServerIdentity } from '../api/runtime-adapter/server-identity';
+import { verifyRuntimeAdapterServerIdentity } from '../api/runtime-adapter/security/server-identity';
 
-import { buildRuntimeAdapterOwnerBindingDigest } from '../api/runtime-adapter/owner-binding';
+import { buildRuntimeAdapterOwnerBindingDigest } from '../api/runtime-adapter/security/owner-binding';
 
-import { signRuntimeAdapterServerIdentity } from '../api/runtime-adapter/server-identity-signer';
+import { signRuntimeAdapterServerIdentity } from '../api/runtime-adapter/security/server-identity-signer';
 
 import {
   assertRuntimeAdapterGraphFrameWireBudget,

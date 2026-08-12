@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { LIMITS } from '../config/constants';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
-import { createOnionEnvelopes, validateEnvelope } from '../protocol/htlc/envelope';
+import { createOnionEnvelopes, validateEnvelope } from '../protocol/htlc/codec/envelope';
 
 describe('htlc envelope validation', () => {
   test('rejects oversized final recipient envelope payload', () => {

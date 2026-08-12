@@ -1,4 +1,4 @@
-import { deterministicEntityTimestamp } from '../../../orderbook/cross-j-orderbook';
+import { deterministicEntityTimestamp } from '../../../orderbook/cross-j/orderbook';
 import {
   isCrossJurisdictionRouteExpired,
   isCrossJurisdictionTerminalStatus,

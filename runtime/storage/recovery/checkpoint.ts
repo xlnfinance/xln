@@ -1,6 +1,6 @@
 import { parseProfile, type Profile } from '../../entity/profile';
 import { validateEntityReplica } from '../../entity/replica-validation';
-import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../runtime/input-clone';
 import { assertAccountJClaimRootsAvailable } from '../../entity/account-j-claim-node-store';

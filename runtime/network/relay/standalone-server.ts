@@ -12,9 +12,9 @@ import {
   serializeWsMessage,
   type RuntimeWsMessage,
 } from '../p2p/ws-protocol';
-import { normalizeRuntimeId } from '../p2p/runtime-id';
+import { normalizeRuntimeId } from '../p2p/auth/runtime-id';
 import { createStructuredLogger } from '../../infra/logger';
-import { createHelloChallengeRegistry } from '../p2p/hello-challenge';
+import { createHelloChallengeRegistry } from '../p2p/auth/hello-challenge';
 
 type StandaloneRelayOptions = {
   host?: string;

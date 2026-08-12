@@ -8,7 +8,7 @@ import type {
 } from '../types';
 import { createStructuredLogger } from '../../infra/logger';
 import { keccak256, toUtf8Bytes } from 'ethers';
-import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getWallClockMs } from '../../infra/time';
 import { validateDeliverableEntityInput } from '../routing-validation';

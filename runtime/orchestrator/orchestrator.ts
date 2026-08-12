@@ -9,7 +9,7 @@ import { REMOTE_RUNTIME } from '../config/constants';
 import { readBooleanEnv } from '../config/environment';
 import { createStructuredLogger, registerStructuredLogSink } from '../infra/logger';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import { sanitizeChildProcessEnv } from '../api/server/child-process-env';
 import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../infra/child-secrets';
 import {
@@ -28,14 +28,14 @@ import { openRelayIncidentJournal } from '../network/relay/incident-journal';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../network/relay/router';
 import { closeRelayClientsForReset } from '../network/relay/reset';
 import { canonicalizeRuntimeWsAudience, deserializeWsMessage, resolveRuntimeWsMaxMessageBytes, serializeWsMessage, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
-import { createHelloChallengeRegistry } from '../network/p2p/hello-challenge';
-import { type MarketSnapshotPayload } from '../network/relay/market-snapshot';
-import { createMarketSubscriptionStack } from '../network/relay/market-subscriptions';
+import { createHelloChallengeRegistry } from '../network/p2p/auth/hello-challenge';
+import { type MarketSnapshotPayload } from '../network/relay/market/snapshot';
+import { createMarketSubscriptionStack } from '../network/relay/market/subscriptions';
 import {
   decodeMarketWireRequest,
   encodeMarketWireMessage,
   type MarketWireRequest,
-} from '../network/relay/market-wire';
+} from '../network/relay/market/wire';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveStaticApp } from '../api/server/static-assets';

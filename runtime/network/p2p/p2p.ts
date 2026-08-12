@@ -9,16 +9,16 @@ import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, Runtim
 import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from '../../entity/profile';
 import { RuntimeWsClient } from './ws-client';
 import { canonicalizeRuntimeWsAudience, directRuntimeWsAudience } from './ws-protocol';
-import { buildLocalEntityProfile } from './gossip-helper';
+import { buildLocalEntityProfile } from './gossip/helper';
 import { extractEntityId } from '../../protocol/identity';
 import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../../account/crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../../entity/profile-signing';
 import { inspectHankoForHash } from '../../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../../protocol/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
-import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
+import { normalizeRuntimeId, isRuntimeId } from './auth/runtime-id';
 import { compareStableText } from '../../protocol/serialization';
-import { DEFAULT_GOSSIP_BATCH_LIMIT, selectProfileBatch, type GossipProfileBatchRequest } from './profile-batch';
+import { DEFAULT_GOSSIP_BATCH_LIMIT, selectProfileBatch, type GossipProfileBatchRequest } from './gossip/profile-batch';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
 import {

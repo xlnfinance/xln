@@ -288,7 +288,7 @@ Token bucket per WS connection. Default: 50 reads/sec, 5 sends/sec, burst
 + `retryAfterMs`. Frontend honors backoff; missing this opens trivial DoS.
 
 ```
-runtime/api/runtime-adapter/rate-limit.ts (~80 LOC)
+runtime/api/runtime-adapter/security/rate-limit.ts (~80 LOC)
 
 class TokenBucket {
   constructor(capacity, refillPerSec) { ... }

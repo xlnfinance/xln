@@ -1,5 +1,5 @@
 import { TIMING } from '../../config/constants';
-import { collectDueLocalProfileCertificationInputs } from '../../network/p2p/local-profile-lifecycle';
+import { collectDueLocalProfileCertificationInputs } from '../../network/p2p/gossip/local-profile-lifecycle';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { recordRuntimeHistoryTraceForTesting } from '../history-retention';
 import { createStructuredLogger } from '../../infra/logger';

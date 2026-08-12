@@ -4,7 +4,7 @@ import {
   deriveRuntimeAdapterCapabilityToken,
   resolveRuntimeAdapterAuthAudience,
   resolveRuntimeAdapterAuthSeed,
-} from '../runtime-adapter/auth';
+} from '../runtime-adapter/security/auth';
 import { safeStringify } from '../../protocol/serialization';
 import type { RuntimeReplica } from '../../runtime/types';
 

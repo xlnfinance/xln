@@ -13,7 +13,7 @@ import type { DeliverableEntityInput, RuntimeReplica, RuntimeEntityInputsEnvelop
 import { createEmptyEnv } from '../runtime';
 import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input/entity-input-envelope-auth.ts';
 import { assertRuntimeEntityInputsEnvelopeSource } from '../runtime/entity-input/entity-input-envelope-auth.ts';
-import { decodeRuntimeEntityInputsEnvelope } from '../network/p2p/entity-input-envelope';
+import { decodeRuntimeEntityInputsEnvelope } from '../network/p2p/auth/entity-input-envelope';
 
 type SentMessage = {
   type?: string;

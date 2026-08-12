@@ -11,7 +11,7 @@
 
 import type { AccountState, AccountTx, Delta, HtlcLock } from '../../../../types/account';
 import { hashHtlcSecret } from '../../../../protocol/htlc/utils';
-import { hashEncryptedHtlcLayer, htlcSecretOfferContextHash } from '../../../../protocol/htlc/onion-layer';
+import { hashEncryptedHtlcLayer, htlcSecretOfferContextHash } from '../../../../protocol/htlc/codec/onion-layer';
 import { validateMultiRecipientCiphertext } from '../../../../protocol/htlc/multi-recipient';
 import { createStructuredLogger, shortHash } from '../../../../infra/logger';
 import { releaseHold } from '../../hold-utils';

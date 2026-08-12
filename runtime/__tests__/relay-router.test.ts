@@ -7,7 +7,7 @@ import { cacheEncryptionKey, createRelayStore, resolveEncryptionPublicKeyHex } f
 import { deserializeWsMessage, hashHelloMessage, hashRuntimeWsFrame, makeHelloNonce, type RuntimeWsMessage } from '../network/p2p/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { encryptJSON, deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
-import { DEFAULT_GOSSIP_BATCH_LIMIT } from '../network/p2p/profile-batch';
+import { DEFAULT_GOSSIP_BATCH_LIMIT } from '../network/p2p/gossip/profile-batch';
 import { createLocalDeliveryHandler } from '../network/relay/local-delivery';
 import { createEmptyEnv } from '../runtime';
 import { signRuntimeEntityInputsEnvelope } from '../runtime/entity-input/entity-input-envelope-auth.ts';

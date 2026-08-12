@@ -7,12 +7,12 @@ import { join } from 'node:path';
 import { ethers } from 'ethers';
 
 import { getSignerPrivateKey } from '../account/crypto';
-import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,
 } from '../api/runtime-adapter/codec';
-import { buildRuntimeAdapterOwnerBindingDigest } from '../api/runtime-adapter/owner-binding';
+import { buildRuntimeAdapterOwnerBindingDigest } from '../api/runtime-adapter/security/owner-binding';
 import { RemoteRuntimeAdapter } from '../api/runtime-adapter/remote';
 import { handleRuntimeAdapterMessage } from '../api/runtime-adapter/server';
 import { createJAdapter, createXlnJsonRpcProvider } from '../jurisdiction/adapter';

@@ -2,7 +2,7 @@ import { SigningKey, hexlify } from 'ethers';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../runtime/account/crypto';
 import { createStructuredLogger } from '../runtime/infra/logger';
 import { RuntimeAdapterError } from '../runtime/api/runtime-adapter/errors';
-import { buildRuntimeAdapterOwnerBindingDigest } from '../runtime/api/runtime-adapter/owner-binding';
+import { buildRuntimeAdapterOwnerBindingDigest } from '../runtime/api/runtime-adapter/security/owner-binding';
 import { RemoteRuntimeAdapter } from '../runtime/api/runtime-adapter/remote';
 import type {
   RuntimeAdapterFrameLog,

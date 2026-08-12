@@ -32,7 +32,7 @@ import {
   createRuntimeAdapterIdentityChallenge,
   verifyRuntimeAdapterServerIdentity,
   type RuntimeAdapterServerIdentityProof,
-} from './server-identity';
+} from './security/server-identity';
 import { XLN_PROTOCOL_VERSION } from '../../protocol/version';
 
 type PendingRequest = {

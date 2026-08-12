@@ -181,7 +181,7 @@ import {
 
 import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
-import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
+import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
 
 import { collectLocalProfileEncryptionAnnouncements } from '../entity/profile-encryption';
 

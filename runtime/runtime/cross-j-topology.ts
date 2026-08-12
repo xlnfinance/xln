@@ -2,7 +2,7 @@ import {
   resolveCrossJurisdictionRuntimeTopology,
   type CrossJurisdictionRuntimeTopology,
 } from '../extensions/cross-j/boundary';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { getLocalEntitySignerKeys, hasLocalSignerForEntitySigner } from './loop/loop-identity.ts';
 import type { RuntimeReplica } from './types';

@@ -22,8 +22,8 @@
     "brainvault/worker-wasm.ts",
     "runtime/__tests__/fixtures/*.ts",
     "runtime/api/server/cli.ts",
-    "runtime/qa/code-fingerprint-cli.ts",
-    "runtime/qa/runtime-state-diff-cli.ts"
+    "runtime/qa/tools/code-fingerprint-cli.ts",
+    "runtime/qa/tools/runtime-state-diff-cli.ts"
   ],
   "project": [
     "runtime/**/*.ts",

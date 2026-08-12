@@ -16,8 +16,8 @@ import {
   getCompleteProfileEncryptionManifest,
   requireProfileEncryptionManifest,
 } from '../entity/profile-encryption';
-import { buildEntityProfile } from '../network/p2p/gossip-helper';
-import { announceCertifiedLocalProfiles } from '../network/p2p/local-profile-lifecycle';
+import { buildEntityProfile } from '../network/p2p/gossip/helper';
+import { announceCertifiedLocalProfiles } from '../network/p2p/gossip/local-profile-lifecycle';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildQuorumHanko, getEntityConfigBoardHash, verifyHankoForHash } from '../hanko/signing';
@@ -88,10 +88,10 @@ import {
 import {
   hashEncryptedHtlcLayer,
   htlcSecretOfferContextHash,
-} from '../protocol/htlc/onion-layer';
+} from '../protocol/htlc/codec/onion-layer';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc-onion-advance';
-import { encodeHtlcSecretOffer } from '../protocol/htlc/onion-codec';
+import { encodeHtlcSecretOffer } from '../protocol/htlc/codec/onion';
 import { appendDefaultProposerAcceptedHtlcReveals } from '../entity/htlc-onion-post-commit';
 import { createJReplica } from '../scenarios/boot';
 import { installCanonicalRegistrationEvidence } from './helpers/registration-evidence';

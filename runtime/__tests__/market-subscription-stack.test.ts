@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { createMarketSubscriptionStack } from '../network/relay/market-subscriptions';
-import type { MarketSnapshotPayload } from '../network/relay/market-snapshot';
+import { createMarketSubscriptionStack } from '../network/relay/market/subscriptions';
+import type { MarketSnapshotPayload } from '../network/relay/market/snapshot';
 
 type FakeSocket = {
   ip: string;

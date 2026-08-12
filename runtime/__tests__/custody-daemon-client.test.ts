@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { decodeRuntimeAdapterRequest, encodeRuntimeAdapterMessageForBrowser } from '../api/runtime-adapter/codec';
-import { signRuntimeAdapterServerIdentity } from '../api/runtime-adapter/server-identity-signer';
+import { signRuntimeAdapterServerIdentity } from '../api/runtime-adapter/security/server-identity-signer';
 import type { RuntimeAdapterRequest } from '../api/runtime-adapter/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { DaemonRpcClient } from '../../custody/daemon-client';

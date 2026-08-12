@@ -7,7 +7,7 @@ import { safeParse, safeStringify } from '../protocol/serialization';
 import {
   buildRuntimeStateDiffReport,
   buildRuntimeStateDiffReportFromJson,
-} from '../qa/runtime-state-diff';
+} from '../qa/tools/runtime-state-diff';
 
 describe('runtime state diff', () => {
   test('canonical hashes ignore object and Map insertion order', () => {
@@ -91,7 +91,7 @@ describe('runtime state diff', () => {
       writeFileSync(leftPath, leftJson);
       writeFileSync(rightPath, rightJson);
       const result = Bun.spawnSync({
-        cmd: [process.execPath, 'runtime/qa/runtime-state-diff-cli.ts', leftPath, rightPath],
+        cmd: [process.execPath, 'runtime/qa/tools/runtime-state-diff-cli.ts', leftPath, rightPath],
         cwd: process.cwd(),
         stdout: 'pipe',
         stderr: 'pipe',
@@ -103,7 +103,7 @@ describe('runtime state diff', () => {
 
       writeFileSync(leftPath, '{bad');
       const invalid = Bun.spawnSync({
-        cmd: [process.execPath, 'runtime/qa/runtime-state-diff-cli.ts', leftPath, rightPath],
+        cmd: [process.execPath, 'runtime/qa/tools/runtime-state-diff-cli.ts', leftPath, rightPath],
         cwd: process.cwd(),
         stdout: 'pipe',
         stderr: 'pipe',

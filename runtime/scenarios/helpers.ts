@@ -11,7 +11,7 @@ import { setFailFastErrors } from '../infra/logger';
 import { deriveSignerAddressSync, getSignerPrivateKey } from '../account/crypto';
 import { getTokenInfo } from '../account/utils';
 import { createGossipLayer } from '../network/p2p/gossip';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/backlog-drain';
 import { buildRouteOutputKey } from '../runtime/output-routing';
 import { releaseUncommittedReliableIngress } from '../runtime/reliable/reliable-delivery.ts';

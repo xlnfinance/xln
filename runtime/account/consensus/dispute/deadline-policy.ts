@@ -1,5 +1,5 @@
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
-import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/onion-layer';
+import { hashEncryptedHtlcLayer } from '../../../protocol/htlc/codec/onion-layer';
 import type { AccountFrame, AccountState, HtlcLock } from '../../../types/account';
 import type { HankoString } from '../../../types/hanko';
 import { isHtlcTimelockExpired } from '../../htlc-deadline';

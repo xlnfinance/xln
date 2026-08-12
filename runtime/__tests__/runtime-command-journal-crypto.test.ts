@@ -20,7 +20,7 @@ import {
 } from '../../frontend/src/lib/stores/runtimeCommandIntent';
 import { submitRuntimeCommand } from '../../frontend/src/lib/stores/runtimeCommandBus';
 import { RuntimeAdapterError } from '../api/runtime-adapter/errors';
-import { verifyRuntimeAdapterOwnerBinding } from '../api/runtime-adapter/owner-binding';
+import { verifyRuntimeAdapterOwnerBinding } from '../api/runtime-adapter/security/owner-binding';
 
 const seed = 'test test test test test test test test test test test junk';
 const otherSeed = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';

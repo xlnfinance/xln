@@ -46,7 +46,7 @@ import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
 } from '../entity/profile-encryption';
-import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
+import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
 import { computeProfileHash } from '../entity/profile-signing';
 import { makeAccount } from './helpers/cross-j';
 

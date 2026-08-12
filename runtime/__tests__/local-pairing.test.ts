@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 
-import { verifyRuntimeAdapterAuthCredential } from '../api/runtime-adapter/auth';
+import { verifyRuntimeAdapterAuthCredential } from '../api/runtime-adapter/security/auth';
 import { createLocalPairingController, isTrustedLocalPairingOrigin } from '../api/server/local-pairing';
 import type { RuntimeReplica } from '../runtime/types';
 

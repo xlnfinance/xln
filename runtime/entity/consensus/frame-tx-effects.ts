@@ -3,7 +3,7 @@ import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dis
 import type { EntityState } from '../types';
 import type { EntityTx } from '../../types/entity-tx';
 import { getPerfMs } from '../../infra/time';
-import { normalizeEntityRef } from '../../orderbook/cross-j-orderbook';
+import { normalizeEntityRef } from '../../orderbook/cross-j/orderbook';
 import { shortId, shortOrder } from '../../infra/logger';
 import { cancelHook, scheduleHook } from '../scheduler';
 import { accountHasProposableMempool } from './account-mempool-eligibility';

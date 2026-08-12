@@ -5,7 +5,7 @@ import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import {
   validateLocalCommittedHtlcLayer,
 } from '../../../htlc/onion-advance';
-import { encryptedHtlcLayer } from '../../../../protocol/htlc/onion-layer';
+import { encryptedHtlcLayer } from '../../../../protocol/htlc/codec/onion-layer';
 import {
   armHtlcSecretAckTimeout,
   terminateHtlcRoute,

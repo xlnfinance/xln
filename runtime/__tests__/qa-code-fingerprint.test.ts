@@ -8,10 +8,10 @@ import {
   assertRepositoryCodeFingerprintStable,
   computeRepositoryCodeFingerprint,
   createRepositoryCodeDriftGuard,
-} from '../qa/code-fingerprint';
+} from '../qa/tools/code-fingerprint';
 
 const temporaryRoots: string[] = [];
-const fingerprintCli = join(import.meta.dir, '..', 'qa', 'code-fingerprint-cli.ts');
+const fingerprintCli = join(import.meta.dir, '..', 'qa', 'tools', 'code-fingerprint-cli.ts');
 
 const runGit = (root: string, args: readonly string[]): string => {
   const result = Bun.spawnSync(['git', ...args], {

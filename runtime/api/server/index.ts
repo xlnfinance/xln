@@ -54,14 +54,14 @@ import {
   serializeWsMessage,
   type RuntimeWsMessage,
 } from '../../network/p2p/ws-protocol';
-import { createHelloChallengeRegistry } from '../../network/p2p/hello-challenge';
+import { createHelloChallengeRegistry } from '../../network/p2p/auth/hello-challenge';
 import { createLocalDeliveryHandler } from '../../network/relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
 import { createStructuredLogger, registerStructuredLogSink, shortId } from '../../infra/logger';
 import { startParentLivenessWatch } from '../../infra/parent-watch';
-import { buildMarketSnapshotForReplica, type MarketSnapshotPayload } from '../../network/relay/market-snapshot';
-import { createMarketSubscriptionStack } from '../../network/relay/market-subscriptions';
-import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../../network/relay/market-wire';
+import { buildMarketSnapshotForReplica, type MarketSnapshotPayload } from '../../network/relay/market/snapshot';
+import { createMarketSubscriptionStack } from '../../network/relay/market/subscriptions';
+import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../../network/relay/market/wire';
 import { JSON_HEADERS, getErrorMessage, resolveRequiredAnvilRpc } from './utils';
 import { enforceFaucetPolicy } from './faucet-policy';
 import { ethers } from 'ethers';

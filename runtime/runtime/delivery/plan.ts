@@ -1,7 +1,7 @@
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../../extensions/cross-j/boundary';
 import { createStructuredLogger, shortId } from '../../infra/logger';
-import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import {
   buildRouteOutputKey,
   cloneRoutedOutputWithCachedIdentity,

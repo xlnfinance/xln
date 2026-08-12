@@ -14,7 +14,7 @@ import {
   markCrossJurisdictionBookRemovalCommitted,
   type CrossJurisdictionFillInstruction,
 } from '../../../../extensions/cross-j/orderbook';
-import { crossJurisdictionBookOwnerRef } from '../../../../orderbook/cross-j-orderbook';
+import { crossJurisdictionBookOwnerRef } from '../../../../orderbook/cross-j/orderbook';
 import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,

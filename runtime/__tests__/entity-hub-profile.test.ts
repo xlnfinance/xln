@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { encodeBoard, hashBoard } from '../entity/factory';
-import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
+import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
 import { cloneEntityState } from '../entity/state-clone';
 import { handleSetHubConfigEntityTx } from '../entity/tx/handlers/account-admin';
 import type { ConsensusConfig, EntityState } from '../entity/types';

@@ -189,7 +189,7 @@ import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 import { recordValidatorJHistory } from '../jurisdiction/machine/local-history';
 import { canonicalDisputeFinalizationEvidenceHash } from '../jurisdiction/machine/event-observation';
 
-import { buildLocalEntityProfile } from '../network/p2p/gossip-helper';
+import { buildLocalEntityProfile } from '../network/p2p/gossip/helper';
 
 import { collectLocalProfileEncryptionAnnouncements } from '../entity/profile-encryption';
 

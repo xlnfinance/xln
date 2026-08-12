@@ -1,9 +1,9 @@
 import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger';
-import { normalizeRuntimeId } from '../../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../../network/p2p/auth/runtime-id';
 import { applyReliableDeliveryReceipts, registerReliableReceiptIngress } from '../reliable/reliable-sender.ts';
-import { announceCertifiedLocalProfiles } from '../../network/p2p/local-profile-lifecycle';
+import { announceCertifiedLocalProfiles } from '../../network/p2p/gossip/local-profile-lifecycle';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
 import type { RuntimeReplica, RoutedEntityInput } from '../types';
 import {

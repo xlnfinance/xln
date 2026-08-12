@@ -145,7 +145,7 @@ const CORE_FILES = {
     'extensions/cross-j/market.ts',          // Canonical cross-j market derivation
     'extensions/cross-j/orderbook.ts',       // Cross-j book-owner and route ownership rules
     'extensions/cross-j/boundary.ts',        // Runtime topology for source/target/book-owner roles
-    'orderbook/cross-j-orderbook.ts', // Cross-j admission lookup/stash/drain helpers
+    'orderbook/cross-j/orderbook.ts', // Cross-j admission lookup/stash/drain helpers
     'entity/tx/cross-j-outputs.ts',          // Cross-j runtime outputs and notices
     'entity/tx/cross-jurisdiction-helpers.ts', // Cross-j account/route helper logic
     'entity/tx/handlers/swap-requests.ts',   // Same-chain and cross-j swap request creation
@@ -168,9 +168,9 @@ const CORE_FILES = {
     'account/tx/handlers/swap/lifecycle/cancel.ts',    // Swap cancellation
     'account/tx/handlers/swap/cross-fill-ack/index.ts', // Cross-j fill acknowledgement processing
     'orderbook/cross-j.ts',                  // Cross-j book types and conversion helpers
-    'network/relay/market-snapshot.ts',            // Market snapshot projection
-    'network/relay/market-subscriptions.ts',       // Orderbook streaming subscriptions
-    'network/relay/market-subscription-limiter.ts', // Stream rate limiting
+    'network/relay/market/snapshot.ts',            // Market snapshot projection
+    'network/relay/market/subscriptions.ts',       // Orderbook streaming subscriptions
+    'network/relay/market/subscription-limiter.ts', // Stream rate limiting
     'orchestrator/mm-node.ts',               // Market maker bootstrap, quote loop, cross books
     'api/server/market-maker-health.ts',     // Health/self-test contract for MM books
     'orchestrator/mesh-common.ts',           // Bootstrap defaults for hubs/MM/accounts
@@ -316,7 +316,7 @@ const CROSS_FILES = {
     'account/input.ts',
     'account/settlement/j-finality.ts',
     'entity/consensus/index.ts',
-    'orderbook/cross-j-orderbook.ts',
+    'orderbook/cross-j/orderbook.ts',
     'account/consensus/index.ts',
     'account/view-state.ts',
     'account/consensus/dispute/policy.ts',
@@ -371,9 +371,9 @@ const CROSS_FILES = {
     'orderbook/core.ts',
     'orderbook/cross-j.ts',
     'orderbook/validity.ts',
-    'network/relay/market-snapshot.ts',
-    'network/relay/market-subscription-limiter.ts',
-    'network/relay/market-subscriptions.ts',
+    'network/relay/market/snapshot.ts',
+    'network/relay/market/subscription-limiter.ts',
+    'network/relay/market/subscriptions.ts',
     'orchestrator/mm-node.ts',
     'orchestrator/mesh-common.ts',
     'orchestrator/mesh-jurisdictions.ts',
@@ -563,7 +563,7 @@ const ORDERBOOK_FILES = {
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
     'entity/consensus/index.ts',
-    'orderbook/cross-j-orderbook.ts',
+    'orderbook/cross-j/orderbook.ts',
     'entity/tx/handlers/account.ts',
     'entity/tx/handlers/account/orderbook-offers.ts',
     'entity/tx/handlers/account/orderbook-queue.ts',
@@ -579,9 +579,9 @@ const ORDERBOOK_FILES = {
     'orderbook/core.ts',
     'orderbook/cross-j.ts',
     'orderbook/validity.ts',
-    'network/relay/market-snapshot.ts',
-    'network/relay/market-subscription-limiter.ts',
-    'network/relay/market-subscriptions.ts',
+    'network/relay/market/snapshot.ts',
+    'network/relay/market/subscription-limiter.ts',
+    'network/relay/market/subscriptions.ts',
     'orchestrator/mm-node.ts',
     'orchestrator/mm-transport.ts',
     'api/server/market-maker-health.ts',
@@ -648,7 +648,7 @@ const SWAP_FILES = {
     'orderbook/types.ts',
     'orderbook/core.ts',
     'orderbook/validity.ts',
-    'network/relay/market-snapshot.ts',
+    'network/relay/market/snapshot.ts',
     'api/server/market-maker-health.ts',
   ]),
   docs: [
@@ -1112,7 +1112,7 @@ Read these together:
 - \`runtime/extensions/cross-j/market.ts\`
 - \`runtime/extensions/cross-j/orderbook.ts\`
 - \`runtime/extensions/cross-j/boundary.ts\`
-- \`runtime/orderbook/cross-j-orderbook.ts\`
+- \`runtime/orderbook/cross-j/orderbook.ts\`
 - \`runtime/entity/tx/handlers/cross-j-*.ts\`
 - \`runtime/account/tx/handlers/swap/cross-fill-ack/index.ts\`
 
@@ -1158,7 +1158,7 @@ books before user swaps run. Empty books are a setup failure, not a user-flow
 failure. Health/self-test lives in:
 - \`runtime/orchestrator/mm-node.ts\`
 - \`runtime/api/server/market-maker-health.ts\`
-- \`runtime/network/relay/market-subscriptions.ts\`
+- \`runtime/network/relay/market/subscriptions.ts\`
 - \`tests/e2e-cross-j-swap.spec.ts\` ("market maker prepublishes...")
 
 ### Smart-contract backstop
@@ -1231,12 +1231,12 @@ xln/
       extensions/cross-j/index.ts       ${fileSizes['runtime/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
       extensions/cross-j/market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
       extensions/cross-j/orderbook.ts ${fileSizes['runtime/extensions/cross-j/orderbook.ts'] || '?'} lines - Cross-j book owner rules
-      orderbook/cross-j-orderbook.ts ${fileSizes['runtime/orderbook/cross-j-orderbook.ts'] || '?'} lines - Cross-j admissions
+      orderbook/cross-j/orderbook.ts ${fileSizes['runtime/orderbook/cross-j/orderbook.ts'] || '?'} lines - Cross-j admissions
       entity/tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
       entity/tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
       account/tx/handlers/swap-*.ts - Account-level offer/resolve/cancel
       account/tx/handlers/swap/cross-fill-ack/index.ts ${fileSizes['runtime/account/tx/handlers/swap/cross-fill-ack/index.ts'] || '?'} lines - Fill ACK processing
-      relay/market-subscriptions.ts ${fileSizes['runtime/network/relay/market-subscriptions.ts'] || '?'} lines - Book streaming
+      relay/market-subscriptions.ts ${fileSizes['runtime/network/relay/market/subscriptions.ts'] || '?'} lines - Book streaming
       orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
       server/market-maker-health.ts ${fileSizes['runtime/api/server/market-maker-health.ts'] || '?'} lines - MM readiness health
       lending.ts                  ${fileSizes['runtime/extensions/lending.ts'] || '?'} lines - Lending math and ids

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
-import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../api/runtime-adapter/security/auth';
 import { decodeRuntimeAdapterBrowserMessage } from '../api/runtime-adapter/codec';
 import { handleRuntimeAdapterMessage } from '../api/runtime-adapter/server';
 import {

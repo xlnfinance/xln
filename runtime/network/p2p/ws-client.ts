@@ -10,11 +10,11 @@ import {
 import { signDigest } from '../../account/crypto';
 import { encryptJSON, decryptJSON, pubKeyToHex } from '../../protocol/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
-import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
+import { isRuntimeId, normalizeRuntimeId } from './auth/runtime-id';
 import { createStructuredLogger } from '../../infra/logger';
-import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
+import { decodeRuntimeEntityInputsEnvelope } from './auth/entity-input-envelope';
 import { isRetryableIngressBackpressure } from './ingress-backpressure';
-import { verifyRuntimeWsFrameAuth } from './hello-auth';
+import { verifyRuntimeWsFrameAuth } from './auth/hello-auth';
 
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
 const wsLog = createStructuredLogger('runtime.wsClient');

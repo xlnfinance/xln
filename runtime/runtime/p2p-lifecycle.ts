@@ -1,14 +1,14 @@
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from './types';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { RuntimeP2P, type P2PConfig } from '../network/p2p/p2p';
-import { isRuntimeId } from '../network/p2p/runtime-id';
+import { isRuntimeId } from '../network/p2p/auth/runtime-id';
 import { assertLocalEntityCryptoKeys } from '../entity/crypto';
 import type { RuntimeInboundEntityInputsResult } from './entity-routing';
 import { isDeliveryDelivered } from '../protocol/payments/delivery-result';
 import {
   buildLocalProfileCertificationInput,
   collectDueLocalProfileCertificationInputs,
-} from '../network/p2p/local-profile-lifecycle';
+} from '../network/p2p/gossip/local-profile-lifecycle';
 
 export type { P2PConfig } from '../network/p2p/p2p';
 

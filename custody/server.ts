@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 import { parseTokenAmount } from '../runtime/account/financial-utils';
 import { DEFAULT_TOKENS } from '../runtime/jurisdiction/machine/default-tokens';
-import { deriveRuntimeAdapterCapabilityToken } from '../runtime/api/runtime-adapter/auth';
+import { deriveRuntimeAdapterCapabilityToken } from '../runtime/api/runtime-adapter/security/auth';
 import { RuntimeAdapterError } from '../runtime/api/runtime-adapter/errors';
 import { createStructuredLogger } from '../runtime/infra/logger';
 import { deserializeTaggedJson, serializeTaggedJson } from '../runtime/protocol/serialization';

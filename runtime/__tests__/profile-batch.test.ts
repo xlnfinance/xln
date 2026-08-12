@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { selectProfileBatch } from '../network/p2p/profile-batch';
+import { selectProfileBatch } from '../network/p2p/gossip/profile-batch';
 import type { Profile } from '../entity/profile';
 
 const profile = (index: number): Profile => ({

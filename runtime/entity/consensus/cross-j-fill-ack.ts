@@ -258,7 +258,7 @@ import { shortId, shortOrder } from '../../infra/logger';
 import {
   findCrossJurisdictionBookAdmissionForAck,
   normalizeEntityRef,
-} from '../../orderbook/cross-j-orderbook';
+} from '../../orderbook/cross-j/orderbook';
 import { compareStableText } from '../../protocol/serialization';
 import type { AccountReplica, AccountTx, RuntimeOverlayRecord } from '../../types/account';
 import { collectCommittedCrossJurisdictionCancelAcks } from '../tx/handlers/account';

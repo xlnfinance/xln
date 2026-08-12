@@ -6,7 +6,7 @@ import { createExternalWalletApi } from '../api/public/external-wallet-api';
 import { createBrainVaultOwnerController, type BrainVaultOwnerController } from '../api/server/brainvault-owner';
 import { hasCliFlag, readCliOption } from '../config/cli';
 import { readBooleanEnv } from '../config/environment';
-import { normalizeRuntimeId } from '../network/p2p/runtime-id';
+import { normalizeRuntimeId } from '../network/p2p/auth/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/machine/default-tokens';
 import {
@@ -39,7 +39,7 @@ import {
   normalizeMarketPairId,
   RPC_MARKET_DEFAULT_DEPTH,
   RPC_MARKET_MAX_DEPTH,
-} from '../network/relay/market-snapshot';
+} from '../network/relay/market/snapshot';
 import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../infra/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
@@ -72,7 +72,7 @@ import {
   registerRuntimeAdapterAuthSeed,
   resolveRuntimeAdapterAuthAudience,
   resolveRuntimeAdapterAuthSeed,
-} from '../api/runtime-adapter/auth';
+} from '../api/runtime-adapter/security/auth';
 import {
   getJurisdictionIdentityRef,
   isJurisdictionStackRef,

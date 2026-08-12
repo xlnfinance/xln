@@ -24,7 +24,7 @@
     decodeMarketWireResponse,
     encodeMarketWireMessage,
     type MarketWireResponse,
-  } from '@xln/runtime/network/relay/market-wire';
+  } from '@xln/runtime/network/relay/market/wire';
 
   export let hubId: string = '';
   export let hubIds: string[] = [];
