@@ -5,7 +5,7 @@ describe('ESLint fintech ratchet', () => {
   test('rejects raw JSON.stringify in new runtime code', () => {
     const result = spawnSync(
       'bunx',
-      ['eslint', '--stdin', '--stdin-filename', 'runtime/__lint-probe__.ts', '--format', 'compact'],
+      ['eslint', '--stdin', '--stdin-filename', 'runtime/__lint-probe__.ts'],
       {
         cwd: process.cwd(),
         encoding: 'utf8',
@@ -21,7 +21,7 @@ describe('ESLint fintech ratchet', () => {
   test('accepts the canonical serializer boundary', () => {
     const result = spawnSync(
       'bunx',
-      ['eslint', '--stdin', '--stdin-filename', 'runtime/__lint-probe__.ts', '--format', 'compact'],
+      ['eslint', '--stdin', '--stdin-filename', 'runtime/__lint-probe__.ts'],
       {
         cwd: process.cwd(),
         encoding: 'utf8',
